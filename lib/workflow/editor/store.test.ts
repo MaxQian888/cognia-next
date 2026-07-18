@@ -4,6 +4,7 @@
 import { createEditorStore, EDITOR_HISTORY_LIMIT } from "./store"
 import type { VisualWorkflow } from "@/types/workflow/visual"
 import { addPluginCatalogEntry, __resetPluginCatalogForTesting } from "@/lib/workflow/nodes/catalog"
+import { workflowEditorRevision } from "./editor-revision"
 
 function emptyWorkflow(): VisualWorkflow {
   return {
@@ -845,6 +846,26 @@ describe("editor store — validation", () => {
 })
 
 describe("editor store — applyProposalOps", () => {
+  it("rejects a proposal whose expected semantic revision is stale", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const expectedRevision = workflowEditorRevision(useStore.getState())
+    useStore.getState().addNode("annotation.note", { x: 0, y: 0 })
+
+    const result = useStore
+      .getState()
+      .applyProposalOps(
+        [{ type: "add_node", nodeId: "n_ai", kind: "ai.prompt", position: { x: 200, y: 0 } }],
+        expectedRevision
+      )
+
+    expect(result).toEqual({
+      applied: 0,
+      stale: true,
+      currentRevision: workflowEditorRevision(useStore.getState()),
+    })
+    expect(useStore.getState().nodes).toHaveLength(1)
+  })
+
   it("returns applied=0 and is a no-op for an empty batch", () => {
     const useStore = createEditorStore(emptyWorkflow())
     const result = useStore.getState().applyProposalOps([])

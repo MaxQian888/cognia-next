@@ -458,12 +458,13 @@ export interface BuildOptionsContext {
    */
   skillRenderMode?: "full" | "name"
   /**
-   * Active `/goal` for this session (ADR-0013). When set AND
+   * Active `/goal` for this session (ADR-0019). When set AND
    * `activeGoal.status === "active"`, the resolver appends a
    * `renderGoalSystemSection(activeGoal)` block to `opts.appendSystemPrompt`
    * — keeping `baseSystem` / character / skill / mode sections untouched.
-   * The chat-send hook pulls this from Dexie via `useActiveGoal()`; team
-   * chat passes `null` to opt out.
+   * The chat-send hook pulls this from Dexie via
+   * `getGoalRuntime().getActiveGoalForSession()`; team chat passes `null` to
+   * opt out.
    */
   activeGoal?: import("@/types/goal").Goal | null
   /**

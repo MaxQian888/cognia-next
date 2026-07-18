@@ -39,6 +39,15 @@ jest.mock("@/stores/terminal/terminal-store", () => ({
     selector(mockTerminalState),
 }))
 
+const mockArtifactDockState = {
+  dockCollapsed: true,
+  toggleDock: jest.fn(),
+}
+jest.mock("@/stores/artifact/artifact-dock-layout-store", () => ({
+  useArtifactDockLayoutStore: (selector: (s: typeof mockArtifactDockState) => unknown) =>
+    selector(mockArtifactDockState),
+}))
+
 const mockToggleGuildRail = jest.fn()
 const mockToggleStatusBar = jest.fn()
 jest.mock("@/lib/desktop/menu-actions", () => ({
@@ -84,6 +93,8 @@ beforeEach(() => {
   mockUiState.toggleSidebar.mockClear()
   mockTerminalState.panelOpen = false
   mockTerminalState.togglePanel.mockClear()
+  mockArtifactDockState.dockCollapsed = true
+  mockArtifactDockState.toggleDock.mockClear()
   mockToggleGuildRail.mockClear()
   mockToggleStatusBar.mockClear()
   mockUiState.barItems = { ...defaultBarItems }
@@ -98,6 +109,10 @@ describe("TitleBarLayoutControls", () => {
       "true"
     )
     expect(screen.getByTestId("title-bar-toggle-sidebar")).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByTestId("title-bar-toggle-right-sidebar")).toHaveAttribute(
+      "aria-pressed",
+      "false"
+    )
     // Terminal starts closed.
     expect(screen.getByTestId("title-bar-toggle-terminal")).toHaveAttribute("aria-pressed", "false")
   })
@@ -117,6 +132,8 @@ describe("TitleBarLayoutControls", () => {
     expect(mockToggleGuildRail).toHaveBeenCalled()
     fireEvent.click(screen.getByTestId("title-bar-toggle-sidebar"))
     expect(mockUiState.toggleSidebar).toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId("title-bar-toggle-right-sidebar"))
+    expect(mockArtifactDockState.toggleDock).toHaveBeenCalled()
     fireEvent.click(screen.getByTestId("title-bar-toggle-terminal"))
     expect(mockTerminalState.togglePanel).toHaveBeenCalled()
   })
@@ -125,16 +142,18 @@ describe("TitleBarLayoutControls", () => {
     render(<TitleBarLayoutControls />)
     expect(screen.getByTestId("title-bar-customize-layout")).toBeInTheDocument()
     const items = screen.getAllByRole("menuitemcheckbox")
-    // 4 panel toggles + 5 status-bar segments + 3 title-bar segments.
-    expect(items).toHaveLength(12)
+    // 5 panel toggles + 5 status-bar segments + 3 title-bar segments.
+    expect(items).toHaveLength(13)
 
     fireEvent.click(screen.getByText("toggleGuildRail"))
     fireEvent.click(screen.getByText("toggleSidebar"))
+    fireEvent.click(screen.getByText("toggleRightSidebar"))
     fireEvent.click(screen.getByText("toggleStatusBar"))
     fireEvent.click(screen.getByText("toggleTerminal"))
     expect(mockToggleGuildRail).toHaveBeenCalled()
     // toggleSidebar is shared by the quick button + the checkbox item.
     expect(mockUiState.toggleSidebar).toHaveBeenCalled()
+    expect(mockArtifactDockState.toggleDock).toHaveBeenCalled()
     expect(mockToggleStatusBar).toHaveBeenCalled()
     expect(mockTerminalState.togglePanel).toHaveBeenCalled()
   })

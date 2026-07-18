@@ -139,6 +139,22 @@ async function seedAll() {
     createdAt: 1,
   })
   await db.sessionState.put({ sessionId: "sess-1", lastReadAt: 1, unreadCount: 0 })
+  await db.sessions.put({
+    id: "embedded",
+    title: "Embedded",
+    kind: "resource-workbench",
+    visibility: "embedded",
+    createdAt: 1,
+    updatedAt: 1,
+  })
+  await db.messages.put({
+    id: "embedded-msg",
+    sessionId: "embedded",
+    role: "user",
+    parts: [{ type: "text", text: "private resource context" }],
+    createdAt: 1,
+  })
+  await db.sessionState.put({ sessionId: "embedded", lastReadAt: 1, unreadCount: 0 })
   await db.trustedWorkspaces.put({ path: "/some/dir", trustedAt: 5 })
   await db.tts_provider_keys.put({ id: "tts.providerKey.openai", value: "sk-xxx" })
 }

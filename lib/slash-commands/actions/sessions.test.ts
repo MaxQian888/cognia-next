@@ -81,6 +81,23 @@ describe("handleSessions", () => {
     expect(md).toContain("Use `/resume <title or id>` to switch.")
   })
 
+  it("does not reveal embedded resource sessions", async () => {
+    mockedList.mockResolvedValue([
+      { id: "ordinary", title: "Ordinary", updatedAt: Date.now() },
+      {
+        id: "resource",
+        title: "Private resource thread",
+        kind: "resource-workbench",
+        visibility: "embedded",
+        updatedAt: Date.now(),
+      },
+    ])
+    const ctx = makeCtx()
+    await handleSessions(ctx)
+    expect(ctx._pushed[0]).toContain("Ordinary")
+    expect(ctx._pushed[0]).not.toContain("Private resource thread")
+  })
+
   it("captures Error from listSessions", async () => {
     mockedList.mockRejectedValue(new Error("nope"))
     const ctx = makeCtx()
@@ -148,6 +165,20 @@ describe("handleResume", () => {
       args: "id-2",
       summary: "Resumed Second",
     })
+  })
+
+  it("cannot resume an embedded resource session through the global command", async () => {
+    mockedList.mockResolvedValue([
+      {
+        id: "resource",
+        title: "Private resource thread",
+        kind: "resource-workbench",
+        visibility: "embedded",
+      },
+    ])
+    const ctx = makeCtx({ args: "resource" })
+    await handleResume(ctx)
+    expect(ctx._pushed[0]).toContain("No sessions yet")
   })
 
   it("matches by case-insensitive exact title", async () => {

@@ -7,7 +7,7 @@
  * `Composer` + `MessageList` + `useChatStore` singleton verbatim — to
  * scope state to "this workflow" we maintain a per-workflow ChatSession
  * row with the deterministic id `workflow:${workflowId}` and pin the
- * global store's `activeSessionId` to it while the editor is mounted.
+ * an embedded session without changing the global active conversation.
  *
  * On unmount we restore whatever session was active before so leaving
  * the editor doesn't strand the user on a session they didn't pick.
@@ -19,7 +19,6 @@
  */
 
 import { useEffect, useState } from "react"
-import { useChatStore } from "@/stores/chat"
 import { getDb } from "@/lib/db/schema"
 import type { ChatSession } from "@cognia/agent-config-types"
 
@@ -55,9 +54,8 @@ export function isWorkflowEditorSessionId(
 }
 
 /**
- * Create a new *additional* session for this workflow, switch the global
- * chat store's focus to it, and reset the visible message list. Returns the
- * new session id.
+ * Create a new additional embedded session for this workflow. The caller owns
+ * the scoped selection and decides when to show it.
  *
  * Shared by the session bar's "+" button and the chat tab's "new session"
  * affordances (welcome state + composer) so every create path is identical:
@@ -74,20 +72,18 @@ export async function createWorkflowEditorSession(
     id,
     title,
     kind: "workflow-editor",
+    visibility: "embedded",
+    surfaceBinding: { kind: "workflow", workflowId },
     createdAt: now,
     updatedAt: now,
   }
   await getDb().sessions.put(row)
-  const store = useChatStore.getState()
-  store.setActiveSession(id)
-  store.setMessages([])
   return id
 }
 
 /**
- * Ensure a `ChatSession` exists for this workflow id, pin the global
- * store's `activeSessionId` to it, and restore the previous active
- * session id on unmount. Idempotent across remounts.
+ * Ensure an embedded `ChatSession` exists for this workflow id. Idempotent
+ * across remounts and deliberately independent of global chat focus.
  */
 export function useWorkflowEditorSession(
   workflowId: string | undefined,
@@ -112,7 +108,6 @@ export function useWorkflowEditorSession(
     if (!workflowId) return
     const sessionId = workflowSessionId(workflowId)
     let cancelled = false
-    const previousActiveSessionId = useChatStore.getState().activeSessionId
     ;(async () => {
       const db = getDb()
       const existing = await db.sessions.get(sessionId)
@@ -121,22 +116,34 @@ export function useWorkflowEditorSession(
         id: sessionId,
         title: workflowName ? `${workflowName} — chat` : "Workflow chat",
         kind: "workflow-editor",
+        visibility: "embedded",
+        surfaceBinding: { kind: "workflow", workflowId },
         createdAt: now,
         updatedAt: now,
       }
       if (!existing) {
         await db.sessions.put(row)
-      } else if (existing.kind !== "workflow-editor") {
+      } else if (
+        existing.kind !== "workflow-editor" ||
+        existing.visibility !== "embedded" ||
+        existing.surfaceBinding?.kind !== "workflow"
+      ) {
         // Defensive: an older row with the same deterministic id missing
         // the kind discriminator. Re-stamp so resolveSendOptions can
         // recognise it.
-        await db.sessions.update(sessionId, { kind: "workflow-editor", updatedAt: now })
+        await db.sessions.update(sessionId, {
+          kind: "workflow-editor",
+          visibility: "embedded",
+          surfaceBinding: { kind: "workflow", workflowId },
+          updatedAt: now,
+        })
         row.kind = "workflow-editor"
+        row.visibility = "embedded"
+        row.surfaceBinding = { kind: "workflow", workflowId }
       }
       if (cancelled) return
       setSession(row)
       setLoading(false)
-      useChatStore.getState().setActiveSession(sessionId)
     })().catch((err) => {
       if (cancelled) return
       console.error("useWorkflowEditorSession: failed to pin session", err)
@@ -144,15 +151,6 @@ export function useWorkflowEditorSession(
     })
     return () => {
       cancelled = true
-      // Restore the previous active session id on the way out so leaving
-      // the editor doesn't strand the user on a hidden workflow-editor
-      // session. Covers the additional sessions spun off via the session bar
-      // (`workflow:${id}:${suffix}`), not just the pinned default — otherwise
-      // creating a new conversation and leaving would strand the user on it.
-      const current = useChatStore.getState().activeSessionId
-      if (isWorkflowEditorSessionId(current, workflowId)) {
-        useChatStore.getState().setActiveSession(previousActiveSessionId)
-      }
     }
   }, [workflowId, workflowName])
 

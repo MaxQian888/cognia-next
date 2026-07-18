@@ -24,6 +24,7 @@ import { formatToolError, resolveStore } from "../store-bridge"
 import { useProposalStore, type ProposalPayload } from "@/lib/workflow/editor/proposal-store"
 import { summarizeOps, type ProposalOp } from "@/lib/workflow/editor/proposal-types"
 import { coerceProposalOp } from "@/lib/workflow/editor/proposal-schema"
+import { workflowEditorRevision } from "@/lib/workflow/editor/editor-revision"
 
 const PLUGIN_ID = "cognia-workflow-ai"
 
@@ -47,6 +48,7 @@ export interface ProposeBatchToolResult {
   proposalId?: string
   summary?: string
   opCount?: ReturnType<typeof summarizeOps>
+  baseRevision?: string
   error?: { code: string; message: string; detail?: unknown }
   /**
    * The renderer side picks this up via the chat message-part renderer
@@ -61,6 +63,7 @@ export interface ProposeBatchToolResult {
     summary: string
     ops: ReadonlyArray<ProposalOp>
     opCount: ReturnType<typeof summarizeOps>
+    baseRevision: string
   }>
 }
 
@@ -220,6 +223,7 @@ export function buildProposeTools(): PluginTool[] {
             workflowId,
             summary,
             ops,
+            baseRevision: workflowEditorRevision(state),
           })
           return {
             ok: true,
@@ -227,6 +231,7 @@ export function buildProposeTools(): PluginTool[] {
             proposalId: payload.proposalId,
             summary: payload.summary,
             opCount,
+            baseRevision: payload.baseRevision,
             messageParts: [
               {
                 type: "workflow-proposal",
@@ -235,6 +240,7 @@ export function buildProposeTools(): PluginTool[] {
                 summary: payload.summary,
                 ops: payload.ops,
                 opCount: payload.opCount,
+                baseRevision: payload.baseRevision,
               },
             ],
           }

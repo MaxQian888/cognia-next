@@ -22,6 +22,7 @@ import type { AppRouterInstance } from "next/dist/shared/lib/app-router-context.
 import { transport } from "@/lib/tauri"
 import { getDb } from "@/lib/db/schema"
 import { listSessions } from "@/lib/db/sessions"
+import { filterExposedSessions } from "@/lib/chat/session-exposure"
 import { loggers } from "@cognia/logging"
 import { desktop as automation } from "@/lib/automation/client"
 import { startNewSession } from "@/lib/chat/start-session"
@@ -255,7 +256,7 @@ export async function quitAction(): Promise<void> {
 export async function loadRecentSessions(limit = 8): Promise<ChatSession[]> {
   try {
     const all = await listSessions()
-    return all.slice(0, limit)
+    return filterExposedSessions(all, "main-list").slice(0, limit)
   } catch (err) {
     log.warn("menu action loadRecentSessions failed", {
       error: err instanceof Error ? err.message : String(err),

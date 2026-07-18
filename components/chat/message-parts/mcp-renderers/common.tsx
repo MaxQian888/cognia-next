@@ -89,12 +89,15 @@ export function languageFromPath(path: string | undefined): string {
 export function McpCardShell({
   title,
   badge,
+  action,
   children,
   className,
   testId,
 }: {
   title: string
   badge?: string
+  /** Optional right-aligned header control (e.g. an "open in review" button). */
+  action?: ReactNode
   children: ReactNode
   className?: string
   testId: string
@@ -106,11 +109,14 @@ export function McpCardShell({
     >
       <div className="flex items-center justify-between gap-2 border-b bg-muted/40 px-3 py-2">
         <span className="font-medium text-xs">{title}</span>
-        {badge && (
-          <Badge variant="outline" className="text-[10px]" data-testid={`${testId}-badge`}>
-            {badge}
-          </Badge>
-        )}
+        <div className="flex items-center gap-1">
+          {badge && (
+            <Badge variant="outline" className="text-[10px]" data-testid={`${testId}-badge`}>
+              {badge}
+            </Badge>
+          )}
+          {action}
+        </div>
       </div>
       <div className="space-y-1 px-3 py-2 text-xs">{children}</div>
     </div>

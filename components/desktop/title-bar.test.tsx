@@ -1276,6 +1276,14 @@ test("File > Recent Sessions submenu lists loaded sessions and routes on click",
   listSessionsMock.mockResolvedValueOnce([
     { id: "s1", title: "Latest chat", kind: "direct", createdAt: 1, updatedAt: 1 },
     { id: "s2", title: "Older chat", kind: "direct", createdAt: 1, updatedAt: 0 },
+    {
+      id: "embedded",
+      title: "Canvas assistant",
+      kind: "resource-workbench",
+      visibility: "embedded",
+      createdAt: 1,
+      updatedAt: 2,
+    },
   ])
   const user = userEvent.setup()
   render(<TitleBar />)
@@ -1285,6 +1293,7 @@ test("File > Recent Sessions submenu lists loaded sessions and routes on click",
   const subTrigger = await screen.findByText("desktop.menu.file.recentSessions")
   subTrigger.focus()
   await user.keyboard("{ArrowRight}")
+  expect(screen.queryByText("Canvas assistant")).toBeNull()
   await user.click(await screen.findByText("Latest chat"))
   expect(setActiveSession).toHaveBeenCalledWith("s1")
   expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "dm" })

@@ -41,20 +41,13 @@ function appendUnique(target: string[], path: string | null): void {
   if (path && !target.includes(path)) target.push(path)
 }
 
-/**
- * Undo every staged, unstaged, conflicted, renamed, and untracked path in the
- * current repository snapshot. The refresh always runs, including when one of
- * the destructive steps fails, so every consumer sees the backend truth.
- */
-export async function undoWorkspaceChanges(
-  repoPath: string,
-  status: GitStatus,
-  deps: UndoWorkspaceChangesDeps = defaultUndoDeps
-): Promise<void> {
+function collectDiscardTargets(files: WorkspaceChangedFile[]): {
+  trackedPaths: string[]
+  discardPaths: string[]
+} {
   const trackedPaths: string[] = []
   const discardPaths: string[] = []
-
-  for (const file of collectWorkspaceChanges(status)) {
+  for (const file of files) {
     for (const change of file.changes) {
       appendUnique(discardPaths, change.path)
       appendUnique(discardPaths, change.origPath)
@@ -64,7 +57,17 @@ export async function undoWorkspaceChanges(
       }
     }
   }
+  return { trackedPaths, discardPaths }
+}
 
+// Unstage then discard the collected paths. The refresh always runs, including
+// when a destructive step fails, so every consumer sees the backend truth.
+async function runDiscard(
+  repoPath: string,
+  trackedPaths: string[],
+  discardPaths: string[],
+  deps: UndoWorkspaceChangesDeps
+): Promise<void> {
   let operationError: unknown
   try {
     if (trackedPaths.length > 0) await deps.unstage(repoPath, trackedPaths)
@@ -80,4 +83,30 @@ export async function undoWorkspaceChanges(
   }
 
   if (operationError !== undefined) throw operationError
+}
+
+/**
+ * Undo every staged, unstaged, conflicted, renamed, and untracked path in the
+ * current repository snapshot.
+ */
+export async function undoWorkspaceChanges(
+  repoPath: string,
+  status: GitStatus,
+  deps: UndoWorkspaceChangesDeps = defaultUndoDeps
+): Promise<void> {
+  const { trackedPaths, discardPaths } = collectDiscardTargets(collectWorkspaceChanges(status))
+  await runDiscard(repoPath, trackedPaths, discardPaths, deps)
+}
+
+/**
+ * Discard every staged/unstaged/untracked path of a SINGLE workspace file, so a
+ * user can revert one agent edit without touching the rest of the working tree.
+ */
+export async function discardWorkspaceFile(
+  repoPath: string,
+  file: WorkspaceChangedFile,
+  deps: UndoWorkspaceChangesDeps = defaultUndoDeps
+): Promise<void> {
+  const { trackedPaths, discardPaths } = collectDiscardTargets([file])
+  await runDiscard(repoPath, trackedPaths, discardPaths, deps)
 }

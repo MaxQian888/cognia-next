@@ -39,7 +39,7 @@ describe("isWorkflowEditorSessionId", () => {
 })
 
 describe("createWorkflowEditorSession", () => {
-  it("persists an additional workflow-editor row, switches focus, and clears messages", async () => {
+  it("persists an additional embedded row without changing global focus", async () => {
     useChatStore.getState().setActiveSession("workflow:wf_a")
     useChatStore.getState().setMessages([{ id: "m1" } as never])
 
@@ -47,32 +47,41 @@ describe("createWorkflowEditorSession", () => {
 
     expect(id).toMatch(/^workflow:wf_a:/)
     const row = await getDb().sessions.get(id)
-    expect(row).toMatchObject({ id, title: "Branch thread", kind: "workflow-editor" })
-    expect(useChatStore.getState().activeSessionId).toBe(id)
-    expect(useChatStore.getState().messages).toEqual([])
+    expect(row).toMatchObject({
+      id,
+      title: "Branch thread",
+      kind: "workflow-editor",
+      visibility: "embedded",
+      surfaceBinding: { kind: "workflow", workflowId: "wf_a" },
+    })
+    expect(useChatStore.getState().activeSessionId).toBe("workflow:wf_a")
+    expect(useChatStore.getState().messages).toEqual([{ id: "m1" }])
   })
 })
 
 describe("useWorkflowEditorSession", () => {
-  it("restores the previous session even when the user ended on an additional workflow session", async () => {
+  it("leaves the previous global session unchanged when creating a branch", async () => {
     useChatStore.getState().setActiveSession("preexisting-session")
     const { result, unmount } = renderHook(() => useWorkflowEditorSession("wf_a", "X"))
     await waitFor(() => expect(result.current.loading).toBe(false))
     // User spun off a new conversation and stayed on it.
     const branch = await createWorkflowEditorSession("wf_a", "Branch")
-    expect(useChatStore.getState().activeSessionId).toBe(branch)
+    expect(branch).toMatch(/^workflow:wf_a:/)
+    expect(useChatStore.getState().activeSessionId).toBe("preexisting-session")
     unmount()
     expect(useChatStore.getState().activeSessionId).toBe("preexisting-session")
   })
 
-  it("creates a workflow-editor ChatSession on first mount and pins it", async () => {
+  it("creates an embedded workflow ChatSession without pinning it globally", async () => {
     const { result } = renderHook(() => useWorkflowEditorSession("wf_a", "My Workflow"))
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.sessionId).toBe("workflow:wf_a")
     const row = await getDb().sessions.get("workflow:wf_a")
     expect(row?.kind).toBe("workflow-editor")
     expect(row?.title).toBe("My Workflow — chat")
-    expect(useChatStore.getState().activeSessionId).toBe("workflow:wf_a")
+    expect(row?.visibility).toBe("embedded")
+    expect(row?.surfaceBinding).toEqual({ kind: "workflow", workflowId: "wf_a" })
+    expect(useChatStore.getState().activeSessionId).toBeNull()
   })
 
   it("reuses an existing row on remount (idempotent)", async () => {
@@ -88,11 +97,11 @@ describe("useWorkflowEditorSession", () => {
     expect(after?.title).toBe(original?.title)
   })
 
-  it("restores the previously-active session id on unmount", async () => {
+  it("never changes the previously-active session id", async () => {
     useChatStore.getState().setActiveSession("preexisting-session")
     const { result, unmount } = renderHook(() => useWorkflowEditorSession("wf_a", "X"))
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(useChatStore.getState().activeSessionId).toBe("workflow:wf_a")
+    expect(useChatStore.getState().activeSessionId).toBe("preexisting-session")
     unmount()
     expect(useChatStore.getState().activeSessionId).toBe("preexisting-session")
   })

@@ -78,6 +78,27 @@ describe("readDexieDelta", () => {
     expect(delta.next_since).toBe(10)
   })
 
+  it("includes embedded resource sessions in authenticated device sync without changing visibility", async () => {
+    const db = getDb()
+    await db.sessions.put({
+      id: "resource-workbench:canvas:doc",
+      title: "Canvas",
+      kind: "resource-workbench",
+      visibility: "embedded",
+      surfaceBinding: { kind: "canvas-document", documentId: "doc" },
+      createdAt: 1,
+      updatedAt: 10,
+    })
+    const delta = await readDexieDelta("sessions", 0)
+    expect(delta.rows).toContainEqual(
+      expect.objectContaining({
+        id: "resource-workbench:canvas:doc",
+        kind: "resource-workbench",
+        visibility: "embedded",
+      })
+    )
+  })
+
   it("pages messages by [createdAt+id], ascending, under the page size", async () => {
     const db = getDb()
     const rows = Array.from({ length: 250 }, (_, i) => ({

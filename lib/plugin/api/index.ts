@@ -86,6 +86,7 @@ export { createShareAPI } from "./share-api"
 export { createBackupAPI } from "./backup-api"
 export { createAutomationAPI } from "./automation-api"
 export { createCompanionAPI } from "./companion-api"
+export { createContextPanelAPI } from "./context-panel-api"
 
 // Re-export types
 export type {
@@ -166,3 +167,4 @@ export type {
 } from "./backup-api"
 export type { PluginAutomationAPI } from "./automation-api"
 export type { PluginCompanionAPI, CompanionServerStatus } from "./companion-api"
+export type { PluginContextPanelAPI, PluginContextPanelRegistration } from "./context-panel-api"

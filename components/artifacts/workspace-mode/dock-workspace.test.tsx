@@ -22,8 +22,16 @@ const mockUseProjectEditor = jest.fn()
 let activePath: string | null = null
 let editorRootKey = "/repo"
 let editorRootPath = "/repo"
-let activeFile: { absolutePath: string; relPath: string; content: string } | null = null
-let openFiles: Array<{ absolutePath: string; relPath: string; content: string }> = []
+interface TestOpenFile {
+  absolutePath: string
+  relPath: string
+  language: string
+  savedContent: string
+  draftContent: string
+  draftVersion: number
+}
+let activeFile: TestOpenFile | null = null
+let openFiles: TestOpenFile[] = []
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -145,6 +153,11 @@ jest.mock("@/components/editor/project/project-monaco", () => ({
       ))}
     </div>
   ),
+}))
+
+jest.mock("@/components/editor/project/project-context-workbench", () => ({
+  ProjectContextWorkbench: () => <div data-testid="project-context-workbench" />,
+  ProjectContextWorkbenchMobile: () => <div data-testid="project-context-workbench-mobile" />,
 }))
 
 jest.mock("@/stores/git/git-store", () => ({
@@ -270,6 +283,21 @@ describe("DockWorkspace", () => {
     expect(screen.queryByTestId("file-tree")).not.toBeInTheDocument()
   })
 
+  it("preselects a requested working-tree file in the review surface", async () => {
+    act(() => {
+      useArtifactDockLayoutStore.getState().revealWorkspaceReview({
+        sessionId: "session-1",
+        rootPath: "/repo",
+        relPath: "src/edited.ts",
+      })
+    })
+
+    render(<DockWorkspace activeSessionId="session-1" />)
+
+    expect(await screen.findByTestId("workspace-review-layout")).toBeInTheDocument()
+    expect(gitState.selectFile).toHaveBeenCalledWith("src/edited.ts", false)
+  })
+
   it("selects the requested root before consuming a reveal", async () => {
     editorRootPath = "/repo-wt"
     act(() => {
@@ -358,7 +386,14 @@ describe("DockWorkspace", () => {
 
   it("wires editor tabs, sidebar, file actions, and keyboard saves", async () => {
     activePath = "src/a.ts"
-    activeFile = { absolutePath: "/repo/src/a.ts", relPath: "src/a.ts", content: "old" }
+    activeFile = {
+      absolutePath: "/repo/src/a.ts",
+      relPath: "src/a.ts",
+      language: "typescript",
+      savedContent: "old",
+      draftContent: "old",
+      draftVersion: 1,
+    }
     openFiles = [activeFile]
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -366,6 +401,8 @@ describe("DockWorkspace", () => {
     })
 
     render(<DockWorkspace activeSessionId="session-1" />)
+
+    expect(screen.queryByTestId("project-context-workbench")).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByTestId("root-switcher"))
     fireEvent.click(screen.getByTestId("fixed-review"))

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect } from "react"
+import { useCallback, useEffect, useMemo } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { listMessages, persistMessages } from "@/lib/db/messages"
 import {
@@ -31,6 +31,7 @@ import { useProjectStore } from "@/stores/project/project-store"
 import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
 import { isTauri } from "@/lib/tauri"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
+import { filterExposedSessions } from "@/lib/chat/session-exposure"
 
 export function useSessions() {
   const setActiveSession = useChatStore((s) => s.setActiveSession)
@@ -49,6 +50,10 @@ export function useSessions() {
     if (!projectStoreLoaded || !activeProjectId) return Promise.resolve([])
     return listScopedSessions(activeProjectId)
   }, [activeProjectId, projectStoreLoaded])
+  const exposedSessions = useMemo(
+    () => (Array.isArray(sessions) ? filterExposedSessions(sessions, "main-list") : []),
+    [sessions]
+  )
 
   // Live-bind the workspace's conversation folders (conversation-list overhaul).
   const folders = useLiveQuery<SessionFolder[]>(() => {
@@ -201,7 +206,7 @@ export function useSessions() {
   )
 
   return {
-    sessions: sessions ?? [],
+    sessions: exposedSessions,
     // `useLiveQuery` returns `undefined` until the first Dexie read resolves;
     // distinguishing that from a genuinely empty list lets the session list
     // show a skeleton instead of flashing the empty state on cold start.

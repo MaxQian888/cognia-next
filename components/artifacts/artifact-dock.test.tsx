@@ -16,6 +16,15 @@ jest.mock("./artifact-panel-content", () => ({
   ),
 }))
 
+jest.mock("@/components/context-workbench/resource-workbench-chat-panel", () => ({
+  ResourceWorkbenchChatPanel: ({ pendingPrompt }: { pendingPrompt?: string | null }) => (
+    <div data-testid="resource-workbench-chat">{pendingPrompt}</div>
+  ),
+}))
+jest.mock("@/hooks/chat/use-resource-workbench-session", () => ({
+  useResourceWorkbenchSession: () => ({ id: "artifact-resource-session" }),
+}))
+
 jest.mock("@/lib/files/workspace-backend", () => ({
   hasWorkspaceFsBackend: () => workspaceAvailable,
 }))
@@ -41,12 +50,16 @@ jest.mock("@/stores/chat", () => ({
 
 import { ArtifactDock } from "./artifact-dock"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
+import { useArtifactStore } from "@/stores/artifact/artifact-store"
 
 beforeEach(() => {
   localStorage.clear()
   workspaceAvailable = true
   artifactListProps.length = 0
-  act(() => useArtifactDockLayoutStore.getState().resetLayout())
+  act(() => {
+    useArtifactDockLayoutStore.getState().resetLayout()
+    useArtifactStore.setState({ activeArtifactId: null, artifacts: {} })
+  })
 })
 
 describe("ArtifactDock", () => {
@@ -103,5 +116,71 @@ describe("ArtifactDock", () => {
     render(<ArtifactDock />)
     fireEvent.click(screen.getByTestId("artifact-dock-collapse"))
     expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
+  })
+
+  it("moves Artifact, History, and Workspace into the Context Workbench registry host", () => {
+    act(() => {
+      useArtifactStore.setState({
+        activeArtifactId: "artifact-1",
+        artifacts: {
+          "artifact-1": {
+            id: "artifact-1",
+            sessionId: "sess-1",
+            messageId: "message-1",
+            type: "document",
+            title: "Document",
+            content: "content",
+            version: 3,
+            createdAt: new Date(0),
+            updatedAt: new Date(0),
+          },
+        },
+      })
+    })
+
+    render(<ArtifactDock />)
+    expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.metadata.artifactTitle" }))
+    expect(screen.getByRole("tab", { name: "artifacts.dock.workspaceMode" })).toBeInTheDocument()
+  })
+
+  it("routes an Artifact selection comment into its resource AI panel", () => {
+    act(() => {
+      useArtifactStore.setState({
+        activeArtifactId: "artifact-1",
+        artifacts: {
+          "artifact-1": {
+            id: "artifact-1",
+            sessionId: "sess-1",
+            messageId: "message-1",
+            type: "document",
+            title: "Document",
+            content: "selected text",
+            version: 1,
+            createdAt: new Date(0),
+            updatedAt: new Date(0),
+          },
+        },
+      })
+    })
+    render(<ArtifactDock />)
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("artifact-context-selection", {
+          detail: { artifactId: "artifact-1", start: 0, end: 8 },
+        })
+      )
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.resourceChat" }))
+    fireEvent.click(screen.getByRole("tab", { name: "contextWorkbench.aiActions" }))
+    fireEvent.change(screen.getByRole("textbox", { name: "label" }), {
+      target: { value: "Rewrite this selection" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "sendToAi" }))
+
+    expect(screen.getByTestId("resource-workbench-chat")).toHaveTextContent(
+      "Rewrite this selection"
+    )
   })
 })

@@ -30,6 +30,7 @@ import { searchSessionsByContent } from "@/lib/db/messages"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
+import { filterExposedSessions } from "@/lib/chat/session-exposure"
 import { useUIStore, type ChannelListView } from "@/stores/ui"
 import { useSettingsStore } from "@/stores/settings"
 import type { DateBucket } from "@/lib/chat/conversation-list-model"
@@ -83,6 +84,7 @@ export function MobileChannelList({
   onUnarchive,
   folders,
 }: MobileChannelListProps) {
+  const exposedSessions = useMemo(() => filterExposedSessions(sessions, "main-list"), [sessions])
   const t = useTranslations("mobile.home")
   const tShell = useTranslations("mobile.shell")
   // Search box: keep the field value immediate but debounce the value fed to
@@ -200,7 +202,7 @@ export function MobileChannelList({
   // Shared grouping model: pinned → date buckets, or a flat result list while
   // searching (mirrors the desktop sidebar via the same headless hook).
   const { sections, filteredCount } = useConversationListModel({
-    sessions,
+    sessions: exposedSessions,
     folders: view === "archived" ? undefined : folders,
     query,
     view,

@@ -27,6 +27,7 @@
     "./api/agent-tool": "./src/api/agent-tool.ts",
     "./api/guardrail": "./src/api/guardrail.ts",
     "./api/context-provider": "./src/api/context-provider.ts",
+    "./api/context-panel": "./src/api/context-panel.ts",
     "./api/balance-adapter": "./src/api/balance-adapter.ts",
     "./api/compaction-strategy": "./src/api/compaction-strategy.ts",
     "./api/im-rate-source": "./src/api/im-rate-source.ts",

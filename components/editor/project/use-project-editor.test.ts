@@ -4,6 +4,14 @@
 import { renderHook, act, waitFor } from "@testing-library/react"
 import { useProjectEditor, joinRootRel, type ProjectEditorDeps } from "./use-project-editor"
 
+const mockSessionsToArray = jest.fn().mockResolvedValue([])
+const mockSessionUpdate = jest.fn().mockResolvedValue(1)
+jest.mock("@/lib/db/schema", () => ({
+  getDb: () => ({
+    sessions: { toArray: mockSessionsToArray, update: mockSessionUpdate },
+  }),
+}))
+
 jest.mock("@cognia/logging", () => {
   const child = {
     debug: jest.fn(),
@@ -39,6 +47,7 @@ function makeDeps(overrides: Partial<ProjectEditorDeps> = {}): Partial<ProjectEd
   return {
     listDir: jest.fn(async () => []),
     readFile: jest.fn(async (_root: string, rel: string) => files[rel] ?? ""),
+    statFile: jest.fn(async () => ({ exists: true, isDir: false, size: 10, mtimeMs: 1234 })),
     writeFile: jest.fn(async (_root: string, rel: string, content: string) => {
       files[rel] = content
     }),
@@ -60,6 +69,8 @@ beforeEach(() => {
   mockPersisted = undefined
   setEditorSession.mockClear()
   for (const k of Object.keys(sessionStore)) delete sessionStore[k]
+  mockSessionsToArray.mockReset().mockResolvedValue([])
+  mockSessionUpdate.mockReset().mockResolvedValue(1)
 })
 
 describe("joinRootRel", () => {
@@ -90,6 +101,7 @@ describe("useProjectEditor", () => {
     })
     expect(result.current.openFiles).toHaveLength(1)
     expect(result.current.activeFile?.language).toBe("typescript")
+    expect(result.current.activeFile?.mtime).toBe(1234)
     expect(result.current.dirtyCount).toBe(0)
 
     act(() => result.current.setDraft("src/a.ts", "changed\n"))
@@ -117,6 +129,19 @@ describe("useProjectEditor", () => {
     expect((deps.readFile as jest.Mock).mock.calls.filter((c) => c[1] === "src/a.ts")).toHaveLength(
       1
     )
+  })
+
+  it("moves an open model when an in-app file rename is confirmed", async () => {
+    const deps = makeDeps()
+    const { result } = renderHook(() =>
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+    )
+    await act(async () => result.current.openFile("src/a.ts"))
+    await act(() => result.current.renameOpenFile("src/a.ts", "src/renamed.ts"))
+    expect(result.current.activeFile).toMatchObject({
+      relPath: "src/renamed.ts",
+      absolutePath: "/repo/src/renamed.ts",
+    })
   })
 
   it("closing the active tab falls back to a neighbour", async () => {

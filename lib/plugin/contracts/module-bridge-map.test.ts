@@ -61,6 +61,7 @@ function makeCtx(manifest: PluginManifest): ModuleBridgeContext {
     importer: async () => ({}),
     resolveAsset: (root, rel) => `${root}/${rel}`,
     moduleExports: {},
+    hasPermission: () => true,
   }
 }
 
@@ -102,6 +103,7 @@ describe("MODULE_BRIDGE_CAPABILITIES", () => {
         "session-importer",
         "tool-route",
         "context-provider",
+        "context-panel",
         "scheduler",
         "view",
         "webview",
@@ -109,7 +111,7 @@ describe("MODULE_BRIDGE_CAPABILITIES", () => {
     )
     // Lock the count — silent growth means the manager dispatch loop picked
     // up new behaviour that may need verification.
-    expect(MODULE_BRIDGE_CAPABILITY_KEYS).toHaveLength(21)
+    expect(MODULE_BRIDGE_CAPABILITY_KEYS).toHaveLength(22)
   })
 
   describe.each(MODULE_BRIDGE_CAPABILITY_KEYS)("%s", (key) => {

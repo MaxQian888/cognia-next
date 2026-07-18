@@ -40,6 +40,18 @@ jest.mock("@/hooks/chat/use-workflow-editor-session", () => ({
 import { RightSidebar } from "./index"
 
 const MESSAGES = {
+  contextWorkbench: {
+    actions: {
+      collapse: "Collapse",
+      focus: "Focus",
+      narrow: "Narrow",
+      pin: "Pin",
+      unpin: "Unpin",
+      wide: "Wide",
+    },
+    panelError: "Panel unavailable",
+    panelErrorDescription: "Panel crashed",
+  },
   workflowEditor: {
     rightSidebar: {
       tabs: {
@@ -57,6 +69,8 @@ const MESSAGES = {
 }
 
 interface FakeState {
+  nodes: []
+  edges: []
   selectedNodeIds: string[]
   selectedEdgeIds: string[]
   baseWorkflow: { id: string; name: string }
@@ -67,11 +81,13 @@ interface FakeState {
   clearRequestedInspectorPanel?: () => void
 }
 
-function makeFakeStore(initial: FakeState): EditorStore {
+function makeFakeStore(
+  initial: Omit<FakeState, "nodes" | "edges"> & Partial<Pick<FakeState, "nodes" | "edges">>
+): EditorStore {
   // Build a minimal real Zustand store with zundo so the production
   // `useShallow` selector path is exercised verbatim.
   const useStore = create<FakeState>()(
-    temporal(() => initial, { limit: 1 })
+    temporal(() => ({ nodes: [], edges: [], ...initial }), { limit: 1 })
   ) as unknown as EditorStore
   return useStore
 }
@@ -101,6 +117,31 @@ function harness(useStore: EditorStore) {
 }
 
 describe("RightSidebar", () => {
+  beforeEach(() => {
+    window.localStorage.setItem(
+      "cognia-context-workbench-surfaces-v1",
+      JSON.stringify({ workflow: false })
+    )
+  })
+
+  it("uses the shared activity rail and preserves smart Inspector switching when enabled", async () => {
+    window.localStorage.setItem(
+      "cognia-context-workbench-surfaces-v1",
+      JSON.stringify({ workflow: true })
+    )
+    const store = makeFakeStore({
+      selectedNodeIds: [],
+      selectedEdgeIds: [],
+      baseWorkflow: { id: "wf_context", name: "Context" },
+    })
+    harness(store)
+
+    expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
+    expect(await screen.findByTestId("mock-chat-tab")).toBeInTheDocument()
+    act(() => setSelectionCount(store, 1))
+    expect(screen.getByTestId("mock-inspector-panel")).toBeInTheDocument()
+  })
+
   describe("tab auto-switch (0 → ≥1 edge trigger)", () => {
     it("starts on Chat when selection is empty", async () => {
       const store = makeFakeStore({

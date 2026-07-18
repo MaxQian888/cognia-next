@@ -106,6 +106,19 @@ describe("useCanvasActions", () => {
     expect(result.current.error).toBe("boom")
   })
 
+  it("blocks provider dispatch when the assembled action prompt contains PII", async () => {
+    const { result } = renderHook(() => useCanvasActions())
+
+    await act(async () => {
+      await expect(
+        result.current.run({ actionType: "improve" as never, content: "jane@example.com" })
+      ).rejects.toThrow("PII gate")
+    })
+
+    expect(generateTextMock).not.toHaveBeenCalled()
+    expect(result.current.error).toContain("PII gate")
+  })
+
   it("stream() accumulates deltas and resolves with full text", async () => {
     streamTextMock.mockReturnValueOnce({
       textStream: (async function* () {
@@ -140,6 +153,21 @@ describe("useCanvasActions", () => {
     })
     expect(result.current.error).toBe("net")
     expect(result.current.output).toBe("p")
+  })
+
+  it("blocks streaming dispatch when the assembled action prompt contains PII", async () => {
+    const { result } = renderHook(() => useCanvasActions())
+
+    await act(async () => {
+      await expect(
+        result.current.stream(
+          { actionType: "improve" as never, content: "jane@example.com" },
+          jest.fn()
+        )
+      ).rejects.toThrow("PII gate")
+    })
+
+    expect(streamTextMock).not.toHaveBeenCalled()
   })
 
   it("reset() returns to the initial state", () => {

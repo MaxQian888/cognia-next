@@ -4,8 +4,11 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
@@ -21,6 +24,7 @@ import {
 import { buttonVariants } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
+import { Kbd } from "@/components/ui/kbd"
 import { SessionListLoading } from "@/components/ui/loading-states"
 import { PluginViewContainerPanel } from "@/components/shell/plugin-view-container-panel"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
@@ -58,12 +62,14 @@ import {
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import type {
+  ConversationSidebarSettings,
   ConversationSidebarDensity,
   ConversationSearchScope,
 } from "@cognia/agent-config-types"
 import { conversationSectionKey } from "@/lib/chat/conversation-list-model"
 import type { DateBucket } from "@/lib/chat/conversation-list-model"
 import type { Character, ChatSession, SessionFolder, Team } from "@cognia/agent-config-types"
+import { filterExposedSessions } from "@/lib/chat/session-exposure"
 import {
   ArchiveIcon,
   ChevronDownIcon,
@@ -76,6 +82,7 @@ import {
   PencilIcon,
   PlusIcon,
   SearchIcon,
+  SlidersHorizontalIcon,
   Trash2Icon,
   UsersIcon,
   XIcon,
@@ -329,11 +336,43 @@ function ChannelListBody({
   // Behavior preferences (Settings → Conversation). Absent settings fall back
   // to today's defaults so the sidebar renders identically before load.
   const sidebarSettings = useSettingsStore((s) => s.settings?.conversationSidebar)
+  const saveSettings = useSettingsStore((s) => s.save)
   const density: ConversationSidebarDensity = sidebarSettings?.density ?? "comfortable"
   const showPreview = sidebarSettings?.showPreview ?? false
   const groupByDate = sidebarSettings?.groupByDate ?? true
   const showUnreadBadges = sidebarSettings?.showUnreadBadges ?? true
   const searchScope: ConversationSearchScope = sidebarSettings?.searchScope ?? "title"
+  const sidebarSettingsRef = useRef(sidebarSettings)
+  const sidebarSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const pendingSidebarSavesRef = useRef(0)
+  useEffect(() => {
+    // Ignore intermediate store snapshots while optimistic writes are queued.
+    // The queue's final write already carries the complete merged value; an
+    // earlier snapshot must not roll the merge base back between user clicks.
+    if (pendingSidebarSavesRef.current === 0) {
+      sidebarSettingsRef.current = sidebarSettings
+    }
+  }, [sidebarSettings])
+  const saveSidebarSettings = useCallback(
+    (patch: Partial<ConversationSidebarSettings>) => {
+      const next = { ...sidebarSettingsRef.current, ...patch }
+      // Advance the merge base before the async store write resolves. A user
+      // can reopen the menu and toggle another option immediately; merging
+      // against the optimistic value prevents that second write from
+      // restoring the first option's stale value.
+      sidebarSettingsRef.current = next
+      pendingSidebarSavesRef.current += 1
+      sidebarSaveQueueRef.current = sidebarSaveQueueRef.current
+        .then(() => saveSettings({ conversationSidebar: next }))
+        .catch((error) => {
+          log.warn("channel-list display settings save failed", { error: String(error) })
+        })
+        .finally(() => {
+          pendingSidebarSavesRef.current -= 1
+        })
+    },
+    [saveSettings]
+  )
   // Narrow once: this component is only ever rendered for the chat
   // (DM/team) guilds. The shell branches on `kind === "canvas"`
   // upstream and renders the CanvasDocumentRail instead.
@@ -374,7 +413,7 @@ function ChannelListBody({
   // hidden imported-subagent inner transcripts, reachable only by drilling in
   // from a parent turn's SubagentPart — never in the list, search, or a bucket.
   const filtered = useMemo(() => {
-    const visible = sessions.filter((s) => s.kind !== "workflow-editor" && s.kind !== "subagent")
+    const visible = filterExposedSessions(sessions, "main-list")
     if (chatGuild.kind === "team") {
       return visible.filter((s) => s.kind === "team" && s.teamId === chatGuild.teamId)
     }
@@ -692,6 +731,12 @@ function ChannelListBody({
           selectedGuild={chatGuild}
           team={team ?? null}
           view={view}
+          density={density}
+          showPreview={showPreview}
+          groupByDate={groupByDate}
+          showUnreadBadges={showUnreadBadges}
+          searchScope={searchScope}
+          onUpdateDisplay={saveSidebarSettings}
           onToggleView={() => setView(view === "active" ? "archived" : "active")}
           onNewFolder={
             view === "active" && onCreateFolder
@@ -709,9 +754,16 @@ function ChannelListBody({
               type="search"
               value={searchInput}
               onChange={(e) => handleSearchChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape" && searchInput) {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  clearSearch()
+                }
+              }}
               placeholder={t("searchPlaceholder")}
               aria-label={t("searchAria")}
-              className="h-8 pr-7 pl-7 text-sm"
+              className="h-8 pr-9 pl-7 text-sm"
             />
             {searchInput ? (
               <Button
@@ -724,7 +776,9 @@ function ChannelListBody({
               >
                 <XIcon className="size-3.5" />
               </Button>
-            ) : null}
+            ) : (
+              <Kbd className="absolute top-1/2 right-1.5 h-5 -translate-y-1/2">/</Kbd>
+            )}
           </div>
         </div>
         {toolbarVisible ? (
@@ -801,6 +855,12 @@ function Header({
   selectedGuild,
   team,
   view,
+  density,
+  showPreview,
+  groupByDate,
+  showUnreadBadges,
+  searchScope,
+  onUpdateDisplay,
   onToggleView,
   onNewFolder,
   onNewDirect,
@@ -809,6 +869,12 @@ function Header({
   selectedGuild: { kind: "dm" } | { kind: "team"; teamId: string }
   team: Team | null
   view: "active" | "archived"
+  density: ConversationSidebarDensity
+  showPreview: boolean
+  groupByDate: boolean
+  showUnreadBadges: boolean
+  searchScope: ConversationSearchScope
+  onUpdateDisplay: (patch: Partial<ConversationSidebarSettings>) => void
   onToggleView: () => void
   onNewFolder?: () => void
   onNewDirect: () => void
@@ -849,6 +915,58 @@ function Header({
             <FolderPlusIcon className="size-4" />
           </Button>
         ) : null}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-7"
+              aria-label={t("displayOptions")}
+              title={t("displayOptions")}
+            >
+              <SlidersHorizontalIcon className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuLabel>{t("displayOptions")}</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuCheckboxItem
+              checked={density === "compact"}
+              onCheckedChange={(checked) =>
+                onUpdateDisplay({ density: checked ? "compact" : "comfortable" })
+              }
+            >
+              {t("compactDensity")}
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem
+              checked={showPreview}
+              onCheckedChange={(checked) => onUpdateDisplay({ showPreview: Boolean(checked) })}
+            >
+              {t("showPreview")}
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem
+              checked={groupByDate}
+              onCheckedChange={(checked) => onUpdateDisplay({ groupByDate: Boolean(checked) })}
+            >
+              {t("groupByDate")}
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem
+              checked={showUnreadBadges}
+              onCheckedChange={(checked) => onUpdateDisplay({ showUnreadBadges: Boolean(checked) })}
+            >
+              {t("showUnreadBadges")}
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuCheckboxItem
+              checked={searchScope === "titleAndContent"}
+              onCheckedChange={(checked) =>
+                onUpdateDisplay({ searchScope: checked ? "titleAndContent" : "title" })
+              }
+            >
+              {t("searchMessageContent")}
+            </DropdownMenuCheckboxItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Button
           size="icon"
           variant="ghost"

@@ -24,7 +24,12 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { gitDiffStat } from "@/lib/git/commands"
-import { collectWorkspaceChanges, undoWorkspaceChanges } from "@/lib/git/workspace-changes"
+import {
+  collectWorkspaceChanges,
+  discardWorkspaceFile,
+  undoWorkspaceChanges,
+  type WorkspaceChangedFile,
+} from "@/lib/git/workspace-changes"
 import { resolveSessionProjectRoot } from "@/lib/workspace/roots"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { useGitStore } from "@/stores/git/git-store"
@@ -46,6 +51,8 @@ export function WorkspaceChangesCard({ session }: WorkspaceChangesCardProps) {
   const [expanded, setExpanded] = useState(false)
   const [confirmUndo, setConfirmUndo] = useState(false)
   const [undoing, setUndoing] = useState(false)
+  const [pendingDiscard, setPendingDiscard] = useState<WorkspaceChangedFile | null>(null)
+  const [discarding, setDiscarding] = useState(false)
   const [statResult, setStatResult] = useState<StatResult | null>(null)
   const projects = useProjectStore((state) => state.projects)
   const gitRootDir = useGitStore((state) => state.rootDir)
@@ -122,6 +129,21 @@ export function WorkspaceChangesCard({ session }: WorkspaceChangesCardProps) {
     }
   }
 
+  const runFileDiscard = async () => {
+    if (!pendingDiscard) return
+    const file = pendingDiscard
+    setPendingDiscard(null)
+    setDiscarding(true)
+    try {
+      await discardWorkspaceFile(rootPath, file)
+      toast.success(t("discardFileSuccess", { path: file.path }))
+    } catch (error) {
+      toast.error(t("discardFileFailed", { path: file.path, error: String(error) }))
+    } finally {
+      setDiscarding(false)
+    }
+  }
+
   return (
     <div
       className="mx-3 mb-1 overflow-hidden rounded-md border bg-muted/20"
@@ -160,26 +182,42 @@ export function WorkspaceChangesCard({ session }: WorkspaceChangesCardProps) {
             {files.map((file) => {
               const stat = statsByPath.get(file.path)
               return (
-                <button
+                <div
                   key={file.path}
-                  type="button"
-                  className="flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted/60 md:min-h-0 md:py-1.5"
-                  data-testid={`workspace-change-${file.path}`}
-                  onClick={() => revealFile(file.path)}
+                  className="group flex items-center gap-1 pr-1 hover:bg-muted/60"
                 >
-                  <FileCode2Icon className="size-3.5 shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 flex-1 truncate" title={file.path}>
-                    {file.path}
-                  </span>
-                  {stat && (
-                    <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
-                      <span className="text-emerald-600 dark:text-emerald-400">
-                        +{stat.insertions}
-                      </span>{" "}
-                      <span className="text-red-600 dark:text-red-400">−{stat.deletions}</span>
+                  <button
+                    type="button"
+                    className="flex min-h-11 min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left text-xs md:min-h-0 md:py-1.5"
+                    data-testid={`workspace-change-${file.path}`}
+                    onClick={() => revealFile(file.path)}
+                  >
+                    <FileCode2Icon className="size-3.5 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate" title={file.path}>
+                      {file.path}
                     </span>
-                  )}
-                </button>
+                    {stat && (
+                      <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+                        <span className="text-emerald-600 dark:text-emerald-400">
+                          +{stat.insertions}
+                        </span>{" "}
+                        <span className="text-red-600 dark:text-red-400">−{stat.deletions}</span>
+                      </span>
+                    )}
+                  </button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="size-7 shrink-0 text-muted-foreground opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+                    aria-label={t("discardFile")}
+                    title={t("discardFile")}
+                    data-testid={`workspace-change-discard-${file.path}`}
+                    disabled={discarding}
+                    onClick={() => setPendingDiscard(file)}
+                  >
+                    <RotateCcwIcon className="size-3.5" />
+                  </Button>
+                </div>
               )
             })}
           </div>
@@ -223,6 +261,30 @@ export function WorkspaceChangesCard({ session }: WorkspaceChangesCardProps) {
               onClick={() => void runUndo()}
             >
               {t("undoConfirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={pendingDiscard !== null}
+        onOpenChange={(open) => !open && setPendingDiscard(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("discardFileConfirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("discardFileConfirmDescription", { path: pendingDiscard?.path ?? "" })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              data-testid="workspace-change-discard-confirm"
+              onClick={() => void runFileDiscard()}
+            >
+              {t("discardFileConfirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -33,6 +33,7 @@ import type { ChatSession } from "@cognia/agent-config-types"
 import type { SingleExportFormat } from "@/lib/export/single"
 import { listSessions } from "@/lib/db/sessions"
 import { createLogger } from "@cognia/logging"
+import { filterExposedSessions } from "@/lib/chat/session-exposure"
 
 const log = createLogger("data-export")
 
@@ -52,8 +53,9 @@ export function BatchExportDialog({ trigger }: Props) {
     if (!open) return
     listSessions()
       .then((rows) => {
-        setSessions(rows)
-        setSelectedIds(new Set(rows.map((r) => r.id)))
+        const exposed = filterExposedSessions(rows, "standard-export")
+        setSessions(exposed)
+        setSelectedIds(new Set(exposed.map((row) => row.id)))
       })
       .catch((error) => {
         log.error("batch-export-list-sessions-failed", { error })

@@ -1226,6 +1226,7 @@ describe("createFullPluginContext", () => {
     expect(context.ai).toBeDefined()
     expect(context.extensions).toBeDefined()
     expect(context.permissions).toBeDefined()
+    expect(context.contextPanels).toBeDefined()
   })
 
   it("should have session API methods", () => {
@@ -1267,6 +1268,13 @@ describe("createFullPluginContext", () => {
     const context = createFullPluginContext(plugin, mockManager)
 
     expect(typeof context.permissions.hasPermission).toBe("function")
+  })
+
+  it("should expose resource-scoped context panel registration", () => {
+    const plugin = createMockPlugin()
+    const context = createFullPluginContext(plugin, mockManager)
+
+    expect(typeof context.contextPanels.register).toBe("function")
   })
 
   it("agent.registerExternalAgentAdapter registers a namespaced adapter into the registry", () => {

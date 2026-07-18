@@ -71,6 +71,7 @@ import { useArtifactStore } from "@/stores/artifact/artifact-store"
 
 beforeEach(() => {
   localStorage.clear()
+  localStorage.setItem("cognia-context-workbench-surfaces-v1", JSON.stringify({ artifact: false }))
   mobileViewportRef.current = false
   useArtifactStore.setState({
     artifacts: {},

@@ -11,6 +11,7 @@ import { join } from "node:path"
 describe("lib/plugin/api barrel", () => {
   it.each([
     "createSessionAPI",
+    "createContextPanelAPI",
     "createProjectAPI",
     "createVectorAPI",
     "createThemeAPI",
@@ -107,6 +108,7 @@ describe("lib/plugin/api barrel", () => {
       "PluginBackupAPI",
       "PluginAutomationAPI",
       "PluginCompanionAPI",
+      "PluginContextPanelAPI",
     ]
 
     for (const apiType of mountedApiTypes) {

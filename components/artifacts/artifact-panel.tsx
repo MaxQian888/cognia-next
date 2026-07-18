@@ -12,15 +12,27 @@
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { useArtifactPanelState } from "@/hooks/artifacts/use-artifact-panel"
 import { ArtifactPanelContent } from "./artifact-panel-content"
+import { ArtifactContextWorkbench } from "./artifact-dock"
+import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { useContextWorkbenchSurfaceFlag } from "@/hooks/context-workbench/use-context-workbench-surface-flag"
 
 export function ArtifactPanel() {
   const { t, panelOpen, panelView, panelMode, panelWidth, closePanel } = useArtifactPanelState()
+  const activeArtifactId = useArtifactStore((state) => state.activeArtifactId)
+  const workbenchEnabled = useContextWorkbenchSurfaceFlag("artifact")
+  const open = panelOpen && panelView === "artifact"
+
+  if (workbenchEnabled && activeArtifactId) {
+    return (
+      <ArtifactContextWorkbench
+        artifactId={activeArtifactId}
+        mobile={{ open, onOpenChange: (next) => !next && closePanel() }}
+      />
+    )
+  }
 
   return (
-    <Sheet
-      open={panelOpen && panelView === "artifact"}
-      onOpenChange={(open) => !open && closePanel()}
-    >
+    <Sheet open={open} onOpenChange={(open) => !open && closePanel()}>
       <SheetContent
         side={panelMode === "mobile" ? "bottom" : "right"}
         className={`${panelWidth} p-0 transition-all duration-200 ${

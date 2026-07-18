@@ -8,7 +8,8 @@ import type { ChatSession } from "@cognia/agent-config-types"
 const logInfo = jest.fn()
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
+    vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
 jest.mock("@cognia/logging", () => ({
@@ -266,6 +267,33 @@ test("Archive menu item is hidden when no onArchive callback is provided", async
   setup()
   await user.click(screen.getByRole("button", { name: "actionsMenu" }))
   expect(screen.queryByText("archive")).toBeNull()
+})
+
+test("Delete requires confirmation before removing the session", async () => {
+  const user = userEvent.setup()
+  const { onDelete } = setup()
+
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  await user.click(await screen.findByText("delete"))
+
+  expect(onDelete).not.toHaveBeenCalled()
+  const dialog = await screen.findByRole("alertdialog")
+  expect(dialog).toHaveTextContent('deleteConfirmTitle:{"title":"Hello"}')
+  await user.click(screen.getByRole("button", { name: "deleteConfirmAction" }))
+  expect(onDelete).toHaveBeenCalledWith("s-1")
+})
+
+test("cancelling delete closes the confirmation without removing the session", async () => {
+  const user = userEvent.setup()
+  const { onDelete } = setup()
+
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  await user.click(await screen.findByText("delete"))
+  expect(await screen.findByRole("alertdialog")).toBeInTheDocument()
+
+  await user.click(screen.getByRole("button", { name: "cancel" }))
+  expect(screen.queryByRole("alertdialog")).toBeNull()
+  expect(onDelete).not.toHaveBeenCalled()
 })
 
 // The Move-to-folder submenu is a Radix sub-menu whose items don't reliably

@@ -43,6 +43,8 @@ jest.mock("@/components/editor/monaco-diagnostics-bar", () => ({
 const revealLineInCenter = jest.fn()
 const setPosition = jest.fn()
 const focus = jest.fn()
+const getOffsetAt = jest.fn(({ column }: { column: number }) => column - 1)
+let cursorSelectionListener: ((event: unknown) => void) | null = null
 let capturedOnChange: ((v: string) => void) | null = null
 jest.mock("@monaco-editor/react", () => {
   const React = jest.requireActual<typeof import("react")>("react")
@@ -60,7 +62,17 @@ jest.mock("@monaco-editor/react", () => {
     React.useEffect(() => {
       if (mountedRef.current) return
       mountedRef.current = true
-      const editor = { revealLineInCenter, setPosition, focus, getId: () => "ed1" }
+      const editor = {
+        revealLineInCenter,
+        setPosition,
+        focus,
+        getId: () => "ed1",
+        getModel: () => ({ getOffsetAt }),
+        onDidChangeCursorSelection: (listener: (event: unknown) => void) => {
+          cursorSelectionListener = listener
+          return { dispose: jest.fn() }
+        },
+      }
       onMount(editor, { editor: {}, languages: {} })
     }, [onMount])
     return React.createElement("div", { "data-testid": "monaco" })
@@ -77,6 +89,7 @@ const file: OpenFile = {
   language: "typescript",
   savedContent: "x",
   draftContent: "x",
+  draftVersion: 1,
 }
 
 beforeEach(() => {
@@ -84,6 +97,7 @@ beforeEach(() => {
   registerActionsMock.mockClear()
   revealLineInCenter.mockClear()
   capturedOnChange = null
+  cursorSelectionListener = null
   mockResolvedTheme = "dark"
 })
 
@@ -132,6 +146,49 @@ describe("ProjectMonaco", () => {
     )
     capturedOnChange?.("new content")
     expect(onChange).toHaveBeenCalledWith("new content")
+  })
+
+  it("reports a non-empty selection as resource offsets", () => {
+    const onSelectionChange = jest.fn()
+    render(
+      <ProjectMonaco
+        file={file}
+        projectRoot="/repo"
+        onChange={jest.fn()}
+        onSelectionChange={onSelectionChange}
+        actions={[]}
+        actionLabels={{}}
+        bindings={{}}
+      />
+    )
+    cursorSelectionListener?.({
+      selection: {
+        getStartPosition: () => ({ lineNumber: 1, column: 2 }),
+        getEndPosition: () => ({ lineNumber: 1, column: 4 }),
+      },
+    })
+    expect(onSelectionChange).toHaveBeenCalledWith({ kind: "text", start: 1, end: 3 })
+  })
+
+  it("lifts the mounted Monaco diagnostics context into the workbench", () => {
+    const onDiagnosticsReady = jest.fn()
+    const { unmount } = render(
+      <ProjectMonaco
+        file={file}
+        projectRoot="/repo"
+        onChange={jest.fn()}
+        onDiagnosticsReady={onDiagnosticsReady}
+        actions={[]}
+        actionLabels={{}}
+        bindings={{}}
+      />
+    )
+    expect(onDiagnosticsReady).toHaveBeenCalledWith(
+      "src/a.ts",
+      expect.objectContaining({ monaco: expect.anything(), editor: expect.anything() })
+    )
+    unmount()
+    expect(onDiagnosticsReady).toHaveBeenLastCalledWith("src/a.ts", null)
   })
 
   it("reveals a line when a goto event targets this file", () => {

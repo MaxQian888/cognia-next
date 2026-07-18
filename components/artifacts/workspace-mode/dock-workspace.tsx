@@ -188,6 +188,7 @@ function WorkspaceEditorBody({
     }
     processedRequest.current = request.id
     if (request.kind === "review") {
+      if (request.relPath) selectFile(request.relPath, false)
       queueMicrotask(() => {
         if (processedRequest.current === request.id) {
           setSurface(hasReview ? "review" : "file")
@@ -208,6 +209,7 @@ function WorkspaceEditorBody({
     rootPath,
     selectRoot,
     hasReview,
+    selectFile,
     openFile,
     clearRequest,
   ])
@@ -342,6 +344,7 @@ function WorkspaceEditorBody({
             workbench={workbench}
             sidebarPosition="right"
             panelIdPrefix="workspace"
+            showContextWorkbench={false}
             layout={layout === "mobile" ? "mobile" : "split"}
           />
         </div>

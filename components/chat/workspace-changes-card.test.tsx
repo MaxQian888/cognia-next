@@ -10,6 +10,7 @@ let gitState: Record<string, unknown> = {}
 let breakpoint: "mobile" | "tablet" | "desktop" = "desktop"
 const gitDiffStat = jest.fn()
 const undoWorkspaceChanges = jest.fn()
+const discardWorkspaceFile = jest.fn()
 const toastError = jest.fn()
 
 jest.mock("next-intl", () => ({
@@ -37,6 +38,7 @@ jest.mock("@/lib/git/workspace-changes", () => {
   return {
     ...actual,
     undoWorkspaceChanges: (...args: unknown[]) => undoWorkspaceChanges(...args),
+    discardWorkspaceFile: (...args: unknown[]) => discardWorkspaceFile(...args),
   }
 })
 
@@ -68,11 +70,28 @@ beforeEach(() => {
     { path: "src/b.ts", insertions: 2, deletions: 0 },
   ])
   undoWorkspaceChanges.mockReset().mockResolvedValue(undefined)
+  discardWorkspaceFile.mockReset().mockResolvedValue(undefined)
   toastError.mockReset()
   act(() => useArtifactDockLayoutStore.getState().resetLayout())
 })
 
 describe("WorkspaceChangesCard", () => {
+  it("discards a single file only after confirmation", async () => {
+    render(<WorkspaceChangesCard session={session} />)
+    fireEvent.click(screen.getByTestId("workspace-changes-toggle"))
+
+    fireEvent.click(await screen.findByTestId("workspace-change-discard-src/a.ts"))
+    expect(discardWorkspaceFile).not.toHaveBeenCalled()
+
+    fireEvent.click(await screen.findByTestId("workspace-change-discard-confirm"))
+    await waitFor(() =>
+      expect(discardWorkspaceFile).toHaveBeenCalledWith(
+        "/repo",
+        expect.objectContaining({ path: "src/a.ts" })
+      )
+    )
+  })
+
   it("renders and loads stats in the mobile Sheet layout", async () => {
     breakpoint = "mobile"
     render(<WorkspaceChangesCard session={session} />)

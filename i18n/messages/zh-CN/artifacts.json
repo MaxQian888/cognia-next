@@ -118,6 +118,12 @@
   "workspace": {
     "card": {
       "cancel": "取消",
+      "discardFile": "丢弃此文件的改动",
+      "discardFileConfirm": "丢弃文件改动",
+      "discardFileConfirmDescription": "这会把 {path} 还原到最近一次提交的状态，且不可撤销。其它改动不受影响。",
+      "discardFileConfirmTitle": "丢弃此文件的改动？",
+      "discardFileFailed": "无法丢弃 {path}：{error}",
+      "discardFileSuccess": "已还原 {path}",
       "editedFiles": "已编辑 {count} 个文件",
       "review": "审阅",
       "undo": "撤销",

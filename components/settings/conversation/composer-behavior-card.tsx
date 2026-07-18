@@ -47,6 +47,7 @@ export function ComposerBehaviorCard() {
   const save = useSettingsStore((s) => s.save)
 
   const cb: ComposerBehavior = settings?.composerBehavior ?? {}
+  const compactLayout = cb.compactLayout === true
   const sendOnEnter = cb.sendOnEnter !== false
   const clearAfterSend = cb.clearAfterSend !== false
   const autoScrollOnStream = cb.autoScrollOnStream !== false
@@ -63,6 +64,14 @@ export function ComposerBehaviorCard() {
         <h3 className="text-sm font-medium">{t("title")}</h3>
         <p className="text-xs text-muted-foreground">{t("description")}</p>
       </div>
+
+      <ToggleRow
+        id="composer-compact-layout"
+        label={t("compactLayout.label")}
+        hint={t("compactLayout.hint")}
+        checked={compactLayout}
+        onChange={(next) => update({ compactLayout: next })}
+      />
 
       <ToggleRow
         id="composer-send-on-enter"

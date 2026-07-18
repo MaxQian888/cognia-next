@@ -28,6 +28,27 @@
   "searchTab": "Search",
   "treeAria": "Project files",
   "treeEmpty": "No files",
+  "workbench": {
+    "mobileTab": "Tools",
+    "ai": "AI",
+    "comments": "Comments",
+    "contentHash": "Draft token",
+    "dirty": "Unsaved draft",
+    "inspect": "Inspect",
+    "language": "Language",
+    "outline": "Outline",
+    "outlineEmpty": "No symbols are available for this file.",
+    "path": "Path",
+    "previewFrameTitle": "Project file preview",
+    "previewRun": "Preview and run",
+    "problems": "Problems",
+    "problemsUnavailable": "Problems become available after the Monaco model is mounted.",
+    "review": "Review",
+    "relinkDescription": "Choose a thread from the same repository after an external file rename.",
+    "relinkTitle": "Reassociate an earlier resource thread",
+    "saved": "Saved",
+    "state": "State"
+  },
   "unavailableDesc": "The project editor needs a desktop app or a paired device to reach the project files.",
   "unavailableTitle": "Editor unavailable"
 }

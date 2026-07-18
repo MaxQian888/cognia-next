@@ -34,6 +34,25 @@ describe("readSessionPage", () => {
     expect(page.next_offset).toBeUndefined()
   })
 
+  it("does not expose embedded resource sessions to the companion connector", async () => {
+    const db = getDb()
+    await db.sessions.bulkPut([
+      { id: "visible", title: "Visible", kind: "direct", createdAt: 0, updatedAt: 1 } as never,
+      {
+        id: "embedded",
+        title: "Embedded",
+        kind: "resource-workbench",
+        visibility: "embedded",
+        createdAt: 0,
+        updatedAt: 2,
+      } as never,
+    ])
+
+    const page = await readSessionPage(10, 0)
+    expect(page.rows.map((row) => row.id)).toEqual(["visible"])
+    expect(page.total).toBe(1)
+  })
+
   it("paginates with limit + offset and reports next_offset", async () => {
     const db = getDb()
     const rows = Array.from({ length: 5 }, (_, i) => ({

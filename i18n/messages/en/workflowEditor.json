@@ -39,7 +39,9 @@
       "discard": "Discard",
       "errorEditorNotOpen": "The editor for this workflow is not open.",
       "errorNotFound": "This proposal is no longer available — it may have been replaced by a newer one.",
+      "errorStale": "The workflow changed after this proposal was created. Rebase or discard it before applying.",
       "hideOps": "Hide ops",
+      "rebase": "Rebase",
       "showOps": "Show {count} ops",
       "status": {
         "applied": "Applied",

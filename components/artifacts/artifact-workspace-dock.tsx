@@ -18,11 +18,10 @@
  */
 
 import { useEffect, useRef, type ReactNode } from "react"
-import { motion } from "motion/react"
+import type { PanelImperativeHandle } from "react-resizable-panels"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { cn } from "@/lib/utils"
 import { useBreakpoint } from "@/hooks/ui"
-import { mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import {
   ARTIFACT_DOCK_BOUNDS,
@@ -90,6 +89,34 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
   const setDockSize = useArtifactDockLayoutStore((s) => s.setDockSize)
   const setDockCollapsed = useArtifactDockLayoutStore((s) => s.setDockCollapsed)
   const setDockMode = useArtifactDockLayoutStore((s) => s.setDockMode)
+  const dockPanelRef = useRef<PanelImperativeHandle | null>(null)
+  const dockPanelElementRef = useRef<HTMLDivElement | null>(null)
+  const previousDockCollapsedRef = useRef(dockCollapsed)
+
+  // Match the conversation sidebar: animate only collapse/expand for 200ms,
+  // then remove the transition so manual divider dragging remains immediate.
+  useEffect(() => {
+    if (previousDockCollapsedRef.current === dockCollapsed) return
+    previousDockCollapsedRef.current = dockCollapsed
+
+    const panel = dockPanelRef.current
+    const element = dockPanelElementRef.current
+    if (!panel || !element) return
+
+    element.classList.add("transition-[flex-grow]", "duration-200", "ease-in-out")
+    // Commit the transition style before react-resizable-panels updates flex-grow.
+    void element.offsetWidth
+    if (dockCollapsed) panel.collapse()
+    else panel.resize(`${dockSize}%`)
+
+    const timer = window.setTimeout(() => {
+      element.classList.remove("transition-[flex-grow]", "duration-200", "ease-in-out")
+    }, 220)
+    return () => {
+      window.clearTimeout(timer)
+      element.classList.remove("transition-[flex-grow]", "duration-200", "ease-in-out")
+    }
+  }, [dockCollapsed, dockSize])
 
   // Auto-expand the dock when a fresh artifact becomes active. Keyed on the id
   // so re-collapsing while the same artifact stays active is respected (we only
@@ -104,8 +131,6 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
       setDockCollapsed(false)
     }
   }, [activeArtifactId, setDockCollapsed, setDockMode])
-
-  const collapseTransition = useReducedMotionTransition(mobileTransition("normal"))
 
   return (
     <div
@@ -132,21 +157,17 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
 
         <ResizablePanel
           id="artifact-dock"
+          panelRef={dockPanelRef}
+          elementRef={dockPanelElementRef}
           defaultSize={dockCollapsed ? "0%" : `${dockSize}%`}
-          minSize={dockCollapsed ? "0%" : `${ARTIFACT_DOCK_BOUNDS.min}%`}
+          minSize={`${ARTIFACT_DOCK_BOUNDS.min}%`}
           maxSize={`${ARTIFACT_DOCK_BOUNDS.max}%`}
           collapsible
           collapsedSize="0%"
         >
-          <motion.div
-            data-testid="artifact-dock-wrapper"
-            layout
-            animate={{ opacity: dockCollapsed ? 0 : 1 }}
-            transition={collapseTransition}
-            className="h-full min-w-0 overflow-hidden"
-          >
+          <div data-testid="artifact-dock-wrapper" className="h-full min-w-0 overflow-hidden">
             <ArtifactDock />
-          </motion.div>
+          </div>
         </ResizablePanel>
       </ResizablePanelGroup>
     </div>

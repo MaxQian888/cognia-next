@@ -33,11 +33,21 @@ import { MonacoDiagnosticsBar } from "@/components/editor/monaco-diagnostics-bar
 import type { MonacoLike, EditorLike } from "@/hooks/use-monaco-markers"
 import type { OpenFile } from "./use-project-editor"
 import { PROJECT_EDITOR_GOTO_EVENT, type ProjectEditorGotoDetail } from "./editor-events"
+import type { TextSelectionCoordinates } from "@/types/context-workbench"
 
 interface RevealableEditor {
   revealLineInCenter(line: number): void
   setPosition(pos: { lineNumber: number; column: number }): void
   focus(): void
+  getModel(): { getOffsetAt(position: { lineNumber: number; column: number }): number } | null
+  onDidChangeCursorSelection(listener: (event: CursorSelectionEvent) => void): { dispose(): void }
+}
+
+interface CursorSelectionEvent {
+  selection: {
+    getStartPosition(): { lineNumber: number; column: number }
+    getEndPosition(): { lineNumber: number; column: number }
+  }
 }
 
 interface Props {
@@ -50,6 +60,11 @@ interface Props {
   actionLabels: Record<string, string>
   /** User keybindings from the canvas keybinding store. */
   bindings: Record<string, string>
+  onSelectionChange?: (selection: TextSelectionCoordinates | undefined) => void
+  onDiagnosticsReady?: (
+    relPath: string,
+    diagnostics: { monaco: MonacoLike; editor: EditorLike } | null
+  ) => void
 }
 
 export function ProjectMonaco({
@@ -59,6 +74,8 @@ export function ProjectMonaco({
   actions,
   actionLabels,
   bindings,
+  onSelectionChange,
+  onDiagnosticsReady,
 }: Props) {
   const { resolvedTheme } = useTheme()
   const handleRef = useRef<MonacoWorkbenchHandle | null>(null)
@@ -80,8 +97,9 @@ export function ProjectMonaco({
       handleRef.current = null
       actionDisposablesRef.current.forEach((d) => d.dispose())
       actionDisposablesRef.current = []
+      onDiagnosticsReady?.(file.relPath, null)
     }
-  }, [file.absolutePath])
+  }, [file.absolutePath, file.relPath, onDiagnosticsReady])
 
   // Reveal a line/column when the orchestrator asks for this file (search jump,
   // terminal path-link). Ignores events targeting a different file.
@@ -101,10 +119,20 @@ export function ProjectMonaco({
 
   const handleMount: OnMount = (editor, monaco) => {
     editorRef.current = editor as unknown as RevealableEditor
-    setDiag({
+    const revealableEditor = editor as unknown as RevealableEditor
+    revealableEditor.onDidChangeCursorSelection((event) => {
+      const model = revealableEditor.getModel()
+      if (!model) return
+      const start = model.getOffsetAt(event.selection.getStartPosition())
+      const end = model.getOffsetAt(event.selection.getEndPosition())
+      onSelectionChange?.(start === end ? undefined : { kind: "text", start, end })
+    })
+    const nextDiagnostics = {
       monaco: monaco as unknown as MonacoLike,
       editor: editor as unknown as EditorLike,
-    })
+    }
+    setDiag(nextDiagnostics)
+    onDiagnosticsReady?.(file.relPath, nextDiagnostics)
     if (resolvedTheme) {
       const variant: "light" | "dark" = resolvedTheme === "dark" ? "dark" : "light"
       const resolved = resolveActiveThemeColors({
@@ -167,7 +195,9 @@ export function ProjectMonaco({
           height="100%"
         />
       </div>
-      <MonacoDiagnosticsBar monaco={diag?.monaco ?? null} editor={diag?.editor ?? null} />
+      {!onDiagnosticsReady ? (
+        <MonacoDiagnosticsBar monaco={diag?.monaco ?? null} editor={diag?.editor ?? null} />
+      ) : null}
     </div>
   )
 }

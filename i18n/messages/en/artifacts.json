@@ -118,6 +118,12 @@
   "workspace": {
     "card": {
       "cancel": "Cancel",
+      "discardFile": "Discard this file's changes",
+      "discardFileConfirm": "Discard file changes",
+      "discardFileConfirmDescription": "This reverts {path} to its last committed state and cannot be undone. Other changes are left untouched.",
+      "discardFileConfirmTitle": "Discard changes to this file?",
+      "discardFileFailed": "Could not discard {path}: {error}",
+      "discardFileSuccess": "Reverted {path}",
       "editedFiles": "Edited {count, plural, one {# file} other {# files}}",
       "review": "Review",
       "undo": "Undo",

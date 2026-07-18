@@ -39,13 +39,32 @@ class ControllableResizeObserver {
 // to a stub that records `layout()` calls so the debounce test can assert
 // against it.
 const mockEditorLayout = jest.fn()
+const mockEditorState = {
+  value: "",
+  selection: null as null | {
+    isEmpty: () => boolean
+    getStartPosition: () => { lineNumber: number; column: number }
+    getEndPosition: () => { lineNumber: number; column: number }
+  },
+}
 const editorStub = {
-  getValue: () => "",
-  getSelection: () => null,
+  getValue: () => mockEditorState.value,
+  getSelection: () => mockEditorState.selection,
   getPosition: () => null,
   executeEdits: jest.fn(),
   focus: jest.fn(),
-  getModel: () => null,
+  getModel: () => ({
+    getValue: () => mockEditorState.value,
+    getValueInRange: () => {
+      const selection = mockEditorState.selection
+      if (!selection) return ""
+      return mockEditorState.value.slice(
+        selection.getStartPosition().column - 1,
+        selection.getEndPosition().column - 1
+      )
+    },
+    getOffsetAt: (position: { column: number }) => position.column - 1,
+  }),
   layout: mockEditorLayout,
   revealLineInCenter: jest.fn(),
   setPosition: jest.fn(),
@@ -149,6 +168,9 @@ describe("CanvasPanel", () => {
     mockActionsState.running = false
     mockActionsState.error = null
     mockActionsState.runResult = ""
+    mockEditorState.value = ""
+    mockEditorState.selection = null
+    editorStub.executeEdits.mockClear()
     act(() => {
       useCanvasSettingsStore.getState().resetSettings()
     })
@@ -290,10 +312,10 @@ describe("CanvasPanel", () => {
       expect(screen.queryByTestId("canvas-view-mode-toggle")).not.toBeInTheDocument()
     })
 
-    it("renders the export trigger", () => {
+    it("moves export out of the editor toolbar into the Context Workbench", () => {
       seedDoc("markdown")
       renderWithProviders(<CanvasPanel />)
-      expect(screen.getByTestId("canvas-export-trigger")).toBeInTheDocument()
+      expect(screen.queryByTestId("canvas-export-trigger")).not.toBeInTheDocument()
     })
 
     it("closing a tab removes the document from the store", () => {
@@ -323,10 +345,24 @@ describe("CanvasPanel", () => {
       expect(useArtifactStore.getState().canvasDocuments[idB]).toBeDefined()
     })
 
-    it("shows the language/type selector for the active document", () => {
+    it("moves the language selector out of the editor toolbar into Inspect", () => {
       seedDoc("javascript")
       renderWithProviders(<CanvasPanel />)
-      expect(screen.getByTestId("canvas-language-select")).toBeInTheDocument()
+      expect(screen.queryByTestId("canvas-language-select")).not.toBeInTheDocument()
+    })
+
+    it("reduces the enabled Workbench toolbar to direct save and command actions", () => {
+      window.localStorage.setItem(
+        "cognia-canvas-feature-flags-v1",
+        JSON.stringify({ "contextWorkbench.v1": true })
+      )
+      seedDoc("markdown")
+      renderWithProviders(<CanvasPanel />)
+
+      expect(screen.getByRole("button", { name: /Save version/i })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /Command palette/i })).toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: /More actions/i })).not.toBeInTheDocument()
+      expect(screen.queryByTestId("format-toolbar")).not.toBeInTheDocument()
     })
 
     it("reveals the line in Monaco when a canvas-goto-line event arrives", async () => {
@@ -378,6 +414,35 @@ describe("CanvasPanel", () => {
       expect(review.proposedContent).toBe("IMPROVED")
       // The buffer itself is untouched until the review is applied.
       expect(useArtifactStore.getState().canvasDocuments[id].content).toBe("x")
+    })
+
+    it("routes a Workbench selection edit into a proposal instead of mutating Monaco", async () => {
+      mockActionsState.runResult = "NEW"
+      mockEditorState.value = "abc"
+      mockEditorState.selection = {
+        isEmpty: () => false,
+        getStartPosition: () => ({ lineNumber: 1, column: 2 }),
+        getEndPosition: () => ({ lineNumber: 1, column: 3 }),
+      }
+      const id = seedDoc("javascript", "abc")
+      renderWithProviders(<CanvasPanel />)
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      await act(async () => {
+        window.dispatchEvent(
+          new CustomEvent("canvas-action", {
+            detail: { type: "improve", proposalFirst: true },
+          })
+        )
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      expect(editorStub.executeEdits).not.toHaveBeenCalled()
+      expect(useArtifactStore.getState().pendingReviews[id]?.proposedContent).toBe("aNEWc")
+      expect(useArtifactStore.getState().canvasDocuments[id].content).toBe("abc")
     })
   })
 

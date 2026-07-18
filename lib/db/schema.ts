@@ -126,6 +126,8 @@ import type { EvalRunCaseRow } from "./eval-run-cases"
 import type { CalibrationItemRow } from "./calibration-items"
 import type { CalibrationRunRow } from "./calibration-runs"
 import type { BackgroundTaskJournalRow } from "./background-tasks"
+import type { ContextCommentRow } from "@/types/context-comment"
+import { contextCommentRowFromCanvas } from "./context-comments-backfill"
 import type { TeamPrObservationRow } from "./team-pr-observations"
 import type { AgentTeamBoardRow } from "./agent-team-board"
 import type { WasmGrantLedgerRow } from "./wasm-grant-ledger"
@@ -239,6 +241,7 @@ export class CogniaDB extends Dexie {
   canvasDocuments!: Table<CanvasDocumentRow, string>
   canvasVersions!: Table<CanvasVersionRow, string>
   canvasComments!: Table<CanvasCommentRow, string>
+  contextComments!: Table<ContextCommentRow, string>
   canvasSessions!: Table<CanvasSessionRow, string>
   a2uiApps!: Table<A2UIAppRow, string>
   a2uiSurfaces!: Table<A2UISurfaceRow, string>
@@ -2526,6 +2529,24 @@ export class CogniaDB extends Dexie {
         "&id, runId, adapterId, conversationKey, status, [runId+conversationKey], projectId",
       executionRunInterrupts: "&id, runId, status, expiresAt, [runId+status], projectId",
     })
+
+    // v115 — One writable comment source for every Context Workbench
+    // resource. Keep canvasComments as a historical rollback table, but
+    // idempotently copy its rows into the generalized resource/anchor model.
+    this.version(115)
+      .stores({
+        contextComments:
+          "&id, resourceKind, resourceId, [resourceKind+resourceId], [resourceKind+resourceId+createdAt], parentId, resolvedAt, projectId",
+      })
+      .upgrade(async (tx) => {
+        const source = tx.table<CanvasCommentRow, string>("canvasComments")
+        const target = tx.table<ContextCommentRow, string>("contextComments")
+        const canvasComments = await source.toArray()
+        for (const canvasComment of canvasComments) {
+          if (await target.get(canvasComment.id)) continue
+          await target.add(contextCommentRowFromCanvas(canvasComment))
+        }
+      })
 
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.

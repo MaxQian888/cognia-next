@@ -105,6 +105,7 @@ import { Composer } from "./composer"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
 import { useChatStore } from "@/stores/chat"
+import { useSettingsStore } from "@/stores/settings"
 import { useProjectStore } from "@/stores/project/project-store"
 import { usePlatform } from "@/hooks/use-platform"
 import { executeShell } from "@/lib/shell/exec"
@@ -151,6 +152,7 @@ const mkSession = (overrides: Partial<ChatSession> = {}): ChatSession => ({
 
 beforeEach(() => {
   useChatStore.getState().clear()
+  useSettingsStore.setState({ settings: undefined as never })
   useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
   mockUsePlatform.mockReturnValue("web")
   // Default to non-desktop so `!command` uses the capture path unless a test
@@ -404,6 +406,20 @@ describe("Composer — mobile (Claude-style) layout", () => {
     mockUsePlatform.mockReturnValue("web")
     renderComposer()
     expect(screen.queryByTestId("composer-plus-toggle")).toBeNull()
+  })
+
+  it("renders the opt-in compact composer as one unified control surface", () => {
+    mockUsePlatform.mockReturnValue("web")
+    useSettingsStore.setState({
+      settings: { composerBehavior: { compactLayout: true } } as never,
+    })
+    renderComposer()
+
+    const textarea = document.querySelector("textarea") as HTMLTextAreaElement
+    const surface = textarea.closest('[data-composer-layout="compact"]')
+    expect(surface).not.toBeNull()
+    expect(screen.getByTestId("composer-plus-toggle")).toBeInTheDocument()
+    expect(surface).toContainElement(screen.getByTestId("composer-toolbar-embedded"))
   })
 
   it("wraps into the two-row stack below @sm and restores the row layout via container queries on web/desktop", () => {

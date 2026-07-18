@@ -1,8 +1,14 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 import type { ToolUIPart } from "ai"
+
+const openEditInWorkbenchReview = jest.fn()
+jest.mock("@/lib/files/edit-review-bridge", () => ({
+  canOfferWorkbenchReview: () => true,
+  openEditInWorkbenchReview: (args: unknown) => openEditInWorkbenchReview(args),
+}))
 
 import { EditCard } from "./edit-card"
 
@@ -16,6 +22,21 @@ const part = (input?: unknown, output?: unknown): ToolUIPart =>
   }) as unknown as ToolUIPart
 
 describe("EditCard", () => {
+  it("offers a workbench-review action that routes the edited file", () => {
+    openEditInWorkbenchReview.mockClear()
+    render(
+      <EditCard
+        sessionId="s1"
+        part={part({ file_path: "/repo/src/a.ts", old_string: "a", new_string: "b" })}
+      />
+    )
+    fireEvent.click(screen.getByTestId("mcp-open-in-review"))
+    expect(openEditInWorkbenchReview).toHaveBeenCalledWith({
+      sessionId: "s1",
+      absolutePath: "/repo/src/a.ts",
+    })
+  })
+
   it("renders the path and a diff for a single edit payload", () => {
     render(
       <EditCard

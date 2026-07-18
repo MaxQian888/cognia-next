@@ -7,6 +7,8 @@ import {
   KeyRoundIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
+  PanelRightCloseIcon,
+  PanelRightOpenIcon,
   Settings2Icon,
 } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -22,6 +24,7 @@ import { AgentFlowDisplayToggle } from "@/components/chat/agent-flow-display-tog
 import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
 import { SessionInsightsSheet } from "@/components/chat/session-insights/session-insights-sheet"
 import { useUIStore } from "@/stores/ui"
+import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 interface Props {
@@ -57,6 +60,14 @@ export function ChatHeader({ session, onOpenSettings }: Props) {
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed)
   const toggleSidebar = useUIStore((s) => s.toggleSidebar)
   const sidebarToggleLabel = sidebarCollapsed ? t("showConversations") : t("hideConversations")
+
+  // Right artifact/output dock toggle — the mirror of the left conversation
+  // toggle. Both rails now collapse/restore from the same top bar (no leftover
+  // strip, always one click away), driving the ONE `dockCollapsed` field the
+  // title-bar layout controls and ⌘J also drive — a single source of truth.
+  const dockCollapsed = useArtifactDockLayoutStore((s) => s.dockCollapsed)
+  const toggleDock = useArtifactDockLayoutStore((s) => s.toggleDock)
+  const dockToggleLabel = dockCollapsed ? t("showArtifacts") : t("hideArtifacts")
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur">
@@ -143,6 +154,23 @@ export function ChatHeader({ session, onOpenSettings }: Props) {
         onClick={() => setSettingsOpen(true)}
       >
         <Settings2Icon className="size-4" />
+      </Button>
+
+      <Button
+        variant="ghost"
+        size="icon"
+        className="hidden size-8 shrink-0 md:inline-flex"
+        onClick={toggleDock}
+        aria-label={dockToggleLabel}
+        aria-pressed={!dockCollapsed}
+        title={dockToggleLabel}
+        data-testid="chat-artifact-dock-toggle"
+      >
+        {dockCollapsed ? (
+          <PanelRightOpenIcon className="size-4" />
+        ) : (
+          <PanelRightCloseIcon className="size-4" />
+        )}
       </Button>
 
       <SessionSettingsSheet session={session} open={settingsOpen} onOpenChange={setSettingsOpen} />

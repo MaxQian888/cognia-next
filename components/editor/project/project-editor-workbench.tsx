@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from "react"
-import { CodeIcon, FilesIcon, SaveIcon, SearchIcon } from "lucide-react"
+import { CodeIcon, FilesIcon, PanelRightIcon, SaveIcon, SearchIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { LightCodeEditor } from "@/components/editor/light-code-editor"
@@ -17,6 +17,10 @@ import { ProjectFileTree } from "./project-file-tree"
 import { ProjectMonaco } from "./project-monaco"
 import { ProjectSearchPanel } from "./project-search-panel"
 import { useProjectEditor, type UseProjectEditorArgs } from "./use-project-editor"
+import { ProjectContextWorkbench, ProjectContextWorkbenchMobile } from "./project-context-workbench"
+import { useContextWorkbenchSurfaceFlag } from "@/hooks/context-workbench/use-context-workbench-surface-flag"
+import type { TextSelectionCoordinates } from "@/types/context-workbench"
+import type { EditorLike, MonacoLike } from "@/hooks/use-monaco-markers"
 
 interface UseProjectEditorWorkbenchArgs extends UseProjectEditorArgs {
   beforeOpen?: () => void
@@ -169,6 +173,7 @@ interface ProjectEditorFileWorkbenchProps {
   sidebarPosition: "left" | "right"
   panelIdPrefix: string
   showTabs?: boolean
+  showContextWorkbench?: boolean
   emptyTestId?: string
   layout?: "split" | "mobile"
 }
@@ -178,10 +183,22 @@ export function ProjectEditorFileWorkbench({
   sidebarPosition,
   panelIdPrefix,
   showTabs = false,
+  showContextWorkbench = true,
   emptyTestId = "editor-empty",
   layout = "split",
 }: ProjectEditorFileWorkbenchProps) {
   const t = useTranslations("projectEditor")
+  const workbenchEnabled = useContextWorkbenchSurfaceFlag("project")
+  const contextWorkbenchVisible = workbenchEnabled && showContextWorkbench
+  const [mobileWorkbenchOpen, setMobileWorkbenchOpen] = useState(false)
+  const [editorSelectionState, setEditorSelectionState] = useState<{
+    relPath: string
+    selection: TextSelectionCoordinates | undefined
+  } | null>(null)
+  const [diagnosticsState, setDiagnosticsState] = useState<{
+    relPath: string
+    diagnostics: { monaco: MonacoLike; editor: EditorLike } | null
+  } | null>(null)
   const {
     actions,
     actionLabels,
@@ -207,6 +224,19 @@ export function ProjectEditorFileWorkbench({
     setDraft,
     treeRefreshToken,
   } = editor
+  const editorSelection =
+    activeFile && editorSelectionState?.relPath === activeFile.relPath
+      ? editorSelectionState.selection
+      : undefined
+  const diagnostics =
+    activeFile && diagnosticsState?.relPath === activeFile.relPath
+      ? diagnosticsState.diagnostics
+      : null
+  const handleDiagnosticsReady = useCallback(
+    (relPath: string, next: { monaco: MonacoLike; editor: EditorLike } | null) =>
+      setDiagnosticsState({ relPath, diagnostics: next }),
+    []
+  )
 
   const fileTree = (
     <ProjectFileTree
@@ -214,6 +244,7 @@ export function ProjectEditorFileWorkbench({
       refreshToken={treeRefreshToken}
       activePath={activePath}
       onOpenFile={gotoLine}
+      onRenamed={editor.renameOpenFile}
       deps={deps}
       density={layout === "mobile" ? "touch" : "compact"}
     />
@@ -250,69 +281,100 @@ export function ProjectEditorFileWorkbench({
       )
 
     return (
-      <div className="flex h-full min-h-0 flex-col" data-testid="project-editor-mobile-layout">
-        <div className="grid shrink-0 grid-cols-3 border-b bg-background/95 p-1">
-          <button
-            type="button"
-            data-testid="project-editor-mobile-files"
-            aria-pressed={mobilePane === "files"}
+      <>
+        <div className="flex h-full min-h-0 flex-col" data-testid="project-editor-mobile-layout">
+          <div
             className={cn(
-              "flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2 text-sm",
-              mobilePane === "files" ? "bg-accent" : "text-muted-foreground"
+              "grid shrink-0 border-b bg-background/95 p-1",
+              contextWorkbenchVisible ? "grid-cols-4" : "grid-cols-3"
             )}
-            onClick={() => {
-              setSideTab("files")
-              setMobilePane("files")
-            }}
           >
-            <FilesIcon className="size-4" />
-            {t("filesTab")}
-          </button>
-          <button
-            type="button"
-            data-testid="project-editor-mobile-search"
-            aria-pressed={mobilePane === "search"}
-            className={cn(
-              "flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2 text-sm",
-              mobilePane === "search" ? "bg-accent" : "text-muted-foreground"
-            )}
-            onClick={() => {
-              setSideTab("search")
-              setMobilePane("search")
-            }}
-          >
-            <SearchIcon className="size-4" />
-            {t("searchTab")}
-          </button>
-          <button
-            type="button"
-            data-testid="project-editor-mobile-editor"
-            aria-pressed={mobilePane === "editor"}
-            className={cn(
-              "flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2 text-sm",
-              mobilePane === "editor" ? "bg-accent" : "text-muted-foreground"
-            )}
-            onClick={() => setMobilePane("editor")}
-          >
-            <CodeIcon className="size-4" />
-            {t("editorTab")}
-          </button>
-        </div>
-        <div className="min-h-0 flex-1">{mobileContent}</div>
-        {mobilePane === "editor" && activeFile ? (
-          <div className="shrink-0 border-t p-2">
-            <Button
+            <button
               type="button"
-              className="h-11 w-full gap-2"
-              onClick={saveActive}
-              data-testid="project-editor-mobile-save"
+              data-testid="project-editor-mobile-files"
+              aria-pressed={mobilePane === "files"}
+              className={cn(
+                "flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2 text-sm",
+                mobilePane === "files" ? "bg-accent" : "text-muted-foreground"
+              )}
+              onClick={() => {
+                setSideTab("files")
+                setMobilePane("files")
+              }}
             >
-              <SaveIcon className="size-4" />
-              {t("action.save")}
-            </Button>
+              <FilesIcon className="size-4" />
+              {t("filesTab")}
+            </button>
+            {contextWorkbenchVisible ? (
+              <button
+                type="button"
+                data-testid="project-editor-mobile-workbench"
+                aria-expanded={mobileWorkbenchOpen}
+                className="flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2 text-sm text-muted-foreground"
+                onClick={() => setMobileWorkbenchOpen(true)}
+              >
+                <PanelRightIcon className="size-4" />
+                {t("workbench.mobileTab")}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              data-testid="project-editor-mobile-search"
+              aria-pressed={mobilePane === "search"}
+              className={cn(
+                "flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2 text-sm",
+                mobilePane === "search" ? "bg-accent" : "text-muted-foreground"
+              )}
+              onClick={() => {
+                setSideTab("search")
+                setMobilePane("search")
+              }}
+            >
+              <SearchIcon className="size-4" />
+              {t("searchTab")}
+            </button>
+            <button
+              type="button"
+              data-testid="project-editor-mobile-editor"
+              aria-pressed={mobilePane === "editor"}
+              className={cn(
+                "flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2 text-sm",
+                mobilePane === "editor" ? "bg-accent" : "text-muted-foreground"
+              )}
+              onClick={() => setMobilePane("editor")}
+            >
+              <CodeIcon className="size-4" />
+              {t("editorTab")}
+            </button>
           </div>
+          <div className="min-h-0 flex-1">{mobileContent}</div>
+          {mobilePane === "editor" && activeFile ? (
+            <div className="shrink-0 border-t p-2">
+              <Button
+                type="button"
+                className="h-11 w-full gap-2"
+                onClick={saveActive}
+                data-testid="project-editor-mobile-save"
+              >
+                <SaveIcon className="size-4" />
+                {t("action.save")}
+              </Button>
+            </div>
+          ) : null}
+        </div>
+        {contextWorkbenchVisible && activeFile ? (
+          <ProjectContextWorkbenchMobile
+            scopeKey={editor.scopeKey}
+            rootPath={rootPath}
+            file={activeFile}
+            onDraftChange={(content) => setDraft(activeFile.relPath, content)}
+            selection={editorSelection}
+            diagnostics={diagnostics}
+            open={mobileWorkbenchOpen}
+            onOpenChange={setMobileWorkbenchOpen}
+          />
         ) : null}
-      </div>
+      </>
     )
   }
 
@@ -373,20 +435,38 @@ export function ProjectEditorFileWorkbench({
             onSaveAll={saveAll}
           />
         ) : null}
-        <div className="min-h-0 flex-1">
+        <div className="flex min-h-0 flex-1">
           {activeFile ? (
-            <ProjectMonaco
-              key={activeFile.absolutePath}
-              file={activeFile}
-              projectRoot={rootPath}
-              onChange={(value) => setDraft(activeFile.relPath, value)}
-              actions={actions}
-              actionLabels={actionLabels}
-              bindings={bindings}
-            />
+            <>
+              <div className="min-w-0 flex-1">
+                <ProjectMonaco
+                  key={activeFile.absolutePath}
+                  file={activeFile}
+                  projectRoot={rootPath}
+                  onChange={(value) => setDraft(activeFile.relPath, value)}
+                  actions={actions}
+                  actionLabels={actionLabels}
+                  bindings={bindings}
+                  onSelectionChange={(selection) =>
+                    setEditorSelectionState({ relPath: activeFile.relPath, selection })
+                  }
+                  onDiagnosticsReady={handleDiagnosticsReady}
+                />
+              </div>
+              {contextWorkbenchVisible ? (
+                <ProjectContextWorkbench
+                  scopeKey={editor.scopeKey}
+                  rootPath={rootPath}
+                  file={activeFile}
+                  onDraftChange={(content) => setDraft(activeFile.relPath, content)}
+                  selection={editorSelection}
+                  diagnostics={diagnostics}
+                />
+              ) : null}
+            </>
           ) : (
             <div
-              className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground"
+              className="flex h-full flex-1 items-center justify-center p-6 text-center text-sm text-muted-foreground"
               data-testid={emptyTestId}
             >
               {t("emptyEditor")}

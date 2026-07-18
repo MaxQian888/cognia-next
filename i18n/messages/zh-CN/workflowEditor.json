@@ -39,7 +39,9 @@
       "discard": "丢弃",
       "errorEditorNotOpen": "对应的工作流编辑器未打开。",
       "errorNotFound": "这个提案已不可用——可能已被更新的提案替代。",
+      "errorStale": "工作流在该提案创建后已变更，请先变基或丢弃后再应用。",
       "hideOps": "收起操作",
+      "rebase": "变基",
       "showOps": "展开 {count} 项操作",
       "status": {
         "applied": "已应用",

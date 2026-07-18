@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   listWorkspaceDir,
   readWorkspaceFile,
+  statWorkspaceFile,
   writeWorkspaceFile,
   createWorkspaceDir,
   deleteWorkspaceEntry,
@@ -24,6 +25,8 @@ import { watchWorkspace } from "@/lib/files/workspace-watch"
 import { languageFromPath, type EditorLanguage } from "@/components/editor/editor-language"
 import { useProjectEditorSessionStore } from "@/stores/editor/project-editor-session-store"
 import { loggers } from "@cognia/logging"
+import { getDb } from "@/lib/db/schema"
+import { migrateResourceSessionBinding } from "@/lib/context-workbench/resource-session"
 
 const editorLogger = loggers.agent.child("project-editor")
 
@@ -45,6 +48,10 @@ export interface OpenFile {
   language: EditorLanguage
   savedContent: string
   draftContent: string
+  /** Monotonic in-memory model version used by proposal compare-and-swap. */
+  draftVersion: number
+  /** Last observed filesystem mtime used by proposal compare-and-swap. */
+  mtime?: number
   /** Set when the file changed on disk under us while open. */
   externallyChanged?: boolean
 }
@@ -61,6 +68,7 @@ export interface UseProjectEditorArgs {
 export interface ProjectEditorDeps {
   listDir: typeof listWorkspaceDir
   readFile: typeof readWorkspaceFile
+  statFile: typeof statWorkspaceFile
   writeFile: typeof writeWorkspaceFile
   createDir: typeof createWorkspaceDir
   deleteEntry: typeof deleteWorkspaceEntry
@@ -74,6 +82,7 @@ export interface ProjectEditorDeps {
 const defaultDeps: ProjectEditorDeps = {
   listDir: listWorkspaceDir,
   readFile: readWorkspaceFile,
+  statFile: statWorkspaceFile,
   writeFile: writeWorkspaceFile,
   createDir: createWorkspaceDir,
   deleteEntry: deleteWorkspaceEntry,
@@ -165,7 +174,10 @@ export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEdito
       if (openPathsRef.current.has(relPath)) return
       openPathsRef.current.add(relPath)
       try {
-        const content = await d.readFile(rootPath, relPath)
+        const [content, stat] = await Promise.all([
+          d.readFile(rootPath, relPath),
+          d.statFile(rootPath, relPath).catch(() => null),
+        ])
         setOpenFiles((prev) => {
           if (prev.some((f) => f.relPath === relPath)) return prev
           return [
@@ -176,6 +188,8 @@ export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEdito
               language: languageFromPath(relPath),
               savedContent: content,
               draftContent: content,
+              draftVersion: 1,
+              mtime: stat?.mtimeMs ?? undefined,
             },
           ]
         })
@@ -204,7 +218,11 @@ export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEdito
 
   const setDraft = useCallback((relPath: string, content: string) => {
     setOpenFiles((prev) =>
-      prev.map((f) => (f.relPath === relPath ? { ...f, draftContent: content } : f))
+      prev.map((f) =>
+        f.relPath === relPath
+          ? { ...f, draftContent: content, draftVersion: f.draftVersion + 1 }
+          : f
+      )
     )
   }, [])
 
@@ -213,10 +231,16 @@ export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEdito
       const file = openFiles.find((f) => f.relPath === relPath)
       if (!file) return
       await d.writeFile(rootPath, relPath, file.draftContent)
+      const stat = await d.statFile(rootPath, relPath).catch(() => null)
       setOpenFiles((prev) =>
         prev.map((f) =>
           f.relPath === relPath
-            ? { ...f, savedContent: f.draftContent, externallyChanged: false }
+            ? {
+                ...f,
+                savedContent: f.draftContent,
+                externallyChanged: false,
+                mtime: stat?.mtimeMs ?? f.mtime,
+              }
             : f
         )
       )
@@ -226,12 +250,20 @@ export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEdito
 
   const saveAll = useCallback(async () => {
     const dirty = openFiles.filter((f) => f.draftContent !== f.savedContent)
+    const mtimes = new Map<string, number>()
     for (const f of dirty) {
       await d.writeFile(rootPath, f.relPath, f.draftContent)
+      const stat = await d.statFile(rootPath, f.relPath).catch(() => null)
+      if (stat?.mtimeMs != null) mtimes.set(f.relPath, stat.mtimeMs)
     }
     if (dirty.length > 0) {
       setOpenFiles((prev) =>
-        prev.map((f) => ({ ...f, savedContent: f.draftContent, externallyChanged: false }))
+        prev.map((f) => ({
+          ...f,
+          savedContent: f.draftContent,
+          externallyChanged: false,
+          mtime: mtimes.get(f.relPath) ?? f.mtime,
+        }))
       )
     }
   }, [d, rootPath, openFiles])
@@ -239,11 +271,21 @@ export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEdito
   const reloadFile = useCallback(
     async (relPath: string) => {
       try {
-        const content = await d.readFile(rootPath, relPath)
+        const [content, stat] = await Promise.all([
+          d.readFile(rootPath, relPath),
+          d.statFile(rootPath, relPath).catch(() => null),
+        ])
         setOpenFiles((prev) =>
           prev.map((f) =>
             f.relPath === relPath
-              ? { ...f, savedContent: content, draftContent: content, externallyChanged: false }
+              ? {
+                  ...f,
+                  savedContent: content,
+                  draftContent: content,
+                  draftVersion: f.draftVersion + 1,
+                  externallyChanged: false,
+                  mtime: stat?.mtimeMs ?? f.mtime,
+                }
               : f
           )
         )
@@ -294,6 +336,55 @@ export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEdito
     return dispose
   }, [d, rootPath])
 
+  const renameOpenFile = useCallback(
+    async (from: string, to: string) => {
+      const migratePath = (path: string) =>
+        path === from ? to : path.startsWith(`${from}/`) ? `${to}${path.slice(from.length)}` : path
+      try {
+        const sessions = await getDb().sessions.toArray()
+        await Promise.all(
+          sessions.flatMap((session) => {
+            const binding = session.surfaceBinding
+            if (
+              session.kind !== "resource-workbench" ||
+              binding?.kind !== "project-file" ||
+              binding.projectId !== scopeKey ||
+              binding.rootId !== rootPath
+            ) {
+              return []
+            }
+            const relPath = migratePath(binding.relPath)
+            if (relPath === binding.relPath) return []
+            return [
+              migrateResourceSessionBinding(
+                session.id,
+                { ...binding, relPath },
+                { update: (id, patch) => getDb().sessions.update(id, patch) }
+              ),
+            ]
+          })
+        )
+      } catch (error) {
+        editorLogger.warn("resource session rename migration failed", { error })
+      }
+      setOpenFiles((previous) =>
+        previous.map((file) => {
+          const relPath = migratePath(file.relPath)
+          return relPath === file.relPath
+            ? file
+            : {
+                ...file,
+                relPath,
+                absolutePath: joinRootRel(rootPath, relPath),
+                language: languageFromPath(relPath),
+              }
+        })
+      )
+      setActivePath((previous) => (previous ? migratePath(previous) : previous))
+    },
+    [rootPath, scopeKey]
+  )
+
   const dirtyCount = useMemo(
     () => openFiles.filter((f) => f.draftContent !== f.savedContent).length,
     [openFiles]
@@ -305,6 +396,7 @@ export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEdito
 
   return {
     deps: d,
+    scopeKey,
     roots,
     rootKey,
     rootPath,
@@ -321,5 +413,6 @@ export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEdito
     saveFile,
     saveAll,
     reloadFile,
+    renameOpenFile,
   }
 }

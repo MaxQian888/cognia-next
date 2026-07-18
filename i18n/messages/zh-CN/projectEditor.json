@@ -28,6 +28,27 @@
   "searchTab": "搜索",
   "treeAria": "项目文件",
   "treeEmpty": "暂无文件",
+  "workbench": {
+    "mobileTab": "工具",
+    "ai": "AI",
+    "comments": "评论",
+    "contentHash": "草稿令牌",
+    "dirty": "未保存草稿",
+    "inspect": "检查",
+    "language": "语言",
+    "outline": "大纲",
+    "outlineEmpty": "当前文件没有可用的符号。",
+    "path": "路径",
+    "previewFrameTitle": "项目文件预览",
+    "previewRun": "预览与运行",
+    "problems": "问题",
+    "problemsUnavailable": "Monaco 模型挂载后将显示问题列表。",
+    "review": "审阅",
+    "relinkDescription": "文件在应用外重命名后，可选择同一仓库中的旧线程继续使用。",
+    "relinkTitle": "重新关联旧资源线程",
+    "saved": "已保存",
+    "state": "状态"
+  },
   "unavailableDesc": "项目编辑器需要桌面应用或已配对的设备才能访问项目文件。",
   "unavailableTitle": "编辑器不可用"
 }

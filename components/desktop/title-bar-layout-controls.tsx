@@ -11,7 +11,13 @@
  * stays render-stable (same pattern as `TitleBarSearchPill`).
  */
 
-import { Columns2Icon, LayoutDashboardIcon, PanelBottomIcon, PanelLeftIcon } from "lucide-react"
+import {
+  Columns2Icon,
+  LayoutDashboardIcon,
+  PanelBottomIcon,
+  PanelLeftIcon,
+  PanelRightIcon,
+} from "lucide-react"
 import { useTranslations } from "next-intl"
 
 import { Button } from "@/components/ui/button"
@@ -25,6 +31,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { toggleGuildRailAction, toggleStatusBarAction } from "@/lib/desktop/menu-actions"
 import { cn } from "@/lib/utils"
+import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { useUIStore, type BarItemId } from "@/stores/ui/ui-store"
 
@@ -94,10 +101,13 @@ export function TitleBarLayoutControls({ className }: { className?: string }) {
   const toggleSidebar = useUIStore((s) => s.toggleSidebar)
   const barItems = useUIStore((s) => s.barItems)
   const toggleBarItem = useUIStore((s) => s.toggleBarItem)
+  const rightSidebarCollapsed = useArtifactDockLayoutStore((s) => s.dockCollapsed)
+  const toggleRightSidebar = useArtifactDockLayoutStore((s) => s.toggleDock)
   const terminalOpen = useTerminalStore((s) => s.panelOpen)
   const toggleTerminal = useTerminalStore((s) => s.togglePanel)
 
   const sidebarOn = !sidebarCollapsed
+  const rightSidebarOn = !rightSidebarCollapsed
   const guildRailOn = !guildRailCollapsed
   const statusBarOn = !statusBarCollapsed
 
@@ -123,6 +133,14 @@ export function TitleBarLayoutControls({ className }: { className?: string }) {
           onClick={toggleSidebar}
         >
           <PanelLeftIcon className="size-4" aria-hidden />
+        </LayoutToggleButton>
+        <LayoutToggleButton
+          label={t("toggleRightSidebar")}
+          testId="title-bar-toggle-right-sidebar"
+          active={rightSidebarOn}
+          onClick={toggleRightSidebar}
+        >
+          <PanelRightIcon className="size-4" aria-hidden />
         </LayoutToggleButton>
         <LayoutToggleButton
           label={t("toggleTerminal")}
@@ -162,6 +180,12 @@ export function TitleBarLayoutControls({ className }: { className?: string }) {
           </DropdownMenuCheckboxItem>
           <DropdownMenuCheckboxItem checked={sidebarOn} onCheckedChange={() => toggleSidebar()}>
             {t("toggleSidebar")}
+          </DropdownMenuCheckboxItem>
+          <DropdownMenuCheckboxItem
+            checked={rightSidebarOn}
+            onCheckedChange={() => toggleRightSidebar()}
+          >
+            {t("toggleRightSidebar")}
           </DropdownMenuCheckboxItem>
           <DropdownMenuCheckboxItem
             checked={statusBarOn}

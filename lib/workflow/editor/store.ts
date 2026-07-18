@@ -52,6 +52,7 @@ import { defaultTypeVersionFor } from "./node-handles"
 import { validateConnection } from "./connection-validator"
 import { computeSplitEdges } from "./edge-insert"
 import type { ProposalOp } from "./proposal-types"
+import { workflowEditorRevision } from "./editor-revision"
 import type { PerformanceTier } from "./performance-tier"
 import type { LastRunSummary } from "@/lib/workflow/runtime/last-run-summary"
 import { runDiagnostics } from "@/lib/workflow/diagnostics/engine"
@@ -438,7 +439,10 @@ export interface EditorState extends EditorStateSnapshot {
    * applied ops + the first error message if any op was rejected (e.g.,
    * `connect_edge` referencing a node that does not exist).
    */
-  applyProposalOps: (ops: ReadonlyArray<ProposalOp>) => { applied: number; firstError?: string }
+  applyProposalOps: (
+    ops: ReadonlyArray<ProposalOp>,
+    expectedRevision?: string
+  ) => { applied: number; firstError?: string; stale?: boolean; currentRevision?: string }
   /**
    * Wrap the given nodes in an `annotation.group` frame sized to the
    * selection bounding box (with padding). Returns the new group's id.
@@ -1166,8 +1170,14 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           return cloned.nodes.map((n) => n.id)
         },
 
-        applyProposalOps: (ops) => {
+        applyProposalOps: (ops, expectedRevision) => {
           if (!ops || ops.length === 0) return { applied: 0 }
+          if (expectedRevision && expectedRevision !== "legacy") {
+            const currentRevision = workflowEditorRevision(get())
+            if (currentRevision !== expectedRevision) {
+              return { applied: 0, stale: true, currentRevision }
+            }
+          }
           perfMark("apply-start")
           // Compute terminal nodes/edges + validation map locally so the
           // whole batch lands in a single set() call — that's what makes

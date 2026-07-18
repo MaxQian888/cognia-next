@@ -23,7 +23,7 @@
  * back through the same `claude.send` path.
  */
 
-import { useCallback, useEffect, useMemo } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
@@ -61,6 +61,7 @@ import {
 } from "@/lib/workflow/editor/mention-expand"
 import { PerfBoundary } from "@/lib/perf"
 import { buildWorkflowChatStarters } from "./workflow-chat-starters"
+import { ChatScopeProvider } from "@/components/chat/chat-scope-provider"
 
 export function WorkflowEditorChatTab({
   useStore,
@@ -78,6 +79,7 @@ export function WorkflowEditorChatTab({
   const t = useTranslations("workflowEditor.chat")
   const { session, loading } = useWorkflowEditorSession(workflowId, workflowName)
   const claude = useClaudeChat()
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
 
   // Copilot ⇄ canvas selector: the composer's `@` / `@node:` / `@edge:` picker
   // reads these elements; picking one stages a reference chip. `onHighlight`
@@ -114,20 +116,20 @@ export function WorkflowEditorChatTab({
   // this workflow; those mutate the chat store's `activeSessionId`. Track it
   // live so the pane + bar re-render against the chosen session instead of
   // staying pinned to the default `useWorkflowEditorSession` row.
-  const activeStoreId = useChatStore((s) => s.activeSessionId)
   const showAdditional =
     !!workflowId &&
     !!session &&
-    isWorkflowEditorSessionId(activeStoreId, workflowId) &&
-    activeStoreId !== session.id
+    isWorkflowEditorSessionId(selectedSessionId, workflowId) &&
+    selectedSessionId !== session.id
   // Resolve the additional session's row (the default row is already in hand).
   const additionalRow = useLiveQuery<ChatSession | undefined>(
-    () => (showAdditional && activeStoreId ? getDb().sessions.get(activeStoreId) : undefined),
-    [showAdditional, activeStoreId]
+    () =>
+      showAdditional && selectedSessionId ? getDb().sessions.get(selectedSessionId) : undefined,
+    [showAdditional, selectedSessionId]
   )
 
   // The session the pane actually reads/streams from.
-  const effectiveSessionId = showAdditional ? activeStoreId : (session?.id ?? null)
+  const effectiveSessionId = showAdditional ? selectedSessionId : (session?.id ?? null)
   // Retry hook: ChatPane's "retry load" bumps this slice nonce.
   const reloadNonce = useChatStore((s) =>
     effectiveSessionId ? (s.sessions[effectiveSessionId]?.messagesReloadNonce ?? 0) : 0
@@ -167,7 +169,8 @@ export function WorkflowEditorChatTab({
       const title = workflowName
         ? t("session.newSuffixed", { name: workflowName })
         : t("session.newDefault")
-      await createWorkflowEditorSession(workflowId, title)
+      const id = await createWorkflowEditorSession(workflowId, title)
+      setSelectedSessionId(id)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
     }
@@ -184,7 +187,7 @@ export function WorkflowEditorChatTab({
         const refs = useChatStore.getState().referencedWorkflowElements
         const withRefs = refs.length > 0 ? prependWorkflowRefs(content, refs) : content
         const expanded = applyWorkflowMentionExpansion(withRefs, useStore)
-        await claude.send(expanded)
+        await claude.send(expanded, undefined, { sessionId: effectiveSessionId ?? undefined })
         if (refs.length > 0) {
           useChatStore.getState().clearReferencedWorkflowElements()
           useStore.getState().setReferencedNodes([])
@@ -193,22 +196,22 @@ export function WorkflowEditorChatTab({
         toast.error(err instanceof Error ? err.message : String(err))
       }
     },
-    [claude, useStore]
+    [claude, effectiveSessionId, useStore]
   )
 
   const handleStop = useCallback(async () => {
-    await claude.stop()
-  }, [claude])
+    await claude.stop(effectiveSessionId ?? undefined)
+  }, [claude, effectiveSessionId])
 
   const handleRegenerate = useCallback(async () => {
-    await claude.regenerate()
-  }, [claude])
+    await claude.regenerate(effectiveSessionId ?? undefined)
+  }, [claude, effectiveSessionId])
 
   const handleEditResend = useCallback(
     async (messageId: string, content: SendContent) => {
-      await claude.editAndResend(messageId, content)
+      await claude.editAndResend(messageId, content, effectiveSessionId ?? undefined)
     },
-    [claude]
+    [claude, effectiveSessionId]
   )
 
   // Build the workflow quick-action prompts from the *current* editor
@@ -289,7 +292,7 @@ export function WorkflowEditorChatTab({
   // pinned default row.
   const activeSession: ChatSession = showAdditional
     ? (additionalRow ?? {
-        id: activeStoreId as string,
+        id: selectedSessionId as string,
         title: "",
         kind: "workflow-editor",
         createdAt: 0,
@@ -298,35 +301,39 @@ export function WorkflowEditorChatTab({
     : session
 
   return (
-    <WorkflowEditorProvider value={ctxValue}>
-      <PerfBoundary id="workflow:chat-tab">
-        <div
-          className="flex h-full w-full flex-col bg-card/40"
-          aria-label={t("ariaLabel", { name: workflowName ?? workflowId })}
-          data-testid="workflow-chat-tab"
-        >
-          <WorkflowSessionBar
-            workflowId={workflowId}
-            workflowName={workflowName}
-            activeSessionId={activeSession.id}
-          />
-          <ChatPane
-            activeSession={activeSession}
-            sessionId={activeSession.id}
-            onSend={handleSend}
-            onStop={handleStop}
-            onRegenerate={handleRegenerate}
-            onEditResend={handleEditResend}
-            onCreate={() => void handleCreateSession()}
-            onUseSample={(text) => void handleSend(text)}
-            onOpenSettings={(tab) => onOpenWorkflowSettings?.(tab)}
-            showHeader={false}
-            emptyState={emptyState}
-            workflowMention={workflowMention}
-          />
-        </div>
-      </PerfBoundary>
-    </WorkflowEditorProvider>
+    <ChatScopeProvider sessionId={activeSession.id}>
+      <WorkflowEditorProvider value={ctxValue}>
+        <PerfBoundary id="workflow:chat-tab">
+          <div
+            className="flex h-full w-full flex-col bg-card/40"
+            aria-label={t("ariaLabel", { name: workflowName ?? workflowId })}
+            data-testid="workflow-chat-tab"
+          >
+            <WorkflowSessionBar
+              workflowId={workflowId}
+              workflowName={workflowName}
+              activeSessionId={activeSession.id}
+              onSwitchSession={setSelectedSessionId}
+              onCreateSession={setSelectedSessionId}
+            />
+            <ChatPane
+              activeSession={activeSession}
+              sessionId={activeSession.id}
+              onSend={handleSend}
+              onStop={handleStop}
+              onRegenerate={handleRegenerate}
+              onEditResend={handleEditResend}
+              onCreate={() => void handleCreateSession()}
+              onUseSample={(text) => void handleSend(text)}
+              onOpenSettings={(tab) => onOpenWorkflowSettings?.(tab)}
+              showHeader={false}
+              emptyState={emptyState}
+              workflowMention={workflowMention}
+            />
+          </div>
+        </PerfBoundary>
+      </WorkflowEditorProvider>
+    </ChatScopeProvider>
   )
 }
 

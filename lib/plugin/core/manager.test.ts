@@ -92,6 +92,10 @@ jest.mock("@/lib/chat/slash-command-registry", () => ({
   unregisterSlashCommand: jest.fn(),
 }))
 
+jest.mock("@/lib/context-workbench/panel-registry", () => ({
+  contextPanelRegistry: { unregisterPlugin: jest.fn() },
+}))
+
 // IndexedDB isn't available in this unit-test environment; the bridge would
 // throw DatabaseClosedError on `applyPluginTables` / `removePluginTables`,
 // blowing up uninstallPlugin's cleanup path before the assertions run.
@@ -128,6 +132,7 @@ jest.mock("@/lib/plugin/security/wasm-grant", () => ({
 }))
 
 import { usePluginStore } from "@/stores/plugin-runtime"
+import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
 import { DEFAULT_POLICY, readPolicy, writePolicy } from "@/lib/plugin/core/plugins-policy-storage"
 import { getPlugin, updatePlugin, upsertPlugin } from "@/lib/db/plugins"
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
@@ -2068,6 +2073,7 @@ describe("PluginManager", () => {
       expect(getPluginConsentBroker().clearSessionGrantsForPlugin).toHaveBeenCalledWith(
         "to-disable"
       )
+      expect(contextPanelRegistry.unregisterPlugin).toHaveBeenCalledWith("to-disable")
     })
 
     it("clears the plugin's IPC + event-bus subscriptions on disable", async () => {

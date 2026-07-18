@@ -782,7 +782,7 @@ function renderToolPart(
       <Tool defaultOpen={cardOpen(tp.state === "input-available")}>
         <ToolHeader type={tp.type} state={tp.state} />
         <ToolContent>
-          <MCPToolCard part={tp} />
+          <MCPToolCard part={tp} sessionId={sessionId} />
         </ToolContent>
       </Tool>
     )

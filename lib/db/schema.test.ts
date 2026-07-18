@@ -155,6 +155,7 @@ describe("getDb", () => {
     expect(db.canvasDocuments).toBeDefined()
     expect(db.canvasVersions).toBeDefined()
     expect(db.canvasComments).toBeDefined()
+    expect(db.contextComments).toBeDefined()
     expect(db.canvasSessions).toBeDefined()
     expect(db.sessionState).toBeDefined()
     expect(db.tts_provider_keys).toBeDefined()
@@ -207,6 +208,59 @@ describe("getDb", () => {
     expect(db.executionRunInterrupts.schema.indexes.map((index) => index.name)).toContain(
       "[runId+status]"
     )
+  })
+
+  it("v115 backfills Canvas comments into generalized context comments", async () => {
+    const name = `cognia-v115-context-comments-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(114).stores({
+      canvasComments: "&id, documentId, [documentId+createdAt], parentId, resolvedAt, projectId",
+    })
+    await legacy.open()
+    await legacy.table("canvasComments").bulkPut([
+      {
+        id: "canvas-new",
+        documentId: "doc-1",
+        projectId: "project-1",
+        authorId: "user-1",
+        authorName: "Maya",
+        content: "Backfill me",
+        range: { startLine: 2, startColumn: 1, endLine: 2, endColumn: 5 },
+        reactions: [],
+        createdAt: 100,
+      },
+      {
+        id: "canvas-existing",
+        documentId: "doc-1",
+        authorId: "user-1",
+        authorName: "Maya",
+        content: "Do not overwrite",
+        range: { startLine: 1, startColumn: 1, endLine: 1, endColumn: 2 },
+        reactions: [],
+        createdAt: 90,
+      },
+    ])
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+
+    expect(upgraded.verno).toBeGreaterThanOrEqual(115)
+    expect(await upgraded.contextComments.count()).toBe(2)
+    expect(await upgraded.contextComments.get("canvas-new")).toEqual(
+      expect.objectContaining({
+        resourceKind: "canvas-document",
+        resourceId: "doc-1",
+        projectId: "project-1",
+        anchor: expect.objectContaining({ kind: "text-range" }),
+      })
+    )
+    expect((await upgraded.contextComments.get("canvas-existing"))?.content).toBe(
+      "Do not overwrite"
+    )
+
+    await upgraded.delete()
+    upgraded.close()
   })
 
   it("v108 stores a code-adoption turn and resolves its indexes", async () => {

@@ -21,6 +21,7 @@ import type {
 import type { TrustedWorkspace } from "@/lib/db/trusted-workspaces"
 import type { SessionStateRow, TtsProviderKeyRow } from "@/lib/db/schema"
 import { getDb } from "@/lib/db/schema"
+import { contextCommentRowFromCanvas } from "@/lib/db/context-comments"
 import type { PluginAnalyticsRow, PluginPermissionRow, PluginRow } from "@/lib/db/plugin-types"
 import type { TwinChunk, TwinDraft, TwinJob, TwinProfile, TwinSource } from "@/types/twin"
 import {
@@ -106,7 +107,7 @@ export async function applyBackupPackage(
       db.tts_provider_keys,
       db.canvasDocuments,
       db.canvasVersions,
-      db.canvasComments,
+      db.contextComments,
       db.canvasSessions,
       db.a2uiApps,
       db.a2uiTemplates,
@@ -235,8 +236,8 @@ export async function applyBackupPackage(
         respectBuiltIn: false,
       })
       await applyCollection({
-        rows: env.canvasComments,
-        table: db.canvasComments,
+        rows: env.canvasComments?.map(contextCommentRowFromCanvas),
+        table: db.contextComments,
         kind: "canvasComments",
         opts,
         summary,

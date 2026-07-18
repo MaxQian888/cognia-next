@@ -41,6 +41,7 @@ import {
   type WorkflowCopilotTemplate,
 } from "@/lib/workflow/copilot-templates"
 import { useProposalStore } from "@/lib/workflow/editor/proposal-store"
+import { workflowEditorRevision } from "@/lib/workflow/editor/editor-revision"
 import { templateToProposalOps } from "@/plugins/workflow-ai/src/tools/template-tools"
 
 interface Props {
@@ -180,6 +181,7 @@ function SlotForm({ template, useStore, workflowId, onClose }: SlotFormProps) {
         workflowId,
         summary,
         ops,
+        baseRevision: workflowEditorRevision(useStore.getState()),
       })
       toast.success(`${template.label.en} → ${summary}`)
       onClose()

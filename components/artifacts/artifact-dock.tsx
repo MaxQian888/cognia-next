@@ -7,9 +7,19 @@
  * toggle) and an optional conversation-scoped artifact history rail.
  */
 
-import { PanelRightClose, History } from "lucide-react"
+import {
+  BotIcon,
+  History,
+  MessageSquareIcon,
+  PanelRightClose,
+  PanelsTopLeftIcon,
+  SearchCodeIcon,
+  InfoIcon,
+} from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { hasWorkspaceFsBackend } from "@/lib/files/workspace-backend"
@@ -18,8 +28,345 @@ import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layo
 import { ArtifactPanelContent } from "./artifact-panel-content"
 import { ArtifactList } from "./artifact-list"
 import { DockWorkspace } from "./workspace-mode/dock-workspace"
+import {
+  ContextWorkbench,
+  ContextWorkbenchMobileSheet,
+} from "@/components/context-workbench/context-workbench"
+import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
+import type { ContextPanelDefinition, ContextResource } from "@/types/context-workbench"
+import { useContextWorkbenchSurfaceFlag } from "@/hooks/context-workbench/use-context-workbench-surface-flag"
+import { ResourceWorkbenchChatPanel } from "@/components/context-workbench/resource-workbench-chat-panel"
+import { ArtifactReviewView } from "./artifact-review-view"
+import { ContextMetadataPanel } from "@/components/context-workbench/context-metadata-panel"
+import { useContextWorkbenchInstanceId } from "@/hooks/context-workbench/use-context-workbench-instance-id"
+import { ContextCommentsPanel } from "@/components/context-workbench/context-comments-panel"
+import { ContextCapabilityUnavailable } from "@/components/context-workbench/context-capability-unavailable"
+import { resolveContextCapabilities } from "@/lib/context-workbench/capabilities"
 
 export function ArtifactDock() {
+  const enabled = useContextWorkbenchSurfaceFlag("artifact")
+  const activeArtifactId = useArtifactStore((state) => state.activeArtifactId)
+  return enabled && activeArtifactId ? (
+    <ArtifactContextWorkbench artifactId={activeArtifactId} />
+  ) : (
+    <LegacyArtifactDock />
+  )
+}
+
+export function ArtifactContextWorkbench({
+  artifactId,
+  mobile,
+}: {
+  artifactId: string
+  mobile?: { open: boolean; onOpenChange: (open: boolean) => void }
+}) {
+  const tWorkbench = useTranslations("contextWorkbench")
+  const workbenchInstanceId = useContextWorkbenchInstanceId("artifact")
+  const artifact = useArtifactStore((state) => state.artifacts[artifactId])
+  const pendingReview = useArtifactStore((state) => state.pendingReviews[artifactId] ?? null)
+  const hadPendingReview = useRef(false)
+  const activeSessionId = useChatStore((state) => state.activeSessionId)
+  const dockMode = useArtifactDockLayoutStore((state) => state.dockMode)
+  const setDockMode = useArtifactDockLayoutStore((state) => state.setDockMode)
+  const setDockCollapsed = useArtifactDockLayoutStore((state) => state.setDockCollapsed)
+  const navigatePanel = useContextWorkbenchStore((state) => state.navigatePanel)
+  const smartReveal = useContextWorkbenchStore((state) => state.smartReveal)
+  const layout = useContextWorkbenchStore(
+    (state) => state.layouts[`${workbenchInstanceId}::artifact:${artifactId}`]
+  )
+  const [selectionState, setSelectionState] = useState<
+    { artifactId: string; start: number; end: number } | undefined
+  >()
+  const [pendingSelectionComment, setPendingSelectionComment] = useState<string | null>(null)
+  const textSelection = useMemo(
+    () =>
+      selectionState?.artifactId === artifactId && selectionState.start !== selectionState.end
+        ? { kind: "text" as const, start: selectionState.start, end: selectionState.end }
+        : undefined,
+    [artifactId, selectionState]
+  )
+  const workspaceAvailable = hasWorkspaceFsBackend()
+
+  useEffect(() => {
+    const handleSelection = (event: Event) => {
+      const detail = (event as CustomEvent<{ artifactId: string; start: number; end: number }>)
+        .detail
+      if (detail.artifactId === artifactId) setSelectionState(detail)
+    }
+    window.addEventListener("artifact-context-selection", handleSelection)
+    return () => window.removeEventListener("artifact-context-selection", handleSelection)
+  }, [artifactId])
+
+  useEffect(() => {
+    if (layout?.activePanelId) return
+    navigatePanel(
+      `${workbenchInstanceId}::artifact:${artifactId}`,
+      dockMode === "workspace" ? "workspace" : "preview",
+      dockMode === "workspace" ? "wide" : "narrow"
+    )
+  }, [artifactId, dockMode, layout?.activePanelId, navigatePanel, workbenchInstanceId])
+
+  useEffect(() => {
+    const appeared = !hadPendingReview.current && pendingReview !== null
+    hadPendingReview.current = pendingReview !== null
+    if (appeared) {
+      smartReveal(`${workbenchInstanceId}::artifact:${artifactId}`, "proposal-review", "wide")
+    }
+  }, [artifactId, pendingReview, smartReveal, workbenchInstanceId])
+
+  const panels = useMemo<ContextPanelDefinition[]>(
+    () => [
+      {
+        id: "resource-chat",
+        activity: "ai",
+        labelKey: "contextWorkbench.resourceChat",
+        icon: BotIcon,
+        order: 5,
+        appliesTo: (resource) => resource.kind === "artifact",
+        retention: "stateful",
+        requiresChatScope: true,
+        renderer: () => (
+          <ResourceWorkbenchChatPanel
+            getResourceContext={() => artifact?.content ?? ""}
+            pendingPrompt={pendingSelectionComment}
+            onPendingPromptConsumed={() => setPendingSelectionComment(null)}
+          />
+        ),
+      },
+      {
+        id: "comments",
+        activity: "comments",
+        labelKey: "contextWorkbench.comments",
+        icon: MessageSquareIcon,
+        order: 10,
+        appliesTo: (resource) => resource.kind === "artifact",
+        retention: "stateful",
+        renderer: () =>
+          artifact ? (
+            <ContextCommentsPanel
+              resource={{ kind: "artifact", id: artifactId, projectId: artifact.projectId }}
+              revision={String(artifact.version)}
+              anchor={
+                textSelection
+                  ? {
+                      kind: "text-range",
+                      start: textSelection.start,
+                      end: textSelection.end,
+                      revision: String(artifact.version),
+                    }
+                  : undefined
+              }
+            />
+          ) : null,
+      },
+      {
+        id: "selection-ai",
+        activity: "ai",
+        labelKey: "contextWorkbench.aiActions",
+        icon: BotIcon,
+        order: 12,
+        appliesTo: (resource) => resource.kind === "artifact",
+        retention: "stateful",
+        renderer: () => (
+          <ArtifactSelectionCommentPanel
+            hasSelection={Boolean(textSelection)}
+            onSubmit={(comment) => {
+              setPendingSelectionComment(comment)
+              navigatePanel(
+                `${workbenchInstanceId}::artifact:${artifactId}`,
+                "resource-chat",
+                "narrow"
+              )
+            }}
+          />
+        ),
+      },
+      {
+        id: "proposal-review",
+        activity: "review",
+        labelKey: "contextWorkbench.proposalReview",
+        icon: History,
+        order: 15,
+        appliesTo: (resource) => resource.kind === "artifact",
+        retention: "stateful",
+        preferredMode: "wide",
+        getBadge: () => (pendingReview ? 1 : 0),
+        renderer: () =>
+          artifact ? <ArtifactReviewView artifact={artifact} panelMode="desktop" /> : null,
+      },
+      {
+        id: "preview",
+        activity: "preview-run",
+        labelKey: "artifacts.dock.artifactMode",
+        icon: PanelsTopLeftIcon,
+        order: 10,
+        appliesTo: (resource) => resource.kind === "artifact",
+        retention: "stateful",
+        onFirstActivate: () => setDockMode("artifact"),
+        onRestore: () => setDockMode("artifact"),
+        renderer: () => <ArtifactPanelContent panelMode="desktop" />,
+      },
+      {
+        id: "history",
+        activity: "review",
+        labelKey: "artifacts.dock.showHistory",
+        icon: History,
+        order: 20,
+        appliesTo: (resource) => resource.kind === "artifact",
+        retention: "stateful",
+        preferredMode: "wide",
+        renderer: () => (
+          <ArtifactList
+            sessionId={activeSessionId ?? undefined}
+            className="h-full"
+            maxHeight="100%"
+          />
+        ),
+      },
+      {
+        id: "metadata",
+        activity: "inspect",
+        labelKey: "contextWorkbench.metadata.artifactTitle",
+        icon: InfoIcon,
+        order: 25,
+        appliesTo: (resource) => resource.kind === "artifact",
+        retention: "stateful",
+        renderer: () =>
+          artifact ? (
+            <ContextMetadataPanel
+              title={tWorkbench("metadata.artifactTitle")}
+              fields={[
+                { label: tWorkbench("metadata.artifactType"), value: artifact.type },
+                {
+                  label: tWorkbench("metadata.language"),
+                  value: artifact.language ?? tWorkbench("metadata.unknown"),
+                },
+                { label: tWorkbench("metadata.version"), value: artifact.version },
+                {
+                  label: tWorkbench("metadata.runtimeStatus"),
+                  value: artifact.metadata?.runtimeHealth ?? tWorkbench("metadata.notRun"),
+                },
+                {
+                  label: tWorkbench("metadata.updatedAt"),
+                  value: artifact.updatedAt.toLocaleString(),
+                },
+              ]}
+            />
+          ) : null,
+      },
+      {
+        id: "workspace",
+        activity: "inspect",
+        labelKey: "artifacts.dock.workspaceMode",
+        icon: SearchCodeIcon,
+        order: 30,
+        appliesTo: (resource) => resource.kind === "artifact",
+        retention: "stateful",
+        preferredMode: "wide",
+        onFirstActivate: () => setDockMode("workspace"),
+        onRestore: () => setDockMode("workspace"),
+        renderer: () =>
+          workspaceAvailable ? (
+            <DockWorkspace activeSessionId={activeSessionId} />
+          ) : (
+            <ContextCapabilityUnavailable capability="workspace" />
+          ),
+      },
+    ],
+    [
+      navigatePanel,
+      activeSessionId,
+      artifact,
+      artifactId,
+      pendingReview,
+      pendingSelectionComment,
+      setDockMode,
+      tWorkbench,
+      textSelection,
+      workbenchInstanceId,
+      workspaceAvailable,
+    ]
+  )
+
+  if (!artifact) return mobile ? null : <LegacyArtifactDock />
+  const resource: ContextResource = {
+    kind: "artifact",
+    artifactId,
+    version: String(artifact.version),
+    selection: textSelection,
+    capabilities: resolveContextCapabilities({
+      kind: "artifact",
+      previewable: true,
+      runnable:
+        artifact.metadata?.runnable ??
+        ["code", "html", "react", "jupyter"].includes(artifact.type),
+      workspaceAvailable,
+    }),
+  }
+
+  return mobile ? (
+    <ContextWorkbenchMobileSheet
+      open={mobile.open}
+      onOpenChange={mobile.onOpenChange}
+      workbenchInstanceId={workbenchInstanceId}
+      resource={resource}
+      panels={panels}
+      onCollapse={() => mobile.onOpenChange(false)}
+    />
+  ) : (
+    <ContextWorkbench
+      workbenchInstanceId={workbenchInstanceId}
+      resource={resource}
+      panels={panels}
+      onCollapse={() => setDockCollapsed(true)}
+      placement="chat-dock"
+      manageOwnWidth={false}
+      className="w-full"
+    />
+  )
+}
+
+function ArtifactSelectionCommentPanel({
+  hasSelection,
+  onSubmit,
+}: {
+  hasSelection: boolean
+  onSubmit: (comment: string) => void
+}) {
+  const t = useTranslations("contextWorkbench.artifactSelectionComment")
+  const [comment, setComment] = useState("")
+  const canSubmit = hasSelection && comment.trim().length > 0
+
+  return (
+    <div className="space-y-3 p-3">
+      <p className="text-xs text-muted-foreground">
+        {hasSelection ? t("selectionReady") : t("selectFirst")}
+      </p>
+      <Textarea
+        value={comment}
+        onChange={(event) => setComment(event.target.value)}
+        placeholder={t("placeholder")}
+        aria-label={t("label")}
+        rows={5}
+      />
+      <Button
+        type="button"
+        className="w-full"
+        disabled={!canSubmit}
+        onClick={() => {
+          onSubmit(comment.trim())
+          setComment("")
+        }}
+      >
+        <BotIcon className="size-4" />
+        {t("sendToAi")}
+      </Button>
+    </div>
+  )
+}
+
+function LegacyArtifactDock() {
   const t = useTranslations("artifacts")
   const listRailOpen = useArtifactDockLayoutStore((s) => s.listRailOpen)
   const toggleListRail = useArtifactDockLayoutStore((s) => s.toggleListRail)

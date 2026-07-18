@@ -12,52 +12,75 @@ jest.mock("@/hooks/artifacts/use-artifact-dock-shortcuts", () => ({
   useArtifactDockShortcuts: jest.fn(),
 }))
 
-jest.mock("@/lib/ui/motion", () => ({
-  mobileTransition: () => ({}),
-  useReducedMotionTransition: (t: unknown) => t,
-}))
+jest.mock("@/components/ui/resizable", () => {
+  const { useImperativeHandle, useRef, useState } =
+    jest.requireActual<typeof import("react")>("react")
 
-jest.mock("@/components/ui/resizable", () => ({
-  ResizablePanelGroup: ({
-    children,
-    onLayoutChanged,
-  }: {
-    children: React.ReactNode
-    onLayoutChanged?: (layout: Record<string, number>) => void
-  }) => (
-    <div>
-      {children}
-      <button
-        type="button"
-        data-testid="resize-dock"
-        onClick={() => onLayoutChanged?.({ "artifact-dock": 42 })}
-      />
-    </div>
-  ),
-  ResizablePanel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  ResizableHandle: () => <div />,
-}))
+  type MockPanelHandle = {
+    collapse: () => void
+    expand: () => void
+    getSize: () => { asPercentage: number; inPixels: number }
+    isCollapsed: () => boolean
+    resize: (size: number | string) => void
+  }
 
-// motion/react → plain divs so layout/animate props don't choke jsdom.
-jest.mock("motion/react", () => ({
-  motion: new Proxy(
-    {},
-    {
-      get:
-        () =>
-        ({ children, ...props }: { children?: React.ReactNode }) => {
-          // strip framer-only props
-          const {
-            layout: _l,
-            animate: _a,
-            transition: _t,
-            ...rest
-          } = props as Record<string, unknown>
-          return <div {...rest}>{children}</div>
+  return {
+    ResizablePanelGroup: ({
+      children,
+      onLayoutChanged,
+    }: {
+      children: React.ReactNode
+      onLayoutChanged?: (layout: Record<string, number>) => void
+    }) => (
+      <div>
+        {children}
+        <button
+          type="button"
+          data-testid="resize-dock"
+          onClick={() => onLayoutChanged?.({ "artifact-dock": 42 })}
+        />
+      </div>
+    ),
+    ResizablePanel: ({
+      children,
+      id,
+      defaultSize,
+      elementRef,
+      panelRef,
+    }: {
+      children: React.ReactNode
+      id: string
+      defaultSize?: number | string
+      elementRef?: React.Ref<HTMLDivElement>
+      panelRef?: React.Ref<MockPanelHandle>
+    }) => {
+      const [size, setSize] = useState(defaultSize)
+      const collapsedRef = useRef(defaultSize === "0%")
+      useImperativeHandle(panelRef, () => ({
+        collapse: () => {
+          collapsedRef.current = true
+          setSize("0%")
         },
-    }
-  ),
-}))
+        expand: () => {
+          collapsedRef.current = false
+          setSize(defaultSize)
+        },
+        getSize: () => ({ asPercentage: 0, inPixels: 0 }),
+        isCollapsed: () => collapsedRef.current,
+        resize: (nextSize) => {
+          collapsedRef.current = nextSize === 0 || nextSize === "0%"
+          setSize(nextSize)
+        },
+      }))
+      return (
+        <div ref={elementRef} data-testid={`resizable-panel-${id}`} data-size={size}>
+          {children}
+        </div>
+      )
+    },
+    ResizableHandle: () => <div />,
+  }
+})
 
 jest.mock("./artifact-dock", () => ({
   ArtifactDock: () => <div data-testid="dock" />,
@@ -194,5 +217,26 @@ describe("ArtifactWorkspaceDock", () => {
 
     act(() => screen.getByTestId("resize-dock").click())
     expect(useArtifactDockLayoutStore.getState().dockSize).toBe(42)
+  })
+
+  it("matches the left sidebar animation while applying dock visibility changes", async () => {
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+
+    expect(screen.getByTestId("resizable-panel-artifact-dock")).toHaveAttribute("data-size", "0%")
+
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+    const dockPanel = screen.getByTestId("resizable-panel-artifact-dock")
+    expect(dockPanel).toHaveAttribute("data-size", "34%")
+    expect(dockPanel).toHaveClass("transition-[flex-grow]", "duration-200", "ease-in-out")
+
+    await waitFor(() => expect(dockPanel).not.toHaveClass("transition-[flex-grow]"))
+
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
+    expect(dockPanel).toHaveAttribute("data-size", "0%")
+    expect(dockPanel).toHaveClass("transition-[flex-grow]", "duration-200", "ease-in-out")
   })
 })

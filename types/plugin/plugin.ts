@@ -66,6 +66,7 @@ import type { PluginDeploymentFilterDef } from "./plugin-deployment-filter"
 import type { PluginProtocolAdapterDef } from "./plugin-protocol-adapter"
 import type { PluginExternalAgentAdapterDef } from "./plugin-external-agent-adapter"
 import type { PluginSessionImporterDef } from "./plugin-session-importer"
+import type { PluginContextPanelDef } from "./plugin-context-panel"
 // Re-exported so the SDK manifest barrel (`@cognia/plugin-sdk/manifest`) can
 // source it from this module, the documented source of truth.
 export type { PluginExternalAgentAdapterDef } from "./plugin-external-agent-adapter"
@@ -180,6 +181,7 @@ export type PluginCapability =
   | "view-container" // Contributes a rail-mounted view container (B1) — own icon + middle-column panel
   | "tree-view" // Contributes tree data providers / custom React views (B2) mounted into a view container
   | "webview" // Contributes sandboxed HTML webview panels (B3) mounted into a view container
+  | "context-panel" // Contributes resource-scoped trusted React panels to the Context Workbench
   | "auth-provider" // Contributes a native auth/OAuth provider (C1) — ctx.auth.registerProvider
   | "uri-handler" // Handles cognia://plugin/<id>/... deep-links (C2) — ctx.uri.registerHandler
   | "pet" // Reads + nurtures the desktop pet — gates ctx.pet (rate-limited, budget-clamped)
@@ -371,6 +373,11 @@ export type PluginPermission =
   | "settings:write" // Modify settings
   | "session:read" // Read chat sessions
   | "session:write" // Modify chat sessions
+  | "project:read" // Read project metadata and files through scoped APIs
+  | "canvas:read" // Read Canvas document metadata and selection
+  | "artifact:read" // Read artifact metadata
+  | "workflow:read" // Read workflow metadata and selection
+  | "extension:ui" // Contribute trusted host-rendered UI
   | "media:image:read" // Read image media assets
   | "media:image:write" // Write image media assets
   | "media:video:read" // Read video media assets
@@ -1074,6 +1081,14 @@ export interface PluginManifest {
    * disable. Permission gate: `extension:ui`.
    */
   views?: PluginViewDef[]
+
+  /**
+   * Resource-scoped trusted React panels mounted in the shared Context
+   * Workbench. Lazy `{ id, entry, export }` modules; sandboxed webviews are
+   * deliberately excluded from this surface. Permission gate:
+   * `extension:ui` plus the read permission for every declared resource kind.
+   */
+  contextPanels?: PluginContextPanelDef[]
 
   /**
    * Sandboxed webview panels (B3) — arbitrary HTML rendered in an isolated
@@ -4469,6 +4484,7 @@ export type PluginAPIPermission =
   | "canvas:collaborate"
   | "artifact:read"
   | "artifact:write"
+  | "workflow:read"
   | "ai:chat"
   | "ai:embed"
   | "agent:control"
@@ -4530,6 +4546,9 @@ export interface PluginPermissionAPI {
 export interface PluginContextAPI {
   /** Session management API */
   session: PluginSessionAPI
+
+  /** Resource-scoped Context Workbench panel registration. */
+  contextPanels: import("@/lib/plugin/api/context-panel-api").PluginContextPanelAPI
 
   /** Project management API */
   project: PluginProjectAPI

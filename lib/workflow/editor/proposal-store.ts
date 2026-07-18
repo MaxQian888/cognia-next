@@ -72,6 +72,8 @@ export interface ProposalPayload {
   workflowId: string
   summary: string
   ops: ReadonlyArray<ProposalOp>
+  /** Semantic editor revision captured when this proposal was created. */
+  baseRevision: string
   opCount: ProposalOpCount
   /**
    * Wall-clock ms at create time. Used by the card to show "Proposed Xs
@@ -104,15 +106,18 @@ interface ProposalStoreState {
   entries: Record<string, ProposalEntry>
   openProposal: (
     workflowId: string,
-    payload: Omit<ProposalPayload, "opCount" | "createdAt"> & {
+    payload: Omit<ProposalPayload, "opCount" | "createdAt" | "baseRevision"> & {
       opCount?: ProposalOpCount
       createdAt?: number
+      baseRevision?: string
     }
   ) => ProposalPayload
   /** Move the current open proposal to `lastApplied`. No-op if no open. */
   markApplied: (workflowId: string) => void
   /** Move the current open proposal to `lastDiscarded`. No-op if no open. */
   discardProposal: (workflowId: string) => void
+  /** Re-anchor an open proposal after the user explicitly accepts the latest graph as its base. */
+  rebaseProposal: (workflowId: string, baseRevision: string) => void
   /** Wipe every record (open / applied / discarded) for the workflow. */
   clearProposalsFor: (workflowId: string) => void
   /** Look up the status of a specific proposal id (across all workflows). */
@@ -132,6 +137,7 @@ export const useProposalStore = create<ProposalStoreState>((set, get) => ({
       workflowId,
       summary: payload.summary,
       ops: payload.ops,
+      baseRevision: payload.baseRevision ?? "legacy",
       opCount,
       createdAt,
     }
@@ -185,6 +191,19 @@ export const useProposalStore = create<ProposalStoreState>((set, get) => ({
       return { entries: { ...s.entries, [workflowId]: next } }
     })
     if (discarded) persistHistory(discarded, "discarded")
+  },
+
+  rebaseProposal: (workflowId, baseRevision) => {
+    set((state) => {
+      const prior = state.entries[workflowId]
+      if (!prior?.open) return state
+      return {
+        entries: {
+          ...state.entries,
+          [workflowId]: { ...prior, open: { ...prior.open, baseRevision } },
+        },
+      }
+    })
   },
 
   clearProposalsFor: (workflowId) => {

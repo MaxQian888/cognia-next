@@ -22,6 +22,7 @@ import { resolveStandaloneProvider } from "@/lib/ai/chat/resolve-standalone-prov
 import { browserDirectHeaders, getStreamingFetch } from "@/lib/runtime/streaming-fetch"
 import { useSettingsStore } from "@/stores/settings"
 import { loggers } from "@cognia/logging"
+import { hasNoLeakingPii } from "@cognia/redact"
 
 export interface CanvasActionInvocation {
   actionType: CanvasActionType
@@ -82,6 +83,9 @@ export function useCanvasActions(): UseCanvasActionsResult {
       try {
         const system = ACTION_PROMPTS[req.actionType] ?? ACTION_PROMPTS.custom
         const user = buildActionUserPrompt(req)
+        if (!hasNoLeakingPii(system) || !hasNoLeakingPii(user)) {
+          throw new Error("Canvas action blocked by PII gate")
+        }
         const { text } = await generateText({
           model: buildModel(),
           system,
@@ -109,6 +113,9 @@ export function useCanvasActions(): UseCanvasActionsResult {
       try {
         const system = ACTION_PROMPTS[req.actionType] ?? ACTION_PROMPTS.custom
         const user = buildActionUserPrompt(req)
+        if (!hasNoLeakingPii(system) || !hasNoLeakingPii(user)) {
+          throw new Error("Canvas action blocked by PII gate")
+        }
         const result = streamText({ model: buildModel(), system, prompt: user })
         for await (const delta of result.textStream) {
           acc += delta

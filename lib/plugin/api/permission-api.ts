@@ -19,6 +19,7 @@ import {
   revokePluginPermission as revokeHostPermission,
 } from "@/lib/plugin/core/transport"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
+import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
 
 // Permission grants by plugin
 const grantedPermissions = new Map<string, Set<PluginAPIPermission>>()
@@ -53,6 +54,7 @@ const permissionMapping: Record<string, PluginAPIPermission[]> = {
   "canvas:collaborate": ["canvas:collaborate"],
   "artifact:read": ["artifact:read"],
   "artifact:write": ["artifact:write"],
+  "workflow:read": ["workflow:read"],
   "ai:chat": ["ai:chat"],
   "ai:embed": ["ai:embed"],
   "agent:control": ["agent:control"],
@@ -197,6 +199,7 @@ export function createPermissionAPI(
 
       if (granted) {
         existing.add(permission)
+        contextPanelRegistry.refresh()
         void grantHostPermission(pluginId, permission).catch((error) =>
           recordSilentFailure(
             pluginId,
@@ -250,6 +253,7 @@ export function pluginHasApiPermission(pluginId: string, permission: PluginAPIPe
  */
 export function revokePluginPermissions(pluginId: string) {
   grantedPermissions.delete(pluginId)
+  contextPanelRegistry.refresh()
 }
 
 /**
@@ -259,6 +263,7 @@ export function grantPermission(pluginId: string, permission: PluginAPIPermissio
   const permissions = grantedPermissions.get(pluginId) || new Set()
   permissions.add(permission)
   grantedPermissions.set(pluginId, permissions)
+  contextPanelRegistry.refresh()
   void grantHostPermission(pluginId, permission).catch((error) =>
     recordSilentFailure(
       pluginId,
@@ -280,6 +285,7 @@ export function revokePermission(pluginId: string, permission: PluginAPIPermissi
   if (permissions) {
     permissions.delete(permission)
   }
+  contextPanelRegistry.refresh()
   void revokeHostPermission(pluginId, permission).catch((error) =>
     recordSilentFailure(
       pluginId,

@@ -102,6 +102,8 @@ export const CANONICAL_EXTENSION_POINTS = [
   "sidebar.left.bottom",
   "sidebar.right.top",
   "sidebar.right.bottom",
+  "sidebar.right.top",
+  "sidebar.right.bottom",
   "toolbar.left",
   "toolbar.center",
   "toolbar.right",
@@ -201,6 +203,8 @@ export const CANONICAL_EXTENSION_POINTS = [
   "twin.persona.panel",
   "twin.settings.cards",
   "twin.overview.panel",
+  "panel.header",
+  "panel.footer",
   "panel.header",
   "panel.footer",
   "settings.general",
@@ -318,6 +322,8 @@ const REGISTRATION_HOST_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
 const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoint, string>> = {
   "sidebar.left.top": "components/shell/guild-rail.tsx",
   "sidebar.left.bottom": "components/shell/guild-rail.tsx",
+  "sidebar.right.top": "components/context-workbench/context-workbench.tsx",
+  "sidebar.right.bottom": "components/context-workbench/context-workbench.tsx",
   "toolbar.left": "components/desktop/title-bar.tsx",
   "toolbar.center": "components/desktop/title-bar.tsx",
   "toolbar.right": "components/desktop/title-bar.tsx",
@@ -356,6 +362,8 @@ const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoi
   "twin.persona.panel": "components/twin/twin-plugin-slots.tsx",
   "twin.settings.cards": "components/twin/twin-plugin-slots.tsx",
   "twin.overview.panel": "components/twin/twin-plugin-slots.tsx",
+  "panel.header": "components/context-workbench/context-workbench.tsx",
+  "panel.footer": "components/context-workbench/context-workbench.tsx",
   "settings.general": "components/settings/agent-runtime/tabs/defaults-tab.tsx",
   "settings.appearance": "components/settings/appearance/appearance-section.tsx",
   "settings.ai": "components/settings/provider/anthropic-subscription-reuse-card.tsx",
@@ -714,43 +722,11 @@ interface UiSlotOverride {
 }
 
 const UI_SLOT_OVERRIDES: Partial<Record<CanonicalExtensionPoint, UiSlotOverride>> = {
-  "sidebar.right.top": {
-    status: "deprecated",
-    stability: "deprecated",
-    binding: "retired (no right sidebar surface mounted)",
-    replacementId: "sidebar.left.top",
-    deprecatedIn: "0.2.0",
-    retirementNote: "No right sidebar surface is mounted; use sidebar.left.top instead.",
-  },
-  "sidebar.right.bottom": {
-    status: "deprecated",
-    stability: "deprecated",
-    binding: "retired (no right sidebar surface mounted)",
-    replacementId: "sidebar.left.bottom",
-    deprecatedIn: "0.2.0",
-    retirementNote: "No right sidebar surface is mounted; use sidebar.left.bottom instead.",
-  },
   // ADR-0026 §5 §A — `chat.message.actions` was previously retired but is
   // revived in the v2 surface. The new mount is a hover action bar above
   // each message (distinct from `chat.message.footer`, which holds copy /
   // regenerate). Listed in `IMPLEMENTED_EXTENSION_POINTS` below so it
   // resolves to status=implemented, not deprecated.
-  "panel.header": {
-    status: "deprecated",
-    stability: "deprecated",
-    binding: "retired (no generic panel shell component exists)",
-    deprecatedIn: "0.4.0",
-    retirementNote:
-      "No generic panel-shell wrapper exists in cognia-next; demoted in SP-1 (2026-05-11) after Phase A audit found no viable host.",
-  },
-  "panel.footer": {
-    status: "deprecated",
-    stability: "deprecated",
-    binding: "retired (no generic panel shell component exists)",
-    deprecatedIn: "0.4.0",
-    retirementNote:
-      "No generic panel-shell wrapper exists in cognia-next; demoted in SP-1 (2026-05-11) after Phase A audit found no viable host.",
-  },
   // ADR-0026 §5 §B — `settings.ai` revived. The mount lives at the top of
   // `components/settings/api-key-section.tsx`. Listed in
   // `IMPLEMENTED_EXTENSION_POINTS` below so it resolves to status=implemented.

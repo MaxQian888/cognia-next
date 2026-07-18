@@ -1,4 +1,8 @@
-import { collectWorkspaceChanges, undoWorkspaceChanges } from "./workspace-changes"
+import {
+  collectWorkspaceChanges,
+  discardWorkspaceFile,
+  undoWorkspaceChanges,
+} from "./workspace-changes"
 import type { GitStatus } from "@/types/git"
 
 const status: GitStatus = {
@@ -125,5 +129,42 @@ describe("undoWorkspaceChanges", () => {
     await expect(undoWorkspaceChanges("/repo", status, { unstage, discard, refresh })).rejects.toBe(
       operationError
     )
+  })
+})
+
+describe("discardWorkspaceFile", () => {
+  it("scopes the unstage/discard to a single file's paths and refreshes", async () => {
+    const calls: string[] = []
+    const unstage = jest.fn(async (_root: string, paths: string[]) => {
+      calls.push(`unstage:${paths.join(",")}`)
+    })
+    const discard = jest.fn(async (_root: string, paths: string[]) => {
+      calls.push(`discard:${paths.join(",")}`)
+    })
+    const refresh = jest.fn(async () => {
+      calls.push("refresh")
+    })
+    const renamed = collectWorkspaceChanges(status).find((file) => file.path === "renamed.ts")!
+
+    await discardWorkspaceFile("/repo", renamed, { unstage, discard, refresh })
+
+    expect(calls).toEqual([
+      "unstage:renamed.ts,original.ts",
+      "discard:renamed.ts,original.ts",
+      "refresh",
+    ])
+  })
+
+  it("discards an untracked file without unstaging", async () => {
+    const unstage = jest.fn().mockResolvedValue(undefined)
+    const discard = jest.fn().mockResolvedValue(undefined)
+    const refresh = jest.fn().mockResolvedValue(undefined)
+    const scratch = collectWorkspaceChanges(status).find((file) => file.path === "scratch.txt")!
+
+    await discardWorkspaceFile("/repo", scratch, { unstage, discard, refresh })
+
+    expect(unstage).not.toHaveBeenCalled()
+    expect(discard).toHaveBeenCalledWith("/repo", ["scratch.txt"])
+    expect(refresh).toHaveBeenCalledWith("/repo")
   })
 })

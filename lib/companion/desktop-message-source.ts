@@ -26,6 +26,7 @@ import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 import type { UIMessage } from "@/types"
 import { listen } from "@tauri-apps/api/event"
 import { invoke } from "@tauri-apps/api/core"
+import { filterExposedSessions } from "@/lib/chat/session-exposure"
 
 const UPDATE_EVENT = "companion://message-update-request"
 const DELETE_EVENT = "companion://message-delete-request"
@@ -246,8 +247,9 @@ export async function readSessionPage(
   const db = getDb()
   const all = await db.sessions.toArray()
 
+  const exposed = filterExposedSessions(all, "external-connector")
   const filtered =
-    typeof before === "number" ? all.filter((s) => Number(s.updatedAt ?? 0) < before) : all
+    typeof before === "number" ? exposed.filter((s) => Number(s.updatedAt ?? 0) < before) : exposed
   filtered.sort((a, b) => Number(b.updatedAt ?? 0) - Number(a.updatedAt ?? 0))
 
   const total = filtered.length

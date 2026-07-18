@@ -34,6 +34,7 @@ import {
   ClipboardEvent as ReactClipboardEvent,
   forwardRef,
   KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
   type Ref,
   useCallback,
   useEffect,
@@ -290,6 +291,9 @@ interface InnerProps {
   placeholder?: string
   mobileMentionMembers?: readonly Character[]
   workflowMention?: ComposerWorkflowMention
+  /** Compact mode embeds the model and agent controls into the input surface. */
+  compactLayout?: boolean
+  toolbar?: ReactNode
 }
 
 function ComposerInner(props: InnerProps) {
@@ -308,6 +312,7 @@ function ComposerInner(props: InnerProps) {
   // Non-LLM composer behavior toggles (AppSettings.composerBehavior). Each
   // defaults ON via `!== false` so an absent block preserves prior behavior.
   const composerBehavior = useSettingsStore((s) => s.settings?.composerBehavior)
+  const compactLayout = props.compactLayout === true
   const sendOnEnter = composerBehavior?.sendOnEnter !== false
   const clearAfterSendEnabled = composerBehavior?.clearAfterSend !== false
   const inputHistoryRecall = composerBehavior?.inputHistoryRecall !== false
@@ -1475,6 +1480,8 @@ function ComposerInner(props: InnerProps) {
           // Mobile (Capacitor) keeps the stack at every width.
           "relative flex flex-wrap items-end gap-2 rounded-2xl border border-input/60 bg-background/70 px-2 py-2 shadow-sm transition-shadow",
           "focus-within:border-primary/40 focus-within:shadow-md focus-within:ring-2 focus-within:ring-ring/15",
+          compactLayout &&
+            "gap-1.5 rounded-[1.75rem] border-border/70 bg-background/85 px-3 py-2.5 shadow-md",
           // Plan mode: amber tint on the input surface (with the banner above)
           // so the read-only state is unmistakable (Claude Code parity).
           permissionMode === "plan" &&
@@ -1487,6 +1494,7 @@ function ComposerInner(props: InnerProps) {
         // prefers-reduced-transparency. Falls back to bg-background/70 when no
         // wallpaper is set.
         data-tonality="translucent"
+        data-composer-layout={compactLayout ? "compact" : "default"}
         onDragEnter={onDragEnter}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
@@ -1507,10 +1515,10 @@ function ComposerInner(props: InnerProps) {
         <div
           className={cn(
             "order-2 flex shrink-0 items-center gap-0.5",
-            !isMobile && "@sm/composer:order-none"
+            !isMobile && !compactLayout && "@sm/composer:order-none"
           )}
         >
-          {isMobile ? (
+          {isMobile || compactLayout ? (
             // Mobile: one WeChat-style "+" menu (camera / album multi-pick /
             // files) replaces the paperclip + camera button pair — fewer
             // 44px targets competing for composer width. Voice stays with
@@ -1553,6 +1561,7 @@ function ComposerInner(props: InnerProps) {
           className={cn(
             "relative order-1 w-full min-w-0",
             !isMobile &&
+              !compactLayout &&
               "@sm/composer:order-none @sm/composer:w-auto @sm/composer:flex-1 @sm/composer:self-center"
           )}
         >
@@ -1573,6 +1582,7 @@ function ComposerInner(props: InnerProps) {
             aria-label={t("ariaMessage")}
             className={cn(
               "field-sizing-content relative z-[1] block min-h-6 w-full resize-none border-0 bg-transparent shadow-none outline-none ring-0 placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0",
+              compactLayout && "min-h-14 py-1.5",
               TEXTAREA_TYPOGRAPHY
             )}
             disabled={props.disabled}
@@ -1609,10 +1619,14 @@ function ComposerInner(props: InnerProps) {
           />
         </div>
 
+        {props.toolbar ? (
+          <div className="order-2 min-w-0 flex-1 self-end">{props.toolbar}</div>
+        ) : null}
+
         <div
           className={cn(
             "order-3 ml-auto flex shrink-0 items-center",
-            !isMobile && "@sm/composer:order-none @sm/composer:ml-0"
+            !isMobile && !compactLayout && "@sm/composer:order-none @sm/composer:ml-0"
           )}
         >
           <Tooltip>
@@ -1822,6 +1836,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const tAttach = useTranslations("chat.composer.attachments")
   const tWebSearch = useTranslations("webSearchToggle")
   const tDraftReview = useTranslations("chat.composer.draftReview")
+  const compactLayout = useSettingsStore(
+    (s) => s.settings?.composerBehavior?.compactLayout === true
+  )
   const status = useChatStore((s) => s.status)
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
   const appendMessage = useChatStore((s) => s.appendMessage)
@@ -2192,8 +2209,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           placeholder={placeholder}
           mobileMentionMembers={mobileMentionMembers}
           workflowMention={workflowMention}
+          compactLayout={compactLayout}
+          toolbar={
+            compactLayout ? <BottomToolbar session={session ?? null} variant="embedded" /> : null
+          }
         />
-        <BottomToolbar session={session ?? null} />
+        {compactLayout ? null : <BottomToolbar session={session ?? null} />}
         <HelperHints />
       </PromptInputProvider>
 

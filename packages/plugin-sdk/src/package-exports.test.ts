@@ -8,6 +8,7 @@ const readme = fs.readFileSync(path.join(process.cwd(), "packages/plugin-sdk/REA
 describe("plugin-sdk package exports", () => {
   it("publishes every implemented API subpath", () => {
     expect(exportsMap["./api/tools"]).toBe("./src/api/tool.ts")
+    expect(exportsMap["./api/context-panel"]).toBe("./src/api/context-panel.ts")
     expect(exportsMap["./api/connector"]).toBe("./src/api/connector.ts")
     expect(exportsMap["./api/connectors"]).toBe("./src/api/connector.ts")
     expect(exportsMap["./api/components"]).toBe("./src/api/a2ui-component.ts")

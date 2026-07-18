@@ -27,6 +27,31 @@ describe("ComposerBehaviorCard", () => {
     expect(screen.getByLabelText("persistDrafts.label")).toBeChecked()
   })
 
+  it("keeps the compact composer opt-in and persists the selection", async () => {
+    const user = userEvent.setup()
+    render(<ComposerBehaviorCard />)
+
+    const compactLayout = screen.getByLabelText("compactLayout.label")
+    expect(compactLayout).not.toBeChecked()
+
+    await user.click(compactLayout)
+    expect(save).toHaveBeenCalledWith({ composerBehavior: { compactLayout: true } })
+  })
+
+  it("turns a persisted compact composer off without losing sibling behavior", async () => {
+    mockSettings = { composerBehavior: { compactLayout: true, sendOnEnter: false } }
+    const user = userEvent.setup()
+    render(<ComposerBehaviorCard />)
+
+    const compactLayout = screen.getByLabelText("compactLayout.label")
+    expect(compactLayout).toBeChecked()
+
+    await user.click(compactLayout)
+    expect(save).toHaveBeenCalledWith({
+      composerBehavior: { compactLayout: false, sendOnEnter: false },
+    })
+  })
+
   it("toggles sendOnEnter off and merges into the block", async () => {
     const user = userEvent.setup()
     render(<ComposerBehaviorCard />)

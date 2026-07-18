@@ -24,6 +24,7 @@ import { createFeatureProviderModel } from "@/lib/ai/provider-consumption"
 import { resolveStandaloneProvider } from "@/lib/ai/chat/resolve-standalone-provider"
 import { browserDirectHeaders, getStreamingFetch } from "@/lib/runtime/streaming-fetch"
 import { loggers } from "@cognia/logging"
+import { hasNoLeakingPii } from "@cognia/redact"
 import type { CanvasSuggestion, ArtifactLanguage } from "@/types"
 
 export interface SuggestionContext {
@@ -156,12 +157,17 @@ export function useCanvasSuggestions() {
       setError(null)
       try {
         const windowed = sliceContextWindow(ctx.content, ctx.cursorLine, contextLines)
+        const system = SYSTEM_PROMPT.replace("{{N}}", String(max))
+        const prompt = `Language: ${ctx.language}\nDocument:\n\n${windowed}\n\n${
+          ctx.selectionText ? `User selection:\n${ctx.selectionText}\n\n` : ""
+        }${ctx.cursorLine !== undefined ? `Cursor line: ${ctx.cursorLine}` : ""}`
+        if (!hasNoLeakingPii(system) || !hasNoLeakingPii(prompt)) {
+          throw new Error("Canvas suggestions blocked by PII gate")
+        }
         const { text } = await generateText({
           model: buildModel(),
-          system: SYSTEM_PROMPT.replace("{{N}}", String(max)),
-          prompt: `Language: ${ctx.language}\nDocument:\n\n${windowed}\n\n${
-            ctx.selectionText ? `User selection:\n${ctx.selectionText}\n\n` : ""
-          }${ctx.cursorLine !== undefined ? `Cursor line: ${ctx.cursorLine}` : ""}`,
+          system,
+          prompt,
         })
         const parsed = parseSuggestions(text, max)
         for (const s of parsed) {

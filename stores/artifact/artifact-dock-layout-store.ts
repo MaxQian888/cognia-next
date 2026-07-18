@@ -30,6 +30,7 @@ type WorkspaceRevealReviewRequest = {
   sessionId: string
   rootPath: string
   kind: "review"
+  relPath?: string
 }
 
 export type WorkspaceRevealRequest = WorkspaceRevealFileRequest | WorkspaceRevealReviewRequest
@@ -70,7 +71,11 @@ export interface ArtifactDockLayoutState {
   setListRailOpen: (open: boolean) => void
   setDockMode: (mode: DockMode) => void
   revealWorkspaceFile: (request: { sessionId: string; rootPath: string; relPath: string }) => void
-  revealWorkspaceReview: (request: { sessionId: string; rootPath: string }) => void
+  revealWorkspaceReview: (request: {
+    sessionId: string
+    rootPath: string
+    relPath?: string
+  }) => void
   clearWorkspaceRevealRequest: (id: string) => void
   clearWorkspaceContext: () => void
   setMobileSheetOpen: (open: boolean) => void

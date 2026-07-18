@@ -56,6 +56,8 @@ import {
   toolResultDecision,
 } from "@/lib/claude/ipc"
 import { detectPlatform } from "@/hooks/use-platform"
+import { isEmbeddedSession } from "@/lib/chat/session-exposure"
+import { gateWorkbenchProviderPayload } from "@/lib/context-workbench/provider-payload"
 
 // ADR-0020 W3 — the chat-modal session grant only ever applies to the
 // three plugin MCP tools that the `cognia-computer-use` plugin
@@ -644,6 +646,9 @@ export function useClaudeChat() {
   // re-deriving from message parts (which lose the original SendContent shape
   // when they include attachments).
   const lastUserContentRef = useRef<Map<string, SendContent>>(new Map())
+  // Private resource context is kept outside the message log. It is reused for
+  // regenerate/edit-resend, but is only attached after plugin prompt hooks.
+  const lastResourceContextRef = useRef<Map<string, string>>(new Map())
   /**
    * Pending branch tag set by `regenerate` and consumed by the first
    * assistant message that arrives afterward. Keyed by sessionId so a regen
@@ -795,6 +800,9 @@ export function useClaudeChat() {
         /** Target session — defaults to the focused session. A multi-pane
          *  composer passes its own session id so each pane sends to itself. */
         sessionId?: string
+        /** Private Context Workbench snapshot/selection. This is never exposed
+         *  to plugin prompt hooks or persisted as visible message content. */
+        resourceContext?: string
       }
     ) => {
       const sessionId = callOptions?.sessionId ?? useChatStore.getState().activeSessionId
@@ -1032,13 +1040,6 @@ export function useClaudeChat() {
         }
       }
 
-      // Capture text from the (possibly plugin-modified) effective content.
-      const effectiveText =
-        typeof effectiveContent === "string"
-          ? effectiveContent
-          : ((effectiveContent.find((b) => b.type === "text") as { text?: string } | undefined)
-              ?.text ?? "")
-
       // New turn: drop any coalesced/debounced streaming work and the mirror
       // from a prior turn (this session only) so its events read the fresh
       // optimistic base. Other sessions' coalescing is untouched.
@@ -1080,6 +1081,24 @@ export function useClaudeChat() {
         }
       }
       const next = callOptions?.skipUserAppend ? previousMessages : [...previousMessages, userMsg]
+      const displayContent = effectiveContent
+      const shouldGateWorkbenchPayload =
+        callOptions?.resourceContext !== undefined || isEmbeddedSession(session ?? {})
+      const providerPayload = shouldGateWorkbenchPayload
+        ? gateWorkbenchProviderPayload(
+            { content: displayContent, sendOptions, messages: next },
+            callOptions?.resourceContext
+          )
+        : { content: displayContent, sendOptions, messages: next }
+      effectiveContent = providerPayload.content
+      sendOptions = providerPayload.sendOptions
+      const providerText =
+        typeof effectiveContent === "string"
+          ? effectiveContent
+          : ((
+              effectiveContent.find((block) => block.type === "text") as
+                { text?: string } | undefined
+            )?.text ?? "")
       if (!callOptions?.skipUserAppend) {
         store.getState().replaceSessionMessages(sessionId, next)
       }
@@ -1101,7 +1120,10 @@ export function useClaudeChat() {
       store.getState().setSessionStatus(sessionId, "streaming")
       perfMark("stream-start")
       store.getState().setSessionError(sessionId, null)
-      lastUserContentRef.current.set(sessionId, effectiveContent)
+      lastUserContentRef.current.set(sessionId, displayContent)
+      if (callOptions?.resourceContext !== undefined) {
+        lastResourceContextRef.current.set(sessionId, callOptions.resourceContext)
+      }
       // Plugin bus: the turn has committed (past the prompt-submit block gate).
       // ids only — never the prompt text (PII red-line). Covers all run paths
       // (external + SDK) since this is upstream of the branch below.
@@ -1146,7 +1168,7 @@ export function useClaudeChat() {
               import("@cognia/redact"),
             ])
             const decision = routeDelegation(
-              { prompt: effectiveText, context: { sessionId } },
+              { prompt: providerText, context: { sessionId } },
               {
                 checkDelegation: (t, c) => mgr.checkDelegation(t, c),
                 // PII gate ON for delegated external sends — the prompt leaves
@@ -1174,7 +1196,7 @@ export function useClaudeChat() {
         }
         // The text sent to the external agent: the PII-filtered prompt when
         // delegated by rule, else the raw composer text.
-        const externalSendText = delegation ? delegation.filteredPrompt : effectiveText
+        const externalSendText = delegation ? delegation.filteredPrompt : providerText
         // Badge metadata so the assistant bubble can show "delegated to <rule>".
         const delegatedMeta = delegation
           ? {
@@ -1198,7 +1220,7 @@ export function useClaudeChat() {
             // re-match the same rule and loop).
             store.getState().replaceSessionMessages(sessionId, next)
             store.getState().setSessionError(sessionId, null)
-            await sendRef.current?.(effectiveContent, opts, {
+            await sendRef.current?.(displayContent, opts, {
               ...callOptions,
               skipUserAppend: true,
               bypassDelegation: true,
@@ -1214,7 +1236,7 @@ export function useClaudeChat() {
         try {
           await persistMessages(sessionId, next)
           await touchSession(sessionId)
-          await applyInstantTitle(sessionId, effectiveContent)
+          await applyInstantTitle(sessionId, displayContent)
 
           const { executeOnExternalAgent } = await import("@/lib/ai/agent/external/manager")
           const { applyExternalAgentEventToParts } =
@@ -1311,7 +1333,7 @@ export function useClaudeChat() {
         // `titleAuto` marks the title as machine-set so the turn-complete path
         // may later upgrade it to an LLM-generated title (until the user
         // manually renames, which clears the flag).
-        await applyInstantTitle(sessionId, effectiveContent)
+        await applyInstantTitle(sessionId, displayContent)
         // Open an agent-trace span for this chat turn. The traceId / spanId
         // are echoed through SendOptions so the sidecar (and later, tool +
         // sub-agent spans) can attach as children. `endSpan` runs in the
@@ -1327,7 +1349,7 @@ export function useClaudeChat() {
             requestModel: sendOptions.model,
             agentId: session?.characterId,
             metadata: sendOptions.provider ? { provider: sendOptions.provider } : undefined,
-            inputPreview: effectiveText || undefined,
+            inputPreview: providerText || undefined,
           })
           sendOptions = {
             ...sendOptions,
@@ -1356,7 +1378,7 @@ export function useClaudeChat() {
           standaloneAbortRef.current.set(sessionId, controller)
           void runStandaloneTurn({
             sessionId,
-            messages: next,
+            messages: providerPayload.messages,
             sendOptions,
             emit: enqueueClaudeEvent,
             signal: controller.signal,
@@ -1626,7 +1648,12 @@ export function useClaudeChat() {
    * is the only mutation.
    */
   const editAndResend = useCallback(
-    async (messageId: string, newContent: SendContent, targetSessionId?: string) => {
+    async (
+      messageId: string,
+      newContent: SendContent,
+      targetSessionId?: string,
+      resourceContext?: string
+    ) => {
       const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
       if (!sessionId) return
       // Truncating the history invalidates any in-flight streaming mirror for
@@ -1642,7 +1669,10 @@ export function useClaudeChat() {
       // send() is applied to the correct base.
       const remaining = await listMessages(sessionId)
       store.getState().replaceSessionMessages(sessionId, remaining)
-      await send(newContent, undefined, { sessionId })
+      await send(newContent, undefined, {
+        sessionId,
+        resourceContext: resourceContext ?? lastResourceContextRef.current.get(sessionId),
+      })
     },
     [send, store, registry]
   )
@@ -1652,7 +1682,7 @@ export function useClaudeChat() {
    * followed it (and anything after) and resends the original content.
    */
   const regenerate = useCallback(
-    async (targetSessionId?: string) => {
+    async (targetSessionId?: string, resourceContext?: string) => {
       const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
       if (!sessionId) return
 
@@ -1700,7 +1730,11 @@ export function useClaudeChat() {
           })
           .map((p) => p.text)
           .join("")
-      await send(content, undefined, { skipUserAppend: true, sessionId })
+      await send(content, undefined, {
+        skipUserAppend: true,
+        sessionId,
+        resourceContext: resourceContext ?? lastResourceContextRef.current.get(sessionId),
+      })
     },
     [send, store, registry]
   )
@@ -2667,76 +2701,126 @@ async function handleEvent(
         // + /loop auto-continuation) mutates the focused conversation and
         // schedules continuations guarded by `activeRef`; it runs only for the
         // focused session. Background panes still seal + go idle above.
-        if (!isActive) return
+        const completedSession = await getSession(sessionId).catch(() => undefined)
 
         // Auto-detect artifacts in the assistant turn that just sealed.
         // Honors the artifacts settings block; off by default for
         // power-users that flip the toggle.
-        try {
-          const settings = useSettingsStore.getState().settings
-          const artifactsCfg = settings?.artifacts
-          const lastAssistant = [...nextMessages].reverse().find((m) => m.role === "assistant")
-          const text = extractAssistantText(lastAssistant)
-          if (text && lastAssistant) {
-            const reviewEnabled = artifactsCfg?.reviewBeforeApply !== false
-            const editTarget =
-              useChatStore.getState().pendingArtifactEditTarget?.[sessionId] ?? null
+        if (isActive || completedSession?.kind === "resource-workbench") {
+          try {
+            const settings = useSettingsStore.getState().settings
+            const artifactsCfg = settings?.artifacts
+            const lastAssistant = [...nextMessages].reverse().find((m) => m.role === "assistant")
+            const text = extractAssistantText(lastAssistant)
+            if (text && lastAssistant) {
+              const reviewEnabled = artifactsCfg?.reviewBeforeApply !== false
+              const editTarget =
+                useChatStore.getState().pendingArtifactEditTarget?.[sessionId] ?? null
 
-            // Codex-style review gate: when the user aimed this turn at an
-            // existing artifact (via a selection chip) and review is on, stage
-            // the revision as a pending diff proposal instead of auto-creating
-            // a duplicate artifact.
-            let routedToReview = false
-            if (editTarget && reviewEnabled) {
-              const { detectArtifacts, DEFAULT_DETECTION_CONFIG } =
-                await import("@/lib/ai/generation/artifact-detector")
-              // Low line threshold so even a small targeted edit surfaces.
-              const detected = detectArtifacts(text, {
-                ...DEFAULT_DETECTION_CONFIG,
-                autoCreate: true,
-                minLines: 1,
-              })
-              const targetArtifact = useArtifactStore.getState().getArtifact(editTarget.artifactId)
-              const route = routeAiRevision({
-                reviewEnabled,
-                target: editTarget,
-                targetArtifactType: targetArtifact?.type,
-                detected,
-              })
-              // The target is single-use — consume it regardless of outcome.
-              useChatStore.getState().setPendingArtifactEditTarget(sessionId, null)
-              if (route.action === "propose") {
-                const proposal = useArtifactStore
+              // Codex-style review gate: when the user aimed this turn at an
+              // existing artifact (via a selection chip) and review is on, stage
+              // the revision as a pending diff proposal instead of auto-creating
+              // a duplicate artifact.
+              let routedToReview = false
+              if (editTarget && reviewEnabled) {
+                const { detectArtifacts, DEFAULT_DETECTION_CONFIG } =
+                  await import("@/lib/ai/generation/artifact-detector")
+                // Low line threshold so even a small targeted edit surfaces.
+                const detected = detectArtifacts(text, {
+                  ...DEFAULT_DETECTION_CONFIG,
+                  autoCreate: true,
+                  minLines: 1,
+                })
+                const targetArtifact = useArtifactStore
                   .getState()
-                  .proposeArtifactUpdate(route.artifactId, route.content, {
-                    requestId: route.requestId,
-                  })
-                // A null proposal (artifact gone / identical content) falls
-                // through to the normal auto-create path below — no lost work.
-                routedToReview = proposal !== null
+                  .getArtifact(editTarget.artifactId)
+                const route = routeAiRevision({
+                  reviewEnabled,
+                  target: editTarget,
+                  targetArtifactType: targetArtifact?.type,
+                  detected,
+                })
+                // The target is single-use — consume it regardless of outcome.
+                useChatStore.getState().setPendingArtifactEditTarget(sessionId, null)
+                if (route.action === "propose") {
+                  const proposal = useArtifactStore
+                    .getState()
+                    .proposeArtifactUpdate(route.artifactId, route.content, {
+                      requestId: route.requestId,
+                    })
+                  // A null proposal (artifact gone / identical content) falls
+                  // through to the normal auto-create path below — no lost work.
+                  routedToReview = proposal !== null
+                }
+              }
+
+              const binding = completedSession?.surfaceBinding
+              if (
+                !routedToReview &&
+                reviewEnabled &&
+                completedSession?.kind === "resource-workbench" &&
+                binding?.kind === "canvas-document"
+              ) {
+                const { detectArtifacts, DEFAULT_DETECTION_CONFIG } =
+                  await import("@/lib/ai/generation/artifact-detector")
+                const detected = detectArtifacts(text, {
+                  ...DEFAULT_DETECTION_CONFIG,
+                  autoCreate: true,
+                  minLines: 1,
+                })
+                const proposed = detected[0]?.content ?? text
+                routedToReview =
+                  useArtifactStore.getState().proposeCanvasReview(binding.documentId, proposed, {
+                    requestId: lastAssistant.id,
+                  }) !== null
+              }
+
+              if (
+                !routedToReview &&
+                reviewEnabled &&
+                completedSession?.kind === "resource-workbench" &&
+                binding?.kind === "project-file"
+              ) {
+                const { detectArtifacts, DEFAULT_DETECTION_CONFIG } =
+                  await import("@/lib/ai/generation/artifact-detector")
+                const detected = detectArtifacts(text, {
+                  ...DEFAULT_DETECTION_CONFIG,
+                  autoCreate: true,
+                  minLines: 1,
+                })
+                const { getProjectFileResourceKey, proposeProjectFileUpdate } =
+                  await import("@/lib/context-workbench/project-file-proposals")
+                routedToReview =
+                  proposeProjectFileUpdate(
+                    getProjectFileResourceKey(binding),
+                    detected[0]?.content ?? text,
+                    lastAssistant.id
+                  ) !== null
+              }
+
+              // Auto-detect artifacts in the assistant turn that just sealed.
+              // Honors the artifacts settings block; off by default for
+              // power-users that flip the toggle.
+              if (!routedToReview && artifactsCfg?.autoCreate !== false) {
+                void useArtifactStore.getState().autoCreateFromContent({
+                  sessionId,
+                  messageId: lastAssistant.id,
+                  content: text,
+                  config: {
+                    autoCreate: true,
+                    minLines: artifactsCfg?.minLines,
+                    enabledTypes: artifactsCfg?.enabledTypes,
+                    showNotification: artifactsCfg?.showNotification !== false,
+                  },
+                })
               }
             }
-
-            // Auto-detect artifacts in the assistant turn that just sealed.
-            // Honors the artifacts settings block; off by default for
-            // power-users that flip the toggle.
-            if (!routedToReview && artifactsCfg?.autoCreate !== false) {
-              void useArtifactStore.getState().autoCreateFromContent({
-                sessionId,
-                messageId: lastAssistant.id,
-                content: text,
-                config: {
-                  autoCreate: true,
-                  minLines: artifactsCfg?.minLines,
-                  enabledTypes: artifactsCfg?.enabledTypes,
-                  showNotification: artifactsCfg?.showNotification !== false,
-                },
-              })
-            }
+          } catch (err) {
+            console.warn("artifact turn-complete routing failed", err)
           }
-        } catch (err) {
-          console.warn("artifact turn-complete routing failed", err)
         }
+
+        if (!isActive) return
 
         // Background utility-model work: upgrade the auto title to an
         // LLM-generated one on the first turn, and (opt-in) generate a

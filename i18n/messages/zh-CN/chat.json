@@ -529,6 +529,7 @@
       "favorites": "收藏",
       "other": "其他"
     },
+    "hideArtifacts": "折叠产物面板",
     "hideConversations": "折叠会话列表",
     "insights": "会话洞察",
     "noApiKey": "未配置 API Key",
@@ -572,6 +573,7 @@
         "status": "状态"
       }
     },
+    "showArtifacts": "展开产物面板",
     "showConversations": "展开会话列表",
     "skills": {
       "aria": "本会话已激活的技能",
@@ -686,6 +688,7 @@
       "empty": "空目录",
       "title": "列出目录"
     },
+    "openInReview": "在审阅中打开",
     "plan": {
       "title": "计划"
     },

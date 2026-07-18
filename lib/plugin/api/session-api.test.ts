@@ -335,6 +335,25 @@ describe("Session API", () => {
       expect(result.length).toBe(3)
     })
 
+    it("hides embedded resource workbench sessions from plugin enumeration", async () => {
+      mockSessions.push({
+        id: "embedded",
+        title: "Embedded",
+        kind: "resource-workbench",
+        visibility: "embedded",
+        mode: "chat",
+        provider: "openai",
+        model: "gpt-4o",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as Session)
+
+      const api = createSessionAPI(testPluginId)
+      const result = await api.listSessions()
+
+      expect(result.map((session) => session.id)).not.toContain("embedded")
+    })
+
     it("should filter by projectId", async () => {
       const api = createSessionAPI(testPluginId)
       const result = await api.listSessions({ projectId: "proj-1" })

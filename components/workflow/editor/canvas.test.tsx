@@ -30,13 +30,12 @@ const reactFlowPropsRef: { current: Record<string, unknown> | null } = {
   current: null,
 }
 
-// Stub the workflow-editor chat tab so this canvas-focused suite doesn't
-// pay the cost of pulling the chat-ui dependency graph (ai-elements →
-// use-stick-to-bottom is ESM-only). The full chat-tab is covered by its
-// own tests under `hooks/chat/` + `plugins/workflow-ai/`.
-jest.mock("./right-sidebar/chat-tab", () => ({
+// Stub the complete right sidebar so this canvas-focused suite doesn't
+// activate lazy Context Workbench panels while asserting React Flow behavior.
+// The sidebar and chat scope have dedicated tests.
+jest.mock("./right-sidebar", () => ({
   __esModule: true,
-  WorkflowEditorChatTab: () => null,
+  RightSidebar: () => null,
 }))
 
 // Mock the runtime so the run gate can be asserted without executing a real
@@ -209,6 +208,7 @@ describe("WorkflowEditorCanvas", () => {
     const wf = await createWorkflow({ name: "x" })
     const sample: VisualWorkflow = { ...buildSample(), id: wf.id }
     renderWithProviders(<WorkflowEditorCanvas workflow={sample} />)
+    await screen.findByTestId("minimap-mock")
     const props = reactFlowPropsRef.current
     expect(typeof props?.onNodeDragStart).toBe("function")
     expect(typeof props?.onNodeDragStop).toBe("function")
@@ -220,17 +220,19 @@ describe("WorkflowEditorCanvas", () => {
         { id: "n_a", position: { x: 0, y: 0 } }
       )
     })
-    expect(screen.getByTestId("minimap-mock").getAttribute("data-pannable")).toBe("false")
+    expect(await screen.findByTestId("minimap-frozen")).toBeInTheDocument()
+    expect(screen.queryByTestId("minimap-mock")).not.toBeInTheDocument()
     act(() => {
       ;(props!.onNodeDragStop as () => void)()
     })
-    expect(screen.getByTestId("minimap-mock").getAttribute("data-pannable")).toBe("true")
+    expect((await screen.findByTestId("minimap-mock")).getAttribute("data-pannable")).toBe("true")
   })
 
   it("wires selection-drag through the same begin/commit drag lifecycle", async () => {
     const wf = await createWorkflow({ name: "x" })
     const sample: VisualWorkflow = { ...buildSample(), id: wf.id }
     renderWithProviders(<WorkflowEditorCanvas workflow={sample} />)
+    await screen.findByTestId("minimap-mock")
     const props = reactFlowPropsRef.current
     // Multi-selection drags route through these events, so they must be wired
     // or the drag-coalescing fix would miss them.
@@ -241,11 +243,12 @@ describe("WorkflowEditorCanvas", () => {
     act(() => {
       ;(props!.onSelectionDragStart as () => void)()
     })
-    expect(screen.getByTestId("minimap-mock").getAttribute("data-pannable")).toBe("false")
+    expect(await screen.findByTestId("minimap-frozen")).toBeInTheDocument()
+    expect(screen.queryByTestId("minimap-mock")).not.toBeInTheDocument()
     act(() => {
       ;(props!.onSelectionDragStop as () => void)()
     })
-    expect(screen.getByTestId("minimap-mock").getAttribute("data-pannable")).toBe("true")
+    expect((await screen.findByTestId("minimap-mock")).getAttribute("data-pannable")).toBe("true")
   })
 
   it("flips minimap to degraded mode while the viewport is panning/zooming", async () => {

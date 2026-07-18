@@ -10,6 +10,7 @@ import { FilePenLineIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
 import { McpCardShell } from "./common"
 import { DiffPreview } from "./diff-preview"
+import { WorkbenchReviewButton } from "./workbench-review-button"
 
 interface EditEntry {
   old_string?: string
@@ -23,7 +24,7 @@ interface EditInput extends EditEntry {
   edits?: EditEntry[]
 }
 
-export function EditCard({ part }: { part: ToolUIPart }) {
+export function EditCard({ part, sessionId }: { part: ToolUIPart; sessionId?: string }) {
   const t = useTranslations("chat.mcp.edit")
   const input = (part.input ?? {}) as EditInput
   const path = input.file_path ?? input.path
@@ -48,7 +49,12 @@ export function EditCard({ part }: { part: ToolUIPart }) {
   if (edits.length === 0) return null
 
   return (
-    <McpCardShell title={t("title")} badge={path} testId="mcp-edit-card">
+    <McpCardShell
+      title={t("title")}
+      badge={path}
+      testId="mcp-edit-card"
+      action={<WorkbenchReviewButton sessionId={sessionId} absolutePath={path} />}
+    >
       <div className="flex items-start gap-2">
         <FilePenLineIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1 space-y-2">

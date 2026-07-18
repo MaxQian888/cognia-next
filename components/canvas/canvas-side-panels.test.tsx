@@ -8,6 +8,7 @@ import { CANVAS_SIDE_PANELS_ICON_ONLY_BREAKPOINT, CanvasSidePanels } from "./can
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useCanvasLayoutStore } from "@/stores/canvas/canvas-layout-store"
+import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 
 function renderWithProviders(ui: React.ReactElement) {
   return render(<TooltipProvider>{ui}</TooltipProvider>)
@@ -28,6 +29,12 @@ jest.mock("./collaboration-panel", () => ({
 }))
 jest.mock("./code-execution-panel", () => ({
   CodeExecutionPanel: () => <div data-testid="host-execution" />,
+}))
+jest.mock("@/components/context-workbench/resource-workbench-chat-panel", () => ({
+  ResourceWorkbenchChatPanel: () => <div data-testid="resource-workbench-chat" />,
+}))
+jest.mock("@/hooks/chat/use-resource-workbench-session", () => ({
+  useResourceWorkbenchSession: () => ({ id: "canvas-resource-session" }),
 }))
 jest.mock("@/stores/canvas/comment-store", () => {
   const store = {
@@ -93,8 +100,13 @@ describe("CanvasSidePanels", () => {
       globalThis as unknown as { ResizeObserver: typeof ControllableResizeObserver }
     ).ResizeObserver = ControllableResizeObserver
     window.localStorage.clear()
+    window.localStorage.setItem(
+      "cognia-canvas-feature-flags-v1",
+      JSON.stringify({ "contextWorkbench.v1": false })
+    )
     act(() => {
       useCanvasLayoutStore.getState().resetLayout()
+      useContextWorkbenchStore.setState({ layouts: {} })
       // Wipe any leftover documents from prior test runs.
       const docs = Object.keys(useArtifactStore.getState().canvasDocuments)
       docs.forEach((id) => useArtifactStore.getState().deleteCanvasDocument(id))
@@ -170,6 +182,70 @@ describe("CanvasSidePanels", () => {
 
   it("pins the icon-only breakpoint export at 280 (regression guard)", () => {
     expect(CANVAS_SIDE_PANELS_ICON_ONLY_BREAKPOINT).toBe(280)
+  })
+
+  it("uses the Context Workbench activity rail when the surface flag is enabled", async () => {
+    window.localStorage.setItem(
+      "cognia-canvas-feature-flags-v1",
+      JSON.stringify({ "contextWorkbench.v1": true })
+    )
+    seedDocument("doc-1")
+    const activeId = useArtifactStore.getState().activeCanvasId
+    const user = userEvent.setup()
+    renderWithProviders(<CanvasSidePanels />)
+
+    expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: /History/i }))
+    expect(
+      Object.entries(useContextWorkbenchStore.getState().layouts).find(([key]) =>
+        key.endsWith(`::canvas:${activeId}`)
+      )?.[1].activePanelId
+    ).toBe("history")
+  })
+
+  it("hosts document language and export actions in Inspect and Preview", async () => {
+    window.localStorage.setItem(
+      "cognia-canvas-feature-flags-v1",
+      JSON.stringify({ "contextWorkbench.v1": true })
+    )
+    seedDocument("doc-1")
+    const user = userEvent.setup()
+    renderWithProviders(<CanvasSidePanels />)
+
+    await user.click(screen.getByRole("button", { name: /Document properties/i }))
+    expect(screen.getByTestId("canvas-language-select")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Bold" })).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: /Preview/i }))
+    expect(screen.getByTestId("canvas-export-trigger")).toBeInTheDocument()
+  })
+
+  it("dispatches AI and format commands from Workbench panels", async () => {
+    window.localStorage.setItem(
+      "cognia-canvas-feature-flags-v1",
+      JSON.stringify({ "contextWorkbench.v1": true })
+    )
+    seedDocument("doc-1")
+    const actionListener = jest.fn()
+    const formatListener = jest.fn()
+    window.addEventListener("canvas-action", actionListener)
+    window.addEventListener("canvas-format", formatListener)
+    const user = userEvent.setup()
+    renderWithProviders(<CanvasSidePanels />)
+
+    await user.click(screen.getByRole("tab", { name: /AI actions/i }))
+    await user.click(screen.getByRole("button", { name: /^Review$/i }))
+    expect(actionListener).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: { type: "review", proposalFirst: true } })
+    )
+
+    await user.click(screen.getByRole("button", { name: /Document properties/i }))
+    await user.click(screen.getByRole("button", { name: "Bold" }))
+    expect(formatListener).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: { action: "bold" } })
+    )
+
+    window.removeEventListener("canvas-action", actionListener)
+    window.removeEventListener("canvas-format", formatListener)
   })
 
   it("wraps the active tab's host in a motion container", () => {

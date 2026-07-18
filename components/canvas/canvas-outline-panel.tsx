@@ -19,7 +19,6 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { symbolParser } from "@/lib/canvas/symbols/symbol-parser"
-import type { CanvasDocument } from "@/types/artifact/artifact"
 import type { DocumentSymbol, SymbolKind } from "@/types/canvas/symbols"
 
 /** Window event that carries an outline click to the editor. */
@@ -40,7 +39,7 @@ const PARSER_LANGUAGE: Record<string, string> = {
 
 /** Parse a document's symbols, or `[]` when the language is unsupported. */
 export function parseCanvasSymbols(
-  doc: Pick<CanvasDocument, "content" | "language"> | undefined
+  doc: { content: string; language: string } | undefined
 ): DocumentSymbol[] {
   if (!doc) return []
   const lang = PARSER_LANGUAGE[doc.language]

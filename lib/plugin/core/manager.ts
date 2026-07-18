@@ -3697,6 +3697,7 @@ export class PluginManager {
       importer: (entry: string) => this.loader.importEntry(entry),
       resolveAsset: await createPluginAssetResolver(),
       moduleExports: this.loader.getModuleExports(pluginId) ?? {},
+      hasPermission: (permission: string) => context.permissions.hasPermission(permission as never),
     }
     for (const cap of MODULE_BRIDGE_CAPABILITY_KEYS) {
       const descriptor = MODULE_BRIDGE_CAPABILITIES[cap]
@@ -3965,6 +3966,8 @@ export class PluginManager {
     // avoid orphan entries lingering after disable.
     clearCustomThemesForPluginContext(pluginId)
     clearPluginExtensions(pluginId)
+    const { contextPanelRegistry } = await import("@/lib/context-workbench/panel-registry")
+    contextPanelRegistry.unregisterPlugin(pluginId)
     // Drop the plugin's imperatively-registered deep-link handler (C2).
     unregisterUriHandlersByPlugin(pluginId)
     // Async module-bridge capabilities — drop every contribution. Includes

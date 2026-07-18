@@ -1,0 +1,85 @@
+{
+  "aiActions": "AI actions",
+  "aiLoading": "Preparing the resource conversation…",
+  "artifactSelectionComment": {
+    "label": "Selection instruction",
+    "placeholder": "Tell AI what to do with this selection",
+    "selectFirst": "Select a range in the artifact before sending an instruction.",
+    "selectionReady": "This instruction will be scoped to the selected range.",
+    "sendToAi": "Send to AI"
+  },
+  "comments": "Comments",
+  "commentsPanel": {
+    "add": "Add comment",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "empty": "No comments yet.",
+    "hideResolved": "Hide resolved",
+    "placeholder": "Write a comment",
+    "reopen": "Reopen",
+    "reply": "Reply",
+    "replyPlaceholder": "Write a reply",
+    "resolve": "Resolve",
+    "resolved": "Resolved",
+    "save": "Save",
+    "showResolved": "Show resolved",
+    "stale": "Outdated anchor",
+    "toggleReaction": "Toggle {emoji} reaction",
+    "you": "You"
+  },
+  "exportResourceSession": "Export this resource conversation",
+  "activityRailLabel": "Context Workbench activities",
+  "actions": {
+    "collapse": "Collapse workbench",
+    "focus": "Focus mode",
+    "narrow": "Narrow mode",
+    "pin": "Pin panel",
+    "resize": "Resize workbench",
+    "retry": "Retry panel",
+    "unpin": "Unpin panel",
+    "wide": "Wide mode"
+  },
+  "metadata": {
+    "artifactTitle": "Artifact properties",
+    "artifactType": "Type",
+    "canvasTitle": "Document properties",
+    "documentType": "Type",
+    "language": "Language",
+    "notRun": "Not run",
+    "revision": "Revision",
+    "runtimeStatus": "Runtime",
+    "saveState": "Save state",
+    "unknown": "Unknown",
+    "updatedAt": "Updated",
+    "version": "Version"
+  },
+  "mobileDescription": "AI, comments, inspection, review, and preview tools for the current resource.",
+  "mobileTitle": "Context Workbench",
+  "panelError": "Panel unavailable",
+  "panelErrorDescription": "This panel stopped unexpectedly. The rest of your work is unchanged.",
+  "proposalReview": "Proposal review",
+  "projectProposal": {
+    "apply": "Apply accepted",
+    "discard": "Discard",
+    "empty": "No file proposal is waiting for review.",
+    "rebase": "Rebase proposal",
+    "stale": "The file changed after this proposal was created. Rebase or discard it before applying.",
+    "undo": "Undo apply"
+  },
+  "resourceChat": "AI conversation",
+  "unavailable": {
+    "comments": {
+      "description": "This resource does not currently provide comment threads. Other workbench activities remain available.",
+      "title": "Comments are not available"
+    },
+    "preview": {
+      "description": "This resource cannot be previewed in the workbench.",
+      "title": "Preview is not available"
+    },
+    "workspace": {
+      "description": "Filesystem workspace tools require a supported desktop or sandbox backend.",
+      "title": "Workspace is not available"
+    }
+  }
+}

@@ -78,6 +78,11 @@ const VALID_PERMISSIONS: PluginPermission[] = [
   "settings:write",
   "session:read",
   "session:write",
+  "project:read",
+  "canvas:read",
+  "artifact:read",
+  "workflow:read",
+  "extension:ui",
   "media:image:read",
   "media:image:write",
   "media:video:read",
@@ -1179,6 +1184,100 @@ export function validatePluginManifest(
           ) {
             push("error", "timeoutMs.range", `chatMiddlewares "timeoutMs" must be in (0, 60000]`)
           }
+        }
+      },
+    },
+    pushError,
+    pushWarning
+  )
+  validateLazyFactoryArray(
+    m.contextPanels,
+    {
+      field: "contextPanels",
+      extra: (entry, _i, push) => {
+        const resourcePermissions: Record<string, string> = {
+          "project-file": "project:read",
+          "canvas-document": "canvas:read",
+          artifact: "artifact:read",
+          workflow: "workflow:read",
+        }
+        const resourceKinds = entry.resourceKinds
+        if (
+          !Array.isArray(resourceKinds) ||
+          resourceKinds.length === 0 ||
+          !resourceKinds.every((kind) => typeof kind === "string" && kind in resourcePermissions)
+        ) {
+          push(
+            "error",
+            "resourceKinds.invalid",
+            `contextPanels "resourceKinds" must be a non-empty array of supported resource kinds`
+          )
+        }
+        const activities = new Set([
+          "ai",
+          "comments",
+          "inspect",
+          "review",
+          "preview-run",
+          "templates",
+        ])
+        if (typeof entry.activity !== "string" || !activities.has(entry.activity)) {
+          push("error", "activity.invalid", `contextPanels "activity" must be canonical`)
+        }
+        if (typeof entry.labelKey !== "string" || entry.labelKey.length === 0) {
+          push("error", "labelKey.missing", `contextPanels entry requires a "labelKey" string`)
+        }
+        const icons = new Set([
+          "blocks",
+          "bot",
+          "file-text",
+          "history",
+          "info",
+          "message-square",
+          "panel-right",
+          "play",
+          "search-code",
+          "settings",
+          "wrench",
+        ])
+        if (
+          entry.icon !== undefined &&
+          (typeof entry.icon !== "string" || !icons.has(entry.icon))
+        ) {
+          push("error", "icon.invalid", `contextPanels "icon" is not a supported safe icon`)
+        }
+        if (
+          entry.preferredMode !== undefined &&
+          !["narrow", "wide", "focus"].includes(String(entry.preferredMode))
+        ) {
+          push("error", "preferredMode.invalid", `contextPanels "preferredMode" is invalid`)
+        }
+        if (
+          entry.retention !== undefined &&
+          entry.retention !== "stateful" &&
+          entry.retention !== "ephemeral"
+        ) {
+          push("error", "retention.invalid", `contextPanels "retention" is invalid`)
+        }
+        const declaredPermissions = new Set(m.permissions ?? [])
+        const requiredPermissions = [
+          "extension:ui",
+          ...(Array.isArray(resourceKinds)
+            ? resourceKinds
+                .filter((kind): kind is string => typeof kind === "string")
+                .map((kind) => resourcePermissions[kind])
+                .filter((permission): permission is string => Boolean(permission))
+            : []),
+        ]
+        const missing = requiredPermissions.find(
+          (permission) => !declaredPermissions.has(permission as PluginPermission)
+        )
+        if (missing) {
+          push(
+            "error",
+            "permission.missing",
+            `contextPanels entry requires manifest permission "${missing}"`
+          )
         }
       },
     },

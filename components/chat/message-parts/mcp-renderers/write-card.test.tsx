@@ -1,8 +1,14 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 import type { ToolUIPart } from "ai"
+
+const openEditInWorkbenchReview = jest.fn()
+jest.mock("@/lib/files/edit-review-bridge", () => ({
+  canOfferWorkbenchReview: () => true,
+  openEditInWorkbenchReview: (args: unknown) => openEditInWorkbenchReview(args),
+}))
 
 import { WriteCard } from "./write-card"
 
@@ -24,6 +30,18 @@ const part = (input?: unknown): ToolUIPart =>
   }) as unknown as ToolUIPart
 
 describe("WriteCard", () => {
+  it("offers a workbench-review action that routes the written file", () => {
+    openEditInWorkbenchReview.mockClear()
+    render(
+      <WriteCard sessionId="s1" part={part({ file_path: "/repo/src/new.ts", content: "a\n" })} />
+    )
+    fireEvent.click(screen.getByTestId("mcp-open-in-review"))
+    expect(openEditInWorkbenchReview).toHaveBeenCalledWith({
+      sessionId: "s1",
+      absolutePath: "/repo/src/new.ts",
+    })
+  })
+
   it("renders the path and a language-aware content preview", () => {
     render(<WriteCard part={part({ file_path: "src/new.ts", content: "export const a = 1\n" })} />)
     expect(screen.getByTestId("mcp-write-path")).toHaveTextContent("src/new.ts")

@@ -25,6 +25,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { filterExposedSessions } from "@/lib/chat/session-exposure"
 import {
   Menubar,
   MenubarCheckboxItem,
@@ -280,7 +281,7 @@ export function TitleBar() {
     void (async () => {
       try {
         const rows = await listSessions()
-        if (!cancelled) setRecentSessions(rows.slice(0, 8))
+        if (!cancelled) setRecentSessions(filterExposedSessions(rows, "global-search").slice(0, 8))
       } catch (err) {
         log.warn("title-bar load recent-sessions failed", {
           error: err instanceof Error ? err.message : String(err),

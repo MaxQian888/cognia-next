@@ -361,6 +361,7 @@ describe("Permission API", () => {
       "canvas:collaborate",
       "artifact:read",
       "artifact:write",
+      "workflow:read",
       "ai:chat",
       "ai:embed",
       "agent:control",

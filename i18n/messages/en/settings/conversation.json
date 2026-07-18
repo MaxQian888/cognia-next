@@ -9,6 +9,10 @@
       "hint": "Follow the reply as it streams by scrolling to the newest content.",
       "label": "Auto-scroll while streaming"
     },
+    "compactLayout": {
+      "hint": "Use a denser composer layout that leaves more room for the conversation.",
+      "label": "Use compact composer layout"
+    },
     "clearAfterSend": {
       "hint": "Empty the composer once a message is sent.",
       "label": "Clear input after sending"

@@ -67,6 +67,7 @@ interface Props {
   onOpenFile: (relPath: string) => void
   deps: ProjectFileTreeDeps
   density?: "compact" | "touch"
+  onRenamed?: (from: string, to: string) => void | Promise<void>
 }
 
 const parentOf = (rel: string) => rel.split("/").slice(0, -1).join("/")
@@ -79,6 +80,7 @@ export function ProjectFileTree({
   onOpenFile,
   deps,
   density = "compact",
+  onRenamed,
 }: Props) {
   const t = useTranslations("projectEditor")
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([""]))
@@ -166,12 +168,13 @@ export function ProjectFileTree({
     const to = joinRel(parent, renameValue.trim())
     try {
       await deps.renameEntry(rootPath, renameTarget, to)
+      await onRenamed?.(renameTarget, to)
       await loadDir(parent)
     } catch {
       /* ignore */
     }
     setRenameTarget(null)
-  }, [renameTarget, renameValue, deps, rootPath, loadDir])
+  }, [renameTarget, renameValue, deps, rootPath, loadDir, onRenamed])
 
   const confirmDelete = useCallback(async () => {
     if (!deleteTarget) return

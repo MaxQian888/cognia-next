@@ -55,11 +55,26 @@ export function SelectionCommentButton({ artifact, className }: SelectionComment
     if (!text) {
       capturedRef.current = null
       setSnapshot("")
+      window.dispatchEvent(
+        new CustomEvent("artifact-context-selection", {
+          detail: { artifactId: artifact.id, start: 0, end: 0 },
+        })
+      )
       return
     }
     const range = locateSelectionRange(artifact.content, text)
     capturedRef.current = { snapshot: text, ...range }
     setSnapshot(text)
+    const start = artifact.content.indexOf(text)
+    window.dispatchEvent(
+      new CustomEvent("artifact-context-selection", {
+        detail: {
+          artifactId: artifact.id,
+          start: Math.max(0, start),
+          end: start < 0 ? 0 : start + text.length,
+        },
+      })
+    )
   }
 
   const confirm = () => {

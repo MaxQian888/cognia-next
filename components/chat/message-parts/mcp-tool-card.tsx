@@ -36,7 +36,7 @@ import { WriteCard } from "./mcp-renderers/write-card"
 import { LsCard } from "./mcp-renderers/ls-card"
 import { WorkflowProposalCard } from "@/components/workflow/editor/chat/workflow-proposal-card"
 
-type CardComponent = (props: { part: ToolUIPart }) => React.JSX.Element | null
+type CardComponent = (props: { part: ToolUIPart; sessionId?: string }) => React.JSX.Element | null
 
 const REGISTRY: Record<string, CardComponent> = {
   // cognia external bridge
@@ -112,7 +112,7 @@ export function isStructuredMcpToolType(type: string): boolean {
  * Returns the structured card for known tools when the payload parses; falls
  * back to the generic ToolBody otherwise so the user always sees *something*.
  */
-export function MCPToolCard({ part }: { part: ToolUIPart }) {
+export function MCPToolCard({ part, sessionId }: { part: ToolUIPart; sessionId?: string }) {
   const type = part.type
   if (typeof type !== "string" || !type.startsWith("tool-")) {
     return <McpToolBodyOrContent part={part} />
@@ -121,11 +121,19 @@ export function MCPToolCard({ part }: { part: ToolUIPart }) {
   const Card = REGISTRY[toolName]
   if (!Card) return <McpToolBodyOrContent part={part} />
 
-  return <McpCardWithFallback Card={Card} part={part} />
+  return <McpCardWithFallback Card={Card} part={part} sessionId={sessionId} />
 }
 
-function McpCardWithFallback({ Card, part }: { Card: CardComponent; part: ToolUIPart }) {
-  const rendered = Card({ part })
+function McpCardWithFallback({
+  Card,
+  part,
+  sessionId,
+}: {
+  Card: CardComponent
+  part: ToolUIPart
+  sessionId?: string
+}) {
+  const rendered = Card({ part, sessionId })
   if (rendered) return rendered
   return <McpToolBodyOrContent part={part} />
 }

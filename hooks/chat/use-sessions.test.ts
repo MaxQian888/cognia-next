@@ -167,6 +167,20 @@ describe("useSessions", () => {
     expect(result.current.sessions).toEqual([{ id: "s1" }])
   })
 
+  it("excludes embedded resource sessions from ordinary lists and command palettes", () => {
+    mockProjectState.loaded = true
+    mockProjectState.activeProjectId = "project-default"
+    liveQueryMock.mockReturnValue([
+      { id: "ordinary", kind: "direct" },
+      { id: "resource", kind: "resource-workbench", visibility: "embedded" },
+      { id: "workflow", kind: "workflow-editor", visibility: "embedded" },
+    ])
+
+    const { result } = renderHook(() => useSessions())
+
+    expect(result.current.sessions).toEqual([{ id: "ordinary", kind: "direct" }])
+  })
+
   it("reports isLoadingSessions until the first live query resolves", () => {
     liveQueryMock.mockReturnValue(undefined)
     const { result, rerender } = renderHook(() => useSessions())

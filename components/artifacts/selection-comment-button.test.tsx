@@ -50,6 +50,8 @@ describe("locateSelectionRange", () => {
 
 describe("SelectionCommentButton", () => {
   it("stages a selection + comment into the chat store", () => {
+    const selectionListener = jest.fn()
+    window.addEventListener("artifact-context-selection", selectionListener)
     setSelection("line two")
     render(<SelectionCommentButton artifact={artifact} />)
 
@@ -70,6 +72,10 @@ describe("SelectionCommentButton", () => {
       comment: "make it const",
       range: { startLine: 2, endLine: 2 },
     })
+    expect(selectionListener).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: { artifactId: "art1", start: 9, end: 17 } })
+    )
+    window.removeEventListener("artifact-context-selection", selectionListener)
   })
 
   it("disables 'add to chat' when there is no selection", () => {

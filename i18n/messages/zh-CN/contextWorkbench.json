@@ -1,0 +1,85 @@
+{
+  "aiActions": "AI 操作",
+  "aiLoading": "正在准备资源会话…",
+  "artifactSelectionComment": {
+    "label": "选区指令",
+    "placeholder": "告诉 AI 如何处理该选区",
+    "selectFirst": "请先在产物中选择一段内容，再发送指令。",
+    "selectionReady": "该指令将仅作用于当前选区。",
+    "sendToAi": "发送给 AI"
+  },
+  "comments": "评论",
+  "commentsPanel": {
+    "add": "添加评论",
+    "cancel": "取消",
+    "delete": "删除",
+    "edit": "编辑",
+    "empty": "暂无评论。",
+    "hideResolved": "隐藏已解决",
+    "placeholder": "撰写评论",
+    "reopen": "重新打开",
+    "reply": "回复",
+    "replyPlaceholder": "撰写回复",
+    "resolve": "解决",
+    "resolved": "已解决",
+    "save": "保存",
+    "showResolved": "显示已解决",
+    "stale": "锚点已过期",
+    "toggleReaction": "切换 {emoji} 表情回应",
+    "you": "你"
+  },
+  "exportResourceSession": "导出此资源会话",
+  "activityRailLabel": "上下文工作台活动",
+  "actions": {
+    "collapse": "收起工作台",
+    "focus": "聚焦模式",
+    "narrow": "窄栏模式",
+    "pin": "固定面板",
+    "resize": "调整工作台宽度",
+    "retry": "重试面板",
+    "unpin": "取消固定面板",
+    "wide": "宽栏模式"
+  },
+  "metadata": {
+    "artifactTitle": "产物属性",
+    "artifactType": "类型",
+    "canvasTitle": "文档属性",
+    "documentType": "类型",
+    "language": "语言",
+    "notRun": "未运行",
+    "revision": "修订",
+    "runtimeStatus": "运行时",
+    "saveState": "保存状态",
+    "unknown": "未知",
+    "updatedAt": "更新时间",
+    "version": "版本"
+  },
+  "mobileDescription": "当前资源的 AI、评论、检查、审阅与预览工具。",
+  "mobileTitle": "上下文工作台",
+  "panelError": "面板暂不可用",
+  "panelErrorDescription": "此面板意外停止，其他工作内容未受影响。",
+  "proposalReview": "提案审阅",
+  "projectProposal": {
+    "apply": "应用已接受项",
+    "discard": "放弃",
+    "empty": "当前没有待审阅的文件提案。",
+    "rebase": "重基提案",
+    "stale": "文件在提案创建后已发生变化，请先重基或放弃提案。",
+    "undo": "撤销应用"
+  },
+  "resourceChat": "AI 会话",
+  "unavailable": {
+    "comments": {
+      "description": "此资源暂不提供评论线程，其他工作台功能仍可使用。",
+      "title": "评论暂不可用"
+    },
+    "preview": {
+      "description": "此资源暂时无法在工作台中预览。",
+      "title": "预览暂不可用"
+    },
+    "workspace": {
+      "description": "文件系统工作区工具需要受支持的桌面端或沙箱后端。",
+      "title": "工作区暂不可用"
+    }
+  }
+}

@@ -125,6 +125,7 @@ import {
   createPermissionAPI,
   createMediaAPI,
   createStorageAPI,
+  createContextPanelAPI,
 } from "../api"
 import { createMessagePartAPI } from "../api/message-part-api"
 import { createDexieAPI } from "../api/dexie-api"
@@ -345,6 +346,9 @@ export function createFullPluginContext(
       governanceMode: manager.getPluginPointGovernanceMode(),
       hasPermission: (permission) => permissionsAPI.hasPermission(permission as never),
     }),
+    contextPanels: createContextPanelAPI(pluginId, (permission) =>
+      permissionsAPI.hasPermission(permission as never)
+    ),
     permissions: permissionsAPI,
     messagePart: createMessagePartAPI(pluginId),
   }

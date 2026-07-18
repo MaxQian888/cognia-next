@@ -16,6 +16,7 @@ import {
 import type { VisualWorkflow } from "@/types/workflow/visual"
 import type { ProposalOp } from "@/lib/workflow/editor/proposal-types"
 import { WorkflowProposalCard } from "./workflow-proposal-card"
+import { workflowEditorRevision } from "@/lib/workflow/editor/editor-revision"
 
 function workflow(id: string): VisualWorkflow {
   return {
@@ -138,6 +139,43 @@ describe("WorkflowProposalCard — open status", () => {
 })
 
 describe("WorkflowProposalCard — Apply flow", () => {
+  it("rejects a stale editor revision and applies only after explicit rebase", () => {
+    const store = createEditorStore(workflow("wf_a"))
+    registerEditorStore("wf_a", store)
+    const baseRevision = workflowEditorRevision(store.getState())
+    useProposalStore.getState().openProposal("wf_a", {
+      proposalId: "p_stale",
+      workflowId: "wf_a",
+      summary: "stale",
+      ops: sampleOps,
+      baseRevision,
+    })
+    store.getState().addNode("annotation.note", { x: 400, y: 0 })
+    render(
+      <WorkflowProposalCard
+        part={makePart({
+          ok: true,
+          proposalId: "p_stale",
+          workflowId: "wf_a",
+          summary: "stale",
+          opCount: { add: 2, remove: 0, connect: 1, disconnect: 0, configure: 0 },
+          baseRevision,
+        })}
+      />
+    )
+
+    fireEvent.click(screen.getByTestId("workflow-proposal-apply"))
+    expect(screen.getByTestId("workflow-proposal-error")).toHaveTextContent(
+      "The workflow changed after this proposal was created"
+    )
+    expect(store.getState().nodes).toHaveLength(1)
+
+    fireEvent.click(screen.getByTestId("workflow-proposal-rebase"))
+    fireEvent.click(screen.getByTestId("workflow-proposal-apply"))
+    expect(useProposalStore.getState().statusOf("p_stale")).toBe("applied")
+    expect(store.getState().nodes).toHaveLength(3)
+  })
+
   it("calls editor.applyProposalOps and transitions to 'applied' status", () => {
     const store = createEditorStore(workflow("wf_a"))
     registerEditorStore("wf_a", store)

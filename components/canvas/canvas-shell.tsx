@@ -19,6 +19,7 @@
 import { PanelLeft, PanelRight } from "lucide-react"
 import { motion } from "motion/react"
 import { useTranslations } from "next-intl"
+import { Activity } from "react"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { Button } from "@/components/ui/button"
@@ -156,14 +157,22 @@ function CanvasMobileShell() {
           </SheetContent>
         </Sheet>
 
-        <Sheet open={mobileRightOpen} onOpenChange={setMobileRightOpen}>
+        <Sheet open={mobileRightOpen} onOpenChange={setMobileRightOpen} modal={mobileRightOpen}>
           <SheetTrigger asChild>
             <Button variant="ghost" size="icon" aria-label={t("openTools")}>
               <PanelRight className="size-4" />
             </Button>
           </SheetTrigger>
-          <SheetContent side="right" className="w-[min(85vw,360px)] p-0">
-            <CanvasSidePanels />
+          <SheetContent
+            forceMount
+            side="right"
+            className="w-[min(85vw,360px)] p-0"
+            inert={!mobileRightOpen}
+            aria-hidden={!mobileRightOpen}
+          >
+            <Activity mode={mobileRightOpen ? "visible" : "hidden"}>
+              <CanvasSidePanels mobile />
+            </Activity>
           </SheetContent>
         </Sheet>
       </div>

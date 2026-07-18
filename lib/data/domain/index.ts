@@ -14,6 +14,7 @@ import type {
 import type { PluginAnalyticsRow, PluginPermissionRow, PluginRow } from "@/lib/db/plugin-types"
 import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 import { getDb } from "@/lib/db/schema"
+import { listAllCanvasCommentRows } from "@/lib/db/context-comments"
 import { applyBackupPackage } from "@/lib/data/apply-package"
 import {
   EXPORT_SCHEMA_VERSION,
@@ -178,7 +179,7 @@ export const DOMAIN_TRANSFERS: DomainSpec[] = [
     const [canvasDocuments, canvasVersions, canvasComments, canvasSessions] = await Promise.all([
       db.canvasDocuments.toArray(),
       db.canvasVersions.toArray(),
-      db.canvasComments.toArray(),
+      listAllCanvasCommentRows(),
       db.canvasSessions.toArray(),
     ])
     return { canvasDocuments, canvasVersions, canvasComments, canvasSessions }

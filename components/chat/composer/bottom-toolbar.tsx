@@ -38,21 +38,29 @@ import { usePromptInputController } from "@/components/ai-elements/prompt-input"
 
 interface BottomToolbarProps {
   session: ChatSession | null
+  variant?: "default" | "embedded"
 }
 
-export function BottomToolbar({ session }: BottomToolbarProps) {
+export function BottomToolbar({ session, variant = "default" }: BottomToolbarProps) {
   // The workflow-editor session is the same discriminator that
   // `resolveSendOptions` keys on to inject workflow subagents + the graph
   // snapshot. The composer surface deserves the same scoping: the generic
   // runtime / mode / external-agent / web-search / generic-skills / generic
   // plugin-slot controls have no useful meaning inside a workflow chat.
   if (session?.kind === "workflow-editor") {
+    if (variant === "embedded") {
+      return (
+        <div className="min-w-0 flex-1" data-testid="composer-toolbar-embedded">
+          <WorkflowBottomToolbar session={session} />
+        </div>
+      )
+    }
     return <WorkflowBottomToolbar session={session} />
   }
-  return <GenericBottomToolbar session={session} />
+  return <GenericBottomToolbar session={session} variant={variant} />
 }
 
-function GenericBottomToolbar({ session }: BottomToolbarProps) {
+function GenericBottomToolbar({ session, variant = "default" }: BottomToolbarProps) {
   const t = useTranslations("chat.composer.toolbar")
   const router = useRouter()
   const status = useChatStore((s) => s.status)
@@ -219,6 +227,30 @@ function GenericBottomToolbar({ session }: BottomToolbarProps) {
       onChange={setEphemeralSkillIds}
     />
   )
+
+  // Compact composer: keep only the stable, high-frequency controls inline.
+  // Everything else remains available in the existing More popover, yielding
+  // one clean footer rail without dropping runtime or plugin capabilities.
+  if (variant === "embedded") {
+    return (
+      <div
+        ref={rootRef}
+        className="flex min-w-0 flex-1 items-center justify-end gap-1 text-[11px] text-muted-foreground"
+        data-testid="composer-toolbar-embedded"
+      >
+        {tier1Group}
+        <ToolbarMoreMenu label={t("moreControls")} active={tierActive} disabled={isStreaming}>
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-2">{tier2}</div>
+            <div className="flex flex-wrap items-center gap-2">{tier3}</div>
+            <div className="flex flex-wrap items-center gap-2">{runtimeControl}</div>
+            <div className="flex justify-end">{contextIndicator}</div>
+          </div>
+        </ToolbarMoreMenu>
+        {skillPicker}
+      </div>
+    )
+  }
 
   // Compact (mobile / narrow workflow sidebar): cap the toolbar at TWO rows —
   // Tier 1 on the first, the overflow menu + context usage sharing the second

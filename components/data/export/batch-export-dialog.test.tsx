@@ -24,6 +24,12 @@ beforeEach(() => {
   listSessionsMock.mockReset().mockResolvedValue([
     { id: "s1", title: "First" },
     { id: "s2", title: "Second" },
+    {
+      id: "embedded",
+      title: "Resource thread",
+      kind: "resource-workbench",
+      visibility: "embedded",
+    },
   ])
 })
 
@@ -37,6 +43,11 @@ async function openDialog() {
 }
 
 describe("BatchExportDialog", () => {
+  it("excludes embedded resource sessions from the ordinary batch export", async () => {
+    await openDialog()
+    expect(screen.queryByText("Resource thread")).not.toBeInTheDocument()
+  })
+
   it("exports the selected sessions and routes feedback through notifyExportOutcome", async () => {
     const outcome = {
       kind: "saved" as const,

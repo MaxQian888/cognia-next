@@ -108,6 +108,10 @@ import {
   registerContextProvidersForPlugin,
   unregisterContextProvidersForPlugin,
 } from "@/lib/plugin/bridge/context-providers-bridge"
+import {
+  registerContextPanelsForPlugin,
+  unregisterContextPanelsForPlugin,
+} from "@/lib/plugin/bridge/context-panels-bridge"
 
 /**
  * Everything a module-bridge descriptor may need to register a plugin's
@@ -125,6 +129,8 @@ export interface ModuleBridgeContext {
   resolveAsset: PluginAssetResolver
   /** The plugin's already-loaded main-module exports (connectors factories). */
   moduleExports: Record<string, unknown>
+  /** Live permission resolver; reflects revocation without re-enabling. */
+  hasPermission: (permission: string) => boolean
 }
 
 export interface ModuleBridgeCapabilityDescriptor {
@@ -414,6 +420,17 @@ export const MODULE_BRIDGE_CAPABILITIES = {
     unregister: (pluginId) => {
       unregisterContextProvidersForPlugin(pluginId)
     },
+  },
+  "context-panel": {
+    key: "context-panel",
+    manifestField: "contextPanels",
+    register: async (ctx) => {
+      await registerContextPanelsForPlugin(ctx.manifest, ctx.installRoot, {
+        importer: ctx.importer,
+        hasPermission: ctx.hasPermission,
+      })
+    },
+    unregister: unregisterContextPanelsForPlugin,
   },
   scheduler: {
     // Creates real, firing `ScheduledTask` rows (type "plugin") in the Dexie

@@ -204,6 +204,10 @@ export type {
 export type { PluginAutomationAPI } from "@/lib/plugin/api/automation-api"
 export type { PluginCompanionAPI, CompanionServerStatus } from "@/lib/plugin/api/companion-api"
 export type { PluginMessagePartAPI } from "@/lib/plugin/api/message-part-api"
+export type {
+  PluginContextPanelAPI,
+  PluginContextPanelRegistration,
+} from "@/lib/plugin/api/context-panel-api"
 
 export type FullPluginContext = Omit<CtxPluginContext, "storage"> &
   Omit<CtxPluginContextAPI, "storage"> & {

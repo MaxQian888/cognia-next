@@ -32,8 +32,17 @@ jest.mock("@/components/chat/chat-view", () => ({
 
 // SessionBar has its own suite — stub it so we can read the id it receives.
 jest.mock("@/components/workflow/editor/chat/session-bar", () => ({
-  WorkflowSessionBar: (props: { activeSessionId: string }) => (
-    <div data-testid="session-bar" data-session-id={props.activeSessionId} />
+  WorkflowSessionBar: (props: {
+    activeSessionId: string
+    onSwitchSession?: (id: string) => void
+  }) => (
+    <div data-testid="session-bar" data-session-id={props.activeSessionId}>
+      <button
+        type="button"
+        data-testid="session-bar-switch"
+        onClick={() => props.onSwitchSession?.("workflow:wf_a:branch")}
+      />
+    </div>
   ),
 }))
 
@@ -157,12 +166,11 @@ beforeEach(() => {
 })
 
 describe("WorkflowEditorChatTab session wiring", () => {
-  it("binds the ChatPane to the store's active session when it is an additional workflow session", () => {
+  it("binds the ChatPane to a scoped additional session without global focus", async () => {
     const branch = { ...DEFAULT_SESSION, id: "workflow:wf_a:branch", title: "Branch" }
     mLive.mockReturnValue(branch)
-    act(() => useChatStore.getState().setActiveSession(branch.id))
-
     harness()
+    await userEvent.click(screen.getByTestId("session-bar-switch"))
 
     expect(screen.getByTestId("chatpane")).toHaveAttribute(
       "data-session-id",
@@ -196,7 +204,11 @@ describe("WorkflowEditorChatTab session wiring", () => {
     const user = userEvent.setup()
     harness()
     await user.click(screen.getByTestId("chatpane-use-sample"))
-    await waitFor(() => expect(claudeSend).toHaveBeenCalledWith("add a webhook trigger"))
+    await waitFor(() =>
+      expect(claudeSend).toHaveBeenCalledWith("add a webhook trigger", undefined, {
+        sessionId: "workflow:wf_a",
+      })
+    )
   })
 
   it("creates a new workflow session when ChatPane's onCreate fires", async () => {

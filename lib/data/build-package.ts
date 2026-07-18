@@ -19,6 +19,8 @@ import {
 import { browserSnapshotStorage, SNAPSHOT_MODULES } from "./snapshots/registry"
 import { readAllSnapshots } from "./snapshots/helpers"
 import type { SnapshotEnv, SnapshotStorage } from "./snapshots/types"
+import { filterExposedSessions } from "@/lib/chat/session-exposure"
+import { listAllCanvasCommentRows } from "@/lib/db/context-comments"
 
 const APP_VERSION = "0.1.0"
 
@@ -91,7 +93,7 @@ export async function buildBackupPackage(
     db.tts_provider_keys.toArray(),
     db.canvasDocuments.toArray(),
     db.canvasVersions.toArray(),
-    db.canvasComments.toArray(),
+    listAllCanvasCommentRows(),
     db.canvasSessions.toArray(),
     db.a2uiApps.toArray(),
     db.a2uiTemplates.toArray(),
@@ -147,9 +149,11 @@ export async function buildBackupPackage(
     twinJobs,
   }
   if (opts.includeSessions) {
-    payload.sessions = sessions
-    payload.messages = messages
-    payload.sessionState = sessionState
+    const exportedSessions = filterExposedSessions(sessions, "standard-export")
+    const exportedSessionIds = new Set(exportedSessions.map((session) => session.id))
+    payload.sessions = exportedSessions
+    payload.messages = messages.filter((message) => exportedSessionIds.has(message.sessionId))
+    payload.sessionState = sessionState.filter((state) => exportedSessionIds.has(state.sessionId))
   }
 
   // localStorage-backed Zustand persist faces (external agents, custom

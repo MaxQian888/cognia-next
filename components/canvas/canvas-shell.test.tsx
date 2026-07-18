@@ -9,12 +9,22 @@ import { CanvasShell } from "./canvas-shell"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useCanvasLayoutStore } from "@/stores/canvas/canvas-layout-store"
 
+const mockSidePanelEffectStarted = jest.fn()
+const mockSidePanelEffectStopped = jest.fn()
+
 // Stub the heavy children — we are testing the shell's layout, not the rails.
 jest.mock("./canvas-document-rail", () => ({
   CanvasDocumentRail: () => <div data-testid="document-rail">Document rail</div>,
 }))
 jest.mock("./canvas-side-panels", () => ({
-  CanvasSidePanels: () => <div data-testid="side-panels">Side panels</div>,
+  CanvasSidePanels: () => {
+    const ReactImpl = jest.requireActual<typeof import("react")>("react")
+    ReactImpl.useEffect(() => {
+      mockSidePanelEffectStarted()
+      return () => mockSidePanelEffectStopped()
+    }, [])
+    return <div data-testid="side-panels">Side panels</div>
+  },
 }))
 jest.mock("./canvas-workspace", () => ({
   CanvasWorkspace: () => <div data-testid="workspace">Workspace</div>,
@@ -77,6 +87,8 @@ function renderWithProviders(ui: React.ReactElement) {
 describe("CanvasShell", () => {
   beforeEach(() => {
     window.localStorage.clear()
+    mockSidePanelEffectStarted.mockClear()
+    mockSidePanelEffectStopped.mockClear()
     useIsMobileMock.mockReturnValue(false)
     act(() => {
       useCanvasLayoutStore.getState().resetLayout()
@@ -156,6 +168,19 @@ describe("CanvasShell", () => {
       renderWithProviders(<CanvasShell />)
       await userEvent.setup().click(screen.getByRole("button", { name: /Open tools/i }))
       expect(useCanvasLayoutStore.getState().mobileRightOpen).toBe(true)
+    })
+
+    it("pauses force-mounted tool effects while the right Sheet is closed", async () => {
+      renderWithProviders(<CanvasShell />)
+      expect(mockSidePanelEffectStarted).not.toHaveBeenCalled()
+
+      const user = userEvent.setup()
+      await user.click(screen.getByRole("button", { name: /Open tools/i }))
+      expect(mockSidePanelEffectStarted).toHaveBeenCalledTimes(1)
+
+      act(() => useCanvasLayoutStore.getState().setMobileRightOpen(false))
+      expect(mockSidePanelEffectStopped).toHaveBeenCalledTimes(1)
+      expect(screen.getByTestId("side-panels")).toBeInTheDocument()
     })
 
     it("uses a responsive width on the left mobile Sheet (no hardcoded 280px)", async () => {

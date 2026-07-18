@@ -155,6 +155,33 @@ describe("<MobileChannelList />", () => {
     expect(within(older).queryByText("Daily standup")).toBeNull()
   })
 
+  it("does not expose embedded resource sessions in the mobile conversation list", () => {
+    render(
+      <MobileChannelList
+        sessions={[
+          ...sessions,
+          {
+            id: "embedded",
+            title: "Canvas assistant",
+            kind: "resource-workbench",
+            visibility: "embedded",
+            createdAt: 0,
+            updatedAt: 20,
+          } as ChatSession,
+        ]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
+      />
+    )
+
+    expect(screen.queryByText("Canvas assistant")).toBeNull()
+  })
+
   it("renames a session via long-press inline edit", async () => {
     const onRename = jest.fn()
     const user = userEvent.setup()

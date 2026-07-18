@@ -2,11 +2,13 @@
 describe("canvas feature flags", () => {
   const originalCollab = process.env.NEXT_PUBLIC_CANVAS_COLLABORATION_V1
   const originalAi = process.env.NEXT_PUBLIC_CANVAS_AI_WORKBENCH_V1
+  const originalContextWorkbench = process.env.NEXT_PUBLIC_CONTEXT_WORKBENCH_V1
 
   beforeEach(() => {
     localStorage.clear()
     delete process.env.NEXT_PUBLIC_CANVAS_COLLABORATION_V1
     delete process.env.NEXT_PUBLIC_CANVAS_AI_WORKBENCH_V1
+    delete process.env.NEXT_PUBLIC_CONTEXT_WORKBENCH_V1
     jest.resetModules()
   })
 
@@ -20,6 +22,11 @@ describe("canvas feature flags", () => {
       delete process.env.NEXT_PUBLIC_CANVAS_AI_WORKBENCH_V1
     } else {
       process.env.NEXT_PUBLIC_CANVAS_AI_WORKBENCH_V1 = originalAi
+    }
+    if (originalContextWorkbench === undefined) {
+      delete process.env.NEXT_PUBLIC_CONTEXT_WORKBENCH_V1
+    } else {
+      process.env.NEXT_PUBLIC_CONTEXT_WORKBENCH_V1 = originalContextWorkbench
     }
   })
 
@@ -59,6 +66,21 @@ describe("canvas feature flags", () => {
     const flags = getCanvasFeatureFlags()
     expect(flags["canvas.aiWorkbench.v1"]).toBe(true)
     expect(flags["canvas.collaboration.v1"]).toBe(true)
+    expect(flags["contextWorkbench.v1"]).toBe(true)
+  })
+
+  it("reads contextWorkbench.v1 from localStorage and environment overrides", async () => {
+    process.env.NEXT_PUBLIC_CONTEXT_WORKBENCH_V1 = "false"
+    localStorage.setItem(
+      "cognia-canvas-feature-flags-v1",
+      JSON.stringify({ "contextWorkbench.v1": true })
+    )
+
+    const { getCanvasFeatureFlags } = await import("./feature-flags")
+    expect(getCanvasFeatureFlags()["contextWorkbench.v1"]).toBe(true)
+
+    localStorage.clear()
+    expect(getCanvasFeatureFlags()["contextWorkbench.v1"]).toBe(false)
   })
 
   it("ignores malformed localStorage JSON", async () => {
@@ -143,5 +165,6 @@ describe("canvas feature flags", () => {
     const { isCanvasFeatureFlagEnabled } = await import("./feature-flags")
     expect(isCanvasFeatureFlagEnabled("canvas.aiWorkbench.v1")).toBe(true)
     expect(isCanvasFeatureFlagEnabled("canvas.collaboration.v1")).toBe(true)
+    expect(isCanvasFeatureFlagEnabled("contextWorkbench.v1")).toBe(true)
   })
 })

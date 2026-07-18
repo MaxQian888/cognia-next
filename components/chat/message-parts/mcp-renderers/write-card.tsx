@@ -9,6 +9,7 @@ import { FilePlus2Icon } from "lucide-react"
 import type { ToolUIPart } from "ai"
 import { McpCardShell, languageFromPath } from "./common"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
+import { WorkbenchReviewButton } from "./workbench-review-button"
 
 const PREVIEW_CHAR_CAP = 4_000
 
@@ -18,7 +19,7 @@ interface WriteInput {
   content?: string
 }
 
-export function WriteCard({ part }: { part: ToolUIPart }) {
+export function WriteCard({ part, sessionId }: { part: ToolUIPart; sessionId?: string }) {
   const t = useTranslations("chat.mcp.write")
   const input = (part.input ?? {}) as WriteInput
   const path = input.file_path ?? input.path
@@ -36,7 +37,12 @@ export function WriteCard({ part }: { part: ToolUIPart }) {
   if (!path || typeof input.content !== "string") return null
 
   return (
-    <McpCardShell title={t("title")} badge={path} testId="mcp-write-card">
+    <McpCardShell
+      title={t("title")}
+      badge={path}
+      testId="mcp-write-card"
+      action={<WorkbenchReviewButton sessionId={sessionId} absolutePath={path} />}
+    >
       <div className="flex items-start gap-2">
         <FilePlus2Icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">

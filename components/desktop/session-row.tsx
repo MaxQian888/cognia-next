@@ -1,7 +1,17 @@
 "use client"
 
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -141,6 +151,7 @@ function SessionRowImpl({
 }: SessionRowProps) {
   const t = useTranslations("desktop.sessionRow")
   const [editing, setEditing] = useState(false)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [draft, setDraft] = useState(session.title)
   const [cogniaAgentStatus, setCogniaAgentStatus] = useState<
     "unknown" | "checking" | "available" | "missing"
@@ -454,7 +465,7 @@ function SessionRowImpl({
             ) : null}
             <DropdownMenuSeparator />
             <DropdownMenuItem
-              onSelect={handleDelete}
+              onSelect={() => setDeleteConfirmOpen(true)}
               className="text-destructive focus:text-destructive"
             >
               <Trash2Icon className="mr-2 size-4" />
@@ -463,6 +474,26 @@ function SessionRowImpl({
           </DropdownMenuContent>
         </DropdownMenu>
       )}
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogContent className="max-w-[90vw] sm:max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("deleteConfirmTitle", { title: session.title })}</AlertDialogTitle>
+            <AlertDialogDescription>{t("deleteConfirmBody")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-col gap-2 sm:flex-row">
+            <AlertDialogCancel className="w-full sm:w-auto">{t("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              className={buttonVariants({ variant: "destructive", className: "w-full sm:w-auto" })}
+              onClick={() => {
+                setDeleteConfirmOpen(false)
+                handleDelete()
+              }}
+            >
+              {t("deleteConfirmAction")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </li>
   )
 }

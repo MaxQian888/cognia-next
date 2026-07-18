@@ -29,6 +29,8 @@ import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useCommentStore } from "@/stores/canvas/comment-store"
 import { getDb } from "@/lib/db/schema"
 import type { CanvasCommentRow, CanvasDocumentRow, CanvasVersionRow } from "@/lib/db/canvas-types"
+import type { ContextCommentRow } from "@/types/context-comment"
+import { canvasCommentRowFromContext, contextCommentRowFromCanvas } from "@/lib/db/context-comments"
 import { loggers } from "@cognia/logging"
 
 let started = false
@@ -129,12 +131,15 @@ async function syncDocumentsAndVersions(next: Record<string, CanvasDocument>): P
     "rw",
     db.canvasDocuments,
     db.canvasVersions,
-    db.canvasComments,
+    db.contextComments,
     db.canvasSessions,
     async () => {
       for (const id of removedDocs) {
         await db.canvasVersions.where("documentId").equals(id).delete()
-        await db.canvasComments.where("documentId").equals(id).delete()
+        await db.contextComments
+          .where("[resourceKind+resourceId]")
+          .equals(["canvas-document", id])
+          .delete()
         await db.canvasSessions.where("documentId").equals(id).delete()
         await db.canvasDocuments.delete(id)
       }
@@ -156,11 +161,11 @@ async function syncDocumentsAndVersions(next: Record<string, CanvasDocument>): P
 async function syncComments(byDoc: Record<string, CanvasComment[]>): Promise<void> {
   const db = getDb()
   const seenIds = new Set<string>()
-  const upserts: CanvasCommentRow[] = []
+  const upserts: ContextCommentRow[] = []
   for (const list of Object.values(byDoc)) {
     for (const c of list) {
       seenIds.add(c.id)
-      upserts.push(commentToRow(c))
+      upserts.push(contextCommentRowFromCanvas(commentToRow(c)))
     }
   }
   const removedIds: string[] = []
@@ -168,9 +173,9 @@ async function syncComments(byDoc: Record<string, CanvasComment[]>): Promise<voi
     if (!seenIds.has(id)) removedIds.push(id)
   }
   if (upserts.length === 0 && removedIds.length === 0) return
-  await db.transaction("rw", db.canvasComments, async () => {
-    if (removedIds.length > 0) await db.canvasComments.bulkDelete(removedIds)
-    if (upserts.length > 0) await db.canvasComments.bulkPut(upserts)
+  await db.transaction("rw", db.contextComments, async () => {
+    if (removedIds.length > 0) await db.contextComments.bulkDelete(removedIds)
+    if (upserts.length > 0) await db.contextComments.bulkPut(upserts)
   })
   mirroredCommentIds = seenIds
 }
@@ -192,7 +197,7 @@ async function hydrateFromDexie(): Promise<void> {
   const [docRows, versionRows, commentRows] = await Promise.all([
     db.canvasDocuments.toArray(),
     db.canvasVersions.toArray(),
-    db.canvasComments.toArray(),
+    db.contextComments.where("resourceKind").equals("canvas-document").toArray(),
   ])
   if (docRows.length === 0 && commentRows.length === 0) return
 
@@ -239,7 +244,8 @@ async function hydrateFromDexie(): Promise<void> {
 
   const commentMemory = useCommentStore.getState().comments
   const commentPatch: Record<string, CanvasComment[]> = {}
-  for (const row of commentRows) {
+  for (const contextRow of commentRows) {
+    const row = canvasCommentRowFromContext(contextRow)
     const docList = commentPatch[row.documentId] ?? [...(commentMemory[row.documentId] ?? [])]
     if (docList.find((c) => c.id === row.id)) continue
     docList.push({

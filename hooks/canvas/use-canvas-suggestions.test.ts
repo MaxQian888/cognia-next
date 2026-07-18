@@ -246,6 +246,22 @@ describe("useCanvasSuggestions", () => {
     expect(suggestions).toEqual([])
     expect(result.current.error).toBe("api dead")
   })
+
+  it("blocks provider dispatch when the suggestion prompt contains PII", async () => {
+    const { result } = renderHook(() => useCanvasSuggestions())
+    let suggestions: unknown[] = []
+    await act(async () => {
+      suggestions = await result.current.generate({
+        documentId: "doc",
+        language: "ts",
+        content: "Contact jane@example.com",
+      })
+    })
+
+    expect(suggestions).toEqual([])
+    expect(generateTextMock).not.toHaveBeenCalled()
+    expect(result.current.error).toContain("PII gate")
+  })
 })
 
 describe("sliceContextWindow", () => {

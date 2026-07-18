@@ -40,12 +40,25 @@ jest.mock("@/lib/claude/ipc", () => ({
 // unaffected; individual tests flip the flag.
 const standaloneFlag = { value: false }
 const runStandaloneTurnMock = jest.fn(async (_args?: unknown): Promise<void> => undefined)
+const gateWorkbenchProviderPayloadMock = jest.fn((payload: unknown) => payload)
 jest.mock("@/lib/runtime/standalone-mode", () => ({
   isStandaloneChatMode: () => standaloneFlag.value,
 }))
 jest.mock("@/lib/ai/chat/standalone-engine", () => ({
   runStandaloneTurn: (args: { emit: (e: unknown) => void; signal: AbortSignal }) =>
     runStandaloneTurnMock(args),
+}))
+jest.mock("@/lib/context-workbench/provider-payload", () => ({
+  gateWorkbenchProviderPayload: (
+    payload: { content: unknown; sendOptions: unknown; messages: unknown[] },
+    resourceContext: string
+  ) =>
+    gateWorkbenchProviderPayloadMock({
+      ...payload,
+      content: resourceContext
+        ? `[Current resource context]\n${resourceContext}\n\n[User instruction]\n${String(payload.content)}`
+        : payload.content,
+    }),
 }))
 
 jest.mock("@/lib/claude/adapter", () => ({
@@ -430,6 +443,7 @@ beforeEach(() => {
   interruptSessionMock.mockReset().mockResolvedValue(undefined)
   standaloneFlag.value = false
   runStandaloneTurnMock.mockReset().mockResolvedValue(undefined)
+  gateWorkbenchProviderPayloadMock.mockClear()
   closeSessionIpcMock.mockReset().mockResolvedValue(undefined)
   approveToolMock.mockReset().mockResolvedValue(undefined)
   persistMessagesMock.mockReset().mockResolvedValue(undefined)
@@ -554,6 +568,66 @@ describe("useClaudeChat — actions", () => {
       expect.objectContaining({ sessionId: "sess-1", emit: expect.any(Function) })
     )
     expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("gates the fully assembled payload for embedded resource sessions", async () => {
+    getSessionMock.mockResolvedValue({
+      id: "sess-1",
+      title: "Embedded",
+      kind: "resource-workbench",
+      visibility: "embedded",
+      model: "sonnet",
+    })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+
+    await act(async () => {
+      await result.current.send("sensitive context")
+    })
+
+    expect(gateWorkbenchProviderPayloadMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "sensitive context",
+        sendOptions: expect.any(Object),
+        messages: expect.any(Array),
+      })
+    )
+  })
+
+  it("keeps private resource context out of plugin hooks and persisted user messages", async () => {
+    getSessionMock.mockResolvedValue({
+      id: "sess-1",
+      title: "Embedded",
+      kind: "resource-workbench",
+      visibility: "embedded",
+      model: "sonnet",
+    })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+
+    await act(async () => {
+      await result.current.send("fix this", undefined, {
+        sessionId: "sess-1",
+        resourceContext: "private@example.com",
+      })
+    })
+
+    expect(dispatchUserPromptSubmitMock).toHaveBeenCalledWith(
+      "fix this",
+      "sess-1",
+      expect.any(Object)
+    )
+    expect(gateWorkbenchProviderPayloadMock).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining("private@example.com") })
+    )
+    expect(sendPromptMock).toHaveBeenCalledWith(
+      "sess-1",
+      expect.stringContaining("private@example.com"),
+      expect.any(Object)
+    )
+    const persistedMessages = persistMessagesMock.mock.calls.at(-1)?.[1]
+    expect(JSON.stringify(persistedMessages)).toContain("fix this")
+    expect(JSON.stringify(persistedMessages)).not.toContain("private@example.com")
   })
 
   it("stop() aborts the standalone turn instead of interrupting the sidecar", async () => {

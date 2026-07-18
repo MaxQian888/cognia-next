@@ -7,6 +7,7 @@ import type { Character, ChatSession, Team } from "@cognia/agent-config-types"
 import type { SelectedGuild } from "@/stores/ui"
 
 const logInfo = jest.fn()
+const logWarn = jest.fn()
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
@@ -20,7 +21,7 @@ jest.mock("next-intl", () => ({
 jest.mock("@cognia/logging", () => {
   const makeLogger = (): Record<string, unknown> => ({
     info: (...args: unknown[]) => logInfo(...args),
-    warn: jest.fn(),
+    warn: (...args: unknown[]) => logWarn(...args),
     error: jest.fn(),
     debug: jest.fn(),
     trace: jest.fn(),
@@ -63,9 +64,13 @@ jest.mock("@/stores/ui", () => ({
 // unread badges on, title-only search) so existing assertions hold. Individual
 // tests can override `conversationSidebar` to exercise the settings-driven paths.
 let conversationSidebar: Record<string, unknown> | null = null
+const saveSettings = jest.fn()
 jest.mock("@/stores/settings", () => ({
-  useSettingsStore: <T,>(selector: (s: { settings: unknown }) => T): T =>
-    selector({ settings: conversationSidebar ? { conversationSidebar } : null }),
+  useSettingsStore: <T,>(selector: (s: { settings: unknown; save: typeof saveSettings }) => T): T =>
+    selector({
+      settings: conversationSidebar ? { conversationSidebar } : null,
+      save: saveSettings,
+    }),
 }))
 
 const searchSessionsByContent = jest.fn()
@@ -126,11 +131,14 @@ function baseSession(id: string, overrides: Partial<ChatSession> = {}): ChatSess
 
 beforeEach(() => {
   logInfo.mockReset()
+  logWarn.mockReset()
   callQueue.length = 0
   selectedGuild = { kind: "dm" }
   isNarrow = false
   sidebarCollapsed = false
   conversationSidebar = null
+  saveSettings.mockReset()
+  saveSettings.mockResolvedValue(undefined)
   searchSessionsByContent.mockReset()
   searchSessionsByContent.mockResolvedValue({ ids: new Set<string>(), truncated: false })
 })
@@ -154,6 +162,30 @@ test("DM guild renders only direct sessions, grouped into date buckets", () => {
   expect(screen.queryByText("Squad meeting")).toBeNull()
   // updatedAt: 0 (epoch) → "Older" date-bucket header (no character grouping).
   expect(screen.getByText("bucketOlder")).toBeInTheDocument()
+})
+
+test("embedded resource workbench sessions stay out of the ordinary conversation list", () => {
+  const embedded = baseSession("embedded", {
+    title: "Canvas assistant",
+    kind: "resource-workbench",
+    visibility: "embedded",
+  })
+  callQueue.push(characters, [], undefined)
+
+  render(
+    <ChannelList
+      sessions={[dmSession, embedded]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  expect(screen.getByText("Hi Alice")).toBeInTheDocument()
+  expect(screen.queryByText("Canvas assistant")).toBeNull()
 })
 
 describe("collapse (width animation)", () => {
@@ -280,6 +312,203 @@ test("the clear button resets the search and restores the list", async () => {
   expect(await screen.findByText(/emptySearch/)).toBeInTheDocument()
   await user.click(screen.getByLabelText("clearSearch"))
   expect(await screen.findByText("Hi Alice")).toBeInTheDocument()
+})
+
+test("Escape clears an active search and restores the grouped list", async () => {
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[dmSession]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  const search = screen.getByLabelText("searchAria")
+  expect(screen.getByText("/")).toBeInTheDocument()
+  await user.type(search, "zzz")
+  expect(screen.queryByText("/")).toBeNull()
+  expect(await screen.findByText(/emptySearch/)).toBeInTheDocument()
+  await user.keyboard("{Escape}")
+
+  expect(search).toHaveValue("")
+  expect(screen.getByText("/")).toBeInTheDocument()
+  expect(await screen.findByText("Hi Alice")).toBeInTheDocument()
+})
+
+test.each([
+  {
+    label: "compactDensity",
+    initial: { showPreview: true, density: "comfortable" },
+    expected: { showPreview: true, density: "compact" },
+  },
+  {
+    label: "compactDensity",
+    initial: { density: "compact" },
+    expected: { density: "comfortable" },
+  },
+  {
+    label: "showPreview",
+    initial: { showPreview: false },
+    expected: { showPreview: true },
+  },
+  {
+    label: "groupByDate",
+    initial: { groupByDate: true },
+    expected: { groupByDate: false },
+  },
+  {
+    label: "showUnreadBadges",
+    initial: { showUnreadBadges: true },
+    expected: { showUnreadBadges: false },
+  },
+  {
+    label: "searchMessageContent",
+    initial: { searchScope: "title" },
+    expected: { searchScope: "titleAndContent" },
+  },
+  {
+    label: "searchMessageContent",
+    initial: { searchScope: "titleAndContent" },
+    expected: { searchScope: "title" },
+  },
+])("display option $label persists its preference without dropping siblings", async (testCase) => {
+  conversationSidebar = testCase.initial
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[dmSession]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  await user.click(screen.getByRole("button", { name: "displayOptions" }))
+  await user.click(await screen.findByRole("menuitemcheckbox", { name: testCase.label }))
+
+  expect(saveSettings).toHaveBeenCalledWith({ conversationSidebar: testCase.expected })
+})
+
+test("rapid display-option changes merge against the latest optimistic settings", async () => {
+  conversationSidebar = { density: "comfortable", showPreview: false }
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[dmSession]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  await user.click(screen.getByRole("button", { name: "displayOptions" }))
+  await user.click(await screen.findByRole("menuitemcheckbox", { name: "compactDensity" }))
+  await user.click(screen.getByRole("button", { name: "displayOptions" }))
+  await user.click(await screen.findByRole("menuitemcheckbox", { name: "showPreview" }))
+
+  expect(saveSettings).toHaveBeenLastCalledWith({
+    conversationSidebar: { density: "compact", showPreview: true },
+  })
+})
+
+test("an intermediate store write cannot roll back later optimistic display changes", async () => {
+  conversationSidebar = { density: "comfortable", showPreview: false, groupByDate: true }
+  let resolveFirst!: () => void
+  let resolveSecond!: () => void
+  saveSettings
+    .mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveFirst = resolve
+        })
+    )
+    .mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSecond = resolve
+        })
+    )
+    .mockResolvedValueOnce(undefined)
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  const renderList = () => (
+    <ChannelList
+      sessions={[dmSession]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+  const { rerender } = render(renderList())
+
+  await user.click(screen.getByRole("button", { name: "displayOptions" }))
+  await user.click(await screen.findByRole("menuitemcheckbox", { name: "compactDensity" }))
+  await user.click(screen.getByRole("button", { name: "displayOptions" }))
+  await user.click(await screen.findByRole("menuitemcheckbox", { name: "showPreview" }))
+
+  // Simulate save A reaching the store while save B is still pending.
+  conversationSidebar = { density: "compact", showPreview: false, groupByDate: true }
+  callQueue.push(characters, [], undefined)
+  rerender(renderList())
+  await user.click(screen.getByRole("button", { name: "displayOptions" }))
+  await user.click(await screen.findByRole("menuitemcheckbox", { name: "groupByDate" }))
+
+  resolveFirst()
+  await waitFor(() => expect(saveSettings.mock.calls.length).toBeGreaterThanOrEqual(2))
+  resolveSecond()
+  await waitFor(() => expect(saveSettings.mock.calls.length).toBeGreaterThanOrEqual(3))
+  expect(saveSettings).toHaveBeenLastCalledWith({
+    conversationSidebar: { density: "compact", showPreview: true, groupByDate: false },
+  })
+})
+
+test("a failed display-option save does not block the next queued change", async () => {
+  conversationSidebar = { density: "comfortable", showPreview: false }
+  saveSettings.mockRejectedValueOnce(new Error("disk full")).mockResolvedValueOnce(undefined)
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[dmSession]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  await user.click(screen.getByRole("button", { name: "displayOptions" }))
+  await user.click(await screen.findByRole("menuitemcheckbox", { name: "compactDensity" }))
+  await user.click(screen.getByRole("button", { name: "displayOptions" }))
+  await user.click(await screen.findByRole("menuitemcheckbox", { name: "showPreview" }))
+
+  await waitFor(() => expect(saveSettings).toHaveBeenCalledTimes(2))
+  expect(logWarn).toHaveBeenCalledWith(
+    "channel-list display settings save failed",
+    expect.objectContaining({ error: "Error: disk full" })
+  )
+  expect(saveSettings).toHaveBeenLastCalledWith({
+    conversationSidebar: { density: "compact", showPreview: true },
+  })
 })
 
 test("Team guild renders only that team's sessions", () => {

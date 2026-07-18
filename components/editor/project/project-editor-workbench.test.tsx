@@ -16,6 +16,7 @@ jest.mock("@/stores/canvas/keybinding-store", () => ({
 }))
 
 const editor = {
+  scopeKey: "session:s1",
   deps: {},
   roots: [{ key: "/repo", label: "main", path: "/repo", isMain: true }],
   rootKey: "/repo",
@@ -27,6 +28,7 @@ const editor = {
     absolutePath: "/repo/src/a.ts",
     savedContent: "old",
     draftContent: "old",
+    draftVersion: 1,
   } as Record<string, unknown> | null,
   dirtyCount: 0,
   treeRefreshToken: 0,
@@ -37,6 +39,7 @@ const editor = {
   setDraft: jest.fn(),
   saveFile: jest.fn().mockResolvedValue(undefined),
   saveAll: jest.fn().mockResolvedValue(undefined),
+  renameOpenFile: jest.fn().mockResolvedValue(undefined),
 }
 
 jest.mock("./use-project-editor", () => ({
@@ -64,6 +67,16 @@ jest.mock("./project-monaco", () => ({
     </div>
   ),
 }))
+const projectContextWorkbenchProps = jest.fn()
+jest.mock("./project-context-workbench", () => ({
+  ProjectContextWorkbench: (props: Record<string, unknown>) => {
+    projectContextWorkbenchProps(props)
+    return <div data-testid="project-context-workbench" />
+  },
+  ProjectContextWorkbenchMobile: ({ open }: { open: boolean }) => (
+    <div data-testid="project-context-workbench-mobile" data-open={String(open)} />
+  ),
+}))
 jest.mock("@/components/editor/light-code-editor", () => ({
   LightCodeEditor: ({ value, onChange }: { value: string; onChange: (value: string) => void }) => (
     <textarea
@@ -79,9 +92,11 @@ import { ProjectEditorFileWorkbench, useProjectEditorWorkbench } from "./project
 function Harness({
   beforeOpen,
   sidebarPosition = "right",
+  showContextWorkbench = true,
 }: {
   beforeOpen?: () => void
   sidebarPosition?: "left" | "right"
+  showContextWorkbench?: boolean
 }) {
   const workbench = useProjectEditorWorkbench({
     scopeKey: "session:s1",
@@ -94,6 +109,7 @@ function Harness({
         workbench={workbench}
         sidebarPosition={sidebarPosition}
         showTabs
+        showContextWorkbench={showContextWorkbench}
         panelIdPrefix="test"
       />
     </div>
@@ -115,12 +131,14 @@ function MobileHarness() {
 beforeEach(() => {
   jest.clearAllMocks()
   registerOpener.mockReturnValue(disposeOpener)
+  projectContextWorkbenchProps.mockClear()
   editor.activePath = "src/a.ts"
   editor.activeFile = {
     relPath: "src/a.ts",
     absolutePath: "/repo/src/a.ts",
     savedContent: "old",
     draftContent: "old",
+    draftVersion: 1,
   }
 })
 
@@ -152,6 +170,26 @@ it("supports the shared left-sidebar composition used by Agent Team", () => {
 
   expect(screen.getByTestId("tree")).toBeInTheDocument()
   expect(screen.getByTestId("monaco")).toBeInTheDocument()
+})
+
+it("mounts a resource-scoped Context Workbench for the active project file", () => {
+  render(<Harness />)
+
+  expect(screen.getByTestId("project-context-workbench")).toBeInTheDocument()
+  expect(projectContextWorkbenchProps).toHaveBeenCalledWith(
+    expect.objectContaining({
+      scopeKey: "session:s1",
+      rootPath: "/repo",
+      file: expect.objectContaining({ relPath: "src/a.ts" }),
+    })
+  )
+})
+
+it("can omit the nested Context Workbench in a constrained embedded layout", () => {
+  render(<Harness showContextWorkbench={false} />)
+
+  expect(screen.getByTestId("monaco")).toBeInTheDocument()
+  expect(screen.queryByTestId("project-context-workbench")).not.toBeInTheDocument()
 })
 
 it("copies absolute and relative paths through shared Monaco actions", () => {
@@ -189,6 +227,15 @@ it("reuses the workbench as a touch-friendly mobile Files/Search/Editor flow", (
   render(<MobileHarness />)
 
   expect(screen.getByTestId("project-editor-mobile-files")).toHaveAttribute("aria-pressed", "true")
+  expect(screen.getByTestId("project-context-workbench-mobile")).toHaveAttribute(
+    "data-open",
+    "false"
+  )
+  fireEvent.click(screen.getByTestId("project-editor-mobile-workbench"))
+  expect(screen.getByTestId("project-context-workbench-mobile")).toHaveAttribute(
+    "data-open",
+    "true"
+  )
   fireEvent.click(screen.getByTestId("tree"))
   expect(editor.openFile).toHaveBeenCalledWith("src/tree.ts")
   expect(screen.getByTestId("light-editor")).toBeInTheDocument()

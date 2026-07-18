@@ -42,6 +42,7 @@ import { getEditorStore } from "@/lib/workflow/editor/store-registry"
 import { parseOutputJson } from "@/components/chat/message-parts/mcp-renderers/common"
 import type { ProposalOp, ProposalOpCount } from "@/lib/workflow/editor/proposal-types"
 import { PerfBoundary } from "@/lib/perf"
+import { workflowEditorRevision } from "@/lib/workflow/editor/editor-revision"
 
 interface ProposeBatchOutput {
   ok?: boolean
@@ -49,6 +50,7 @@ interface ProposeBatchOutput {
   workflowId?: string
   summary?: string
   opCount?: ProposalOpCount
+  baseRevision?: string
   error?: { code?: string; message?: string }
   /**
    * Echo of the full proposal (including `ops`) emitted by the tool. On the
@@ -64,6 +66,7 @@ interface ProposeBatchOutput {
     workflowId?: string
     summary?: string
     ops?: ProposalOp[]
+    baseRevision?: string
   }>
 }
 
@@ -103,6 +106,7 @@ export function WorkflowProposalCard({ part }: { part: ToolUIPart }) {
   const [, startApplyTransition] = useTransition()
   const [expanded, setExpanded] = useState(false)
   const [applyError, setApplyError] = useState<string | null>(null)
+  const [stale, setStale] = useState(false)
 
   if (!parsed) return null
   // Tool errored OR tool returned ok:false — show a compact error pill
@@ -117,9 +121,11 @@ export function WorkflowProposalCard({ part }: { part: ToolUIPart }) {
 
   // Full ops echoed in the tool result — the seed source when THIS renderer
   // never ran the tool (cross-device copilot session).
-  const echoedOps = parsed.messageParts?.find(
+  const echoedProposal = parsed.messageParts?.find(
     (p) => p?.type === "workflow-proposal" && p.proposalId === proposalId
-  )?.ops
+  )
+  const echoedOps = echoedProposal?.ops
+  const echoedBaseRevision = parsed.baseRevision ?? echoedProposal?.baseRevision ?? "legacy"
 
   const handleApply = () => {
     setApplyError(null)
@@ -132,6 +138,7 @@ export function WorkflowProposalCard({ part }: { part: ToolUIPart }) {
         workflowId,
         summary,
         ops: echoedOps,
+        baseRevision: echoedBaseRevision,
       })
     }
     if (!proposal) {
@@ -146,6 +153,12 @@ export function WorkflowProposalCard({ part }: { part: ToolUIPart }) {
       setApplyError(t("errorEditorNotOpen"))
       return
     }
+    const currentRevision = workflowEditorRevision(store.getState())
+    if (proposal.baseRevision !== "legacy" && proposal.baseRevision !== currentRevision) {
+      setStale(true)
+      setApplyError(t("errorStale"))
+      return
+    }
     let firstError: string | undefined
     startApplyTransition(() => {
       // Optimistic flip — the badge / button instantly switches to
@@ -154,7 +167,12 @@ export function WorkflowProposalCard({ part }: { part: ToolUIPart }) {
       // optimistic value auto-reverts to the real status (still "open")
       // once the transition settles.
       addOptimisticStatus("applied")
-      const result = store.getState().applyProposalOps(proposal.ops)
+      const result = store.getState().applyProposalOps(proposal.ops, proposal.baseRevision)
+      if (result.stale) {
+        firstError = t("errorStale")
+        setStale(true)
+        return
+      }
       if (result.firstError) {
         firstError = result.firstError
         return
@@ -178,6 +196,7 @@ export function WorkflowProposalCard({ part }: { part: ToolUIPart }) {
         workflowId,
         summary,
         ops: echoedOps,
+        baseRevision: echoedBaseRevision,
       })
     }
     startApplyTransition(() => {
@@ -272,6 +291,27 @@ export function WorkflowProposalCard({ part }: { part: ToolUIPart }) {
               {applyError}
             </div>
           )}
+
+          {stale && effectiveStatus === "open" ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 px-2 text-[11px]"
+              onClick={() => {
+                const store = getEditorStore(workflowId)
+                if (!store) return
+                useProposalStore
+                  .getState()
+                  .rebaseProposal(workflowId, workflowEditorRevision(store.getState()))
+                setStale(false)
+                setApplyError(null)
+              }}
+              data-testid="workflow-proposal-rebase"
+            >
+              {t("rebase")}
+            </Button>
+          ) : null}
 
           {effectiveStatus === "open" && (
             <div className="flex items-center gap-1.5 pt-1">

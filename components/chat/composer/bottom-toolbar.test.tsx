@@ -119,7 +119,10 @@ let chatStoreState = {
 }
 
 jest.mock("@/stores/chat", () => ({
-  useChatStore: <T,>(selector: (s: typeof chatStoreState) => T) => selector(chatStoreState),
+  useChatStore: Object.assign(
+    <T,>(selector: (s: typeof chatStoreState) => T) => selector(chatStoreState),
+    { getState: () => chatStoreState }
+  ),
 }))
 
 jest.mock("@/stores/settings", () => ({
@@ -177,6 +180,21 @@ describe("BottomToolbar — session-kind branching", () => {
     expect(screen.queryByTestId("web-search-toggle")).toBeNull()
   })
 
+  it("embeds the workflow toolbar inside compact composer mode", () => {
+    const wfSession: ChatSession = {
+      id: "workflow:wf_x",
+      title: "Test workflow",
+      kind: "workflow-editor",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
+    render(<BottomToolbar session={wfSession} variant="embedded" />)
+
+    const embedded = screen.getByTestId("composer-toolbar-embedded")
+    expect(embedded).toContainElement(screen.getByTestId("workflow-bottom-toolbar"))
+    expect(screen.queryByTestId("agent-runtime-selector")).toBeNull()
+  })
+
   it("renders the generic toolbar for a direct session", () => {
     render(<BottomToolbar session={session} />)
     expect(screen.queryByTestId("workflow-bottom-toolbar")).toBeNull()
@@ -216,6 +234,19 @@ describe("BottomToolbar — session-kind branching", () => {
 })
 
 describe("BottomToolbar — narrow-width More menu", () => {
+  it("embeds primary controls and keeps advanced controls in overflow for compact composer mode", () => {
+    render(<BottomToolbar session={session} variant="embedded" />)
+
+    expect(screen.getByTestId("composer-toolbar-embedded")).toBeInTheDocument()
+    expect(screen.getByTestId("permission-mode-indicator")).toBeInTheDocument()
+    expect(screen.getByTestId("effort-selector")).toBeInTheDocument()
+    expect(screen.queryByTestId("web-search-toggle")).toBeNull()
+
+    fireEvent.click(screen.getByTestId("composer-toolbar-more"))
+    expect(screen.getByTestId("web-search-toggle")).toBeInTheDocument()
+    expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
+  })
+
   it("keeps Tier 2/3 inline when the toolbar is wide, with Runtime in the More menu", () => {
     mockToolbarWidth = 600
     render(<BottomToolbar session={session} />)

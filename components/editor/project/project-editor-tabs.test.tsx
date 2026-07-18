@@ -17,6 +17,7 @@ function file(relPath: string, dirty = false, externallyChanged = false): OpenFi
     language: "typescript",
     savedContent: "a",
     draftContent: dirty ? "b" : "a",
+    draftVersion: dirty ? 2 : 1,
     externallyChanged,
   }
 }

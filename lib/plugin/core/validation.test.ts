@@ -586,11 +586,29 @@ describe("Plugin Validation", () => {
             field: "contextProviders",
             value: [{ id: "repo", label: "Repo", entry: "context.js", export: "create" }],
           },
+          {
+            capability: "context-panel",
+            field: "contextPanels",
+            value: [
+              {
+                id: "outline",
+                label: "Outline",
+                labelKey: "panels.outline",
+                entry: "panel.js",
+                export: "OutlinePanel",
+                resourceKinds: ["canvas-document"],
+                activity: "inspect",
+              },
+            ],
+          },
         ]
 
         for (const { capability, field, value } of cases) {
           const manifest = createValidManifest()
           manifest.capabilities = [capability] as PluginManifest["capabilities"]
+          if (capability === "context-panel") {
+            manifest.permissions = ["extension:ui", "canvas:read"]
+          }
           ;(manifest as unknown as Record<string, unknown>)[field] = value
 
           const result = validatePluginManifest(manifest, { governanceMode: "warn" })

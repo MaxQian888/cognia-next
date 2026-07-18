@@ -70,6 +70,7 @@ jest.mock("@/stores/ui", () => ({
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { ChatHeader } from "./chat-header"
+import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { useCredentialStatus } from "@/hooks/chat/use-credential-status"
 import { isTauri } from "@/lib/tauri"
 
@@ -171,6 +172,31 @@ describe("ChatHeader", () => {
     const toggle = screen.getByTestId("chat-sidebar-toggle")
     expect(toggle).toHaveAttribute("aria-label", "Show conversation list")
     expect(toggle).toHaveAttribute("aria-pressed", "false")
+  })
+
+  it("mirrors the conversation toggle with a right artifacts-dock toggle", () => {
+    act(() => useArtifactDockLayoutStore.setState({ dockCollapsed: true }))
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+    const toggle = screen.getByTestId("chat-artifact-dock-toggle")
+    expect(toggle).toHaveAttribute("aria-label", "Show artifacts panel")
+    expect(toggle).toHaveAttribute("aria-pressed", "false")
+  })
+
+  it("clicking the artifacts-dock toggle drives the dock collapse action", () => {
+    act(() => useArtifactDockLayoutStore.setState({ dockCollapsed: true }))
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+    fireEvent.click(screen.getByTestId("chat-artifact-dock-toggle"))
+    expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
   })
 
   it("mounts the agent-flow display quick toggle", () => {

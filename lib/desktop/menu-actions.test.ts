@@ -273,6 +273,15 @@ test("loadRecentSessions caps result count at limit", async () => {
   expect(result.map((s) => s.id)).toEqual(["1", "2"])
 })
 
+test("loadRecentSessions excludes embedded workbench threads", async () => {
+  listSessionsMock.mockResolvedValueOnce([
+    { id: "resource", kind: "resource-workbench", visibility: "embedded" },
+    { id: "ordinary", kind: "direct" },
+  ])
+  const result = await loadRecentSessions(8)
+  expect(result.map((session) => session.id)).toEqual(["ordinary"])
+})
+
 test("loadRecentSessions returns [] when the Dexie call throws", async () => {
   listSessionsMock.mockRejectedValueOnce(new Error("io"))
   const result = await loadRecentSessions(5)

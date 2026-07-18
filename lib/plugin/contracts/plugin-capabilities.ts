@@ -1357,6 +1357,31 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     ],
   },
   {
+    id: "context-panel",
+    support: "supported",
+    manifestFields: ["contextPanels"],
+    runtimeBinding:
+      "manifest.contextPanels → context-panels module bridge → Context Workbench panel registry",
+    hostBindings: [
+      "lib/plugin/bridge/context-panels-bridge.ts",
+      "lib/context-workbench/panel-registry.ts",
+      "components/context-workbench/context-workbench.tsx",
+      "lib/plugin/contracts/module-bridge-map.ts",
+    ],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/api/context-panel.ts",
+      "packages/plugin-sdk/src/define/define-context-panel.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
+    pythonSdk: [],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#context-workbench-panels",
+    requiredTests: [
+      "lib/plugin/bridge/context-panels-bridge.test.ts",
+      "lib/plugin/api/context-panel-api.test.ts",
+      "packages/plugin-sdk/src/define/define-context-panel.test.ts",
+    ],
+  },
+  {
     // Custom view containers (B1) — a plugin contributes a rail icon → its own
     // middle-column panel hosting its views. Declarative `manifest.viewsContainers`
     // registered through the `view-container` overlay capability on enable and

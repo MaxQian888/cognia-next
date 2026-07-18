@@ -6,6 +6,7 @@ import type { SlashContext } from "../builtin"
 import type { SlashCommandResultBlock } from "../system-blocks"
 import { listSessions } from "@/lib/db/sessions"
 import { useChatStore } from "@/stores/chat"
+import { filterExposedSessions } from "@/lib/chat/session-exposure"
 
 /**
  * Build the inline result chip for a successful `/resume`, so the transcript
@@ -28,7 +29,7 @@ function resumedChip(arg: string, title: string | undefined): SlashCommandResult
 export async function handleSessions(ctx: SlashContext): Promise<void> {
   let rows: Awaited<ReturnType<typeof listSessions>>
   try {
-    rows = await listSessions()
+    rows = filterExposedSessions(await listSessions(), "main-list")
   } catch (err) {
     ctx.pushSystemMessage(
       `Could not list sessions: ${err instanceof Error ? err.message : String(err)}`
@@ -84,7 +85,7 @@ export async function handleResume(ctx: SlashContext): Promise<void> {
   }
   let rows: Awaited<ReturnType<typeof listSessions>>
   try {
-    rows = await listSessions()
+    rows = filterExposedSessions(await listSessions(), "main-list")
   } catch (err) {
     ctx.pushSystemMessage(
       `Could not list sessions: ${err instanceof Error ? err.message : String(err)}`

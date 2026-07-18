@@ -97,6 +97,11 @@ export type { PluginChatMiddlewareDef } from "@/types/plugin/plugin-chat-middlew
 export type { PluginCliToolDef } from "@/types/plugin/plugin-cli-tool"
 export type { PluginCompactionStrategyDef } from "@/types/plugin/plugin-compaction-strategy"
 export type { PluginContextProviderDef } from "@/types/plugin/plugin-context-provider"
+export type {
+  PluginContextPanelDef,
+  PluginContextPanelIcon,
+  PluginContextPanelRenderer,
+} from "@/types/plugin/plugin-context-panel"
 export type { PluginDeploymentFilterDef } from "@/types/plugin/plugin-deployment-filter"
 export type { PluginImRateSourceDef } from "@/types/plugin/plugin-im-rate-source"
 export type { PluginLimitsSourceDef } from "@/types/plugin/plugin-limits-source"

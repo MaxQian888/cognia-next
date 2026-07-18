@@ -59,6 +59,14 @@ import * as ResizablePrimitive from "react-resizable-panels"
 import type { PanelImperativeHandle } from "react-resizable-panels"
 import { GripVerticalIcon } from "lucide-react"
 import type { NodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
+import { useIsMobile } from "@/hooks/ui/use-mobile"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
 
 interface CanvasInnerProps {
   store: EditorStore
@@ -71,6 +79,9 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   const tValidation = useTranslations("workflows.validation")
   const tDiag = useTranslations("workflows.diagnostics")
   const tToolbar = useTranslations("workflows.toolbar")
+  const tWorkbench = useTranslations("contextWorkbench")
+  const isMobile = useIsMobile()
+  const [mobileToolsOpen, setMobileToolsOpen] = useState(false)
 
   // (A8) Chrome slice — everything the editor *frame* needs that does NOT
   // change on every drag frame. Crucially this NO LONGER subscribes to
@@ -159,11 +170,19 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     else panel.collapse()
   }, [])
   const toggleRightPanel = useCallback(() => {
+    if (isMobile) {
+      setMobileToolsOpen((open) => !open)
+      return
+    }
     const panel = rightPanelRef.current
     if (!panel) return
     if (panel.isCollapsed()) panel.expand()
     else panel.collapse()
-  }, [])
+  }, [isMobile])
+  const collapseRightWorkbench = useCallback(() => {
+    if (isMobile) setMobileToolsOpen(false)
+    else rightPanelRef.current?.collapse()
+  }, [isMobile])
   // Canvas-toolbar view state. Local to this editor instance (the store is
   // recreated per workflow, so these reset on navigation) — see canvas-toolbar.
   // `interactive` mirrors React Flow's native lock; `minimapVisible` and
@@ -1013,7 +1032,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         onToggleLeftPanel={toggleLeftPanel}
         leftPanelCollapsed={leftCollapsed}
         onToggleRightPanel={toggleRightPanel}
-        rightPanelCollapsed={rightCollapsed}
+        rightPanelCollapsed={isMobile ? !mobileToolsOpen : rightCollapsed}
       />
       <ShareLinkDialog
         open={shareImageOpen}
@@ -1109,30 +1128,56 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
             }
           />
         </ResizablePrimitive.Panel>
-        <ResizablePrimitive.Separator
-          className={`relative flex w-px items-center justify-center bg-border after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 focus-visible:outline-none ${rightCollapsed ? "hidden" : ""}`}
-        >
-          <div className="z-10 flex h-4 w-3 items-center justify-center rounded border bg-border">
-            <GripVerticalIcon className="size-2.5" />
-          </div>
-        </ResizablePrimitive.Separator>
-        <ResizablePrimitive.Panel
-          panelRef={rightPanelRef}
-          defaultSize="28%"
-          minSize="20%"
-          maxSize="42%"
-          collapsible
-          collapsedSize="0%"
-          onResize={handleRightPanelResize}
-          className="overflow-hidden"
-        >
-          <RightSidebar
-            useStore={store}
-            className="h-full w-full"
-            reactFlowInstance={reactFlowInstance}
-          />
-        </ResizablePrimitive.Panel>
+        {!isMobile ? (
+          <>
+            <ResizablePrimitive.Separator
+              className={`relative flex w-px items-center justify-center bg-border after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 focus-visible:outline-none ${rightCollapsed ? "hidden" : ""}`}
+            >
+              <div className="z-10 flex h-4 w-3 items-center justify-center rounded border bg-border">
+                <GripVerticalIcon className="size-2.5" />
+              </div>
+            </ResizablePrimitive.Separator>
+            <ResizablePrimitive.Panel
+              panelRef={rightPanelRef}
+              defaultSize="28%"
+              minSize="20%"
+              maxSize="42%"
+              collapsible
+              collapsedSize="0%"
+              onResize={handleRightPanelResize}
+              className="overflow-hidden"
+            >
+              <RightSidebar
+                useStore={store}
+                className="h-full w-full"
+                reactFlowInstance={reactFlowInstance}
+              />
+            </ResizablePrimitive.Panel>
+          </>
+        ) : null}
       </ResizablePrimitive.Group>
+      {isMobile ? (
+        <Sheet open={mobileToolsOpen} onOpenChange={setMobileToolsOpen} modal={mobileToolsOpen}>
+          <SheetContent
+            forceMount
+            side="right"
+            className="w-full gap-0 p-0 sm:max-w-none"
+            inert={!mobileToolsOpen}
+            aria-hidden={!mobileToolsOpen}
+          >
+            <SheetHeader className="sr-only">
+              <SheetTitle>{tWorkbench("mobileTitle")}</SheetTitle>
+              <SheetDescription>{tWorkbench("mobileDescription")}</SheetDescription>
+            </SheetHeader>
+            <RightSidebar
+              useStore={store}
+              className="h-full w-full border-l-0"
+              reactFlowInstance={reactFlowInstance}
+              onCollapse={collapseRightWorkbench}
+            />
+          </SheetContent>
+        </Sheet>
+      ) : null}
       <CommandPalette
         open={paletteOpen}
         onOpenChange={handlePaletteOpenChange}
