@@ -17,9 +17,9 @@
 //! call, with a no-op shim off macOS so the call sites stay `cfg`-free.
 #![allow(dead_code)]
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(target_os = "macos")]
-use std::sync::{atomic::AtomicBool, Arc};
+use std::sync::Arc;
 
 // `Manager` is required in scope on macOS only: the `tauri_panel!`-generated
 // `from_window` calls `window.app_handle()` (a `Manager` method) when it
@@ -47,6 +47,9 @@ pub(crate) enum PetPanelRole {
 static SPRITE_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
 static POPUP_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
 static ISLAND_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
+static SPRITE_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
+static POPUP_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
+static ISLAND_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 
 fn panel_generation(role: PetPanelRole) -> &'static AtomicU64 {
     match role {
@@ -56,8 +59,23 @@ fn panel_generation(role: PetPanelRole) -> &'static AtomicU64 {
     }
 }
 
-/// Invalidate any queued AppKit work for this role and return the new token.
-pub(crate) fn advance_panel_generation(role: PetPanelRole) -> u64 {
+fn panel_open_intent(role: PetPanelRole) -> &'static AtomicBool {
+    match role {
+        PetPanelRole::Sprite => &SPRITE_PANEL_OPEN,
+        PetPanelRole::Popup => &POPUP_PANEL_OPEN,
+        PetPanelRole::Island => &ISLAND_PANEL_OPEN,
+    }
+}
+
+/// Start a new open lifecycle and invalidate work from every older lifecycle.
+pub(crate) fn begin_panel_open(role: PetPanelRole) -> u64 {
+    panel_open_intent(role).store(true, Ordering::SeqCst);
+    panel_generation(role).fetch_add(1, Ordering::SeqCst) + 1
+}
+
+/// Cancel every queued reveal and mark the panel as intentionally hidden.
+pub(crate) fn cancel_panel_reveal(role: PetPanelRole) -> u64 {
+    panel_open_intent(role).store(false, Ordering::SeqCst);
     panel_generation(role).fetch_add(1, Ordering::SeqCst) + 1
 }
 
@@ -66,7 +84,7 @@ pub(crate) fn current_panel_generation(role: PetPanelRole) -> u64 {
 }
 
 pub(crate) fn panel_generation_is_current(role: PetPanelRole, expected: u64) -> bool {
-    current_panel_generation(role) == expected
+    panel_open_intent(role).load(Ordering::SeqCst) && current_panel_generation(role) == expected
 }
 
 impl PetPanelRole {
@@ -265,12 +283,12 @@ pub(crate) fn reveal_pet_panel<R: Runtime>(
     window: &WebviewWindow<R>,
     role: PetPanelRole,
     focus: bool,
+    expected_generation: u64,
 ) -> Result<(), String> {
     use tauri_nspanel::ManagerExt;
 
     let app = window.app_handle().clone();
     let win = window.clone();
-    let expected_generation = current_panel_generation(role);
     run_on_appkit_thread(window, "panel reveal", move || {
         if !panel_generation_is_current(role, expected_generation) {
             return Ok(());
@@ -335,9 +353,13 @@ pub(crate) fn configure_pet_panel<R: Runtime>(
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn reveal_pet_panel<R: Runtime>(
     window: &WebviewWindow<R>,
-    _role: PetPanelRole,
+    role: PetPanelRole,
     focus: bool,
+    expected_generation: u64,
 ) -> Result<(), String> {
+    if !panel_generation_is_current(role, expected_generation) {
+        return Ok(());
+    }
     window.show().map_err(|e| e.to_string())?;
     if focus {
         window.set_focus().map_err(|e| e.to_string())?;
@@ -392,5 +414,20 @@ mod tests {
             assert!(!role.hides_on_deactivate());
             assert!(role.works_when_modal());
         }
+    }
+
+    #[test]
+    fn closing_a_panel_invalidates_queued_reveal_work() {
+        let generation = begin_panel_open(PetPanelRole::Sprite);
+        assert!(panel_generation_is_current(
+            PetPanelRole::Sprite,
+            generation
+        ));
+
+        cancel_panel_reveal(PetPanelRole::Sprite);
+        assert!(!panel_generation_is_current(
+            PetPanelRole::Sprite,
+            generation
+        ));
     }
 }

@@ -43,7 +43,7 @@ pub struct PetPopupOpts {
 /// than destroy. Generic so `mod.rs` (also generic over runtime) can reuse it
 /// when the sprite window is hidden or destroyed.
 pub(crate) fn close_pet_popup_inner<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
-    super::macos_panel::advance_panel_generation(super::macos_panel::PetPanelRole::Popup);
+    super::macos_panel::cancel_panel_reveal(super::macos_panel::PetPanelRole::Popup);
     if let Some(window) = app.get_webview_window(PET_POPUP_LABEL) {
         window.hide().map_err(|e| e.to_string())?;
         // Tell the renderer the popup is gone so its open/expanded state can't
@@ -60,7 +60,6 @@ pub(crate) fn close_pet_popup_inner<R: Runtime>(app: &AppHandle<R>) -> Result<()
 /// window ever flashing an unpainted opaque rectangle).
 #[tauri::command]
 pub async fn open_pet_popup(app: AppHandle, opts: PetPopupOpts) -> Result<(), String> {
-    super::macos_panel::advance_panel_generation(super::macos_panel::PetPanelRole::Popup);
     if let Some(window) = app.get_webview_window(PET_POPUP_LABEL) {
         window
             .set_size(LogicalSize::new(opts.width, opts.height))
@@ -68,13 +67,21 @@ pub async fn open_pet_popup(app: AppHandle, opts: PetPopupOpts) -> Result<(), St
         window
             .set_position(PhysicalPosition::new(opts.x, opts.y))
             .map_err(|e| e.to_string())?;
-        super::macos_panel::reveal_pet_panel(
+        let generation =
+            super::macos_panel::begin_panel_open(super::macos_panel::PetPanelRole::Popup);
+        if let Err(error) = super::macos_panel::reveal_pet_panel(
             &window,
             super::macos_panel::PetPanelRole::Popup,
             true,
-        )?;
+            generation,
+        ) {
+            super::macos_panel::cancel_panel_reveal(super::macos_panel::PetPanelRole::Popup);
+            return Err(error);
+        }
         return Ok(());
     }
+
+    let generation = super::macos_panel::begin_panel_open(super::macos_panel::PetPanelRole::Popup);
 
     let window = tauri::WebviewWindowBuilder::new(
         &app,
@@ -90,7 +97,10 @@ pub async fn open_pet_popup(app: AppHandle, opts: PetPopupOpts) -> Result<(), St
     .visible(false)
     .inner_size(opts.width, opts.height)
     .build()
-    .map_err(|e| e.to_string())?;
+    .map_err(|error| {
+        super::macos_panel::cancel_panel_reveal(super::macos_panel::PetPanelRole::Popup);
+        error.to_string()
+    })?;
 
     // Same as the sprite window (`mod.rs`): the app-wide menu bar attaches to
     // every new window on Windows/Linux — detach it from this frameless popup
@@ -98,7 +108,7 @@ pub async fn open_pet_popup(app: AppHandle, opts: PetPopupOpts) -> Result<(), St
     let _ = window.remove_menu();
 
     if let Err(error) = window.set_position(PhysicalPosition::new(opts.x, opts.y)) {
-        super::macos_panel::advance_panel_generation(super::macos_panel::PetPanelRole::Popup);
+        super::macos_panel::cancel_panel_reveal(super::macos_panel::PetPanelRole::Popup);
         let _ = window.close();
         return Err(error.to_string());
     }
@@ -110,7 +120,7 @@ pub async fn open_pet_popup(app: AppHandle, opts: PetPopupOpts) -> Result<(), St
     let app_handle = app.clone();
     window.on_window_event(move |event| {
         if matches!(event, WindowEvent::Focused(false)) {
-            super::macos_panel::advance_panel_generation(super::macos_panel::PetPanelRole::Popup);
+            super::macos_panel::cancel_panel_reveal(super::macos_panel::PetPanelRole::Popup);
             if let Some(w) = app_handle.get_webview_window(PET_POPUP_LABEL) {
                 let _ = w.hide();
                 // Broadcast the native blur-hide so the renderer's popup state
@@ -130,10 +140,16 @@ pub async fn open_pet_popup(app: AppHandle, opts: PetPopupOpts) -> Result<(), St
     if let Err(error) =
         super::macos_panel::configure_pet_panel(&window, super::macos_panel::PetPanelRole::Popup)
     {
-        super::macos_panel::advance_panel_generation(super::macos_panel::PetPanelRole::Popup);
+        super::macos_panel::cancel_panel_reveal(super::macos_panel::PetPanelRole::Popup);
         let _ = super::macos_panel::detach_pet_panel(&window);
         let _ = window.close();
         return Err(error);
+    }
+    if !super::macos_panel::panel_generation_is_current(
+        super::macos_panel::PetPanelRole::Popup,
+        generation,
+    ) {
+        return Ok(());
     }
 
     // Intentionally do NOT `show()` / `set_focus()` here. Like the sprite

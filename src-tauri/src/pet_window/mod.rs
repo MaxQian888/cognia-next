@@ -200,7 +200,6 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
     opts: PetWindowOpts,
 ) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("pet") {
-        macos_panel::advance_panel_generation(macos_panel::PetPanelRole::Sprite);
         // Re-validate the position before revealing: monitors may have been
         // unplugged / rearranged / DPI-changed while the window sat hidden
         // (the window-state plugin is denylisted for "pet", so nothing else
@@ -220,14 +219,27 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
             }
         }
         apply_click_through(&window, opts.click_through)?;
-        macos_panel::reveal_pet_panel(&window, macos_panel::PetPanelRole::Sprite, false)?;
+        let generation = macos_panel::begin_panel_open(macos_panel::PetPanelRole::Sprite);
+        if let Err(error) = macos_panel::reveal_pet_panel(
+            &window,
+            macos_panel::PetPanelRole::Sprite,
+            false,
+            generation,
+        ) {
+            macos_panel::cancel_panel_reveal(macos_panel::PetPanelRole::Sprite);
+            return Err(error);
+        }
+        if !macos_panel::panel_generation_is_current(macos_panel::PetPanelRole::Sprite, generation)
+        {
+            return Ok(());
+        }
         // The renderer paused its animation loops on `pet://suspend`; wake it.
         let _ = app.emit("pet://resume", serde_json::Value::Null);
         emit_pet_state(app, true, opts.click_through);
         return Ok(());
     }
 
-    let generation = macos_panel::advance_panel_generation(macos_panel::PetPanelRole::Sprite);
+    let generation = macos_panel::begin_panel_open(macos_panel::PetPanelRole::Sprite);
 
     let (area_x, area_y, area_w, area_h, scale) = work_area_for(app, opts.x.zip(opts.y));
     // The monitor work area and any persisted drag position are PHYSICAL pixels,
@@ -261,7 +273,10 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
             .visible(false)
             .inner_size(opts.width, opts.height)
             .build()
-            .map_err(|e| e.to_string())?;
+            .map_err(|error| {
+                macos_panel::cancel_panel_reveal(macos_panel::PetPanelRole::Sprite);
+                error.to_string()
+            })?;
 
     // Configure the freshly built (still hidden) window. Any failure here
     // closes the window before propagating: a half-configured hidden window
@@ -295,10 +310,13 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
         Ok(())
     };
     if let Err(e) = configure() {
-        macos_panel::advance_panel_generation(macos_panel::PetPanelRole::Sprite);
+        macos_panel::cancel_panel_reveal(macos_panel::PetPanelRole::Sprite);
         let _ = macos_panel::detach_pet_panel(&window);
         let _ = window.close();
         return Err(e);
+    }
+    if !macos_panel::panel_generation_is_current(macos_panel::PetPanelRole::Sprite, generation) {
+        return Ok(());
     }
 
     // Monitor topology / DPI changes: nudge the renderer to re-read its work
@@ -352,6 +370,7 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
                         &window,
                         macos_panel::PetPanelRole::Sprite,
                         false,
+                        generation,
                     );
                 }
             }
@@ -368,7 +387,7 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
 pub(crate) fn close_pet_window_inner<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     // Invalidate any pending force-show safety net from a recent open — a
     // close inside the grace period must win over the net.
-    macos_panel::advance_panel_generation(macos_panel::PetPanelRole::Sprite);
+    macos_panel::cancel_panel_reveal(macos_panel::PetPanelRole::Sprite);
     if let Some(window) = app.get_webview_window("pet") {
         apply_click_through(&window, false)?;
         window.hide().map_err(|e| e.to_string())?;
@@ -398,14 +417,19 @@ pub async fn open_pet_window(app: AppHandle, opts: PetWindowOpts) -> Result<(), 
 /// Reveal the current pet webview after its first painted frame. The caller's
 /// label is injected by Tauri and restricted to the two pet windows, so the
 /// non-activating NSPanel path cannot be used to raise arbitrary app windows.
+fn pet_panel_role_for_label(label: &str) -> Result<macos_panel::PetPanelRole, String> {
+    match label {
+        "pet" => Ok(macos_panel::PetPanelRole::Sprite),
+        popup::PET_POPUP_LABEL => Ok(macos_panel::PetPanelRole::Popup),
+        label => Err(format!("window '{label}' is not a pet overlay")),
+    }
+}
+
 #[tauri::command]
 pub async fn reveal_pet_window(window: WebviewWindow, focus: bool) -> Result<(), String> {
-    let role = match window.label() {
-        "pet" => macos_panel::PetPanelRole::Sprite,
-        popup::PET_POPUP_LABEL => macos_panel::PetPanelRole::Popup,
-        label => return Err(format!("window '{label}' is not a pet overlay")),
-    };
-    macos_panel::reveal_pet_panel(&window, role, focus)
+    let role = pet_panel_role_for_label(window.label())?;
+    let generation = macos_panel::current_panel_generation(role);
+    macos_panel::reveal_pet_panel(&window, role, focus, generation)
 }
 
 /// Hide the desktop pet window (toggle semantics — reopen is cheap).
@@ -419,8 +443,8 @@ pub async fn close_pet_window(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn destroy_pet_window(app: AppHandle) -> Result<(), String> {
     // Invalidate any pending force-show safety net from a recent open.
-    macos_panel::advance_panel_generation(macos_panel::PetPanelRole::Sprite);
-    macos_panel::advance_panel_generation(macos_panel::PetPanelRole::Popup);
+    macos_panel::cancel_panel_reveal(macos_panel::PetPanelRole::Sprite);
+    macos_panel::cancel_panel_reveal(macos_panel::PetPanelRole::Popup);
     // Tear the click popup down with the sprite so disabling the pet leaves no
     // orphan window behind.
     if let Some(popup) = app.get_webview_window(popup::PET_POPUP_LABEL) {
@@ -710,5 +734,29 @@ mod tests {
         assert_eq!(opts.x, None);
         assert_eq!(opts.y, None);
         assert!(!opts.click_through);
+    }
+
+    #[test]
+    fn reveal_command_accepts_only_the_two_pet_window_labels() {
+        assert_eq!(
+            pet_panel_role_for_label("pet").unwrap(),
+            macos_panel::PetPanelRole::Sprite
+        );
+        assert_eq!(
+            pet_panel_role_for_label(popup::PET_POPUP_LABEL).unwrap(),
+            macos_panel::PetPanelRole::Popup
+        );
+        assert!(pet_panel_role_for_label("main")
+            .unwrap_err()
+            .contains("not a pet overlay"));
+    }
+
+    #[test]
+    fn pet_overlay_capability_uses_the_dedicated_reveal_permission() {
+        let capability = include_str!("../../capabilities/pet.json");
+        let permission = include_str!("../../permissions/pet-app-commands.toml");
+        assert!(capability.contains("\"allow-pet-app-commands\""));
+        assert!(permission.contains("\"reveal_pet_window\""));
+        assert!(!permission.contains("\"destroy_pet_window\""));
     }
 }
