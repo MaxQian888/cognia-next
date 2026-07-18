@@ -1661,6 +1661,12 @@
     "workspace": {
       "card": {
         "cancel": "Cancel",
+        "discardFile": "Discard this file's changes",
+        "discardFileConfirm": "Discard file changes",
+        "discardFileConfirmDescription": "This reverts {path} to its last committed state and cannot be undone. Other changes are left untouched.",
+        "discardFileConfirmTitle": "Discard changes to this file?",
+        "discardFileFailed": "Could not discard {path}: {error}",
+        "discardFileSuccess": "Reverted {path}",
         "editedFiles": "Edited {count, plural, one {# file} other {# files}}",
         "review": "Review",
         "undo": "Undo",
@@ -2662,6 +2668,14 @@
   },
   "chat": {
     "agentFlow": {
+      "action": {
+        "edit": "{count, plural, =1 {Edited a file} other {Edited files}}",
+        "other": "{count, plural, =1 {Used a tool} other {Used tools}}",
+        "read": "{count, plural, =1 {Read a file} other {Read files}}",
+        "run": "{count, plural, =1 {Ran a command} other {Ran commands}}",
+        "search": "{count, plural, =1 {Searched} other {Searched files}}",
+        "web": "{count, plural, =1 {Fetched the web} other {Fetched the web}}"
+      },
       "group": {
         "collapseAll": "Collapse all",
         "expandAll": "Expand all",
@@ -3183,6 +3197,7 @@
         "favorites": "Favorites",
         "other": "Other"
       },
+      "hideArtifacts": "Hide artifacts panel",
       "hideConversations": "Hide conversation list",
       "insights": "Session insights",
       "noApiKey": "No API key",
@@ -3226,6 +3241,7 @@
           "status": "Status"
         }
       },
+      "showArtifacts": "Show artifacts panel",
       "showConversations": "Show conversation list",
       "skills": {
         "aria": "Skills active in this session",
@@ -3340,6 +3356,7 @@
         "empty": "Empty directory",
         "title": "List directory"
       },
+      "openInReview": "Open in review",
       "plan": {
         "title": "Plan"
       },
@@ -3906,6 +3923,91 @@
       "title": "Merge platform identities"
     }
   },
+  "contextWorkbench": {
+    "actions": {
+      "collapse": "Collapse workbench",
+      "focus": "Focus mode",
+      "narrow": "Narrow mode",
+      "pin": "Pin panel",
+      "resize": "Resize workbench",
+      "retry": "Retry panel",
+      "unpin": "Unpin panel",
+      "wide": "Wide mode"
+    },
+    "activityRailLabel": "Context Workbench activities",
+    "aiActions": "AI actions",
+    "aiLoading": "Preparing the resource conversation…",
+    "artifactSelectionComment": {
+      "label": "Selection instruction",
+      "placeholder": "Tell AI what to do with this selection",
+      "selectFirst": "Select a range in the artifact before sending an instruction.",
+      "selectionReady": "This instruction will be scoped to the selected range.",
+      "sendToAi": "Send to AI"
+    },
+    "comments": "Comments",
+    "commentsPanel": {
+      "add": "Add comment",
+      "cancel": "Cancel",
+      "delete": "Delete",
+      "edit": "Edit",
+      "empty": "No comments yet.",
+      "hideResolved": "Hide resolved",
+      "placeholder": "Write a comment",
+      "reopen": "Reopen",
+      "reply": "Reply",
+      "replyPlaceholder": "Write a reply",
+      "resolve": "Resolve",
+      "resolved": "Resolved",
+      "save": "Save",
+      "showResolved": "Show resolved",
+      "stale": "Outdated anchor",
+      "toggleReaction": "Toggle {emoji} reaction",
+      "you": "You"
+    },
+    "exportResourceSession": "Export this resource conversation",
+    "metadata": {
+      "artifactTitle": "Artifact properties",
+      "artifactType": "Type",
+      "canvasTitle": "Document properties",
+      "documentType": "Type",
+      "language": "Language",
+      "notRun": "Not run",
+      "revision": "Revision",
+      "runtimeStatus": "Runtime",
+      "saveState": "Save state",
+      "unknown": "Unknown",
+      "updatedAt": "Updated",
+      "version": "Version"
+    },
+    "mobileDescription": "AI, comments, inspection, review, and preview tools for the current resource.",
+    "mobileTitle": "Context Workbench",
+    "panelError": "Panel unavailable",
+    "panelErrorDescription": "This panel stopped unexpectedly. The rest of your work is unchanged.",
+    "projectProposal": {
+      "apply": "Apply accepted",
+      "discard": "Discard",
+      "empty": "No file proposal is waiting for review.",
+      "rebase": "Rebase proposal",
+      "stale": "The file changed after this proposal was created. Rebase or discard it before applying.",
+      "undo": "Undo apply"
+    },
+    "proposalReview": "Proposal review",
+    "resourceChat": "AI conversation",
+    "unavailable": {
+      "comments": {
+        "description": "This resource does not currently provide comment threads. Other workbench activities remain available.",
+        "title": "Comments are not available"
+      },
+      "preview": {
+        "description": "This resource cannot be previewed in the workbench.",
+        "title": "Preview is not available"
+      },
+      "workspace": {
+        "description": "Filesystem workspace tools require a supported desktop or sandbox backend.",
+        "title": "Workspace is not available"
+      }
+    }
+  },
   "crashDialog": {
     "description": "A session started {time} (version {version}) ended in a crash. A crash report was saved with the details.",
     "dismiss": "Dismiss",
@@ -4079,17 +4181,20 @@
       },
       "cancel": "Cancel",
       "clearSearch": "Clear search",
+      "compactDensity": "Compact rows",
       "conversationsTitle": "Conversations",
       "deleteFolder": "Delete folder",
       "deleteFolderConfirmBody": "The folder is removed; its conversations stay and return to the date list. This cannot be undone.",
       "deleteFolderConfirmTitle": "Delete the folder “{name}”?",
       "directMessages": "Direct Messages",
+      "displayOptions": "Display options",
       "emptyArchived": "No archived conversations.",
       "emptyDm": "No chats yet. Pick a character to begin.",
       "emptyFolder": "Empty — move conversations here.",
       "emptySearch": "No conversations match “{query}”.",
       "emptyTeam": "No conversations yet. Start one above.",
       "folderActions": "Folder actions",
+      "groupByDate": "Group by date",
       "groupOther": "Other",
       "newChat": "New chat",
       "newConversation": "New conversation",
@@ -4099,10 +4204,13 @@
       "renameFolder": "Rename folder",
       "resizeHandle": "Resize sidebar",
       "searchAria": "Search conversations",
+      "searchMessageContent": "Search message content",
       "searchPlaceholder": "Search conversations…",
       "searchTruncated": "Some results may be hidden — refine your search.",
       "sectionPinned": "Pinned",
       "sectionRecent": "Recent",
+      "showPreview": "Show message previews",
+      "showUnreadBadges": "Show unread badges",
       "teamFallback": "Team",
       "viewActive": "Show active conversations",
       "viewArchived": "Show archived conversations"
@@ -4512,7 +4620,13 @@
       "actionsMenu": "Session actions",
       "archive": "Archive",
       "branchedFrom": "Branched conversation — open parent",
+      "cancel": "Cancel",
+      "cogniaAgentChecking": "Checking for the Cognia agent…",
+      "cogniaAgentNotInstalled": "The Cognia agent CLI isn't installed",
       "delete": "Delete",
+      "deleteConfirmAction": "Delete conversation",
+      "deleteConfirmBody": "This permanently removes the conversation and all its messages. This cannot be undone.",
+      "deleteConfirmTitle": "Delete “{title}”?",
       "dragHandle": "Drag to reorder or move to a folder",
       "moveToFolder": "Move to folder",
       "openInTerminal": "Open in terminal",
@@ -4601,6 +4715,7 @@
         "title": "Customize Layout",
         "titleBarGroup": "Title bar",
         "toggleGuildRail": "Toggle Guild Rail",
+        "toggleRightSidebar": "Toggle Right Sidebar",
         "toggleSidebar": "Toggle Sidebar",
         "toggleStatusBar": "Toggle Status Bar",
         "toggleTerminal": "Toggle Terminal"
@@ -5988,15 +6103,15 @@
     },
     "judge": {
       "heading": "Judge",
+      "invalidModel": "This judge model isn't offered by any configured provider — goals will fall back to the chat model.",
       "maxTokens": "Judge max tokens",
       "maxTokensHint": "Cap on the judge's reply. The judge answers in one line — 200 is plenty.",
       "model": "Judge model",
       "modelHint": "Model that decides whether the goal is done. Leave on the chat model unless you want a cheaper/faster judge.",
+      "noModels": "No models available. Configure a provider first.",
       "promptOverride": "Judge prompt override",
       "promptOverrideHint": "Replaces the built-in judge instructions. Must still ask for a one-line JSON verdict.",
-      "provider": "Judge provider",
-      "providerHint": "Provider id paired with the judge model. Leave blank to reuse the session / app provider.",
-      "providerPlaceholder": "Session provider",
+      "searchPlaceholder": "Search models…",
       "temperature": "Judge temperature",
       "temperatureHint": "0 is deterministic (recommended). Higher loosens the verdict.",
       "useChatModel": "Use chat model"
@@ -6011,8 +6126,10 @@
       "createdBadge": "Created: {date}",
       "endedBadge": "Ended: {date}",
       "exitReason": "Exit reason",
+      "foregroundDormancy": "Interactive goals advance only while the app is open; closing it pauses progress until you reopen this chat. Scheduled and headless goals continue on their own.",
       "lastJudgeReason": "Last judge reason",
       "objective": "Objective",
+      "reasonQuoted": "“{reason}”",
       "statusBadge": "Status: {status}",
       "tokenBudgetAria": "Token budget used",
       "tokens": "Tokens",
@@ -6076,7 +6193,6 @@
       "turn_limited": "turn limited"
     },
     "subgoals": {
-      "body": "Automatic subgoal decomposition is deferred to a later release. For now the goal runs as a single objective; the judge decides when it's complete.",
       "description": "Break the objective into a checklist the agent works through.",
       "empty": "No subgoals yet. Generate a checklist from the objective.",
       "error": "Couldn't generate a checklist. Try again.",
@@ -6107,6 +6223,7 @@
       "customise": "Want to customise this agent's prompt? Open Settings → Characters and duplicate the Goal Tracker.",
       "loading": "Loading…",
       "missing": "The Goal Tracker character is missing — reseed built-ins to restore it.",
+      "openCharacters": "Open Characters settings",
       "permissionMode": "Permission mode: {mode}",
       "systemPrompt": "System prompt"
     }
@@ -6498,6 +6615,7 @@
         "allowComputerUse": "Allow Computer Use tools",
         "allowComputerUseWarning": "When on, replies in this channel may fire screenshot, mouse, and keyboard actions on the host. Off by default for IM channels.",
         "allowGoalDriving": "Allow self-driving /goal on this conversation",
+        "allowGoalDrivingPlatform": "Runs only where the connector runtime runs — the desktop app (all channels) or `cli serve` (webhook channels). The mobile app can't drive IM goals.",
         "allowGoalDrivingWarning": "When off, /goal refuses to start on this IM conversation so a self-driving loop cannot auto-reply without operator review. Off by default.",
         "allowedSkills": {
           "add": "Add",
@@ -10603,6 +10721,54 @@
       "empty": "No hotspots recorded yet.",
       "hint": "Run an operation (send a message, run an OCR, execute a workflow) to populate the table."
     },
+    "managed": {
+      "actions": {
+        "kill": "Kill",
+        "restart": "Restart",
+        "restartUnavailable": "Restart is not available for this process."
+      },
+      "columns": {
+        "actions": "Actions",
+        "cpu": "CPU",
+        "memory": "Memory",
+        "name": "Process",
+        "pid": "PID",
+        "status": "Status",
+        "uptime": "Uptime"
+      },
+      "confirm": {
+        "cancel": "Cancel",
+        "confirm": "Kill process",
+        "description": "This stops {name}. External agents reconnect on next use; supervised processes may respawn automatically.",
+        "title": "Kill this process?"
+      },
+      "empty": "No cognia-managed processes are running.",
+      "status": {
+        "error": "Error",
+        "running": "Running",
+        "starting": "Starting",
+        "stopped": "Stopped",
+        "stopping": "Stopping"
+      },
+      "subsystems": {
+        "acpTerminal": "Agent terminals",
+        "chatSidecar": "Chat sidecar",
+        "externalAgent": "External agents",
+        "integratedTerminal": "Terminals",
+        "mcpServer": "MCP server"
+      },
+      "summary": {
+        "managed": "Managed",
+        "running": "Running",
+        "totalCpu": "Total CPU",
+        "totalMemory": "Total memory"
+      },
+      "toast": {
+        "failed": "Action failed: {error}",
+        "killed": "Stopped {name}",
+        "restarted": "Restarted {name}"
+      }
+    },
     "memoryPressure": {
       "high": "Critical",
       "low": "Normal",
@@ -10677,6 +10843,7 @@
     "subtitle": "Live view of the Rust backend's process tree, async runtime, and operation hotspots.",
     "tabs": {
       "hotspots": "Hotspots",
+      "managed": "Managed",
       "overview": "Performance",
       "processes": "Processes",
       "runtime": "Async runtime"
@@ -12887,7 +13054,28 @@
     "treeAria": "Project files",
     "treeEmpty": "No files",
     "unavailableDesc": "The project editor needs a desktop app or a paired device to reach the project files.",
-    "unavailableTitle": "Editor unavailable"
+    "unavailableTitle": "Editor unavailable",
+    "workbench": {
+      "ai": "AI",
+      "comments": "Comments",
+      "contentHash": "Draft token",
+      "dirty": "Unsaved draft",
+      "inspect": "Inspect",
+      "language": "Language",
+      "mobileTab": "Tools",
+      "outline": "Outline",
+      "outlineEmpty": "No symbols are available for this file.",
+      "path": "Path",
+      "previewFrameTitle": "Project file preview",
+      "previewRun": "Preview and run",
+      "problems": "Problems",
+      "problemsUnavailable": "Problems become available after the Monaco model is mounted.",
+      "relinkDescription": "Choose a thread from the same repository after an external file rename.",
+      "relinkTitle": "Reassociate an earlier resource thread",
+      "review": "Review",
+      "saved": "Saved",
+      "state": "State"
+    }
   },
   "providerCompare": {
     "compare": "Compare",
@@ -15579,21 +15767,50 @@
         "alreadyLatest": "You're on the latest version.",
         "autoCheckDescription": "Check for a new version on launch and periodically while the app is running.",
         "autoCheckLabel": "Check for updates automatically",
+        "autoDownloadDescription": "Download the signed package in the background. Installation still requires confirmation.",
+        "autoDownloadLabel": "Download updates automatically",
+        "checkIntervalDescription": "How often a running desktop app contacts the update endpoint.",
+        "checkIntervalLabel": "Check frequency",
         "checkUpdates": "Check for updates",
         "checking": "Checking…",
         "desktopOnly": "Updates are delivered through the desktop app.",
+        "download": "Download",
+        "downloadedReady": "The signed update package is downloaded and ready to install.",
+        "downloading": "Downloading…",
+        "downloadingBackground": "Downloading version {version}…",
         "downloadingPercent": "Downloading… {percent}%",
         "goInstallAction": "Install",
         "install": "Install {version}",
+        "installedRestartRequired": "Update installed. Restart Cognia to finish.",
         "installing": "Installing…",
+        "intervals": {
+          "15": "Every 15 minutes",
+          "60": "Every hour",
+          "360": "Every 6 hours",
+          "720": "Every 12 hours",
+          "1440": "Daily",
+          "10080": "Weekly"
+        },
         "lastChecked": "Last checked",
+        "relaunchAfterInstallDescription": "Restart immediately after installation. On Windows, the installer may close the app regardless.",
+        "relaunchAfterInstallLabel": "Restart after installing",
+        "requestTimeoutDescription": "Maximum time allowed for the manifest and package requests.",
+        "requestTimeoutLabel": "Request timeout",
+        "restartNow": "Restart now",
+        "timeoutSeconds": "{seconds} seconds",
         "title": "Updates",
         "updateAvailable": "Update {version} available",
         "updateAvailableBackground": "Version {version} is available.",
         "updateAvailableToast": "Update available: {version}",
         "updateCheckFailed": "Update check failed: {error}",
+        "updateDownloadFailed": "Update download failed: {error}",
+        "updateDownloadedBackground": "Version {version} is downloaded and ready to install.",
+        "updateDownloadedToast": "Update downloaded and verified.",
         "updateInstallFailed": "Update install failed: {error}",
-        "updateNoLongerAvailable": "Update no longer available."
+        "updateNoLongerAvailable": "Update no longer available.",
+        "updateRelaunchFailed": "Could not restart the app: {error}",
+        "useProxyDescription": "Route update checks and downloads through the active global network proxy.",
+        "useProxyLabel": "Use network proxy"
       },
       "versionCard": {
         "build": "Build number",
@@ -17142,6 +17359,7 @@
         "hint": "Push config and credentials to the CLI each time the desktop app starts. Credentials are written to an owner-only (0600) file in the CLI home.",
         "label": "Auto-sync on launch"
       },
+      "codexChatGptHint": "Codex API keys sync to the CLI, but Codex ChatGPT sign-ins aren't portable — sign in to Codex again in the CLI.",
       "description": "Push this app's agent config and provider credentials to the standalone cognia-agent CLI so it runs with the same setup — no second login.",
       "mcpHint": "MCP servers sync per-server from the MCP settings page — Cognia CLI is one of the agent targets there.",
       "status": {
@@ -18646,6 +18864,10 @@
           "hint": "Empty the composer once a message is sent.",
           "label": "Clear input after sending"
         },
+        "compactLayout": {
+          "hint": "Use a denser composer layout that leaves more room for the conversation.",
+          "label": "Use compact composer layout"
+        },
         "description": "Control how the message composer handles typing, sending, and drafts.",
         "inputHistory": {
           "hint": "Press Up / Down in an empty composer to recall previous messages.",
@@ -19790,10 +20012,22 @@
       "colStatus": "Status",
       "colTime": "Time",
       "colTokens": "Tokens",
+      "concurrencyHeading": "Upstream protection",
+      "concurrencyHelp": "Cool down rate-limited accounts, disable dead ones, and cap concurrent load so a burst can't trip your upstream accounts' risk-control.",
+      "concurrencyWait": "Queue wait (ms)",
+      "concurrencyWaitHelp": "How long a request waits for a free concurrency slot before it is rejected with 429. 0 = reject immediately.",
       "connectHeading": "Connect external tools",
       "connectHelp": "Point any OpenAI- or Anthropic-compatible client at the gateway by setting one of these environment variables.",
       "connectTimeout": "Connect timeout (s)",
       "connectTimeoutHelp": "Bounds a hung upstream connection on every request, streaming included.",
+      "cooldownFallback": "Rate-limit cooldown (s)",
+      "cooldownFallbackHelp": "Park an account this long after a 429 with no Retry-After header, so failover stops re-picking it. 0 = honour upstream headers only.",
+      "cooldownsCoolingUntil": "Cooling until {time}",
+      "cooldownsEmpty": "No upstream accounts are parked.",
+      "cooldownsHeading": "Parked upstream accounts",
+      "cooldownsHelp": "Accounts cooling (rate-limited) or permanently disabled (quota / auth). Cleared automatically as cooldowns lift.",
+      "cooldownsPermanent": "Disabled",
+      "cooldownsRefresh": "Refresh",
       "copied": "Copied",
       "copy": "Copy",
       "copyKey": "Copy key",
@@ -19803,6 +20037,9 @@
       "description": "Expose your configured providers as a local OpenAI- and Anthropic-compatible endpoint so external tools can borrow Cognia's routing and credentials.",
       "desktopOnlyNotice": "The gateway needs an HTTP listener and is available only in the desktop app.",
       "disable": "Disable",
+      "disableKeywords": "Disable keywords",
+      "disableKeywordsHelp": "Error-body phrases that mark an account permanently dead (quota exhausted, org disabled) rather than merely cooled.",
+      "disableKeywordsPlaceholder": "insufficient_quota, then Enter",
       "editKey": "Edit key",
       "enable": "Enable",
       "enabled": "Enable gateway",
@@ -19813,6 +20050,9 @@
       "exposedModelsPlaceholder": "fast, gpt-4o, then Enter",
       "exposureHeading": "Model exposure",
       "exposureHelp": "Control which models this gateway advertises and serves.",
+      "fieldStripAllow": "Field-strip exceptions",
+      "fieldStripAllowHelp": "Re-permit a stripped field for one provider, written provider:field.",
+      "fieldStripAllowPlaceholder": "openai:service_tier, then Enter",
       "hide": "Hide",
       "hideRawModels": "List aliases only",
       "hideRawModelsHelp": "Hide raw provider model ids from /v1/models — advertise routing aliases only. Direct provider:model calls still work.",
@@ -19850,11 +20090,17 @@
       "logFilterOk": "Success",
       "logHeading": "Request log",
       "logHelp": "Every inbound request, kept across restarts.",
+      "maxConcurrentPerKey": "Max concurrent / gateway key",
+      "maxConcurrentPerKeyHelp": "Simultaneous in-flight requests allowed per API key. 0 = unlimited.",
+      "maxConcurrentPerUpstreamKey": "Max concurrent / upstream account",
+      "maxConcurrentPerUpstreamKeyHelp": "Simultaneous upstream calls allowed per pooled account. 0 = unlimited.",
       "maxRetries": "Max attempts",
       "maxRetriesHelp": "Cap on candidates tried per request. 0 = walk the whole fallback chain.",
       "newKeyHeading": "Key created",
       "newKeyReveal": "Copy this key now — for your security it is shown only once.",
       "openaiSnippet": "OpenAI clients",
+      "overloadCooldown": "Overload cooldown (s)",
+      "overloadCooldownHelp": "Park an account this long after a 529 overloaded response.",
       "port": "Port",
       "quotaExceeded": "Quota spent",
       "quotaReset": "Quota usage reset",
@@ -19874,6 +20120,9 @@
       "save": "Save",
       "saved": "Saved",
       "serverHeading": "Server",
+      "strippedFields": "Stripped request fields",
+      "strippedFieldsHelp": "Client fields removed from every upstream request (billing / privacy / behaviour toggles). Dotted paths reach nested leaves.",
+      "strippedFieldsPlaceholder": "service_tier, store, then Enter",
       "summaryAvgLatency": "Avg latency",
       "summaryErrors": "Errors",
       "summaryRequests": "Requests",
@@ -21524,6 +21773,8 @@
         "provider": "Provider",
         "rate": "Rate",
         "remove": "Remove",
+        "retiredNotice": "This voice provider has been retired and may stop working at any time. Please pick another provider.",
+        "retiredSuffix": "(retired)",
         "sample": {
           "en": "Hello, this is a test of the text-to-speech feature.",
           "ja": "こんにちは、これはテスト音声です。",
@@ -24814,7 +25065,9 @@
         "discard": "Discard",
         "errorEditorNotOpen": "The editor for this workflow is not open.",
         "errorNotFound": "This proposal is no longer available — it may have been replaced by a newer one.",
+        "errorStale": "The workflow changed after this proposal was created. Rebase or discard it before applying.",
         "hideOps": "Hide ops",
+        "rebase": "Rebase",
         "showOps": "Show {count} ops",
         "status": {
           "applied": "Applied",
@@ -25735,6 +25988,10 @@
         "title": {
           "label": "Title"
         }
+      },
+      "arrayField": {
+        "add": "Add",
+        "removeItem": "Remove item {index}"
       },
       "branch": {
         "condition": {

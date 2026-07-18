@@ -1661,6 +1661,12 @@
     "workspace": {
       "card": {
         "cancel": "取消",
+        "discardFile": "丢弃此文件的改动",
+        "discardFileConfirm": "丢弃文件改动",
+        "discardFileConfirmDescription": "这会把 {path} 还原到最近一次提交的状态，且不可撤销。其它改动不受影响。",
+        "discardFileConfirmTitle": "丢弃此文件的改动？",
+        "discardFileFailed": "无法丢弃 {path}：{error}",
+        "discardFileSuccess": "已还原 {path}",
         "editedFiles": "已编辑 {count} 个文件",
         "review": "审阅",
         "undo": "撤销",
@@ -2662,6 +2668,14 @@
   },
   "chat": {
     "agentFlow": {
+      "action": {
+        "edit": "{count, plural, =1 {编辑了文件} other {编辑了多个文件}}",
+        "other": "{count, plural, =1 {调用了工具} other {调用了多个工具}}",
+        "read": "{count, plural, =1 {查看了文件} other {查看了多个文件}}",
+        "run": "{count, plural, =1 {运行了命令} other {运行了多个命令}}",
+        "search": "{count, plural, =1 {搜索了内容} other {多次搜索}}",
+        "web": "{count, plural, =1 {检索了网页} other {检索了多个网页}}"
+      },
       "group": {
         "collapseAll": "全部折叠",
         "expandAll": "全部展开",
@@ -3183,6 +3197,7 @@
         "favorites": "收藏",
         "other": "其他"
       },
+      "hideArtifacts": "折叠产物面板",
       "hideConversations": "折叠会话列表",
       "insights": "会话洞察",
       "noApiKey": "未配置 API Key",
@@ -3226,6 +3241,7 @@
           "status": "状态"
         }
       },
+      "showArtifacts": "展开产物面板",
       "showConversations": "展开会话列表",
       "skills": {
         "aria": "本会话已激活的技能",
@@ -3340,6 +3356,7 @@
         "empty": "空目录",
         "title": "列出目录"
       },
+      "openInReview": "在审阅中打开",
       "plan": {
         "title": "计划"
       },
@@ -3906,6 +3923,91 @@
       "title": "合并平台身份"
     }
   },
+  "contextWorkbench": {
+    "actions": {
+      "collapse": "收起工作台",
+      "focus": "聚焦模式",
+      "narrow": "窄栏模式",
+      "pin": "固定面板",
+      "resize": "调整工作台宽度",
+      "retry": "重试面板",
+      "unpin": "取消固定面板",
+      "wide": "宽栏模式"
+    },
+    "activityRailLabel": "上下文工作台活动",
+    "aiActions": "AI 操作",
+    "aiLoading": "正在准备资源会话…",
+    "artifactSelectionComment": {
+      "label": "选区指令",
+      "placeholder": "告诉 AI 如何处理该选区",
+      "selectFirst": "请先在产物中选择一段内容，再发送指令。",
+      "selectionReady": "该指令将仅作用于当前选区。",
+      "sendToAi": "发送给 AI"
+    },
+    "comments": "评论",
+    "commentsPanel": {
+      "add": "添加评论",
+      "cancel": "取消",
+      "delete": "删除",
+      "edit": "编辑",
+      "empty": "暂无评论。",
+      "hideResolved": "隐藏已解决",
+      "placeholder": "撰写评论",
+      "reopen": "重新打开",
+      "reply": "回复",
+      "replyPlaceholder": "撰写回复",
+      "resolve": "解决",
+      "resolved": "已解决",
+      "save": "保存",
+      "showResolved": "显示已解决",
+      "stale": "锚点已过期",
+      "toggleReaction": "切换 {emoji} 表情回应",
+      "you": "你"
+    },
+    "exportResourceSession": "导出此资源会话",
+    "metadata": {
+      "artifactTitle": "产物属性",
+      "artifactType": "类型",
+      "canvasTitle": "文档属性",
+      "documentType": "类型",
+      "language": "语言",
+      "notRun": "未运行",
+      "revision": "修订",
+      "runtimeStatus": "运行时",
+      "saveState": "保存状态",
+      "unknown": "未知",
+      "updatedAt": "更新时间",
+      "version": "版本"
+    },
+    "mobileDescription": "当前资源的 AI、评论、检查、审阅与预览工具。",
+    "mobileTitle": "上下文工作台",
+    "panelError": "面板暂不可用",
+    "panelErrorDescription": "此面板意外停止，其他工作内容未受影响。",
+    "projectProposal": {
+      "apply": "应用已接受项",
+      "discard": "放弃",
+      "empty": "当前没有待审阅的文件提案。",
+      "rebase": "重基提案",
+      "stale": "文件在提案创建后已发生变化，请先重基或放弃提案。",
+      "undo": "撤销应用"
+    },
+    "proposalReview": "提案审阅",
+    "resourceChat": "AI 会话",
+    "unavailable": {
+      "comments": {
+        "description": "此资源暂不提供评论线程，其他工作台功能仍可使用。",
+        "title": "评论暂不可用"
+      },
+      "preview": {
+        "description": "此资源暂时无法在工作台中预览。",
+        "title": "预览暂不可用"
+      },
+      "workspace": {
+        "description": "文件系统工作区工具需要受支持的桌面端或沙箱后端。",
+        "title": "工作区暂不可用"
+      }
+    }
+  },
   "crashDialog": {
     "description": "{time} 开始的会话（版本 {version}）因崩溃而结束。已保存包含详细信息的崩溃报告。",
     "dismiss": "关闭",
@@ -4079,17 +4181,20 @@
       },
       "cancel": "取消",
       "clearSearch": "清空搜索",
+      "compactDensity": "紧凑行距",
       "conversationsTitle": "会话",
       "deleteFolder": "删除文件夹",
       "deleteFolderConfirmBody": "仅删除文件夹；其中的会话会保留并回到日期列表。此操作不可撤销。",
       "deleteFolderConfirmTitle": "删除文件夹「{name}」？",
       "directMessages": "私信",
+      "displayOptions": "显示选项",
       "emptyArchived": "没有已归档的会话。",
       "emptyDm": "还没有聊天，挑选一个角色开始。",
       "emptyFolder": "空文件夹——把会话移动到这里。",
       "emptySearch": "没有与「{query}」匹配的会话。",
       "emptyTeam": "还没有会话，从上方开启一个吧。",
       "folderActions": "文件夹操作",
+      "groupByDate": "按日期分组",
       "groupOther": "其它",
       "newChat": "新建聊天",
       "newConversation": "新建会话",
@@ -4099,10 +4204,13 @@
       "renameFolder": "重命名文件夹",
       "resizeHandle": "调整侧边栏宽度",
       "searchAria": "搜索会话",
+      "searchMessageContent": "搜索消息正文",
       "searchPlaceholder": "搜索会话…",
       "searchTruncated": "部分结果可能被隐藏——请细化搜索。",
       "sectionPinned": "置顶",
       "sectionRecent": "最近",
+      "showPreview": "显示消息预览",
+      "showUnreadBadges": "显示未读角标",
       "teamFallback": "团队",
       "viewActive": "显示活跃会话",
       "viewArchived": "显示已归档会话"
@@ -4512,7 +4620,13 @@
       "actionsMenu": "会话操作",
       "archive": "归档",
       "branchedFrom": "分支会话——打开父会话",
+      "cancel": "取消",
+      "cogniaAgentChecking": "正在检查 Cognia 代理…",
+      "cogniaAgentNotInstalled": "未安装 Cognia 代理 CLI",
       "delete": "删除",
+      "deleteConfirmAction": "删除会话",
+      "deleteConfirmBody": "将永久删除此会话及其全部消息，且无法撤销。",
+      "deleteConfirmTitle": "删除「{title}」？",
       "dragHandle": "拖拽以重新排序或移动到文件夹",
       "moveToFolder": "移动到文件夹",
       "openInTerminal": "在终端打开",
@@ -4601,6 +4715,7 @@
         "title": "自定义布局",
         "titleBarGroup": "标题栏",
         "toggleGuildRail": "切换工会侧栏",
+        "toggleRightSidebar": "切换右侧栏",
         "toggleSidebar": "切换侧栏",
         "toggleStatusBar": "切换状态栏",
         "toggleTerminal": "切换终端"
@@ -5988,15 +6103,15 @@
     },
     "judge": {
       "heading": "判定",
+      "invalidModel": "该判定模型不在任何已配置的提供商中——目标将回退到聊天模型。",
       "maxTokens": "判定最大 token",
       "maxTokensHint": "判定回复的上限。判定只回一行——200 足够。",
       "model": "判定模型",
       "modelHint": "判定目标是否完成的模型。除非想用更便宜/更快的判定，否则保持聊天模型即可。",
+      "noModels": "暂无可用模型，请先配置提供商。",
       "promptOverride": "判定提示覆盖",
       "promptOverrideHint": "替换内置判定指令。仍须要求返回一行 JSON 判定结果。",
-      "provider": "判定提供商",
-      "providerHint": "与判定模型配对的提供商 id。留空则复用会话 / 应用的提供商。",
-      "providerPlaceholder": "会话提供商",
+      "searchPlaceholder": "搜索模型…",
       "temperature": "判定温度",
       "temperatureHint": "0 为确定性（推荐）。越高判定越宽松。",
       "useChatModel": "使用聊天模型"
@@ -6011,8 +6126,10 @@
       "createdBadge": "创建于：{date}",
       "endedBadge": "结束于：{date}",
       "exitReason": "退出原因",
+      "foregroundDormancy": "交互式目标仅在 App 打开时推进；关闭后会暂停，直到你重新打开该会话。定时与无头目标则会自行继续。",
       "lastJudgeReason": "最近判定理由",
       "objective": "目标",
+      "reasonQuoted": "“{reason}”",
       "statusBadge": "状态：{status}",
       "tokenBudgetAria": "已用 token 预算",
       "tokens": "Tokens",
@@ -6076,7 +6193,6 @@
       "turn_limited": "回合耗尽"
     },
     "subgoals": {
-      "body": "自动子目标拆解将在后续版本提供。目前目标作为单一任务运行，由判定决定何时完成。",
       "description": "把目标拆解为一份检查清单，供智能体逐项推进。",
       "empty": "还没有子目标。从目标生成一份检查清单。",
       "error": "生成清单失败，请重试。",
@@ -6107,6 +6223,7 @@
       "customise": "想自定义该智能体的提示？打开 设置 → 角色 并复制 Goal Tracker。",
       "loading": "加载中…",
       "missing": "Goal Tracker 角色缺失——重新播种内置项以恢复。",
+      "openCharacters": "打开角色设置",
       "permissionMode": "权限模式：{mode}",
       "systemPrompt": "系统提示"
     }
@@ -6498,6 +6615,7 @@
         "allowComputerUse": "允许 Computer Use 工具",
         "allowComputerUseWarning": "开启后，该会话中的回复可能在本机触发截图、鼠标、键盘操作。IM 默认关闭。",
         "allowGoalDriving": "允许在此会话上启动自驱 /goal",
+        "allowGoalDrivingPlatform": "仅在连接器运行时所在处运行——桌面应用（全部渠道）或 `cli serve`（webhook 渠道）。移动端无法驱动 IM 目标。",
         "allowGoalDrivingWarning": "关闭时 /goal 拒绝在该 IM 会话上启动，避免自驱循环在没人审核的情况下自动回复。默认关闭。",
         "allowedSkills": {
           "add": "添加",
@@ -10603,6 +10721,54 @@
       "empty": "尚未记录到热点。",
       "hint": "执行一次操作（发送消息、运行 OCR、执行工作流）即可填充该表。"
     },
+    "managed": {
+      "actions": {
+        "kill": "终止",
+        "restart": "重启",
+        "restartUnavailable": "该进程不支持重启。"
+      },
+      "columns": {
+        "actions": "操作",
+        "cpu": "CPU",
+        "memory": "内存",
+        "name": "进程",
+        "pid": "PID",
+        "status": "状态",
+        "uptime": "运行时长"
+      },
+      "confirm": {
+        "cancel": "取消",
+        "confirm": "终止进程",
+        "description": "这将停止 {name}。外部 Agent 会在下次使用时重连；受监督的进程可能会自动重启。",
+        "title": "终止该进程？"
+      },
+      "empty": "当前没有由 cognia 托管的进程在运行。",
+      "status": {
+        "error": "错误",
+        "running": "运行中",
+        "starting": "启动中",
+        "stopped": "已停止",
+        "stopping": "停止中"
+      },
+      "subsystems": {
+        "acpTerminal": "Agent 终端",
+        "chatSidecar": "聊天 sidecar",
+        "externalAgent": "外部 Agent",
+        "integratedTerminal": "集成终端",
+        "mcpServer": "MCP 服务器"
+      },
+      "summary": {
+        "managed": "托管进程",
+        "running": "运行中",
+        "totalCpu": "总 CPU",
+        "totalMemory": "总内存"
+      },
+      "toast": {
+        "failed": "操作失败：{error}",
+        "killed": "已停止 {name}",
+        "restarted": "已重启 {name}"
+      }
+    },
     "memoryPressure": {
       "high": "严重",
       "low": "正常",
@@ -10677,6 +10843,7 @@
     "subtitle": "实时查看 Rust 后端的进程树、异步运行时与操作热点。",
     "tabs": {
       "hotspots": "热点",
+      "managed": "托管进程",
       "overview": "性能",
       "processes": "进程",
       "runtime": "异步运行时"
@@ -12887,7 +13054,28 @@
     "treeAria": "项目文件",
     "treeEmpty": "暂无文件",
     "unavailableDesc": "项目编辑器需要桌面应用或已配对的设备才能访问项目文件。",
-    "unavailableTitle": "编辑器不可用"
+    "unavailableTitle": "编辑器不可用",
+    "workbench": {
+      "ai": "AI",
+      "comments": "评论",
+      "contentHash": "草稿令牌",
+      "dirty": "未保存草稿",
+      "inspect": "检查",
+      "language": "语言",
+      "mobileTab": "工具",
+      "outline": "大纲",
+      "outlineEmpty": "当前文件没有可用的符号。",
+      "path": "路径",
+      "previewFrameTitle": "项目文件预览",
+      "previewRun": "预览与运行",
+      "problems": "问题",
+      "problemsUnavailable": "Monaco 模型挂载后将显示问题列表。",
+      "relinkDescription": "文件在应用外重命名后，可选择同一仓库中的旧线程继续使用。",
+      "relinkTitle": "重新关联旧资源线程",
+      "review": "审阅",
+      "saved": "已保存",
+      "state": "状态"
+    }
   },
   "providerCompare": {
     "compare": "对比",
@@ -15579,21 +15767,50 @@
         "alreadyLatest": "你已是最新版本。",
         "autoCheckDescription": "启动时及应用运行期间定期检查新版本。",
         "autoCheckLabel": "自动检查更新",
+        "autoDownloadDescription": "在后台下载已签名的更新包，安装仍需确认。",
+        "autoDownloadLabel": "自动下载更新",
+        "checkIntervalDescription": "桌面应用运行期间访问更新端点的频率。",
+        "checkIntervalLabel": "检查频率",
         "checkUpdates": "检查更新",
         "checking": "检查中…",
         "desktopOnly": "更新通过桌面版应用推送。",
+        "download": "下载",
+        "downloadedReady": "已下载并验证更新包，可以安装。",
+        "downloading": "正在下载…",
+        "downloadingBackground": "正在下载 {version} 版本…",
         "downloadingPercent": "正在下载… {percent}%",
         "goInstallAction": "去安装",
         "install": "安装 {version}",
+        "installedRestartRequired": "更新已安装，重启 Cognia 后生效。",
         "installing": "正在安装…",
+        "intervals": {
+          "15": "每 15 分钟",
+          "60": "每小时",
+          "360": "每 6 小时",
+          "720": "每 12 小时",
+          "1440": "每天",
+          "10080": "每周"
+        },
         "lastChecked": "上次检查",
+        "relaunchAfterInstallDescription": "安装后立即重启。在 Windows 上，安装程序仍可能自动关闭应用。",
+        "relaunchAfterInstallLabel": "安装后重启",
+        "requestTimeoutDescription": "获取更新清单和更新包时允许等待的最长时间。",
+        "requestTimeoutLabel": "请求超时",
+        "restartNow": "立即重启",
+        "timeoutSeconds": "{seconds} 秒",
         "title": "更新",
         "updateAvailable": "{version} 版本可用",
         "updateAvailableBackground": "{version} 版本可用。",
         "updateAvailableToast": "可用更新：{version}",
         "updateCheckFailed": "检查更新失败：{error}",
+        "updateDownloadFailed": "下载更新失败：{error}",
+        "updateDownloadedBackground": "{version} 版本已下载，可以安装。",
+        "updateDownloadedToast": "更新已下载并验证。",
         "updateInstallFailed": "安装更新失败：{error}",
-        "updateNoLongerAvailable": "更新已不可用。"
+        "updateNoLongerAvailable": "更新已不可用。",
+        "updateRelaunchFailed": "无法重启应用：{error}",
+        "useProxyDescription": "通过当前启用的全局网络代理检查并下载更新。",
+        "useProxyLabel": "使用网络代理"
       },
       "versionCard": {
         "build": "构建号",
@@ -17142,6 +17359,7 @@
         "hint": "每次桌面应用启动时把配置与凭据推送到 CLI。凭据会写入 CLI 主目录下仅所有者可读写（0600）的文件。",
         "label": "启动时自动同步"
       },
+      "codexChatGptHint": "Codex API 密钥会同步到 CLI，但 Codex 的 ChatGPT 登录态无法迁移——需在 CLI 中重新登录 Codex。",
       "description": "把本应用的智能体配置与服务商凭据推送到独立的 cognia-agent CLI，使其无需二次登录即可使用相同设置。",
       "mcpHint": "MCP 服务器在 MCP 设置页按服务器逐个同步——Cognia CLI 是其中一个 agent 目标。",
       "status": {
@@ -18646,6 +18864,10 @@
           "hint": "消息发送后清空输入框。",
           "label": "发送后清空输入框"
         },
+        "compactLayout": {
+          "hint": "使用更紧凑的输入区布局，为会话内容留出更多空间。",
+          "label": "使用紧凑输入区布局"
+        },
         "description": "控制消息输入框的输入、发送与草稿行为。",
         "inputHistory": {
           "hint": "在空输入框中按上/下方向键调出历史消息。",
@@ -19790,10 +20012,22 @@
       "colStatus": "状态",
       "colTime": "时间",
       "colTokens": "Token",
+      "concurrencyHeading": "上游保护",
+      "concurrencyHelp": "为被限流的账号降温、停用已失效账号，并限制并发，避免突发流量触发上游账号的风控。",
+      "concurrencyWait": "排队等待（毫秒）",
+      "concurrencyWaitHelp": "请求在被 429 拒绝前，最多等待多久以获得空闲并发槽。0 = 立即拒绝。",
       "connectHeading": "接入外部工具",
       "connectHelp": "把任意 OpenAI / Anthropic 兼容客户端的 base URL 指向网关，设置下面其中一个环境变量即可。",
       "connectTimeout": "连接超时（秒）",
       "connectTimeoutHelp": "对每个请求（含流式）约束卡住的上游连接。",
+      "cooldownFallback": "限流冷却（秒）",
+      "cooldownFallbackHelp": "当 429 未带 Retry-After 头时，把该账号冷却这么久，避免故障转移立刻重选它。0 = 只遵循上游返回头。",
+      "cooldownsCoolingUntil": "冷却至 {time}",
+      "cooldownsEmpty": "当前没有被暂停的上游账号。",
+      "cooldownsHeading": "被暂停的上游账号",
+      "cooldownsHelp": "正在冷却（被限流）或已被永久停用（额度 / 鉴权）的账号。冷却结束后自动清除。",
+      "cooldownsPermanent": "已停用",
+      "cooldownsRefresh": "刷新",
       "copied": "已复制",
       "copy": "复制",
       "copyKey": "复制密钥",
@@ -19803,6 +20037,9 @@
       "description": "把你配置好的服务商暴露成本地 OpenAI / Anthropic 兼容端点，让外部工具借用 Cognia 的路由和凭据。",
       "desktopOnlyNotice": "网关需要 HTTP 监听器，仅在桌面端可用。",
       "disable": "停用",
+      "disableKeywords": "停用关键字",
+      "disableKeywordsHelp": "出现在错误响应体中的短语，命中即把该账号标记为永久失效（额度耗尽、组织被禁用），而非仅冷却。",
+      "disableKeywordsPlaceholder": "insufficient_quota，回车添加",
       "editKey": "编辑密钥",
       "enable": "启用",
       "enabled": "启用网关",
@@ -19813,6 +20050,9 @@
       "exposedModelsPlaceholder": "fast, gpt-4o，回车添加",
       "exposureHeading": "模型暴露",
       "exposureHelp": "控制此网关对外公布并提供哪些模型。",
+      "fieldStripAllow": "字段剥离例外",
+      "fieldStripAllowHelp": "为某个服务商放行一个被剥离字段，写作 provider:field。",
+      "fieldStripAllowPlaceholder": "openai:service_tier，回车添加",
       "hide": "隐藏",
       "hideRawModels": "仅列出别名",
       "hideRawModelsHelp": "在 /v1/models 中隐藏原始服务商模型 id，只公布路由别名。直接的 provider:model 调用仍然有效。",
@@ -19850,11 +20090,17 @@
       "logFilterOk": "成功",
       "logHeading": "请求日志",
       "logHelp": "每一次入站请求，重启后仍保留。",
+      "maxConcurrentPerKey": "最大并发 / 网关密钥",
+      "maxConcurrentPerKeyHelp": "每个 API 密钥允许的同时在途请求数。0 = 不限。",
+      "maxConcurrentPerUpstreamKey": "最大并发 / 上游账号",
+      "maxConcurrentPerUpstreamKeyHelp": "每个池内上游账号允许的同时在途调用数。0 = 不限。",
       "maxRetries": "最大尝试数",
       "maxRetriesHelp": "每个请求尝试的候选上限。0 = 走完整条回退链。",
       "newKeyHeading": "密钥已创建",
       "newKeyReveal": "请立即复制此密钥——出于安全考虑它只显示这一次。",
       "openaiSnippet": "OpenAI 客户端",
+      "overloadCooldown": "过载冷却（秒）",
+      "overloadCooldownHelp": "遇到 529 过载响应后，把该账号冷却这么久。",
       "port": "端口",
       "quotaExceeded": "额度已用尽",
       "quotaReset": "额度用量已重置",
@@ -19874,6 +20120,9 @@
       "save": "保存",
       "saved": "已保存",
       "serverHeading": "服务器",
+      "strippedFields": "剥离的请求字段",
+      "strippedFieldsHelp": "从每个上游请求体中移除的客户端字段（计费 / 隐私 / 行为开关）。点号路径可命中嵌套叶子。",
+      "strippedFieldsPlaceholder": "service_tier, store，回车添加",
       "summaryAvgLatency": "平均延迟",
       "summaryErrors": "错误数",
       "summaryRequests": "请求数",
@@ -21524,6 +21773,8 @@
         "provider": "服务商",
         "rate": "语速",
         "remove": "移除",
+        "retiredNotice": "该语音服务商已退役，随时可能失效。请改用其他服务商。",
+        "retiredSuffix": "（已退役）",
         "sample": {
           "en": "Hello, this is a test of the text-to-speech feature.",
           "ja": "こんにちは、これはテスト音声です。",
@@ -24814,7 +25065,9 @@
         "discard": "丢弃",
         "errorEditorNotOpen": "对应的工作流编辑器未打开。",
         "errorNotFound": "这个提案已不可用——可能已被更新的提案替代。",
+        "errorStale": "工作流在该提案创建后已变更，请先变基或丢弃后再应用。",
         "hideOps": "收起操作",
+        "rebase": "变基",
         "showOps": "展开 {count} 项操作",
         "status": {
           "applied": "已应用",
@@ -25735,6 +25988,10 @@
         "title": {
           "label": "标题"
         }
+      },
+      "arrayField": {
+        "add": "添加",
+        "removeItem": "移除第 {index} 项"
       },
       "branch": {
         "condition": {
