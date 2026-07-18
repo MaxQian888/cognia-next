@@ -150,6 +150,12 @@ describe("lib/tauri/pet-window — happy path command mapping", () => {
     await expect(revealPetWindow(true)).resolves.toBe(true)
     expect(mockInvoke).toHaveBeenCalledWith("reveal_pet_window", { focus: true })
   })
+
+  it("revealPetWindow defaults to a non-activating reveal", async () => {
+    mockInvoke.mockResolvedValue(undefined)
+    await expect(revealPetWindow()).resolves.toBe(true)
+    expect(mockInvoke).toHaveBeenCalledWith("reveal_pet_window", { focus: false })
+  })
 })
 
 describe("lib/tauri/pet-window — off Tauri", () => {
@@ -321,6 +327,7 @@ describe("lib/tauri/pet-window — command rejection is swallowed", () => {
     await expect(openPetPopup({ width: 1, height: 1, x: 0, y: 0 })).resolves.toBe(false)
     await expect(closePetPopup()).resolves.toBe(false)
     await expect(resizePetPopup(1, 1)).resolves.toBe(false)
-    expect(warnSpy).toHaveBeenCalledTimes(13)
+    await expect(revealPetWindow()).resolves.toBe(false)
+    expect(warnSpy).toHaveBeenCalledTimes(14)
   })
 })

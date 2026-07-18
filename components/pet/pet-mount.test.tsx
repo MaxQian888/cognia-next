@@ -243,6 +243,31 @@ describe("PetMount", () => {
     expect(openPetWindow).not.toHaveBeenCalled()
   })
 
+  it("does not restore the desktop-pet window after the mount is disposed", async () => {
+    settingsValue = {
+      petSettings: {
+        ...ENABLED_SETTINGS.petSettings,
+        desktopPet: { enabled: true, clickThrough: false, size: 128, position: null },
+      },
+    }
+    getPetWindowRole.mockReturnValue("main")
+    isTauri.mockReturnValue(true)
+    let resolveProbe!: (open: boolean) => void
+    isPetWindowOpen.mockReturnValue(
+      new Promise<boolean>((resolve) => {
+        resolveProbe = resolve
+      })
+    )
+
+    const { unmount } = render(<PetMount />)
+    await waitFor(() => expect(isPetWindowOpen).toHaveBeenCalledTimes(1))
+    unmount()
+    resolveProbe(false)
+    await Promise.resolve()
+
+    expect(openPetWindow).not.toHaveBeenCalled()
+  })
+
   it("routes the popup's open-console request to /pet?tab=…", () => {
     settingsValue = ENABLED_SETTINGS
     getPetWindowRole.mockReturnValue("main")
