@@ -240,6 +240,24 @@ describe("<UpdateCard />", () => {
     expect(saveUpdateSettingsMock).toHaveBeenNthCalledWith(5, { requestTimeoutSeconds: 60 })
   })
 
+  it("downloads immediately after a manual check when auto-download is enabled", async () => {
+    settingsState.settings = {
+      updates: { ...defaultUpdateSettings, autoDownload: true },
+    }
+    const download = jest.fn(async () => {})
+    checkMock.mockResolvedValueOnce({
+      version: "1.0.0",
+      download,
+      install: jest.fn(async () => {}),
+    })
+    render(<UpdateCard />)
+
+    fireEvent.click(screen.getByTestId("check-updates"))
+
+    await waitFor(() => expect(download).toHaveBeenCalledTimes(1))
+    expect(screen.getByTestId("update-downloaded")).toBeInTheDocument()
+  })
+
   it("surfaces updater preference persistence failures", async () => {
     saveUpdateSettingsMock.mockRejectedValueOnce("db unavailable")
     render(<UpdateCard />)
