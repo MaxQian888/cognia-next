@@ -52,6 +52,7 @@ members = [
   "crates/cognia-ccswitch",
   "crates/cognia-mcp-server",
   "crates/cognia-external-agent",
+  "crates/cognia-task-workspace",
 ]
 exclude = [
   "services/signaling-server",

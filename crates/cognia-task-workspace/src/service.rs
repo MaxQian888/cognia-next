@@ -1,0 +1,810 @@
+use crate::{
+    ledger,
+    resource::{is_sensitive_resource, media_type_for},
+    snapshot::{capture, materialize, WorkspaceSnapshot},
+    store::WorkspaceStore,
+    BeginTaskRun, ChangeKind, ContributionOrigin, IsolationKind, ResourceChange, RunState, TaskRun,
+    TaskWorkspace, TaskWorkspaceState,
+};
+use parking_lot::Mutex;
+use std::{
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+
+#[derive(Debug, Clone)]
+pub struct ServiceConfig {
+    pub data_dir: PathBuf,
+    pub retention: Duration,
+    pub max_blob_bytes: u64,
+}
+
+impl ServiceConfig {
+    pub fn new(data_dir: PathBuf) -> Self {
+        Self {
+            data_dir,
+            retention: Duration::from_secs(30 * 24 * 60 * 60),
+            max_blob_bytes: 1024 * 1024 * 1024,
+        }
+    }
+}
+
+pub struct TaskWorkspaceService {
+    store: Mutex<WorkspaceStore>,
+    execution_dir: PathBuf,
+    retention: Duration,
+}
+
+impl TaskWorkspaceService {
+    pub fn open(config: ServiceConfig) -> Result<Self, String> {
+        let service_dir = config.data_dir.join("task-workspaces");
+        let execution_dir = service_dir.join("executions");
+        fs::create_dir_all(&execution_dir).map_err(|error| {
+            format!("create execution dir {}: {error}", execution_dir.display())
+        })?;
+        Ok(Self {
+            store: Mutex::new(WorkspaceStore::open(&service_dir, config.max_blob_bytes)?),
+            execution_dir,
+            retention: config.retention,
+        })
+    }
+
+    pub fn begin_run(&self, input: BeginTaskRun) -> Result<TaskRun, String> {
+        validate_id("taskId", &input.task_id)?;
+        validate_id("runId", &input.run_id)?;
+        let root = PathBuf::from(&input.workspace_root)
+            .canonicalize()
+            .map_err(|error| format!("canonicalize workspace {}: {error}", input.workspace_root))?;
+        if !root.is_dir() {
+            return Err(format!("workspace is not a directory: {}", root.display()));
+        }
+        let now = now_ms();
+        let (baseline, blobs) = capture(&root)?;
+        let execution_root = self.execution_dir.join(&input.task_id).join(&input.run_id);
+        if execution_root.exists() {
+            return Err(format!(
+                "run already has an execution root: {}",
+                input.run_id
+            ));
+        }
+        let (isolation_kind, isolation_ref) = create_execution(
+            &root,
+            &execution_root,
+            &input.task_id,
+            &input.run_id,
+            &baseline,
+            &blobs,
+        )?;
+
+        let mut store = self.store.lock();
+        for (hash, bytes) in &blobs {
+            if let Err(error) = store.put_blob(hash, bytes, now) {
+                let _ = fs::remove_dir_all(&execution_root);
+                return Err(error);
+            }
+        }
+        let mut task = store.get_task(&input.task_id)?.unwrap_or(TaskWorkspace {
+            task_id: input.task_id.clone(),
+            session_id: input.session_id.clone(),
+            workspace_root: root.to_string_lossy().into_owned(),
+            state: TaskWorkspaceState::Active,
+            revision: 0,
+            created_at: now,
+            expires_at: now + self.retention.as_millis() as i64,
+            pinned: false,
+        });
+        if task.workspace_root != root.to_string_lossy() {
+            let _ = fs::remove_dir_all(&execution_root);
+            return Err("one task cannot span multiple workspace roots".into());
+        }
+        task.state = TaskWorkspaceState::Active;
+        task.expires_at = now + self.retention.as_millis() as i64;
+        store.put_task(&task)?;
+        let run = TaskRun {
+            run_id: input.run_id,
+            task_id: input.task_id,
+            parent_run_id: input.parent_run_id,
+            agent_id: input.agent_id,
+            agent_kind: input.agent_kind,
+            execution_root: execution_root.to_string_lossy().into_owned(),
+            isolation_kind,
+            isolation_ref,
+            baseline_revision: task.revision,
+            state: RunState::Running,
+            created_at: now,
+            settled_at: None,
+        };
+        store.put_run(&run, &baseline)?;
+        Ok(run)
+    }
+
+    pub fn settle_run(&self, run_id: &str) -> Result<Vec<ResourceChange>, String> {
+        let now = now_ms();
+        let mut store = self.store.lock();
+        let (mut run, baseline): (TaskRun, WorkspaceSnapshot) = store
+            .get_run(run_id)?
+            .ok_or_else(|| format!("unknown task run: {run_id}"))?;
+        if run.state != RunState::Running && run.state != RunState::Settling {
+            return store.list_resources(&run.task_id);
+        }
+        run.state = RunState::Settling;
+        store.put_run(&run, &baseline)?;
+        let (current, blobs) = capture(Path::new(&run.execution_root))?;
+        for (hash, bytes) in &blobs {
+            store.put_blob(hash, bytes, now)?;
+        }
+        let mut task = store
+            .get_task(&run.task_id)?
+            .ok_or_else(|| format!("missing task: {}", run.task_id))?;
+        task.revision = task.revision.saturating_add(1);
+        let changes = reconcile(
+            &baseline,
+            &current,
+            &mut store,
+            task.revision,
+            &run.agent_id,
+            now,
+        )?;
+        run.state = RunState::Ready;
+        run.settled_at = Some(now);
+        task.state = TaskWorkspaceState::Ready;
+        task.expires_at = now + self.retention.as_millis() as i64;
+        store.replace_resources(&task.task_id, &run.run_id, task.revision, &changes)?;
+        let scratch = self
+            .execution_dir
+            .parent()
+            .unwrap_or(&self.execution_dir)
+            .join("scratch");
+        let patch = ledger::build_patch_set(
+            &task.task_id,
+            &run.run_id,
+            run.baseline_revision,
+            &changes,
+            &mut store,
+            &scratch,
+            now,
+        )?;
+        store.put_patch_set(&patch)?;
+        store.put_run(&run, &baseline)?;
+        store.put_task(&task)?;
+        Ok(changes)
+    }
+
+    pub fn get_task(&self, task_id: &str) -> Result<Option<TaskWorkspace>, String> {
+        self.store.lock().get_task(task_id)
+    }
+
+    pub fn list_runs(&self, task_id: &str) -> Result<Vec<TaskRun>, String> {
+        self.store.lock().list_runs(task_id)
+    }
+
+    pub fn list_resources(&self, task_id: &str) -> Result<Vec<ResourceChange>, String> {
+        self.store.lock().list_resources(task_id)
+    }
+
+    pub fn get_patch_set(&self, run_id: &str) -> Result<Option<crate::PatchSet>, String> {
+        self.store.lock().get_patch_set(run_id)
+    }
+
+    pub fn apply_patch_set(
+        &self,
+        run_id: &str,
+        selection: &[crate::PatchSelection],
+    ) -> Result<crate::ApplyOutcome, String> {
+        let now = now_ms();
+        let mut store = self.store.lock();
+        let mut patch = store
+            .get_patch_set(run_id)?
+            .ok_or_else(|| format!("unknown patch set for run: {run_id}"))?;
+        let mut task = store
+            .get_task(&patch.task_id)?
+            .ok_or_else(|| format!("missing task: {}", patch.task_id))?;
+        let next_revision = task.revision.saturating_add(1);
+        let scratch = self
+            .execution_dir
+            .parent()
+            .unwrap_or(&self.execution_dir)
+            .join("scratch");
+        let outcome = ledger::apply(
+            Path::new(&task.workspace_root),
+            &scratch,
+            &mut store,
+            &mut patch,
+            selection,
+            next_revision,
+            now,
+        )?;
+        if outcome.state == crate::PatchState::Applied {
+            task.revision = next_revision;
+            task.state = TaskWorkspaceState::Applied;
+        } else if outcome.state == crate::PatchState::Conflict {
+            task.state = TaskWorkspaceState::Conflict;
+        }
+        task.expires_at = now + self.retention.as_millis() as i64;
+        store.put_patch_set(&patch)?;
+        store.put_task(&task)?;
+        Ok(outcome)
+    }
+
+    pub fn undo_patch_set(&self, run_id: &str) -> Result<crate::ApplyOutcome, String> {
+        let now = now_ms();
+        let mut store = self.store.lock();
+        let mut patch = store
+            .get_patch_set(run_id)?
+            .ok_or_else(|| format!("unknown patch set for run: {run_id}"))?;
+        let mut task = store
+            .get_task(&patch.task_id)?
+            .ok_or_else(|| format!("missing task: {}", patch.task_id))?;
+        let next_revision = task.revision.saturating_add(1);
+        let scratch = self
+            .execution_dir
+            .parent()
+            .unwrap_or(&self.execution_dir)
+            .join("scratch");
+        let outcome = ledger::undo(
+            Path::new(&task.workspace_root),
+            &scratch,
+            &mut store,
+            &mut patch,
+            next_revision,
+            now,
+        )?;
+        if outcome.state == crate::PatchState::Reverted {
+            task.revision = next_revision;
+            task.state = TaskWorkspaceState::Ready;
+        } else if outcome.state == crate::PatchState::Conflict {
+            task.state = TaskWorkspaceState::Conflict;
+        }
+        task.expires_at = now + self.retention.as_millis() as i64;
+        store.put_patch_set(&patch)?;
+        store.put_task(&task)?;
+        Ok(outcome)
+    }
+}
+
+fn create_execution(
+    workspace_root: &Path,
+    execution_root: &Path,
+    task_id: &str,
+    run_id: &str,
+    baseline: &WorkspaceSnapshot,
+    blobs: &HashMap<String, Vec<u8>>,
+) -> Result<(IsolationKind, Option<String>), String> {
+    if is_git_root(workspace_root) {
+        let branch = format!("cognia/task/{task_id}/{run_id}");
+        if let Some(parent) = execution_root.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("create {}: {error}", parent.display()))?;
+        }
+        let output = Command::new("git")
+            .args(["-C"])
+            .arg(workspace_root)
+            .args(["worktree", "add", "-b", &branch])
+            .arg(execution_root)
+            .arg("HEAD")
+            .output()
+            .map_err(|error| format!("start git worktree add: {error}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "git worktree add failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        let result = clear_worktree_contents(execution_root)
+            .and_then(|_| materialize(execution_root, baseline, blobs));
+        if let Err(error) = result {
+            cleanup_git_worktree(workspace_root, execution_root, &branch);
+            return Err(error);
+        }
+        return Ok((IsolationKind::GitWorktree, Some(branch)));
+    }
+    materialize(execution_root, baseline, blobs)?;
+    Ok((IsolationKind::Shadow, None))
+}
+
+fn is_git_root(workspace_root: &Path) -> bool {
+    let Ok(repository) = git2::Repository::discover(workspace_root) else {
+        return false;
+    };
+    repository
+        .workdir()
+        .and_then(|path| path.canonicalize().ok())
+        .is_some_and(|path| path == workspace_root)
+}
+
+fn clear_worktree_contents(execution_root: &Path) -> Result<(), String> {
+    for entry in fs::read_dir(execution_root)
+        .map_err(|error| format!("read worktree {}: {error}", execution_root.display()))?
+    {
+        let entry = entry.map_err(|error| format!("read worktree entry: {error}"))?;
+        if entry.file_name() == ".git" {
+            continue;
+        }
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("stat {}: {error}", path.display()))?;
+        if file_type.is_dir() && !file_type.is_symlink() {
+            fs::remove_dir_all(&path)
+                .map_err(|error| format!("remove {}: {error}", path.display()))?;
+        } else {
+            fs::remove_file(&path)
+                .map_err(|error| format!("remove {}: {error}", path.display()))?;
+        }
+    }
+    Ok(())
+}
+
+fn cleanup_git_worktree(workspace_root: &Path, execution_root: &Path, branch: &str) {
+    let _ = Command::new("git")
+        .args(["-C"])
+        .arg(workspace_root)
+        .args(["worktree", "remove", "--force"])
+        .arg(execution_root)
+        .status();
+    let _ = Command::new("git")
+        .args(["-C"])
+        .arg(workspace_root)
+        .args(["branch", "-D", branch])
+        .status();
+}
+
+fn reconcile(
+    before: &WorkspaceSnapshot,
+    after: &WorkspaceSnapshot,
+    store: &mut WorkspaceStore,
+    revision: u64,
+    agent_id: &str,
+    now: i64,
+) -> Result<Vec<ResourceChange>, String> {
+    let meta = ChangeMeta { revision, agent_id };
+    let mut deleted: Vec<_> = before
+        .entries
+        .iter()
+        .filter(|(path, _)| !after.entries.contains_key(*path))
+        .collect();
+    let mut created: Vec<_> = after
+        .entries
+        .iter()
+        .filter(|(path, _)| !before.entries.contains_key(*path))
+        .collect();
+    let mut renames = Vec::new();
+    let mut consumed_deleted = Vec::new();
+    let mut consumed_created = Vec::new();
+    for (deleted_index, (old_path, old)) in deleted.iter().enumerate() {
+        if let Some((created_index, (new_path, new))) = created
+            .iter()
+            .enumerate()
+            .find(|(index, (_, new))| !consumed_created.contains(index) && new.hash == old.hash)
+        {
+            consumed_deleted.push(deleted_index);
+            consumed_created.push(created_index);
+            renames.push((
+                (*old_path).clone(),
+                (*new_path).clone(),
+                (*old).clone(),
+                (*new).clone(),
+            ));
+        }
+    }
+    deleted = deleted
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, value)| (!consumed_deleted.contains(&index)).then_some(value))
+        .collect();
+    created = created
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, value)| (!consumed_created.contains(&index)).then_some(value))
+        .collect();
+
+    let mut changes = Vec::new();
+    for (old_path, new_path, old, new) in renames {
+        changes.push(change_from_entries(
+            &new_path,
+            Some(old_path),
+            ChangeKind::Renamed,
+            Some(&old),
+            Some(&new),
+            meta,
+            None,
+        ));
+    }
+    for (path, entry) in created {
+        let bytes = store.get_blob(&entry.hash, now)?;
+        let stats = (!entry.binary).then(|| (line_count(&bytes), 0));
+        changes.push(change_from_entries(
+            path,
+            None,
+            ChangeKind::Created,
+            None,
+            Some(entry),
+            meta,
+            stats,
+        ));
+    }
+    for (path, entry) in deleted {
+        let bytes = store.get_blob(&entry.hash, now)?;
+        let stats = (!entry.binary).then(|| (0, line_count(&bytes)));
+        changes.push(change_from_entries(
+            path,
+            None,
+            ChangeKind::Deleted,
+            Some(entry),
+            None,
+            meta,
+            stats,
+        ));
+    }
+    for (path, old) in &before.entries {
+        let Some(new) = after.entries.get(path) else {
+            continue;
+        };
+        if old.hash == new.hash && old.mode == new.mode && old.kind == new.kind {
+            continue;
+        }
+        let stats = if !old.binary && !new.binary {
+            let old_bytes = store.get_blob(&old.hash, now)?;
+            let new_bytes = store.get_blob(&new.hash, now)?;
+            line_stats(&old_bytes, &new_bytes)
+        } else {
+            None
+        };
+        changes.push(change_from_entries(
+            path,
+            None,
+            ChangeKind::Modified,
+            Some(old),
+            Some(new),
+            meta,
+            stats,
+        ));
+    }
+    changes.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(changes)
+}
+
+#[derive(Clone, Copy)]
+struct ChangeMeta<'a> {
+    revision: u64,
+    agent_id: &'a str,
+}
+
+fn change_from_entries(
+    path: &str,
+    old_path: Option<String>,
+    kind: ChangeKind,
+    before: Option<&crate::snapshot::SnapshotEntry>,
+    after: Option<&crate::snapshot::SnapshotEntry>,
+    meta: ChangeMeta<'_>,
+    stats: Option<(u32, u32)>,
+) -> ResourceChange {
+    let visible = after.or(before);
+    ResourceChange {
+        path: path.to_string(),
+        old_path,
+        kind,
+        origin: ContributionOrigin::Agent,
+        agent_id: Some(meta.agent_id.to_string()),
+        media_type: visible
+            .map(|entry| entry.media_type.clone())
+            .unwrap_or_else(|| media_type_for(path, false).to_string()),
+        size: after.map(|entry| entry.size).unwrap_or(0),
+        hash: after.map(|entry| entry.hash.clone()),
+        before_hash: before.map(|entry| entry.hash.clone()),
+        insertions: stats.map(|value| value.0),
+        deletions: stats.map(|value| value.1),
+        binary: visible.map(|entry| entry.binary).unwrap_or(false),
+        resource_kind: match visible.map(|entry| entry.kind) {
+            Some(crate::snapshot::EntryKind::Symlink) => crate::ResourceKind::Symlink,
+            _ => crate::ResourceKind::File,
+        },
+        before_mode: before.and_then(|entry| entry.mode),
+        after_mode: after.and_then(|entry| entry.mode),
+        sensitive: visible
+            .map(|entry| entry.sensitive)
+            .unwrap_or_else(|| is_sensitive_resource(path)),
+        revision: meta.revision,
+    }
+}
+
+fn line_count(bytes: &[u8]) -> u32 {
+    if bytes.is_empty() {
+        return 0;
+    }
+    let newlines = bytes.iter().filter(|byte| **byte == b'\n').count() as u32;
+    newlines + u32::from(!bytes.ends_with(b"\n"))
+}
+
+fn line_stats(before: &[u8], after: &[u8]) -> Option<(u32, u32)> {
+    let before = std::str::from_utf8(before)
+        .ok()?
+        .lines()
+        .collect::<Vec<_>>();
+    let after = std::str::from_utf8(after).ok()?.lines().collect::<Vec<_>>();
+    if before.len().saturating_mul(after.len()) > 4_000_000 {
+        return None;
+    }
+    let mut previous = vec![0_u32; after.len() + 1];
+    for before_line in &before {
+        let mut current = vec![0_u32; after.len() + 1];
+        for (index, after_line) in after.iter().enumerate() {
+            current[index + 1] = if before_line == after_line {
+                previous[index] + 1
+            } else {
+                current[index].max(previous[index + 1])
+            };
+        }
+        previous = current;
+    }
+    let common = previous[after.len()];
+    Some((after.len() as u32 - common, before.len() as u32 - common))
+}
+
+fn validate_id(label: &str, value: &str) -> Result<(), String> {
+    if value.is_empty()
+        || value.len() > 128
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':'))
+    {
+        return Err(format!("invalid {label}: {value}"));
+    }
+    Ok(())
+}
+
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ChangeKind, IsolationKind, RunState, TaskWorkspaceState};
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn input(root: &TempDir, task_id: &str, run_id: &str) -> BeginTaskRun {
+        BeginTaskRun {
+            task_id: task_id.into(),
+            session_id: "session-1".into(),
+            run_id: run_id.into(),
+            parent_run_id: None,
+            agent_id: "agent-1".into(),
+            agent_kind: "in-app".into(),
+            workspace_root: root.path().to_string_lossy().into_owned(),
+        }
+    }
+
+    #[test]
+    fn non_git_run_is_isolated_and_settles_authoritative_changes() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        fs::write(workspace.path().join("modify.txt"), "before\n").unwrap();
+        fs::write(workspace.path().join("delete.txt"), "gone\n").unwrap();
+
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let run = service
+            .begin_run(input(&workspace, "task-1", "run-1"))
+            .unwrap();
+        assert_eq!(run.isolation_kind, IsolationKind::Shadow);
+        assert_eq!(run.state, RunState::Running);
+        assert_ne!(run.execution_root, workspace.path().to_string_lossy());
+
+        let execution = PathBuf::from(&run.execution_root);
+        fs::write(execution.join("modify.txt"), "after\n").unwrap();
+        fs::remove_file(execution.join("delete.txt")).unwrap();
+        fs::write(execution.join("create.txt"), "created\n").unwrap();
+
+        assert_eq!(
+            fs::read_to_string(workspace.path().join("modify.txt")).unwrap(),
+            "before\n"
+        );
+        assert!(workspace.path().join("delete.txt").exists());
+        assert!(!workspace.path().join("create.txt").exists());
+
+        let changes = service.settle_run("run-1").unwrap();
+        assert_eq!(
+            changes
+                .iter()
+                .map(|change| (change.path.as_str(), change.kind))
+                .collect::<Vec<_>>(),
+            vec![
+                ("create.txt", ChangeKind::Created),
+                ("delete.txt", ChangeKind::Deleted),
+                ("modify.txt", ChangeKind::Modified),
+            ]
+        );
+        assert!(changes.iter().all(|change| change.revision == 1));
+
+        let task = service.get_task("task-1").unwrap().unwrap();
+        assert_eq!(task.state, TaskWorkspaceState::Ready);
+        assert_eq!(task.revision, 1);
+        assert_eq!(service.list_resources("task-1").unwrap(), changes);
+        assert_eq!(
+            service.list_runs("task-1").unwrap()[0].state,
+            RunState::Ready
+        );
+    }
+
+    #[test]
+    fn one_task_lists_retry_and_child_runs_as_versions() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+
+        service
+            .begin_run(input(&workspace, "task-1", "run-1"))
+            .unwrap();
+        let mut child = input(&workspace, "task-1", "run-2");
+        child.parent_run_id = Some("run-1".into());
+        child.agent_id = "agent-2".into();
+        service.begin_run(child).unwrap();
+
+        let runs = service.list_runs("task-1").unwrap();
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[1].parent_run_id.as_deref(), Some("run-1"));
+        assert_eq!(runs[1].agent_id, "agent-2");
+    }
+
+    #[test]
+    fn git_run_uses_worktree_with_the_live_workspace_as_its_baseline() {
+        use git2::{IndexAddOption, Repository, Signature};
+
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let repo = Repository::init(workspace.path()).unwrap();
+        {
+            let mut config = repo.config().unwrap();
+            config.set_str("user.name", "Task Workspace Test").unwrap();
+            config.set_str("user.email", "task@example.com").unwrap();
+        }
+        fs::write(workspace.path().join("tracked.txt"), "committed\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index
+            .add_all(["tracked.txt"], IndexAddOption::DEFAULT, None)
+            .unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let signature = Signature::now("Task Workspace Test", "task@example.com").unwrap();
+        repo.commit(Some("HEAD"), &signature, &signature, "seed", &tree, &[])
+            .unwrap();
+        drop(tree);
+
+        fs::write(
+            workspace.path().join("tracked.txt"),
+            "uncommitted baseline\n",
+        )
+        .unwrap();
+        fs::write(workspace.path().join("untracked.txt"), "also baseline\n").unwrap();
+
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let run = service
+            .begin_run(input(&workspace, "task-git", "run-git"))
+            .unwrap();
+
+        assert_eq!(run.isolation_kind, IsolationKind::GitWorktree);
+        assert_eq!(
+            run.isolation_ref.as_deref(),
+            Some("cognia/task/task-git/run-git")
+        );
+        let execution = PathBuf::from(run.execution_root);
+        assert!(execution.join(".git").is_file());
+        assert_eq!(
+            fs::read_to_string(execution.join("tracked.txt")).unwrap(),
+            "uncommitted baseline\n"
+        );
+        assert_eq!(
+            fs::read_to_string(execution.join("untracked.txt")).unwrap(),
+            "also baseline\n"
+        );
+        assert_eq!(
+            fs::read_to_string(workspace.path().join("tracked.txt")).unwrap(),
+            "uncommitted baseline\n"
+        );
+    }
+
+    #[test]
+    fn apply_and_undo_preserve_non_overlapping_user_edits() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        fs::write(workspace.path().join("story.txt"), "one\ntwo\n").unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let run = service
+            .begin_run(input(&workspace, "task-merge", "run-merge"))
+            .unwrap();
+
+        fs::write(
+            Path::new(&run.execution_root).join("story.txt"),
+            "one\nagent two\n",
+        )
+        .unwrap();
+        fs::write(workspace.path().join("story.txt"), "one\ntwo\nuser three\n").unwrap();
+        service.settle_run("run-merge").unwrap();
+
+        let patch = service.get_patch_set("run-merge").unwrap().unwrap();
+        assert_eq!(patch.state, crate::PatchState::Ready);
+        let applied = service.apply_patch_set("run-merge", &[]).unwrap();
+        assert_eq!(applied.state, crate::PatchState::Applied);
+        assert_eq!(
+            fs::read_to_string(workspace.path().join("story.txt")).unwrap(),
+            "one\nagent two\nuser three\n"
+        );
+
+        let undone = service.undo_patch_set("run-merge").unwrap();
+        assert_eq!(undone.state, crate::PatchState::Reverted);
+        assert_eq!(
+            fs::read_to_string(workspace.path().join("story.txt")).unwrap(),
+            "one\ntwo\nuser three\n"
+        );
+    }
+
+    #[test]
+    fn overlapping_apply_conflict_is_fail_closed() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        fs::write(workspace.path().join("story.txt"), "one\ntwo\n").unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let run = service
+            .begin_run(input(&workspace, "task-conflict", "run-conflict"))
+            .unwrap();
+        fs::write(
+            Path::new(&run.execution_root).join("story.txt"),
+            "one\nagent\n",
+        )
+        .unwrap();
+        fs::write(workspace.path().join("story.txt"), "one\nuser\n").unwrap();
+        service.settle_run("run-conflict").unwrap();
+
+        let outcome = service.apply_patch_set("run-conflict", &[]).unwrap();
+        assert_eq!(outcome.state, crate::PatchState::Conflict);
+        assert_eq!(outcome.conflicts[0].path, "story.txt");
+        assert_eq!(
+            fs::read_to_string(workspace.path().join("story.txt")).unwrap(),
+            "one\nuser\n"
+        );
+    }
+
+    #[test]
+    fn applies_only_the_selected_text_hunk() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let baseline = (1..=24)
+            .map(|line| format!("line {line}\n"))
+            .collect::<String>();
+        fs::write(workspace.path().join("many.txt"), &baseline).unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let run = service
+            .begin_run(input(&workspace, "task-hunks", "run-hunks"))
+            .unwrap();
+        let changed = baseline
+            .replace("line 2\n", "agent line 2\n")
+            .replace("line 22\n", "agent line 22\n");
+        fs::write(Path::new(&run.execution_root).join("many.txt"), changed).unwrap();
+        service.settle_run("run-hunks").unwrap();
+
+        let patch = service.get_patch_set("run-hunks").unwrap().unwrap();
+        assert_eq!(patch.files[0].hunks.len(), 2);
+        let first_hunk = patch.files[0].hunks[0].id.clone();
+        let outcome = service
+            .apply_patch_set(
+                "run-hunks",
+                &[crate::PatchSelection {
+                    path: "many.txt".into(),
+                    hunk_ids: vec![first_hunk],
+                }],
+            )
+            .unwrap();
+        assert_eq!(outcome.state, crate::PatchState::Applied);
+        let applied = fs::read_to_string(workspace.path().join("many.txt")).unwrap();
+        assert!(applied.contains("agent line 2\n"));
+        assert!(applied.contains("line 22\n"));
+        assert!(!applied.contains("agent line 22\n"));
+    }
+}
