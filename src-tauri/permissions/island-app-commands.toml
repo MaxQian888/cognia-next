@@ -1,0 +1,12 @@
+[[permission]]
+identifier = "allow-island-app-commands"
+description = "Enables the application commands invoked by the trusted local fleet island window."
+commands.allow = [
+  "fleet_focus_terminal",
+  "fleet_get_snapshot",
+  "fleet_opencode_send_message",
+  "fleet_permission_respond",
+  "fleet_question_respond",
+  "island_resize",
+  "island_set_tucked",
+]

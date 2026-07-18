@@ -14,6 +14,7 @@
     "core:window:allow-inner-size",
     "core:window:allow-set-size",
     "core:window:allow-set-resizable",
+    "allow-island-app-commands",
     "opener:allow-reveal-item-in-dir"
   ]
 }
