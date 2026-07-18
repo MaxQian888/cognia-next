@@ -190,6 +190,7 @@ Distributing unsigned Cognia builds will trigger SmartScreen / Gatekeeper / Linu
     - Tauri uses `signtool.exe`; ensure the Windows SDK is on PATH in CI.
   </Tab>
   <Tab value="macOS">
+    - The repository configures Tauri's ad-hoc `bundle.macOS.signingIdentity: "-"` baseline so Apple Silicon accepts builds downloaded from GitHub. Users may still need to approve the app in Privacy & Security.
     - Apple Developer Account + Developer ID Application certificate.
     - Notarisation: set `APPLE_ID`, `APPLE_PASSWORD` (app-specific), `APPLE_TEAM_ID` env vars; Tauri runs `notarytool` automatically.
     - Universal binaries: build separately for `aarch64-apple-darwin` and `x86_64-apple-darwin`, then `lipo` them.
@@ -203,7 +204,7 @@ Distributing unsigned Cognia builds will trigger SmartScreen / Gatekeeper / Linu
   </Tab>
 </Tabs>
 
-Cognia's repo runs the Tauri build matrix via `release.yml` → `build-tauri.yml` (OS runners, installers uploaded to a draft release). Updater signing is live through the `TAURI_SIGNING_*` secrets; OS code-signing (SmartScreen/notarization) remains opt-in per platform as above.
+Cognia's repo runs the Tauri build matrix via `release.yml` → `build-tauri.yml` (OS runners, installers uploaded to the published release). Updater signing is live through the `TAURI_SIGNING_*` secrets; macOS has an ad-hoc signing baseline, while authenticated OS trust signing (SmartScreen/notarization) remains opt-in per platform as above.
 
 ## In-app updater
 

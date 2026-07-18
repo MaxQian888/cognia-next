@@ -89,8 +89,11 @@ use. Installation remains user-confirmed even when background download is on.
 
 ## Notes
 
-- OS code signing (Apple Developer ID / Windows Authenticode) is a **separate**
-  concern from updater signing and stays disabled; it is not required for in-app
-  updates. Unsigned installers still update fine via the updater signature.
+- OS trust signing is a **separate** concern from updater signing. macOS bundles
+  use Tauri's ad-hoc identity (`bundle.macOS.signingIdentity: "-"`) so Apple
+  Silicon does not reject Internet-downloaded builds as damaged. Ad-hoc signing
+  is not notarization: users may still need to approve the app in Privacy &
+  Security. Developer ID/notarization and Windows Authenticode remain optional
+  production hardening.
 - There is no `active` field in the Tauri v2 updater config — enablement is
   `createUpdaterArtifacts` + `endpoints` + `pubkey`.

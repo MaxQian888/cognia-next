@@ -195,6 +195,7 @@ deep-link 的桌面 scheme 是 `cognia`，移动端列表留空（[移动端架�
     - Tauri 使用 `signtool.exe`；CI 中确保 Windows SDK 在 PATH。
   </Tab>
   <Tab value="macOS">
+    - 仓库已配置 Tauri ad-hoc 基线 `bundle.macOS.signingIdentity: "-"`，避免 Apple Silicon 拒绝从 GitHub 下载的构建；用户仍可能需要在“隐私与安全性”中批准应用。
     - Apple Developer 账号 + Developer ID Application 证书。
     - 公证：设 `APPLE_ID`、`APPLE_PASSWORD`（应用专用）、`APPLE_TEAM_ID` 环境变量；Tauri 自动调 `notarytool`。
     - 通用二进制：分别构建 `aarch64-apple-darwin` 与 `x86_64-apple-darwin`，再 `lipo` 合并。
@@ -208,7 +209,7 @@ deep-link 的桌面 scheme 是 `cognia`，移动端列表留空（[移动端架�
   </Tab>
 </Tabs>
 
-仓库通过 `release.yml` → `build-tauri.yml` 在多 OS 矩阵上跑 Tauri 构建并把安装包上传到 draft release。updater 签名已通过 `TAURI_SIGNING_*` secrets 生效；操作系统层的代码签名（SmartScreen / 公证）仍按上文各平台自行接入。
+仓库通过 `release.yml` → `build-tauri.yml` 在多 OS 矩阵上跑 Tauri 构建并把安装包上传到已发布的 release。updater 签名已通过 `TAURI_SIGNING_*` secrets 生效；macOS 已有 ad-hoc 签名基线，经过认证的操作系统信任签名（SmartScreen / 公证）仍按上文各平台自行接入。
 
 ## 应用内更新
 

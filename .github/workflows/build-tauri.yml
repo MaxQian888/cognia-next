@@ -22,8 +22,9 @@ name: Build Tauri
 # the bundles; without these secrets a tagged build FAILS by design (an unsigned
 # release would be un-updatable). Pass them through with `secrets: inherit`.
 #
-# OPTIONAL OS code signing (Apple / Windows certs) stays disabled — that is
-# separate from updater signing and not required for in-app updates.
+# OPTIONAL authenticated OS signing (Apple Developer ID / Windows Authenticode)
+# stays disabled. macOS still receives the ad-hoc identity configured in
+# tauri.conf.json so Apple Silicon accepts Internet-downloaded bundles.
 # ============================================================================
 
 on:
