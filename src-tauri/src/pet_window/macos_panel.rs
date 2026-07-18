@@ -17,6 +17,10 @@
 //! call, with a no-op shim off macOS so the call sites stay `cfg`-free.
 #![allow(dead_code)]
 
+use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(target_os = "macos")]
+use std::sync::{atomic::AtomicBool, Arc};
+
 // `Manager` is required in scope on macOS only: the `tauri_panel!`-generated
 // `from_window` calls `window.app_handle()` (a `Manager` method) when it
 // reclasses the window. The off-macOS shim never touches it — cfg-gate the
@@ -38,6 +42,31 @@ pub(crate) enum PetPanelRole {
     /// edge of the screen, and at the pet's floating level (3) the menu bar
     /// (level 24) would draw over it on every non-fullscreen Space.
     Island,
+}
+
+static SPRITE_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
+static POPUP_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
+static ISLAND_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+fn panel_generation(role: PetPanelRole) -> &'static AtomicU64 {
+    match role {
+        PetPanelRole::Sprite => &SPRITE_PANEL_GENERATION,
+        PetPanelRole::Popup => &POPUP_PANEL_GENERATION,
+        PetPanelRole::Island => &ISLAND_PANEL_GENERATION,
+    }
+}
+
+/// Invalidate any queued AppKit work for this role and return the new token.
+pub(crate) fn advance_panel_generation(role: PetPanelRole) -> u64 {
+    panel_generation(role).fetch_add(1, Ordering::SeqCst) + 1
+}
+
+pub(crate) fn current_panel_generation(role: PetPanelRole) -> u64 {
+    panel_generation(role).load(Ordering::SeqCst)
+}
+
+pub(crate) fn panel_generation_is_current(role: PetPanelRole, expected: u64) -> bool {
+    current_panel_generation(role) == expected
 }
 
 impl PetPanelRole {
@@ -115,6 +144,52 @@ tauri_panel! {
     })
 }
 
+/// Run an AppKit operation synchronously. Tauri's `run_on_main_thread` only
+/// enqueues work, so callers must wait for the result or a later close/destroy
+/// can be overtaken by a stale reveal. The cancellation flag prevents a timed-
+/// out task that has not started from mutating the window later.
+#[cfg(target_os = "macos")]
+fn run_on_appkit_thread<R, T, F>(
+    window: &WebviewWindow<R>,
+    operation_name: &'static str,
+    operation: F,
+) -> Result<T, String>
+where
+    R: Runtime,
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    use objc2::MainThreadMarker;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    if MainThreadMarker::new().is_some() {
+        return operation();
+    }
+
+    let (tx, rx) = mpsc::sync_channel(1);
+    let pending = Arc::new(AtomicBool::new(true));
+    let task_pending = Arc::clone(&pending);
+    window
+        .run_on_main_thread(move || {
+            if !task_pending.swap(false, Ordering::SeqCst) {
+                return;
+            }
+            let _ = tx.send(operation());
+        })
+        .map_err(|error| format!("pet: scheduling {operation_name} failed: {error}"))?;
+
+    match rx.recv_timeout(Duration::from_secs(5)) {
+        Ok(result) => result,
+        Err(error) => {
+            pending.store(false, Ordering::SeqCst);
+            Err(format!(
+                "pet: {operation_name} main-thread task failed: {error}"
+            ))
+        }
+    }
+}
+
 /// Reclass a freshly-built pet window into a non-activating NSPanel and apply the
 /// float-over-everything collection behavior. macOS only; a no-op elsewhere.
 #[cfg(target_os = "macos")]
@@ -122,6 +197,7 @@ pub(crate) fn apply_pet_panel_behavior<R: Runtime>(
     window: &WebviewWindow<R>,
     role: PetPanelRole,
 ) -> Result<(), String> {
+    debug_assert!(objc2::MainThreadMarker::new().is_some());
     use objc2_app_kit::NSWindowCollectionBehavior;
     use tauri_nspanel::{CollectionBehavior, StyleMask, WebviewWindowExt};
 
@@ -167,6 +243,20 @@ pub(crate) fn apply_pet_panel_behavior<R: Runtime>(
     Ok(())
 }
 
+/// Convert a hidden webview to its NSPanel class and wait until AppKit has
+/// applied the complete role policy. Callers can therefore close the window on
+/// failure instead of returning success with a half-configured normal window.
+#[cfg(target_os = "macos")]
+pub(crate) fn configure_pet_panel<R: Runtime>(
+    window: &WebviewWindow<R>,
+    role: PetPanelRole,
+) -> Result<(), String> {
+    let win = window.clone();
+    run_on_appkit_thread(window, "panel conversion", move || {
+        apply_pet_panel_behavior(&win, role)
+    })
+}
+
 /// Reveal through `NSPanel::orderFrontRegardless` so another active app never
 /// suppresses the pet. If initial conversion is still queued or failed, retry
 /// conversion and reveal together on the main thread.
@@ -180,28 +270,48 @@ pub(crate) fn reveal_pet_panel<R: Runtime>(
 
     let app = window.app_handle().clone();
     let win = window.clone();
-    window
-        .run_on_main_thread(move || {
-            let panel = app.get_webview_panel(win.label()).ok().or_else(|| {
-                if let Err(error) = apply_pet_panel_behavior(&win, role) {
-                    log::error!("pet: native panel conversion retry failed: {error}");
-                    return None;
-                }
-                app.get_webview_panel(win.label()).ok()
-            });
-            match panel {
-                Some(panel) if focus => panel.show_and_make_key(),
-                Some(panel) => panel.show(),
-                None => {
-                    log::error!("pet: native panel reveal failed after conversion retry");
-                    let _ = win.show();
-                    if focus {
-                        let _ = win.set_focus();
-                    }
-                }
+    let expected_generation = current_panel_generation(role);
+    run_on_appkit_thread(window, "panel reveal", move || {
+        if !panel_generation_is_current(role, expected_generation) {
+            return Ok(());
+        }
+        let panel = match app.get_webview_panel(win.label()) {
+            Ok(panel) => panel,
+            Err(_) => {
+                apply_pet_panel_behavior(&win, role)?;
+                app.get_webview_panel(win.label()).map_err(|error| {
+                    format!("pet: native panel missing after conversion: {error:?}")
+                })?
             }
-        })
-        .map_err(|e| e.to_string())
+        };
+        if !panel_generation_is_current(role, expected_generation) {
+            return Ok(());
+        }
+        if focus {
+            panel.show_and_make_key();
+        } else {
+            panel.show();
+        }
+        Ok(())
+    })
+}
+
+/// Remove the retained tauri-nspanel manager entry and restore the original
+/// NSWindow class before a webview is destroyed. Without this, recreating the
+/// same label can retrieve and reveal the closed native panel.
+#[cfg(target_os = "macos")]
+pub(crate) fn detach_pet_panel<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {
+    use tauri_nspanel::ManagerExt;
+
+    let app = window.app_handle().clone();
+    let label = window.label().to_string();
+    run_on_appkit_thread(window, "panel detach", move || {
+        if let Ok(panel) = app.get_webview_panel(&label) {
+            panel.hide();
+            let _ = panel.to_window();
+        }
+        Ok(())
+    })
 }
 
 /// Off macOS the builder flags already give the desired behavior — no-op.
@@ -215,6 +325,14 @@ pub(crate) fn apply_pet_panel_behavior<R: Runtime>(
 }
 
 #[cfg(not(target_os = "macos"))]
+pub(crate) fn configure_pet_panel<R: Runtime>(
+    window: &WebviewWindow<R>,
+    role: PetPanelRole,
+) -> Result<(), String> {
+    apply_pet_panel_behavior(window, role)
+}
+
+#[cfg(not(target_os = "macos"))]
 pub(crate) fn reveal_pet_panel<R: Runtime>(
     window: &WebviewWindow<R>,
     _role: PetPanelRole,
@@ -224,6 +342,11 @@ pub(crate) fn reveal_pet_panel<R: Runtime>(
     if focus {
         window.set_focus().map_err(|e| e.to_string())?;
     }
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn detach_pet_panel<R: Runtime>(_window: &WebviewWindow<R>) -> Result<(), String> {
     Ok(())
 }
 

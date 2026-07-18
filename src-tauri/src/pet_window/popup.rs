@@ -43,6 +43,7 @@ pub struct PetPopupOpts {
 /// than destroy. Generic so `mod.rs` (also generic over runtime) can reuse it
 /// when the sprite window is hidden or destroyed.
 pub(crate) fn close_pet_popup_inner<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    super::macos_panel::advance_panel_generation(super::macos_panel::PetPanelRole::Popup);
     if let Some(window) = app.get_webview_window(PET_POPUP_LABEL) {
         window.hide().map_err(|e| e.to_string())?;
         // Tell the renderer the popup is gone so its open/expanded state can't
@@ -59,6 +60,7 @@ pub(crate) fn close_pet_popup_inner<R: Runtime>(app: &AppHandle<R>) -> Result<()
 /// window ever flashing an unpainted opaque rectangle).
 #[tauri::command]
 pub async fn open_pet_popup(app: AppHandle, opts: PetPopupOpts) -> Result<(), String> {
+    super::macos_panel::advance_panel_generation(super::macos_panel::PetPanelRole::Popup);
     if let Some(window) = app.get_webview_window(PET_POPUP_LABEL) {
         window
             .set_size(LogicalSize::new(opts.width, opts.height))
@@ -95,9 +97,11 @@ pub async fn open_pet_popup(app: AppHandle, opts: PetPopupOpts) -> Result<(), St
     // before the first reveal so no File/Edit menubar strip ever paints.
     let _ = window.remove_menu();
 
-    window
-        .set_position(PhysicalPosition::new(opts.x, opts.y))
-        .map_err(|e| e.to_string())?;
+    if let Err(error) = window.set_position(PhysicalPosition::new(opts.x, opts.y)) {
+        super::macos_panel::advance_panel_generation(super::macos_panel::PetPanelRole::Popup);
+        let _ = window.close();
+        return Err(error.to_string());
+    }
 
     // Native blur-to-close: clicking outside the popup (it loses focus) hides
     // it, mirroring a system context menu. Scoped to this window — no global
@@ -106,6 +110,7 @@ pub async fn open_pet_popup(app: AppHandle, opts: PetPopupOpts) -> Result<(), St
     let app_handle = app.clone();
     window.on_window_event(move |event| {
         if matches!(event, WindowEvent::Focused(false)) {
+            super::macos_panel::advance_panel_generation(super::macos_panel::PetPanelRole::Popup);
             if let Some(w) = app_handle.get_webview_window(PET_POPUP_LABEL) {
                 let _ = w.hide();
                 // Broadcast the native blur-hide so the renderer's popup state
@@ -120,21 +125,15 @@ pub async fn open_pet_popup(app: AppHandle, opts: PetPopupOpts) -> Result<(), St
     // typeable; the `WindowEvent::Focused(false)` blur-to-close above is kept as
     // the cross-platform dismiss path. No-op off macOS.
     //
-    // Main-thread dispatch: `to_panel`'s raw AppKit calls trap off-main and
-    // this runs inside an async command (tokio worker) — same crash class as
-    // the fleet island (see fleet/island_window.rs). The window is hidden
-    // until the renderer's first-paint reveal, so fire-and-forget is safe.
+    // `to_panel`'s raw AppKit calls trap off-main. Wait for the conversion so
+    // the command cannot report success with a hidden ordinary NSWindow.
+    if let Err(error) =
+        super::macos_panel::configure_pet_panel(&window, super::macos_panel::PetPanelRole::Popup)
     {
-        let win = window.clone();
-        app.run_on_main_thread(move || {
-            if let Err(e) = super::macos_panel::apply_pet_panel_behavior(
-                &win,
-                super::macos_panel::PetPanelRole::Popup,
-            ) {
-                log::warn!("pet popup: applying panel behavior failed: {e}");
-            }
-        })
-        .map_err(|e| e.to_string())?;
+        super::macos_panel::advance_panel_generation(super::macos_panel::PetPanelRole::Popup);
+        let _ = super::macos_panel::detach_pet_panel(&window);
+        let _ = window.close();
+        return Err(error);
     }
 
     // Intentionally do NOT `show()` / `set_focus()` here. Like the sprite

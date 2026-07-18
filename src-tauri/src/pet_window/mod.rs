@@ -18,7 +18,6 @@
 //! window ops are smoke-tested via `pnpm tauri dev`.
 
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Runtime, WebviewWindow};
 
 mod macos_panel;
@@ -172,12 +171,6 @@ fn emit_pet_state<R: Runtime>(app: &AppHandle<R>, open: bool, click_through: boo
     );
 }
 
-/// Generation token for the force-show safety net: every open bumps it and the
-/// spawned net only fires when the token still matches, so a `close` (or a
-/// newer open) issued within the grace period cancels the pending force-show —
-/// previously the net re-showed a pet the user had just closed.
-static PET_OPEN_GENERATION: AtomicU64 = AtomicU64::new(0);
-
 /// Apply click-through, tolerating failure on Linux: Wayland has no
 /// cursor-passthrough API, and a failed toggle must degrade to a solid
 /// (interactive) overlay instead of aborting the whole open and stranding a
@@ -207,6 +200,7 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
     opts: PetWindowOpts,
 ) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("pet") {
+        macos_panel::advance_panel_generation(macos_panel::PetPanelRole::Sprite);
         // Re-validate the position before revealing: monitors may have been
         // unplugged / rearranged / DPI-changed while the window sat hidden
         // (the window-state plugin is denylisted for "pet", so nothing else
@@ -225,7 +219,6 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
                 let _ = window.set_position(PhysicalPosition::new(x, y));
             }
         }
-        PET_OPEN_GENERATION.fetch_add(1, Ordering::SeqCst);
         apply_click_through(&window, opts.click_through)?;
         macos_panel::reveal_pet_panel(&window, macos_panel::PetPanelRole::Sprite, false)?;
         // The renderer paused its animation loops on `pet://suspend`; wake it.
@@ -233,6 +226,8 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
         emit_pet_state(app, true, opts.click_through);
         return Ok(());
     }
+
+    let generation = macos_panel::advance_panel_generation(macos_panel::PetPanelRole::Sprite);
 
     let (area_x, area_y, area_w, area_h, scale) = work_area_for(app, opts.x.zip(opts.y));
     // The monitor work area and any persisted drag position are PHYSICAL pixels,
@@ -293,23 +288,15 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
         // while the window is still hidden — converting a hidden window is fine.
         //
         // MUST run on the main thread: `to_panel` issues raw AppKit calls
-        // (`-[NSPanel setFloatingPanel:]`) that trap (EXC_BREAKPOINT) off-main,
-        // and the `open_pet_window` command is async → tokio worker (the island
-        // crashed exactly this way; see fleet/island_window.rs). Fire-and-forget
-        // is safe: the window is created hidden and only revealed by the renderer
-        // after first paint, well after this closure has run.
-        let win = window.clone();
-        app.run_on_main_thread(move || {
-            if let Err(e) =
-                macos_panel::apply_pet_panel_behavior(&win, macos_panel::PetPanelRole::Sprite)
-            {
-                log::warn!("pet: applying panel behavior failed: {e}");
-            }
-        })
-        .map_err(|e| e.to_string())?;
+        // (`-[NSPanel setFloatingPanel:]`) that trap (EXC_BREAKPOINT) off-main.
+        // The helper waits for that AppKit task, so this open cannot report
+        // success while the hidden window is still an ordinary NSWindow.
+        macos_panel::configure_pet_panel(&window, macos_panel::PetPanelRole::Sprite)?;
         Ok(())
     };
     if let Err(e) = configure() {
+        macos_panel::advance_panel_generation(macos_panel::PetPanelRole::Sprite);
+        let _ = macos_panel::detach_pet_panel(&window);
         let _ = window.close();
         return Err(e);
     }
@@ -348,10 +335,12 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
     // force-show can't yank focus from whatever the user is typing in.
     {
         let handle = app.clone();
-        let generation = PET_OPEN_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(8)).await;
-            if PET_OPEN_GENERATION.load(Ordering::SeqCst) != generation {
+            if !macos_panel::panel_generation_is_current(
+                macos_panel::PetPanelRole::Sprite,
+                generation,
+            ) {
                 return;
             }
             if let Some(window) = handle.get_webview_window("pet") {
@@ -379,7 +368,7 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
 pub(crate) fn close_pet_window_inner<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     // Invalidate any pending force-show safety net from a recent open — a
     // close inside the grace period must win over the net.
-    PET_OPEN_GENERATION.fetch_add(1, Ordering::SeqCst);
+    macos_panel::advance_panel_generation(macos_panel::PetPanelRole::Sprite);
     if let Some(window) = app.get_webview_window("pet") {
         apply_click_through(&window, false)?;
         window.hide().map_err(|e| e.to_string())?;
@@ -430,16 +419,19 @@ pub async fn close_pet_window(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn destroy_pet_window(app: AppHandle) -> Result<(), String> {
     // Invalidate any pending force-show safety net from a recent open.
-    PET_OPEN_GENERATION.fetch_add(1, Ordering::SeqCst);
+    macos_panel::advance_panel_generation(macos_panel::PetPanelRole::Sprite);
+    macos_panel::advance_panel_generation(macos_panel::PetPanelRole::Popup);
     // Tear the click popup down with the sprite so disabling the pet leaves no
     // orphan window behind.
     if let Some(popup) = app.get_webview_window(popup::PET_POPUP_LABEL) {
-        let _ = popup.close();
+        macos_panel::detach_pet_panel(&popup)?;
+        popup.close().map_err(|e| e.to_string())?;
     }
     if let Some(window) = app.get_webview_window("pet") {
         // Reset click-through first so a future window can never inherit a
         // pointer-trapping state through a recreated label.
         let _ = window.set_ignore_cursor_events(false);
+        macos_panel::detach_pet_panel(&window)?;
         window.close().map_err(|e| e.to_string())?;
     }
     emit_pet_state(&app, false, false);
