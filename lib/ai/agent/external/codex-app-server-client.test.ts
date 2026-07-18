@@ -230,6 +230,11 @@ describe("CodexAppServerAdapter", () => {
       expect(init).toBeDefined()
       expect("jsonrpc" in init).toBe(false)
       expect((init.params as Record<string, unknown>).clientInfo).toMatchObject({ name: "cognia" })
+      expect((init.params as Record<string, unknown>).capabilities).toEqual({
+        experimentalApi: true,
+        requestAttestation: false,
+        mcpServerOpenaiFormElicitation: true,
+      })
 
       const initialized = lastWritten((m) => m.method === "initialized")
       expect(initialized).toBeDefined()
@@ -855,6 +860,55 @@ describe("CodexAppServerAdapter", () => {
       expect(reply?.result).toEqual({ answers: { q1: { answers: [] } } })
     })
 
+    it("resolves only the request named by serverRequest/resolved", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession({ permissionMode: "default" })
+      const it = iterator(adapter, session.id, userMessage("ask twice"))
+      let next = it.next()
+
+      feedServerRequest(731, "item/tool/requestUserInput", {
+        threadId: "thr_1",
+        itemId: "q-first",
+        questions: [{ id: "first", question: "First?" }],
+      })
+      feedServerRequest(732, "item/tool/requestUserInput", {
+        threadId: "thr_1",
+        itemId: "q-second",
+        questions: [{ id: "second", question: "Second?" }],
+      })
+
+      const pendingIds: string[] = []
+      while (pendingIds.length < 2) {
+        const event = await next
+        expect(event.done).toBe(false)
+        if (event.value?.type === "permission_request") {
+          pendingIds.push(event.value.request.requestId ?? event.value.request.id)
+        }
+        next = it.next()
+      }
+
+      feed("serverRequest/resolved", { threadId: "thr_1", requestId: 731 })
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(lastWritten((message) => message.id === 731)?.result).toEqual({
+        answers: { first: { answers: [] } },
+      })
+      expect(lastWritten((message) => message.id === 732)).toBeUndefined()
+
+      await adapter.respondToPermission(session.id, {
+        requestId: "q-second",
+        granted: false,
+      })
+      feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
+      while (!(await next).done) next = it.next()
+
+      expect(pendingIds).toEqual(["q-first", "q-second"])
+      expect(lastWritten((message) => message.id === 732)?.result).toEqual({
+        answers: { second: { answers: [] } },
+      })
+    })
+
     it("forwards availableDecisions and commandActions into the approval request metadata", async () => {
       const adapter = await connectedAdapter()
       const session = await adapter.createSession({ permissionMode: "default" })
@@ -881,6 +935,279 @@ describe("CodexAppServerAdapter", () => {
         availableDecisions: ["accept", "decline", "cancel"],
         commandActions: [{ kind: "network" }],
       })
+    })
+
+    it("surfaces granular permission profiles and grants only the requested subset", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession({ permissionMode: "default" })
+      const it = iterator(adapter, session.id, userMessage("write outside the workspace"))
+      let next = it.next()
+      feedServerRequest(75, "item/permissions/requestApproval", {
+        threadId: "thr_1",
+        turnId: "turn_1",
+        itemId: "permissions-1",
+        environmentId: "local",
+        cwd: "/work",
+        reason: "Write generated files",
+        permissions: {
+          network: null,
+          fileSystem: { read: null, write: ["/shared"], entries: [] },
+        },
+      })
+
+      for (;;) {
+        const event = await next
+        expect(event.done).toBe(false)
+        if (event.value?.type === "permission_request") {
+          expect(event.value.request).toMatchObject({
+            requestId: "permissions-1",
+            reason: "Write generated files",
+            metadata: { codexPermissionProfile: true },
+          })
+          await adapter.respondToPermission(session.id, {
+            requestId: "permissions-1",
+            granted: true,
+            scope: "session",
+          })
+          feed("turn/completed", {
+            threadId: "thr_1",
+            turn: { id: "turn_1", status: "completed" },
+          })
+        }
+        next = it.next()
+        if (event.value?.type === "done") break
+      }
+
+      expect(lastWritten((message) => message.id === 75)?.result).toEqual({
+        permissions: { fileSystem: { read: null, write: ["/shared"], entries: [] } },
+        scope: "session",
+      })
+    })
+
+    it.each([
+      [
+        "execCommandApproval",
+        {
+          conversationId: "thr_1",
+          callId: "legacy-call-command",
+          approvalId: "legacy-command",
+          command: ["git", "status"],
+          cwd: "/work",
+          reason: "Inspect worktree",
+          parsedCmd: [],
+        },
+        true,
+        { decision: "approved_for_session" },
+      ],
+      [
+        "applyPatchApproval",
+        {
+          conversationId: "thr_1",
+          callId: "legacy-call-patch",
+          fileChanges: { "/work/file.ts": { type: "add", content: "new" } },
+          reason: "Apply patch",
+          grantRoot: null,
+        },
+        false,
+        { decision: "denied" },
+      ],
+    ])(
+      "maps legacy %s fields and ReviewDecision values",
+      async (method, params, granted, expected) => {
+        const adapter = await connectedAdapter()
+        const session = await adapter.createSession({ permissionMode: "default" })
+        const it = iterator(adapter, session.id, userMessage("legacy approval"))
+        let next = it.next()
+        feedServerRequest(751, method, params)
+
+        for (;;) {
+          const event = await next
+          expect(event.done).toBe(false)
+          if (event.value?.type === "permission_request") {
+            expect(event.value.request.metadata).toEqual({ codexLegacyApproval: true })
+            await adapter.respondToPermission(session.id, {
+              requestId: event.value.request.requestId!,
+              granted,
+              rememberChoice: granted,
+            })
+            feed("turn/completed", {
+              threadId: "thr_1",
+              turn: { id: "turn_1", status: "completed" },
+            })
+          }
+          next = it.next()
+          if (event.value?.type === "done") break
+        }
+
+        expect(lastWritten((message) => message.id === 751)?.result).toEqual(expected)
+      }
+    )
+
+    it("aborts a pending legacy approval on disconnect", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession({ permissionMode: "default" })
+      const it = iterator(adapter, session.id, userMessage("legacy approval"))
+      const next = it.next()
+      feedServerRequest(752, "execCommandApproval", {
+        conversationId: "thr_1",
+        callId: "legacy-disconnect",
+        approvalId: null,
+        command: ["rm", "file"],
+        cwd: "/work",
+        reason: null,
+        parsedCmd: [],
+      })
+      expect((await next).value?.type).toBe("permission_request")
+
+      await adapter.disconnect()
+      await Promise.resolve()
+
+      expect(lastWritten((message) => message.id === 752)?.result).toEqual({ decision: "abort" })
+    })
+
+    it("translates MCP form elicitations into questions and typed response content", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession({ permissionMode: "default" })
+      const it = iterator(adapter, session.id, userMessage("configure deployment"))
+      let next = it.next()
+      feedServerRequest(76, "mcpServer/elicitation/request", {
+        threadId: "thr_1",
+        turnId: "turn_1",
+        serverName: "deploy",
+        mode: "form",
+        message: "Choose deployment settings",
+        requestedSchema: {
+          type: "object",
+          required: ["environment", "replicas", "targets"],
+          properties: {
+            environment: {
+              type: "string",
+              title: "Environment",
+              enum: ["staging", "production"],
+              enumNames: ["Staging", "Production"],
+            },
+            replicas: {
+              type: "integer",
+              title: "Replicas",
+              description: "Replica count",
+              minimum: 1,
+              maximum: 5,
+            },
+            targets: {
+              type: "array",
+              title: "Targets",
+              minItems: 1,
+              maxItems: 2,
+              items: { type: "string", enum: ["blue", "green"] },
+            },
+            note: { type: "string", minLength: 2, maxLength: 20, default: "ship" },
+          },
+        },
+      })
+
+      for (;;) {
+        const event = await next
+        expect(event.done).toBe(false)
+        if (event.value?.type === "permission_request") {
+          expect(event.value.request.metadata?.codexMcpElicitation).toMatchObject({
+            serverName: "deploy",
+            mode: "form",
+          })
+          expect(event.value.request.metadata?.codexUserInput).toMatchObject({
+            questions: [
+              { id: "environment" },
+              { id: "replicas" },
+              { id: "targets", multiple: true },
+              { id: "note", required: false },
+            ],
+          })
+          await adapter.respondToPermission(session.id, {
+            requestId: event.value.request.requestId!,
+            granted: true,
+            answers: {
+              environment: ["production"],
+              replicas: ["3"],
+              targets: ["blue", "green"],
+            },
+          })
+          feed("turn/completed", {
+            threadId: "thr_1",
+            turn: { id: "turn_1", status: "completed" },
+          })
+        }
+        next = it.next()
+        if (event.value?.type === "done") break
+      }
+
+      expect(lastWritten((message) => message.id === 76)?.result).toEqual({
+        action: "accept",
+        content: {
+          environment: "production",
+          replicas: 3,
+          targets: ["blue", "green"],
+          note: "ship",
+        },
+        _meta: null,
+      })
+    })
+
+    it("declines an openai/form elicitation when a typed answer violates its schema", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession({ permissionMode: "default" })
+      const it = iterator(adapter, session.id, userMessage("configure deployment"))
+      let next = it.next()
+      feedServerRequest(761, "mcpServer/elicitation/request", {
+        threadId: "thr_1",
+        serverName: "deploy",
+        mode: "openai/form",
+        message: "Choose deployment settings",
+        requestedSchema: {
+          type: "object",
+          required: ["replicas"],
+          properties: {
+            replicas: { type: "integer", minimum: 1, maximum: 5 },
+            channel: { type: "string", enum: ["stable", "canary"] },
+          },
+        },
+      })
+
+      for (;;) {
+        const event = await next
+        expect(event.done).toBe(false)
+        if (event.value?.type === "permission_request") {
+          await adapter.respondToPermission(session.id, {
+            requestId: event.value.request.requestId!,
+            granted: true,
+            answers: { replicas: ["3.5"], channel: ["unknown"] },
+          })
+          feed("turn/completed", {
+            threadId: "thr_1",
+            turn: { id: "turn_1", status: "completed" },
+          })
+        }
+        next = it.next()
+        if (event.value?.type === "done") break
+      }
+
+      expect(lastWritten((message) => message.id === 761)?.result).toEqual({
+        action: "decline",
+        content: null,
+        _meta: null,
+      })
+    })
+
+    it("answers currentTime/read with whole Unix seconds", async () => {
+      const adapter = await connectedAdapter()
+      feedServerRequest(77, "currentTime/read", { threadId: "thr_1" })
+      await Promise.resolve()
+      await Promise.resolve()
+
+      const response = lastWritten((message) => message.id === 77)?.result as {
+        currentTimeAt: number
+      }
+      expect(Number.isInteger(response.currentTimeAt)).toBe(true)
+      expect(response.currentTimeAt).toBeGreaterThan(0)
+      await adapter.disconnect()
     })
   })
 

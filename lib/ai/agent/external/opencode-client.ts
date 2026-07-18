@@ -173,6 +173,24 @@ function buildOpenCodeFileParts(
 /** The SDK's SSE helpers resolve to `{ stream }`; this is the slice we consume. */
 type OcEventStream = { stream: AsyncIterable<OcEvent> }
 
+type OpenCodeInteractionKind = "permission" | "permissionV2" | "question" | "questionV2"
+
+interface PendingOpenCodeInteraction {
+  kind: OpenCodeInteractionKind
+  sessionId: string
+  questionIds?: string[]
+}
+
+interface OpenCodeWireEvent {
+  type: string
+  properties?: Record<string, unknown>
+  data?: Record<string, unknown>
+}
+
+function interactionKey(sessionId: string, requestId: string): string {
+  return JSON.stringify([sessionId, requestId])
+}
+
 // ============================================================================
 // Provider info type (SDK doesn't export a named type for this aggregate)
 // ============================================================================
@@ -230,6 +248,9 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
     args?: Record<string, unknown>
   }> = []
   private providerInfo: ProviderListData | null = null
+  private baseUrl = ""
+  private requestFetch?: (request: Request) => ReturnType<typeof fetch>
+  private pendingInteractions = new Map<string, PendingOpenCodeInteraction>()
 
   /** Agent id of an auto-spawned `opencode serve` process, if any. */
   private spawnedServerId: string | null = null
@@ -249,7 +270,9 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
       // Create the SDK client, injecting auth headers via a custom fetch when
       // the server is password-protected (OPENCODE_SERVER_PASSWORD) or a
       // bearer token / custom headers are configured.
-      this.client = createOpencodeClient({ baseUrl, fetch: this.buildAuthFetch(config) })
+      this.baseUrl = baseUrl
+      this.requestFetch = this.buildAuthFetch(config)
+      this.client = createOpencodeClient({ baseUrl, fetch: this.requestFetch })
 
       // Probe reachability with a cheap, non-SSE call. When we auto-spawned the
       // server, retry briefly to cover the gap between the "listening" log line
@@ -562,6 +585,9 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
     await this.killSpawnedServer()
 
     this._sessions.clear()
+    this.pendingInteractions.clear()
+    this.baseUrl = ""
+    this.requestFetch = undefined
     this._connectionStatus = "disconnected"
     this._config = undefined
     log.info("Disconnected from OpenCode server")
@@ -874,7 +900,14 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
   // ============================================================================
 
   async respondToPermission(sessionId: string, response: AcpPermissionResponse): Promise<void> {
+    const key = interactionKey(sessionId, response.requestId)
+    const pending = this.pendingInteractions.get(key)
     try {
+      if (pending) {
+        await this.replyToCurrentInteraction(pending, response)
+        this.pendingInteractions.delete(key)
+        return
+      }
       await this.client.postSessionIdPermissionsPermissionId({
         path: { id: sessionId, permissionID: response.requestId },
         body: {
@@ -883,6 +916,55 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
       })
     } catch (error: unknown) {
       log.warn(`Failed to respond to permission ${response.requestId}:`, toLogContext(error))
+    }
+  }
+
+  private async replyToCurrentInteraction(
+    pending: PendingOpenCodeInteraction,
+    response: AcpPermissionResponse
+  ): Promise<void> {
+    const requestId = encodeURIComponent(response.requestId)
+    const sessionId = encodeURIComponent(pending.sessionId)
+    if (pending.kind === "permission" || pending.kind === "permissionV2") {
+      const reply = response.granted
+        ? response.rememberChoice || response.scope === "always" || response.scope === "session"
+          ? "always"
+          : "once"
+        : "reject"
+      const path =
+        pending.kind === "permissionV2"
+          ? `/api/session/${sessionId}/permission/${requestId}/reply`
+          : `/permission/${requestId}/reply`
+      await this.postInteraction(path, { reply })
+      return
+    }
+
+    const basePath =
+      pending.kind === "questionV2"
+        ? `/api/session/${sessionId}/question/${requestId}`
+        : `/question/${requestId}`
+    if (!response.granted) {
+      await this.postInteraction(`${basePath}/reject`)
+      return
+    }
+    const answers = (pending.questionIds ?? []).map((id) => response.answers?.[id] ?? [])
+    await this.postInteraction(`${basePath}/reply`, { answers })
+  }
+
+  private async postInteraction(path: string, body?: Record<string, unknown>): Promise<void> {
+    if (!this.baseUrl) throw new Error("OpenCode server is not connected")
+    const request = new Request(`${this.baseUrl}${path}`, {
+      method: "POST",
+      ...(body
+        ? {
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          }
+        : {}),
+    })
+    const response = await (this.requestFetch ? this.requestFetch(request) : fetch(request))
+    if (!response.ok) {
+      throw new Error(`OpenCode interaction reply failed with HTTP ${response.status}`)
     }
   }
 
@@ -1644,6 +1726,8 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
   translateSdkEvent(sessionId: string, event: OcEvent): ExternalAgentEvent[] {
     const now = new Date()
     const events: ExternalAgentEvent[] = []
+    const interactive = this.translateCurrentInteractionEvent(sessionId, event, now)
+    if (interactive) return interactive
 
     switch (event.type) {
       case "server.connected":
@@ -1908,6 +1992,173 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
   }
 
   /**
+   * Translate the current OpenCode permission/question events that are newer
+   * than the root SDK client's generated Event union. Runtime SSE still carries
+   * them, so this structural compatibility layer prevents headless sessions
+   * from stalling while retaining the existing SDK surface for older servers.
+   */
+  private translateCurrentInteractionEvent(
+    sessionId: string,
+    event: OcEvent,
+    timestamp: Date
+  ): ExternalAgentEvent[] | undefined {
+    const wire = event as unknown as OpenCodeWireEvent
+    const properties = wire.properties ?? wire.data
+    const type = wire.type
+    if (!properties) return undefined
+
+    if (type === "permission.asked" || type === "permission.v2.asked") {
+      const eventSessionId = asOpenCodeString(properties.sessionID)
+      if (eventSessionId !== sessionId) return []
+      const requestId = asOpenCodeString(properties.id)
+      if (!requestId) return []
+      const isV2 = type === "permission.v2.asked"
+      const action = asOpenCodeString(isV2 ? properties.action : properties.permission) ?? "unknown"
+      const tool = asOpenCodeRecord(isV2 ? properties.source : properties.tool)
+      const metadata = asOpenCodeRecord(properties.metadata)
+      const resources = isV2
+        ? asOpenCodeStringArray(properties.resources)
+        : asOpenCodeStringArray(properties.patterns)
+      const persistentResources = isV2
+        ? asOpenCodeStringArray(properties.save)
+        : asOpenCodeStringArray(properties.always)
+
+      this.pendingInteractions.set(interactionKey(sessionId, requestId), {
+        kind: isV2 ? "permissionV2" : "permission",
+        sessionId,
+      })
+      return [
+        {
+          type: "permission_request",
+          sessionId,
+          timestamp,
+          request: {
+            id: requestId,
+            requestId,
+            sessionId,
+            ...(asOpenCodeString(tool?.callID)
+              ? { toolCallId: asOpenCodeString(tool?.callID) }
+              : {}),
+            title: action,
+            toolInfo: { id: action, name: action, category: action },
+            rawInput: {
+              ...(isV2 ? { resources } : { patterns: resources }),
+              ...(persistentResources.length > 0
+                ? { [isV2 ? "save" : "always"]: persistentResources }
+                : {}),
+            },
+            ...(metadata ? { metadata } : {}),
+            reason: action,
+          },
+        },
+      ]
+    }
+
+    if (type === "question.asked" || type === "question.v2.asked") {
+      const eventSessionId = asOpenCodeString(properties.sessionID)
+      if (eventSessionId !== sessionId) return []
+      const requestId = asOpenCodeString(properties.id)
+      const rawQuestions = Array.isArray(properties.questions) ? properties.questions : []
+      if (!requestId || rawQuestions.length === 0) return []
+      const questions = rawQuestions.flatMap((rawQuestion, index) => {
+        const question = asOpenCodeRecord(rawQuestion)
+        const text = asOpenCodeString(question?.question)
+        if (!question || !text) return []
+        const options = Array.isArray(question.options)
+          ? question.options.flatMap((rawOption) => {
+              const option = asOpenCodeRecord(rawOption)
+              const label = asOpenCodeString(option?.label)
+              if (!label) return []
+              const description = asOpenCodeString(option?.description)
+              return [description ? { label, description } : { label }]
+            })
+          : []
+        if (Array.isArray(question.options) && options.length !== question.options.length) return []
+        return [
+          {
+            id: `${requestId}:${index}`,
+            header: asOpenCodeString(question.header),
+            question: text,
+            options,
+            multiple: question.multiple === true,
+            isOther: question.custom === true,
+          },
+        ]
+      })
+      // Do not partially accept malformed payloads: answer ordering is positional in
+      // both OpenCode question APIs, so dropping a question would shift every reply.
+      if (questions.length !== rawQuestions.length) {
+        const isV2 = type === "question.v2.asked"
+        const encodedSessionId = encodeURIComponent(sessionId)
+        const encodedRequestId = encodeURIComponent(requestId)
+        const path = isV2
+          ? `/api/session/${encodedSessionId}/question/${encodedRequestId}/reject`
+          : `/question/${encodedRequestId}/reject`
+        void this.postInteraction(path).catch((error) => {
+          log.warn(
+            `Failed to reject malformed OpenCode question ${requestId}:`,
+            toLogContext(error)
+          )
+        })
+        return []
+      }
+      const tool = asOpenCodeRecord(properties.tool)
+      const questionIds = questions.map((question) => question.id)
+      this.pendingInteractions.set(interactionKey(sessionId, requestId), {
+        kind: type === "question.v2.asked" ? "questionV2" : "question",
+        sessionId,
+        questionIds,
+      })
+      return [
+        {
+          type: "permission_request",
+          sessionId,
+          timestamp,
+          request: {
+            id: requestId,
+            requestId,
+            sessionId,
+            ...(asOpenCodeString(tool?.callID)
+              ? { toolCallId: asOpenCodeString(tool?.callID) }
+              : {}),
+            title: questions[0].header ?? questions[0].question,
+            kind: "other",
+            toolInfo: { id: requestId, name: "request_user_input", category: "other" },
+            metadata: {
+              codexUserInput: { requestId, questions },
+              openCodeQuestion: { version: type === "question.v2.asked" ? 2 : 1 },
+            },
+          },
+        },
+      ]
+    }
+
+    const permissionReply = type === "permission.v2.replied" || type === "permission.replied"
+    const questionReply =
+      type === "question.replied" ||
+      type === "question.rejected" ||
+      type === "question.v2.replied" ||
+      type === "question.v2.rejected"
+    const requestId = asOpenCodeString(properties.requestID)
+    if ((permissionReply || questionReply) && requestId) {
+      const eventSessionId = asOpenCodeString(properties.sessionID)
+      if (eventSessionId !== sessionId) return []
+      this.pendingInteractions.delete(interactionKey(sessionId, requestId))
+      const rejected = type.endsWith(".rejected") || properties.reply === "reject"
+      return [
+        {
+          type: "permission_response",
+          sessionId,
+          timestamp,
+          response: { requestId, granted: !rejected },
+        },
+      ]
+    }
+
+    return undefined
+  }
+
+  /**
    * Emit events from a synchronous message response
    */
   private *emitEventsFromMessage(
@@ -2122,4 +2373,20 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
 
     this.sessionConfigOptions.set(sessionId, options)
   }
+}
+
+function asOpenCodeRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined
+}
+
+function asOpenCodeString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined
+}
+
+function asOpenCodeStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : []
 }

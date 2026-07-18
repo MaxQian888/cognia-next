@@ -73,7 +73,7 @@ const HEALTH_PROBE_TIMEOUT_MS = 5000
 // ============================================================================
 
 // Wire-format ground truth: verified against `codex app-server generate-json-schema`
-// (codex-cli 0.141.0). Key invariants encoded below:
+// (codex-cli 0.144.4). Key invariants encoded below:
 // - `approvalPolicy` (AskForApproval) is kebab-case: "untrusted" | "on-failure" |
 //   "on-request" | "never".
 // - `sandboxPolicy` is a `type`-tagged camelCase union (see CodexSandboxPolicy).
@@ -170,6 +170,8 @@ export interface CodexUserInputQuestion {
   options?: Array<{ label: string; description?: string }> | null
   isOther?: boolean
   isSecret?: boolean
+  multiple?: boolean
+  required?: boolean
 }
 
 interface CodexThreadItem {
@@ -252,10 +254,12 @@ function normalizeSkillRoots(roots: readonly string[]): string[] {
 }
 
 interface PendingApproval {
-  resolve: (decision: { decision: string }) => void
+  resolve: (response: unknown) => void
   request: AcpPermissionRequest
-  kind: "command" | "fileChange"
+  kind: "command" | "fileChange" | "permissionProfile" | "legacyCommand" | "legacyFileChange"
   sessionId?: string
+  rpcId: number | string
+  requestedPermissions?: Record<string, unknown>
 }
 
 interface PendingUserInput {
@@ -263,6 +267,18 @@ interface PendingUserInput {
   sessionId?: string
   questions: CodexUserInputQuestion[]
   timer?: ReturnType<typeof setTimeout>
+  rpcId: number | string
+}
+
+interface PendingMcpElicitation {
+  resolve: (response: {
+    action: "accept" | "decline" | "cancel"
+    content: unknown
+    _meta: null
+  }) => void
+  sessionId?: string
+  rpcId: number | string
+  fields: Map<string, McpElicitationField>
 }
 
 // ============================================================================
@@ -291,6 +307,9 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   private pendingApprovals = new Map<string, PendingApproval>()
   // Pending `item/tool/requestUserInput` requests awaiting a UI answer.
   private pendingUserInputs = new Map<string, PendingUserInput>()
+  // Pending MCP form elicitations use the same question UI but a distinct wire
+  // response shape (`{action, content, _meta}`).
+  private pendingMcpElicitations = new Map<string, PendingMcpElicitation>()
   // `agentMessage` itemId → MessagePhase ("commentary" | "final_answer") from
   // item/started, so deltas (which carry no phase) can route to thinking.
   private itemPhases = new Map<string, string>()
@@ -335,7 +354,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
         concurrentServerRequests: true,
         writeRaw: (message) => this.writeToProcess(message),
         onNotification: (method, params) => this.handleNotification(method, params),
-        onServerRequest: (method, params) => this.handleServerRequest(method, params),
+        onServerRequest: (method, params, id) => this.handleServerRequest(method, params, id),
       })
 
       const env = await buildAgentEnv(config, config.process.env || {})
@@ -351,9 +370,13 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       }>("initialize", {
         clientInfo: { name: "cognia", title: "Cognia", version: "1.0.0" },
         // `experimentalApi` opts into experimental methods/fields — required for
-        // `item/tool/requestUserInput` (marked EXPERIMENTAL in the 0.141 schema).
+        // `item/tool/requestUserInput` (marked EXPERIMENTAL in the 0.144.4 schema).
         // Unknown experimental notifications fall through the default branch.
-        capabilities: { experimentalApi: true },
+        capabilities: {
+          experimentalApi: true,
+          requestAttestation: false,
+          mcpServerOpenaiFormElicitation: true,
+        },
       })
       this.serverInfo = {
         userAgent: result?.userAgent,
@@ -422,6 +445,24 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   async disconnect(): Promise<void> {
     if (this._connectionStatus === "disconnected") return
 
+    // Resolve server-initiated requests while the peer/process is still live so
+    // Codex receives a protocol-level cancellation instead of a dropped pipe.
+    for (const [, pending] of this.pendingApprovals) {
+      pending.resolve(this.cancelApprovalResponse(pending))
+    }
+    this.pendingApprovals.clear()
+    for (const [, pending] of this.pendingUserInputs) {
+      if (pending.timer) clearTimeout(pending.timer)
+      pending.resolve({ answers: emptyAnswersFor(pending.questions) })
+    }
+    this.pendingUserInputs.clear()
+    for (const [, pending] of this.pendingMcpElicitations) {
+      pending.resolve({ action: "cancel", content: null, _meta: null })
+    }
+    this.pendingMcpElicitations.clear()
+    await Promise.resolve()
+    await Promise.resolve()
+
     this.cleanupListeners()
     this.peer?.rejectAll("Disconnected from Codex app-server")
 
@@ -433,15 +474,6 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       }
     }
 
-    for (const [, pending] of this.pendingApprovals) {
-      pending.resolve({ decision: "cancel" })
-    }
-    this.pendingApprovals.clear()
-    for (const [, pending] of this.pendingUserInputs) {
-      if (pending.timer) clearTimeout(pending.timer)
-      pending.resolve({ answers: emptyAnswersFor(pending.questions) })
-    }
-    this.pendingUserInputs.clear()
     this.processId = undefined
     this.peer = undefined
     this._sessions.clear()
@@ -1308,9 +1340,13 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
         return
       case "serverRequest/resolved": {
         // The server resolved an outstanding request (approval / user input)
-        // elsewhere — unblock any pending resolver for this thread; the late
-        // JSON-RPC response is ignored server-side.
-        this.resolvePendingForThread(sessionId, "resolved_elsewhere")
+        // elsewhere — unblock only the named request. Multiple independent
+        // approvals can be pending on one thread, so resolving by thread would
+        // incorrectly decline unrelated prompts.
+        const requestId = readRequestId(p.requestId)
+        if (requestId !== undefined) {
+          this.resolvePendingRequest(sessionId, requestId, "resolved_elsewhere")
+        }
         return
       }
       default:
@@ -1318,12 +1354,12 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     }
   }
 
-  /** Resolve all pending approvals + user-input requests for a thread. */
-  private resolvePendingForThread(sessionId: string, reason: string): void {
+  /** Resolve the pending approval or user-input request named by its JSON-RPC id. */
+  private resolvePendingRequest(sessionId: string, rpcId: number | string, reason: string): void {
     for (const [id, pending] of this.pendingApprovals) {
-      if (pending.sessionId !== sessionId) continue
+      if (pending.sessionId !== sessionId || pending.rpcId !== rpcId) continue
       this.pendingApprovals.delete(id)
-      pending.resolve({ decision: "decline" })
+      pending.resolve(this.cancelApprovalResponse(pending))
       this.emit(sessionId, {
         type: "permission_response",
         sessionId,
@@ -1332,10 +1368,21 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       })
     }
     for (const [id, pending] of this.pendingUserInputs) {
-      if (pending.sessionId !== sessionId) continue
+      if (pending.sessionId !== sessionId || pending.rpcId !== rpcId) continue
       this.pendingUserInputs.delete(id)
       if (pending.timer) clearTimeout(pending.timer)
       pending.resolve({ answers: emptyAnswersFor(pending.questions) })
+      this.emit(sessionId, {
+        type: "permission_response",
+        sessionId,
+        timestamp: new Date(),
+        response: { requestId: id, granted: false, reason },
+      })
+    }
+    for (const [id, pending] of this.pendingMcpElicitations) {
+      if (pending.sessionId !== sessionId || pending.rpcId !== rpcId) continue
+      this.pendingMcpElicitations.delete(id)
+      pending.resolve({ action: "cancel", content: null, _meta: null })
       this.emit(sessionId, {
         type: "permission_response",
         sessionId,
@@ -1613,17 +1660,34 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
 
   private async handleServerRequest(
     method: string,
-    params: Record<string, unknown> | undefined
+    params: Record<string, unknown> | undefined,
+    rpcId: number | string
   ): Promise<unknown> {
     const p = params ?? {}
     if (method === "item/commandExecution/requestApproval") {
-      return this.handleApproval(p, "command")
+      return this.handleApproval(p, "command", rpcId)
     }
     if (method === "item/fileChange/requestApproval") {
-      return this.handleApproval(p, "fileChange")
+      return this.handleApproval(p, "fileChange", rpcId)
     }
     if (method === "item/tool/requestUserInput") {
-      return this.handleRequestUserInput(p)
+      return this.handleRequestUserInput(p, rpcId)
+    }
+    if (method === "item/permissions/requestApproval") {
+      return this.handlePermissionProfileApproval(p, rpcId)
+    }
+    if (method === "mcpServer/elicitation/request") {
+      return this.handleMcpElicitation(p, rpcId)
+    }
+    if (method === "currentTime/read") {
+      return { currentTimeAt: Math.floor(Date.now() / 1000) }
+    }
+    // Compatibility aliases emitted by older app-server protocol revisions.
+    if (method === "execCommandApproval") {
+      return this.handleLegacyApproval(p, "legacyCommand", rpcId)
+    }
+    if (method === "applyPatchApproval") {
+      return this.handleLegacyApproval(p, "legacyFileChange", rpcId)
     }
     // Unknown client method → JSON-RPC method-not-found via the peer.
     throw new Error(`Method not found: ${method}`)
@@ -1640,7 +1704,8 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
    * once the window elapses.
    */
   private handleRequestUserInput(
-    params: Record<string, unknown>
+    params: Record<string, unknown>,
+    rpcId: number | string
   ): Promise<{ answers: Record<string, { answers: string[] }> }> {
     const sessionId = this.resolveSessionId(params)
     const questions = parseUserInputQuestions(params.questions)
@@ -1678,7 +1743,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     }
 
     return new Promise((resolve) => {
-      const pending: PendingUserInput = { resolve, sessionId, questions }
+      const pending: PendingUserInput = { resolve, sessionId, questions, rpcId }
       if (autoResolutionMs && autoResolutionMs > 0) {
         pending.timer = setTimeout(() => {
           if (!this.pendingUserInputs.has(requestId)) return
@@ -1704,7 +1769,8 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
 
   private async handleApproval(
     params: Record<string, unknown>,
-    kind: "command" | "fileChange"
+    kind: "command" | "fileChange",
+    rpcId: number | string
   ): Promise<{ decision: string }> {
     const sessionId = this.resolveSessionId(params)
     const session = sessionId ? this._sessions.get(sessionId) : undefined
@@ -1747,7 +1813,13 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
 
     // Surface to the UI and await `respondToPermission`.
     return new Promise<{ decision: string }>((resolve) => {
-      this.pendingApprovals.set(itemId, { resolve, request, kind, sessionId })
+      this.pendingApprovals.set(itemId, {
+        resolve: (response) => resolve(response as { decision: string }),
+        request,
+        kind,
+        sessionId,
+        rpcId,
+      })
       if (sessionId) {
         this.emit(sessionId, {
           type: "permission_request",
@@ -1756,6 +1828,173 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
           request,
         })
       }
+    })
+  }
+
+  private async handlePermissionProfileApproval(
+    params: Record<string, unknown>,
+    rpcId: number | string
+  ): Promise<unknown> {
+    const sessionId = this.resolveSessionId(params)
+    const session = sessionId ? this._sessions.get(sessionId) : undefined
+    const itemId = readString(params.itemId) ?? `permissions_${String(rpcId)}`
+    const requestedPermissions = readObject(params.permissions) ?? {}
+    const request: AcpPermissionRequest = {
+      id: itemId,
+      requestId: itemId,
+      sessionId,
+      toolCallId: itemId,
+      title: readString(params.reason) ?? "Grant additional permissions",
+      kind: requestedPermissions.network ? "execute" : "file_write",
+      toolInfo: {
+        id: itemId,
+        name: "request_permissions",
+        category: requestedPermissions.network ? "execute" : "edit",
+      },
+      rawInput: {
+        permissions: requestedPermissions,
+        cwd: params.cwd,
+        environmentId: params.environmentId,
+      },
+      reason: readString(params.reason),
+      metadata: { codexPermissionProfile: true },
+    }
+
+    const pendingBase: Omit<PendingApproval, "resolve"> = {
+      request,
+      kind: "permissionProfile",
+      sessionId,
+      rpcId,
+      requestedPermissions,
+    }
+    const mode = session?.permissionMode ?? "default"
+    if (mode === "bypassPermissions") {
+      return this.permissionProfileResponse(pendingBase, {
+        requestId: itemId,
+        granted: true,
+        scope: "session",
+      })
+    }
+    if (MODE_RANK[mode] <= MODE_RANK.dontAsk) {
+      return this.permissionProfileResponse(pendingBase, { requestId: itemId, granted: false })
+    }
+
+    return new Promise<unknown>((resolve) => {
+      this.pendingApprovals.set(itemId, { ...pendingBase, resolve })
+      if (sessionId) {
+        this.emit(sessionId, {
+          type: "permission_request",
+          sessionId,
+          timestamp: new Date(),
+          request,
+        })
+      }
+    })
+  }
+
+  private handleLegacyApproval(
+    params: Record<string, unknown>,
+    kind: "legacyCommand" | "legacyFileChange",
+    rpcId: number | string
+  ): Promise<{ decision: string }> {
+    const sessionId = readString(params.conversationId) ?? this.resolveSessionId(params)
+    const session = sessionId ? this._sessions.get(sessionId) : undefined
+    const approvalId = readString(params.approvalId)
+    const callId = readString(params.callId)
+    const requestId = approvalId ?? callId ?? `legacy_approval_${String(rpcId)}`
+    const command = Array.isArray(params.command)
+      ? params.command.filter((part): part is string => typeof part === "string")
+      : []
+    const isCommand = kind === "legacyCommand"
+    const request: AcpPermissionRequest = {
+      id: requestId,
+      requestId,
+      sessionId,
+      toolCallId: callId ?? requestId,
+      title: isCommand ? command.join(" ") || "Run command" : "Apply file changes",
+      kind: isCommand ? "execute" : "file_write",
+      toolInfo: {
+        id: callId ?? requestId,
+        name: isCommand ? command[0] || "shell" : "edit",
+        category: isCommand ? "execute" : "edit",
+      },
+      rawInput: isCommand
+        ? { command, cwd: readString(params.cwd), parsedCmd: params.parsedCmd }
+        : { fileChanges: params.fileChanges, grantRoot: params.grantRoot },
+      reason: readString(params.reason),
+      metadata: { codexLegacyApproval: true },
+    }
+
+    const auto = this.autoDecision(
+      session?.permissionMode ?? "default",
+      isCommand ? "command" : "fileChange"
+    )
+    if (auto) return Promise.resolve({ decision: auto === "accept" ? "approved" : "denied" })
+
+    return new Promise((resolve) => {
+      this.pendingApprovals.set(requestId, {
+        resolve: (response) => resolve(response as { decision: string }),
+        request,
+        kind,
+        sessionId,
+        rpcId,
+      })
+      if (sessionId) {
+        this.emit(sessionId, {
+          type: "permission_request",
+          sessionId,
+          timestamp: new Date(),
+          request,
+        })
+      }
+    })
+  }
+
+  private handleMcpElicitation(
+    params: Record<string, unknown>,
+    rpcId: number | string
+  ): Promise<{ action: "accept" | "decline" | "cancel"; content: unknown; _meta: null }> {
+    const sessionId = this.resolveSessionId(params)
+    const mode = readString(params.mode)
+    const parsed = parseMcpElicitationSchema(params.requestedSchema)
+    if (!sessionId || (mode !== "form" && mode !== "openai/form") || !parsed) {
+      return Promise.resolve({ action: "decline", content: null, _meta: null })
+    }
+
+    const requestId = `mcp_elicitation_${String(rpcId)}`
+    const request: AcpPermissionRequest = {
+      id: requestId,
+      requestId,
+      sessionId,
+      title: readString(params.message) ?? "MCP server requests input",
+      kind: "other",
+      toolInfo: {
+        id: requestId,
+        name: `mcp:${readString(params.serverName) ?? "server"}:elicitation`,
+        category: "other",
+      },
+      metadata: {
+        codexUserInput: { requestId, questions: parsed.questions },
+        codexMcpElicitation: {
+          serverName: readString(params.serverName),
+          mode,
+        },
+      },
+    }
+
+    return new Promise((resolve) => {
+      this.pendingMcpElicitations.set(requestId, {
+        resolve,
+        sessionId,
+        rpcId,
+        fields: parsed.fields,
+      })
+      this.emit(sessionId, {
+        type: "permission_request",
+        sessionId,
+        timestamp: new Date(),
+        request,
+      })
     })
   }
 
@@ -1796,21 +2035,86 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       return
     }
 
+    const elicitation = this.pendingMcpElicitations.get(response.requestId)
+    if (elicitation) {
+      this.pendingMcpElicitations.delete(response.requestId)
+      const content = response.granted
+        ? buildMcpElicitationContent(elicitation.fields, response.answers)
+        : null
+      elicitation.resolve({
+        action: response.granted && content ? "accept" : "decline",
+        content,
+        _meta: null,
+      })
+      const sessionId = elicitation.sessionId || _sessionId
+      this.emit(sessionId, {
+        type: "permission_response",
+        sessionId,
+        timestamp: new Date(),
+        response,
+      })
+      return
+    }
+
     const pending = this.pendingApprovals.get(response.requestId)
     if (!pending) return
     this.pendingApprovals.delete(response.requestId)
-    const decision = response.granted
-      ? response.scope === "session" || response.rememberChoice
-        ? "acceptForSession"
-        : "accept"
-      : "decline"
-    pending.resolve({ decision })
+    pending.resolve(
+      pending.kind === "permissionProfile"
+        ? this.permissionProfileResponse(pending, response)
+        : pending.kind === "legacyCommand" || pending.kind === "legacyFileChange"
+          ? {
+              decision: response.granted
+                ? response.scope === "session" || response.rememberChoice
+                  ? "approved_for_session"
+                  : "approved"
+                : "denied",
+            }
+          : {
+              decision: response.granted
+                ? response.scope === "session" || response.rememberChoice
+                  ? "acceptForSession"
+                  : "accept"
+                : "decline",
+            }
+    )
     this.emit(pending.request.sessionId || _sessionId, {
       type: "permission_response",
       sessionId: pending.request.sessionId || _sessionId,
       timestamp: new Date(),
       response,
     })
+  }
+
+  private permissionProfileResponse(
+    pending: Pick<PendingApproval, "requestedPermissions">,
+    response: AcpPermissionResponse
+  ): { permissions: Record<string, unknown>; scope: "turn" | "session" } {
+    const requested = pending.requestedPermissions ?? {}
+    const permissions: Record<string, unknown> = {}
+    if (response.granted) {
+      if (requested.network !== null && requested.network !== undefined) {
+        permissions.network = requested.network
+      }
+      if (requested.fileSystem !== null && requested.fileSystem !== undefined) {
+        permissions.fileSystem = requested.fileSystem
+      }
+    }
+    return {
+      permissions,
+      scope:
+        response.scope === "session" || response.scope === "always" || response.rememberChoice
+          ? "session"
+          : "turn",
+    }
+  }
+
+  private cancelApprovalResponse(pending: PendingApproval): unknown {
+    return pending.kind === "permissionProfile"
+      ? this.permissionProfileResponse(pending, { requestId: pending.request.id, granted: false })
+      : pending.kind === "legacyCommand" || pending.kind === "legacyFileChange"
+        ? { decision: "abort" }
+        : { decision: "cancel" }
   }
 
   /** Map a UI permission response onto the Codex requestUserInput answer map. */
@@ -2193,7 +2497,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   }
 
   private resolveSessionId(params: Record<string, unknown>): string | undefined {
-    const direct = readString(params.threadId)
+    const direct = readString(params.threadId) ?? readString(params.conversationId)
     if (direct) return direct
     const fromThread = readString(readObject(params.thread)?.id)
     if (fromThread) return fromThread
@@ -2361,6 +2665,304 @@ function parseUserInputQuestions(raw: unknown): CodexUserInputQuestion[] {
     })
   }
   return questions
+}
+
+type McpElicitationFieldType = "string" | "number" | "integer" | "boolean" | "string[]"
+type McpElicitationValue = string | number | boolean | string[]
+
+interface McpElicitationField {
+  type: McpElicitationFieldType
+  required: boolean
+  enumValues?: string[]
+  minimum?: number
+  maximum?: number
+  minLength?: number
+  maxLength?: number
+  minItems?: number
+  maxItems?: number
+  format?: "email" | "uri" | "date" | "date-time"
+  defaultValue?: McpElicitationValue
+}
+
+/**
+ * Convert the MCP form-mode JSON schema subset the existing question dialog can
+ * represent. Unsupported property shapes are declined by the caller instead of
+ * accepting a form whose response would violate the server-provided schema.
+ */
+function parseMcpElicitationSchema(raw: unknown): {
+  questions: CodexUserInputQuestion[]
+  fields: Map<string, McpElicitationField>
+} | null {
+  const schema = readObject(raw)
+  const properties = readObject(schema?.properties)
+  if (schema?.type !== "object" || !properties || Object.keys(properties).length === 0) {
+    return null
+  }
+
+  const rawRequired = schema.required
+  if (
+    rawRequired !== undefined &&
+    (!Array.isArray(rawRequired) || rawRequired.some((id) => typeof id !== "string"))
+  ) {
+    return null
+  }
+  const required = new Set((rawRequired as string[] | undefined) ?? [])
+  if ([...required].some((id) => !(id in properties))) return null
+
+  const questions: CodexUserInputQuestion[] = []
+  const fields = new Map<string, McpElicitationField>()
+  for (const [id, rawProperty] of Object.entries(properties)) {
+    const property = readObject(rawProperty)
+    const wireType = readString(property?.type)
+    if (!property) return null
+
+    let type: McpElicitationFieldType
+    let enumValues: string[] | undefined
+    let enumNames: string[] | undefined
+    if (wireType === "array") {
+      const items = readObject(property.items)
+      const parsedOptions = parseMcpElicitationOptions(items)
+      if (
+        !items ||
+        (items.type !== undefined && items.type !== "string") ||
+        !parsedOptions ||
+        parsedOptions.values.length === 0
+      ) {
+        return null
+      }
+      type = "string[]"
+      enumValues = parsedOptions.values
+      enumNames = parsedOptions.titles
+    } else {
+      if (!isMcpElicitationFieldType(wireType) || wireType === "string[]") return null
+      type = wireType
+      const parsedOptions = parseMcpElicitationOptions(property)
+      if (
+        (Array.isArray(property.enum) ||
+          Array.isArray(property.oneOf) ||
+          Array.isArray(property.anyOf)) &&
+        !parsedOptions
+      ) {
+        return null
+      }
+      enumValues = parsedOptions?.values
+      enumNames = parsedOptions?.titles
+    }
+
+    const minimum = readOptionalSchemaNumber(property, "minimum")
+    const maximum = readOptionalSchemaNumber(property, "maximum")
+    const minLength = readOptionalSchemaCount(property, "minLength")
+    const maxLength = readOptionalSchemaCount(property, "maxLength")
+    const minItems = readOptionalSchemaCount(property, "minItems")
+    const maxItems = readOptionalSchemaCount(property, "maxItems")
+    if (
+      minimum === null ||
+      maximum === null ||
+      minLength === null ||
+      maxLength === null ||
+      minItems === null ||
+      maxItems === null ||
+      (minimum !== undefined && maximum !== undefined && minimum > maximum) ||
+      (minLength !== undefined && maxLength !== undefined && minLength > maxLength) ||
+      (minItems !== undefined && maxItems !== undefined && minItems > maxItems)
+    ) {
+      return null
+    }
+    const format = readString(property.format)
+    if (
+      format !== undefined &&
+      format !== "email" &&
+      format !== "uri" &&
+      format !== "date" &&
+      format !== "date-time"
+    ) {
+      return null
+    }
+
+    const options =
+      enumValues && enumValues.length > 0
+        ? enumValues.map((value, index) => ({
+            label: value,
+            ...(enumNames?.[index] ? { description: enumNames[index] } : {}),
+          }))
+        : type === "boolean"
+          ? [{ label: "true" }, { label: "false" }]
+          : null
+
+    questions.push({
+      id,
+      question: readString(property.description) ?? readString(property.title) ?? id,
+      header: readString(property.title),
+      options,
+      isOther: false,
+      multiple: type === "string[]",
+      required: required.has(id),
+    })
+    const field: McpElicitationField = {
+      type,
+      required: required.has(id),
+      ...(enumValues ? { enumValues } : {}),
+      ...(minimum !== undefined ? { minimum } : {}),
+      ...(maximum !== undefined ? { maximum } : {}),
+      ...(minLength !== undefined ? { minLength } : {}),
+      ...(maxLength !== undefined ? { maxLength } : {}),
+      ...(minItems !== undefined ? { minItems } : {}),
+      ...(maxItems !== undefined ? { maxItems } : {}),
+      ...(format ? { format } : {}),
+    }
+    if (property.default !== undefined) {
+      const defaultValue = parseMcpDefaultValue(field, property.default)
+      if (defaultValue === undefined || !isValidMcpValue(field, defaultValue)) return null
+      field.defaultValue = defaultValue
+    }
+    fields.set(id, field)
+  }
+
+  return { questions, fields }
+}
+
+function readOptionalSchemaNumber(
+  schema: Record<string, unknown>,
+  key: string
+): number | null | undefined {
+  if (schema[key] === undefined) return undefined
+  return readNumber(schema[key]) ?? null
+}
+
+function readOptionalSchemaCount(
+  schema: Record<string, unknown>,
+  key: string
+): number | null | undefined {
+  const value = readOptionalSchemaNumber(schema, key)
+  if (value === null || value === undefined) return value
+  return Number.isInteger(value) && value >= 0 ? value : null
+}
+
+function isMcpElicitationFieldType(value: string | undefined): value is McpElicitationFieldType {
+  return (
+    value === "string" ||
+    value === "number" ||
+    value === "integer" ||
+    value === "boolean" ||
+    value === "string[]"
+  )
+}
+
+function parseMcpElicitationOptions(
+  schema: Record<string, unknown> | undefined
+): { values: string[]; titles?: string[] } | undefined {
+  if (!schema) return undefined
+  if (Array.isArray(schema.enum)) {
+    const values = schema.enum.filter((value): value is string => typeof value === "string")
+    if (values.length !== schema.enum.length) return undefined
+    const titles = Array.isArray(schema.enumNames)
+      ? schema.enumNames.filter((value): value is string => typeof value === "string")
+      : undefined
+    return { values, titles }
+  }
+  const variants = Array.isArray(schema.oneOf)
+    ? schema.oneOf
+    : Array.isArray(schema.anyOf)
+      ? schema.anyOf
+      : undefined
+  if (!variants) return undefined
+  const values: string[] = []
+  const titles: string[] = []
+  for (const rawVariant of variants) {
+    const variant = readObject(rawVariant)
+    const value = readString(variant?.const)
+    if (!value) return undefined
+    values.push(value)
+    titles.push(readString(variant?.title) ?? value)
+  }
+  return { values, titles }
+}
+
+/** Coerce question-dialog strings back into the primitive JSON schema types. */
+function buildMcpElicitationContent(
+  fields: ReadonlyMap<string, McpElicitationField>,
+  answers: Record<string, string[]> | undefined
+): Record<string, McpElicitationValue> | null {
+  const content: Record<string, McpElicitationValue> = {}
+  for (const [id, field] of fields) {
+    const rawValues = answers?.[id] ?? []
+    if (rawValues.length === 0) {
+      if (field.defaultValue !== undefined) content[id] = field.defaultValue
+      else if (field.required) return null
+      continue
+    }
+    const value = parseMcpAnswerValue(field, rawValues)
+    if (value === undefined || !isValidMcpValue(field, value)) return null
+    content[id] = value
+  }
+  return content
+}
+
+function parseMcpDefaultValue(
+  field: McpElicitationField,
+  raw: unknown
+): McpElicitationValue | undefined {
+  if (field.type === "string[]") {
+    return Array.isArray(raw) && raw.every((value) => typeof value === "string") ? raw : undefined
+  }
+  if (field.type === "string") return typeof raw === "string" ? raw : undefined
+  if (field.type === "boolean") return typeof raw === "boolean" ? raw : undefined
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : undefined
+}
+
+function parseMcpAnswerValue(
+  field: McpElicitationField,
+  rawValues: string[]
+): McpElicitationValue | undefined {
+  if (field.type === "string[]") return rawValues
+  if (rawValues.length !== 1) return undefined
+  const raw = rawValues[0]
+  if (field.type === "string") return raw
+  if (field.type === "boolean") {
+    if (raw === "true") return true
+    if (raw === "false") return false
+    return undefined
+  }
+  if (!raw.trim()) return undefined
+  const value = Number(raw)
+  return Number.isFinite(value) ? value : undefined
+}
+
+function isValidMcpValue(field: McpElicitationField, value: McpElicitationValue): boolean {
+  if (field.type === "string[]") {
+    if (!Array.isArray(value)) return false
+    if (field.minItems !== undefined && value.length < field.minItems) return false
+    if (field.maxItems !== undefined && value.length > field.maxItems) return false
+    return !field.enumValues || value.every((item) => field.enumValues!.includes(item))
+  }
+  if (field.type === "boolean") return typeof value === "boolean"
+  if (field.type === "number" || field.type === "integer") {
+    if (typeof value !== "number" || !Number.isFinite(value)) return false
+    if (field.type === "integer" && !Number.isInteger(value)) return false
+    if (field.minimum !== undefined && value < field.minimum) return false
+    if (field.maximum !== undefined && value > field.maximum) return false
+    return true
+  }
+  if (typeof value !== "string") return false
+  if (field.enumValues && !field.enumValues.includes(value)) return false
+  if (field.minLength !== undefined && value.length < field.minLength) return false
+  if (field.maxLength !== undefined && value.length > field.maxLength) return false
+  if (!field.format) return true
+  if (field.format === "email") return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+  if (field.format === "uri") {
+    try {
+      return Boolean(new URL(value).protocol)
+    } catch {
+      return false
+    }
+  }
+  const parsed = Date.parse(value)
+  if (!Number.isFinite(parsed)) return false
+  return field.format === "date" ? /^\d{4}-\d{2}-\d{2}$/.test(value) : value.includes("T")
+}
+
+function readRequestId(value: unknown): number | string | undefined {
+  return typeof value === "number" || typeof value === "string" ? value : undefined
 }
 
 function emptyAnswersFor(

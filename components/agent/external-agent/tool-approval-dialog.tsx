@@ -41,7 +41,7 @@ import {
 } from "@/components/ui/dialog"
 import type { AcpPermissionOption } from "@/types/agent/external-agent"
 
-/** One interactive question (Codex `item/tool/requestUserInput` wire shape). */
+/** One interactive question shared by Codex and OpenCode agent requests. */
 export interface ToolApprovalUserInputQuestion {
   id: string
   header?: string
@@ -49,6 +49,8 @@ export interface ToolApprovalUserInputQuestion {
   options?: Array<{ label: string; description?: string }> | null
   isOther?: boolean
   isSecret?: boolean
+  multiple?: boolean
+  required?: boolean
 }
 
 export interface ToolApprovalRequest {
@@ -115,6 +117,9 @@ export function ToolApprovalDialog({
   // Question-mode state: per-question selected option / free-typed text, keyed
   // by `${requestId}:${questionId}` so a new request never inherits answers.
   const [selectedAnswers, setSelectedAnswers] = useState<Record<string, string>>({})
+  const [selectedMultipleAnswers, setSelectedMultipleAnswers] = useState<Record<string, string[]>>(
+    {}
+  )
   const [otherAnswers, setOtherAnswers] = useState<Record<string, string>>({})
 
   if (!request) return null
@@ -153,6 +158,12 @@ export function ToolApprovalDialog({
     if (submitting) return
     const answers: Record<string, string[]> = {}
     for (const question of questions) {
+      if (question.multiple) {
+        const selected = selectedMultipleAnswers[answerKey(question.id)] ?? []
+        const typed = otherAnswers[answerKey(question.id)]?.trim()
+        answers[question.id] = typed ? [...selected, typed] : selected
+        continue
+      }
       const selected = selectedAnswers[answerKey(question.id)]
       const typed = otherAnswers[answerKey(question.id)]?.trim()
       if (selected && selected !== OTHER_SENTINEL) {
@@ -168,6 +179,13 @@ export function ToolApprovalDialog({
   }
 
   const answeredAll = questions.every((question) => {
+    if (question.required === false) return true
+    if (question.multiple) {
+      return (
+        (selectedMultipleAnswers[answerKey(question.id)]?.length ?? 0) > 0 ||
+        !!otherAnswers[answerKey(question.id)]?.trim()
+      )
+    }
     const selected = selectedAnswers[answerKey(question.id)]
     if (selected && selected !== OTHER_SENTINEL) return true
     return !!otherAnswers[answerKey(question.id)]?.trim()
@@ -198,7 +216,10 @@ export function ToolApprovalDialog({
               const key = answerKey(question.id)
               const hasOptions = !!question.options && question.options.length > 0
               const selected = selectedAnswers[key] ?? ""
-              const showOtherInput = !hasOptions || selected === OTHER_SENTINEL
+              const selectedMultiple = selectedMultipleAnswers[key] ?? []
+              const showOtherInput =
+                !hasOptions ||
+                (question.multiple ? question.isOther === true : selected === OTHER_SENTINEL)
               return (
                 <div key={question.id} className="space-y-2" data-testid="user-input-question">
                   {question.header && (
@@ -207,7 +228,41 @@ export function ToolApprovalDialog({
                     </p>
                   )}
                   <p className="text-sm font-medium">{question.question}</p>
-                  {hasOptions && (
+                  {hasOptions && question.multiple && (
+                    <div className="space-y-2">
+                      {question.options!.map((option) => {
+                        const checked = selectedMultiple.includes(option.label)
+                        return (
+                          <div key={option.label} className="flex items-start gap-2">
+                            <Checkbox
+                              checked={checked}
+                              id={`${key}:${option.label}`}
+                              className="mt-0.5"
+                              onCheckedChange={(value) =>
+                                setSelectedMultipleAnswers((prev) => ({
+                                  ...prev,
+                                  [key]: value
+                                    ? (prev[key] ?? []).includes(option.label)
+                                      ? (prev[key] ?? [])
+                                      : [...(prev[key] ?? []), option.label]
+                                    : (prev[key] ?? []).filter((label) => label !== option.label),
+                                }))
+                              }
+                            />
+                            <Label htmlFor={`${key}:${option.label}`} className="font-normal">
+                              <span>{option.label}</span>
+                              {option.description && (
+                                <span className="block text-xs text-muted-foreground">
+                                  {option.description}
+                                </span>
+                              )}
+                            </Label>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                  {hasOptions && !question.multiple && (
                     <RadioGroup
                       value={selected}
                       onValueChange={(value) =>

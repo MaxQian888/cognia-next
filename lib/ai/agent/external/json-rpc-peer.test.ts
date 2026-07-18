@@ -115,22 +115,30 @@ describe("JsonRpcPeer", () => {
   })
 
   describe("server→client requests", () => {
-    it("answers with the handler result", async () => {
+    it.each([7, "request-7"])("passes request id %p to the handler and answers", async (id) => {
       const writes: string[] = []
       const peer = new JsonRpcPeer({
         writeRaw: (m) => {
           writes.push(m)
         },
-        onServerRequest: async (method) => {
+        onServerRequest: async (method, params, requestId) => {
           expect(method).toBe("item/fileChange/requestApproval")
+          expect(params).toEqual({ itemId: "change-1" })
+          expect(requestId).toBe(id)
           return { decision: "accept" }
         },
       })
-      peer.ingest(JSON.stringify({ id: 7, method: "item/fileChange/requestApproval", params: {} }))
+      peer.ingest(
+        JSON.stringify({
+          id,
+          method: "item/fileChange/requestApproval",
+          params: { itemId: "change-1" },
+        })
+      )
       await Promise.resolve()
       await Promise.resolve()
       const sent = JSON.parse(writes.at(-1)!)
-      expect(sent).toMatchObject({ id: 7, result: { decision: "accept" } })
+      expect(sent).toMatchObject({ id, result: { decision: "accept" } })
     })
 
     it("returns -32601 when no handler is registered", async () => {

@@ -294,6 +294,69 @@ describe("ToolApprovalDialog (ACP variant)", () => {
       expect(onSubmitAnswers).toHaveBeenCalledWith("q-secret", { q1: ["sk-123"] })
     })
 
+    it("submits every selected option for a multiple-choice question", () => {
+      const onSubmitAnswers = jest.fn()
+      render(
+        wrap(
+          <ToolApprovalDialog
+            request={{
+              ...baseRequest,
+              id: "q-multiple",
+              userInput: {
+                questions: [
+                  {
+                    id: "regions",
+                    question: "Choose regions",
+                    options: [{ label: "us-east" }, { label: "eu-west" }],
+                    multiple: true,
+                  },
+                ],
+              },
+            }}
+            open
+            onOpenChange={() => {}}
+            onApprove={() => {}}
+            onDeny={() => {}}
+            onSubmitAnswers={onSubmitAnswers}
+          />
+        )
+      )
+
+      fireEvent.click(screen.getByLabelText("us-east"))
+      fireEvent.click(screen.getByLabelText("eu-west"))
+      fireEvent.click(screen.getByTestId("user-input-submit"))
+      expect(onSubmitAnswers).toHaveBeenCalledWith("q-multiple", {
+        regions: ["us-east", "eu-west"],
+      })
+    })
+
+    it("allows optional questions to be submitted without an answer", () => {
+      const onSubmitAnswers = jest.fn()
+      render(
+        wrap(
+          <ToolApprovalDialog
+            request={{
+              ...baseRequest,
+              id: "q-optional",
+              userInput: {
+                questions: [{ id: "note", question: "Optional note", required: false }],
+              },
+            }}
+            open
+            onOpenChange={() => {}}
+            onApprove={() => {}}
+            onDeny={() => {}}
+            onSubmitAnswers={onSubmitAnswers}
+          />
+        )
+      )
+
+      const submit = screen.getByTestId("user-input-submit")
+      expect(submit).not.toBeDisabled()
+      fireEvent.click(submit)
+      expect(onSubmitAnswers).toHaveBeenCalledWith("q-optional", { note: [] })
+    })
+
     it("skip denies the request", () => {
       const onDeny = jest.fn()
       render(

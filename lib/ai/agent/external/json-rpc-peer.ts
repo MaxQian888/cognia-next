@@ -32,7 +32,8 @@ export interface JsonRpcPeerOptions {
    */
   onServerRequest?: (
     method: string,
-    params: Record<string, unknown> | undefined
+    params: Record<string, unknown> | undefined,
+    id: number | string
   ) => Promise<unknown> | unknown
   /**
    * Process server→client requests concurrently instead of awaiting each one
@@ -204,7 +205,7 @@ export class JsonRpcPeer {
       return
     }
     try {
-      const result = await this.opts.onServerRequest(method, params)
+      const result = await this.opts.onServerRequest(method, params, id)
       await this.writeResult(this.envelope({ id, result }))
     } catch (error) {
       const code = error instanceof JsonRpcMethodError ? error.code : -32603

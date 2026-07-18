@@ -653,6 +653,200 @@ describe("translateSdkEvent", () => {
     expect(events[0]).toMatchObject({ type: "permission_request" })
   })
 
+  it("maps current permission.asked events and replies through the current endpoint", async () => {
+    const client = makeFakeClient()
+    mockCreateOpencodeClient.mockReturnValue(client)
+    global.fetch = jest.fn().mockResolvedValue(new Response(null, { status: 200 })) as typeof fetch
+    const connected = new OpenCodeClientAdapter()
+    await connected.connect(buildConfig({ network: { endpoint: "http://opencode.test" } }))
+
+    const events = connected.translateSdkEvent("s1", {
+      type: "permission.asked",
+      properties: {
+        id: "perm-current",
+        sessionID: "s1",
+        permission: "bash",
+        patterns: ["git status", "git diff"],
+        metadata: { command: "git status" },
+        always: ["git *"],
+        tool: { messageID: "m1", callID: "call-1" },
+      },
+    } as never)
+
+    expect(events[0]).toMatchObject({
+      type: "permission_request",
+      request: {
+        requestId: "perm-current",
+        toolCallId: "call-1",
+        rawInput: { patterns: ["git status", "git diff"] },
+      },
+    })
+    await connected.respondToPermission("s1", {
+      requestId: "perm-current",
+      granted: true,
+      rememberChoice: true,
+    })
+
+    const request = (global.fetch as jest.Mock).mock.calls.at(-1)?.[0] as Request
+    expect(request.url).toBe("http://opencode.test/permission/perm-current/reply")
+    await expect(request.json()).resolves.toEqual({ reply: "always" })
+    expect(client.postSessionIdPermissionsPermissionId).not.toHaveBeenCalled()
+  })
+
+  it("maps permission.v2.asked and replies through the session-scoped v2 endpoint", async () => {
+    mockCreateOpencodeClient.mockReturnValue(makeFakeClient())
+    global.fetch = jest.fn().mockResolvedValue(new Response(null, { status: 204 })) as typeof fetch
+    const connected = new OpenCodeClientAdapter()
+    await connected.connect(buildConfig({ network: { endpoint: "http://opencode.test" } }))
+
+    const events = connected.translateSdkEvent("s1", {
+      type: "permission.v2.asked",
+      properties: {
+        id: "perm-v2",
+        sessionID: "s1",
+        action: "edit",
+        resources: ["/workspace/file.ts"],
+        save: ["/workspace/*"],
+        metadata: { diff: "+change" },
+        source: { type: "tool", messageID: "m2", callID: "call-2" },
+      },
+    } as never)
+
+    expect(events[0]).toMatchObject({
+      type: "permission_request",
+      request: {
+        requestId: "perm-v2",
+        toolCallId: "call-2",
+        rawInput: { resources: ["/workspace/file.ts"] },
+      },
+    })
+    await connected.respondToPermission("s1", { requestId: "perm-v2", granted: false })
+
+    const request = (global.fetch as jest.Mock).mock.calls.at(-1)?.[0] as Request
+    expect(request.url).toBe("http://opencode.test/api/session/s1/permission/perm-v2/reply")
+    await expect(request.json()).resolves.toEqual({ reply: "reject" })
+  })
+
+  it.each([
+    ["question.asked", "/question/question-1/reply"],
+    ["question.v2.asked", "/api/session/s1/question/question-1/reply"],
+  ])("maps %s and returns ordered answers", async (eventType, expectedPath) => {
+    mockCreateOpencodeClient.mockReturnValue(makeFakeClient())
+    global.fetch = jest.fn().mockResolvedValue(new Response(null, { status: 200 })) as typeof fetch
+    const connected = new OpenCodeClientAdapter()
+    await connected.connect(buildConfig({ network: { endpoint: "http://opencode.test" } }))
+
+    const events = connected.translateSdkEvent("s1", {
+      type: eventType,
+      properties: {
+        id: "question-1",
+        sessionID: "s1",
+        questions: [
+          {
+            header: "Region",
+            question: "Choose regions",
+            options: [
+              { label: "us-east", description: "Virginia" },
+              { label: "eu-west", description: "Ireland" },
+            ],
+            multiple: true,
+            custom: false,
+          },
+          { header: "Note", question: "Deployment note", options: [], custom: true },
+        ],
+        tool: { messageID: "m3", callID: "call-3" },
+      },
+    } as never)
+
+    expect(events[0]).toMatchObject({
+      type: "permission_request",
+      request: {
+        requestId: "question-1",
+        toolCallId: "call-3",
+        metadata: {
+          codexUserInput: {
+            questions: [
+              { id: "question-1:0", multiple: true },
+              { id: "question-1:1", isOther: true },
+            ],
+          },
+        },
+      },
+    })
+    await connected.respondToPermission("s1", {
+      requestId: "question-1",
+      granted: true,
+      answers: {
+        "question-1:0": ["us-east", "eu-west"],
+        "question-1:1": ["ship tonight"],
+      },
+    })
+
+    const request = (global.fetch as jest.Mock).mock.calls.at(-1)?.[0] as Request
+    expect(request.url).toBe(`http://opencode.test${expectedPath}`)
+    await expect(request.json()).resolves.toEqual({
+      answers: [["us-east", "eu-west"], ["ship tonight"]],
+    })
+  })
+
+  it("rejects a partially malformed question payload instead of leaving the server blocked", async () => {
+    mockCreateOpencodeClient.mockReturnValue(makeFakeClient())
+    global.fetch = jest.fn().mockResolvedValue(new Response(null, { status: 200 })) as typeof fetch
+    const connected = new OpenCodeClientAdapter()
+    await connected.connect(buildConfig({ network: { endpoint: "http://opencode.test" } }))
+
+    const events = connected.translateSdkEvent("s1", {
+      type: "question.asked",
+      properties: {
+        id: "question-malformed",
+        sessionID: "s1",
+        questions: [
+          { header: "Valid", question: "First question", options: [] },
+          { header: "Invalid", options: [] },
+        ],
+      },
+    } as never)
+
+    expect(events).toEqual([])
+    await Promise.resolve()
+    const request = (global.fetch as jest.Mock).mock.calls.at(-1)?.[0] as Request
+    expect(request.url).toBe("http://opencode.test/question/question-malformed/reject")
+  })
+
+  it("correlates pending v2 interactions by session and request id", async () => {
+    mockCreateOpencodeClient.mockReturnValue(makeFakeClient())
+    global.fetch = jest.fn().mockResolvedValue(new Response(null, { status: 204 })) as typeof fetch
+    const connected = new OpenCodeClientAdapter()
+    await connected.connect(buildConfig({ network: { endpoint: "http://opencode.test" } }))
+
+    for (const sessionID of ["s1", "s2"]) {
+      connected.translateSdkEvent(sessionID, {
+        type: "permission.v2.asked",
+        properties: {
+          id: "shared-request",
+          sessionID,
+          action: "edit",
+          resources: [`/${sessionID}/file.ts`],
+        },
+      } as never)
+    }
+
+    await connected.respondToPermission("s1", {
+      requestId: "shared-request",
+      granted: true,
+    })
+    await connected.respondToPermission("s2", {
+      requestId: "shared-request",
+      granted: false,
+    })
+
+    const urls = (global.fetch as jest.Mock).mock.calls.slice(-2).map(([request]) => request.url)
+    expect(urls).toEqual([
+      "http://opencode.test/api/session/s1/permission/shared-request/reply",
+      "http://opencode.test/api/session/s2/permission/shared-request/reply",
+    ])
+  })
+
   it("ignores events for other sessions", () => {
     const events = a.translateSdkEvent("s1", {
       type: "message.part.updated",
