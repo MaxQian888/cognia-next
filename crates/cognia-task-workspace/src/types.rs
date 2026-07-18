@@ -197,3 +197,11 @@ pub struct ApplyOutcome {
     pub revision: u64,
     pub conflicts: Vec<PatchConflict>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PruneOutcome {
+    pub removed_task_ids: Vec<String>,
+    pub removed_blob_count: u64,
+    pub reclaimed_bytes: u64,
+}

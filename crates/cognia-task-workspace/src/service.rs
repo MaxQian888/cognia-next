@@ -3,8 +3,9 @@ use crate::{
     resource::{is_sensitive_resource, media_type_for},
     snapshot::{capture, materialize, WorkspaceSnapshot},
     store::WorkspaceStore,
-    BeginTaskRun, ChangeKind, ContributionOrigin, IsolationKind, ResourceChange, RunState, TaskRun,
-    TaskWorkspace, TaskWorkspaceState,
+    BeginTaskRun, ChangeKind, ContributionOrigin, DownloadHandle, IsolationKind, ResourceChange,
+    RunState, TaskRun, TaskWorkspace, TaskWorkspaceEventSink, TaskWorkspaceState, TransferChunk,
+    TransferRegistry, UploadHandle, WatchManager,
 };
 use parking_lot::Mutex;
 use std::{
@@ -36,6 +37,10 @@ pub struct TaskWorkspaceService {
     store: Mutex<WorkspaceStore>,
     execution_dir: PathBuf,
     retention: Duration,
+    transfers: TransferRegistry,
+    upload_owners: Mutex<HashMap<String, (String, String)>>,
+    origin_hints: Mutex<HashMap<(String, String), ContributionOrigin>>,
+    watchers: WatchManager,
 }
 
 impl TaskWorkspaceService {
@@ -49,6 +54,10 @@ impl TaskWorkspaceService {
             store: Mutex::new(WorkspaceStore::open(&service_dir, config.max_blob_bytes)?),
             execution_dir,
             retention: config.retention,
+            transfers: TransferRegistry::new(Duration::from_secs(5 * 60)),
+            upload_owners: Mutex::new(HashMap::new()),
+            origin_hints: Mutex::new(HashMap::new()),
+            watchers: WatchManager::new(),
         })
     }
 
@@ -127,8 +136,14 @@ impl TaskWorkspaceService {
         let (mut run, baseline): (TaskRun, WorkspaceSnapshot) = store
             .get_run(run_id)?
             .ok_or_else(|| format!("unknown task run: {run_id}"))?;
-        if run.state != RunState::Running && run.state != RunState::Settling {
+        if !matches!(
+            run.state,
+            RunState::Running | RunState::Settling | RunState::Ready
+        ) {
             return store.list_resources(&run.task_id);
+        }
+        if run.state == RunState::Ready {
+            return store.list_run_resources(run_id);
         }
         run.state = RunState::Settling;
         store.put_run(&run, &baseline)?;
@@ -140,14 +155,17 @@ impl TaskWorkspaceService {
             .get_task(&run.task_id)?
             .ok_or_else(|| format!("missing task: {}", run.task_id))?;
         task.revision = task.revision.saturating_add(1);
-        let changes = reconcile(
-            &baseline,
-            &current,
-            &mut store,
-            task.revision,
-            &run.agent_id,
+        let origin_hints = self.origin_hints.lock();
+        let mut context = ReconcileContext {
+            store: &mut store,
+            revision: task.revision,
+            run_id: &run.run_id,
+            agent_id: &run.agent_id,
+            origin_hints: &origin_hints,
             now,
-        )?;
+        };
+        let changes = reconcile(&baseline, &current, &mut context)?;
+        drop(origin_hints);
         run.state = RunState::Ready;
         run.settled_at = Some(now);
         task.state = TaskWorkspaceState::Ready;
@@ -175,6 +193,55 @@ impl TaskWorkspaceService {
 
     pub fn get_task(&self, task_id: &str) -> Result<Option<TaskWorkspace>, String> {
         self.store.lock().get_task(task_id)
+    }
+
+    pub fn set_task_pinned(&self, task_id: &str, pinned: bool) -> Result<TaskWorkspace, String> {
+        let store = self.store.lock();
+        let mut task = store
+            .get_task(task_id)?
+            .ok_or_else(|| format!("unknown task workspace: {task_id}"))?;
+        task.pinned = pinned;
+        store.put_task(&task)?;
+        Ok(task)
+    }
+
+    pub fn prune(&self) -> Result<crate::PruneOutcome, String> {
+        let now = now_ms();
+        let mut store = self.store.lock();
+        let mut removed_task_ids = Vec::new();
+        for task in store.list_tasks()? {
+            if task.pinned || task.expires_at > now || !store.task_is_prunable(&task.task_id)? {
+                continue;
+            }
+            for run in store.list_runs(&task.task_id)? {
+                let execution_root = Path::new(&run.execution_root);
+                match run.isolation_kind {
+                    IsolationKind::GitWorktree => cleanup_git_worktree(
+                        Path::new(&task.workspace_root),
+                        execution_root,
+                        run.isolation_ref.as_deref().unwrap_or_default(),
+                    ),
+                    IsolationKind::Shadow => {
+                        if execution_root.exists() {
+                            fs::remove_dir_all(execution_root).map_err(|error| {
+                                format!(
+                                    "remove execution root {}: {error}",
+                                    execution_root.display()
+                                )
+                            })?;
+                        }
+                    }
+                }
+            }
+            store.delete_task(&task.task_id)?;
+            removed_task_ids.push(task.task_id);
+        }
+        let (removed_blob_count, reclaimed_bytes) = store.prune_unreferenced_blobs()?;
+        Ok(crate::PruneOutcome {
+            removed_task_ids,
+            removed_blob_count,
+            reclaimed_bytes,
+        })
     }
 
     pub fn list_runs(&self, task_id: &str) -> Result<Vec<TaskRun>, String> {
@@ -263,6 +330,136 @@ impl TaskWorkspaceService {
         store.put_task(&task)?;
         Ok(outcome)
     }
+
+    pub fn read_resource(
+        &self,
+        run_id: &str,
+        rel_path: &str,
+        offset: u64,
+        max_bytes: Option<usize>,
+        allow_sensitive: bool,
+    ) -> Result<crate::ResourceRead, String> {
+        if is_sensitive_resource(rel_path) && !allow_sensitive {
+            return Err(format!(
+                "sensitive resource requires explicit authorization: {rel_path}"
+            ));
+        }
+        let (run, _): (TaskRun, WorkspaceSnapshot) = self
+            .store
+            .lock()
+            .get_run(run_id)?
+            .ok_or_else(|| format!("unknown task run: {run_id}"))?;
+        crate::read_text_resource(Path::new(&run.execution_root), rel_path, offset, max_bytes)
+    }
+
+    pub fn open_resource_download(
+        &self,
+        run_id: &str,
+        rel_path: &str,
+        allow_sensitive: bool,
+    ) -> Result<DownloadHandle, String> {
+        let (run, _): (TaskRun, WorkspaceSnapshot) = self
+            .store
+            .lock()
+            .get_run(run_id)?
+            .ok_or_else(|| format!("unknown task run: {run_id}"))?;
+        self.transfers
+            .open_download(Path::new(&run.execution_root), rel_path, allow_sensitive)
+    }
+
+    pub fn read_download_chunk(
+        &self,
+        handle_id: &str,
+        offset: u64,
+        length: Option<usize>,
+    ) -> Result<TransferChunk, String> {
+        self.transfers.read_chunk(handle_id, offset, length)
+    }
+
+    pub fn close_resource_download(&self, handle_id: &str) -> Result<(), String> {
+        self.transfers.close_download(handle_id)
+    }
+
+    pub fn open_resource_upload(
+        &self,
+        run_id: &str,
+        rel_path: &str,
+        expected_size: u64,
+        expected_hash: &str,
+        allow_sensitive: bool,
+    ) -> Result<UploadHandle, String> {
+        let (run, _): (TaskRun, WorkspaceSnapshot) = self
+            .store
+            .lock()
+            .get_run(run_id)?
+            .ok_or_else(|| format!("unknown task run: {run_id}"))?;
+        let handle = self.transfers.open_upload(
+            Path::new(&run.execution_root),
+            rel_path,
+            expected_size,
+            expected_hash,
+            allow_sensitive,
+        )?;
+        self.upload_owners.lock().insert(
+            handle.handle_id.clone(),
+            (run_id.to_string(), rel_path.to_string()),
+        );
+        Ok(handle)
+    }
+
+    pub fn write_upload_chunk(
+        &self,
+        handle_id: &str,
+        offset: u64,
+        data_base64: &str,
+        chunk_hash: &str,
+    ) -> Result<u64, String> {
+        self.transfers
+            .write_chunk(handle_id, offset, data_base64, chunk_hash)
+    }
+
+    pub fn commit_resource_upload(&self, handle_id: &str) -> Result<String, String> {
+        let owner = self
+            .upload_owners
+            .lock()
+            .get(handle_id)
+            .cloned()
+            .ok_or_else(|| format!("unknown upload owner: {handle_id}"))?;
+        let _ = self.watchers.mark_echo(&owner.0, &owner.1);
+        let hash = self.transfers.commit_upload(handle_id)?;
+        self.upload_owners.lock().remove(handle_id);
+        self.origin_hints
+            .lock()
+            .insert(owner, ContributionOrigin::User);
+        Ok(hash)
+    }
+
+    pub fn abort_resource_upload(&self, handle_id: &str) -> Result<(), String> {
+        self.upload_owners.lock().remove(handle_id);
+        self.transfers.abort_upload(handle_id)
+    }
+
+    pub fn watch_run(
+        &self,
+        run_id: &str,
+        sink: std::sync::Arc<dyn TaskWorkspaceEventSink>,
+    ) -> Result<(), String> {
+        let (run, _): (TaskRun, WorkspaceSnapshot) = self
+            .store
+            .lock()
+            .get_run(run_id)?
+            .ok_or_else(|| format!("unknown task run: {run_id}"))?;
+        self.watchers.start(
+            &run.task_id,
+            &run.run_id,
+            Path::new(&run.execution_root),
+            sink,
+        )
+    }
+
+    pub fn stop_watching_run(&self, run_id: &str) -> Result<(), String> {
+        self.watchers.stop(run_id)
+    }
 }
 
 fn create_execution(
@@ -345,22 +542,35 @@ fn cleanup_git_worktree(workspace_root: &Path, execution_root: &Path, branch: &s
         .args(["worktree", "remove", "--force"])
         .arg(execution_root)
         .status();
-    let _ = Command::new("git")
-        .args(["-C"])
-        .arg(workspace_root)
-        .args(["branch", "-D", branch])
-        .status();
+    if !branch.is_empty() {
+        let _ = Command::new("git")
+            .args(["-C"])
+            .arg(workspace_root)
+            .args(["branch", "-D", branch])
+            .status();
+    }
+}
+
+struct ReconcileContext<'a> {
+    store: &'a mut WorkspaceStore,
+    revision: u64,
+    run_id: &'a str,
+    agent_id: &'a str,
+    origin_hints: &'a HashMap<(String, String), ContributionOrigin>,
+    now: i64,
 }
 
 fn reconcile(
     before: &WorkspaceSnapshot,
     after: &WorkspaceSnapshot,
-    store: &mut WorkspaceStore,
-    revision: u64,
-    agent_id: &str,
-    now: i64,
+    context: &mut ReconcileContext<'_>,
 ) -> Result<Vec<ResourceChange>, String> {
-    let meta = ChangeMeta { revision, agent_id };
+    let meta = ChangeMeta {
+        revision: context.revision,
+        run_id: context.run_id,
+        agent_id: context.agent_id,
+        origin_hints: context.origin_hints,
+    };
     let mut deleted: Vec<_> = before
         .entries
         .iter()
@@ -414,7 +624,7 @@ fn reconcile(
         ));
     }
     for (path, entry) in created {
-        let bytes = store.get_blob(&entry.hash, now)?;
+        let bytes = context.store.get_blob(&entry.hash, context.now)?;
         let stats = (!entry.binary).then(|| (line_count(&bytes), 0));
         changes.push(change_from_entries(
             path,
@@ -427,7 +637,7 @@ fn reconcile(
         ));
     }
     for (path, entry) in deleted {
-        let bytes = store.get_blob(&entry.hash, now)?;
+        let bytes = context.store.get_blob(&entry.hash, context.now)?;
         let stats = (!entry.binary).then(|| (0, line_count(&bytes)));
         changes.push(change_from_entries(
             path,
@@ -447,8 +657,8 @@ fn reconcile(
             continue;
         }
         let stats = if !old.binary && !new.binary {
-            let old_bytes = store.get_blob(&old.hash, now)?;
-            let new_bytes = store.get_blob(&new.hash, now)?;
+            let old_bytes = context.store.get_blob(&old.hash, context.now)?;
+            let new_bytes = context.store.get_blob(&new.hash, context.now)?;
             line_stats(&old_bytes, &new_bytes)
         } else {
             None
@@ -470,7 +680,9 @@ fn reconcile(
 #[derive(Clone, Copy)]
 struct ChangeMeta<'a> {
     revision: u64,
+    run_id: &'a str,
     agent_id: &'a str,
+    origin_hints: &'a HashMap<(String, String), ContributionOrigin>,
 }
 
 fn change_from_entries(
@@ -483,12 +695,17 @@ fn change_from_entries(
     stats: Option<(u32, u32)>,
 ) -> ResourceChange {
     let visible = after.or(before);
+    let origin = meta
+        .origin_hints
+        .get(&(meta.run_id.to_string(), path.to_string()))
+        .copied()
+        .unwrap_or(ContributionOrigin::Agent);
     ResourceChange {
         path: path.to_string(),
         old_path,
         kind,
-        origin: ContributionOrigin::Agent,
-        agent_id: Some(meta.agent_id.to_string()),
+        origin,
+        agent_id: (origin == ContributionOrigin::Agent).then(|| meta.agent_id.to_string()),
         media_type: visible
             .map(|entry| entry.media_type.clone())
             .unwrap_or_else(|| media_type_for(path, false).to_string()),
@@ -806,5 +1023,125 @@ mod tests {
         assert!(applied.contains("agent line 2\n"));
         assert!(applied.contains("line 22\n"));
         assert!(!applied.contains("agent line 22\n"));
+    }
+
+    #[test]
+    fn uploaded_task_resource_is_attributed_to_the_user() {
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        use sha2::{Digest, Sha256};
+
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        service
+            .begin_run(input(&workspace, "task-user", "run-user"))
+            .unwrap();
+        let bytes = b"written in the task dock";
+        let hash = hex::encode(Sha256::digest(bytes));
+        let handle = service
+            .open_resource_upload(
+                "run-user",
+                "notes/user.txt",
+                bytes.len() as u64,
+                &hash,
+                false,
+            )
+            .unwrap();
+        service
+            .write_upload_chunk(&handle.handle_id, 0, &STANDARD.encode(bytes), &hash)
+            .unwrap();
+        service.commit_resource_upload(&handle.handle_id).unwrap();
+
+        let changes = service.settle_run("run-user").unwrap();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].origin, ContributionOrigin::User);
+        assert_eq!(changes[0].agent_id, None);
+    }
+
+    #[test]
+    fn settling_a_ready_run_is_idempotent() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let run = service
+            .begin_run(input(&workspace, "task-idempotent", "run-idempotent"))
+            .unwrap();
+        fs::write(Path::new(&run.execution_root).join("result.txt"), "result").unwrap();
+
+        let first = service.settle_run("run-idempotent").unwrap();
+        let first_task = service.get_task("task-idempotent").unwrap().unwrap();
+        let second = service.settle_run("run-idempotent").unwrap();
+        let second_task = service.get_task("task-idempotent").unwrap().unwrap();
+
+        assert_eq!(second, first);
+        assert_eq!(second_task.revision, first_task.revision);
+        assert_eq!(second_task.revision, 1);
+    }
+
+    #[test]
+    fn sensitive_resource_reads_require_explicit_authorization() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        fs::write(workspace.path().join(".env.local"), "TOKEN=secret\n").unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        service
+            .begin_run(input(&workspace, "task-sensitive", "run-sensitive"))
+            .unwrap();
+
+        let denied = service
+            .read_resource("run-sensitive", ".env.local", 0, None, false)
+            .unwrap_err();
+        assert!(denied.contains("explicit authorization"));
+
+        let allowed = service
+            .read_resource("run-sensitive", ".env.local", 0, None, true)
+            .unwrap();
+        assert_eq!(allowed.content.as_deref(), Some("TOKEN=secret\n"));
+        assert!(allowed.sensitive);
+    }
+
+    #[test]
+    fn prune_keeps_unapplied_tasks_and_removes_expired_applied_tasks() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        fs::write(workspace.path().join("result.txt"), "before\n").unwrap();
+        let mut config = ServiceConfig::new(data.path().into());
+        config.retention = Duration::ZERO;
+        let service = TaskWorkspaceService::open(config).unwrap();
+        let run = service
+            .begin_run(input(&workspace, "task-prune", "run-prune"))
+            .unwrap();
+        fs::write(Path::new(&run.execution_root).join("result.txt"), "after\n").unwrap();
+        service.settle_run("run-prune").unwrap();
+
+        let protected = service.prune().unwrap();
+        assert!(protected.removed_task_ids.is_empty());
+        assert!(service.get_task("task-prune").unwrap().is_some());
+
+        service.apply_patch_set("run-prune", &[]).unwrap();
+        let pruned = service.prune().unwrap();
+        assert_eq!(pruned.removed_task_ids, vec!["task-prune"]);
+        assert!(pruned.removed_blob_count > 0);
+        assert!(pruned.reclaimed_bytes > 0);
+        assert!(service.get_task("task-prune").unwrap().is_none());
+        assert!(!Path::new(&run.execution_root).exists());
+    }
+
+    #[test]
+    fn prune_keeps_pinned_tasks() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let mut config = ServiceConfig::new(data.path().into());
+        config.retention = Duration::ZERO;
+        let service = TaskWorkspaceService::open(config).unwrap();
+        service
+            .begin_run(input(&workspace, "task-pinned", "run-pinned"))
+            .unwrap();
+        service.settle_run("run-pinned").unwrap();
+        service.apply_patch_set("run-pinned", &[]).unwrap();
+        service.set_task_pinned("task-pinned", true).unwrap();
+
+        assert!(service.prune().unwrap().removed_task_ids.is_empty());
+        assert!(service.get_task("task-pinned").unwrap().is_some());
     }
 }

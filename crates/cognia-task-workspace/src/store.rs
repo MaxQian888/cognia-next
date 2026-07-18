@@ -1,11 +1,13 @@
-use crate::{ResourceChange, TaskRun, TaskWorkspace};
+use crate::{PatchState, ResourceChange, RunState, TaskRun, TaskWorkspace};
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::{
+    collections::HashSet,
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
 };
+use uuid::Uuid;
 
 pub struct WorkspaceStore {
     connection: Connection,
@@ -194,6 +196,54 @@ impl WorkspaceStore {
         )
     }
 
+    pub fn list_tasks(&self) -> Result<Vec<TaskWorkspace>, String> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT payload FROM task_workspaces ORDER BY rowid")
+            .map_err(|error| format!("prepare tasks: {error}"))?;
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|error| format!("query tasks: {error}"))?;
+        rows.map(|row| {
+            let payload = row.map_err(|error| error.to_string())?;
+            serde_json::from_str(&payload).map_err(|error| error.to_string())
+        })
+        .collect()
+    }
+
+    pub fn task_is_prunable(&self, task_id: &str) -> Result<bool, String> {
+        let runs = self.list_runs(task_id)?;
+        if runs
+            .iter()
+            .any(|run| matches!(run.state, RunState::Running | RunState::Settling))
+        {
+            return Ok(false);
+        }
+        let mut statement = self
+            .connection
+            .prepare("SELECT payload FROM task_patch_sets WHERE task_id=?1")
+            .map_err(|error| format!("prepare task patch sets: {error}"))?;
+        let rows = statement
+            .query_map([task_id], |row| row.get::<_, String>(0))
+            .map_err(|error| format!("query task patch sets: {error}"))?;
+        for row in rows {
+            let payload = row.map_err(|error| error.to_string())?;
+            let patch: crate::PatchSet =
+                serde_json::from_str(&payload).map_err(|error| error.to_string())?;
+            if matches!(patch.state, PatchState::Ready | PatchState::Conflict) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    pub fn delete_task(&self, task_id: &str) -> Result<(), String> {
+        self.connection
+            .execute("DELETE FROM task_workspaces WHERE task_id=?1", [task_id])
+            .map_err(|error| format!("delete task {task_id}: {error}"))?;
+        Ok(())
+    }
+
     pub fn put_run<T: serde::Serialize>(&self, run: &TaskRun, baseline: &T) -> Result<(), String> {
         let payload = serde_json::to_string(run).map_err(|error| error.to_string())?;
         let baseline = serde_json::to_string(baseline).map_err(|error| error.to_string())?;
@@ -288,6 +338,21 @@ impl WorkspaceStore {
         .collect()
     }
 
+    pub fn list_run_resources(&self, run_id: &str) -> Result<Vec<ResourceChange>, String> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT payload FROM task_resources WHERE run_id=?1 ORDER BY path")
+            .map_err(|error| format!("prepare run resources: {error}"))?;
+        let rows = statement
+            .query_map([run_id], |row| row.get::<_, String>(0))
+            .map_err(|error| format!("query run resources: {error}"))?;
+        rows.map(|row| {
+            let payload = row.map_err(|error| error.to_string())?;
+            serde_json::from_str(&payload).map_err(|error| error.to_string())
+        })
+        .collect()
+    }
+
     pub fn put_patch_set(&self, patch: &crate::PatchSet) -> Result<(), String> {
         let payload = serde_json::to_string(patch).map_err(|error| error.to_string())?;
         self.connection
@@ -311,6 +376,120 @@ impl WorkspaceStore {
                 .optional()
                 .map_err(|error| format!("get patch set: {error}"))?,
         )
+    }
+
+    pub fn prune_unreferenced_blobs(&mut self) -> Result<(u64, u64), String> {
+        let mut referenced = HashSet::new();
+        for table_column in [
+            "task_runs:payload",
+            "task_runs:baseline",
+            "task_resources:payload",
+            "task_patch_sets:payload",
+        ] {
+            let (table, column) = table_column.split_once(':').expect("static table column");
+            let sql = format!("SELECT {column} FROM {table}");
+            let mut statement = self
+                .connection
+                .prepare(&sql)
+                .map_err(|error| format!("prepare blob reference scan: {error}"))?;
+            let rows = statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .map_err(|error| format!("query blob references: {error}"))?;
+            for row in rows {
+                let payload = row.map_err(|error| error.to_string())?;
+                let value: serde_json::Value =
+                    serde_json::from_str(&payload).map_err(|error| error.to_string())?;
+                collect_hashes(&value, &mut referenced);
+            }
+        }
+
+        let mut statement = self
+            .connection
+            .prepare("SELECT hash,rel_path,stored_size FROM task_blobs")
+            .map_err(|error| format!("prepare blobs for prune: {error}"))?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, u64>(2)?,
+                ))
+            })
+            .map_err(|error| format!("query blobs for prune: {error}"))?;
+        let stale = rows
+            .filter_map(|row| match row {
+                Ok(value) if !referenced.contains(&value.0) => Some(Ok(value)),
+                Ok(_) => None,
+                Err(error) => Some(Err(error.to_string())),
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        drop(statement);
+
+        let mut tombstones = Vec::with_capacity(stale.len());
+        for (hash, rel_path, _) in &stale {
+            let source = self.blob_dir.join(rel_path);
+            let tombstone = self
+                .blob_dir
+                .join(format!(".prune-{}-{hash}", Uuid::now_v7()));
+            if let Err(error) = fs::rename(&source, &tombstone) {
+                restore_tombstones(&tombstones);
+                return Err(format!("stage blob {hash} for prune: {error}"));
+            }
+            tombstones.push((source, tombstone));
+        }
+
+        let transaction = match self.connection.transaction() {
+            Ok(transaction) => transaction,
+            Err(error) => {
+                restore_tombstones(&tombstones);
+                return Err(format!("begin blob prune: {error}"));
+            }
+        };
+        let mut reclaimed = 0_u64;
+        for (hash, _, stored_size) in &stale {
+            if let Err(error) = transaction.execute("DELETE FROM task_blobs WHERE hash=?1", [hash])
+            {
+                drop(transaction);
+                restore_tombstones(&tombstones);
+                return Err(format!("delete blob {hash}: {error}"));
+            }
+            reclaimed = reclaimed.saturating_add(*stored_size);
+        }
+        if let Err(error) = transaction.commit() {
+            restore_tombstones(&tombstones);
+            return Err(format!("commit blob prune: {error}"));
+        }
+        for (_, tombstone) in tombstones {
+            let _ = fs::remove_file(tombstone);
+        }
+        Ok((stale.len() as u64, reclaimed))
+    }
+}
+
+fn restore_tombstones(tombstones: &[(PathBuf, PathBuf)]) {
+    for (source, tombstone) in tombstones.iter().rev() {
+        let _ = fs::rename(tombstone, source);
+    }
+}
+
+fn collect_hashes(value: &serde_json::Value, hashes: &mut HashSet<String>) {
+    match value {
+        serde_json::Value::String(value)
+            if value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()) =>
+        {
+            hashes.insert(value.to_ascii_lowercase());
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                collect_hashes(value, hashes);
+            }
+        }
+        serde_json::Value::Object(values) => {
+            for value in values.values() {
+                collect_hashes(value, hashes);
+            }
+        }
+        _ => {}
     }
 }
 
