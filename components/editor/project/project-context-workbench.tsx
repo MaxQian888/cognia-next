@@ -39,6 +39,7 @@ import {
   isProjectFilePreviewable,
   resolveContextCapabilities,
 } from "@/lib/context-workbench/capabilities"
+import { useContextCommentBadge } from "@/hooks/context-workbench/use-context-comment-badge"
 
 function contentToken(content: string | undefined | null): string {
   const text = content ?? ""
@@ -143,6 +144,7 @@ function ProjectContextWorkbenchHost({
     rootId: rootPath,
     relPath: file.relPath,
   })
+  const unresolvedCommentCount = useContextCommentBadge("project-file", resourceKey)
   const proposal = useSyncExternalStore(
     subscribeProjectFileProposals,
     () => getProjectFileProposal(resourceKey),
@@ -214,6 +216,7 @@ function ProjectContextWorkbenchHost({
         order: 20,
         appliesTo: (resource) => resource.kind === "project-file",
         retention: "stateful",
+        getBadge: () => unresolvedCommentCount,
         renderer: () => (
           <ContextCommentsPanel
             resource={{ kind: "project-file", id: resourceKey, projectId: scopeKey }}
@@ -334,7 +337,19 @@ function ProjectContextWorkbenchHost({
         ),
       },
     ],
-    [dirty, diagnostics, file, hash, proposal, resourceKey, rootPath, scopeKey, selection, t]
+    [
+      dirty,
+      diagnostics,
+      file,
+      hash,
+      proposal,
+      resourceKey,
+      rootPath,
+      scopeKey,
+      selection,
+      t,
+      unresolvedCommentCount,
+    ]
   )
 
   const resource: ContextResource = {

@@ -43,6 +43,7 @@ import { useContextWorkbenchInstanceId } from "@/hooks/context-workbench/use-con
 import { ContextCommentsPanel } from "@/components/context-workbench/context-comments-panel"
 import { ContextCapabilityUnavailable } from "@/components/context-workbench/context-capability-unavailable"
 import { resolveContextCapabilities } from "@/lib/context-workbench/capabilities"
+import { useContextCommentBadge } from "@/hooks/context-workbench/use-context-comment-badge"
 
 export function ArtifactDock() {
   const enabled = useContextWorkbenchSurfaceFlag("artifact")
@@ -64,6 +65,7 @@ export function ArtifactContextWorkbench({
   const tWorkbench = useTranslations("contextWorkbench")
   const workbenchInstanceId = useContextWorkbenchInstanceId("artifact")
   const artifact = useArtifactStore((state) => state.artifacts[artifactId])
+  const unresolvedCommentCount = useContextCommentBadge("artifact", artifactId)
   const pendingReview = useArtifactStore((state) => state.pendingReviews[artifactId] ?? null)
   const hadPendingReview = useRef(false)
   const activeSessionId = useChatStore((state) => state.activeSessionId)
@@ -142,6 +144,7 @@ export function ArtifactContextWorkbench({
         order: 10,
         appliesTo: (resource) => resource.kind === "artifact",
         retention: "stateful",
+        getBadge: () => unresolvedCommentCount,
         renderer: () =>
           artifact ? (
             <ContextCommentsPanel
@@ -284,6 +287,7 @@ export function ArtifactContextWorkbench({
       setDockMode,
       tWorkbench,
       textSelection,
+      unresolvedCommentCount,
       workbenchInstanceId,
       workspaceAvailable,
     ]
@@ -299,8 +303,7 @@ export function ArtifactContextWorkbench({
       kind: "artifact",
       previewable: true,
       runnable:
-        artifact.metadata?.runnable ??
-        ["code", "html", "react", "jupyter"].includes(artifact.type),
+        artifact.metadata?.runnable ?? ["code", "html", "react", "jupyter"].includes(artifact.type),
       workspaceAvailable,
     }),
   }

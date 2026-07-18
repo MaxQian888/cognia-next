@@ -1,10 +1,16 @@
 import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
-import { setActiveContextForHost } from "@/lib/context-workbench/active-context"
+import {
+  resetActiveContextForTesting,
+  setActiveContextForHost,
+} from "@/lib/context-workbench/active-context"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 import { createContextPanelAPI } from "./context-panel-api"
 
 describe("plugin context panel API", () => {
-  afterEach(() => contextPanelRegistry.unregisterPlugin("plugin-a"))
+  afterEach(() => {
+    contextPanelRegistry.unregisterPlugin("plugin-a")
+    resetActiveContextForTesting()
+  })
 
   beforeEach(() => {
     useContextWorkbenchStore.setState({ layouts: {} })
@@ -152,6 +158,19 @@ describe("plugin context panel API", () => {
     expect(api.getActiveContext()).not.toHaveProperty("content")
     expect(listener).toHaveBeenCalled()
     unsubscribe()
+    disposeHost()
+  })
+
+  it("fails closed when reading active context without its resource permission", () => {
+    const api = createContextPanelAPI("plugin-a", (permission) => permission === "extension:ui")
+    const disposeHost = setActiveContextForHost("window:workflow::workflow:w-1", {
+      kind: "workflow",
+      workflowId: "w-1",
+      editorRevision: "1",
+      capabilities: ["inspect"],
+    })
+
+    expect(api.getActiveContext()).toBeNull()
     disposeHost()
   })
 })

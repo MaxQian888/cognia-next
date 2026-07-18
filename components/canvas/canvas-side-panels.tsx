@@ -72,6 +72,7 @@ import { TRANSLATE_LANGUAGES } from "@/lib/canvas/constants"
 import type { CanvasActionType } from "@/lib/ai/generation/canvas-actions"
 import { useContextWorkbenchInstanceId } from "@/hooks/context-workbench/use-context-workbench-instance-id"
 import { resolveContextCapabilities } from "@/lib/context-workbench/capabilities"
+import { useContextCommentBadge } from "@/hooks/context-workbench/use-context-comment-badge"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -108,7 +109,6 @@ function CanvasContextWorkbench({ mobile }: { mobile: boolean }) {
     activeId ? (state.pendingReviews[activeId] ?? null) : null
   )
   const hadPendingReview = useRef(false)
-  const getCommentsForDocument = useCommentStore((state) => state.getCommentsForDocument)
   const activeRightTab = useCanvasLayoutStore((state) => state.activeRightTab)
   const setRightCollapsed = useCanvasLayoutStore((state) => state.setRightCollapsed)
   const setMobileRightOpen = useCanvasLayoutStore((state) => state.setMobileRightOpen)
@@ -116,6 +116,7 @@ function CanvasContextWorkbench({ mobile }: { mobile: boolean }) {
   const smartReveal = useContextWorkbenchStore((state) => state.smartReveal)
   const layouts = useContextWorkbenchStore((state) => state.layouts)
   const document = activeId ? documents[activeId] : undefined
+  const unresolvedCommentCount = useContextCommentBadge("canvas-document", activeId)
   const scopeKey = activeId ? `${workbenchInstanceId}::canvas:${activeId}` : null
   const [selectionState, setSelectionState] = useState<
     { documentId: string; start: number; end: number } | undefined
@@ -198,11 +199,7 @@ function CanvasContextWorkbench({ mobile }: { mobile: boolean }) {
         order: 20,
         appliesTo: (resource) => resource.kind === "canvas-document",
         retention: "stateful",
-        getBadge: () =>
-          activeId
-            ? getCommentsForDocument(activeId).filter((comment) => comment.resolvedAt == null)
-                .length
-            : 0,
+        getBadge: () => unresolvedCommentCount,
         renderer: () =>
           activeId && document ? (
             <ContextCommentsPanel
@@ -356,10 +353,10 @@ function CanvasContextWorkbench({ mobile }: { mobile: boolean }) {
       activeId,
       document,
       getCanvasVersions,
-      getCommentsForDocument,
       pendingReview,
       tWorkbench,
       textSelection,
+      unresolvedCommentCount,
     ]
   )
 

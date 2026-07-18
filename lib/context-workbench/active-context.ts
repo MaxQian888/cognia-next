@@ -47,7 +47,13 @@ function cloneResource(resource: ContextResource): ContextResource {
 }
 
 function notify(): void {
-  listeners.forEach((listener) => listener())
+  listeners.forEach((listener) => {
+    try {
+      listener()
+    } catch {
+      // A plugin listener cannot block other active-context subscribers.
+    }
+  })
 }
 
 function newestHost(): ActiveContextHost | undefined {

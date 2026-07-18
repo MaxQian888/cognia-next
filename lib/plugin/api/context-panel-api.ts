@@ -51,6 +51,14 @@ export function createContextPanelAPI(
   pluginId: string,
   hasPermission: (permission: string) => boolean
 ): PluginContextPanelAPI {
+  const getPermittedActiveContext = (): ContextResource | null => {
+    const context = getActiveContextResource()
+    if (!context) return null
+    return hasPermission("extension:ui") &&
+      hasPermission(CONTEXT_RESOURCE_READ_PERMISSIONS[context.kind])
+      ? context
+      : null
+  }
   return {
     register(registration) {
       const required = [
@@ -82,9 +90,9 @@ export function createContextPanelAPI(
       })
     },
     reveal: (panelId) => revealPluginContextPanel(pluginId, panelId),
-    getActiveContext: getActiveContextResource,
+    getActiveContext: getPermittedActiveContext,
     onDidChangeActiveContext(listener) {
-      return subscribeActiveContext(() => listener(getActiveContextResource()))
+      return subscribeActiveContext(() => listener(getPermittedActiveContext()))
     },
   }
 }

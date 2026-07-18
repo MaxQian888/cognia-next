@@ -59,6 +59,7 @@ import { useContextWorkbenchSurfaceFlag } from "@/hooks/context-workbench/use-co
 import { useContextWorkbenchInstanceId } from "@/hooks/context-workbench/use-context-workbench-instance-id"
 import { ContextCommentsPanel } from "@/components/context-workbench/context-comments-panel"
 import { resolveContextCapabilities } from "@/lib/context-workbench/capabilities"
+import { useContextCommentBadge } from "@/hooks/context-workbench/use-context-comment-badge"
 
 // Lazy-load the chat tab so the canvas bundle stays lean AND so unit
 // tests that mount the canvas don't pay the cost of pulling the entire
@@ -450,6 +451,7 @@ function WorkflowContextWorkbench({
     }))
   )
   const scopeKey = `${workbenchInstanceId}::workflow:${workflowId}`
+  const unresolvedCommentCount = useContextCommentBadge("workflow", workflowId)
   const layout = useContextWorkbenchStore((state) => state.layouts[scopeKey])
   const navigatePanel = useContextWorkbenchStore((state) => state.navigatePanel)
   const smartReveal = useContextWorkbenchStore((state) => state.smartReveal)
@@ -515,6 +517,7 @@ function WorkflowContextWorkbench({
         order: 15,
         appliesTo: (resource) => resource.kind === "workflow",
         retention: "stateful",
+        getBadge: () => unresolvedCommentCount,
         renderer: () => (
           <ContextCommentsPanel
             resource={{ kind: "workflow", id: workflowId }}
@@ -641,6 +644,7 @@ function WorkflowContextWorkbench({
       selectedEdgeIds,
       selectedNodeIds,
       useStore,
+      unresolvedCommentCount,
       warningCount,
       workflowId,
       workflowName,
