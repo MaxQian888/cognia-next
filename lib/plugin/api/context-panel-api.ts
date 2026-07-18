@@ -6,7 +6,7 @@ import {
   subscribeActiveContext,
 } from "@/lib/context-workbench/active-context"
 import type {
-  ContextActivity,
+  CanonicalContextActivity,
   ContextCapability,
   ContextPanelDefinition,
   ContextPanelMode,
@@ -19,7 +19,7 @@ type ContextResourceKind = ContextResource["kind"]
 
 export interface PluginContextPanelRegistration {
   id: string
-  activity: ContextActivity
+  activity: CanonicalContextActivity
   label: string
   labelKey: string
   resourceKinds: ContextResourceKind[]

@@ -1,6 +1,6 @@
 import type { ComponentType } from "react"
 import type {
-  ContextActivity,
+  CanonicalContextActivity,
   ContextCapability,
   ContextPanelMode,
   ContextPanelRenderProps,
@@ -26,7 +26,7 @@ export interface PluginContextPanelDef {
   entry: string
   export: string
   resourceKinds: ContextResourceKind[]
-  activity: ContextActivity
+  activity: CanonicalContextActivity
   labelKey: string
   label: string
   icon?: PluginContextPanelIcon

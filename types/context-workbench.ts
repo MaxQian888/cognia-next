@@ -14,8 +14,9 @@ export type ContextCapability =
   | "templates"
   | "workspace"
   | "history"
-export type ContextActivity =
-  "ai" | "comments" | "inspect" | "review" | "preview-run" | (string & {})
+export type CanonicalContextActivity =
+  "ai" | "comments" | "inspect" | "review" | "preview-run" | "templates"
+export type ContextActivity = CanonicalContextActivity | (string & {})
 
 export interface TextSelectionCoordinates {
   kind: "text"

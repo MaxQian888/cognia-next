@@ -11,6 +11,7 @@ export type {
   PluginContextPanelRegistration,
 } from "@/lib/plugin/api/context-panel-api"
 export type {
+  CanonicalContextActivity,
   ContextActivity,
   ContextCapability,
   ContextPanelMode,
