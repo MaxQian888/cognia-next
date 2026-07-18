@@ -32,6 +32,12 @@ struct PreflightContext<'a> {
     now: i64,
 }
 
+pub struct ApplyOptions {
+    pub revision: u64,
+    pub now: i64,
+    pub allow_irreversible: bool,
+}
+
 pub fn build_patch_set(
     task_id: &str,
     run_id: &str,
@@ -73,6 +79,7 @@ pub fn build_patch_set(
         applied_revision: None,
         files,
         applied_files: Vec::new(),
+        reversible: true,
         created_at: now,
     })
 }
@@ -83,8 +90,7 @@ pub fn apply(
     store: &mut WorkspaceStore,
     patch: &mut PatchSet,
     selection: &[PatchSelection],
-    revision: u64,
-    now: i64,
+    options: ApplyOptions,
 ) -> Result<ApplyOutcome, String> {
     if patch.state != PatchState::Ready && patch.state != PatchState::Conflict {
         return Err(format!("patch set is not ready: {:?}", patch.state));
@@ -109,7 +115,7 @@ pub fn apply(
         workspace_root,
         scratch_root,
         store,
-        now,
+        now: options.now,
     };
     for file in files {
         let hunk_ids = selection
@@ -123,23 +129,17 @@ pub fn apply(
         patch.state = PatchState::Conflict;
         return Ok(ApplyOutcome {
             state: PatchState::Conflict,
-            revision,
+            revision: options.revision,
             conflicts,
         });
     }
 
-    for plan in &plans {
-        if let Some(before) = &plan.before {
-            context
-                .store
-                .put_blob(&hash(&before.bytes), &before.bytes, now)?;
-        }
-        if let Some(after) = &plan.after {
-            context
-                .store
-                .put_blob(&hash(&after.bytes), &after.bytes, now)?;
-        }
-    }
+    patch.reversible = persist_plan_blobs(
+        context.store,
+        &plans,
+        options.now,
+        options.allow_irreversible,
+    )?;
     commit_plans(workspace_root, &plans)?;
     patch.applied_files = plans
         .iter()
@@ -159,10 +159,10 @@ pub fn apply(
         })
         .collect();
     patch.state = PatchState::Applied;
-    patch.applied_revision = Some(revision);
+    patch.applied_revision = Some(options.revision);
     Ok(ApplyOutcome {
         state: PatchState::Applied,
-        revision,
+        revision: options.revision,
         conflicts: Vec::new(),
     })
 }
@@ -177,6 +177,11 @@ pub fn undo(
 ) -> Result<ApplyOutcome, String> {
     if patch.state != PatchState::Applied && patch.state != PatchState::Conflict {
         return Err(format!("patch set is not applied: {:?}", patch.state));
+    }
+    if !patch.reversible {
+        return Err(
+            "patch set was applied irreversibly because inverse data was not retained".into(),
+        );
     }
     let mut plans = Vec::new();
     let mut conflicts = Vec::new();
@@ -238,8 +243,7 @@ pub fn force_apply(
     store: &mut WorkspaceStore,
     patch: &mut PatchSet,
     selection: &[PatchSelection],
-    revision: u64,
-    now: i64,
+    options: ApplyOptions,
 ) -> Result<ApplyOutcome, String> {
     if patch.state != PatchState::Conflict {
         return Err(format!("patch set is not conflicted: {:?}", patch.state));
@@ -269,7 +273,7 @@ pub fn force_apply(
             file.after_hash.as_deref(),
             Some(file.resource_kind),
             file.after_mode,
-            now,
+            options.now,
         )?;
         if !hunk_ids.is_empty() {
             let base = payload_from_store(
@@ -277,11 +281,18 @@ pub fn force_apply(
                 file.before_hash.as_deref(),
                 Some(file.resource_kind),
                 file.before_mode,
-                now,
+                options.now,
             )?
             .ok_or_else(|| format!("hunk selection missing baseline: {}", file.path))?;
             desired = Some(EntryPayload {
-                bytes: apply_selected_hunks(scratch_root, file, hunk_ids, &base.bytes, store, now)?,
+                bytes: apply_selected_hunks(
+                    scratch_root,
+                    file,
+                    hunk_ids,
+                    &base.bytes,
+                    store,
+                    options.now,
+                )?,
                 kind: ResourceKind::File,
                 mode: file.after_mode,
             });
@@ -303,14 +314,7 @@ pub fn force_apply(
             after: desired,
         });
     }
-    for plan in &plans {
-        if let Some(before) = &plan.before {
-            store.put_blob(&hash(&before.bytes), &before.bytes, now)?;
-        }
-        if let Some(after) = &plan.after {
-            store.put_blob(&hash(&after.bytes), &after.bytes, now)?;
-        }
-    }
+    patch.reversible = persist_plan_blobs(store, &plans, options.now, options.allow_irreversible)?;
     commit_plans(workspace_root, &plans)?;
     patch.applied_files = plans
         .iter()
@@ -330,12 +334,35 @@ pub fn force_apply(
         })
         .collect();
     patch.state = PatchState::Applied;
-    patch.applied_revision = Some(revision);
+    patch.applied_revision = Some(options.revision);
     Ok(ApplyOutcome {
         state: PatchState::Applied,
-        revision,
+        revision: options.revision,
         conflicts: Vec::new(),
     })
+}
+
+fn persist_plan_blobs(
+    store: &mut WorkspaceStore,
+    plans: &[PlannedWrite],
+    now: i64,
+    allow_irreversible: bool,
+) -> Result<bool, String> {
+    let mut reversible = true;
+    for entry in plans
+        .iter()
+        .flat_map(|plan| [plan.before.as_ref(), plan.after.as_ref()])
+        .flatten()
+    {
+        if let Err(error) = store.put_blob(&hash(&entry.bytes), &entry.bytes, now) {
+            if allow_irreversible && error.starts_with("task workspace ledger capacity exceeded:") {
+                reversible = false;
+            } else {
+                return Err(error);
+            }
+        }
+    }
+    Ok(reversible)
 }
 
 pub fn keep_current(patch: &mut PatchSet, revision: u64) -> Result<ApplyOutcome, String> {
@@ -950,4 +977,31 @@ fn create_symlink(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let target =
         String::from_utf8(bytes.to_vec()).map_err(|_| "invalid symlink target".to_string())?;
     symlink_file(target, path).map_err(|error| format!("symlink {}: {error}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn capacity_failure_requires_an_explicit_irreversible_override() {
+        let data = TempDir::new().unwrap();
+        let plans = vec![PlannedWrite {
+            path: "result.bin".into(),
+            before: Some(EntryPayload {
+                bytes: vec![1, 2],
+                kind: ResourceKind::File,
+                mode: None,
+            }),
+            after: None,
+        }];
+        let mut blocked_store = WorkspaceStore::open(data.path(), 0).unwrap();
+        let error = persist_plan_blobs(&mut blocked_store, &plans, 1, false).unwrap_err();
+        assert!(error.starts_with("task workspace ledger capacity exceeded:"));
+
+        let override_data = TempDir::new().unwrap();
+        let mut override_store = WorkspaceStore::open(override_data.path(), 0).unwrap();
+        assert!(!persist_plan_blobs(&mut override_store, &plans, 1, true).unwrap());
+    }
 }

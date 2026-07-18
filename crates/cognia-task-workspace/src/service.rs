@@ -66,6 +66,9 @@ impl TaskWorkspaceService {
     pub fn begin_run(&self, input: BeginTaskRun) -> Result<TaskRun, String> {
         validate_id("taskId", &input.task_id)?;
         validate_id("runId", &input.run_id)?;
+        if let Some(workspace_key) = input.workspace_key.as_deref() {
+            validate_id("workspaceKey", workspace_key)?;
+        }
         let root = PathBuf::from(&input.workspace_root)
             .canonicalize()
             .map_err(|error| format!("canonicalize workspace {}: {error}", input.workspace_root))?;
@@ -82,6 +85,7 @@ impl TaskWorkspaceService {
                     && existing.parent_run_id == input.parent_run_id
                     && existing.agent_id == input.agent_id
                     && existing.agent_kind == input.agent_kind
+                    && existing.workspace_key == input.workspace_key
                     && task.session_id == input.session_id
                     && Path::new(&task.workspace_root) == root;
                 return matches_request.then_some(existing).ok_or_else(|| {
@@ -93,30 +97,76 @@ impl TaskWorkspaceService {
             }
         }
         let now = now_ms();
-        let (baseline, blobs) = capture(&root)?;
-        let execution_root = self
-            .execution_dir
-            .join(storage_key(&input.task_id))
-            .join(storage_key(&input.run_id));
-        if execution_root.exists() {
-            return Err(format!(
-                "run already has an execution root: {}",
-                input.run_id
-            ));
-        }
-        let (isolation_kind, isolation_ref) = create_execution(
-            &root,
-            &execution_root,
-            &input.task_id,
-            &input.run_id,
-            &baseline,
-            &blobs,
-        )?;
+        let reusable = if let Some(workspace_key) = input.workspace_key.as_deref() {
+            let runs = self.store.lock().list_runs(&input.task_id)?;
+            if runs.iter().any(|run| {
+                run.workspace_key.as_deref() == Some(workspace_key)
+                    && matches!(run.state, RunState::Running | RunState::Settling)
+            }) {
+                return Err(format!(
+                    "pipeline workspace is already active: {workspace_key}"
+                ));
+            }
+            runs.into_iter().rev().find(|run| {
+                run.workspace_key.as_deref() == Some(workspace_key) && run.state == RunState::Ready
+            })
+        } else {
+            None
+        };
+        let (baseline, blobs, execution_root, isolation_kind, isolation_ref, owns_execution) =
+            if let Some(previous) = reusable {
+                let execution_root = PathBuf::from(&previous.execution_root);
+                if !execution_root.is_dir() {
+                    return Err(format!(
+                        "pipeline workspace is unavailable: {}",
+                        execution_root.display()
+                    ));
+                }
+                let (baseline, blobs) = capture(&execution_root)?;
+                (
+                    baseline,
+                    blobs,
+                    execution_root,
+                    previous.isolation_kind,
+                    previous.isolation_ref,
+                    false,
+                )
+            } else {
+                let (baseline, blobs) = capture(&root)?;
+                let execution_root = self
+                    .execution_dir
+                    .join(storage_key(&input.task_id))
+                    .join(storage_key(&input.run_id));
+                if execution_root.exists() {
+                    return Err(format!(
+                        "run already has an execution root: {}",
+                        input.run_id
+                    ));
+                }
+                let (isolation_kind, isolation_ref) = create_execution(
+                    &root,
+                    &execution_root,
+                    &input.task_id,
+                    &input.run_id,
+                    &baseline,
+                    &blobs,
+                )?;
+                (
+                    baseline,
+                    blobs,
+                    execution_root,
+                    isolation_kind,
+                    isolation_ref,
+                    true,
+                )
+            };
 
         let mut store = self.store.lock();
         for (hash, bytes) in &blobs {
             if let Err(error) = store.put_blob(hash, bytes, now) {
-                let _ = fs::remove_dir_all(&execution_root);
+                if owns_execution {
+                    let _ = fs::remove_dir_all(&execution_root);
+                }
                 return Err(error);
             }
         }
@@ -131,7 +181,9 @@ impl TaskWorkspaceService {
             pinned: false,
         });
         if task.workspace_root != root.to_string_lossy() {
-            let _ = fs::remove_dir_all(&execution_root);
+            if owns_execution {
+                let _ = fs::remove_dir_all(&execution_root);
+            }
             return Err("one task cannot span multiple workspace roots".into());
         }
         task.state = TaskWorkspaceState::Active;
@@ -146,6 +198,7 @@ impl TaskWorkspaceService {
             execution_root: execution_root.to_string_lossy().into_owned(),
             isolation_kind,
             isolation_ref,
+            workspace_key: input.workspace_key,
             baseline_revision: task.revision,
             state: RunState::Running,
             created_at: now,
@@ -391,6 +444,15 @@ impl TaskWorkspaceService {
         run_id: &str,
         selection: &[crate::PatchSelection],
     ) -> Result<crate::ApplyOutcome, String> {
+        self.apply_patch_set_with_options(run_id, selection, false)
+    }
+
+    pub fn apply_patch_set_with_options(
+        &self,
+        run_id: &str,
+        selection: &[crate::PatchSelection],
+        allow_irreversible: bool,
+    ) -> Result<crate::ApplyOutcome, String> {
         let now = now_ms();
         let mut store = self.store.lock();
         let mut patch = store
@@ -411,8 +473,11 @@ impl TaskWorkspaceService {
             &mut store,
             &mut patch,
             selection,
-            next_revision,
-            now,
+            ledger::ApplyOptions {
+                revision: next_revision,
+                now,
+                allow_irreversible,
+            },
         )?;
         if outcome.state == crate::PatchState::Applied {
             task.revision = next_revision;
@@ -467,8 +532,18 @@ impl TaskWorkspaceService {
         selection: &[crate::PatchSelection],
         resolution: crate::ConflictResolution,
     ) -> Result<crate::ApplyOutcome, String> {
+        self.resolve_conflict_with_options(run_id, selection, resolution, false)
+    }
+
+    pub fn resolve_conflict_with_options(
+        &self,
+        run_id: &str,
+        selection: &[crate::PatchSelection],
+        resolution: crate::ConflictResolution,
+        allow_irreversible: bool,
+    ) -> Result<crate::ApplyOutcome, String> {
         if resolution == crate::ConflictResolution::RetryMerge {
-            return self.apply_patch_set(run_id, selection);
+            return self.apply_patch_set_with_options(run_id, selection, allow_irreversible);
         }
         let now = now_ms();
         let mut store = self.store.lock();
@@ -491,8 +566,11 @@ impl TaskWorkspaceService {
                 &mut store,
                 &mut patch,
                 selection,
-                next_revision,
-                now,
+                ledger::ApplyOptions {
+                    revision: next_revision,
+                    now,
+                    allow_irreversible,
+                },
             )?,
             crate::ConflictResolution::KeepCurrent => {
                 ledger::keep_current(&mut patch, next_revision)?
@@ -986,6 +1064,7 @@ mod tests {
             agent_id: "agent-1".into(),
             agent_kind: "in-app".into(),
             workspace_root: root.path().to_string_lossy().into_owned(),
+            workspace_key: None,
         }
     }
 
@@ -1538,5 +1617,43 @@ mod tests {
             "recovered.txt"
         );
         assert!(Path::new(&run.execution_root).exists());
+    }
+
+    #[test]
+    fn pipeline_runs_reuse_a_settled_execution_root_with_a_fresh_baseline() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let mut first_input = input(&workspace, "task-pipeline", "run-stage-1");
+        first_input.workspace_key = Some("pipeline-main".into());
+        let first = service.begin_run(first_input).unwrap();
+        fs::write(Path::new(&first.execution_root).join("stage-1.txt"), "one").unwrap();
+        service.settle_run(&first.run_id).unwrap();
+
+        let mut second_input = input(&workspace, "task-pipeline", "run-stage-2");
+        second_input.workspace_key = Some("pipeline-main".into());
+        let second = service.begin_run(second_input).unwrap();
+        assert_eq!(second.execution_root, first.execution_root);
+        assert_eq!(second.workspace_key.as_deref(), Some("pipeline-main"));
+        fs::write(Path::new(&second.execution_root).join("stage-2.txt"), "two").unwrap();
+
+        let changes = service.settle_run(&second.run_id).unwrap();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].path, "stage-2.txt");
+    }
+
+    #[test]
+    fn pipeline_workspace_rejects_concurrent_runs() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let mut first_input = input(&workspace, "task-pipeline", "run-stage-1");
+        first_input.workspace_key = Some("pipeline-main".into());
+        service.begin_run(first_input).unwrap();
+
+        let mut second_input = input(&workspace, "task-pipeline", "run-stage-2");
+        second_input.workspace_key = Some("pipeline-main".into());
+        let error = service.begin_run(second_input).unwrap_err();
+        assert!(error.contains("pipeline workspace is already active"));
     }
 }

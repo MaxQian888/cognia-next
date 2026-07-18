@@ -23,6 +23,7 @@ export interface TaskRun {
   executionRoot: string
   isolationKind: "gitWorktree" | "shadow"
   isolationRef: string | null
+  workspaceKey: string | null
   baselineRevision: number
   state: TaskRunState
   createdAt: number
@@ -111,6 +112,7 @@ export interface PatchSet {
   state: "ready" | "applied" | "reverted" | "conflict"
   baseRevision: number
   appliedRevision: number | null
+  reversible: boolean
   files: Array<{
     path: string
     oldPath: string | null

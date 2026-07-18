@@ -575,6 +575,7 @@ export async function dispatchTeammate(
         agentId: teammate.id,
         agentKind: "agent-team",
         workspaceRoot: taskWorkspaceRoot,
+        ...(args.workspaceKey ? { workspaceKey: args.workspaceKey } : {}),
       })
       if (!taskRun) {
         throw new Error("task workspace host did not return an execution root for Agent Team")

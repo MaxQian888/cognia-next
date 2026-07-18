@@ -24,6 +24,7 @@ export interface BeginTaskWorkspaceTurn {
   agentId: string
   agentKind: string
   workspaceRoot: string
+  workspaceKey?: string
 }
 
 function safeId(prefix: string, value: string): string {
@@ -158,9 +159,10 @@ export function readTaskResourceDiff(
 
 export function applyTaskWorkspace(
   runId: string,
-  selection: PatchSelection[] = []
+  selection: PatchSelection[] = [],
+  allowIrreversible = false
 ): Promise<ApplyOutcome> {
-  return transport.call("task_workspace_apply", { runId, selection })
+  return transport.call("task_workspace_apply", { runId, selection, allowIrreversible })
 }
 
 export function undoTaskWorkspace(runId: string): Promise<ApplyOutcome> {
@@ -170,13 +172,21 @@ export function undoTaskWorkspace(runId: string): Promise<ApplyOutcome> {
 export function resolveTaskWorkspaceConflict(
   runId: string,
   resolution: "retryMerge" | "applyTask" | "keepCurrent",
-  selection: PatchSelection[] = []
+  selection: PatchSelection[] = [],
+  allowIrreversible = false
 ): Promise<ApplyOutcome> {
-  return transport.call("task_workspace_resolve_conflict", { runId, resolution, selection })
+  return transport.call("task_workspace_resolve_conflict", {
+    runId,
+    resolution,
+    selection,
+    allowIrreversible,
+  })
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes)
+  const digestInput = new Uint8Array(bytes.byteLength)
+  digestInput.set(bytes)
+  const digest = await crypto.subtle.digest("SHA-256", digestInput.buffer)
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
 }
 

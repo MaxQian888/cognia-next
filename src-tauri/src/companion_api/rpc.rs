@@ -2949,6 +2949,7 @@ pub(super) async fn dispatch(
                         workspace_root: input.workspace_root,
                         agent_id: input.agent_id,
                         agent_kind: input.agent_kind,
+                        workspace_key: input.workspace_key,
                     },
                     sink,
                 )
@@ -3163,9 +3164,14 @@ pub(super) async fn dispatch(
             let run_id: String = required(&args, "runId")?;
             let selection: Option<Vec<cognia_task_workspace::PatchSelection>> =
                 optional(&args, "selection")?;
+            let allow_irreversible: Option<bool> = optional(&args, "allowIrreversible")?;
             tokio::task::spawn_blocking(move || {
                 crate::task_workspace::service()?
-                    .apply_patch_set(&run_id, &selection.unwrap_or_default())
+                    .apply_patch_set_with_options(
+                        &run_id,
+                        &selection.unwrap_or_default(),
+                        allow_irreversible.unwrap_or(false),
+                    )
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -3196,11 +3202,13 @@ pub(super) async fn dispatch(
                 optional(&args, "selection")?;
             let resolution: cognia_task_workspace::ConflictResolution =
                 required(&args, "resolution")?;
+            let allow_irreversible: Option<bool> = optional(&args, "allowIrreversible")?;
             tokio::task::spawn_blocking(move || {
-                crate::task_workspace::service()?.resolve_conflict(
+                crate::task_workspace::service()?.resolve_conflict_with_options(
                     &run_id,
                     &selection.unwrap_or_default(),
                     resolution,
+                    allow_irreversible.unwrap_or(false),
                 )
             })
             .await

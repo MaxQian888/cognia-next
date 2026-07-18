@@ -173,8 +173,12 @@ export function TaskResourcesPanel({
 
   async function refresh() {
     if (!active) return
-    const next = await listTaskResources(active.taskId)
+    const [next, nextPatchSet] = await Promise.all([
+      listTaskResources(active.taskId),
+      selectedRunId ? getTaskPatchSet(selectedRunId) : Promise.resolve(null),
+    ])
     setResources(next)
+    setPatchSet(nextPatchSet)
     reconcile(sessionId, next)
   }
 
@@ -182,10 +186,21 @@ export function TaskResourcesPanel({
     if (!selectedRunId) return
     setLoading(true)
     try {
-      const outcome = await applyTaskWorkspace(
-        selectedRunId,
-        selectionPath ? [{ path: selectionPath, hunkIds }] : []
-      )
+      const selection = selectionPath ? [{ path: selectionPath, hunkIds }] : []
+      let outcome
+      try {
+        outcome = await applyTaskWorkspace(selectedRunId, selection)
+      } catch (reason) {
+        const message = reason instanceof Error ? reason.message : String(reason)
+        if (
+          message.includes("task workspace ledger capacity exceeded:") &&
+          window.confirm(t("irreversibleApplyConfirm"))
+        ) {
+          outcome = await applyTaskWorkspace(selectedRunId, selection, true)
+        } else {
+          throw reason
+        }
+      }
       if (outcome.conflicts.length > 0)
         setError(outcome.conflicts.map((item) => item.reason).join("\n"))
       setConflicted(outcome.state === "conflict")
@@ -306,7 +321,13 @@ export function TaskResourcesPanel({
             <UploadIcon className="size-3.5" />
             {t("upload")}
           </Button>
-          <Button size="sm" variant="outline" onClick={() => void undo()}>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={patchSet?.reversible === false}
+            title={patchSet?.reversible === false ? t("undoUnavailableIrreversible") : undefined}
+            onClick={() => void undo()}
+          >
             {t("undo")}
           </Button>
           <Button

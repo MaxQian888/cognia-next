@@ -6740,7 +6740,7 @@ paths:
       tags: [rpc-task-workspace]
       summary: Atomically apply selected files or hunks with three-way conflict protection. Requires remote control.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [runId], properties: { runId: { type: string }, selection: { type: array, items: { type: object, additionalProperties: true } } } } } } }
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [runId], properties: { runId: { type: string }, selection: { type: array, items: { type: object, additionalProperties: true } }, allowIrreversible: { type: boolean, default: false, description: Explicit one-shot override when inverse data cannot fit in the local ledger. } } } } } }
       responses:
         "200": { description: Applied or conflicted outcome., content: { application/json: { schema: { type: object, additionalProperties: true } } } }
         "401": { $ref: "#/components/responses/JwtRejected" }
@@ -6764,7 +6764,7 @@ paths:
       tags: [rpc-task-workspace]
       summary: Resolve a conflicted patch by retrying merge, explicitly applying task bytes, or keeping current workspace bytes. Requires remote control.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [runId, resolution], properties: { runId: { type: string }, resolution: { type: string, enum: [retryMerge, applyTask, keepCurrent] }, selection: { type: array, items: { type: object, additionalProperties: true } } } } } } }
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [runId, resolution], properties: { runId: { type: string }, resolution: { type: string, enum: [retryMerge, applyTask, keepCurrent] }, selection: { type: array, items: { type: object, additionalProperties: true } }, allowIrreversible: { type: boolean, default: false } } } } } }
       responses:
         "200": { description: Resolved outcome., content: { application/json: { schema: { type: object, additionalProperties: true } } } }
         "401": { $ref: "#/components/responses/JwtRejected" }

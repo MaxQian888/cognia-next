@@ -1115,6 +1115,25 @@ describe("dispatchTeammate — workspace isolation", () => {
     expect(allocate).toHaveBeenCalledWith(expect.objectContaining({ workspaceKey: "pipe" }))
   })
 
+  it("forwards workspaceKey to the task workspace service when the experiment is enabled", async () => {
+    taskWorkspaceEnabledMock.mockReturnValue(true)
+    isTauriMock.mockReturnValue(true)
+    beginTaskWorkspaceTurnMock.mockResolvedValue({
+      runId: "task-run-pipeline",
+      executionRoot: "/isolated/pipeline",
+    })
+    createSessionMock.mockResolvedValue({ id: "sess1" })
+    getSessionMock.mockResolvedValue({ id: "sess1", kind: "team" })
+    runAndCaptureMock.mockResolvedValue({ text: "the answer" })
+    const { ctx } = makeCtx(makeTeammate({ name: "Alice" }), { workingDir: "/repo" })
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "do it", workspaceKey: "pipe" })
+
+    expect(beginTaskWorkspaceTurnMock).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceKey: "pipe" })
+    )
+  })
+
   it("is a no-op when no allocator is present (shared-dir behavior)", async () => {
     executeAgentMock.mockResolvedValue({ text: "ok" })
     const { ctx } = makeCtx(makeTeammate())

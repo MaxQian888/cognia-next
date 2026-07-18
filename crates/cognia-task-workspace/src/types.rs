@@ -78,6 +78,8 @@ pub struct BeginTaskRun {
     pub agent_id: String,
     pub agent_kind: String,
     pub workspace_root: String,
+    #[serde(default)]
+    pub workspace_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -104,6 +106,8 @@ pub struct TaskRun {
     pub execution_root: String,
     pub isolation_kind: IsolationKind,
     pub isolation_ref: Option<String>,
+    #[serde(default)]
+    pub workspace_key: Option<String>,
     pub baseline_revision: u64,
     pub state: RunState,
     pub created_at: i64,
@@ -181,7 +185,13 @@ pub struct PatchSet {
     pub applied_revision: Option<u64>,
     pub files: Vec<PatchFile>,
     pub applied_files: Vec<AppliedFile>,
+    #[serde(default = "default_true")]
+    pub reversible: bool,
     pub created_at: i64,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

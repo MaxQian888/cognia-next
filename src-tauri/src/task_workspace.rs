@@ -66,6 +66,7 @@ pub struct TaskWorkspaceTurnEnvelope {
     pub workspace_root: String,
     pub agent_id: String,
     pub agent_kind: String,
+    pub workspace_key: Option<String>,
 }
 
 pub fn begin_hosted_turn(
@@ -90,6 +91,7 @@ pub fn begin_hosted_turn(
         agent_id: envelope.agent_id,
         agent_kind: envelope.agent_kind,
         workspace_root: envelope.workspace_root,
+        workspace_key: envelope.workspace_key,
     })?;
     service.watch_run(&run.run_id, sink)?;
     Ok(run)
@@ -256,8 +258,16 @@ pub fn task_resource_upload_abort(handle_id: String) -> Result<(), String> {
 pub async fn task_workspace_apply(
     run_id: String,
     selection: Vec<PatchSelection>,
+    allow_irreversible: Option<bool>,
 ) -> Result<ApplyOutcome, String> {
-    blocking(move |service| service.apply_patch_set(&run_id, &selection)).await
+    blocking(move |service| {
+        service.apply_patch_set_with_options(
+            &run_id,
+            &selection,
+            allow_irreversible.unwrap_or(false),
+        )
+    })
+    .await
 }
 
 #[tauri::command]
@@ -270,8 +280,17 @@ pub async fn task_workspace_resolve_conflict(
     run_id: String,
     selection: Vec<PatchSelection>,
     resolution: ConflictResolution,
+    allow_irreversible: Option<bool>,
 ) -> Result<ApplyOutcome, String> {
-    blocking(move |service| service.resolve_conflict(&run_id, &selection, resolution)).await
+    blocking(move |service| {
+        service.resolve_conflict_with_options(
+            &run_id,
+            &selection,
+            resolution,
+            allow_irreversible.unwrap_or(false),
+        )
+    })
+    .await
 }
 
 #[tauri::command]

@@ -8,6 +8,7 @@ jest.mock("@/lib/tauri", () => ({
 
 import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import {
+  applyTaskWorkspace,
   beginTaskWorkspaceTurn,
   listTaskWorkspaces,
   resolveTaskWorkspaceConflict,
@@ -89,6 +90,19 @@ describe("task workspace client", () => {
       runId: "run:session:1",
       resolution: "keepCurrent",
       selection: [],
+      allowIrreversible: false,
+    })
+  })
+
+  it("forwards the one-shot irreversible apply override", async () => {
+    call.mockResolvedValueOnce({ state: "applied", revision: 2, conflicts: [] })
+
+    await applyTaskWorkspace("run:session:1", [], true)
+
+    expect(call).toHaveBeenCalledWith("task_workspace_apply", {
+      runId: "run:session:1",
+      selection: [],
+      allowIrreversible: true,
     })
   })
 })

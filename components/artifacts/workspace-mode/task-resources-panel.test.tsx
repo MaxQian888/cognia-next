@@ -6,6 +6,7 @@ import { TaskResourcesPanel } from "./task-resources-panel"
 const listRuns = jest.fn()
 const listResources = jest.fn()
 const readResource = jest.fn()
+const applyWorkspace = jest.fn()
 
 jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
 jest.mock("@/components/chat/markdown-renderer", () => ({
@@ -18,7 +19,7 @@ jest.mock("@/lib/task-workspace/client", () => ({
   readTaskResource: (...args: unknown[]) => readResource(...args),
   readTaskResourceDiff: jest.fn(async () => "@@ diff"),
   getTaskPatchSet: jest.fn(async () => null),
-  applyTaskWorkspace: jest.fn(async () => ({ state: "applied", revision: 2, conflicts: [] })),
+  applyTaskWorkspace: (...args: unknown[]) => applyWorkspace(...args),
   undoTaskWorkspace: jest.fn(async () => ({ state: "reverted", revision: 3, conflicts: [] })),
   resolveTaskWorkspaceConflict: jest.fn(async () => ({
     state: "applied",
@@ -53,6 +54,8 @@ const resource = {
 
 describe("TaskResourcesPanel", () => {
   beforeEach(() => {
+    applyWorkspace.mockReset()
+    applyWorkspace.mockResolvedValue({ state: "applied", revision: 2, conflicts: [] })
     useTaskWorkspaceStore.getState().clear()
     useTaskWorkspaceStore.getState().activate({
       taskId: "task-1",
@@ -101,5 +104,20 @@ describe("TaskResourcesPanel", () => {
     render(<TaskResourcesPanel sessionId="session-1" layout="mobile" />)
     expect(screen.getByText("provisional")).toBeInTheDocument()
     await waitFor(() => expect(screen.getByText("authoritative")).toBeInTheDocument())
+  })
+
+  it("requires an explicit confirmation before retrying an irreversible apply", async () => {
+    const user = userEvent.setup()
+    const confirm = jest.spyOn(window, "confirm").mockReturnValue(true)
+    applyWorkspace
+      .mockRejectedValueOnce(new Error("task workspace ledger capacity exceeded: 11 > 10 bytes"))
+      .mockResolvedValueOnce({ state: "applied", revision: 2, conflicts: [] })
+    render(<TaskResourcesPanel sessionId="session-1" layout="desktop" />)
+
+    await user.click(screen.getByRole("button", { name: "applyAll" }))
+
+    await waitFor(() => expect(applyWorkspace).toHaveBeenLastCalledWith("run-1", [], true))
+    expect(confirm).toHaveBeenCalledWith("irreversibleApplyConfirm")
+    confirm.mockRestore()
   })
 })
