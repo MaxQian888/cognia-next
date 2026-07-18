@@ -8,6 +8,10 @@ import {
   ContextWorkbenchMobileSheet,
   useContextWorkbench,
 } from "./context-workbench"
+import {
+  clearAllMockExtensions,
+  registerMockExtension,
+} from "@/components/plugins/test-utils/register-mock-extension"
 
 let mockResourceSession: { id: string } | null = null
 const mockUseResourceWorkbenchSession = jest.fn(
@@ -72,6 +76,8 @@ describe("ContextWorkbench", () => {
     mockResourceSession = null
     mockUseResourceWorkbenchSession.mockClear()
   })
+
+  afterEach(clearAllMockExtensions)
 
   it("retains its stable resource layout across unmounts", () => {
     const Comments = ({ active }: { active: boolean }) => <div>comments:{String(active)}</div>
@@ -511,5 +517,39 @@ describe("ContextWorkbench", () => {
     fireEvent.keyDown(firstTab, { key: "End" })
     expect(screen.getByText("comments-two-panel")).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: "contextWorkbench.panels.commentsTwo" })).toHaveFocus()
+  })
+
+  it("mounts the revived right-sidebar and panel extension slots with safe resource context", () => {
+    const Probe = ({
+      extensionId,
+      context,
+    }: {
+      extensionId: string
+      context?: Record<string, unknown>
+    }) => <span data-testid={extensionId.split(":")[0]}>{JSON.stringify(context)}</span>
+    const registrations = [
+      registerMockExtension("sidebar.right.top", Probe),
+      registerMockExtension("sidebar.right.bottom", Probe),
+      registerMockExtension("panel.header", Probe),
+      registerMockExtension("panel.footer", Probe),
+    ]
+
+    renderWorkbench([
+      {
+        id: "comments",
+        activity: "comments",
+        labelKey: "contextWorkbench.panels.comments",
+        appliesTo: () => true,
+        renderer: () => <div>comments-panel</div>,
+      },
+    ])
+
+    for (const registration of registrations) {
+      const context = JSON.parse(
+        screen.getByTestId(registration.pluginId).textContent ?? "{}"
+      ) as Record<string, unknown>
+      expect(context.resource).toEqual(resource)
+      expect(context.resource).not.toHaveProperty("content")
+    }
   })
 })
