@@ -214,6 +214,8 @@ deep-link 的桌面 scheme 是 `cognia`，移动端列表留空（[移动端架�
 
 `tauri-plugin-updater` **已启用**：`tauri.conf.json` 带上了 release endpoints、真实公钥和 `createUpdaterArtifacts: true`，每次 release 构建都会产出带签名的 updater 产物。`release.yml`（`v*` tag）以继承 secrets 的方式调用 `build-tauri.yml`，发布 updater 启动时轮询的签名 `latest.json`。
 
+设置、命令面板、托盘操作和后台检查统一复用 `lib/tauri/updater.ts`。该客户端会合并并发拉取、释放过期的原生更新资源、应用自定义超时和当前网络代理，并将下载与安装拆分。设置 → 关于提供自动检查间隔、后台下载、安装后重启、请求超时和代理选项。Tauri capability 仅开放 `allow-check`、`allow-download`、`allow-install` 和进程重启，不开放组合式下载安装与进程退出权限。
+
 CI 签名 secrets（Tauri **v2** 名称 —— v1 的 `TAURI_PRIVATE_KEY` / `TAURI_KEY_PASSWORD` 不会被读取）：
 
 - `TAURI_SIGNING_PRIVATE_KEY` —— 私钥文件内容。

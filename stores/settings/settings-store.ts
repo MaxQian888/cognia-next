@@ -7,7 +7,7 @@ import type {
   AppTheme,
   BuiltinToolsConfig,
 } from "@cognia/agent-config-types"
-import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
+import { DEFAULT_BUILTIN_TOOLS, DEFAULT_UPDATE_SETTINGS } from "@cognia/agent-config-types"
 import type { ColorThemePreset, CustomTheme } from "@/types/plugin/plugin"
 import type {
   AutoModeSettings,
@@ -403,7 +403,7 @@ const DEFAULTS: AppSettings = {
   permissionMode: "default",
   alwaysAllowTools: [],
   builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
-  updates: { autoCheck: true },
+  updates: { ...DEFAULT_UPDATE_SETTINGS },
   // Canvas-executed code is confined by default (ADR-0028); independently
   // overridable from Settings → Sandbox.
   canvasCodeSandboxEnabled: true,

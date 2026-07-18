@@ -13,12 +13,16 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
 import { isTauri } from "@/lib/tauri"
-import { checkForUpdate, downloadAndInstallUpdate } from "@/lib/tauri/updater"
+import {
+  checkForUpdate,
+  downloadAndInstallUpdate,
+  downloadUpdate,
+  installUpdate,
+  relaunchAfterUpdate,
+  resolveUpdateSettings,
+} from "@/lib/tauri/updater"
 import { loggers } from "@cognia/logging"
 import { useSettingsStore } from "@/stores/settings/settings-store"
-
-/** Re-check every 6 hours so long-running desktop sessions still notice. */
-const RECHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
 
 /**
  * Minimum gap between two automatic checks. Boot used to fire the effect
@@ -54,7 +58,9 @@ function isNoReleaseError(message: string): boolean {
 }
 
 export function UpdateCheckInitializer() {
-  const autoCheck = useSettingsStore((s) => s.settings?.updates?.autoCheck ?? true)
+  const rawUpdateSettings = useSettingsStore((s) => s.settings?.updates)
+  const save = useSettingsStore((s) => s.save)
+  const updateSettings = resolveUpdateSettings(rawUpdateSettings)
   const t = useTranslations("settings.about.updates")
   // Don't re-toast the same version when the 6h interval fires again.
   const notifiedVersion = useRef<string | null>(null)
@@ -62,26 +68,47 @@ export function UpdateCheckInitializer() {
   // re-creates `t`, and re-subscribing the effect used to fire an immediate
   // extra network check on every boot-time context change.
   const tRef = useRef(t)
+  const saveRef = useRef(save)
   useEffect(() => {
     tRef.current = t
   }, [t])
+  useEffect(() => {
+    saveRef.current = save
+  }, [save])
 
   useEffect(() => {
-    if (!isTauri() || !autoCheck) return
+    if (!isTauri() || !updateSettings.autoCheck) return
 
     let cancelled = false
 
-    // One-click install from the toast action: download + relaunch in place.
-    // The handle was cached by the preceding `checkForUpdate`, so this does not
-    // re-hit the network on the happy path.
-    const install = async () => {
+    const restart = async () => {
+      try {
+        await relaunchAfterUpdate()
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err)
+        loggers.app.error("about.autoUpdateRelaunchFailed", err)
+        toast.error(tRef.current("updateRelaunchFailed", { error }))
+      }
+    }
+
+    const install = async (alreadyDownloaded: boolean) => {
       const toastId = toast.loading(tRef.current("installing"))
       try {
-        const result = await downloadAndInstallUpdate()
+        const options = { relaunch: updateSettings.relaunchAfterInstall }
+        const result = alreadyDownloaded
+          ? await installUpdate(options)
+          : await downloadAndInstallUpdate(undefined, options)
         if (result === "noLongerAvailable") {
           toast.info(tRef.current("updateNoLongerAvailable"), { id: toastId })
+        } else if (result === "installed") {
+          toast.success(tRef.current("installedRestartRequired"), {
+            id: toastId,
+            action: {
+              label: tRef.current("restartNow"),
+              onClick: () => void restart(),
+            },
+          })
         }
-        // "installed" relaunches the app; "web" can't happen on the desktop path.
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err)
         loggers.app.error("about.autoUpdateInstallFailed", err)
@@ -97,6 +124,11 @@ export function UpdateCheckInitializer() {
       lastAutoCheckAt = now
       try {
         const update = await checkForUpdate()
+        try {
+          await saveRef.current({ lastUpdateCheckAt: Date.now() })
+        } catch (err) {
+          loggers.app.warn("about.autoUpdateTimestampPersistFailed", { err: String(err) })
+        }
         if (cancelled || !update) return
         if (notifiedVersion.current === update.version) return
         notifiedVersion.current = update.version
@@ -104,10 +136,40 @@ export function UpdateCheckInitializer() {
           status: "available",
           version: update.version,
         })
+        if (updateSettings.autoDownload) {
+          const toastId = toast.loading(
+            tRef.current("downloadingBackground", { version: update.version })
+          )
+          try {
+            const result = await downloadUpdate()
+            if (cancelled) return
+            if (result === "noLongerAvailable") {
+              toast.info(tRef.current("updateNoLongerAvailable"), { id: toastId })
+              return
+            }
+            toast.success(tRef.current("updateDownloadedBackground", { version: update.version }), {
+              id: toastId,
+              action: {
+                label: tRef.current("goInstallAction"),
+                onClick: () => void install(true),
+              },
+            })
+          } catch (err) {
+            loggers.app.warn("about.autoUpdateDownloadFailed", { err: String(err) })
+            toast.success(tRef.current("updateAvailableBackground", { version: update.version }), {
+              id: toastId,
+              action: {
+                label: tRef.current("goInstallAction"),
+                onClick: () => void install(false),
+              },
+            })
+          }
+          return
+        }
         toast.success(tRef.current("updateAvailableBackground", { version: update.version }), {
           action: {
             label: tRef.current("goInstallAction"),
-            onClick: () => void install(),
+            onClick: () => void install(false),
           },
         })
       } catch (err) {
@@ -121,12 +183,17 @@ export function UpdateCheckInitializer() {
     }
 
     void run()
-    const id = setInterval(() => void run(), RECHECK_INTERVAL_MS)
+    const id = setInterval(() => void run(), updateSettings.checkIntervalMinutes * 60 * 1000)
     return () => {
       cancelled = true
       clearInterval(id)
     }
-  }, [autoCheck])
+  }, [
+    updateSettings.autoCheck,
+    updateSettings.autoDownload,
+    updateSettings.checkIntervalMinutes,
+    updateSettings.relaunchAfterInstall,
+  ])
 
   return null
 }

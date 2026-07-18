@@ -4,8 +4,10 @@ In-app auto-updates are **fully configured** and ready:
 
 - `tauri.conf.json` → `bundle.createUpdaterArtifacts: true`, `plugins.updater.endpoints`
   set, and `plugins.updater.pubkey` **populated** with the real minisign public key.
-- Plugin registered in `src-tauri/src/lib.rs`; permissions (`updater:default`,
-  `process:default`, `process:allow-restart`) granted in `capabilities/default.json`.
+- Plugin registered in `src-tauri/src/lib.rs`; least-privilege permissions
+  (`updater:allow-check`, `updater:allow-download`, `updater:allow-install`, and
+  `process:allow-restart`) granted in `capabilities/default.json`. The combined
+  updater command and process exit command are intentionally not exposed.
 - CI (`release.yml` → `build-tauri.yml`) builds + signs via `tauri-apps/tauri-action`
   with `releaseDraft: false`, so a tagged build **publishes** the release directly.
 - Signing secrets `TAURI_SIGNING_PRIVATE_KEY` / `..._PASSWORD` are already set in
@@ -75,6 +77,15 @@ https://github.com/MaxQian888/cognia-next/releases/latest/download/latest.json
 > `0.1.0` only sees `v0.1.1+`).
 
 The `latest.json` format is documented at https://v2.tauri.app/plugin/updater/.
+
+## Runtime behavior
+
+All renderer entry points reuse `lib/tauri/updater.ts`. The wrapper deduplicates
+concurrent checks/downloads, closes superseded native update resources, applies
+the configured request timeout and active network proxy, and downloads and
+installs through separate Tauri commands. Settings → About controls the check
+interval, background download, post-install relaunch, request timeout, and proxy
+use. Installation remains user-confirmed even when background download is on.
 
 ## Notes
 

@@ -2,6 +2,7 @@ import type { AppSettings, BuiltinToolsConfig } from "@cognia/agent-config-types
 import {
   DEFAULT_BIOMETRIC_GUARD,
   DEFAULT_BUILTIN_TOOLS,
+  DEFAULT_UPDATE_SETTINGS,
   DEFAULT_USER_PROFILE,
 } from "@cognia/agent-config-types"
 import { DEFAULT_TTS_SETTINGS } from "@cognia/tts/types"
@@ -52,7 +53,7 @@ export const DEFAULTS: AppSettings = {
     defaultPropagation: [],
   },
   lastUpdateCheckAt: undefined,
-  updates: { autoCheck: true },
+  updates: { ...DEFAULT_UPDATE_SETTINGS },
   browserCookieImportEnabled: false,
   cliBridge: { autoSync: false },
   webTools: { enabled: true },
@@ -200,6 +201,7 @@ export async function getSettings(): Promise<AppSettings> {
     networkProxy: { ...DEFAULT_NETWORK_PROXY_SETTINGS, ...(row.networkProxy ?? {}) },
     webTools: { enabled: row.webTools?.enabled ?? true },
     cliBridge: { autoSync: row.cliBridge?.autoSync ?? false },
+    updates: { ...DEFAULT_UPDATE_SETTINGS, ...(row.updates ?? {}) },
     biometricRequiredFor: {
       ...DEFAULT_BIOMETRIC_GUARD,
       ...(row.biometricRequiredFor ?? {}),

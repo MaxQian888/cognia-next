@@ -209,6 +209,8 @@ Cognia's repo runs the Tauri build matrix via `release.yml` → `build-tauri.yml
 
 `tauri-plugin-updater` is **enabled**: `tauri.conf.json` carries the release endpoints, a real public key, and `createUpdaterArtifacts: true`, so every release build emits signed updater artifacts. `release.yml` (tag `v*`) calls `build-tauri.yml` with inherited secrets and publishes the signed `latest.json` manifest the updater polls on app start.
 
+The renderer has one shared update client (`lib/tauri/updater.ts`) for Settings, the command palette, tray actions, and background checks. It deduplicates concurrent fetches, closes stale native resources, applies the configured timeout and active network proxy, and keeps download and install separate. Settings → About exposes the automatic check interval, optional background download, post-install relaunch, request timeout, and proxy behavior. Tauri capabilities grant only `allow-check`, `allow-download`, `allow-install`, and process restart; combined download-and-install and process exit are not exposed.
+
 CI signing secrets (Tauri **v2** names — the v1 names `TAURI_PRIVATE_KEY` / `TAURI_KEY_PASSWORD` are ignored):
 
 - `TAURI_SIGNING_PRIVATE_KEY` — contents of the private key file.

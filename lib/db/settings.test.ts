@@ -3,6 +3,7 @@
 // patches, and the alwaysAllow tool list helpers.
 
 import "fake-indexeddb/auto"
+import { DEFAULT_UPDATE_SETTINGS } from "@cognia/agent-config-types"
 import { addAlwaysAllow, getSettings, removeAlwaysAllow, saveSettings } from "./settings"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
 
@@ -24,7 +25,7 @@ describe("getSettings", () => {
     expect(s.fontScale).toBe("md")
     expect(s.searchEnabled).toBe(false)
     expect(s.searchProviders).toBeDefined()
-    expect(s.updates).toEqual({ autoCheck: true })
+    expect(s.updates).toEqual(DEFAULT_UPDATE_SETTINGS)
     expect(s.browserCookieImportEnabled).toBe(false)
   })
 
@@ -36,7 +37,7 @@ describe("getSettings", () => {
       updates: { autoCheck: false },
     } as unknown as Awaited<ReturnType<typeof getSettings>>)
     const s = await getSettings()
-    expect(s.updates).toEqual({ autoCheck: false })
+    expect(s.updates).toEqual({ ...DEFAULT_UPDATE_SETTINGS, autoCheck: false })
   })
 
   it("fills appearance defaults when missing", async () => {

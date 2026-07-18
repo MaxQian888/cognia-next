@@ -9,9 +9,24 @@ jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
 
 const checkForUpdateMock = jest.fn()
 const downloadAndInstallMock = jest.fn()
+const downloadUpdateMock = jest.fn()
+const installUpdateMock = jest.fn()
+const relaunchAfterUpdateMock = jest.fn()
 jest.mock("@/lib/tauri/updater", () => ({
   checkForUpdate: () => checkForUpdateMock(),
   downloadAndInstallUpdate: (...a: unknown[]) => downloadAndInstallMock(...a),
+  downloadUpdate: (...a: unknown[]) => downloadUpdateMock(...a),
+  installUpdate: (...a: unknown[]) => installUpdateMock(...a),
+  relaunchAfterUpdate: () => relaunchAfterUpdateMock(),
+  resolveUpdateSettings: (raw?: Record<string, unknown>) => ({
+    autoCheck: true,
+    checkIntervalMinutes: 360,
+    autoDownload: false,
+    relaunchAfterInstall: true,
+    requestTimeoutSeconds: 30,
+    useProxy: true,
+    ...raw,
+  }),
 }))
 
 jest.mock("@cognia/logging", () => ({
@@ -32,7 +47,19 @@ jest.mock("next-intl", () => ({
     params ? `${key}:${JSON.stringify(params)}` : key,
 }))
 
-const settingsState = { settings: { updates: { autoCheck: true } } as Record<string, unknown> }
+const saveMock = jest.fn(async () => {})
+const defaultUpdateSettings = {
+  autoCheck: true,
+  checkIntervalMinutes: 360,
+  autoDownload: false,
+  relaunchAfterInstall: true,
+  requestTimeoutSeconds: 30,
+  useProxy: true,
+}
+const settingsState = {
+  settings: { updates: { ...defaultUpdateSettings } } as Record<string, unknown>,
+  save: saveMock,
+}
 jest.mock("@/stores/settings/settings-store", () => ({
   useSettingsStore: (selector: (s: typeof settingsState) => unknown) => selector(settingsState),
 }))
@@ -54,7 +81,7 @@ const errorMock = (loggers.app as unknown as { error: jest.Mock }).error
 beforeEach(() => {
   jest.clearAllMocks()
   isTauriMock.mockReturnValue(true)
-  settingsState.settings = { updates: { autoCheck: true } }
+  settingsState.settings = { updates: { ...defaultUpdateSettings } }
   __resetAutoCheckThrottle()
 })
 
@@ -73,7 +100,7 @@ describe("UpdateCheckInitializer", () => {
   })
 
   it("does not check when auto-check is disabled", async () => {
-    settingsState.settings = { updates: { autoCheck: false } }
+    settingsState.settings = { updates: { ...defaultUpdateSettings, autoCheck: false } }
     render(<UpdateCheckInitializer />)
     await Promise.resolve()
     expect(checkForUpdateMock).not.toHaveBeenCalled()
@@ -88,7 +115,7 @@ describe("UpdateCheckInitializer", () => {
 
   it("toasts an available update whose action installs in one click", async () => {
     checkForUpdateMock.mockResolvedValue({ version: "9.9.9", body: "Notes" })
-    downloadAndInstallMock.mockResolvedValue("installed")
+    downloadAndInstallMock.mockResolvedValue("relaunching")
     render(<UpdateCheckInitializer />)
     await waitFor(() =>
       expect(toastMock.success).toHaveBeenCalledWith(
@@ -105,6 +132,149 @@ describe("UpdateCheckInitializer", () => {
     })
     expect(toastMock.loading).toHaveBeenCalledWith("installing")
     expect(downloadAndInstallMock).toHaveBeenCalled()
+  })
+
+  it("downloads in the background when auto-download is enabled", async () => {
+    settingsState.settings = {
+      updates: { ...defaultUpdateSettings, autoDownload: true },
+    }
+    checkForUpdateMock.mockResolvedValue({ version: "9.9.9", body: "Notes" })
+    downloadUpdateMock.mockResolvedValue("downloaded")
+    installUpdateMock.mockResolvedValue("relaunching")
+    render(<UpdateCheckInitializer />)
+
+    await waitFor(() => expect(downloadUpdateMock).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(toastMock.success).toHaveBeenCalledWith(
+        'updateDownloadedBackground:{"version":"9.9.9"}',
+        expect.objectContaining({ action: expect.any(Object), id: "toast-id" })
+      )
+    )
+    const opts = toastMock.success.mock.calls.at(-1)?.[1] as {
+      action: { onClick: () => void }
+    }
+    await act(async () => {
+      opts.action.onClick()
+      await Promise.resolve()
+    })
+    expect(installUpdateMock).toHaveBeenCalledWith({ relaunch: true })
+  })
+
+  it("offers restart after installing without an immediate relaunch", async () => {
+    settingsState.settings = {
+      updates: { ...defaultUpdateSettings, relaunchAfterInstall: false },
+    }
+    checkForUpdateMock.mockResolvedValue({ version: "9.9.9" })
+    downloadAndInstallMock.mockResolvedValue("installed")
+    render(<UpdateCheckInitializer />)
+    await waitFor(() => expect(toastMock.success).toHaveBeenCalled())
+    const availableOptions = toastMock.success.mock.calls[0][1] as {
+      action: { onClick: () => void }
+    }
+    await act(async () => {
+      availableOptions.action.onClick()
+      await Promise.resolve()
+    })
+    await waitFor(() =>
+      expect(toastMock.success).toHaveBeenCalledWith(
+        "installedRestartRequired",
+        expect.objectContaining({ action: expect.any(Object), id: "toast-id" })
+      )
+    )
+    const installedCall = toastMock.success.mock.calls.find(
+      ([message]) => message === "installedRestartRequired"
+    )
+    const installedOptions = installedCall?.[1] as { action: { onClick: () => void } }
+    await act(async () => {
+      installedOptions.action.onClick()
+      await Promise.resolve()
+    })
+    expect(relaunchAfterUpdateMock).toHaveBeenCalled()
+  })
+
+  it("surfaces a manual restart failure", async () => {
+    settingsState.settings = {
+      updates: { ...defaultUpdateSettings, relaunchAfterInstall: false },
+    }
+    checkForUpdateMock.mockResolvedValue({ version: "9.9.9" })
+    downloadAndInstallMock.mockResolvedValue("installed")
+    relaunchAfterUpdateMock.mockRejectedValueOnce("restart denied")
+    render(<UpdateCheckInitializer />)
+    await waitFor(() => expect(toastMock.success).toHaveBeenCalled())
+    const availableOptions = toastMock.success.mock.calls[0][1] as {
+      action: { onClick: () => void }
+    }
+    await act(async () => {
+      availableOptions.action.onClick()
+      await Promise.resolve()
+    })
+    const installedCall = toastMock.success.mock.calls.find(
+      ([message]) => message === "installedRestartRequired"
+    )
+    const installedOptions = installedCall?.[1] as { action: { onClick: () => void } }
+    await act(async () => {
+      installedOptions.action.onClick()
+      await Promise.resolve()
+    })
+    await waitFor(() =>
+      expect(toastMock.error).toHaveBeenCalledWith(
+        'updateRelaunchFailed:{"error":"restart denied"}'
+      )
+    )
+  })
+
+  it("falls back to manual installation when background download fails", async () => {
+    settingsState.settings = {
+      updates: { ...defaultUpdateSettings, autoDownload: true },
+    }
+    checkForUpdateMock.mockResolvedValue({ version: "9.9.9" })
+    downloadUpdateMock.mockRejectedValue(new Error("offline"))
+    render(<UpdateCheckInitializer />)
+
+    await waitFor(() =>
+      expect(toastMock.success).toHaveBeenCalledWith(
+        'updateAvailableBackground:{"version":"9.9.9"}',
+        expect.objectContaining({ action: expect.any(Object), id: "toast-id" })
+      )
+    )
+    expect(warnMock).toHaveBeenCalledWith(
+      "about.autoUpdateDownloadFailed",
+      expect.objectContaining({ err: expect.stringContaining("offline") })
+    )
+  })
+
+  it("reports when an auto-downloaded update vanishes", async () => {
+    settingsState.settings = {
+      updates: { ...defaultUpdateSettings, autoDownload: true },
+    }
+    checkForUpdateMock.mockResolvedValue({ version: "9.9.9" })
+    downloadUpdateMock.mockResolvedValue("noLongerAvailable")
+    render(<UpdateCheckInitializer />)
+
+    await waitFor(() =>
+      expect(toastMock.info).toHaveBeenCalledWith("updateNoLongerAvailable", { id: "toast-id" })
+    )
+  })
+
+  it("persists the successful background check timestamp", async () => {
+    checkForUpdateMock.mockResolvedValue(null)
+    render(<UpdateCheckInitializer />)
+    await waitFor(() => expect(checkForUpdateMock).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith({ lastUpdateCheckAt: expect.any(Number) })
+    )
+  })
+
+  it("keeps checking when timestamp persistence fails", async () => {
+    saveMock.mockRejectedValueOnce(new Error("db unavailable"))
+    checkForUpdateMock.mockResolvedValue({ version: "9.9.9" })
+    render(<UpdateCheckInitializer />)
+
+    await waitFor(() => expect(toastMock.success).toHaveBeenCalled())
+    expect(warnMock).toHaveBeenCalledWith(
+      "about.autoUpdateTimestampPersistFailed",
+      expect.objectContaining({ err: expect.stringContaining("db unavailable") })
+    )
   })
 
   it("surfaces a background install failure via an error toast + log", async () => {

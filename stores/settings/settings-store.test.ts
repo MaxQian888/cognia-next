@@ -160,7 +160,14 @@ describe("load", () => {
         dependencyResearch: false,
         webclone: false,
       },
-      updates: { autoCheck: true },
+      updates: {
+        autoCheck: true,
+        checkIntervalMinutes: 360,
+        autoDownload: false,
+        relaunchAfterInstall: true,
+        requestTimeoutSeconds: 30,
+        useProxy: true,
+      },
       canvasCodeSandboxEnabled: true,
     })
   })

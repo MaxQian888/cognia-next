@@ -1300,7 +1300,15 @@ export type SDKMessage =
  *     reachable only by drilling in from the parent turn's `SubagentPart`.
  *     Carries no `branchSeed`, so it has no continuation path.
  */
-export type SessionKind = "direct" | "team" | "workflow-editor" | "subagent"
+export type SessionKind = "direct" | "team" | "workflow-editor" | "resource-workbench" | "subagent"
+
+export type SessionVisibility = "standard" | "embedded"
+
+export type SessionSurfaceBinding =
+  | { kind: "canvas-document"; documentId: string }
+  | { kind: "project-file"; projectId: string; rootId: string; relPath: string }
+  | { kind: "artifact"; artifactId: string }
+  | { kind: "workflow"; workflowId: string }
 
 export interface ChatSession {
   id: string
@@ -1322,6 +1330,10 @@ export interface ChatSession {
   titleAuto?: boolean
   /** Missing means "direct" (back-compat with v2 sessions). */
   kind?: SessionKind
+  /** Embedded sessions belong to a resource workbench, not the global conversation rail. */
+  visibility?: SessionVisibility
+  /** Typed resource identity for an embedded session; never contains resource content. */
+  surfaceBinding?: SessionSurfaceBinding
   /** Direct sessions: the persona driving replies. */
   characterId?: string
   /** Team sessions: the team whose members reply. */
@@ -1829,6 +1841,30 @@ export interface SandboxResourcePolicy {
   readableRoots?: string[]
 }
 
+export interface UpdateSettings {
+  /** Check on launch and keep checking while the desktop app is running. */
+  autoCheck: boolean
+  /** Period between automatic checks. Clamped to 15 minutes–7 days at runtime. */
+  checkIntervalMinutes: number
+  /** Fetch the signed update package in the background after discovering it. */
+  autoDownload: boolean
+  /** Relaunch immediately after installation instead of waiting for the user. */
+  relaunchAfterInstall: boolean
+  /** Timeout applied to update manifest and package requests. */
+  requestTimeoutSeconds: number
+  /** Reuse the active global network proxy for update requests. */
+  useProxy: boolean
+}
+
+export const DEFAULT_UPDATE_SETTINGS: UpdateSettings = {
+  autoCheck: true,
+  checkIntervalMinutes: 6 * 60,
+  autoDownload: false,
+  relaunchAfterInstall: true,
+  requestTimeoutSeconds: 30,
+  useProxy: true,
+}
+
 export interface AppSettings {
   id: "singleton"
   /** Opt-in local Chromium-cookie import for the embedded desktop browser. */
@@ -1981,10 +2017,7 @@ export interface AppSettings {
    * Merged forward by `getSettings()` so older installs pick up the default
    * without a migration. No-op off the Tauri desktop shell.
    */
-  updates?: {
-    /** Auto-check for updates on launch. Default true. */
-    autoCheck: boolean
-  }
+  updates?: UpdateSettings
   /**
    * Mobile runtime mode (ADR: standalone BYOK mobile). Decides whether the
    * Capacitor shell drives a paired desktop ("paired") or runs chat / search /
@@ -2123,6 +2156,8 @@ export interface AppSettings {
    * `components/chat/composer.tsx` and `components/chat/message-list.tsx`.
    */
   composerBehavior?: {
+    /** Render the message composer as a compact, vertically stacked control surface. Default false. */
+    compactLayout?: boolean
     /**
      * Plain Enter submits (default). When false, Enter inserts a newline and
      * ⌘/Ctrl+Enter submits instead. Wired in the composer `onKeyDown`.
