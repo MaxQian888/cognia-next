@@ -49,8 +49,7 @@ pub trait ExternalAgentEventSink: Send + Sync + 'static {
 /// the sink verbatim, so UI events are unaffected.
 fn is_transient_codex_noise(line: &str) -> bool {
     line.contains("codex_models_manager")
-        && (line.contains("failed to load models cache")
-            || line.contains("failed to renew cache"))
+        && (line.contains("failed to load models cache") || line.contains("failed to renew cache"))
 }
 
 /// Configuration for spawning an external agent
@@ -550,7 +549,9 @@ mod tests {
         assert!(!is_transient_codex_noise(
             "ERROR codex_core::client: 401 Unauthorized: invalid API key"
         ));
-        assert!(!is_transient_codex_noise("panicked at 'index out of bounds'"));
+        assert!(!is_transient_codex_noise(
+            "panicked at 'index out of bounds'"
+        ));
         assert!(!is_transient_codex_noise(""));
         // A models-manager line that is not a cache load/renew transient still
         // warns — the two conditions are ANDed, not ORed.

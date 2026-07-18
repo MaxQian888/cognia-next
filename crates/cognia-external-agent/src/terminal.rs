@@ -674,7 +674,10 @@ mod tests {
             .expect("spawn cat");
 
         let snap = mgr.managed_snapshot().await;
-        let row = snap.iter().find(|r| r.id == id).expect("terminal in snapshot");
+        let row = snap
+            .iter()
+            .find(|r| r.id == id)
+            .expect("terminal in snapshot");
         assert_eq!(row.command, "cat");
         assert_eq!(row.session_id, "sess");
         assert!(row.running);

@@ -483,7 +483,9 @@ mod tests {
             .find(|f| f.rel_path == PathBuf::from("plugin.json"))
             .unwrap();
         let m: serde_json::Value = serde_json::from_str(&pj.content).unwrap();
-        let caps = m["capabilities"].as_array().expect("capabilities is an array");
+        let caps = m["capabilities"]
+            .as_array()
+            .expect("capabilities is an array");
         assert!(
             caps.iter().any(|c| c == "tools"),
             "wasm template must declare the `tools` capability its code implements, got: {caps:?}"

@@ -103,8 +103,7 @@ fn strip_section(wasm: &[u8], target_name: &str) -> Result<Vec<u8>> {
         let contents = &wasm[pos..contents_end];
         pos = contents_end;
 
-        let is_target =
-            id == 0 && custom_section_name(contents).as_deref() == Some(target_name);
+        let is_target = id == 0 && custom_section_name(contents).as_deref() == Some(target_name);
         if !is_target {
             out.extend_from_slice(&wasm[section_start..contents_end]);
         }
@@ -486,7 +485,10 @@ mod tests {
             }
         }
         assert!(saw_type, "type section must be forwarded, not dropped");
-        assert_eq!(version_sections, 1, "exactly one cognia:api-version section");
+        assert_eq!(
+            version_sections, 1,
+            "exactly one cognia:api-version section"
+        );
     }
 
     #[test]
@@ -541,7 +543,9 @@ mod tests {
             "re-embed must replace, not append"
         );
         assert_eq!(count_marker(&twice, b"producers"), 1);
-        assert!(twice.windows(5).any(|w| w == [0x07, 0x03, 0xaa, 0xbb, 0xcc]));
+        assert!(twice
+            .windows(5)
+            .any(|w| w == [0x07, 0x03, 0xaa, 0xbb, 0xcc]));
     }
 
     #[test]

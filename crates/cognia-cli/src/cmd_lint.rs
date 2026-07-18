@@ -1574,9 +1574,7 @@ fn lazy_factory_entry_violations(entry: &str) -> Vec<&'static str> {
 fn lazy_factory_entry_message(code: &str) -> String {
     match code {
         "invalid_chars" => "\"entry\" must not contain NUL bytes".into(),
-        "absolute" => {
-            "\"entry\" must be a relative path (no leading \"/\" or drive letter)".into()
-        }
+        "absolute" => "\"entry\" must be a relative path (no leading \"/\" or drive letter)".into(),
         "traversal" => "\"entry\" must not contain \"..\" path segments".into(),
         _ => "invalid \"entry\" path".into(),
     }
@@ -2172,11 +2170,20 @@ mod tests {
     fn lazy_factory_entry_violations_match_ts_regexes() {
         let none: Vec<&str> = Vec::new();
         assert_eq!(lazy_factory_entry_violations("dist/index.js"), none);
-        assert_eq!(lazy_factory_entry_violations("../secret"), vec!["traversal"]);
+        assert_eq!(
+            lazy_factory_entry_violations("../secret"),
+            vec!["traversal"]
+        );
         assert_eq!(lazy_factory_entry_violations("a/../b"), vec!["traversal"]);
-        assert_eq!(lazy_factory_entry_violations("/etc/shadow"), vec!["absolute"]);
+        assert_eq!(
+            lazy_factory_entry_violations("/etc/shadow"),
+            vec!["absolute"]
+        );
         assert_eq!(lazy_factory_entry_violations("C:\\win"), vec!["absolute"]);
-        assert_eq!(lazy_factory_entry_violations("has\0nul"), vec!["invalid_chars"]);
+        assert_eq!(
+            lazy_factory_entry_violations("has\0nul"),
+            vec!["invalid_chars"]
+        );
         // A path can trip several checks, in TS order.
         assert_eq!(
             lazy_factory_entry_violations("/foo/../bar"),
@@ -2309,6 +2316,9 @@ mod tests {
         assert!(json_str.contains("\"schemaVersion\":2"), "got: {json_str}");
         // Unified shape: camelCase manifestPath + always-present stage.
         assert!(json_str.contains("\"manifestPath\":"), "got: {json_str}");
-        assert!(json_str.contains("\"stage\":\"validate\""), "got: {json_str}");
+        assert!(
+            json_str.contains("\"stage\":\"validate\""),
+            "got: {json_str}"
+        );
     }
 }

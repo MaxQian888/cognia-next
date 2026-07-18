@@ -697,14 +697,21 @@ fn plugin_doctor_json_reports_checks() {
     // A non-plugin directory has no project checks, so nothing can hard-fail
     // (environment gaps are warnings) → exit 0.
     let (code, stdout, _stderr) = run_cognia_in_dir(tmp.path(), &["plugin", "doctor", "--json"]);
-    assert_eq!(code, Some(0), "doctor in a clean dir should exit 0: {stdout}");
+    assert_eq!(
+        code,
+        Some(0),
+        "doctor in a clean dir should exit 0: {stdout}"
+    );
     let parsed: serde_json::Value =
         serde_json::from_str(&stdout).expect("doctor --json should emit valid JSON");
     assert_eq!(parsed["schemaVersion"], 1);
     assert_eq!(parsed["action"], "doctor");
     assert_eq!(parsed["ok"], true);
     let checks = parsed["checks"].as_array().expect("checks is an array");
-    assert!(!checks.is_empty(), "doctor should run at least the env checks");
+    assert!(
+        !checks.is_empty(),
+        "doctor should run at least the env checks"
+    );
     assert!(
         checks
             .iter()
@@ -776,7 +783,11 @@ fn lint_warnings_as_errors_flips_the_exit() {
 
     // -W: the same warning gates.
     let (code_w, _o, _e) = run_cognia(&["plugin", "lint", "--path", path, "-W"]);
-    assert_ne!(code_w, Some(0), "--warnings-as-errors must fail on a warning");
+    assert_ne!(
+        code_w,
+        Some(0),
+        "--warnings-as-errors must fail on a warning"
+    );
 
     // The payload marks the run not-ok while the manifest stays valid.
     let (_c, stdout, _e) = run_cognia(&["plugin", "lint", "--path", path, "-W", "--json"]);

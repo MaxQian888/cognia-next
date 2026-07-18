@@ -106,7 +106,11 @@ pub fn run(fix: bool, as_json: bool, ui: &mut RuntimeUi) -> Result<()> {
     } else if as_json {
         Err(crate::JsonFailureExit.into())
     } else {
-        let fails = report.checks.iter().filter(|c| c.status == CheckStatus::Fail).count();
+        let fails = report
+            .checks
+            .iter()
+            .filter(|c| c.status == CheckStatus::Fail)
+            .count();
         bail!("cognia plugin doctor found {fails} problem(s) — see above");
     }
 }
@@ -149,7 +153,9 @@ fn collect_checks(cwd: &Path, project_kind: Option<&str>) -> Vec<Check> {
     if cwd.join("plugin.json").exists() {
         checks.push(signing_key_check(
             cwd.join(".cognia/plugin.private.b64").exists(),
-            std::fs::read_to_string(cwd.join(".gitignore")).ok().as_deref(),
+            std::fs::read_to_string(cwd.join(".gitignore"))
+                .ok()
+                .as_deref(),
         ));
         checks.push(manifest_check(cwd));
     }
@@ -383,8 +389,16 @@ fn print_human(report: &DoctorReport) {
         }
     }
     println!();
-    let fails = report.checks.iter().filter(|c| c.status == CheckStatus::Fail).count();
-    let warns = report.checks.iter().filter(|c| c.status == CheckStatus::Warn).count();
+    let fails = report
+        .checks
+        .iter()
+        .filter(|c| c.status == CheckStatus::Fail)
+        .count();
+    let warns = report
+        .checks
+        .iter()
+        .filter(|c| c.status == CheckStatus::Warn)
+        .count();
     let summary = format!("{fails} problem(s), {warns} warning(s)");
     if report.ok {
         println!("{}{summary}", style::success_prefix());
@@ -435,10 +449,7 @@ mod tests {
 
     #[test]
     fn signing_key_absent_or_gitignored_is_ok() {
-        assert_eq!(
-            signing_key_check(false, None).status,
-            CheckStatus::Ok
-        );
+        assert_eq!(signing_key_check(false, None).status, CheckStatus::Ok);
         assert_eq!(
             signing_key_check(true, Some("target/\n.cognia/\n")).status,
             CheckStatus::Ok
@@ -485,7 +496,11 @@ mod tests {
         let mut checks = vec![signing_key_check(true, Some("target/\n"))];
         assert_eq!(checks[0].status, CheckStatus::Fail);
         apply_fixes(tmp.path(), &mut checks);
-        assert_eq!(checks[0].status, CheckStatus::Ok, "--fix must gitignore the key");
+        assert_eq!(
+            checks[0].status,
+            CheckStatus::Ok,
+            "--fix must gitignore the key"
+        );
         let gi = std::fs::read_to_string(tmp.path().join(".gitignore")).unwrap();
         assert!(gi.lines().any(|l| l.trim() == ".cognia/"));
     }

@@ -124,12 +124,19 @@ mod tests {
             .expect("KEYRING_PROVIDER_IDS missing from lib/tts/keyring.ts");
         // Skip past the `: KeyringProviderId[]` type annotation to the `=`, then
         // take the first `[ ... ]` after it — the array literal itself.
-        let eq = src[anchor..].find('=').expect("= after KEYRING_PROVIDER_IDS") + anchor;
+        let eq = src[anchor..]
+            .find('=')
+            .expect("= after KEYRING_PROVIDER_IDS")
+            + anchor;
         let open = src[eq..].find('[').expect("array literal open") + eq;
         let close = src[open..].find(']').expect("array literal close") + open;
         let mut ts_ids: Vec<String> = src[open + 1..close]
             .split(',')
-            .map(|tok| tok.trim().trim_matches(|c| c == '"' || c == '\'').to_string())
+            .map(|tok| {
+                tok.trim()
+                    .trim_matches(|c| c == '"' || c == '\'')
+                    .to_string()
+            })
             .filter(|s| !s.is_empty())
             .collect();
         ts_ids.sort();

@@ -441,9 +441,14 @@ mod tests {
 
         // The managed-process registry sees the running sidecar by bound port,
         // and surfaces the Node child's OS pid.
-        let snap = state.managed_snapshot().expect("running server has a snapshot");
+        let snap = state
+            .managed_snapshot()
+            .expect("running server has a snapshot");
         assert_eq!(snap.port, bound_port);
-        assert!(snap.pid.is_some(), "a running sidecar should report an OS pid");
+        assert!(
+            snap.pid.is_some(),
+            "a running sidecar should report an OS pid"
+        );
 
         state.stop().expect("stop should succeed");
         assert!(!state.is_running());
