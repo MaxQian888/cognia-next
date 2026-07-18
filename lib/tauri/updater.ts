@@ -84,9 +84,27 @@ let pendingUpdate: UpdateHandle | null = null
 let pendingUpdateAt = 0
 let pendingDownloaded = false
 let installedVersionAwaitingRestart: string | null = null
+const installedRestartListeners = new Set<() => void>()
 let checkInFlight: Promise<AvailableUpdate | null> | null = null
 let downloadInFlight: Promise<DownloadUpdateResult> | null = null
 let installInFlight: Promise<InstallUpdateResult> | null = null
+
+function setInstalledVersionAwaitingRestart(version: string | null): void {
+  if (installedVersionAwaitingRestart === version) return
+  installedVersionAwaitingRestart = version
+  for (const listener of installedRestartListeners) listener()
+}
+
+/** Current installed version that still requires this process to restart. */
+export function getInstalledVersionAwaitingRestart(): string | null {
+  return installedVersionAwaitingRestart
+}
+
+/** Subscribe UI surfaces to the shared installed-pending-restart state. */
+export function subscribeInstalledVersionAwaitingRestart(listener: () => void): () => void {
+  installedRestartListeners.add(listener)
+  return () => installedRestartListeners.delete(listener)
+}
 
 function clampInteger(value: unknown, fallback: number, min: number, max: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback
@@ -339,7 +357,7 @@ export function installUpdate(options: InstallUpdateOptions = {}): Promise<Insta
       throw classifyError(error, "install")
     }
 
-    installedVersionAwaitingRestart = handle.version
+    setInstalledVersionAwaitingRestart(handle.version)
     pendingUpdate = null
     pendingUpdateAt = 0
     pendingDownloaded = false
@@ -373,7 +391,7 @@ export function __resetPendingUpdate(): void {
   pendingUpdate = null
   pendingUpdateAt = 0
   pendingDownloaded = false
-  installedVersionAwaitingRestart = null
+  setInstalledVersionAwaitingRestart(null)
   checkInFlight = null
   downloadInFlight = null
   installInFlight = null

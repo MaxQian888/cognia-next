@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, type ReactNode } from "react"
+import { useState, useSyncExternalStore, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { DownloadIcon, RefreshCwIcon, RocketIcon, RotateCcwIcon } from "lucide-react"
@@ -26,10 +26,12 @@ import {
   checkForUpdate,
   downloadAndInstallUpdate,
   downloadUpdate,
+  getInstalledVersionAwaitingRestart,
   installUpdate,
   isUpdateErrorPhase,
   relaunchAfterUpdate,
   resolveUpdateSettings,
+  subscribeInstalledVersionAwaitingRestart,
   type AvailableUpdate,
   type UpdateProgress,
 } from "@/lib/tauri/updater"
@@ -80,7 +82,11 @@ export function UpdateCard() {
   const [downloading, setDownloading] = useState(false)
   const [downloaded, setDownloaded] = useState(false)
   const [installing, setInstalling] = useState(false)
-  const [restartRequired, setRestartRequired] = useState(false)
+  const restartRequired = useSyncExternalStore(
+    subscribeInstalledVersionAwaitingRestart,
+    () => getInstalledVersionAwaitingRestart() !== null,
+    () => false
+  )
   const [progress, setProgress] = useState<UpdateProgress | null>(null)
 
   const desktop = isTauri()
@@ -174,7 +180,6 @@ export function UpdateCard() {
         return
       }
       if (result === "installed") {
-        setRestartRequired(true)
         setInstalling(false)
         toast.success(t("updates.installedRestartRequired"))
         return
@@ -183,7 +188,6 @@ export function UpdateCard() {
     } catch (error) {
       const errorText = error instanceof Error ? error.message : String(error)
       if (isUpdateErrorPhase(error, "relaunch")) {
-        setRestartRequired(true)
         loggers.app.error("about.updateRelaunchFailed", error)
         toast.error(t("updates.updateRelaunchFailed", { error: errorText }))
         setInstalling(false)

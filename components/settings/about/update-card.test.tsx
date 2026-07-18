@@ -343,13 +343,16 @@ describe("<UpdateCard />", () => {
       download: jest.fn(async () => {}),
       install: jest.fn(async () => {}),
     })
-    render(<UpdateCard />)
+    const first = render(<UpdateCard />)
     fireEvent.click(screen.getByTestId("check-updates"))
     await waitFor(() => expect(screen.getByTestId("install-update")).toBeInTheDocument())
 
     fireEvent.click(screen.getByTestId("install-update"))
 
     await waitFor(() => expect(screen.getByTestId("restart-update")).toBeInTheDocument())
+    first.unmount()
+    render(<UpdateCard />)
+    expect(screen.getByTestId("restart-update")).toBeInTheDocument()
     const checkButton = screen.getByTestId("check-updates")
     expect(checkButton).toBeDisabled()
     checkButton.removeAttribute("disabled")

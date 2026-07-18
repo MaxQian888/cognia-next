@@ -49,10 +49,12 @@ import {
   checkForUpdate,
   downloadAndInstallUpdate,
   downloadUpdate,
+  getInstalledVersionAwaitingRestart,
   installUpdate,
   isUpdateErrorPhase,
   relaunchAfterUpdate,
   resolveUpdateSettings,
+  subscribeInstalledVersionAwaitingRestart,
   __resetPendingUpdate,
 } from "./updater"
 
@@ -267,9 +269,13 @@ describe("downloadUpdate + installUpdate", () => {
   it("suppresses repeated update work after install until the process restarts", async () => {
     const download = jest.fn(async () => {})
     const install = jest.fn(async () => {})
+    const listener = jest.fn()
+    const unsubscribe = subscribeInstalledVersionAwaitingRestart(listener)
     checkMock.mockResolvedValueOnce({ version: "2.0.0", download, install })
 
     expect(await installUpdate({ relaunch: false })).toBe("installed")
+    expect(getInstalledVersionAwaitingRestart()).toBe("2.0.0")
+    expect(listener).toHaveBeenCalledTimes(1)
     expect(await checkForUpdate()).toBeNull()
     expect(await downloadUpdate()).toBe("noLongerAvailable")
     expect(await installUpdate({ relaunch: false })).toBe("installed")
@@ -278,6 +284,7 @@ describe("downloadUpdate + installUpdate", () => {
     expect(checkMock).toHaveBeenCalledTimes(1)
     expect(download).toHaveBeenCalledTimes(1)
     expect(install).toHaveBeenCalledTimes(1)
+    unsubscribe()
   })
 
   it("waits for a preceding check before starting a download", async () => {
