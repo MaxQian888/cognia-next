@@ -19,6 +19,7 @@ jest.mock("sonner", () => ({
 }))
 
 const saveMock = jest.fn(async () => {})
+const saveUpdateSettingsMock = jest.fn(async (_patch: Record<string, unknown>) => {})
 const defaultUpdateSettings = {
   autoCheck: true,
   checkIntervalMinutes: 360,
@@ -30,6 +31,7 @@ const defaultUpdateSettings = {
 const settingsState = {
   settings: { updates: { ...defaultUpdateSettings } } as Record<string, unknown>,
   save: saveMock,
+  saveUpdateSettings: saveUpdateSettingsMock,
 }
 jest.mock("@/stores/settings/settings-store", () => ({
   useSettingsStore: Object.assign(
@@ -52,6 +54,10 @@ beforeEach(() => {
   jest.clearAllMocks()
   isTauriMock.mockReturnValue(true)
   settingsState.settings = { updates: { ...defaultUpdateSettings } }
+  saveUpdateSettingsMock.mockImplementation(async (patch: Record<string, unknown>) => {
+    const current = settingsState.settings.updates as Record<string, unknown>
+    settingsState.settings = { ...settingsState.settings, updates: { ...current, ...patch } }
+  })
   // The updater caches the last `check()` handle module-side; clear it so each
   // case starts cold.
   __resetPendingUpdate()
@@ -212,11 +218,7 @@ describe("<UpdateCard />", () => {
   it("persists the auto-check toggle via the settings store", async () => {
     render(<UpdateCard />)
     fireEvent.click(screen.getByTestId("auto-check-updates-toggle"))
-    await waitFor(() =>
-      expect(saveMock).toHaveBeenCalledWith({
-        updates: { ...defaultUpdateSettings, autoCheck: false },
-      })
-    )
+    await waitFor(() => expect(saveUpdateSettingsMock).toHaveBeenCalledWith({ autoCheck: false }))
   })
 
   it("persists advanced updater switches and select options", async () => {
@@ -230,22 +232,23 @@ describe("<UpdateCard />", () => {
     fireEvent.click(screen.getByTestId("update-request-timeout"))
     fireEvent.click(screen.getByRole("option", { name: "60 seconds" }))
 
-    await waitFor(() => expect(saveMock).toHaveBeenCalledTimes(5))
-    expect(saveMock).toHaveBeenCalledWith({
-      updates: { ...defaultUpdateSettings, autoDownload: true },
-    })
-    expect(saveMock).toHaveBeenCalledWith({
-      updates: { ...defaultUpdateSettings, relaunchAfterInstall: false },
-    })
-    expect(saveMock).toHaveBeenCalledWith({
-      updates: { ...defaultUpdateSettings, useProxy: false },
-    })
-    expect(saveMock).toHaveBeenCalledWith({
-      updates: { ...defaultUpdateSettings, checkIntervalMinutes: 60 },
-    })
-    expect(saveMock).toHaveBeenCalledWith({
-      updates: { ...defaultUpdateSettings, requestTimeoutSeconds: 60 },
-    })
+    await waitFor(() => expect(saveUpdateSettingsMock).toHaveBeenCalledTimes(5))
+    expect(saveUpdateSettingsMock).toHaveBeenNthCalledWith(1, { autoDownload: true })
+    expect(saveUpdateSettingsMock).toHaveBeenNthCalledWith(2, { relaunchAfterInstall: false })
+    expect(saveUpdateSettingsMock).toHaveBeenNthCalledWith(3, { useProxy: false })
+    expect(saveUpdateSettingsMock).toHaveBeenNthCalledWith(4, { checkIntervalMinutes: 60 })
+    expect(saveUpdateSettingsMock).toHaveBeenNthCalledWith(5, { requestTimeoutSeconds: 60 })
+  })
+
+  it("surfaces updater preference persistence failures", async () => {
+    saveUpdateSettingsMock.mockRejectedValueOnce(new Error("db unavailable"))
+    render(<UpdateCard />)
+
+    fireEvent.click(screen.getByTestId("auto-download-updates-toggle"))
+
+    await waitFor(() =>
+      expect(toastMock.error).toHaveBeenCalledWith(expect.stringContaining("db unavailable"))
+    )
   })
 
   it("downloads an available update without installing it", async () => {
@@ -329,9 +332,28 @@ describe("<UpdateCard />", () => {
     fireEvent.click(screen.getByTestId("install-update"))
 
     await waitFor(() => expect(screen.getByTestId("restart-update")).toBeInTheDocument())
+    expect(screen.getByTestId("check-updates")).toBeDisabled()
     expect(relaunchMock).not.toHaveBeenCalled()
     fireEvent.click(screen.getByTestId("restart-update"))
     await waitFor(() => expect(relaunchMock).toHaveBeenCalled())
+  })
+
+  it("keeps the restart action when automatic relaunch fails after installation", async () => {
+    relaunchMock.mockRejectedValueOnce(new Error("restart denied"))
+    checkMock.mockResolvedValueOnce({
+      version: "1.0.0",
+      download: jest.fn(async () => {}),
+      install: jest.fn(async () => {}),
+    })
+    render(<UpdateCard />)
+    fireEvent.click(screen.getByTestId("check-updates"))
+    await waitFor(() => expect(screen.getByTestId("install-update")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByTestId("install-update"))
+
+    await waitFor(() => expect(screen.getByTestId("restart-update")).toBeInTheDocument())
+    expect(screen.getByTestId("check-updates")).toBeDisabled()
+    expect(toastMock.error).toHaveBeenCalledWith(expect.stringContaining("restart denied"))
   })
 
   it("surfaces a manual restart failure", async () => {

@@ -27,6 +27,7 @@ import {
   downloadAndInstallUpdate,
   downloadUpdate,
   installUpdate,
+  isUpdateErrorPhase,
   relaunchAfterUpdate,
   resolveUpdateSettings,
   type AvailableUpdate,
@@ -68,6 +69,7 @@ export function UpdateCard() {
   const rawUpdateSettings = useSettingsStore((s) => s.settings?.updates)
   const lastUpdateCheckAt = useSettingsStore((s) => s.settings?.lastUpdateCheckAt)
   const save = useSettingsStore((s) => s.save)
+  const saveUpdateSettings = useSettingsStore((s) => s.saveUpdateSettings)
   const updateSettings = resolveUpdateSettings(rawUpdateSettings)
 
   const [checking, setChecking] = useState(false)
@@ -83,8 +85,15 @@ export function UpdateCard() {
 
   const desktop = isTauri()
 
-  const persistUpdateSettings = (patch: Partial<typeof updateSettings>) =>
-    save({ updates: { ...updateSettings, ...patch } })
+  const persistUpdateSettings = async (patch: Partial<typeof updateSettings>) => {
+    try {
+      await saveUpdateSettings(patch)
+    } catch (error) {
+      const errorText = error instanceof Error ? error.message : String(error)
+      loggers.app.error("about.updateSettingsSaveFailed", error)
+      toast.error(t("updates.settingsSaveFailed", { error: errorText }))
+    }
+  }
 
   const recordSuccessfulCheck = async () => {
     const checkedAt = Date.now()
@@ -123,8 +132,8 @@ export function UpdateCard() {
   }
 
   const handleCheck = async () => {
+    if (restartRequired) return
     setChecking(true)
-    setRestartRequired(false)
     setDownloaded(false)
     try {
       const update = await checkForUpdate()
@@ -173,6 +182,14 @@ export function UpdateCard() {
       loggers.app.info("about.updateInstall", { status: result, version: available.version })
     } catch (error) {
       const errorText = error instanceof Error ? error.message : String(error)
+      if (isUpdateErrorPhase(error, "relaunch")) {
+        setRestartRequired(true)
+        loggers.app.error("about.updateRelaunchFailed", error)
+        toast.error(t("updates.updateRelaunchFailed", { error: errorText }))
+        setInstalling(false)
+        setProgress(null)
+        return
+      }
       loggers.app.error("about.updateInstallFailed", error)
       toast.error(t("updates.updateInstallFailed", { error: errorText }))
       setInstalling(false)
@@ -215,7 +232,11 @@ export function UpdateCard() {
         )}
 
         <div className="mt-2 flex flex-wrap gap-2">
-          <Button onClick={handleCheck} disabled={busy || !desktop} data-testid="check-updates">
+          <Button
+            onClick={handleCheck}
+            disabled={busy || !desktop || restartRequired}
+            data-testid="check-updates"
+          >
             <RefreshCwIcon className={`mr-2 size-4 ${checking ? "animate-spin" : ""}`} />
             {checking ? t("updates.checking") : t("updates.checkUpdates")}
           </Button>

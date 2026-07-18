@@ -6,6 +6,7 @@ import type {
   AppLanguage,
   AppTheme,
   BuiltinToolsConfig,
+  UpdateSettings,
 } from "@cognia/agent-config-types"
 import { DEFAULT_BUILTIN_TOOLS, DEFAULT_UPDATE_SETTINGS } from "@cognia/agent-config-types"
 import type { ColorThemePreset, CustomTheme } from "@/types/plugin/plugin"
@@ -105,6 +106,8 @@ interface SettingsState {
   providerKeysLoaded: boolean
   load: () => Promise<void>
   save: (patch: Partial<Omit<AppSettings, "id">>) => Promise<void>
+  /** Serialize partial updater preference writes so rapid controls cannot overwrite each other. */
+  saveUpdateSettings: (patch: Partial<UpdateSettings>) => Promise<void>
   /**
    * Restore settings to their defaults. With `keys`, resets just those keys
    * (per-section reset); without, resets all preferences but keeps credentials
@@ -602,6 +605,8 @@ export function resolveSkillBundleMirrors(settings: AppSettings | null | undefin
   }
 }
 
+let updateSettingsSaveQueue: Promise<void> = Promise.resolve()
+
 export const useSettingsStore = create<SettingsState>((rawSet, get) => {
   // Intercept every state update: if the update modifies `settings`, also
   // re-derive the plugin-facing flat fields. This keeps the two views
@@ -699,6 +704,22 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
           console.warn("networkProxy.applyToRust failed", err)
         }
       }
+    },
+
+    saveUpdateSettings: (patch) => {
+      const task = updateSettingsSaveQueue
+        .catch(() => undefined)
+        .then(() =>
+          get().save({
+            updates: {
+              ...DEFAULT_UPDATE_SETTINGS,
+              ...get().settings?.updates,
+              ...patch,
+            },
+          })
+        )
+      updateSettingsSaveQueue = task
+      return task
     },
 
     resetSettings: async (keys) => {

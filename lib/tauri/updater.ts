@@ -69,6 +69,11 @@ export class AppUpdateError extends Error {
   }
 }
 
+/** Narrow a classified updater failure without coupling callers to message text. */
+export function isUpdateErrorPhase(error: unknown, phase: UpdatePhase): error is AppUpdateError {
+  return error instanceof AppUpdateError && error.phase === phase
+}
+
 const PENDING_UPDATE_TTL_MS = 10 * 60 * 1000
 const MIN_CHECK_INTERVAL_MINUTES = 15
 const MAX_CHECK_INTERVAL_MINUTES = 7 * 24 * 60

@@ -307,6 +307,65 @@ describe("save", () => {
     expect(dbSettings.saveSettings).toHaveBeenCalledWith({ defaultModel: "claude-sonnet" })
     expect(useSettingsStore.getState().settings).toEqual(next)
   })
+
+  it("serializes updater preference patches without losing earlier changes", async () => {
+    dbSettings.saveSettings.mockImplementation(async (patch) => baseSettings(patch))
+    useSettingsStore.setState({ settings: baseSettings() })
+
+    await act(async () => {
+      await Promise.all([
+        useSettingsStore.getState().saveUpdateSettings({ autoDownload: true }),
+        useSettingsStore.getState().saveUpdateSettings({ checkIntervalMinutes: 15 }),
+      ])
+    })
+
+    expect(dbSettings.saveSettings).toHaveBeenLastCalledWith({
+      updates: expect.objectContaining({ autoDownload: true, checkIntervalMinutes: 15 }),
+    })
+  })
+
+  it("serializes partial updater settings without losing rapid changes", async () => {
+    const initialUpdates = {
+      autoCheck: true,
+      checkIntervalMinutes: 360,
+      autoDownload: false,
+      relaunchAfterInstall: true,
+      requestTimeoutSeconds: 30,
+      useProxy: true,
+    }
+    useSettingsStore.setState({ settings: baseSettings({ updates: initialUpdates }) })
+    let releaseFirst!: () => void
+    dbSettings.saveSettings
+      .mockImplementationOnce(
+        (patch) =>
+          new Promise((resolve) => {
+            releaseFirst = () => resolve(baseSettings(patch))
+          })
+      )
+      .mockImplementationOnce(async (patch) => baseSettings(patch))
+
+    const first = useSettingsStore.getState().saveUpdateSettings({ autoDownload: true })
+    const second = useSettingsStore.getState().saveUpdateSettings({ useProxy: false })
+    for (
+      let attempt = 0;
+      attempt < 5 && dbSettings.saveSettings.mock.calls.length === 0;
+      attempt++
+    ) {
+      await Promise.resolve()
+    }
+    expect(dbSettings.saveSettings).toHaveBeenCalledTimes(1)
+
+    releaseFirst()
+    await first
+    await second
+
+    expect(dbSettings.saveSettings).toHaveBeenNthCalledWith(1, {
+      updates: { ...initialUpdates, autoDownload: true },
+    })
+    expect(dbSettings.saveSettings).toHaveBeenNthCalledWith(2, {
+      updates: { ...initialUpdates, autoDownload: true, useProxy: false },
+    })
+  })
 })
 
 // ---- resetSettings ----

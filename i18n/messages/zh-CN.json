@@ -15797,6 +15797,7 @@
         "requestTimeoutDescription": "获取更新清单和更新包时允许等待的最长时间。",
         "requestTimeoutLabel": "请求超时",
         "restartNow": "立即重启",
+        "settingsSaveFailed": "无法保存更新设置：{error}",
         "timeoutSeconds": "{seconds} 秒",
         "title": "更新",
         "updateAvailable": "{version} 版本可用",

@@ -17,6 +17,8 @@ jest.mock("@/lib/tauri/updater", () => ({
   downloadAndInstallUpdate: (...a: unknown[]) => downloadAndInstallMock(...a),
   downloadUpdate: (...a: unknown[]) => downloadUpdateMock(...a),
   installUpdate: (...a: unknown[]) => installUpdateMock(...a),
+  isUpdateErrorPhase: (error: unknown, phase: string) =>
+    (error as { phase?: string } | null)?.phase === phase,
   relaunchAfterUpdate: () => relaunchAfterUpdateMock(),
   resolveUpdateSettings: (raw?: Record<string, unknown>) => ({
     autoCheck: true,
@@ -381,6 +383,63 @@ describe("UpdateCheckInitializer", () => {
       expect(checkForUpdateMock).toHaveBeenCalledTimes(2)
       // same version → no second toast
       expect(toastMock.success).toHaveBeenCalledTimes(1)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("offers restart recovery when install succeeded but automatic relaunch failed", async () => {
+    checkForUpdateMock.mockResolvedValue({ version: "9.9.9" })
+    downloadAndInstallMock.mockRejectedValue(
+      Object.assign(new Error("restart denied"), { phase: "relaunch" })
+    )
+    render(<UpdateCheckInitializer />)
+    await waitFor(() => expect(toastMock.success).toHaveBeenCalled())
+    const availableOptions = toastMock.success.mock.calls[0][1] as {
+      action: { onClick: () => void }
+    }
+
+    await act(async () => {
+      availableOptions.action.onClick()
+      await Promise.resolve()
+    })
+
+    await waitFor(() =>
+      expect(toastMock.error).toHaveBeenCalledWith(
+        'updateRelaunchFailed:{"error":"restart denied"}',
+        expect.objectContaining({ action: expect.any(Object), id: "toast-id" })
+      )
+    )
+    expect(errorMock).toHaveBeenCalledWith(
+      "about.autoUpdateRelaunchFailed",
+      expect.objectContaining({ phase: "relaunch" })
+    )
+  })
+
+  it("does not fetch merely because download or relaunch preferences changed", async () => {
+    jest.useFakeTimers()
+    try {
+      checkForUpdateMock.mockResolvedValue(null)
+      const { rerender } = render(<UpdateCheckInitializer />)
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(checkForUpdateMock).toHaveBeenCalledTimes(1)
+
+      jest.advanceTimersByTime(2 * 60 * 1000)
+      settingsState.settings = {
+        updates: {
+          ...defaultUpdateSettings,
+          autoDownload: true,
+          relaunchAfterInstall: false,
+        },
+      }
+      rerender(<UpdateCheckInitializer />)
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      expect(checkForUpdateMock).toHaveBeenCalledTimes(1)
     } finally {
       jest.useRealTimers()
     }

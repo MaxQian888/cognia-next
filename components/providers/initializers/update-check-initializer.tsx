@@ -18,6 +18,7 @@ import {
   downloadAndInstallUpdate,
   downloadUpdate,
   installUpdate,
+  isUpdateErrorPhase,
   relaunchAfterUpdate,
   resolveUpdateSettings,
 } from "@/lib/tauri/updater"
@@ -64,6 +65,7 @@ export function UpdateCheckInitializer() {
   const t = useTranslations("settings.about.updates")
   // Don't re-toast the same version when the 6h interval fires again.
   const notifiedVersion = useRef<string | null>(null)
+  const updateSettingsRef = useRef(updateSettings)
   // Keep the latest translator out of the main effect's deps: a locale flip
   // re-creates `t`, and re-subscribing the effect used to fire an immediate
   // extra network check on every boot-time context change.
@@ -75,6 +77,9 @@ export function UpdateCheckInitializer() {
   useEffect(() => {
     saveRef.current = save
   }, [save])
+  useEffect(() => {
+    updateSettingsRef.current = updateSettings
+  }, [updateSettings])
 
   useEffect(() => {
     if (!isTauri() || !updateSettings.autoCheck) return
@@ -94,7 +99,7 @@ export function UpdateCheckInitializer() {
     const install = async (alreadyDownloaded: boolean) => {
       const toastId = toast.loading(tRef.current("installing"))
       try {
-        const options = { relaunch: updateSettings.relaunchAfterInstall }
+        const options = { relaunch: updateSettingsRef.current.relaunchAfterInstall }
         const result = alreadyDownloaded
           ? await installUpdate(options)
           : await downloadAndInstallUpdate(undefined, options)
@@ -111,6 +116,17 @@ export function UpdateCheckInitializer() {
         }
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err)
+        if (isUpdateErrorPhase(err, "relaunch")) {
+          loggers.app.error("about.autoUpdateRelaunchFailed", err)
+          toast.error(tRef.current("updateRelaunchFailed", { error }), {
+            id: toastId,
+            action: {
+              label: tRef.current("restartNow"),
+              onClick: () => void restart(),
+            },
+          })
+          return
+        }
         loggers.app.error("about.autoUpdateInstallFailed", err)
         toast.error(tRef.current("updateInstallFailed", { error }), { id: toastId })
       }
@@ -136,7 +152,7 @@ export function UpdateCheckInitializer() {
           status: "available",
           version: update.version,
         })
-        if (updateSettings.autoDownload) {
+        if (updateSettingsRef.current.autoDownload) {
           const toastId = toast.loading(
             tRef.current("downloadingBackground", { version: update.version })
           )
@@ -188,12 +204,7 @@ export function UpdateCheckInitializer() {
       cancelled = true
       clearInterval(id)
     }
-  }, [
-    updateSettings.autoCheck,
-    updateSettings.autoDownload,
-    updateSettings.checkIntervalMinutes,
-    updateSettings.relaunchAfterInstall,
-  ])
+  }, [updateSettings.autoCheck, updateSettings.checkIntervalMinutes])
 
   return null
 }

@@ -101,6 +101,7 @@
     "requestTimeoutDescription": "Maximum time allowed for the manifest and package requests.",
     "requestTimeoutLabel": "Request timeout",
     "restartNow": "Restart now",
+    "settingsSaveFailed": "Could not save update settings: {error}",
     "timeoutSeconds": "{seconds} seconds",
     "title": "Updates",
     "updateDownloadedBackground": "Version {version} is downloaded and ready to install.",

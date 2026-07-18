@@ -50,6 +50,7 @@ import {
   downloadAndInstallUpdate,
   downloadUpdate,
   installUpdate,
+  isUpdateErrorPhase,
   relaunchAfterUpdate,
   resolveUpdateSettings,
   __resetPendingUpdate,
@@ -223,6 +224,15 @@ describe("checkForUpdate", () => {
     await expect(checkForUpdate()).rejects.toEqual(
       expect.objectContaining({ code: "permission", phase: "check" })
     )
+  })
+
+  it("narrows classified errors by phase", async () => {
+    checkMock.mockRejectedValueOnce(new Error("network"))
+    const error = await checkForUpdate().catch((caught: unknown) => caught)
+
+    expect(isUpdateErrorPhase(error, "check")).toBe(true)
+    expect(isUpdateErrorPhase(error, "download")).toBe(false)
+    expect(isUpdateErrorPhase(new Error("network"), "check")).toBe(false)
   })
 
   it.each([
