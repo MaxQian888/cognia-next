@@ -104,6 +104,7 @@ mod shutdown;
 pub use cognia_skills as skills;
 mod subscription;
 mod supervision_backoff;
+pub mod task_workspace;
 mod telemetry;
 // ADR-0067 Tier B — extracted to `crates/cognia-terminal`; re-aliased so
 // `crate::terminal::…` (companion_api rpc/ws_terminal, plugin_api cli_exec,
@@ -244,6 +245,13 @@ pub fn run() {
     // ADR-0067 Tier B — the extracted plugin runtime can't reach
     // claude::sidecar; hand its vscode LSP host the sidecar-dir resolver.
     plugin_api::vscode::commands::set_sidecar_dir_resolver(claude::sidecar::sidecar_dir);
+
+    let task_workspace_data_dir = dirs::data_dir()
+        .map(|dir| dir.join("cognia"))
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    if let Err(error) = task_workspace::install(task_workspace_data_dir) {
+        log::error!("initialize task workspace service: {error}");
+    }
 
     let mut builder = tauri::Builder::default();
 
@@ -640,6 +648,31 @@ pub fn run() {
             files::fs_search_content_workspace,
             files::fs_read_workspace_file,
             files::fs_write_workspace_file,
+            task_workspace::task_workspace_status,
+            task_workspace::task_workspace_begin,
+            task_workspace::task_workspace_settle,
+            task_workspace::task_workspace_get,
+            task_workspace::task_workspace_list,
+            task_workspace::task_workspace_list_runs,
+            task_workspace::task_workspace_list_resources,
+            task_workspace::task_workspace_get_resource,
+            task_workspace::task_workspace_get_patch_set,
+            task_workspace::task_resource_read_diff,
+            task_workspace::task_resource_read_text,
+            task_workspace::task_resource_download_open,
+            task_workspace::task_resource_download_read_chunk,
+            task_workspace::task_resource_download_close,
+            task_workspace::task_resource_upload_open,
+            task_workspace::task_resource_upload_write_chunk,
+            task_workspace::task_resource_upload_commit,
+            task_workspace::task_resource_upload_abort,
+            task_workspace::task_workspace_apply,
+            task_workspace::task_workspace_undo,
+            task_workspace::task_workspace_resolve_conflict,
+            task_workspace::task_workspace_pin,
+            task_workspace::task_workspace_prune,
+            task_workspace::task_workspace_watch,
+            task_workspace::task_workspace_stop_watch,
             files::fs_list_workspace_dir,
             files::fs_stat_workspace_file,
             files::fs_create_workspace_dir,

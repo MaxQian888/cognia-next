@@ -6,7 +6,8 @@ const save = jest.fn()
 const stateRef = {
   current: {
     debugMode: undefined as boolean | undefined,
-    developer: undefined as { chatMiddlewareExecution?: boolean } | undefined,
+    developer: undefined as
+      { chatMiddlewareExecution?: boolean; taskWorkspace?: boolean } | undefined,
   },
 }
 
@@ -25,6 +26,7 @@ jest.mock("@/stores/settings", () => ({
 // SettingsToggle renders the switches in declaration order: debug, then middleware.
 const debugSwitch = () => screen.getAllByRole("switch")[0]
 const middlewareSwitch = () => screen.getAllByRole("switch")[1]
+const taskWorkspaceSwitch = () => screen.getAllByRole("switch")[2]
 
 describe("DeveloperFlagsCard", () => {
   beforeEach(() => {
@@ -32,10 +34,11 @@ describe("DeveloperFlagsCard", () => {
     stateRef.current = { debugMode: undefined, developer: undefined }
   })
 
-  it("renders both developer toggles unchecked by default", () => {
+  it("renders developer toggles unchecked by default", () => {
     render(<DeveloperFlagsCard />)
     expect(debugSwitch()).toHaveAttribute("data-state", "unchecked")
     expect(middlewareSwitch()).toHaveAttribute("data-state", "unchecked")
+    expect(taskWorkspaceSwitch()).toHaveAttribute("data-state", "unchecked")
   })
 
   it("enabling debug mode persists true", async () => {
@@ -68,5 +71,18 @@ describe("DeveloperFlagsCard", () => {
     stateRef.current = { debugMode: undefined, developer: { chatMiddlewareExecution: true } }
     render(<DeveloperFlagsCard />)
     expect(middlewareSwitch()).toHaveAttribute("data-state", "checked")
+  })
+
+  it("toggles the experimental task workspace without dropping other flags", async () => {
+    stateRef.current = {
+      debugMode: undefined,
+      developer: { chatMiddlewareExecution: true, taskWorkspace: false },
+    }
+    const user = userEvent.setup()
+    render(<DeveloperFlagsCard />)
+    await user.click(taskWorkspaceSwitch())
+    expect(save).toHaveBeenCalledWith({
+      developer: { chatMiddlewareExecution: true, taskWorkspace: true },
+    })
   })
 })

@@ -50,7 +50,7 @@ impl TaskWorkspaceService {
         fs::create_dir_all(&execution_dir).map_err(|error| {
             format!("create execution dir {}: {error}", execution_dir.display())
         })?;
-        Ok(Self {
+        let service = Self {
             store: Mutex::new(WorkspaceStore::open(&service_dir, config.max_blob_bytes)?),
             execution_dir,
             retention: config.retention,
@@ -58,7 +58,9 @@ impl TaskWorkspaceService {
             upload_owners: Mutex::new(HashMap::new()),
             origin_hints: Mutex::new(HashMap::new()),
             watchers: WatchManager::new(),
-        })
+        };
+        service.recover_incomplete_runs()?;
+        Ok(service)
     }
 
     pub fn begin_run(&self, input: BeginTaskRun) -> Result<TaskRun, String> {
@@ -70,9 +72,32 @@ impl TaskWorkspaceService {
         if !root.is_dir() {
             return Err(format!("workspace is not a directory: {}", root.display()));
         }
+        {
+            let store = self.store.lock();
+            if let Some((existing, _)) = store.get_run::<WorkspaceSnapshot>(&input.run_id)? {
+                let task = store
+                    .get_task(&existing.task_id)?
+                    .ok_or_else(|| format!("missing task: {}", existing.task_id))?;
+                let matches_request = existing.task_id == input.task_id
+                    && existing.parent_run_id == input.parent_run_id
+                    && existing.agent_id == input.agent_id
+                    && existing.agent_kind == input.agent_kind
+                    && task.session_id == input.session_id
+                    && Path::new(&task.workspace_root) == root;
+                return matches_request.then_some(existing).ok_or_else(|| {
+                    format!(
+                        "runId is already owned by another task run: {}",
+                        input.run_id
+                    )
+                });
+            }
+        }
         let now = now_ms();
         let (baseline, blobs) = capture(&root)?;
-        let execution_root = self.execution_dir.join(&input.task_id).join(&input.run_id);
+        let execution_root = self
+            .execution_dir
+            .join(storage_key(&input.task_id))
+            .join(storage_key(&input.run_id));
         if execution_root.exists() {
             return Err(format!(
                 "run already has an execution root: {}",
@@ -140,7 +165,7 @@ impl TaskWorkspaceService {
             run.state,
             RunState::Running | RunState::Settling | RunState::Ready
         ) {
-            return store.list_resources(&run.task_id);
+            return store.list_run_resources(run_id);
         }
         if run.state == RunState::Ready {
             return store.list_run_resources(run_id);
@@ -168,7 +193,6 @@ impl TaskWorkspaceService {
         drop(origin_hints);
         run.state = RunState::Ready;
         run.settled_at = Some(now);
-        task.state = TaskWorkspaceState::Ready;
         task.expires_at = now + self.retention.as_millis() as i64;
         store.replace_resources(&task.task_id, &run.run_id, task.revision, &changes)?;
         let scratch = self
@@ -187,12 +211,81 @@ impl TaskWorkspaceService {
         )?;
         store.put_patch_set(&patch)?;
         store.put_run(&run, &baseline)?;
+        task.state = if store
+            .list_runs(&task.task_id)?
+            .iter()
+            .any(|candidate| matches!(candidate.state, RunState::Running | RunState::Settling))
+        {
+            TaskWorkspaceState::Active
+        } else {
+            TaskWorkspaceState::Ready
+        };
         store.put_task(&task)?;
         Ok(changes)
     }
 
+    pub fn settle_failed_run(&self, run_id: &str) -> Result<Vec<ResourceChange>, String> {
+        let resources = self.settle_run(run_id)?;
+        self.set_run_terminal_state(run_id, RunState::Failed)?;
+        Ok(resources)
+    }
+
+    pub fn settle_cancelled_run(&self, run_id: &str) -> Result<Vec<ResourceChange>, String> {
+        let resources = self.settle_run(run_id)?;
+        self.set_run_terminal_state(run_id, RunState::Cancelled)?;
+        Ok(resources)
+    }
+
+    fn recover_incomplete_runs(&self) -> Result<(), String> {
+        let run_ids = {
+            let store = self.store.lock();
+            let mut run_ids = Vec::new();
+            for task in store.list_tasks()? {
+                run_ids.extend(
+                    store
+                        .list_runs(&task.task_id)?
+                        .into_iter()
+                        .filter(|run| matches!(run.state, RunState::Running | RunState::Settling))
+                        .map(|run| run.run_id),
+                );
+            }
+            run_ids
+        };
+        for run_id in run_ids {
+            if self.settle_failed_run(&run_id).is_err() {
+                let _ = self.set_run_terminal_state(&run_id, RunState::Failed);
+            }
+        }
+        Ok(())
+    }
+
+    fn set_run_terminal_state(&self, run_id: &str, state: RunState) -> Result<(), String> {
+        if !matches!(
+            state,
+            RunState::Ready | RunState::Failed | RunState::Cancelled
+        ) {
+            return Err(format!("invalid terminal task run state: {state:?}"));
+        }
+        let store = self.store.lock();
+        let (mut run, baseline): (TaskRun, WorkspaceSnapshot) = store
+            .get_run(run_id)?
+            .ok_or_else(|| format!("unknown task run: {run_id}"))?;
+        run.state = state;
+        run.settled_at.get_or_insert_with(now_ms);
+        store.put_run(&run, &baseline)
+    }
+
     pub fn get_task(&self, task_id: &str) -> Result<Option<TaskWorkspace>, String> {
         self.store.lock().get_task(task_id)
+    }
+
+    pub fn list_tasks(&self, session_id: Option<&str>) -> Result<Vec<TaskWorkspace>, String> {
+        let mut tasks = self.store.lock().list_tasks()?;
+        if let Some(session_id) = session_id {
+            tasks.retain(|task| task.session_id == session_id);
+        }
+        tasks.sort_by_key(|task| std::cmp::Reverse(task.created_at));
+        Ok(tasks)
     }
 
     pub fn set_task_pinned(&self, task_id: &str, pinned: bool) -> Result<TaskWorkspace, String> {
@@ -254,6 +347,43 @@ impl TaskWorkspaceService {
 
     pub fn get_patch_set(&self, run_id: &str) -> Result<Option<crate::PatchSet>, String> {
         self.store.lock().get_patch_set(run_id)
+    }
+
+    pub fn read_patch_diff(
+        &self,
+        run_id: &str,
+        path: &str,
+        allow_sensitive: bool,
+    ) -> Result<String, String> {
+        if is_sensitive_resource(path) && !allow_sensitive {
+            return Err(format!(
+                "sensitive resource requires explicit authorization: {path}"
+            ));
+        }
+        let now = now_ms();
+        let mut store = self.store.lock();
+        let patch = store
+            .get_patch_set(run_id)?
+            .ok_or_else(|| format!("unknown patch set for run: {run_id}"))?;
+        let file = patch
+            .files
+            .iter()
+            .find(|file| file.path == path)
+            .ok_or_else(|| format!("resource is not part of patch set: {path}"))?;
+        if file.binary || file.resource_kind != crate::ResourceKind::File {
+            return Err(format!("resource does not have a textual diff: {path}"));
+        }
+        let mut diff = String::new();
+        for hunk in &file.hunks {
+            let bytes = store.get_blob(&hunk.forward_patch_hash, now)?;
+            let text = std::str::from_utf8(&bytes)
+                .map_err(|_| format!("stored patch is not UTF-8: {}", hunk.id))?;
+            diff.push_str(text);
+            if !diff.ends_with('\n') {
+                diff.push('\n');
+            }
+        }
+        Ok(diff)
     }
 
     pub fn apply_patch_set(
@@ -325,6 +455,56 @@ impl TaskWorkspaceService {
         } else if outcome.state == crate::PatchState::Conflict {
             task.state = TaskWorkspaceState::Conflict;
         }
+        task.expires_at = now + self.retention.as_millis() as i64;
+        store.put_patch_set(&patch)?;
+        store.put_task(&task)?;
+        Ok(outcome)
+    }
+
+    pub fn resolve_conflict(
+        &self,
+        run_id: &str,
+        selection: &[crate::PatchSelection],
+        resolution: crate::ConflictResolution,
+    ) -> Result<crate::ApplyOutcome, String> {
+        if resolution == crate::ConflictResolution::RetryMerge {
+            return self.apply_patch_set(run_id, selection);
+        }
+        let now = now_ms();
+        let mut store = self.store.lock();
+        let mut patch = store
+            .get_patch_set(run_id)?
+            .ok_or_else(|| format!("unknown patch set for run: {run_id}"))?;
+        let mut task = store
+            .get_task(&patch.task_id)?
+            .ok_or_else(|| format!("missing task: {}", patch.task_id))?;
+        let next_revision = task.revision.saturating_add(1);
+        let scratch = self
+            .execution_dir
+            .parent()
+            .unwrap_or(&self.execution_dir)
+            .join("scratch");
+        let outcome = match resolution {
+            crate::ConflictResolution::ApplyTask => ledger::force_apply(
+                Path::new(&task.workspace_root),
+                &scratch,
+                &mut store,
+                &mut patch,
+                selection,
+                next_revision,
+                now,
+            )?,
+            crate::ConflictResolution::KeepCurrent => {
+                ledger::keep_current(&mut patch, next_revision)?
+            }
+            crate::ConflictResolution::RetryMerge => unreachable!(),
+        };
+        task.revision = next_revision;
+        task.state = if outcome.state == crate::PatchState::Applied {
+            TaskWorkspaceState::Applied
+        } else {
+            TaskWorkspaceState::Ready
+        };
         task.expires_at = now + self.retention.as_millis() as i64;
         store.put_patch_set(&patch)?;
         store.put_task(&task)?;
@@ -471,7 +651,11 @@ fn create_execution(
     blobs: &HashMap<String, Vec<u8>>,
 ) -> Result<(IsolationKind, Option<String>), String> {
     if is_git_root(workspace_root) {
-        let branch = format!("cognia/task/{task_id}/{run_id}");
+        let branch = format!(
+            "cognia/task/{}/{}",
+            storage_key(task_id),
+            storage_key(run_id)
+        );
         if let Some(parent) = execution_root.parent() {
             fs::create_dir_all(parent)
                 .map_err(|error| format!("create {}: {error}", parent.display()))?;
@@ -701,6 +885,7 @@ fn change_from_entries(
         .copied()
         .unwrap_or(ContributionOrigin::Agent);
     ResourceChange {
+        run_id: meta.run_id.to_string(),
         path: path.to_string(),
         old_path,
         kind,
@@ -771,6 +956,11 @@ fn validate_id(label: &str, value: &str) -> Result<(), String> {
         return Err(format!("invalid {label}: {value}"));
     }
     Ok(())
+}
+
+fn storage_key(value: &str) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(value.as_bytes()))[..24].to_string()
 }
 
 fn now_ms() -> i64 {
@@ -868,6 +1058,53 @@ mod tests {
         assert_eq!(runs.len(), 2);
         assert_eq!(runs[1].parent_run_id.as_deref(), Some("run-1"));
         assert_eq!(runs[1].agent_id, "agent-2");
+        service.settle_run("run-1").unwrap();
+        assert_eq!(
+            service.get_task("task-1").unwrap().unwrap().state,
+            TaskWorkspaceState::Active
+        );
+        service.settle_run("run-2").unwrap();
+        assert_eq!(
+            service.get_task("task-1").unwrap().unwrap().state,
+            TaskWorkspaceState::Ready
+        );
+    }
+
+    #[test]
+    fn beginning_the_same_run_is_idempotent_but_rejects_reuse() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let request = input(&workspace, "task-idempotent-begin", "run-idempotent-begin");
+
+        let first = service.begin_run(request.clone()).unwrap();
+        let second = service.begin_run(request).unwrap();
+        assert_eq!(second, first);
+
+        let mut reused = input(&workspace, "another-task", "run-idempotent-begin");
+        reused.agent_id = "another-agent".into();
+        assert!(service
+            .begin_run(reused)
+            .unwrap_err()
+            .contains("already owned"));
+    }
+
+    #[test]
+    fn lists_tasks_by_session_newest_first() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        service
+            .begin_run(input(&workspace, "task-1", "run-1"))
+            .unwrap();
+        let mut other = input(&workspace, "task-2", "run-2");
+        other.session_id = "session-2".into();
+        service.begin_run(other).unwrap();
+
+        let session_tasks = service.list_tasks(Some("session-1")).unwrap();
+        assert_eq!(session_tasks.len(), 1);
+        assert_eq!(session_tasks[0].task_id, "task-1");
+        assert_eq!(service.list_tasks(None).unwrap().len(), 2);
     }
 
     #[test]
@@ -903,14 +1140,16 @@ mod tests {
 
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let run = service
-            .begin_run(input(&workspace, "task-git", "run-git"))
+            .begin_run(input(&workspace, "task:git", "run:git"))
             .unwrap();
 
         assert_eq!(run.isolation_kind, IsolationKind::GitWorktree);
-        assert_eq!(
-            run.isolation_ref.as_deref(),
-            Some("cognia/task/task-git/run-git")
+        let expected_branch = format!(
+            "cognia/task/{}/{}",
+            storage_key("task:git"),
+            storage_key("run:git")
         );
+        assert_eq!(run.isolation_ref.as_deref(), Some(expected_branch.as_str()));
         let execution = PathBuf::from(run.execution_root);
         assert!(execution.join(".git").is_file());
         assert_eq!(
@@ -986,6 +1225,111 @@ mod tests {
             fs::read_to_string(workspace.path().join("story.txt")).unwrap(),
             "one\nuser\n"
         );
+
+        let resolved = service
+            .resolve_conflict("run-conflict", &[], crate::ConflictResolution::ApplyTask)
+            .unwrap();
+        assert_eq!(resolved.state, crate::PatchState::Applied);
+        assert_eq!(
+            fs::read_to_string(workspace.path().join("story.txt")).unwrap(),
+            "one\nagent\n"
+        );
+        service.undo_patch_set("run-conflict").unwrap();
+        assert_eq!(
+            fs::read_to_string(workspace.path().join("story.txt")).unwrap(),
+            "one\nuser\n"
+        );
+    }
+
+    #[test]
+    fn conflict_can_keep_current_or_retry_after_user_resolves_drift() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        fs::write(workspace.path().join("story.txt"), "base\n").unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let run = service
+            .begin_run(input(&workspace, "task-resolution", "run-resolution"))
+            .unwrap();
+        fs::write(Path::new(&run.execution_root).join("story.txt"), "agent\n").unwrap();
+        fs::write(workspace.path().join("story.txt"), "user\n").unwrap();
+        service.settle_run("run-resolution").unwrap();
+        assert_eq!(
+            service
+                .apply_patch_set("run-resolution", &[])
+                .unwrap()
+                .state,
+            crate::PatchState::Conflict
+        );
+        assert_eq!(
+            service
+                .resolve_conflict(
+                    "run-resolution",
+                    &[],
+                    crate::ConflictResolution::KeepCurrent,
+                )
+                .unwrap()
+                .state,
+            crate::PatchState::Reverted
+        );
+        assert_eq!(
+            fs::read_to_string(workspace.path().join("story.txt")).unwrap(),
+            "user\n"
+        );
+
+        let retry = service
+            .begin_run(input(&workspace, "task-retry", "run-retry"))
+            .unwrap();
+        fs::write(
+            Path::new(&retry.execution_root).join("story.txt"),
+            "agent retry\n",
+        )
+        .unwrap();
+        fs::write(workspace.path().join("story.txt"), "drift\n").unwrap();
+        service.settle_run("run-retry").unwrap();
+        assert_eq!(
+            service.apply_patch_set("run-retry", &[]).unwrap().state,
+            crate::PatchState::Conflict
+        );
+        fs::write(workspace.path().join("story.txt"), "user\n").unwrap();
+        assert_eq!(
+            service
+                .resolve_conflict("run-retry", &[], crate::ConflictResolution::RetryMerge)
+                .unwrap()
+                .state,
+            crate::PatchState::Applied
+        );
+    }
+
+    #[test]
+    fn failed_and_cancelled_runs_reconcile_before_becoming_terminal() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        for (run_id, cancelled) in [("run-failed", false), ("run-cancelled", true)] {
+            let run = service
+                .begin_run(input(&workspace, run_id, run_id))
+                .unwrap();
+            fs::write(
+                Path::new(&run.execution_root).join(format!("{run_id}.txt")),
+                "saved",
+            )
+            .unwrap();
+            if cancelled {
+                service.settle_cancelled_run(run_id).unwrap();
+            } else {
+                service.settle_failed_run(run_id).unwrap();
+            }
+            let state = service.list_runs(run_id).unwrap()[0].state;
+            assert_eq!(
+                state,
+                if cancelled {
+                    RunState::Cancelled
+                } else {
+                    RunState::Failed
+                }
+            );
+            assert_eq!(service.list_resources(run_id).unwrap().len(), 1);
+        }
     }
 
     #[test]
@@ -1143,5 +1487,56 @@ mod tests {
 
         assert!(service.prune().unwrap().removed_task_ids.is_empty());
         assert!(service.get_task("task-pinned").unwrap().is_some());
+    }
+
+    #[test]
+    fn reads_only_ledger_backed_text_diffs() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        fs::write(workspace.path().join("story.txt"), "before\n").unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let run = service
+            .begin_run(input(&workspace, "task-diff", "run-diff"))
+            .unwrap();
+        fs::write(Path::new(&run.execution_root).join("story.txt"), "after\n").unwrap();
+        service.settle_run("run-diff").unwrap();
+
+        let diff = service
+            .read_patch_diff("run-diff", "story.txt", false)
+            .unwrap();
+        assert!(diff.contains("-before"));
+        assert!(diff.contains("+after"));
+        assert!(service
+            .read_patch_diff("run-diff", "missing.txt", false)
+            .unwrap_err()
+            .contains("not part"));
+    }
+
+    #[test]
+    fn reopening_recovers_and_reconciles_an_interrupted_run() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let run = {
+            let service =
+                TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+            let run = service
+                .begin_run(input(&workspace, "task-crash", "run-crash"))
+                .unwrap();
+            fs::write(
+                Path::new(&run.execution_root).join("recovered.txt"),
+                "saved",
+            )
+            .unwrap();
+            run
+        };
+
+        let recovered = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let runs = recovered.list_runs("task-crash").unwrap();
+        assert_eq!(runs[0].state, RunState::Failed);
+        assert_eq!(
+            recovered.list_resources("task-crash").unwrap()[0].path,
+            "recovered.txt"
+        );
+        assert!(Path::new(&run.execution_root).exists());
     }
 }

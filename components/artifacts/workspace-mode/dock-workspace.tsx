@@ -19,11 +19,15 @@ import { useGitActions } from "@/hooks/git/use-git-actions"
 import { getSession } from "@/lib/db/sessions"
 import { hasWorkspaceFsBackend } from "@/lib/files/workspace-backend"
 import { refreshGitStatus } from "@/lib/git/load"
+import { listTaskRuns, listTaskWorkspaces } from "@/lib/task-workspace/client"
 import { cn } from "@/lib/utils"
 import { resolveSessionProjectRoot } from "@/lib/workspace/roots"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { useGitStore } from "@/stores/git/git-store"
 import { useProjectStore } from "@/stores/project/project-store"
+import { useSettingsStore } from "@/stores/settings"
+import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
+import { TaskResourcesPanel } from "./task-resources-panel"
 
 interface DockWorkspaceProps {
   activeSessionId: string | null
@@ -139,6 +143,7 @@ function WorkspaceEditorBody({
   const request = useArtifactDockLayoutStore((state) => state.workspaceRevealRequest)
   const clearRequest = useArtifactDockLayoutStore((state) => state.clearWorkspaceRevealRequest)
   const [surface, setSurface] = useState<"file" | "review">("file")
+  const [scope, setScope] = useState<"task" | "workspace">("task")
   const [mobileReviewPane, setMobileReviewPane] = useState<"changes" | "diff">("changes")
   const processedRequest = useRef<string | null>(null)
   const showFileSurface = useCallback(() => setSurface("file"), [])
@@ -148,6 +153,38 @@ function WorkspaceEditorBody({
     beforeOpen: showFileSurface,
   })
   const editor = workbench.editor
+  const taskWorkspaceEnabled = useSettingsStore(
+    (state) => state.settings?.developer?.taskWorkspace === true
+  )
+  const activeTask = useTaskWorkspaceStore((state) => state.activeBySession[sessionId])
+  const activateTask = useTaskWorkspaceStore((state) => state.activate)
+  const hasTaskScope = taskWorkspaceEnabled && Boolean(activeTask)
+  const visibleScope = hasTaskScope ? scope : "workspace"
+
+  useEffect(() => {
+    if (!taskWorkspaceEnabled || activeTask) return
+    let cancelled = false
+    void listTaskWorkspaces(sessionId)
+      .then(async (tasks) => {
+        const task = tasks.find((item) => item.workspaceRoot === workingDir)
+        if (!task) return
+        const runs = await listTaskRuns(task.taskId)
+        const run = runs.at(-1)
+        if (!run || cancelled) return
+        activateTask({
+          taskId: task.taskId,
+          runId: run.runId,
+          sessionId,
+          workspaceRoot: task.workspaceRoot,
+          executionRoot: run.executionRoot,
+          state: run.state,
+        })
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [activeTask, activateTask, sessionId, taskWorkspaceEnabled, workingDir])
   const {
     roots,
     rootKey,
@@ -252,102 +289,140 @@ function WorkspaceEditorBody({
       data-testid="dock-workspace"
       onKeyDown={workbench.onKeyDown}
     >
-      <div className="flex shrink-0 items-center border-b px-2 py-1">
+      <div className="flex shrink-0 items-center gap-2 border-b px-2 py-1">
         <ProjectRootSwitcher
           roots={roots}
           rootKey={rootKey}
           onSelect={selectRoot}
           density={layout === "mobile" ? "touch" : "compact"}
         />
+        {hasTaskScope && (
+          <div
+            className="ml-auto flex rounded-md border bg-muted/30 p-0.5"
+            role="group"
+            aria-label={t("scopeLabel")}
+          >
+            <button
+              type="button"
+              aria-pressed={visibleScope === "task"}
+              className={cn(
+                "rounded px-2 py-1 text-xs",
+                visibleScope === "task" ? "bg-background shadow-sm" : "text-muted-foreground"
+              )}
+              onClick={() => setScope("task")}
+            >
+              {t("currentTask")}
+            </button>
+            <button
+              type="button"
+              aria-pressed={visibleScope === "workspace"}
+              className={cn(
+                "rounded px-2 py-1 text-xs",
+                visibleScope === "workspace" ? "bg-background shadow-sm" : "text-muted-foreground"
+              )}
+              onClick={() => setScope("workspace")}
+            >
+              {t("allWorkspace")}
+            </button>
+          </div>
+        )}
       </div>
-      <ProjectEditorTabs
-        density={layout === "mobile" ? "touch" : "compact"}
-        fixedTabs={
-          hasReview
-            ? [
-                {
-                  id: "review",
-                  label: t("review"),
-                  icon: <GitCompareArrowsIcon className="size-3.5" />,
-                  active: visibleSurface === "review",
-                  onSelect: () => setSurface("review"),
-                },
-              ]
-            : undefined
-        }
-        files={openFiles}
-        activePath={visibleSurface === "file" ? activePath : null}
-        dirtyCount={dirtyCount}
-        onSelect={(path) => {
-          setSurface("file")
-          if (layout === "mobile") workbench.setMobilePane("editor")
-          setActivePath(path)
-        }}
-        onClose={closeFile}
-        onSaveAll={workbench.saveAll}
-      />
-
-      {visibleSurface === "review" && hasReview ? (
-        <div className="min-h-0 flex-1" data-testid="workspace-review-layout">
-          {layout === "mobile" ? (
-            <div className="flex h-full min-h-0 flex-col">
-              <div
-                className="grid shrink-0 grid-cols-2 border-b bg-background/95 p-1"
-                data-testid="workspace-mobile-review-tabs"
-              >
-                <button
-                  type="button"
-                  data-testid="workspace-mobile-review-changes"
-                  aria-pressed={mobileReviewPane === "changes"}
-                  className={cn(
-                    "min-h-11 rounded-md px-3 text-sm",
-                    mobileReviewPane === "changes" ? "bg-accent" : "text-muted-foreground"
-                  )}
-                  onClick={() => setMobileReviewPane("changes")}
-                >
-                  {t("reviewChanges")}
-                </button>
-                <button
-                  type="button"
-                  data-testid="workspace-mobile-review-diff"
-                  aria-pressed={mobileReviewPane === "diff"}
-                  className={cn(
-                    "min-h-11 rounded-md px-3 text-sm",
-                    mobileReviewPane === "diff" ? "bg-accent" : "text-muted-foreground"
-                  )}
-                  onClick={() => setMobileReviewPane("diff")}
-                >
-                  {t("reviewDiff")}
-                </button>
-              </div>
-              <div className="min-h-0 flex-1">
-                {mobileReviewPane === "changes" ? changesPane : diffPane}
-              </div>
-            </div>
-          ) : status ? (
-            <ResizablePanelGroup orientation="horizontal" className="h-full">
-              <ResizablePanel id="workspace-review-changes" defaultSize="38%" minSize="25%">
-                {changesPane}
-              </ResizablePanel>
-              <ResizableHandle withHandle />
-              <ResizablePanel id="workspace-review-diff" defaultSize="62%" minSize="35%">
-                {diffPane}
-              </ResizablePanel>
-            </ResizablePanelGroup>
-          ) : (
-            reviewEmpty
-          )}
+      {visibleScope === "task" ? (
+        <div className="min-h-0 flex-1">
+          <TaskResourcesPanel sessionId={sessionId} layout={layout} />
         </div>
       ) : (
-        <div className="min-h-0 flex-1" data-testid="workspace-file-layout">
-          <ProjectEditorFileWorkbench
-            workbench={workbench}
-            sidebarPosition="right"
-            panelIdPrefix="workspace"
-            showContextWorkbench={false}
-            layout={layout === "mobile" ? "mobile" : "split"}
+        <>
+          <ProjectEditorTabs
+            density={layout === "mobile" ? "touch" : "compact"}
+            fixedTabs={
+              hasReview
+                ? [
+                    {
+                      id: "review",
+                      label: t("review"),
+                      icon: <GitCompareArrowsIcon className="size-3.5" />,
+                      active: visibleSurface === "review",
+                      onSelect: () => setSurface("review"),
+                    },
+                  ]
+                : undefined
+            }
+            files={openFiles}
+            activePath={visibleSurface === "file" ? activePath : null}
+            dirtyCount={dirtyCount}
+            onSelect={(path) => {
+              setSurface("file")
+              if (layout === "mobile") workbench.setMobilePane("editor")
+              setActivePath(path)
+            }}
+            onClose={closeFile}
+            onSaveAll={workbench.saveAll}
           />
-        </div>
+
+          {visibleSurface === "review" && hasReview ? (
+            <div className="min-h-0 flex-1" data-testid="workspace-review-layout">
+              {layout === "mobile" ? (
+                <div className="flex h-full min-h-0 flex-col">
+                  <div
+                    className="grid shrink-0 grid-cols-2 border-b bg-background/95 p-1"
+                    data-testid="workspace-mobile-review-tabs"
+                  >
+                    <button
+                      type="button"
+                      data-testid="workspace-mobile-review-changes"
+                      aria-pressed={mobileReviewPane === "changes"}
+                      className={cn(
+                        "min-h-11 rounded-md px-3 text-sm",
+                        mobileReviewPane === "changes" ? "bg-accent" : "text-muted-foreground"
+                      )}
+                      onClick={() => setMobileReviewPane("changes")}
+                    >
+                      {t("reviewChanges")}
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="workspace-mobile-review-diff"
+                      aria-pressed={mobileReviewPane === "diff"}
+                      className={cn(
+                        "min-h-11 rounded-md px-3 text-sm",
+                        mobileReviewPane === "diff" ? "bg-accent" : "text-muted-foreground"
+                      )}
+                      onClick={() => setMobileReviewPane("diff")}
+                    >
+                      {t("reviewDiff")}
+                    </button>
+                  </div>
+                  <div className="min-h-0 flex-1">
+                    {mobileReviewPane === "changes" ? changesPane : diffPane}
+                  </div>
+                </div>
+              ) : status ? (
+                <ResizablePanelGroup orientation="horizontal" className="h-full">
+                  <ResizablePanel id="workspace-review-changes" defaultSize="38%" minSize="25%">
+                    {changesPane}
+                  </ResizablePanel>
+                  <ResizableHandle withHandle />
+                  <ResizablePanel id="workspace-review-diff" defaultSize="62%" minSize="35%">
+                    {diffPane}
+                  </ResizablePanel>
+                </ResizablePanelGroup>
+              ) : (
+                reviewEmpty
+              )}
+            </div>
+          ) : (
+            <div className="min-h-0 flex-1" data-testid="workspace-file-layout">
+              <ProjectEditorFileWorkbench
+                workbench={workbench}
+                sidebarPosition="right"
+                panelIdPrefix="workspace"
+                showContextWorkbench={false}
+                layout={layout === "mobile" ? "mobile" : "split"}
+              />
+            </div>
+          )}
+        </>
       )}
     </div>
   )

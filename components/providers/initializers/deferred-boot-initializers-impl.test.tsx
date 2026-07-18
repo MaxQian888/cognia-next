@@ -5,6 +5,9 @@ import { render } from "@testing-library/react"
 jest.mock("./agent-team-runtime-initializer", () => ({
   AgentTeamRuntimeInitializer: () => <span data-boot="agent-team" />,
 }))
+jest.mock("./code-adoption-tracker-initializer", () => ({
+  CodeAdoptionTrackerInitializer: () => <span data-boot="task-workspace-tracker" />,
+}))
 jest.mock("@/components/scheduler/scheduler-initializer", () => ({
   SchedulerInitializer: () => <span data-boot="scheduler" />,
 }))
@@ -27,7 +30,7 @@ jest.mock("@/components/connectors/connector-bus-provider", () => ({
 import { DeferredBootInitializersImpl } from "./deferred-boot-initializers-impl"
 
 describe("DeferredBootInitializersImpl", () => {
-  it("renders all seven boot initializers in the layout's original document order", () => {
+  it("renders all boot initializers in the layout's original document order", () => {
     const { container } = render(<DeferredBootInitializersImpl />)
     const order = Array.from(container.querySelectorAll("[data-boot]")).map((el) =>
       el.getAttribute("data-boot")
@@ -40,6 +43,7 @@ describe("DeferredBootInitializersImpl", () => {
     // child is caught here.
     expect(order).toEqual([
       "agent-team",
+      "task-workspace-tracker",
       "scheduler",
       "workflow",
       "provider-core",

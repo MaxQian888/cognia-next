@@ -69,6 +69,7 @@ pub fn capture(root: &Path) -> Result<(WorkspaceSnapshot, HashMap<String, Vec<u8
         let (kind, bytes) = if file_type.is_symlink() {
             let target = fs::read_link(path)
                 .map_err(|error| format!("read link {}: {error}", path.display()))?;
+            validate_symlink_target(rel, &target)?;
             (
                 EntryKind::Symlink,
                 target.to_string_lossy().as_bytes().to_vec(),
@@ -100,6 +101,38 @@ pub fn capture(root: &Path) -> Result<(WorkspaceSnapshot, HashMap<String, Vec<u8
         blobs.entry(hash).or_insert(bytes);
     }
     Ok((WorkspaceSnapshot { entries }, blobs))
+}
+
+fn validate_symlink_target(link_path: &Path, target: &Path) -> Result<(), String> {
+    use std::path::Component;
+    if target.is_absolute() {
+        return Err(format!(
+            "symlink escapes workspace: {} -> {}",
+            link_path.display(),
+            target.display()
+        ));
+    }
+    let mut depth = link_path
+        .parent()
+        .map_or(0, |parent| parent.components().count());
+    for component in target.components() {
+        match component {
+            Component::ParentDir if depth == 0 => {
+                return Err(format!(
+                    "symlink escapes workspace: {} -> {}",
+                    link_path.display(),
+                    target.display()
+                ));
+            }
+            Component::ParentDir => depth -= 1,
+            Component::Normal(_) => depth += 1,
+            Component::CurDir => {}
+            Component::RootDir | Component::Prefix(_) => {
+                return Err("absolute symlink target is not allowed".into());
+            }
+        }
+    }
+    Ok(())
 }
 
 fn excluded(path: &Path, root: &Path) -> bool {
@@ -180,6 +213,23 @@ fn create_symlink(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let target =
         String::from_utf8(bytes.to_vec()).map_err(|_| "invalid symlink target".to_string())?;
     symlink(target, path).map_err(|error| format!("symlink {}: {error}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[cfg(unix)]
+    #[test]
+    fn capture_rejects_symlinks_that_escape_the_workspace() {
+        use std::os::unix::fs::symlink;
+        let root = TempDir::new().unwrap();
+        symlink("../../outside", root.path().join("escape")).unwrap();
+        assert!(capture(root.path())
+            .unwrap_err()
+            .contains("escapes workspace"));
+    }
 }
 
 #[cfg(windows)]

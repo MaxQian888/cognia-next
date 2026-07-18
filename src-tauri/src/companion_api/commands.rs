@@ -372,6 +372,9 @@ pub fn register_default_event_channels(app: &tauri::AppHandle, bus: Arc<EventBus
     // frame is their only push-based refresh trigger; the desktop StatusBar
     // owns the watcher lifecycle.
     register_tauri_event(app, Arc::clone(&bus), "git://status-changed");
+    // Task-scoped resource invalidations carry only ids, paths, and summaries;
+    // clients fetch file bodies through the bounded resource RPCs.
+    register_tauri_event(app, Arc::clone(&bus), crate::task_workspace::RESOURCE_EVENT);
     // ADR-0009 — live agent-fleet snapshot. A phone / companion browser watching
     // the fleet subscribes to this to mirror the desktop island in real time
     // (backfill via the `fleet_get_snapshot` RPC). Full-snapshot semantics, so

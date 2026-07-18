@@ -23,6 +23,17 @@ const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   "read_agent_config",
   "session_list",
   "companion_can_control",
+  "browser_capability",
+  "browser_session_get",
+  "browser_snapshot",
+  "browser_read_console",
+  "browser_read_network",
+  "browser_get_page",
+  "browser_pages",
+  "browser_wait_for",
+  "browser_wait_for_load",
+  "browser_screenshot",
+  "browser_downloads",
   // Wave 4.1 reads — must stay in lockstep with READ_ONLY_COMMANDS in
   // `src-tauri/src/companion_api/rpc.rs`. A write wrongly listed here would
   // skip the Idempotency-Key header and risk double-execution on retry.
@@ -56,6 +67,19 @@ const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   "fs_read_workspace_file",
   "fs_list_workspace_dir",
   "fs_stat_workspace_file",
+  // Task workspace metadata and bounded/verified reads.
+  "task_workspace_status",
+  "task_workspace_get",
+  "task_workspace_list",
+  "task_workspace_list_runs",
+  "task_workspace_list_resources",
+  "task_workspace_get_resource",
+  "task_workspace_get_patch_set",
+  "task_resource_read_text",
+  "task_resource_read_diff",
+  "task_resource_download_open",
+  "task_resource_download_read_chunk",
+  "task_resource_download_close",
   // Terminal session listings.
   "terminal_list_all",
   "terminal_list_for_project",

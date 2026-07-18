@@ -60,6 +60,14 @@ pub enum PatchState {
     Conflict,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ConflictResolution {
+    RetryMerge,
+    ApplyTask,
+    KeepCurrent,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BeginTaskRun {
@@ -105,6 +113,7 @@ pub struct TaskRun {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResourceChange {
+    pub run_id: String,
     pub path: String,
     pub old_path: Option<String>,
     pub kind: ChangeKind,

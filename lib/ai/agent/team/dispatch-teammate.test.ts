@@ -9,6 +9,24 @@ const mockedBusEmit = emitSystemBusEvent as jest.Mock
 const isTauriMock = jest.fn<boolean, []>(() => false)
 jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
 
+const taskWorkspaceEnabledMock = jest.fn(() => false)
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: {
+    getState: () => ({
+      settings: { developer: { taskWorkspace: taskWorkspaceEnabledMock() } },
+    }),
+  },
+}))
+
+const beginTaskWorkspaceTurnMock = jest.fn()
+const settleTaskWorkspaceRunMock = jest.fn()
+jest.mock("@/lib/task-workspace/client", () => ({
+  beginTaskWorkspaceTurn: (...args: unknown[]) => beginTaskWorkspaceTurnMock(...args),
+  settleTaskWorkspaceRun: (...args: unknown[]) => settleTaskWorkspaceRunMock(...args),
+  taskIdForMessage: (value: string) => `task:${value}`,
+  runIdForTurn: (sessionId: string, runId: number) => `run:${sessionId}:${runId}`,
+}))
+
 const resolveAcpMcpMock = jest.fn<Promise<unknown[]>, unknown[]>(async () => [])
 jest.mock("@/lib/ai/agent/external/resolve-acp-mcp-servers", () => ({
   resolveAcpMcpServers: (...a: unknown[]) => resolveAcpMcpMock(...a),
@@ -141,6 +159,9 @@ function makeCtx(
 beforeEach(() => {
   jest.clearAllMocks()
   isTauriMock.mockReturnValue(false)
+  taskWorkspaceEnabledMock.mockReturnValue(false)
+  beginTaskWorkspaceTurnMock.mockResolvedValue(null)
+  settleTaskWorkspaceRunMock.mockResolvedValue([])
   resolveExternalMock.mockResolvedValue(null)
   applyTeammateTwinContextMock.mockResolvedValue({ systemPrompt: "unused-default", applied: false })
 })
@@ -1059,6 +1080,29 @@ describe("dispatchTeammate — workspace isolation", () => {
     expect(ledger.get("t1")).toEqual(
       expect.objectContaining({ ok: true, handle: expect.objectContaining({ taskId: "t1" }) })
     )
+  })
+
+  it("uses and settles the shared task workspace when the experiment is enabled", async () => {
+    taskWorkspaceEnabledMock.mockReturnValue(true)
+    isTauriMock.mockReturnValue(true)
+    beginTaskWorkspaceTurnMock.mockResolvedValue({
+      runId: "task-run-1",
+      executionRoot: "/isolated/task-run-1",
+    })
+    createSessionMock.mockResolvedValue({ id: "sess1" })
+    getSessionMock.mockResolvedValue({ id: "sess1", kind: "team" })
+    runAndCaptureMock.mockResolvedValue({ text: "the answer" })
+    const { ctx } = makeCtx(makeTeammate({ name: "Alice" }), { workingDir: "/repo" })
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "do it" })
+
+    expect(beginTaskWorkspaceTurnMock).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: "tm1", workspaceRoot: "/repo" })
+    )
+    expect(createSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ workingDir: "/isolated/task-run-1" })
+    )
+    expect(settleTaskWorkspaceRunMock).toHaveBeenCalledWith("task-run-1", "ready")
   })
 
   it("forwards workspaceKey (pipeline sharing) to the allocator", async () => {

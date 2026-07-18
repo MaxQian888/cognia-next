@@ -82,7 +82,7 @@ impl WatchManager {
             .map_err(|error| format!("canonicalize watch root {}: {error}", root.display()))?;
         let mut registrations = self.registrations.lock();
         if registrations.contains_key(run_id) {
-            return Err(format!("task run is already watched: {run_id}"));
+            return Ok(());
         }
         let (sender, receiver) = mpsc::channel();
         let callback_sender = sender.clone();

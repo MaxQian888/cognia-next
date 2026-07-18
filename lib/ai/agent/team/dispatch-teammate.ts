@@ -34,6 +34,13 @@ import type { WorktreeHandle } from "./workspace/allocator"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 import { createTeammateProgressReporter } from "./teammate-progress-coalescer"
 import { agendaFingerprint, parseRateLimitCooldown } from "./nudge-guard"
+import {
+  beginTaskWorkspaceTurn,
+  runIdForTurn,
+  settleTaskWorkspaceRun,
+  taskIdForMessage,
+} from "@/lib/task-workspace/client"
+import { useSettingsStore } from "@/stores/settings"
 
 const DEFAULT_TEAMMATE_SYSTEM_PROMPT =
   "You are a focused, helpful agent teammate. Stay on-task and produce concrete output."
@@ -540,6 +547,8 @@ export async function dispatchTeammate(
 
   let turn: { text: string; usage?: TokenUsage }
   let workspace: WorktreeHandle | undefined
+  let taskWorkspaceRunId: string | undefined
+  let taskWorkspaceExecutionRoot: string | undefined
   const recordWorkspace = (ok: boolean, output?: string, commitSha?: string): void => {
     if (workspace && teamCtx.workspaceLedger) {
       teamCtx.workspaceLedger.set(workspace.key, {
@@ -554,7 +563,25 @@ export async function dispatchTeammate(
     // Workspace isolation: give this dispatch its own git worktree + branch.
     // Fail-closed — an allocation error flows through the catch below (recorded
     // as a failure + released) instead of silently running in the shared dir.
-    if (teamCtx.workspaceAllocator) {
+    const taskWorkspaceRoot = teamCtx.team.config?.workingDir
+    if (
+      useSettingsStore.getState().settings?.developer?.taskWorkspace === true &&
+      taskWorkspaceRoot
+    ) {
+      const taskRun = await beginTaskWorkspaceTurn({
+        taskId: taskIdForMessage(`team:${teamCtx.runId}`),
+        sessionId: teamCtx.runId,
+        runId: runIdForTurn(`${teamCtx.runId}:${teammate.id}:${args.taskId}`, 0),
+        agentId: teammate.id,
+        agentKind: "agent-team",
+        workspaceRoot: taskWorkspaceRoot,
+      })
+      if (!taskRun) {
+        throw new Error("task workspace host did not return an execution root for Agent Team")
+      }
+      taskWorkspaceRunId = taskRun.runId
+      taskWorkspaceExecutionRoot = taskRun.executionRoot
+    } else if (teamCtx.workspaceAllocator) {
       workspace = await teamCtx.workspaceAllocator.allocate({
         runId: teamCtx.runId,
         teammateName: teammate.name,
@@ -572,7 +599,7 @@ export async function dispatchTeammate(
         systemPrompt,
         combinedSignal,
         streamFull && reporter ? (event) => reporter.onCaptureEvent(event) : undefined,
-        workspace?.path,
+        taskWorkspaceExecutionRoot ?? workspace?.path,
         // The teammate's own model wins over the run-level hint, mirroring the
         // sidecar path (where teammateToCharacter applies config.model first).
         teammate.config?.model ?? modelHint
@@ -590,7 +617,7 @@ export async function dispatchTeammate(
         // channels surface start/terminal markers via the reporter instead.
         streamFull && reporter ? (event) => reporter.onCaptureEvent(event) : undefined,
         maxSteps,
-        workspace?.path
+        taskWorkspaceExecutionRoot ?? workspace?.path
       )
     } else {
       // Twin-backed teammate on the text-only channel (web/mobile): executeAgent
@@ -612,6 +639,7 @@ export async function dispatchTeammate(
       turn = await runTextOnly(promptText, textSystemPrompt, modelHint, combinedSignal, maxSteps)
     }
   } catch (err) {
+    if (taskWorkspaceRunId) await settleTaskWorkspaceRun(taskWorkspaceRunId, "failed")
     reporter?.finalize("failed")
     endSpan(span.spanId, {
       errorType: err instanceof Error ? err.name : "Error",
@@ -663,6 +691,7 @@ export async function dispatchTeammate(
       }
       recordWorkspace(false)
       release("failure", empty)
+      if (taskWorkspaceRunId) await settleTaskWorkspaceRun(taskWorkspaceRunId, "failed")
       throw empty
     }
     const minChars = args.minOutputChars ?? teamCtx.team.config?.minOutputChars ?? 0
@@ -677,10 +706,12 @@ export async function dispatchTeammate(
       }
       recordWorkspace(false)
       release("failure", short)
+      if (taskWorkspaceRunId) await settleTaskWorkspaceRun(taskWorkspaceRunId, "failed")
       throw short
     }
   }
 
+  if (taskWorkspaceRunId) await settleTaskWorkspaceRun(taskWorkspaceRunId, "ready")
   teamCtx.pool.recordSuccess(teammate.id)
   if (turn.usage) {
     teamCtx.budget.add(turn.usage)

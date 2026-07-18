@@ -7,6 +7,7 @@ import { ProviderCoreRuntimeInitializer } from "./provider-core-runtime-initiali
 import { RoutingRuntimeInitializer } from "./routing-runtime-initializer"
 import { GatewayProvider } from "@/components/providers/gateway-provider"
 import { ConnectorBusProvider } from "@/components/connectors/connector-bus-provider"
+import { CodeAdoptionTrackerInitializer } from "./code-adoption-tracker-initializer"
 
 /**
  * The deferred boot bundle's SINGLE chunk graph (ADR-0068 C3). All seven
@@ -30,6 +31,7 @@ export function DeferredBootInitializersImpl() {
   return (
     <>
       <AgentTeamRuntimeInitializer />
+      <CodeAdoptionTrackerInitializer />
       <SchedulerInitializer />
       <WorkflowRuntimeProvider />
       <ProviderCoreRuntimeInitializer />

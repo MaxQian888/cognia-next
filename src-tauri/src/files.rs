@@ -661,12 +661,17 @@ pub fn fs_read_workspace_file(
             root_path.display()
         ));
     }
-    let limit = max_bytes.unwrap_or(256 * 1024);
     let mut content =
         std::fs::read_to_string(&canonical).map_err(|e| format!("read {}: {}", rel_path, e))?;
-    if content.len() > limit {
-        content.truncate(limit);
-        content.push_str("\n... (truncated)");
+    if let Some(limit) = max_bytes {
+        if content.len() > limit {
+            let mut boundary = limit.min(content.len());
+            while !content.is_char_boundary(boundary) {
+                boundary = boundary.saturating_sub(1);
+            }
+            content.truncate(boundary);
+            content.push_str("\n... (truncated)");
+        }
     }
     Ok(content)
 }
@@ -1437,6 +1442,35 @@ mod tests {
             None,
         );
         assert!(escape.is_err(), "traversal must be rejected");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn read_workspace_file_never_silently_truncates_an_editor_read() {
+        let root = make_sandbox("read-complete");
+        let content = "x".repeat(300 * 1024);
+        std::fs::write(root.join("large.txt"), &content).unwrap();
+
+        let complete =
+            fs_read_workspace_file(root.to_string_lossy().to_string(), "large.txt".into(), None)
+                .unwrap();
+        assert_eq!(complete, content);
+
+        let preview = fs_read_workspace_file(
+            root.to_string_lossy().to_string(),
+            "large.txt".into(),
+            Some(1024),
+        )
+        .unwrap();
+        assert!(preview.ends_with("... (truncated)"));
+        std::fs::write(root.join("unicode.txt"), "你好世界").unwrap();
+        let unicode_preview = fs_read_workspace_file(
+            root.to_string_lossy().to_string(),
+            "unicode.txt".into(),
+            Some(5),
+        )
+        .unwrap();
+        assert!(unicode_preview.starts_with("你"));
         let _ = std::fs::remove_dir_all(&root);
     }
 

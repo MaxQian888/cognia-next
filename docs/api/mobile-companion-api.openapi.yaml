@@ -118,6 +118,8 @@ tags:
     description: Git porcelain over a repo path (ADR-0038). Writes are control-gated.
   - name: rpc-files
     description: Filesystem reads/writes — raw absolute paths + sandboxed workspace variants.
+  - name: rpc-task-workspace
+    description: Task-scoped isolated resources, verified transfers, review, apply, and undo.
   - name: rpc-terminal
     description: Terminal session listing/kill + one-shot command execution.
   - name: rpc-plugin
@@ -6540,6 +6542,256 @@ paths:
             description: error,
             content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
           }
+
+  /api/v1/_rpc/task_workspace_status:
+    post:
+      operationId: rpcTaskWorkspaceStatus
+      tags: [rpc-task-workspace]
+      summary: Read task-workspace capability and transfer limits.
+      responses:
+        "200": { description: Capability status., content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/task_workspace_begin:
+    post:
+      operationId: rpcTaskWorkspaceBegin
+      tags: [rpc-task-workspace]
+      summary: Begin an isolated task run. Requires remote control; built-in headless chat consumes the same envelope internally.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [input], properties: { input: { type: object, additionalProperties: true } } } } } }
+      responses:
+        "200": { description: Created task run and isolated execution root., content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { description: Remote-control permission required., content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+
+  /api/v1/_rpc/task_workspace_settle:
+    post:
+      operationId: rpcTaskWorkspaceSettle
+      tags: [rpc-task-workspace]
+      summary: Reconcile a run snapshot into authoritative resource changes; idempotent once ready.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [runId], properties: { runId: { type: string }, finalState: { type: string, enum: [ready, failed, cancelled] } } } } } }
+      responses:
+        "200": { description: Authoritative resource changes., content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/task_workspace_get:
+    post:
+      operationId: rpcTaskWorkspaceGet
+      tags: [rpc-task-workspace]
+      summary: Read one task workspace by task id.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [taskId], properties: { taskId: { type: string } } } } } }
+      responses:
+        "200": { description: Task workspace or null., content: { application/json: { schema: { type: [object, "null"], additionalProperties: true } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/task_workspace_list_runs:
+    post:
+      operationId: rpcTaskWorkspaceListRuns
+      tags: [rpc-task-workspace]
+      summary: List parent, retry, and child-agent runs for a task.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [taskId], properties: { taskId: { type: string } } } } } }
+      responses:
+        "200": { description: Task runs., content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/task_workspace_list:
+    post:
+      operationId: rpcTaskWorkspaceList
+      tags: [rpc-task-workspace]
+      summary: List persisted task workspaces, optionally scoped to one chat session.
+      requestBody: { required: false, content: { application/json: { schema: { type: object, properties: { sessionId: { type: string } } } } } }
+      responses:
+        "200": { description: Task workspaces newest first., content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/task_workspace_list_resources:
+    post:
+      operationId: rpcTaskWorkspaceListResources
+      tags: [rpc-task-workspace]
+      summary: List authoritative resource changes for a task.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [taskId], properties: { taskId: { type: string } } } } } }
+      responses:
+        "200": { description: Resource changes without file bodies., content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/task_workspace_get_resource:
+    post:
+      operationId: rpcTaskWorkspaceGetResource
+      tags: [rpc-task-workspace]
+      summary: Read the latest metadata for one task resource.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [taskId, path], properties: { taskId: { type: string }, path: { type: string } } } } } }
+      responses:
+        "200": { description: Resource metadata or null., content: { application/json: { schema: { type: [object, "null"], additionalProperties: true } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/task_workspace_get_patch_set:
+    post:
+      operationId: rpcTaskWorkspaceGetPatchSet
+      tags: [rpc-task-workspace]
+      summary: Read patch metadata and hunk ids for one run.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [runId], properties: { runId: { type: string } } } } } }
+      responses:
+        "200": { description: Patch set metadata or null., content: { application/json: { schema: { type: [object, "null"], additionalProperties: true } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/task_resource_read_text:
+    post:
+      operationId: rpcTaskResourceReadText
+      tags: [rpc-task-workspace]
+      summary: Read bounded UTF-8 content with hash, truncation, and resume metadata.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [runId, relPath], properties: { runId: { type: string }, relPath: { type: string }, offset: { type: integer }, maxBytes: { type: integer }, allowSensitive: { type: boolean, description: Requires remote-control permission. } } } } } }
+      responses:
+        "200": { description: Structured resource read., content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { description: Sensitive resource authorization required., content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+
+  /api/v1/_rpc/task_resource_read_diff:
+    post:
+      operationId: rpcTaskResourceReadDiff
+      tags: [rpc-task-workspace]
+      summary: Read a ledger-backed textual diff for one task resource.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [runId, path], properties: { runId: { type: string }, path: { type: string }, allowSensitive: { type: boolean, description: Requires remote-control permission. } } } } } }
+      responses:
+        "200": { description: Unified diff text., content: { application/json: { schema: { type: string } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { description: Sensitive resource authorization required., content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+
+  /api/v1/_rpc/task_resource_download_open:
+    post:
+      operationId: rpcTaskResourceDownloadOpen
+      tags: [rpc-task-workspace]
+      summary: Open a verified resumable download handle.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [runId, relPath], properties: { runId: { type: string }, relPath: { type: string }, allowSensitive: { type: boolean, description: Requires remote-control permission. } } } } } }
+      responses:
+        "200": { description: Download handle with ETag hash., content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/task_resource_download_read_chunk:
+    post:
+      operationId: rpcTaskResourceDownloadReadChunk
+      tags: [rpc-task-workspace]
+      summary: Read at most 24 KiB from a download handle with a chunk hash.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [handleId, offset], properties: { handleId: { type: string }, offset: { type: integer }, length: { type: integer, maximum: 24576 } } } } } }
+      responses:
+        "200": { description: Base64 chunk and checksum., content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/task_resource_download_close:
+    post:
+      operationId: rpcTaskResourceDownloadClose
+      tags: [rpc-task-workspace]
+      summary: Close a download handle.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [handleId], properties: { handleId: { type: string } } } } } }
+      responses:
+        "200": { description: Closed., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/task_resource_upload_open:
+    post:
+      operationId: rpcTaskResourceUploadOpen
+      tags: [rpc-task-workspace]
+      summary: Open a verified upload handle. Requires remote control.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [runId, relPath, expectedSize, expectedHash], properties: { runId: { type: string }, relPath: { type: string }, expectedSize: { type: integer }, expectedHash: { type: string }, allowSensitive: { type: boolean } } } } } }
+      responses:
+        "200": { description: Upload handle., content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { description: Remote-control permission required., content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+
+  /api/v1/_rpc/task_resource_upload_write_chunk:
+    post:
+      operationId: rpcTaskResourceUploadWriteChunk
+      tags: [rpc-task-workspace]
+      summary: Append a verified upload chunk. Requires remote control.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [handleId, offset, dataBase64, chunkHash], properties: { handleId: { type: string }, offset: { type: integer }, dataBase64: { type: string }, chunkHash: { type: string } } } } } }
+      responses:
+        "200": { description: Next required offset., content: { application/json: { schema: { type: integer } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { description: Remote-control permission required., content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+
+  /api/v1/_rpc/task_resource_upload_commit:
+    post:
+      operationId: rpcTaskResourceUploadCommit
+      tags: [rpc-task-workspace]
+      summary: Atomically publish a verified upload. Requires remote control.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [handleId], properties: { handleId: { type: string } } } } } }
+      responses:
+        "200": { description: Published SHA-256 hash., content: { application/json: { schema: { type: string } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { description: Remote-control permission required., content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+
+  /api/v1/_rpc/task_resource_upload_abort:
+    post:
+      operationId: rpcTaskResourceUploadAbort
+      tags: [rpc-task-workspace]
+      summary: Abort an upload and remove its temporary content. Requires remote control.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [handleId], properties: { handleId: { type: string } } } } } }
+      responses:
+        "200": { description: Aborted., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { description: Remote-control permission required., content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+
+  /api/v1/_rpc/task_workspace_apply:
+    post:
+      operationId: rpcTaskWorkspaceApply
+      tags: [rpc-task-workspace]
+      summary: Atomically apply selected files or hunks with three-way conflict protection. Requires remote control.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [runId], properties: { runId: { type: string }, selection: { type: array, items: { type: object, additionalProperties: true } } } } } } }
+      responses:
+        "200": { description: Applied or conflicted outcome., content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { description: Remote-control permission required., content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+
+  /api/v1/_rpc/task_workspace_undo:
+    post:
+      operationId: rpcTaskWorkspaceUndo
+      tags: [rpc-task-workspace]
+      summary: Apply the exact inverse contribution with conflict protection. Requires remote control.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [runId], properties: { runId: { type: string } } } } } }
+      responses:
+        "200": { description: Reverted or conflicted outcome., content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { description: Remote-control permission required., content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+
+  /api/v1/_rpc/task_workspace_resolve_conflict:
+    post:
+      operationId: rpcTaskWorkspaceResolveConflict
+      tags: [rpc-task-workspace]
+      summary: Resolve a conflicted patch by retrying merge, explicitly applying task bytes, or keeping current workspace bytes. Requires remote control.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [runId, resolution], properties: { runId: { type: string }, resolution: { type: string, enum: [retryMerge, applyTask, keepCurrent] }, selection: { type: array, items: { type: object, additionalProperties: true } } } } } } }
+      responses:
+        "200": { description: Resolved outcome., content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { description: Remote-control permission required., content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+
+  /api/v1/_rpc/task_workspace_pin:
+    post:
+      operationId: rpcTaskWorkspacePin
+      tags: [rpc-task-workspace]
+      summary: Protect or unprotect a task from retention pruning. Requires remote control.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [taskId, pinned], properties: { taskId: { type: string }, pinned: { type: boolean } } } } } }
+      responses:
+        "200": { description: Updated task workspace., content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { description: Remote-control permission required., content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+
+  /api/v1/_rpc/task_workspace_prune:
+    post:
+      operationId: rpcTaskWorkspacePrune
+      tags: [rpc-task-workspace]
+      summary: Prune expired reversible task data while preserving pinned and unapplied tasks. Requires remote control.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { description: Prune counts and reclaimed bytes., content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { description: Remote-control permission required., content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
 
   /api/v1/_rpc/write_text_file:
     post:

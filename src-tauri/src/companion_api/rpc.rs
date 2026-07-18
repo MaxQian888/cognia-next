@@ -395,6 +395,31 @@ const KNOWN_COMMANDS: &[&str] = &[
     "fs_search_content_workspace",
     "fs_read_workspace_file",
     "fs_write_workspace_file",
+    // Task-scoped resource ledger. File bodies use bounded reads or verified
+    // transfer handles; events carry only summaries.
+    "task_workspace_status",
+    "task_workspace_begin",
+    "task_workspace_settle",
+    "task_workspace_get",
+    "task_workspace_list",
+    "task_workspace_list_runs",
+    "task_workspace_list_resources",
+    "task_workspace_get_resource",
+    "task_workspace_get_patch_set",
+    "task_resource_read_diff",
+    "task_resource_read_text",
+    "task_resource_download_open",
+    "task_resource_download_read_chunk",
+    "task_resource_download_close",
+    "task_resource_upload_open",
+    "task_resource_upload_write_chunk",
+    "task_resource_upload_commit",
+    "task_resource_upload_abort",
+    "task_workspace_apply",
+    "task_workspace_undo",
+    "task_workspace_resolve_conflict",
+    "task_workspace_pin",
+    "task_workspace_prune",
     // File-tree browser: list/stat (reads) + mkdir/delete/rename/copy (writes),
     // all root-relative + path-traversal checked.
     "fs_list_workspace_dir",
@@ -574,6 +599,18 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "fs_search_workspace",
     "fs_search_content_workspace",
     "fs_read_workspace_file",
+    "task_workspace_status",
+    "task_workspace_get",
+    "task_workspace_list",
+    "task_workspace_list_runs",
+    "task_workspace_list_resources",
+    "task_workspace_get_resource",
+    "task_workspace_get_patch_set",
+    "task_resource_read_diff",
+    "task_resource_read_text",
+    "task_resource_download_open",
+    "task_resource_download_read_chunk",
+    "task_resource_download_close",
     // File-tree browser reads — same (root, relPath) returns the same listing/stat.
     "fs_list_workspace_dir",
     "fs_stat_workspace_file",
@@ -691,6 +728,17 @@ const CONTROL_COMMANDS: &[&str] = &[
     "ensure_dir",
     "ensure_dir_confined",
     "fs_write_workspace_file",
+    "task_resource_upload_open",
+    "task_workspace_begin",
+    "task_workspace_settle",
+    "task_resource_upload_write_chunk",
+    "task_resource_upload_commit",
+    "task_resource_upload_abort",
+    "task_workspace_apply",
+    "task_workspace_undo",
+    "task_workspace_resolve_conflict",
+    "task_workspace_pin",
+    "task_workspace_prune",
     // File-tree browser writes — mutate the workspace, so remote-control gated.
     "fs_create_workspace_dir",
     "fs_delete_workspace_entry",
@@ -1221,6 +1269,22 @@ fn optional<T: DeserializeOwned>(
     }
 }
 
+fn authorize_sensitive_resource(
+    requested: bool,
+    device_id: &str,
+    scope: Option<&str>,
+) -> Result<bool, (StatusCode, Json<RpcError>)> {
+    if !requested {
+        return Ok(false);
+    }
+    if scope == Some("service") || super::control_allow_list::global().is_allowed(device_id) {
+        return Ok(true);
+    }
+    Err(RpcError::forbidden(
+        "sensitive task resources require remote-control authorization",
+    ))
+}
+
 /// Serialize a command result into the JSON [`Value`] envelope, mapping any
 /// serde failure to a `500 internal_error`. Cuts the repeated
 /// `serde_json::to_value(x).map_err(...)` boilerplate across the native arms.
@@ -1295,7 +1359,25 @@ pub(super) async fn dispatch(
         "claude_send" => {
             let session_id: String = required(&args, "session_id")?;
             let prompt: Value = required(&args, "prompt")?;
-            let options: Option<claude_commands::SendOptions> = optional(&args, "options")?;
+            let mut options: Option<claude_commands::SendOptions> = optional(&args, "options")?;
+            if let Some(send_options) = options.as_mut() {
+                if let Some(envelope) = send_options.extra.remove("taskWorkspace") {
+                    let envelope: crate::task_workspace::TaskWorkspaceTurnEnvelope =
+                        serde_json::from_value(envelope)
+                            .map_err(|error| RpcError::malformed(error.to_string()))?;
+                    let sink: std::sync::Arc<dyn cognia_task_workspace::TaskWorkspaceEventSink> =
+                        std::sync::Arc::new(crate::task_workspace::BusResourceEventSink(
+                            std::sync::Arc::clone(&state.event_bus),
+                        ));
+                    let run = crate::task_workspace::begin_hosted_turn(
+                        session_id.clone(),
+                        envelope,
+                        sink,
+                    )
+                    .map_err(RpcError::internal)?;
+                    send_options.cwd = Some(run.execution_root);
+                }
+            }
             claude_commands::claude_send_with_host(
                 host.sidecar_host(),
                 host.sidecar_state(),
@@ -2850,6 +2932,289 @@ pub(super) async fn dispatch(
             .map(|_| Value::Null)
             .map_err(RpcError::internal)
         }
+        "task_workspace_status" => to_json(crate::task_workspace::task_workspace_status()),
+        "task_workspace_begin" => {
+            let input: cognia_task_workspace::BeginTaskRun = required(&args, "input")?;
+            let sink: std::sync::Arc<dyn cognia_task_workspace::TaskWorkspaceEventSink> =
+                std::sync::Arc::new(crate::task_workspace::BusResourceEventSink(
+                    std::sync::Arc::clone(&state.event_bus),
+                ));
+            tokio::task::spawn_blocking(move || {
+                crate::task_workspace::begin_hosted_turn(
+                    input.session_id.clone(),
+                    crate::task_workspace::TaskWorkspaceTurnEnvelope {
+                        task_id: input.task_id,
+                        run_id: input.run_id,
+                        parent_run_id: input.parent_run_id,
+                        workspace_root: input.workspace_root,
+                        agent_id: input.agent_id,
+                        agent_kind: input.agent_kind,
+                    },
+                    sink,
+                )
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
+        "task_workspace_settle" => {
+            let run_id: String = required(&args, "runId")?;
+            let final_state: Option<cognia_task_workspace::RunState> =
+                optional(&args, "finalState")?;
+            let settle_run_id = run_id.clone();
+            let resources = tokio::task::spawn_blocking(move || {
+                let service = crate::task_workspace::service()?;
+                match final_state.unwrap_or(cognia_task_workspace::RunState::Ready) {
+                    cognia_task_workspace::RunState::Ready => service.settle_run(&settle_run_id),
+                    cognia_task_workspace::RunState::Failed => {
+                        service.settle_failed_run(&settle_run_id)
+                    }
+                    cognia_task_workspace::RunState::Cancelled => {
+                        service.settle_cancelled_run(&settle_run_id)
+                    }
+                    state => Err(format!("invalid settle state: {state:?}")),
+                }
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)?;
+            if let Ok(service) = crate::task_workspace::service() {
+                let _ = service.stop_watching_run(&run_id);
+            }
+            to_json(resources)
+        }
+        "task_workspace_get" => {
+            let task_id: String = required(&args, "taskId")?;
+            crate::task_workspace::service()
+                .and_then(|service| service.get_task(&task_id))
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_workspace_list" => {
+            let session_id: Option<String> = optional(&args, "sessionId")?;
+            crate::task_workspace::service()
+                .and_then(|service| service.list_tasks(session_id.as_deref()))
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_workspace_list_runs" => {
+            let task_id: String = required(&args, "taskId")?;
+            crate::task_workspace::service()
+                .and_then(|service| service.list_runs(&task_id))
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_workspace_list_resources" => {
+            let task_id: String = required(&args, "taskId")?;
+            crate::task_workspace::service()
+                .and_then(|service| service.list_resources(&task_id))
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_workspace_get_resource" => {
+            let task_id: String = required(&args, "taskId")?;
+            let path: String = required(&args, "path")?;
+            crate::task_workspace::service()
+                .and_then(|service| service.list_resources(&task_id))
+                .map(|resources| {
+                    resources
+                        .into_iter()
+                        .filter(|resource| resource.path == path)
+                        .max_by_key(|resource| resource.revision)
+                })
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_workspace_get_patch_set" => {
+            let run_id: String = required(&args, "runId")?;
+            crate::task_workspace::service()
+                .and_then(|service| service.get_patch_set(&run_id))
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_resource_read_diff" => {
+            let run_id: String = required(&args, "runId")?;
+            let path: String = required(&args, "path")?;
+            let requested_sensitive: Option<bool> = optional(&args, "allowSensitive")?;
+            let allow_sensitive = authorize_sensitive_resource(
+                requested_sensitive.unwrap_or(false),
+                device_id,
+                scope,
+            )?;
+            crate::task_workspace::service()
+                .and_then(|service| service.read_patch_diff(&run_id, &path, allow_sensitive))
+                .map(Value::String)
+                .map_err(RpcError::internal)
+        }
+        "task_resource_read_text" => {
+            let run_id: String = required(&args, "runId")?;
+            let rel_path: String = required(&args, "relPath")?;
+            let offset: Option<u64> = optional(&args, "offset")?;
+            let max_bytes: Option<usize> = optional(&args, "maxBytes")?;
+            let requested_sensitive: Option<bool> = optional(&args, "allowSensitive")?;
+            let allow_sensitive = authorize_sensitive_resource(
+                requested_sensitive.unwrap_or(false),
+                device_id,
+                scope,
+            )?;
+            tokio::task::spawn_blocking(move || {
+                crate::task_workspace::service()?.read_resource(
+                    &run_id,
+                    &rel_path,
+                    offset.unwrap_or(0),
+                    max_bytes,
+                    allow_sensitive,
+                )
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
+        "task_resource_download_open" => {
+            let run_id: String = required(&args, "runId")?;
+            let rel_path: String = required(&args, "relPath")?;
+            let requested_sensitive: Option<bool> = optional(&args, "allowSensitive")?;
+            let allow_sensitive = authorize_sensitive_resource(
+                requested_sensitive.unwrap_or(false),
+                device_id,
+                scope,
+            )?;
+            tokio::task::spawn_blocking(move || {
+                crate::task_workspace::service()?.open_resource_download(
+                    &run_id,
+                    &rel_path,
+                    allow_sensitive,
+                )
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
+        "task_resource_download_read_chunk" => {
+            let handle_id: String = required(&args, "handleId")?;
+            let offset: u64 = required(&args, "offset")?;
+            let length: Option<usize> = optional(&args, "length")?;
+            crate::task_workspace::service()
+                .and_then(|service| service.read_download_chunk(&handle_id, offset, length))
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_resource_download_close" => {
+            let handle_id: String = required(&args, "handleId")?;
+            crate::task_workspace::service()
+                .and_then(|service| service.close_resource_download(&handle_id))
+                .map(|_| Value::Null)
+                .map_err(RpcError::internal)
+        }
+        "task_resource_upload_open" => {
+            let run_id: String = required(&args, "runId")?;
+            let rel_path: String = required(&args, "relPath")?;
+            let expected_size: u64 = required(&args, "expectedSize")?;
+            let expected_hash: String = required(&args, "expectedHash")?;
+            let allow_sensitive: Option<bool> = optional(&args, "allowSensitive")?;
+            crate::task_workspace::service()
+                .and_then(|service| {
+                    service.open_resource_upload(
+                        &run_id,
+                        &rel_path,
+                        expected_size,
+                        &expected_hash,
+                        allow_sensitive.unwrap_or(false),
+                    )
+                })
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_resource_upload_write_chunk" => {
+            let handle_id: String = required(&args, "handleId")?;
+            let offset: u64 = required(&args, "offset")?;
+            let data_base64: String = required(&args, "dataBase64")?;
+            let chunk_hash: String = required(&args, "chunkHash")?;
+            crate::task_workspace::service()
+                .and_then(|service| {
+                    service.write_upload_chunk(
+                        &handle_id,
+                        offset,
+                        &data_base64,
+                        &chunk_hash,
+                    )
+                })
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_resource_upload_commit" => {
+            let handle_id: String = required(&args, "handleId")?;
+            crate::task_workspace::service()
+                .and_then(|service| service.commit_resource_upload(&handle_id))
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_resource_upload_abort" => {
+            let handle_id: String = required(&args, "handleId")?;
+            crate::task_workspace::service()
+                .and_then(|service| service.abort_resource_upload(&handle_id))
+                .map(|_| Value::Null)
+                .map_err(RpcError::internal)
+        }
+        "task_workspace_apply" => {
+            let run_id: String = required(&args, "runId")?;
+            let selection: Option<Vec<cognia_task_workspace::PatchSelection>> =
+                optional(&args, "selection")?;
+            tokio::task::spawn_blocking(move || {
+                crate::task_workspace::service()?
+                    .apply_patch_set(&run_id, &selection.unwrap_or_default())
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
+        "task_workspace_undo" => {
+            let run_id: String = required(&args, "runId")?;
+            tokio::task::spawn_blocking(move || {
+                crate::task_workspace::service()?.undo_patch_set(&run_id)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
+        "task_workspace_pin" => {
+            let task_id: String = required(&args, "taskId")?;
+            let pinned: bool = required(&args, "pinned")?;
+            crate::task_workspace::service()
+                .and_then(|service| service.set_task_pinned(&task_id, pinned))
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_workspace_resolve_conflict" => {
+            let run_id: String = required(&args, "runId")?;
+            let selection: Option<Vec<cognia_task_workspace::PatchSelection>> =
+                optional(&args, "selection")?;
+            let resolution: cognia_task_workspace::ConflictResolution =
+                required(&args, "resolution")?;
+            tokio::task::spawn_blocking(move || {
+                crate::task_workspace::service()?.resolve_conflict(
+                    &run_id,
+                    &selection.unwrap_or_default(),
+                    resolution,
+                )
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
+        "task_workspace_prune" => tokio::task::spawn_blocking(move || {
+            crate::task_workspace::service()?.prune()
+        })
+        .await
+        .map_err(|error| RpcError::internal(error.to_string()))?
+        .map_err(RpcError::internal)
+        .and_then(to_json),
         // File-tree browser: list children / stat one path (reads), and
         // mkdir / delete / rename / copy (CONTROL-gated writes). All use the
         // `root` + `relPath` sandbox shape of the read/write variants above.

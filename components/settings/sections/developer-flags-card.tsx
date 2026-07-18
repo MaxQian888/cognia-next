@@ -5,6 +5,7 @@
 // observability surface rather than the agent-runtime defaults:
 //  - `debugMode` — verbose SDK / sub-process logs
 //  - `developer.chatMiddlewareExecution` — experimental plugin chat middleware
+//  - `developer.taskWorkspace` — isolated task resource ledger and review UI
 
 import { useTranslations } from "next-intl"
 import { BugIcon } from "lucide-react"
@@ -19,6 +20,7 @@ export function DeveloperFlagsCard() {
 
   const debugMode = Boolean(settings?.debugMode)
   const chatMiddleware = Boolean(settings?.developer?.chatMiddlewareExecution)
+  const taskWorkspace = Boolean(settings?.developer?.taskWorkspace)
 
   return (
     <SettingsCard
@@ -40,6 +42,15 @@ export function DeveloperFlagsCard() {
         checked={chatMiddleware}
         onCheckedChange={(next) =>
           void save({ developer: { ...settings?.developer, chatMiddlewareExecution: next } })
+        }
+      />
+      <SettingsToggle
+        id="diagnostics-task-workspace"
+        label={t("taskWorkspace")}
+        description={t("taskWorkspaceHint")}
+        checked={taskWorkspace}
+        onCheckedChange={(next) =>
+          void save({ developer: { ...settings?.developer, taskWorkspace: next } })
         }
       />
     </SettingsCard>

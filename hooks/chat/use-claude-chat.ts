@@ -112,6 +112,7 @@ import {
 } from "@cognia/agent-trace/chat-tool-spans"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { beginCodeAdoptionTurn } from "@/lib/code-adoption/client"
+import { beginTaskWorkspaceTurn, runIdForTurn, taskIdForMessage } from "@/lib/task-workspace/client"
 import { bumpUnread } from "@/lib/db/session-state"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import { pendingRecoveryPhase } from "@/lib/usage/compaction-metrics"
@@ -1130,12 +1131,39 @@ export function useClaudeChat() {
       emitSystemBusEvent(SystemEvents.MESSAGE_SENT, { sessionId })
       emitSystemBusEvent(SystemEvents.AGENT_STARTED, { sessionId })
 
+      // Experimental task workspace: snapshot the live workspace and redirect
+      // this turn into an isolated worktree/shadow root before any agent starts.
+      // Regenerate/continuation keeps the same user-message task id while the
+      // chat run id creates a distinct TaskRun version.
+      const chatRunId = store.getState().sessions[sessionId]?.runId ?? 0
+      if (
+        useSettingsStore.getState().settings?.developer?.taskWorkspace === true &&
+        sendOptions.cwd
+      ) {
+        const anchorMessage = callOptions?.skipUserAppend
+          ? [...previousMessages].reverse().find((message) => message.role === "user")
+          : userMsg
+        const taskEnvelope = {
+          taskId: taskIdForMessage(anchorMessage?.id ?? userMsg.id),
+          sessionId,
+          runId: runIdForTurn(sessionId, chatRunId),
+          agentId: "built-in",
+          agentKind: "in-app",
+          workspaceRoot: sendOptions.cwd,
+        }
+        const taskRun = await beginTaskWorkspaceTurn(taskEnvelope)
+        sendOptions = { ...sendOptions, taskWorkspace: taskEnvelope }
+        if (taskRun) {
+          sendOptions = { ...sendOptions, cwd: taskRun.executionRoot }
+        }
+      }
+
       // Code-adoption tracking (Phase 1): open a per-turn attribution window.
       // Fire-and-forget — must never block or disrupt the turn. `runId` is read
       // back from the store, whose streaming flip above bumped it for this turn.
       void beginCodeAdoptionTurn(sendOptions.cwd, {
         sessionId,
-        runId: store.getState().sessions[sessionId]?.runId ?? 0,
+        runId: chatRunId,
         model: sendOptions.model ?? null,
         agentKind: "in-app",
       })
@@ -1265,6 +1293,7 @@ export function useClaudeChat() {
 
           const result = await executeOnExternalAgent(externalSendText, {
             agentId: extAgentId,
+            workingDirectory: sendOptions.cwd,
             onEvent: (event) => {
               const nextParts = applyExternalAgentEventToParts(assistantParts, event)
               if (nextParts !== assistantParts) {

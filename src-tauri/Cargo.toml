@@ -121,6 +121,7 @@ cognia-instrument = { path = "../crates/cognia-instrument" }
 # git2/vendored-libgit2 C compile isolates. Re-aliased as `crate::git` in
 # lib.rs; its `commands::git_*` are referenced from `generate_handler!`.
 cognia-git = { path = "../crates/cognia-git" }
+cognia-task-workspace = { path = "../crates/cognia-task-workspace" }
 log = "0.4"
 # `unstable` unlocks the built-in multi-webview API (`Window::add_child`,
 # `Manager::get_webview`) that powers the embedded in-app browser pane

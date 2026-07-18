@@ -1,19 +1,24 @@
-jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn() }))
+jest.mock("@/lib/task-workspace/client", () => ({ settleTaskWorkspaceTurn: jest.fn() }))
 jest.mock("./client", () => ({ endCodeAdoptionTurn: jest.fn() }))
 jest.mock("./persist", () => ({
   persistCodeAdoptionTurn: jest.fn(),
   pruneCodeAdoptionTurns: jest.fn(),
 }))
 jest.mock("@/stores/chat/chat-store", () => ({ useChatStore: { subscribe: jest.fn() } }))
+jest.mock("@/stores/task-workspace-store", () => ({
+  useTaskWorkspaceStore: {
+    getState: () => ({ activeBySession: { s1: { workspaceRoot: "/repo" } } }),
+  },
+}))
 
-import { isTauri } from "@/lib/tauri"
+import { settleTaskWorkspaceTurn } from "@/lib/task-workspace/client"
 import { useChatStore } from "@/stores/chat/chat-store"
 
 import { endCodeAdoptionTurn } from "./client"
 import { persistCodeAdoptionTurn, pruneCodeAdoptionTurns } from "./persist"
 import { isSettleEdge, startCodeAdoptionTracker } from "./turn-tracker"
 
-const mockIsTauri = isTauri as jest.Mock
+const mockSettleTaskWorkspace = settleTaskWorkspaceTurn as jest.Mock
 const mockSubscribe = useChatStore.subscribe as unknown as jest.Mock
 const mockEnd = endCodeAdoptionTurn as jest.Mock
 const mockPersist = persistCodeAdoptionTurn as jest.Mock
@@ -39,15 +44,7 @@ describe("isSettleEdge", () => {
 })
 
 describe("startCodeAdoptionTracker", () => {
-  it("no-ops off Tauri and does not subscribe", () => {
-    mockIsTauri.mockReturnValue(false)
-    const unsub = startCodeAdoptionTracker()
-    expect(mockSubscribe).not.toHaveBeenCalled()
-    expect(typeof unsub).toBe("function")
-  })
-
   function wire() {
-    mockIsTauri.mockReturnValue(true)
     const storeUnsub = jest.fn()
     mockSubscribe.mockReturnValue(storeUnsub)
     const ret = startCodeAdoptionTracker()
@@ -65,6 +62,7 @@ describe("startCodeAdoptionTracker", () => {
       { sessions: { s1: { status: "streaming", runId: 3 } } }
     )
     await flush()
+    expect(mockSettleTaskWorkspace).toHaveBeenCalledWith("s1", 3, "ready")
     expect(mockEnd).toHaveBeenCalledWith("s1:3")
     expect(mockPersist).toHaveBeenCalledWith(row)
     expect(mockPrune).toHaveBeenCalled()
@@ -88,6 +86,7 @@ describe("startCodeAdoptionTracker", () => {
       { sessions: { s1: { status: "streaming", runId: 1 } } }
     )
     await flush()
+    expect(mockSettleTaskWorkspace).toHaveBeenCalledWith("s1", 1, "failed")
     expect(mockEnd).toHaveBeenCalledWith("s1:1")
     expect(mockPersist).not.toHaveBeenCalled()
     expect(mockPrune).not.toHaveBeenCalled()
@@ -96,5 +95,34 @@ describe("startCodeAdoptionTracker", () => {
   it("returns the store unsubscribe", () => {
     const { ret, storeUnsub } = wire()
     expect(ret).toBe(storeUnsub)
+  })
+
+  it("projects agent-only adoption metrics from the authoritative task ledger", async () => {
+    mockSettleTaskWorkspace.mockResolvedValue([
+      {
+        path: "agent.ts",
+        origin: "agent",
+        kind: "modified",
+        insertions: 4,
+        deletions: 1,
+      },
+      { path: "notes.txt", origin: "user", kind: "created", insertions: 2, deletions: 0 },
+    ])
+    mockEnd.mockResolvedValue(null)
+    const { fn } = wire()
+    fn(
+      { sessions: { s1: { status: "idle", runId: 3 } } },
+      { sessions: { s1: { status: "streaming", runId: 3 } } }
+    )
+    await flush()
+    expect(mockPersist).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "s1:3",
+        workspaceRoot: "/repo",
+        totalFiles: 1,
+        totalAdded: 4,
+        totalRemoved: 1,
+      })
+    )
   })
 })

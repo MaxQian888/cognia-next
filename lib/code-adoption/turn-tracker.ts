@@ -10,12 +10,47 @@
  * idle→streaming edge (`chat-store.ts:statusPatch`).
  */
 
-import { isTauri } from "@/lib/tauri"
+import { settleTaskWorkspaceTurn } from "@/lib/task-workspace/client"
 import { useChatStore } from "@/stores/chat/chat-store"
+import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import type { ChatStatus } from "@/stores/chat/chat-store"
 
 import { endCodeAdoptionTurn } from "./client"
 import { persistCodeAdoptionTurn, pruneCodeAdoptionTurns } from "./persist"
+import type { CodeAdoptionTurnRow } from "./types"
+
+function projectTaskResources(
+  sessionId: string,
+  runId: number,
+  resources: Awaited<ReturnType<typeof settleTaskWorkspaceTurn>>,
+  legacy: CodeAdoptionTurnRow | null,
+  workspaceRoot?: string
+): CodeAdoptionTurnRow | null {
+  if (!resources) return legacy
+  const files = resources
+    .filter((resource) => resource.origin === "agent")
+    .map((resource) => ({
+      path: resource.path,
+      added: resource.insertions ?? 0,
+      removed: resource.deletions ?? 0,
+      isNew: resource.kind === "created",
+      hunks: [] as Array<[number, number]>,
+    }))
+  return {
+    id: `${sessionId}:${runId}`,
+    runId,
+    sessionId,
+    workspaceRoot: legacy?.workspaceRoot ?? workspaceRoot ?? "",
+    agentKind: legacy?.agentKind ?? "in-app",
+    model: legacy?.model ?? null,
+    ts: Date.now(),
+    totalFiles: files.length,
+    totalAdded: files.reduce((sum, file) => sum + file.added, 0),
+    totalRemoved: files.reduce((sum, file) => sum + file.removed, 0),
+    files,
+    truncated: false,
+  }
+}
 
 /** A turn ends when a running status transitions to a terminal one. */
 export function isSettleEdge(before: ChatStatus | undefined, now: ChatStatus): boolean {
@@ -24,8 +59,15 @@ export function isSettleEdge(before: ChatStatus | undefined, now: ChatStatus): b
 }
 
 /** Best-effort: reconcile a settled turn, persist its record, and bound growth. */
-async function settleTurn(sessionId: string, runId: number): Promise<void> {
-  const row = await endCodeAdoptionTurn(`${sessionId}:${runId}`)
+async function settleTurn(sessionId: string, runId: number, status: ChatStatus): Promise<void> {
+  const active = useTaskWorkspaceStore.getState().activeBySession[sessionId]
+  const resources = await settleTaskWorkspaceTurn(
+    sessionId,
+    runId,
+    status === "error" ? "failed" : "ready"
+  )
+  const legacy = await endCodeAdoptionTurn(`${sessionId}:${runId}`)
+  const row = projectTaskResources(sessionId, runId, resources, legacy, active?.workspaceRoot)
   if (!row) return
   await persistCodeAdoptionTurn(row)
   await pruneCodeAdoptionTurns()
@@ -36,13 +78,12 @@ async function settleTurn(sessionId: string, runId: number): Promise<void> {
  * attribution. Returns an unsubscribe. No-op (returns a noop) off-Tauri.
  */
 export function startCodeAdoptionTracker(): () => void {
-  if (!isTauri()) return () => {}
   return useChatStore.subscribe((state, prev) => {
     for (const sessionId of Object.keys(state.sessions)) {
       const slice = state.sessions[sessionId]
       const before = prev.sessions[sessionId]?.status
       if (!isSettleEdge(before, slice.status)) continue
-      void settleTurn(sessionId, slice.runId).catch(() => {})
+      void settleTurn(sessionId, slice.runId, slice.status).catch(() => {})
     }
   })
 }

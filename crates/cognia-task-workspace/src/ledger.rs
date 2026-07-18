@@ -232,6 +232,125 @@ pub fn undo(
     })
 }
 
+pub fn force_apply(
+    workspace_root: &Path,
+    scratch_root: &Path,
+    store: &mut WorkspaceStore,
+    patch: &mut PatchSet,
+    selection: &[PatchSelection],
+    revision: u64,
+    now: i64,
+) -> Result<ApplyOutcome, String> {
+    if patch.state != PatchState::Conflict {
+        return Err(format!("patch set is not conflicted: {:?}", patch.state));
+    }
+    let selected_paths = selected_paths(selection)?;
+    let files = patch
+        .files
+        .iter()
+        .filter(|file| {
+            selected_paths
+                .as_ref()
+                .is_none_or(|paths| paths.contains(&file.path))
+        })
+        .collect::<Vec<_>>();
+    if files.is_empty() && !patch.files.is_empty() {
+        return Err("patch selection did not match any resource".into());
+    }
+    let mut plans = Vec::new();
+    for file in files {
+        let hunk_ids = selection
+            .iter()
+            .find(|item| item.path == file.path)
+            .map(|item| item.hunk_ids.as_slice())
+            .unwrap_or_default();
+        let mut desired = payload_from_store(
+            store,
+            file.after_hash.as_deref(),
+            Some(file.resource_kind),
+            file.after_mode,
+            now,
+        )?;
+        if !hunk_ids.is_empty() {
+            let base = payload_from_store(
+                store,
+                file.before_hash.as_deref(),
+                Some(file.resource_kind),
+                file.before_mode,
+                now,
+            )?
+            .ok_or_else(|| format!("hunk selection missing baseline: {}", file.path))?;
+            desired = Some(EntryPayload {
+                bytes: apply_selected_hunks(scratch_root, file, hunk_ids, &base.bytes, store, now)?,
+                kind: ResourceKind::File,
+                mode: file.after_mode,
+            });
+        }
+        if file.kind == ChangeKind::Renamed {
+            let old_path = file
+                .old_path
+                .as_deref()
+                .ok_or_else(|| format!("rename missing old path: {}", file.path))?;
+            plans.push(PlannedWrite {
+                path: old_path.to_string(),
+                before: read_entry(workspace_root, old_path)?,
+                after: None,
+            });
+        }
+        plans.push(PlannedWrite {
+            path: file.path.clone(),
+            before: read_entry(workspace_root, &file.path)?,
+            after: desired,
+        });
+    }
+    for plan in &plans {
+        if let Some(before) = &plan.before {
+            store.put_blob(&hash(&before.bytes), &before.bytes, now)?;
+        }
+        if let Some(after) = &plan.after {
+            store.put_blob(&hash(&after.bytes), &after.bytes, now)?;
+        }
+    }
+    commit_plans(workspace_root, &plans)?;
+    patch.applied_files = plans
+        .iter()
+        .map(|plan| AppliedFile {
+            path: plan.path.clone(),
+            before_apply_hash: plan.before.as_ref().map(|entry| hash(&entry.bytes)),
+            after_apply_hash: plan.after.as_ref().map(|entry| hash(&entry.bytes)),
+            before_kind: plan.before.as_ref().map(|entry| entry.kind),
+            after_kind: plan.after.as_ref().map(|entry| entry.kind),
+            before_mode: plan.before.as_ref().and_then(|entry| entry.mode),
+            after_mode: plan.after.as_ref().and_then(|entry| entry.mode),
+            binary: plan
+                .after
+                .as_ref()
+                .or(plan.before.as_ref())
+                .is_some_and(|entry| detect_binary(&entry.bytes)),
+        })
+        .collect();
+    patch.state = PatchState::Applied;
+    patch.applied_revision = Some(revision);
+    Ok(ApplyOutcome {
+        state: PatchState::Applied,
+        revision,
+        conflicts: Vec::new(),
+    })
+}
+
+pub fn keep_current(patch: &mut PatchSet, revision: u64) -> Result<ApplyOutcome, String> {
+    if patch.state != PatchState::Conflict {
+        return Err(format!("patch set is not conflicted: {:?}", patch.state));
+    }
+    patch.state = PatchState::Reverted;
+    patch.applied_files.clear();
+    Ok(ApplyOutcome {
+        state: PatchState::Reverted,
+        revision,
+        conflicts: Vec::new(),
+    })
+}
+
 fn selected_paths(selection: &[PatchSelection]) -> Result<Option<HashSet<String>>, String> {
     if selection.is_empty() {
         return Ok(None);

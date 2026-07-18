@@ -337,6 +337,8 @@ async fn run_serve(
     // configure command. Failures are logged but don't block startup —
     // a missing file just means no provider is configured yet.
     let data_dir = store_data_dir();
+    app_lib::task_workspace::install(data_dir.clone())
+        .map_err(|error| format!("task workspace: {error}"))?;
     push_creds::install(FilePushCredStore::new(&data_dir));
     if let Err(err) = push_creds::reinstall_persisted_dispatchers() {
         eprintln!("[cognia-server] push-creds reinstall: {err}");

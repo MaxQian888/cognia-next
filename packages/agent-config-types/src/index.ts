@@ -219,6 +219,18 @@ export const DEFAULT_BUILTIN_TOOLS: BuiltinToolsConfig = {
 
 export interface SendOptions {
   /**
+   * Host-only task workspace envelope. The Rust/Companion host consumes it
+   * before spawning the agent and never forwards it to a model provider.
+   */
+  taskWorkspace?: {
+    taskId: string
+    runId: string
+    parentRunId?: string
+    workspaceRoot: string
+    agentId: string
+    agentKind: string
+  }
+  /**
    * Per-send turn id, stamped by `runAndCaptureAssistantReply` — an envelope
    * field rather than a real SDK option (it rides in `options` only because
    * Rust's `SendOptions.extra` flatten forwards unknown keys verbatim, and the
@@ -3482,6 +3494,12 @@ export const DEFAULT_AUTOMATION_POLICY: AutomationPolicy = {
  * UIs.
  */
 export interface DeveloperSettings {
+  /**
+   * Experimental task-scoped isolated workspace and reversible resource
+   * ledger. Default off until the full runtime matrix reaches GA.
+   */
+  taskWorkspace?: boolean
+
   /**
    * Experimental: when `true`, registered plugin chat-middlewares actually run
    * on the send hot path (ADR-0026 §4 §A). Default off — the runner skips
