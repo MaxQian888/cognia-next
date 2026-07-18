@@ -36,6 +36,15 @@ jest.mock("@tauri-apps/plugin-process", () => ({ relaunch: () => relaunchMock() 
   virtual: true,
 })
 
+type UpdateHandleFixture = {
+  version: string
+  body?: string
+  date?: string
+  download: jest.Mock<Promise<void>, []>
+  install: jest.Mock<Promise<void>, []>
+  close?: jest.Mock<Promise<void>, []>
+}
+
 import {
   checkForUpdate,
   downloadAndInstallUpdate,
@@ -243,6 +252,42 @@ describe("downloadUpdate + installUpdate", () => {
     expect(install).toHaveBeenCalledTimes(1)
     expect(relaunchMock).not.toHaveBeenCalled()
     expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it("suppresses repeated update work after install until the process restarts", async () => {
+    const download = jest.fn(async () => {})
+    const install = jest.fn(async () => {})
+    checkMock.mockResolvedValueOnce({ version: "2.0.0", download, install })
+
+    expect(await installUpdate({ relaunch: false })).toBe("installed")
+    expect(await checkForUpdate()).toBeNull()
+    expect(await downloadUpdate()).toBe("noLongerAvailable")
+    expect(await installUpdate({ relaunch: false })).toBe("installed")
+    expect(await downloadAndInstallUpdate(undefined, { relaunch: false })).toBe("installed")
+
+    expect(checkMock).toHaveBeenCalledTimes(1)
+    expect(download).toHaveBeenCalledTimes(1)
+    expect(install).toHaveBeenCalledTimes(1)
+  })
+
+  it("waits for a preceding check before starting a download", async () => {
+    let resolveCheck!: (value: UpdateHandleFixture) => void
+    const download = jest.fn(async () => {})
+    const install = jest.fn(async () => {})
+    checkMock.mockReturnValueOnce(
+      new Promise<UpdateHandleFixture>((resolve) => {
+        resolveCheck = resolve
+      })
+    )
+
+    const checking = checkForUpdate()
+    const downloading = downloadUpdate()
+    resolveCheck({ version: "2.0.0", download, install })
+
+    await checking
+    await expect(downloading).resolves.toBe("downloaded")
+    expect(checkMock).toHaveBeenCalledTimes(1)
+    expect(download).toHaveBeenCalledTimes(1)
   })
 
   it("deduplicates concurrent downloads", async () => {

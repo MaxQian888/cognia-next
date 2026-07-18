@@ -78,6 +78,7 @@ const MAX_REQUEST_TIMEOUT_SECONDS = 5 * 60
 let pendingUpdate: UpdateHandle | null = null
 let pendingUpdateAt = 0
 let pendingDownloaded = false
+let installedVersionAwaitingRestart: string | null = null
 let checkInFlight: Promise<AvailableUpdate | null> | null = null
 let downloadInFlight: Promise<DownloadUpdateResult> | null = null
 let installInFlight: Promise<InstallUpdateResult> | null = null
@@ -223,6 +224,7 @@ function startCheck(): Promise<AvailableUpdate | null> {
 
 export function checkForUpdate(): Promise<AvailableUpdate | null> {
   if (!isTauri()) return Promise.resolve(null)
+  if (installedVersionAwaitingRestart) return Promise.resolve(null)
   if ((downloadInFlight || installInFlight) && pendingUpdate) {
     return Promise.resolve(availableFromHandle(pendingUpdate))
   }
@@ -230,6 +232,11 @@ export function checkForUpdate(): Promise<AvailableUpdate | null> {
 }
 
 async function ensurePendingUpdate(): Promise<UpdateHandle | null> {
+  // A check that started just before a download/install owns pendingUpdate.
+  // Let it finish before reading the handle so it cannot replace and close a
+  // resource while that resource is being downloaded or installed.
+  if (checkInFlight) await checkInFlight
+  if (installedVersionAwaitingRestart) return null
   if (
     pendingUpdate &&
     (pendingDownloaded || Date.now() - pendingUpdateAt <= PENDING_UPDATE_TTL_MS)
@@ -270,6 +277,7 @@ export type DownloadUpdateResult = "downloaded" | "noLongerAvailable" | "web"
 /** Download and verify the pending package without installing it. */
 export function downloadUpdate(onProgress?: UpdateProgressHandler): Promise<DownloadUpdateResult> {
   if (!isTauri()) return Promise.resolve("web")
+  if (installedVersionAwaitingRestart) return Promise.resolve("noLongerAvailable")
   if (pendingDownloaded) return Promise.resolve("downloaded")
   if (downloadInFlight) return downloadInFlight
 
@@ -312,6 +320,7 @@ export async function relaunchAfterUpdate(): Promise<void> {
 /** Install an already-downloaded update, downloading first when necessary. */
 export function installUpdate(options: InstallUpdateOptions = {}): Promise<InstallUpdateResult> {
   if (!isTauri()) return Promise.resolve("web")
+  if (installedVersionAwaitingRestart) return Promise.resolve("installed")
   if (installInFlight) return installInFlight
 
   const task = (async () => {
@@ -325,6 +334,7 @@ export function installUpdate(options: InstallUpdateOptions = {}): Promise<Insta
       throw classifyError(error, "install")
     }
 
+    installedVersionAwaitingRestart = handle.version
     pendingUpdate = null
     pendingUpdateAt = 0
     pendingDownloaded = false
@@ -346,6 +356,7 @@ export async function downloadAndInstallUpdate(
   onProgress?: UpdateProgressHandler,
   options: InstallUpdateOptions = {}
 ): Promise<InstallUpdateResult> {
+  if (installedVersionAwaitingRestart) return "installed"
   const downloadResult = await downloadUpdate(onProgress)
   if (downloadResult !== "downloaded") return downloadResult
   return installUpdate(options)
@@ -357,6 +368,7 @@ export function __resetPendingUpdate(): void {
   pendingUpdate = null
   pendingUpdateAt = 0
   pendingDownloaded = false
+  installedVersionAwaitingRestart = null
   checkInFlight = null
   downloadInFlight = null
   installInFlight = null
