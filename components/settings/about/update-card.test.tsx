@@ -241,7 +241,7 @@ describe("<UpdateCard />", () => {
   })
 
   it("surfaces updater preference persistence failures", async () => {
-    saveUpdateSettingsMock.mockRejectedValueOnce(new Error("db unavailable"))
+    saveUpdateSettingsMock.mockRejectedValueOnce("db unavailable")
     render(<UpdateCard />)
 
     fireEvent.click(screen.getByTestId("auto-download-updates-toggle"))
@@ -332,7 +332,11 @@ describe("<UpdateCard />", () => {
     fireEvent.click(screen.getByTestId("install-update"))
 
     await waitFor(() => expect(screen.getByTestId("restart-update")).toBeInTheDocument())
-    expect(screen.getByTestId("check-updates")).toBeDisabled()
+    const checkButton = screen.getByTestId("check-updates")
+    expect(checkButton).toBeDisabled()
+    checkButton.removeAttribute("disabled")
+    fireEvent.click(checkButton)
+    expect(checkMock).toHaveBeenCalledTimes(1)
     expect(relaunchMock).not.toHaveBeenCalled()
     fireEvent.click(screen.getByTestId("restart-update"))
     await waitFor(() => expect(relaunchMock).toHaveBeenCalled())

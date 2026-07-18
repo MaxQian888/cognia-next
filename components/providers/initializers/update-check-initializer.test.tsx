@@ -414,6 +414,14 @@ describe("UpdateCheckInitializer", () => {
       "about.autoUpdateRelaunchFailed",
       expect.objectContaining({ phase: "relaunch" })
     )
+    const recoveryOptions = toastMock.error.mock.calls.at(-1)?.[1] as {
+      action: { onClick: () => void }
+    }
+    await act(async () => {
+      recoveryOptions.action.onClick()
+      await Promise.resolve()
+    })
+    expect(relaunchAfterUpdateMock).toHaveBeenCalled()
   })
 
   it("does not fetch merely because download or relaunch preferences changed", async () => {

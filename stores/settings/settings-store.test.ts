@@ -366,6 +366,32 @@ describe("save", () => {
       updates: { ...initialUpdates, autoDownload: true, useProxy: false },
     })
   })
+
+  it("continues the updater settings queue after a failed write", async () => {
+    const initialUpdates = {
+      autoCheck: true,
+      checkIntervalMinutes: 360,
+      autoDownload: false,
+      relaunchAfterInstall: true,
+      requestTimeoutSeconds: 30,
+      useProxy: true,
+    }
+    useSettingsStore.setState({ settings: baseSettings({ updates: initialUpdates }) })
+    dbSettings.saveSettings
+      .mockRejectedValueOnce(new Error("db unavailable"))
+      .mockImplementationOnce(async (patch) => baseSettings(patch))
+
+    await expect(
+      useSettingsStore.getState().saveUpdateSettings({ autoDownload: true })
+    ).rejects.toThrow("db unavailable")
+    await expect(
+      useSettingsStore.getState().saveUpdateSettings({ useProxy: false })
+    ).resolves.toBeUndefined()
+
+    expect(dbSettings.saveSettings).toHaveBeenLastCalledWith({
+      updates: { ...initialUpdates, useProxy: false },
+    })
+  })
 })
 
 // ---- resetSettings ----
