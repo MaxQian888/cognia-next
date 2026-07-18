@@ -38,6 +38,30 @@ describe("ExternalAgentPlan", () => {
     expect(container).toBeEmptyDOMElement()
   })
 
+  it("renders an identified file plan without item entries", () => {
+    render(
+      wrap(
+        <ExternalAgentPlan
+          entries={[]}
+          document={{ planId: "file", kind: "file", uri: "file:///work/PLAN.md" }}
+        />
+      )
+    )
+    expect(screen.getByText("file:///work/PLAN.md")).toBeInTheDocument()
+  })
+
+  it("renders identified Markdown plan content", () => {
+    render(
+      wrap(
+        <ExternalAgentPlan
+          entries={[]}
+          document={{ planId: "markdown", kind: "markdown", content: "# Ship it" }}
+        />
+      )
+    )
+    expect(screen.getByText("# Ship it")).toBeInTheDocument()
+  })
+
   it("renders null when entries is undefined-like (null guard)", () => {
     // The component guards `!entries || entries.length === 0`
     const { container } = render(wrap(<ExternalAgentPlan entries={[] as AcpPlanEntry[]} />))

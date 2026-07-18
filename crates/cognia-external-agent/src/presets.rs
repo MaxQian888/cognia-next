@@ -42,13 +42,20 @@ const BINARY_ALLOWLIST: &[&str] = &[
     "cursor-agent",
     "cline",
     "gemini",
+    "copilot",
+    "kiro-cli",
+    "droid",
 ];
 
 /// Packages `npx` may execute (`npx [-y|--yes] <package> …`).
 const NPX_PACKAGE_ALLOWLIST: &[&str] = &[
+    "@agentclientprotocol/claude-agent-acp",
     "@zed-industries/claude-code-acp",
     "@zed-industries/codex-acp",
     "@anthropic-ai/claude-code",
+    "@google/gemini-cli",
+    "@qwen-code/qwen-code",
+    "pi-acp",
     "opencode-ai",
 ];
 
@@ -75,6 +82,13 @@ const ENV_PREFIX_ALLOWLIST: &[&str] = &[
     "GOOGLE_",
     "OPENCODE_",
     "CURSOR_",
+    "COPILOT_",
+    "GITHUB_",
+    "GH_",
+    "QWEN_",
+    "KIRO_",
+    "FACTORY_",
+    "DROID_",
     "ACP_",
     "COGNIA_AGENT_",
 ];
@@ -298,6 +312,9 @@ mod tests {
             "cline",
             "gemini",
             "claude-code-acp",
+            "copilot",
+            "kiro-cli",
+            "droid",
         ] {
             assert!(p.validate(config(bin, &[])).is_ok(), "{bin} must pass");
         }
@@ -321,8 +338,18 @@ mod tests {
     fn npx_requires_an_allowlisted_package() {
         let (_tmp, p) = policy(false);
         assert!(p
-            .validate(config("npx", &["-y", "@zed-industries/claude-code-acp"]))
+            .validate(config(
+                "npx",
+                &["-y", "@agentclientprotocol/claude-agent-acp"]
+            ))
             .is_ok());
+        assert!(p
+            .validate(config("npx", &["-y", "@google/gemini-cli", "--acp"]))
+            .is_ok());
+        assert!(p
+            .validate(config("npx", &["-y", "@qwen-code/qwen-code", "--acp"]))
+            .is_ok());
+        assert!(p.validate(config("npx", &["-y", "pi-acp"])).is_ok());
         assert!(p
             .validate(config("npx", &["--yes", "opencode-ai", "--acp"]))
             .is_ok());
@@ -386,6 +413,9 @@ mod tests {
         cfg.env = HashMap::from([
             ("ANTHROPIC_API_KEY".to_string(), "sk".to_string()),
             ("CLAUDE_CODE_OAUTH_TOKEN".to_string(), "oat".to_string()),
+            ("GH_TOKEN".to_string(), "gh".to_string()),
+            ("QWEN_API_KEY".to_string(), "qwen".to_string()),
+            ("FACTORY_API_KEY".to_string(), "factory".to_string()),
             ("HTTPS_PROXY".to_string(), "http://p".to_string()),
             ("LD_PRELOAD".to_string(), "/evil.so".to_string()),
             ("NODE_OPTIONS".to_string(), "--require evil".to_string()),
@@ -398,6 +428,9 @@ mod tests {
         let validated = p.validate(cfg).expect("valid command");
         assert!(validated.config.env.contains_key("ANTHROPIC_API_KEY"));
         assert!(validated.config.env.contains_key("CLAUDE_CODE_OAUTH_TOKEN"));
+        assert!(validated.config.env.contains_key("GH_TOKEN"));
+        assert!(validated.config.env.contains_key("QWEN_API_KEY"));
+        assert!(validated.config.env.contains_key("FACTORY_API_KEY"));
         assert!(validated.config.env.contains_key("HTTPS_PROXY"));
         assert_eq!(
             validated.dropped_env_keys,
@@ -408,7 +441,7 @@ mod tests {
                 "PATH"
             ]
         );
-        assert_eq!(validated.config.env.len(), 3);
+        assert_eq!(validated.config.env.len(), 6);
     }
 
     #[test]

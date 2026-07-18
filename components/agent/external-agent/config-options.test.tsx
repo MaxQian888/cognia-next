@@ -39,6 +39,16 @@ function makeOption(overrides: Partial<AcpConfigOption> = {}): AcpConfigOption {
   }
 }
 
+function makeBooleanOption(currentValue = false): AcpConfigOption {
+  return {
+    id: "autoFormat",
+    name: "Auto format",
+    description: "Format edited files",
+    type: "boolean",
+    currentValue,
+  }
+}
+
 const noop = jest.fn().mockResolvedValue([])
 
 // --------------------------------------------------------------------------
@@ -112,6 +122,62 @@ describe("ExternalAgentConfigOptions", () => {
     })
 
     expect(onSetConfigOption).toHaveBeenCalledWith("model", "gpt-5")
+  })
+
+  it("renders boolean config options as switches and sends a boolean value", async () => {
+    const onSetConfigOption = jest.fn().mockResolvedValue([])
+    render(
+      wrap(
+        <ExternalAgentConfigOptions
+          configOptions={[makeBooleanOption(false)]}
+          onSetConfigOption={onSetConfigOption}
+        />
+      )
+    )
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("switch", { name: "Auto format" }))
+    })
+
+    expect(onSetConfigOption).toHaveBeenCalledWith("autoFormat", true)
+  })
+
+  it("renders a boolean switch in compact mode", () => {
+    render(
+      wrap(
+        <ExternalAgentConfigOptions
+          configOptions={[makeBooleanOption(true)]}
+          onSetConfigOption={noop}
+          compact
+        />
+      )
+    )
+
+    expect(screen.getByRole("switch", { name: "Auto format" })).toBeChecked()
+  })
+
+  it("renders values from grouped select options", async () => {
+    render(
+      wrap(
+        <ExternalAgentConfigOptions
+          configOptions={[
+            makeOption({
+              options: [
+                {
+                  group: "recommended",
+                  name: "Recommended",
+                  options: [{ value: "gpt-5", name: "GPT-5" }],
+                },
+              ],
+            }),
+          ]}
+          onSetConfigOption={noop}
+        />
+      )
+    )
+
+    fireEvent.click(screen.getByRole("combobox"))
+    expect(await screen.findByText("GPT-5")).toBeInTheDocument()
   })
 
   it("does NOT call onSetConfigOption when the value is unchanged (handleChange guard)", () => {

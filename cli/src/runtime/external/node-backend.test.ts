@@ -23,6 +23,9 @@ describe("NodeExternalAgentBackend", () => {
       {
         CODEX_ACCESS_TOKEN: "configured-codex",
         CLAUDE_CODE_OAUTH_TOKEN: "configured-claude",
+        GH_TOKEN: "configured-copilot",
+        QWEN_API_KEY: "configured-qwen",
+        FACTORY_API_KEY: "configured-droid",
         NODE_OPTIONS: "--inspect",
         PATH: "/untrusted/bin",
       }
@@ -33,6 +36,9 @@ describe("NodeExternalAgentBackend", () => {
       ANTHROPIC_API_KEY: "plain-anthropic",
       CODEX_ACCESS_TOKEN: "configured-codex",
       CLAUDE_CODE_OAUTH_TOKEN: "configured-claude",
+      GH_TOKEN: "configured-copilot",
+      QWEN_API_KEY: "configured-qwen",
+      FACTORY_API_KEY: "configured-droid",
       DISABLE_AUTO_UPDATE: "1",
       PWD: "/work",
     })
@@ -105,7 +111,8 @@ describe("NodeExternalAgentBackend", () => {
   })
 
   it.each([
-    ["npx", ["-y", "@google/gemini-cli", "--experimental-acp"]],
+    ["npx", ["-y", "@agentclientprotocol/claude-agent-acp"]],
+    ["npx", ["-y", "@google/gemini-cli", "--acp"]],
     ["npx", ["-y", "@qwen-code/qwen-code", "--acp"]],
     ["npx", ["-y", "pi-acp"]],
     ["copilot", ["--acp"]],

@@ -190,14 +190,14 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
         executionMode: "direct",
         defaultPermissionMode: "default",
         tags: ["coding", "anthropic", "claude"],
-        docsUrl: "https://docs.anthropic.com/en/docs/claude-code/overview",
+        docsUrl: "https://github.com/agentclientprotocol/claude-agent-acp",
         envVarHint:
           "Reuses your active Claude subscription (Claude Code sign-in) or ANTHROPIC_API_KEY automatically.",
         setupHint:
-          "Runs Claude Code over ACP via the official Zed adapter (`npx -y @zed-industries/claude-code-acp`) — no local install needed; it wraps the Claude Agent SDK.",
+          "Runs Claude Code through the ACP registry adapter (`npx -y @agentclientprotocol/claude-agent-acp`) — no local install needed; it wraps the Claude Agent SDK.",
         process: {
           command: "npx",
-          args: ["-y", "@zed-industries/claude-code-acp"],
+          args: ["-y", "@agentclientprotocol/claude-agent-acp"],
         },
         icon: "anthropic",
       },
@@ -224,10 +224,10 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
         docsUrl: "https://github.com/google-gemini/gemini-cli",
         envVarHint: "Requires GOOGLE_API_KEY environment variable",
         setupHint:
-          "Launches Gemini CLI in ACP mode (`gemini --experimental-acp`); the bare `--stdio` flag would drop it into interactive mode and hang.",
+          "Launches Gemini CLI in its current ACP mode (`gemini --acp`); the deprecated `--experimental-acp` alias is intentionally not used.",
         process: {
           command: "npx",
-          args: ["-y", "@google/gemini-cli", "--experimental-acp"],
+          args: ["-y", "@google/gemini-cli", "--acp"],
         },
         icon: "google",
       },

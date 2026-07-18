@@ -239,7 +239,12 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
         // ACP session/new requires the field even when no MCP servers are
         // forwarded. Keep v1 intentionally empty rather than leaking the
         // built-in sidecar's unrelated MCP configuration into the child.
-        context: { custom: { mcpServers: [] } },
+        context: {
+          custom: {
+            mcpServers: [],
+            additionalDirectories: params.config.additionalRoots ?? [],
+          },
+        },
         workingDirectory: params.config.cwd,
         ...(opts.signal ? { signal: opts.signal } : {}),
         ...(opts.timeoutMs ? { timeout: opts.timeoutMs } : {}),

@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
-import type { AcpPlanEntry } from "@/types/agent/external-agent"
+import type { AcpPlanEntry, ExternalAgentPlanDocument } from "@/types/agent/external-agent"
 
 // ============================================================================
 // Types
@@ -24,6 +24,8 @@ export interface ExternalAgentPlanProps {
   entries: AcpPlanEntry[]
   /** Current step index (0-based) */
   currentStep?: number
+  /** ACP identified file/Markdown plan to display when the plan is not item-based. */
+  document?: ExternalAgentPlanDocument | null
   /** Whether to show compact view */
   compact?: boolean
   /** Custom class name */
@@ -118,13 +120,33 @@ function PlanEntry({ entry, index, isActive, compact }: PlanEntryProps) {
 export function ExternalAgentPlan({
   entries,
   currentStep,
+  document,
   compact = false,
   className,
 }: ExternalAgentPlanProps) {
   const t = useTranslations("externalAgent")
 
-  if (!entries || entries.length === 0) {
+  if ((!entries || entries.length === 0) && !document) {
     return null
+  }
+
+  if (document) {
+    const value = document.kind === "file" ? document.uri : document.content
+    return (
+      <div className={cn("rounded-lg border bg-card", className)}>
+        <div className="border-b p-3">
+          <h4 className="text-sm font-medium">{t("executionPlan")}</h4>
+        </div>
+        <pre
+          className={cn(
+            "max-h-[300px] overflow-auto whitespace-pre-wrap break-all p-3 text-xs",
+            compact && "max-h-[160px]"
+          )}
+        >
+          {value}
+        </pre>
+      </div>
+    )
   }
 
   const completedCount = entries.filter((e) => e.status === "completed").length

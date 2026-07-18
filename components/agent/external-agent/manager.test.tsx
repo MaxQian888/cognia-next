@@ -814,7 +814,14 @@ describe("ExternalAgentManager", () => {
 
   it("invokes resumeSession when the resume button is clicked", async () => {
     const resumeSession = jest.fn().mockResolvedValue(undefined)
-    const listSessions = jest.fn().mockResolvedValue([{ sessionId: "s1", title: "Saved" }])
+    const listSessions = jest.fn().mockResolvedValue([
+      {
+        sessionId: "s1",
+        title: "Saved",
+        cwd: "/work",
+        additionalDirectories: ["/shared"],
+      },
+    ])
     const agent = makeAgent({
       transport: "http",
       process: undefined,
@@ -846,12 +853,22 @@ describe("ExternalAgentManager", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: en.externalAgent.manager.resume }))
     })
-    expect(resumeSession).toHaveBeenCalledWith("s1")
+    expect(resumeSession).toHaveBeenCalledWith("s1", {
+      cwd: "/work",
+      additionalDirectories: ["/shared"],
+    })
   })
 
   it("invokes forkSession when the fork button is clicked", async () => {
     const forkSession = jest.fn().mockResolvedValue(undefined)
-    const listSessions = jest.fn().mockResolvedValue([{ sessionId: "s2", title: "Forked" }])
+    const listSessions = jest.fn().mockResolvedValue([
+      {
+        sessionId: "s2",
+        title: "Forked",
+        cwd: "/work",
+        additionalDirectories: ["/shared"],
+      },
+    ])
     const agent = makeAgent({
       transport: "http",
       process: undefined,
@@ -883,7 +900,10 @@ describe("ExternalAgentManager", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: en.externalAgent.manager.fork }))
     })
-    expect(forkSession).toHaveBeenCalledWith("s2")
+    expect(forkSession).toHaveBeenCalledWith("s2", {
+      cwd: "/work",
+      additionalDirectories: ["/shared"],
+    })
   })
 
   it("toasts a validation error when the endpoint field is empty for HTTP transport", async () => {

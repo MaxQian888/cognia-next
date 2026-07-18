@@ -30,7 +30,50 @@ describe("CLI external-agent host branch", () => {
   it("reads and writes ACP text files through node fs", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-host-fs-"))
     const file = path.join(dir, "note.txt")
-    await agentWriteTextFile(file, "hello")
-    await expect(agentReadTextFile(file)).resolves.toBe("hello")
+    await agentWriteTextFile(file, "hello", [dir])
+    await expect(agentReadTextFile(file, [dir])).resolves.toBe("hello")
+  })
+
+  it("rejects lexical and symlink escapes from ACP session roots", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-host-root-"))
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-host-outside-"))
+    const secret = path.join(outside, "secret.txt")
+    fs.writeFileSync(secret, "secret")
+    const link = path.join(root, "escape")
+    fs.symlinkSync(outside, link, "dir")
+
+    await expect(agentReadTextFile(secret, [root])).rejects.toThrow(/outside.*workspace roots/i)
+    await expect(agentReadTextFile(path.join(link, "secret.txt"), [root])).rejects.toThrow(
+      /outside.*workspace roots/i
+    )
+    await expect(agentWriteTextFile(path.join(link, "new.txt"), "x", [root])).rejects.toThrow(
+      /outside.*workspace roots/i
+    )
+    expect(fs.existsSync(path.join(outside, "new.txt"))).toBe(false)
+  })
+
+  it("rejects relative paths and missing session roots", async () => {
+    await expect(agentReadTextFile("relative.txt", [process.cwd()])).rejects.toThrow(/absolute/i)
+    await expect(agentWriteTextFile("relative.txt", "x", [process.cwd()])).rejects.toThrow(
+      /absolute/i
+    )
+    await expect(
+      agentReadTextFile(path.resolve("package.json"), ["/missing/root"])
+    ).rejects.toThrow(/no valid.*roots/i)
+  })
+
+  it("rejects missing parent directories and final-component symlinks", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-host-boundary-"))
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-host-target-"))
+    const target = path.join(outside, "target.txt")
+    fs.writeFileSync(target, "untouched")
+    const link = path.join(root, "linked.txt")
+    fs.symlinkSync(target, link)
+
+    await expect(agentWriteTextFile(link, "changed", [root])).rejects.toThrow()
+    await expect(
+      agentWriteTextFile(path.join(root, "missing", "file.txt"), "x", [root])
+    ).rejects.toThrow()
+    expect(fs.readFileSync(target, "utf8")).toBe("untouched")
   })
 })

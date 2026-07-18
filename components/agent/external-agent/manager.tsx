@@ -895,7 +895,14 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
   const refreshSessionsFailedMessage = tManager("refreshSessionsFailed")
   const [addDialogOpen, setAddDialogOpen] = useState(false)
   const [sessionList, setSessionList] = useState<
-    Array<{ sessionId: string; title?: string; createdAt?: string; updatedAt?: string }>
+    Array<{
+      sessionId: string
+      cwd?: string
+      additionalDirectories?: string[]
+      title?: string
+      createdAt?: string
+      updatedAt?: string
+    }>
   >([])
   const [isLoadingSessions, setIsLoadingSessions] = useState(false)
 
@@ -913,6 +920,7 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
     availableCommands,
     planEntries,
     planStep,
+    planDocument,
     configOptions,
     addAgent,
     removeAgent,
@@ -1146,7 +1154,12 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
     }
     setIsLoadingSessions(true)
     try {
-      const sessions = await listSessions(activeAgentId)
+      const configuredCwd = agents.find((agent) => agent.config.id === activeAgentId)?.config
+        .process?.cwd
+      const sessions = await listSessions(
+        activeAgentId,
+        configuredCwd ? { cwd: configuredCwd } : undefined
+      )
       setSessionList(sessions)
     } catch (err) {
       const unsupported = isExternalAgentSessionExtensionUnsupportedForMethod(err, "session/list")
@@ -1159,6 +1172,7 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
     }
   }, [
     activeAgentId,
+    agents,
     isActiveAgentConnected,
     isActiveAgentExecutable,
     listSupport?.state,
@@ -1170,7 +1184,11 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
   const handleResumeSession = useCallback(
     async (sessionId: string) => {
       try {
-        await resumeSession(sessionId)
+        const source = sessionList.find((session) => session.sessionId === sessionId)
+        const options = source?.cwd
+          ? { cwd: source.cwd, additionalDirectories: source.additionalDirectories }
+          : undefined
+        await resumeSession(sessionId, options)
         await refreshSessions()
       } catch (err) {
         const unsupported = isExternalAgentSessionExtensionUnsupportedForMethod(
@@ -1184,13 +1202,17 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
         toast.error(getErrorMessage(err, tManager("resumeSessionFailed")))
       }
     },
-    [resumeSession, refreshSessions, tManager, getErrorMessage]
+    [resumeSession, refreshSessions, sessionList, tManager, getErrorMessage]
   )
 
   const handleForkSession = useCallback(
     async (sessionId: string) => {
       try {
-        await forkSession(sessionId)
+        const source = sessionList.find((session) => session.sessionId === sessionId)
+        const options = source?.cwd
+          ? { cwd: source.cwd, additionalDirectories: source.additionalDirectories }
+          : undefined
+        await forkSession(sessionId, options)
         await refreshSessions()
       } catch (err) {
         const unsupported = isExternalAgentSessionExtensionUnsupportedForMethod(err, "session/fork")
@@ -1201,7 +1223,7 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
         toast.error(getErrorMessage(err, tManager("forkSessionFailed")))
       }
     },
-    [forkSession, refreshSessions, tManager, getErrorMessage]
+    [forkSession, refreshSessions, sessionList, tManager, getErrorMessage]
   )
 
   const mapAcpOptions = useCallback((options?: AcpPermissionOption[]) => {
@@ -1681,7 +1703,7 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
           />
         )}
 
-        {(availableCommands.length > 0 || planEntries.length > 0) &&
+        {(availableCommands.length > 0 || planEntries.length > 0 || planDocument) &&
           isActiveAgentConnected &&
           isActiveAgentExecutable && (
             <div className="flex flex-col gap-3">
@@ -1692,7 +1714,11 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
                   isExecuting={commandsDisabled}
                 />
               </div>
-              <ExternalAgentPlan entries={planEntries} currentStep={planStep ?? undefined} />
+              <ExternalAgentPlan
+                entries={planEntries}
+                currentStep={planStep ?? undefined}
+                document={planDocument}
+              />
             </div>
           )}
       </div>

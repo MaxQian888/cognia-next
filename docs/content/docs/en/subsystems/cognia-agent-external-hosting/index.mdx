@@ -58,7 +58,7 @@ cognia-agent chat --backend builtin
 # Prefer native `codex app-server`; fall back to the Codex ACP shim
 cognia-agent chat --backend codex
 
-# Claude Code through the Zed ACP adapter
+# Claude Code through the ACP registry adapter
 cognia-agent chat --backend claude-code
 
 # Persist the selection in ~/.cognia/config.json
@@ -67,8 +67,11 @@ cognia-agent config set agentBackend codex
 
 The `codex` alias checks for the official `codex` executable. If present, it materializes the native
 `codex-app-server` preset; otherwise it uses `npx -y @zed-industries/codex-acp`. Claude Code uses
-`npx -y @zed-industries/claude-code-acp`. Although the flag accepts a preset id, the CLI process host
-also applies an executable/package allowlist; Codex and Claude Code are the verified v1 targets.
+`npx -y @agentclientprotocol/claude-agent-acp`. Although the flag accepts a preset id, the CLI process host
+also applies an executable/package allowlist. The runner image now carries the complete built-in preset set:
+Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, Qwen Code, Kiro CLI, Factory Droid, Pi plus `pi-acp`,
+OpenCode, Cline, and the optional Cursor Agent installer. ACP-capable presets use their current native ACP
+mode or registry adapter rather than historical compatibility flags.
 
 ## Reading order
 
@@ -81,6 +84,9 @@ also applies an executable/package allowlist; Codex and Claude Code are the veri
 ## Verification status
 
 On 2026-07-16, real strict-sandbox turns completed through both paths:
+
+The Claude preset has since migrated to the ACP registry package; the entry below intentionally
+records the exact older package used by that historical smoke run.
 
 - `codex-cli 0.144.4 app-server` streamed `PHASE4_CODEX_OK` using native Codex login fallback.
 - `@zed-industries/claude-code-acp@0.16.2` streamed `PHASE4_CLAUDE_OK` and shut down cleanly.

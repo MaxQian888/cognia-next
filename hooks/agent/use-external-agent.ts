@@ -29,6 +29,7 @@ import type {
   AcpAuthMethod,
   AcpConfigOption,
   ExternalAgentLastRunSnapshot,
+  ExternalAgentPlanDocument,
   ExternalAgentValiditySnapshot,
 } from "@/types/agent/external-agent"
 import type { AgentTool } from "@/lib/ai/agent"
@@ -44,6 +45,10 @@ import {
 const externalAgentLogger = loggers.agent.child("external-agent-hook")
 import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@/lib/ai/agent/external/session-extension-errors"
 import { normalizeExternalAgentValiditySnapshot } from "@/lib/ai/agent/external/canonical-contract"
+import type {
+  SessionCreateOptions,
+  SessionListOptions,
+} from "@/lib/ai/agent/external/protocol-adapter"
 
 // ============================================================================
 // Validity projection
@@ -126,6 +131,8 @@ export interface UseExternalAgentState {
   planEntries: AcpPlanEntry[]
   /** Current plan step index */
   planStep: number | null
+  /** Active ACP file/Markdown identified plan. */
+  planDocument: ExternalAgentPlanDocument | null
   /** Streaming response text */
   streamingResponse: string
   /** Last execution result */
@@ -157,15 +164,25 @@ export interface UseExternalAgentActions {
   /** Set the active agent */
   setActiveAgent: (agentId: string | null) => void
   /** Create a new session with the active agent */
-  createSession: (options?: { systemPrompt?: string }) => Promise<ExternalAgentSession>
+  createSession: (options?: SessionCreateOptions) => Promise<ExternalAgentSession>
   /** Close a session */
   closeSession: (sessionId: string) => Promise<void>
   /** List existing sessions (ACP extension) */
   listSessions: (
-    agentId?: string
-  ) => Promise<Array<{ sessionId: string; title?: string; createdAt?: string; updatedAt?: string }>>
+    agentId?: string,
+    options?: SessionListOptions
+  ) => Promise<
+    Array<{
+      sessionId: string
+      cwd?: string
+      additionalDirectories?: string[]
+      title?: string
+      createdAt?: string
+      updatedAt?: string
+    }>
+  >
   /** Fork a session (ACP extension) */
-  forkSession: (sessionId: string) => Promise<ExternalAgentSession>
+  forkSession: (sessionId: string, options?: SessionCreateOptions) => Promise<ExternalAgentSession>
   /** Trigger server-side context compaction (Codex app-server only) */
   compactSession: (sessionId: string) => Promise<void>
   /** Whether the active agent supports server-side context compaction */
@@ -173,7 +190,7 @@ export interface UseExternalAgentActions {
   /** Resume a session (ACP extension) */
   resumeSession: (
     sessionId: string,
-    options?: { systemPrompt?: string }
+    options?: SessionCreateOptions
   ) => Promise<ExternalAgentSession>
   /** Execute a prompt on the active agent */
   execute: (prompt: string, options?: ExternalAgentExecutionOptions) => Promise<ExternalAgentResult>
@@ -199,7 +216,7 @@ export interface UseExternalAgentActions {
   /** Authenticate with the agent */
   authenticate: (methodId: string, credentials?: Record<string, unknown>) => Promise<void>
   /** Set a session config option */
-  setConfigOption: (configId: string, value: string) => Promise<AcpConfigOption[]>
+  setConfigOption: (configId: string, value: string | boolean) => Promise<AcpConfigOption[]>
   /** Get session config options */
   getConfigOptions: () => AcpConfigOption[]
   /** Get agent tools as Cognia AgentTools */
@@ -303,6 +320,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
   const [availableCommands, setAvailableCommands] = useState<AcpAvailableCommand[]>([])
   const [planEntries, setPlanEntries] = useState<AcpPlanEntry[]>([])
   const [planStep, setPlanStep] = useState<number | null>(null)
+  const [planDocument, setPlanDocument] = useState<ExternalAgentPlanDocument | null>(null)
   const [streamingResponse, setStreamingResponse] = useState("")
   const [configOptions, setConfigOptions] = useState<AcpConfigOption[]>([])
   const [lastResult, setLastResult] = useState<ExternalAgentResult | null>(null)
@@ -603,8 +621,15 @@ export function useExternalAgent(): UseExternalAgentReturn {
         setAvailableCommands([])
         setPlanEntries([])
         setPlanStep(null)
+        setPlanDocument(null)
         return
       }
+
+      setAvailableCommands([])
+      setPlanEntries([])
+      setPlanStep(null)
+      setPlanDocument(null)
+      setConfigOptions([])
 
       const manager = await getManager()
 
@@ -617,6 +642,18 @@ export function useExternalAgent(): UseExternalAgentReturn {
         if (event.type === "plan_update") {
           setPlanEntries(event.entries)
           setPlanStep(event.step ?? null)
+          if (event.removed) {
+            setPlanDocument((current) => (current?.planId === event.planId ? null : current))
+          } else if (event.planId && (event.kind === "file" || event.kind === "markdown")) {
+            setPlanDocument({
+              planId: event.planId,
+              kind: event.kind,
+              ...(event.uri ? { uri: event.uri } : {}),
+              ...(event.content !== undefined ? { content: event.content } : {}),
+            })
+          } else if (event.kind === "items" || !event.kind) {
+            setPlanDocument(null)
+          }
         }
         if (event.type === "config_options_update") {
           setConfigOptions(event.configOptions)
@@ -625,7 +662,9 @@ export function useExternalAgent(): UseExternalAgentReturn {
           // Sync configOptions mode value if present
           setConfigOptions((prev) =>
             prev.map((opt) =>
-              opt.category === "mode" ? { ...opt, currentValue: event.modeId } : opt
+              opt.type === "select" && opt.category === "mode"
+                ? { ...opt, currentValue: event.modeId }
+                : opt
             )
           )
         }
@@ -638,6 +677,9 @@ export function useExternalAgent(): UseExternalAgentReturn {
         const sessionPlan = session?.metadata?.plan as AcpPlanEntry[] | undefined
         const sessionConfigOptions = session?.metadata?.configOptions as
           AcpConfigOption[] | undefined
+        const sessionPlans = session?.metadata?.plans as
+          | Record<string, { type?: string; planId?: string; uri?: string; content?: string }>
+          | undefined
         if (sessionCommands) {
           setAvailableCommands(sessionCommands)
         }
@@ -648,6 +690,21 @@ export function useExternalAgent(): UseExternalAgentReturn {
         }
         if (sessionConfigOptions) {
           setConfigOptions(sessionConfigOptions)
+        }
+        if (sessionPlans) {
+          const document = Object.values(sessionPlans)
+            .reverse()
+            .find((plan) => plan.type === "file" || plan.type === "markdown")
+          setPlanDocument(
+            document?.planId && (document.type === "file" || document.type === "markdown")
+              ? {
+                  planId: document.planId,
+                  kind: document.type,
+                  ...(document.uri ? { uri: document.uri } : {}),
+                  ...(document.content !== undefined ? { content: document.content } : {}),
+                }
+              : null
+          )
         }
       }
     }
@@ -896,7 +953,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
 
   // Create a new session
   const createSession = useCallback(
-    async (options?: { systemPrompt?: string }): Promise<ExternalAgentSession> => {
+    async (options?: SessionCreateOptions): Promise<ExternalAgentSession> => {
       if (!activeAgentId) {
         throw new Error("No active agent selected")
       }
@@ -906,9 +963,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
 
       try {
         const manager = await getManager()
-        const session = await manager.createSession(activeAgentId, {
-          systemPrompt: options?.systemPrompt,
-        })
+        const session = await manager.createSession(activeAgentId, options)
         setActiveSession(session)
         executingSessionIdRef.current = session.id
         return session
@@ -984,7 +1039,8 @@ export function useExternalAgent(): UseExternalAgentReturn {
 
   const listSessions = useCallback(
     async (
-      agentId?: string
+      agentId?: string,
+      options?: SessionListOptions
     ): Promise<
       Array<{ sessionId: string; title?: string; createdAt?: string; updatedAt?: string }>
     > => {
@@ -995,7 +1051,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
       let manager: ExternalAgentManagerType | null = null
       try {
         manager = await getManager()
-        return await manager.listSessions(targetAgentId)
+        return await manager.listSessions(targetAgentId, options)
       } catch (err) {
         const unsupported = isExternalAgentSessionExtensionUnsupportedForMethod(err, "session/list")
         if (!unsupported) {
@@ -1010,14 +1066,14 @@ export function useExternalAgent(): UseExternalAgentReturn {
   )
 
   const forkSession = useCallback(
-    async (sessionId: string): Promise<ExternalAgentSession> => {
+    async (sessionId: string, options?: SessionCreateOptions): Promise<ExternalAgentSession> => {
       if (!activeAgentId) {
         throw new Error("No active agent selected")
       }
       let manager: ExternalAgentManagerType | null = null
       try {
         manager = await getManager()
-        const forked = await manager.forkSession(activeAgentId, sessionId)
+        const forked = await manager.forkSession(activeAgentId, sessionId, options)
         setActiveSession(forked)
         executingSessionIdRef.current = forked.id
         return forked
@@ -1075,19 +1131,14 @@ export function useExternalAgent(): UseExternalAgentReturn {
   )
 
   const resumeSession = useCallback(
-    async (
-      sessionId: string,
-      options?: { systemPrompt?: string }
-    ): Promise<ExternalAgentSession> => {
+    async (sessionId: string, options?: SessionCreateOptions): Promise<ExternalAgentSession> => {
       if (!activeAgentId) {
         throw new Error("No active agent selected")
       }
       let manager: ExternalAgentManagerType | null = null
       try {
         manager = await getManager()
-        const resumed = await manager.resumeSession(activeAgentId, sessionId, {
-          systemPrompt: options?.systemPrompt,
-        })
+        const resumed = await manager.resumeSession(activeAgentId, sessionId, options)
         setActiveSession(resumed)
         executingSessionIdRef.current = resumed.id
         return resumed
@@ -1384,7 +1435,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
 
   // Set config option
   const setConfigOption = useCallback(
-    async (configId: string, value: string): Promise<AcpConfigOption[]> => {
+    async (configId: string, value: string | boolean): Promise<AcpConfigOption[]> => {
       if (!activeAgentId || !activeSession) {
         throw new Error("No active session to update")
       }
@@ -1454,6 +1505,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
     availableCommands,
     planEntries,
     planStep,
+    planDocument,
     streamingResponse,
     lastResult,
     configOptions,

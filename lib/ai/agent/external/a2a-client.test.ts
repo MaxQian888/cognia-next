@@ -4,6 +4,48 @@ import type { ExternalAgentConfig, ExternalAgentMessage } from "@/types/agent/ex
 // ── pure mapper ──────────────────────────────────────────────────────────────
 
 describe("mapA2aResult", () => {
+  it("maps A2A 1.0 response wrappers, ProtoJSON enums, and discriminator-free parts", () => {
+    const ctx: { contextId: string; taskId?: string } = { contextId: "c1" }
+    const { events, done } = mapA2aResult(
+      {
+        statusUpdate: {
+          taskId: "t-v1",
+          contextId: "c-v1",
+          status: {
+            state: "TASK_STATE_COMPLETED",
+            message: { role: "ROLE_AGENT", parts: [{ text: "v1 done" }] },
+          },
+        },
+      } as never,
+      ctx
+    )
+    expect(done).toBe(true)
+    expect(ctx).toEqual({ contextId: "c-v1", taskId: "t-v1" })
+    expect(events[0]).toMatchObject({ type: "message_delta", delta: { text: "v1 done" } })
+    expect(events.at(-1)).toMatchObject({ type: "done", success: true })
+  })
+
+  it("maps an A2A 1.0 artifactUpdate wrapper", () => {
+    const { events, done } = mapA2aResult(
+      {
+        artifactUpdate: {
+          taskId: "t-v1",
+          contextId: "c-v1",
+          artifact: {
+            artifactId: "artifact-1",
+            parts: [{ filename: "report.pdf", mediaType: "application/pdf", url: "https://x/r" }],
+          },
+        },
+      } as never,
+      { contextId: "c" }
+    )
+    expect(done).toBe(false)
+    expect(events[0]).toMatchObject({
+      type: "message_delta",
+      delta: { text: "[file: report.pdf application/pdf (https://x/r)]" },
+    })
+  })
+
   it("maps a bare agent message to a text delta + done", () => {
     const ctx: { contextId: string; taskId?: string } = { contextId: "c1" }
     const { events, done } = mapA2aResult(
@@ -133,6 +175,40 @@ function cardResponse(streaming: boolean): Response {
   } as unknown as Response
 }
 
+function v1CardResponse(streaming: boolean): Response {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({
+      name: "Remote v1",
+      supportedInterfaces: [
+        {
+          url: "https://x/v1/rpc",
+          protocolBinding: "JSONRPC",
+          protocolVersion: "1.0",
+          tenant: "tenant-1",
+        },
+      ],
+      capabilities: { streaming },
+    }),
+  } as unknown as Response
+}
+
+function interfacesCardResponse(
+  supportedInterfaces: Array<{
+    url: string
+    protocolBinding: string
+    protocolVersion: string
+    tenant?: string
+  }>
+): Response {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({ name: "Remote", supportedInterfaces, capabilities: {} }),
+  } as unknown as Response
+}
+
 function makeConfig(): ExternalAgentConfig {
   return {
     id: "a2a-1",
@@ -153,6 +229,337 @@ async function collect(it: AsyncIterable<unknown>): Promise<unknown[]> {
 }
 
 describe("A2aClientAdapter", () => {
+  it("skips unsupported interfaces and negotiates a later supported JSON-RPC interface", async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(
+      interfacesCardResponse([
+        {
+          url: "https://x/v2/rpc",
+          protocolBinding: "JSONRPC",
+          protocolVersion: "2.0",
+        },
+        {
+          url: "https://x/v1/rpc",
+          protocolBinding: "JSONRPC",
+          protocolVersion: "1.0",
+        },
+      ])
+    )
+    const a = new A2aClientAdapter({ fetchImpl })
+
+    await a.connect(makeConfig())
+
+    await a.createSession()
+    expect(a.isConnected()).toBe(true)
+  })
+
+  it("rejects an Agent Card that only advertises unsupported JSON-RPC versions", async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(
+      interfacesCardResponse([
+        {
+          url: "https://x/v2/rpc",
+          protocolBinding: "JSONRPC",
+          protocolVersion: "2.0",
+        },
+      ])
+    )
+    const a = new A2aClientAdapter({ fetchImpl })
+
+    await expect(a.connect(makeConfig())).rejects.toThrow(/supported JSON-RPC interface/i)
+  })
+
+  it("rejects an Agent Card that explicitly advertises no interfaces", async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(interfacesCardResponse([]))
+    const a = new A2aClientAdapter({ fetchImpl })
+
+    await expect(a.connect(makeConfig())).rejects.toThrow(/supported JSON-RPC interface/i)
+  })
+
+  it("rejects a path-only local file instead of sending an invalid A2A 1.0 Part", async () => {
+    const fetchImpl = jest.fn().mockResolvedValueOnce(v1CardResponse(false))
+    const a = new A2aClientAdapter({ fetchImpl })
+    await a.connect(makeConfig())
+    const session = await a.createSession()
+    const message: ExternalAgentMessage = {
+      id: "file-message",
+      role: "user",
+      timestamp: new Date(),
+      content: [{ type: "file", path: "/work/report.pdf", mimeType: "application/pdf" }],
+    }
+
+    const events = (await collect(a.prompt(session.id, message))) as Array<{
+      type: string
+      error?: string
+    }>
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "error",
+        error: expect.stringMatching(/file content or URL/i),
+      })
+    )
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it("sends a zero-byte A2A 1.0 file as an empty raw part", async () => {
+    const fetchImpl = jest
+      .fn()
+      .mockResolvedValueOnce(v1CardResponse(false))
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          result: { message: { role: "ROLE_AGENT", parts: [{ text: "ok" }] } },
+        }),
+      } as unknown as Response)
+    const a = new A2aClientAdapter({ fetchImpl })
+    await a.connect(makeConfig())
+    const session = await a.createSession()
+    const message: ExternalAgentMessage = {
+      id: "empty-file",
+      role: "user",
+      timestamp: new Date(),
+      content: [
+        {
+          type: "file",
+          path: "empty.bin",
+          content: "",
+          encoding: "base64",
+          mimeType: "application/octet-stream",
+        },
+      ],
+    }
+
+    await collect(a.prompt(session.id, message))
+
+    const body = JSON.parse(fetchImpl.mock.calls[1][1].body as string)
+    expect(body.params.message.parts).toEqual([
+      { raw: "", filename: "empty.bin", mediaType: "application/octet-stream" },
+    ])
+  })
+
+  it("reports an empty streaming response as an unsuccessful turn", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.close()
+      },
+    })
+    const fetchImpl = jest
+      .fn()
+      .mockResolvedValueOnce(v1CardResponse(true))
+      .mockResolvedValueOnce({ ok: true, status: 200, body: stream } as unknown as Response)
+    const a = new A2aClientAdapter({ fetchImpl })
+    await a.connect(makeConfig())
+    const session = await a.createSession()
+
+    const events = (await collect(a.prompt(session.id, userMessage("stream")))) as Array<{
+      type: string
+      success?: boolean
+    }>
+
+    expect(events).toContainEqual(expect.objectContaining({ type: "error" }))
+    expect(events.at(-1)).toMatchObject({ type: "done", success: false })
+  })
+
+  it("reports a still-working polled task after a dropped stream as unsuccessful", async () => {
+    const firstStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            `data: ${JSON.stringify({ result: { kind: "status-update", taskId: "task-working", status: { state: "working" } } })}\n\n`
+          )
+        )
+        controller.close()
+      },
+    })
+    const fetchImpl = jest
+      .fn()
+      .mockResolvedValueOnce(cardResponse(true))
+      .mockResolvedValueOnce({ ok: true, status: 200, body: firstStream } as unknown as Response)
+      .mockResolvedValueOnce({ ok: false, status: 404 } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          result: { kind: "task", id: "task-working", status: { state: "working" } },
+        }),
+      } as unknown as Response)
+    const a = new A2aClientAdapter({ fetchImpl })
+    await a.connect(makeConfig())
+    const session = await a.createSession()
+
+    const events = (await collect(a.prompt(session.id, userMessage("stream")))) as Array<{
+      type: string
+      success?: boolean
+    }>
+
+    expect(events).toContainEqual(expect.objectContaining({ type: "error" }))
+    expect(events.at(-1)).toMatchObject({ type: "done", success: false })
+  })
+
+  it("rejects an image part with neither URL nor content", async () => {
+    const fetchImpl = jest.fn().mockResolvedValueOnce(v1CardResponse(false))
+    const a = new A2aClientAdapter({ fetchImpl })
+    await a.connect(makeConfig())
+    const session = await a.createSession()
+    const message: ExternalAgentMessage = {
+      id: "missing-image",
+      role: "user",
+      timestamp: new Date(),
+      content: [
+        {
+          type: "image",
+          source: { type: "base64", data: undefined as unknown as string, mediaType: "image/png" },
+        },
+      ],
+    }
+
+    const events = (await collect(a.prompt(session.id, message))) as Array<{ type: string }>
+
+    expect(events).toContainEqual(expect.objectContaining({ type: "error" }))
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it("blocks PII-bearing messages before the A2A network request", async () => {
+    const fetchImpl = jest.fn().mockResolvedValueOnce(v1CardResponse(false))
+    const a = new A2aClientAdapter({ fetchImpl })
+    await a.connect(makeConfig())
+    const session = await a.createSession()
+
+    const events = (await collect(
+      a.prompt(session.id, userMessage("Contact alice@example.com"))
+    )) as Array<{ type: string; error?: string }>
+
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "error", error: expect.stringMatching(/PII gate/i) })
+    )
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it("negotiates A2A 1.0 from the Agent Card and sends its canonical JSON-RPC shape", async () => {
+    const card = v1CardResponse(false)
+    const sendRes = {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        jsonrpc: "2.0",
+        id: 1,
+        result: {
+          message: { messageId: "reply", role: "ROLE_AGENT", parts: [{ text: "v1 reply" }] },
+        },
+      }),
+    } as unknown as Response
+    const fetchImpl = jest.fn().mockResolvedValueOnce(card).mockResolvedValueOnce(sendRes)
+    const a = new A2aClientAdapter({ fetchImpl })
+    await a.connect(makeConfig())
+    const session = await a.createSession()
+    const events = (await collect(a.prompt(session.id, userMessage("hello")))) as Array<{
+      type: string
+    }>
+
+    const [url, init] = fetchImpl.mock.calls[1] as [string, RequestInit]
+    const body = JSON.parse(init.body as string)
+    expect(url).toBe("https://x/v1/rpc")
+    expect(init.headers).toMatchObject({ "A2A-Version": "1.0" })
+    expect(body).toMatchObject({
+      method: "SendMessage",
+      params: {
+        tenant: "tenant-1",
+        message: { role: "ROLE_USER", parts: [{ text: "hello" }] },
+      },
+    })
+    expect(events[0]).toMatchObject({ type: "message_delta", delta: { text: "v1 reply" } })
+    expect(events.at(-1)).toMatchObject({ type: "done", success: true })
+  })
+
+  it("uses A2A 1.0 streaming and cancellation method names", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            `data: ${JSON.stringify({
+              result: {
+                statusUpdate: {
+                  taskId: "task-v1",
+                  contextId: "context-v1",
+                  status: { state: "TASK_STATE_COMPLETED" },
+                },
+              },
+            })}\n\n`
+          )
+        )
+        controller.close()
+      },
+    })
+    const fetchImpl = jest
+      .fn()
+      .mockResolvedValueOnce(v1CardResponse(true))
+      .mockResolvedValueOnce({ ok: true, status: 200, body: stream } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ result: { task: { id: "task-v1" } } }),
+      } as unknown as Response)
+    const a = new A2aClientAdapter({ fetchImpl })
+    await a.connect(makeConfig())
+    const session = await a.createSession()
+    await collect(a.prompt(session.id, userMessage("stream")))
+    await a.cancel(session.id)
+
+    const streamBody = JSON.parse(fetchImpl.mock.calls[1][1].body as string)
+    const cancelBody = JSON.parse(fetchImpl.mock.calls[2][1].body as string)
+    expect(streamBody.method).toBe("SendStreamingMessage")
+    expect(cancelBody).toMatchObject({
+      method: "CancelTask",
+      params: { tenant: "tenant-1", id: "task-v1" },
+    })
+  })
+
+  it("parses CRLF-delimited SSE events split across chunks", async () => {
+    const payload = JSON.stringify({
+      result: {
+        statusUpdate: {
+          taskId: "task-crlf",
+          contextId: "context-crlf",
+          status: {
+            state: "TASK_STATE_COMPLETED",
+            message: {
+              messageId: "message-crlf",
+              role: "ROLE_AGENT",
+              parts: [{ text: "parsed CRLF event" }],
+            },
+          },
+        },
+      },
+    })
+    const bytes = new TextEncoder().encode(`data: ${payload}\r\n\r\n`)
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes.slice(0, bytes.length - 3))
+        controller.enqueue(bytes.slice(bytes.length - 3))
+        controller.close()
+      },
+    })
+    const fetchImpl = jest
+      .fn()
+      .mockResolvedValueOnce(v1CardResponse(true))
+      .mockResolvedValueOnce({ ok: true, status: 200, body: stream } as unknown as Response)
+    const a = new A2aClientAdapter({ fetchImpl })
+    await a.connect(makeConfig())
+    const session = await a.createSession()
+
+    const events = (await collect(a.prompt(session.id, userMessage("stream")))) as Array<{
+      type: string
+    }>
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "message_delta",
+        delta: { type: "text", text: "parsed CRLF event" },
+      })
+    )
+    expect(events.at(-1)).toMatchObject({ type: "done", success: true })
+  })
+
   it("connects by fetching the agent card and reflects streaming capability", async () => {
     const fetchImpl = jest.fn().mockResolvedValue(cardResponse(true))
     const a = new A2aClientAdapter({ fetchImpl })

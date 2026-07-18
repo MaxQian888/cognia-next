@@ -695,12 +695,17 @@ describe("useClaudeChat — actions", () => {
     await flush()
     subscribers.forEach((sub) => sub(chatState))
     await act(async () => {
-      await result.current.send("refactor this module")
+      await result.current.send("refactor this module", {
+        additionalDirectories: ["/shared"],
+      })
     })
     expect(setDelegationRulesMock).toHaveBeenCalled()
     expect(executeOnExternalAgentMock).toHaveBeenCalledWith(
       "refactor this module",
-      expect.objectContaining({ agentId: "ext-1" })
+      expect.objectContaining({
+        agentId: "ext-1",
+        context: { custom: { additionalDirectories: ["/shared"] } },
+      })
     )
     // Built-in SDK path did NOT run for the delegated turn.
     expect(sendPromptMock).not.toHaveBeenCalled()

@@ -32,7 +32,7 @@ import {
   shouldReconcileExitToDisconnected,
   type ExternalAgentLifecycleEvent,
 } from "./manager"
-import { protocolAdapterRegistry } from "./protocol-adapter"
+import { protocolAdapterRegistry, type SessionCreateOptions } from "./protocol-adapter"
 import type {
   ExternalAgentConfig,
   ExternalAgentEvent,
@@ -59,8 +59,8 @@ class MockAdapter {
   })
   failConnect = false
   cancelImpl: jest.Mock<Promise<void>, [string]> = jest.fn(async (_id: string) => {})
-  listSessionsImpl?: jest.Mock<Promise<unknown>, []>
-  forkSessionImpl?: jest.Mock<Promise<ExternalAgentSession>, [string]>
+  listSessionsImpl?: jest.Mock<Promise<unknown>, [unknown?]>
+  forkSessionImpl?: jest.Mock<Promise<ExternalAgentSession>, [string, SessionCreateOptions?]>
   resumeSessionImpl?: jest.Mock<Promise<ExternalAgentSession>, [string]>
   setSessionModeImpl: jest.Mock = jest.fn(async () => {})
   setSessionModelImpl: jest.Mock = jest.fn(async () => {})
@@ -177,13 +177,13 @@ class MockAdapter {
   getSessionModels(sid: string) {
     return this.getSessionModelsImpl?.(sid)
   }
-  listSessions() {
+  listSessions(options?: unknown) {
     if (!this.listSessionsImpl) return undefined
-    return this.listSessionsImpl()
+    return this.listSessionsImpl(options)
   }
-  forkSession(sid: string) {
+  forkSession(sid: string, options?: SessionCreateOptions) {
     if (!this.forkSessionImpl) return undefined
-    return this.forkSessionImpl(sid)
+    return this.forkSessionImpl(sid, options)
   }
   resumeSession(sid: string, _opts?: unknown) {
     if (!this.resumeSessionImpl) return undefined
@@ -447,6 +447,19 @@ describe("Session extensions: list/fork/resume", () => {
     expect(out).toHaveLength(1)
   })
 
+  it("listSessions forwards an ACP cwd filter and preserves workspace roots", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    currentMock.listSessionsImpl = jest.fn(async () => [
+      { sessionId: "s_1", cwd: "/work", additionalDirectories: ["/shared"] },
+    ])
+
+    const out = await m.listSessions("agent-1", { cwd: "/work" })
+
+    expect(currentMock.listSessionsImpl).toHaveBeenCalledWith({ cwd: "/work" })
+    expect(out).toEqual([{ sessionId: "s_1", cwd: "/work", additionalDirectories: ["/shared"] }])
+  })
+
   it("forkSession throws unsupported when adapter lacks forkSession", async () => {
     const m = freshManager()
     await m.addAgent(buildBaseConfig())
@@ -469,6 +482,31 @@ describe("Session extensions: list/fork/resume", () => {
     currentMock.forkSessionImpl = jest.fn(async (_id: string) => forked)
     const out = await m.forkSession("agent-1", "s_1")
     expect(out.id).toBe("s_forked")
+  })
+
+  it("forkSession forwards workspace options to the adapter", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    const forked = {
+      id: "s_forked",
+      agentId: "agent-1",
+      status: "active" as const,
+      createdAt: new Date(),
+      lastActivityAt: new Date(),
+      messages: [],
+      permissionMode: "default" as const,
+    }
+    currentMock.forkSessionImpl = jest.fn(async () => forked)
+
+    await m.forkSession("agent-1", "s_1", {
+      cwd: "/work",
+      additionalDirectories: ["/shared"],
+    })
+
+    expect(currentMock.forkSessionImpl).toHaveBeenCalledWith("s_1", {
+      cwd: "/work",
+      additionalDirectories: ["/shared"],
+    })
   })
 
   it("resumeSession throws unsupported when adapter lacks resumeSession", async () => {

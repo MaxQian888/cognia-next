@@ -8,7 +8,7 @@
 # without editing the script; bump the defaults deliberately.
 #
 # Note: the in-app claude-code ACP preset spawns
-# `npx -y @zed-industries/claude-code-acp` territory — the zed ACP bridge wraps
+# `npx -y @agentclientprotocol/claude-agent-acp` territory — the ACP registry bridge wraps
 # @anthropic-ai/claude-code. Both are installed globally so `npx -y` resolves
 # offline. cursor-agent ships through Cursor's own installer (no npm package);
 # it is optional — a missing cursor-agent degrades that one preset only.
@@ -19,9 +19,15 @@ set -euo pipefail
 : "${CODEX_VERSION:=latest}"
 : "${CODEX_ACP_VERSION:=latest}"
 : "${GEMINI_CLI_VERSION:=latest}"
+: "${COPILOT_CLI_VERSION:=latest}"
+: "${QWEN_CODE_VERSION:=latest}"
+: "${PI_ACP_VERSION:=latest}"
+: "${PI_CODING_AGENT_VERSION:=latest}"
 : "${OPENCODE_VERSION:=latest}"
 : "${CLINE_VERSION:=latest}"
 : "${INSTALL_CURSOR_AGENT:=1}"
+: "${INSTALL_KIRO_CLI:=1}"
+: "${INSTALL_DROID_CLI:=1}"
 
 # Every binary in SpawnPolicy's BINARY_ALLOWLIST (external_agent/presets.rs)
 # must resolve in these images — an allowlisted-but-absent CLI fails every
@@ -29,10 +35,14 @@ set -euo pipefail
 # (bin: cline); cursor-agent is the only non-npm install below.
 npm install -g --no-audit --no-fund \
   "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
-  "@zed-industries/claude-code-acp@${CLAUDE_CODE_ACP_VERSION}" \
+  "@agentclientprotocol/claude-agent-acp@${CLAUDE_CODE_ACP_VERSION}" \
   "@openai/codex@${CODEX_VERSION}" \
   "@zed-industries/codex-acp@${CODEX_ACP_VERSION}" \
   "@google/gemini-cli@${GEMINI_CLI_VERSION}" \
+  "@github/copilot@${COPILOT_CLI_VERSION}" \
+  "@qwen-code/qwen-code@${QWEN_CODE_VERSION}" \
+  "@earendil-works/pi-coding-agent@${PI_CODING_AGENT_VERSION}" \
+  "pi-acp@${PI_ACP_VERSION}" \
   "opencode-ai@${OPENCODE_VERSION}" \
   "cline@${CLINE_VERSION}"
 
@@ -47,6 +57,22 @@ if [ "${INSTALL_CURSOR_AGENT}" = "1" ]; then
     chmod -R a+rX /root/.local 2>/dev/null || true
   else
     echo "install-agents: cursor-agent installer failed — continuing without it" >&2
+  fi
+fi
+
+if [ "${INSTALL_KIRO_CLI}" = "1" ]; then
+  if curl -fsSL https://cli.kiro.dev/install | bash; then
+    ln -sf /root/.local/bin/kiro-cli /usr/local/bin/kiro-cli || true
+  else
+    echo "install-agents: Kiro CLI installer failed — continuing without it" >&2
+  fi
+fi
+
+if [ "${INSTALL_DROID_CLI}" = "1" ]; then
+  if curl -fsSL https://app.factory.ai/cli | bash; then
+    ln -sf /root/.local/bin/droid /usr/local/bin/droid || true
+  else
+    echo "install-agents: Factory Droid installer failed — continuing without it" >&2
   fi
 fi
 

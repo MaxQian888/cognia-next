@@ -1294,6 +1294,11 @@ export function useClaudeChat() {
           const result = await executeOnExternalAgent(externalSendText, {
             agentId: extAgentId,
             workingDirectory: sendOptions.cwd,
+            context: {
+              custom: {
+                additionalDirectories: sendOptions.additionalDirectories ?? [],
+              },
+            },
             onEvent: (event) => {
               const nextParts = applyExternalAgentEventToParts(assistantParts, event)
               if (nextParts !== assistantParts) {

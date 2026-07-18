@@ -435,6 +435,15 @@ export interface AcpClientCapabilities {
   }
   /** Terminal capability - all terminal/* methods available */
   terminal?: boolean
+  /** Session-level client features. */
+  session?: {
+    configOptions?: {
+      /** Client can render and update boolean config options. */
+      boolean?: Record<string, never>
+    }
+  }
+  /** Client can receive experimental identified plan updates/removals. */
+  plan?: Record<string, never>
   /** Custom capabilities via _meta */
   _meta?: Record<string, unknown>
 }
@@ -474,6 +483,8 @@ export interface AcpAgentCapabilities {
     delete?: Record<string, unknown>
     /** List sessions support (`session/list`) */
     list?: Record<string, unknown>
+    /** Additional workspace roots on session lifecycle requests. */
+    additionalDirectories?: Record<string, unknown>
   }
   /** Authentication capabilities */
   auth?: {
@@ -557,6 +568,8 @@ export type AcpSessionUpdateType =
   | "tool_call"
   | "tool_call_update"
   | "plan"
+  | "plan_update"
+  | "plan_removed"
   | "available_commands_update"
   | "mode_change"
   | "current_mode_update"
@@ -714,6 +727,24 @@ export interface AcpPlanUpdate {
   entries: AcpPlanEntry[]
 }
 
+/** Identified plan content used by the current ACP SDK extension. */
+export type AcpPlanUpdateContent =
+  | { type: "items"; planId: string; entries: AcpPlanEntry[] }
+  | { type: "file"; planId: string; uri: string }
+  | { type: "markdown"; planId: string; content: string }
+
+/** Current ACP identified-plan update notification. */
+export interface AcpPlanContentUpdate {
+  sessionUpdate: "plan_update"
+  plan: AcpPlanUpdateContent
+}
+
+/** Current ACP identified-plan removal notification. */
+export interface AcpPlanRemovedUpdate {
+  sessionUpdate: "plan_removed"
+  planId: string
+}
+
 /**
  * ACP Available commands update
  */
@@ -737,7 +768,7 @@ export interface AcpModeChangeUpdate {
  */
 export interface AcpCurrentModeUpdate {
   sessionUpdate: "current_mode_update"
-  modeId: string
+  currentModeId: string
 }
 
 // ============================================================================
@@ -749,12 +780,12 @@ export interface AcpCurrentModeUpdate {
  * Config option category for semantic UX hints
  * Categories starting with '_' are for custom use
  */
-export type AcpConfigOptionCategory = "mode" | "model" | "thought_level" | string
+export type AcpConfigOptionCategory = "mode" | "model" | "model_config" | "thought_level" | string
 
 /**
- * Config option type (currently only 'select' is supported by the spec)
+ * Config option type supported by ACP v1.
  */
-export type AcpConfigOptionType = "select"
+export type AcpConfigOptionType = "select" | "boolean"
 
 /**
  * A single value within a config option
@@ -768,11 +799,18 @@ export interface AcpConfigOptionValue {
   description?: string
 }
 
+/** A named group of select values. */
+export interface AcpConfigOptionGroup {
+  group: string
+  name: string
+  options: AcpConfigOptionValue[]
+}
+
 /**
  * A configuration option for a session
  * @see https://agentclientprotocol.com/protocol/session-config-options
  */
-export interface AcpConfigOption {
+interface AcpConfigOptionBase {
   /** Unique identifier for this configuration option */
   id: string
   /** Human-readable label for the option */
@@ -781,13 +819,20 @@ export interface AcpConfigOption {
   description?: string
   /** Semantic category for UX hints */
   category?: AcpConfigOptionCategory
-  /** The type of input control */
-  type: AcpConfigOptionType
-  /** The currently selected value */
-  currentValue: string
-  /** The available values */
-  options: AcpConfigOptionValue[]
 }
+
+export type AcpConfigOption = AcpConfigOptionBase &
+  (
+    | {
+        type: "select"
+        currentValue: string
+        options: AcpConfigOptionValue[] | AcpConfigOptionGroup[]
+      }
+    | {
+        type: "boolean"
+        currentValue: boolean
+      }
+  )
 
 /**
  * ACP Config options update (session notification)
@@ -856,6 +901,8 @@ export interface AcpToolCallLocation {
  * @see https://agentclientprotocol.com/protocol/file-system
  */
 export interface AcpReadTextFileParams {
+  /** Session whose workspace roots authorize this request */
+  sessionId: string
   /** Absolute file path */
   path: string
   /** 1-based line number to start from */
@@ -863,6 +910,14 @@ export interface AcpReadTextFileParams {
   /** Maximum number of lines to return */
   limit?: number
   /** Optional metadata */
+  _meta?: Record<string, unknown>
+}
+
+/** ACP fs/write_text_file params. */
+export interface AcpWriteTextFileParams {
+  sessionId: string
+  path: string
+  content: string
   _meta?: Record<string, unknown>
 }
 
@@ -875,7 +930,7 @@ export interface AcpTerminalCreateParams {
   command: string
   args?: string[]
   cwd?: string
-  env?: Record<string, string>
+  env?: Array<{ name: string; value: string }>
   outputByteLimit?: number
   _meta?: Record<string, unknown>
 }
@@ -885,6 +940,7 @@ export interface AcpTerminalCreateParams {
  * @see https://agentclientprotocol.com/protocol/terminals
  */
 export interface AcpTerminalOutputParams {
+  sessionId: string
   terminalId: string
   outputByteLimit?: number
   _meta?: Record<string, unknown>
@@ -987,6 +1043,8 @@ export type AcpSessionUpdate =
   | AcpToolCallUpdate
   | AcpToolCallStatusUpdate
   | AcpPlanUpdate
+  | AcpPlanContentUpdate
+  | AcpPlanRemovedUpdate
   | AcpAvailableCommandsUpdate
   | AcpModeChangeUpdate
   | AcpCurrentModeUpdate
@@ -1642,6 +1700,24 @@ export interface ExternalAgentPlanUpdateEvent extends ExternalAgentEventBase {
   progress: number
   step: number
   totalSteps: number
+  /** Stable plan identifier for ACP's identified-plan extension. */
+  planId?: string
+  /** Identified plan representation. Legacy `plan` updates use `items`. */
+  kind?: "items" | "file" | "markdown"
+  /** File URI when `kind` is `file`. */
+  uri?: string
+  /** Raw markdown when `kind` is `markdown`. */
+  content?: string
+  /** True when the identified plan was removed. */
+  removed?: boolean
+}
+
+/** Active non-item plan representation exposed by ACP identified plans. */
+export interface ExternalAgentPlanDocument {
+  planId: string
+  kind: "file" | "markdown"
+  uri?: string
+  content?: string
 }
 
 /**

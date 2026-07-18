@@ -55,7 +55,7 @@ cognia-agent chat --backend builtin
 # 优先原生 `codex app-server`，否则回退到 Codex ACP shim
 cognia-agent chat --backend codex
 
-# 通过 Zed ACP adapter 运行 Claude Code
+# 通过 ACP registry adapter 运行 Claude Code
 cognia-agent chat --backend claude-code
 
 # 持久化到 ~/.cognia/config.json
@@ -64,8 +64,11 @@ cognia-agent config set agentBackend codex
 
 `codex` alias 会检查官方 `codex` 可执行文件；若存在则实例化原生 `codex-app-server`
 preset，否则使用 `npx -y @zed-industries/codex-acp`。Claude Code 使用
-`npx -y @zed-industries/claude-code-acp`。虽然 flag 接受 preset id，CLI process host 还会
-应用 executable/package allowlist；Codex 与 Claude Code 是 v1 已验证目标。
+`npx -y @agentclientprotocol/claude-agent-acp`。虽然 flag 接受 preset id，CLI process host 还会
+应用 executable/package allowlist。Runner image 现在包含完整的内置 preset 集合：Claude Code、
+Codex、Gemini CLI、GitHub Copilot CLI、Qwen Code、Kiro CLI、Factory Droid、Pi 与 `pi-acp`、
+OpenCode、Cline，以及可选安装的 Cursor Agent。支持 ACP 的 preset 使用当前原生 ACP mode 或
+registry adapter，不再依赖历史兼容 flag。
 
 ## 阅读顺序
 
@@ -78,6 +81,9 @@ preset，否则使用 `npx -y @zed-industries/codex-acp`。Claude Code 使用
 ## 验证状态
 
 2026-07-16，两条路径都完成了真实严格沙箱 turn：
+
+Claude preset 后续已迁移到 ACP registry package；下方条目有意保留当时 smoke run
+实际使用的旧 package。
 
 - `codex-cli 0.144.4 app-server` 使用 Codex 原生登录回退，流式输出 `PHASE4_CODEX_OK`。
 - `@zed-industries/claude-code-acp@0.16.2` 流式输出 `PHASE4_CLAUDE_OK` 并干净退出。

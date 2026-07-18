@@ -48,7 +48,7 @@ describe("external-agent sandbox launcher", () => {
         {
           id: "a",
           command: "npx",
-          args: ["-y", "@zed-industries/claude-code-acp"],
+          args: ["-y", "@agentclientprotocol/claude-agent-acp"],
           cwd: "/work/repo",
         },
         "/home/user"
@@ -70,6 +70,20 @@ describe("external-agent sandbox launcher", () => {
     ).not.toContain("/home/user/.codex")
   })
 
+  it.each([
+    ["npx", ["-y", "@google/gemini-cli", "--acp"], ".gemini"],
+    ["npx", ["-y", "@qwen-code/qwen-code", "--acp"], ".qwen"],
+    ["npx", ["-y", "pi-acp"], ".pi"],
+    ["copilot", ["--acp"], ".copilot"],
+    ["kiro-cli", ["acp"], ".kiro"],
+    ["droid", ["exec", "--output-format", "acp"], ".factory"],
+    ["cursor-agent", ["acp"], ".cursor"],
+  ])("grants %s its writable state root", (command, args, stateDir) => {
+    expect(
+      buildSandboxLauncherArgs({ id: "agent", command, args, cwd: "/work/repo" }, "/home/user")
+    ).toEqual(expect.arrayContaining(["--writable", `/home/user/${stateDir}`]))
+  })
+
   it("only creates writable state directories, never file-shaped roots", async () => {
     const ensureDir = jest.fn()
     const ensureFile = jest.fn()
@@ -77,7 +91,7 @@ describe("external-agent sandbox launcher", () => {
       {
         id: "a",
         command: "npx",
-        args: ["-y", "@zed-industries/claude-code-acp"],
+        args: ["-y", "@agentclientprotocol/claude-agent-acp"],
         cwd: "/work/repo",
       },
       {

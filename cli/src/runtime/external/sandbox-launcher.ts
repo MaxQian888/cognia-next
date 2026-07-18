@@ -80,6 +80,15 @@ function agentStateWritableRoots(config: NodeExternalAgentSpawnConfig, homedir: 
       path.join(homedir, ".claude.json.backup")
     )
   }
+  if (/gemini/.test(target)) roots.push(path.join(homedir, ".gemini"))
+  if (/qwen/.test(target)) roots.push(path.join(homedir, ".qwen"))
+  if (target === "pi-acp" || command === "pi") roots.push(path.join(homedir, ".pi"))
+  if (/copilot/.test(target)) {
+    roots.push(path.join(homedir, ".copilot"), path.join(homedir, ".cache", "copilot"))
+  }
+  if (/kiro/.test(target)) roots.push(path.join(homedir, ".kiro"))
+  if (/droid|factory/.test(target)) roots.push(path.join(homedir, ".factory"))
+  if (/cursor/.test(target)) roots.push(path.join(homedir, ".cursor"))
   if (command === "npx") roots.push(path.join(homedir, ".npm"))
   return roots
 }

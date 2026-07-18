@@ -42,6 +42,7 @@ import {
   type ProtocolAdapter,
   protocolAdapterRegistry,
   type SessionCreateOptions,
+  type SessionListOptions,
 } from "./protocol-adapter"
 import { AcpClientAdapter } from "./acp-client"
 import { CodexAppServerAdapter } from "./codex-app-server-client"
@@ -387,7 +388,7 @@ export class ExternalAgentManager {
     agentId: string,
     sessionId: string,
     configId: string,
-    value: string
+    value: string | boolean
   ): Promise<AcpConfigOption[]> {
     const adapter = this.adapters.get(agentId)
     if (!adapter?.setConfigOption) {
@@ -414,8 +415,18 @@ export class ExternalAgentManager {
   }
 
   async listSessions(
-    agentId: string
-  ): Promise<Array<{ sessionId: string; title?: string; createdAt?: string; updatedAt?: string }>> {
+    agentId: string,
+    options?: SessionListOptions
+  ): Promise<
+    Array<{
+      sessionId: string
+      cwd?: string
+      additionalDirectories?: string[]
+      title?: string
+      createdAt?: string
+      updatedAt?: string
+    }>
+  > {
     const adapter = this.adapters.get(agentId)
     const instance = this.instances.get(agentId)
     if (!adapter || !instance) {
@@ -449,7 +460,7 @@ export class ExternalAgentManager {
     }
 
     try {
-      const sessions = await adapter.listSessions()
+      const sessions = options ? await adapter.listSessions(options) : await adapter.listSessions()
       this.setSessionExtensionSupport(agentId, instance, "session/list", "supported", "ok")
       return sessions
     } catch (error) {
@@ -480,7 +491,11 @@ export class ExternalAgentManager {
     }
   }
 
-  async forkSession(agentId: string, sessionId: string): Promise<ExternalAgentSession> {
+  async forkSession(
+    agentId: string,
+    sessionId: string,
+    options?: SessionCreateOptions
+  ): Promise<ExternalAgentSession> {
     const adapter = this.adapters.get(agentId)
     const instance = this.instances.get(agentId)
     if (!adapter?.forkSession || !instance) {
@@ -513,7 +528,7 @@ export class ExternalAgentManager {
     }
 
     try {
-      const forked = await adapter.forkSession(sessionId)
+      const forked = await adapter.forkSession(sessionId, options)
       instance.sessions.set(forked.id, forked)
       this.setSessionExtensionSupport(agentId, instance, "session/fork", "supported", "ok")
       return forked
@@ -1578,6 +1593,11 @@ export class ExternalAgentManager {
     const mcpServers = Array.isArray(custom?.mcpServers)
       ? (custom?.mcpServers as SessionCreateOptions["mcpServers"])
       : undefined
+    const additionalDirectories = Array.isArray(custom?.additionalDirectories)
+      ? custom.additionalDirectories.filter(
+          (directory): directory is string => typeof directory === "string"
+        )
+      : undefined
     const cwdCandidate =
       options?.workingDirectory ||
       (typeof custom?.workingDirectory === "string" ? custom.workingDirectory : undefined) ||
@@ -1610,6 +1630,7 @@ export class ExternalAgentManager {
       allowedTools: options?.allowedTools,
       timeout: options?.timeout,
       mcpServers,
+      additionalDirectories,
       metadata,
     }
   }

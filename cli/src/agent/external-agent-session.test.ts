@@ -237,6 +237,7 @@ describe("createExternalAgentSession", () => {
       config: {
         ...DEFAULT_RESOLVED_CONFIG,
         cwd: "/work",
+        additionalRoots: ["/shared"],
         agentBackend: "claude-code",
       },
       sessionId: "cli-session",
@@ -273,7 +274,9 @@ describe("createExternalAgentSession", () => {
       1,
       "cli-external-cli-session",
       "first",
-      expect.objectContaining({ context: { custom: { mcpServers: [] } } })
+      expect.objectContaining({
+        context: { custom: { mcpServers: [], additionalDirectories: ["/shared"] } },
+      })
     )
     expect(manager.execute).toHaveBeenNthCalledWith(
       2,

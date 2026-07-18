@@ -49,18 +49,26 @@ describe("new ACP agent surfaces", () => {
     // (a bare `--stdio` drops Gemini into interactive mode and hangs; Claude
     // Code has no native ACP flag and must run through the Zed adapter). Lock
     // the exact launch commands so a regression can't silently break them.
-    { presetId: "claude-code", command: "npx", args: ["-y", "@zed-industries/claude-code-acp"] },
+    {
+      presetId: "claude-code",
+      command: "npx",
+      args: ["-y", "@agentclientprotocol/claude-agent-acp"],
+    },
     {
       presetId: "gemini-cli",
       command: "npx",
-      args: ["-y", "@google/gemini-cli", "--experimental-acp"],
+      args: ["-y", "@google/gemini-cli", "--acp"],
     },
     { presetId: "cursor-cli", command: "cursor-agent", args: ["acp"] },
     { presetId: "copilot-cli", command: "copilot", args: ["--acp"] },
     { presetId: "kiro", command: "kiro-cli", args: ["acp"] },
     { presetId: "qwen-code", command: "npx", args: ["-y", "@qwen-code/qwen-code", "--acp"] },
     { presetId: "pi", command: "npx", args: ["-y", "pi-acp"] },
-    { presetId: "droid", command: "droid", args: ["exec", "--output-format", "acp"] },
+    {
+      presetId: "droid",
+      command: "droid",
+      args: ["exec", "--output-format", "acp"],
+    },
   ]
 
   it.each(cases)(

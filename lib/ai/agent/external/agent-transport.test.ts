@@ -108,17 +108,75 @@ describe("agentInvoke / agentListen routing", () => {
 })
 
 describe("agent fs seam", () => {
-  it("headless reads/writes through node:fs", async () => {
+  it("headless routes reads and writes through the confined workspace RPCs", async () => {
     g.__COGNIA_HEADLESS__ = true
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-fs-"))
-    const file = path.join(dir, "note.txt")
-    await agentWriteTextFile(file, "hello agent")
-    await expect(agentReadTextFile(file)).resolves.toBe("hello agent")
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-fs-"))
+    const file = path.join(root, "nested", "note.txt")
+    transportCall.mockResolvedValueOnce(null).mockResolvedValueOnce("hello agent")
+
+    await agentWriteTextFile(file, "hello agent", [root])
+    await expect(agentReadTextFile(file, [root])).resolves.toBe("hello agent")
+
+    expect(transportCall).toHaveBeenNthCalledWith(1, "fs_write_workspace_file", {
+      root,
+      relPath: path.join("nested", "note.txt"),
+      content: "hello agent",
+    })
+    expect(transportCall).toHaveBeenNthCalledWith(2, "fs_read_workspace_file", {
+      root,
+      relPath: path.join("nested", "note.txt"),
+      maxBytes: undefined,
+    })
+  })
+
+  it("rejects paths outside the session roots before calling the host", async () => {
+    g.__COGNIA_HEADLESS__ = true
+
+    await expect(agentReadTextFile("/private/secret", ["/workspace"])).rejects.toThrow(
+      /outside.*session workspace roots/i
+    )
+    await expect(agentWriteTextFile("/private/secret", "x", ["/workspace"])).rejects.toThrow(
+      /outside.*session workspace roots/i
+    )
+    expect(transportCall).not.toHaveBeenCalled()
+  })
+
+  it("routes Win32 drive and UNC paths under their matching roots", async () => {
+    g.__COGNIA_HEADLESS__ = true
+    transportCall.mockResolvedValue("ok")
+
+    await expect(agentReadTextFile("C:\\work\\src\\main.ts", ["C:\\work"])).resolves.toBe("ok")
+    await expect(
+      agentReadTextFile("\\\\server\\share\\project\\README.md", ["\\\\server\\share\\project"])
+    ).resolves.toBe("ok")
+
+    expect(transportCall).toHaveBeenNthCalledWith(1, "fs_read_workspace_file", {
+      root: "C:\\work",
+      relPath: "src\\main.ts",
+      maxBytes: undefined,
+    })
+    expect(transportCall).toHaveBeenNthCalledWith(2, "fs_read_workspace_file", {
+      root: "\\\\server\\share\\project",
+      relPath: "README.md",
+      maxBytes: undefined,
+    })
+  })
+
+  it("rejects Win32 drive and UNC paths outside their configured roots", async () => {
+    g.__COGNIA_HEADLESS__ = true
+
+    await expect(agentReadTextFile("D:\\secret.txt", ["C:\\work"])).rejects.toThrow(/outside/i)
+    await expect(
+      agentReadTextFile("\\\\server\\other\\secret.txt", ["\\\\server\\share"])
+    ).rejects.toThrow(/outside/i)
+    expect(transportCall).not.toHaveBeenCalled()
   })
 
   it("browser throws", async () => {
-    await expect(agentReadTextFile("/nope")).rejects.toThrow(/not available in browser/)
-    await expect(agentWriteTextFile("/nope", "x")).rejects.toThrow(/not available in browser/)
+    await expect(agentReadTextFile("/nope", ["/"])).rejects.toThrow(/not available in browser/)
+    await expect(agentWriteTextFile("/nope", "x", ["/"])).rejects.toThrow(
+      /not available in browser/
+    )
   })
 })
 

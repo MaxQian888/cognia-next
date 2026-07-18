@@ -512,9 +512,12 @@ describe("useExternalAgent core actions", () => {
     const { result } = renderHook(() => useExternalAgent())
     await flush()
     await act(async () => {
-      await result.current.createSession({ systemPrompt: "x" })
+      await result.current.createSession({ systemPrompt: "x", additionalDirectories: ["/shared"] })
     })
-    expect(fakeManager.createSession).toHaveBeenCalledWith("a1", { systemPrompt: "x" })
+    expect(fakeManager.createSession).toHaveBeenCalledWith("a1", {
+      systemPrompt: "x",
+      additionalDirectories: ["/shared"],
+    })
     await act(async () => {
       await result.current.closeSession("sess-1")
     })
@@ -560,9 +563,9 @@ describe("useExternalAgent core actions", () => {
     const { result } = renderHook(() => useExternalAgent())
     await flush()
     await act(async () => {
-      await result.current.forkSession("s1")
+      await result.current.forkSession("s1", { cwd: "/work" })
     })
-    expect(fakeManager.forkSession).toHaveBeenCalledWith("a1", "s1")
+    expect(fakeManager.forkSession).toHaveBeenCalledWith("a1", "s1", { cwd: "/work" })
   })
 
   it("resumeSession forwards options", async () => {
@@ -573,6 +576,46 @@ describe("useExternalAgent core actions", () => {
       await result.current.resumeSession("s1", { systemPrompt: "p" })
     })
     expect(fakeManager.resumeSession).toHaveBeenCalledWith("a1", "s1", { systemPrompt: "p" })
+  })
+
+  it("retains identified file plans emitted by the active session", async () => {
+    seedAgent("a1")
+    let listener: ((event: Record<string, unknown>) => void) | undefined
+    fakeManager.addEventListener.mockImplementation(
+      (_agentId: string, callback: (event: Record<string, unknown>) => void) => {
+        listener = callback
+        return () => undefined
+      }
+    )
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+
+    act(() => {
+      listener?.({
+        type: "plan_update",
+        sessionId: "s1",
+        timestamp: new Date(),
+        planId: "file-plan",
+        kind: "file",
+        uri: "file:///work/PLAN.md",
+        entries: [],
+        progress: 0,
+        step: -1,
+        totalSteps: 0,
+      })
+    })
+
+    expect(result.current.planDocument).toEqual({
+      planId: "file-plan",
+      kind: "file",
+      uri: "file:///work/PLAN.md",
+    })
+
+    await act(async () => {
+      await result.current.createSession()
+    })
+    await flush()
+    expect(result.current.planDocument).toBeNull()
   })
 
   it("execute requires an active agent", async () => {

@@ -180,7 +180,7 @@ describe("createAgentFromPreset", () => {
   it("falls back to preset defaults when overrides are missing", () => {
     const cfg = createAgentFromPreset("gemini-cli")!
     expect(cfg.name).toBeDefined()
-    expect(cfg.process?.args).toEqual(["-y", "@google/gemini-cli", "--experimental-acp"])
+    expect(cfg.process?.args).toEqual(["-y", "@google/gemini-cli", "--acp"])
   })
 
   it("preserves network field when preset has one (synthetic)", () => {

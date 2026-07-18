@@ -17,6 +17,7 @@
 // `isTauri` via @/lib/utils (the app-wide re-export the existing agent test
 // suites mock); `isHeadlessHost` from the platform leaf.
 import { isHeadlessHost } from "@/lib/platform/detect"
+import { isPathUnderRoot } from "@/lib/sandbox/policy-bridge"
 import { isTauri } from "@/lib/utils"
 
 /** Whether this host can spawn/drive external agent processes at all. */
@@ -60,30 +61,41 @@ export async function agentListen<T>(
   return transport.subscribe<T>(event, handler)
 }
 
-/** Read a text file for the ACP `fs/read_text_file` capability. */
-export async function agentReadTextFile(path: string): Promise<string> {
-  if (isTauri()) {
-    const { readTextFile } = await import("@tauri-apps/plugin-fs")
-    return readTextFile(path)
+function resolveSessionWorkspacePath(
+  path: string,
+  allowedRoots: string[]
+): { root: string; relPath: string } {
+  const root = allowedRoots.find((candidate) => {
+    return /^[A-Za-z]:[\\/]|^\\\\/.test(candidate)
+      ? isPathUnderRoot(path, candidate, "win32")
+      : isPathUnderRoot(path, candidate)
+  })
+  if (!root) {
+    throw new Error(`Path is outside the ACP session workspace roots: ${path}`)
   }
-  if (isHeadlessHost()) {
-    const fs = await import(/* webpackIgnore: true */ "node:fs/promises")
-    return fs.readFile(path, "utf8")
-  }
-  throw new Error("File system access not available in browser")
+  const normalizedRoot = root.replace(/[\\/]+$/, "")
+  const relPath = path.slice(normalizedRoot.length).replace(/^[\\/]+/, "")
+  return { root, relPath }
 }
 
-/** Write a text file for the ACP `fs/write_text_file` capability. */
-export async function agentWriteTextFile(path: string, content: string): Promise<void> {
-  if (isTauri()) {
-    const { writeTextFile } = await import("@tauri-apps/plugin-fs")
-    await writeTextFile(path, content)
-    return
+/** Read a text file through the host's symlink-aware workspace boundary. */
+export async function agentReadTextFile(path: string, allowedRoots: string[]): Promise<string> {
+  if (!supportsAgentFs()) {
+    throw new Error("File system access not available in browser")
   }
-  if (isHeadlessHost()) {
-    const fs = await import(/* webpackIgnore: true */ "node:fs/promises")
-    await fs.writeFile(path, content, "utf8")
-    return
+  const { root, relPath } = resolveSessionWorkspacePath(path, allowedRoots)
+  return agentInvoke<string>("fs_read_workspace_file", { root, relPath, maxBytes: undefined })
+}
+
+/** Write a text file through the host's symlink-aware workspace boundary. */
+export async function agentWriteTextFile(
+  path: string,
+  content: string,
+  allowedRoots: string[]
+): Promise<void> {
+  if (!supportsAgentFs()) {
+    throw new Error("File system access not available in browser")
   }
-  throw new Error("File system access not available in browser")
+  const { root, relPath } = resolveSessionWorkspacePath(path, allowedRoots)
+  await agentInvoke("fs_write_workspace_file", { root, relPath, content })
 }

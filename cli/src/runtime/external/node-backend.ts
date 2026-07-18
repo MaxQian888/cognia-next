@@ -49,6 +49,7 @@ const BINARY_ALLOWLIST = new Set([
   "droid",
 ])
 const NPX_ALLOWLIST = new Set([
+  "@agentclientprotocol/claude-agent-acp",
   "@zed-industries/claude-code-acp",
   "@zed-industries/codex-acp",
   "@anthropic-ai/claude-code",
@@ -113,6 +114,13 @@ const CONFIG_ENV_PREFIXES = [
   "GOOGLE_",
   "OPENCODE_",
   "CURSOR_",
+  "COPILOT_",
+  "GITHUB_",
+  "GH_",
+  "QWEN_",
+  "KIRO_",
+  "FACTORY_",
+  "DROID_",
   "ACP_",
   "COGNIA_AGENT_",
 ]

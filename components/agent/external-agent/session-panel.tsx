@@ -41,6 +41,7 @@ export function ExternalAgentSessionPanel({ className }: Props) {
     availableCommands,
     planEntries,
     planStep,
+    planDocument,
     configOptions,
     setConfigOption,
     execute,
@@ -54,7 +55,7 @@ export function ExternalAgentSessionPanel({ className }: Props) {
   if (runtime !== "external") return null
 
   const hasCommands = availableCommands.length > 0
-  const hasPlan = planEntries.length > 0
+  const hasPlan = planEntries.length > 0 || Boolean(planDocument)
   const hasConfigOptions = configOptions.length > 0
   const canFork = Boolean(activeSession)
 
@@ -153,7 +154,12 @@ export function ExternalAgentSessionPanel({ className }: Props) {
         </div>
       )}
       {hasPlan && (
-        <ExternalAgentPlan entries={planEntries} currentStep={planStep ?? undefined} compact />
+        <ExternalAgentPlan
+          entries={planEntries}
+          currentStep={planStep ?? undefined}
+          document={planDocument}
+          compact
+        />
       )}
     </div>
   )

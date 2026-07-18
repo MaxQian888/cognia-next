@@ -128,7 +128,7 @@ export interface ProtocolAdapter {
   setConfigOption?: (
     sessionId: string,
     configId: string,
-    value: string
+    value: string | boolean
   ) => Promise<AcpConfigOption[]>
 
   /**
@@ -148,14 +148,21 @@ export interface ProtocolAdapter {
   /**
    * Optional: List sessions (ACP extension / unstable)
    */
-  listSessions?: () => Promise<
-    Array<{ sessionId: string; title?: string; createdAt?: string; updatedAt?: string }>
+  listSessions?: (options?: SessionListOptions) => Promise<
+    Array<{
+      sessionId: string
+      cwd?: string
+      additionalDirectories?: string[]
+      title?: string
+      createdAt?: string
+      updatedAt?: string
+    }>
   >
 
   /**
    * Optional: Fork session (ACP extension / unstable)
    */
-  forkSession?: (sessionId: string) => Promise<ExternalAgentSession>
+  forkSession?: (sessionId: string, options?: SessionCreateOptions) => Promise<ExternalAgentSession>
 
   /**
    * Optional: Resume session (ACP extension / unstable)
@@ -236,6 +243,12 @@ export interface ProtocolAdapter {
   healthCheck(): Promise<boolean>
 }
 
+/** Optional filters for protocol-backed session discovery. */
+export interface SessionListOptions {
+  /** Absolute working directory filter defined by ACP session/list. */
+  cwd?: string
+}
+
 /**
  * Options for creating a session
  * @see https://agentclientprotocol.com/protocol/session-setup
@@ -243,6 +256,8 @@ export interface ProtocolAdapter {
 export interface SessionCreateOptions {
   /** Working directory for the session (absolute path, required by ACP) */
   cwd?: string
+  /** Additional absolute workspace roots (ACP `additionalDirectories`). */
+  additionalDirectories?: string[]
   /** MCP servers to connect to */
   mcpServers?: import("@/types/agent/external-agent").AcpMcpServerConfig[]
   /** Permission mode for the session */

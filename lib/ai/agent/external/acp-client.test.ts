@@ -7,6 +7,7 @@
 
 jest.mock("@/lib/native/external-agent", () => ({
   acpTerminalCreate: jest.fn(async () => "terminal-1"),
+  cleanupSessionTerminals: jest.fn(async () => undefined),
   acpTerminalKill: jest.fn(async () => undefined),
   acpTerminalOutput: jest.fn(async () => ({
     output: "",
@@ -22,6 +23,12 @@ jest.mock("@/lib/native/external-agent", () => ({
 
 jest.mock("@/lib/network/proxy-fetch", () => ({
   proxyFetch: jest.fn(),
+}))
+
+jest.mock("./agent-transport", () => ({
+  ...jest.requireActual("./agent-transport"),
+  agentReadTextFile: jest.fn(),
+  agentWriteTextFile: jest.fn(),
 }))
 
 // Tauri IPC + event bridge — override only invoke/listen so the stdio connect
@@ -45,7 +52,13 @@ jest.mock("@/lib/utils", () => ({
 }))
 
 import { isTauri } from "@/lib/utils"
-import { acpTerminalWrite } from "@/lib/native/external-agent"
+import {
+  acpTerminalCreate,
+  acpTerminalOutput,
+  acpTerminalWaitForExit,
+  acpTerminalWrite,
+  cleanupSessionTerminals,
+} from "@/lib/native/external-agent"
 import { listen } from "@tauri-apps/api/event"
 import { invoke } from "@tauri-apps/api/core"
 import {
@@ -60,19 +73,32 @@ import {
 import type { ExternalAgentConfig, AcpPermissionResponse } from "@/types/agent/external-agent"
 import { loggers } from "@cognia/logging"
 import { LOG_VALUE_MAX_CHARS, truncateForLog } from "@cognia/logging/truncate"
+import { agentReadTextFile, agentWriteTextFile } from "./agent-transport"
 
 const mockIsTauri = isTauri as jest.Mock
 const mockTerminalWrite = acpTerminalWrite as jest.Mock
+const mockTerminalCreate = acpTerminalCreate as jest.Mock
+const mockTerminalOutput = acpTerminalOutput as jest.Mock
+const mockTerminalWaitForExit = acpTerminalWaitForExit as jest.Mock
+const mockCleanupSessionTerminals = cleanupSessionTerminals as jest.Mock
 const mockListen = listen as jest.Mock
 const mockInvoke = invoke as jest.Mock
+const mockAgentReadTextFile = agentReadTextFile as jest.Mock
+const mockAgentWriteTextFile = agentWriteTextFile as jest.Mock
 
 afterEach(() => {
   mockIsTauri.mockReturnValue(false)
   mockTerminalWrite.mockClear()
+  mockTerminalCreate.mockClear()
+  mockTerminalOutput.mockClear()
+  mockTerminalWaitForExit.mockClear()
+  mockCleanupSessionTerminals.mockClear()
   mockListen.mockReset()
   mockInvoke.mockReset()
   mockListen.mockImplementation(async () => jest.fn())
   mockInvoke.mockImplementation(async () => "proc-1")
+  mockAgentReadTextFile.mockReset()
+  mockAgentWriteTextFile.mockReset()
 })
 
 /** Poke the private listener bag the cleanup logic manages. */
@@ -145,12 +171,40 @@ function callPermission(a: AcpClientAdapter, params: PermissionParams): Promise<
   ).handlePermissionRequest(params)
 }
 
-function callTerminalWrite(a: AcpClientAdapter, terminalId: string, data: string): Promise<void> {
+function callTerminalWrite(
+  a: AcpClientAdapter,
+  sessionId: string,
+  terminalId: string,
+  data: string
+): Promise<void> {
   return (
     a as unknown as {
-      handleTerminalWrite: (p: { terminalId: string; data: string }) => Promise<void>
+      handleTerminalWrite: (p: {
+        sessionId: string
+        terminalId: string
+        data: string
+      }) => Promise<void>
     }
-  ).handleTerminalWrite({ terminalId, data })
+  ).handleTerminalWrite({ sessionId, terminalId, data })
+}
+
+function seedTerminal(a: AcpClientAdapter, sessionId: string, terminalId: string): void {
+  ;(a as unknown as { terminalSessions: Map<string, string> }).terminalSessions.set(
+    terminalId,
+    sessionId
+  )
+}
+
+function dispatchAgentRequest(
+  a: AcpClientAdapter,
+  method: string,
+  params: Record<string, unknown>
+): Promise<unknown> {
+  return (
+    a as unknown as {
+      dispatchAgentRequest: (method: string, params: Record<string, unknown>) => Promise<unknown>
+    }
+  ).dispatchAgentRequest(method, params)
 }
 
 describe("buildSpawnArgs", () => {
@@ -471,6 +525,55 @@ describe("AcpClientAdapter — permission-mode auto-resolution", () => {
       new Promise((r) => setTimeout(() => r(sentinel), 10)),
     ])
     expect(winner).toBe(sentinel)
+    const session = (a as unknown as { _sessions: Map<string, { status?: string }> })._sessions.get(
+      "s"
+    )!
+    session.status = "executing"
+    await a.cancel("s")
+    await expect(pending).resolves.toEqual({ outcome: { outcome: "cancelled" } })
+  })
+
+  it("resolves an outstanding permission as cancelled when its turn is cancelled", async () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s", "default")
+    const session = (
+      a as unknown as {
+        _sessions: Map<string, { permissionMode: string; status?: string }>
+      }
+    )._sessions.get("s")!
+    session.status = "executing"
+    const pending = callPermission(a, {
+      sessionId: "s",
+      toolCall: { toolCallId: "tc", title: "Shell", kind: "execute" },
+      options: [ALLOW, REJECT],
+    })
+
+    await a.cancel("s")
+
+    await expect(pending).resolves.toEqual({ outcome: { outcome: "cancelled" } })
+  })
+
+  it("does not cancel a permission belonging to a session with the same id prefix", async () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s", "default")
+    seedSession(a, "s2", "default")
+    const sessions = (a as unknown as { _sessions: Map<string, { status?: string }> })._sessions
+    sessions.get("s")!.status = "executing"
+    sessions.get("s2")!.status = "executing"
+    const pending = callPermission(a, {
+      sessionId: "s2",
+      toolCall: { toolCallId: "tc", title: "Shell", kind: "execute" },
+      options: [ALLOW, REJECT],
+    })
+
+    await a.cancel("s")
+    const sentinel = Symbol("pending")
+    await expect(
+      Promise.race([pending, new Promise((resolve) => setTimeout(() => resolve(sentinel), 10))])
+    ).resolves.toBe(sentinel)
+
+    await a.cancel("s2")
+    await expect(pending).resolves.toEqual({ outcome: { outcome: "cancelled" } })
   })
 })
 
@@ -566,15 +669,146 @@ describe("AcpClientAdapter — terminal/write", () => {
   it("throws outside Tauri", async () => {
     mockIsTauri.mockReturnValue(false)
     const a = new AcpClientAdapter()
-    await expect(callTerminalWrite(a, "t1", "echo hi\n")).rejects.toThrow(/Tauri/)
+    await expect(callTerminalWrite(a, "s1", "t1", "echo hi\n")).rejects.toThrow(/Tauri/)
     expect(mockTerminalWrite).not.toHaveBeenCalled()
   })
 
   it("delegates to the native binding inside Tauri", async () => {
     mockIsTauri.mockReturnValue(true)
     const a = new AcpClientAdapter()
-    await expect(callTerminalWrite(a, "t1", "echo hi\n")).resolves.toBeUndefined()
+    seedTerminal(a, "s1", "t1")
+    await expect(callTerminalWrite(a, "s1", "t1", "echo hi\n")).resolves.toBeUndefined()
     expect(mockTerminalWrite).toHaveBeenCalledWith("t1", "echo hi\n")
+  })
+
+  it("rejects a terminal operation from a different ACP session", async () => {
+    mockIsTauri.mockReturnValue(true)
+    const a = new AcpClientAdapter()
+    seedTerminal(a, "owner", "t1")
+
+    await expect(
+      dispatchAgentRequest(a, "terminal/output", { sessionId: "other", terminalId: "t1" })
+    ).rejects.toThrow(/does not belong to ACP session/i)
+    expect(mockTerminalOutput).not.toHaveBeenCalled()
+  })
+})
+
+describe("AcpClientAdapter — current terminal wire shape", () => {
+  it("converts ACP env entries to the native terminal map", async () => {
+    mockIsTauri.mockReturnValue(true)
+    const a = new AcpClientAdapter()
+    seedSession(a, "s", "default")
+
+    await expect(
+      dispatchAgentRequest(a, "terminal/create", {
+        sessionId: "s",
+        command: "node",
+        args: ["script.js"],
+        env: [
+          { name: "NODE_ENV", value: "test" },
+          { name: "DEBUG", value: "1" },
+        ],
+      })
+    ).resolves.toEqual({ terminalId: "terminal-1" })
+
+    expect(mockTerminalCreate).toHaveBeenCalledWith(
+      "s",
+      "node",
+      ["script.js"],
+      undefined,
+      { NODE_ENV: "test", DEBUG: "1" },
+      undefined
+    )
+  })
+
+  it("returns the canonical top-level terminal wait result", async () => {
+    mockIsTauri.mockReturnValue(true)
+    mockTerminalWaitForExit.mockResolvedValueOnce({
+      exitStatus: { exitCode: null, signal: "SIGTERM" },
+    })
+    const a = new AcpClientAdapter()
+    seedTerminal(a, "s", "terminal-1")
+
+    await expect(
+      dispatchAgentRequest(a, "terminal/wait_for_exit", {
+        sessionId: "s",
+        terminalId: "terminal-1",
+      })
+    ).resolves.toEqual({ exitCode: null, signal: "SIGTERM" })
+  })
+
+  it("kills owned native terminals when an ACP session closes", async () => {
+    mockIsTauri.mockReturnValue(true)
+    const a = new AcpClientAdapter()
+    seedSession(a, "s", "default")
+    seedTerminal(a, "s", "terminal-1")
+
+    await a.closeSession("s")
+
+    expect(mockCleanupSessionTerminals).toHaveBeenCalledWith("s")
+  })
+})
+
+describe("AcpClientAdapter — session-confined file requests", () => {
+  it("passes the session cwd and additional directories to host-confined reads and writes", async () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s", "default")
+    const session = (
+      a as unknown as {
+        _sessions: Map<string, { metadata?: Record<string, unknown> }>
+      }
+    )._sessions.get("s")!
+    session.metadata = { cwd: "/work", additionalDirectories: ["/shared"] }
+    mockAgentReadTextFile.mockResolvedValue("contents")
+    mockAgentWriteTextFile.mockResolvedValue(undefined)
+
+    await expect(
+      dispatchAgentRequest(a, "fs/read_text_file", { sessionId: "s", path: "/shared/note.md" })
+    ).resolves.toEqual({ content: "contents" })
+    await expect(
+      dispatchAgentRequest(a, "fs/write_text_file", {
+        sessionId: "s",
+        path: "/work/out.md",
+        content: "done",
+      })
+    ).resolves.toBeUndefined()
+
+    expect(mockAgentReadTextFile).toHaveBeenCalledWith("/shared/note.md", ["/work", "/shared"])
+    expect(mockAgentWriteTextFile).toHaveBeenCalledWith("/work/out.md", "done", [
+      "/work",
+      "/shared",
+    ])
+  })
+
+  it("fails closed when a file request has no known session roots", async () => {
+    const a = new AcpClientAdapter()
+
+    await expect(
+      dispatchAgentRequest(a, "fs/read_text_file", { sessionId: "missing", path: "/tmp/x" })
+    ).rejects.toThrow(/unknown ACP session/i)
+  })
+})
+
+describe("AcpClientAdapter — outbound PII gate", () => {
+  it("blocks a PII-bearing JSON-RPC payload before it reaches the agent transport", async () => {
+    mockIsTauri.mockReturnValue(true)
+    const a = new AcpClientAdapter()
+    ;(a as unknown as { _config: ExternalAgentConfig })._config = stdioConfig()
+    ;(a as unknown as { processId: string }).processId = "proc-1"
+
+    await expect(
+      (
+        a as unknown as {
+          sendMessage: (message: string) => Promise<void>
+        }
+      ).sendMessage(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "session/prompt",
+          params: { sessionId: "s", prompt: "Contact alice@example.com" },
+        })
+      )
+    ).rejects.toThrow(/PII gate/i)
   })
 })
 
@@ -713,6 +947,12 @@ describe("AcpClientAdapter — JsonRpcPeer integration over stdio", () => {
     expect(init).toBeDefined()
     expect(init.jsonrpc).toBe("2.0")
     expect(init.id).toBe(1)
+    expect(init.params).toMatchObject({
+      clientCapabilities: {
+        session: { configOptions: { boolean: {} } },
+        plan: {},
+      },
+    })
     expect(adapter.isConnected()).toBe(true)
     await adapter.disconnect()
   })
@@ -1144,6 +1384,134 @@ function setAgentCaps(a: AcpClientAdapter, caps: unknown): void {
 }
 
 describe("AcpClientAdapter — ACP v1 session updates", () => {
+  it("maps item plan_update and plan_removed notifications", () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+    const updated = handleUpdate(a, "s1", {
+      sessionUpdate: "plan_update",
+      plan: {
+        type: "items",
+        planId: "main",
+        entries: [{ content: "Implement", priority: "high", status: "in_progress" }],
+      },
+    }) as { type: string; planId: string; entries: unknown[]; removed?: boolean }
+    expect(updated).toMatchObject({
+      type: "plan_update",
+      planId: "main",
+      entries: [{ content: "Implement", status: "in_progress" }],
+      removed: false,
+    })
+    expect(sessionMeta(a, "s1")?.plan).toEqual(updated.entries)
+
+    const removed = handleUpdate(a, "s1", {
+      sessionUpdate: "plan_removed",
+      planId: "main",
+    }) as { type: string; planId: string; entries: unknown[]; removed?: boolean }
+    expect(removed).toMatchObject({
+      type: "plan_update",
+      planId: "main",
+      entries: [],
+      removed: true,
+    })
+    expect(sessionMeta(a, "s1")?.plan).toEqual([])
+  })
+
+  it("preserves file and markdown plan updates in session metadata", () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+    const file = handleUpdate(a, "s1", {
+      sessionUpdate: "plan_update",
+      plan: { type: "file", planId: "file-plan", uri: "file:///work/PLAN.md" },
+    }) as { type: string; kind?: string; uri?: string; entries: unknown[] }
+    expect(file).toMatchObject({
+      type: "plan_update",
+      planId: "file-plan",
+      kind: "file",
+      uri: "file:///work/PLAN.md",
+      entries: [],
+    })
+
+    const markdown = handleUpdate(a, "s1", {
+      sessionUpdate: "plan_update",
+      plan: { type: "markdown", planId: "md-plan", content: "# Plan" },
+    }) as { type: string; kind?: string; content?: string; entries: unknown[] }
+    expect(markdown).toMatchObject({
+      type: "plan_update",
+      planId: "md-plan",
+      kind: "markdown",
+      content: "# Plan",
+      entries: [],
+    })
+    expect(sessionMeta(a, "s1")?.plans).toMatchObject({
+      "file-plan": { type: "file", uri: "file:///work/PLAN.md" },
+      "md-plan": { type: "markdown", content: "# Plan" },
+    })
+  })
+
+  it("keeps the active item plan when an unrelated identified plan is removed", () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+    const entries = [{ content: "Implement", priority: "high", status: "in_progress" }]
+    handleUpdate(a, "s1", {
+      sessionUpdate: "plan_update",
+      plan: { type: "items", planId: "main", entries },
+    })
+    handleUpdate(a, "s1", {
+      sessionUpdate: "plan_update",
+      plan: { type: "file", planId: "supporting-file", uri: "file:///work/PLAN.md" },
+    })
+
+    handleUpdate(a, "s1", {
+      sessionUpdate: "plan_removed",
+      planId: "supporting-file",
+    })
+
+    expect(sessionMeta(a, "s1")?.plan).toEqual(entries)
+    expect(sessionMeta(a, "s1")?.plans).toEqual({
+      main: { type: "items", planId: "main", entries },
+    })
+  })
+
+  it("preserves a legacy active plan when an unrelated identified plan is removed", () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+    const legacyEntries = [{ content: "Legacy", priority: "high", status: "in_progress" }]
+    handleUpdate(a, "s1", { sessionUpdate: "plan", entries: legacyEntries })
+    handleUpdate(a, "s1", {
+      sessionUpdate: "plan_update",
+      plan: { type: "file", planId: "file", uri: "file:///work/PLAN.md" },
+    })
+
+    handleUpdate(a, "s1", { sessionUpdate: "plan_removed", planId: "file" })
+
+    expect(sessionMeta(a, "s1")?.plan).toEqual(legacyEntries)
+  })
+
+  it("keeps the latest active item plan when another plan is removed", () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+    const first = [{ content: "First", priority: "medium", status: "pending" }]
+    const second = [{ content: "Second", priority: "high", status: "in_progress" }]
+    handleUpdate(a, "s1", {
+      sessionUpdate: "plan_update",
+      plan: { type: "items", planId: "first", entries: first },
+    })
+    handleUpdate(a, "s1", {
+      sessionUpdate: "plan_update",
+      plan: { type: "items", planId: "second", entries: second },
+    })
+    handleUpdate(a, "s1", {
+      sessionUpdate: "plan_update",
+      plan: { type: "file", planId: "file", uri: "file:///work/PLAN.md" },
+    })
+
+    handleUpdate(a, "s1", { sessionUpdate: "plan_removed", planId: "file" })
+    expect(sessionMeta(a, "s1")?.plan).toEqual(second)
+
+    handleUpdate(a, "s1", { sessionUpdate: "plan_removed", planId: "second" })
+    expect(sessionMeta(a, "s1")?.plan).toEqual(first)
+  })
+
   it("maps the canonical agent_thought_chunk to a thinking event", () => {
     const a = new AcpClientAdapter()
     seedSession(a, "s1", "default")
@@ -1182,6 +1550,29 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
     }) as { type: string; configOptions: unknown[] }
     expect(ev).toMatchObject({ type: "config_options_update" })
     expect(ev.configOptions).toHaveLength(1)
+  })
+
+  it("does not treat a boolean mode-category option as a permission mode", () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+
+    handleUpdate(a, "s1", {
+      sessionUpdate: "config_option_update",
+      configOptions: [
+        {
+          id: "safeMode",
+          name: "Safe mode",
+          type: "boolean",
+          currentValue: true,
+          category: "mode",
+        },
+      ],
+    })
+
+    const session = (
+      a as unknown as { _sessions: Map<string, { permissionMode?: string }> }
+    )._sessions.get("s1")
+    expect(session?.permissionMode).toBe("default")
   })
 
   it("records usage_update context occupancy in session metadata (no fabricated token total)", () => {
@@ -1235,9 +1626,174 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
     expect(ev).toBeNull()
     expect(sessionMeta(a, "s1")?.title).toBe("Refactor auth")
   })
+
+  it("applies current_mode_update from the canonical currentModeId field", () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+
+    const event = handleUpdate(a, "s1", {
+      sessionUpdate: "current_mode_update",
+      currentModeId: "plan",
+    }) as { type: string; modeId: string }
+
+    expect(event).toMatchObject({ type: "mode_update", modeId: "plan" })
+    const session = (
+      a as unknown as { _sessions: Map<string, { permissionMode?: string }> }
+    )._sessions.get("s1")
+    expect(session?.permissionMode).toBe("plan")
+  })
+})
+
+describe("AcpClientAdapter — boolean session config options", () => {
+  it("validates and sends the typed boolean set_config_option request", async () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+    const option = {
+      id: "autoFormat",
+      name: "Auto format",
+      type: "boolean" as const,
+      currentValue: false,
+    }
+    const session = (
+      a as unknown as { _sessions: Map<string, { metadata?: Record<string, unknown> }> }
+    )._sessions.get("s1")!
+    session.metadata = { configOptions: [option] }
+    const spy = jest
+      .spyOn(
+        a as unknown as { sendRequest: (m: string, p: unknown) => Promise<unknown> },
+        "sendRequest"
+      )
+      .mockResolvedValue({ configOptions: [{ ...option, currentValue: true }] })
+
+    await expect(a.setConfigOption("s1", "autoFormat", true)).resolves.toEqual([
+      { ...option, currentValue: true },
+    ])
+    expect(spy).toHaveBeenCalledWith("session/set_config_option", {
+      sessionId: "s1",
+      configId: "autoFormat",
+      type: "boolean",
+      value: true,
+    })
+  })
 })
 
 describe("AcpClientAdapter — session/close · session/delete · logout gating", () => {
+  it("sends strict session/new parameters including empty MCP servers and additional roots", async () => {
+    const a = new AcpClientAdapter()
+    setStatus(a, "connected")
+    ;(a as unknown as { _config: ExternalAgentConfig })._config = stdioConfig()
+    setAgentCaps(a, { sessionCapabilities: { additionalDirectories: {} } })
+    const spy = jest
+      .spyOn(
+        a as unknown as { sendRequest: (m: string, p: unknown) => Promise<unknown> },
+        "sendRequest"
+      )
+      .mockResolvedValue({ sessionId: "s-new" })
+
+    const session = await a.createSession({ cwd: "/work", additionalDirectories: ["/shared"] })
+
+    expect(spy).toHaveBeenCalledWith(
+      "session/new",
+      expect.objectContaining({
+        cwd: "/work",
+        additionalDirectories: ["/shared"],
+        mcpServers: [],
+      })
+    )
+    expect(session.metadata).toMatchObject({
+      cwd: "/work",
+      additionalDirectories: ["/shared"],
+    })
+  })
+
+  it("rejects additional roots when the agent does not advertise them", async () => {
+    const a = new AcpClientAdapter()
+    setStatus(a, "connected")
+    ;(a as unknown as { _config: ExternalAgentConfig })._config = stdioConfig()
+    setAgentCaps(a, { sessionCapabilities: {} })
+    await expect(
+      a.createSession({ cwd: "/work", additionalDirectories: ["/shared"] })
+    ).rejects.toThrow(/additionalDirectories/)
+  })
+
+  it("normalizes required empty MCP env and header arrays on the wire", async () => {
+    const a = new AcpClientAdapter()
+    setStatus(a, "connected")
+    ;(a as unknown as { _config: ExternalAgentConfig })._config = stdioConfig()
+    const spy = jest
+      .spyOn(
+        a as unknown as { sendRequest: (m: string, p: unknown) => Promise<unknown> },
+        "sendRequest"
+      )
+      .mockResolvedValue({ sessionId: "s-mcp" })
+
+    await a.createSession({
+      cwd: "/work",
+      mcpServers: [
+        { name: "stdio", command: "mcp", args: [] },
+        { type: "http", name: "http", url: "https://mcp.example/rpc" },
+        { type: "sse", name: "sse", url: "https://mcp.example/events" },
+      ],
+    })
+
+    expect(spy).toHaveBeenCalledWith(
+      "session/new",
+      expect.objectContaining({
+        mcpServers: [
+          { name: "stdio", command: "mcp", args: [], env: [] },
+          { type: "http", name: "http", url: "https://mcp.example/rpc", headers: [] },
+          { type: "sse", name: "sse", url: "https://mcp.example/events", headers: [] },
+        ],
+      })
+    )
+  })
+
+  it("rejects empty additional root entries as invalid absolute paths", async () => {
+    const a = new AcpClientAdapter()
+    setStatus(a, "connected")
+    ;(a as unknown as { _config: ExternalAgentConfig })._config = stdioConfig()
+    setAgentCaps(a, { sessionCapabilities: { additionalDirectories: {} } })
+
+    await expect(a.createSession({ cwd: "/work", additionalDirectories: [""] })).rejects.toThrow(
+      /absolute paths/i
+    )
+  })
+
+  it("rejects a relative session cwd before sending an ACP lifecycle request", async () => {
+    const a = new AcpClientAdapter()
+    setStatus(a, "connected")
+    ;(a as unknown as { _config: ExternalAgentConfig })._config = stdioConfig()
+    const spy = jest.spyOn(
+      a as unknown as { sendRequest: (m: string, p: unknown) => Promise<unknown> },
+      "sendRequest"
+    )
+
+    await expect(a.createSession({ cwd: "relative/work" })).rejects.toThrow(/absolute path/i)
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it("paginates session/list with a cwd filter and preserves authoritative roots", async () => {
+    const a = new AcpClientAdapter()
+    setAgentCaps(a, { sessionCapabilities: { list: {} } })
+    const spy = jest
+      .spyOn(
+        a as unknown as { sendRequest: (m: string, p: unknown) => Promise<unknown> },
+        "sendRequest"
+      )
+      .mockResolvedValueOnce({
+        sessions: [{ sessionId: "s1", cwd: "/work", additionalDirectories: ["/shared"] }],
+        nextCursor: "page-2",
+      })
+      .mockResolvedValueOnce({ sessions: [{ sessionId: "s2", cwd: "/work" }] })
+
+    await expect(a.listSessions({ cwd: "/work" })).resolves.toEqual([
+      { sessionId: "s1", cwd: "/work", additionalDirectories: ["/shared"] },
+      { sessionId: "s2", cwd: "/work" },
+    ])
+    expect(spy).toHaveBeenNthCalledWith(1, "session/list", { cwd: "/work" })
+    expect(spy).toHaveBeenNthCalledWith(2, "session/list", { cwd: "/work", cursor: "page-2" })
+  })
+
   it("logout no-ops when the agent does not advertise auth.logout", async () => {
     const a = new AcpClientAdapter()
     const spy = jest

@@ -20,8 +20,10 @@ import {
 import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { loggers } from "@cognia/logging"
 import { truncateForLog } from "@cognia/logging/truncate"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import {
   acpTerminalCreate,
+  cleanupSessionTerminals,
   acpTerminalKill,
   acpTerminalOutput,
   acpTerminalRelease,
@@ -57,6 +59,19 @@ export const RAPID_EXIT_THRESHOLD_MS = 5000
 /** Consecutive rapid crashes that trip the breaker and stop autonomous reconnect. */
 export const MAX_RAPID_EXITS = 3
 
+function isAbsoluteWorkspacePath(path: string): boolean {
+  return path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\")
+}
+
+function normalizeMcpServers(servers?: AcpMcpServerConfig[]): AcpMcpServerConfig[] {
+  return (servers ?? []).map((server) => {
+    if ("type" in server && (server.type === "http" || server.type === "sse")) {
+      return { ...server, headers: server.headers ?? [] }
+    }
+    return { ...server, env: server.env ?? [] }
+  })
+}
+
 import type {
   ExternalAgentConfig,
   ExternalAgentSession,
@@ -79,6 +94,7 @@ import type {
   AcpSessionModesState,
   AcpConfigOption,
   AcpReadTextFileParams,
+  AcpWriteTextFileParams,
   AcpTerminalCreateParams,
   AcpTerminalOutputParams,
   AcpTerminalOutputResult,
@@ -87,6 +103,7 @@ import type {
   AcpToolCallKind,
   AcpToolCallStatus,
   AcpToolCallLocation,
+  AcpPlanEntry,
   ExternalAgentBranchReasonCode,
   ExternalAgentSessionExtensionMethod,
   ExternalAgentSessionExtensionSupport,
@@ -143,7 +160,9 @@ interface AcpNewSessionParams {
   /** Working directory (absolute path, required) */
   cwd: string
   /** MCP servers to connect to */
-  mcpServers?: AcpMcpServerConfig[]
+  mcpServers: AcpMcpServerConfig[]
+  /** Additional absolute workspace roots (capability-gated). */
+  additionalDirectories?: string[]
   /** Custom metadata */
   _meta?: {
     /** System prompt configuration */
@@ -184,6 +203,8 @@ interface AcpNewSessionResult {
  */
 interface AcpSessionListItem {
   sessionId: string
+  cwd: string
+  additionalDirectories?: string[]
   title?: string
   createdAt?: string
   updatedAt?: string
@@ -345,6 +366,11 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   private turnMessageId: Map<string, string> = new Map()
   private messageIdSeq = 0
 
+  // Terminal IDs are process-global native handles. ACP scopes every terminal
+  // follow-up request to a session, so retain ownership locally and fail closed
+  // before a request can operate on another session's terminal.
+  private terminalSessions: Map<string, string> = new Map()
+
   /**
    * Connect to an ACP agent
    */
@@ -457,7 +483,11 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     this._eventsEndpoint = undefined
 
     this.processId = undefined
+    for (const sessionId of new Set(this.terminalSessions.values())) {
+      await this.cleanupNativeSessionTerminals(sessionId)
+    }
     this._sessions.clear()
+    this.terminalSessions.clear()
     for (const [, pending] of this.pendingPermissions) {
       clearTimeout(pending.timeout)
       pending.resolve({ outcome: { outcome: "cancelled" } })
@@ -837,15 +867,19 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   private async initialize(): Promise<AcpInitializeResult> {
     // fs is host-backed on desktop AND the headless brain; the terminal
     // capability stays desktop-only (no headless acp_terminal_* arms).
-    const clientCapabilities: AcpClientCapabilities = supportsAgentFs()
-      ? {
-          fs: {
-            readTextFile: true,
-            writeTextFile: true,
-          },
-          ...(supportsAgentTerminal() ? { terminal: true } : {}),
-        }
-      : {}
+    const clientCapabilities: AcpClientCapabilities = {
+      session: { configOptions: { boolean: {} } },
+      plan: {},
+      ...(supportsAgentFs()
+        ? {
+            fs: {
+              readTextFile: true,
+              writeTextFile: true,
+            },
+            ...(supportsAgentTerminal() ? { terminal: true } : {}),
+          }
+        : {}),
+    }
     const params: AcpInitializeParams = {
       protocolVersion: LATEST_ACP_PROTOCOL_VERSION,
       clientCapabilities,
@@ -958,6 +992,65 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     log.info("Disconnected")
   }
 
+  private resolveAdditionalDirectories(options?: SessionCreateOptions): string[] | undefined {
+    const directories = options?.additionalDirectories
+    if (!directories?.length) {
+      return undefined
+    }
+    if (!this._agentCapabilities?.sessionCapabilities?.additionalDirectories) {
+      throw new Error("Agent does not advertise ACP additionalDirectories support")
+    }
+    const invalid = directories.find(
+      (directory) => !directory || !isAbsoluteWorkspacePath(directory)
+    )
+    if (invalid !== undefined) {
+      throw new Error(
+        `ACP additionalDirectories entries must be absolute paths: ${invalid || "<empty>"}`
+      )
+    }
+    return [...new Set(directories)]
+  }
+
+  private resolveSessionCwd(options?: SessionCreateOptions): string {
+    const cwd =
+      options?.cwd ||
+      this._config?.process?.cwd ||
+      (typeof process !== "undefined" && process.cwd?.()) ||
+      "/"
+    if (!isAbsoluteWorkspacePath(cwd)) {
+      throw new Error(`ACP session cwd must be an absolute path: ${cwd}`)
+    }
+    return cwd
+  }
+
+  private sessionWorkspaceMetadata(
+    cwd: string,
+    additionalDirectories: string[] | undefined
+  ): Record<string, unknown> {
+    return { cwd, additionalDirectories: additionalDirectories ?? [] }
+  }
+
+  private getSessionWorkspaceRoots(sessionId: string | undefined): string[] {
+    if (!sessionId) {
+      throw new Error("ACP file requests require a sessionId")
+    }
+    const session = this._sessions.get(sessionId)
+    if (!session) {
+      throw new Error(`Unknown ACP session: ${sessionId}`)
+    }
+    const cwd = session.metadata?.cwd
+    if (typeof cwd !== "string" || !isAbsoluteWorkspacePath(cwd)) {
+      throw new Error(`ACP session ${sessionId} has no authoritative workspace root`)
+    }
+    const additionalDirectories = Array.isArray(session.metadata?.additionalDirectories)
+      ? session.metadata.additionalDirectories.filter(
+          (directory): directory is string =>
+            typeof directory === "string" && isAbsoluteWorkspacePath(directory)
+        )
+      : []
+    return [cwd, ...additionalDirectories]
+  }
+
   /**
    * Create a new session
    * @see https://agentclientprotocol.com/protocol/session-setup
@@ -967,14 +1060,13 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       throw new Error("Not connected to agent")
     }
 
+    const additionalDirectories = this.resolveAdditionalDirectories(options)
+    const cwd = this.resolveSessionCwd(options)
     // Build session params according to ACP spec
     const params: AcpNewSessionParams = {
-      cwd:
-        options?.cwd ||
-        this._config?.process?.cwd ||
-        (typeof process !== "undefined" && process.cwd?.()) ||
-        "/",
-      mcpServers: options?.mcpServers,
+      cwd,
+      mcpServers: normalizeMcpServers(options?.mcpServers),
+      ...(additionalDirectories ? { additionalDirectories } : {}),
       _meta: this.buildSessionRequestMeta(options),
     }
 
@@ -992,7 +1084,9 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     // Derive mode from configOptions (preferred) or modes (legacy)
     let initialMode: AcpPermissionMode = (options?.permissionMode || "default") as AcpPermissionMode
     if (sessionConfigOptions) {
-      const modeOption = sessionConfigOptions.find((opt) => opt.category === "mode")
+      const modeOption = sessionConfigOptions.find(
+        (opt) => opt.type === "select" && opt.category === "mode"
+      )
       if (modeOption) {
         initialMode = modeOption.currentValue as AcpPermissionMode
       }
@@ -1011,11 +1105,14 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       messages: [],
       createdAt: new Date(),
       lastActivityAt: new Date(),
-      metadata: this.buildSessionMetadata(options, {
-        models: sessionModels,
-        modes: sessionModes,
-        configOptions: sessionConfigOptions,
-      }),
+      metadata: {
+        ...this.buildSessionMetadata(options, {
+          models: sessionModels,
+          modes: sessionModes,
+          configOptions: sessionConfigOptions,
+        }),
+        ...this.sessionWorkspaceMetadata(cwd, additionalDirectories),
+      },
     }
 
     this._sessions.set(session.id, session)
@@ -1048,7 +1145,10 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 
     // Clean up any pending permissions for this session
     for (const [requestId, pending] of this.pendingPermissions) {
-      if (pending.request.sessionId === sessionId || requestId.startsWith(sessionId)) {
+      const belongsToSession = pending.request.sessionId
+        ? pending.request.sessionId === sessionId
+        : requestId.startsWith(`${sessionId}:`)
+      if (belongsToSession) {
         clearTimeout(pending.timeout)
         pending.resolve({ outcome: { outcome: "cancelled" } })
         this.pendingPermissions.delete(requestId)
@@ -1056,6 +1156,8 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
 
     this.turnMessageId.delete(sessionId)
+    await this.cleanupNativeSessionTerminals(sessionId)
+    this.forgetSessionTerminals(sessionId)
     this._sessions.delete(sessionId)
     log.info("Closed session", { sessionId })
   }
@@ -1073,19 +1175,40 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       }
     }
     this.turnMessageId.delete(sessionId)
-    this.sessionCtxCleanup(sessionId)
+    await this.sessionCtxCleanup(sessionId)
   }
 
   /** Local teardown shared by close/delete. */
-  private sessionCtxCleanup(sessionId: string): void {
+  private async sessionCtxCleanup(sessionId: string): Promise<void> {
     for (const [requestId, pending] of this.pendingPermissions) {
-      if (pending.request.sessionId === sessionId || requestId.startsWith(sessionId)) {
+      const belongsToSession = pending.request.sessionId
+        ? pending.request.sessionId === sessionId
+        : requestId.startsWith(`${sessionId}:`)
+      if (belongsToSession) {
         clearTimeout(pending.timeout)
         pending.resolve({ outcome: { outcome: "cancelled" } })
         this.pendingPermissions.delete(requestId)
       }
     }
+    await this.cleanupNativeSessionTerminals(sessionId)
+    this.forgetSessionTerminals(sessionId)
     this._sessions.delete(sessionId)
+  }
+
+  private async cleanupNativeSessionTerminals(sessionId: string): Promise<void> {
+    if (!supportsAgentTerminal()) return
+    if (![...this.terminalSessions.values()].includes(sessionId)) return
+    try {
+      await cleanupSessionTerminals(sessionId)
+    } catch (error) {
+      log.warn("Failed to clean up ACP session terminals", { sessionId, error })
+    }
+  }
+
+  private forgetSessionTerminals(sessionId: string): void {
+    for (const [terminalId, ownerSessionId] of this.terminalSessions) {
+      if (ownerSessionId === sessionId) this.terminalSessions.delete(terminalId)
+    }
   }
 
   /**
@@ -1303,6 +1426,18 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 
     // session/cancel is a notification, not a request
     this.sendNotification("session/cancel", { sessionId })
+    // ACP requires an outstanding permission request to resolve as cancelled
+    // when its prompt turn is cancelled.
+    for (const [requestId, pending] of this.pendingPermissions) {
+      const belongsToSession = pending.request.sessionId
+        ? pending.request.sessionId === sessionId
+        : requestId.startsWith(`${sessionId}:`)
+      if (belongsToSession) {
+        clearTimeout(pending.timeout)
+        pending.resolve({ outcome: { outcome: "cancelled" } })
+        this.pendingPermissions.delete(requestId)
+      }
+    }
     this.updateSession(sessionId, { status: "idle" })
   }
 
@@ -1437,7 +1572,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   async setConfigOption(
     sessionId: string,
     configId: string,
-    value: string
+    value: string | boolean
   ): Promise<AcpConfigOption[]> {
     const session = this._sessions.get(sessionId)
     if (!session) {
@@ -1456,16 +1591,30 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       )
     }
 
-    const validValue = option.options.find((o) => o.value === value)
-    if (!validValue) {
-      throw new Error(
-        `Invalid value '${value}' for option '${configId}'. Available: ${option.options.map((o) => o.value).join(", ")}`
+    let request: Record<string, unknown>
+    if (option.type === "boolean") {
+      if (typeof value !== "boolean") {
+        throw new Error(`Config option '${configId}' requires a boolean value`)
+      }
+      request = { sessionId, configId, type: "boolean", value }
+    } else {
+      if (typeof value !== "string") {
+        throw new Error(`Config option '${configId}' requires a string value`)
+      }
+      const availableValues = option.options.flatMap((entry) =>
+        "group" in entry ? entry.options : [entry]
       )
+      if (!availableValues.some((entry) => entry.value === value)) {
+        throw new Error(
+          `Invalid value '${value}' for option '${configId}'. Available: ${availableValues.map((entry) => entry.value).join(", ")}`
+        )
+      }
+      request = { sessionId, configId, value }
     }
 
     const result = await this.sendRequest<{ configOptions: AcpConfigOption[] }>(
       "session/set_config_option",
-      { sessionId, configId, value } as unknown as Record<string, unknown>
+      request
     )
 
     // Update session metadata with new config state
@@ -1474,7 +1623,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 
     // Sync mode from config options if applicable
     const modeOpt = updatedOptions.find((opt) => opt.category === "mode")
-    if (modeOpt) {
+    if (modeOpt && typeof modeOpt.currentValue === "string") {
       this.updateSession(sessionId, { permissionMode: modeOpt.currentValue as AcpPermissionMode })
     }
 
@@ -1494,10 +1643,13 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       throw new Error("Agent does not support loading sessions")
     }
 
+    const additionalDirectories = this.resolveAdditionalDirectories(options)
+    const cwd = this.resolveSessionCwd(options)
     const params = {
       sessionId,
-      cwd: options?.cwd || this._config?.process?.cwd || "/",
-      mcpServers: options?.mcpServers,
+      cwd,
+      mcpServers: normalizeMcpServers(options?.mcpServers),
+      ...(additionalDirectories ? { additionalDirectories } : {}),
       _meta: this.buildSessionRequestMeta(options),
     }
 
@@ -1514,7 +1666,10 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       messages: [],
       createdAt: new Date(),
       lastActivityAt: new Date(),
-      metadata: this.buildSessionMetadata(options),
+      metadata: {
+        ...this.buildSessionMetadata(options),
+        ...this.sessionWorkspaceMetadata(cwd, additionalDirectories),
+      },
     }
 
     this._sessions.set(session.id, session)
@@ -1524,8 +1679,23 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   /**
    * List existing sessions (ACP extension / unstable)
    */
-  async listSessions(): Promise<AcpSessionListItem[]> {
+  async listSessions(options?: { cwd?: string }): Promise<AcpSessionListItem[]> {
     const method = "session/list"
+    if (
+      this._agentCapabilities?.sessionCapabilities &&
+      !this._agentCapabilities.sessionCapabilities.list
+    ) {
+      this.setExtensionSupport(
+        method,
+        "unsupported",
+        "extension_unsupported",
+        "Agent does not advertise session listing support"
+      )
+      throw createExternalAgentUnsupportedSessionExtensionError(
+        method,
+        "Agent does not advertise session listing support"
+      )
+    }
     if (this.unsupportedMethods.has(method)) {
       this.setExtensionSupport(
         method,
@@ -1537,14 +1707,34 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
 
     try {
-      const result = await this.sendRequest<
-        { sessions?: AcpSessionListItem[] } | AcpSessionListItem[]
-      >(method, {})
-      this.setExtensionSupport(method, "supported", "ok")
-      if (Array.isArray(result)) {
-        return result
+      if (options?.cwd && !isAbsoluteWorkspacePath(options.cwd)) {
+        throw new Error(`ACP session/list cwd must be an absolute path: ${options.cwd}`)
       }
-      return result.sessions ?? []
+      const sessions: AcpSessionListItem[] = []
+      const seenCursors = new Set<string>()
+      let cursor: string | undefined
+      do {
+        const result = await this.sendRequest<
+          { sessions?: AcpSessionListItem[]; nextCursor?: string | null } | AcpSessionListItem[]
+        >(method, {
+          ...(options?.cwd ? { cwd: options.cwd } : {}),
+          ...(cursor ? { cursor } : {}),
+        })
+        if (Array.isArray(result)) {
+          sessions.push(...result)
+          cursor = undefined
+        } else {
+          sessions.push(...(result.sessions ?? []))
+          const nextCursor = result.nextCursor || undefined
+          if (nextCursor && seenCursors.has(nextCursor)) {
+            throw new Error(`Agent returned a repeated session/list cursor: ${nextCursor}`)
+          }
+          if (nextCursor) seenCursors.add(nextCursor)
+          cursor = nextCursor
+        }
+      } while (cursor)
+      this.setExtensionSupport(method, "supported", "ok")
+      return sessions
     } catch (error) {
       if (
         isExternalAgentMethodNotFoundError(error) ||
@@ -1572,7 +1762,10 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   /**
    * Fork a session (ACP extension / unstable)
    */
-  async forkSession(sessionId: string): Promise<ExternalAgentSession> {
+  async forkSession(
+    sessionId: string,
+    options?: SessionCreateOptions
+  ): Promise<ExternalAgentSession> {
     const method = "session/fork"
     if (
       this._agentCapabilities?.sessionCapabilities &&
@@ -1600,10 +1793,15 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
 
     try {
-      const result = await this.sendRequest<AcpNewSessionResult>(method, { sessionId } as Record<
-        string,
-        unknown
-      >)
+      const additionalDirectories = this.resolveAdditionalDirectories(options)
+      const cwd = this.resolveSessionCwd(options)
+      const result = await this.sendRequest<AcpNewSessionResult>(method, {
+        sessionId,
+        cwd,
+        mcpServers: normalizeMcpServers(options?.mcpServers),
+        ...(additionalDirectories ? { additionalDirectories } : {}),
+        _meta: this.buildSessionRequestMeta(options),
+      } as Record<string, unknown>)
       const inheritedMetadata = this._sessions.get(sessionId)?.metadata as
         Record<string, unknown> | undefined
       const forkedSession: ExternalAgentSession = {
@@ -1616,15 +1814,18 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         messages: [],
         createdAt: new Date(),
         lastActivityAt: new Date(),
-        metadata: this.buildSessionMetadata(
-          undefined,
-          {
-            models: result.models,
-            modes: result.modes,
-            configOptions: result.configOptions,
-          },
-          inheritedMetadata
-        ),
+        metadata: {
+          ...this.buildSessionMetadata(
+            options,
+            {
+              models: result.models,
+              modes: result.modes,
+              configOptions: result.configOptions,
+            },
+            inheritedMetadata
+          ),
+          ...this.sessionWorkspaceMetadata(cwd, additionalDirectories),
+        },
       }
       this._sessions.set(forkedSession.id, forkedSession)
       this.setExtensionSupport(method, "supported", "ok")
@@ -1705,10 +1906,13 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
 
     try {
+      const additionalDirectories = this.resolveAdditionalDirectories(options)
+      const cwd = this.resolveSessionCwd(options)
       const result = await this.sendRequest<AcpNewSessionResult>(method, {
         sessionId,
-        cwd: options?.cwd || this._config?.process?.cwd || "/",
-        mcpServers: options?.mcpServers,
+        cwd,
+        mcpServers: normalizeMcpServers(options?.mcpServers),
+        ...(additionalDirectories ? { additionalDirectories } : {}),
         _meta: this.buildSessionRequestMeta(options),
       } as Record<string, unknown>)
 
@@ -1722,11 +1926,14 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         messages: [],
         createdAt: new Date(),
         lastActivityAt: new Date(),
-        metadata: this.buildSessionMetadata(options, {
-          models: result.models,
-          modes: result.modes,
-          configOptions: result.configOptions,
-        }),
+        metadata: {
+          ...this.buildSessionMetadata(options, {
+            models: result.models,
+            modes: result.modes,
+            configOptions: result.configOptions,
+          }),
+          ...this.sessionWorkspaceMetadata(cwd, additionalDirectories),
+        },
       }
       this._sessions.set(resumedSession.id, resumedSession)
       this.setExtensionSupport(method, "supported", "ok")
@@ -1868,6 +2075,15 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * Send a message to the agent
    */
   private async sendMessage(message: string): Promise<void> {
+    let outboundPayload: unknown
+    try {
+      outboundPayload = JSON.parse(message)
+    } catch {
+      throw new Error("ACP outbound payload is not valid JSON")
+    }
+    if (!hasNoLeakingPiiDeep(outboundPayload)) {
+      throw new Error("ACP outbound payload blocked by the PII gate")
+    }
     if (this._config?.transport === "stdio" && this.processId && supportsExternalAgents()) {
       await agentInvoke("send_to_external_agent", {
         agentId: this.processId,
@@ -1928,7 +2144,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       case "fs/read_text_file":
         return this.handleReadTextFile(params as unknown as AcpReadTextFileParams)
       case "fs/write_text_file":
-        return this.handleWriteTextFile(params as unknown as { path: string; content: string })
+        return this.handleWriteTextFile(params as unknown as AcpWriteTextFileParams)
       case "session/request_permission":
         return this.handlePermissionRequest(params as unknown as AcpPermissionRequest)
       case "terminal/create":
@@ -1936,14 +2152,20 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       case "terminal/output":
         return this.handleTerminalOutput(params as unknown as AcpTerminalOutputParams)
       case "terminal/kill":
-        return this.handleTerminalKill(params as unknown as { terminalId: string })
+        return this.handleTerminalKill(
+          params as unknown as { sessionId: string; terminalId: string }
+        )
       case "terminal/release":
-        return this.handleTerminalRelease(params as unknown as { terminalId: string })
+        return this.handleTerminalRelease(
+          params as unknown as { sessionId: string; terminalId: string }
+        )
       case "terminal/write":
-        return this.handleTerminalWrite(params as unknown as { terminalId: string; data: string })
+        return this.handleTerminalWrite(
+          params as unknown as { sessionId: string; terminalId: string; data: string }
+        )
       case "terminal/wait_for_exit":
         return this.handleTerminalWaitForExit(
-          params as unknown as { terminalId: string; timeout?: number }
+          params as unknown as { sessionId: string; terminalId: string; timeout?: number }
         )
       default:
         if (method.startsWith("_")) {
@@ -1962,9 +2184,10 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * @see https://agentclientprotocol.com/protocol/file-system
    */
   private async handleReadTextFile(params: AcpReadTextFileParams): Promise<{ content: string }> {
-    // Host-backed on desktop (plugin-fs) and the headless brain (node:fs);
-    // throws in a plain browser — agent-transport owns the branching.
-    const fullContent = await agentReadTextFile(params.path)
+    const fullContent = await agentReadTextFile(
+      params.path,
+      this.getSessionWorkspaceRoots(params.sessionId)
+    )
     const hasLineParams = typeof params.line === "number" || typeof params.limit === "number"
     if (!hasLineParams) {
       return { content: fullContent }
@@ -1982,8 +2205,12 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * Handle fs/write_text_file request
    * @see https://agentclientprotocol.com/protocol/file-system
    */
-  private async handleWriteTextFile(params: { path: string; content: string }): Promise<void> {
-    await agentWriteTextFile(params.path, params.content)
+  private async handleWriteTextFile(params: AcpWriteTextFileParams): Promise<void> {
+    await agentWriteTextFile(
+      params.path,
+      params.content,
+      this.getSessionWorkspaceRoots(params.sessionId)
+    )
   }
 
   /**
@@ -2160,11 +2387,20 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       params.command,
       params.args || [],
       params.cwd,
-      params.env,
+      params.env
+        ? Object.fromEntries(params.env.map(({ name, value }) => [name, value]))
+        : undefined,
       params.outputByteLimit
     )
+    this.terminalSessions.set(terminalId, params.sessionId)
 
     return { terminalId }
+  }
+
+  private assertTerminalOwnership(sessionId: string, terminalId: string): void {
+    if (this.terminalSessions.get(terminalId) !== sessionId) {
+      throw new Error(`Terminal ${terminalId} does not belong to ACP session ${sessionId}`)
+    }
   }
 
   /**
@@ -2178,6 +2414,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       throw new Error("Terminal support requires the Tauri desktop environment")
     }
 
+    this.assertTerminalOwnership(params.sessionId, params.terminalId)
     const result = await acpTerminalOutput(params.terminalId, params.outputByteLimit)
     return result
   }
@@ -2186,11 +2423,15 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * Handle terminal/kill request from agent
    * @see https://agentclientprotocol.com/protocol/terminals
    */
-  private async handleTerminalKill(params: { terminalId: string }): Promise<void> {
+  private async handleTerminalKill(params: {
+    sessionId: string
+    terminalId: string
+  }): Promise<void> {
     if (!supportsAgentTerminal()) {
       throw new Error("Terminal support requires the Tauri desktop environment")
     }
 
+    this.assertTerminalOwnership(params.sessionId, params.terminalId)
     await acpTerminalKill(params.terminalId)
   }
 
@@ -2198,12 +2439,17 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * Handle terminal/release request from agent
    * @see https://agentclientprotocol.com/protocol/terminals
    */
-  private async handleTerminalRelease(params: { terminalId: string }): Promise<void> {
+  private async handleTerminalRelease(params: {
+    sessionId: string
+    terminalId: string
+  }): Promise<void> {
     if (!supportsAgentTerminal()) {
       throw new Error("Terminal support requires the Tauri desktop environment")
     }
 
+    this.assertTerminalOwnership(params.sessionId, params.terminalId)
     await acpTerminalRelease(params.terminalId)
+    this.terminalSessions.delete(params.terminalId)
   }
 
   /**
@@ -2211,11 +2457,16 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * stdin. Delegates to the native binding (the Rust side flushes after write).
    * @see https://agentclientprotocol.com/protocol/terminals
    */
-  private async handleTerminalWrite(params: { terminalId: string; data: string }): Promise<void> {
+  private async handleTerminalWrite(params: {
+    sessionId: string
+    terminalId: string
+    data: string
+  }): Promise<void> {
     if (!supportsAgentTerminal()) {
       throw new Error("Terminal support requires the Tauri desktop environment")
     }
 
+    this.assertTerminalOwnership(params.sessionId, params.terminalId)
     await acpTerminalWrite(params.terminalId, params.data)
   }
 
@@ -2224,20 +2475,19 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * @see https://agentclientprotocol.com/protocol/terminals
    */
   private async handleTerminalWaitForExit(params: {
+    sessionId: string
     terminalId: string
     timeout?: number
-  }): Promise<{
-    exitCode: number | null
-    exitStatus: { exitCode: number | null; signal: string | null }
-  }> {
+  }): Promise<{ exitCode: number | null; signal: string | null }> {
     if (!supportsAgentTerminal()) {
       throw new Error("Terminal support requires the Tauri desktop environment")
     }
 
+    this.assertTerminalOwnership(params.sessionId, params.terminalId)
     const waitResult = await acpTerminalWaitForExit(params.terminalId, params.timeout)
     return {
       exitCode: waitResult.exitStatus.exitCode,
-      exitStatus: waitResult.exitStatus,
+      signal: waitResult.exitStatus.signal,
     }
   }
 
@@ -2395,6 +2645,85 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
           totalSteps,
         }
 
+      case "plan_update": {
+        const plan = update.plan
+        const planSession = this._sessions.get(sessionId)
+        const plans = {
+          ...((planSession?.metadata?.plans as Record<string, unknown> | undefined) ?? {}),
+          [plan.planId]: plan,
+        }
+        const entries = plan.type === "items" ? plan.entries : []
+        if (planSession) {
+          planSession.metadata = {
+            ...planSession.metadata,
+            plans,
+            ...(plan.type === "items" ? { plan: entries, activeItemPlanId: plan.planId } : {}),
+          }
+        }
+        const completed = entries.filter((entry) => entry.status === "completed").length
+        const current = entries.findIndex((entry) => entry.status === "in_progress")
+        return {
+          type: "plan_update",
+          sessionId,
+          timestamp,
+          planId: plan.planId,
+          kind: plan.type,
+          entries,
+          progress: entries.length > 0 ? (completed / entries.length) * 100 : 0,
+          step: current,
+          totalSteps: entries.length,
+          ...(plan.type === "file" ? { uri: plan.uri } : {}),
+          ...(plan.type === "markdown" ? { content: plan.content } : {}),
+          removed: false,
+        }
+      }
+
+      case "plan_removed": {
+        const planSession = this._sessions.get(sessionId)
+        if (planSession) {
+          const plans = {
+            ...((planSession.metadata?.plans as Record<string, unknown> | undefined) ?? {}),
+          }
+          delete plans[update.planId]
+          const itemPlans = Object.entries(plans).filter(
+            (entry): entry is [string, { type: "items"; entries: AcpPlanEntry[] }] => {
+              const plan = entry[1]
+              return (
+                typeof plan === "object" &&
+                plan !== null &&
+                (plan as { type?: unknown }).type === "items" &&
+                Array.isArray((plan as { entries?: unknown }).entries)
+              )
+            }
+          )
+          const currentActiveId =
+            typeof planSession.metadata?.activeItemPlanId === "string"
+              ? planSession.metadata.activeItemPlanId
+              : undefined
+          const activeItemPlan = currentActiveId
+            ? (itemPlans.find(([planId]) => planId === currentActiveId) ?? itemPlans[0])
+            : undefined
+          const metadata = { ...planSession.metadata, plans }
+          if (currentActiveId) {
+            metadata.plan = activeItemPlan?.[1].entries ?? []
+            if (activeItemPlan) metadata.activeItemPlanId = activeItemPlan[0]
+            else delete metadata.activeItemPlanId
+          }
+          planSession.metadata = metadata
+        }
+        return {
+          type: "plan_update",
+          sessionId,
+          timestamp,
+          planId: update.planId,
+          entries: [],
+          progress: 0,
+          step: -1,
+          totalSteps: 0,
+          removed: true,
+        }
+      }
+
       case "available_commands_update":
         // Store available commands in session metadata
         const cmdSession = this._sessions.get(sessionId)
@@ -2419,12 +2748,16 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         // Agent-initiated mode change
         const modeSession = this._sessions.get(sessionId)
         if (modeSession) {
-          this.updateSession(sessionId, { permissionMode: update.modeId as AcpPermissionMode })
+          this.updateSession(sessionId, {
+            permissionMode: update.currentModeId as AcpPermissionMode,
+          })
           // Also update configOptions if they exist
           const configOpts = modeSession.metadata?.configOptions as AcpConfigOption[] | undefined
           if (configOpts) {
             const updatedOpts = configOpts.map((opt) =>
-              opt.category === "mode" ? { ...opt, currentValue: update.modeId } : opt
+              opt.category === "mode" && opt.type === "select"
+                ? { ...opt, currentValue: update.currentModeId }
+                : opt
             )
             modeSession.metadata = { ...modeSession.metadata, configOptions: updatedOpts }
           }
@@ -2433,7 +2766,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
           type: "mode_update" as const,
           sessionId,
           timestamp,
-          modeId: update.modeId,
+          modeId: update.currentModeId,
         }
       }
 
@@ -2449,7 +2782,9 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
             configOptions: update.configOptions,
           }
           // Sync mode from config options
-          const modeOpt = update.configOptions.find((opt) => opt.category === "mode")
+          const modeOpt = update.configOptions.find(
+            (opt) => opt.type === "select" && opt.category === "mode"
+          )
           if (modeOpt) {
             this.updateSession(sessionId, {
               permissionMode: modeOpt.currentValue as AcpPermissionMode,
