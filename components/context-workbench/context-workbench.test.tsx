@@ -470,4 +470,46 @@ describe("ContextWorkbench", () => {
     fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.panels.comments" }))
     expect(mounted).toHaveBeenCalledTimes(2)
   })
+
+  it("supports arrow, Home, and End keyboard navigation for activities and grouped panels", () => {
+    renderWorkbench([
+      {
+        id: "comments",
+        activity: "comments",
+        labelKey: "contextWorkbench.panels.comments",
+        appliesTo: () => true,
+        renderer: () => <div>comments-panel</div>,
+      },
+      {
+        id: "comments-two",
+        activity: "comments",
+        labelKey: "contextWorkbench.panels.commentsTwo",
+        appliesTo: () => true,
+        renderer: () => <div>comments-two-panel</div>,
+      },
+      {
+        id: "review",
+        activity: "review",
+        labelKey: "contextWorkbench.panels.review",
+        appliesTo: () => true,
+        renderer: () => <div>review-panel</div>,
+      },
+    ])
+
+    const commentsActivity = screen.getByRole("button", {
+      name: "contextWorkbench.panels.comments",
+    })
+    commentsActivity.focus()
+    fireEvent.keyDown(commentsActivity, { key: "ArrowDown" })
+    expect(screen.getByText("review-panel")).toBeInTheDocument()
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "contextWorkbench.panels.review" }), {
+      key: "Home",
+    })
+    const firstTab = screen.getByRole("tab", { name: "contextWorkbench.panels.comments" })
+    firstTab.focus()
+    fireEvent.keyDown(firstTab, { key: "End" })
+    expect(screen.getByText("comments-two-panel")).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "contextWorkbench.panels.commentsTwo" })).toHaveFocus()
+  })
 })

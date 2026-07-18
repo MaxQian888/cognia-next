@@ -11,6 +11,7 @@ import {
   useRef,
   useSyncExternalStore,
   type ErrorInfo,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react"
@@ -398,6 +399,46 @@ export function ContextWorkbench({
     window.addEventListener("pointerup", handleUp)
   }
 
+  const handleActivityKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return
+    const buttons = Array.from(
+      event.currentTarget.querySelectorAll<HTMLButtonElement>("[data-workbench-activity-button]")
+    )
+    if (buttons.length === 0) return
+    const currentIndex = Math.max(0, buttons.indexOf(event.target as HTMLButtonElement))
+    const nextIndex =
+      event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? buttons.length - 1
+          : event.key === "ArrowDown"
+            ? (currentIndex + 1) % buttons.length
+            : (currentIndex - 1 + buttons.length) % buttons.length
+    event.preventDefault()
+    buttons[nextIndex]?.focus()
+    buttons[nextIndex]?.click()
+  }
+
+  const handleGroupTabKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!["ArrowRight", "ArrowLeft", "Home", "End"].includes(event.key)) return
+    const tabs = Array.from(
+      event.currentTarget.querySelectorAll<HTMLButtonElement>("[data-workbench-group-tab]")
+    )
+    if (tabs.length === 0) return
+    const currentIndex = Math.max(0, tabs.indexOf(event.target as HTMLButtonElement))
+    const nextIndex =
+      event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? tabs.length - 1
+          : event.key === "ArrowRight"
+            ? (currentIndex + 1) % tabs.length
+            : (currentIndex - 1 + tabs.length) % tabs.length
+    event.preventDefault()
+    tabs[nextIndex]?.focus()
+    tabs[nextIndex]?.click()
+  }
+
   const value = useMemo(
     () => ({ workbenchInstanceId, resource, scopeKey, layout }),
     [layout, resource, scopeKey, workbenchInstanceId]
@@ -448,6 +489,7 @@ export function ContextWorkbench({
             className="flex w-12 shrink-0 flex-col items-center gap-1 border-r bg-muted/30 py-2"
             aria-label={t("contextWorkbench.activityRailLabel")}
             data-testid="context-workbench-activity-rail"
+            onKeyDown={handleActivityKeyDown}
           >
             {activityGroups.map(([activity, group]) => {
               const panel =
@@ -469,6 +511,7 @@ export function ContextWorkbench({
                       variant={activePanel?.activity === activity ? "secondary" : "ghost"}
                       aria-label={label}
                       aria-pressed={activePanel?.activity === activity}
+                      data-workbench-activity-button
                       onClick={() => handleActivate(panel)}
                       className="relative"
                     >
@@ -523,6 +566,7 @@ export function ContextWorkbench({
                 <div
                   role="tablist"
                   className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
+                  onKeyDown={handleGroupTabKeyDown}
                 >
                   {activeGroup.map((panel) => (
                     <Button
