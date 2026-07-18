@@ -42,6 +42,9 @@ export function GoalSubgoalsTab({ goal }: Props) {
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(false)
+  // Distinct from `error`: no model with a usable API key is resolvable, so
+  // retrying can't succeed. Renders the non-retryable `unavailable` copy.
+  const [unavailable, setUnavailable] = useState(false)
 
   const done = subgoals.filter((s) => s.done).length
   const total = subgoals.length
@@ -50,6 +53,7 @@ export function GoalSubgoalsTab({ goal }: Props) {
   async function generate() {
     setBusy(true)
     setError(false)
+    setUnavailable(false)
     try {
       const session = await getSession(current.sessionId)
       const client = buildRendererLlmClient({
@@ -58,7 +62,9 @@ export function GoalSubgoalsTab({ goal }: Props) {
         featureId: "goal-subgoals",
       })
       if (!client) {
-        setError(true)
+        // No resolvable model/API key — surface the non-retryable reason
+        // instead of the generic "try again" error.
+        setUnavailable(true)
         return
       }
       const updated = await getGoalRuntime().generateSubgoals(current.id, client)
@@ -107,6 +113,15 @@ export function GoalSubgoalsTab({ goal }: Props) {
         </p>
       )}
 
+      {unavailable && (
+        <p
+          className="rounded-md border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground"
+          data-testid="goal-subgoals-unavailable"
+        >
+          {t("subgoals.unavailable")}
+        </p>
+      )}
+
       {hasSubgoals ? (
         <>
           <div className="space-y-1">
@@ -145,7 +160,8 @@ export function GoalSubgoalsTab({ goal }: Props) {
           </motion.ul>
         </>
       ) : (
-        !error && (
+        !error &&
+        !unavailable && (
           <p
             className="rounded-md border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground"
             data-testid="goal-subgoals-empty"

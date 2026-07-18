@@ -66,4 +66,12 @@ describe("GoalOverviewTab", () => {
     render(<GoalOverviewTab goal={ended} />)
     expect(screen.getByText(/Ended:/)).toBeInTheDocument()
   })
+
+  it("pins the foreground-dormancy note to active goals only (contract, no boot re-arm)", () => {
+    const { rerender } = render(<GoalOverviewTab goal={buildGoal({ status: "active" })} />)
+    expect(screen.getByTestId("goal-foreground-dormancy-note")).toBeInTheDocument()
+    // Terminal goals have nothing to resume — the note must not show.
+    rerender(<GoalOverviewTab goal={buildGoal({ status: "completed", endedAt: 1 })} />)
+    expect(screen.queryByTestId("goal-foreground-dormancy-note")).not.toBeInTheDocument()
+  })
 })

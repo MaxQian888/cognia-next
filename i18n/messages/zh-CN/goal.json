@@ -188,15 +188,15 @@
   },
   "judge": {
     "heading": "判定",
+    "invalidModel": "该判定模型不在任何已配置的提供商中——目标将回退到聊天模型。",
     "maxTokens": "判定最大 token",
     "maxTokensHint": "判定回复的上限。判定只回一行——200 足够。",
     "model": "判定模型",
     "modelHint": "判定目标是否完成的模型。除非想用更便宜/更快的判定，否则保持聊天模型即可。",
+    "noModels": "暂无可用模型，请先配置提供商。",
     "promptOverride": "判定提示覆盖",
     "promptOverrideHint": "替换内置判定指令。仍须要求返回一行 JSON 判定结果。",
-    "provider": "判定提供商",
-    "providerHint": "与判定模型配对的提供商 id。留空则复用会话 / 应用的提供商。",
-    "providerPlaceholder": "会话提供商",
+    "searchPlaceholder": "搜索模型…",
     "temperature": "判定温度",
     "temperatureHint": "0 为确定性（推荐）。越高判定越宽松。",
     "useChatModel": "使用聊天模型"
@@ -211,7 +211,9 @@
     "createdBadge": "创建于：{date}",
     "endedBadge": "结束于：{date}",
     "exitReason": "退出原因",
+    "foregroundDormancy": "交互式目标仅在 App 打开时推进；关闭后会暂停，直到你重新打开该会话。定时与无头目标则会自行继续。",
     "lastJudgeReason": "最近判定理由",
+    "reasonQuoted": "“{reason}”",
     "objective": "目标",
     "statusBadge": "状态：{status}",
     "tokenBudgetAria": "已用 token 预算",
@@ -276,7 +278,6 @@
     "turn_limited": "回合耗尽"
   },
   "subgoals": {
-    "body": "自动子目标拆解将在后续版本提供。目前目标作为单一任务运行，由判定决定何时完成。",
     "description": "把目标拆解为一份检查清单，供智能体逐项推进。",
     "empty": "还没有子目标。从目标生成一份检查清单。",
     "error": "生成清单失败，请重试。",
@@ -306,6 +307,7 @@
     "builtin": "内置（不可删除）",
     "customise": "想自定义该智能体的提示？打开 设置 → 角色 并复制 Goal Tracker。",
     "loading": "加载中…",
+    "openCharacters": "打开角色设置",
     "missing": "Goal Tracker 角色缺失——重新播种内置项以恢复。",
     "permissionMode": "权限模式：{mode}",
     "systemPrompt": "系统提示"

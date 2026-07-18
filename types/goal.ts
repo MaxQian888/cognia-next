@@ -37,6 +37,15 @@
  *   turn_limited     → turnsUsed >= maxTurns (terminal)
  *   timed_out        → wall-clock exceeded timeoutMs (terminal)
  *   preempted        → user typed a non-slash message mid-loop (terminal)
+ *
+ * Foreground-goal dormancy contract (ADR-0019, intentional — no boot re-arm):
+ * an `"active"` goal of interactive origin is pumped ONLY by the chat hook
+ * (`hooks/chat/use-claude-chat.ts:scheduleGoalContinuation`) while its session
+ * is open in a running app. Closing the app leaves the row `"active"` but idle;
+ * it resumes when the user reopens the chat — the app does NOT scan and re-arm
+ * active goals on launch. Headless origins (scheduler/remote/plugin/workflow)
+ * keep advancing via their own driver. Surfaced to the user by the Overview
+ * tab's `overview.foregroundDormancy` note and pinned by its test.
  */
 export type GoalStatus =
   | "active"

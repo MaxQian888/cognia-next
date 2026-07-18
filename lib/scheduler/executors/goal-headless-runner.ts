@@ -26,14 +26,20 @@
  * turns use the turn-driver's generated continuation messages.
  */
 
-import type { AppSettings } from "@cognia/agent-config-types"
-import { isTerminalGoalStatus, type GoalStatus } from "@/types/goal"
+import type { AppSettings, SendContent, SendOptions } from "@cognia/agent-config-types"
+import { isTerminalGoalStatus, type Goal, type GoalStatus } from "@/types/goal"
 import { getGoal } from "@/lib/db/goals"
 import { getSession } from "@/lib/db/sessions"
 import { resolveSendOptions } from "@/lib/claude/build-options"
-import { runAndCaptureAssistantReply, RunAndCaptureError } from "@/lib/claude/run-and-capture"
+import {
+  runAndCaptureAssistantReply,
+  RunAndCaptureError,
+  type RunAndCaptureOptions,
+  type RunAndCaptureResult,
+} from "@/lib/claude/run-and-capture"
 import { buildGoalJudgeClient } from "@/lib/goal/judge-client"
 import { handleTurnComplete } from "@/lib/goal/turn-driver"
+import { gateContinuation } from "@/lib/goal/pacing"
 import { loggers } from "@cognia/logging"
 
 const log = loggers.scheduler
@@ -45,6 +51,38 @@ export interface RunGoalLoopInput {
   signal: AbortSignal
   /** Per-turn capture timeout (ms). Defaults to the run-and-capture default. */
   perTurnTimeoutMs?: number
+  /**
+   * Called after each completed turn with the captured assistant text. The
+   * scheduler leaves it unset (no per-turn delivery); the connector driver
+   * uses it to post every turn back to the IM conversation.
+   */
+  onTurn?: (text: string, turnIndex: number, goal: Goal) => void | Promise<void>
+  /**
+   * Model-send seam for unreviewed runtimes. Connector callers inject their
+   * PII-gated sender; the scheduler keeps the existing capture implementation.
+   */
+  sendTurn?: (
+    sessionId: string,
+    prompt: SendContent,
+    options: SendOptions | undefined,
+    captureOptions: RunAndCaptureOptions
+  ) => Promise<RunAndCaptureResult>
+  /**
+   * Opt-in continuation pacing. OFF by default so the scheduler path is
+   * byte-for-byte unchanged (a cron firing IS the scheduled goal's pacing).
+   * The connector driver turns it on so IM goals honor manualContinue /
+   * quiet-hours / min-interval between turns, deferring or holding as the
+   * pacing gate decides.
+   */
+  pacing?: {
+    enabled: boolean
+    /** Clock source (defaults to `Date.now`). */
+    now?: () => number
+    /** Sleep primitive (defaults to `setTimeout`). */
+    sleep?: (ms: number) => Promise<void>
+    /** Max single sleep before re-checking status + re-evaluating the gate. */
+    maxSleepMs?: number
+  }
 }
 
 export interface RunGoalLoopResult {
@@ -56,6 +94,7 @@ export interface RunGoalLoopResult {
 
 export async function runGoalLoopHeadless(input: RunGoalLoopInput): Promise<RunGoalLoopResult> {
   const { sessionId, goalId, appSettings, signal } = input
+  const sendTurn = input.sendTurn ?? runAndCaptureAssistantReply
 
   const session = await getSession(sessionId)
   if (!session) {
@@ -76,6 +115,13 @@ export async function runGoalLoopHeadless(input: RunGoalLoopInput): Promise<RunG
   let nextPrompt: string | null = null
   let turns = 0
   let lastResponse: string | undefined
+
+  // Pacing state (only consulted when `pacing.enabled`).
+  const nowFn = input.pacing?.now ?? Date.now
+  const sleepFn =
+    input.pacing?.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  const maxSleepMs = input.pacing?.maxSleepMs ?? 60_000
+  let lastContinuationAt: number | undefined
 
   // Defensive hard cap: maxTurns (the real bound is inside handleTurnComplete)
   // plus a small buffer for parse-error continues.
@@ -98,6 +144,24 @@ export async function runGoalLoopHeadless(input: RunGoalLoopInput): Promise<RunG
       return { status: goal.status, turns, lastResponse }
     }
 
+    // Pacing gate — consulted only between turns (never before the first, when
+    // `nextPrompt` is still null) and only when the caller opted in.
+    if (input.pacing?.enabled && nextPrompt !== null) {
+      const decision = gateContinuation(goal, nowFn(), lastContinuationAt)
+      if (decision.kind === "hold") {
+        // manualContinue: there is no headless way to advance one turn, so the
+        // goal stays active + idle and the driver exits.
+        return { status: goal.status, turns, lastResponse, error: "held" }
+      }
+      if (decision.kind === "defer") {
+        const waitMs = Math.min(Math.max(0, decision.untilMs - nowFn()), maxSleepMs)
+        if (waitMs > 0) {
+          await sleepFn(waitMs)
+          continue // re-check status + re-evaluate the gate (bounds long defers)
+        }
+      }
+    }
+
     const prompt = nextPrompt ?? goal.safeObjective
     const capturedGenerationId = goal.generationId
 
@@ -118,7 +182,7 @@ export async function runGoalLoopHeadless(input: RunGoalLoopInput): Promise<RunG
     let budgetExceeded = false
     let captureUsage: Awaited<ReturnType<typeof runAndCaptureAssistantReply>>["usage"]
     try {
-      const capture = await runAndCaptureAssistantReply(sessionId, prompt, resolved, {
+      const capture = await sendTurn(sessionId, prompt, resolved, {
         signal,
         ...(typeof input.perTurnTimeoutMs === "number"
           ? { timeoutMs: input.perTurnTimeoutMs }
@@ -146,6 +210,10 @@ export async function runGoalLoopHeadless(input: RunGoalLoopInput): Promise<RunG
 
     turns += 1
 
+    // Per-turn delivery — the connector driver posts each turn to the IM
+    // conversation. The scheduler leaves `onTurn` unset (no delivery).
+    await input.onTurn?.(captureText, turns, goal)
+
     const outcome = await handleTurnComplete({
       goalId,
       lastResponse: captureText,
@@ -166,6 +234,8 @@ export async function runGoalLoopHeadless(input: RunGoalLoopInput): Promise<RunG
     switch (outcome.kind) {
       case "continue":
         nextPrompt = outcome.userMessage
+        // Baseline for the next pacing gate's interval math.
+        lastContinuationAt = nowFn()
         break
       case "exit":
         return { status: outcome.resultingStatus, turns, lastResponse }

@@ -1,9 +1,9 @@
 "use client"
 
 /**
- * Detail surface for a `/goal` (ADR-0013). Four tabs:
+ * Detail surface for a `/goal` (ADR-0019). Four tabs:
  *   - Overview   — status badge, objective, progress bars, last judge reason
- *   - Subgoals   — Phase 2 placeholder
+ *   - Subgoals   — LLM decomposition + checkable checklist (judge auto-marks steps)
  *   - Activity   — reverse-chrono event log from `chatGoalEvents`
  *   - Settings   — per-goal config knobs (maxTurns / maxTokens / etc.)
  *

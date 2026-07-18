@@ -398,6 +398,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
               />
             </div>
             <p className="text-xs text-muted-foreground">{t("fields.allowGoalDrivingWarning")}</p>
+            <p className="text-xs text-muted-foreground">{t("fields.allowGoalDrivingPlatform")}</p>
           </div>
         </div>
       </div>

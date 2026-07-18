@@ -69,6 +69,16 @@ describe("parseControlCommand", () => {
     expect(isReadonlyCommand("workflow")).toBe(false)
   })
 
+  it("parses /goal with a multi-word objective as the arg", () => {
+    expect(parseControlCommand("/goal write a haiku about winter")).toEqual({
+      kind: "known",
+      name: "goal",
+      arg: "write a haiku about winter",
+    })
+    // State-changing (create/pause/stop live under it) → gated, not read-only.
+    expect(isReadonlyCommand("goal")).toBe(false)
+  })
+
   it("classifies read-only vs state-changing commands", () => {
     expect(isReadonlyCommand("help")).toBe(true)
     expect(isReadonlyCommand("status")).toBe(true)

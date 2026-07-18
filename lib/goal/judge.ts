@@ -31,6 +31,7 @@ import {
   type LifecycleHookFirer,
 } from "@/lib/claude/hooks/lifecycle-firer"
 import { JUDGE_SYSTEM_PROMPT, renderJudgeUserPrompt } from "./prompts"
+import { hasNoLeakingPii } from "@cognia/redact"
 
 /** Discriminated outcome of one `evaluateGoal` call. */
 export type JudgeResult =
@@ -130,6 +131,12 @@ export async function evaluateGoal(input: EvaluateGoalInput): Promise<JudgeResul
   const effectiveSystem = pre.additionalContext
     ? `${baseSystem}\n\n${pre.additionalContext}`
     : baseSystem
+
+  if (!hasNoLeakingPii(userPrompt) || !hasNoLeakingPii(effectiveSystem)) {
+    const error = "judge blocked by PII gate"
+    void firePostCallHooks(firer, hookCtx, { success: false, error })
+    return { kind: "parse_error", raw: "", error }
+  }
 
   let raw: string
   try {

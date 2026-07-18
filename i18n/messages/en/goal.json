@@ -188,15 +188,15 @@
   },
   "judge": {
     "heading": "Judge",
+    "invalidModel": "This judge model isn't offered by any configured provider — goals will fall back to the chat model.",
     "maxTokens": "Judge max tokens",
     "maxTokensHint": "Cap on the judge's reply. The judge answers in one line — 200 is plenty.",
     "model": "Judge model",
     "modelHint": "Model that decides whether the goal is done. Leave on the chat model unless you want a cheaper/faster judge.",
+    "noModels": "No models available. Configure a provider first.",
     "promptOverride": "Judge prompt override",
     "promptOverrideHint": "Replaces the built-in judge instructions. Must still ask for a one-line JSON verdict.",
-    "provider": "Judge provider",
-    "providerHint": "Provider id paired with the judge model. Leave blank to reuse the session / app provider.",
-    "providerPlaceholder": "Session provider",
+    "searchPlaceholder": "Search models…",
     "temperature": "Judge temperature",
     "temperatureHint": "0 is deterministic (recommended). Higher loosens the verdict.",
     "useChatModel": "Use chat model"
@@ -211,7 +211,9 @@
     "createdBadge": "Created: {date}",
     "endedBadge": "Ended: {date}",
     "exitReason": "Exit reason",
+    "foregroundDormancy": "Interactive goals advance only while the app is open; closing it pauses progress until you reopen this chat. Scheduled and headless goals continue on their own.",
     "lastJudgeReason": "Last judge reason",
+    "reasonQuoted": "“{reason}”",
     "objective": "Objective",
     "statusBadge": "Status: {status}",
     "tokenBudgetAria": "Token budget used",
@@ -276,7 +278,6 @@
     "turn_limited": "turn limited"
   },
   "subgoals": {
-    "body": "Automatic subgoal decomposition is deferred to a later release. For now the goal runs as a single objective; the judge decides when it's complete.",
     "description": "Break the objective into a checklist the agent works through.",
     "empty": "No subgoals yet. Generate a checklist from the objective.",
     "error": "Couldn't generate a checklist. Try again.",
@@ -306,6 +307,7 @@
     "builtin": "Built-in (cannot be deleted)",
     "customise": "Want to customise this agent's prompt? Open Settings → Characters and duplicate the Goal Tracker.",
     "loading": "Loading…",
+    "openCharacters": "Open Characters settings",
     "missing": "The Goal Tracker character is missing — reseed built-ins to restore it.",
     "permissionMode": "Permission mode: {mode}",
     "systemPrompt": "System prompt"

@@ -140,6 +140,22 @@ describe("evaluateGoal — judge customization (ADR-0019 Phase 2)", () => {
 })
 
 describe("evaluateGoal — parse_error fail-OPEN", () => {
+  it("fails closed before the judge provider call when assembled text contains PII", async () => {
+    const complete = jest.fn()
+    const result = await evaluateGoal({
+      goal: buildGoal(),
+      lastResponse: "Contact jane@example.com",
+      client: mockClient(complete),
+    })
+
+    expect(result).toEqual({
+      kind: "parse_error",
+      raw: "",
+      error: "judge blocked by PII gate",
+    })
+    expect(complete).not.toHaveBeenCalled()
+  })
+
   it("returns parse_error when the response is not JSON", async () => {
     const complete = jest.fn().mockResolvedValue("not json at all")
     const result = await evaluateGoal({

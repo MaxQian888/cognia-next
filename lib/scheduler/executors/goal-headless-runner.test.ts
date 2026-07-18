@@ -138,4 +138,79 @@ describe("runGoalLoopHeadless", () => {
     expect(r.status).toBe("paused")
     expect(runCaptureMock).not.toHaveBeenCalled()
   })
+
+  it("delivers each turn's captured text via onTurn", async () => {
+    getGoalMock.mockResolvedValue(activeGoal)
+    runCaptureMock.mockResolvedValueOnce({ text: "r1" }).mockResolvedValueOnce({ text: "r2" })
+    handleTurnCompleteMock
+      .mockResolvedValueOnce({ kind: "continue", userMessage: "keep going" })
+      .mockResolvedValueOnce({
+        kind: "exit",
+        resultingStatus: "completed",
+        exit: "judge_done",
+        reason: "done",
+      })
+    const onTurn = jest.fn()
+    await runGoalLoopHeadless(input({ onTurn }))
+    expect(onTurn).toHaveBeenNthCalledWith(1, "r1", 1, activeGoal)
+    expect(onTurn).toHaveBeenNthCalledWith(2, "r2", 2, activeGoal)
+  })
+
+  it("pacing: manualContinue holds — the driver exits active after one turn", async () => {
+    const manualGoal = { ...activeGoal, config: { maxTurns: 20, manualContinue: true } }
+    getGoalMock.mockResolvedValue(manualGoal)
+    runCaptureMock.mockResolvedValue({ text: "r1" })
+    handleTurnCompleteMock.mockResolvedValue({ kind: "continue", userMessage: "more" })
+
+    const r = await runGoalLoopHeadless(input({ pacing: { enabled: true } }))
+    expect(r.status).toBe("active")
+    expect(r.error).toBe("held")
+    expect(r.turns).toBe(1)
+    expect(runCaptureMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("pacing: defers by the min interval, then continues", async () => {
+    const pacedGoal = { ...activeGoal, config: { maxTurns: 20, continuationIntervalMs: 10_000 } }
+    getGoalMock.mockResolvedValue(pacedGoal)
+    runCaptureMock.mockResolvedValueOnce({ text: "r1" }).mockResolvedValueOnce({ text: "r2" })
+    handleTurnCompleteMock
+      .mockResolvedValueOnce({ kind: "continue", userMessage: "more" })
+      .mockResolvedValueOnce({
+        kind: "exit",
+        resultingStatus: "completed",
+        exit: "judge_done",
+        reason: "done",
+      })
+    // Turn 1 continues at t=1000 (baseline). The gate then defers until 11000;
+    // the sleep advances the clock past the window so the re-check sends.
+    let t = 1000
+    const now = jest.fn(() => t)
+    const sleep = jest.fn().mockImplementation(async () => {
+      t = 11_000
+    })
+
+    const r = await runGoalLoopHeadless(input({ pacing: { enabled: true, now, sleep } }))
+    expect(r.status).toBe("completed")
+    expect(r.turns).toBe(2)
+    expect(sleep).toHaveBeenCalledWith(10_000)
+  })
+
+  it("pacing: falls back to real Date.now + setTimeout when no clock is injected", async () => {
+    // A tiny (20 ms) interval so the default timer path is exercised for real
+    // without a slow test — one short defer between the two turns.
+    const pacedGoal = { ...activeGoal, config: { maxTurns: 20, continuationIntervalMs: 20 } }
+    getGoalMock.mockResolvedValue(pacedGoal)
+    runCaptureMock.mockResolvedValueOnce({ text: "r1" }).mockResolvedValueOnce({ text: "r2" })
+    handleTurnCompleteMock
+      .mockResolvedValueOnce({ kind: "continue", userMessage: "more" })
+      .mockResolvedValueOnce({
+        kind: "exit",
+        resultingStatus: "completed",
+        exit: "judge_done",
+        reason: "done",
+      })
+    const r = await runGoalLoopHeadless(input({ pacing: { enabled: true } }))
+    expect(r.status).toBe("completed")
+    expect(r.turns).toBe(2)
+  })
 })

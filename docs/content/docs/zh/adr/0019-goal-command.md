@@ -113,7 +113,7 @@ handleTurnComplete({ goalId, lastResponse, tokensDelta, judgeClient, capturedGen
 **代价 / 风险:**
 
 - 每个 turn 额外多一次 judge LLM 调用。成本通过 goal 行上的 `tokensUsed` + composer 状态条 + Activity tab 暴露,用户可审计。
-- Phase 1 暂未在 chat hook 中接上静默自动续 turn —— turn-driver 已返回 `{ kind: "continue", userMessage }`,但 `hooks/use-claude-chat.ts` 仅记录 outcome。把实际的 `sendPrompt` 调用接上是 follow-up(在 plan 的 Risks 中跟踪)。
+- 交互式 goal 的自动续 turn **仅在 App 内运行**:会话打开时才推进(`hooks/use-claude-chat.ts:scheduleGoalContinuation` 以 `skipUserAppend` 下发续 turn)。关闭 App 后 goal 保持 `active` 但空转,直到用户重新打开会话 —— 这是**有意设计**(不做启动续弦;见 `GoalStatus` 类型注释 + Overview tab 说明)。无头来源(调度器 / 连接器)由各自的 driver 续跑。
 - Judge 是每 turn 一次 LLM 调用,无 batching 无 caching。Hermes 的 3 次解析失败 auto-pause 防止 wedge,但解决不了 per-turn 成本。
 
 ## Alternatives considered
@@ -125,12 +125,16 @@ handleTurnComplete({ goalId, lastResponse, tokensDelta, judgeClient, capturedGen
 
 ## Future Work
 
-Phase 2 及之后延后:
+Phase 1 之后已落地(此处保留作交付记录):
 
-- **子目标自动拆解** —— 自动把 objective 拆成有序步骤(Subgoals tab 当前是占位)。
-- **Judge model override** —— `Settings → Goals → Tracker` 加下拉,给 judge 调用选另一个 provider。
-- **Workflow trigger 集成** —— 让 workflow 的 `chat.message` 触发器在 goal 完成 / 失败时点火。
-- **Cron 驱动续 turn** —— 长周期 goal 走调度器,每 N 分钟下发一次 continuation。
-- **Connector inbound goals** —— Telegram / Discord 用户能跨 connector 启动一个 `/goal`,循环在桌面端执行。
-- **Goal 模板库** —— 预置 objective("做 PR review"、"总结这周日程")。
-- **chat hook 静默 send 接线** —— 把 Phase 1 的"仅 log"替换成真正的 `sendPrompt(..., { goalDriven: true })` 调用,在 transcript 里把 continuation 渲染成虚化的 system 续 turn 卡片。
+- **子目标自动拆解** —— DONE。`lib/goal/subgoals.ts` + Subgoals tab(LLM 拆成可勾选清单;judge 可经 `completedSubgoals` 判定自动勾选)。
+- **Judge model override** —— DONE。`GoalConfig.judgeModel` / `judgeProvider`,在 `Settings → Goals → Defaults` 用 provider-model 选择器编辑(按 provider 目录校验 —— 打错字不再静默降级 judge)。
+- **Workflow trigger 集成** —— DONE。`lib/goal/completion-linkage.ts` 在终态发 `trigger.goal.completed`。
+- **Cron 驱动续 turn** —— DONE。调度器 `goal` executor 驱动 `lib/scheduler/executors/goal-headless-runner.ts:runGoalLoopHeadless`。
+- **Goal 模板库** —— DONE。`lib/goal/seed-templates.ts`(4 个内置)+ Templates tab CRUD。
+- **chat hook 静默 send 接线** —— DONE。`hooks/use-claude-chat.ts:scheduleGoalContinuation` 以 `sendRef.current(msg, …, { skipUserAppend: true })` 下发续 turn。
+- **Connector inbound goals** —— DONE。`/goal` 是连接器控制命令(`lib/connectors/commands/goal.ts`):复用 `dispatchGoalSubcommand` 的子命令文法,并因 IM 会话无 chat hook 而驱动一个无头 driver(`runGoalLoopHeadless` + 逐回合投递 + pacing 门)。由 v49 的 `ConversationOverrideRow.allowGoalDriving` opt-in 守卫。在连接器运行时所在处运行 —— 桌面(全部渠道)+ `cli serve`(webhook 渠道);Capacitor 移动壳无连接器运行时。
+
+仍开放 / 有意延后:
+
+- **交互式 goal 的启动续弦** —— 有意**不**实现。关闭 App 后前台 goal 暂停是**设计契约**(`GoalStatus` 类型注释记录该契约;Overview tab 明示;测试锁定)。启动时扫描并复活 `active` goal 需要多窗口去重 + 与调度器/连接器 driver 互斥,收益甚微。

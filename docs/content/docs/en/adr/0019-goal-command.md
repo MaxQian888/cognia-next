@@ -113,7 +113,7 @@ handleTurnComplete({ goalId, lastResponse, tokensDelta, judgeClient, capturedGen
 **Cons / risks:**
 
 - Each turn now costs an extra judge LLM call. Cost is surfaced via `tokensUsed` on the goal row + the composer pill + the Activity tab — users can audit it.
-- Silent auto-continuation is not yet implemented in the chat hook for Phase 1 — the turn driver returns `{ kind: "continue", userMessage }` but `hooks/use-claude-chat.ts` only **logs** the outcome. Wiring the actual `sendPrompt` dispatch is a follow-up (tracked in the plan's "Risks" section).
+- Auto-continuation runs **in-app only** for an interactive goal: it advances while its chat session is open (`hooks/use-claude-chat.ts:scheduleGoalContinuation` dispatches the continuation with `skipUserAppend`). Closing the app leaves the goal `active` but idle until the user reopens the chat — intentional (no boot re-arm; see the `GoalStatus` doc + the Overview-tab note). Headless origins (scheduler / connector) resume via their own driver.
 - Judge is a single LLM call per turn — no batching, no caching. Hermes' 3-fail auto-pause stops the goal from wedging on a flaky judge but doesn't fix per-turn cost.
 
 ## Alternatives considered
@@ -125,12 +125,16 @@ handleTurnComplete({ goalId, lastResponse, tokensDelta, judgeClient, capturedGen
 
 ## Future Work
 
-Deferred to Phase 2 (and beyond):
+Landed since Phase 1 (kept here as a delivery record):
 
-- **Subgoal decomposition** — automatic break-down into bulleted next steps (Subgoals tab is a placeholder today).
-- **Judge model override** — a dropdown in `Settings → Goals → Tracker` to pick a different model for the judge calls.
-- **Workflow trigger integration** — let a workflow's `chat.message` trigger fire when a goal completes / fails.
-- **Cron-driven continuation** — long-horizon goals that fire one continuation per N minutes via the existing scheduler.
-- **Connector inbound goals** — let Telegram / Discord users start a `/goal` over a connector and have the loop run on the desktop.
-- **Goal template library** — preset objectives ("review this PR", "summarise my week").
-- **Silent send wire-up in the chat hook** — replace the Phase 1 "log only" with a true `sendPrompt(..., { goalDriven: true })` path that styles the continuation message as a virtual system continuation in the transcript.
+- **Subgoal decomposition** — DONE. `lib/goal/subgoals.ts` + the Subgoals tab (LLM decomposition into a checkable checklist; the judge can auto-mark steps via its `completedSubgoals` verdict).
+- **Judge model override** — DONE. `GoalConfig.judgeModel` / `judgeProvider`, edited via the provider-model picker in `Settings → Goals → Defaults` (validated against the provider catalog — a typo can no longer silently downgrade the judge).
+- **Workflow trigger integration** — DONE. `lib/goal/completion-linkage.ts` emits `trigger.goal.completed` on terminal states.
+- **Cron-driven continuation** — DONE. The scheduler `goal` executor drives `lib/scheduler/executors/goal-headless-runner.ts:runGoalLoopHeadless`.
+- **Goal template library** — DONE. `lib/goal/seed-templates.ts` (4 built-ins) + Templates-tab CRUD.
+- **Silent send wire-up in the chat hook** — DONE. `hooks/use-claude-chat.ts:scheduleGoalContinuation` dispatches the continuation via `sendRef.current(msg, …, { skipUserAppend: true })`.
+- **Connector inbound goals** — DONE. `/goal` is a connector control command (`lib/connectors/commands/goal.ts`): it reuses `dispatchGoalSubcommand` for the subcommand grammar and pumps a headless driver (`runGoalLoopHeadless` + per-turn delivery + pacing gate) because an IM session has no chat hook. Guarded by the v49 `ConversationOverrideRow.allowGoalDriving` opt-in. Runs wherever the connector runtime runs — desktop (all channels) + `cli serve` (webhook channels); the Capacitor mobile shell has no connector runtime.
+
+Still open / intentionally deferred:
+
+- **Boot re-arm of interactive goals** — intentionally NOT implemented. Closing the app pauses a foreground goal _by design_ (the `GoalStatus` type documents the contract; the Overview tab surfaces it; a test pins it). A launch-time scan that revives `active` goals would need multi-window dedup and mutual exclusion with the scheduler / connector drivers for little user gain.

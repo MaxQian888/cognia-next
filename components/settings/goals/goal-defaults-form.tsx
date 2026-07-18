@@ -11,6 +11,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { resolveUserTimeZone } from "@/lib/profile/timezone"
 import type { GoalDefaults, GoalQuietHours } from "@/types/goal"
 import { DEFAULT_GOAL_CONFIG } from "@/lib/goal/runtime"
+import { JudgeModelPicker } from "./judge-model-picker"
 
 /**
  * Edit `AppSettings.goals` — the per-user defaults that apply to every new
@@ -157,23 +158,14 @@ export function GoalDefaultsForm() {
       </h3>
       <div>
         <Label className="text-xs font-medium">{t("judge.model")}</Label>
-        <Input
-          value={draft.judgeModel ?? ""}
-          placeholder={t("judge.useChatModel")}
-          onChange={(e) => setDraft({ ...draft, judgeModel: e.target.value })}
-          data-testid="goal-defaults-judge-model"
+        <JudgeModelPicker
+          model={draft.judgeModel}
+          provider={draft.judgeProvider}
+          onChange={({ model, provider }) =>
+            setDraft({ ...draft, judgeModel: model, judgeProvider: provider })
+          }
         />
         <p className="mt-1 text-[10px] text-muted-foreground">{t("judge.modelHint")}</p>
-      </div>
-      <div>
-        <Label className="text-xs font-medium">{t("judge.provider")}</Label>
-        <Input
-          value={draft.judgeProvider ?? ""}
-          placeholder={t("judge.providerPlaceholder")}
-          onChange={(e) => setDraft({ ...draft, judgeProvider: e.target.value })}
-          data-testid="goal-defaults-judge-provider"
-        />
-        <p className="mt-1 text-[10px] text-muted-foreground">{t("judge.providerHint")}</p>
       </div>
       <Numeric
         label={t("judge.temperature")}

@@ -27,6 +27,11 @@ const COMMAND_HELP: Array<{ name: ControlCommandName; usage: string; desc: strin
     usage: "/workflow <名称|id|off>",
     desc: "绑定/解绑可视化工作流 / bind a workflow",
   },
+  {
+    name: "goal",
+    usage: "/goal <目标|status|pause|resume|stop>",
+    desc: "启动/管理持续目标 / start or manage a goal",
+  },
   { name: "dir", usage: "/dir", desc: "查看工作目录上下文 / working-dir context" },
 ]
 
@@ -42,6 +47,22 @@ export function renderUnknown(name: string): string {
 
 export function renderDenied(): string {
   return "你没有权限在此会话执行该命令 / You're not allowed to run this command here"
+}
+
+/**
+ * Reply when `/goal` create is blocked by the v49 guard — the conversation
+ * hasn't opted into goal driving (`ConversationOverrideRow.allowGoalDriving`).
+ */
+export function renderGoalBlocked(): string {
+  return [
+    "该会话未开启目标驱动 / Goal driving isn't enabled for this conversation.",
+    "在 App 的 收件箱 → 会话覆盖 中开启「允许目标驱动」后重试 / Enable it in the app under Inbox → Conversation override, then try again.",
+  ].join("\n")
+}
+
+/** Usage hint for `/goal` (unknown subcommand / no session). */
+export function renderGoalUsage(): string {
+  return "用法 / Usage: /goal <目标 objective> · /goal status · /goal pause · /goal resume · /goal stop"
 }
 
 /** Per-command usage hint, shown when arg validation fails. */

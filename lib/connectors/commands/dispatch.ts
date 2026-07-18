@@ -35,6 +35,7 @@ import { resolveWorkflowByNameOrId } from "@/lib/workflow/library/lookup"
 import { isBuiltInProviderId } from "@cognia/provider-types/built-in-provider-catalog"
 import { clearSessionBypass } from "@/lib/connectors/hitl/approval-registry"
 import { parseControlCommand, isReadonlyCommand } from "./parse"
+import { handleGoalCommand } from "./goal"
 import * as R from "./render"
 
 const CONNECTOR_MODES: ReadonlySet<string> = new Set<ConnectorMode>(["auto", "manual", "draft"])
@@ -58,6 +59,8 @@ export interface ControlCommandDeps {
    * a richer validator that also accepts configured custom providers.
    */
   isKnownProvider?: (provider: string) => Promise<boolean>
+  /** Injectable `/goal` handler (defaults to the real connector goal router). */
+  handleGoal?: typeof handleGoalCommand
 }
 
 function idPrefix(id: string): string {
@@ -398,6 +401,15 @@ export async function maybeHandleControlCommand(
       }
       await persist({ workflowId: res.workflowId })
       await reply(R.confirmWorkflow(res.name), "applied")
+      return true
+    }
+
+    case "goal": {
+      // `/goal` has its own subcommand grammar + a headless driver, so it lives
+      // in `commands/goal.ts`. It shares this scope's `reply` (confirmation +
+      // audit) and `ensureSession` (the IM-bound session the guard checks).
+      const handleGoal = deps.handleGoal ?? handleGoalCommand
+      await handleGoal({ event, arg, ensureSession, reply })
       return true
     }
   }

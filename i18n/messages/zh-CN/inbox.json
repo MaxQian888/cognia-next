@@ -231,6 +231,7 @@
       "allowComputerUse": "允许 Computer Use 工具",
       "allowComputerUseWarning": "开启后，该会话中的回复可能在本机触发截图、鼠标、键盘操作。IM 默认关闭。",
       "allowGoalDriving": "允许在此会话上启动自驱 /goal",
+      "allowGoalDrivingPlatform": "仅在连接器运行时所在处运行——桌面应用（全部渠道）或 `cli serve`（webhook 渠道）。移动端无法驱动 IM 目标。",
       "allowGoalDrivingWarning": "关闭时 /goal 拒绝在该 IM 会话上启动，避免自驱循环在没人审核的情况下自动回复。默认关闭。",
       "allowedSkills": {
         "add": "添加",

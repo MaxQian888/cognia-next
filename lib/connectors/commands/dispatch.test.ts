@@ -52,6 +52,7 @@ interface Harness {
   audits: Array<{ kind: string; command?: unknown }>
   patches: Array<{ patch: Record<string, unknown>; sessionId?: string }>
   created: ChatSession[]
+  goalCalls: Array<{ arg: string }>
   deps: ControlCommandDeps
 }
 
@@ -60,8 +61,16 @@ function harness(opts: { sessions?: ChatSession[]; active?: ChatSession } = {}):
   const audits: Harness["audits"] = []
   const patches: Harness["patches"] = []
   const created: ChatSession[] = []
+  const goalCalls: Harness["goalCalls"] = []
   const sessions = opts.sessions ?? []
   const deps: ControlCommandDeps = {
+    handleGoal: (async (inp: {
+      arg: string
+      reply: (t: string, k: "applied" | "denied" | "unknown") => Promise<void>
+    }) => {
+      goalCalls.push({ arg: inp.arg })
+      await inp.reply("goal-ok", "applied")
+    }) as unknown as ControlCommandDeps["handleGoal"],
     enqueue: (async (job: { request: { segments: Array<{ text?: string }> } }) => {
       enqueued.push({ text: job.request.segments.map((s) => s.text ?? "").join("") })
     }) as unknown as ControlCommandDeps["enqueue"],
@@ -107,7 +116,7 @@ function harness(opts: { sessions?: ChatSession[]; active?: ChatSession } = {}):
       return { ok: false, reason: "not-found" }
     }) as unknown as ControlCommandDeps["resolveWorkflow"],
   }
-  return { enqueued, audits, patches, created, deps }
+  return { enqueued, audits, patches, created, goalCalls, deps }
 }
 
 describe("isCommandAllowed", () => {
@@ -212,6 +221,38 @@ describe("maybeHandleControlCommand", () => {
     )
     expect(h.patches[0].patch).toEqual({ modelOverride: "gpt-5" })
     expect(h.enqueued[0].text).toMatch(/Model set: gpt-5/)
+  })
+
+  it("routes /goal (subcommand + arg) to the connector goal handler", async () => {
+    const h = harness({ active: session("s1") })
+    const handled = await maybeHandleControlCommand(
+      makeEvent({ plainText: "/goal write a haiku" }),
+      makeAdapter(),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+    expect(handled).toBe(true)
+    // The `/goal ` prefix is stripped; the remainder is the handler's arg.
+    expect(h.goalCalls).toEqual([{ arg: "write a haiku" }])
+    expect(h.enqueued.map((e) => e.text)).toContain("goal-ok")
+  })
+
+  it("denies /goal to an un-allowlisted group sender (state-changing gate)", async () => {
+    const h = harness({ active: session("s1") })
+    const handled = await maybeHandleControlCommand(
+      makeEvent({
+        plainText: "/goal do it",
+        channel: { id: "c1", kind: "group" as ChannelKind, name: "Group" },
+      }),
+      makeAdapter({ controlCommands: { enabled: true, mode: "allowlist", allowedUserIds: [] } }),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+    expect(handled).toBe(true)
+    expect(h.goalCalls).toEqual([]) // never reached the goal handler
+    expect(h.enqueued[0].text).toMatch(/not allowed|不允许|没有权限/)
   })
 
   it("splits provider/model for /model", async () => {

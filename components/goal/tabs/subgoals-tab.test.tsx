@@ -63,12 +63,14 @@ describe("GoalSubgoalsTab", () => {
     })
   })
 
-  it("shows an error when no LLM client is available", async () => {
+  it("shows the non-retryable unavailable notice when no LLM client is available", async () => {
     const goal = await makeGoal()
     llmClient = null
     render(<GoalSubgoalsTab goal={goal} />)
     fireEvent.click(await screen.findByTestId("goal-subgoals-generate"))
-    await waitFor(() => expect(screen.getByTestId("goal-subgoals-error")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId("goal-subgoals-unavailable")).toBeInTheDocument())
+    // It is NOT the generic retryable error.
+    expect(screen.queryByTestId("goal-subgoals-error")).not.toBeInTheDocument()
   })
 
   it("shows an error when decomposition returns nothing", async () => {

@@ -1,8 +1,11 @@
 "use client"
 
 import { useTranslations } from "next-intl"
+import { useRouter } from "next/navigation"
 import { useLiveQuery } from "dexie-react-hooks"
+import { ExternalLinkIcon } from "lucide-react"
 import { getCharacter } from "@/lib/db/characters"
+import { Button } from "@/components/ui/button"
 
 const GOAL_TRACKER_ID = "char_builtin_goal_tracker"
 
@@ -11,10 +14,12 @@ const GOAL_TRACKER_ID = "char_builtin_goal_tracker"
  * Tracker character so the user can confirm it's installed and inspect
  * the canonical systemPrompt. Editing the character (model, custom
  * prompt, tools) is done via the regular Settings → Characters surface;
- * this card just links there.
+ * the button at the foot of the card deep-links there
+ * (`/settings?section=characters`).
  */
 export function GoalTrackerConfig() {
   const t = useTranslations("goal")
+  const router = useRouter()
   // Map "not found" to `null` so we can distinguish loading (useLiveQuery
   // pre-emission → `undefined`) from a genuine missing-row state (→ `null`).
   const character = useLiveQuery(async () => {
@@ -59,6 +64,16 @@ export function GoalTrackerConfig() {
         <span>{t("tracker.builtin")}</span>
       </div>
       <p className="text-xs text-muted-foreground">{t("tracker.customise")}</p>
+      <Button
+        variant="outline"
+        size="sm"
+        className="self-start"
+        onClick={() => router.push("/settings?section=characters")}
+        data-testid="goal-tracker-open-characters"
+      >
+        <ExternalLinkIcon className="size-4" aria-hidden />
+        {t("tracker.openCharacters")}
+      </Button>
     </div>
   )
 }

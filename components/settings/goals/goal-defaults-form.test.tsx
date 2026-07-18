@@ -1,5 +1,7 @@
 import "fake-indexeddb/auto"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { PROVIDERS } from "@cognia/provider-types/provider"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { GoalDefaultsForm } from "./goal-defaults-form"
 
@@ -39,7 +41,7 @@ describe("GoalDefaultsForm", () => {
   it("renders the previously-dormant defaults (budget / provider / pacing / gate)", () => {
     render(<GoalDefaultsForm />)
     expect(screen.getByTestId("goal-defaults-max-budget-usd")).toBeInTheDocument()
-    expect(screen.getByTestId("goal-defaults-judge-provider")).toBeInTheDocument()
+    expect(screen.getByTestId("goal-judge-model-picker")).toBeInTheDocument()
     expect(screen.getByTestId("goal-defaults-adaptive-pacing")).toBeInTheDocument()
     expect(screen.getByTestId("goal-defaults-max-promise-denials")).toBeInTheDocument()
     expect(screen.getByTestId("goal-defaults-reset")).toBeInTheDocument()
@@ -56,15 +58,22 @@ describe("GoalDefaultsForm", () => {
     })
   })
 
-  it("persists a default judge provider", async () => {
+  it("persists a judge model + provider chosen from the picker", async () => {
+    const user = userEvent.setup()
     render(<GoalDefaultsForm />)
-    fireEvent.change(screen.getByTestId("goal-defaults-judge-provider"), {
-      target: { value: "anthropic" },
-    })
+    // No providerSettings in the mock → the picker offers the built-in
+    // anthropic catalog fallback.
+    await user.click(screen.getByTestId("goal-judge-model-picker"))
+    await user.click(screen.getByText(PROVIDERS.anthropic.defaultModel))
     fireEvent.click(screen.getByTestId("goal-defaults-save"))
     await waitFor(() => {
       expect(saveMock).toHaveBeenCalledWith(
-        expect.objectContaining({ goals: expect.objectContaining({ judgeProvider: "anthropic" }) })
+        expect.objectContaining({
+          goals: expect.objectContaining({
+            judgeModel: PROVIDERS.anthropic.defaultModel,
+            judgeProvider: "anthropic",
+          }),
+        })
       )
     })
   })

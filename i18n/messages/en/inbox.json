@@ -231,6 +231,7 @@
       "allowComputerUse": "Allow Computer Use tools",
       "allowComputerUseWarning": "When on, replies in this channel may fire screenshot, mouse, and keyboard actions on the host. Off by default for IM channels.",
       "allowGoalDriving": "Allow self-driving /goal on this conversation",
+      "allowGoalDrivingPlatform": "Runs only where the connector runtime runs — the desktop app (all channels) or `cli serve` (webhook channels). The mobile app can't drive IM goals.",
       "allowGoalDrivingWarning": "When off, /goal refuses to start on this IM conversation so a self-driving loop cannot auto-reply without operator review. Off by default.",
       "allowedSkills": {
         "add": "Add",

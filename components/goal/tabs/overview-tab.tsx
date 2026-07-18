@@ -70,7 +70,7 @@ export function GoalOverviewTab({ goal }: Props) {
       {lastReason && (
         <div>
           <span className="text-xs text-muted-foreground">{t("overview.lastJudgeReason")}</span>
-          <p className="mt-1 italic">&ldquo;{lastReason}&rdquo;</p>
+          <p className="mt-1 italic">{t("overview.reasonQuoted", { reason: lastReason })}</p>
         </div>
       )}
       {exitReason && (
@@ -78,6 +78,14 @@ export function GoalOverviewTab({ goal }: Props) {
           <span className="text-xs text-muted-foreground">{t("overview.exitReason")}</span>
           <p className="mt-1">{exitReason}</p>
         </div>
+      )}
+      {goal.status === "active" && (
+        <p
+          className="border-t pt-3 text-xs text-muted-foreground"
+          data-testid="goal-foreground-dormancy-note"
+        >
+          {t("overview.foregroundDormancy")}
+        </p>
       )}
     </div>
   )

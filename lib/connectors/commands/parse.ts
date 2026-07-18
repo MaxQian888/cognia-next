@@ -29,6 +29,7 @@ export type ControlCommandName =
   | "character"
   | "team"
   | "workflow"
+  | "goal"
 
 /**
  * Commands anyone may run regardless of the permission gate. `help` is here so
@@ -58,6 +59,7 @@ const KNOWN_COMMANDS: ReadonlySet<string> = new Set<ControlCommandName>([
   "character",
   "team",
   "workflow",
+  "goal",
 ])
 
 export interface KnownControlCommand {
@@ -68,9 +70,7 @@ export interface KnownControlCommand {
 }
 
 export type ParsedControlCommand =
-  | KnownControlCommand
-  | { kind: "unknown"; name: string }
-  | { kind: "not-a-command" }
+  KnownControlCommand | { kind: "unknown"; name: string } | { kind: "not-a-command" }
 
 const COMMAND_RE = /^\/([A-Za-z][A-Za-z-]*)(?:\s+([\s\S]*))?$/
 
