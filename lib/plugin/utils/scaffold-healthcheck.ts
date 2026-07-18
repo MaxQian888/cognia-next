@@ -12,9 +12,8 @@
  *   - declared capabilities have a matching registration call in the entry
  *     (warning-level heuristic — templates evolve).
  *
- * The RUNTIME boot assertion lives in the co-located test stub the scaffold
- * now emits (`buildScaffoldTestFile` in templates.ts) — it runs in the plugin
- * author's environment, where the module is compilable.
+ * The canonical Rust CLI owns scaffold generation. This validator remains a
+ * reusable pure check for callers that already hold an in-memory file map.
  */
 
 import { validatePluginManifest } from "@/lib/plugin/core/validation"

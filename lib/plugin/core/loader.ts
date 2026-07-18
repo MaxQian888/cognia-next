@@ -2,7 +2,7 @@
  * Plugin Loader - Handles loading plugin modules dynamically
  */
 
-import { isTauri } from "@/lib/platform/detect"
+import { detectPlatform, isTauri } from "@/lib/platform/detect"
 import { loggers } from "@cognia/logging"
 import type { Plugin, PluginDefinition, PluginManifest, PluginPermission } from "@/types/plugin"
 import { TimeoutError, withTimeout } from "@cognia/primitives"
@@ -15,6 +15,7 @@ import {
   launchPluginJs,
   type LaunchPluginJsResult,
 } from "../launcher/launchPluginJs"
+import { resolvePluginPath } from "./plugin-path"
 
 const pluginLoaderLogger = loggers.plugin.child("loader")
 
@@ -61,14 +62,19 @@ function isNodeTargetFrontend(manifest: PluginManifest): boolean {
   )
 }
 
-function joinPluginPath(pluginPath: string, entry: string | undefined): string {
+function resolveRuntimeEntry(pluginPath: string, entry: string | undefined): string {
   if (!entry?.trim()) {
     throw new Error("Node-target frontend plugin missing 'main' entry point")
   }
-  if (/^[a-zA-Z]:[\\/]/.test(entry) || entry.startsWith("/") || entry.startsWith("\\")) {
-    return entry
-  }
-  return `${pluginPath.replace(/[\\/]+$/, "")}/${entry.replace(/^[\\/]+/, "")}`
+  return resolvePluginPath(pluginPath, entry)
+}
+
+function selectRuntimeEntry(manifest: PluginManifest): string | undefined {
+  const platform = detectPlatform()
+  if (platform === "headless") return manifest.main
+  const runtime = platform === "web" ? "browser" : platform
+  const override = manifest.runtimeCompatibility?.[runtime]?.entrypoint
+  return override && override !== "node" ? override : manifest.main
 }
 
 function hasPermission(manifest: PluginManifest, permission: PluginPermission): boolean {
@@ -241,7 +247,7 @@ export class PluginLoader {
 
       // Dynamic import of the plugin module
       // In production, plugins would be bundled and served from a known location
-      const modulePath = `${pluginPath}/${manifest.main}`
+      const modulePath = resolveRuntimeEntry(pluginPath, selectRuntimeEntry(manifest))
 
       // CLI / Node hosts inject a `frontendImporter` (the Tauri / fetch / eval
       // strategies below don't exist under Node). Otherwise fall back to the
@@ -269,7 +275,7 @@ export class PluginLoader {
     manifest: PluginManifest,
     pluginPath: string
   ): Promise<PluginDefinition> {
-    const entryPath = joinPluginPath(pluginPath, manifest.main)
+    const entryPath = resolveRuntimeEntry(pluginPath, selectRuntimeEntry(manifest))
     const scope = deriveNodePermissionScope(manifest)
     let launch: LaunchPluginJsResult | null = null
     const definition: PluginDefinition = {

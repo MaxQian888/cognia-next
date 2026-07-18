@@ -203,6 +203,32 @@ describe("PluginLoader", () => {
       await expect(loader.load(plugin)).rejects.toThrow("missing 'main' entry point")
     })
 
+    it("rejects a traversing main entry before invoking the importer", async () => {
+      const plugin = createMockPlugin("unsafe-main")
+      plugin.manifest.main = "..\\outside.js"
+      const frontendImporter = jest.fn()
+      const unsafeLoader = new PluginLoader({ frontendImporter })
+
+      await expect(unsafeLoader.load(plugin)).rejects.toThrow("plugin-relative path (traversal)")
+      expect(frontendImporter).not.toHaveBeenCalled()
+    })
+
+    it("loads the browser-specific entrypoint when declared", async () => {
+      const plugin = createMockPlugin("browser-entry")
+      plugin.manifest.runtimeCompatibility = {
+        browser: { availability: "supported", entrypoint: "dist/browser.js" },
+      }
+      const frontendImporter = jest.fn().mockResolvedValue({ activate: jest.fn() })
+      const browserLoader = new PluginLoader({ frontendImporter })
+
+      await browserLoader.load(plugin)
+
+      expect(frontendImporter).toHaveBeenCalledWith(
+        "/plugins/browser-entry/dist/browser.js",
+        "browser-entry"
+      )
+    })
+
     it("launches Node-target JavaScript plugins through the Node permission executor", async () => {
       const plugin = createMockPlugin("node-plugin")
       plugin.manifest.engines = { node: ">=24" }
@@ -255,12 +281,12 @@ describe("PluginLoader", () => {
       expect(kill).toHaveBeenCalledTimes(1)
     })
 
-    it("launches runtimeCompatibility Node plugins with absolute entry paths", async () => {
+    it("launches runtimeCompatibility Node plugins with a contained entry path", async () => {
       const plugin = createMockPlugin("node-compat")
       plugin.manifest.runtimeCompatibility = {
         tauri: { availability: "supported", entrypoint: "node" },
       }
-      plugin.manifest.main = "C:\\Plugins\\node-compat\\entry.mjs"
+      plugin.manifest.main = "dist\\entry.mjs"
 
       const definition = await loader.load(plugin)
       await definition.activate({ logger: { info: jest.fn(), warn: jest.fn() } } as never)
@@ -268,7 +294,7 @@ describe("PluginLoader", () => {
       expect(launcherModule.launchPluginJs).toHaveBeenCalledWith(
         expect.objectContaining({
           pluginId: "node-compat",
-          entryPath: "C:\\Plugins\\node-compat\\entry.mjs",
+          entryPath: "/plugins/node-compat/dist/entry.mjs",
           cwd: "/plugins/node-compat",
           scope: expect.objectContaining({
             readPaths: [],

@@ -34,6 +34,7 @@ import type {
   AIChatOptions,
 } from "@/types/plugin/plugin"
 import { loggers } from "@/lib/plugin/core/logger"
+import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 import { createAIProviderAPI } from "@/lib/plugin/api/ai-provider-api"
 
 const unregistrarsByPlugin = new Map<string, Array<() => void>>()
@@ -104,7 +105,7 @@ async function adaptProvider(
   importer: NonNullable<AiProvidersBridgeOptions["importer"]>,
   options: AiProvidersBridgeOptions
 ): Promise<AIProviderDefinition> {
-  const resolved = `${installRoot.replace(/[\\/]+$/, "")}/${def.entry.replace(/^[\\/]+/, "")}`
+  const resolved = resolvePluginPath(installRoot, def.entry)
   const mod = await importer(resolved)
   const exported = mod[def.export]
   if (typeof exported !== "function") {

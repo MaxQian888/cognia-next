@@ -37,6 +37,7 @@ pub struct WasmLoadResult {
 #[tauri::command]
 pub async fn plugin_wasm_load(
     state: State<'_, WasmPluginState>,
+    runtime: State<'_, PluginRuntimeState>,
     plugin_id: String,
     manifest_json: String,
     plugin_path: String,
@@ -49,7 +50,16 @@ pub async fn plugin_wasm_load(
             manifest.id
         ));
     }
-    let plugin_api_version = WasmPluginHost::load(&state, manifest, PathBuf::from(plugin_path))?;
+    let expected_root = runtime.plugin_dir(&plugin_id);
+    let claimed_root = PathBuf::from(plugin_path);
+    let wasm_state = state.inner().clone();
+    let plugin_api_version = tokio::task::spawn_blocking(move || {
+        let plugin_root =
+            crate::contained_path::validate_claimed_plugin_root(&expected_root, &claimed_root)?;
+        WasmPluginHost::load(&wasm_state, manifest, plugin_root)
+    })
+    .await
+    .map_err(|error| format!("WASM load task panicked: {error}"))??;
     Ok(WasmLoadResult { plugin_api_version })
 }
 

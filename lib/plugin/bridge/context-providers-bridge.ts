@@ -21,6 +21,7 @@ import type {
   PluginContextProviderFactory,
 } from "@/types/plugin/plugin-context-provider"
 import { loggers } from "@/lib/plugin/core/logger"
+import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 import {
   registerContextProvider,
   unregisterContextProvidersByPlugin,
@@ -85,7 +86,7 @@ async function registerOne(
   installRoot: string,
   importer: NonNullable<ContextProvidersBridgeOptions["importer"]>
 ): Promise<void> {
-  const resolved = `${installRoot.replace(/[\\/]+$/, "")}/${def.entry.replace(/^[\\/]+/, "")}`
+  const resolved = resolvePluginPath(installRoot, def.entry)
   const mod = await importer(resolved)
   const exported = mod[def.export]
   if (typeof exported !== "function") {

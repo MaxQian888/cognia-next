@@ -1,0 +1,75 @@
+---
+title: Public Plugin SDK and Runtime Contract
+description: Supported imports, runtime combinations, path containment, context APIs, and migration guidance for distributable Cognia plugins.
+---
+
+# Public Plugin SDK and Runtime Contract
+
+Use the packed `@cognia/plugin-sdk` package as the only Cognia dependency in a third-party TypeScript plugin. The package ships ESM, CommonJS, and declarations; it does not expose host registries, executors, factories, test reset functions, PKCE helpers, or internal session constructors.
+
+## Public import map
+
+| Import | Supported content |
+| --- | --- |
+| `@cognia/plugin-sdk` | `define*` helpers, stable constants, and public author types |
+| `@cognia/plugin-sdk/manifest` | manifest, capability, permission, and contribution types |
+| `@cognia/plugin-sdk/context` | `PluginContext`, `FullPluginContext`, and callable context API interfaces |
+| `@cognia/plugin-sdk/hooks` | hook payloads and hook interfaces |
+| `@cognia/plugin-sdk/contracts` | read-only canonical contract metadata |
+| `@cognia/plugin-sdk/api/tool`, `/api/native-anthropic-tool` | explicitly supported compatibility subpaths |
+
+Never import `@/lib`, `@/types`, `@cognia/plugin-sdk/host`, or an app-private `@cognia/*` package. The `host` entry exists only for one repository migration window and is deliberately absent from npm exports and tarballs.
+
+## Runtime matrix
+
+| Manifest type | Required entry | JavaScript lazy contributions | Notes |
+| --- | --- | --- | --- |
+| `frontend` | `main` | allowed | Browser/Tauri availability follows `runtimeCompatibility` |
+| `python` | `pythonMain` | rejected | Python declarations cannot execute JavaScript contribution factories |
+| `hybrid` | `pythonMain`; `main` when JS contributions exist | allowed with `main` | Each runtime is loaded independently |
+| `wasm` | `wasmMain` and `wasm.apiVersion` | rejected | Desktop Component Model host |
+| `vscode-extension` | `vscodeMain`, except theme-only packages | VS Code contributions only | Desktop Node sidecar |
+
+`engines.cognia` is the compatibility authority. Lint and install reject unknown capabilities and a lower bound older than any declared capability's catalog minimum.
+
+## Path rules
+
+Every executable or asset entry is relative to the plugin root. Empty paths, control/NUL bytes, URI schemes, POSIX or Windows absolute paths, drive-relative paths, UNC/extended paths, encoded path controls, and `..` using either slash style are rejected. Installed archives may contain regular files and directories only: symbolic and hard links are rejected. Runtime loaders re-check containment and reject symlinked path segments before consuming executable entries.
+
+Valid: `dist/index.js`, `providers/session/importer.js`.
+
+Invalid: `../outside.js`, `C:outside.js`, `C:\\outside.js`, `\\\\server\\share\\entry.js`, `dist/%2e%2e/outside.js`.
+
+## Context surface
+
+`PluginContext` describes the intentionally partial/base context. `FullPluginContext` describes the host-created runtime surface. In the full context, `memory`, `pet`, `webview`, `auth`, and `uri` are required, alongside the core logger, storage, UI, agent, and other extended APIs. Implementations and `create*API` factories remain host-only.
+
+```ts
+import { definePlugin, type PluginContext } from "@cognia/plugin-sdk"
+
+export default definePlugin({
+  manifest,
+  activate(ctx: PluginContext) {
+    ctx.agent.registerTool(tool)
+    return {
+      onCommand(command, args) {
+        if (command !== "example.greet") return false
+        ctx.ui.showToast(`Hello, ${args.join(" ") || "world"}`)
+        return true
+      },
+    }
+  },
+})
+```
+
+## Migration
+
+| Previous author code | Supported replacement |
+| --- | --- |
+| `@/types/plugin` | types from package root, `/manifest`, or `/context` |
+| direct slash-command registry | declare `commands` and return `hooks.onCommand` from `activate` |
+| host registry/executor imports | manifest contribution plus the corresponding `ctx.*` callable API |
+| `create*API` factory | use the API already mounted on `ctx` |
+| public PII helper assumption | provide a plugin-owned `canUseTool`/guardrail; host PII gates are internal |
+
+Generate new projects with `cognia plugin new <name> --kind ts`. `pnpm plugin:create` is only a compatibility adapter over that command.

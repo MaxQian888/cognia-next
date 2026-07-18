@@ -17,237 +17,12 @@ use std::path::{Path, PathBuf};
 use crate::read_plugin_manifest;
 use crate::ui::RuntimeUi;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Whitelist constants — keep in sync with lib/plugin/core/validation.ts
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Host-side permissions, mirrored from `lib/plugin/core/validation.ts`
-/// `VALID_PERMISSIONS`. Update if the TS list changes (the
-/// `rust-capability-parity.test.ts` contract test enforces lockstep); the
-/// duplicate is deliberate so the CLI can validate offline without pulling
-/// the TS source.
-const VALID_PERMISSIONS: &[&str] = &[
-    "filesystem:read",
-    "filesystem:write",
-    "network:fetch",
-    "network:websocket",
-    "clipboard:read",
-    "clipboard:write",
-    "notification",
-    "shell:execute",
-    "process:spawn",
-    "database:read",
-    "database:write",
-    "settings:read",
-    "settings:write",
-    "session:read",
-    "session:write",
-    "media:image:read",
-    "media:image:write",
-    "media:video:read",
-    "media:video:write",
-    "media:video:export",
-    "agent:control",
-    "agent:dispatch-external",
-    "agent:dispatch",
-    "agent:shared-memory:read",
-    "twin:read",
-    "python:execute",
-    "sandbox:web-execute",
-    "secrets:read",
-    "secrets:write",
-    "auth:provide",
-    "auth:consume",
-    "terminal:spawn",
-    "terminal:write",
-    "terminal:kill",
-    "terminal:completion",
-    "terminal:safety",
-    "git:read",
-    "git:write",
-    "goal:read",
-    "goal:write",
-    "memory:read",
-    "memory:write",
-    "team:read",
-    "team:write",
-    "subscription:read",
-    "perf:read",
-    "connectors:read",
-    "connectors:send",
-    "connectors:manage",
-    "share:read",
-    "share:create",
-    "backup:read",
-    "backup:write",
-    "automation:screenshot",
-    "automation:read",
-    "automation:click",
-    "automation:type",
-    "automation:pointer",
-    "automation:window",
-    "companion:read",
-    "companion:control",
-    "companion:goal-control",
-    "cli:execute",
-    "native:input",
-    "native:screen",
-    "native:filesystem",
-    "native:process",
-    "pet:read",
-    "pet:interact",
-    "hooks:chat-intercept",
-];
-
-/// Canonical plugin capabilities. MUST stay in lockstep with
-/// `CANONICAL_PLUGIN_CAPABILITIES` (derived from `PLUGIN_CAPABILITY_CONTRACTS`
-/// in lib/plugin/contracts/plugin-capabilities.ts) — the set the app's
-/// validator enforces. A drift here means `cognia plugin lint` passes a
-/// manifest the app then rejects at load. The set is asserted equal by
-/// `lib/plugin/contracts/rust-capability-parity.test.ts`.
-const VALID_CAPABILITIES: &[&str] = &[
-    "tools",
-    "native-anthropic-tool",
-    "components",
-    "modes",
-    "skills",
-    "media",
-    "canvas",
-    "ai-provider",
-    "themes",
-    "commands",
-    "hooks",
-    "processors",
-    "providers",
-    "exporters",
-    "importers",
-    "configuration",
-    "a2ui",
-    "python",
-    "scheduler",
-    "workspace-backend",
-    "message-renderer",
-    "density-preset",
-    "chat-middleware",
-    "modal-mount",
-    "terminal-completion",
-    "routing-strategy",
-    "deployment-filter",
-    "protocol-adapter",
-    "tool-route",
-    "context-provider",
-    "external-agent-preset",
-    "external-agent-adapter",
-    "session-importer",
-    "mcp-server-preset",
-    "connectors",
-    "workflow",
-    "workflow-trigger",
-    "tray",
-    "lsp-server",
-    "character-pack",
-    "subagent",
-    "agent-team-template",
-    "shared-memory-adapter",
-    "workflow-template",
-    "quick-action",
-    "theme-pack",
-    "fonts",
-    "wallpapers",
-    "cli-tools",
-    // Kept in set-equality with CANONICAL_PLUGIN_CAPABILITIES (the contract
-    // list) — enforced by rust-capability-parity.test.ts. `balance-adapter`
-    // had a contract but was missing here; reconciled alongside the new
-    // `compaction-strategy` capability.
-    "balance-adapter",
-    "limits-source",
-    "im-rate-source",
-    "compaction-strategy",
-    // Capability tags gating the imperative ctx.automation / ctx.companion
-    // surfaces (no manifest contribution field). Added contracts so the
-    // validator stops rejecting them; kept in lockstep here.
-    "automation",
-    "companion",
-    // B1 — rail-mounted view containers (manifest.viewsContainers).
-    "view-container",
-    // B2 — tree data providers + custom views (manifest.views).
-    "tree-view",
-    // B3 — sandboxed HTML webview panels (manifest.webviews).
-    "webview",
-    // C1 — native auth/OAuth provider (manifest.authProviders + ctx.auth).
-    "auth-provider",
-    // C2 — deep-link handler (ctx.uri + onUri activation; no manifest field).
-    "uri-handler",
-    "pet",
-    "pet-achievement",
-    "pet-item",
-];
-
-const VALID_PLUGIN_TYPES: &[&str] = &["frontend", "python", "hybrid", "wasm", "vscode-extension"];
-
-/// Capability → contribution array field(s). This is the hand-copied Rust
-/// mirror of the app's cross-check in `validation.ts`, which iterates
-/// `PLUGIN_CAPABILITY_CONTRACTS` directly: it includes every contract whose
-/// `manifestFields` is non-empty, EXCEPT `python` (whose fields are entry-point
-/// strings — `pythonMain` / `pythonDependencies` — validated by the type block,
-/// not array contributions). Api-only capabilities (`manifestFields: []`, e.g.
-/// `themes` / `media` / `canvas` / `hooks`) are therefore absent here: listing
-/// one makes the field cross-check emit a bogus `field_missing` the app
-/// suppresses. Kept in exact parity by `rust-capability-parity.test.ts` — do
-/// not edit by hand without re-running it.
-const CAPABILITY_FIELDS: &[(&str, &[&str])] = &[
-    ("tools", &["tools"]),
-    ("components", &["a2uiComponents"]),
-    ("modes", &["modes"]),
-    ("skills", &["skills"]),
-    ("commands", &["commands"]),
-    ("a2ui", &["a2uiComponents", "a2uiTemplates"]),
-    ("scheduler", &["scheduledTasks"]),
-    ("workspace-backend", &["workspaceBackends"]),
-    ("message-renderer", &["messageRenderers"]),
-    ("density-preset", &["densityPresets"]),
-    ("chat-middleware", &["chatMiddlewares"]),
-    ("modal-mount", &["modalMounts"]),
-    ("terminal-completion", &["terminalCompletionProviders"]),
-    ("routing-strategy", &["routingStrategies"]),
-    ("deployment-filter", &["deploymentFilters"]),
-    ("protocol-adapter", &["protocolAdapters"]),
-    ("tool-route", &["toolRoutes"]),
-    ("context-provider", &["contextProviders"]),
-    ("external-agent-preset", &["externalAgentPresets"]),
-    ("external-agent-adapter", &["externalAgentAdapters"]),
-    ("session-importer", &["sessionImporters"]),
-    ("mcp-server-preset", &["mcpServerPresets"]),
-    ("native-anthropic-tool", &["nativeAnthropicTools"]),
-    ("lsp-server", &["lspServers"]),
-    ("character-pack", &["characterPacks"]),
-    ("subagent", &["subagents"]),
-    ("agent-team-template", &["agentTeamTemplates"]),
-    ("shared-memory-adapter", &["sharedMemoryAdapters"]),
-    ("workflow-template", &["workflowTemplates"]),
-    ("quick-action", &["quickActions"]),
-    ("view-container", &["viewsContainers"]),
-    ("tree-view", &["views"]),
-    ("webview", &["webviews"]),
-    ("auth-provider", &["authProviders"]),
-    ("connectors", &["connectors"]),
-    ("workflow", &["workflows"]),
-    ("workflow-trigger", &["workflows"]),
-    ("theme-pack", &["themePacks"]),
-    ("fonts", &["fonts"]),
-    ("wallpapers", &["wallpapers"]),
-    ("cli-tools", &["cliTools"]),
-    // ADR-0025 subscription overlays + compaction-strategy: each ships an
-    // array contribution field, so it gates a field_missing check like the
-    // module-bridge capabilities above. These had contracts in the TS source
-    // but were never added here (see rust-capability-parity.test.ts).
-    ("balance-adapter", &["balanceAdapters"]),
-    ("limits-source", &["limitsSources"]),
-    ("im-rate-source", &["imRateSources"]),
-    ("compaction-strategy", &["compactionStrategies"]),
-    ("pet-achievement", &["petAchievements"]),
-    ("pet-item", &["petItems"]),
-];
+#[path = "generated_plugin_contract.rs"]
+mod generated_plugin_contract;
+use generated_plugin_contract::{
+    CAPABILITY_FIELDS, CAPABILITY_MINIMUM_HOST_VERSIONS, EXECUTABLE_CONTRIBUTION_FIELDS,
+    PLUGIN_PATH_FIELDS, VALID_CAPABILITIES, VALID_PERMISSIONS, VALID_PLUGIN_TYPES,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Diagnostic types
@@ -661,6 +436,46 @@ pub fn validate_manifest(manifest: &Value) -> Vec<Diagnostic> {
         .and_then(Value::as_array)
         .map(|arr| arr.iter().filter_map(Value::as_str).collect())
         .unwrap_or_default();
+    if let Some(constraint) = obj
+        .get("engines")
+        .and_then(Value::as_object)
+        .and_then(|engines| engines.get("cognia"))
+        .and_then(Value::as_str)
+    {
+        let declared_minimum = extract_semver(constraint);
+        if declared_minimum.is_none() {
+            out.push(Diagnostic {
+                severity: Severity::Error,
+                field: "engines.cognia".into(),
+                code: "manifest.engines.cognia.invalid".into(),
+                message: "engines.cognia must include a semantic version such as >=0.1.0".into(),
+                hint: None,
+            });
+        } else {
+            let required_minimum = declared
+                .iter()
+                .filter_map(|capability| {
+                    CAPABILITY_MINIMUM_HOST_VERSIONS
+                        .iter()
+                        .find(|(id, _)| id == capability)
+                        .and_then(|(_, version)| parse_semver(version))
+                })
+                .max()
+                .unwrap_or([0, 0, 0]);
+            if declared_minimum.is_some_and(|minimum| minimum < required_minimum) {
+                out.push(Diagnostic {
+                    severity: Severity::Error,
+                    field: "engines.cognia".into(),
+                    code: "manifest.engines.cognia.capability_minimum".into(),
+                    message: format!(
+                        "engines.cognia is older than the minimum required by declared capabilities: {}.{}.{}",
+                        required_minimum[0], required_minimum[1], required_minimum[2]
+                    ),
+                    hint: None,
+                });
+            }
+        }
+    }
     let is_populated_array = |field: &str| -> bool {
         match obj.get(field) {
             Some(Value::Array(a)) => !a.is_empty(),
@@ -853,7 +668,29 @@ pub fn validate_manifest(manifest: &Value) -> Vec<Diagnostic> {
     lint_cli_tools(obj, &mut out);
 
     // ── lazy-factory contribution fields: `entry` path safety ────────────
-    lint_lazy_factory_entries(obj, &mut out);
+    lint_manifest_paths(obj, &mut out);
+
+    let has_js_contributions = EXECUTABLE_CONTRIBUTION_FIELDS.iter().any(|field| {
+        obj.get(*field)
+            .and_then(Value::as_array)
+            .is_some_and(|entries| !entries.is_empty())
+    }) || obj.get("configComponent").is_some();
+    if obj.get("type").and_then(Value::as_str) != Some("frontend")
+        && has_js_contributions
+        && obj.get("main").and_then(Value::as_str).is_none()
+    {
+        out.push(Diagnostic {
+            severity: Severity::Error,
+            field: "main".into(),
+            code: "manifest.main.required_for_js_contributions".into(),
+            message: "JavaScript-executed contributions require a relative \"main\" entry point"
+                .into(),
+            hint: Some(
+                "Use a hybrid plugin with \"main\", or remove JavaScript-executed contributions."
+                    .into(),
+            ),
+        });
+    }
 
     // ── commands[]: each must have id + name ────────────────────────────
     if let Some(arr) = obj.get("commands").and_then(Value::as_array) {
@@ -1499,49 +1336,69 @@ fn cli_has_path_traversal(rel_path: &str) -> bool {
     rel_path.split(['/', '\\']).any(|segment| segment == "..")
 }
 
-/// The seven ADR-0026 lazy-factory contribution fields. Each shares the
-/// `{ id, label, entry, export }` shape and its `entry` is a *relative* path
-/// the host lazy-imports at activation. Mirrors the callers of
-/// `validateLazyFactoryArray` in `lib/plugin/core/validation.ts`.
-const LAZY_FACTORY_FIELDS: &[&str] = &[
-    "ocrProviders",
-    "workspaceBackends",
-    "messageRenderers",
-    "aiProviders",
-    "modalMounts",
-    "routingStrategies",
-    "chatMiddlewares",
-];
-
-/// Reject unsafe `entry` paths across the lazy-factory fields, using the same
-/// `manifest.<field>.entry.*` codes the app's validator emits. This is an
-/// author-side lint gate (skippable), not a runtime sandbox — it stops honest
-/// mistakes and makes CI meaningful; the loader enforces its own boundary.
-fn lint_lazy_factory_entries(obj: &serde_json::Map<String, Value>, out: &mut Vec<Diagnostic>) {
-    for field in LAZY_FACTORY_FIELDS {
-        let Some(arr) = obj.get(*field).and_then(Value::as_array) else {
-            continue;
-        };
-        for (i, item) in arr.iter().enumerate() {
-            let Some(entry) = item
-                .as_object()
-                .and_then(|o| o.get("entry"))
-                .and_then(Value::as_str)
-            else {
+/// Reject every plugin-controlled path described by the generated catalog.
+fn lint_manifest_paths(obj: &serde_json::Map<String, Value>, out: &mut Vec<Diagnostic>) {
+    for descriptor in PLUGIN_PATH_FIELDS {
+        if let Some((array_field, nested_path)) = descriptor.split_once("[].") {
+            let Some(items) = obj.get(array_field).and_then(Value::as_array) else {
                 continue;
             };
-            for code in lazy_factory_entry_violations(entry) {
-                out.push(Diagnostic {
-                    severity: Severity::Error,
-                    field: format!("{field}[{i}].entry"),
-                    code: format!("manifest.{field}.entry.{code}"),
-                    message: lazy_factory_entry_message(code),
-                    hint: Some(
-                        "\"entry\" must be a relative path inside the plugin directory.".into(),
-                    ),
-                });
+            for (index, item) in items.iter().enumerate() {
+                let Some(entry) = value_at_path(item, nested_path).and_then(Value::as_str) else {
+                    continue;
+                };
+                push_path_diagnostics(
+                    entry,
+                    format!("{array_field}[{index}].{nested_path}"),
+                    format!("{array_field}.{nested_path}"),
+                    out,
+                );
             }
+            continue;
         }
+
+        let Some(entry) = value_at_path_from_object(obj, descriptor).and_then(Value::as_str) else {
+            continue;
+        };
+        let code_path = if descriptor.contains('.') {
+            (*descriptor).to_string()
+        } else {
+            format!("{descriptor}.entry")
+        };
+        push_path_diagnostics(entry, (*descriptor).to_string(), code_path, out);
+    }
+}
+
+fn value_at_path_from_object<'a>(
+    obj: &'a serde_json::Map<String, Value>,
+    path: &str,
+) -> Option<&'a Value> {
+    let (first, rest) = path.split_once('.').unwrap_or((path, ""));
+    let value = obj.get(first)?;
+    if rest.is_empty() {
+        Some(value)
+    } else {
+        value_at_path(value, rest)
+    }
+}
+
+fn value_at_path<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
+    let mut current = value;
+    for segment in path.split('.') {
+        current = current.as_object()?.get(segment)?;
+    }
+    Some(current)
+}
+
+fn push_path_diagnostics(entry: &str, field: String, code_path: String, out: &mut Vec<Diagnostic>) {
+    for code in lazy_factory_entry_violations(entry) {
+        out.push(Diagnostic {
+            severity: Severity::Error,
+            field: field.clone(),
+            code: format!("manifest.{code_path}.{code}"),
+            message: lazy_factory_entry_message(code),
+            hint: Some("Path must stay inside the plugin directory.".into()),
+        });
     }
 }
 
@@ -1550,17 +1407,26 @@ fn lint_lazy_factory_entries(obj: &serde_json::Map<String, Value>, out: &mut Vec
 /// (`invalid_chars`, `absolute`, `traversal`); one path can trip several.
 fn lazy_factory_entry_violations(entry: &str) -> Vec<&'static str> {
     let mut codes = Vec::new();
-    // LAZY_FACTORY_ENTRY_NUL = /\0/
-    if entry.contains('\0') {
+    let encoded = entry.to_ascii_lowercase();
+    if entry.chars().any(|ch| ch.is_control())
+        || encoded.contains("%2e")
+        || encoded.contains("%2f")
+        || encoded.contains("%5c")
+    {
         codes.push("invalid_chars");
     }
-    // LAZY_FACTORY_ENTRY_ABS = /^(\/|[a-zA-Z]:[\\/])/
     let bytes = entry.as_bytes();
+    let has_scheme = entry.split_once(':').is_some_and(|(scheme, _)| {
+        !scheme.is_empty()
+            && scheme.as_bytes()[0].is_ascii_alphabetic()
+            && scheme
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.'))
+    });
     let absolute = entry.starts_with('/')
-        || (bytes.len() >= 3
-            && bytes[0].is_ascii_alphabetic()
-            && bytes[1] == b':'
-            && (bytes[2] == b'/' || bytes[2] == b'\\'));
+        || entry.starts_with('\\')
+        || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
+        || has_scheme;
     if absolute {
         codes.push("absolute");
     }
@@ -1573,8 +1439,8 @@ fn lazy_factory_entry_violations(entry: &str) -> Vec<&'static str> {
 
 fn lazy_factory_entry_message(code: &str) -> String {
     match code {
-        "invalid_chars" => "\"entry\" must not contain NUL bytes".into(),
-        "absolute" => "\"entry\" must be a relative path (no leading \"/\" or drive letter)".into(),
+        "invalid_chars" => "path contains unsafe or encoded characters".into(),
+        "absolute" => "path must be relative (no root, drive, UNC path, or URI scheme)".into(),
         "traversal" => "\"entry\" must not contain \"..\" path segments".into(),
         _ => "invalid \"entry\" path".into(),
     }
@@ -1644,6 +1510,22 @@ fn is_valid_version(s: &str) -> bool {
         }
     }
     true
+}
+
+fn parse_semver(value: &str) -> Option<[u64; 3]> {
+    let mut parts = value.split('.');
+    let parsed = [
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+    ];
+    parts.next().is_none().then_some(parsed)
+}
+
+fn extract_semver(constraint: &str) -> Option<[u64; 3]> {
+    constraint
+        .split(|character: char| !character.is_ascii_digit() && character != '.')
+        .find_map(parse_semver)
 }
 
 /// `^\d+\.\d+\.\d+$` — strict for WASM api version (no prerelease).
@@ -1749,6 +1631,64 @@ mod tests {
                 "successExitCodes": [0, 1]
             }]
         })
+    }
+
+    #[test]
+    fn runtime_combinations_enforce_javascript_entry_ownership() {
+        let contribution = json!([{
+            "id": "sessions",
+            "entry": "dist/importer.js",
+            "export": "createImporter"
+        }]);
+        let python_only = json!({
+            "id": "python-only",
+            "name": "Python only",
+            "version": "0.1.0",
+            "description": "Python plugin",
+            "type": "python",
+            "capabilities": ["python", "session-importer"],
+            "pythonMain": "main.py",
+            "sessionImporters": contribution
+        });
+        assert_has_error_code(python_only, "manifest.main.required_for_js_contributions");
+
+        let hybrid = json!({
+            "id": "hybrid-plugin",
+            "name": "Hybrid",
+            "version": "0.1.0",
+            "description": "Hybrid plugin",
+            "type": "hybrid",
+            "capabilities": ["python", "session-importer"],
+            "main": "dist/index.js",
+            "pythonMain": "main.py",
+            "sessionImporters": contribution
+        });
+        assert_clean(hybrid);
+
+        let javascript = json!({
+            "id": "javascript-plugin",
+            "name": "JavaScript",
+            "version": "0.1.0",
+            "description": "JavaScript plugin",
+            "type": "frontend",
+            "capabilities": ["session-importer"],
+            "main": "dist/index.js",
+            "sessionImporters": contribution
+        });
+        assert_clean(javascript);
+    }
+
+    #[test]
+    fn engines_cognia_must_cover_declared_capability_minimums() {
+        let mut manifest = minimal_frontend();
+        manifest["engines"] = json!({ "cognia": ">=0.0.9" });
+        assert_has_error_code(
+            manifest.clone(),
+            "manifest.engines.cognia.capability_minimum",
+        );
+
+        manifest["engines"] = json!({ "cognia": ">=0.1.0" });
+        assert_clean(manifest);
     }
 
     #[test]
@@ -2180,6 +2120,18 @@ mod tests {
             vec!["absolute"]
         );
         assert_eq!(lazy_factory_entry_violations("C:\\win"), vec!["absolute"]);
+        assert_eq!(
+            lazy_factory_entry_violations("C:drive-relative"),
+            vec!["absolute"]
+        );
+        assert_eq!(
+            lazy_factory_entry_violations("\\\\server\\share"),
+            vec!["absolute"]
+        );
+        assert_eq!(
+            lazy_factory_entry_violations("dist/%2e%2e/secret"),
+            vec!["invalid_chars"]
+        );
         assert_eq!(
             lazy_factory_entry_violations("has\0nul"),
             vec!["invalid_chars"]

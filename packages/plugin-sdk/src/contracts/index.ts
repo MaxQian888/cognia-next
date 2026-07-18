@@ -6,6 +6,8 @@
  * currently supports without importing from `lib/plugin/contracts/*`.
  */
 
+export * from "./catalog"
+
 export {
   CANONICAL_PLUGIN_CAPABILITIES,
   PLUGIN_CAPABILITY_CONTRACTS,

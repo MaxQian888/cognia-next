@@ -1,6 +1,6 @@
 ---
 title: Agent SDK (ctx.agent)
-description: The embeddable agent runtime exposed to plugins — typed run / runStreamed with structured output, a rewrite-capable canUseTool permission gate wired to PII redaction, and invokeTool for reusing host tools by name.
+description: The embeddable agent runtime exposed to plugins — typed run / runStreamed with structured output, rewrite-capable tool permission gates, and invokeTool for reusing host tools by name.
 ---
 
 # Agent SDK (ctx.agent)
@@ -66,12 +66,15 @@ Set `outputFormat: { type: "json_schema", schema }`. A JSON-only instruction (`b
 The permission gate mirrors the Claude Agent SDK's `canUseTool`: it returns `allow` (optionally with `updatedInput` to **rewrite** the arguments) or `deny` (with a message fed back to the model).
 
 ```ts
-import { createPiiRedactionGate } from "@cognia/plugin-sdk"
+const redactGate: PluginCanUseTool = async (_toolName, input) => ({
+  behavior: "allow",
+  updatedInput: redactPluginInput(input),
+})
 
-await ctx.agent.run("...", { toolsEnabled: true, canUseTool: createPiiRedactionGate() })
+await ctx.agent.run("...", { toolsEnabled: true, canUseTool: redactGate })
 ```
 
-For tool-enabled (sidecar) runs the gate answers the sidecar's existing `permission_request` round-trip and forwards a rewritten `updatedInput` via `approveTool` — reusing the rewrite-capable contract end-to-end. The built-in `createPiiRedactionGate()` runs every string argument through the twin ingest redactor (`packages/redact/src/index.ts`) and substitutes placeholders instead of hard-denying. A run-level gate composes with per-tool `canUseTool`: the tool-level gate runs first, its rewritten input flows into the run-level gate, and a `deny` from either short-circuits.
+For tool-enabled (sidecar) runs the gate answers the sidecar's existing `permission_request` round-trip and forwards a rewritten `updatedInput` via `approveTool` — reusing the rewrite-capable contract end-to-end. A run-level gate composes with per-tool `canUseTool`: the tool-level gate runs first, its rewritten input flows into the run-level gate, and a `deny` from either short-circuits. Cognia's built-in PII gate remains a host-only policy implementation; distributed plugins provide their own gate against the public `PluginCanUseTool` contract.
 
 > **Coverage limit.** Host tools auto-allowed by the permission ruleset do not emit a `permission_request`, so the gate intercepts only ask-tier host tools. A plugin's own inline tools are always gated.
 
@@ -110,7 +113,7 @@ Output rewrite rides a new opt-in sidecar round-trip (`tool_result_review` → `
 Input/output guardrails run **around** a run (OpenAI Agents SDK style). A tripped tripwire aborts with a typed `PluginGuardrailTripwireError`.
 
 ```ts
-import { defineGuardrail, createPiiOutputGuardrail } from "@cognia/plugin-sdk"
+import { defineGuardrail } from "@cognia/plugin-sdk"
 
 ctx.agent.guardrails.register(
   defineGuardrail({
@@ -120,7 +123,7 @@ ctx.agent.guardrails.register(
   })
 )
 
-await ctx.agent.run("...", { guardrails: ["no-secrets", createPiiOutputGuardrail()] })
+await ctx.agent.run("...", { guardrails: ["no-secrets"] })
 ```
 
 A run's `guardrails` is a mix of inline guardrail objects and ids of guardrails registered via `ctx.agent.guardrails`. Input guardrails run before the turn; output guardrails on the final text. Guardrails are channel-agnostic (full on the text channel) and ride `agent:control`.
@@ -199,11 +202,11 @@ Text-only runs, context-provider/guardrail **registration**, and `onStop` are un
 
 ## Authoring helpers
 
-`@cognia/plugin-sdk` re-exports `defineAgentTool()`, `defineGuardrail()`, `defineContextProvider()` (typed pass-through for either a runtime provider object or a declarative `manifest.contextProviders[]` entry) plus `createPiiRedactionGate()` (tool-arg gate) and `createPiiOutputGuardrail()` (output guardrail). Direct helper subpaths are also available under `@cognia/plugin-sdk/define/<name>`.
+`@cognia/plugin-sdk` re-exports `defineAgentTool()`, `defineGuardrail()`, and `defineContextProvider()` (typed pass-through for either a runtime provider object or a declarative `manifest.contextProviders[]` entry). Direct helper subpaths are also available under `@cognia/plugin-sdk/define/<name>`. Host PII factories are intentionally excluded from the published author SDK.
 
 ## Dogfood
 
-The in-tree `cognia-web-tools` plugin's `web_research` tool exercises the surface end-to-end: it gathers source pages with `ctx.agent.invokeTool("web_fetch", …)`, then summarizes them with `ctx.agent.runStreamed` using `outputFormat`, `createPiiRedactionGate()`, an output **guardrail**, an `onStop` **hook**, and `trace`. On activate it registers a **context provider**. See `plugins/web-tools/src/index.ts`.
+The trusted in-tree `cognia-web-tools` host module exercises the surface end-to-end: it gathers source pages with `ctx.agent.invokeTool("web_fetch", …)`, then summarizes them with `ctx.agent.runStreamed` using `outputFormat`, the host-only PII gate, an output **guardrail**, an `onStop` **hook**, and `trace`. On activate it registers a **context provider**. Bundled host modules are not third-party SDK examples; see `plugins/web-tools/src/index.ts`.
 
 ## Key files
 

@@ -17,7 +17,10 @@ import { fileURLToPath } from "node:url"
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(__dirname, "../..")
 const source = resolve(repoRoot, "src-tauri/wit/cognia-plugin.wit")
-const mirror = resolve(repoRoot, "plugin-sdk/wit/cognia-plugin.wit")
+const mirrors = [
+  resolve(repoRoot, "plugin-sdk/wit/cognia-plugin.wit"),
+  resolve(repoRoot, "packages/plugin-sdk/wit/cognia-plugin.wit"),
+]
 
 async function readOrNull(path) {
   try {
@@ -37,15 +40,17 @@ async function main() {
     process.exit(2)
   }
 
-  const currentMirror = await readOrNull(mirror)
-  if (currentMirror === sourceContent) {
-    console.log(`[sync-plugin-sdk-wit] up to date: ${mirror}`)
-    return
-  }
+  for (const mirror of mirrors) {
+    const currentMirror = await readOrNull(mirror)
+    if (currentMirror === sourceContent) {
+      console.log(`[sync-plugin-sdk-wit] up to date: ${mirror}`)
+      continue
+    }
 
-  await mkdir(dirname(mirror), { recursive: true })
-  await writeFile(mirror, sourceContent, "utf8")
-  console.log(`[sync-plugin-sdk-wit] wrote ${mirror} (${sourceContent.length} bytes)`)
+    await mkdir(dirname(mirror), { recursive: true })
+    await writeFile(mirror, sourceContent, "utf8")
+    console.log(`[sync-plugin-sdk-wit] wrote ${mirror} (${sourceContent.length} bytes)`)
+  }
 }
 
 main().catch((err) => {

@@ -26,6 +26,150 @@ describe("Plugin Validation", () => {
       expect(result.errors).toHaveLength(0)
     })
 
+    it("enforces capability minimums through engines.cognia", () => {
+      const manifest = createValidManifest()
+      manifest.engines = { cognia: ">=0.0.9" }
+      const incompatible = validatePluginManifest(manifest)
+      expect(incompatible.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "engines.cognia",
+            code: "manifest.engines.cognia.capability_minimum",
+            severity: "error",
+          }),
+        ])
+      )
+
+      manifest.engines = { cognia: ">=0.1.0" }
+      expect(validatePluginManifest(manifest).valid).toBe(true)
+    })
+
+    it.each([
+      "externalAgentAdapters",
+      "sessionImporters",
+      "contextProviders",
+      "terminalCompletionProviders",
+      "deploymentFilters",
+      "views",
+      "webviews",
+      "protocolAdapters",
+      "contextPanels",
+      "workspaceBackends",
+      "messageRenderers",
+      "aiProviders",
+      "ocrProviders",
+      "modalMounts",
+      "routingStrategies",
+      "chatMiddlewares",
+    ])("rejects traversal in executable contribution field %s", (field) => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.permissions = [
+        "extension:ui",
+        "project:read",
+        "canvas:read",
+        "artifact:read",
+        "workflow:read",
+      ]
+      manifest[field] = [
+        {
+          id: "unsafe-entry",
+          label: "Unsafe Entry",
+          labelKey: "unsafe.entry",
+          entry: "../../outside.js",
+          export: "createEntry",
+          resourceKinds: ["project-file"],
+          activity: "inspect",
+          spec: {},
+        },
+      ]
+
+      const result = validatePluginManifest(manifest)
+
+      expect(result.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: `${field}[0].entry`,
+            code: `manifest.${field}.entry.traversal`,
+            severity: "error",
+          }),
+        ])
+      )
+    })
+
+    it.each(["main", "pythonMain", "wasmMain", "vscodeMain", "styles"])(
+      "rejects an unsafe top-level runtime entry at %s",
+      (field) => {
+        const manifest = createValidManifest() as unknown as Record<string, unknown>
+        manifest[field] = "C:outside.js"
+        if (field === "pythonMain") manifest.type = "python"
+        if (field === "wasmMain") {
+          manifest.type = "wasm"
+          manifest.wasm = { apiVersion: "0.1.0" }
+        }
+        if (field === "vscodeMain") manifest.type = "vscode-extension"
+
+        const result = validatePluginManifest(manifest)
+
+        expect(result.diagnostics).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              field,
+              code: `manifest.${field}.entry.absolute`,
+              severity: "error",
+            }),
+          ])
+        )
+      }
+    )
+
+    it.each(["vscodeGrammars", "vscodeIconThemes", "vscodeSnippets"])(
+      "rejects traversal in VS Code asset field %s",
+      (field) => {
+        const manifest = createValidManifest() as unknown as Record<string, unknown>
+        manifest[field] = [{ id: "asset", language: "ts", path: "..\\outside.json" }]
+
+        const result = validatePluginManifest(manifest)
+
+        expect(result.diagnostics).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              field: `${field}[0].path`,
+              code: `manifest.${field}.path.traversal`,
+              severity: "error",
+            }),
+          ])
+        )
+      }
+    )
+
+    it("requires a JavaScript entry for Python manifests with JS lazy contributions", () => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.type = "python"
+      delete manifest.main
+      manifest.pythonMain = "main.py"
+      manifest.capabilities = ["session-importer"]
+      manifest.sessionImporters = [
+        {
+          id: "legacy-session",
+          label: "Legacy Session",
+          entry: "dist/importer.js",
+          export: "createImporter",
+        },
+      ]
+
+      const result = validatePluginManifest(manifest)
+
+      expect(result.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "main",
+            code: "manifest.main.required_for_js_contributions",
+            severity: "error",
+          }),
+        ])
+      )
+    })
+
     it("should reject missing id", () => {
       const manifest = createValidManifest()
       delete (manifest as unknown as Record<string, unknown>).id

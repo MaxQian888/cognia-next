@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "minimumHostVersion",
+    "pluginTypes",
+    "permissions",
+    "capabilities",
+    "pathFields"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "minimumHostVersion": { "type": "string" },
+    "pluginTypes": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "permissions": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "support", "manifestFields"],
+        "properties": {
+          "id": { "type": "string" },
+          "support": { "enum": ["supported", "partial", "experimental", "blocked"] },
+          "minimumHostVersion": { "type": "string" },
+          "manifestFields": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+        },
+        "additionalProperties": false
+      }
+    },
+    "pathFields": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "runtime", "requiredFor"],
+        "properties": {
+          "path": { "type": "string" },
+          "runtime": { "enum": ["javascript", "python", "wasm", "vscode", "asset"] },
+          "requiredFor": { "type": "array", "items": { "type": "string" } }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

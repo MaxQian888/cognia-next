@@ -185,6 +185,7 @@ import type {
   PluginAgentRunOptions,
   PluginAgentRunResult,
 } from "@/types/plugin/plugin-agent-sdk"
+import type { FullPluginContext as PublicFullPluginContext } from "@cognia/plugin-sdk/context"
 
 /**
  * Full plugin context combining base and extended APIs.
@@ -411,7 +412,7 @@ export function createFullPluginContext(
     automation: createAutomationAPI(pluginId),
     companion: createCompanionAPI(pluginId),
     pet: createPetAPI({ pluginId, capabilities: plugin.manifest.capabilities ?? [] }),
-  }
+  } satisfies PublicFullPluginContext
 }
 
 /**

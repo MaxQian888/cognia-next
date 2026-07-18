@@ -12,6 +12,7 @@
 //! Tests pin this ordering.
 
 use std::fs;
+use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
@@ -120,11 +121,19 @@ pub async fn plugin_python_load(
     config: Option<Value>,
     host_settings: Option<PythonHostSettings>,
 ) -> Result<Value> {
+    let expected_root = plugins.plugin_dir(&plugin_id);
+    let claimed_root = PathBuf::from(&plugin_path);
+    let safe_root = tokio::task::spawn_blocking(move || {
+        crate::contained_path::validate_claimed_plugin_root(&expected_root, &claimed_root)
+    })
+    .await
+    .map_err(|error| PluginError::Internal(format!("plugin path task panicked: {error}")))?
+    .map_err(|error| PluginError::Internal(format!("invalid plugin root: {error}")))?;
     load_inner(
         &state,
         &plugins,
         plugin_id,
-        plugin_path,
+        safe_root.to_string_lossy().into_owned(),
         main_module,
         dependencies,
         config,
@@ -431,6 +440,17 @@ async fn load_inner(
     // Gate order: permission beats availability (tests pin this).
     check_execute_grant(plugins, &plugin_id)?;
     let interpreter = resolve_plugin_interpreter(state, &plugin_id, &settings)?;
+    let root_for_validation = PathBuf::from(&plugin_path);
+    let main_for_validation = main_module.clone();
+    tokio::task::spawn_blocking(move || {
+        crate::contained_path::resolve_existing_plugin_file(
+            &root_for_validation,
+            &main_for_validation,
+        )
+    })
+    .await
+    .map_err(|error| PluginError::Internal(format!("plugin path task panicked: {error}")))?
+    .map_err(|error| PluginError::Internal(format!("invalid pythonMain: {error}")))?;
 
     let host_script = state.host_script_path();
     if !host_script.is_file() {

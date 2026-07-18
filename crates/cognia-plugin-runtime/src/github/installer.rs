@@ -200,7 +200,11 @@ fn extract_tar_gz_stripping_root(bytes: &[u8], dest: &Path) -> Result<(), String
             continue;
         }
         if rel.components().any(|c| matches!(c, Component::ParentDir)) {
-            continue;
+            return Err(format!("unsafe tar entry path: {path:?}"));
+        }
+        let entry_type = entry.header().entry_type();
+        if entry_type.is_symlink() || entry_type.is_hard_link() {
+            return Err(format!("archive links are not allowed: {path:?}"));
         }
 
         let out = dest.join(rel);
@@ -257,7 +261,9 @@ pub(crate) fn validate_no_build(root: &Path, manifest: &PartialManifest) -> Resu
     match manifest.plugin_type.as_deref() {
         Some("wasm") => {
             let wasm_main = manifest.wasm_main.as_deref().map(str::trim).unwrap_or("");
-            if wasm_main.is_empty() || !root.join(wasm_main).exists() {
+            if wasm_main.is_empty()
+                || crate::contained_path::resolve_existing_plugin_file(root, wasm_main).is_err()
+            {
                 return Err(
                     "WASM plugins must ship a prebuilt .wasm in the repo. Use \"Install WASM from Git\" to build from source instead."
                         .into(),
@@ -266,14 +272,14 @@ pub(crate) fn validate_no_build(root: &Path, manifest: &PartialManifest) -> Resu
         }
         Some("frontend") | Some("hybrid") => {
             if let Some(main) = entry_field(&manifest.main) {
-                if !root.join(main).exists() {
+                if crate::contained_path::resolve_existing_plugin_file(root, main).is_err() {
                     return Err(format!(
                         "manifest 'main' entry '{main}' is missing from the repo — the plugin must ship its built artifact (this installer does not run a build)."
                     ));
                 }
             }
             if let Some(styles) = entry_field(&manifest.styles) {
-                if !root.join(styles).exists() {
+                if crate::contained_path::resolve_existing_plugin_file(root, styles).is_err() {
                     return Err(format!(
                         "manifest 'styles' entry '{styles}' is missing from the repo."
                     ));
@@ -523,6 +529,33 @@ mod tests {
         assert!(tmp.path().join("main.js").exists());
         // Top-level dir must NOT survive.
         assert!(!tmp.path().join("cool-plugin-main").exists());
+    }
+
+    #[test]
+    fn extract_rejects_symlink_entries() {
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+
+        let mut bytes = Vec::new();
+        {
+            let encoder = GzEncoder::new(&mut bytes, Compression::fast());
+            let mut builder = tar::Builder::new(encoder);
+            let mut header = tar::Header::new_gnu();
+            header.set_entry_type(tar::EntryType::Symlink);
+            header.set_size(0);
+            header.set_mode(0o777);
+            header.set_link_name("../../outside.js").unwrap();
+            header.set_cksum();
+            builder
+                .append_data(&mut header, "repo-main/link.js", &[][..])
+                .unwrap();
+            builder.into_inner().unwrap().finish().unwrap();
+        }
+
+        let dest = tempfile::tempdir().unwrap();
+        let error = extract_tar_gz_stripping_root(&bytes, dest.path()).unwrap_err();
+        assert!(error.contains("links are not allowed"));
+        assert!(!dest.path().join("link.js").exists());
     }
 
     #[test]

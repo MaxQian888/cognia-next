@@ -11,7 +11,7 @@ import { withMathErrorBoundary } from "./math-error-boundary"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { loggers } from "@cognia/logging"
 
-interface MathBlockProps {
+export interface MathBlockProps {
   content: string
   className?: string
   scale?: number

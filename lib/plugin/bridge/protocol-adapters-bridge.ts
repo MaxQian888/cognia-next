@@ -22,6 +22,7 @@ import type {
   PluginProtocolAdapterDef,
 } from "@/types/plugin/plugin-protocol-adapter"
 import { loggers } from "@/lib/plugin/core/logger"
+import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 import {
   registerCodeAdapterExecutor,
   registerProtocolAdapter,
@@ -101,7 +102,7 @@ export async function registerProtocolAdaptersForPlugin(
     // Code adapters: import + register the executor (renderer-side).
     if (def.spec.kind === "code") {
       try {
-        const resolved = `${installRoot.replace(/[\\/]+$/, "")}/${def.entry!.replace(/^[\\/]+/, "")}`
+        const resolved = resolvePluginPath(installRoot, def.entry!)
         const mod = await importer(resolved)
         const exported = mod[def.export!]
         if (typeof exported !== "function") {

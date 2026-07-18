@@ -21,6 +21,7 @@ import type {
   TreeDataProvider,
 } from "@/types/plugin/plugin-view"
 import { loggers } from "@/lib/plugin/core/logger"
+import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 import { registerView, unregisterViewsByPlugin } from "@/lib/plugin/registries/tree-view-registry"
 
 export interface ViewBridgeError {
@@ -78,7 +79,7 @@ async function resolveView(
   installRoot: string,
   importer: NonNullable<ViewBridgeOptions["importer"]>
 ): Promise<ResolvedPluginView> {
-  const resolvedEntry = `${installRoot.replace(/[\\/]+$/, "")}/${def.entry.replace(/^[\\/]+/, "")}`
+  const resolvedEntry = resolvePluginPath(installRoot, def.entry)
   const mod = await importer(resolvedEntry)
   const exported = mod[def.export]
   if (exported == null) {

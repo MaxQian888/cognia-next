@@ -17,7 +17,8 @@ import type { PluginContext, PluginDefinition } from "@/types/plugin"
 // `isTauri` retained as fallback when host doesn't expose
 // `ctx.capabilities` (ADR-0026 §5 §C migration path).
 import { isTauri } from "@/lib/tauri"
-import { createPiiRedactionGate, defineContextProvider } from "@cognia/plugin-sdk"
+import { defineContextProvider } from "@cognia/plugin-sdk"
+import { createPiiRedactionGate } from "@/packages/plugin-sdk/src/host"
 // web_search / web_fetch share one implementation with the promoted built-in
 // tools (`lib/web/web-tools-core`), which in turn reuses lib/search +
 // lib/document. The plugin layer only adapts the call to the plugin boundary

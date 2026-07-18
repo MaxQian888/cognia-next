@@ -8,10 +8,5 @@ module.exports = {
   preset: "ts-jest",
   testEnvironment: "jsdom",
   testMatch: ["<rootDir>/src/**/*.test.ts"],
-  moduleNameMapper: {
-    // Host types are injected at runtime by cognia — keep them as `any`
-    // shims at test time so we don't pull the whole monorepo in.
-    "^@/(.*)$": "<rootDir>/src/__shims__/$1",
-  },
-  collectCoverageFrom: ["src/**/*.ts", "!src/**/*.test.ts", "!src/__shims__/**"],
+  collectCoverageFrom: ["src/**/*.ts", "!src/**/*.test.ts"],
 }

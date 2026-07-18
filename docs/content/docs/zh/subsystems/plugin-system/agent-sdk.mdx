@@ -1,6 +1,6 @@
 ---
 title: Agent SDK (ctx.agent)
-description: 暴露给插件的可嵌入 Agent 运行时 —— 带类型的 run / runStreamed、结构化输出、可改写参数的 canUseTool 许可门（接 PII 脱敏），以及按名复用宿主工具的 invokeTool。
+description: 暴露给插件的可嵌入 Agent 运行时 —— 带类型的 run / runStreamed、结构化输出、可改写参数的工具许可门，以及按名复用宿主工具的 invokeTool。
 ---
 
 # Agent SDK (ctx.agent)
@@ -66,12 +66,15 @@ run.cancel()                      // 中途中止
 许可门对齐 Claude Agent SDK 的 `canUseTool`：返回 `allow`（可带 `updatedInput` 以**改写**参数）或 `deny`（带回传给模型的 message）。
 
 ```ts
-import { createPiiRedactionGate } from "@cognia/plugin-sdk"
+const redactGate: PluginCanUseTool = async (_toolName, input) => ({
+  behavior: "allow",
+  updatedInput: redactPluginInput(input),
+})
 
-await ctx.agent.run("...", { toolsEnabled: true, canUseTool: createPiiRedactionGate() })
+await ctx.agent.run("...", { toolsEnabled: true, canUseTool: redactGate })
 ```
 
-对工具运行（sidecar）而言，许可门应答 sidecar 既有的 `permission_request` 往返，并经 `approveTool` 回传改写后的 `updatedInput` —— 端到端复用可改写契约。内置的 `createPiiRedactionGate()` 把每个字符串参数过一遍 twin 摄取脱敏器（`packages/redact/src/index.ts`），以占位符替换而非硬拒。运行级门与每工具 `canUseTool` 组合：工具级门先跑，其改写后的输入流入运行级门，任一方 `deny` 即短路。
+对工具运行（sidecar）而言，许可门应答 sidecar 既有的 `permission_request` 往返，并经 `approveTool` 回传改写后的 `updatedInput` —— 端到端复用可改写契约。运行级门与每工具 `canUseTool` 组合：工具级门先跑，其改写后的输入流入运行级门，任一方 `deny` 即短路。Cognia 内置 PII gate 仍是宿主内部策略实现；可分发插件应基于公共 `PluginCanUseTool` 契约提供自己的 gate。
 
 > **覆盖范围限制。** 被权限规则集自动放行的宿主工具不会发出 `permission_request`，因此许可门只拦截 ask 档的宿主工具；插件自有的内联工具始终受门把关。
 
@@ -110,7 +113,7 @@ await ctx.agent.run("...", {
 输入/输出守卫**环绕**运行（OpenAI Agents SDK 风格）。触发 tripwire 会以带类型的 `PluginGuardrailTripwireError` 中止。
 
 ```ts
-import { defineGuardrail, createPiiOutputGuardrail } from "@cognia/plugin-sdk"
+import { defineGuardrail } from "@cognia/plugin-sdk"
 
 ctx.agent.guardrails.register(
   defineGuardrail({
@@ -120,7 +123,7 @@ ctx.agent.guardrails.register(
   })
 )
 
-await ctx.agent.run("...", { guardrails: ["no-secrets", createPiiOutputGuardrail()] })
+await ctx.agent.run("...", { guardrails: ["no-secrets"] })
 ```
 
 运行的 `guardrails` 可混用内联守卫对象与经 `ctx.agent.guardrails` 注册的守卫 id。输入守卫在回合前跑，输出守卫在最终文本上跑。守卫与通道无关（文本通道上完整生效），搭乘 `agent:control`。
@@ -199,11 +202,11 @@ await ctx.agent.run("...", {
 
 ## 作者辅助
 
-`@cognia/plugin-sdk` 再导出 `defineAgentTool()`、`defineGuardrail()`、`defineContextProvider()`（带类型直通，可定义运行时 provider 对象，也可定义声明式 `manifest.contextProviders[]` 条目），以及 `createPiiRedactionGate()`（工具参数门）与 `createPiiOutputGuardrail()`（输出守卫）。直接 helper 子路径也可通过 `@cognia/plugin-sdk/define/<name>` 使用。
+`@cognia/plugin-sdk` 再导出 `defineAgentTool()`、`defineGuardrail()`、`defineContextProvider()`（带类型直通，可定义运行时 provider 对象，也可定义声明式 `manifest.contextProviders[]` 条目）。直接 helper 子路径也可通过 `@cognia/plugin-sdk/define/<name>` 使用。宿主 PII factory 被有意排除在发布的作者 SDK 之外。
 
 ## Dogfood
 
-内置 `cognia-web-tools` 插件的 `web_research` 工具端到端演练了整个面：先用 `ctx.agent.invokeTool("web_fetch", …)` 收集来源页，再用 `ctx.agent.runStreamed` 配合 `outputFormat`、`createPiiRedactionGate()`、一个输出**守卫**、一个 `onStop` **钩子**与 `trace` 做总结；激活时注册一个**上下文提供器**。见 `plugins/web-tools/src/index.ts`。
+受信任的内置 `cognia-web-tools` 宿主模块端到端演练了整个面：先用 `ctx.agent.invokeTool("web_fetch", …)` 收集来源页，再用 `ctx.agent.runStreamed` 配合 `outputFormat`、宿主内部 PII gate、一个输出**守卫**、一个 `onStop` **钩子**与 `trace` 做总结；激活时注册一个**上下文提供器**。内置宿主模块不是第三方 SDK 示例；见 `plugins/web-tools/src/index.ts`。
 
 ## 关键文件
 

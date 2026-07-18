@@ -636,8 +636,6 @@ mod tests {
             "plugin.json",
             "src/index.ts",
             "src/index.test.ts",
-            "src/__shims__/types/plugin.ts",
-            "src/__shims__/lib/chat/slash-command-registry.ts",
             "README.md",
         ] {
             assert!(target.join(relpath).exists(), "missing: {relpath}");
@@ -647,6 +645,9 @@ mod tests {
         let manifest = std::fs::read_to_string(target.join("plugin.json")).unwrap();
         assert!(manifest.contains(r#""id": "hello-ts""#));
         assert!(manifest.contains(r#""type": "frontend""#));
+        let source = std::fs::read_to_string(target.join("src/index.ts")).unwrap();
+        assert!(source.contains("@cognia/plugin-sdk"));
+        assert!(!target.join("src/__shims__").exists());
     }
 
     #[test]

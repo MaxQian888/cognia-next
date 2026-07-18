@@ -64,6 +64,8 @@ tempfile = "3"
 zip = { version = "2", default-features = false, features = ["deflate", "bzip2"] }
 tar = "0.4"
 flate2 = "1"
+cap-std = "3"
+cap-fs-ext = "3"
 
 [dev-dependencies]
 cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }

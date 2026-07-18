@@ -2,111 +2,109 @@
   "name": "@cognia/plugin-sdk",
   "version": "0.1.0",
   "private": false,
-  "description": "TypeScript SDK for authoring Cognia plugins. Stable public façade over the host runtime's plugin contracts (manifest, context, capabilities, registries, hook types).",
-  "license": "SEE LICENSE IN ../../LICENSE",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "description": "Standalone TypeScript SDK for authoring Cognia plugins.",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./manifest": "./src/manifest/index.ts",
-    "./context": "./src/context/index.ts",
-    "./context/extended": "./src/context/extended.ts",
-    "./contracts": "./src/contracts/index.ts",
-    "./define/*": "./src/define/define-*.ts",
-    "./api/native-anthropic-tool": "./src/api/native-anthropic-tool.ts",
-    "./api/skill": "./src/api/skill.ts",
-    "./api/skills": "./src/api/skill.ts",
-    "./api/mcp-server-preset": "./src/api/mcp-server-preset.ts",
-    "./api/character-pack": "./src/api/character-pack.ts",
-    "./api/connector": "./src/api/connector.ts",
-    "./api/connectors": "./src/api/connector.ts",
-    "./api/workflow": "./src/api/workflow.ts",
-    "./api/subagent": "./src/api/subagent.ts",
-    "./api/agent-team-template": "./src/api/agent-team-template.ts",
-    "./api/workflow-template": "./src/api/workflow-template.ts",
-    "./api/agent-tool": "./src/api/agent-tool.ts",
-    "./api/guardrail": "./src/api/guardrail.ts",
-    "./api/context-provider": "./src/api/context-provider.ts",
-    "./api/context-panel": "./src/api/context-panel.ts",
-    "./api/balance-adapter": "./src/api/balance-adapter.ts",
-    "./api/compaction-strategy": "./src/api/compaction-strategy.ts",
-    "./api/im-rate-source": "./src/api/im-rate-source.ts",
-    "./api/limits-source": "./src/api/limits-source.ts",
-    "./api/shared-memory-adapter": "./src/api/shared-memory-adapter.ts",
-    "./api/auth-provider": "./src/api/auth-provider.ts",
-    "./api/message-renderer": "./src/api/message-renderer.ts",
-    "./api/quick-action": "./src/api/quick-action.ts",
-    "./api/uri-handler": "./src/api/uri-handler.ts",
-    "./api/view-container": "./src/api/view-container.ts",
-    "./api/view": "./src/api/view.ts",
-    "./api/tree-view": "./src/api/view.ts",
-    "./api/webview": "./src/api/webview.ts",
-    "./api/routing-strategy": "./src/api/routing-strategy.ts",
-    "./api/deployment-filter": "./src/api/deployment-filter.ts",
-    "./api/protocol-adapter": "./src/api/protocol-adapter.ts",
-    "./api/tool-route": "./src/api/tool-route.ts",
-    "./api/terminal-completion": "./src/api/terminal-completion.ts",
-    "./api/command-safety": "./src/api/command-safety.ts",
-    "./api/workspace-backend": "./src/api/workspace-backend.ts",
-    "./api/modal-mount": "./src/api/modal-mount.ts",
-    "./api/tray-item": "./src/api/tray-item.ts",
-    "./api/tray": "./src/api/tray-item.ts",
-    "./api/theme": "./src/api/theme.ts",
-    "./api/themes": "./src/api/theme.ts",
-    "./api/theme-pack": "./src/api/theme-pack.ts",
-    "./api/font-contribution": "./src/api/font-contribution.ts",
-    "./api/fonts": "./src/api/font-contribution.ts",
-    "./api/wallpaper": "./src/api/wallpaper.ts",
-    "./api/wallpapers": "./src/api/wallpaper.ts",
-    "./api/density-preset": "./src/api/density-preset.ts",
-    "./api/ai-provider": "./src/api/ai-provider.ts",
-    "./api/providers": "./src/api/ai-provider.ts",
-    "./api/ocr-provider": "./src/api/ocr-provider.ts",
-    "./api/media": "./src/api/media.ts",
-    "./api/canvas": "./src/api/canvas.ts",
-    "./api/automation": "./src/api/automation.ts",
-    "./api/companion": "./src/api/companion.ts",
-    "./api/python": "./src/api/python.ts",
-    "./api/pet": "./src/api/pet.ts",
-    "./api/workflow-node": "./src/api/workflow-node.ts",
-    "./api/workflow-trigger": "./src/api/workflow-trigger.ts",
-    "./api/exporter": "./src/api/exporter.ts",
-    "./api/importer": "./src/api/importer.ts",
-    "./api/exporters": "./src/api/exporter.ts",
-    "./api/importers": "./src/api/importer.ts",
-    "./api/components": "./src/api/a2ui-component.ts",
-    "./api/a2ui-component": "./src/api/a2ui-component.ts",
-    "./api/a2ui-template": "./src/api/a2ui-template.ts",
-    "./api/chat-middleware": "./src/api/chat-middleware.ts",
-    "./api/cli-tool": "./src/api/cli-tool.ts",
-    "./api/command": "./src/api/command.ts",
-    "./api/commands": "./src/api/command.ts",
-    "./api/configuration": "./src/api/configuration.ts",
-    "./api/external-agent-adapter": "./src/api/external-agent-adapter.ts",
-    "./api/external-agent-preset": "./src/api/external-agent-preset.ts",
-    "./api/lsp-server": "./src/api/lsp-server.ts",
-    "./api/mode": "./src/api/mode.ts",
-    "./api/modes": "./src/api/mode.ts",
-    "./api/scheduled-task": "./src/api/scheduled-task.ts",
-    "./api/scheduler": "./src/api/scheduled-task.ts",
-    "./api/tool": "./src/api/tool.ts",
-    "./api/tools": "./src/api/tool.ts",
-    "./events": "./src/events/index.ts",
-    "./hooks": "./src/hooks/index.ts",
-    "./api/hooks": "./src/hooks/index.ts",
-    "./permissions": "./src/permissions/index.ts",
-    "./extensions": "./src/extensions/index.ts"
+    ".": {
+      "cognia-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
+    },
+    "./manifest": {
+      "cognia-source": "./src/manifest/index.ts",
+      "types": "./dist/manifest.d.ts",
+      "import": "./dist/manifest.js",
+      "require": "./dist/manifest.cjs",
+      "default": "./dist/manifest.js"
+    },
+    "./context": {
+      "cognia-source": "./src/context/index.ts",
+      "types": "./dist/context.d.ts",
+      "import": "./dist/context.js",
+      "require": "./dist/context.cjs",
+      "default": "./dist/context.js"
+    },
+    "./context/extended": {
+      "cognia-source": "./src/context/extended.ts",
+      "types": "./dist/context.d.ts",
+      "import": "./dist/context.js",
+      "require": "./dist/context.cjs",
+      "default": "./dist/context.js"
+    },
+    "./contracts": {
+      "cognia-source": "./src/contracts/catalog.ts",
+      "types": "./dist/contracts.d.ts",
+      "import": "./dist/contracts.js",
+      "require": "./dist/contracts.cjs",
+      "default": "./dist/contracts.js"
+    },
+    "./api/tool": {
+      "cognia-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
+    },
+    "./api/native-anthropic-tool": {
+      "cognia-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
+    },
+    "./events": {
+      "cognia-source": "./src/events/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./hooks": {
+      "cognia-source": "./src/hooks/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./permissions": {
+      "cognia-source": "./src/permissions/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./extensions": {
+      "cognia-source": "./src/extensions/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./package.json": "./package.json"
   },
   "files": [
-    "src",
-    "README.md"
+    "dist",
+    "contract",
+    "wit",
+    "README.md",
+    "LICENSE"
   ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "pack:test": "node ../../scripts/plugin/test-sdk-package.mjs"
+  },
   "peerDependencies": {
     "react": "^19.0.0",
     "typescript": ">=5.0.0"
   },
   "peerDependenciesMeta": {
     "react": {
+      "optional": true
+    },
+    "typescript": {
       "optional": true
     }
   },
@@ -117,7 +115,6 @@
     "cognia",
     "plugin",
     "sdk",
-    "anthropic",
     "tauri"
   ],
   "engines": {

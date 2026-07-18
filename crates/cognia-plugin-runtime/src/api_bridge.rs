@@ -41,7 +41,7 @@
 //! honestly rather than pretending to succeed.
 
 use std::collections::HashMap;
-use std::path::{Component, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -219,32 +219,43 @@ fn resolve_scoped(
     raw: &str,
 ) -> std::result::Result<PathBuf, PluginApiError> {
     let base = state.plugin_dir(plugin_id).join("data");
-    // The plugin SDK's getDataDir() advertises `plugins_runtime/<id>/data`;
-    // tolerate callers that prefix paths with that, treating everything as
-    // relative to the sandbox root.
-    let rel = raw.trim_start_matches('/').trim_start_matches('\\');
-    let candidate = PathBuf::from(rel);
-    if candidate.is_absolute() {
-        return Err(PluginApiError::permission_denied(format!(
-            "fs path must be relative to the plugin sandbox: {raw}"
-        )));
+    let candidate = crate::contained_path::validate_plugin_relative_path(raw).map_err(|error| {
+        PluginApiError::permission_denied(format!("fs path is not contained: {raw}: {error}"))
+    })?;
+    if let Ok(metadata) = std::fs::symlink_metadata(&base) {
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(PluginApiError::permission_denied(
+                "plugin data root must be a non-symlink directory",
+            ));
+        }
     }
+    let mut cursor = base.clone();
     for component in candidate.components() {
-        match component {
-            Component::ParentDir => {
+        cursor.push(component.as_os_str());
+        match std::fs::symlink_metadata(&cursor) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
                 return Err(PluginApiError::permission_denied(format!(
-                    "fs path escapes the plugin sandbox: {raw}"
+                    "fs path traverses a symbolic link: {}",
+                    cursor.display()
                 )));
             }
-            Component::Prefix(_) | Component::RootDir => {
-                return Err(PluginApiError::permission_denied(format!(
-                    "fs path must be relative to the plugin sandbox: {raw}"
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+            Err(error) => {
+                return Err(PluginApiError::internal(format!(
+                    "fs path validation failed: {error}"
                 )));
             }
-            _ => {}
         }
     }
     Ok(base.join(candidate))
+}
+
+fn data_handle_path(raw: &str) -> std::result::Result<PathBuf, PluginApiError> {
+    let relative = crate::contained_path::validate_plugin_relative_path(raw).map_err(|error| {
+        PluginApiError::permission_denied(format!("fs path is not contained: {raw}: {error}"))
+    })?;
+    Ok(PathBuf::from("data").join(relative))
 }
 
 fn payload_str(payload: &Value, key: &str) -> std::result::Result<String, PluginApiError> {
@@ -271,30 +282,42 @@ fn handle_fs(
 ) -> std::result::Result<Value, PluginApiError> {
     match op {
         "readText" => {
-            let path = resolve_scoped(state, plugin_id, &payload_str(payload, "path")?)?;
-            let text = std::fs::read_to_string(&path)
-                .map_err(|e| PluginApiError::internal(format!("fs:readText: {e}")))?;
+            let relative = payload_str(payload, "path")?;
+            resolve_scoped(state, plugin_id, &relative)?;
+            let bytes = crate::contained_path::read_existing_plugin_file(
+                &state.plugin_dir(plugin_id),
+                &data_handle_path(&relative)?.to_string_lossy(),
+            )
+            .map_err(|e| PluginApiError::internal(format!("fs:readText: {e}")))?;
+            let text = String::from_utf8(bytes)
+                .map_err(|e| PluginApiError::internal(format!("fs:readText utf8: {e}")))?;
             Ok(Value::String(text))
         }
         "readBinary" => {
-            let path = resolve_scoped(state, plugin_id, &payload_str(payload, "path")?)?;
-            let bytes = std::fs::read(&path)
-                .map_err(|e| PluginApiError::internal(format!("fs:readBinary: {e}")))?;
+            let relative = payload_str(payload, "path")?;
+            resolve_scoped(state, plugin_id, &relative)?;
+            let bytes = crate::contained_path::read_existing_plugin_file(
+                &state.plugin_dir(plugin_id),
+                &data_handle_path(&relative)?.to_string_lossy(),
+            )
+            .map_err(|e| PluginApiError::internal(format!("fs:readBinary: {e}")))?;
             Ok(json!(bytes))
         }
         "writeText" => {
-            let path = resolve_scoped(state, plugin_id, &payload_str(payload, "path")?)?;
+            let relative = payload_str(payload, "path")?;
+            resolve_scoped(state, plugin_id, &relative)?;
             let content = payload_str(payload, "content")?;
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| PluginApiError::internal(format!("fs:writeText mkdir: {e}")))?;
-            }
-            std::fs::write(&path, content)
-                .map_err(|e| PluginApiError::internal(format!("fs:writeText: {e}")))?;
+            crate::contained_path::write_plugin_file(
+                &state.plugin_dir(plugin_id),
+                &data_handle_path(&relative)?.to_string_lossy(),
+                content.as_bytes(),
+            )
+            .map_err(|e| PluginApiError::internal(format!("fs:writeText: {e}")))?;
             Ok(Value::Null)
         }
         "writeBinary" => {
-            let path = resolve_scoped(state, plugin_id, &payload_str(payload, "path")?)?;
+            let relative = payload_str(payload, "path")?;
+            resolve_scoped(state, plugin_id, &relative)?;
             let content: Vec<u8> = payload
                 .get("content")
                 .and_then(Value::as_array)
@@ -306,12 +329,12 @@ fn handle_fs(
                 .ok_or_else(|| {
                     PluginApiError::invalid("fs:writeBinary requires content: number[]")
                 })?;
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| PluginApiError::internal(format!("fs:writeBinary mkdir: {e}")))?;
-            }
-            std::fs::write(&path, content)
-                .map_err(|e| PluginApiError::internal(format!("fs:writeBinary: {e}")))?;
+            crate::contained_path::write_plugin_file(
+                &state.plugin_dir(plugin_id),
+                &data_handle_path(&relative)?.to_string_lossy(),
+                &content,
+            )
+            .map_err(|e| PluginApiError::internal(format!("fs:writeBinary: {e}")))?;
             Ok(Value::Null)
         }
         "exists" => {
@@ -340,14 +363,21 @@ fn handle_fs(
             Ok(Value::Null)
         }
         "copy" => {
-            let src = resolve_scoped(state, plugin_id, &payload_str(payload, "src")?)?;
-            let dest = resolve_scoped(state, plugin_id, &payload_str(payload, "dest")?)?;
-            if let Some(parent) = dest.parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| PluginApiError::internal(format!("fs:copy mkdir: {e}")))?;
-            }
-            std::fs::copy(&src, &dest)
-                .map_err(|e| PluginApiError::internal(format!("fs:copy: {e}")))?;
+            let src_rel = payload_str(payload, "src")?;
+            let dest_rel = payload_str(payload, "dest")?;
+            resolve_scoped(state, plugin_id, &src_rel)?;
+            resolve_scoped(state, plugin_id, &dest_rel)?;
+            let bytes = crate::contained_path::read_existing_plugin_file(
+                &state.plugin_dir(plugin_id),
+                &data_handle_path(&src_rel)?.to_string_lossy(),
+            )
+            .map_err(|e| PluginApiError::internal(format!("fs:copy read: {e}")))?;
+            crate::contained_path::write_plugin_file(
+                &state.plugin_dir(plugin_id),
+                &data_handle_path(&dest_rel)?.to_string_lossy(),
+                &bytes,
+            )
+            .map_err(|e| PluginApiError::internal(format!("fs:copy write: {e}")))?;
             Ok(Value::Null)
         }
         "move" => {
@@ -839,7 +869,7 @@ async fn handle_network(
             let url = payload_str(payload, "url")?;
             let dest_rel = payload_str(payload, "destPath")?;
             guard_network_host(state, plugin_id, &url)?;
-            let dest = resolve_scoped(state, plugin_id, &dest_rel)?;
+            resolve_scoped(state, plugin_id, &dest_rel)?;
 
             let client = network_http_client()?;
             let mut req = client.get(&url);
@@ -865,13 +895,13 @@ async fn handle_network(
                 .bytes()
                 .await
                 .map_err(|e| PluginApiError::internal(format!("network:download body: {e}")))?;
-            if let Some(parent) = dest.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| {
-                    PluginApiError::internal(format!("network:download mkdir: {e}"))
-                })?;
-            }
-            std::fs::write(&dest, &bytes)
-                .map_err(|e| PluginApiError::internal(format!("network:download write: {e}")))?;
+            resolve_scoped(state, plugin_id, &dest_rel)?;
+            crate::contained_path::write_plugin_file(
+                &state.plugin_dir(plugin_id),
+                &data_handle_path(&dest_rel)?.to_string_lossy(),
+                &bytes,
+            )
+            .map_err(|e| PluginApiError::internal(format!("network:download write: {e}")))?;
             Ok(json!({
                 "path": dest_rel,
                 "size": bytes.len(),
@@ -885,7 +915,11 @@ async fn handle_network(
             let file_rel = payload_str(payload, "filePath")?;
             guard_network_host(state, plugin_id, &url)?;
             let src = resolve_scoped(state, plugin_id, &file_rel)?;
-            let bytes = std::fs::read(&src).map_err(|e| {
+            let bytes = crate::contained_path::read_existing_plugin_file(
+                &state.plugin_dir(plugin_id),
+                &data_handle_path(&file_rel)?.to_string_lossy(),
+            )
+            .map_err(|e| {
                 PluginApiError::internal(format!("network:upload read {file_rel}: {e}"))
             })?;
 
@@ -1378,6 +1412,7 @@ mod tests {
 
     fn seeded_state(tmp: &TempDir) -> PluginRuntimeState {
         let state = PluginRuntimeState::new(PathBuf::from(tmp.path()));
+        std::fs::create_dir_all(state.plugin_dir("demo")).unwrap();
         state.plugins.write().insert(
             "demo".into(),
             PluginRecord {
@@ -1433,6 +1468,30 @@ mod tests {
         let exists =
             handle_fs(&state, "demo", "exists", &json!({ "path": "sub/file.txt" })).unwrap();
         assert_eq!(exists, Value::Bool(true));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fs_rejects_symlinked_segments_inside_the_data_sandbox() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = TempDir::new().unwrap();
+        let state = seeded_state(&tmp);
+        let data = state.plugin_dir("demo").join("data");
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("secret.txt"), "secret").unwrap();
+        symlink(&outside, data.join("link")).unwrap();
+
+        let error = handle_fs(
+            &state,
+            "demo",
+            "readText",
+            &json!({ "path": "link/secret.txt" }),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "PERMISSION_DENIED");
     }
 
     #[test]

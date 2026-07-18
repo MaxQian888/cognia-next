@@ -82,3 +82,20 @@ it("isolates missing exports without leaving a partial panel", async () => {
   expect(result.errors[0]?.message).toMatch(/OutlinePanel/)
   expect(contextPanelRegistry.get("review-plugin:outline")).toBeUndefined()
 })
+
+it("rejects an unsafe entry even when runtime registration bypasses manifest validation", async () => {
+  const unsafeManifest = {
+    ...manifest,
+    contextPanels: [{ ...manifest.contextPanels[0], entry: "../../outside.js" }],
+  } satisfies PluginManifest
+  const importer = jest.fn(async () => ({ OutlinePanel: () => null }))
+
+  const result = await registerContextPanelsForPlugin(unsafeManifest, "/plugins/review", {
+    importer,
+    hasPermission: () => true,
+  })
+
+  expect(result.registered).toBe(0)
+  expect(result.errors[0]?.message).toMatch(/unsafe plugin-relative path/i)
+  expect(importer).not.toHaveBeenCalled()
+})

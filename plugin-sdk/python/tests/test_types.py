@@ -7,6 +7,46 @@ from typing import List
 import pytest
 
 import cognia
+
+
+def test_js_lazy_contribution_models_serialize_to_manifest_shape():
+    panel = cognia.ContextPanelDef(
+        id="outline",
+        entry="dist/panels.js",
+        export="OutlinePanel",
+        resource_kinds=["project-file"],
+        activity="inspect",
+        label_key="panels.outline",
+        label="Outline",
+        required_capabilities=["inspect"],
+        preferred_mode="wide",
+    )
+    importer = cognia.SessionImporterDef(
+        id="cursor",
+        label="Cursor",
+        description="Imports Cursor sessions.",
+        entry="dist/cursor.js",
+        export="createCursorImporter",
+    )
+
+    assert panel.to_dict() == {
+        "id": "outline",
+        "entry": "dist/panels.js",
+        "export": "OutlinePanel",
+        "resourceKinds": ["project-file"],
+        "activity": "inspect",
+        "labelKey": "panels.outline",
+        "label": "Outline",
+        "requiredCapabilities": ["inspect"],
+        "preferredMode": "wide",
+    }
+    assert importer.to_dict() == {
+        "id": "cursor",
+        "label": "Cursor",
+        "description": "Imports Cursor sessions.",
+        "entry": "dist/cursor.js",
+        "export": "createCursorImporter",
+    }
 import cognia.types as cognia_types
 from cognia.types import (
     ToolDefinition,

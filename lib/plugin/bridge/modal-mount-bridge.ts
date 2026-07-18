@@ -17,6 +17,7 @@ import {
   registerDeclaredModal,
   unregisterDeclaredModalsForPlugin,
 } from "@/stores/plugin-runtime/plugin-modal-store"
+import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 
 export interface RegisterModalMountsOptions {
   importer: (entry: string) => Promise<Record<string, unknown>>
@@ -28,10 +29,9 @@ export async function registerModalMountsForPlugin(
   options: RegisterModalMountsOptions
 ): Promise<void> {
   const defs = manifest.modalMounts ?? []
-  const root = installRoot.replace(/[\\/]+$/, "")
   for (const def of defs) {
     if (!def?.id || !def.entry || !def.export) continue
-    const resolved = `${root}/${def.entry.replace(/^[\\/]+/, "")}`
+    const resolved = resolvePluginPath(installRoot, def.entry)
     registerDeclaredModal({
       pluginId: manifest.id,
       id: def.id,

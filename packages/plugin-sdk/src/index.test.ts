@@ -1,5 +1,5 @@
 import * as sdk from "./index"
-import type { AuthSession, ParsedDeepLink, PkceFlowConfig, PkceTokenResult } from "./index"
+import type { PluginManifest } from "./index"
 
 const rootBarrel = sdk as Record<string, unknown>
 
@@ -71,14 +71,14 @@ describe("plugin-sdk root barrel", () => {
     }
   })
 
-  it("keeps auth and agent SDK convenience exports on the package root", () => {
-    expect(typeof sdk.runPkceAuthFlow).toBe("function")
-    expect(typeof sdk.__makeSession).toBe("function")
-    expect(typeof sdk.createPiiRedactionGate).toBe("function")
-    expect(typeof sdk.createPiiOutputGuardrail).toBe("function")
+  it("does not publish host auth or PII implementations", () => {
+    expect(rootBarrel.runPkceAuthFlow).toBeUndefined()
+    expect(rootBarrel.__makeSession).toBeUndefined()
+    expect(rootBarrel.createPiiRedactionGate).toBeUndefined()
+    expect(rootBarrel.createPiiOutputGuardrail).toBeUndefined()
   })
 
-  it("re-exports registry-backed capability API functions from the package root", () => {
+  it("does not publish registry-backed host functions from the package root", () => {
     const registryExports = [
       "registerBalanceAdapter",
       "unregisterBalanceAdaptersByPlugin",
@@ -254,14 +254,12 @@ describe("plugin-sdk root barrel", () => {
     ]
 
     for (const registryExport of registryExports) {
-      expect(typeof rootBarrel[registryExport]).toBe("function")
+      expect(rootBarrel[registryExport]).toBeUndefined()
     }
   })
 
-  it("exposes the legacy type-only auth and deep-link contracts", () => {
-    const assertSdkTypes = <
-      _T extends ParsedDeepLink | PkceFlowConfig | PkceTokenResult | AuthSession,
-    >(): void => undefined
+  it("exposes the author manifest contract", () => {
+    const assertSdkTypes = <_T extends PluginManifest>(): void => undefined
 
     expect(assertSdkTypes).toBeDefined()
   })

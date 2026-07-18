@@ -11,6 +11,10 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { CANONICAL_PLUGIN_CAPABILITIES, PLUGIN_CAPABILITY_CONTRACTS } from "./plugin-capabilities"
+import {
+  CANONICAL_PLUGIN_PERMISSIONS,
+  CANONICAL_PLUGIN_TYPES,
+} from "@/packages/plugin-sdk/src/contracts/catalog"
 
 const REPO_ROOT = join(__dirname, "..", "..", "..")
 
@@ -33,8 +37,7 @@ function readGuarded(...segments: string[]): string {
   return readFileSync(path, "utf8")
 }
 
-const RUST_LINT = readGuarded("crates", "cognia-cli", "src", "cmd_lint.rs")
-const TS_VALIDATION = readGuarded("lib", "plugin", "core", "validation.ts")
+const RUST_LINT = readGuarded("crates", "cognia-cli", "src", "generated_plugin_contract.rs")
 const API_BRIDGE = readGuarded("crates", "cognia-plugin-runtime", "src", "api_bridge.rs")
 
 /** Permission strings advertised inside the gateway's `capability_table()`. */
@@ -109,13 +112,13 @@ describe("Rust CLI ↔ TS validator parity", () => {
 
   it("VALID_PERMISSIONS matches the TS validator list", () => {
     const rust = extractList(RUST_LINT, "VALID_PERMISSIONS")
-    const ts = extractList(TS_VALIDATION, "VALID_PERMISSIONS")
+    const ts = new Set<string>(CANONICAL_PLUGIN_PERMISSIONS)
     expect(sorted(rust)).toEqual(sorted(ts))
   })
 
   it("VALID_PLUGIN_TYPES matches the TS validator list", () => {
     const rust = extractList(RUST_LINT, "VALID_PLUGIN_TYPES")
-    const ts = extractList(TS_VALIDATION, "VALID_PLUGIN_TYPES")
+    const ts = new Set<string>(CANONICAL_PLUGIN_TYPES)
     expect(sorted(rust)).toEqual(sorted(ts))
   })
 
@@ -139,7 +142,7 @@ describe("Rust CLI ↔ TS validator parity", () => {
 
   it("api_bridge capability_table permissions are a subset of VALID_PERMISSIONS", () => {
     const advertised = extractCapabilityTablePermissions(API_BRIDGE)
-    const valid = extractList(TS_VALIDATION, "VALID_PERMISSIONS")
+    const valid = new Set<string>(CANONICAL_PLUGIN_PERMISSIONS)
     expect(advertised.size).toBeGreaterThan(0)
     const offenders = [...advertised].filter((p) => !valid.has(p))
     expect(offenders).toEqual([])

@@ -65,11 +65,6 @@ pub mod ts {
     pub const SRC_INDEX_TS: &str = include_str!("../../cognia-plugin-template-ts/src/index.ts");
     pub const SRC_INDEX_TEST_TS: &str =
         include_str!("../../cognia-plugin-template-ts/src/index.test.ts");
-    pub const SHIM_PLUGIN_TS: &str =
-        include_str!("../../cognia-plugin-template-ts/src/__shims__/types/plugin.ts");
-    pub const SHIM_SLASH_TS: &str = include_str!(
-        "../../cognia-plugin-template-ts/src/__shims__/lib/chat/slash-command-registry.ts"
-    );
     pub const GITIGNORE: &str = include_str!("../../cognia-plugin-template-ts/.gitignore");
     pub const README: &str = include_str!("../../cognia-plugin-template-ts/README.md");
 }
@@ -172,21 +167,6 @@ pub fn files_for(kind: TemplateKind, plugin_name: &str) -> Vec<TemplateFile> {
             TemplateFile {
                 rel_path: PathBuf::from("src").join("index.test.ts"),
                 content: substitute_ts_name(ts::SRC_INDEX_TEST_TS, plugin_name),
-            },
-            TemplateFile {
-                rel_path: PathBuf::from("src")
-                    .join("__shims__")
-                    .join("types")
-                    .join("plugin.ts"),
-                content: ts::SHIM_PLUGIN_TS.into(),
-            },
-            TemplateFile {
-                rel_path: PathBuf::from("src")
-                    .join("__shims__")
-                    .join("lib")
-                    .join("chat")
-                    .join("slash-command-registry.ts"),
-                content: ts::SHIM_SLASH_TS.into(),
             },
             TemplateFile {
                 rel_path: PathBuf::from(".gitignore"),
@@ -601,22 +581,18 @@ mod tests {
     }
 
     #[test]
-    fn ts_tsconfig_paths_resolve_at_alias_to_shims() {
-        // Regression: ts-jest type-checks `@/*` imports against tsconfig
-        // `paths`. If `@/*` points at a nonexistent package the scaffold's
-        // own `pnpm test` fails on a fresh `plugin new --kind ts` (TS2307),
-        // contradicting the README + next-steps promise that tests are
-        // green out of the box. The shims under src/__shims__ are the
-        // resolution target the jest moduleNameMapper already uses.
-        let cfg = ts::TSCONFIG_JSON;
-        assert!(
-            cfg.contains("./src/__shims__/*"),
-            "tsconfig @/* should resolve to the bundled shims, got: {cfg}"
-        );
-        assert!(
-            !cfg.contains("cognia-types"),
-            "tsconfig must not point @/* at the nonexistent cognia-types package"
-        );
+    fn ts_template_uses_only_the_public_sdk() {
+        let source = ts::SRC_INDEX_TS;
+        assert!(source.contains("@cognia/plugin-sdk"));
+        assert!(source.contains("ctx.agent.registerTool"));
+        assert!(source.contains("onCommand"));
+        for forbidden in ["@/lib", "@/types", "plugin-sdk/host"] {
+            assert!(
+                !source.contains(forbidden),
+                "TypeScript template must not import host-only module {forbidden}"
+            );
+        }
+        assert!(ts::PACKAGE_JSON.contains(r#""@cognia/plugin-sdk": "^0.2.0""#));
     }
 
     #[test]

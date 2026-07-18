@@ -36,3 +36,10 @@ export type {
   PluginPetAchievementDef,
   PluginPetItemDef,
 } from "@/types/plugin/plugin-pet"
+
+export type {
+  PluginPetAPI,
+  PluginPetEvent,
+  PluginPetInteractionKind,
+  PluginPetSummary,
+} from "@/lib/plugin/api/pet-api"

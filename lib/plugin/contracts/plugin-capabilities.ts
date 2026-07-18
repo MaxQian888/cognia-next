@@ -1,5 +1,6 @@
 import type { PluginCapability } from "@/types/plugin"
 import type { PluginPointGovernanceMode } from "./plugin-points"
+import { CANONICAL_PLUGIN_CAPABILITIES as AUTHOR_CAPABILITY_IDS } from "@/packages/plugin-sdk/src/contracts/catalog"
 
 export type PluginCapabilitySupport = "supported" | "partial" | "experimental" | "blocked"
 
@@ -363,7 +364,10 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     support: "supported",
     manifestFields: ["pythonMain", "pythonDependencies"],
     runtimeBinding: "PyO3/Tauri python runtime",
-    hostBindings: ["src-tauri/src/plugin_api/python/commands.rs", "lib/plugin/core/manager.ts"],
+    hostBindings: [
+      "crates/cognia-plugin-runtime/src/python/commands.rs",
+      "lib/plugin/core/manager.ts",
+    ],
     typescriptSdk: [
       "packages/plugin-sdk/src/api/python.ts",
       "packages/plugin-sdk/src/context/index.ts",
@@ -771,7 +775,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "sidecar/dispatch/anthropic.mjs",
       "plugins/computer-use/rust/src/commands.rs",
       "plugins/computer-use/rust/src/translator.rs",
-      "src-tauri/src/automation/commands.rs",
+      "crates/cognia-automation/src/automation/commands.rs",
     ],
     typescriptSdk: [
       "packages/plugin-sdk/src/api/native-anthropic-tool.ts",
@@ -1272,7 +1276,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/cli-tools/execute-cli-tool.ts",
       "lib/plugin/cli-tools/cli-binary-policy.ts",
       "lib/plugin/cli-tools/binary-status.ts",
-      "src-tauri/src/plugin_api/cli_exec.rs",
+      "crates/cognia-plugin-runtime/src/cli_exec.rs",
     ],
     typescriptSdk: [
       "packages/plugin-sdk/src/define/define-cli-tool.ts",
@@ -1323,7 +1327,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     hostBindings: [
       "lib/plugin/api/automation-api.ts",
       "lib/automation",
-      "src-tauri/src/automation",
+      "crates/cognia-automation/src/automation",
     ],
     typescriptSdk: ["packages/plugin-sdk/src/api/automation.ts"],
     pythonSdk: [],
@@ -1373,7 +1377,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "packages/plugin-sdk/src/define/define-context-panel.ts",
       "packages/plugin-sdk/src/index.ts",
     ],
-    pythonSdk: [],
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#context-workbench-panels",
     requiredTests: [
       "lib/plugin/bridge/context-panels-bridge.test.ts",
@@ -1576,9 +1580,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
   },
 ] as const
 
-export const CANONICAL_PLUGIN_CAPABILITIES = PLUGIN_CAPABILITY_CONTRACTS.map(
-  (entry) => entry.id
-) as readonly PluginCapability[]
+export const CANONICAL_PLUGIN_CAPABILITIES = AUTHOR_CAPABILITY_IDS as readonly PluginCapability[]
 
 const capabilityContractMap = new Map(PLUGIN_CAPABILITY_CONTRACTS.map((entry) => [entry.id, entry]))
 

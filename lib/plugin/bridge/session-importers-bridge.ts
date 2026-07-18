@@ -16,6 +16,7 @@
 import type { PluginManifest } from "@/types/plugin/plugin"
 import type { PluginSessionImporterDef } from "@/types/plugin/plugin-session-importer"
 import { loggers } from "@/lib/plugin/core/logger"
+import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 import {
   registerSessionSource,
   unregisterSessionSourcesByPlugin,
@@ -79,7 +80,7 @@ export async function registerSessionImportersForPlugin(
     }
 
     try {
-      const resolved = `${installRoot.replace(/[\\/]+$/, "")}/${def.entry.replace(/^[\\/]+/, "")}`
+      const resolved = resolvePluginPath(installRoot, def.entry)
       const mod = await importer(resolved)
       const exported = mod[def.export]
       if (typeof exported !== "function") {

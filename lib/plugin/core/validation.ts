@@ -23,6 +23,13 @@ import {
   type PluginPointGovernanceMode,
 } from "@/lib/plugin/contracts/plugin-points"
 import { isValidPluginTableName, MAX_TABLES_PER_PLUGIN } from "@/lib/plugin/dexie/namespace"
+import { getPluginPathViolations, type PluginPathViolation } from "@/lib/plugin/core/plugin-path"
+import {
+  AUTHOR_CAPABILITY_CONTRACTS,
+  CANONICAL_PLUGIN_PERMISSIONS,
+  CANONICAL_PLUGIN_TYPES,
+  PLUGIN_PATH_FIELD_CONTRACTS,
+} from "@/packages/plugin-sdk/src/contracts/catalog"
 
 // =============================================================================
 // Types
@@ -32,6 +39,19 @@ export interface ValidationError {
   field: string
   code: string
   message: string
+}
+
+function compareSemver(left: string, right: string): number {
+  const leftParts = left.split(".").map(Number)
+  const rightParts = right.split(".").map(Number)
+  for (let index = 0; index < 3; index += 1) {
+    if (leftParts[index] !== rightParts[index]) return leftParts[index] - rightParts[index]
+  }
+  return 0
+}
+
+function declaredMinimumHostVersion(constraint: string): string | undefined {
+  return constraint.match(/\d+\.\d+\.\d+/)?.[0]
 }
 
 export interface ManifestDiagnostic extends ValidationError {
@@ -62,91 +82,9 @@ export interface ManifestValidationOptions {
 
 const VALID_CAPABILITIES: PluginCapability[] = [...CANONICAL_PLUGIN_CAPABILITIES]
 
-const VALID_PERMISSIONS: PluginPermission[] = [
-  "filesystem:read",
-  "filesystem:write",
-  "network:fetch",
-  "network:websocket",
-  "clipboard:read",
-  "clipboard:write",
-  "notification",
-  "shell:execute",
-  "process:spawn",
-  "database:read",
-  "database:write",
-  "settings:read",
-  "settings:write",
-  "session:read",
-  "session:write",
-  "project:read",
-  "canvas:read",
-  "artifact:read",
-  "workflow:read",
-  "extension:ui",
-  "media:image:read",
-  "media:image:write",
-  "media:video:read",
-  "media:video:write",
-  "media:video:export",
-  "agent:control",
-  "agent:dispatch-external",
-  "agent:dispatch",
-  "agent:shared-memory:read",
-  "twin:read",
-  "python:execute",
-  "sandbox:web-execute",
-  "secrets:read",
-  "secrets:write",
-  "auth:provide",
-  "auth:consume",
-  "terminal:spawn",
-  "terminal:write",
-  "terminal:kill",
-  "terminal:completion",
-  "terminal:safety",
-  "git:read",
-  "git:write",
-  "goal:read",
-  "goal:write",
-  "memory:read",
-  "memory:write",
-  "team:read",
-  "team:write",
-  "subscription:read",
-  "perf:read",
-  "connectors:read",
-  "connectors:send",
-  "connectors:manage",
-  "share:read",
-  "share:create",
-  "backup:read",
-  "backup:write",
-  "automation:screenshot",
-  "automation:read",
-  "automation:click",
-  "automation:type",
-  "automation:pointer",
-  "automation:window",
-  "companion:read",
-  "companion:control",
-  "companion:goal-control",
-  "cli:execute",
-  "native:input",
-  "native:screen",
-  "native:filesystem",
-  "native:process",
-  "pet:read",
-  "pet:interact",
-  "hooks:chat-intercept",
-]
+const VALID_PERMISSIONS = [...CANONICAL_PLUGIN_PERMISSIONS] as PluginPermission[]
 
-const VALID_PLUGIN_TYPES: PluginType[] = [
-  "frontend",
-  "python",
-  "hybrid",
-  "wasm",
-  "vscode-extension",
-]
+const VALID_PLUGIN_TYPES = [...CANONICAL_PLUGIN_TYPES] as PluginType[]
 
 const WASM_API_VERSION_PATTERN = /^\d+\.\d+\.\d+$/
 const WASM_PREOPEN_PATH_PATTERN = /^[^\0]+$/
@@ -168,10 +106,33 @@ const VERSION_PATTERN = /^\d+\.\d+\.\d+(-[a-z0-9]+)?$/i
 // applies to `vscodeJsonPath`, keeping security policy consistent across
 // every manifest plugin-supplied path.
 
-const LAZY_FACTORY_ENTRY_TRAVERSAL = /(^|[\\/])\.\.([\\/]|$)/
-const LAZY_FACTORY_ENTRY_NUL = /\0/
-const LAZY_FACTORY_ENTRY_ABS = /^(\/|[a-zA-Z]:[\\/])/
 const JS_IDENT_PATTERN = /^[$_a-zA-Z][$_a-zA-Z0-9]*$/
+
+const LAZY_FACTORY_VALIDATED_FIELDS = new Set([
+  "ocrProviders",
+  "workspaceBackends",
+  "messageRenderers",
+  "aiProviders",
+  "modalMounts",
+  "routingStrategies",
+  "chatMiddlewares",
+  "contextPanels",
+])
+
+const JS_EXECUTABLE_CONTRIBUTION_FIELDS = PLUGIN_PATH_FIELD_CONTRACTS.flatMap((contract) => {
+  const match = /^([^.[\]]+)\[\]\.entry$/.exec(contract.path)
+  return contract.runtime === "javascript" && match ? [match[1]] : []
+})
+
+const ADDITIONAL_EXECUTABLE_CONTRIBUTION_FIELDS = JS_EXECUTABLE_CONTRIBUTION_FIELDS.filter(
+  (field) => !LAZY_FACTORY_VALIDATED_FIELDS.has(field)
+)
+
+function pluginPathMessage(violation: PluginPathViolation): string {
+  if (violation === "invalid_chars") return '"entry" contains unsafe or encoded path characters'
+  if (violation === "absolute") return '"entry" must be a relative path'
+  return '"entry" must not contain ".." path segments'
+}
 
 interface LazyFactoryEntry {
   id?: unknown
@@ -262,25 +223,11 @@ function validateLazyFactoryArray(
         `Entry at index ${i} requires a non-empty string "entry" (relative path)`
       )
     } else {
-      if (LAZY_FACTORY_ENTRY_NUL.test(entry.entry)) {
+      for (const violation of getPluginPathViolations(entry.entry)) {
         pushError(
           `${path}.entry`,
-          `manifest.${field}.entry.invalid_chars`,
-          `"entry" must not contain NUL bytes`
-        )
-      }
-      if (LAZY_FACTORY_ENTRY_ABS.test(entry.entry)) {
-        pushError(
-          `${path}.entry`,
-          `manifest.${field}.entry.absolute`,
-          `"entry" must be a relative path (no leading "/" or drive letter)`
-        )
-      }
-      if (LAZY_FACTORY_ENTRY_TRAVERSAL.test(entry.entry)) {
-        pushError(
-          `${path}.entry`,
-          `manifest.${field}.entry.traversal`,
-          `"entry" must not contain ".." path segments`
+          `manifest.${field}.entry.${violation}`,
+          pluginPathMessage(violation)
         )
       }
     }
@@ -591,6 +538,92 @@ export function validatePluginManifest(
     }
   }
 
+  for (const field of ["main", "pythonMain", "wasmMain", "vscodeMain", "styles"] as const) {
+    const entry = m[field]
+    if (typeof entry !== "string") continue
+    for (const violation of getPluginPathViolations(entry)) {
+      pushError(field, `manifest.${field}.entry.${violation}`, pluginPathMessage(violation))
+    }
+  }
+
+  for (const field of ["vscodeGrammars", "vscodeIconThemes", "vscodeSnippets"] as const) {
+    const entries = m[field]
+    if (!Array.isArray(entries)) continue
+    entries.forEach((entry, index) => {
+      if (!entry || typeof entry !== "object") return
+      const candidate = (entry as { path?: unknown }).path
+      if (typeof candidate !== "string") return
+      for (const violation of getPluginPathViolations(candidate)) {
+        pushError(
+          `${field}[${index}].path`,
+          `manifest.${field}.path.${violation}`,
+          pluginPathMessage(violation)
+        )
+      }
+    })
+  }
+
+  for (const field of ADDITIONAL_EXECUTABLE_CONTRIBUTION_FIELDS) {
+    const entries = (m as unknown as Record<string, unknown>)[field]
+    if (!Array.isArray(entries)) continue
+    entries.forEach((entry, index) => {
+      if (!entry || typeof entry !== "object") return
+      const candidate = (entry as { entry?: unknown }).entry
+      if (typeof candidate !== "string") return
+      for (const violation of getPluginPathViolations(candidate)) {
+        pushError(
+          `${field}[${index}].entry`,
+          `manifest.${field}.entry.${violation}`,
+          pluginPathMessage(violation)
+        )
+      }
+    })
+  }
+
+  if (m.configComponent && typeof m.configComponent === "object") {
+    const entry = (m.configComponent as { entry?: unknown }).entry
+    if (typeof entry === "string") {
+      for (const violation of getPluginPathViolations(entry)) {
+        pushError(
+          "configComponent.entry",
+          `manifest.configComponent.entry.${violation}`,
+          pluginPathMessage(violation)
+        )
+      }
+    }
+  }
+
+  if (m.runtimeCompatibility && typeof m.runtimeCompatibility === "object") {
+    const compatibility = m.runtimeCompatibility as Record<string, unknown>
+    for (const runtime of ["browser", "tauri", "mobile"] as const) {
+      const block = compatibility[runtime]
+      if (!block || typeof block !== "object") continue
+      const entrypoint = (block as { entrypoint?: unknown }).entrypoint
+      if (typeof entrypoint !== "string") continue
+      for (const violation of getPluginPathViolations(entrypoint)) {
+        pushError(
+          `runtimeCompatibility.${runtime}.entrypoint`,
+          `manifest.runtimeCompatibility.${runtime}.entrypoint.${violation}`,
+          pluginPathMessage(violation)
+        )
+      }
+    }
+  }
+
+  const hasJsExecutableContributions =
+    JS_EXECUTABLE_CONTRIBUTION_FIELDS.some((field) => {
+      const entries = (m as unknown as Record<string, unknown>)[field]
+      return Array.isArray(entries) && entries.length > 0
+    }) || Boolean(m.configComponent)
+  if (m.type !== "frontend" && hasJsExecutableContributions && !m.main) {
+    pushError(
+      "main",
+      "manifest.main.required_for_js_contributions",
+      'JavaScript-executed contributions require a relative "main" entry point',
+      'Use a hybrid plugin with "main", or remove JavaScript-executed contributions.'
+    )
+  }
+
   // Optional fields validation
   if (m.permissions && Array.isArray(m.permissions)) {
     for (const perm of m.permissions) {
@@ -651,12 +684,47 @@ export function validatePluginManifest(
 
   if (m.engines && typeof m.engines === "object") {
     const engines = m.engines as Record<string, unknown>
-    if (engines.cognia && typeof engines.cognia !== "string") {
-      pushError(
-        "engines.cognia",
-        "manifest.engines.cognia.invalid",
-        'Invalid "engines.cognia" field'
-      )
+    if (engines.cognia) {
+      if (typeof engines.cognia !== "string") {
+        pushError(
+          "engines.cognia",
+          "manifest.engines.cognia.invalid",
+          'Invalid "engines.cognia" field'
+        )
+      } else {
+        const declaredMinimum = declaredMinimumHostVersion(engines.cognia)
+        if (!declaredMinimum) {
+          pushError(
+            "engines.cognia",
+            "manifest.engines.cognia.invalid",
+            'Invalid "engines.cognia" constraint: include a semantic version such as ">=0.1.0"'
+          )
+        } else {
+          const declared = Array.isArray(m.capabilities)
+            ? new Set(
+                m.capabilities.filter(
+                  (capability): capability is string => typeof capability === "string"
+                )
+              )
+            : new Set<string>()
+          const requiredMinimum = AUTHOR_CAPABILITY_CONTRACTS.filter((contract) =>
+            declared.has(contract.id)
+          ).reduce(
+            (highest, contract) =>
+              compareSemver(contract.minimumHostVersion, highest) > 0
+                ? contract.minimumHostVersion
+                : highest,
+            "0.0.0"
+          )
+          if (compareSemver(declaredMinimum, requiredMinimum) < 0) {
+            pushError(
+              "engines.cognia",
+              "manifest.engines.cognia.capability_minimum",
+              `engines.cognia starts at ${declaredMinimum}, but declared capabilities require Cognia ${requiredMinimum} or newer`
+            )
+          }
+        }
+      }
     }
     if (engines.python && typeof engines.python !== "string") {
       pushError(

@@ -18,6 +18,8 @@
  *  - Runtime API types live in `@cognia/plugin-sdk/context`.
  */
 
+import type { PluginDefinition } from "@/types/plugin/plugin"
+
 export type {
   PluginManifest,
   PluginManifestDexieBlock,
@@ -86,7 +88,9 @@ export type {
   PluginLspServerDef,
 } from "@/types/plugin/plugin"
 
-export { definePlugin } from "@/types/plugin/plugin"
+export function definePlugin(definition: PluginDefinition): PluginDefinition {
+  return definition
+}
 
 export type { PluginAgentTeamTemplateDef } from "@/types/plugin/plugin-agent-team-template"
 export type { PluginAiProviderDef } from "@/types/plugin/plugin-ai-provider"

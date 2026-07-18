@@ -1227,6 +1227,11 @@ describe("createFullPluginContext", () => {
     expect(context.extensions).toBeDefined()
     expect(context.permissions).toBeDefined()
     expect(context.contextPanels).toBeDefined()
+    expect(context.memory).toBeDefined()
+    expect(context.pet).toBeDefined()
+    expect(context.webview).toBeDefined()
+    expect(context.auth).toBeDefined()
+    expect(context.uri).toBeDefined()
   })
 
   it("should have session API methods", () => {

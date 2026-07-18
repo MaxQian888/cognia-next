@@ -21,6 +21,7 @@ import type {
   PluginDeploymentFilterFactory,
 } from "@/types/plugin/plugin-deployment-filter"
 import { loggers } from "@/lib/plugin/core/logger"
+import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 import {
   registerDeploymentFilter,
   unregisterDeploymentFiltersByPlugin,
@@ -85,7 +86,7 @@ async function registerOne(
   installRoot: string,
   importer: NonNullable<DeploymentFiltersBridgeOptions["importer"]>
 ): Promise<void> {
-  const resolved = `${installRoot.replace(/[\\/]+$/, "")}/${def.entry.replace(/^[\\/]+/, "")}`
+  const resolved = resolvePluginPath(installRoot, def.entry)
   const mod = await importer(resolved)
   const exported = mod[def.export]
   if (typeof exported !== "function") {

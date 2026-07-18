@@ -13,6 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
+from ._generated_contract import CAPABILITY_FIELDS, CAPABILITY_SUPPORT
+
 # Support levels, identical to the TypeScript `PluginCapabilitySupport` union.
 SUPPORTED = "supported"
 PARTIAL = "partial"
@@ -115,7 +117,7 @@ def _contract_index(
 
 def validate_capabilities(
     capabilities: Sequence[str],
-    contracts: Iterable[CapabilityContract],
+    contracts: Optional[Iterable[CapabilityContract]] = None,
     *,
     governance_mode: str = "warn",
 ) -> CapabilityValidationOutcome:
@@ -126,7 +128,9 @@ def validate_capabilities(
     warning); ``partial`` / ``experimental`` are warnings; ``supported`` passes
     cleanly. ``allowed`` is true when no diagnostic has ``severity == "error"``.
     """
-    index = _contract_index(contracts)
+    index = _contract_index(
+        CANONICAL_CAPABILITY_CONTRACTS if contracts is None else contracts
+    )
     diagnostics: List[CapabilityDiagnostic] = []
 
     for capability in capabilities:
@@ -198,3 +202,13 @@ def capability_contract_from_dict(raw: Mapping[str, Any]) -> CapabilityContract:
         docs=str(raw.get("docs", "")),
         required_tests=tuple(raw.get("requiredTests", ())),
     )
+
+
+CANONICAL_CAPABILITY_CONTRACTS = tuple(
+    define_capability_contract(
+        capability_id,
+        CAPABILITY_SUPPORT[capability_id],
+        manifest_fields=CAPABILITY_FIELDS[capability_id],
+    )
+    for capability_id in CAPABILITY_SUPPORT
+)

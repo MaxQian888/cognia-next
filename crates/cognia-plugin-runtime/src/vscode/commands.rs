@@ -42,6 +42,7 @@ use tokio::sync::mpsc;
 use super::host::{InboundFrame, Sidecar, SpawnRequest};
 use super::installer::{install_vsix, InstallError, InstallResult};
 use super::VscodeExtensionState;
+use crate::PluginRuntimeState;
 
 /// Wall-clock cap on any single sidecar request. 30s matches the VS Code
 /// extension activation budget that real extensions assume.
@@ -191,6 +192,7 @@ pub async fn plugin_load_vscode(
     node_binary: Option<String>,
     app_handle: AppHandle,
     state: State<'_, VscodeExtensionState>,
+    runtime: State<'_, PluginRuntimeState>,
 ) -> Result<(), VscodeCommandError> {
     let manifest: serde_json::Value = serde_json::from_str(&manifest_json)
         .map_err(|e| VscodeCommandError::new("bad_manifest", e.to_string()))?;
@@ -203,12 +205,20 @@ pub async fn plugin_load_vscode(
                 "manifest.vscodeMain is required to load a VS Code extension",
             )
         })?;
+    let expected_root = runtime.plugin_dir(&plugin_id);
+    let claimed_root = PathBuf::from(plugin_path);
+    let main = main.to_string();
+    let extension_path = tokio::task::spawn_blocking(move || {
+        let plugin_root =
+            crate::contained_path::validate_claimed_plugin_root(&expected_root, &claimed_root)?;
+        crate::contained_path::resolve_existing_plugin_file(&plugin_root, &main)
+    })
+    .await
+    .map_err(|error| VscodeCommandError::new("unsafe_main", error.to_string()))?
+    .map_err(|error| VscodeCommandError::new("unsafe_main", error))?;
     let request = SpawnRequest {
         extension_id: plugin_id.clone(),
-        extension_path: PathBuf::from(&plugin_path)
-            .join(main)
-            .to_string_lossy()
-            .to_string(),
+        extension_path: extension_path.to_string_lossy().to_string(),
         node_binary,
         sidecar_script,
     };

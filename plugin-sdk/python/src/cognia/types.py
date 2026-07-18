@@ -553,6 +553,68 @@ class ContextProviderDef:
         return out
 
 
+@dataclass(frozen=True)
+class ContextPanelDef:
+    """A renderer-side Context Workbench panel contribution."""
+
+    id: str
+    entry: str
+    export: str
+    resource_kinds: List[str]
+    activity: str
+    label_key: str
+    label: str
+    icon: Optional[str] = None
+    order: Optional[int] = None
+    required_capabilities: Optional[List[str]] = None
+    preferred_mode: Optional[str] = None
+    retention: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "id": self.id,
+            "entry": self.entry,
+            "export": self.export,
+            "resourceKinds": list(self.resource_kinds),
+            "activity": self.activity,
+            "labelKey": self.label_key,
+            "label": self.label,
+        }
+        if self.icon is not None:
+            out["icon"] = self.icon
+        if self.order is not None:
+            out["order"] = self.order
+        if self.required_capabilities is not None:
+            out["requiredCapabilities"] = list(self.required_capabilities)
+        if self.preferred_mode is not None:
+            out["preferredMode"] = self.preferred_mode
+        if self.retention is not None:
+            out["retention"] = self.retention
+        return out
+
+
+@dataclass(frozen=True)
+class SessionImporterDef:
+    """A renderer-side session-source adapter factory contribution."""
+
+    id: str
+    label: str
+    entry: str
+    export: str
+    description: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "id": self.id,
+            "label": self.label,
+            "entry": self.entry,
+            "export": self.export,
+        }
+        if self.description is not None:
+            out["description"] = self.description
+        return out
+
+
 def ensure_serializable(value: Any, context: str) -> Any:
     """Raise if ``value`` is not JSON-serialisable (mirrors host policy).
 

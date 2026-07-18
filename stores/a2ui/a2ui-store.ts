@@ -101,7 +101,7 @@ function buildSnapshotUpdate(
 /**
  * A2UI Store State
  */
-interface A2UIState {
+export interface A2UIState {
   // Surface management
   surfaces: Record<string, A2UISurfaceState>
   activeSurfaceId: string | null
@@ -127,7 +127,7 @@ interface A2UIState {
 /**
  * A2UI Store Actions
  */
-interface A2UIActions {
+export interface A2UIActions {
   // Surface lifecycle
   createSurface: (
     surfaceId: string,

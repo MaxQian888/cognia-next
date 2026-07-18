@@ -5,24 +5,13 @@
  * defense.
  */
 
-/**
- * Reject relative paths that try to escape the plugin root.
- * Allowed: relative subpaths like `syntaxes/foo.json` or `./foo.json`.
- * Blocked: `..` segments, leading `/`, leading `\`, drive letters.
- */
+import { getPluginPathViolations, resolvePluginPath } from "@/lib/plugin/core/plugin-path"
+
+/** Reject paths that cannot be confined to the plugin root. */
 export function isUnsafeRelativePath(path: string): boolean {
-  if (typeof path !== "string" || path.length === 0) return true
-  // Drive letter (Windows) or POSIX absolute.
-  if (/^([A-Za-z]:)?[\\/]/.test(path)) return true
-  // Any `..` segment after splitting on either separator.
-  const segments = path.split(/[\\/]+/)
-  return segments.some((seg) => seg === "..")
+  return getPluginPathViolations(path).length > 0
 }
 
 export function joinPluginPath(baseDir: string, relative: string): string {
-  if (baseDir.endsWith("/") || baseDir.endsWith("\\")) {
-    return baseDir + relative
-  }
-  // Use `/` — Tauri's plugin-fs accepts both separators on Windows.
-  return `${baseDir}/${relative}`
+  return resolvePluginPath(baseDir, relative)
 }

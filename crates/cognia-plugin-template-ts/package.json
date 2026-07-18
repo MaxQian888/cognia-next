@@ -2,11 +2,15 @@
   "name": "cognia-plugin-template-ts",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@10.30.3",
   "description": "Cognia frontend TypeScript plugin template",
   "scripts": {
-    "build": "esbuild src/index.ts --bundle --format=cjs --platform=neutral --target=es2022 --outfile=dist/index.js --external:@/types/plugin --external:@/lib/* --log-level=info",
+    "build": "esbuild src/index.ts --bundle --format=cjs --platform=neutral --target=es2022 --outfile=dist/index.js --log-level=info",
     "test": "jest",
     "test:watch": "jest --watch"
+  },
+  "dependencies": {
+    "@cognia/plugin-sdk": "^0.2.0"
   },
   "devDependencies": {
     "@types/jest": "^29.5.12",

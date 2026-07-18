@@ -166,8 +166,12 @@ fn validate_install_manifest(plugin_id: &str, payload: &InstallPayload) -> Resul
             "manifest_json is required to install a plugin (refusing to create a manifest-less plugin)".into(),
         )
     })?;
-    let manifest: PluginManifestPayload = serde_json::from_str(raw)
+    let manifest_value: serde_json::Value = serde_json::from_str(raw)
         .map_err(|e| PluginError::InvalidManifest(format!("manifest is not valid JSON: {e}")))?;
+    crate::contract::validate_manifest_contract(&manifest_value)
+        .map_err(PluginError::InvalidManifest)?;
+    let manifest: PluginManifestPayload = serde_json::from_value(manifest_value)
+        .map_err(|e| PluginError::InvalidManifest(format!("manifest fields are invalid: {e}")))?;
     if manifest.id != plugin_id {
         return Err(PluginError::InvalidManifest(format!(
             "manifest.id={} does not match plugin_id={}",

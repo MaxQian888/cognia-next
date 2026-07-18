@@ -180,7 +180,7 @@ function preprocessLatex(content: string): string {
   return processed
 }
 
-interface MarkdownRendererProps {
+export interface MarkdownRendererProps {
   content: string
   className?: string
   enableMermaid?: boolean

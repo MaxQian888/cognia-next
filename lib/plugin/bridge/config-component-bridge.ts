@@ -20,6 +20,7 @@
 import type React from "react"
 import type { PluginManifest } from "@/types/plugin/plugin"
 import { loggers } from "@/lib/plugin/core/logger"
+import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 
 export interface ConfigComponentProps {
   /** Current resolved config (post-`configSchema` defaults merge). */
@@ -62,7 +63,7 @@ export async function loadConfigComponent(
   }
   try {
     const importer = options.importer ?? DEFAULT_IMPORTER
-    const resolved = `${installRoot.replace(/[\\/]+$/, "")}/${def.entry.replace(/^[\\/]+/, "")}`
+    const resolved = resolvePluginPath(installRoot, def.entry)
     const mod = await importer(resolved)
     const exported = mod[def.export]
     if (typeof exported !== "function") {

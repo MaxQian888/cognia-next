@@ -16,6 +16,7 @@ import type {
   WorkspaceProvider,
 } from "@/types/plugin/plugin-workspace-backend"
 import { loggers } from "@/lib/plugin/core/logger"
+import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 import {
   clearWorkspaceBackendsForPluginContext,
   createWorkspaceAPI,
@@ -86,7 +87,7 @@ async function resolveBackend(
   importer: NonNullable<WorkspaceBackendBridgeOptions["importer"]>,
   options: WorkspaceBackendBridgeOptions
 ): Promise<WorkspaceProvider> {
-  const resolved = `${installRoot.replace(/[\\/]+$/, "")}/${def.entry.replace(/^[\\/]+/, "")}`
+  const resolved = resolvePluginPath(installRoot, def.entry)
   const mod = await importer(resolved)
   const exported = mod[def.export]
   if (typeof exported !== "function") {

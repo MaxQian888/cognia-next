@@ -25,7 +25,20 @@
  */
 
 import type { PluginCharacterPackDef } from "@/types/plugin/plugin-character-pack"
-import { TTS_PROVIDERS } from "@cognia/tts/types"
+
+const KNOWN_TTS_PROVIDERS = new Set([
+  "system",
+  "openai",
+  "gemini",
+  "edge",
+  "elevenlabs",
+  "lmnt",
+  "hume",
+  "cartesia",
+  "deepgram",
+  "xiaomi",
+  "openai-realtime",
+])
 
 /**
  * Soft upper bound on characters per pack — keeps the in-memory overlay
@@ -74,7 +87,7 @@ function warnIfUnknownVoiceProvider(
   provider: string | undefined
 ): void {
   if (!provider) return
-  if (Object.prototype.hasOwnProperty.call(TTS_PROVIDERS, provider)) return
+  if (KNOWN_TTS_PROVIDERS.has(provider)) return
 
   console.warn(
     `defineCharacterPack: pack "${packId}" character "${localId}" declares voiceProfile.provider "${provider}", ` +

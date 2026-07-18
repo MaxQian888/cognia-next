@@ -22,12 +22,14 @@ describe("plugin-sdk legacy barrel surface", () => {
 
   // These two narrow + lightly validate (not pure identity), so just assert
   // the barrel re-exports them (they were authored but previously unexported).
-  it.each([
-    "defineCharacterPack",
-    "defineWorkflowTemplate",
-    "createPiiRedactionGate",
-    "createPiiOutputGuardrail",
-  ])("re-exports %s", (name) => {
+  it.each(["defineCharacterPack", "defineWorkflowTemplate"])("re-exports %s", (name) => {
     expect(typeof (sdk as Record<string, unknown>)[name]).toBe("function")
   })
+
+  it.each(["createPiiRedactionGate", "createPiiOutputGuardrail"])(
+    "does not expose host-only implementation %s",
+    (name) => {
+      expect((sdk as Record<string, unknown>)[name]).toBeUndefined()
+    }
+  )
 })

@@ -6,14 +6,13 @@ Minimal scaffold for a `type: "frontend"` cognia plugin written in TypeScript. S
 
 ```
 <your-plugin>/
-├── package.json        — esbuild + jest devDeps
+├── package.json        — public SDK + esbuild + jest
 ├── tsconfig.json
 ├── jest.config.cjs
 ├── plugin.json         — type: "frontend", capabilities: ["tools","commands"]
 ├── src/
 │   ├── index.ts        — PluginDefinition with one sample tool + one slash command
-│   ├── index.test.ts   — jsdom tests covering activate / deactivate / tool / slash command
-│   └── __shims__/      — test-time stubs for @/types/plugin and the host registry
+│   └── index.test.ts   — jsdom tests covering activate / deactivate / tool / slash command
 ├── .gitignore
 └── README.md
 ```
@@ -55,7 +54,7 @@ Each capability ships through a different host bridge. Refer to:
 
 ## Testing
 
-Tests use **jest + jsdom**. The `@/...` path imports are intercepted by the `__shims__/` directory so you don't need the full cognia monorepo on hand. Mirror the mock-PluginContext pattern shown in `src/index.test.ts` when you add your own tests.
+Tests use **jest + jsdom** and import types only from `@cognia/plugin-sdk`. Mirror the mock-`PluginContext` pattern shown in `src/index.test.ts` when you add your own tests. Do not import `@/lib`, `@/types`, or `@cognia/plugin-sdk/host`; those are host internals and are unavailable to distributed plugins.
 
 ## Packaging
 

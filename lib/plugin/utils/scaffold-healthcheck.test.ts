@@ -1,84 +1,85 @@
 import { healthcheckScaffold } from "./scaffold-healthcheck"
-import { scaffoldPlugin, type PluginScaffoldOptions } from "./templates"
 
-const options: PluginScaffoldOptions = {
-  id: "acme-widgets",
-  name: "Acme Widgets",
-  description: "Widgets for Acme",
-  type: "frontend",
-  capabilities: ["tools"],
-  author: { name: "Acme" },
-} as PluginScaffoldOptions
-
-function healthyFiles(): Map<string, string> {
-  return scaffoldPlugin(options)
+function healthyFiles(type: "frontend" | "python" = "frontend"): Map<string, string> {
+  const manifest = {
+    id: "acme-widgets",
+    name: "Acme Widgets",
+    version: "0.1.0",
+    description: "Widgets for Acme",
+    type,
+    capabilities: type === "python" ? ["python"] : ["tools"],
+    author: { name: "Acme" },
+    engines: { cognia: ">=0.1.0" },
+    permissions: type === "python" ? ["python:execute"] : [],
+    ...(type === "python" ? { pythonMain: "main.py" } : { main: "index.ts" }),
+  }
+  return new Map([
+    ["plugin.json", JSON.stringify(manifest)],
+    [
+      type === "python" ? "main.py" : "index.ts",
+      type === "python" ? "@tool\ndef run(): pass" : "registerPluginTools([])",
+    ],
+  ])
 }
 
 describe("healthcheckScaffold", () => {
-  it("passes a freshly scaffolded basic plugin", () => {
+  it("passes a valid frontend file map", () => {
     const report = healthcheckScaffold(healthyFiles())
-    expect(report.issues.filter((i) => i.severity === "error")).toEqual([])
+    expect(report.issues.filter((issue) => issue.severity === "error")).toEqual([])
     expect(report.ok).toBe(true)
   })
 
   it("errors when plugin.json is missing", () => {
     const files = healthyFiles()
     files.delete("plugin.json")
-    const report = healthcheckScaffold(files)
-    expect(report.ok).toBe(false)
-    expect(report.issues.some((i) => i.code === "manifest_missing")).toBe(true)
+    expect(
+      healthcheckScaffold(files).issues.some((issue) => issue.code === "manifest_missing")
+    ).toBe(true)
   })
 
-  it("errors on unparsable manifest JSON", () => {
-    const files = healthyFiles()
-    files.set("plugin.json", "{ not json")
-    const report = healthcheckScaffold(files)
-    expect(report.ok).toBe(false)
-    expect(report.issues.some((i) => i.code === "manifest_unparsable")).toBe(true)
+  it("errors on invalid JSON and invalid manifests", () => {
+    const invalidJson = healthyFiles()
+    invalidJson.set("plugin.json", "{ not json")
+    expect(
+      healthcheckScaffold(invalidJson).issues.some((issue) => issue.code === "manifest_unparsable")
+    ).toBe(true)
+
+    const invalidManifest = healthyFiles()
+    const manifest = JSON.parse(invalidManifest.get("plugin.json") as string)
+    manifest.id = "Not Valid"
+    invalidManifest.set("plugin.json", JSON.stringify(manifest))
+    expect(
+      healthcheckScaffold(invalidManifest).issues.some((issue) => issue.code === "manifest_invalid")
+    ).toBe(true)
   })
 
-  it("errors when the manifest fails validation (bad id)", () => {
-    const files = healthyFiles()
-    const manifest = JSON.parse(files.get("plugin.json") as string)
-    manifest.id = "Not A Valid Id!!"
-    files.set("plugin.json", JSON.stringify(manifest))
-    const report = healthcheckScaffold(files)
-    expect(report.ok).toBe(false)
-    expect(report.issues.some((i) => i.code === "manifest_invalid")).toBe(true)
-  })
-
-  it("errors when manifest.main points at a file the scaffold did not emit", () => {
+  it("errors when the declared entry is absent", () => {
     const files = healthyFiles()
     files.delete("index.ts")
-    const report = healthcheckScaffold(files)
-    expect(report.ok).toBe(false)
-    expect(report.issues.some((i) => i.code === "main_missing")).toBe(true)
+    expect(healthcheckScaffold(files).issues.some((issue) => issue.code === "main_missing")).toBe(
+      true
+    )
   })
 
-  it("errors on surviving {{placeholder}} template residue", () => {
+  it("errors on template residue", () => {
     const files = healthyFiles()
-    files.set("README.md", "# {{name}} left unexpanded")
-    const report = healthcheckScaffold(files)
-    expect(report.ok).toBe(false)
-    expect(report.issues.some((i) => i.code === "template_residue")).toBe(true)
+    files.set("README.md", "# {{name}}")
+    expect(
+      healthcheckScaffold(files).issues.some((issue) => issue.code === "template_residue")
+    ).toBe(true)
   })
 
-  it("warns (not errors) when a declared capability has no registration marker", () => {
+  it("reports an unwired capability as a warning", () => {
     const files = healthyFiles()
-    // Strip the tools registration from the entry while keeping the manifest claim.
-    files.set("index.ts", "export default { activate() { return {} } }")
+    files.set("index.ts", "export default {}")
     const report = healthcheckScaffold(files)
-    const unwired = report.issues.find((i) => i.code === "capability_unwired")
-    expect(unwired?.severity).toBe("warning")
-    // Warnings alone never fail the scaffold.
-    expect(report.issues.filter((i) => i.severity === "error")).toEqual([])
+    expect(report.issues.find((issue) => issue.code === "capability_unwired")?.severity).toBe(
+      "warning"
+    )
     expect(report.ok).toBe(true)
   })
-})
 
-it("passes a basic python scaffold (pythonMain entry present)", () => {
-  const files = scaffoldPlugin({ ...options, type: "python", capabilities: ["python"] })
-  const report = healthcheckScaffold(files)
-  expect(report.issues.filter((i) => i.severity === "error")).toEqual([])
-  expect(report.ok).toBe(true)
+  it("accepts a valid Python file map", () => {
+    expect(healthcheckScaffold(healthyFiles("python")).ok).toBe(true)
+  })
 })

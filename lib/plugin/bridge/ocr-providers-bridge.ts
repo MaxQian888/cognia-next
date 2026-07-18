@@ -19,6 +19,7 @@ import type { PluginManifest } from "@/types/plugin/plugin"
 import type { PluginOcrProviderDef, PluginOcrProviderFactory } from "@/types/plugin/plugin-ocr"
 import type { OcrProvider } from "@/types/ocr"
 import { loggers } from "@/lib/plugin/core/logger"
+import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 import { clearOcrProvidersForPlugin, createOcrAPI } from "@/lib/plugin/api/ocr-api"
 
 export interface OcrProvidersBridgeError {
@@ -103,7 +104,7 @@ async function resolveProvider(
   // `manifest.ocrProviders[].entry` is a relative path validated at manifest
   // load time (`lib/plugin/core/validation.ts`). We resolve it against the
   // plugin install root before importing.
-  const resolved = `${installRoot.replace(/[\\/]+$/, "")}/${def.entry.replace(/^[\\/]+/, "")}`
+  const resolved = resolvePluginPath(installRoot, def.entry)
   const mod = await importer(resolved)
   const exported = mod[def.export]
   if (typeof exported !== "function") {

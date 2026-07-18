@@ -1,90 +1,39 @@
-/**
- * `@cognia/plugin-sdk` — root barrel.
- *
- * Convenience surface that re-exports every subpath. Plugin authors who
- * want to pick a single import path can write
- *   import { definePlugin, defineNativeAnthropicTool } from "@cognia/plugin-sdk"
- * but the recommended pattern is to import from the specific subpath
- * (`@cognia/plugin-sdk/manifest`, `/context`, `/api/...`, etc.) so the
- * bundled type surface stays narrow.
- *
- * The SDK owns the `define-*` authoring helpers and re-exports the host
- * runtime registries, messaging contracts, plugin point contracts, and
- * canonical plugin type tree. See `README.md` for the subpath table.
- */
+/** Public, author-safe surface for `@cognia/plugin-sdk`. */
 
-export * from "./manifest"
-export * from "./context"
-export * from "./api/native-anthropic-tool"
-export * from "./api/skill"
-export * from "./api/mcp-server-preset"
-export * from "./api/connector"
-export * from "./api/character-pack"
-export * from "./api/workflow"
-export * from "./api/subagent"
-export * from "./api/agent-team-template"
-export * from "./api/workflow-template"
-export * from "./api/agent-tool"
-export * from "./api/guardrail"
-export * from "./api/context-provider"
-export * from "./api/context-panel"
-export * from "./api/balance-adapter"
-export * from "./api/compaction-strategy"
-export * from "./api/im-rate-source"
-export * from "./api/limits-source"
-export * from "./api/shared-memory-adapter"
-export * from "./api/auth-provider"
-export * from "./api/message-renderer"
-export * from "./api/quick-action"
-export * from "./api/uri-handler"
-export * from "./api/view-container"
-export * from "./api/view"
-export * from "./api/webview"
-export * from "./api/routing-strategy"
-export * from "./api/deployment-filter"
-export * from "./api/protocol-adapter"
-export * from "./api/tool-route"
-export * from "./api/terminal-completion"
-export * from "./api/command-safety"
-export * from "./api/workspace-backend"
-export * from "./api/modal-mount"
-export * from "./api/tray-item"
-export * from "./api/theme"
-export * from "./api/theme-pack"
-export * from "./api/font-contribution"
-export * from "./api/wallpaper"
-export * from "./api/density-preset"
-export * from "./api/ai-provider"
-export * from "./api/ocr-provider"
-export * from "./api/pet"
-export * from "./api/workflow-node"
-export * from "./api/workflow-trigger"
-export * from "./api/exporter"
-export * from "./api/importer"
-export * from "./api/a2ui-component"
-export * from "./api/a2ui-template"
-export * from "./api/chat-middleware"
-export * from "./api/cli-tool"
-export * from "./api/command"
-export * from "./api/configuration"
-export * from "./api/external-agent-adapter"
-export * from "./api/external-agent-preset"
-export * from "./api/lsp-server"
-export * from "./api/mode"
-export * from "./api/scheduled-task"
-export * from "./api/tool"
-export * from "./events"
-export * from "./hooks"
-export * from "./permissions"
-export * from "./extensions"
-export * from "./contracts"
+export type * from "./manifest"
+export type * from "./context"
+export type * from "./hooks"
+export type * from "./permissions"
+export type * from "./extensions"
+export type {
+  BusEvent,
+  EventSource,
+  EventSubscription,
+  MessageBusConfig,
+  PluginEventAPI,
+} from "./events"
 
+export {
+  AUTHOR_CAPABILITY_CONTRACTS,
+  CANONICAL_PLUGIN_CAPABILITIES,
+  CANONICAL_PLUGIN_PERMISSIONS,
+  CANONICAL_PLUGIN_TYPES,
+  PLUGIN_CONTRACT_MINIMUM_HOST_VERSION,
+  PLUGIN_CONTRACT_SCHEMA_VERSION,
+  PLUGIN_PATH_FIELD_CONTRACTS,
+} from "./contracts/catalog"
+
+export { definePlugin } from "./manifest"
 export { defineMcpServerPreset } from "./define/define-mcp-server-preset"
 export { defineNativeAnthropicTool } from "./define/define-native-anthropic-tool"
 export { defineSkill } from "./define/define-skill"
 export { defineSubagent } from "./define/define-subagent"
 export { defineAgentTeamTemplate } from "./define/define-agent-team-template"
-export { defineCharacterPack } from "./define/define-character-pack"
+export {
+  defineCharacterPack,
+  PLUGIN_CHARACTER_AVATAR_WEB_DATA_URL_SOFT_BYTES,
+  PLUGIN_CHARACTER_PACK_SOFT_LIMIT,
+} from "./define/define-character-pack"
 export { defineWorkflowTemplate } from "./define/define-workflow-template"
 export { defineAgentTool } from "./define/define-agent-tool"
 export { defineTool } from "./define/define-tool"
@@ -113,10 +62,8 @@ export { defineDeploymentFilter } from "./define/define-deployment-filter"
 export { defineProtocolAdapter } from "./define/define-protocol-adapter"
 export { defineToolRoute } from "./define/define-tool-route"
 export { defineViewContainer } from "./define/define-view-container"
-export { defineView, defineTreeDataProvider } from "./define/define-view"
-export type { TreeDataProvider, PluginTreeNode, PluginViewProps } from "@/types/plugin/plugin-view"
+export { defineTreeDataProvider, defineView } from "./define/define-view"
 export { defineWebview } from "./define/define-webview"
-export type { PluginWebviewHandle, PluginWebviewMessage } from "@/types/plugin/plugin-webview"
 export { defineAuthProvider } from "./define/define-auth-provider"
 export { defineUriHandler } from "./define/define-uri-handler"
 export { defineTheme } from "./define/define-theme"
@@ -139,10 +86,3 @@ export { defineLimitsSource } from "./define/define-limits-source"
 export { defineImRateSource } from "./define/define-im-rate-source"
 export { defineCompactionStrategy } from "./define/define-compaction-strategy"
 export { defineTrayItem } from "./define/define-tray-item"
-export type { ParsedDeepLink } from "@/lib/plugin/uri/parse-deep-link"
-export { runPkceAuthFlow } from "@/lib/plugin/auth/auth-pkce-flow"
-export type { PkceFlowConfig, PkceTokenResult } from "@/lib/plugin/auth/auth-pkce-flow"
-export { __makeSession } from "@/lib/plugin/auth/auth-provider-registry"
-export type { AuthSession } from "@/lib/plugin/auth/auth-provider-registry"
-export { createPiiRedactionGate } from "@/lib/plugin/agent-sdk/pii-gate"
-export { createPiiOutputGuardrail } from "@/lib/plugin/agent-sdk/guardrails"

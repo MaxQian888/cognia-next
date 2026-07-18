@@ -53,6 +53,7 @@ PYTHON_MIRRORS: dict[str, str] = {
     "chat-middleware": "ChatMiddlewareDef",
     "compaction-strategy": "CompactionStrategyDef",
     "context-provider": "ContextProviderDef",
+    "context-panel": "ContextPanelDef",
     "density-preset": "DensityPresetContribution",
     "deployment-filter": "DeploymentFilterDef",
     "message-renderer": "MessageRendererDef",
@@ -65,6 +66,7 @@ PYTHON_MIRRORS: dict[str, str] = {
     "view-container": "ViewContainerDef",
     "webview": "WebviewDef",
     "workspace-backend": "WorkspaceBackendDef",
+    "session-importer": "SessionImporterDef",
     # external-agent (merged into cognia)
     "external-agent-preset": "define_external_agent_preset",
     "external-agent-adapter": "define_external_agent_adapter",

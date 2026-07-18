@@ -22,6 +22,7 @@ import {
   clearChatMiddlewaresForPlugin,
 } from "@/lib/claude/chat-middleware/registry"
 import { loggers } from "@/lib/plugin/core/logger"
+import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 
 export interface RegisterChatMiddlewaresOptions {
   importer: (entry: string) => Promise<Record<string, unknown>>
@@ -33,10 +34,9 @@ export async function registerChatMiddlewaresForPlugin(
   options: RegisterChatMiddlewaresOptions
 ): Promise<void> {
   const defs = manifest.chatMiddlewares ?? []
-  const root = installRoot.replace(/[\\/]+$/, "")
   for (const def of defs) {
     if (!def?.id || !def.entry || !def.export) continue
-    const resolved = `${root}/${def.entry.replace(/^[\\/]+/, "")}`
+    const resolved = resolvePluginPath(installRoot, def.entry)
     try {
       const mod = await options.importer(resolved)
       const exported = mod[def.export]

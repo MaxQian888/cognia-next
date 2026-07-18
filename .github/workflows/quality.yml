@@ -55,6 +55,11 @@ jobs:
           node-version: 20.x
           cache: "pnpm"
 
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -95,6 +100,26 @@ jobs:
       - name: Plugin SDK WIT contract sync check
         run: pnpm lint:plugin-sdk-wit
 
+      - name: Plugin contract generation freshness
+        run: node scripts/plugin/generate-contract.mjs --check
+
+      - name: Plugin author import boundary
+        run: node scripts/plugin/check-author-imports.mjs
+
+      - name: Standalone plugin SDK build and package consumer
+        run: |
+          pnpm --dir packages/plugin-sdk build
+          pnpm --dir packages/plugin-sdk pack:test
+          node scripts/plugin/test-author-scaffold.mjs
+
+      - name: Python plugin SDK contract suite
+        run: |
+          python -m pip install -e "plugin-sdk/python[dev]"
+          python -m pytest plugin-sdk/python/tests
+
+      - name: Rust plugin runtime security suite
+        run: cargo test --locked -p cognia-plugin-runtime
+
       - name: i18n lint (key parity + hardcoded-string baseline + key existence)
         run: pnpm lint:i18n
 
@@ -117,6 +142,7 @@ jobs:
           pnpm config:sync:test
           pnpm audit:silent-flags:test
           pnpm audit:pii-boundaries:test
+          node --test scripts/plugin/check-author-imports.test.mjs scripts/plugin/generate-contract.test.mjs scripts/plugin/test-sdk-package.test.mjs scripts/plugin/test-author-scaffold.test.mjs
 
       - name: Security audit
         run: pnpm audit --audit-level=moderate

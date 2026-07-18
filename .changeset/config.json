@@ -7,5 +7,9 @@
   "access": "restricted",
   "baseBranch": "master",
   "updateInternalDependencies": "patch",
-  "ignore": ["docs", "mobile", "@cognia/*"]
+  "ignore": ["docs", "mobile"],
+  "privatePackages": {
+    "version": false,
+    "tag": false
+  }
 }

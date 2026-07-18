@@ -16,6 +16,7 @@ import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
 import { CONTEXT_RESOURCE_READ_PERMISSIONS } from "@/lib/plugin/api/context-panel-api"
 import { recordPluginPointDiagnostic } from "@/lib/plugin/contracts/diagnostics-store"
 import { loggers } from "@/lib/plugin/core/logger"
+import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 import type { ContextPanelRenderProps } from "@/types/context-workbench"
 import type { PluginManifest } from "@/types/plugin/plugin"
 import type { PluginContextPanelIcon } from "@/types/plugin/plugin-context-panel"
@@ -85,7 +86,7 @@ export async function registerContextPanelsForPlugin(
       )
       if (denied) throw new Error(`Permission denied: ${denied} is required`)
 
-      const entry = `${installRoot.replace(/[\\/]+$/, "")}/${def.entry.replace(/^[\\/]+/, "")}`
+      const entry = resolvePluginPath(installRoot, def.entry)
       const importedModule = await importer(entry)
       const exported = importedModule[def.export]
       if (typeof exported !== "function") {

@@ -211,6 +211,16 @@ test("e2e: stale allowlist entry warns but does not fail", () => {
   rmSync(root, { recursive: true, force: true })
 })
 
+test("e2e: tracked files deleted in the working tree are skipped", () => {
+  const root = makeFixture({
+    tsFiles: [{ path: "lib/deleted.ts", contents: `import fs from "node:fs"` }],
+  })
+  rmSync(join(root, "lib", "deleted.ts"))
+  const result = runScript(root)
+  assert.equal(result.status, 0, result.stderr + result.stdout)
+  rmSync(root, { recursive: true, force: true })
+})
+
 test("e2e: .test/.stories/.mjs files are out of scope", () => {
   const root = makeFixture({
     tsFiles: [

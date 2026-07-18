@@ -31,6 +31,11 @@ import type { PluginShareAPI as CtxPluginShareAPI } from "@/lib/plugin/api/share
 import type { PluginBackupAPI as CtxPluginBackupAPI } from "@/lib/plugin/api/backup-api"
 import type { PluginAutomationAPI as CtxPluginAutomationAPI } from "@/lib/plugin/api/automation-api"
 import type { PluginCompanionAPI as CtxPluginCompanionAPI } from "@/lib/plugin/api/companion-api"
+import type { PluginMemoryAPI as CtxPluginMemoryAPI } from "@/lib/plugin/api/memory-api"
+import type { PluginPetAPI as CtxPluginPetAPI } from "@/lib/plugin/api/pet-api"
+import type { PluginWebviewAPI as CtxPluginWebviewAPI } from "@/lib/plugin/api/webview-api"
+import type { PluginAuthAPI as CtxPluginAuthAPI } from "@/lib/plugin/api/auth-api"
+import type { PluginUriAPI as CtxPluginUriAPI } from "@/lib/plugin/api/uri-api"
 
 // =============================================================================
 // Core PluginContext + per-field APIs (from types/plugin/plugin.ts)
@@ -203,13 +208,28 @@ export type {
 } from "@/lib/plugin/api/backup-api"
 export type { PluginAutomationAPI } from "@/lib/plugin/api/automation-api"
 export type { PluginCompanionAPI, CompanionServerStatus } from "@/lib/plugin/api/companion-api"
+export type {
+  PluginMemoryAPI,
+  PluginMemoryListFilter,
+  PluginMemorySearchOptions,
+  PluginMemoryStoreInput,
+} from "@/lib/plugin/api/memory-api"
+export type {
+  PluginPetAPI,
+  PluginPetEvent,
+  PluginPetInteractionKind,
+  PluginPetSummary,
+} from "@/lib/plugin/api/pet-api"
 export type { PluginMessagePartAPI } from "@/lib/plugin/api/message-part-api"
 export type {
   PluginContextPanelAPI,
   PluginContextPanelRegistration,
 } from "@/lib/plugin/api/context-panel-api"
 
-export type FullPluginContext = Omit<CtxPluginContext, "storage"> &
+export type FullPluginContext = Omit<
+  CtxPluginContext,
+  "storage" | "webview" | "auth" | "uri" | "pet"
+> &
   Omit<CtxPluginContextAPI, "storage"> & {
     storage: CtxPluginContextAPI["storage"]
     ocr: CtxPluginOcrAPI
@@ -228,6 +248,11 @@ export type FullPluginContext = Omit<CtxPluginContext, "storage"> &
     backup: CtxPluginBackupAPI
     automation: CtxPluginAutomationAPI
     companion: CtxPluginCompanionAPI
+    memory: CtxPluginMemoryAPI
+    pet: CtxPluginPetAPI
+    webview: CtxPluginWebviewAPI
+    auth: CtxPluginAuthAPI
+    uri: CtxPluginUriAPI
   }
 
 // =============================================================================

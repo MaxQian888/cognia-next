@@ -75,7 +75,7 @@ pub struct ActivatedPlugin {
     pub call_timeout_ms: u64,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct WasmPluginState {
     pub loaded: Arc<RwLock<HashMap<String, LoadedPlugin>>>,
     /// Typed pre-instantiation handle per plugin, built once in `load()` and
@@ -126,11 +126,9 @@ impl WasmPluginHost {
         manifest: WasmManifestSlice,
         plugin_path: PathBuf,
     ) -> Result<String, String> {
-        let wasm_path = plugin_path.join(&manifest.wasm_main);
-        if !wasm_path.exists() {
-            return Err(format!("wasmMain not found: {wasm_path:?}"));
-        }
-        let bytes = std::fs::read(&wasm_path).map_err(|e| format!("read {wasm_path:?}: {e}"))?;
+        let bytes =
+            crate::contained_path::read_existing_plugin_file(&plugin_path, &manifest.wasm_main)
+                .map_err(|error| format!("invalid wasmMain: {error}"))?;
         // The embedded `cognia:api-version` custom section is the trusted
         // source of the ABI version. A binary that omits it is malformed
         // (ADR-0013): we do NOT fall back to the manifest-declared version,
@@ -327,7 +325,7 @@ mod tests {
         let m = manifest_v01();
         let tmp = tempfile::tempdir().unwrap();
         let err = WasmPluginHost::load(&state, m, tmp.path().to_path_buf()).unwrap_err();
-        assert!(err.contains("wasmMain not found"));
+        assert!(err.contains("invalid wasmMain"));
     }
 
     #[test]

@@ -14,6 +14,7 @@
 import type { PluginManifest } from "@/types/plugin/plugin"
 import type { PluginWebviewDef, ResolvedPluginWebview } from "@/types/plugin/plugin-webview"
 import { loggers } from "@/lib/plugin/core/logger"
+import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 import { wrapWebviewHtml } from "@/lib/plugin/security/webview-csp"
 import {
   registerWebview,
@@ -83,7 +84,7 @@ async function resolveWebview(
   if (typeof def.html === "string") {
     body = def.html
   } else if (def.entry && def.export) {
-    const resolvedEntry = `${installRoot.replace(/[\\/]+$/, "")}/${def.entry.replace(/^[\\/]+/, "")}`
+    const resolvedEntry = resolvePluginPath(installRoot, def.entry)
     const mod = await importer(resolvedEntry)
     const exported = mod[def.export]
     const value = typeof exported === "function" ? (exported as () => unknown)() : exported

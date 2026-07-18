@@ -102,9 +102,8 @@ fn verify_detached(
         .map_err(|e| format!("signature verification failed: {e}"))
 }
 
-/// Extract a `.zip` plugin bundle into `target_dir`. Skips path traversal
-/// attempts (zip entries with `..` segments). Returns the path of the
-/// extracted `plugin.json` if present.
+/// Extract a `.zip` plugin bundle into `target_dir`. Unsafe paths or archive
+/// links reject the whole bundle. Returns the extracted `plugin.json` path.
 fn extract_zip_bundle(bytes: &[u8], target_dir: &Path) -> Result<PathBuf, String> {
     let reader = Cursor::new(bytes);
     let mut archive = zip::ZipArchive::new(reader).map_err(|e| format!("open zip bundle: {e}"))?;
@@ -113,10 +112,19 @@ fn extract_zip_bundle(bytes: &[u8], target_dir: &Path) -> Result<PathBuf, String
         let mut entry = archive
             .by_index(i)
             .map_err(|e| format!("read zip entry {i}: {e}"))?;
-        let entry_path = match entry.enclosed_name() {
-            Some(p) => p.to_path_buf(),
-            None => continue, // Skip absolute or `..` paths.
-        };
+        let entry_path = entry
+            .enclosed_name()
+            .ok_or_else(|| format!("unsafe zip entry path: {}", entry.name()))?
+            .to_path_buf();
+        if entry
+            .unix_mode()
+            .is_some_and(|mode| mode & 0o170000 == 0o120000)
+        {
+            return Err(format!(
+                "symbolic-link zip entries are not allowed: {}",
+                entry.name()
+            ));
+        }
         let target = target_dir.join(&entry_path);
         if entry.is_dir() {
             std::fs::create_dir_all(&target).map_err(|e| format!("mkdir {target:?}: {e}"))?;
@@ -157,6 +165,10 @@ fn assert_wasm_manifest(parsed: &PartialManifest) -> Result<(), String> {
     {
         return Err("bundle manifest is missing wasmMain".into());
     }
+    crate::contained_path::validate_plugin_relative_path(
+        parsed.wasm_main.as_deref().unwrap_or_default(),
+    )
+    .map_err(|error| format!("bundle manifest has unsafe wasmMain: {error}"))?;
     if parsed
         .wasm
         .as_ref()
@@ -479,6 +491,26 @@ mod tests {
     }
 
     #[test]
+    fn extract_zip_rejects_symlink_entries() {
+        let mut buf = Vec::new();
+        {
+            let cursor = Cursor::new(&mut buf);
+            let mut writer = zip::ZipWriter::new(cursor);
+            writer
+                .add_symlink(
+                    "link.wasm",
+                    "../../outside.wasm",
+                    zip::write::SimpleFileOptions::default(),
+                )
+                .unwrap();
+            writer.finish().unwrap();
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let error = extract_zip_bundle(&buf, tmp.path()).unwrap_err();
+        assert!(error.contains("symbolic-link"));
+    }
+
+    #[test]
     fn assert_wasm_manifest_rejects_non_wasm() {
         let parsed = PartialManifest {
             id: "x".into(),
@@ -514,6 +546,19 @@ mod tests {
         assert!(assert_wasm_manifest(&parsed)
             .unwrap_err()
             .contains("apiVersion"));
+
+        let parsed = PartialManifest {
+            id: "x".into(),
+            plugin_type: Some("wasm".into()),
+            wasm_main: Some("../outside.wasm".into()),
+            author: None,
+            wasm: Some(PartialWasmBlock {
+                api_version: "0.1.0".into(),
+            }),
+        };
+        assert!(assert_wasm_manifest(&parsed)
+            .unwrap_err()
+            .contains("unsafe wasmMain"));
     }
 
     #[test]

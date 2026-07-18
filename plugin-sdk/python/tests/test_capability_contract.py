@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from cognia import (
+    CANONICAL_CAPABILITY_CONTRACTS,
     CapabilityContract,
     define_capability_contract,
     validate_capabilities,
@@ -53,6 +54,12 @@ def test_validate_supported_is_clean():
     outcome = validate_capabilities(["tools"], _contracts())
     assert outcome.allowed is True
     assert outcome.diagnostics == []
+
+
+def test_generated_canonical_contract_is_the_default():
+    assert any(contract.id == "context-panel" for contract in CANONICAL_CAPABILITY_CONTRACTS)
+    assert validate_capabilities(["context-panel"]).allowed is True
+    assert validate_capabilities(["not-canonical"]).allowed is False
 
 
 def test_validate_unknown_is_error():

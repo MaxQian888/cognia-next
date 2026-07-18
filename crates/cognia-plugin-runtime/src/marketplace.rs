@@ -171,7 +171,11 @@ fn extract_tar_gz(bytes: &[u8], dest: &Path) -> std::result::Result<(), String> 
                 Component::ParentDir | Component::RootDir | Component::Prefix(_)
             )
         }) {
-            continue;
+            return Err(format!("unsafe tar entry path: {path:?}"));
+        }
+        let entry_type = entry.header().entry_type();
+        if entry_type.is_symlink() || entry_type.is_hard_link() {
+            return Err(format!("archive links are not allowed: {path:?}"));
         }
         let out = dest.join(&path);
         if entry.header().entry_type().is_dir() {
@@ -534,6 +538,33 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, PluginError::Internal(_)));
+    }
+
+    #[test]
+    fn extraction_rejects_symlink_entries() {
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+
+        let mut bytes = Vec::new();
+        {
+            let encoder = GzEncoder::new(&mut bytes, Compression::fast());
+            let mut builder = tar::Builder::new(encoder);
+            let mut header = tar::Header::new_gnu();
+            header.set_entry_type(tar::EntryType::Symlink);
+            header.set_size(0);
+            header.set_mode(0o777);
+            header.set_link_name("../../outside.js").unwrap();
+            header.set_cksum();
+            builder
+                .append_data(&mut header, "plugin/link.js", &[][..])
+                .unwrap();
+            builder.into_inner().unwrap().finish().unwrap();
+        }
+
+        let dest = TempDir::new().unwrap();
+        let error = extract_tar_gz(&bytes, dest.path()).unwrap_err();
+        assert!(error.contains("links are not allowed"));
+        assert!(!dest.path().join("plugin/link.js").exists());
     }
 
     fn sha256_hex(bytes: &[u8]) -> String {

@@ -485,12 +485,7 @@ pub async fn install_inner(
     let plugin_state = state.app_handle.state::<PluginRuntimeState>();
     let (manifest, plugin_id) = read_manifest_from_zip(&bytes)?;
     let target_dir = plugin_state.plugin_dir(&plugin_id);
-    if target_dir.exists() {
-        // Replace any prior contents — install is idempotent.
-        std::fs::remove_dir_all(&target_dir)?;
-    }
-    std::fs::create_dir_all(&target_dir)?;
-    extract_zip_into(&bytes, &target_dir)?;
+    replace_directory_atomically(&target_dir, |staging| extract_zip_into(&bytes, staging))?;
 
     register_installed_plugin(&plugin_state, &plugin_id, &manifest, &target_dir);
     log::info!("cli_bridge installed {plugin_id} from {}", bundle.display());
@@ -531,11 +526,10 @@ pub async fn install_from_directory_inner<P: tauri::Runtime>(
 
     let plugin_state = app_handle.state::<PluginRuntimeState>();
     let target_dir = plugin_state.plugin_dir(&plugin_id);
-    if target_dir.exists() {
-        std::fs::remove_dir_all(&target_dir)?;
-    }
-    std::fs::create_dir_all(&target_dir)?;
-    copy_dir_recursive(&source, &target_dir)?;
+    replace_directory_atomically(&target_dir, |staging| {
+        copy_dir_recursive(&source, staging)?;
+        Ok(())
+    })?;
 
     register_installed_plugin(&plugin_state, &plugin_id, &manifest, &target_dir);
     log::info!(
@@ -543,6 +537,40 @@ pub async fn install_from_directory_inner<P: tauri::Runtime>(
         source.display()
     );
     Ok((plugin_id, vec![]))
+}
+
+/// Populate a sibling staging directory, then replace the live install with
+/// same-filesystem renames. A failed extraction/copy never mutates the prior
+/// installation, and a failed final rename restores it before returning.
+fn replace_directory_atomically(
+    target: &Path,
+    populate: impl FnOnce(&Path) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    let parent = target
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("plugin install target has no parent"))?;
+    std::fs::create_dir_all(parent)?;
+    let staging = tempfile::Builder::new()
+        .prefix(".cognia-plugin-staging-")
+        .tempdir_in(parent)?;
+    populate(staging.path())?;
+    let staging_path = staging.keep();
+    let backup = parent.join(format!(".cognia-plugin-backup-{}", uuid::Uuid::now_v7()));
+    let had_existing = target.exists();
+    if had_existing {
+        std::fs::rename(target, &backup)?;
+    }
+    if let Err(error) = std::fs::rename(&staging_path, target) {
+        if had_existing {
+            let _ = std::fs::rename(&backup, target);
+        }
+        let _ = std::fs::remove_dir_all(&staging_path);
+        return Err(error.into());
+    }
+    if had_existing {
+        std::fs::remove_dir_all(backup)?;
+    }
+    Ok(())
 }
 
 /// Shared between the zip and directory install paths. Builds the runtime
@@ -656,17 +684,26 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Extract all entries of `bytes` into `target_dir`. Skips entries
-/// whose names contain `..` or absolute paths (zip-slip defense).
+/// Extract all regular entries of `bytes` into `target_dir`.
+/// Unsafe names and symbolic-link entries reject the whole archive.
 fn extract_zip_into(bytes: &[u8], target_dir: &Path) -> anyhow::Result<()> {
     let reader = std::io::Cursor::new(bytes);
     let mut archive = zip::ZipArchive::new(reader)?;
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i)?;
-        let entry_path = match entry.enclosed_name() {
-            Some(p) => p.to_path_buf(),
-            None => continue, // zip-slip / absolute path; skip.
-        };
+        let entry_path = entry
+            .enclosed_name()
+            .ok_or_else(|| anyhow::anyhow!("unsafe zip entry path: {}", entry.name()))?
+            .to_path_buf();
+        if entry
+            .unix_mode()
+            .is_some_and(|mode| mode & 0o170000 == 0o120000)
+        {
+            anyhow::bail!(
+                "symbolic-link zip entries are not allowed: {}",
+                entry.name()
+            );
+        }
         let dest = target_dir.join(&entry_path);
         if entry.is_dir() {
             std::fs::create_dir_all(&dest)?;
@@ -871,6 +908,26 @@ mod tests {
     }
 
     #[test]
+    fn atomic_directory_replace_preserves_existing_install_on_population_failure() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("demo");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("old.txt"), "old").unwrap();
+
+        let result = replace_directory_atomically(&target, |staging| {
+            std::fs::write(staging.join("partial.txt"), "partial")?;
+            anyhow::bail!("rejected archive")
+        });
+
+        assert!(result.is_err());
+        assert_eq!(
+            std::fs::read_to_string(target.join("old.txt")).unwrap(),
+            "old"
+        );
+        assert!(!target.join("partial.txt").exists());
+    }
+
+    #[test]
     fn read_manifest_from_bytes_round_trips_a_plain_plugin_json() {
         let bytes = br#"{"id":"loose","name":"Loose","version":"0.2.0","type":"frontend"}"#;
         let (m, id) = read_manifest_from_bytes(bytes).unwrap();
@@ -924,7 +981,7 @@ mod tests {
     }
 
     #[test]
-    fn extract_zip_into_skips_path_traversal_entries() {
+    fn extract_zip_into_rejects_path_traversal_entries() {
         // Build a zip whose entry name is "../../etc/passwd" — enclosed_name
         // returns None for these, so extract_zip_into should silently skip.
         let mut buf = Vec::new();
@@ -939,9 +996,8 @@ mod tests {
             w.finish().unwrap();
         }
         let tmp = tempfile::tempdir().unwrap();
-        extract_zip_into(&buf, tmp.path()).unwrap();
-        // legit.txt should be there; ../escape.txt should NOT have escaped.
-        assert!(tmp.path().join("legit.txt").exists());
+        let error = extract_zip_into(&buf, tmp.path()).unwrap_err();
+        assert!(error.to_string().contains("unsafe zip entry path"));
         // ../escape.txt would have ended up at the parent of tmp.path() —
         // confirm it didn't.
         let parent_escape = tmp.path().parent().unwrap().join("escape.txt");
@@ -950,6 +1006,27 @@ mod tests {
             "zip-slip should be blocked but {} exists",
             parent_escape.display()
         );
+    }
+
+    #[test]
+    fn extract_zip_into_rejects_symlink_entries() {
+        let mut buf = Vec::new();
+        {
+            let cursor = std::io::Cursor::new(&mut buf);
+            let mut writer = zip::ZipWriter::new(cursor);
+            writer
+                .add_symlink(
+                    "link.js",
+                    "../../outside.js",
+                    zip::write::SimpleFileOptions::default(),
+                )
+                .unwrap();
+            writer.finish().unwrap();
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let error = extract_zip_into(&buf, tmp.path()).unwrap_err();
+        assert!(error.to_string().contains("symbolic-link"));
+        assert!(!tmp.path().join("link.js").exists());
     }
 
     #[test]

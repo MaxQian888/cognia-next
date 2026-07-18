@@ -3,8 +3,24 @@ import {
   getPluginCapabilityContract,
   validatePluginCapabilities,
 } from "./plugin-capabilities"
+import { AUTHOR_CAPABILITY_CONTRACTS } from "@/packages/plugin-sdk/src/contracts/catalog"
 
 describe("plugin capability contracts", () => {
+  it("keeps host proof metadata aligned with the public author catalog", () => {
+    expect(
+      PLUGIN_CAPABILITY_CONTRACTS.map(({ id, support, manifestFields }) => ({
+        id,
+        support,
+        manifestFields: [...manifestFields],
+      }))
+    ).toEqual(
+      AUTHOR_CAPABILITY_CONTRACTS.map(({ id, support, manifestFields }) => ({
+        id,
+        support,
+        manifestFields: [...manifestFields],
+      }))
+    )
+  })
   const fieldDrivenModuleBridgeContracts = [
     ["workspace-backend", "workspaceBackends"],
     ["message-renderer", "messageRenderers"],

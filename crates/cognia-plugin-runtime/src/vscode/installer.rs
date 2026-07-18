@@ -192,6 +192,16 @@ fn unpack_extension<R: Read + std::io::Seek>(
             .by_index(i)
             .map_err(|e| InstallError::InvalidZip(format!("entry {i}: {e}")))?;
 
+        if entry
+            .unix_mode()
+            .is_some_and(|mode| mode & 0o170000 == 0o120000)
+        {
+            return Err(InstallError::UnsafeEntryPath(format!(
+                "{} (symbolic link)",
+                entry.name()
+            )));
+        }
+
         // `enclosed_name()`, not `name()`, is what rejects absolute paths and
         // `..`. The previous `rel.contains("..")` check missed
         // `extension//etc/passwd` — `rel` became `/etc/passwd`, and
@@ -290,6 +300,28 @@ mod tests {
     fn rejects_non_zip_payload() {
         let result = install_vsix(b"not a zip", &PathBuf::from("/tmp/x"));
         assert!(matches!(result, Err(InstallError::InvalidZip(_))));
+    }
+
+    #[test]
+    fn rejects_symlink_entries() {
+        let mut bytes = Vec::new();
+        {
+            let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut bytes));
+            let regular = FileOptions::<()>::default();
+            zip.start_file("extension/package.json", regular).unwrap();
+            zip.write_all(br#"{ "publisher": "cognia", "name": "hello", "version": "1.0.0" }"#)
+                .unwrap();
+            zip.add_symlink(
+                "extension/out/extension.js",
+                "../../outside.js",
+                FileOptions::<()>::default(),
+            )
+            .unwrap();
+            zip.finish().unwrap();
+        }
+        let root = tempfile::tempdir().unwrap();
+        let error = install_vsix(&bytes, &root.path().to_path_buf()).unwrap_err();
+        assert!(matches!(error, InstallError::UnsafeEntryPath(_)));
     }
 
     #[test]

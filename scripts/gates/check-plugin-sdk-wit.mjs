@@ -19,7 +19,10 @@ import { fileURLToPath } from "node:url"
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(__dirname, "../..")
 const source = resolve(repoRoot, "src-tauri/wit/cognia-plugin.wit")
-const mirror = resolve(repoRoot, "plugin-sdk/wit/cognia-plugin.wit")
+const mirrors = [
+  resolve(repoRoot, "plugin-sdk/wit/cognia-plugin.wit"),
+  resolve(repoRoot, "packages/plugin-sdk/wit/cognia-plugin.wit"),
+]
 
 async function readOrFail(path, label) {
   try {
@@ -45,33 +48,31 @@ function unifiedDiff(aLabel, aText, bLabel, bText) {
 }
 
 async function main() {
-  const [sourceContent, mirrorContent] = await Promise.all([
-    readOrFail(source, "canonical WIT source"),
-    readOrFail(mirror, "plugin-sdk WIT mirror"),
-  ])
-
-  if (sourceContent === mirrorContent) {
-    console.log(`[check-plugin-sdk-wit] ok: ${relative(repoRoot, mirror)} matches canonical source`)
-    return
-  }
-
-  console.error(
-    `[check-plugin-sdk-wit] DRIFT detected between canonical source and plugin-sdk mirror.`
-  )
-  console.error(`  source: ${source}`)
-  console.error(`  mirror: ${mirror}`)
-  console.error(``)
-  console.error(
-    unifiedDiff(
-      relative(repoRoot, source),
-      sourceContent,
-      relative(repoRoot, mirror),
-      mirrorContent
+  const sourceContent = await readOrFail(source, "canonical WIT source")
+  let drifted = false
+  for (const mirror of mirrors) {
+    const mirrorContent = await readOrFail(mirror, "plugin-sdk WIT mirror")
+    if (sourceContent === mirrorContent) {
+      console.log(
+        `[check-plugin-sdk-wit] ok: ${relative(repoRoot, mirror)} matches canonical source`
+      )
+      continue
+    }
+    drifted = true
+    console.error(`[check-plugin-sdk-wit] DRIFT detected: ${relative(repoRoot, mirror)}`)
+    console.error(
+      unifiedDiff(
+        relative(repoRoot, source),
+        sourceContent,
+        relative(repoRoot, mirror),
+        mirrorContent
+      )
     )
-  )
-  console.error(``)
-  console.error(`Run \`pnpm sync:plugin-sdk-wit\` to update the mirror.`)
-  process.exit(1)
+  }
+  if (drifted) {
+    console.error(`Run \`pnpm sync:plugin-sdk-wit\` to update the mirrors.`)
+    process.exit(1)
+  }
 }
 
 main().catch((err) => {

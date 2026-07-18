@@ -15,7 +15,7 @@ import {
   type HighlightHtml,
 } from "@/lib/shiki/highlight-cache"
 
-interface CodeBlockProps {
+export interface CodeBlockProps {
   code: string
   language?: string
   className?: string
