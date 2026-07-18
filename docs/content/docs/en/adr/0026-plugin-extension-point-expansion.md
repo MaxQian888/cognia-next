@@ -140,3 +140,13 @@ These plugins keep working via legacy shims today but should migrate in follow-u
 - Plugin marketplace install-from-URL.
 - Lifting the workspace-backend registry out of `lib/github/` into a `lib/workspace/` namespace.
 - Reviving `sidebar.right.*` / `panel.header` / `panel.footer` (no host surfaces exist).
+
+## 2026-07 amendment — Context Workbench
+
+[ADR-0083](./0083-context-workbench) creates the shared right-side host that did not exist when this ADR was accepted. It therefore supersedes the two slot decisions above:
+
+- `sidebar.right.top`, `sidebar.right.bottom`, `panel.header`, and `panel.footer` are implemented in `ContextWorkbench` and receive sanitized resource context.
+- `manifest.contextPanels` adds lazy `{ id, entry, export }` trusted React contributions with resource kinds, canonical activity, plugin-local `labelKey` plus required `label` fallback, safe icon, capabilities, preferred mode, and retention.
+- `ctx.contextPanels` exposes `register`, controlled `reveal`, sanitized `getActiveContext`, and `onDidChangeActiveContext`.
+- Panels require `extension:ui` and the corresponding resource read permission. Permission changes immediately re-resolve availability; disable and uninstall remove contributions.
+- Sandboxed Webview panels remain out of scope.

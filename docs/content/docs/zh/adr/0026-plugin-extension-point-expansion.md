@@ -136,3 +136,13 @@ AI-provider 桥负责把新 `PluginLlmProvider` / `PluginEmbeddingProvider` 形�
 - 插件市场 install-from-URL。
 - 把 workspace-backend registry 从 `lib/github/` 移出到 `lib/workspace/`。
 - 复活 `sidebar.right.*` / `panel.header` / `panel.footer`。
+
+## 2026-07 修订 — Context Workbench
+
+[ADR-0083](./0083-context-workbench) 建立了本 ADR 通过时尚不存在的共享右侧宿主，因此取代上面两处槽位结论：
+
+- `sidebar.right.top`、`sidebar.right.bottom`、`panel.header`、`panel.footer` 已在 `ContextWorkbench` 实装，并接收清洗后的资源上下文。
+- `manifest.contextPanels` 以懒加载 `{ id, entry, export }` 方式贡献可信 React 面板，包括资源类型、canonical activity、插件本地 `labelKey` 与必填 `label` fallback、安全 icon、capabilities、preferred mode 和 retention。
+- `ctx.contextPanels` 提供 `register`、受控 `reveal`、清洗后的 `getActiveContext` 与 `onDidChangeActiveContext`。
+- 面板要求 `extension:ui` 与对应资源 read 权限。权限变化会立即重算可用性，disable/uninstall 会清理贡献。
+- Sandboxed Webview 面板仍不在范围内。

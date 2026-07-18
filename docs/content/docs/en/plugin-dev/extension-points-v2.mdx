@@ -246,6 +246,65 @@ Two previously deprecated slots are revived in v2:
   separate from the `chat.message.footer` host actions row.
 - **`settings.ai`** — top of `api-key-section`, the canonical home for
   unified AI-settings plugin cards.
+- **`sidebar.right.top` / `sidebar.right.bottom`** — above and below the
+  resource panel inside the shared Context Workbench.
+- **`panel.header` / `panel.footer`** — immediately around the active
+  Context Workbench panel.
+
+## Resource panels in the Context Workbench
+
+Trusted frontend plugins can contribute panels declaratively:
+
+```jsonc
+{
+  "permissions": ["extension:ui", "canvas:read", "project:read"],
+  "contextPanels": [
+    {
+      "id": "insights",
+      "entry": "context/insights.js",
+      "export": "InsightsPanel",
+      "resourceKinds": ["canvas-document", "project-file"],
+      "activity": "inspect",
+      "labelKey": "context.insights",
+      "label": "Insights",
+      "icon": "search-code",
+      "requiredCapabilities": ["inspect"],
+      "preferredMode": "wide",
+      "retention": "stateful"
+    }
+  ]
+}
+```
+
+`activity` must be one of `ai`, `comments`, `inspect`, `review`,
+`preview-run`, or `templates`. The label is resolved through the plugin's
+existing i18n bundle; `label` is the deterministic fallback. Unsupported
+icons fall back to the host panel icon.
+
+The imperative API uses the same namespaced registry:
+
+```ts
+const dispose = ctx.contextPanels.register({
+  id: "live-insights",
+  activity: "inspect",
+  labelKey: "context.liveInsights",
+  label: "Live insights",
+  resourceKinds: ["canvas-document"],
+  renderer: LiveInsightsPanel,
+})
+
+ctx.contextPanels.reveal("live-insights")
+const context = ctx.contextPanels.getActiveContext()
+const unsubscribe = ctx.contextPanels.onDidChangeActiveContext((next) => {
+  // Identity, revision, selection, and capabilities only; never resource content.
+})
+```
+
+`reveal()` can target only the calling plugin's applicable panels. It
+respects user pinning, so a request can become pending instead of replacing
+the selected panel. Every panel requires `extension:ui` plus each declared
+resource permission: `project:read`, `canvas:read`, `artifact:read`, or
+`workflow:read`. Sandboxed Webview renderers are not supported.
 
 ## Status & reference plugins
 

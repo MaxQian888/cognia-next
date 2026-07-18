@@ -213,6 +213,61 @@ v2 复活两个之前 deprecated 的槽位：
 
 - **`chat.message.actions`** — 每条消息上方的 hover action bar，与 `chat.message.footer`（host copy/regenerate）区分。
 - **`settings.ai`** — `api-key-section` 顶部，统一 AI 设置卡片的标准 host。
+- **`sidebar.right.top` / `sidebar.right.bottom`** — 共享 Context Workbench 内资源面板的上方与下方。
+- **`panel.header` / `panel.footer`** — 活动 Context Workbench 面板的紧邻头部与尾部。
+
+## Context Workbench 资源面板
+
+可信前端插件可以声明式贡献面板：
+
+```jsonc
+{
+  "permissions": ["extension:ui", "canvas:read", "project:read"],
+  "contextPanels": [
+    {
+      "id": "insights",
+      "entry": "context/insights.js",
+      "export": "InsightsPanel",
+      "resourceKinds": ["canvas-document", "project-file"],
+      "activity": "inspect",
+      "labelKey": "context.insights",
+      "label": "洞察",
+      "icon": "search-code",
+      "requiredCapabilities": ["inspect"],
+      "preferredMode": "wide",
+      "retention": "stateful"
+    }
+  ]
+}
+```
+
+`activity` 只能是 `ai`、`comments`、`inspect`、`review`、`preview-run` 或
+`templates`。Host 通过插件现有 i18n bundle 解析标签，`label` 是确定性的
+fallback；不支持的 icon 回退为宿主面板 icon。
+
+命令式 API 与声明式贡献共用同一个命名空间 registry：
+
+```ts
+const dispose = ctx.contextPanels.register({
+  id: "live-insights",
+  activity: "inspect",
+  labelKey: "context.liveInsights",
+  label: "实时洞察",
+  resourceKinds: ["canvas-document"],
+  renderer: LiveInsightsPanel,
+})
+
+ctx.contextPanels.reveal("live-insights")
+const context = ctx.contextPanels.getActiveContext()
+const unsubscribe = ctx.contextPanels.onDidChangeActiveContext((next) => {
+  // 只有身份、revision、selection、capabilities；绝不包含资源内容。
+})
+```
+
+`reveal()` 只能打开调用插件自己的适用面板，并遵守用户 pin，因此请求可能进入
+pending 而不替换当前面板。每个面板需要 `extension:ui`，以及声明资源对应的
+`project:read`、`canvas:read`、`artifact:read` 或 `workflow:read`。不支持 sandboxed
+Webview renderer。
 
 ## 状态与参考插件
 

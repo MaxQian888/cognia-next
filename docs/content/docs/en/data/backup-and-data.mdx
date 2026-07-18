@@ -25,6 +25,10 @@ Cognia ships a complete backup / restore / transfer system under `lib/data/`. Th
 
 The full design rationale is in [ADR-0001](../adr/0001-backup-schema-v3).
 
+<Callout type="info" title="Comment compatibility">
+The external v3 payload keeps the `canvasComments` field for file compatibility. Runtime storage uses `contextComments` as the single writable source for Canvas, project, artifact, and workflow comments. Export projects Canvas rows into the legacy field; import maps them idempotently back into `contextComments`.
+</Callout>
+
 ## Where it lives
 
 ```

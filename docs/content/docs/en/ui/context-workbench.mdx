@@ -1,0 +1,39 @@
+---
+title: Context Workbench
+description: Shared right-side workspace for project files, Canvas documents, artifacts, workflows, comments, sessions, and plugin panels.
+---
+
+# Context Workbench
+
+The Context Workbench is the common right-side workspace for resource-specific tools. It consolidates navigation and layout; it does **not** replace the specialized capabilities owned by Project, Canvas, Artifact, or Workflow.
+
+## Surface parity
+
+| Resource | Native panels kept in the Workbench |
+| --- | --- |
+| Project file | resource chat, comments, metadata/session controls, outline, diagnostics, Git review, proposal review, preview |
+| Canvas document | AI actions/chat, suggestions, comments, collaboration, properties/formatting, outline, history, proposal review, preview/export, execution |
+| Artifact | resource chat, comments, proposal review, preview, history, metadata, filesystem workspace, selection-to-AI |
+| Workflow | specialized chat, comments, inspector, problems, runs, templates, settings, changelog |
+
+Each host computes capabilities from the current resource and platform. A native panel may remain visible with an explanation when its backend is unavailable. A plugin panel is omitted when its declared capabilities or permissions are not satisfied.
+
+## Navigation and layout
+
+- Activity buttons group related panels. Arrow keys, Home, and End move through both activities and grouped tabs with standard tab/tabpanel semantics.
+- `narrow` uses the host's normal 360px width. `wide` uses about half of the host, clamped to 640–960px. `focus` is an accessible full-screen presentation that restores focus on Escape.
+- Mobile renders a full-width Sheet and intentionally omits desktop-only width and focus controls.
+- Pinning protects the selected panel from automatic reveals. Diagnostics, proposals, selection changes, and plugin requests update pending indicators until the user navigates explicitly or unpins.
+
+## Comments and resource sessions
+
+All four resources use the shared comment model. Comments can target the whole resource, a text/line range, or Workflow nodes/edges. Threads retain edit/delete, replies, reactions, resolve/reopen, unresolved badges, revision metadata, and stale-anchor indication.
+
+Each resource also owns one durable embedded AI session. Existing provider-bound context assembly, PII redaction, proposal-first editing, and review bridges remain in the specialized panel implementations.
+
+## Rollback switches
+
+The four host switches—`canvas`, `project`, `artifact`, and `workflow`—default on independently. Turning one off restores that surface's complete legacy sidebar without changing the other three. Legacy hosts remain for one minor release.
+
+See [ADR-0083](../adr/0083-context-workbench) for lifecycle, persistence, comments, and plugin decisions.
+

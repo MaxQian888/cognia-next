@@ -1,6 +1,7 @@
 {
   "title": "UI 与平台",
   "pages": [
+    "context-workbench",
     "chat-ui-architecture",
     "settings-ui",
     "shadcn-ui-setup",

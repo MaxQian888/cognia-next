@@ -8,6 +8,10 @@ Cognia 在 `lib/data/` 下提供完整的备份 / 还原 / 传输系统。当前
 
 完整设计原由参见 [ADR-0001](../adr/0001-backup-schema-v3)。
 
+<Callout type="info" title="评论兼容">
+外部 v3 payload 为保持文件兼容继续使用 `canvasComments` 字段；运行时以 `contextComments` 作为 Canvas、Project、Artifact、Workflow 评论的唯一可写来源。导出时把 Canvas 行投影到旧字段，导入时再幂等映射回 `contextComments`。
+</Callout>
+
 ## 代码位置
 
 ```text title="lib/data/"

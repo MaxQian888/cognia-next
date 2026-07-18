@@ -5,7 +5,7 @@ description: 完整 IndexedDB schema、按版本演进、表索引清单与新�
 
 # 存储（Dexie schema）
 
-Cognia 几乎所有浏览器侧状态都通过 **Dexie 存在 IndexedDB**。Schema 定义在 `lib/db/schema.ts`，当前版本 **v54**。Schema 版本只增不改 —— 永远不要修改既有的 `.version(n).stores({...})` 块。
+Cognia 几乎所有浏览器侧状态都通过 **Dexie 存在 IndexedDB**。Schema 定义在 `lib/db/schema.ts`，当前版本 **v115**。Schema 版本只增不改 —— 永远不要修改既有的 `.version(n).stores({...})` 块。
 
 ## 数据库标识
 
@@ -48,7 +48,7 @@ Dexie 数据库名是 `cognia-claude`（保留原始代号，避免对已有用�
 | ----------------- | -------------------------------------------------------------- |
 | `canvasDocuments` | `id, title, language, type, updatedAt, createdAt`              |
 | `canvasVersions`  | `id, documentId, [documentId+createdAt], isAutoSave`           |
-| `canvasComments`  | `id, documentId, [documentId+createdAt], parentId, resolvedAt` |
+| `canvasComments`  | `id, documentId, [documentId+createdAt], parentId, resolvedAt`（旧 Canvas 兼容投影） |
 | `canvasSessions`  | `id, documentId, ownerId, createdAt`                           |
 
 详见 [Canvas 页](../subsystems/canvas)。
@@ -215,7 +215,12 @@ timeline
 | **v24** | 每消息用量 + 成本     | + `sessionUsage`（由 SDK adapter 在每次 `result` 事件写入）。                                                                                                         |
 | **v25** | 移动出站队列          | + `mobileOutboundQueue`（手机端写操作离线队列，最多重试 5 次）。                                                                                                      |
 | **v26** | 聊天草稿              | + `chatDrafts`（每会话未发送的 Composer 内容）。                                                                                                                      |
-| **v27 – v54** | 后续追加              | OCR 结果、Goal 跟踪、Agent Team 持久化、角色 pack overlay、GitHub Delivery 状态、external agent 配置、移动同步游标、性能采样、终端会话、WeChat/WeCom 适配、公共分享链等。具体差异以 `lib/db/schema.ts` 为准。 |
+| **v27 – v112** | 后续追加              | OCR 结果、Goal 跟踪、Agent Team 持久化、角色 pack overlay、GitHub Delivery 状态、external agent 配置、移动同步游标、性能采样、终端会话、WeChat/WeCom 适配、公共分享链等。具体差异以 `lib/db/schema.ts` 为准。 |
+| **v115** | 资源评论 | 新增 `contextComments` 作为跨资源评论的唯一可写表，并幂等回填 Canvas 评论。所有历史版本块保持不变。 |
+
+### 资源评论（v115）
+
+`contextComments` 按资源类型/id、父评论、解决状态、创建时间和 project scope 建索引，保存资源级、文本/行区间、Workflow 节点/边锚点，以及 revision 与 stale-anchor 元数据。Canvas store、插件 API、旧 Canvas UI 与备份/导入兼容均通过 adapter 访问该表，因此只有一个可写事实来源。
 
 <Callout type="info" title="幂等升级">
   每个版本都幂等 —— 打开旧库会自动按顺序升级到最新版本。Dexie 按顺序应用。 **永远不要修改之前的
