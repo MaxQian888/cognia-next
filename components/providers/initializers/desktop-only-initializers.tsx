@@ -48,14 +48,11 @@ function useIsClient(): boolean {
  * `null`), so the shared static-export bundle hydrates without divergence
  * whether it boots in the browser, Tauri, or the Capacitor WebView.
  */
-const WindowShowInitializer = dynamic(
-  () => import("./window-show-initializer").then((m) => m.WindowShowInitializer),
-  { ssr: false }
-)
-const WebviewHeartbeatInitializer = dynamic(
-  () => import("./webview-heartbeat-initializer").then((m) => m.WebviewHeartbeatInitializer),
-  { ssr: false }
-)
+// NOTE: WindowShowInitializer + WebviewHeartbeatInitializer used to live here,
+// but this whole bundle mounts *below* AccountGate — so on a locked/first-run
+// cold boot (the common case) they never ran and the hidden window stayed black
+// until the Rust 8s force-show fallback. They now mount in
+// `WindowLivenessInitializers`, above the account gate. See that component.
 const CodexUsageSchedulerInitializer = dynamic(
   () => import("./codex-usage-scheduler-initializer").then((m) => m.CodexUsageSchedulerInitializer),
   { ssr: false }
@@ -117,8 +114,7 @@ const CrashReportDialog = dynamic(
   { ssr: false }
 )
 const CodeAdoptionTrackerInitializer = dynamic(
-  () =>
-    import("./code-adoption-tracker-initializer").then((m) => m.CodeAdoptionTrackerInitializer),
+  () => import("./code-adoption-tracker-initializer").then((m) => m.CodeAdoptionTrackerInitializer),
   { ssr: false }
 )
 
@@ -139,8 +135,6 @@ export function DesktopOnlyInitializers() {
 
   return (
     <>
-      <WindowShowInitializer />
-      <WebviewHeartbeatInitializer />
       <CodexUsageSchedulerInitializer />
       <CliSyncInitializer />
       <ComputerUseKillSwitchInitializer />

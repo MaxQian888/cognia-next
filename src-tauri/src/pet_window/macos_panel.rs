@@ -61,6 +61,16 @@ impl PetPanelRole {
             PetPanelRole::Island => 25,
         }
     }
+
+    /// A desktop companion stays visible while another application is active.
+    pub(crate) fn hides_on_deactivate(self) -> bool {
+        false
+    }
+
+    /// Keep the overlay operable while Cognia itself owns a modal sheet.
+    pub(crate) fn works_when_modal(self) -> bool {
+        true
+    }
 }
 
 /// NSWindow level a desktop pet floats at (`NSFloatingWindowLevel` == 3).
@@ -71,10 +81,10 @@ pub(crate) fn pet_panel_floating_level() -> i64 {
 }
 
 /// The collection-behavior bitmask a desktop pet needs, for documentation +
-/// pinning: `CanJoinAllSpaces(1) | Stationary(16) | FullScreenAuxiliary(256)`.
-/// The macOS path constructs the equivalent via `tauri-nspanel`'s builder.
+/// pinning: `CanJoinAllSpaces(1) | Stationary(16) | IgnoresCycle(64) |
+/// FullScreenAuxiliary(256) | CanJoinAllApplications(262144)`.
 pub(crate) fn pet_collection_behavior_bits() -> u64 {
-    (1 << 0) | (1 << 4) | (1 << 8)
+    (1 << 0) | (1 << 4) | (1 << 6) | (1 << 8) | (1 << 18)
 }
 
 #[cfg(target_os = "macos")]
@@ -86,7 +96,10 @@ tauri_panel! {
     panel!(PetSpritePanel {
         config: {
             can_become_key_window: false,
-            is_floating_panel: true
+            can_become_main_window: false,
+            is_floating_panel: true,
+            hides_on_deactivate: false,
+            works_when_modal: true
         }
     })
     // Popup: may become key so the talk composer accepts typing, but the
@@ -94,7 +107,10 @@ tauri_panel! {
     panel!(PetPopupPanel {
         config: {
             can_become_key_window: true,
-            is_floating_panel: true
+            can_become_main_window: false,
+            is_floating_panel: true,
+            hides_on_deactivate: false,
+            works_when_modal: true
         }
     })
 }
@@ -106,24 +122,25 @@ pub(crate) fn apply_pet_panel_behavior<R: Runtime>(
     window: &WebviewWindow<R>,
     role: PetPanelRole,
 ) -> Result<(), String> {
+    use objc2_app_kit::NSWindowCollectionBehavior;
     use tauri_nspanel::{CollectionBehavior, StyleMask, WebviewWindowExt};
 
-    let behavior = CollectionBehavior::new()
-        .can_join_all_spaces()
-        .stationary()
-        .full_screen_auxiliary();
+    let behavior = CollectionBehavior::from_raw(
+        NSWindowCollectionBehavior::CanJoinAllSpaces
+            | NSWindowCollectionBehavior::Stationary
+            | NSWindowCollectionBehavior::IgnoresCycle
+            | NSWindowCollectionBehavior::FullScreenAuxiliary
+            | NSWindowCollectionBehavior::CanJoinAllApplications,
+    );
     // Borderless (empty) + non-activating so showing/keying never activates the app.
     let style = StyleMask::empty().nonactivating_panel();
 
-    match role {
+    let panel = match role {
         PetPanelRole::Sprite => {
             debug_assert!(!role.can_become_key());
-            let panel = window
+            window
                 .to_panel::<PetSpritePanel<R>>()
-                .map_err(|e| format!("pet sprite to_panel failed: {e:?}"))?;
-            panel.set_level(role.window_level());
-            panel.set_collection_behavior(behavior.into());
-            panel.set_style_mask(style.into());
+                .map_err(|e| format!("pet sprite to_panel failed: {e:?}"))?
         }
         // The island shares the popup's panel class (key-capable,
         // non-activating); only its window level differs.
@@ -132,14 +149,59 @@ pub(crate) fn apply_pet_panel_behavior<R: Runtime>(
             let panel = window
                 .to_panel::<PetPopupPanel<R>>()
                 .map_err(|e| format!("overlay panel to_panel failed: {e:?}"))?;
-            panel.set_level(role.window_level());
-            panel.set_collection_behavior(behavior.into());
             // Buttons don't pull key; only the <input> does — non-activating throughout.
             panel.set_becomes_key_only_if_needed(true);
-            panel.set_style_mask(style.into());
+            panel
         }
-    }
+    };
+    panel.set_level(role.window_level());
+    panel.set_collection_behavior(behavior.into());
+    panel.set_style_mask(style.into());
+    panel.set_floating_panel(true);
+    panel.set_hides_on_deactivate(role.hides_on_deactivate());
+    panel.set_works_when_modal(role.works_when_modal());
+    panel.set_released_when_closed(false);
+    panel.set_has_shadow(false);
+    panel.set_transparent(true);
+    panel.set_opaque(false);
     Ok(())
+}
+
+/// Reveal through `NSPanel::orderFrontRegardless` so another active app never
+/// suppresses the pet. If initial conversion is still queued or failed, retry
+/// conversion and reveal together on the main thread.
+#[cfg(target_os = "macos")]
+pub(crate) fn reveal_pet_panel<R: Runtime>(
+    window: &WebviewWindow<R>,
+    role: PetPanelRole,
+    focus: bool,
+) -> Result<(), String> {
+    use tauri_nspanel::ManagerExt;
+
+    let app = window.app_handle().clone();
+    let win = window.clone();
+    window
+        .run_on_main_thread(move || {
+            let panel = app.get_webview_panel(win.label()).ok().or_else(|| {
+                if let Err(error) = apply_pet_panel_behavior(&win, role) {
+                    log::error!("pet: native panel conversion retry failed: {error}");
+                    return None;
+                }
+                app.get_webview_panel(win.label()).ok()
+            });
+            match panel {
+                Some(panel) if focus => panel.show_and_make_key(),
+                Some(panel) => panel.show(),
+                None => {
+                    log::error!("pet: native panel reveal failed after conversion retry");
+                    let _ = win.show();
+                    if focus {
+                        let _ = win.set_focus();
+                    }
+                }
+            }
+        })
+        .map_err(|e| e.to_string())
 }
 
 /// Off macOS the builder flags already give the desired behavior — no-op.
@@ -149,6 +211,19 @@ pub(crate) fn apply_pet_panel_behavior<R: Runtime>(
     role: PetPanelRole,
 ) -> Result<(), String> {
     let _ = role.can_become_key();
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn reveal_pet_panel<R: Runtime>(
+    window: &WebviewWindow<R>,
+    _role: PetPanelRole,
+    focus: bool,
+) -> Result<(), String> {
+    window.show().map_err(|e| e.to_string())?;
+    if focus {
+        window.set_focus().map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -172,8 +247,9 @@ mod tests {
 
     #[test]
     fn collection_behavior_is_all_spaces_stationary_fullscreen_aux() {
-        // CanJoinAllSpaces(1) | Stationary(16) | FullScreenAuxiliary(256) == 273.
-        assert_eq!(pet_collection_behavior_bits(), 273);
+        // CanJoinAllSpaces(1) | Stationary(16) | IgnoresCycle(64) |
+        // FullScreenAuxiliary(256) | CanJoinAllApplications(262144) == 262481.
+        assert_eq!(pet_collection_behavior_bits(), 262_481);
     }
 
     #[test]
@@ -181,5 +257,17 @@ mod tests {
         assert!(!PetPanelRole::Sprite.can_become_key());
         assert!(PetPanelRole::Popup.can_become_key());
         assert!(PetPanelRole::Island.can_become_key());
+    }
+
+    #[test]
+    fn overlay_roles_stay_visible_and_operable_when_the_app_deactivates() {
+        for role in [
+            PetPanelRole::Sprite,
+            PetPanelRole::Popup,
+            PetPanelRole::Island,
+        ] {
+            assert!(!role.hides_on_deactivate());
+            assert!(role.works_when_modal());
+        }
     }
 }

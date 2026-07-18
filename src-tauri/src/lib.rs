@@ -569,6 +569,7 @@ pub fn run() {
             webview_watchdog::webview_heartbeat,
             webview_watchdog::webview_take_recovery_notice,
             pet_window::open_pet_window,
+            pet_window::reveal_pet_window,
             pet_window::close_pet_window,
             pet_window::destroy_pet_window,
             pet_window::pet_window_set_ignore_cursor_events,
@@ -1699,7 +1700,10 @@ mod command_registration_tests {
         let grant = include_str!("../permissions/all-app-commands.toml");
 
         let marker = ["generate_handler!", "["].concat();
-        let start = source.find(&marker).expect("generate_handler! block present") + marker.len();
+        let start = source
+            .find(&marker)
+            .expect("generate_handler! block present")
+            + marker.len();
         let end = source[start..]
             .find(']')
             .expect("generate_handler! block is terminated");
@@ -1712,7 +1716,8 @@ mod command_registration_tests {
             for token in line.split(',') {
                 let name = token.rsplit("::").next().unwrap_or("").trim();
                 let mut chars = name.chars();
-                let head_ok = matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_');
+                let head_ok =
+                    matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_');
                 let tail_ok = chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
                 if head_ok && tail_ok {
                     registered += 1;

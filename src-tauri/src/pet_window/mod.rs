@@ -19,7 +19,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Runtime};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Runtime, WebviewWindow};
 
 mod macos_panel;
 mod popup;
@@ -200,7 +200,8 @@ fn apply_click_through<R: Runtime>(
 
 /// Core "open or re-show" logic shared by the `open_pet_window` command and
 /// the tray native action. Idempotent: if the window already exists it is
-/// shown, focused, and its click-through state re-applied.
+/// ordered in front without activating Cognia, and its click-through state is
+/// re-applied.
 pub(crate) fn open_pet_window_inner<R: Runtime>(
     app: &AppHandle<R>,
     opts: PetWindowOpts,
@@ -225,9 +226,8 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
             }
         }
         PET_OPEN_GENERATION.fetch_add(1, Ordering::SeqCst);
-        window.show().map_err(|e| e.to_string())?;
-        let _ = window.set_focus();
         apply_click_through(&window, opts.click_through)?;
+        macos_panel::reveal_pet_panel(&window, macos_panel::PetPanelRole::Sprite, false)?;
         // The renderer paused its animation loops on `pet://suspend`; wake it.
         let _ = app.emit("pet://resume", serde_json::Value::Null);
         emit_pet_state(app, true, opts.click_through);
@@ -333,8 +333,8 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
     // until I click it" bug. The window is created `visible(false)`; the pet
     // overlay renderer reveals it after its first painted frame (see
     // `PetOverlayView`), exactly like the main window's `WindowShowInitializer`.
-    // The re-show branch above still calls `show()` directly because an existing
-    // window has already painted, so it can never flash.
+    // The re-show branch above reveals through the native panel owner because an
+    // existing window has already painted, so it can never flash.
 
     // Safety net (mirrors the main window's net in `lib.rs`). The frontend
     // reveal (`lib/pet/reveal.ts`) is best-effort and error-swallowing — if it
@@ -344,8 +344,8 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
     // Guarded twice: the generation token cancels the net when a close (or a
     // newer open) intervened during the grace period — `!is_visible` alone
     // can't distinguish "reveal never ran" from "user just hid it" — and the
-    // reveal uses a bare `show()` (never `set_focus`) so a late force-show
-    // can't yank focus from whatever the user is typing in.
+    // reveal uses `orderFrontRegardless` (never `set_focus`) so a late
+    // force-show can't yank focus from whatever the user is typing in.
     {
         let handle = app.clone();
         let generation = PET_OPEN_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
@@ -359,7 +359,11 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
                     log::warn!(
                         "pet window still hidden 8s after open; force-showing (renderer never signaled first paint)"
                     );
-                    let _ = window.show();
+                    let _ = macos_panel::reveal_pet_panel(
+                        &window,
+                        macos_panel::PetPanelRole::Sprite,
+                        false,
+                    );
                 }
             }
         });
@@ -396,10 +400,23 @@ pub(crate) fn is_pet_window_open_inner<R: Runtime>(app: &AppHandle<R>) -> bool {
         .unwrap_or(false)
 }
 
-/// Open the desktop pet window, or show + focus it if it already exists.
+/// Open the desktop pet window, or order it in front if it already exists.
 #[tauri::command]
 pub async fn open_pet_window(app: AppHandle, opts: PetWindowOpts) -> Result<(), String> {
     open_pet_window_inner(&app, opts)
+}
+
+/// Reveal the current pet webview after its first painted frame. The caller's
+/// label is injected by Tauri and restricted to the two pet windows, so the
+/// non-activating NSPanel path cannot be used to raise arbitrary app windows.
+#[tauri::command]
+pub async fn reveal_pet_window(window: WebviewWindow, focus: bool) -> Result<(), String> {
+    let role = match window.label() {
+        "pet" => macos_panel::PetPanelRole::Sprite,
+        popup::PET_POPUP_LABEL => macos_panel::PetPanelRole::Popup,
+        label => return Err(format!("window '{label}' is not a pet overlay")),
+    };
+    macos_panel::reveal_pet_panel(&window, role, focus)
 }
 
 /// Hide the desktop pet window (toggle semantics — reopen is cheap).

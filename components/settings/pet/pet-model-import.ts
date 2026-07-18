@@ -17,8 +17,7 @@ export { deriveModelName }
 
 /** Outcome of an import attempt — `ok` or a typed error code for the UI. */
 export type ImportOutcome =
-  | { ok: true; id: string }
-  | { ok: false; code: Live2dImportError | "downloadFailed" }
+  { ok: true; id: string } | { ok: false; code: Live2dImportError | "downloadFailed" }
 
 /**
  * Build `ModelFileEntry[]` from a `FileList` (or array of `File`). A single

@@ -539,6 +539,7 @@ commands.allow = [
   "remote_control_update_config",
   "resolve_cli_home",
   "resolve_close_request",
+  "reveal_pet_window",
   "run_agent_hook",
   "sandbox_exec",
   "sandbox_health_check",

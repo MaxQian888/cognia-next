@@ -10,6 +10,7 @@
 
 import { isTauri } from "@/lib/platform/detect"
 import { isMacPlatform } from "@/lib/tauri/os"
+import { revealPetWindow } from "@/lib/tauri/pet-window"
 
 export interface PetWindowRevealOptions {
   /**
@@ -43,6 +44,10 @@ export function schedulePetWindowReveal(options: PetWindowRevealOptions = {}): (
   const reveal = () => {
     void (async () => {
       try {
+        if (isMacPlatform()) {
+          await revealPetWindow(Boolean(options.focus))
+          return
+        }
         const [{ getCurrentWindow }, { PhysicalSize }] = await Promise.all([
           import("@tauri-apps/api/window"),
           import("@tauri-apps/api/dpi"),
@@ -51,19 +56,12 @@ export function schedulePetWindowReveal(options: PetWindowRevealOptions = {}): (
         const win = getCurrentWindow()
         await win.show()
         if (options.focus) await win.setFocus()
-        // The Windows transparent-recomposite nudge below toggles `resizable`
-        // and resizes the window. On macOS `setResizable` mutates the NSPanel
-        // style mask and can drop the non-activating bit (re-adding focus theft),
-        // and `macos-private-api` composites transparency without any nudge — so
-        // skip it entirely there (macos_panel.rs owns the macOS window class).
-        if (!isMacPlatform()) {
-          const size = await win.innerSize()
-          if (cancelled) return
-          await win.setResizable(true)
-          await win.setSize(new PhysicalSize(size.width, size.height + 1))
-          await win.setSize(new PhysicalSize(size.width, size.height))
-          await win.setResizable(false)
-        }
+        const size = await win.innerSize()
+        if (cancelled) return
+        await win.setResizable(true)
+        await win.setSize(new PhysicalSize(size.width, size.height + 1))
+        await win.setSize(new PhysicalSize(size.width, size.height))
+        await win.setResizable(false)
       } catch {
         // Best-effort: if the reveal fails the window stays hidden, and
         // re-toggling it reopens via the already-painted re-show path.

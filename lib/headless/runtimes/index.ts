@@ -33,6 +33,8 @@
  *   sync-down into a phone); a brain is the server side.
  * - `storage-persistence` — `navigator.storage.persist()` is a browser API.
  * - `window-title`, `context-keys`, `appearance` — WebView chrome/UI state.
+ * - `window-liveness-initializers` — reveals and heartbeats the Tauri main
+ *   window; a headless/cloud runtime has no native window to manage.
  * - `ocr-runtime` — native OCR is desktop-only hardware (ADR-0059 D4).
  * - `desktop-only-initializers` / `mobile-only-initializers` — shell-specific
  *   by definition; anything inside them that belongs in the brain must be

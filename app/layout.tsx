@@ -43,6 +43,7 @@ import { WindowTitleInitializer } from "@/components/providers/initializers/wind
 import { ContextKeysInitializer } from "@/components/providers/initializers/context-keys-initializer"
 import { AppShortcutDispatcher } from "@/components/providers/app-shortcut-dispatcher"
 import { DeferredBootInitializers } from "@/components/providers/initializers/deferred-boot-initializers"
+import { WindowLivenessInitializers } from "@/components/providers/initializers/window-liveness-initializers"
 import { TwinWorkerInitializer } from "@/components/twin/twin-worker-initializer"
 import { ProjectKnowledgeWorkerInitializer } from "@/components/shell/project-kb-worker-initializer"
 import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler-provider"
@@ -159,6 +160,13 @@ export default async function RootLayout({
           >
             <AccountStoreInitializer />
             <LocaleGate>
+              {/* Reveals the hidden Tauri main window on first paint and starts
+                  the white-screen watchdog heartbeat. Mounted ABOVE AccountGate
+                  so a locked / first-run cold boot (which never renders the
+                  gate's children) still shows the themed lock/create screen
+                  immediately instead of an 8-second black window. Inside
+                  LocaleGate because the heartbeat consumes i18n. */}
+              <WindowLivenessInitializers />
               <AccountGate>
                 <SettingsHydrator />
                 <AccountAutoLock />

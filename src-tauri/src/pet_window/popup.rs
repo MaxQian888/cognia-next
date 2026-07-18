@@ -66,8 +66,11 @@ pub async fn open_pet_popup(app: AppHandle, opts: PetPopupOpts) -> Result<(), St
         window
             .set_position(PhysicalPosition::new(opts.x, opts.y))
             .map_err(|e| e.to_string())?;
-        window.show().map_err(|e| e.to_string())?;
-        let _ = window.set_focus();
+        super::macos_panel::reveal_pet_panel(
+            &window,
+            super::macos_panel::PetPanelRole::Popup,
+            true,
+        )?;
         return Ok(());
     }
 

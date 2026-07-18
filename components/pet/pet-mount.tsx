@@ -17,7 +17,8 @@ import { ensurePetAccountId } from "@/lib/pet/bones/account-id"
 import { ensurePetProfile } from "@/lib/pet/runtime/init-pet"
 import { registerPetInteractionCommands, registerPetWindowCommand } from "@/lib/pet/commands"
 import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
-import { onPetNativeStateChanged } from "@/lib/tauri/pet-window"
+import { overlayWindowSize } from "@/lib/pet/overlay-geometry"
+import { isPetWindowOpen, onPetNativeStateChanged, openPetWindow } from "@/lib/tauri/pet-window"
 import { isTauri } from "@/lib/platform/detect"
 import { usePlatform } from "@/hooks/use-platform"
 import { startMainPetBridge } from "@/lib/pet/events/cross-window-bridge"
@@ -50,6 +51,7 @@ export function PetMount() {
   // Independent of `enabled`: the toggle-window hotkey must summon the pet even
   // when the widget is currently off.
   const isMainDesktopWindow = !secondary && !isMobile && isTauri()
+  const desktopPet = pet.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY
 
   usePetEventBus(widgetEnabled, pet.twinAwareness)
   // User-activity signal (Smart-Moving): feeds the proactive idle trigger and
@@ -92,6 +94,35 @@ export function PetMount() {
     if (!isMainDesktopWindow) return
     return registerPetWindowCommand()
   }, [isMainDesktopWindow])
+
+  // Reconcile persisted intent after a cold start. The native window is
+  // process-local, so `desktopPet.enabled` can survive a restart while no
+  // `pet` webview exists. Probe first so React remounts never duplicate or
+  // unnecessarily raise an already-visible panel.
+  useEffect(() => {
+    if (!isMainDesktopWindow || !widgetEnabled || !desktopPet.enabled) return
+    let cancelled = false
+    void isPetWindowOpen().then((open) => {
+      if (cancelled || open) return
+      void openPetWindow({
+        ...overlayWindowSize(desktopPet.size),
+        x: desktopPet.position?.x,
+        y: desktopPet.position?.y,
+        clickThrough: desktopPet.clickThrough,
+      })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [
+    desktopPet.clickThrough,
+    desktopPet.enabled,
+    desktopPet.position?.x,
+    desktopPet.position?.y,
+    desktopPet.size,
+    isMainDesktopWindow,
+    widgetEnabled,
+  ])
 
   // Keep PetSettings in sync with NATIVE window mutations the renderer didn't
   // initiate (tray toggle, tray click-through recovery): the Rust side

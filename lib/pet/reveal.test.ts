@@ -15,6 +15,11 @@ jest.mock("@/lib/platform/detect", () => ({
 let mockIsMac = false
 jest.mock("@/lib/tauri/os", () => ({ isMacPlatform: () => mockIsMac }))
 
+const revealPetWindowMock = jest.fn().mockResolvedValue(true)
+jest.mock("@/lib/tauri/pet-window", () => ({
+  revealPetWindow: (focus: boolean) => revealPetWindowMock(focus),
+}))
+
 // Tauri window API reached via dynamic import inside the reveal.
 const showMock = jest.fn().mockResolvedValue(undefined)
 const setFocusMock = jest.fn().mockResolvedValue(undefined)
@@ -65,6 +70,7 @@ beforeEach(() => {
   innerSizeMock.mockResolvedValue({ width: 200, height: 240 })
   setSizeMock.mockClear()
   setResizableMock.mockClear()
+  revealPetWindowMock.mockClear()
   rafCallbacks.length = 0
   rafSpy = jest.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
     rafCallbacks.push(cb)
@@ -116,11 +122,25 @@ describe("schedulePetWindowReveal", () => {
     flushRaf()
     await flushAsync()
 
-    // The window still reveals, but the Windows-only recomposite nudge is
-    // skipped so `setResizable` can't drop the non-activating panel bit.
-    expect(showMock).toHaveBeenCalledTimes(1)
+    // Native NSPanel reveal uses `orderFrontRegardless`, so the pet remains
+    // visible without activating Cognia or racing generic NSWindow.show().
+    expect(revealPetWindowMock).toHaveBeenCalledWith(false)
+    expect(showMock).not.toHaveBeenCalled()
     expect(setResizableMock).not.toHaveBeenCalled()
     expect(setSizeMock).not.toHaveBeenCalled()
+  })
+
+  it("asks the native macOS panel to become key only for the popup", async () => {
+    mockIsTauri = true
+    mockIsMac = true
+    schedulePetWindowReveal({ focus: true })
+    flushRaf()
+    flushRaf()
+    await flushAsync()
+
+    expect(revealPetWindowMock).toHaveBeenCalledWith(true)
+    expect(showMock).not.toHaveBeenCalled()
+    expect(setFocusMock).not.toHaveBeenCalled()
   })
 
   it("focuses after showing when focus is requested (popup blur-to-close)", async () => {

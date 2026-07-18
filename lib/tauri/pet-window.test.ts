@@ -31,6 +31,7 @@ import {
   openPetPopup,
   closePetPopup,
   resizePetPopup,
+  revealPetWindow,
   onPetNativeStateChanged,
   onPetSuspend,
   onPetResume,
@@ -143,6 +144,12 @@ describe("lib/tauri/pet-window — happy path command mapping", () => {
     await expect(resizePetPopup(316, 416)).resolves.toBe(true)
     expect(mockInvoke).toHaveBeenCalledWith("pet_popup_resize", { width: 316, height: 416 })
   })
+
+  it("revealPetWindow delegates first-paint reveal to the native window owner", async () => {
+    mockInvoke.mockResolvedValue(undefined)
+    await expect(revealPetWindow(true)).resolves.toBe(true)
+    expect(mockInvoke).toHaveBeenCalledWith("reveal_pet_window", { focus: true })
+  })
 })
 
 describe("lib/tauri/pet-window — off Tauri", () => {
@@ -164,6 +171,7 @@ describe("lib/tauri/pet-window — off Tauri", () => {
     await expect(openPetPopup({ width: 1, height: 1, x: 0, y: 0 })).resolves.toBe(false)
     await expect(closePetPopup()).resolves.toBe(false)
     await expect(resizePetPopup(1, 1)).resolves.toBe(false)
+    await expect(revealPetWindow(false)).resolves.toBe(false)
     expect(mockInvoke).not.toHaveBeenCalled()
   })
 })

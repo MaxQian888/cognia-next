@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react"
+import { render, waitFor } from "@testing-library/react"
 
 const usePetEventBus = jest.fn()
 const ensurePetAccountId = jest.fn().mockResolvedValue("acct-1")
@@ -14,6 +14,8 @@ const registerPetWindowCommand = jest.fn<() => void, []>()
 const registerPetInteractionCommands = jest.fn<() => void, []>()
 const windowCommandDispose = jest.fn()
 const interactionCommandsDispose = jest.fn()
+const openPetWindow = jest.fn().mockResolvedValue(true)
+const isPetWindowOpen = jest.fn().mockResolvedValue(false)
 
 jest.mock("@/hooks/pet/use-pet-event-bus", () => ({
   usePetEventBus: (e: boolean, twinAwareness: unknown) => usePetEventBus(e, twinAwareness),
@@ -39,6 +41,8 @@ jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => usePlatform() }))
 const onPetNativeStateChanged = jest.fn((_handler: unknown) => () => {})
 jest.mock("@/lib/tauri/pet-window", () => ({
   onPetNativeStateChanged: (handler: unknown) => onPetNativeStateChanged(handler),
+  openPetWindow: (opts: unknown) => openPetWindow(opts),
+  isPetWindowOpen: () => isPetWindowOpen(),
 }))
 jest.mock("@/lib/pet/events/cross-window-bridge", () => ({
   startMainPetBridge: (deps: unknown) => startMainPetBridge(deps),
@@ -80,6 +84,9 @@ beforeEach(() => {
   registerPetInteractionCommands.mockReset()
   windowCommandDispose.mockReset()
   interactionCommandsDispose.mockReset()
+  openPetWindow.mockClear()
+  isPetWindowOpen.mockReset()
+  isPetWindowOpen.mockResolvedValue(false)
   registerPetWindowCommand.mockReturnValue(windowCommandDispose)
   registerPetInteractionCommands.mockReturnValue(interactionCommandsDispose)
 })
@@ -188,6 +195,52 @@ describe("PetMount", () => {
     expect(startMainPetBridge).toHaveBeenCalledTimes(1)
     unmount()
     expect(mainBridgeDispose).toHaveBeenCalledTimes(1)
+  })
+
+  it("restores a persisted desktop-pet window when the Tauri main window starts", async () => {
+    settingsValue = {
+      petSettings: {
+        ...ENABLED_SETTINGS.petSettings,
+        desktopPet: {
+          enabled: true,
+          clickThrough: true,
+          size: 160,
+          position: { x: 120, y: 240 },
+        },
+      },
+    }
+    getPetWindowRole.mockReturnValue("main")
+    isTauri.mockReturnValue(true)
+
+    render(<PetMount />)
+
+    await waitFor(() => {
+      expect(isPetWindowOpen).toHaveBeenCalledTimes(1)
+      expect(openPetWindow).toHaveBeenCalledWith({
+        width: 256,
+        height: 320,
+        x: 120,
+        y: 240,
+        clickThrough: true,
+      })
+    })
+  })
+
+  it("does not duplicate an already-visible desktop-pet window", async () => {
+    settingsValue = {
+      petSettings: {
+        ...ENABLED_SETTINGS.petSettings,
+        desktopPet: { enabled: true, clickThrough: false, size: 128, position: null },
+      },
+    }
+    getPetWindowRole.mockReturnValue("main")
+    isTauri.mockReturnValue(true)
+    isPetWindowOpen.mockResolvedValue(true)
+
+    render(<PetMount />)
+
+    await waitFor(() => expect(isPetWindowOpen).toHaveBeenCalledTimes(1))
+    expect(openPetWindow).not.toHaveBeenCalled()
   })
 
   it("routes the popup's open-console request to /pet?tab=…", () => {

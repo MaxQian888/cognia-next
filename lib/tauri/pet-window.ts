@@ -202,6 +202,22 @@ export async function resizePetPopup(width: number, height: number): Promise<boo
   }
 }
 
+/**
+ * Reveal the current pet overlay after its first paint. On macOS Rust orders
+ * the NSPanel front without activating Cognia; callers outside the two pet
+ * windows are rejected by the native command.
+ */
+export async function revealPetWindow(focus = false): Promise<boolean> {
+  if (!isTauri()) return false
+  try {
+    await invoke("reveal_pet_window", { focus })
+    return true
+  } catch (err) {
+    console.warn("revealPetWindow failed", err)
+    return false
+  }
+}
+
 /** Bring the main app window back to the foreground (overlay "show main"). */
 export async function showMainWindow(): Promise<boolean> {
   if (!isTauri()) return false
