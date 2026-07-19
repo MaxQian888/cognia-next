@@ -37,6 +37,14 @@ export function WindowShowInitializer() {
           if (cancelled) return
           const win = getCurrentWindow()
           await win.show()
+          try {
+            const { invoke } = await import("@tauri-apps/api/core")
+            await invoke("webview_acknowledge_boot_reveal")
+          } catch (error) {
+            log.warn("window-show: failed to acknowledge boot reveal", {
+              error: error instanceof Error ? error.message : String(error),
+            })
+          }
           await win.setFocus()
         } catch (error) {
           log.warn("window-show: failed to reveal main window", {

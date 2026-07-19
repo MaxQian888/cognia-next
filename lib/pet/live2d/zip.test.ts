@@ -1,3 +1,5 @@
+/** @jest-environment jsdom */
+
 import JSZip from "jszip"
 
 import { readBlobText } from "./read-blob-text"
@@ -131,3 +133,4 @@ describe("extractModelZip — real jszip", () => {
     expect(settings && (await readBlobText(settings.blob))).toBe('{"Version":3}')
   })
 })
+/** @jest-environment jsdom */

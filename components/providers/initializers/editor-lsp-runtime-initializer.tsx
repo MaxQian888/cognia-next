@@ -15,19 +15,22 @@
  * `isTauri()`; a no-op on web/Capacitor.
  */
 
-import { useEffect, useRef } from "react"
+import { useEffect, useSyncExternalStore } from "react"
 
 import { isTauri } from "@/lib/tauri"
 import { ensureEditorLspRuntime } from "@/lib/lsp/ensure-editor-lsp-runtime"
+import { isRemoteHostActive, subscribeActiveRemoteTransport } from "@/lib/tauri/transport-routing"
 
 export function EditorLspRuntimeInitializer() {
-  const started = useRef(false)
+  const remoteHostActive = useSyncExternalStore(
+    (notify) => subscribeActiveRemoteTransport(() => notify()),
+    isRemoteHostActive,
+    () => false
+  )
   useEffect(() => {
-    if (started.current) return
-    if (!isTauri()) return
-    started.current = true
+    if (!isTauri() && !remoteHostActive) return
     void ensureEditorLspRuntime()
-  }, [])
+  }, [remoteHostActive])
   return null
 }
 

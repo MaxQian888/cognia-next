@@ -189,10 +189,23 @@ describe("startMainPetBridge", () => {
   })
 
   it("returns an inert disposer when BroadcastChannel is unavailable", () => {
-    const store = makeStore()
-    const dispose = startMainPetBridge({ store: store as never })
-    expect(store.hasListener()).toBe(false)
-    expect(() => dispose()).not.toThrow()
+    const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, "BroadcastChannel")
+    Object.defineProperty(globalThis, "BroadcastChannel", {
+      configurable: true,
+      value: undefined,
+    })
+    try {
+      const store = makeStore()
+      const dispose = startMainPetBridge({ store: store as never })
+      expect(store.hasListener()).toBe(false)
+      expect(() => dispose()).not.toThrow()
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(globalThis, "BroadcastChannel", originalDescriptor)
+      } else {
+        delete (globalThis as { BroadcastChannel?: typeof BroadcastChannel }).BroadcastChannel
+      }
+    }
   })
 
   it("constructs a BroadcastChannel from the global when none is injected", () => {

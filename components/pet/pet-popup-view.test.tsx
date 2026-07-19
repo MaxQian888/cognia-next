@@ -90,6 +90,7 @@ const showMainWindow = jest.fn().mockResolvedValue(true)
 jest.mock("@/lib/tauri/pet-window", () => ({
   closePetPopup: () => closePetPopup(),
   closePetWindow: () => closePetWindow(),
+  onPetPopupHidden: jest.fn(() => jest.fn()),
   resizePetPopup: (w: number, h: number) => resizePetPopup(w, h),
   setPetClickThrough: (v: boolean) => setPetClickThrough(v),
   showMainWindow: () => showMainWindow(),

@@ -20,6 +20,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(target_os = "macos")]
 use std::sync::Arc;
+use std::sync::Mutex;
 
 // `Manager` is required in scope on macOS only: the `tauri_panel!`-generated
 // `from_window` calls `window.app_handle()` (a `Manager` method) when it
@@ -51,6 +52,25 @@ static SPRITE_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 static POPUP_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 static ISLAND_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 
+#[derive(Debug)]
+struct PanelLifecycle {
+    destroying: bool,
+    in_flight_builds: u64,
+}
+
+static SPRITE_PANEL_LIFECYCLE: Mutex<PanelLifecycle> = Mutex::new(PanelLifecycle {
+    destroying: false,
+    in_flight_builds: 0,
+});
+static POPUP_PANEL_LIFECYCLE: Mutex<PanelLifecycle> = Mutex::new(PanelLifecycle {
+    destroying: false,
+    in_flight_builds: 0,
+});
+static ISLAND_PANEL_LIFECYCLE: Mutex<PanelLifecycle> = Mutex::new(PanelLifecycle {
+    destroying: false,
+    in_flight_builds: 0,
+});
+
 fn panel_generation(role: PetPanelRole) -> &'static AtomicU64 {
     match role {
         PetPanelRole::Sprite => &SPRITE_PANEL_GENERATION,
@@ -67,6 +87,41 @@ fn panel_open_intent(role: PetPanelRole) -> &'static AtomicBool {
     }
 }
 
+fn panel_lifecycle(role: PetPanelRole) -> &'static Mutex<PanelLifecycle> {
+    match role {
+        PetPanelRole::Sprite => &SPRITE_PANEL_LIFECYCLE,
+        PetPanelRole::Popup => &POPUP_PANEL_LIFECYCLE,
+        PetPanelRole::Island => &ISLAND_PANEL_LIFECYCLE,
+    }
+}
+
+pub(crate) struct PanelBuildGuard {
+    role: PetPanelRole,
+}
+
+impl Drop for PanelBuildGuard {
+    fn drop(&mut self) {
+        let mut lifecycle = panel_lifecycle(self.role)
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        lifecycle.in_flight_builds = lifecycle.in_flight_builds.saturating_sub(1);
+    }
+}
+
+/// Atomically claim a build/re-show lifecycle unless destruction already owns
+/// the label. This closes the gap between a caller checking `destroying` and a
+/// builder becoming visible to Tauri's window manager.
+pub(crate) fn try_begin_panel_build(role: PetPanelRole) -> Option<PanelBuildGuard> {
+    let mut lifecycle = panel_lifecycle(role)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if lifecycle.destroying || lifecycle.in_flight_builds != 0 {
+        return None;
+    }
+    lifecycle.in_flight_builds += 1;
+    Some(PanelBuildGuard { role })
+}
+
 /// Start a new open lifecycle and invalidate work from every older lifecycle.
 pub(crate) fn begin_panel_open(role: PetPanelRole) -> u64 {
     panel_open_intent(role).store(true, Ordering::SeqCst);
@@ -79,12 +134,52 @@ pub(crate) fn cancel_panel_reveal(role: PetPanelRole) -> u64 {
     panel_generation(role).fetch_add(1, Ordering::SeqCst) + 1
 }
 
+/// Mark a label as closing before `WebviewWindow::close` queues its native
+/// close event. New opens must wait until Tauri removes the old label from its
+/// manager; otherwise they can reveal the doomed window and have it disappear
+/// when the queued close event finally runs.
+pub(crate) fn begin_panel_destroy(role: PetPanelRole) {
+    panel_lifecycle(role)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .destroying = true;
+    cancel_panel_reveal(role);
+}
+
+pub(crate) fn finish_panel_destroy(role: PetPanelRole) -> bool {
+    let mut lifecycle = panel_lifecycle(role)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if lifecycle.in_flight_builds != 0 {
+        return false;
+    }
+    lifecycle.destroying = false;
+    true
+}
+
+pub(crate) fn panel_is_destroying(role: PetPanelRole) -> bool {
+    panel_lifecycle(role)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .destroying
+}
+
+pub(crate) fn panel_has_in_flight_builds(role: PetPanelRole) -> bool {
+    panel_lifecycle(role)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .in_flight_builds
+        != 0
+}
+
 pub(crate) fn current_panel_generation(role: PetPanelRole) -> u64 {
     panel_generation(role).load(Ordering::SeqCst)
 }
 
 pub(crate) fn panel_generation_is_current(role: PetPanelRole, expected: u64) -> bool {
-    panel_open_intent(role).load(Ordering::SeqCst) && current_panel_generation(role) == expected
+    !panel_is_destroying(role)
+        && panel_open_intent(role).load(Ordering::SeqCst)
+        && current_panel_generation(role) == expected
 }
 
 impl PetPanelRole {
@@ -429,5 +524,34 @@ mod tests {
             PetPanelRole::Sprite,
             generation
         ));
+    }
+
+    #[test]
+    fn destroying_a_panel_blocks_new_reveal_work_until_removal_finishes() {
+        let build = try_begin_panel_build(PetPanelRole::Popup).unwrap();
+        assert!(try_begin_panel_build(PetPanelRole::Popup).is_none());
+        let generation = begin_panel_open(PetPanelRole::Popup);
+        begin_panel_destroy(PetPanelRole::Popup);
+        assert!(panel_is_destroying(PetPanelRole::Popup));
+        assert!(panel_has_in_flight_builds(PetPanelRole::Popup));
+        assert!(!panel_generation_is_current(
+            PetPanelRole::Popup,
+            generation
+        ));
+
+        // Destroy owns the lifecycle atomically: no new builder may start, and
+        // the gate cannot clear while the pre-existing builder is still live.
+        assert!(try_begin_panel_build(PetPanelRole::Popup).is_none());
+        assert!(!finish_panel_destroy(PetPanelRole::Popup));
+
+        drop(build);
+        assert!(!panel_has_in_flight_builds(PetPanelRole::Popup));
+        assert!(finish_panel_destroy(PetPanelRole::Popup));
+        let reopened_generation = begin_panel_open(PetPanelRole::Popup);
+        assert!(panel_generation_is_current(
+            PetPanelRole::Popup,
+            reopened_generation
+        ));
+        cancel_panel_reveal(PetPanelRole::Popup);
     }
 }

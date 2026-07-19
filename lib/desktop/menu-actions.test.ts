@@ -377,6 +377,8 @@ test("toggleReduceMotionAction warns when persistence throws", async () => {
 })
 
 test("goAction routes static destinations", () => {
+  goAction(router, "go-sites")
+  expect(router.push).toHaveBeenCalledWith("/sites")
   goAction(router, "go-twin")
   expect(router.push).toHaveBeenCalledWith("/twin")
   goAction(router, "go-logs")

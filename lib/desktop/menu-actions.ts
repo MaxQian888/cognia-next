@@ -67,6 +67,7 @@ export const MENU_ACTION_IDS = [
   // Go
   "go-inbox",
   "go-workflows",
+  "go-sites",
   "go-twin",
   "go-skills",
   "go-plugins",
@@ -158,6 +159,7 @@ export async function verifyMenuActionParity(): Promise<MenuActionParityReport |
 export const GO_ROUTES: Record<string, string> = {
   "go-inbox": "/inbox/all",
   "go-workflows": "/workflows",
+  "go-sites": "/sites",
   "go-twin": "/twin",
   "go-skills": "/skills",
   "go-plugins": "/plugins",

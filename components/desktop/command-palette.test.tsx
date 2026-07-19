@@ -23,6 +23,13 @@ jest.mock("@cognia/logging", () => ({
       warn: jest.fn(),
       error: (...args: unknown[]) => logError(...args),
     },
+    agent: {
+      debug: jest.fn(),
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+      child: () => ({ debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() }),
+    },
   },
   // Pulled in transitively by @/lib/plugin → hooks-system → core/logger.
   createLogger: () => ({

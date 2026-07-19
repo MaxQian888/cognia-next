@@ -195,7 +195,7 @@ fn apply_click_through<R: Runtime>(
 /// the tray native action. Idempotent: if the window already exists it is
 /// ordered in front without activating Cognia, and its click-through state is
 /// re-applied.
-pub(crate) fn open_pet_window_inner<R: Runtime>(
+fn open_pet_window_claimed<R: Runtime>(
     app: &AppHandle<R>,
     opts: PetWindowOpts,
 ) -> Result<(), String> {
@@ -316,6 +316,11 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
         return Err(e);
     }
     if !macos_panel::panel_generation_is_current(macos_panel::PetPanelRole::Sprite, generation) {
+        // A close/destroy landed while the hidden webview was being built.
+        // Destroy owns the intent, but it may have observed no Tauri label yet;
+        // the stale builder must therefore clean up the window it just inserted.
+        let _ = macos_panel::detach_pet_panel(&window);
+        let _ = window.close();
         return Ok(());
     }
 
@@ -381,6 +386,35 @@ pub(crate) fn open_pet_window_inner<R: Runtime>(
     Ok(())
 }
 
+pub(crate) fn open_pet_window_inner<R: Runtime>(
+    app: &AppHandle<R>,
+    opts: PetWindowOpts,
+) -> Result<(), String> {
+    if let Some(_build_guard) =
+        macos_panel::try_begin_panel_build(macos_panel::PetPanelRole::Sprite)
+    {
+        return open_pet_window_claimed(app, opts);
+    }
+
+    // A builder/re-show or asynchronous close currently owns the label. Queue
+    // this intent off the native event thread and claim the lifecycle only when
+    // it becomes idle; this prevents concurrent same-label builders.
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        for _ in 0..200 {
+            if let Some(_build_guard) =
+                macos_panel::try_begin_panel_build(macos_panel::PetPanelRole::Sprite)
+            {
+                let _ = open_pet_window_claimed(&handle, opts);
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        log::error!("pet: timed out waiting for the window lifecycle to become idle");
+    });
+    Ok(())
+}
+
 /// Core "hide for toggle" logic shared by the command and the tray action.
 /// Resets click-through to false first so a hidden window can never strand the
 /// pointer; reopening is cheap so we hide rather than destroy.
@@ -438,28 +472,89 @@ pub async fn close_pet_window(app: AppHandle) -> Result<(), String> {
     close_pet_window_inner(&app)
 }
 
+async fn wait_for_window_removed<R: Runtime>(
+    app: &AppHandle<R>,
+    label: &str,
+    role: macos_panel::PetPanelRole,
+) -> Result<(), String> {
+    for _ in 0..200 {
+        // Check the guarded build count first. While destroy owns the role no
+        // new builder can start, so once this reaches zero the following label
+        // lookup cannot miss a not-yet-inserted pre-destroy builder.
+        if !macos_panel::panel_has_in_flight_builds(role) && app.get_webview_window(label).is_none()
+        {
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    Err(format!(
+        "pet: timed out waiting for window '{label}' to be destroyed"
+    ))
+}
+
+/// Fully destroy both native pet surfaces and wait until Tauri has removed
+/// their labels. `WebviewWindow::close()` only queues a close event; returning
+/// before removal lets an immediate reopen retrieve a window that is already
+/// doomed to close.
+async fn destroy_pet_window_inner<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    macos_panel::begin_panel_destroy(macos_panel::PetPanelRole::Sprite);
+    macos_panel::begin_panel_destroy(macos_panel::PetPanelRole::Popup);
+
+    let popup_result = (|| -> Result<(), String> {
+        // Tear the click popup down with the sprite so disabling the pet leaves
+        // no orphan window behind.
+        if let Some(window) = app.get_webview_window(popup::PET_POPUP_LABEL) {
+            macos_panel::detach_pet_panel(&window)?;
+            window.close().map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    })();
+
+    let sprite_result = (|| -> Result<(), String> {
+        if let Some(window) = app.get_webview_window("pet") {
+            // Reset click-through first so a future window can never inherit a
+            // pointer-trapping state through a recreated label.
+            let _ = window.set_ignore_cursor_events(false);
+            macos_panel::detach_pet_panel(&window)?;
+            window.close().map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    })();
+
+    let popup_result = match popup_result {
+        Ok(()) => {
+            wait_for_window_removed(
+                app,
+                popup::PET_POPUP_LABEL,
+                macos_panel::PetPanelRole::Popup,
+            )
+            .await
+        }
+        Err(error) => Err(error),
+    };
+    let sprite_result = match sprite_result {
+        Ok(()) => wait_for_window_removed(app, "pet", macos_panel::PetPanelRole::Sprite).await,
+        Err(error) => Err(error),
+    };
+
+    // Only a successful wait proves both invariants: no Tauri label remains
+    // and every builder that started before destroy has finished its stale
+    // cleanup. On failure keep the gate raised rather than reuse a doomed label.
+    if popup_result.is_ok() {
+        let _ = macos_panel::finish_panel_destroy(macos_panel::PetPanelRole::Popup);
+    }
+    if sprite_result.is_ok() {
+        let _ = macos_panel::finish_panel_destroy(macos_panel::PetPanelRole::Sprite);
+    }
+    emit_pet_state(app, false, false);
+    popup_result.and(sprite_result)
+}
+
 /// Fully destroy the pet window — used by the settings "disable" path so the
 /// overlay is gone (not merely hidden) until re-enabled.
 #[tauri::command]
 pub async fn destroy_pet_window(app: AppHandle) -> Result<(), String> {
-    // Invalidate any pending force-show safety net from a recent open.
-    macos_panel::cancel_panel_reveal(macos_panel::PetPanelRole::Sprite);
-    macos_panel::cancel_panel_reveal(macos_panel::PetPanelRole::Popup);
-    // Tear the click popup down with the sprite so disabling the pet leaves no
-    // orphan window behind.
-    if let Some(popup) = app.get_webview_window(popup::PET_POPUP_LABEL) {
-        macos_panel::detach_pet_panel(&popup)?;
-        popup.close().map_err(|e| e.to_string())?;
-    }
-    if let Some(window) = app.get_webview_window("pet") {
-        // Reset click-through first so a future window can never inherit a
-        // pointer-trapping state through a recreated label.
-        let _ = window.set_ignore_cursor_events(false);
-        macos_panel::detach_pet_panel(&window)?;
-        window.close().map_err(|e| e.to_string())?;
-    }
-    emit_pet_state(&app, false, false);
-    Ok(())
+    destroy_pet_window_inner(&app).await
 }
 
 /// Core click-through toggle shared by the command and the tray recovery

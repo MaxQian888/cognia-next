@@ -5,6 +5,8 @@ use tauri::{
     App, Emitter, Manager,
 };
 
+const GO_SITES_MENU_ID: &str = "go-sites";
+
 // `MENU_IDS` lives in `crate::commands` so the `menu_action_ids` Tauri
 // command can be registered on every platform — see
 // `commands::MENU_IDS` and `commands::menu_action_ids`.
@@ -143,6 +145,9 @@ pub fn install(app: &App) -> tauri::Result<()> {
         .id("go-workflows")
         .accelerator("CmdOrCtrl+2")
         .build(handle)?;
+    let go_sites = MenuItemBuilder::new("Sites")
+        .id(GO_SITES_MENU_ID)
+        .build(handle)?;
     let go_twin = MenuItemBuilder::new("Twin Workbench")
         .id("go-twin")
         .accelerator("CmdOrCtrl+3")
@@ -183,6 +188,7 @@ pub fn install(app: &App) -> tauri::Result<()> {
     let go = SubmenuBuilder::new(handle, "Go")
         .item(&go_inbox)
         .item(&go_workflows)
+        .item(&go_sites)
         .item(&go_twin)
         .item(&go_skills)
         .item(&go_plugins)
@@ -304,5 +310,13 @@ pub fn install(app: &App) -> tauri::Result<()> {
     Ok(())
 }
 
-// Tests for `MENU_IDS` (uniqueness, kebab-case, canonical-set parity) live
-// in `crate::commands::tests` next to the constant they exercise.
+#[cfg(test)]
+mod tests {
+    use super::GO_SITES_MENU_ID;
+
+    #[test]
+    fn sites_item_uses_a_registered_go_menu_id() {
+        assert_eq!(GO_SITES_MENU_ID, "go-sites");
+        assert!(crate::commands::MENU_IDS.contains(&GO_SITES_MENU_ID));
+    }
+}

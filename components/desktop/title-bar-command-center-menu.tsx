@@ -22,6 +22,7 @@ import {
   CalendarClockIcon,
   ChevronDownIcon,
   CompassIcon,
+  Globe2Icon,
   InboxIcon,
   MessageSquareIcon,
   PuzzleIcon,
@@ -55,6 +56,7 @@ const MENU_CONTENT_PERF =
 const GO_TARGETS: Array<{ id: MenuActionId; key: string; icon: LucideIcon }> = [
   { id: "go-inbox", key: "inbox", icon: InboxIcon },
   { id: "go-workflows", key: "workflows", icon: WorkflowIcon },
+  { id: "go-sites", key: "sites", icon: Globe2Icon },
   { id: "go-agent-teams", key: "agentTeams", icon: UsersIcon },
   { id: "go-scheduler", key: "scheduler", icon: CalendarClockIcon },
   { id: "go-discover", key: "discover", icon: CompassIcon },

@@ -58,8 +58,7 @@ pub(crate) fn close_pet_popup_inner<R: Runtime>(app: &AppHandle<R>) -> Result<()
 /// non-resizable, and hidden — the renderer reveals + focuses it after its
 /// first painted frame (so the blur-to-close handler can fire without the
 /// window ever flashing an unpainted opaque rectangle).
-#[tauri::command]
-pub async fn open_pet_popup(app: AppHandle, opts: PetPopupOpts) -> Result<(), String> {
+fn open_pet_popup_inner<R: Runtime>(app: &AppHandle<R>, opts: PetPopupOpts) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(PET_POPUP_LABEL) {
         window
             .set_size(LogicalSize::new(opts.width, opts.height))
@@ -84,7 +83,7 @@ pub async fn open_pet_popup(app: AppHandle, opts: PetPopupOpts) -> Result<(), St
     let generation = super::macos_panel::begin_panel_open(super::macos_panel::PetPanelRole::Popup);
 
     let window = tauri::WebviewWindowBuilder::new(
-        &app,
+        app,
         PET_POPUP_LABEL,
         tauri::WebviewUrl::App("pet-popup".into()),
     )
@@ -149,6 +148,10 @@ pub async fn open_pet_popup(app: AppHandle, opts: PetPopupOpts) -> Result<(), St
         super::macos_panel::PetPanelRole::Popup,
         generation,
     ) {
+        // Destroy may have started before the builder inserted this label, so
+        // the stale build is responsible for detaching and closing itself.
+        let _ = super::macos_panel::detach_pet_panel(&window);
+        let _ = window.close();
         return Ok(());
     }
 
@@ -162,6 +165,27 @@ pub async fn open_pet_popup(app: AppHandle, opts: PetPopupOpts) -> Result<(), St
     // The re-show branch at the top still shows + focuses directly because an
     // existing window has already painted, so it can never flash.
     Ok(())
+}
+
+#[tauri::command]
+pub async fn open_pet_popup(app: AppHandle, opts: PetPopupOpts) -> Result<(), String> {
+    // A sprite destroy also destroys this label. Wait until its queued close
+    // event has removed the old webview before allowing a fresh builder to use
+    // the same label.
+    let _build_guard = {
+        let mut guard = None;
+        for _ in 0..200 {
+            if let Some(claimed) =
+                super::macos_panel::try_begin_panel_build(super::macos_panel::PetPanelRole::Popup)
+            {
+                guard = Some(claimed);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        guard.ok_or_else(|| "pet popup: timed out waiting for destroy to finish".to_string())?
+    };
+    open_pet_popup_inner(&app, opts)
 }
 
 /// Hide the popup window (renderer Esc / explicit close action).

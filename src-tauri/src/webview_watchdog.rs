@@ -1,11 +1,12 @@
 //! Runtime white-screen watchdog for the main webview.
 //!
-//! `window_recovery` + the lib.rs 8s force-show timer handle *boot-time*
-//! blanking — an off-screen restore, or a renderer that never paints its first
-//! frame. This module is their *runtime* counterpart: after a healthy boot the
-//! webview's renderer process can crash (WebView2 `ProcessFailed`, WKWebView
-//! content-process termination, GPU/OOM kills), the page can wedge on a blocked
-//! main thread, or it can be navigated to a blank/broken document. In every one
+//! `window_recovery` + the boot-reveal guard handle *boot-time* blanking — an
+//! off-screen restore, or a renderer that never paints its first frame. The
+//! guard is armed only after Tauri reports the initial document as loaded, so a
+//! slow Next.js dev compile cannot expose an unpainted black webview. After a
+//! healthy boot, this module also handles renderer-process crashes (WebView2
+//! `ProcessFailed`, WKWebView content-process termination, GPU/OOM kills), a
+//! wedged main thread, or navigation to a blank/broken document. In every one
 //! of those cases the JS realm is gone or frozen, so the React error boundaries
 //! in `app/error.tsx` / `app/global-error.tsx` can never fire — the user is left
 //! staring at a white screen with no way back.
@@ -47,6 +48,42 @@ pub const MAX_RECOVERIES: u32 = 3;
 /// full retry allowance.
 pub const RECOVERY_COUNTER_RESET: Duration = Duration::from_secs(120);
 
+/// Grace period after the initial document has finished loading for React to
+/// reveal the hidden main window itself.
+pub const BOOT_REVEAL_GRACE: Duration = Duration::from_secs(8);
+
+/// What the boot-time reveal safety net should do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BootRevealAction {
+    Idle,
+    Reveal,
+}
+
+/// Whether a Tauri page-load callback belongs to the one event that may arm
+/// the main-window boot reveal guard.
+pub fn should_arm_boot_reveal(webview_label: &str, load_finished: bool) -> bool {
+    webview_label == "main" && load_finished
+}
+
+/// Pure boot-time reveal decision. `None` means the initial document has not
+/// finished loading yet (for example while Next.js is compiling `/` in dev).
+pub fn decide_boot_reveal(
+    elapsed_since_finished_load: Option<Duration>,
+    visible: bool,
+    renderer_revealed: bool,
+    grace: Duration,
+) -> BootRevealAction {
+    if visible || renderer_revealed || elapsed_since_finished_load.is_none() {
+        return BootRevealAction::Idle;
+    }
+
+    if elapsed_since_finished_load.is_some_and(|elapsed| elapsed >= grace) {
+        BootRevealAction::Reveal
+    } else {
+        BootRevealAction::Idle
+    }
+}
+
 /// What the watchdog should do on a given poll.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WatchdogAction {
@@ -62,7 +99,7 @@ pub enum WatchdogAction {
 /// whether the window is visible, and how many recoveries we've already spent,
 /// decide the action. Hidden windows and not-yet-booted renderers are always
 /// [`WatchdogAction::Idle`] — we never reload a page that hasn't proven it can
-/// boot (the 8s force-show owns the boot path) or one the user can't even see.
+/// boot (the boot-reveal guard owns that path) or one the user can't even see.
 pub fn decide(
     elapsed_since_beat: Option<Duration>,
     visible: bool,
@@ -88,6 +125,13 @@ pub fn decide(
 
 #[derive(Default)]
 struct Inner {
+    /// Set once, when Tauri reports the main document's first `Finished` load.
+    /// A pending dev-server response deliberately leaves this `None`.
+    initial_load_finished_at: Option<Instant>,
+    /// Latched by the renderer immediately after `window.show()` succeeds.
+    /// Once true, a later user-initiated hide-to-tray must never be mistaken
+    /// for a boot failure by the one-shot safety timer.
+    renderer_revealed: bool,
     /// `None` until the first heartbeat — see [`decide`].
     last_beat: Option<Instant>,
     /// Last-known-good route, used as the reload target so recovery preserves
@@ -119,6 +163,33 @@ impl WebviewWatchdog {
         Self {
             inner: Mutex::new(Inner::default()),
         }
+    }
+
+    /// Arm the one-shot boot reveal grace period after the initial document
+    /// finishes loading. Returns `true` only for the first finished load so
+    /// later navigations cannot surface a window the user hid to the tray.
+    pub fn record_initial_load_finished(&self, now: Instant) -> bool {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.initial_load_finished_at.is_some() {
+            return false;
+        }
+        inner.initial_load_finished_at = Some(now);
+        true
+    }
+
+    /// Permanently disarm the boot force-show fallback after the renderer has
+    /// successfully revealed the main window.
+    pub fn acknowledge_boot_reveal(&self) {
+        self.inner.lock().unwrap().renderer_revealed = true;
+    }
+
+    /// Decide whether the one-shot boot safety net should reveal the window.
+    pub fn poll_boot_reveal(&self, now: Instant, visible: bool) -> BootRevealAction {
+        let inner = self.inner.lock().unwrap();
+        let elapsed = inner
+            .initial_load_finished_at
+            .and_then(|finished| now.checked_duration_since(finished));
+        decide_boot_reveal(elapsed, visible, inner.renderer_revealed, BOOT_REVEAL_GRACE)
     }
 
     /// Record a renderer heartbeat (current URL + arrival time). Resets the
@@ -222,6 +293,13 @@ pub fn webview_heartbeat(state: tauri::State<'_, WebviewWatchdog>, url: Option<S
     state.record_heartbeat(url, Instant::now());
 }
 
+/// Disarm the boot-time force-show fallback after the renderer successfully
+/// calls `show()` for the main window.
+#[tauri::command]
+pub fn webview_acknowledge_boot_reveal(state: tauri::State<'_, WebviewWatchdog>) {
+    state.acknowledge_boot_reveal();
+}
+
 /// Returns (and clears) whether the page was just auto-recovered from a blank
 /// screen, so the reloaded renderer can surface a toast.
 #[tauri::command]
@@ -235,6 +313,82 @@ mod tests {
 
     const TIMEOUT: Duration = Duration::from_secs(15);
     const MAX: u32 = 3;
+
+    #[test]
+    fn slow_initial_page_load_stays_hidden() {
+        // The document is still pending while Next.js compiles `/` for 61s.
+        // Showing at the app-boot +8s mark exposes the unpainted black webview.
+        assert_eq!(
+            decide_boot_reveal(None, false, false, BOOT_REVEAL_GRACE),
+            BootRevealAction::Idle
+        );
+    }
+
+    #[test]
+    fn only_finished_main_document_arms_boot_reveal() {
+        assert!(should_arm_boot_reveal("main", true));
+        assert!(!should_arm_boot_reveal("main", false));
+        assert!(!should_arm_boot_reveal("pet", true));
+    }
+
+    #[test]
+    fn loaded_document_stays_hidden_inside_grace() {
+        assert_eq!(
+            decide_boot_reveal(
+                Some(BOOT_REVEAL_GRACE - Duration::from_nanos(1)),
+                false,
+                false,
+                BOOT_REVEAL_GRACE
+            ),
+            BootRevealAction::Idle
+        );
+    }
+
+    #[test]
+    fn hidden_window_reveals_after_loaded_document_grace() {
+        assert_eq!(
+            decide_boot_reveal(Some(BOOT_REVEAL_GRACE), false, false, BOOT_REVEAL_GRACE),
+            BootRevealAction::Reveal
+        );
+    }
+
+    #[test]
+    fn visible_window_never_force_reveals() {
+        assert_eq!(
+            decide_boot_reveal(
+                Some(BOOT_REVEAL_GRACE + Duration::from_secs(1)),
+                true,
+                false,
+                BOOT_REVEAL_GRACE
+            ),
+            BootRevealAction::Idle
+        );
+    }
+
+    #[test]
+    fn initial_load_finish_arms_only_once() {
+        let wd = WebviewWatchdog::new();
+        let first = Instant::now();
+        assert!(wd.record_initial_load_finished(first));
+        assert!(!wd.record_initial_load_finished(first + Duration::from_secs(1)));
+        assert_eq!(
+            wd.poll_boot_reveal(first + BOOT_REVEAL_GRACE, false),
+            BootRevealAction::Reveal
+        );
+    }
+
+    #[test]
+    fn renderer_reveal_ack_survives_later_hide_to_tray() {
+        let wd = WebviewWatchdog::new();
+        let loaded = Instant::now();
+        assert!(wd.record_initial_load_finished(loaded));
+        wd.acknowledge_boot_reveal();
+
+        assert_eq!(
+            wd.poll_boot_reveal(loaded + BOOT_REVEAL_GRACE, false),
+            BootRevealAction::Idle
+        );
+    }
 
     #[test]
     fn no_heartbeat_yet_is_idle() {

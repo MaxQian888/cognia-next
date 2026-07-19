@@ -23,6 +23,11 @@ jest.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({ show, setFocus }),
 }))
 
+const invoke = jest.fn().mockResolvedValue(undefined)
+jest.mock("@tauri-apps/api/core", () => ({
+  invoke: (...args: unknown[]) => invoke(...args),
+}))
+
 import { WindowShowInitializer } from "./window-show-initializer"
 
 /**
@@ -61,6 +66,7 @@ beforeEach(() => {
   isTauriMock.mockReset()
   show.mockReset().mockResolvedValue(undefined)
   setFocus.mockReset().mockResolvedValue(undefined)
+  invoke.mockReset().mockResolvedValue(undefined)
   raf = flushRaf()
   raf.install()
 })
@@ -82,6 +88,7 @@ test("Tauri mode reveals and focuses the window after two frames", async () => {
   render(<WindowShowInitializer />)
   raf.drain()
   await waitFor(() => expect(show).toHaveBeenCalledTimes(1))
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("webview_acknowledge_boot_reveal"))
   await waitFor(() => expect(setFocus).toHaveBeenCalledTimes(1))
 })
 
@@ -106,6 +113,7 @@ test("logs a warning when show() rejects with an Error", async () => {
       expect.objectContaining({ error: "boom" })
     )
   )
+  expect(invoke).not.toHaveBeenCalled()
 })
 
 test("warning falls back to String(err) for non-Error throws", async () => {
@@ -118,5 +126,31 @@ test("warning falls back to String(err) for non-Error throws", async () => {
       "window-show: failed to reveal main window",
       expect.objectContaining({ error: "string-err" })
     )
+  )
+})
+
+test("focuses the shown window when boot-reveal acknowledgement fails", async () => {
+  isTauriMock.mockReturnValue(true)
+  invoke.mockRejectedValueOnce(new Error("ack failed"))
+  render(<WindowShowInitializer />)
+  raf.drain()
+
+  await waitFor(() => expect(setFocus).toHaveBeenCalledTimes(1))
+  expect(logWarn).toHaveBeenCalledWith(
+    "window-show: failed to acknowledge boot reveal",
+    expect.objectContaining({ error: "ack failed" })
+  )
+})
+
+test("stringifies a non-Error boot-reveal acknowledgement failure", async () => {
+  isTauriMock.mockReturnValue(true)
+  invoke.mockRejectedValueOnce("ack string failure")
+  render(<WindowShowInitializer />)
+  raf.drain()
+
+  await waitFor(() => expect(setFocus).toHaveBeenCalledTimes(1))
+  expect(logWarn).toHaveBeenCalledWith(
+    "window-show: failed to acknowledge boot reveal",
+    expect.objectContaining({ error: "ack string failure" })
   )
 })
