@@ -19,6 +19,8 @@
     "debugMode": "调试模式",
     "debugModeHint": "为 SDK 和派生的 MCP / 子进程开启详细日志。可在 Tauri dev 控制台或 sidecar 日志中查看。",
     "description": "用于调试与实验性插件行为的底层开关。",
+    "taskWorkspace": "任务资源工作区",
+    "taskWorkspaceHint": "实验功能。让 Agent 在隔离的任务工作区中执行，审查其资源，并显式应用或精确撤销归因改动。",
     "title": "开发者选项"
   },
   "inboxTelemetry": {

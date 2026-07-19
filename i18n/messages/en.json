@@ -1,5 +1,14 @@
 {
   "a2ui": {
+    "add": "Add",
+    "addComponent": "Add Component",
+    "addComponentDescription": "Choose a catalog component and its exact parent slot and position.",
+    "addDataEntry": "Add data entry",
+    "addDataEntryAt": "Add data entry at {path}",
+    "addDataEntryDescription": "Enter a JSON value for a new entry under {path}.",
+    "addRootDataEntry": "Add root data entry",
+    "advancedProperties": "Advanced properties",
+    "advancedPropertiesDescription": "Edit the complete non-structural property object as JSON. Identity and component-tree references are protected.",
     "aiGenerate": "AI Generate",
     "aiPaperAnalysis": "AI Paper Analysis",
     "aiRegeneratePrompt": "Describe what you want to change...",
@@ -32,7 +41,16 @@
     "appExported": "App exported",
     "appName": "App Name",
     "appPreview": "App Preview",
+    "appRegenerated": "App regenerated",
     "appSaved": "App saved",
+    "append": "Append",
+    "appendDataEntry": "Append data entry",
+    "apply": "Apply",
+    "applyDataModelJson": "Apply complete data model JSON",
+    "applyDataValue": "Apply value at {path}",
+    "applyProperty": "Apply {property}",
+    "applyPropertyJson": "Apply property JSON",
+    "applyStructuralMetadata": "Apply {property} structural metadata",
     "askFollowUp": "Ask Follow-up",
     "author": "Author",
     "authorEmail": "Email",
@@ -42,6 +60,7 @@
     "basicInfo": "Basic Info",
     "browseTemplates": "Browse pre-built templates",
     "cancel": "Cancel",
+    "cancelDataValueEdit": "Cancel editing value at {path}",
     "cannotRedo": "Nothing to redo",
     "cannotUndo": "Nothing to undo",
     "category": "Category",
@@ -54,8 +73,15 @@
     "clearErrors": "Clear All",
     "clearThumbnail": "Clear Thumbnail",
     "close": "Close",
+    "closePreview": "Close preview",
+    "collapseComponent": "Collapse component",
+    "collapseDataPath": "Collapse {path}",
     "comparisonEmpty": "No comparison data available.",
+    "completeDataModelJson": "Complete data model JSON",
+    "componentId": "Component ID",
+    "componentMutationFailed": "The component change could not be applied. Check the destination and try again.",
     "componentTree": "Components",
+    "componentType": "Component type",
     "continueWorking": "Continue Working",
     "copied": "Copied!",
     "copiedExclamation": "Copied!",
@@ -63,28 +89,46 @@
     "copyAnalysis": "Copy Analysis",
     "copyLink": "Copy Link",
     "copyShareCode": "Copy Share Code",
+    "create": "Create",
     "createFirstApp": "Create your first app",
     "createStudio": "Create Studio",
     "created": "Created",
     "createdAt": "Created At",
     "customApp": "Custom App",
+    "dataArrayType": "Array ({count})",
+    "dataEntryKey": "Key",
+    "dataEntryValueJson": "Value JSON",
     "dataMode": "Data",
     "dataModel": "Data Model",
+    "dataModelKeyCount": "{count, plural, one {# key} other {# keys}}",
+    "dataObjectType": "Object ({count})",
     "delete": "Delete",
     "deleteApp": "Delete App",
     "deleteComponent": "Delete Component",
     "deleteConfirmDescription": "Are you sure you want to delete this app? This action cannot be undone.",
     "deleteConfirmTitle": "Delete App",
+    "deleteDataValueAt": "Delete value at {path}",
+    "deleteDataValueDescription": "Delete {path} and all data nested below it? You can undo this change from the workspace toolbar.",
+    "deleteDataValueTitle": "Delete data value?",
+    "deleteFailed": "Failed to delete app",
+    "deleting": "Deleting",
     "descriptionPlaceholder": "Describe the app's purpose and features...",
+    "destination": "Destination",
     "dismissError": "Dismiss",
     "download": "Download",
     "duplicate": "Duplicate",
     "duplicateComponent": "Duplicate Component",
     "editApp": "Edit",
+    "editCompleteDataModelJson": "Edit complete data model JSON",
+    "editDataModelJson": "Edit data model JSON",
+    "editDataModelJsonDescription": "Replace the complete data model with a safe JSON object. This supports structural changes across nested objects and arrays.",
+    "editDataValue": "Edit value at {path}",
     "editInfo": "Edit Info",
     "editMode": "Edit",
+    "editablePropertiesJson": "Editable properties JSON",
     "emailLabel": "Email",
     "emailPlaceholder": "email@example.com",
+    "emptyDataModel": "Empty data model",
     "errorBoundary": {
       "renderError": "{type} render error",
       "retry": "Retry"
@@ -100,6 +144,8 @@
     "exampleTimerDesc": "Countdown",
     "exampleTodo": "Todo",
     "exampleTodoDesc": "Task manager",
+    "expandComponent": "Expand component",
+    "expandDataPath": "Expand {path}",
     "export": "Export",
     "exportAllApps": "Export All Apps",
     "featureAI": "AI Generation",
@@ -123,6 +169,8 @@
     "gridView": "Grid view",
     "heroSubtitle": "Describe your app in one sentence, AI builds it in seconds",
     "heroTitle": "Build Mini Apps Instantly",
+    "hideComponentTree": "Hide component tree",
+    "hidePropertiesPanel": "Hide properties panel",
     "hubSummary": "Create instantly, resume quickly, and manage every mini app from one hub.",
     "importApp": "Import App",
     "importFromFile": "Import from File",
@@ -168,12 +216,22 @@
       "untitled": "Untitled",
       "user": "User"
     },
+    "invalidDataEntry": "Enter a unique, safe key and a valid JSON value.",
+    "invalidDataModelJson": "Enter a safe JSON object with non-empty keys and finite values.",
+    "invalidDataValue": "Enter valid JSON that keeps the complete data model safe.",
+    "invalidJson": "Enter valid JSON before applying this property.",
+    "invalidPropertyJson": "Enter a valid JSON object containing only editable properties.",
+    "invalidStructuralMetadata": "This change is invalid or would remove a slot that still contains child components.",
     "lastModified": "Last Modified",
+    "latest": "Latest",
     "listView": "List view",
     "loadMore": "Load More",
     "manageApps": "Manage your created apps",
     "metadata": "Metadata",
     "missingFields": "Missing required fields",
+    "move": "Move",
+    "moveComponent": "Move Component",
+    "moveComponentDescription": "Move the selected component to an exact parent slot and final position.",
     "myAppsTab": "My Apps",
     "nameLabel": "Name",
     "namePlaceholder": "Author Name",
@@ -183,11 +241,14 @@
     "noAuthorInfo": "No author info",
     "noComponentSelected": "No component selected",
     "noDescription": "No description",
+    "noEditableProperties": "This component has no current editable properties. Use the advanced editor to add optional properties.",
     "noPapersFound": "No papers found",
+    "noSurfaceLoaded": "No surface loaded",
     "noTags": "No tags",
     "noTemplatesFound": "No templates found",
     "noThumbnail": "No thumbnail",
     "noVersions": "No versions yet",
+    "notSet": "Not set",
     "pageTitle": "Mini Apps",
     "paperCardAdd": "Add",
     "paperCardAnalyze": "Analyze",
@@ -196,8 +257,13 @@
     "paperCardOpenAccess": "Open Access",
     "paperCardPdf": "PDF",
     "papersCount": "{count} papers",
+    "position": "Position",
+    "positionHelp": "Final zero-based position (0–{max}).",
     "previewMode": "Preview",
+    "propertyDataPath": "{property} data path",
+    "propertyFields": "Property fields",
     "propertyInspector": "Properties",
+    "propertyJsonLabel": "{property} JSON",
     "publishCheck": "Publish Check",
     "publishMissing": "The following information is required:",
     "publishPrep": "Publish Prep",
@@ -207,6 +273,12 @@
     "published": "Published",
     "publishedAt": "Published at",
     "quickApps": "Quick Apps",
+    "quickPromptBmi": "BMI Calculator",
+    "quickPromptConverter": "Unit Converter",
+    "quickPromptExpense": "Expense Tracker",
+    "quickPromptHabit": "Habit Tracker",
+    "quickPromptPomodoro": "Pomodoro Timer",
+    "quickPromptTodo": "Todo List",
     "quickTry": "Quick try:",
     "rating": "Rating",
     "readyToPublish": "Ready to publish!",
@@ -214,12 +286,15 @@
     "redo": "Redo",
     "refreshThumbnail": "Refresh Thumbnail",
     "regenerate": "Regenerate",
+    "regenerateAppDescription": "Describe how you want to regenerate this app.",
     "relatedTopics": "Related Topics",
     "reset": "Reset",
     "resetZoom": "Reset Zoom",
+    "resetZoomWithLevel": "Reset Zoom ({zoom}%)",
     "restoreVersion": "Restore",
     "resultsFor": "Results for \"{query}\"",
     "richOutput": {
+      "loadingRuntime": "Loading rich runtime...",
       "next": "Next",
       "previous": "Previous",
       "richOutputFallback": "Fallback",
@@ -228,7 +303,10 @@
     "run": "Run",
     "save": "Save",
     "saveApp": "Save",
+    "saveFailed": "Failed to save app changes",
+    "saving": "Saving",
     "searchAndManageApps": "Search, sort, and jump back into the apps that already exist.",
+    "searchComponents": "Search component types...",
     "searchLoadMore": "Load More Results",
     "searchLoading": "Loading...",
     "searchNoPapers": "No papers found",
@@ -244,6 +322,7 @@
     "searchingPapers": "Searching papers...",
     "selectCategory": "Select Category",
     "selectComponent": "Click a component to inspect its properties",
+    "selectDestination": "Select a destination",
     "selectPlaceholder": "Select...",
     "setThumbnail": "Set Thumbnail",
     "share": "Share",
@@ -253,11 +332,21 @@
     "shareToTelegram": "Share to Telegram",
     "shareToTwitter": "Share to Twitter",
     "shortcuts": "Keyboard Shortcuts",
+    "showComponentTree": "Show component tree",
+    "showPropertiesPanel": "Show properties panel",
+    "slotAccordionItem": "Accordion item {index}",
+    "slotActions": "Actions",
+    "slotChildren": "Children",
+    "slotFooter": "Footer",
+    "slotGuideStep": "Guide step {index}",
+    "slotTab": "Tab {index}",
+    "sortAscending": "Sort ascending",
     "sortByLabel": "Sort by",
     "sortByMostUsed": "Most Used",
     "sortByName": "Name",
     "sortByNewest": "Newest",
     "sortCitations": "Most Cited",
+    "sortDescending": "Sort descending",
     "sortNewest": "Newest",
     "sortOldest": "Oldest",
     "sortRelevance": "Relevance",
@@ -272,6 +361,9 @@
       "previous": "Previous"
     },
     "storeId": "Store ID",
+    "structuralMetadata": "Structural metadata",
+    "structuralMetadataDescription": "Edit slot labels and ordering. Component references stay protected, and only empty slots can be removed.",
+    "structuralMetadataJsonLabel": "{property} structural metadata JSON",
     "suggestedQuestions": "Suggested Questions",
     "suggestionCalculator": "Calculator",
     "suggestionChart": "Chart",
@@ -280,11 +372,13 @@
     "suggestionPomodoro": "Pomodoro",
     "suggestionTodo": "Todo",
     "surface": {
+      "dialogLabel": "A2UI dialog",
       "errorLoading": "Error loading surface",
       "loading": "Loading...",
       "noContent": "No content to display",
       "rendering": "Rendering..."
     },
+    "surfaceRoot": "Surface root (wrap existing root)",
     "systemShare": "System Share",
     "tableEmpty": "No data available",
     "tableNext": "Next",
@@ -323,6 +417,1012 @@
     },
     "zoomIn": "Zoom In",
     "zoomOut": "Zoom Out"
+  },
+  "a2uiGenerator": {
+    "dashboardDataModel": {
+      "chartData": [
+        {
+          "name": "Mon",
+          "value": 120
+        },
+        {
+          "name": "Tue",
+          "value": 180
+        },
+        {
+          "name": "Wed",
+          "value": 150
+        },
+        {
+          "name": "Thu",
+          "value": 220
+        },
+        {
+          "name": "Fri",
+          "value": 190
+        },
+        {
+          "name": "Sat",
+          "value": 280
+        },
+        {
+          "name": "Sun",
+          "value": 250
+        }
+      ],
+      "status": {
+        "detail": "The latest update occurred within the past 5 minutes.",
+        "message": "The data source is synchronized and ready to refresh."
+      },
+      "summaryItems": [
+        {
+          "badge": "Live",
+          "id": "value-1",
+          "title": "Metric 1",
+          "value": "1,234"
+        },
+        {
+          "badge": "Stable",
+          "id": "value-2",
+          "title": "Metric 2",
+          "value": "567"
+        },
+        {
+          "badge": "Trend",
+          "id": "value-3",
+          "title": "Metric 3",
+          "value": "+12%"
+        }
+      ]
+    },
+    "factories": {
+      "ageCalculator": {
+        "calc-btn": {
+          "text": "Calculate Age"
+        },
+        "date-input": {
+          "label": "Date of Birth"
+        },
+        "header": {
+          "text": "🎂 Age Calculator"
+        }
+      },
+      "bmiCalculator": {
+        "calc-btn": {
+          "text": "Calculate BMI"
+        },
+        "header": {
+          "text": "🏃 BMI Calculator"
+        },
+        "height-input": {
+          "label": "Height (cm)"
+        },
+        "weight-input": {
+          "label": "Weight (kg)"
+        }
+      },
+      "contact": {
+        "email": {
+          "label": "Email"
+        },
+        "first-name": {
+          "label": "First Name"
+        },
+        "header": {
+          "text": "✉️ Contact Us"
+        },
+        "last-name": {
+          "label": "Last Name"
+        },
+        "message": {
+          "label": "Message"
+        },
+        "subject": {
+          "label": "Subject",
+          "options": [
+            {
+              "label": "General Inquiry",
+              "value": "general"
+            },
+            {
+              "label": "Technical Support",
+              "value": "support"
+            },
+            {
+              "label": "Feedback",
+              "value": "feedback"
+            }
+          ]
+        },
+        "submit-btn": {
+          "text": "Send"
+        }
+      },
+      "dashboard": {
+        "chart-section": {
+          "title": "Trend"
+        },
+        "refresh-btn": {
+          "text": "Refresh"
+        },
+        "status": {
+          "title": "Data Status"
+        },
+        "summary": {
+          "title": "Key Metrics"
+        }
+      },
+      "expenseTracker": {
+        "add-btn": {
+          "text": "Add Expense"
+        },
+        "amount-input": {
+          "label": "Amount"
+        },
+        "budget-card": {
+          "title": "Budget"
+        },
+        "category-select": {
+          "label": "Category",
+          "options": [
+            {
+              "label": "🍔 Food",
+              "value": "food"
+            },
+            {
+              "label": "🚗 Transport",
+              "value": "transport"
+            },
+            {
+              "label": "🛍️ Shopping",
+              "value": "shopping"
+            },
+            {
+              "label": "🎮 Entertainment",
+              "value": "entertainment"
+            },
+            {
+              "label": "📦 Other",
+              "value": "other"
+            }
+          ]
+        },
+        "expense-list": {
+          "emptyText": "No records yet"
+        },
+        "header": {
+          "text": "💰 Expense Tracker"
+        },
+        "total-card": {
+          "title": "Spent"
+        }
+      },
+      "habitTracker": {
+        "add-btn": {
+          "text": "Add"
+        },
+        "habit-input": {
+          "placeholder": "New habit name"
+        },
+        "habits-list": {
+          "emptyText": "Add your first habit"
+        },
+        "header": {
+          "text": "🎯 Habit Tracker"
+        }
+      },
+      "healthTracker": {
+        "header": {
+          "text": "🏃 Health Tracker"
+        },
+        "steps-card": {
+          "title": "👟 Steps"
+        },
+        "steps-input": {
+          "placeholder": "Steps"
+        },
+        "water-1": {
+          "text": "+1 cup"
+        },
+        "water-2": {
+          "text": "+2 cups"
+        },
+        "water-3": {
+          "text": "+3 cups"
+        },
+        "water-card": {
+          "title": "💧 Water"
+        }
+      },
+      "loanCalculator": {
+        "calc-btn": {
+          "text": "Calculate"
+        },
+        "header": {
+          "text": "🏠 Loan Calculator"
+        },
+        "interest-card": {
+          "title": "Interest"
+        },
+        "monthly-card": {
+          "title": "Monthly Payment"
+        },
+        "principal-input": {
+          "label": "Loan Amount"
+        },
+        "rate-input": {
+          "label": "Annual Rate (%)"
+        },
+        "total-card": {
+          "title": "Total Payment"
+        },
+        "years-input": {
+          "label": "Loan Term (years)"
+        }
+      },
+      "notes": {
+        "header": {
+          "text": "📝 Quick Notes"
+        },
+        "note-content": {
+          "placeholder": "Write down your thoughts..."
+        },
+        "note-title": {
+          "label": "Title",
+          "placeholder": "Title"
+        },
+        "notes-list": {
+          "emptyText": "No notes yet"
+        },
+        "save-btn": {
+          "text": "Save Note"
+        },
+        "search": {
+          "placeholder": "🔍 Search notes..."
+        }
+      },
+      "pomodoro": {
+        "break-btn": {
+          "text": "Break 5 min"
+        },
+        "header": {
+          "text": "🍅 Pomodoro Timer"
+        },
+        "long-break-btn": {
+          "text": "Long Break 15 min"
+        },
+        "pause-btn": {
+          "text": "Pause"
+        },
+        "reset-btn": {
+          "text": "Reset"
+        },
+        "start-btn": {
+          "text": "Start"
+        },
+        "work-btn": {
+          "text": "Work 25 min"
+        }
+      },
+      "survey": {
+        "desc": {
+          "text": "Please answer the following questions"
+        },
+        "q1": {
+          "label": "Your Name"
+        },
+        "q2": {
+          "label": "Satisfaction",
+          "options": [
+            {
+              "label": "Very Satisfied",
+              "value": "very"
+            },
+            {
+              "label": "Satisfied",
+              "value": "good"
+            },
+            {
+              "label": "Neutral",
+              "value": "neutral"
+            },
+            {
+              "label": "Dissatisfied",
+              "value": "poor"
+            }
+          ]
+        },
+        "q3": {
+          "label": "Additional Suggestions"
+        },
+        "submit-btn": {
+          "text": "Submit"
+        },
+        "title": {
+          "text": "📋 Quick Survey"
+        }
+      },
+      "timer": {
+        "10min-btn": {
+          "text": "10 min"
+        },
+        "1min-btn": {
+          "text": "1 min"
+        },
+        "5min-btn": {
+          "text": "5 min"
+        },
+        "header": {
+          "text": "⏱️ Timer"
+        },
+        "pause-btn": {
+          "text": "Pause"
+        },
+        "reset-btn": {
+          "text": "Reset"
+        },
+        "start-btn": {
+          "text": "Start"
+        }
+      },
+      "tipCalculator": {
+        "bill-input": {
+          "label": "Bill Amount"
+        },
+        "header": {
+          "text": "💰 Tip Calculator"
+        },
+        "people-input": {
+          "label": "People"
+        },
+        "tip-card": {
+          "title": "Tip"
+        },
+        "tip-slider": {
+          "label": "Tip (%)"
+        },
+        "total-card": {
+          "title": "Per Person"
+        }
+      },
+      "todo": {
+        "add-btn": {
+          "text": "Add"
+        },
+        "due-date": {
+          "placeholder": "Due date"
+        },
+        "filter-all": {
+          "text": "All"
+        },
+        "filter-done": {
+          "text": "Completed"
+        },
+        "filter-pending": {
+          "text": "Pending"
+        },
+        "header": {
+          "text": "✅ Todo List"
+        },
+        "task-input": {
+          "placeholder": "Add a new task..."
+        },
+        "task-list": {
+          "emptyText": "No tasks yet"
+        }
+      }
+    }
+  },
+  "a2uiTemplates": {
+    "runtime": {
+      "ageYears": "{count} years old",
+      "bmiNormal": "Normal",
+      "bmiObese": "Obese",
+      "bmiOverweight": "Overweight",
+      "bmiUnderweight": "Underweight",
+      "habitCompletedToday": "{count} completed today",
+      "habitStreak": "{count} day streak",
+      "itemCount": "{count} items",
+      "nextBirthday": "{count} days until the next birthday",
+      "noteCount": "{count} notes",
+      "taskCompleted": "{count} completed",
+      "taskPending": "{count} pending",
+      "untitledNote": "Untitled"
+    },
+    "templates": {
+      "calculator": {
+        "description": "A basic calculator for arithmetic operations",
+        "name": "Calculator",
+        "tags": [
+          "math",
+          "calculator",
+          "utility"
+        ]
+      },
+      "contact-form": {
+        "components": {
+          "email-input": {
+            "label": "Email Address",
+            "placeholder": "john@example.com"
+          },
+          "first-name": {
+            "label": "First Name",
+            "placeholder": "John"
+          },
+          "last-name": {
+            "label": "Last Name",
+            "placeholder": "Doe"
+          },
+          "message-input": {
+            "label": "Message",
+            "placeholder": "Tell us how we can help..."
+          },
+          "privacy-notice": {
+            "text": "We respect your privacy."
+          },
+          "subject-select": {
+            "label": "Subject",
+            "options": [
+              {
+                "label": "General Inquiry",
+                "value": "general"
+              },
+              {
+                "label": "Technical Support",
+                "value": "support"
+              },
+              {
+                "label": "Sales Question",
+                "value": "sales"
+              },
+              {
+                "label": "Feedback",
+                "value": "feedback"
+              },
+              {
+                "label": "Other",
+                "value": "other"
+              }
+            ],
+            "placeholder": "Select a topic..."
+          },
+          "submit-btn": {
+            "text": "Send Message"
+          },
+          "subtitle": {
+            "text": "We'd love to hear from you!"
+          },
+          "title": {
+            "text": "✉️ Contact Us"
+          }
+        },
+        "description": "A professional contact form with validation",
+        "name": "Contact Form",
+        "tags": [
+          "contact",
+          "form",
+          "email",
+          "support"
+        ]
+      },
+      "data-dashboard": {
+        "components": {
+          "activity-table": {
+            "columns": [
+              {
+                "header": "Date",
+                "key": "date",
+                "type": "date"
+              },
+              {
+                "header": "Event",
+                "key": "event"
+              },
+              {
+                "header": "User",
+                "key": "user"
+              },
+              {
+                "align": "right",
+                "header": "Value",
+                "key": "value",
+                "type": "number"
+              }
+            ]
+          },
+          "chart-section": {
+            "title": "Monthly Trends"
+          },
+          "refresh-btn": {
+            "text": "Refresh"
+          },
+          "stat-growth": {
+            "title": "Growth"
+          },
+          "stat-revenue": {
+            "title": "Revenue"
+          },
+          "stat-users": {
+            "title": "Total Users"
+          },
+          "table-section": {
+            "title": "Recent Activity"
+          },
+          "title": {
+            "text": "📊 Analytics Dashboard"
+          }
+        },
+        "dataModel": {
+          "activityData": [
+            {
+              "date": "2024-01-15",
+              "event": "New signup",
+              "id": 1,
+              "user": "John Doe",
+              "value": 1
+            },
+            {
+              "date": "2024-01-15",
+              "event": "Purchase",
+              "id": 2,
+              "user": "Jane Smith",
+              "value": 99
+            },
+            {
+              "date": "2024-01-14",
+              "event": "Upgrade",
+              "id": 3,
+              "user": "Bob Wilson",
+              "value": 49
+            }
+          ],
+          "chartData": [
+            {
+              "month": "Jan",
+              "revenue": 5000,
+              "users": 1200
+            },
+            {
+              "month": "Feb",
+              "revenue": 6200,
+              "users": 1400
+            },
+            {
+              "month": "Mar",
+              "revenue": 7800,
+              "users": 1800
+            },
+            {
+              "month": "Apr",
+              "revenue": 8500,
+              "users": 2100
+            },
+            {
+              "month": "May",
+              "revenue": 9200,
+              "users": 2500
+            },
+            {
+              "month": "Jun",
+              "revenue": 10500,
+              "users": 2800
+            }
+          ]
+        },
+        "description": "A dashboard displaying charts and statistics",
+        "name": "Data Dashboard",
+        "tags": [
+          "dashboard",
+          "analytics",
+          "charts",
+          "data"
+        ]
+      },
+      "expense-tracker": {
+        "components": {
+          "add-btn": {
+            "text": "Add Expense"
+          },
+          "amount-input": {
+            "label": "Amount"
+          },
+          "category-row": {
+            "label": "Category",
+            "options": [
+              {
+                "label": "🍔 Food",
+                "value": "food"
+              },
+              {
+                "label": "🚗 Transport",
+                "value": "transport"
+              },
+              {
+                "label": "🛍️ Shopping",
+                "value": "shopping"
+              },
+              {
+                "label": "🎬 Entertainment",
+                "value": "entertainment"
+              },
+              {
+                "label": "📦 Other",
+                "value": "other"
+              }
+            ]
+          },
+          "desc-input": {
+            "label": "What",
+            "placeholder": "Description..."
+          },
+          "expenses-list": {
+            "emptyText": "No expenses recorded"
+          },
+          "header": {
+            "text": "💰 Expense Tracker"
+          },
+          "today-label": {
+            "text": "Today"
+          },
+          "total-label": {
+            "text": "Total Spent"
+          }
+        },
+        "description": "Track your daily expenses and budget",
+        "name": "Expense Tracker",
+        "tags": [
+          "expenses",
+          "money",
+          "budget",
+          "finance",
+          "tracking"
+        ]
+      },
+      "habit-tracker": {
+        "components": {
+          "add-btn": {
+            "text": "Add"
+          },
+          "habit-input": {
+            "placeholder": "New habit..."
+          },
+          "habits-list": {
+            "emptyText": "No habits yet. Add one above!"
+          },
+          "header": {
+            "text": "🎯 Habit Tracker"
+          }
+        },
+        "dataModel": {
+          "stats": {
+            "streakText": "0 day streak",
+            "todayText": "0 completed today"
+          }
+        },
+        "description": "Track your daily habits and build streaks",
+        "name": "Habit Tracker",
+        "tags": [
+          "habits",
+          "tracking",
+          "daily",
+          "goals",
+          "productivity"
+        ]
+      },
+      "notes": {
+        "components": {
+          "header": {
+            "text": "📝 Quick Notes"
+          },
+          "note-content-input": {
+            "placeholder": "Write your note here..."
+          },
+          "note-title-input": {
+            "label": "Title",
+            "placeholder": "Note title"
+          },
+          "save-btn": {
+            "text": "Save Note"
+          },
+          "search-row": {
+            "placeholder": "🔍 Search notes..."
+          }
+        },
+        "dataModel": {
+          "notesCountText": "0 notes"
+        },
+        "description": "A simple note-taking app with search",
+        "name": "Quick Notes",
+        "tags": [
+          "notes",
+          "writing",
+          "productivity"
+        ]
+      },
+      "profile-card": {
+        "components": {
+          "avatar": {
+            "alt": "Avatar"
+          },
+          "follow-btn": {
+            "text": "Follow"
+          },
+          "followers-label": {
+            "text": "Followers"
+          },
+          "following-label": {
+            "text": "Following"
+          },
+          "message-btn": {
+            "text": "Message"
+          },
+          "posts-label": {
+            "text": "Posts"
+          }
+        },
+        "dataModel": {
+          "profile": {
+            "bio": "Building great products with code.",
+            "location": "San Francisco, CA",
+            "name": "John Doe",
+            "title": "Software Developer"
+          }
+        },
+        "description": "Display user profile information",
+        "name": "Profile Card",
+        "tags": [
+          "profile",
+          "user",
+          "card",
+          "social"
+        ]
+      },
+      "shopping-list": {
+        "components": {
+          "add-btn": {
+            "text": "Add"
+          },
+          "clear-btn": {
+            "text": "Clear All"
+          },
+          "item-input": {
+            "placeholder": "Item name..."
+          },
+          "items-list": {
+            "emptyText": "Your shopping list is empty"
+          },
+          "qty-input": {
+            "placeholder": "Qty"
+          },
+          "title": {
+            "text": "🛒 Shopping List"
+          }
+        },
+        "dataModel": {
+          "totalText": "0 items"
+        },
+        "description": "Simple grocery and shopping list manager",
+        "name": "Shopping List",
+        "tags": [
+          "shopping",
+          "grocery",
+          "list",
+          "productivity"
+        ]
+      },
+      "survey-form": {
+        "components": {
+          "clear-btn": {
+            "text": "Clear"
+          },
+          "description": {
+            "text": "Help us improve by answering a few questions"
+          },
+          "email-field": {
+            "label": "Email Address",
+            "placeholder": "your@email.com"
+          },
+          "feedback-field": {
+            "label": "Additional Feedback",
+            "placeholder": "Tell us more about your experience..."
+          },
+          "name-field": {
+            "label": "Your Name",
+            "placeholder": "Enter your name"
+          },
+          "rating-label": {
+            "text": "How would you rate your experience?"
+          },
+          "submit-btn": {
+            "text": "Submit"
+          },
+          "title": {
+            "text": "📋 Quick Survey"
+          }
+        },
+        "dataModel": {
+          "form": {
+            "ratingText": "5/10 - Average"
+          }
+        },
+        "description": "A customizable survey or feedback collection form",
+        "name": "Survey Form",
+        "tags": [
+          "survey",
+          "feedback",
+          "form",
+          "questionnaire"
+        ]
+      },
+      "timer": {
+        "components": {
+          "header": {
+            "text": "⏱️ Timer"
+          },
+          "pause-btn": {
+            "text": "Pause"
+          },
+          "preset-1": {
+            "text": "1 min"
+          },
+          "preset-10": {
+            "text": "10 min"
+          },
+          "preset-25": {
+            "text": "25 min"
+          },
+          "preset-5": {
+            "text": "5 min"
+          },
+          "reset-btn": {
+            "text": "Reset"
+          },
+          "start-btn": {
+            "text": "Start"
+          }
+        },
+        "description": "A countdown timer and stopwatch app",
+        "name": "Timer",
+        "tags": [
+          "timer",
+          "stopwatch",
+          "countdown",
+          "time"
+        ]
+      },
+      "todo-list": {
+        "components": {
+          "add-btn": {
+            "text": "Add"
+          },
+          "header": {
+            "text": "📝 My Tasks"
+          },
+          "task-input": {
+            "placeholder": "Enter a new task..."
+          },
+          "task-list": {
+            "emptyText": "No tasks yet. Add one above!"
+          }
+        },
+        "dataModel": {
+          "stats": {
+            "completedText": "0 completed",
+            "pendingText": "0 pending"
+          }
+        },
+        "description": "A simple task management app with add, complete, and delete functionality",
+        "name": "Todo List",
+        "tags": [
+          "tasks",
+          "productivity",
+          "list"
+        ]
+      },
+      "unit-converter": {
+        "components": {
+          "convert-btn": {
+            "text": "Convert"
+          },
+          "from-unit": {
+            "label": "From",
+            "options": [
+              {
+                "label": "Meter",
+                "value": "m"
+              },
+              {
+                "label": "Centimeter",
+                "value": "cm"
+              },
+              {
+                "label": "Feet",
+                "value": "ft"
+              }
+            ]
+          },
+          "header": {
+            "text": "🔄 Unit Converter"
+          },
+          "input-row": {
+            "label": "Value"
+          },
+          "result-label": {
+            "text": "Result"
+          },
+          "to-unit": {
+            "label": "To",
+            "options": [
+              {
+                "label": "Meter",
+                "value": "m"
+              },
+              {
+                "label": "Centimeter",
+                "value": "cm"
+              },
+              {
+                "label": "Feet",
+                "value": "ft"
+              }
+            ]
+          },
+          "type-select": {
+            "label": "Type",
+            "options": [
+              {
+                "label": "Length",
+                "value": "length"
+              },
+              {
+                "label": "Weight",
+                "value": "weight"
+              },
+              {
+                "label": "Temperature",
+                "value": "temperature"
+              }
+            ]
+          }
+        },
+        "description": "Convert between different units of measurement",
+        "name": "Unit Converter",
+        "tags": [
+          "converter",
+          "units",
+          "utility",
+          "measurement"
+        ]
+      },
+      "weather": {
+        "components": {
+          "humidity-label": {
+            "text": "💧 Humidity"
+          },
+          "uv-label": {
+            "text": "☀️ UV"
+          },
+          "wind-label": {
+            "text": "💨 Wind"
+          }
+        },
+        "dataModel": {
+          "weather": {
+            "condition": "Partly Cloudy",
+            "location": "San Francisco, CA",
+            "uv": "Moderate",
+            "wind": "12 mph"
+          }
+        },
+        "description": "Display current weather information",
+        "name": "Weather Widget",
+        "tags": [
+          "weather",
+          "widget",
+          "utility"
+        ]
+      }
+    }
   },
   "account": {
     "gate": {
@@ -1659,6 +2759,7 @@
     "versionRestored": "Version restored",
     "words": "words",
     "workspace": {
+      "allWorkspace": "All workspace",
       "card": {
         "cancel": "Cancel",
         "discardFile": "Discard this file's changes",
@@ -1677,6 +2778,7 @@
         "undoSuccess": "Workspace changes undone"
       },
       "close": "Close workspace",
+      "currentTask": "Current task",
       "missingProject": {
         "description": "Link this conversation to a project before editing workspace files.",
         "title": "No project linked"
@@ -1690,13 +2792,11 @@
         "title": "No conversation selected"
       },
       "mobileTitle": "Workspace",
-      "scopeLabel": "Workspace scope",
-      "currentTask": "Current task",
-      "allWorkspace": "All workspace",
       "review": "Review",
       "reviewChanges": "Changes",
       "reviewDiff": "Diff",
       "reviewEmpty": "Select a changed file to review its diff",
+      "scopeLabel": "Workspace scope",
       "taskResources": {
         "agent": "Agent",
         "allOrigins": "All sources",
@@ -1708,9 +2808,9 @@
         "authorizeOnce": "Authorize once",
         "binarySource": "Binary resources do not have a text source preview.",
         "bytes": "{count} bytes",
-        "created": "Created",
         "conflictApplyTask": "Apply task version",
         "conflictKeepCurrent": "Keep current version",
+        "created": "Created",
         "deleted": "Deleted",
         "diff": "Diff",
         "diffUnavailable": "No text diff is available.",
@@ -1733,12 +2833,12 @@
         "sensitiveConfirm": "Authorize this one sensitive resource operation? Its contents remain on the execution host.",
         "sensitiveDescription": "This path may contain credentials or secrets. Each read or download requires explicit authorization and remote control.",
         "source": "Source",
-        "statusFilter": "Filter by change type",
         "staticPreview": "Static preview",
+        "statusFilter": "Filter by change type",
         "undo": "Undo agent changes",
         "undoUnavailableIrreversible": "This application was explicitly made irreversible because its inverse data was not retained.",
-        "unpin": "Unpin task",
         "unknown": "External",
+        "unpin": "Unpin task",
         "upload": "Upload",
         "user": "User"
       },
@@ -2218,6 +3318,16 @@
       "stop": "Stop",
       "stopReplay": "Stop replay",
       "title": "Record actions"
+    },
+    "remote": {
+      "canvas": "Remote browser canvas",
+      "closePage": "Close page",
+      "error": "Remote browser unavailable ({code})",
+      "humanControl": "You're controlling",
+      "takeover": "Take control",
+      "untitledPage": "Untitled page",
+      "url": "Remote browser URL",
+      "waiting": "Waiting for the remote browser…"
     },
     "screenshot": {
       "failed": "Could not capture the preview",
@@ -3248,6 +4358,11 @@
       "hideArtifacts": "Hide artifacts panel",
       "hideConversations": "Hide conversation list",
       "insights": "Session insights",
+      "memoryInherit": "Inherit app setting",
+      "memoryLearn": "Learn from this chat",
+      "memoryOff": "Off",
+      "memoryOn": "On",
+      "memoryUse": "Use memories in this chat",
       "noApiKey": "No API key",
       "permissionModeAppDefault": "Use app default",
       "permissionModeLabel": "Permission mode",
@@ -3285,6 +4400,7 @@
           "actions": "Session actions",
           "behavior": "Behavior",
           "display": "Display",
+          "memory": "Memory",
           "role": "Role & abilities",
           "status": "Status"
         }
@@ -4481,6 +5597,7 @@
         "plugins": "Plugins",
         "scheduler": "Scheduler",
         "settings": "Settings",
+        "sites": "Sites",
         "skills": "Skills",
         "twin": "Twin Workbench",
         "workflows": "Workflows"
@@ -7884,9 +9001,16 @@
   },
   "memory": {
     "add": {
+      "agentIdLabel": "Agent ID",
+      "branchLabel": "Branch (optional)",
       "cancel": "Cancel",
-      "description": "Manually save a durable fact. Stored in global scope with explicit provenance.",
+      "characterIdLabel": "Character ID",
+      "description": "Manually save a durable fact with explicit provenance and an optional narrow scope.",
       "importanceLabel": "Importance",
+      "pathPatternLabel": "Path prefix (optional)",
+      "projectIdLabel": "Project ID",
+      "projectIdOptionalLabel": "Project ID (optional)",
+      "scopeLabel": "Scope",
       "submit": "Add memory",
       "tagsLabel": "Tags",
       "tagsPlaceholder": "comma, separated, tags",
@@ -7910,22 +9034,30 @@
       "unpin": "Unpin"
     },
     "detail": {
+      "auditTitle": "Audit history",
       "cancel": "Cancel",
       "close": "Close",
+      "conflictGone": "The conflicting memory was deleted.",
+      "conflictsWith": "Conflicts with",
       "deleteConfirm": {
         "cancel": "Cancel",
         "confirm": "Delete",
         "description": "This permanently removes the memory. This can't be undone.",
         "title": "Delete this memory?"
       },
+      "evidenceTitle": "Evidence records",
       "fields": {
         "accessCount": "Recalled",
         "archivedAt": "Archived",
+        "contamination": "Context trust",
         "created": "Created",
+        "evidence": "Evidence",
         "importance": "Importance",
         "indexed": "Indexed",
         "key": "Key",
         "lastUsed": "Last used",
+        "review": "Review",
+        "scope": "Scope",
         "updated": "Updated",
         "version": "Version"
       },
@@ -7933,6 +9065,7 @@
       "next": "Next memory",
       "no": "No",
       "previous": "Previous memory",
+      "recordCount": "{count, plural, one {# record} other {# records}}",
       "replacedBy": "Replaced by",
       "replacedByGone": "The replacement was deleted.",
       "save": "Save",
@@ -7941,6 +9074,18 @@
       "tagsPlaceholder": "comma, separated, tags",
       "textLabel": "Text",
       "yes": "Yes"
+    },
+    "governance": {
+      "clean": "Clean",
+      "conflict": "Conflict",
+      "external-context": "External context",
+      "legacy": "Legacy / no evidence",
+      "markConflict": "Mark conflict",
+      "markVerified": "Mark verified",
+      "supported": "Evidence-backed",
+      "unknown": "Unknown",
+      "unreviewed": "Unreviewed",
+      "verified": "Verified"
     },
     "panel": {
       "accessedRelative": "used {time}",
@@ -7999,9 +9144,11 @@
       "user": "Auto (chat)"
     },
     "scopes": {
+      "agent": "Agent",
       "all": "All scopes",
       "character": "Character",
-      "global": "Global"
+      "global": "Global",
+      "workspace": "Workspace"
     },
     "types": {
       "episodic": "Event",
@@ -8335,6 +9482,33 @@
         "title": "Push notifications"
       },
       "pushTokenFailed": "Couldn't tell the desktop about this phone's push token ({reason}).",
+      "remoteBrowser": {
+        "description": "Run an isolated Chromium session on the paired workspace runtime and stream it to Cognia.",
+        "domains": {
+          "description": "Only explicitly granted domains may be opened by this workspace.",
+          "domain": "Domain",
+          "grant": "Grant domain",
+          "placeholder": "example.com",
+          "revoke": "Revoke {domain}",
+          "title": "Allowed domains"
+        },
+        "enable": "Enable remote browser",
+        "error": "Remote browser error: {message}",
+        "experimental": "Experimental",
+        "gateHint": "Both this setting and the server rollout gate must be enabled.",
+        "operationFailed": "The remote browser setting could not be saved.",
+        "profiles": {
+          "create": "Create profile",
+          "description": "Persistent profiles retain browser state inside the selected workspace.",
+          "ephemeral": "Ephemeral session",
+          "name": "Profile name",
+          "placeholder": "Research profile",
+          "title": "Browser profiles"
+        },
+        "title": "Remote browser",
+        "toggle": "Toggle remote browser",
+        "workspaceHint": "Select a workspace before managing profiles or domains."
+      },
       "remoteControl": {
         "blocked": "Remote control not enabled ({reason}).",
         "col": "Remote control",
@@ -9129,6 +10303,8 @@
     },
     "memory": {
       "empty": "No memories yet",
+      "queueForgetLabel": "Forget memory",
+      "queueUpdateLabel": "Update memory",
       "searchAria": "Search memories",
       "searchPlaceholder": "Search memories…",
       "title": "Memory"
@@ -9675,6 +10851,28 @@
     },
     "splash": {
       "label": "Starting cognia"
+    },
+    "standaloneSearch": {
+      "answerTitle": "Answer",
+      "backAria": "Back to Me",
+      "configureCta": "Configure providers",
+      "errors": {
+        "answer-failed": "Could not synthesize an answer",
+        "empty-query": "Enter a question",
+        "no-model-provider": "No model provider is configured",
+        "no-search-provider": "No web-search provider is configured",
+        "search-failed": "Web search failed"
+      },
+      "idleHint": "Ask a question to search the web and build a cited answer.",
+      "loading": "Searching and synthesizing…",
+      "modelUnavailableTitle": "Sources found, but no model is configured",
+      "noResults": "No sources found.",
+      "placeholder": "Ask a question about the web…",
+      "queryAria": "Web-search question",
+      "run": "Search",
+      "sourcesTitle": "Sources",
+      "stop": "Stop",
+      "title": "Web Search"
     },
     "subagents": {
       "backAria": "Back to Me",
@@ -15696,6 +16894,7 @@
           "description": "Applied to new characters and surfaces.",
           "enabledHelp": "New characters inherit this value.",
           "enabledLabel": "Enable A2UI by default",
+          "standardCatalog": "Cognia Standard Catalog",
           "title": "Global defaults"
         },
         "loading": "Loading…",
@@ -15705,10 +16904,22 @@
           "limitLabel": "LRU limit",
           "title": "Persistence"
         },
+        "saveFailed": "Failed to save: {error}",
         "widget": {
           "description": "Used when a surface widget omits the field.",
+          "hostStrategies": {
+            "artifact-preview": "Artifact preview",
+            "lazy-runtime": "Lazy runtime",
+            "native": "Native",
+            "sandboxed-html": "Sandboxed HTML"
+          },
           "hostStrategyLabel": "Host strategy",
           "themeLabel": "Theme",
+          "themes": {
+            "dark": "Dark",
+            "inherit": "Inherit app theme",
+            "light": "Light"
+          },
           "title": "Widget defaults"
         }
       },
@@ -16056,7 +17267,7 @@
             "name": "Code graph"
           },
           "coreFiles": {
-            "desc": "grep / glob / read / edit / write / bash — the full file-tool suite for non-Anthropic models. Mutating tools require approval.",
+            "desc": "Search, read, patch, shell, waitable background commands, and structured session tasks for non-Anthropic models. Filesystem and shell mutations require approval.",
             "name": "Core file tools"
           },
           "dependencyResearch": {
@@ -16818,6 +18029,19 @@
         "enabledLabel": "Enable background",
         "formats": "PNG, JPEG, WebP, GIF, AVIF · up to 32 MB",
         "galleryTitle": "Gallery",
+        "generator": {
+          "accent": "Generated accent color",
+          "action": "Generate matching theme",
+          "created": "A matching light/dark theme was created and activated.",
+          "description": "Extract a local accent color from this image and build a readable light/dark theme.",
+          "error": "Could not analyze this image. The wallpaper is unchanged.",
+          "themeName": "{name} palette",
+          "title": "Generate theme from wallpaper",
+          "variant": {
+            "dark": "Dark base",
+            "light": "Light base"
+          }
+        },
         "gradient": {
           "angle": "Angle",
           "end": "End",
@@ -19555,9 +20779,12 @@
         "save": "Save",
         "saved": "WebDAV settings saved.",
         "startup": {
+          "autoKeyUnavailable": "Auto-key is unavailable on this runtime.",
           "newerBody": "Another device uploaded a newer snapshot. Open backup settings to review and restore it.",
           "newerFound": "A newer backup is available on your WebDAV server.",
-          "restoreAction": "Restore"
+          "restoreAction": "Restore",
+          "scheduledMissingDestination": "Scheduled backup is enabled, but no writable destination folder is configured.",
+          "syncPassphraseLocked": "WebDAV upload was skipped because the sync passphrase is locked for this session."
         },
         "syncFailed": "Upload failed: {error}",
         "syncNow": "Sync now",
@@ -20601,22 +21828,42 @@
         "heading": "Enable long-term memory",
         "label": "Enable long-term memory"
       },
+      "externalContext": {
+        "description": "Do not learn automatically from turns that used web search, MCP, screen context, or connectors. Local code tools stay eligible.",
+        "heading": "Block external-context learning",
+        "label": "Block external-context learning"
+      },
+      "halfLife": {
+        "label": "Recency half-life (days)"
+      },
       "hybrid": {
         "description": "Combine semantic (vector) and keyword search when recalling.",
         "heading": "Hybrid retrieval",
         "label": "Hybrid retrieval"
       },
+      "learnFromChats": {
+        "description": "Learn durable facts from eligible chats in the background. Each chat can override this independently from recall.",
+        "heading": "Learn from chats",
+        "label": "Learn from chats"
+      },
       "manage": "Manage memories",
+      "maxIdle": {
+        "label": "Forget after unused days (0 = never)"
+      },
       "queryExpansion": {
         "description": "Widen the keyword leg with synonym expansion when recalling memories.",
         "heading": "Query expansion",
         "label": "Query expansion"
       },
+      "relevanceFloor": {
+        "label": "Minimum recall relevance"
+      },
       "scope": {
         "character": "Per character",
-        "description": "Where new memories are stored. Global is shared across all characters.",
+        "description": "Where new memories are stored. Narrower scopes override broader memories with the same stable key.",
         "global": "Global (all characters)",
-        "heading": "Default scope"
+        "heading": "Default scope",
+        "workspace": "Current workspace"
       },
       "temporary": {
         "description": "Pause memory for now — neither read nor write this session.",
@@ -20624,8 +21871,16 @@
         "label": "Temporary mode"
       },
       "title": "Memory",
+      "tokenBudget": {
+        "label": "Recall token budget"
+      },
       "topK": {
         "label": "Memories injected per turn"
+      },
+      "useMemory": {
+        "description": "Allow eligible chats to recall saved memories. Each chat can override this.",
+        "heading": "Use memories",
+        "label": "Use memories"
       }
     },
     "network": {
@@ -22191,6 +23446,10 @@
         "sound": "Sound",
         "visual": "Visual flash"
       },
+      "boldBrightColors": {
+        "helper": "Render bold ANSI text with the bright variant of its color.",
+        "label": "Bright colors for bold text"
+      },
       "colorScheme": {
         "auto": "Auto (follow app theme)",
         "darkGroup": "Dark schemes",
@@ -22213,8 +23472,20 @@
         "bar": "Bar",
         "blink": "Cursor blink",
         "block": "Block",
+        "inactiveBar": "Bar",
+        "inactiveBlock": "Block",
+        "inactiveLabel": "Inactive cursor",
+        "inactiveNone": "Hidden",
+        "inactiveOutline": "Outline",
+        "inactiveUnderline": "Underline",
         "label": "Cursor style",
-        "underline": "Underline"
+        "underline": "Underline",
+        "width": "Cursor width",
+        "widthHelper": "Cursor width applies to bar-style cursors and is clamped to 1–10 pixels."
+      },
+      "customGlyphs": {
+        "helper": "Use xterm's built-in box-drawing and block glyphs for crisp terminal UI.",
+        "label": "Custom terminal glyphs"
       },
       "exposeDockToAgents": {
         "helper": "Lets the chat agent drive your visible terminal tabs via the synthetic terminal_dock_* MCP tools. The agent shares the same PTY you see — one shell, one cwd, one history. Each tab requires per-session consent. Off by default.",
@@ -22311,6 +23582,10 @@
         "label": "Renderer",
         "webgl": "WebGL"
       },
+      "rescaleOverlappingGlyphs": {
+        "helper": "Rescale wide glyphs that would otherwise overlap adjacent terminal cells.",
+        "label": "Rescale overlapping glyphs"
+      },
       "runInDockTimeout": {
         "helper": "How long the chat 'Run in dock' affordance and the agent's terminal_dock_write tool wait for a command_end OSC 633 event before timing out. Per-call overrides win; this is the floor. Range 5–600, default 60.",
         "label": "Run-in-dock timeout (seconds)"
@@ -22342,6 +23617,10 @@
       "shellIntegration": {
         "helper": "Injects OSC 633 prompt markers (bash / zsh / pwsh) so the dock can show command status and cwd badges. Disable for shells that mis-parse the sequences.",
         "label": "Enable shell integration"
+      },
+      "smoothScrolling": {
+        "helper": "Animate wheel and touchpad scrolling instead of jumping between terminal rows.",
+        "label": "Smooth scrolling"
       },
       "stickyScroll": {
         "helper": "Pin the current command's prompt line at the top of the viewport while you scroll through its output.",
@@ -22586,6 +23865,178 @@
   },
   "shortcuts": {
     "openLogs": "Open Log Panel (Ctrl+Shift+L)"
+  },
+  "sites": {
+    "access": {
+      "description": "Authoring permissions stay in Cognia. Visitor policy is reconciled with Cloudflare Access.",
+      "hostname": "Protected hostname",
+      "mode": "Visitor access mode",
+      "modes": {
+        "domains": "Email domains",
+        "identities": "Specific identities",
+        "organization": "Organization",
+        "private": "Private (deny all)",
+        "public": "Public"
+      },
+      "title": "Visitor access",
+      "values": "One email, domain, or organization ID per line"
+    },
+    "actions": {
+      "addDomain": "Add domain",
+      "approveTool": "Approve exact tool bytes",
+      "build": "Build saved version",
+      "cancel": "Cancel",
+      "confirmDeleteMetadata": "Delete metadata",
+      "confirmPurge": "Purge managed resources",
+      "create": "Create Site",
+      "deleteMetadata": "Delete Site metadata",
+      "deploy": "Deploy",
+      "loadAnalytics": "Load last 24 hours of analytics",
+      "loadLogs": "Load last 24 hours of logs",
+      "preview": "Start preview",
+      "provision": "Provision bindings",
+      "purge": "Purge managed resources",
+      "reconcile": "Reconcile provider state",
+      "refresh": "Refresh Sites",
+      "remove": "Remove",
+      "restore": "Restore",
+      "rollback": "Redeploy / Roll back",
+      "saveAccess": "Apply access policy",
+      "saveAuthoring": "Save authoring access",
+      "saveEnvironment": "Save environment revision",
+      "saveToken": "Verify and save token",
+      "stopPreview": "Stop preview",
+      "takeDown": "Take down",
+      "upload": "Upload version"
+    },
+    "authoring": {
+      "accountsPlaceholder": "One Cognia account ID per line",
+      "deployers": "Deployer account IDs",
+      "editors": "Editor account IDs"
+    },
+    "build": {
+      "description": "Cognia reads .cognia/hosting.json and runs its argv commands inside the OS sandbox.",
+      "networkHosts": "Approved install hosts",
+      "packageManager": "Package manager snapshot",
+      "runtime": "Runtime snapshot",
+      "title": "Confined build and local preview"
+    },
+    "confirm": {
+      "deleteMetadata": {
+        "description": "This removes the deleted Site, versions, operation history, and preserved-resource report from Cognia. Provider resources are not changed.",
+        "title": "Delete Cognia Site metadata?"
+      },
+      "purge": {
+        "description": "This permanently deletes eligible Cognia-managed resources. Adopted and shared provider resources remain intact and will be reported as preserved.",
+        "title": "Purge managed provider resources?"
+      }
+    },
+    "create": {
+      "accountId": "Cloudflare account ID",
+      "name": "Site name",
+      "project": "Project",
+      "subpath": "Source subpath (optional)",
+      "workerName": "Worker name"
+    },
+    "deploymentStatus": {
+      "active": "Active",
+      "deploying": "Deploying",
+      "failed": "Failed",
+      "pending": "Pending",
+      "superseded": "Superseded",
+      "taken-down": "Taken down"
+    },
+    "desktopOnly": {
+      "description": "Builds, provider credentials, and previews stay on the selected local desktop host.",
+      "title": "Sites requires Cognia Desktop"
+    },
+    "domains": {
+      "description": "Attach and reconcile Cloudflare Worker custom domains.",
+      "hostname": "docs.example.com",
+      "title": "Custom domains"
+    },
+    "empty": "Create or select a Site to begin.",
+    "environment": {
+      "description": "Plain values are versioned. Secret values go only to this host's OS keyring.",
+      "secrets": "Secrets",
+      "secretsPlaceholder": "API_TOKEN=secret-value",
+      "title": "Environment",
+      "variables": "Variables",
+      "variablesPlaceholder": "API_ORIGIN=https://api.example.com"
+    },
+    "errors": {
+      "artifactRequired": "The saved version artifact is unavailable.",
+      "environmentRequired": "Save an environment revision first.",
+      "projectRoot": "The selected project has no workspace root.",
+      "wranglerRequired": "Choose an approved absolute Wrangler binary path."
+    },
+    "feedback": {
+      "success": "Site state updated"
+    },
+    "lifecycle": {
+      "active": "Active",
+      "deleted": "Deleted",
+      "deleting": "Deleting",
+      "taken-down": "Taken down"
+    },
+    "observability": {
+      "description": "Query Cloudflare Worker logs and request analytics without copying them into another runtime.",
+      "empty": "No query has run yet.",
+      "title": "Provider observability"
+    },
+    "operationStatus": {
+      "cancelled": "Cancelled",
+      "failed": "Failed",
+      "queued": "Queued",
+      "running": "Running",
+      "succeeded": "Succeeded",
+      "waiting-reconcile": "Waiting for reconciliation"
+    },
+    "operationType": {
+      "access": "Access",
+      "build": "Build",
+      "deploy": "Deploy",
+      "domain": "Domain",
+      "environment": "Environment",
+      "provision": "Provision",
+      "purge": "Purge",
+      "reconcile": "Reconcile",
+      "restore": "Restore",
+      "takedown": "Take down",
+      "upload": "Upload"
+    },
+    "operations": {
+      "description": "Durable lifecycle events used for crash recovery and provider reconciliation.",
+      "empty": "No lifecycle operations yet.",
+      "eventCount": "{count, plural, one {# event} other {# events}}",
+      "title": "Operation journal"
+    },
+    "provider": {
+      "account": "Account",
+      "description": "The API token is verified before it is stored in the local OS keyring.",
+      "title": "Cloudflare provider",
+      "token": "Cloudflare API token",
+      "worker": "Worker"
+    },
+    "subtitle": "Build, preview, and publish from Cognia",
+    "tabs": {
+      "access": "Access",
+      "build": "Build & Preview",
+      "domains": "Domains",
+      "observability": "Logs & Analytics",
+      "provider": "Provider",
+      "versions": "Versions"
+    },
+    "title": "Sites",
+    "versionStatus": {
+      "building": "Building",
+      "failed": "Failed",
+      "ready": "Ready"
+    },
+    "versions": {
+      "version": "Version {sequence}",
+      "wranglerPath": "Absolute path to the approved Wrangler binary"
+    }
   },
   "skills": {
     "ai": {
@@ -23410,6 +24861,35 @@
         "list": "List"
       },
       "timelineView": "Timeline view"
+    },
+    "worktrees": {
+      "baseRefLabel": "Start point (optional)",
+      "baseRefPlaceholder": "HEAD, branch, tag, or commit",
+      "branchLabel": "New branch",
+      "branchPlaceholder": "feature/my-change",
+      "chooseDirectory": "Choose",
+      "count": "{count, plural, one {# worktree} other {# worktrees}}",
+      "create": "Create Worktree",
+      "created": "Worktree created",
+      "deleteBranch": "Also delete the branch",
+      "deleteBranchDescription": "Permanently delete {branch} after removing the worktree.",
+      "description": "Create and manage parallel checkouts of this repository.",
+      "detached": "Detached HEAD",
+      "empty": "No worktrees found",
+      "error": "Worktree operation failed: {message}",
+      "forceRemove": "Force removal",
+      "forceRemoveDescription": "Discard uncommitted changes in this worktree.",
+      "main": "Main",
+      "open": "Open",
+      "pathLabel": "Empty directory",
+      "pathPlaceholder": "Choose an empty directory",
+      "prune": "Prune stale",
+      "pruned": "Stale worktree records pruned",
+      "remove": "Remove Worktree",
+      "removeDescription": "Remove the linked worktree at {path}?",
+      "removeTitle": "Remove worktree?",
+      "removed": "Worktree removed",
+      "title": "Worktrees"
     }
   },
   "sourceVerification": {
@@ -24289,7 +25769,7 @@
     "codeGraph": "Code graph intelligence",
     "codeGraphDesc": "Structural code intelligence over a tree-sitter symbol graph (codegraph_search / node / callers / callees / impact / context / explore / files). Sub-millisecond queries grep can't answer: where a symbol is defined, who calls it, and blast radius. Read-only; desktop only.",
     "coreFiles": "Core file tools",
-    "coreFilesDesc": "grep / glob / read / ls / edit / multi_edit / write / bash / TodoWrite — the unified file-tool suite that gives non-Anthropic models full codebase access. Read-only tools run freely; mutating tools require per-call approval.",
+    "coreFilesDesc": "Full coding-agent toolkit for non-Anthropic models: search, read, patch, shell, waitable background commands, and structured session tasks with dependencies. Read-only tools run freely; filesystem and shell mutations require per-call approval.",
     "dependencyResearch": "Dependency source",
     "dependencyResearchDesc": "Clone a dependency's source repository into an ignored .cognia/clonedeps/ workspace (clone_dep_source / list_cloned_deps) so the agent can read library internals. HTTPS only, idempotent, no build scripts run. Desktop only.",
     "description": "Per-category toggles for the in-process cognia-tools MCP server. Each category exposes a different set of tools to the agent.",
@@ -24340,10 +25820,15 @@
       "coreGlob": "Find files by glob pattern, sorted by modification time (newest first).",
       "coreGrep": "Search file contents with a regex (ripgrep-backed; content / files / count modes).",
       "coreKillShell": "Terminate a background shell started with bash(run_in_background).",
+      "coreListShells": "List background shells with status, working directory, timing, and exit details.",
       "coreLs": "List a directory's entries (directories first).",
       "coreMultiEdit": "Apply multiple string replacements to one file atomically.",
       "coreNotebookEdit": "Edit a Jupyter notebook cell (replace / insert / delete) by cell id or number.",
       "coreRead": "Read a text file with line numbers; pages large files; lists directories.",
+      "coreTaskCreate": "Create a structured session task and return its stable id.",
+      "coreTaskGet": "Read one structured task with dependencies, owner, metadata, and timestamps.",
+      "coreTaskList": "List structured session tasks and their current dependency state.",
+      "coreTaskUpdate": "Update task state, details, ownership, metadata, dependencies, or delete it.",
       "coreTodoWrite": "Update the session task list shown to the user.",
       "coreWrite": "Create or overwrite a file (requires a prior read of existing files).",
       "currentTime": "Get the current date and time (UTC plus a localized string for a given timezone).",
@@ -26394,15 +27879,20 @@
           "hint": "Minimum time between fires for this workflow — guards against the workflow's own desktop actions re-triggering it.",
           "label": "Cooldown (ms)"
         },
-        "desktopOnly": "Desktop only — fires on live UI Automation events (v1: focus-changed on Windows); has no effect in the browser.",
+        "desktopOnly": "Desktop only — fires on native Windows UI Automation focus, structure, and property changes; has no effect in the browser.",
         "kinds": {
-          "hint": "Fire when any of the selected UI Automation events occur. v1 delivers focus-changed; the other kinds are pending.",
+          "hint": "Fire when any of the selected native UI Automation events occur.",
           "label": "Event kinds",
           "options": {
             "focus-changed": "Focus changed",
             "property-changed": "Property changed",
             "structure-changed": "Structure changed"
           }
+        },
+        "scope": {
+          "hint": "Optional UIA element reference. Events are limited to this element and its descendants.",
+          "label": "UIA element scope",
+          "placeholder": "Paste an element reference"
         }
       },
       "desktopFindElement": {
@@ -27280,22 +28770,42 @@
         }
       },
       "memoryRecall": {
+        "agentId": {
+          "label": "Agent ID"
+        },
+        "branch": {
+          "label": "Branch restriction"
+        },
         "characterId": {
           "label": "Character"
+        },
+        "path": {
+          "label": "Workspace-relative path"
+        },
+        "projectId": {
+          "label": "Project ID"
         },
         "query": {
           "label": "Query"
         },
         "scope": {
+          "agent": "Agent",
           "character": "Character",
           "global": "Global",
-          "label": "Scope"
+          "label": "Scope",
+          "workspace": "Workspace"
         },
         "topK": {
           "label": "Top K"
         }
       },
       "memoryStore": {
+        "agentId": {
+          "label": "Agent ID"
+        },
+        "branch": {
+          "label": "Branch restriction"
+        },
         "characterId": {
           "label": "Character"
         },
@@ -27303,16 +28813,24 @@
           "hint": "How defining this fact is. /remember uses 7.",
           "label": "Importance (1–10)"
         },
+        "pathPattern": {
+          "label": "Workspace-relative path prefix"
+        },
         "piiGate": {
           "block": "Block (fail the step)",
           "hint": "Memories persist durably — block (fail on PII) or redact placeholders. Cannot be disabled.",
           "label": "PII gate",
           "redact": "Redact placeholders"
         },
+        "projectId": {
+          "label": "Project ID"
+        },
         "scope": {
+          "agent": "Agent",
           "character": "Character",
           "global": "Global",
-          "label": "Scope"
+          "label": "Scope",
+          "workspace": "Workspace"
         },
         "text": {
           "hint": "One self-contained statement. Deduped against existing memories via the consolidator.",

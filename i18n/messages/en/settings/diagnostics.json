@@ -19,6 +19,8 @@
     "debugMode": "Debug mode",
     "debugModeHint": "Verbose logs from the SDK and any spawned MCP / sub-process. Look for them in the Tauri dev console or the sidecar log file.",
     "description": "Low-level toggles for debugging and experimental plugin behavior.",
+    "taskWorkspace": "Task resource workspace",
+    "taskWorkspaceHint": "Experimental. Run agents in isolated task workspaces, review their resources, and explicitly apply or undo attributed changes.",
     "title": "Developer flags"
   },
   "inboxTelemetry": {

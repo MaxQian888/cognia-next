@@ -90,6 +90,7 @@ pub const MENU_IDS: &[&str] = &[
     // Go
     "go-inbox",
     "go-workflows",
+    "go-sites",
     "go-twin",
     "go-skills",
     "go-plugins",

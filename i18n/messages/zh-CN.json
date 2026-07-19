@@ -1,5 +1,14 @@
 {
   "a2ui": {
+    "add": "添加",
+    "addComponent": "添加组件",
+    "addComponentDescription": "选择目录组件，并指定精确的父级槽位和位置。",
+    "addDataEntry": "添加数据项",
+    "addDataEntryAt": "在 {path} 添加数据项",
+    "addDataEntryDescription": "为 {path} 下的新数据项输入 JSON 值。",
+    "addRootDataEntry": "添加根数据项",
+    "advancedProperties": "高级属性",
+    "advancedPropertiesDescription": "以 JSON 编辑完整的非结构属性对象；组件身份和组件树引用会受到保护。",
     "aiGenerate": "AI 生成",
     "aiPaperAnalysis": "AI 论文分析",
     "aiRegeneratePrompt": "描述你想要修改的内容...",
@@ -32,7 +41,16 @@
     "appExported": "应用已导出",
     "appName": "应用名称",
     "appPreview": "应用预览",
+    "appRegenerated": "应用已重新生成",
     "appSaved": "应用已保存",
+    "append": "追加",
+    "appendDataEntry": "追加数据项",
+    "apply": "应用",
+    "applyDataModelJson": "应用完整数据模型 JSON",
+    "applyDataValue": "应用 {path} 的值",
+    "applyProperty": "应用 {property}",
+    "applyPropertyJson": "应用属性 JSON",
+    "applyStructuralMetadata": "应用 {property} 结构元数据",
     "askFollowUp": "追问",
     "author": "作者",
     "authorEmail": "邮箱",
@@ -42,6 +60,7 @@
     "basicInfo": "基本信息",
     "browseTemplates": "浏览预设模板",
     "cancel": "取消",
+    "cancelDataValueEdit": "取消编辑 {path} 的值",
     "cannotRedo": "无可重做操作",
     "cannotUndo": "无可撤销操作",
     "category": "分类",
@@ -54,8 +73,15 @@
     "clearErrors": "全部清除",
     "clearThumbnail": "清除缩略图",
     "close": "关闭",
+    "closePreview": "关闭预览",
+    "collapseComponent": "折叠组件",
+    "collapseDataPath": "折叠 {path}",
     "comparisonEmpty": "暂无对比数据。",
+    "completeDataModelJson": "完整数据模型 JSON",
+    "componentId": "组件 ID",
+    "componentMutationFailed": "无法应用组件变更，请检查目标位置后重试。",
     "componentTree": "组件",
+    "componentType": "组件类型",
     "continueWorking": "继续工作",
     "copied": "已复制!",
     "copiedExclamation": "已复制！",
@@ -63,28 +89,46 @@
     "copyAnalysis": "复制分析",
     "copyLink": "复制链接",
     "copyShareCode": "复制分享码",
+    "create": "创建",
     "createFirstApp": "创建第一个应用",
     "createStudio": "创建工作室",
     "created": "创建时间",
     "createdAt": "创建时间",
     "customApp": "自定义应用",
+    "dataArrayType": "数组（{count}）",
+    "dataEntryKey": "键",
+    "dataEntryValueJson": "值 JSON",
     "dataMode": "数据",
     "dataModel": "数据模型",
+    "dataModelKeyCount": "{count} 个键",
+    "dataObjectType": "对象（{count}）",
     "delete": "删除",
     "deleteApp": "删除应用",
     "deleteComponent": "删除组件",
     "deleteConfirmDescription": "确定要删除这个应用吗？此操作无法撤消。",
     "deleteConfirmTitle": "删除应用",
+    "deleteDataValueAt": "删除 {path} 的值",
+    "deleteDataValueDescription": "删除 {path} 及其所有嵌套数据？可从工作区工具栏撤销此修改。",
+    "deleteDataValueTitle": "删除数据值？",
+    "deleteFailed": "删除应用失败",
+    "deleting": "正在删除",
     "descriptionPlaceholder": "描述应用的功能和用途...",
+    "destination": "目标位置",
     "dismissError": "忽略",
     "download": "下载",
     "duplicate": "复制",
     "duplicateComponent": "复制组件",
     "editApp": "编辑",
+    "editCompleteDataModelJson": "编辑完整数据模型 JSON",
+    "editDataModelJson": "编辑数据模型 JSON",
+    "editDataModelJsonDescription": "以安全的 JSON 对象替换完整数据模型，支持修改嵌套对象和数组结构。",
+    "editDataValue": "编辑 {path} 的值",
     "editInfo": "编辑信息",
     "editMode": "编辑",
+    "editablePropertiesJson": "可编辑属性 JSON",
     "emailLabel": "邮箱",
     "emailPlaceholder": "email@example.com",
+    "emptyDataModel": "空数据模型",
     "errorBoundary": {
       "renderError": "{type} 渲染错误",
       "retry": "重试"
@@ -100,6 +144,8 @@
     "exampleTimerDesc": "倒计时",
     "exampleTodo": "待办",
     "exampleTodoDesc": "任务管理",
+    "expandComponent": "展开组件",
+    "expandDataPath": "展开 {path}",
     "export": "导出",
     "exportAllApps": "导出所有应用",
     "featureAI": "AI 生成",
@@ -123,6 +169,8 @@
     "gridView": "网格视图",
     "heroSubtitle": "一句话描述你想要的应用，AI 秒速生成",
     "heroTitle": "即刻构建迷你应用",
+    "hideComponentTree": "隐藏组件树",
+    "hidePropertiesPanel": "隐藏属性面板",
     "hubSummary": "在一个中枢里完成创建、续做和管理，随时回到你的迷你应用工作流。",
     "importApp": "导入应用",
     "importFromFile": "从文件导入",
@@ -168,12 +216,22 @@
       "untitled": "未命名",
       "user": "用户"
     },
+    "invalidDataEntry": "请输入唯一且安全的键，以及有效的 JSON 值。",
+    "invalidDataModelJson": "请输入键非空、数值有限的安全 JSON 对象。",
+    "invalidDataValue": "请输入有效 JSON，并保持完整数据模型安全。",
+    "invalidJson": "请先输入有效 JSON，再应用此属性。",
+    "invalidPropertyJson": "请输入仅包含可编辑属性的有效 JSON 对象。",
+    "invalidStructuralMetadata": "该修改无效，或会删除仍包含子组件的插槽。",
     "lastModified": "最后修改",
+    "latest": "最新",
     "listView": "列表视图",
     "loadMore": "加载更多",
     "manageApps": "管理已创建的应用",
     "metadata": "元数据",
     "missingFields": "缺少必填字段",
+    "move": "移动",
+    "moveComponent": "移动组件",
+    "moveComponentDescription": "将所选组件移动到精确的父级槽位和最终位置。",
     "myAppsTab": "我的",
     "nameLabel": "名称",
     "namePlaceholder": "作者名称",
@@ -183,11 +241,14 @@
     "noAuthorInfo": "暂无作者信息",
     "noComponentSelected": "未选中组件",
     "noDescription": "暂无描述",
+    "noEditableProperties": "此组件当前没有可编辑属性，可使用高级编辑器添加可选属性。",
     "noPapersFound": "未找到论文",
+    "noSurfaceLoaded": "未加载界面",
     "noTags": "暂无标签",
     "noTemplatesFound": "未找到模板",
     "noThumbnail": "暂无缩略图",
     "noVersions": "暂无版本",
+    "notSet": "未设置",
     "pageTitle": "迷你应用",
     "paperCardAdd": "加入",
     "paperCardAnalyze": "分析",
@@ -196,8 +257,13 @@
     "paperCardOpenAccess": "开放获取",
     "paperCardPdf": "PDF",
     "papersCount": "{count} 篇论文",
+    "position": "位置",
+    "positionHelp": "最终的从零开始位置（0–{max}）。",
     "previewMode": "预览",
+    "propertyDataPath": "{property} 数据路径",
+    "propertyFields": "属性字段",
     "propertyInspector": "属性",
+    "propertyJsonLabel": "{property} JSON",
     "publishCheck": "发布检查",
     "publishMissing": "需要补充以下信息：",
     "publishPrep": "发布准备",
@@ -207,6 +273,12 @@
     "published": "已发布",
     "publishedAt": "发布时间",
     "quickApps": "快速应用",
+    "quickPromptBmi": "BMI 计算器",
+    "quickPromptConverter": "单位换算器",
+    "quickPromptExpense": "支出追踪器",
+    "quickPromptHabit": "习惯追踪器",
+    "quickPromptPomodoro": "番茄钟",
+    "quickPromptTodo": "待办清单",
     "quickTry": "快速尝试：",
     "rating": "评分",
     "readyToPublish": "可以发布！",
@@ -214,12 +286,15 @@
     "redo": "重做",
     "refreshThumbnail": "刷新缩略图",
     "regenerate": "重新生成",
+    "regenerateAppDescription": "描述你希望如何重新生成这个应用。",
     "relatedTopics": "相关主题",
     "reset": "重置",
     "resetZoom": "重置缩放",
+    "resetZoomWithLevel": "重置缩放（{zoom}%）",
     "restoreVersion": "恢复",
     "resultsFor": "“{query}”的搜索结果",
     "richOutput": {
+      "loadingRuntime": "正在加载富媒体运行时...",
       "next": "下一步",
       "previous": "上一步",
       "richOutputFallback": "已降级展示",
@@ -228,7 +303,10 @@
     "run": "运行",
     "save": "保存",
     "saveApp": "保存",
+    "saveFailed": "保存应用更改失败",
+    "saving": "正在保存",
     "searchAndManageApps": "搜索、排序并快速回到已有应用，保持管理链路顺手。",
+    "searchComponents": "搜索组件类型...",
     "searchLoadMore": "加载更多结果",
     "searchLoading": "加载中...",
     "searchNoPapers": "未找到论文",
@@ -244,6 +322,7 @@
     "searchingPapers": "正在搜索论文...",
     "selectCategory": "选择分类",
     "selectComponent": "点击组件查看其属性",
+    "selectDestination": "选择目标位置",
     "selectPlaceholder": "请选择...",
     "setThumbnail": "设置缩略图",
     "share": "分享",
@@ -253,11 +332,21 @@
     "shareToTelegram": "分享到 Telegram",
     "shareToTwitter": "分享到 Twitter",
     "shortcuts": "键盘快捷键",
+    "showComponentTree": "显示组件树",
+    "showPropertiesPanel": "显示属性面板",
+    "slotAccordionItem": "手风琴项 {index}",
+    "slotActions": "操作区",
+    "slotChildren": "子组件",
+    "slotFooter": "页脚",
+    "slotGuideStep": "引导步骤 {index}",
+    "slotTab": "标签页 {index}",
+    "sortAscending": "升序排列",
     "sortByLabel": "排序方式",
     "sortByMostUsed": "最常用",
     "sortByName": "名称",
     "sortByNewest": "最新",
     "sortCitations": "引用最多",
+    "sortDescending": "降序排列",
     "sortNewest": "最新",
     "sortOldest": "最旧",
     "sortRelevance": "相关性",
@@ -272,6 +361,9 @@
       "previous": "上一步"
     },
     "storeId": "商店 ID",
+    "structuralMetadata": "结构元数据",
+    "structuralMetadataDescription": "编辑插槽标签与顺序。组件引用会受到保护，并且只能删除空插槽。",
+    "structuralMetadataJsonLabel": "{property} 结构元数据 JSON",
     "suggestedQuestions": "推荐问题",
     "suggestionCalculator": "🧮 计算器",
     "suggestionChart": "📊 图表",
@@ -280,11 +372,13 @@
     "suggestionPomodoro": "⏱️ 番茄钟",
     "suggestionTodo": "📝 待办",
     "surface": {
+      "dialogLabel": "A2UI 对话框",
       "errorLoading": "加载表层失败",
       "loading": "加载中...",
       "noContent": "暂无内容可显示",
       "rendering": "渲染中..."
     },
+    "surfaceRoot": "Surface 根（包装现有根）",
     "systemShare": "系统分享",
     "tableEmpty": "暂无数据",
     "tableNext": "下一页",
@@ -323,6 +417,1012 @@
     },
     "zoomIn": "放大",
     "zoomOut": "缩小"
+  },
+  "a2uiGenerator": {
+    "dashboardDataModel": {
+      "chartData": [
+        {
+          "name": "周一",
+          "value": 120
+        },
+        {
+          "name": "周二",
+          "value": 180
+        },
+        {
+          "name": "周三",
+          "value": 150
+        },
+        {
+          "name": "周四",
+          "value": 220
+        },
+        {
+          "name": "周五",
+          "value": 190
+        },
+        {
+          "name": "周六",
+          "value": 280
+        },
+        {
+          "name": "周日",
+          "value": 250
+        }
+      ],
+      "status": {
+        "detail": "最近一次更新发生在过去 5 分钟内。",
+        "message": "数据源已同步，当前可安全刷新。"
+      },
+      "summaryItems": [
+        {
+          "badge": "实时",
+          "id": "value-1",
+          "title": "数据 1",
+          "value": "1,234"
+        },
+        {
+          "badge": "稳定",
+          "id": "value-2",
+          "title": "数据 2",
+          "value": "567"
+        },
+        {
+          "badge": "趋势",
+          "id": "value-3",
+          "title": "数据 3",
+          "value": "+12%"
+        }
+      ]
+    },
+    "factories": {
+      "ageCalculator": {
+        "calc-btn": {
+          "text": "计算年龄"
+        },
+        "date-input": {
+          "label": "出生日期"
+        },
+        "header": {
+          "text": "🎂 年龄计算器"
+        }
+      },
+      "bmiCalculator": {
+        "calc-btn": {
+          "text": "计算 BMI"
+        },
+        "header": {
+          "text": "🏃 BMI 计算器"
+        },
+        "height-input": {
+          "label": "身高 (cm)"
+        },
+        "weight-input": {
+          "label": "体重 (kg)"
+        }
+      },
+      "contact": {
+        "email": {
+          "label": "邮箱"
+        },
+        "first-name": {
+          "label": "名"
+        },
+        "header": {
+          "text": "✉️ 联系我们"
+        },
+        "last-name": {
+          "label": "姓"
+        },
+        "message": {
+          "label": "留言内容"
+        },
+        "subject": {
+          "label": "主题",
+          "options": [
+            {
+              "label": "一般咨询",
+              "value": "general"
+            },
+            {
+              "label": "技术支持",
+              "value": "support"
+            },
+            {
+              "label": "意见反馈",
+              "value": "feedback"
+            }
+          ]
+        },
+        "submit-btn": {
+          "text": "发送"
+        }
+      },
+      "dashboard": {
+        "chart-section": {
+          "title": "趋势图"
+        },
+        "refresh-btn": {
+          "text": "刷新"
+        },
+        "status": {
+          "title": "数据状态"
+        },
+        "summary": {
+          "title": "关键指标"
+        }
+      },
+      "expenseTracker": {
+        "add-btn": {
+          "text": "添加支出"
+        },
+        "amount-input": {
+          "label": "金额"
+        },
+        "budget-card": {
+          "title": "预算"
+        },
+        "category-select": {
+          "label": "类别",
+          "options": [
+            {
+              "label": "🍔 餐饮",
+              "value": "food"
+            },
+            {
+              "label": "🚗 交通",
+              "value": "transport"
+            },
+            {
+              "label": "🛍️ 购物",
+              "value": "shopping"
+            },
+            {
+              "label": "🎮 娱乐",
+              "value": "entertainment"
+            },
+            {
+              "label": "📦 其他",
+              "value": "other"
+            }
+          ]
+        },
+        "expense-list": {
+          "emptyText": "暂无记录"
+        },
+        "header": {
+          "text": "💰 支出记录"
+        },
+        "total-card": {
+          "title": "已支出"
+        }
+      },
+      "habitTracker": {
+        "add-btn": {
+          "text": "添加"
+        },
+        "habit-input": {
+          "placeholder": "新习惯名称"
+        },
+        "habits-list": {
+          "emptyText": "添加你的第一个习惯"
+        },
+        "header": {
+          "text": "🎯 习惯打卡"
+        }
+      },
+      "healthTracker": {
+        "header": {
+          "text": "🏃 健康追踪"
+        },
+        "steps-card": {
+          "title": "👟 步数"
+        },
+        "steps-input": {
+          "placeholder": "步数"
+        },
+        "water-1": {
+          "text": "+1 杯"
+        },
+        "water-2": {
+          "text": "+2 杯"
+        },
+        "water-3": {
+          "text": "+3 杯"
+        },
+        "water-card": {
+          "title": "💧 饮水"
+        }
+      },
+      "loanCalculator": {
+        "calc-btn": {
+          "text": "计算"
+        },
+        "header": {
+          "text": "🏠 贷款计算器"
+        },
+        "interest-card": {
+          "title": "利息"
+        },
+        "monthly-card": {
+          "title": "月供"
+        },
+        "principal-input": {
+          "label": "贷款金额"
+        },
+        "rate-input": {
+          "label": "年利率 (%)"
+        },
+        "total-card": {
+          "title": "总还款"
+        },
+        "years-input": {
+          "label": "贷款年限"
+        }
+      },
+      "notes": {
+        "header": {
+          "text": "📝 快速笔记"
+        },
+        "note-content": {
+          "placeholder": "写下你的想法……"
+        },
+        "note-title": {
+          "label": "标题",
+          "placeholder": "标题"
+        },
+        "notes-list": {
+          "emptyText": "暂无笔记"
+        },
+        "save-btn": {
+          "text": "保存笔记"
+        },
+        "search": {
+          "placeholder": "🔍 搜索笔记……"
+        }
+      },
+      "pomodoro": {
+        "break-btn": {
+          "text": "休息 5 分钟"
+        },
+        "header": {
+          "text": "🍅 番茄钟"
+        },
+        "long-break-btn": {
+          "text": "长休 15 分钟"
+        },
+        "pause-btn": {
+          "text": "暂停"
+        },
+        "reset-btn": {
+          "text": "重置"
+        },
+        "start-btn": {
+          "text": "开始"
+        },
+        "work-btn": {
+          "text": "工作 25 分钟"
+        }
+      },
+      "survey": {
+        "desc": {
+          "text": "请填写以下问题"
+        },
+        "q1": {
+          "label": "您的名字"
+        },
+        "q2": {
+          "label": "满意度",
+          "options": [
+            {
+              "label": "非常满意",
+              "value": "very"
+            },
+            {
+              "label": "满意",
+              "value": "good"
+            },
+            {
+              "label": "一般",
+              "value": "neutral"
+            },
+            {
+              "label": "不满意",
+              "value": "poor"
+            }
+          ]
+        },
+        "q3": {
+          "label": "其他建议"
+        },
+        "submit-btn": {
+          "text": "提交"
+        },
+        "title": {
+          "text": "📋 快速调查"
+        }
+      },
+      "timer": {
+        "10min-btn": {
+          "text": "10 分钟"
+        },
+        "1min-btn": {
+          "text": "1 分钟"
+        },
+        "5min-btn": {
+          "text": "5 分钟"
+        },
+        "header": {
+          "text": "⏱️ 计时器"
+        },
+        "pause-btn": {
+          "text": "暂停"
+        },
+        "reset-btn": {
+          "text": "重置"
+        },
+        "start-btn": {
+          "text": "开始"
+        }
+      },
+      "tipCalculator": {
+        "bill-input": {
+          "label": "账单金额"
+        },
+        "header": {
+          "text": "💰 小费计算器"
+        },
+        "people-input": {
+          "label": "人数"
+        },
+        "tip-card": {
+          "title": "小费"
+        },
+        "tip-slider": {
+          "label": "小费比例 (%)"
+        },
+        "total-card": {
+          "title": "每人"
+        }
+      },
+      "todo": {
+        "add-btn": {
+          "text": "添加"
+        },
+        "due-date": {
+          "placeholder": "截止日期"
+        },
+        "filter-all": {
+          "text": "全部"
+        },
+        "filter-done": {
+          "text": "已完成"
+        },
+        "filter-pending": {
+          "text": "待完成"
+        },
+        "header": {
+          "text": "✅ 待办事项"
+        },
+        "task-input": {
+          "placeholder": "添加新任务……"
+        },
+        "task-list": {
+          "emptyText": "暂无任务"
+        }
+      }
+    }
+  },
+  "a2uiTemplates": {
+    "runtime": {
+      "ageYears": "{count} 岁",
+      "bmiNormal": "正常",
+      "bmiObese": "肥胖",
+      "bmiOverweight": "偏胖",
+      "bmiUnderweight": "偏瘦",
+      "habitCompletedToday": "今日已完成 {count} 项",
+      "habitStreak": "连续 {count} 天",
+      "itemCount": "共 {count} 件商品",
+      "nextBirthday": "距离下次生日还有 {count} 天",
+      "noteCount": "共 {count} 条笔记",
+      "taskCompleted": "已完成 {count} 项",
+      "taskPending": "待完成 {count} 项",
+      "untitledNote": "未命名"
+    },
+    "templates": {
+      "calculator": {
+        "description": "用于基本算术运算的计算器",
+        "name": "计算器",
+        "tags": [
+          "数学",
+          "计算器",
+          "工具"
+        ]
+      },
+      "contact-form": {
+        "components": {
+          "email-input": {
+            "label": "电子邮箱",
+            "placeholder": "xiaoming@example.com"
+          },
+          "first-name": {
+            "label": "名字",
+            "placeholder": "小明"
+          },
+          "last-name": {
+            "label": "姓氏",
+            "placeholder": "王"
+          },
+          "message-input": {
+            "label": "留言",
+            "placeholder": "请告诉我们可以如何帮助你……"
+          },
+          "privacy-notice": {
+            "text": "我们尊重你的隐私。"
+          },
+          "subject-select": {
+            "label": "主题",
+            "options": [
+              {
+                "label": "一般咨询",
+                "value": "general"
+              },
+              {
+                "label": "技术支持",
+                "value": "support"
+              },
+              {
+                "label": "销售咨询",
+                "value": "sales"
+              },
+              {
+                "label": "意见反馈",
+                "value": "feedback"
+              },
+              {
+                "label": "其他",
+                "value": "other"
+              }
+            ],
+            "placeholder": "选择一个主题……"
+          },
+          "submit-btn": {
+            "text": "发送消息"
+          },
+          "subtitle": {
+            "text": "期待收到你的消息！"
+          },
+          "title": {
+            "text": "✉️ 联系我们"
+          }
+        },
+        "description": "带校验功能的专业联系表单",
+        "name": "联系表单",
+        "tags": [
+          "联系",
+          "表单",
+          "邮件",
+          "支持"
+        ]
+      },
+      "data-dashboard": {
+        "components": {
+          "activity-table": {
+            "columns": [
+              {
+                "header": "日期",
+                "key": "date",
+                "type": "date"
+              },
+              {
+                "header": "事件",
+                "key": "event"
+              },
+              {
+                "header": "用户",
+                "key": "user"
+              },
+              {
+                "align": "right",
+                "header": "数值",
+                "key": "value",
+                "type": "number"
+              }
+            ]
+          },
+          "chart-section": {
+            "title": "月度趋势"
+          },
+          "refresh-btn": {
+            "text": "刷新"
+          },
+          "stat-growth": {
+            "title": "增长率"
+          },
+          "stat-revenue": {
+            "title": "收入"
+          },
+          "stat-users": {
+            "title": "用户总数"
+          },
+          "table-section": {
+            "title": "最近动态"
+          },
+          "title": {
+            "text": "📊 数据分析仪表盘"
+          }
+        },
+        "dataModel": {
+          "activityData": [
+            {
+              "date": "2024-01-15",
+              "event": "新用户注册",
+              "id": 1,
+              "user": "张明",
+              "value": 1
+            },
+            {
+              "date": "2024-01-15",
+              "event": "购买",
+              "id": 2,
+              "user": "李娜",
+              "value": 99
+            },
+            {
+              "date": "2024-01-14",
+              "event": "升级",
+              "id": 3,
+              "user": "王博",
+              "value": 49
+            }
+          ],
+          "chartData": [
+            {
+              "month": "1 月",
+              "revenue": 5000,
+              "users": 1200
+            },
+            {
+              "month": "2 月",
+              "revenue": 6200,
+              "users": 1400
+            },
+            {
+              "month": "3 月",
+              "revenue": 7800,
+              "users": 1800
+            },
+            {
+              "month": "4 月",
+              "revenue": 8500,
+              "users": 2100
+            },
+            {
+              "month": "5 月",
+              "revenue": 9200,
+              "users": 2500
+            },
+            {
+              "month": "6 月",
+              "revenue": 10500,
+              "users": 2800
+            }
+          ]
+        },
+        "description": "展示图表与统计数据的仪表盘",
+        "name": "数据仪表盘",
+        "tags": [
+          "仪表盘",
+          "分析",
+          "图表",
+          "数据"
+        ]
+      },
+      "expense-tracker": {
+        "components": {
+          "add-btn": {
+            "text": "添加支出"
+          },
+          "amount-input": {
+            "label": "金额"
+          },
+          "category-row": {
+            "label": "分类",
+            "options": [
+              {
+                "label": "🍔 餐饮",
+                "value": "food"
+              },
+              {
+                "label": "🚗 交通",
+                "value": "transport"
+              },
+              {
+                "label": "🛍️ 购物",
+                "value": "shopping"
+              },
+              {
+                "label": "🎬 娱乐",
+                "value": "entertainment"
+              },
+              {
+                "label": "📦 其他",
+                "value": "other"
+              }
+            ]
+          },
+          "desc-input": {
+            "label": "事项",
+            "placeholder": "支出说明……"
+          },
+          "expenses-list": {
+            "emptyText": "暂无支出记录"
+          },
+          "header": {
+            "text": "💰 支出追踪器"
+          },
+          "today-label": {
+            "text": "今日"
+          },
+          "total-label": {
+            "text": "累计支出"
+          }
+        },
+        "description": "记录每日支出与预算",
+        "name": "支出追踪器",
+        "tags": [
+          "支出",
+          "资金",
+          "预算",
+          "财务",
+          "追踪"
+        ]
+      },
+      "habit-tracker": {
+        "components": {
+          "add-btn": {
+            "text": "添加"
+          },
+          "habit-input": {
+            "placeholder": "新习惯……"
+          },
+          "habits-list": {
+            "emptyText": "还没有习惯，请在上方添加！"
+          },
+          "header": {
+            "text": "🎯 习惯追踪器"
+          }
+        },
+        "dataModel": {
+          "stats": {
+            "streakText": "连续 0 天",
+            "todayText": "今日已完成 0 项"
+          }
+        },
+        "description": "追踪每日习惯并保持连续记录",
+        "name": "习惯追踪器",
+        "tags": [
+          "习惯",
+          "追踪",
+          "每日",
+          "目标",
+          "效率"
+        ]
+      },
+      "notes": {
+        "components": {
+          "header": {
+            "text": "📝 快捷笔记"
+          },
+          "note-content-input": {
+            "placeholder": "在这里写下笔记……"
+          },
+          "note-title-input": {
+            "label": "标题",
+            "placeholder": "笔记标题"
+          },
+          "save-btn": {
+            "text": "保存笔记"
+          },
+          "search-row": {
+            "placeholder": "🔍 搜索笔记……"
+          }
+        },
+        "dataModel": {
+          "notesCountText": "共 0 条笔记"
+        },
+        "description": "支持搜索的简易笔记应用",
+        "name": "快捷笔记",
+        "tags": [
+          "笔记",
+          "写作",
+          "效率"
+        ]
+      },
+      "profile-card": {
+        "components": {
+          "avatar": {
+            "alt": "头像"
+          },
+          "follow-btn": {
+            "text": "关注"
+          },
+          "followers-label": {
+            "text": "粉丝"
+          },
+          "following-label": {
+            "text": "关注"
+          },
+          "message-btn": {
+            "text": "发消息"
+          },
+          "posts-label": {
+            "text": "帖子"
+          }
+        },
+        "dataModel": {
+          "profile": {
+            "bio": "用代码打造优秀产品。",
+            "location": "中国上海",
+            "name": "张明",
+            "title": "软件开发工程师"
+          }
+        },
+        "description": "展示用户个人资料",
+        "name": "个人资料卡",
+        "tags": [
+          "个人资料",
+          "用户",
+          "卡片",
+          "社交"
+        ]
+      },
+      "shopping-list": {
+        "components": {
+          "add-btn": {
+            "text": "添加"
+          },
+          "clear-btn": {
+            "text": "全部清空"
+          },
+          "item-input": {
+            "placeholder": "商品名称……"
+          },
+          "items-list": {
+            "emptyText": "购物清单为空"
+          },
+          "qty-input": {
+            "placeholder": "数量"
+          },
+          "title": {
+            "text": "🛒 购物清单"
+          }
+        },
+        "dataModel": {
+          "totalText": "共 0 件商品"
+        },
+        "description": "简单的杂货与购物清单管理工具",
+        "name": "购物清单",
+        "tags": [
+          "购物",
+          "杂货",
+          "清单",
+          "效率"
+        ]
+      },
+      "survey-form": {
+        "components": {
+          "clear-btn": {
+            "text": "清空"
+          },
+          "description": {
+            "text": "请回答几个问题，帮助我们持续改进"
+          },
+          "email-field": {
+            "label": "电子邮箱",
+            "placeholder": "your@email.com"
+          },
+          "feedback-field": {
+            "label": "补充反馈",
+            "placeholder": "请详细说说你的体验……"
+          },
+          "name-field": {
+            "label": "姓名",
+            "placeholder": "请输入姓名"
+          },
+          "rating-label": {
+            "text": "你会如何评价这次体验？"
+          },
+          "submit-btn": {
+            "text": "提交"
+          },
+          "title": {
+            "text": "📋 快速调查"
+          }
+        },
+        "dataModel": {
+          "form": {
+            "ratingText": "5/10 - 一般"
+          }
+        },
+        "description": "可自定义的调查或反馈收集表单",
+        "name": "调查表单",
+        "tags": [
+          "调查",
+          "反馈",
+          "表单",
+          "问卷"
+        ]
+      },
+      "timer": {
+        "components": {
+          "header": {
+            "text": "⏱️ 计时器"
+          },
+          "pause-btn": {
+            "text": "暂停"
+          },
+          "preset-1": {
+            "text": "1 分钟"
+          },
+          "preset-10": {
+            "text": "10 分钟"
+          },
+          "preset-25": {
+            "text": "25 分钟"
+          },
+          "preset-5": {
+            "text": "5 分钟"
+          },
+          "reset-btn": {
+            "text": "重置"
+          },
+          "start-btn": {
+            "text": "开始"
+          }
+        },
+        "description": "倒计时与秒表应用",
+        "name": "计时器",
+        "tags": [
+          "计时器",
+          "秒表",
+          "倒计时",
+          "时间"
+        ]
+      },
+      "todo-list": {
+        "components": {
+          "add-btn": {
+            "text": "添加"
+          },
+          "header": {
+            "text": "📝 我的任务"
+          },
+          "task-input": {
+            "placeholder": "输入新任务……"
+          },
+          "task-list": {
+            "emptyText": "还没有任务，请在上方添加！"
+          }
+        },
+        "dataModel": {
+          "stats": {
+            "completedText": "已完成 0 项",
+            "pendingText": "待完成 0 项"
+          }
+        },
+        "description": "支持添加、完成和删除任务的简易任务管理应用",
+        "name": "待办清单",
+        "tags": [
+          "任务",
+          "效率",
+          "清单"
+        ]
+      },
+      "unit-converter": {
+        "components": {
+          "convert-btn": {
+            "text": "换算"
+          },
+          "from-unit": {
+            "label": "从",
+            "options": [
+              {
+                "label": "米",
+                "value": "m"
+              },
+              {
+                "label": "厘米",
+                "value": "cm"
+              },
+              {
+                "label": "英尺",
+                "value": "ft"
+              }
+            ]
+          },
+          "header": {
+            "text": "🔄 单位换算器"
+          },
+          "input-row": {
+            "label": "数值"
+          },
+          "result-label": {
+            "text": "结果"
+          },
+          "to-unit": {
+            "label": "到",
+            "options": [
+              {
+                "label": "米",
+                "value": "m"
+              },
+              {
+                "label": "厘米",
+                "value": "cm"
+              },
+              {
+                "label": "英尺",
+                "value": "ft"
+              }
+            ]
+          },
+          "type-select": {
+            "label": "类型",
+            "options": [
+              {
+                "label": "长度",
+                "value": "length"
+              },
+              {
+                "label": "重量",
+                "value": "weight"
+              },
+              {
+                "label": "温度",
+                "value": "temperature"
+              }
+            ]
+          }
+        },
+        "description": "在不同计量单位之间进行换算",
+        "name": "单位换算器",
+        "tags": [
+          "换算",
+          "单位",
+          "工具",
+          "计量"
+        ]
+      },
+      "weather": {
+        "components": {
+          "humidity-label": {
+            "text": "💧 湿度"
+          },
+          "uv-label": {
+            "text": "☀️ 紫外线"
+          },
+          "wind-label": {
+            "text": "💨 风速"
+          }
+        },
+        "dataModel": {
+          "weather": {
+            "condition": "局部多云",
+            "location": "美国加利福尼亚州旧金山",
+            "uv": "中等",
+            "wind": "每小时 12 英里"
+          }
+        },
+        "description": "展示当前天气信息",
+        "name": "天气组件",
+        "tags": [
+          "天气",
+          "组件",
+          "工具"
+        ]
+      }
+    }
   },
   "account": {
     "gate": {
@@ -1659,6 +2759,7 @@
     "versionRestored": "版本已恢复",
     "words": "字",
     "workspace": {
+      "allWorkspace": "全部工作区",
       "card": {
         "cancel": "取消",
         "discardFile": "丢弃此文件的改动",
@@ -1677,6 +2778,7 @@
         "undoSuccess": "已撤销工作区改动"
       },
       "close": "关闭工作区",
+      "currentTask": "当前任务",
       "missingProject": {
         "description": "请先将当前对话关联到项目，再编辑工作区文件。",
         "title": "未关联项目"
@@ -1690,13 +2792,11 @@
         "title": "未选择对话"
       },
       "mobileTitle": "工作区",
-      "scopeLabel": "工作区范围",
-      "currentTask": "当前任务",
-      "allWorkspace": "全部工作区",
       "review": "审阅",
       "reviewChanges": "改动",
       "reviewDiff": "差异",
       "reviewEmpty": "请选择一个改动文件以审阅差异",
+      "scopeLabel": "工作区范围",
       "taskResources": {
         "agent": "Agent",
         "allOrigins": "全部来源",
@@ -1708,9 +2808,9 @@
         "authorizeOnce": "单次授权",
         "binarySource": "二进制资源没有文本源码预览。",
         "bytes": "{count} 字节",
-        "created": "已创建",
         "conflictApplyTask": "应用任务版本",
         "conflictKeepCurrent": "保留当前版本",
+        "created": "已创建",
         "deleted": "已删除",
         "diff": "差异",
         "diffUnavailable": "没有可用的文本差异。",
@@ -1733,12 +2833,12 @@
         "sensitiveConfirm": "授权本次敏感资源操作？正文仍保留在实际执行端。",
         "sensitiveDescription": "此路径可能包含凭据或密钥。每次读取或下载都需要显式授权和远程控制权限。",
         "source": "源码",
-        "statusFilter": "按改动类型筛选",
         "staticPreview": "静态预览",
+        "statusFilter": "按改动类型筛选",
         "undo": "撤销 Agent 改动",
         "undoUnavailableIrreversible": "本次应用已被明确设为不可逆，因为反向数据未被保留。",
-        "unpin": "取消固定",
         "unknown": "外部修改",
+        "unpin": "取消固定",
         "upload": "上传",
         "user": "用户"
       },
@@ -2218,6 +3318,16 @@
       "stop": "停止",
       "stopReplay": "停止回放",
       "title": "录制操作"
+    },
+    "remote": {
+      "canvas": "远程浏览器画布",
+      "closePage": "关闭页面",
+      "error": "远程浏览器不可用（{code}）",
+      "humanControl": "由你控制",
+      "takeover": "接管控制",
+      "untitledPage": "未命名页面",
+      "url": "远程浏览器地址",
+      "waiting": "正在等待远程浏览器…"
     },
     "screenshot": {
       "failed": "无法截取预览画面",
@@ -3248,6 +4358,11 @@
       "hideArtifacts": "折叠产物面板",
       "hideConversations": "折叠会话列表",
       "insights": "会话洞察",
+      "memoryInherit": "继承应用设置",
+      "memoryLearn": "从此对话学习",
+      "memoryOff": "关闭",
+      "memoryOn": "开启",
+      "memoryUse": "在此对话使用记忆",
       "noApiKey": "未配置 API Key",
       "permissionModeAppDefault": "使用应用默认",
       "permissionModeLabel": "权限模式",
@@ -3285,6 +4400,7 @@
           "actions": "会话操作",
           "behavior": "行为",
           "display": "显示",
+          "memory": "记忆",
           "role": "角色与能力",
           "status": "状态"
         }
@@ -4481,6 +5597,7 @@
         "plugins": "插件",
         "scheduler": "调度器",
         "settings": "设置",
+        "sites": "站点",
         "skills": "技能",
         "twin": "Twin 工作台",
         "workflows": "工作流"
@@ -7884,9 +9001,16 @@
   },
   "memory": {
     "add": {
+      "agentIdLabel": "Agent ID",
+      "branchLabel": "分支（可选）",
       "cancel": "取消",
-      "description": "手动保存一条耐久事实。以显式来源存入全局作用域。",
+      "characterIdLabel": "角色 ID",
+      "description": "手动保存一条耐久事实，并以显式来源设置可选的精细作用域。",
       "importanceLabel": "重要度",
+      "pathPatternLabel": "路径前缀（可选）",
+      "projectIdLabel": "项目 ID",
+      "projectIdOptionalLabel": "项目 ID（可选）",
+      "scopeLabel": "作用域",
       "submit": "新增记忆",
       "tagsLabel": "标签",
       "tagsPlaceholder": "用逗号分隔的标签",
@@ -7910,22 +9034,30 @@
       "unpin": "取消置顶"
     },
     "detail": {
+      "auditTitle": "审计历史",
       "cancel": "取消",
       "close": "关闭",
+      "conflictGone": "冲突记忆已被删除。",
+      "conflictsWith": "冲突对象",
       "deleteConfirm": {
         "cancel": "取消",
         "confirm": "删除",
         "description": "这将永久删除该记忆，且无法撤销。",
         "title": "删除这条记忆？"
       },
+      "evidenceTitle": "证据记录",
       "fields": {
         "accessCount": "召回次数",
         "archivedAt": "归档于",
+        "contamination": "上下文信任",
         "created": "创建于",
+        "evidence": "证据",
         "importance": "重要度",
         "indexed": "已索引",
         "key": "键",
         "lastUsed": "最近使用",
+        "review": "审核",
+        "scope": "作用域",
         "updated": "更新于",
         "version": "版本"
       },
@@ -7933,6 +9065,7 @@
       "next": "下一条记忆",
       "no": "否",
       "previous": "上一条记忆",
+      "recordCount": "{count} 条",
       "replacedBy": "已被替换为",
       "replacedByGone": "替换它的记忆已被删除。",
       "save": "保存",
@@ -7941,6 +9074,18 @@
       "tagsPlaceholder": "用逗号分隔的标签",
       "textLabel": "内容",
       "yes": "是"
+    },
+    "governance": {
+      "clean": "干净",
+      "conflict": "冲突",
+      "external-context": "外部上下文",
+      "legacy": "旧记忆 / 无证据",
+      "markConflict": "标记冲突",
+      "markVerified": "标记已验证",
+      "supported": "有证据",
+      "unknown": "未知",
+      "unreviewed": "未审核",
+      "verified": "已验证"
     },
     "panel": {
       "accessedRelative": "{time}使用",
@@ -7999,9 +9144,11 @@
       "user": "自动（对话）"
     },
     "scopes": {
+      "agent": "Agent",
       "all": "所有作用域",
       "character": "角色",
-      "global": "全局"
+      "global": "全局",
+      "workspace": "工作区"
     },
     "types": {
       "episodic": "事件",
@@ -8335,6 +9482,33 @@
         "title": "推送通知"
       },
       "pushTokenFailed": "未能向桌面端上报本机推送 token（{reason}）。",
+      "remoteBrowser": {
+        "description": "在已配对的工作区运行时中启动隔离的 Chromium 会话，并将画面串流到 Cognia。",
+        "domains": {
+          "description": "此工作区只能打开明确授权的域名。",
+          "domain": "域名",
+          "grant": "授权域名",
+          "placeholder": "example.com",
+          "revoke": "撤销 {domain}",
+          "title": "允许的域名"
+        },
+        "enable": "启用远程浏览器",
+        "error": "远程浏览器错误：{message}",
+        "experimental": "实验功能",
+        "gateHint": "此设置与服务端灰度开关必须同时启用。",
+        "operationFailed": "无法保存远程浏览器设置。",
+        "profiles": {
+          "create": "创建配置文件",
+          "description": "持久配置文件会在所选工作区内保留浏览器状态。",
+          "ephemeral": "临时会话",
+          "name": "配置文件名称",
+          "placeholder": "研究配置",
+          "title": "浏览器配置文件"
+        },
+        "title": "远程浏览器",
+        "toggle": "切换远程浏览器",
+        "workspaceHint": "请先选择工作区，再管理配置文件或域名。"
+      },
       "remoteControl": {
         "blocked": "远程控制未启用（{reason}）。",
         "col": "远程控制",
@@ -9129,6 +10303,8 @@
     },
     "memory": {
       "empty": "暂无记忆",
+      "queueForgetLabel": "遗忘记忆",
+      "queueUpdateLabel": "更新记忆",
       "searchAria": "搜索记忆",
       "searchPlaceholder": "搜索记忆…",
       "title": "记忆"
@@ -9675,6 +10851,28 @@
     },
     "splash": {
       "label": "正在启动 cognia"
+    },
+    "standaloneSearch": {
+      "answerTitle": "回答",
+      "backAria": "返回我的页面",
+      "configureCta": "配置服务商",
+      "errors": {
+        "answer-failed": "无法生成回答",
+        "empty-query": "请输入问题",
+        "no-model-provider": "尚未配置模型服务商",
+        "no-search-provider": "尚未配置网络搜索服务商",
+        "search-failed": "网络搜索失败"
+      },
+      "idleHint": "输入问题，搜索网络并生成带引用的回答。",
+      "loading": "正在搜索并生成回答…",
+      "modelUnavailableTitle": "已找到来源，但尚未配置模型",
+      "noResults": "未找到来源。",
+      "placeholder": "输入一个网络问题…",
+      "queryAria": "网络搜索问题",
+      "run": "搜索",
+      "sourcesTitle": "来源",
+      "stop": "停止",
+      "title": "网络搜索"
     },
     "subagents": {
       "backAria": "返回我的",
@@ -15696,6 +16894,7 @@
           "description": "应用到新角色和面板。",
           "enabledHelp": "新角色继承此值。",
           "enabledLabel": "默认启用 A2UI",
+          "standardCatalog": "Cognia 标准目录",
           "title": "全局默认"
         },
         "loading": "加载中…",
@@ -15705,10 +16904,22 @@
           "limitLabel": "LRU 上限",
           "title": "持久化"
         },
+        "saveFailed": "保存失败：{error}",
         "widget": {
           "description": "surface widget 未指定字段时的默认值。",
+          "hostStrategies": {
+            "artifact-preview": "Artifact 预览",
+            "lazy-runtime": "按需运行时",
+            "native": "原生",
+            "sandboxed-html": "沙箱 HTML"
+          },
           "hostStrategyLabel": "宿主策略",
           "themeLabel": "主题",
+          "themes": {
+            "dark": "深色",
+            "inherit": "跟随应用主题",
+            "light": "浅色"
+          },
           "title": "Widget 默认值"
         }
       },
@@ -16056,7 +17267,7 @@
             "name": "代码图谱"
           },
           "coreFiles": {
-            "desc": "grep / glob / read / edit / write / bash —— 面向非 Anthropic 模型的完整文件工具套件。写入类工具需审批。",
+            "desc": "面向非 Anthropic 模型的搜索、读取、补丁、Shell、可等待后台命令和结构化会话任务工具集。文件系统和 Shell 变更需审批。",
             "name": "核心文件工具"
           },
           "dependencyResearch": {
@@ -16818,6 +18029,19 @@
         "enabledLabel": "启用背景",
         "formats": "PNG、JPEG、WebP、GIF、AVIF · 不超过 32 MB",
         "galleryTitle": "图库",
+        "generator": {
+          "accent": "生成的强调色",
+          "action": "生成匹配主题",
+          "created": "已创建并启用匹配的明暗双主题。",
+          "description": "在本地提取图片强调色，并生成可读的明暗双主题。",
+          "error": "无法分析这张图片，壁纸设置未受影响。",
+          "themeName": "{name} 配色",
+          "title": "从壁纸生成主题",
+          "variant": {
+            "dark": "暗色基底",
+            "light": "亮色基底"
+          }
+        },
         "gradient": {
           "angle": "角度",
           "end": "结束色",
@@ -19555,9 +20779,12 @@
         "save": "保存",
         "saved": "WebDAV 设置已保存。",
         "startup": {
+          "autoKeyUnavailable": "此运行环境无法使用自动密钥。",
           "newerBody": "另一台设备上传了更新的快照。打开备份设置以查看并恢复。",
           "newerFound": "你的 WebDAV 服务器上有更新的备份。",
-          "restoreAction": "恢复"
+          "restoreAction": "恢复",
+          "scheduledMissingDestination": "已启用定时备份，但尚未配置可写的目标文件夹。",
+          "syncPassphraseLocked": "WebDAV 上传已跳过，因为本次会话尚未解锁同步密码。"
         },
         "syncFailed": "上传失败：{error}",
         "syncNow": "立即同步",
@@ -20601,22 +21828,42 @@
         "heading": "启用长期记忆",
         "label": "启用长期记忆"
       },
+      "externalContext": {
+        "description": "使用网页搜索、MCP、屏幕上下文或连接器的轮次不自动学习；本地代码工具仍可学习。",
+        "heading": "阻止外部上下文学习",
+        "label": "阻止外部上下文学习"
+      },
+      "halfLife": {
+        "label": "新近度半衰期（天）"
+      },
       "hybrid": {
         "description": "召回时结合语义（向量）与关键词检索。",
         "heading": "混合检索",
         "label": "混合检索"
       },
+      "learnFromChats": {
+        "description": "在后台从符合条件的对话学习耐久事实；可与召回开关分别按对话覆盖。",
+        "heading": "从对话学习",
+        "label": "从对话学习"
+      },
       "manage": "管理记忆",
+      "maxIdle": {
+        "label": "未使用后遗忘天数（0 为永不）"
+      },
       "queryExpansion": {
         "description": "召回记忆时用同义词扩展加宽关键词检索。",
         "heading": "查询扩展",
         "label": "查询扩展"
       },
+      "relevanceFloor": {
+        "label": "最低召回相关度"
+      },
       "scope": {
         "character": "按人格",
-        "description": "新记忆存放的位置。全局记忆在所有人格间共享。",
+        "description": "新记忆的存储位置。相同稳定键下，更窄的作用域覆盖更宽的记忆。",
         "global": "全局（所有人格）",
-        "heading": "默认作用域"
+        "heading": "默认作用域",
+        "workspace": "当前工作区"
       },
       "temporary": {
         "description": "暂停记忆——本次会话既不读取也不写入。",
@@ -20624,8 +21871,16 @@
         "label": "临时模式"
       },
       "title": "记忆",
+      "tokenBudget": {
+        "label": "召回 Token 预算"
+      },
       "topK": {
         "label": "每轮注入的记忆数"
+      },
+      "useMemory": {
+        "description": "允许符合条件的对话召回已保存记忆；每个对话可单独覆盖。",
+        "heading": "使用记忆",
+        "label": "使用记忆"
       }
     },
     "network": {
@@ -22191,6 +23446,10 @@
         "sound": "声音",
         "visual": "视觉闪烁"
       },
+      "boldBrightColors": {
+        "helper": "使用对应颜色的明亮变体渲染 ANSI 粗体文本。",
+        "label": "粗体使用明亮色"
+      },
       "colorScheme": {
         "auto": "自动（跟随应用主题）",
         "darkGroup": "深色方案",
@@ -22213,8 +23472,20 @@
         "bar": "竖线",
         "blink": "光标闪烁",
         "block": "方块",
+        "inactiveBar": "竖线",
+        "inactiveBlock": "方块",
+        "inactiveLabel": "非活动光标",
+        "inactiveNone": "隐藏",
+        "inactiveOutline": "轮廓",
+        "inactiveUnderline": "下划线",
         "label": "光标样式",
-        "underline": "下划线"
+        "underline": "下划线",
+        "width": "光标宽度",
+        "widthHelper": "光标宽度适用于竖线样式，并限制在 1–10 像素。"
+      },
+      "customGlyphs": {
+        "helper": "使用 xterm 内置的线框与方块字形，使终端界面更清晰。",
+        "label": "自定义终端字形"
       },
       "exposeDockToAgents": {
         "helper": "允许聊天智能体通过合成的 terminal_dock_* MCP 工具驱动你可见的终端标签。智能体与你共用同一个 PTY —— 同一个 shell、同一个 cwd、同一份历史。每个标签按会话需要单独授权。默认关闭。",
@@ -22311,6 +23582,10 @@
         "label": "渲染器",
         "webgl": "WebGL"
       },
+      "rescaleOverlappingGlyphs": {
+        "helper": "缩放可能覆盖相邻终端单元格的宽字形。",
+        "label": "缩放重叠字形"
+      },
       "runInDockTimeout": {
         "helper": "聊天中的「Run in dock」与智能体 terminal_dock_write 等候 command_end OSC 633 事件的时间上限。每次调用可单独覆盖，此处是默认值。范围 5–600，默认 60。",
         "label": "Run-in-dock 超时（秒）"
@@ -22342,6 +23617,10 @@
       "shellIntegration": {
         "helper": "向 bash / zsh / pwsh 注入 OSC 633 提示符标记，让面板能展示命令状态和 cwd 徽章。若 shell 会解析错误，请关闭。",
         "label": "启用 shell 集成"
+      },
+      "smoothScrolling": {
+        "helper": "为滚轮和触控板滚动添加动画，避免在终端行之间跳动。",
+        "label": "平滑滚动"
       },
       "stickyScroll": {
         "helper": "查看长输出时，将当前命令的提示符行固定在视口顶部。",
@@ -22586,6 +23865,178 @@
   },
   "shortcuts": {
     "openLogs": "打开日志面板（Ctrl+Shift+L）"
+  },
+  "sites": {
+    "access": {
+      "description": "创作权限保留在 Cognia；访客策略会与 Cloudflare Access 对账。",
+      "hostname": "受保护的主机名",
+      "mode": "访客访问模式",
+      "modes": {
+        "domains": "邮箱域名",
+        "identities": "指定身份",
+        "organization": "组织",
+        "private": "私有（全部拒绝）",
+        "public": "公开"
+      },
+      "title": "访客访问",
+      "values": "每行填写一个邮箱、域名或组织 ID"
+    },
+    "actions": {
+      "addDomain": "添加域名",
+      "approveTool": "批准当前工具文件",
+      "build": "构建保存版本",
+      "cancel": "取消",
+      "confirmDeleteMetadata": "删除元数据",
+      "confirmPurge": "清除托管资源",
+      "create": "创建站点",
+      "deleteMetadata": "删除站点元数据",
+      "deploy": "部署",
+      "loadAnalytics": "加载最近 24 小时分析",
+      "loadLogs": "加载最近 24 小时日志",
+      "preview": "启动预览",
+      "provision": "配置资源绑定",
+      "purge": "清除托管资源",
+      "reconcile": "对账服务商状态",
+      "refresh": "刷新站点",
+      "remove": "移除",
+      "restore": "恢复",
+      "rollback": "重新部署 / 回滚",
+      "saveAccess": "应用访问策略",
+      "saveAuthoring": "保存创作权限",
+      "saveEnvironment": "保存环境修订",
+      "saveToken": "验证并保存令牌",
+      "stopPreview": "停止预览",
+      "takeDown": "下线",
+      "upload": "上传版本"
+    },
+    "authoring": {
+      "accountsPlaceholder": "每行填写一个 Cognia 账户 ID",
+      "deployers": "部署者账户 ID",
+      "editors": "编辑者账户 ID"
+    },
+    "build": {
+      "description": "Cognia 读取 .cognia/hosting.json，并在操作系统沙箱中执行其中的 argv 命令。",
+      "networkHosts": "已批准的安装网络主机",
+      "packageManager": "包管理器快照",
+      "runtime": "运行时快照",
+      "title": "受限构建与本地预览"
+    },
+    "confirm": {
+      "deleteMetadata": {
+        "description": "此操作会从 Cognia 中删除已清除的站点、版本、操作历史和保留资源报告，不会更改服务商资源。",
+        "title": "删除 Cognia 站点元数据？"
+      },
+      "purge": {
+        "description": "此操作会永久删除符合条件的 Cognia 托管资源。已接管和共享的服务商资源会保持不变，并在结果中标记为已保留。",
+        "title": "清除托管的服务商资源？"
+      }
+    },
+    "create": {
+      "accountId": "Cloudflare 账户 ID",
+      "name": "站点名称",
+      "project": "项目",
+      "subpath": "源码子路径（可选）",
+      "workerName": "Worker 名称"
+    },
+    "deploymentStatus": {
+      "active": "运行中",
+      "deploying": "部署中",
+      "failed": "失败",
+      "pending": "等待中",
+      "superseded": "已被替代",
+      "taken-down": "已下线"
+    },
+    "desktopOnly": {
+      "description": "构建、服务商凭据与预览仅保留在所选的本地桌面主机上。",
+      "title": "站点功能需要 Cognia 桌面端"
+    },
+    "domains": {
+      "description": "挂载并对账 Cloudflare Worker 自定义域名。",
+      "hostname": "docs.example.com",
+      "title": "自定义域名"
+    },
+    "empty": "创建或选择一个站点以开始。",
+    "environment": {
+      "description": "普通变量会随版本记录；密钥值只会进入当前主机的系统密钥环。",
+      "secrets": "密钥",
+      "secretsPlaceholder": "API_TOKEN=secret-value",
+      "title": "环境变量",
+      "variables": "普通变量",
+      "variablesPlaceholder": "API_ORIGIN=https://api.example.com"
+    },
+    "errors": {
+      "artifactRequired": "保存版本的构建产物不可用。",
+      "environmentRequired": "请先保存一个环境修订。",
+      "projectRoot": "所选项目没有工作区根目录。",
+      "wranglerRequired": "请选择已批准的 Wrangler 二进制文件绝对路径。"
+    },
+    "feedback": {
+      "success": "站点状态已更新"
+    },
+    "lifecycle": {
+      "active": "运行中",
+      "deleted": "已删除",
+      "deleting": "删除中",
+      "taken-down": "已下线"
+    },
+    "observability": {
+      "description": "直接查询 Cloudflare Worker 日志与请求分析，不复制到另一套运行时。",
+      "empty": "尚未执行查询。",
+      "title": "服务商可观测性"
+    },
+    "operationStatus": {
+      "cancelled": "已取消",
+      "failed": "失败",
+      "queued": "已排队",
+      "running": "运行中",
+      "succeeded": "成功",
+      "waiting-reconcile": "等待校准"
+    },
+    "operationType": {
+      "access": "访问控制",
+      "build": "构建",
+      "deploy": "部署",
+      "domain": "域名",
+      "environment": "环境变量",
+      "provision": "创建资源",
+      "purge": "清除",
+      "reconcile": "校准",
+      "restore": "恢复",
+      "takedown": "下线",
+      "upload": "上传"
+    },
+    "operations": {
+      "description": "用于崩溃恢复与云端状态校准的持久化生命周期事件。",
+      "empty": "暂无生命周期操作。",
+      "eventCount": "{count} 个事件",
+      "title": "操作日志"
+    },
+    "provider": {
+      "account": "账户",
+      "description": "API 令牌会先验证，再写入本地操作系统密钥环。",
+      "title": "Cloudflare 服务商",
+      "token": "Cloudflare API 令牌",
+      "worker": "Worker"
+    },
+    "subtitle": "在 Cognia 中构建、预览与发布",
+    "tabs": {
+      "access": "访问控制",
+      "build": "构建与预览",
+      "domains": "域名",
+      "observability": "日志与分析",
+      "provider": "服务商",
+      "versions": "版本"
+    },
+    "title": "站点",
+    "versionStatus": {
+      "building": "构建中",
+      "failed": "失败",
+      "ready": "就绪"
+    },
+    "versions": {
+      "version": "版本 {sequence}",
+      "wranglerPath": "已批准 Wrangler 二进制文件的绝对路径"
+    }
   },
   "skills": {
     "ai": {
@@ -23410,6 +24861,35 @@
         "list": "列表"
       },
       "timelineView": "时间线视图"
+    },
+    "worktrees": {
+      "baseRefLabel": "起始点（可选）",
+      "baseRefPlaceholder": "HEAD、分支、标签或提交",
+      "branchLabel": "新分支",
+      "branchPlaceholder": "feature/my-change",
+      "chooseDirectory": "选择",
+      "count": "{count} 个工作树",
+      "create": "创建工作树",
+      "created": "工作树已创建",
+      "deleteBranch": "同时删除分支",
+      "deleteBranchDescription": "移除工作树后永久删除 {branch}。",
+      "description": "创建和管理此仓库的并行检出。",
+      "detached": "分离的 HEAD",
+      "empty": "未找到工作树",
+      "error": "工作树操作失败：{message}",
+      "forceRemove": "强制移除",
+      "forceRemoveDescription": "丢弃此工作树中未提交的更改。",
+      "main": "主工作树",
+      "open": "打开",
+      "pathLabel": "空目录",
+      "pathPlaceholder": "选择一个空目录",
+      "prune": "清理失效项",
+      "pruned": "已清理失效的工作树记录",
+      "remove": "移除工作树",
+      "removeDescription": "确定移除位于 {path} 的关联工作树吗？",
+      "removeTitle": "移除工作树？",
+      "removed": "工作树已移除",
+      "title": "工作树"
     }
   },
   "sourceVerification": {
@@ -24289,7 +25769,7 @@
     "codeGraph": "代码图谱智能",
     "codeGraphDesc": "基于 tree-sitter 符号图谱的结构化代码智能（codegraph_search / node / callers / callees / impact / context / explore / files）。提供 grep 无法回答的亚毫秒级查询：符号定义位置、谁在调用它、影响范围。只读；仅桌面端。",
     "coreFiles": "核心文件工具",
-    "coreFilesDesc": "grep / glob / read / ls / edit / multi_edit / write / bash / TodoWrite —— 让非 Anthropic 模型获得完整代码库访问能力的统一文件工具套件。只读工具自由运行；写入类工具需逐次审批。",
+    "coreFilesDesc": "面向非 Anthropic 模型的完整编码 Agent 工具集：搜索、读取、补丁、Shell、可等待的后台命令，以及带依赖关系的结构化会话任务。只读工具自由运行；文件系统和 Shell 变更需逐次审批。",
     "dependencyResearch": "依赖源码",
     "dependencyResearchDesc": "将依赖的源码仓库克隆到被忽略的 .cognia/clonedeps/ 工作区（clone_dep_source / list_cloned_deps），让 Agent 直接阅读库的内部实现。仅 HTTPS、幂等、不运行任何构建脚本。仅桌面端。",
     "description": "分类切换 sidecar 内的 cognia-tools MCP 服务器。每个分类向 Agent 暴露一组不同的工具。",
@@ -24340,10 +25820,15 @@
       "coreGlob": "按 glob 模式查找文件，按修改时间从新到旧排序。",
       "coreGrep": "用正则搜索文件内容（ripgrep 驱动；内容 / 文件 / 计数模式）。",
       "coreKillShell": "终止由 bash(run_in_background) 启动的后台 shell。",
+      "coreListShells": "列出后台 shell 的状态、工作目录、运行时间和退出信息。",
       "coreLs": "列出目录条目（目录在前）。",
       "coreMultiEdit": "对同一文件原子地应用多处字符串替换。",
       "coreNotebookEdit": "按单元格 id 或编号编辑 Jupyter notebook 单元格（替换 / 插入 / 删除）。",
       "coreRead": "带行号读取文本文件；大文件分页；可列目录。",
+      "coreTaskCreate": "创建结构化会话任务并返回稳定 id。",
+      "coreTaskGet": "读取单个结构化任务及其依赖、负责人、元数据和时间戳。",
+      "coreTaskList": "列出结构化会话任务及其当前依赖状态。",
+      "coreTaskUpdate": "更新任务状态、详情、负责人、元数据和依赖，或删除任务。",
       "coreTodoWrite": "更新展示给用户的会话任务清单。",
       "coreWrite": "创建或覆盖文件（覆盖已有文件需先读取）。",
       "currentTime": "获取当前日期与时间（UTC 以及指定时区的本地化字符串）。",
@@ -26394,15 +27879,20 @@
           "hint": "本工作流两次触发之间的最短间隔——防止工作流自身的桌面操作再次触发它。",
           "label": "冷却时间（毫秒）"
         },
-        "desktopOnly": "仅桌面端——在实时 UI Automation 事件上触发（v1：Windows 焦点变化）；浏览器中无效。",
+        "desktopOnly": "仅桌面端——由 Windows 原生 UI Automation 的焦点、结构和属性变化触发；浏览器中无效。",
         "kinds": {
-          "hint": "当所选的任一 UI Automation 事件发生时触发。v1 仅投递焦点变化，其余类型待实现。",
+          "hint": "当所选的任一原生 UI Automation 事件发生时触发。",
           "label": "事件类型",
           "options": {
             "focus-changed": "焦点变化",
             "property-changed": "属性变化",
             "structure-changed": "结构变化"
           }
+        },
+        "scope": {
+          "hint": "可选的 UIA 元素引用。事件将限定在该元素及其后代范围内。",
+          "label": "UIA 元素作用域",
+          "placeholder": "粘贴元素引用"
         }
       },
       "desktopFindElement": {
@@ -27280,22 +28770,42 @@
         }
       },
       "memoryRecall": {
+        "agentId": {
+          "label": "智能体 ID"
+        },
+        "branch": {
+          "label": "分支限制"
+        },
         "characterId": {
           "label": "角色"
+        },
+        "path": {
+          "label": "工作区相对路径"
+        },
+        "projectId": {
+          "label": "项目 ID"
         },
         "query": {
           "label": "查询"
         },
         "scope": {
+          "agent": "智能体",
           "character": "角色",
           "global": "全局",
-          "label": "作用域"
+          "label": "作用域",
+          "workspace": "工作区"
         },
         "topK": {
           "label": "Top K"
         }
       },
       "memoryStore": {
+        "agentId": {
+          "label": "智能体 ID"
+        },
+        "branch": {
+          "label": "分支限制"
+        },
         "characterId": {
           "label": "角色"
         },
@@ -27303,16 +28813,24 @@
           "hint": "这条事实有多关键。/remember 使用 7。",
           "label": "重要度（1–10）"
         },
+        "pathPattern": {
+          "label": "工作区相对路径前缀"
+        },
         "piiGate": {
           "block": "拦截（步骤失败）",
           "hint": "记忆会持久保存——拦截（含 PII 即失败）或脱敏占位符。不可关闭。",
           "label": "PII 防护",
           "redact": "脱敏占位符"
         },
+        "projectId": {
+          "label": "项目 ID"
+        },
         "scope": {
+          "agent": "智能体",
           "character": "角色",
           "global": "全局",
-          "label": "作用域"
+          "label": "作用域",
+          "workspace": "工作区"
         },
         "text": {
           "hint": "一条自洽的陈述。会经整合器与既有记忆去重。",

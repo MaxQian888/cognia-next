@@ -146,6 +146,33 @@
     "title": "Allow remote control",
     "toggleAria": "Toggle remote control for {label}"
   },
+  "remoteBrowser": {
+    "description": "Run an isolated Chromium session on the paired workspace runtime and stream it to Cognia.",
+    "domains": {
+      "description": "Only explicitly granted domains may be opened by this workspace.",
+      "domain": "Domain",
+      "grant": "Grant domain",
+      "placeholder": "example.com",
+      "revoke": "Revoke {domain}",
+      "title": "Allowed domains"
+    },
+    "enable": "Enable remote browser",
+    "error": "Remote browser error: {message}",
+    "experimental": "Experimental",
+    "gateHint": "Both this setting and the server rollout gate must be enabled.",
+    "operationFailed": "The remote browser setting could not be saved.",
+    "profiles": {
+      "create": "Create profile",
+      "description": "Persistent profiles retain browser state inside the selected workspace.",
+      "ephemeral": "Ephemeral session",
+      "name": "Profile name",
+      "placeholder": "Research profile",
+      "title": "Browser profiles"
+    },
+    "title": "Remote browser",
+    "toggle": "Toggle remote browser",
+    "workspaceHint": "Select a workspace before managing profiles or domains."
+  },
   "resume": {
     "blocked": "Resume not completed ({reason}).",
     "description": "The device's JWT is removed from the deny-list and regains access.",

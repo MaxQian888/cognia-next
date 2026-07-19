@@ -1,0 +1,22 @@
+{
+  "answerTitle": "Answer",
+  "backAria": "Back to Me",
+  "configureCta": "Configure providers",
+  "errors": {
+    "answer-failed": "Could not synthesize an answer",
+    "empty-query": "Enter a question",
+    "no-model-provider": "No model provider is configured",
+    "no-search-provider": "No web-search provider is configured",
+    "search-failed": "Web search failed"
+  },
+  "idleHint": "Ask a question to search the web and build a cited answer.",
+  "loading": "Searching and synthesizing…",
+  "modelUnavailableTitle": "Sources found, but no model is configured",
+  "noResults": "No sources found.",
+  "placeholder": "Ask a question about the web…",
+  "queryAria": "Web-search question",
+  "run": "Search",
+  "sourcesTitle": "Sources",
+  "stop": "Stop",
+  "title": "Web Search"
+}
