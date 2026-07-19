@@ -43,6 +43,10 @@ export const MOBILE_OUTBOUND_COMMANDS = [
   "plugin_set_enabled",
   "adapter_update_policy",
   "app_settings_update",
+  // Long-term memory mutations — mobile edits must reach the desktop
+  // authority instead of only changing the offline sync mirror.
+  "memory_update",
+  "memory_forget",
   // External agents (ADR-0056, Wave 4) — enable/disable + permission-mode edit.
   "external_agent_update",
 ] as const

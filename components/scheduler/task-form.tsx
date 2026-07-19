@@ -1112,7 +1112,7 @@ export function TaskForm({
               <Input
                 value={f.eventType}
                 onChange={(e) => updateForm({ eventType: e.target.value, triggerError: null })}
-                placeholder="e.g., message.created, workflow.completed"
+                placeholder={t("eventTypePlaceholder")}
                 className="h-10 transition-all focus:ring-2 focus:ring-primary/20"
               />
             </div>
@@ -1236,6 +1236,7 @@ export function TaskForm({
         {f.payloadEditorMode === "structured" && isChatLikeTaskType(f.taskType) && (
           <ChatPayloadEditor
             taskType={f.taskType}
+            taskName={f.name}
             draft={f.chatLikeDraft}
             onDraftChange={(draft) => {
               updateForm({
@@ -1307,7 +1308,7 @@ export function TaskForm({
             <Textarea
               value={f.payloadJson}
               onChange={(e) => updateForm({ payloadJson: e.target.value, payloadError: null })}
-              placeholder='{"key": "value"}'
+              placeholder={t("payload.jsonPlaceholder")}
               className={cn(
                 "min-h-[100px] resize-none font-mono text-sm transition-all",
                 f.payloadError

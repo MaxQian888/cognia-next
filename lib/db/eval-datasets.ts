@@ -136,6 +136,10 @@ export async function addCase(datasetIdValue: string, input: AddCaseInput): Prom
     ...(input.failureMode ? { failureMode: input.failureMode } : {}),
     ...(input.sourceTraceId ? { sourceTraceId: input.sourceTraceId } : {}),
     ...(input.notes ? { notes: input.notes } : {}),
+    ...(input.tags ? { tags: input.tags } : {}),
+    ...(input.split ? { split: input.split } : {}),
+    ...(input.metadata ? { metadata: input.metadata } : {}),
+    ...(input.inputVars ? { inputVars: input.inputVars } : {}),
   }
   await getDb().evalCases.put(row)
   await bumpDatasetVersion(datasetIdValue)

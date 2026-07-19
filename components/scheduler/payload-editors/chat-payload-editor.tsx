@@ -17,6 +17,7 @@
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
+import { useShallow } from "zustand/react/shallow"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -52,6 +53,7 @@ const EFFORTS: NonNullable<SendOptions["effort"]>[] = ["low", "medium", "high", 
 
 export interface ChatPayloadEditorProps {
   taskType: ScheduledTaskType
+  taskName?: string
   draft: ChatLikeDraft
   onDraftChange: (next: ChatLikeDraft) => void
   errors?: Record<string, string>
@@ -66,6 +68,7 @@ export interface ChatPayloadEditorProps {
 
 export function ChatPayloadEditor({
   taskType,
+  taskName,
   draft,
   onDraftChange,
   errors,
@@ -79,7 +82,7 @@ export function ChatPayloadEditor({
   const [characters, setCharacters] = useState<Character[] | null>(charactersForTesting ?? null)
   const [skills, setSkills] = useState<Skill[] | null>(skillsForTesting ?? null)
   const [teams, setTeams] = useState<Team[] | null>(teamsForTesting ?? null)
-  const customModes = useCustomModeStore((s) => Object.values(s.customModes))
+  const customModes = useCustomModeStore(useShallow((s) => Object.values(s.customModes)))
 
   useEffect(() => {
     if (charactersForTesting) return
@@ -359,7 +362,9 @@ export function ChatPayloadEditor({
           <Input
             value={draft.sessionTitle ?? ""}
             onChange={(e) => update("sessionTitle", e.target.value || undefined)}
-            placeholder={t("payload.sessionTitlePlaceholder")}
+            placeholder={t("payload.sessionTitlePlaceholder", {
+              name: taskName?.trim() || t("taskName"),
+            })}
             disabled={disabled}
             className="h-10"
             data-testid={`${testId}-session-title-input`}

@@ -157,4 +157,25 @@ describe("case CRUD", () => {
       reference: { expectedTools: ["Read"] },
     })
   })
+
+  it("persists optional authoring metadata when adding a case", async () => {
+    const ds = await createDataset({ name: "A", capability: "chat.tool-use" })
+    const c = await addCase(ds.id, {
+      input: "x",
+      source: "handwritten",
+      split: "regression",
+      tags: ["release", "tools"],
+      notes: "Release gate regression case",
+      metadata: { owner: "release" },
+      inputVars: { branch: "main" },
+    })
+
+    expect(await getCase(c.id)).toMatchObject({
+      split: "regression",
+      tags: ["release", "tools"],
+      notes: "Release gate regression case",
+      metadata: { owner: "release" },
+      inputVars: { branch: "main" },
+    })
+  })
 })

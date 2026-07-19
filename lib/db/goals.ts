@@ -17,7 +17,8 @@ import Dexie from "dexie"
 import type { Goal, GoalEvent, GoalEventKind, GoalEventPayload, GoalStatus } from "@/types/goal"
 import { isTerminalGoalStatus } from "@/types/goal"
 import { getDb } from "./schema"
-import { resolveScopeProjectId, resolveSessionProjectId } from "./project-scope"
+import { DEFAULT_PROJECT_ID, resolveSessionProjectId } from "./project-scope"
+import { getSettings } from "./settings"
 
 const EVENTS_PER_GOAL_CAP = 5000
 
@@ -85,7 +86,11 @@ export async function listGoalsBySession(sessionId: string): Promise<Goal[]> {
  * compound index (Dexie v86).
  */
 export async function listAllGoals(limit = 500, projectId?: string): Promise<Goal[]> {
-  const pid = await resolveScopeProjectId(projectId)
+  // This reader is called from Dexie liveQuery surfaces. Falling back through
+  // resolveScopeProjectId would auto-create Default and write settings inside
+  // the liveQuery's read-only context on first boot. The project initializer
+  // owns that write; until it finishes, an empty Default-scoped read is safe.
+  const pid = projectId ?? (await getSettings()).activeProjectId ?? DEFAULT_PROJECT_ID
   return getDb()
     .chatGoals.where("[projectId+createdAt]")
     .between([pid, Dexie.minKey], [pid, Dexie.maxKey])
