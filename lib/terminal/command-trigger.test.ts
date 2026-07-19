@@ -60,6 +60,7 @@ describe("dispatchTerminalCommandTriggers", () => {
     expect(dispatchTriggerMock).toHaveBeenCalledTimes(2)
     expect(dispatchTriggerMock).toHaveBeenCalledWith({
       workflowId: "wf-a",
+      triggerId: "n1",
       kind: "trigger.terminal.command",
       payload: {
         sessionId: "tab-1",

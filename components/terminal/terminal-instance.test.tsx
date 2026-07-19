@@ -39,6 +39,12 @@ const mockTermInstance: {
     minimumContrastRatio?: number
     cursorStyle?: string
     cursorBlink?: boolean
+    cursorWidth?: number
+    cursorInactiveStyle?: string
+    customGlyphs?: boolean
+    rescaleOverlappingGlyphs?: boolean
+    drawBoldTextInBrightColors?: boolean
+    smoothScrollDuration?: number
   }
   unicode: { activeVersion: string }
   rows: number
@@ -70,6 +76,18 @@ const mockSearchInstance = {
   clearDecorations: jest.fn(),
   dispose: jest.fn(),
 }
+let mockWebglContextLossHandler: (() => void) | null = null
+const mockWebglDispose = jest.fn()
+const mockWebglContextLossDispose = jest.fn()
+const mockCanvasDispose = jest.fn()
+const mockWebglAddon = {
+  dispose: mockWebglDispose,
+  onContextLoss: jest.fn((handler: () => void) => {
+    mockWebglContextLossHandler = handler
+    return { dispose: mockWebglContextLossDispose }
+  }),
+}
+const mockCanvasAddon = { dispose: mockCanvasDispose }
 
 jest.mock("@xterm/xterm", () => ({
   Terminal: jest.fn(() => mockTermInstance),
@@ -87,10 +105,10 @@ jest.mock("@xterm/addon-search", () => ({
   SearchAddon: jest.fn(() => mockSearchInstance),
 }))
 jest.mock("@xterm/addon-webgl", () => ({
-  WebglAddon: jest.fn(() => ({ dispose: jest.fn() })),
+  WebglAddon: jest.fn(() => mockWebglAddon),
 }))
 jest.mock("@xterm/addon-canvas", () => ({
-  CanvasAddon: jest.fn(() => ({ dispose: jest.fn() })),
+  CanvasAddon: jest.fn(() => mockCanvasAddon),
 }))
 const mockLigaturesAddon = jest.fn(() => ({ dispose: jest.fn() }))
 jest.mock("@xterm/addon-ligatures", () => ({
@@ -242,6 +260,11 @@ beforeEach(() => {
   mockSearchInstance.findPrevious.mockReset().mockReturnValue(true)
   mockSearchInstance.clearDecorations.mockReset()
   mockSearchInstance.dispose.mockReset()
+  mockWebglContextLossHandler = null
+  mockWebglDispose.mockReset()
+  mockWebglContextLossDispose.mockReset()
+  mockCanvasDispose.mockReset()
+  mockWebglAddon.onContextLoss.mockClear()
   mockTerminalSettings = {}
   mockLigaturesAddon.mockClear()
   ;(MockTerminal as unknown as jest.Mock).mockClear()
@@ -283,6 +306,17 @@ describe("TerminalInstance", () => {
     // 4 mandatory addons + 1 renderer (webgl OR canvas, both mocked so
     // webgl wins). 5 total addons loaded.
     expect(mockTermInstance.loadAddon).toHaveBeenCalledTimes(5)
+  })
+
+  it("falls back to Canvas when the WebGL context is lost", async () => {
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    expect(mockWebglContextLossHandler).not.toBeNull()
+    act(() => {
+      mockWebglContextLossHandler?.()
+    })
+    expect(mockWebglDispose).toHaveBeenCalled()
+    expect(mockTermInstance.loadAddon).toHaveBeenLastCalledWith(mockCanvasAddon)
   })
 
   it("wires session.onData to the backpressure→term.write pipeline", async () => {
@@ -548,6 +582,18 @@ describe("TerminalInstance", () => {
     expect(opts.cursorBlink).toBe(false)
   })
 
+  it("passes cursor width and inactive style to xterm", async () => {
+    mockTerminalSettings = { cursorWidth: 3, cursorInactiveStyle: "none" }
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    const opts = (MockTerminal as unknown as jest.Mock).mock.calls.at(-1)?.[0] as {
+      cursorWidth?: number
+      cursorInactiveStyle?: string
+    }
+    expect(opts.cursorWidth).toBe(3)
+    expect(opts.cursorInactiveStyle).toBe("none")
+  })
+
   it("constructs the Terminal with font-weight, line-height, spacing and contrast", async () => {
     mockTerminalSettings = {
       fontWeight: "300",
@@ -575,6 +621,46 @@ describe("TerminalInstance", () => {
     expect(opts.scrollSensitivity).toBe(3)
     expect(opts.fastScrollSensitivity).toBe(15) // 5× the base sensitivity
     expect(opts.minimumContrastRatio).toBe(7)
+  })
+
+  it("passes the custom glyph preference to xterm", async () => {
+    mockTerminalSettings = { customGlyphs: false }
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    const opts = (MockTerminal as unknown as jest.Mock).mock.calls.at(-1)?.[0] as {
+      customGlyphs?: boolean
+    }
+    expect(opts.customGlyphs).toBe(false)
+  })
+
+  it("passes the overlapping glyph rescale preference to xterm", async () => {
+    mockTerminalSettings = { rescaleOverlappingGlyphs: false }
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    const opts = (MockTerminal as unknown as jest.Mock).mock.calls.at(-1)?.[0] as {
+      rescaleOverlappingGlyphs?: boolean
+    }
+    expect(opts.rescaleOverlappingGlyphs).toBe(false)
+  })
+
+  it("passes the bold bright-color preference to xterm", async () => {
+    mockTerminalSettings = { drawBoldTextInBrightColors: false }
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    const opts = (MockTerminal as unknown as jest.Mock).mock.calls.at(-1)?.[0] as {
+      drawBoldTextInBrightColors?: boolean
+    }
+    expect(opts.drawBoldTextInBrightColors).toBe(false)
+  })
+
+  it("maps smooth scrolling to VS Code's 125 ms xterm duration", async () => {
+    mockTerminalSettings = { smoothScrolling: true }
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    const opts = (MockTerminal as unknown as jest.Mock).mock.calls.at(-1)?.[0] as {
+      smoothScrollDuration?: number
+    }
+    expect(opts.smoothScrollDuration).toBe(125)
   })
 
   it("re-fits when the line height changes (cell metrics shift)", async () => {
@@ -622,6 +708,54 @@ describe("TerminalInstance", () => {
     rerender(<TerminalInstance sessionId="s-1" fontFamily="Menlo" fontSize={13} />)
     await flushAsync()
     expect(mockTermInstance.options.minimumContrastRatio).toBe(7)
+    expect(mockFit).not.toHaveBeenCalled()
+  })
+
+  it("live-updates non-metric rendering options without a re-fit", async () => {
+    const { rerender } = render(
+      <TerminalInstance sessionId="s-1" fontFamily="Menlo" fontSize={13} />
+    )
+    await flushAsync()
+    Object.assign(mockTermInstance.options, {
+      fontFamily: "Menlo",
+      fontSize: 13,
+      fontWeight: "normal",
+      fontWeightBold: "bold",
+      lineHeight: 1,
+      letterSpacing: 0,
+      scrollSensitivity: 1,
+      fastScrollSensitivity: 5,
+      minimumContrastRatio: 1,
+      cursorStyle: "block",
+      cursorBlink: true,
+      cursorWidth: 1,
+      cursorInactiveStyle: "outline",
+      customGlyphs: true,
+      rescaleOverlappingGlyphs: true,
+      drawBoldTextInBrightColors: true,
+      smoothScrollDuration: 0,
+    })
+    mockFit.mockClear()
+    mockTerminalSettings = {
+      cursorWidth: 4,
+      cursorInactiveStyle: "none",
+      customGlyphs: false,
+      rescaleOverlappingGlyphs: false,
+      drawBoldTextInBrightColors: false,
+      smoothScrolling: true,
+    }
+    rerender(<TerminalInstance sessionId="s-1" fontFamily="Menlo" fontSize={13} />)
+    await flushAsync()
+    expect(mockTermInstance.options).toEqual(
+      expect.objectContaining({
+        cursorWidth: 4,
+        cursorInactiveStyle: "none",
+        customGlyphs: false,
+        rescaleOverlappingGlyphs: false,
+        drawBoldTextInBrightColors: false,
+        smoothScrollDuration: 125,
+      })
+    )
     expect(mockFit).not.toHaveBeenCalled()
   })
 

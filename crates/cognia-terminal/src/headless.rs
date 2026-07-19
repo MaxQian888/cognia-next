@@ -337,6 +337,7 @@ pub fn spawn_headless(
         // global `settings.terminal.sandboxed` toggle and pass it through;
         // spawn_session_with_sink then wraps the shell in bwrap / sandbox-exec.
         sandboxed,
+        sandbox_network: None,
     };
 
     let capture = Arc::new(StdMutex::new(CaptureState {

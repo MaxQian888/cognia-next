@@ -48,6 +48,8 @@ export interface SpawnRequest {
    * closed when no backend is available (Windows runner pending).
    */
   sandboxed?: boolean
+  /** Defaults true. Sites previews set false to deny all outbound network. */
+  sandboxNetwork?: boolean
 }
 
 export interface SessionInfo {

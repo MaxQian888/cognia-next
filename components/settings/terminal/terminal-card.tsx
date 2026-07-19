@@ -65,12 +65,18 @@ const DEFAULT_VALUES: TerminalSettings = {
   exposeDockToAgents: false,
   runInDockTimeoutSec: 60,
   cursorStyle: "block",
+  cursorWidth: 1,
+  cursorInactiveStyle: "outline",
   cursorBlink: true,
   fontLigatures: false,
+  customGlyphs: true,
+  rescaleOverlappingGlyphs: true,
+  drawBoldTextInBrightColors: true,
   forceUtf8: true,
   colorScheme: AUTO_SCHEME_ID,
   renderer: "auto",
   scrollSensitivity: 1,
+  smoothScrolling: false,
   minimumContrastRatio: 1,
   autocomplete: {
     enabled: false,
@@ -167,6 +173,16 @@ const NERD_FONT_STACK =
   '"MesloLGS NF", "CaskaydiaCove Nerd Font", "JetBrains Mono", "Cascadia Code", monospace'
 
 const CURSOR_STYLES: ReadonlyArray<"block" | "bar" | "underline"> = ["block", "bar", "underline"]
+const INACTIVE_CURSOR_STYLES: ReadonlyArray<{
+  value: "outline" | "block" | "bar" | "underline" | "none"
+  labelKey: string
+}> = [
+  { value: "outline", labelKey: "settings.terminal.cursor.inactiveOutline" },
+  { value: "block", labelKey: "settings.terminal.cursor.inactiveBlock" },
+  { value: "bar", labelKey: "settings.terminal.cursor.inactiveBar" },
+  { value: "underline", labelKey: "settings.terminal.cursor.inactiveUnderline" },
+  { value: "none", labelKey: "settings.terminal.cursor.inactiveNone" },
+]
 
 const AUTO = "__auto__"
 const CUSTOM = "__custom__"
@@ -398,6 +414,56 @@ export function TerminalCard() {
 
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-2">
+            <Label className="text-xs">{t("settings.terminal.cursor.width")}</Label>
+            <Input
+              type="number"
+              min={1}
+              max={10}
+              step={1}
+              value={terminal.cursorWidth ?? 1}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (Number.isFinite(n)) {
+                  update({ cursorWidth: Math.max(1, Math.min(10, Math.round(n))) })
+                }
+              }}
+              className="h-8 text-xs"
+              aria-label={t("settings.terminal.cursor.width")}
+              data-testid="terminal-card-cursor-width"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label className="text-xs">{t("settings.terminal.cursor.inactiveLabel")}</Label>
+            <Select
+              value={terminal.cursorInactiveStyle ?? "outline"}
+              onValueChange={(value) =>
+                update({
+                  cursorInactiveStyle: value as "outline" | "block" | "bar" | "underline" | "none",
+                })
+              }
+            >
+              <SelectTrigger
+                className="h-8 text-xs"
+                data-testid="terminal-card-cursor-inactive-style"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {INACTIVE_CURSOR_STYLES.map((style) => (
+                  <SelectItem key={style.value} value={style.value} className="text-xs">
+                    {t(style.labelKey as never)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          {t("settings.terminal.cursor.widthHelper")}
+        </p>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-2">
             <Label className="text-xs">{t("settings.terminal.colorScheme.label")}</Label>
             <Select
               value={terminal.colorScheme || AUTO_SCHEME_ID}
@@ -472,6 +538,53 @@ export function TerminalCard() {
             onCheckedChange={(checked) => update({ fontLigatures: checked })}
             aria-label={t("settings.terminal.ligatures.label")}
             data-testid="terminal-card-ligatures"
+          />
+        </div>
+
+        <div className="flex items-center justify-between rounded border p-3">
+          <div className="space-y-0.5">
+            <Label className="text-xs">{t("settings.terminal.customGlyphs.label")}</Label>
+            <p className="text-[11px] text-muted-foreground">
+              {t("settings.terminal.customGlyphs.helper")}
+            </p>
+          </div>
+          <Switch
+            checked={terminal.customGlyphs ?? true}
+            onCheckedChange={(checked) => update({ customGlyphs: checked })}
+            aria-label={t("settings.terminal.customGlyphs.label")}
+            data-testid="terminal-card-custom-glyphs"
+          />
+        </div>
+
+        <div className="flex items-center justify-between rounded border p-3">
+          <div className="space-y-0.5">
+            <Label className="text-xs">
+              {t("settings.terminal.rescaleOverlappingGlyphs.label")}
+            </Label>
+            <p className="text-[11px] text-muted-foreground">
+              {t("settings.terminal.rescaleOverlappingGlyphs.helper")}
+            </p>
+          </div>
+          <Switch
+            checked={terminal.rescaleOverlappingGlyphs ?? true}
+            onCheckedChange={(checked) => update({ rescaleOverlappingGlyphs: checked })}
+            aria-label={t("settings.terminal.rescaleOverlappingGlyphs.label")}
+            data-testid="terminal-card-rescale-overlapping-glyphs"
+          />
+        </div>
+
+        <div className="flex items-center justify-between rounded border p-3">
+          <div className="space-y-0.5">
+            <Label className="text-xs">{t("settings.terminal.boldBrightColors.label")}</Label>
+            <p className="text-[11px] text-muted-foreground">
+              {t("settings.terminal.boldBrightColors.helper")}
+            </p>
+          </div>
+          <Switch
+            checked={terminal.drawBoldTextInBrightColors ?? true}
+            onCheckedChange={(checked) => update({ drawBoldTextInBrightColors: checked })}
+            aria-label={t("settings.terminal.boldBrightColors.label")}
+            data-testid="terminal-card-bold-bright-colors"
           />
         </div>
       </Section>
@@ -664,6 +777,21 @@ export function TerminalCard() {
         <p className="text-[11px] text-muted-foreground">
           {t("settings.terminal.minContrast.helper")}
         </p>
+
+        <div className="flex items-center justify-between rounded border p-3">
+          <div className="space-y-0.5">
+            <Label className="text-xs">{t("settings.terminal.smoothScrolling.label")}</Label>
+            <p className="text-[11px] text-muted-foreground">
+              {t("settings.terminal.smoothScrolling.helper")}
+            </p>
+          </div>
+          <Switch
+            checked={terminal.smoothScrolling ?? false}
+            onCheckedChange={(checked) => update({ smoothScrolling: checked })}
+            aria-label={t("settings.terminal.smoothScrolling.label")}
+            data-testid="terminal-card-smooth-scrolling"
+          />
+        </div>
 
         <div className="flex items-center justify-between rounded border p-3">
           <div className="space-y-0.5">

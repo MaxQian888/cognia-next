@@ -69,6 +69,7 @@ export async function dispatchTerminalCommandTriggers(
         dispatchTrigger({
           workflowId: match.workflowId,
           kind: "trigger.terminal.command",
+          triggerId: match.nodeId,
           payload: {
             sessionId: event.sessionId,
             projectId: event.projectId,
