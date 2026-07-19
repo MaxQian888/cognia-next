@@ -54,7 +54,7 @@ tempfile = "3"
 
 [target."cfg(target_os = \"windows\")".dependencies]
 # UI Automation — pins windows = 0.62.2 (matched below to avoid a duplicate tree).
-uiautomation = { version = "0.25", features = ["process"] }
+uiautomation = { version = "0.25", features = ["event", "process"] }
 # Direct windows-rs for SendInput / display-topology / power / DWM. Feature set
 # matches src-tauri (superset of what automation + sandbox need).
 windows = { version = "0.62.2", features = [

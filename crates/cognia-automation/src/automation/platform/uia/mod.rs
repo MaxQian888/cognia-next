@@ -33,7 +33,8 @@ impl UiaBackend {
         Ok(Self {
             automation,
             cache: ElementCache::new(),
-            events: events::EventSubscriptions::new(),
+            events: events::EventSubscriptions::new()
+                .map_err(|err| format!("UIA event subsystem failed: {err}"))?,
         })
     }
 }
@@ -45,7 +46,7 @@ impl AutomationBackend for UiaBackend {
             has_uia: true,
             has_input_sim: true,
             has_screenshot: true,
-            has_events: true, // v1: focus-changed via the poll watcher (events.rs).
+            has_events: true,    // Native focus / structure / property UIA handlers.
             has_a11y_tree: true, // UIA exposes a full element tree.
             monitors: screenshot::list_monitors(),
         }
@@ -188,10 +189,15 @@ impl AutomationBackend for UiaBackend {
     }
 
     fn subscribe_events(&self, filter: EventFilter) -> Result<SubscriptionId> {
-        // v1: focus-changed via a dedicated poll-watcher thread (see
-        // events.rs for why COM event handlers are deferred). Events reach
-        // the renderer through `automation::events::emit_uia_event`.
-        self.events.subscribe(&filter)
+        let scope = match filter.scope.as_ref() {
+            Some(element_ref) => Some(
+                self.cache
+                    .get(element_ref)
+                    .ok_or(AutomationError::StaleElement)?,
+            ),
+            None => None,
+        };
+        self.events.subscribe(&filter, scope)
     }
     fn unsubscribe(&self, sub: SubscriptionId) -> Result<()> {
         self.events.unsubscribe(&sub)

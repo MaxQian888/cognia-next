@@ -190,7 +190,7 @@ Windows 后端解析 `uiautomation::inputs::Keyboard::send_keys` 能接受的所
 2. `bash.restart: true` 作为审计内空操作处理。Cognia 没有可重启的常驻 shell，命令返回合成 `BashResult` 在 `stdout` 说明差异，审计命令名为 `bash:restart`。
 3. `plugins/computer-use/plugin.json` 的 `runtimeCompatibility` 键由 `desktop` 改为规范的 `tauri`（与 `types/plugin/plugin.ts:99` 一致）。新增 `lib/plugin/core/builtin-manifest-shape.test.ts` 遍历所有内置插件 manifest，拒绝非规范键。其余 6 个插件同步修正。
 4. 删除 `plugins/computer-use/src/index.ts` 中 `activate()` 里的运行时 `registerNativeAnthropicTool` 调用；manifest 驱动注册为规范路径。
-5. TypeScript SDK 文件按能力契约路径补齐：`packages/plugin-sdk/src/api/native-anthropic-tool.ts` 与 `packages/plugin-sdk/src/context/extended.ts`。
+5. TypeScript SDK 文件按能力契约路径补齐：`packages/plugin-sdk/src/api/native-anthropic-tool.ts` 与 `packages/plugin-sdk/src/context/index.ts`。
 6. `runtime-proof-audit.test.ts` 锁定 `native-anthropic-tool` 的 `proofStatus` = `verified`。
 7. 设置 → 自动化 的授权浮层 + 全部五个标签（概览 / 权限 / 白名单 / 审计 / 检查器），以及 角色 → Computer Use 开关、外部网桥 `mcp:computer-use` 作用域描述均通过 `useTranslations()` 接入 i18n；新增 `automation.*` 命名空间，扩展现有 `settings.*`。`/cu` 斜杠命令通过 `lib/i18n/plugin-i18n-registry` 注册插件侧 i18n bundle。
 8. `i18n/messages/en.json` 与 `zh-CN.json` 键对齐恢复。`scripts/i18n-baseline.json` 重置 — JSX 硬编码字符串数量从 811 降至 698（关闭 ~113 处）。

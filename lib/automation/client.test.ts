@@ -15,15 +15,55 @@ jest.mock("@/lib/tauri", () => ({
   },
 }))
 
+const mockUiaListen = jest.fn()
+jest.mock("@tauri-apps/api/event", () => ({
+  listen: (event: string, handler: (event: { payload: unknown }) => void) =>
+    mockUiaListen(event, handler),
+}))
+
 import { transport } from "@/lib/tauri"
 
-import { desktop, defaultAutomationSettings } from "./client"
+import {
+  desktop,
+  defaultAutomationSettings,
+  listenUiaEvents,
+  UIA_EVENT_NAME,
+  type UiaEventPayload,
+} from "./client"
 import { elementRef, keyChord } from "./types"
 
 const mockCall = transport.call as unknown as jest.Mock
 
 afterEach(() => {
   mockCall.mockReset()
+  mockUiaListen.mockReset()
+})
+
+describe("UIA event client", () => {
+  it("forwards native property and structure metadata without dropping fields", async () => {
+    const unlisten = jest.fn()
+    const payload: UiaEventPayload = {
+      subscriptionId: 7,
+      kind: "structure-changed",
+      controlType: "Window",
+      processId: 42,
+      property: "Name",
+      structureChangeType: "ChildAdded",
+      runtimeId: [1, 2, 3],
+      at: 100,
+    }
+    mockUiaListen.mockImplementationOnce(
+      async (_event: string, handler: (event: { payload: UiaEventPayload }) => void) => {
+        handler({ payload })
+        return unlisten
+      }
+    )
+    const handler = jest.fn()
+
+    await expect(listenUiaEvents(handler)).resolves.toBe(unlisten)
+    expect(mockUiaListen).toHaveBeenCalledWith(UIA_EVENT_NAME, expect.any(Function))
+    expect(handler).toHaveBeenCalledWith(payload)
+  })
 })
 
 describe("desktop client", () => {

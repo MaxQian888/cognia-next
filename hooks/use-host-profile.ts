@@ -9,6 +9,7 @@ import {
   type CapabilityId,
   type HostProfile,
 } from "@/lib/platform/capabilities"
+import { isRemoteHostActive, subscribeActiveRemoteTransport } from "@/lib/tauri/transport-routing"
 
 /**
  * Host profile + capability availability as React hooks (ADR-0059 C3/F5).
@@ -32,13 +33,26 @@ export function useHostProfile(): HostProfile {
 /**
  * Whether `cap` is available on this host — either provided by the local
  * runtime baseline or executed server-side on the host's behalf (companion
- * profiles). This is the local-OR-server rule UI surfaces gate on.
+ * profiles). A desktop actively driving another Cognia host also receives the
+ * same server-backed set; the hook passes that session-scoped state.
  */
-export function capabilityAvailable(cap: CapabilityId, profile: HostProfile): boolean {
-  return hasCapability(cap) || serverBackedCapabilities(profile).includes(cap)
+export function capabilityAvailable(
+  cap: CapabilityId,
+  profile: HostProfile,
+  remoteHostActive = false
+): boolean {
+  const remoteCapabilities = remoteHostActive
+    ? serverBackedCapabilities("cloud-companion")
+    : serverBackedCapabilities(profile)
+  return hasCapability(cap) || remoteCapabilities.includes(cap)
 }
 
 export function useCapability(cap: CapabilityId): boolean {
   const profile = useHostProfile()
-  return capabilityAvailable(cap, profile)
+  const remoteHostActive = useSyncExternalStore(
+    (notify) => subscribeActiveRemoteTransport(() => notify()),
+    isRemoteHostActive,
+    () => false
+  )
+  return capabilityAvailable(cap, profile, remoteHostActive)
 }

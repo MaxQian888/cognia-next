@@ -49,6 +49,9 @@ export interface UiaEventPayload {
   name?: string
   controlType?: string
   processId?: number
+  property?: string
+  structureChangeType?: string
+  runtimeId?: number[]
   at: number
 }
 
