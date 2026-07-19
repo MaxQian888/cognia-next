@@ -37,6 +37,7 @@ import { SyncToolbar } from "./sync-toolbar"
 import { TagPanel } from "./tag-panel"
 import { TimelineView } from "./timeline-view"
 import { SourceControlViewSettings } from "./view-settings"
+import { WorktreePanel } from "./worktree-panel"
 
 export function SourceControlPanel() {
   const t = useTranslations("sourceControl")
@@ -60,6 +61,7 @@ export function SourceControlPanel() {
   const [remoteOpen, setRemoteOpen] = useState(false)
   const [tagOpen, setTagOpen] = useState(false)
   const [compareOpen, setCompareOpen] = useState(false)
+  const [worktreesOpen, setWorktreesOpen] = useState(false)
   const [blameTarget, setBlameTarget] = useState<{ path: string; rev?: string } | null>(null)
   const [restorePath, setRestorePath] = useState<string | null>(null)
   const [rebaseBase, setRebaseBase] = useState<string | null>(null)
@@ -162,6 +164,7 @@ export function SourceControlPanel() {
             onOpenRemotes={() => setRemoteOpen(true)}
             onOpenTags={() => setTagOpen(true)}
             onOpenCompare={() => setCompareOpen(true)}
+            onOpenWorktrees={() => setWorktreesOpen(true)}
             onRefresh={() => void refresh()}
           />
           <Popover>
@@ -284,6 +287,7 @@ export function SourceControlPanel() {
       />
       <TagPanel open={tagOpen} onOpenChange={setTagOpen} rootDir={rootDir} actions={actions} />
       <CompareRefsSheet open={compareOpen} onOpenChange={setCompareOpen} rootDir={rootDir} />
+      <WorktreePanel open={worktreesOpen} onOpenChange={setWorktreesOpen} rootDir={rootDir} />
       <RestoreDialog
         rootDir={rootDir}
         path={restorePath}

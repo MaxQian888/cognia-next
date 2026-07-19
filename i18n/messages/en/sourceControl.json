@@ -300,5 +300,34 @@
       "list": "List"
     },
     "timelineView": "Timeline view"
+  },
+  "worktrees": {
+    "baseRefLabel": "Start point (optional)",
+    "baseRefPlaceholder": "HEAD, branch, tag, or commit",
+    "branchLabel": "New branch",
+    "branchPlaceholder": "feature/my-change",
+    "chooseDirectory": "Choose",
+    "count": "{count, plural, one {# worktree} other {# worktrees}}",
+    "create": "Create Worktree",
+    "created": "Worktree created",
+    "deleteBranch": "Also delete the branch",
+    "deleteBranchDescription": "Permanently delete {branch} after removing the worktree.",
+    "description": "Create and manage parallel checkouts of this repository.",
+    "detached": "Detached HEAD",
+    "empty": "No worktrees found",
+    "error": "Worktree operation failed: {message}",
+    "forceRemove": "Force removal",
+    "forceRemoveDescription": "Discard uncommitted changes in this worktree.",
+    "main": "Main",
+    "open": "Open",
+    "pathLabel": "Empty directory",
+    "pathPlaceholder": "Choose an empty directory",
+    "prune": "Prune stale",
+    "pruned": "Stale worktree records pruned",
+    "remove": "Remove Worktree",
+    "removeDescription": "Remove the linked worktree at {path}?",
+    "removed": "Worktree removed",
+    "removeTitle": "Remove worktree?",
+    "title": "Worktrees"
   }
 }

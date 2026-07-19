@@ -299,7 +299,10 @@ mod tests {
             return;
         }
         let tmp = TempDir::new().unwrap();
-        run_git_in(tmp.path(), &["init", "-q", "--bare", "-b", "main", "remote.git"]);
+        run_git_in(
+            tmp.path(),
+            &["init", "-q", "--bare", "-b", "main", "remote.git"],
+        );
         let bare = tmp.path().join("remote.git");
         let work = tmp.path().join("work");
         run_git_in(tmp.path(), &["init", "-q", "-b", "main", "work"]);
@@ -326,7 +329,13 @@ mod tests {
 
         // The bare remote actually received main.
         let out = std::process::Command::new("git")
-            .args(["-C", bare.to_str().unwrap(), "rev-parse", "--verify", "main"])
+            .args([
+                "-C",
+                bare.to_str().unwrap(),
+                "rev-parse",
+                "--verify",
+                "main",
+            ])
             .output()
             .unwrap();
         assert!(out.status.success(), "remote is missing main");
@@ -338,7 +347,10 @@ mod tests {
             return;
         }
         let tmp = TempDir::new().unwrap();
-        run_git_in(tmp.path(), &["init", "-q", "--bare", "-b", "main", "remote.git"]);
+        run_git_in(
+            tmp.path(),
+            &["init", "-q", "--bare", "-b", "main", "remote.git"],
+        );
         let url = tmp.path().join("remote.git");
         let url = url.to_str().unwrap();
 

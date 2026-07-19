@@ -72,7 +72,19 @@ jest.mock("./timeline-view", () => ({ TimelineView: () => null }))
 jest.mock("./branch-header", () => ({
   BranchHeader: () => <div data-testid="branch-header-stub" />,
 }))
-jest.mock("./sync-toolbar", () => ({ SyncToolbar: () => <div data-testid="sync-toolbar-stub" /> }))
+jest.mock("./sync-toolbar", () => ({
+  SyncToolbar: ({ onOpenWorktrees }: { onOpenWorktrees: () => void }) => (
+    <div data-testid="sync-toolbar-stub">
+      <button type="button" onClick={onOpenWorktrees} data-testid="open-worktrees-stub">
+        worktrees
+      </button>
+    </div>
+  ),
+}))
+jest.mock("./worktree-panel", () => ({
+  WorktreePanel: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="worktree-panel-stub" /> : null,
+}))
 
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
@@ -229,5 +241,11 @@ describe("SourceControlPanel", () => {
     expect(trigger).toBeInTheDocument()
     await user.click(trigger)
     expect(await screen.findByTestId("sc-view-settings")).toBeInTheDocument()
+  })
+
+  it("wires the toolbar worktree action to the worktree panel", () => {
+    render(<SourceControlPanel />)
+    fireEvent.click(screen.getByTestId("open-worktrees-stub"))
+    expect(screen.getByTestId("worktree-panel-stub")).toBeInTheDocument()
   })
 })

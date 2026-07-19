@@ -187,9 +187,9 @@ where
         .map_err(spawn_error)?;
 
     if let Some(mut sink) = child.stdin.take() {
-        sink.write_all(stdin.as_bytes())
-            .await
-            .map_err(|e| GitError::CommandFailed(format!("write patch to git stdin: {e}").into()))?;
+        sink.write_all(stdin.as_bytes()).await.map_err(|e| {
+            GitError::CommandFailed(format!("write patch to git stdin: {e}").into())
+        })?;
         sink.shutdown()
             .await
             .map_err(|e| GitError::CommandFailed(format!("close git stdin: {e}").into()))?;
