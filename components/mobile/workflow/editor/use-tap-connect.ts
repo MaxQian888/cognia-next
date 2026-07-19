@@ -74,17 +74,19 @@ export function useTapConnect(store: EditorStore): TapConnect {
       const cs = state.connectionState
       if (!cs)
         return { valid: false, reason: "Not in connect mode.", reasonKey: "notConnecting" }
+      const connection = {
+        source: cs.sourceId,
+        target: targetId,
+        sourceHandle: cs.sourceHandle ?? undefined,
+      }
       const result = validateConnection(
-        { source: cs.sourceId, target: targetId },
+        connection,
         state.nodes,
-        state.edges
+        state.edges,
+        { errorPolicy: state.baseWorkflow.settings.errorPolicy }
       )
       if (result.valid) {
-        state.connect({
-          source: cs.sourceId,
-          target: targetId,
-          sourceHandle: cs.sourceHandle ?? undefined,
-        })
+        state.connect(connection)
       }
       // Leave connect mode regardless — an invalid tap exits so the user
       // isn't trapped; they re-enter from a handle / the inspector if they

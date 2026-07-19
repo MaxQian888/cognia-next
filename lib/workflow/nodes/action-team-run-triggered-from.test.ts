@@ -9,7 +9,10 @@
 
 const runTeamLifecycle = jest.fn().mockResolvedValue({ runId: "team_run_1", status: "completed" })
 
-jest.mock("@/lib/ai/agent/agent-team-runtime", () => ({ runTeamLifecycle }))
+jest.mock("@/lib/ai/agent/agent-team-runtime", () => ({
+  runTeamLifecycle: (...args: unknown[]) =>
+    runTeamLifecycle(...(args as Parameters<typeof runTeamLifecycle>)),
+}))
 jest.mock("@/lib/ai/agent/agent-team-runtime-deps", () => ({
   buildAgentTeamRuntimeDeps: () => ({
     notifierDeps: { toast: () => {}, osNotify: async () => {}, log: async () => {} },

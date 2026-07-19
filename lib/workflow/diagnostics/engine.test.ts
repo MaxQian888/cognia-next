@@ -65,6 +65,30 @@ describe("runDiagnostics", () => {
     expect(result.byEdgeId["e9"]?.length).toBeGreaterThan(0)
   })
 
+  it("indexes invalid routing handles as edge diagnostics", () => {
+    const branch = node("branch", "flow.branch", {
+      typeVersion: 2,
+      data: { label: "branch", params: { conditions: [] } },
+    })
+    const target = node("target")
+    target.data.params = { userPrompt: "ok" }
+    const w = wf(
+      [node("start", "trigger.manual"), branch, target],
+      [
+        { id: "e1", source: "start", target: "branch" },
+        { id: "e2", source: "branch", target: "target" },
+      ]
+    )
+
+    const result = runDiagnostics({ workflow: w, isWeb: false })
+    expect(result.diagnostics.find((d) => d.code === "invalidConnection")).toMatchObject({
+      edgeId: "e2",
+      severity: "error",
+      messageKey: "workflows.diagnostics.invalidConnection",
+    })
+    expect(result.byEdgeId.e2?.some((d) => d.code === "invalidConnection")).toBe(true)
+  })
+
   it("flags an orphan node unreachable from the trigger", () => {
     const w = wf(
       [node("a", "trigger.manual"), node("b"), node("island")],

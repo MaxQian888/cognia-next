@@ -51,8 +51,9 @@ function rebuildIndex(rows: WorkflowRow[]): void {
   const next = new Map<WorkflowNodeKind, SubscribedTrigger[]>()
   for (const kind of INDEXED_KINDS) next.set(kind, [])
   for (const wf of rows) {
+    if (wf.isTemplate || wf.isBuiltIn) continue
     for (const node of wf.nodes) {
-      if (!INDEXED_KINDS.includes(node.type)) continue
+      if (node.data.disabled || !INDEXED_KINDS.includes(node.type)) continue
       const params = (node.data?.params ?? {}) as Record<string, unknown>
       next.get(node.type)!.push({
         workflowId: wf.id,

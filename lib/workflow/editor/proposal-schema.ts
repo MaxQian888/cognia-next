@@ -32,6 +32,7 @@ const addNodeSchema = z.object({
   type: z.literal("add_node"),
   nodeId: z.string().min(1, "is required"),
   kind: z.string().min(1, "is required"),
+  typeVersion: z.number().int().min(1).optional(),
   position: positionSchema,
   data: nodeDataPatchSchema.optional(),
 })

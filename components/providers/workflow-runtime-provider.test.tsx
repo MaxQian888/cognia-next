@@ -10,6 +10,8 @@ const installTriggerBridgeMock = jest.fn()
 const listWorkflowsMock = jest.fn()
 const syncWorkflowTriggersMock = jest.fn()
 const resumeInFlightRunsMock = jest.fn()
+const initPluginTriggerLifecycleMock = jest.fn()
+const disposePluginTriggerLifecycleMock = jest.fn(async () => undefined)
 
 jest.mock("@/lib/workflow/runtime/trigger-bridge", () => ({
   __esModule: true,
@@ -31,11 +33,18 @@ jest.mock("@/lib/workflow/runtime/resume-controller", () => ({
   resumeInFlightRuns: (...args: unknown[]) => resumeInFlightRunsMock(...args),
 }))
 
+jest.mock("@/lib/workflow/triggers/lifecycle", () => ({
+  initPluginTriggerLifecycle: () => initPluginTriggerLifecycleMock(),
+  disposePluginTriggerLifecycle: () => disposePluginTriggerLifecycleMock(),
+}))
+
 beforeEach(() => {
   installTriggerBridgeMock.mockReset()
   listWorkflowsMock.mockReset()
   syncWorkflowTriggersMock.mockReset()
   resumeInFlightRunsMock.mockReset()
+  initPluginTriggerLifecycleMock.mockClear()
+  disposePluginTriggerLifecycleMock.mockClear()
   // Default: nothing in-flight. Individual tests can override.
   resumeInFlightRunsMock.mockResolvedValue({ attempted: 0, succeeded: 0, failed: 0, skipped: 0 })
 })
@@ -59,11 +68,39 @@ describe("WorkflowRuntimeProvider", () => {
     await waitFor(() => expect(installTriggerBridgeMock).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(listWorkflowsMock).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(syncWorkflowTriggersMock).toHaveBeenCalledTimes(2))
-    expect(syncWorkflowTriggersMock).toHaveBeenCalledWith(expect.objectContaining({ id: "wf_a" }))
-    expect(syncWorkflowTriggersMock).toHaveBeenCalledWith(expect.objectContaining({ id: "wf_b" }))
+    expect(initPluginTriggerLifecycleMock).toHaveBeenCalledTimes(1)
+    expect(syncWorkflowTriggersMock).toHaveBeenCalledWith(expect.objectContaining({ id: "wf_a" }), {
+      signal: expect.any(AbortSignal),
+    })
+    expect(syncWorkflowTriggersMock).toHaveBeenCalledWith(expect.objectContaining({ id: "wf_b" }), {
+      signal: expect.any(AbortSignal),
+    })
 
     unmount()
     expect(disposer).toHaveBeenCalledTimes(1)
+    expect(disposePluginTriggerLifecycleMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not sync template or built-in gallery workflows on mount", async () => {
+    installTriggerBridgeMock.mockResolvedValue(jest.fn())
+    listWorkflowsMock.mockResolvedValue([
+      { id: "wf_active", nodes: [], edges: [] },
+      { id: "wf_template", nodes: [], edges: [], isTemplate: true },
+      { id: "wf_builtin", nodes: [], edges: [], isBuiltIn: true },
+    ])
+    syncWorkflowTriggersMock.mockResolvedValue(undefined)
+
+    render(
+      <WorkflowRuntimeProvider>
+        <div />
+      </WorkflowRuntimeProvider>
+    )
+
+    await waitFor(() => expect(syncWorkflowTriggersMock).toHaveBeenCalledTimes(1))
+    expect(syncWorkflowTriggersMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "wf_active" }),
+      { signal: expect.any(AbortSignal) }
+    )
   })
 
   it("resumes in-flight runs on mount, after syncing triggers", async () => {
@@ -146,28 +183,83 @@ describe("WorkflowRuntimeProvider", () => {
     resolveBridge(disposer)
     await waitFor(() => expect(disposer).toHaveBeenCalledTimes(1))
   })
+
+  it("does not start trigger projection after unmount while workflow loading is pending", async () => {
+    installTriggerBridgeMock.mockResolvedValue(jest.fn())
+    let resolveWorkflows!: (rows: Array<{ id: string; nodes: []; edges: [] }>) => void
+    listWorkflowsMock.mockReturnValue(
+      new Promise((resolve) => {
+        resolveWorkflows = resolve
+      })
+    )
+    const { unmount } = render(
+      <WorkflowRuntimeProvider>
+        <div />
+      </WorkflowRuntimeProvider>
+    )
+    await waitFor(() => expect(listWorkflowsMock).toHaveBeenCalledTimes(1))
+
+    unmount()
+    resolveWorkflows([{ id: "wf_after_unmount", nodes: [], edges: [] }])
+    await Promise.resolve()
+
+    expect(syncWorkflowTriggersMock).not.toHaveBeenCalled()
+    expect(disposePluginTriggerLifecycleMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("aborts an in-progress trigger projection when the provider unmounts", async () => {
+    installTriggerBridgeMock.mockResolvedValue(jest.fn())
+    listWorkflowsMock.mockResolvedValue([{ id: "wf_pending_sync", nodes: [], edges: [] }])
+    let resolveSync!: () => void
+    syncWorkflowTriggersMock.mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveSync = resolve
+      })
+    )
+    const { unmount } = render(
+      <WorkflowRuntimeProvider>
+        <div />
+      </WorkflowRuntimeProvider>
+    )
+    await waitFor(() => expect(syncWorkflowTriggersMock).toHaveBeenCalledTimes(1))
+    const options = syncWorkflowTriggersMock.mock.calls[0][1] as { signal: AbortSignal }
+
+    unmount()
+
+    expect(options.signal.aborted).toBe(true)
+    resolveSync()
+    await Promise.resolve()
+    expect(resumeInFlightRunsMock).not.toHaveBeenCalled()
+  })
 })
 
 /**
  * Regression guard: the provider is the SOLE production caller of
  * `installTriggerBridge` / `initTriggerSubscriptions` / `resumeInFlightRuns`.
- * If it is not mounted in the root layout, every non-manual trigger (cron,
+ * If it is not mounted through the root layout's deferred boot bundle, every non-manual trigger (cron,
  * webhook, connector.inbound, chat.message, terminal.command, goal.completed),
  * boot-time trigger re-sync, and crash recovery silently go dormant — the
  * exact "built-but-never-wired" defect this test exists to prevent. We assert
- * against the layout source (rendering the server root layout in jsdom is
- * impractical) the same way the plugin-runtime contract guards do.
+ * against both source files (rendering the server root layout in jsdom is
+ * impractical) so moving the runtime behind the shared dynamic boundary does
+ * not weaken the reachability guard or accidentally mount a duplicate copy.
  */
 describe("WorkflowRuntimeProvider — root layout wiring", () => {
   const layoutSource = readFileSync(resolve(__dirname, "../../app/layout.tsx"), "utf8")
+  const deferredSource = readFileSync(
+    resolve(__dirname, "initializers/deferred-boot-initializers-impl.tsx"),
+    "utf8"
+  )
 
-  it("is imported by app/layout.tsx", () => {
-    expect(layoutSource).toMatch(
+  it("is imported by the deferred boot implementation", () => {
+    expect(deferredSource).toMatch(
       /import\s*\{\s*WorkflowRuntimeProvider\s*\}\s*from\s*["']@\/components\/providers\/workflow-runtime-provider["']/
     )
   })
 
-  it("is mounted in the app/layout.tsx provider tree", () => {
-    expect(layoutSource).toMatch(/<WorkflowRuntimeProvider\b/)
+  it("is mounted exactly once through the root layout's deferred boot bundle", () => {
+    expect(deferredSource.match(/<WorkflowRuntimeProvider\b/g)).toHaveLength(1)
+    expect(layoutSource).toMatch(/<DeferredBootInitializers\b/)
+    expect(layoutSource).not.toMatch(/<WorkflowRuntimeProvider\b/)
   })
 })

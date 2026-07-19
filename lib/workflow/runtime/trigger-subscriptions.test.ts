@@ -38,6 +38,24 @@ afterEach(() => {
 })
 
 describe("trigger-subscriptions", () => {
+  it("excludes disabled triggers, templates, and built-in gallery rows", () => {
+    const disabled = trigger("n_disabled", "trigger.chat.message", {})
+    disabled.data.disabled = true
+    _seedTriggerSubscriptionsForTest([
+      wf("wf_active", [trigger("n_active", "trigger.chat.message", {})]),
+      wf("wf_disabled", [disabled]),
+      {
+        ...wf("wf_template", [trigger("n_template", "trigger.chat.message", {})]),
+        isTemplate: true,
+      },
+      { ...wf("wf_builtin", [trigger("n_builtin", "trigger.chat.message", {})]), isBuiltIn: true },
+    ])
+
+    expect(
+      findMatchingWorkflows("trigger.chat.message", {}).map((entry) => entry.workflowId)
+    ).toEqual(["wf_active"])
+  })
+
   it("indexes only chat.message and connector.inbound triggers", () => {
     _seedTriggerSubscriptionsForTest([
       wf("wf_a", [

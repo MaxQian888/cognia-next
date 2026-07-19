@@ -66,6 +66,36 @@ describe("visualWorkflowSchema", () => {
     }
   })
 
+  it("preserves every serializable workflow, node, and edge metadata field", () => {
+    const wf = baseWorkflow({
+      complexity: "advanced",
+      folderId: "folder-a",
+      interface: {
+        inputSchema: { type: "object", properties: { query: { type: "string" } } },
+        outputSchema: { type: "object" },
+      },
+      published: { at: 123, toolName: "advanced_flow" },
+    })
+    wf.nodes[1].data = {
+      ...wf.nodes[1].data,
+      authoredBy: "ai",
+      pluginMetadata: { stable: true },
+    }
+    wf.edges[0].data = { kind: "conditional", comment: "Keep this note" }
+
+    const result = visualWorkflowSchema.safeParse(wf)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.complexity).toBe("advanced")
+      expect(result.data.folderId).toBe("folder-a")
+      expect(result.data.interface).toEqual(wf.interface)
+      expect(result.data.published).toEqual(wf.published)
+      expect(result.data.nodes[1].data.authoredBy).toBe("ai")
+      expect(result.data.nodes[1].data.pluginMetadata).toEqual({ stable: true })
+      expect(result.data.edges[0].data?.comment).toBe("Keep this note")
+    }
+  })
+
   it("rejects malformed errorHandling (negative retries / unknown onError)", () => {
     const wf = baseWorkflow()
     wf.nodes[1].data.errorHandling = {
@@ -263,6 +293,61 @@ describe("validateGraphIntegrity", () => {
     wf.edges.push({ id: "e2", source: "n1", target: "n_missing" })
     const r = validateGraphIntegrity(wf)
     expect(r.errors.some((e) => e.includes("unknown node"))).toBe(true)
+  })
+
+  it("rejects edges that omit or invent a required routing handle", () => {
+    const wf = baseWorkflow()
+    wf.nodes[1] = {
+      ...wf.nodes[1],
+      type: "flow.branch",
+      typeVersion: 2,
+      data: { label: "Branch", params: { conditions: [] } },
+    }
+    wf.nodes.push({
+      id: "n3",
+      type: "ai.prompt",
+      typeVersion: 1,
+      position: { x: 400, y: 0 },
+      data: { label: "Prompt", params: {} },
+    })
+
+    wf.edges = [
+      { id: "e1", source: "n1", target: "n2" },
+      { id: "e2", source: "n2", target: "n3" },
+      { id: "e3", source: "n2", sourceHandle: "maybe", target: "n3" },
+    ]
+
+    const result = validateGraphIntegrity(wf)
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("Pick one of this node's output handles"),
+        expect.stringContaining("Unknown output handle on the source node"),
+      ])
+    )
+  })
+
+  it("accepts all declared routing handles", () => {
+    const wf = baseWorkflow()
+    wf.nodes[1] = {
+      ...wf.nodes[1],
+      type: "flow.branch",
+      typeVersion: 2,
+      data: { label: "Branch", params: { conditions: [] } },
+    }
+    wf.nodes.push({
+      id: "n3",
+      type: "ai.prompt",
+      typeVersion: 1,
+      position: { x: 400, y: 0 },
+      data: { label: "Prompt", params: {} },
+    })
+    wf.edges = [
+      { id: "e1", source: "n1", target: "n2" },
+      { id: "e2", source: "n2", sourceHandle: "true", target: "n3" },
+      { id: "e3", source: "n2", sourceHandle: "false", target: "n3" },
+    ]
+
+    expect(validateGraphIntegrity(wf).errors).toEqual([])
   })
 
   it("warns when no trigger is present", () => {

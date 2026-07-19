@@ -32,9 +32,9 @@ describe("WorkflowDeleteDialog", () => {
 
     await waitFor(async () => {
       expect(await getWorkflow(a.id)).toBeUndefined()
+      expect(await getWorkflow(b.id)).toBeUndefined()
+      expect(useWorkflowLibraryStore.getState().deleteDialogTarget).toBeNull()
     })
-    expect(await getWorkflow(b.id)).toBeUndefined()
-    expect(useWorkflowLibraryStore.getState().deleteDialogTarget).toBeNull()
   })
 
   it("skips built-in workflows", async () => {

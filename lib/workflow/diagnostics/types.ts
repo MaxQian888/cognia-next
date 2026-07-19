@@ -20,6 +20,7 @@ export type DiagnosticCode =
   | "duplicateEdgeId"
   | "danglingSource"
   | "danglingTarget"
+  | "invalidConnection"
   | "missingTrigger"
   | "selfParent"
   | "missingParent"

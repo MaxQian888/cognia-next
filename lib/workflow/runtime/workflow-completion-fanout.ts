@@ -122,6 +122,7 @@ export async function emitWorkflowCompletedFanout(
         return dispatchTrigger({
           workflowId: match.workflowId,
           kind: "trigger.workflow.completed",
+          triggerId: match.nodeId,
           payload,
           originAt,
         }).catch((err) => {

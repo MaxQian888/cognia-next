@@ -21,6 +21,17 @@ jest.mock("@cognia/redact", () => ({
   hasNoLeakingPii: (text: string) => hasNoLeakingPiiMock(text),
 }))
 
+const automationSubscribeMock = jest.fn(async (_filter: unknown) => 41)
+const automationUnsubscribeMock = jest.fn(async (_id: number) => undefined)
+const automationListenMock = jest.fn(async (_handler: unknown) => jest.fn())
+jest.mock("@/lib/automation/client", () => ({
+  desktop: {
+    subscribeEvents: (filter: unknown) => automationSubscribeMock(filter),
+    unsubscribeEvents: (id: number) => automationUnsubscribeMock(id),
+  },
+  listenUiaEvents: (handler: unknown) => automationListenMock(handler),
+}))
+
 import {
   initDesktopEventTrigger,
   disposeDesktopEventTrigger,
@@ -77,6 +88,9 @@ afterEach(() => {
   workflowRows = []
   dispatchTriggerMock.mockReset().mockResolvedValue(undefined)
   hasNoLeakingPiiMock.mockReset().mockReturnValue(true)
+  automationSubscribeMock.mockClear()
+  automationUnsubscribeMock.mockClear()
+  automationListenMock.mockClear()
 })
 
 describe("initDesktopEventTrigger", () => {
@@ -86,6 +100,9 @@ describe("initDesktopEventTrigger", () => {
     initDesktopEventTrigger(deps)
     await flush()
     expect(deps.subscribe).toHaveBeenCalledTimes(1)
+    expect(deps.subscribe).toHaveBeenCalledWith({
+      kinds: ["focus-changed", "property-changed", "structure-changed"],
+    })
     expect(deps.listen).toHaveBeenCalledTimes(1)
 
     disposeDesktopEventTrigger()
@@ -99,6 +116,20 @@ describe("initDesktopEventTrigger", () => {
     initDesktopEventTrigger(deps)
     await flush()
     expect(deps.subscribe).not.toHaveBeenCalled()
+  })
+
+  it("uses the automation client defaults when no dependencies are injected", async () => {
+    workflowRows = [wf("wf1", { kinds: ["property-changed"] })]
+    initDesktopEventTrigger()
+    await flush()
+    await flush()
+
+    expect(automationSubscribeMock).toHaveBeenCalledWith({ kinds: ["property-changed"] })
+    expect(automationListenMock).toHaveBeenCalledTimes(1)
+
+    disposeDesktopEventTrigger()
+    await flush()
+    expect(automationUnsubscribeMock).toHaveBeenCalledWith(41)
   })
 })
 
@@ -136,6 +167,59 @@ describe("desktop-event fan-out", () => {
     seedAndInit({ kinds: ["structure-changed"] })
     await _injectUiaEventForTest({ kind: "focus-changed", at: 5 })
     expect(dispatchTriggerMock).not.toHaveBeenCalled()
+  })
+
+  it("routes distinct kind/scope subscriptions back to only their owning trigger nodes", async () => {
+    const focus = wf("wf_focus", { kinds: ["focus-changed"], scope: ["scope-a"] })
+    const structure = wf("wf_structure", {
+      kinds: ["structure-changed"],
+      scope: "scope-b",
+      cooldownMs: 0,
+    })
+    workflowRows = [focus, structure]
+    _seedTriggerSubscriptionsForTest([focus, structure])
+    const deps = makeDeps()
+    let nextSubscriptionId = 10
+    deps.subscribe.mockImplementation(async () => nextSubscriptionId++)
+    initDesktopEventTrigger(deps)
+    await flush()
+    await flush()
+
+    expect(deps.subscribe).toHaveBeenCalledTimes(2)
+    expect(deps.subscribe).toHaveBeenNthCalledWith(1, {
+      kinds: ["focus-changed"],
+      scope: ["scope-a"],
+    })
+    expect(deps.subscribe).toHaveBeenNthCalledWith(2, {
+      kinds: ["structure-changed"],
+      scope: ["scope-b"],
+    })
+
+    await _injectUiaEventForTest({
+      subscriptionId: 11,
+      kind: "structure-changed",
+      name: "Dialog",
+      controlType: "Window",
+      processId: 42,
+      structureChangeType: "ChildAdded",
+      runtimeId: [1, 2, 3],
+      at: 5,
+    })
+
+    expect(dispatchTriggerMock).toHaveBeenCalledTimes(1)
+    expect(dispatchTriggerMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflowId: "wf_structure",
+        triggerId: "wf_structure-n1",
+        payload: expect.objectContaining({
+          kind: "structure-changed",
+          controlType: "Window",
+          processId: 42,
+          structureChangeType: "ChildAdded",
+          runtimeId: [1, 2, 3],
+        }),
+      })
+    )
   })
 
   it("applies the per-workflow cooldown loop guard", async () => {

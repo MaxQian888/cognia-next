@@ -1,3 +1,5 @@
+/** @jest-environment jsdom */
+
 /**
  * Tests for the `trigger.pet.event` runner. The trigger bridge is mocked at
  * the module boundary and the subscription cache is seeded directly, so the
@@ -53,6 +55,7 @@ describe("pet-event-trigger", () => {
     expect(dispatchTrigger).toHaveBeenCalledWith({
       workflowId: "wf1",
       kind: "trigger.pet.event",
+      triggerId: "wf1-n1",
       payload: { kind: "achievementUnlocked", at: 1000, achievementId: "well-fed" },
       originAt: 100_000,
     })

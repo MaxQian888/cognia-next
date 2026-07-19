@@ -21,6 +21,10 @@ export interface TriggerInstanceHandle extends PluginTriggerHandle {
   kind: string
   /** Workflow this instance feeds. */
   workflowId: string
+  /** Exact workflow trigger-node root this source feeds. */
+  triggerId: string
+  /** Stable authored-param signature used to avoid unnecessary restarts. */
+  paramsSignature: string
 }
 
 export interface TriggerRegistration {
@@ -30,14 +34,14 @@ export interface TriggerRegistration {
   pluginId: string
   def: PluginTriggerDef
   /**
-   * Live instances spawned from this registration, keyed by workflowId.
-   * One trigger registration may feed many workflows; each binding gets
-   * its own instance.
+   * Live instances spawned from this registration, keyed by
+   * `workflowId::triggerId`. One workflow may contain multiple nodes of the
+   * same plugin trigger kind; each binding gets its own exact-root instance.
    */
   instances: Map<string, TriggerInstanceHandle>
 }
 
-export type TriggerRegistryEventType = "register" | "unregister"
+export type TriggerRegistryEventType = "register" | "unregister" | "instances"
 
 export interface TriggerRegistryEvent {
   type: TriggerRegistryEventType
@@ -50,6 +54,7 @@ export type TriggerRegistryListener = (event: TriggerRegistryEvent) => void
 
 const registry = new Map<string, TriggerRegistration>()
 const listeners = new Set<TriggerRegistryListener>()
+const instanceStartGenerations = new Map<string, number>()
 
 function emit(event: TriggerRegistryEvent): void {
   queueMicrotask(() => {
@@ -70,7 +75,14 @@ function emit(event: TriggerRegistryEvent): void {
  * but does NOT restart already-running instances.
  */
 export function registerPluginTrigger(reg: TriggerRegistration): void {
-  registry.set(`${reg.kind}@${reg.typeVersion}`, reg)
+  const key = `${reg.kind}@${reg.typeVersion}`
+  const previous = registry.get(key)
+  if (previous && previous !== reg) {
+    // Preserve already-running bindings across a same-version hot reload.
+    // Future restarts use the new definition; current sources remain live.
+    reg.instances = previous.instances
+  }
+  registry.set(key, reg)
   emit({
     type: "register",
     kind: reg.kind,
@@ -87,6 +99,15 @@ export async function unregisterPluginTrigger(kind: string, typeVersion: number)
   const k = `${kind}@${typeVersion}`
   const reg = registry.get(k)
   if (!reg) return
+  // Remove ownership before awaiting stop() so any in-flight start observes
+  // the registration replacement/removal and tears its just-created source
+  // down instead of publishing an orphan handle.
+  registry.delete(k)
+  // Publish ownership removal before awaiting live stop handlers. The
+  // lifecycle subscriber uses this event to abort cooperative starts that
+  // have not produced a handle yet; waiting until teardown completed could
+  // otherwise leave unregister blocked behind the very start it must cancel.
+  emit({ type: "unregister", kind, typeVersion, pluginId: reg.pluginId })
   // Stop all live instances. Wrap each in try/catch so one bad teardown
   // doesn't strand the others.
   await Promise.all(
@@ -99,8 +120,6 @@ export async function unregisterPluginTrigger(kind: string, typeVersion: number)
     })
   )
   reg.instances.clear()
-  registry.delete(k)
-  emit({ type: "unregister", kind, typeVersion, pluginId: reg.pluginId })
 }
 
 export function getPluginTrigger(
@@ -126,14 +145,75 @@ export async function startPluginTriggerInstance(
 ): Promise<TriggerInstanceHandle | undefined> {
   const reg = getPluginTrigger(kind, typeVersion)
   if (!reg) return undefined
+  const key = pluginTriggerInstanceKey(ctx.workflowId, ctx.triggerId)
+  const startKey = `${kind}@${typeVersion}::${key}`
+  const generation = (instanceStartGenerations.get(startKey) ?? 0) + 1
+  instanceStartGenerations.set(startKey, generation)
+  await reg.instances.get(key)?.stop()
   const handle = await reg.def.start(ctx)
+  if (
+    instanceStartGenerations.get(startKey) !== generation ||
+    getPluginTrigger(kind, typeVersion) !== reg
+  ) {
+    await handle.stop()
+    return undefined
+  }
+  let stopped = false
   const wrapped: TriggerInstanceHandle = {
     kind: reg.kind,
     workflowId: ctx.workflowId,
-    stop: handle.stop,
+    triggerId: ctx.triggerId,
+    paramsSignature: stableParamsSignature(ctx.params),
+    stop: async () => {
+      if (stopped) return
+      stopped = true
+      try {
+        await handle.stop()
+      } finally {
+        if (reg.instances.get(key) === wrapped) {
+          reg.instances.delete(key)
+          emit({
+            type: "instances",
+            kind: reg.kind,
+            typeVersion: reg.typeVersion,
+            pluginId: reg.pluginId,
+          })
+        }
+      }
+    },
   }
-  reg.instances.set(ctx.workflowId, wrapped)
+  reg.instances.set(key, wrapped)
+  emit({
+    type: "instances",
+    kind: reg.kind,
+    typeVersion: reg.typeVersion,
+    pluginId: reg.pluginId,
+  })
   return wrapped
+}
+
+export async function stopPluginTriggerInstance(
+  kind: string,
+  typeVersion: number,
+  workflowId: string,
+  triggerId: string
+): Promise<void> {
+  await getPluginTrigger(kind, typeVersion)
+    ?.instances.get(pluginTriggerInstanceKey(workflowId, triggerId))
+    ?.stop()
+}
+
+export function pluginTriggerInstanceKey(workflowId: string, triggerId: string): string {
+  return `${workflowId}::${triggerId}`
+}
+
+export function stableParamsSignature(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "undefined"
+  if (Array.isArray(value)) return `[${value.map(stableParamsSignature).join(",")}]`
+  return `{${Object.entries(value as Record<string, unknown>)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, nested]) => `${JSON.stringify(key)}:${stableParamsSignature(nested)}`)
+    .join(",")}}`
 }
 
 export function subscribePluginTriggerRegistry(fn: TriggerRegistryListener): () => void {
@@ -240,4 +320,5 @@ export function __resetTriggerMutesForTesting(): void {
 export function __resetTriggerRegistryForTesting(): void {
   registry.clear()
   listeners.clear()
+  instanceStartGenerations.clear()
 }

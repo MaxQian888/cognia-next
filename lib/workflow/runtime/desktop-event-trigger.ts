@@ -1,15 +1,13 @@
 /**
  * `trigger.desktop.event` fan-out — bridges the Rust automation backend's
- * live UI events (v1: Windows focus-changed, `automation:uia-event`) to
+ * native Windows UIA focus/structure/property events (`automation:uia-event`) to
  * subscribed workflows.
  *
  * Lifecycle: `initDesktopEventTrigger()` (mounted by
  * `WorkflowRuntimeProvider`, Tauri-only) opens a Dexie liveQuery over the
- * `workflows` table; while ≥1 workflow carries a `trigger.desktop.event`
- * node, ONE backend subscription is held (v1 only emits focus-changed, so
- * one covers everything); when the last node disappears the subscription is
- * released. Per-workflow kind filters are applied at match time via the
- * shared trigger-subscription cache.
+ * `workflows` table; active nodes are grouped by their exact `{kinds, scope}`
+ * filter and each distinct group owns one backend subscription. Incoming
+ * subscription ids route events back to only the trigger nodes in that group.
  *
  * Safety gates:
  *  1. **PII red-line** — the focused element's `name` may carry user text
@@ -27,6 +25,7 @@
 import { liveQuery, type Subscription } from "dexie"
 
 import { getDb } from "@/lib/db/schema"
+import { elementRef, type EventFilter, type EventKind } from "@/lib/automation/types"
 import { loggers } from "@cognia/logging"
 import type { WorkflowRow } from "@/types/workflow/visual"
 
@@ -36,21 +35,38 @@ const DEFAULT_COOLDOWN_MS = 2_000
 
 export interface DesktopEventTriggerDeps {
   /** Subscribe the backend watcher; resolves the subscription id. */
-  subscribe?: () => Promise<number>
+  subscribe?: (filter: EventFilter) => Promise<number>
   /** Release a backend subscription. */
   unsubscribe?: (sub: number) => Promise<void>
   /** Listen for `automation:uia-event`; resolves the unlisten fn. */
-  listen?: (
-    handler: (payload: { kind: string; name?: string; at: number }) => void
-  ) => Promise<() => void>
+  listen?: (handler: (payload: DesktopUiaEvent) => void) => Promise<() => void>
   /** Injectable clock for the cooldown gate. */
   now?: () => number
+}
+
+export interface DesktopUiaEvent {
+  subscriptionId?: number
+  kind: string
+  name?: string
+  controlType?: string
+  processId?: number
+  property?: string
+  structureChangeType?: string
+  runtimeId?: number[]
+  at: number
+}
+
+interface BackendSubscription {
+  id: number
+  nodeIds: Set<string>
 }
 
 interface RunnerState {
   workflowsSub?: Subscription
   uiaUnlisten?: (() => void) | null
-  backendSub?: number | null
+  backendSubs: Map<string, BackendSubscription>
+  subscriptionsById: Map<number, BackendSubscription>
+  reconcileChain: Promise<void>
   /** Per-workflow last-fire timestamps (cooldown gate). */
   lastFired: Map<string, number>
   /** Workflows with an in-flight run started by this trigger. */
@@ -61,9 +77,9 @@ interface RunnerState {
 
 let state: RunnerState | null = null
 
-async function defaultSubscribe(): Promise<number> {
+async function defaultSubscribe(filter: EventFilter): Promise<number> {
   const { desktop } = await import("@/lib/automation/client")
-  return desktop.subscribeEvents({ kinds: ["focus-changed"] })
+  return desktop.subscribeEvents(filter)
 }
 
 async function defaultUnsubscribe(sub: number): Promise<void> {
@@ -71,58 +87,126 @@ async function defaultUnsubscribe(sub: number): Promise<void> {
   await desktop.unsubscribeEvents(sub)
 }
 
-async function defaultListen(
-  handler: (payload: { kind: string; name?: string; at: number }) => void
-): Promise<() => void> {
+async function defaultListen(handler: (payload: DesktopUiaEvent) => void): Promise<() => void> {
   const { listenUiaEvents } = await import("@/lib/automation/client")
   return listenUiaEvents(handler)
 }
 
-function hasDesktopEventNodes(rows: WorkflowRow[]): boolean {
-  return rows.some((wf) => wf.nodes.some((n) => n.type === "trigger.desktop.event"))
+const ALL_EVENT_KINDS: EventKind[] = ["focus-changed", "structure-changed", "property-changed"]
+
+interface DesiredBackendSubscription {
+  filter: EventFilter
+  nodeIds: Set<string>
 }
 
-/** Ensure/release the single backend subscription to match the node count. */
-async function reconcile(wanted: boolean): Promise<void> {
-  const s = state
-  if (!s) return
-  if (wanted && s.backendSub == null) {
+function desiredSubscriptions(rows: WorkflowRow[]): Map<string, DesiredBackendSubscription> {
+  const desired = new Map<string, DesiredBackendSubscription>()
+  for (const workflow of rows) {
+    if (workflow.isTemplate || workflow.isBuiltIn) continue
+    for (const node of workflow.nodes) {
+      if (node.type !== "trigger.desktop.event" || node.data.disabled) continue
+      const rawKinds = Array.isArray(node.data.params.kinds)
+        ? node.data.params.kinds.filter((kind): kind is EventKind =>
+            ALL_EVENT_KINDS.includes(kind as EventKind)
+          )
+        : []
+      const kinds = [...new Set(rawKinds.length > 0 ? rawKinds : ALL_EVENT_KINDS)].sort()
+      const rawScope = node.data.params.scope
+      const scopeValue =
+        typeof rawScope === "string"
+          ? rawScope
+          : Array.isArray(rawScope) && typeof rawScope[0] === "string"
+            ? rawScope[0]
+            : undefined
+      const key = JSON.stringify({ kinds, scope: scopeValue ?? null })
+      const existing = desired.get(key)
+      if (existing) {
+        existing.nodeIds.add(node.id)
+      } else {
+        desired.set(key, {
+          filter: { kinds, ...(scopeValue ? { scope: elementRef(scopeValue) } : {}) },
+          nodeIds: new Set([node.id]),
+        })
+      }
+    }
+  }
+  return desired
+}
+
+async function reconcileNow(s: RunnerState, rows: WorkflowRow[]): Promise<void> {
+  if (!s.active || state !== s) return
+  const desired = desiredSubscriptions(rows)
+
+  for (const [key, current] of [...s.backendSubs]) {
+    if (desired.has(key)) continue
+    s.backendSubs.delete(key)
+    s.subscriptionsById.delete(current.id)
+    await s.deps.unsubscribe(current.id).catch(() => undefined)
+  }
+
+  if (desired.size > 0 && !s.uiaUnlisten) {
+    s.uiaUnlisten = await s.deps.listen((payload) => void onUiaEvent(payload))
+  }
+
+  for (const [key, wanted] of desired) {
+    const current = s.backendSubs.get(key)
+    if (current) {
+      current.nodeIds = wanted.nodeIds
+      continue
+    }
     try {
-      const sub = await s.deps.subscribe()
-      // The runner may have been disposed while awaiting.
-      if (!state || state !== s || !s.active) {
-        await s.deps.unsubscribe(sub).catch(() => undefined)
+      const id = await s.deps.subscribe(wanted.filter)
+      if (!s.active || state !== s) {
+        await s.deps.unsubscribe(id).catch(() => undefined)
         return
       }
-      s.backendSub = sub
-      s.uiaUnlisten = await s.deps.listen((payload) => void onUiaEvent(payload))
-      log.info?.("desktop-event-trigger: backend subscription active", { sub })
+      const registered = { id, nodeIds: wanted.nodeIds }
+      s.backendSubs.set(key, registered)
+      s.subscriptionsById.set(id, registered)
+      log.info?.("desktop-event-trigger: backend subscription active", {
+        id,
+        filter: wanted.filter,
+      })
     } catch (err) {
-      // Backend unavailable (non-Windows / automation off) — log once and
-      // leave backendSub null; a later workflow save retries.
       log.warn?.("desktop-event-trigger: subscribe failed", {
         error: err instanceof Error ? err.message : String(err),
       })
     }
-  } else if (!wanted && s.backendSub != null) {
-    const sub = s.backendSub
-    s.backendSub = null
-    s.uiaUnlisten?.()
+  }
+
+  if (desired.size === 0 && s.uiaUnlisten) {
+    s.uiaUnlisten()
     s.uiaUnlisten = null
-    await s.deps.unsubscribe(sub).catch(() => undefined)
   }
 }
 
-async function onUiaEvent(payload: { kind: string; name?: string; at: number }): Promise<void> {
+function queueReconcile(rows: WorkflowRow[]): void {
+  const s = state
+  if (!s) return
+  s.reconcileChain = s.reconcileChain
+    .then(() => reconcileNow(s, rows))
+    .catch((err) =>
+      log.warn?.("desktop-event-trigger: reconcile failed", {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    )
+}
+
+async function onUiaEvent(payload: DesktopUiaEvent): Promise<void> {
   const s = state
   if (!s || !s.active) return
   try {
     const [{ dispatchTrigger }, { findMatchingWorkflows }, { hasNoLeakingPii }] = await Promise.all(
       [import("./trigger-bridge"), import("./trigger-subscriptions"), import("@cognia/redact")]
     )
+    const routedNodeIds =
+      payload.subscriptionId === undefined
+        ? undefined
+        : s.subscriptionsById.get(payload.subscriptionId)?.nodeIds
+    if (payload.subscriptionId !== undefined && !routedNodeIds) return
     const matches = findMatchingWorkflows("trigger.desktop.event", {
       desktopEventKind: payload.kind,
-    })
+    }).filter((match) => !routedNodeIds || routedNodeIds.has(match.nodeId))
     if (matches.length === 0) return
 
     // PII red-line: element names carry user text (titles, form contents).
@@ -146,9 +230,17 @@ async function onUiaEvent(payload: { kind: string; name?: string; at: number }):
           await dispatchTrigger({
             workflowId: match.workflowId,
             kind: "trigger.desktop.event",
+            triggerId: match.nodeId,
             payload: {
               kind: payload.kind,
               ...(safeName ? { name: safeName } : {}),
+              ...(payload.controlType ? { controlType: payload.controlType } : {}),
+              ...(payload.processId !== undefined ? { processId: payload.processId } : {}),
+              ...(payload.property ? { property: payload.property } : {}),
+              ...(payload.structureChangeType
+                ? { structureChangeType: payload.structureChangeType }
+                : {}),
+              ...(payload.runtimeId ? { runtimeId: payload.runtimeId } : {}),
               at: payload.at,
             },
             originAt: now,
@@ -173,6 +265,9 @@ export function initDesktopEventTrigger(deps: DesktopEventTriggerDeps = {}): voi
   if (typeof window === "undefined") return
   disposeDesktopEventTrigger()
   const s: RunnerState = {
+    backendSubs: new Map(),
+    subscriptionsById: new Map(),
+    reconcileChain: Promise.resolve(),
     lastFired: new Map(),
     inflight: new Set(),
     active: true,
@@ -190,12 +285,12 @@ export function initDesktopEventTrigger(deps: DesktopEventTriggerDeps = {}): voi
     // initial emission is a harmless no-op afterwards.
     void getDb()
       .workflows.toArray()
-      .then((rows) => reconcile(hasDesktopEventNodes(rows)))
+      .then((rows) => queueReconcile(rows))
       .catch(() => undefined)
     const observable = liveQuery(() => getDb().workflows.toArray())
     s.workflowsSub = observable.subscribe({
       next: (rows) => {
-        void reconcile(hasDesktopEventNodes(rows))
+        queueReconcile(rows)
       },
       error: (err) => {
         log.warn?.("desktop-event-trigger: liveQuery error", {
@@ -223,17 +318,23 @@ export function disposeDesktopEventTrigger(): void {
   }
   s.uiaUnlisten?.()
   s.uiaUnlisten = null
-  if (s.backendSub != null) {
-    const sub = s.backendSub
-    s.backendSub = null
-    void s.deps.unsubscribe(sub).catch(() => undefined)
+  for (const subscription of s.backendSubs.values()) {
+    void s.deps.unsubscribe(subscription.id).catch(() => undefined)
   }
+  s.backendSubs.clear()
+  s.subscriptionsById.clear()
 }
 
 /** Test-only — drive one event through the runner without a Tauri bridge. */
 export async function _injectUiaEventForTest(payload: {
+  subscriptionId?: number
   kind: string
   name?: string
+  controlType?: string
+  processId?: number
+  property?: string
+  structureChangeType?: string
+  runtimeId?: number[]
   at: number
 }): Promise<void> {
   await onUiaEvent(payload)

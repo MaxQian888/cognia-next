@@ -23,6 +23,14 @@ import { X as CancelIcon, Maximize2 as FitViewIcon, Trash2 as TrashIcon } from "
 
 import { Button } from "@/components/ui/button"
 import { FloatingActionButton } from "@/components/ui/floating-action-button"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
+import { RightSidebar } from "@/components/workflow/editor/right-sidebar"
 import { createEditorStore, type EditorStore } from "@/lib/workflow/editor/store"
 import { EditorStoreProvider } from "@/lib/workflow/editor/store-context"
 import type { NodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
@@ -38,10 +46,12 @@ import { useTapConnect } from "./use-tap-connect"
 function MobileEditorInner({ store }: { store: EditorStore }) {
   const t = useTranslations("mobile.workflow.editor")
   const tConnection = useTranslations("workflows.editor.connection")
+  const tWorkbench = useTranslations("contextWorkbench")
   const [mode, setMode] = useState<"read" | "edit">("read")
   const [inspectorOpen, setInspectorOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [copilotOpen, setCopilotOpen] = useState(false)
+  const [workbenchOpen, setWorkbenchOpen] = useState(false)
   const [rf, setRf] = useState<WorkflowFlowInstance | null>(null)
   const canvasAreaRef = useRef<HTMLDivElement | null>(null)
   const tapConnect = useTapConnect(store)
@@ -157,6 +167,7 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
         mode={mode}
         onToggleMode={onToggleMode}
         onOpenCopilot={() => setCopilotOpen(true)}
+        onOpenWorkbench={() => setWorkbenchOpen(true)}
       />
       <div ref={canvasAreaRef} className="relative min-h-0 flex-1">
         <MobileCanvas
@@ -231,6 +242,27 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
         workflowId={workflowId}
         workflowName={workflowName}
       />
+      <Sheet open={workbenchOpen} onOpenChange={setWorkbenchOpen} modal={workbenchOpen}>
+        <SheetContent
+          forceMount
+          side="right"
+          className="w-full gap-0 p-0 sm:max-w-none"
+          inert={!workbenchOpen}
+          aria-hidden={!workbenchOpen}
+          data-testid="context-workbench-mobile-sheet"
+        >
+          <SheetHeader className="sr-only">
+            <SheetTitle>{tWorkbench("mobileTitle")}</SheetTitle>
+            <SheetDescription>{tWorkbench("mobileDescription")}</SheetDescription>
+          </SheetHeader>
+          <RightSidebar
+            useStore={store}
+            className="h-full w-full border-l-0"
+            onCollapse={() => setWorkbenchOpen(false)}
+            placement="mobile-sheet"
+          />
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }

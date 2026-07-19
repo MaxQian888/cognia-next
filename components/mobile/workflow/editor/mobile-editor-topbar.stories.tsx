@@ -5,8 +5,8 @@ import { MobileEditorTopbar } from "./mobile-editor-topbar"
 import { createEditorStore } from "@/lib/workflow/editor/store"
 import { editorWorkflow } from "@/lib/storybook/fixtures/mobile-workflow-editor"
 
-// Editor chrome: back / name + dirty badge / read·edit toggle / Save / Run /
-// overflow menu (undo·redo·auto-layout·fit·snap·history·export·import). Driven
+// Editor chrome: back / name + dirty badge / read·edit toggle / Workbench /
+// Save / Run / overflow menu (Copilot·undo·redo·auto-layout·fit·snap·history·export·import). Driven
 // by a real per-workflow editor store; `reactFlowInstance` is null in the
 // story (fit-view is a no-op) since there's no mounted canvas.
 const store = createEditorStore(editorWorkflow)
@@ -21,6 +21,7 @@ const meta = {
     mode: "read",
     onToggleMode: fn(),
     onOpenCopilot: fn(),
+    onOpenWorkbench: fn(),
   },
   decorators: [
     (Story) => (

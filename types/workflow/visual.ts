@@ -751,6 +751,8 @@ export interface TriggerEvent {
   workflowId: string
   /** Which trigger node kind produced this event. */
   kind: WorkflowNodeKind
+  /** Exact workflow trigger-node id that produced this event. */
+  triggerId?: string
   /** Free-form payload — chat message body, webhook headers/body, etc. */
   payload: unknown
   /** Wall-clock when the trigger fired (Rust mirror or webview Date.now()). */
@@ -844,6 +846,8 @@ export interface WorkflowRunRow {
   status: RunStatus
   /** Which trigger kind started this run. */
   triggerKind: WorkflowNodeKind
+  /** Exact trigger-node id, when the producer identified one. */
+  triggerId?: string
   triggerPayload: unknown
   triggerBinding?: WorkflowTriggerBinding
   input?: unknown

@@ -75,6 +75,7 @@ function renderTopbar(mode: "read" | "edit" = "read") {
   const store: EditorStore = createEditorStore(buildWorkflow())
   const onToggleMode = jest.fn()
   const onOpenCopilot = jest.fn()
+  const onOpenWorkbench = jest.fn()
   render(
     <MobileEditorTopbar
       store={store}
@@ -82,9 +83,10 @@ function renderTopbar(mode: "read" | "edit" = "read") {
       mode={mode}
       onToggleMode={onToggleMode}
       onOpenCopilot={onOpenCopilot}
+      onOpenWorkbench={onOpenWorkbench}
     />
   )
-  return { store, onToggleMode, onOpenCopilot }
+  return { store, onToggleMode, onOpenCopilot, onOpenWorkbench }
 }
 
 beforeEach(async () => {
@@ -113,8 +115,16 @@ describe("<MobileEditorTopbar />", () => {
   it("fires onOpenCopilot when the copilot button is tapped (available in read mode)", async () => {
     const user = userEvent.setup()
     const { onOpenCopilot } = renderTopbar("read")
+    await user.click(screen.getByTestId("mobile-editor-menu"))
     await user.click(screen.getByTestId("mobile-editor-copilot"))
     expect(onOpenCopilot).toHaveBeenCalledTimes(1)
+  })
+
+  it("opens the shared Context Workbench from the primary sidebar action", async () => {
+    const user = userEvent.setup()
+    const { onOpenWorkbench } = renderTopbar("read")
+    await user.click(screen.getByTestId("mobile-editor-workbench"))
+    expect(onOpenWorkbench).toHaveBeenCalledTimes(1)
   })
 
   it("disables Save when clean and persists once dirty", async () => {
@@ -143,6 +153,29 @@ describe("<MobileEditorTopbar />", () => {
     expect(toastSuccess).toHaveBeenCalledWith("runQueued")
     // Clean store → Run should not persist.
     expect(persistEditorWorkflow).not.toHaveBeenCalled()
+  })
+
+  it("persists imported JSON before queueing Run", async () => {
+    const user = userEvent.setup()
+    const { store } = renderTopbar()
+    const imported = {
+      name: "Imported mobile graph",
+      nodes: buildWorkflow().nodes,
+      edges: [],
+    }
+
+    await user.upload(
+      screen.getByTestId("mobile-editor-import-input"),
+      new File([JSON.stringify(imported)], "workflow.json", { type: "application/json" })
+    )
+    await waitFor(() => expect(store.getState().dirty).toBe(true))
+
+    await user.click(screen.getByTestId("mobile-editor-run"))
+
+    await waitFor(() => expect(persistEditorWorkflow).toHaveBeenCalledWith(store))
+    expect(store.getState().baseWorkflow.id).toBe("wf_top")
+    expect(store.getState().baseWorkflow.name).toBe("Imported mobile graph")
+    expect(await listByStatus("pending")).toHaveLength(1)
   })
 
   it("exports JSON from the overflow menu", async () => {

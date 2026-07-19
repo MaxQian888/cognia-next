@@ -373,6 +373,44 @@ describe("action: character/team/skill schemas", () => {
   })
 })
 
+describe("memory action schemas", () => {
+  it("accepts all four scopes and the complete namespace fields", () => {
+    for (const scope of ["global", "workspace", "character", "agent"]) {
+      expect(
+        PARAMS_SCHEMAS["action.memory.recall"].safeParse({
+          query: "tooling",
+          scope,
+          projectId: "p1",
+          characterId: "c1",
+          agentId: "a1",
+          branch: "main",
+          path: "src",
+        }).success
+      ).toBe(true)
+      expect(
+        PARAMS_SCHEMAS["action.memory.store"].safeParse({
+          text: "The project uses pnpm",
+          scope,
+          projectId: "p1",
+          characterId: "c1",
+          agentId: "a1",
+          branch: "main",
+          pathPattern: "src",
+        }).success
+      ).toBe(true)
+    }
+  })
+
+  it("rejects unknown scopes and invalid namespace value types", () => {
+    expect(
+      PARAMS_SCHEMAS["action.memory.recall"].safeParse({ query: "x", scope: "team" }).success
+    ).toBe(false)
+    expect(
+      PARAMS_SCHEMAS["action.memory.store"].safeParse({ text: "x", projectId: 42 }).success
+    ).toBe(false)
+  })
+})
+
 describe("action: goal schemas", () => {
   it("action.goal.create requires sessionId + rawObjective and accepts configJson", () => {
     const s = PARAMS_SCHEMAS["action.goal.create" as WorkflowNodeKind]
@@ -1027,6 +1065,27 @@ describe("flow schemas", () => {
     const s = PARAMS_SCHEMAS["flow.set"]
     expect(s.safeParse({ variable: "1bad", value: "x" }).success).toBe(false)
     expect(s.safeParse({ variable: "ok_name", value: "x" }).success).toBe(true)
+    expect(s.safeParse({ variable: "ok_name", value: 1 }).success).toBe(true)
+    expect(s.safeParse({ variable: "ok_name", value: false }).success).toBe(true)
+    expect(s.safeParse({ variable: "ok_name", value: { nested: [1, null] } }).success).toBe(true)
+    expect(s.safeParse({ variable: "ok_name" }).success).toBe(false)
+  })
+
+  it("accepts runtime expressions for GitHub issue and PR numbers", () => {
+    expect(
+      PARAMS_SCHEMAS["action.github.commentPr"].safeParse({
+        repoFullName: "owner/repo",
+        prNumber: "{{ $node.open.out.number }}",
+        body: "done",
+      }).success
+    ).toBe(true)
+    expect(
+      PARAMS_SCHEMAS["action.github.commentIssue"].safeParse({
+        repoFullName: "owner/repo",
+        issueNumber: "not-an-expression",
+        body: "done",
+      }).success
+    ).toBe(false)
   })
 
   it("flow.subworkflow requires workflowId", () => {

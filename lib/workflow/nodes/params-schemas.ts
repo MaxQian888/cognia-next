@@ -38,6 +38,13 @@ function positiveInteger() {
   return z.number().int().min(1, "minValue")
 }
 
+function positiveIntegerOrExpression() {
+  return z.union([
+    positiveInteger(),
+    requiredString("required").refine((value) => value.includes("{{"), "invalidType"),
+  ])
+}
+
 /**
  * Accepts an http(s) URL or any value containing a `{{ … }}` expression
  * (resolved at run time, so we can't validate the final shape here). Empty
@@ -278,16 +285,24 @@ const TeamRunParams = z.object({
 const MemoryRecallParams = z.object({
   query: requiredString("required"),
   topK: numberRange(1, 50).optional(),
-  scope: z.enum(["global", "character"]).optional(),
+  scope: z.enum(["global", "workspace", "character", "agent"]).optional(),
   characterId: optionalString,
+  projectId: optionalString,
+  agentId: optionalString,
+  branch: optionalString,
+  path: optionalString,
   relevanceFloor: numberRange(0, 1).optional(),
   types: z.array(z.enum(["semantic", "episodic", "procedural"])).optional(),
 })
 
 const MemoryStoreParams = z.object({
   text: requiredString("required"),
-  scope: z.enum(["global", "character"]).optional(),
+  scope: z.enum(["global", "workspace", "character", "agent"]).optional(),
   characterId: optionalString,
+  projectId: optionalString,
+  agentId: optionalString,
+  branch: optionalString,
+  pathPattern: optionalString,
   type: z.enum(["semantic", "episodic", "procedural"]).optional(),
   key: optionalString,
   importance: numberRange(1, 10).optional(),
@@ -946,11 +961,11 @@ const GithubCommonParams = z.object({
 })
 
 const GithubPrNumberParams = GithubCommonParams.extend({
-  prNumber: positiveInteger(),
+  prNumber: positiveIntegerOrExpression(),
 })
 
 const GithubIssueNumberParams = GithubCommonParams.extend({
-  issueNumber: positiveInteger(),
+  issueNumber: positiveIntegerOrExpression(),
 })
 
 const GithubOpenPrParams = GithubCommonParams.extend({
@@ -1490,7 +1505,11 @@ const WaitParams = z.object({
 
 const SetVariableParams = z.object({
   variable: requiredString("required").regex(/^[a-z_][a-z0-9_]*$/i, "variableName"),
-  value: requiredString("required"),
+  // Expressions are resolved before validation, so a text expression can
+  // legitimately become a number, boolean, object, array, or null. Reject
+  // only an absent/unresolved value; the executor intentionally stores the
+  // resolved value without coercing it back to a string.
+  value: z.unknown().refine((value) => value !== undefined, "required"),
 })
 
 const SubworkflowParams = z.object({

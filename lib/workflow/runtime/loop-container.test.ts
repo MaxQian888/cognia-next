@@ -333,7 +333,7 @@ describe("failure / abort / cache", () => {
       // flow.set with empty variable name throws.
       [node("body", "flow.set", { variable: "  ", value: "x" }, "loop1")]
     )
-    await expect(run(workflow, loopNode)).rejects.toThrow(/non-empty/)
+    await expect(run(workflow, loopNode)).rejects.toThrow(/variableName|non-empty/)
   })
 
   it("per-node onError=continue inside the body keeps the iteration alive", async () => {
@@ -491,7 +491,7 @@ describe("edge cases", () => {
       },
       [node("body", "flow.set", { variable: "  ", value: "x" }, "loop1")]
     )
-    await expect(run(workflow, loopNode)).rejects.toThrow(/non-empty/)
+    await expect(run(workflow, loopNode)).rejects.toThrow(/variableName|non-empty/)
   })
 
   it("reports null sources distinctly", async () => {

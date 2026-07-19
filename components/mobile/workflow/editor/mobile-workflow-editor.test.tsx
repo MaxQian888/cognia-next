@@ -53,6 +53,19 @@ jest.mock("./mobile-editor-topbar", () => ({
       <button data-testid="open-copilot" onClick={props.onOpenCopilot as () => void}>
         copilot
       </button>
+      <button data-testid="open-workbench" onClick={props.onOpenWorkbench as () => void}>
+        workbench
+      </button>
+    </div>
+  ),
+}))
+
+jest.mock("@/components/workflow/editor/right-sidebar", () => ({
+  RightSidebar: (props: ChildProps) => (
+    <div data-testid="workbench-sidebar" data-placement={String(props.placement)}>
+      <button data-testid="collapse-workbench" onClick={props.onCollapse as () => void}>
+        collapse
+      </button>
     </div>
   ),
 }))
@@ -169,6 +182,26 @@ describe("<MobileWorkflowEditor />", () => {
     expect(screen.getByTestId("copilot-sheet")).toHaveAttribute("data-open", "true")
     fireEvent.click(screen.getByTestId("close-copilot"))
     expect(screen.getByTestId("copilot-sheet")).toHaveAttribute("data-open", "false")
+  })
+
+  it("opens the shared Context Workbench in a full-width mobile Sheet", () => {
+    render(<MobileWorkflowEditor workflow={buildWorkflow()} />)
+    const sheet = screen.getByTestId("context-workbench-mobile-sheet")
+    expect(sheet).toHaveAttribute("data-state", "closed")
+    fireEvent.click(screen.getByTestId("open-workbench"))
+    expect(screen.getByTestId("context-workbench-mobile-sheet")).toHaveAttribute(
+      "data-state",
+      "open"
+    )
+    expect(screen.getByTestId("workbench-sidebar")).toHaveAttribute(
+      "data-placement",
+      "mobile-sheet"
+    )
+    fireEvent.click(screen.getByTestId("collapse-workbench"))
+    expect(screen.getByTestId("context-workbench-mobile-sheet")).toHaveAttribute(
+      "data-state",
+      "closed"
+    )
   })
 
   it("opens the inspector drawer when a node is tapped", () => {

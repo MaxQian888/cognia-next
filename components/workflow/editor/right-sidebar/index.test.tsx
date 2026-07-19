@@ -108,10 +108,13 @@ function setEdgeSelectionCount(useStore: EditorStore, count: number) {
   })
 }
 
-function harness(useStore: EditorStore) {
+function harness(
+  useStore: EditorStore,
+  placement?: React.ComponentProps<typeof RightSidebar>["placement"]
+) {
   return render(
     <NextIntlClientProvider locale="en" messages={MESSAGES as never} timeZone="UTC">
-      <RightSidebar useStore={useStore} />
+      <RightSidebar useStore={useStore} placement={placement} />
     </NextIntlClientProvider>
   )
 }
@@ -140,6 +143,28 @@ describe("RightSidebar", () => {
     expect(await screen.findByTestId("mock-chat-tab")).toBeInTheDocument()
     act(() => setSelectionCount(store, 1))
     expect(screen.getByTestId("mock-inspector-panel")).toBeInTheDocument()
+  })
+
+  it("uses mobile Sheet semantics without desktop layout controls", async () => {
+    window.localStorage.setItem(
+      "cognia-context-workbench-surfaces-v1",
+      JSON.stringify({ workflow: true })
+    )
+    const store = makeFakeStore({
+      selectedNodeIds: [],
+      selectedEdgeIds: [],
+      baseWorkflow: { id: "wf_mobile", name: "Mobile" },
+    })
+    harness(store, "mobile-sheet")
+
+    expect(screen.getByTestId("context-workbench")).toHaveAttribute(
+      "data-placement",
+      "mobile-sheet"
+    )
+    expect(await screen.findByTestId("mock-chat-tab")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Narrow" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Wide" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Focus" })).not.toBeInTheDocument()
   })
 
   describe("tab auto-switch (0 → ≥1 edge trigger)", () => {

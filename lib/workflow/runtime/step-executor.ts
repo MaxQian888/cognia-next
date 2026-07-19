@@ -18,6 +18,9 @@ import type { RunLogger } from "./event-log"
 import type { SecretResolver } from "./secret-resolver"
 import { createStreamSink } from "./stream-sink"
 import { assertCircuitClosed, recordCircuitFailure, recordCircuitSuccess } from "./circuit-breaker"
+import { validateNodeParams } from "@/lib/workflow/nodes/validate-params"
+import { nodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
+import { validateAgainstJsonSchema } from "@/lib/workflow/nodes/ai/schema-validate"
 
 export interface RunStepInput {
   workflow: VisualWorkflow
@@ -75,6 +78,18 @@ export interface StepExecution {
   decision?: string | string[]
   /** True iff this step came from the idempotency cache (no executor invoked). */
   fromCache: boolean
+}
+
+export class InvalidNodeParamsError extends Error {
+  readonly code = "invalid-node-params" as const
+  readonly retryable = false
+
+  constructor(node: WorkflowNode, errors: readonly string[]) {
+    super(
+      `Invalid params for node ${node.id} (${node.type}@${node.typeVersion}): ${errors.join("; ")}`
+    )
+    this.name = "InvalidNodeParamsError"
+  }
 }
 
 /**
@@ -149,12 +164,32 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
     variables: input.workflow.variables ?? {},
     ...(input.nodesOutputs ? { nodes: input.nodesOutputs } : {}),
   })
+  const resolvedParamRecord =
+    resolvedParams && typeof resolvedParams === "object" && !Array.isArray(resolvedParams)
+      ? (resolvedParams as Record<string, unknown>)
+      : {}
+  // Built-in Zod schemas describe the authored inspector payload. Validate
+  // that payload before expression substitution: a valid expression string
+  // may resolve to a boolean, number, object, or array that intentionally no
+  // longer matches the editor field's source type. Plugin JSON Schemas, by
+  // contrast, are execution contracts and therefore validate resolved input.
+  const paramErrors = validateNodeParams(node.type, node.data.params).summary
+  const pluginParamsSchema = nodeCatalogEntry(node.type).paramsSchema
+  if (pluginParamsSchema) {
+    const pluginValidation = validateAgainstJsonSchema(pluginParamsSchema, resolvedParamRecord)
+    if (!pluginValidation.ok) paramErrors.push(...pluginValidation.errors)
+  }
+  if (paramErrors.length > 0) {
+    const err = new InvalidNodeParamsError(node, paramErrors)
+    await logger.stepFailed(node.id, { message: err.message, retryable: false })
+    throw err
+  }
 
   const ctx: StepExecutionContext = {
     runId,
     workflowId: input.workflow.id,
     stepId: node.id,
-    params: resolvedParams as Record<string, unknown>,
+    params: resolvedParamRecord,
     upstream,
     trigger: input.trigger,
     signal,
@@ -198,7 +233,7 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
       const result = await runWithTimeout(
         reg.timeoutMs ?? input.workflow.settings.timeoutMs,
         signal,
-        () => reg.execute(ctx)
+        (attemptSignal) => reg.execute({ ...ctx, signal: attemptSignal })
       )
       sink.final()
       const exec: StepExecution = {
@@ -220,7 +255,7 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
     } catch (err) {
       sink.final()
       const message = err instanceof Error ? err.message : String(err)
-      const retryable = isRetryableError(err)
+      const retryable = reg.retryable !== false && isRetryableError(err)
       const lastAttempt = attempt >= retryPolicy.attempts
       await logger.stepFailed(node.id, { message, retryable })
 
@@ -274,28 +309,50 @@ function computeBackoffMs(policy: WorkflowRetryPolicy, attempt: number): number 
 async function runWithTimeout<T>(
   timeoutMs: number,
   outer: AbortSignal,
-  fn: () => Promise<T>
+  fn: (signal: AbortSignal) => Promise<T>
 ): Promise<T> {
-  if (timeoutMs <= 0) return fn()
   return new Promise<T>((resolve, reject) => {
     const ac = new AbortController()
-    const onAbort = () => ac.abort(new Error("Workflow run aborted"))
-    if (outer.aborted) return reject(new Error("Workflow run aborted"))
+    let settled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    const cleanup = () => {
+      if (timer) clearTimeout(timer)
+      outer.removeEventListener("abort", onAbort)
+    }
+    const settle = (outcome: { value: T } | { error: unknown }) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      if ("value" in outcome) resolve(outcome.value)
+      else reject(outcome.error instanceof Error ? outcome.error : new Error(String(outcome.error)))
+    }
+    const onAbort = () => {
+      const err = new Error("Workflow run aborted")
+      err.name = "AbortError"
+      ac.abort(err)
+      settle({ error: err })
+    }
+
+    if (outer.aborted) {
+      onAbort()
+      return
+    }
     outer.addEventListener("abort", onAbort, { once: true })
-    const timer = setTimeout(() => {
-      ac.abort(new Error(`Step exceeded timeout (${timeoutMs}ms)`))
-    }, timeoutMs)
-    fn()
-      .then((value) => {
-        clearTimeout(timer)
-        outer.removeEventListener("abort", onAbort)
-        resolve(value)
-      })
-      .catch((err) => {
-        clearTimeout(timer)
-        outer.removeEventListener("abort", onAbort)
-        reject(err instanceof Error ? err : new Error(String(err)))
-      })
+    if (timeoutMs > 0) {
+      timer = setTimeout(() => {
+        const err = new Error(`Step exceeded timeout (${timeoutMs}ms)`)
+        err.name = "TimeoutError"
+        ac.abort(err)
+        settle({ error: err })
+      }, timeoutMs)
+    }
+    Promise.resolve()
+      .then(() => fn(ac.signal))
+      .then(
+        (value) => settle({ value }),
+        (error) => settle({ error })
+      )
   })
 }
 

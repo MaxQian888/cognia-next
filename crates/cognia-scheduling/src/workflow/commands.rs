@@ -94,7 +94,9 @@ pub async fn workflow_register_trigger(
         | "trigger.goal.completed"
         | "trigger.terminal.command"
         | "trigger.desktop.event"
+        | "trigger.pet.event"
         | "trigger.team"
+        | "trigger.workflow.completed"
         | "trigger.manual" => Ok(()),
         other => Err(format!(
             "workflow_register_trigger: unsupported kind '{other}'"
@@ -108,10 +110,11 @@ pub async fn workflow_register_trigger(
 #[tauri::command]
 pub async fn workflow_unregister_trigger(
     state: State<'_, WorkflowState>,
+    workflow_id: String,
     trigger_id: String,
 ) -> Result<(), String> {
-    state.cron.remove(&trigger_id);
-    state.webhook.unregister(&trigger_id);
+    state.cron.remove(&workflow_id, &trigger_id);
+    state.webhook.unregister(&workflow_id, &trigger_id);
     Ok(())
 }
 
@@ -121,9 +124,10 @@ pub async fn workflow_unregister_trigger(
 #[tauri::command]
 pub async fn workflow_get_webhook_url(
     state: State<'_, WorkflowState>,
+    workflow_id: String,
     trigger_id: String,
 ) -> Result<Option<String>, String> {
-    Ok(state.webhook.url_for_trigger(&trigger_id))
+    Ok(state.webhook.url_for_trigger(&workflow_id, &trigger_id))
 }
 
 /// `workflow_webhook_respond` — deliver a dynamic HTTP response to a webhook
@@ -228,7 +232,7 @@ mod tests {
     #[test]
     fn unregister_is_idempotent_for_unknown_ids() {
         let (state, _) = WorkflowState::open_in_memory_for_testing();
-        state.cron.remove("never_registered");
+        state.cron.remove("wf_missing", "never_registered");
         assert_eq!(state.cron.entry_count(), 0);
     }
 

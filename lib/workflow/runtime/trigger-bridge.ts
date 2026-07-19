@@ -56,11 +56,32 @@ export async function dispatchTrigger(
     console.warn(`workflow trigger bridge: workflow ${event.workflowId} not found; ignoring`)
     return
   }
+  const triggerId = resolveTriggerId(event)
+  if (triggerId) {
+    const triggerNode = workflow.nodes.find((node) => node.id === triggerId)
+    if (!triggerNode || triggerNode.type !== event.kind || triggerNode.data.disabled === true) {
+      console.warn(
+        `workflow trigger bridge: trigger ${triggerId} is missing, disabled, or not ${event.kind}; ignoring`
+      )
+      return
+    }
+  }
+  const normalizedEvent =
+    triggerId && event.triggerId !== triggerId ? { ...event, triggerId } : event
   // Single canonical fan-in for every trigger path (cron / webhook / connector
   // / chat / plugin all route through here). Resume does NOT call this, so a
   // resumed run correctly does not re-fire the trigger hook.
   getPluginEventHooks().dispatchWorkflowTriggerFired(event.workflowId, event.kind, event.payload)
-  await runWorkflow({ workflow, trigger: event, triggeredBy: opts?.triggeredBy })
+  await runWorkflow({ workflow, trigger: normalizedEvent, triggeredBy: opts?.triggeredBy })
+}
+
+function resolveTriggerId(event: TriggerEvent): string | undefined {
+  if (typeof event.triggerId === "string" && event.triggerId.length > 0) return event.triggerId
+  if (!event.payload || typeof event.payload !== "object") return undefined
+  const legacyTriggerId = (event.payload as Record<string, unknown>).triggerId
+  return typeof legacyTriggerId === "string" && legacyTriggerId.length > 0
+    ? legacyTriggerId
+    : undefined
 }
 
 /**
@@ -72,6 +93,9 @@ export function isTriggerEvent(value: unknown): value is TriggerEvent {
   if (!value || typeof value !== "object") return false
   const v = value as Record<string, unknown>
   return (
-    typeof v.workflowId === "string" && typeof v.kind === "string" && typeof v.originAt === "number"
+    typeof v.workflowId === "string" &&
+    typeof v.kind === "string" &&
+    typeof v.originAt === "number" &&
+    (v.triggerId === undefined || typeof v.triggerId === "string")
   )
 }

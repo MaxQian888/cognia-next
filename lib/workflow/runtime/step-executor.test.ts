@@ -9,6 +9,7 @@ import { IdempotencyCache } from "./idempotency"
 import { createRunLogger, listRunEvents } from "./event-log"
 import { NoopSecretResolver } from "./secret-resolver"
 import { CircuitOpenError, resetCircuitBreaker } from "./circuit-breaker"
+import { addPluginCatalogEntry, __resetPluginCatalogForTesting } from "@/lib/workflow/nodes/catalog"
 import {
   DEFAULT_WORKFLOW_SETTINGS,
   type TriggerEvent,
@@ -29,6 +30,7 @@ beforeEach(async () => {
   await whenSeeded()
   execSpy.mockClear()
   resetCircuitBreaker()
+  __resetPluginCatalogForTesting()
 })
 
 const node: WorkflowNode = {
@@ -36,7 +38,7 @@ const node: WorkflowNode = {
   type: "data.code",
   typeVersion: 1,
   position: { x: 0, y: 0 },
-  data: { label: "n1", params: {} },
+  data: { label: "n1", params: { code: "return null" } },
 }
 
 function makeWorkflow(pinData?: Record<string, unknown>): VisualWorkflow {
@@ -122,7 +124,7 @@ describe("circuit breaker integration", () => {
       position: { x: 0, y: 0 },
       data: {
         label: "cb",
-        params: {},
+        params: { url: "https://example.com" },
         errorHandling: {
           // No retries (terminal on the first throw) + breaker trips after 2.
           retry: { maxRetries: 0, retryIntervalMs: 0, backoff: "fixed" },
@@ -171,7 +173,7 @@ describe("circuit breaker integration", () => {
       position: { x: 0, y: 0 },
       data: {
         label: "cb2",
-        params: {},
+        params: { input: "breaker reset" },
         errorHandling: {
           retry: { maxRetries: 0, retryIntervalMs: 0, backoff: "fixed" },
           circuitBreaker: { threshold: 2, cooldownMs: 60_000 },
@@ -257,7 +259,7 @@ describe("per-node retry runtime", () => {
       position: { x: 0, y: 0 },
       data: {
         label: "flaky",
-        params: {},
+        params: { template: "retry me" },
         errorHandling: { retry: { maxRetries: 1, retryIntervalMs: 0, backoff: "fixed" } },
       },
     }
@@ -284,5 +286,123 @@ describe("per-node retry runtime", () => {
     expect(retrying[0].payload).toEqual(
       expect.objectContaining({ attempt: 1, maxAttempts: 2, error: "transient 1" })
     )
+  })
+})
+
+describe("runtime parameter and timeout integrity", () => {
+  it("rejects invalid authored params before invoking the executor", async () => {
+    const execute = jest.fn(async () => ({ output: "should not run" }))
+    registerNodeExecutor({ kind: "action.character.send", typeVersion: 99, execute })
+    const invalidNode: WorkflowNode = {
+      id: "n_invalid_params",
+      type: "action.character.send",
+      typeVersion: 99,
+      position: { x: 0, y: 0 },
+      data: { label: "invalid", params: {} },
+    }
+    const runId = "run_invalid_params"
+
+    await expect(
+      runStep({
+        workflow: { ...makeWorkflow(), nodes: [invalidNode] },
+        node: invalidNode,
+        trigger,
+        upstream: {},
+        runId,
+        signal: new AbortController().signal,
+        cache: await IdempotencyCache.hydrate(runId),
+        retryPolicy: { attempts: 1, backoff: "fixed", baseMs: 0 },
+        secretResolver: NoopSecretResolver,
+        logger: createRunLogger(runId),
+      })
+    ).rejects.toThrow(/Invalid params.*characterId/i)
+    expect(execute).not.toHaveBeenCalled()
+  })
+
+  it("rejects and aborts a non-cooperative executor at its effective timeout", async () => {
+    let executorSignal: AbortSignal | undefined
+    const execute = jest.fn(
+      async (ctx: { signal: AbortSignal }) =>
+        new Promise<{ output: unknown }>(() => {
+          executorSignal = ctx.signal
+        })
+    )
+    registerNodeExecutor({
+      kind: "data.code",
+      typeVersion: 99,
+      execute: execute as never,
+      timeoutMs: 20,
+      retryable: false,
+    })
+    const slowNode: WorkflowNode = {
+      id: "n_timeout",
+      type: "data.code",
+      typeVersion: 99,
+      position: { x: 0, y: 0 },
+      data: { label: "slow", params: { code: "return null" } },
+    }
+    const runId = "run_timeout"
+
+    await expect(
+      runStep({
+        workflow: { ...makeWorkflow(), nodes: [slowNode] },
+        node: slowNode,
+        trigger,
+        upstream: {},
+        runId,
+        signal: new AbortController().signal,
+        cache: await IdempotencyCache.hydrate(runId),
+        retryPolicy: { attempts: 1, backoff: "fixed", baseMs: 0 },
+        secretResolver: NoopSecretResolver,
+        logger: createRunLogger(runId),
+      })
+    ).rejects.toThrow(/Step exceeded timeout \(20ms\)/)
+    expect(execute).toHaveBeenCalledTimes(1)
+    expect(executorSignal?.aborted).toBe(true)
+  })
+
+  it("enforces a plugin node's registered JSON params schema at runtime", async () => {
+    const kind = "demo.action.secure" as WorkflowNode["type"]
+    const execute = jest.fn(async () => ({ output: "should not run" }))
+    addPluginCatalogEntry({
+      kind,
+      typeVersion: 3,
+      category: "plugin",
+      label: "Secure",
+      description: "Requires a token",
+      iconName: "Lock",
+      keywords: [],
+      pluginId: "demo",
+      paramsSchema: {
+        type: "object",
+        required: ["token"],
+        properties: { token: { type: "string" } },
+      },
+    })
+    registerNodeExecutor({ kind, typeVersion: 3, execute })
+    const pluginNode: WorkflowNode = {
+      id: "n_plugin_params",
+      type: kind,
+      typeVersion: 3,
+      position: { x: 0, y: 0 },
+      data: { label: "secure", params: {} },
+    }
+    const runId = "run_plugin_params"
+
+    await expect(
+      runStep({
+        workflow: { ...makeWorkflow(), nodes: [pluginNode] },
+        node: pluginNode,
+        trigger,
+        upstream: {},
+        runId,
+        signal: new AbortController().signal,
+        cache: await IdempotencyCache.hydrate(runId),
+        retryPolicy: { attempts: 1, backoff: "fixed", baseMs: 0 },
+        secretResolver: NoopSecretResolver,
+        logger: createRunLogger(runId),
+      })
+    ).rejects.toThrow(/Invalid params.*token/i)
+    expect(execute).not.toHaveBeenCalled()
   })
 })

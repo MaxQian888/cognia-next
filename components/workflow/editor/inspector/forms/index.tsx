@@ -4765,12 +4765,13 @@ function WebhookUrlBanner() {
   const [url, setUrl] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   const triggerId = ctx?.currentNodeId
+  const workflowId = ctx?.store.getState().baseWorkflow.id
   useEffect(() => {
-    if (!triggerId) return
+    if (!workflowId || !triggerId) return
     let cancelled = false
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setPending(true)
-    void getWebhookUrl(triggerId)
+    void getWebhookUrl(workflowId, triggerId)
       .then((u) => {
         if (!cancelled) setUrl(u)
       })
@@ -4780,7 +4781,7 @@ function WebhookUrlBanner() {
     return () => {
       cancelled = true
     }
-  }, [triggerId])
+  }, [triggerId, workflowId])
   return (
     <div className="rounded-md border border-wf-status-running/40 bg-wf-status-running/5 px-2.5 py-2 text-[11px] space-y-1">
       <p className="text-wf-status-running">{t("desktopOnly")}</p>
@@ -5287,6 +5288,10 @@ export function MemoryRecallConfig({ params, onChange }: ConfigProps) {
   const query = readString(params, "query")
   const scope = readString(params, "scope", "global")
   const characterId = readString(params, "characterId")
+  const projectId = readString(params, "projectId")
+  const agentId = readString(params, "agentId")
+  const branch = readString(params, "branch")
+  const path = readString(params, "path")
   const topK = readNumber(params, "topK", 6)
   return (
     <FieldGroup>
@@ -5307,7 +5312,9 @@ export function MemoryRecallConfig({ params, onChange }: ConfigProps) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="global">{t("scope.global")}</SelectItem>
+              <SelectItem value="workspace">{t("scope.workspace")}</SelectItem>
               <SelectItem value="character">{t("scope.character")}</SelectItem>
+              <SelectItem value="agent">{t("scope.agent")}</SelectItem>
             </SelectContent>
           </Select>
         </Field>
@@ -5331,6 +5338,46 @@ export function MemoryRecallConfig({ params, onChange }: ConfigProps) {
           />
         </Field>
       ) : null}
+      <div className="grid grid-cols-2 gap-3">
+        <Field
+          label={t("projectId.label")}
+          htmlFor="mr-project"
+          name="projectId"
+          required={scope === "workspace"}
+        >
+          <ExpressionField
+            id="mr-project"
+            value={projectId}
+            onChange={(v) => onChange(patchParam(params, "projectId", v))}
+          />
+        </Field>
+        <Field
+          label={t("agentId.label")}
+          htmlFor="mr-agent"
+          name="agentId"
+          required={scope === "agent"}
+        >
+          <ExpressionField
+            id="mr-agent"
+            value={agentId}
+            onChange={(v) => onChange(patchParam(params, "agentId", v))}
+          />
+        </Field>
+        <Field label={t("branch.label")} htmlFor="mr-branch" name="branch">
+          <ExpressionField
+            id="mr-branch"
+            value={branch}
+            onChange={(v) => onChange(patchParam(params, "branch", v))}
+          />
+        </Field>
+        <Field label={t("path.label")} htmlFor="mr-path" name="path">
+          <ExpressionField
+            id="mr-path"
+            value={path}
+            onChange={(v) => onChange(patchParam(params, "path", v))}
+          />
+        </Field>
+      </div>
     </FieldGroup>
   )
 }
@@ -5341,6 +5388,10 @@ export function MemoryStoreConfig({ params, onChange }: ConfigProps) {
   const text = readString(params, "text")
   const scope = readString(params, "scope", "global")
   const characterId = readString(params, "characterId")
+  const projectId = readString(params, "projectId")
+  const agentId = readString(params, "agentId")
+  const branch = readString(params, "branch")
+  const pathPattern = readString(params, "pathPattern")
   const importance = readNumber(params, "importance", 7)
   const piiGate = readString(params, "piiGate", "block")
   return (
@@ -5362,7 +5413,9 @@ export function MemoryStoreConfig({ params, onChange }: ConfigProps) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="global">{t("scope.global")}</SelectItem>
+              <SelectItem value="workspace">{t("scope.workspace")}</SelectItem>
               <SelectItem value="character">{t("scope.character")}</SelectItem>
+              <SelectItem value="agent">{t("scope.agent")}</SelectItem>
             </SelectContent>
           </Select>
         </Field>
@@ -5393,6 +5446,46 @@ export function MemoryStoreConfig({ params, onChange }: ConfigProps) {
           />
         </Field>
       ) : null}
+      <div className="grid grid-cols-2 gap-3">
+        <Field
+          label={t("projectId.label")}
+          htmlFor="ms-project"
+          name="projectId"
+          required={scope === "workspace"}
+        >
+          <ExpressionField
+            id="ms-project"
+            value={projectId}
+            onChange={(v) => onChange(patchParam(params, "projectId", v))}
+          />
+        </Field>
+        <Field
+          label={t("agentId.label")}
+          htmlFor="ms-agent"
+          name="agentId"
+          required={scope === "agent"}
+        >
+          <ExpressionField
+            id="ms-agent"
+            value={agentId}
+            onChange={(v) => onChange(patchParam(params, "agentId", v))}
+          />
+        </Field>
+        <Field label={t("branch.label")} htmlFor="ms-branch" name="branch">
+          <ExpressionField
+            id="ms-branch"
+            value={branch}
+            onChange={(v) => onChange(patchParam(params, "branch", v))}
+          />
+        </Field>
+        <Field label={t("pathPattern.label")} htmlFor="ms-path" name="pathPattern">
+          <ExpressionField
+            id="ms-path"
+            value={pathPattern}
+            onChange={(v) => onChange(patchParam(params, "pathPattern", v))}
+          />
+        </Field>
+      </div>
       <Field label={t("piiGate.label")} htmlFor="ms-pii" hint={t("piiGate.hint")} name="piiGate">
         <Select value={piiGate} onValueChange={(v) => onChange(patchParam(params, "piiGate", v))}>
           <SelectTrigger id="ms-pii">
@@ -7155,6 +7248,12 @@ const DESKTOP_EVENT_KINDS = ["focus-changed", "structure-changed", "property-cha
 export function DesktopEventTriggerConfig({ params, onChange }: ConfigProps) {
   const t = useTranslations("workflows.forms.desktopEventTrigger")
   const selected = Array.isArray(params.kinds) ? (params.kinds as string[]) : []
+  const scope =
+    typeof params.scope === "string"
+      ? params.scope
+      : Array.isArray(params.scope) && typeof params.scope[0] === "string"
+        ? params.scope[0]
+        : ""
   const cooldownMs = readNumber(params, "cooldownMs", 2000)
   const toggle = (kind: string) => {
     const next = selected.includes(kind) ? selected.filter((k) => k !== kind) : [...selected, kind]
@@ -7179,6 +7278,15 @@ export function DesktopEventTriggerConfig({ params, onChange }: ConfigProps) {
             </label>
           ))}
         </div>
+      </Field>
+      <Field label={t("scope.label")} htmlFor="det-scope" hint={t("scope.hint")} name="scope">
+        <Input
+          id="det-scope"
+          value={scope}
+          placeholder={t("scope.placeholder")}
+          data-testid="desktop-event-scope"
+          onChange={(e) => onChange(patchParam(params, "scope", e.target.value || undefined))}
+        />
       </Field>
       <Field
         label={t("cooldownMs.label")}

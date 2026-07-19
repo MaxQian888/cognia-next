@@ -18,6 +18,8 @@ import type { CapabilityId } from "@/lib/platform/capabilities"
 
 export interface NodeCatalogEntry {
   kind: WorkflowNodeKind
+  /** Current authoring version for plugin-contributed kinds. */
+  typeVersion?: number
   category: WorkflowNodeCategory | "plugin"
   /** Short label shown in the sidebar / palette. */
   label: string
@@ -888,12 +890,11 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
   "trigger.desktop.event": {
     label: "On UIA event",
     description:
-      "Experimental: fire on live desktop UI events. v1: focus-changed on Windows (structure/property pending). A per-workflow cooldown guards against a workflow's own desktop actions re-triggering it.",
+      "Fire on native Windows UI Automation focus, structure, or property changes, optionally scoped to one element. A per-workflow cooldown guards against the workflow's own desktop actions re-triggering it.",
     iconName: "Bell",
     keywords: ["desktop", "trigger", "event", "uia", "focus"],
     desktopOnly: true,
     requires: ["uia-automation"],
-    experimental: true,
   },
   // ── System: integrated terminal ───────────────────────────────────────────
   "action.system.terminal": {

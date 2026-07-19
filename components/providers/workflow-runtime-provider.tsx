@@ -18,6 +18,10 @@ import { installApprovalNotificationActions } from "@/lib/workflow/runtime/appro
 import { isTauri } from "@/lib/tauri"
 import { listWorkflows } from "@/lib/db/workflows"
 import { syncWorkflowTriggers } from "@/lib/workflow/runtime/webhook-bridge"
+import {
+  disposePluginTriggerLifecycle,
+  initPluginTriggerLifecycle,
+} from "@/lib/workflow/triggers/lifecycle"
 import { resumeInFlightRuns } from "@/lib/workflow/runtime/resume-controller"
 import { loggers } from "@cognia/logging"
 
@@ -50,6 +54,7 @@ export function WorkflowRuntimeProvider({ children }: { children?: React.ReactNo
     if (typeof window === "undefined") return
 
     let cancelled = false
+    const startupController = new AbortController()
     const disposers: Disposer[] = []
 
     void (async () => {
@@ -73,6 +78,16 @@ export function WorkflowRuntimeProvider({ children }: { children?: React.ReactNo
         log.info?.("workflow runtime: trigger subscriptions initialised")
       } catch (err) {
         log.warn?.("workflow runtime: initTriggerSubscriptions failed", {
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
+
+      try {
+        initPluginTriggerLifecycle()
+        disposers.push(() => disposePluginTriggerLifecycle())
+        log.info?.("workflow runtime: plugin-trigger lifecycle initialised")
+      } catch (err) {
+        log.warn?.("workflow runtime: initPluginTriggerLifecycle failed", {
           error: err instanceof Error ? err.message : String(err),
         })
       }
@@ -118,9 +133,16 @@ export function WorkflowRuntimeProvider({ children }: { children?: React.ReactNo
 
       try {
         const all = await listWorkflows()
-        await Promise.allSettled(all.map((w) => syncWorkflowTriggers(w)))
+        if (cancelled) return
+        const active = all.filter((workflow) => !workflow.isTemplate && !workflow.isBuiltIn)
+        await Promise.allSettled(
+          active.map((workflow) =>
+            syncWorkflowTriggers(workflow, { signal: startupController.signal })
+          )
+        )
+        if (cancelled) return
         log.info?.("workflow runtime: synced trigger registrations to Rust", {
-          count: all.length,
+          count: active.length,
         })
       } catch (err) {
         log.warn?.("workflow runtime: initial trigger sync failed", {
@@ -153,6 +175,7 @@ export function WorkflowRuntimeProvider({ children }: { children?: React.ReactNo
 
     return () => {
       cancelled = true
+      startupController.abort()
       const pending = [...disposersRef.current].reverse()
       disposersRef.current = []
       for (const d of pending) {

@@ -536,9 +536,9 @@ describe("runWorkflow — loop container (flow.loop v2)", () => {
 
 describe("runWorkflow — failure handling", () => {
   it("reports a failed run when an executor is missing for a node kind", async () => {
-    // Use annotation.note — annotations are intentionally not executable
-    // (they're display-only) so they exercise the "no executor registered"
-    // failure path. action.* and ai.* kinds are now all registered.
+    // GitHub delivery actions are plugin-contributed and intentionally have
+    // no host executor, so this exercises the missing-plugin execution path
+    // without trying to route an edge into a display-only annotation.
     const wf = buildWorkflow(
       [
         {
@@ -550,10 +550,13 @@ describe("runWorkflow — failure handling", () => {
         },
         {
           id: "n_note",
-          type: "annotation.note",
+          type: "action.github.openPr",
           typeVersion: 1,
           position: { x: 200, y: 0 },
-          data: { label: "note", params: { text: "blocking annotation" } },
+          data: {
+            label: "open PR",
+            params: { repoFullName: "owner/repo", head: "feature", base: "main", title: "PR" },
+          },
         },
       ],
       [{ id: "e1", source: "n_start", target: "n_note" }]
@@ -729,7 +732,8 @@ describe("runWorkflow — plugin hook dispatches", () => {
   })
 
   it("step failure fires onWorkflowError + onWorkflowComplete(false)", async () => {
-    // annotation.note has no executor — drives the step-failure path.
+    // Plugin-contributed GitHub action has no host executor — drives the
+    // step-failure path while remaining a semantically valid graph target.
     const wf = buildWorkflow(
       [
         {
@@ -741,10 +745,13 @@ describe("runWorkflow — plugin hook dispatches", () => {
         },
         {
           id: "n_note",
-          type: "annotation.note",
+          type: "action.github.openPr",
           typeVersion: 1,
           position: { x: 200, y: 0 },
-          data: { label: "note", params: { text: "blocking annotation" } },
+          data: {
+            label: "open PR",
+            params: { repoFullName: "owner/repo", head: "feature", base: "main", title: "PR" },
+          },
         },
       ],
       [{ id: "e1", source: "n_start", target: "n_note" }]

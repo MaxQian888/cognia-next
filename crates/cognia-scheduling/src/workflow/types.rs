@@ -22,6 +22,8 @@ pub const TRIGGER_KINDS: &[&str] = &[
     "trigger.goal.completed",
     "trigger.desktop.event",
     "trigger.terminal.command",
+    "trigger.pet.event",
+    "trigger.workflow.completed",
 ];
 
 /// Run lifecycle states. Mirrors `RunStatus` in `types/workflow/visual.ts`.
@@ -137,6 +139,9 @@ pub struct RegisterTriggerInput {
 pub struct TriggerEvent {
     pub workflow_id: String,
     pub kind: String,
+    /// Exact trigger-node id that produced this event.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger_id: Option<String>,
     pub payload: serde_json::Value,
     /// Wall-clock time the trigger fired (ms since epoch).
     pub origin_at: i64,
@@ -275,12 +280,14 @@ mod tests {
         let ev = TriggerEvent {
             workflow_id: "wf_1".into(),
             kind: "trigger.cron".into(),
+            trigger_id: Some("trg_1".into()),
             payload: serde_json::json!({ "tick": true }),
             origin_at: 1_700_000_000_000,
             binding: None,
         };
         let s = serde_json::to_string(&ev).unwrap();
         assert!(s.contains("\"workflowId\""));
+        assert!(s.contains("\"triggerId\":\"trg_1\""));
         assert!(s.contains("\"originAt\""));
         assert!(s.contains("1700000000000"));
     }
@@ -300,5 +307,7 @@ mod tests {
         assert!(TRIGGER_KINDS.contains(&"trigger.goal.completed"));
         assert!(TRIGGER_KINDS.contains(&"trigger.desktop.event"));
         assert!(TRIGGER_KINDS.contains(&"trigger.terminal.command"));
+        assert!(TRIGGER_KINDS.contains(&"trigger.pet.event"));
+        assert!(TRIGGER_KINDS.contains(&"trigger.workflow.completed"));
     }
 }

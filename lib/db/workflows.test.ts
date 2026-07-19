@@ -37,6 +37,18 @@ import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
 import { ROOT_FOLDER_ID } from "@/types/workflow/folder"
 import { DEFAULT_WORKFLOW_SETTINGS, type VisualWorkflow } from "@/types/workflow/visual"
 
+jest.mock("@/lib/workflow/runtime/webhook-bridge", () => ({
+  syncWorkflowTriggers: jest.fn(async () => undefined),
+  unsyncWorkflowTriggers: jest.fn(async () => undefined),
+}))
+
+const triggerProjectionMocks = jest.requireMock("@/lib/workflow/runtime/webhook-bridge") as {
+  syncWorkflowTriggers: jest.Mock
+  unsyncWorkflowTriggers: jest.Mock
+}
+const syncWorkflowTriggersMock = triggerProjectionMocks.syncWorkflowTriggers
+const unsyncWorkflowTriggersMock = triggerProjectionMocks.unsyncWorkflowTriggers
+
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
@@ -46,6 +58,8 @@ beforeEach(async () => {
   await getDb().workflowFolders.clear()
   await getDb().workflowRuns.clear()
   __resetRunCountCacheForTesting()
+  syncWorkflowTriggersMock.mockReset().mockResolvedValue(undefined)
+  unsyncWorkflowTriggersMock.mockClear()
 })
 
 function manualNode(id: string, x = 0): VisualWorkflow["nodes"][number] {
@@ -124,6 +138,57 @@ describe("createWorkflow", () => {
     expect(wf.settings.concurrency).toBe(5)
     expect(wf.viewport?.zoom).toBe(1.5)
   })
+
+  it("preserves every content field supplied by a complete draft", async () => {
+    const wf = await createWorkflow({
+      name: "Complete",
+      complexity: "advanced",
+      variables: { REGION: "eu" },
+      pinData: { n1: { preview: true } },
+      staticData: { cursor: 7 },
+      interface: { inputSchema: { type: "object" }, outputSchema: { type: "string" } },
+      published: { at: 100, toolName: "complete_flow" },
+      settings: {
+        ...DEFAULT_WORKFLOW_SETTINGS,
+        riskGating: false,
+        onFailure: { runCatchNodes: false, notify: true },
+      },
+    })
+
+    expect(wf).toMatchObject({
+      complexity: "advanced",
+      variables: { REGION: "eu" },
+      pinData: { n1: { preview: true } },
+      staticData: { cursor: 7 },
+      interface: { inputSchema: { type: "object" }, outputSchema: { type: "string" } },
+      published: { at: 100, toolName: "complete_flow" },
+    })
+    expect(wf.settings.riskGating).toBe(false)
+    expect(wf.settings.onFailure).toEqual({ runCatchNodes: false, notify: true })
+  })
+
+  it("projects the persisted workflow into the trigger runtime", async () => {
+    const wf = await createWorkflow({ name: "Projected", nodes: [manualNode("trigger-a")] })
+
+    expect(syncWorkflowTriggersMock).toHaveBeenCalledTimes(1)
+    expect(syncWorkflowTriggersMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: wf.id, nodes: wf.nodes })
+    )
+  })
+
+  it("keeps the database write when trigger projection fails", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+    syncWorkflowTriggersMock.mockRejectedValueOnce(new Error("native runtime unavailable"))
+
+    const wf = await createWorkflow({ name: "Still persisted", nodes: [manualNode("trigger-a")] })
+
+    expect((await getWorkflow(wf.id))?.name).toBe("Still persisted")
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("trigger projection failed"),
+      expect.any(Error)
+    )
+    warn.mockRestore()
+  })
 })
 
 describe("listWorkflows / listWorkflowsByUpdated", () => {
@@ -187,12 +252,42 @@ describe("updateWorkflow / replaceWorkflow", () => {
     expect(fresh?.nodes).toHaveLength(1)
     await expect(replaceWorkflow({ ...wf, id: "wf_missing" })).rejects.toThrow(/not found/)
   })
+
+  it("projects the complete post-update and replacement snapshots", async () => {
+    const wf = await createWorkflow({ name: "A" })
+    syncWorkflowTriggersMock.mockClear()
+
+    await updateWorkflow(wf.id, { nodes: [manualNode("updated-trigger")] })
+    expect(syncWorkflowTriggersMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: wf.id, nodes: [manualNode("updated-trigger")] })
+    )
+
+    const replacement = {
+      ...(await getWorkflow(wf.id))!,
+      nodes: [manualNode("replacement-trigger")],
+    }
+    await replaceWorkflow(replacement)
+    expect(syncWorkflowTriggersMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: wf.id, nodes: [manualNode("replacement-trigger")] })
+    )
+  })
 })
 
 describe("deleteWorkflow", () => {
   it("removes a user-created row", async () => {
     const wf = await createWorkflow({ name: "A" })
     await deleteWorkflow(wf.id)
+    expect(await getWorkflow(wf.id)).toBeUndefined()
+  })
+
+  it("unregisters trigger nodes before deleting the workflow row", async () => {
+    const wf = await createWorkflow({ name: "A", nodes: [manualNode("n_manual")] })
+
+    await deleteWorkflow(wf.id)
+
+    expect(unsyncWorkflowTriggersMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: wf.id, nodes: wf.nodes })
+    )
     expect(await getWorkflow(wf.id)).toBeUndefined()
   })
 
@@ -244,6 +339,17 @@ describe("duplicateWorkflow", () => {
 
   it("throws when the source is missing", async () => {
     await expect(duplicateWorkflow("wf_missing")).rejects.toThrow(/not found/)
+  })
+
+  it("projects the duplicated workflow under its new id", async () => {
+    const wf = await createWorkflow({ name: "Original", nodes: [manualNode("n1")] })
+    syncWorkflowTriggersMock.mockClear()
+
+    const copy = await duplicateWorkflow(wf.id)
+
+    expect(syncWorkflowTriggersMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: copy.id, nodes: copy.nodes })
+    )
   })
 })
 
@@ -603,6 +709,28 @@ describe("schemaVersion 2 funnel", () => {
       expect(tpl.nodes).toHaveLength(1)
       expect(tpl.tags).toEqual(["x"])
       expect((await listTemplateWorkflows()).map((w) => w.id)).toContain(tpl.id)
+    })
+
+    it("keeps reusable content while clearing source publication identity", async () => {
+      const src = await createWorkflow({
+        name: "Published pipeline",
+        complexity: "intermediate",
+        variables: { REGION: "us" },
+        pinData: { n1: { sample: 1 } },
+        staticData: { cursor: 3 },
+        interface: { inputSchema: { type: "object" }, outputSchema: { type: "object" } },
+        published: { at: 10, toolName: "published_pipeline" },
+      })
+
+      const tpl = await saveWorkflowAsTemplate(src.id)
+      expect(tpl).toMatchObject({
+        complexity: "intermediate",
+        variables: { REGION: "us" },
+        pinData: { n1: { sample: 1 } },
+        staticData: { cursor: 3 },
+        interface: { inputSchema: { type: "object" }, outputSchema: { type: "object" } },
+      })
+      expect(tpl.published).toBeUndefined()
     })
 
     it("throws when the source workflow is missing", async () => {

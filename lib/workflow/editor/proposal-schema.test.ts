@@ -49,6 +49,35 @@ describe("coerceProposalOp", () => {
     expect(typeof result).toBe("string")
   })
 
+  it("preserves positive integer typeVersion values and rejects invalid versions", () => {
+    const valid = coerceProposalOp(
+      {
+        type: "add_node",
+        nodeId: "n",
+        kind: "flow.branch",
+        typeVersion: 1,
+        position: { x: 0, y: 0 },
+      },
+      0
+    )
+    expect(valid).toMatchObject({ typeVersion: 1 })
+
+    for (const typeVersion of [0, -1, 1.5, "1"]) {
+      expect(
+        coerceProposalOp(
+          {
+            type: "add_node",
+            nodeId: "n",
+            kind: "flow.branch",
+            typeVersion,
+            position: { x: 0, y: 0 },
+          },
+          0
+        )
+      ).toMatch(/typeVersion/)
+    }
+  })
+
   it("strips unknown top-level keys on a valid op", () => {
     const result = coerceProposalOp({ type: "remove_node", nodeId: "n_a", bogus: 1 }, 0)
     expect(result).toEqual({ type: "remove_node", nodeId: "n_a" })

@@ -377,7 +377,7 @@ export interface EditorState extends EditorStateSnapshot {
     target: string
     sourceHandle?: string
     targetHandle?: string
-  }) => string
+  }) => string | null
   /** Update an edge's `data` field (undoable). Returns true if the edge existed. */
   updateEdgeData: (id: string, patch: Record<string, unknown>) => boolean
   /**
@@ -412,8 +412,12 @@ export interface EditorState extends EditorStateSnapshot {
   unpinNodeData: (nodeId: string) => void
 
   // ── lifecycle ─────────────────────────────────────────────────────────────
-  /** Replace entire state with a fresh workflow (e.g., on route change). */
-  loadWorkflow: (wf: VisualWorkflow) => void
+  /**
+   * Replace entire state with a fresh workflow (e.g., on route change).
+   * Imported content passes `dirty: true` until it is persisted under the
+   * current workflow id.
+   */
+  loadWorkflow: (wf: VisualWorkflow, options?: { dirty?: boolean }) => void
   /** Snapshot back into a `VisualWorkflow` for `replaceWorkflow(wf)`. */
   toWorkflow: () => VisualWorkflow
   /** Mark the editor as saved at the current timestamp. */
@@ -519,6 +523,10 @@ export function defaultLabelFor(kind: WorkflowNodeKind): string {
 
 function defaultParamsFor(kind: WorkflowNodeKind): Record<string, unknown> {
   return { ...(nodeCatalogEntry(kind).defaultParams ?? {}) }
+}
+
+function authoringTypeVersionFor(kind: WorkflowNodeKind): number {
+  return nodeCatalogEntry(kind).typeVersion ?? defaultTypeVersionFor(kind)
 }
 
 /**
@@ -725,7 +733,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
               // New nodes author at the kind's current generation (e.g.
               // branch/switch v2 structured conditions); loaded graphs keep
               // their stored version.
-              typeVersion: defaultTypeVersionFor(kind),
+              typeVersion: authoringTypeVersionFor(kind),
             },
           }
           set({ nodes: [...get().nodes, node], dirty: true })
@@ -749,7 +757,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
               disabled: overrides?.disabled,
               authoredBy: overrides?.authoredBy,
               kind,
-              typeVersion: defaultTypeVersionFor(kind),
+              typeVersion: authoringTypeVersionFor(kind),
             },
           }
           const { upstream, downstream } = computeSplitEdges(
@@ -806,7 +814,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
               label: defaultLabelFor(kind),
               params: defaultParamsFor(kind),
               kind,
-              typeVersion: defaultTypeVersionFor(kind),
+              typeVersion: authoringTypeVersionFor(kind),
             },
           }
           const params = {
@@ -860,7 +868,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
               label: replacement.label ?? defaultLabelFor(replacement.kind),
               params: replacement.params,
               kind: replacement.kind,
-              typeVersion: defaultTypeVersionFor(replacement.kind),
+              typeVersion: authoringTypeVersionFor(replacement.kind),
             },
           }
           const keptNodes = nodes.filter((n) => !removed.has(n.id))
@@ -1023,6 +1031,14 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         },
 
         connect: ({ source, target, sourceHandle, targetHandle }) => {
+          const current = get()
+          const validation = validateConnection(
+            { source, target, sourceHandle, targetHandle },
+            current.nodes,
+            current.edges,
+            { errorPolicy: current.baseWorkflow.settings.errorPolicy }
+          )
+          if (!validation.valid) return null
           const id = "e_" + nanoid(8)
           const edge: RFWorkflowEdge = {
             id,
@@ -1032,7 +1048,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
             targetHandle: targetHandle ?? undefined,
             type: "default",
           }
-          set({ edges: [...get().edges, edge], dirty: true })
+          set({ edges: [...current.edges, edge], dirty: true })
           return id
         },
 
@@ -1118,7 +1134,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
             return { baseWorkflow: { ...s.baseWorkflow, pinData: nextPin }, dirty: true }
           }),
 
-        loadWorkflow: (wf) => {
+        loadWorkflow: (wf, options) => {
           const c = workflowToReactFlow(wf)
           set({
             baseWorkflow: wf,
@@ -1127,7 +1143,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
             viewport: c.viewport,
             selectedNodeIds: [],
             selectedEdgeIds: [],
-            dirty: false,
+            dirty: options?.dirty ?? false,
             savedAt: wf.updatedAt > 0 ? wf.updatedAt : null,
           })
           // Reset history so the freshly loaded graph doesn't show "undo"
@@ -1190,16 +1206,19 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           const edgeById = new Map(startEdges.map((e) => [e.id, e]))
           // Track ids touched so we know which nodes to re-validate.
           const touchedNodeIds = new Set<string>()
-          let firstError: string | undefined
           let applied = 0
+
+          const reject = (message: string) => {
+            perfMark("apply-end")
+            return { applied: 0, firstError: message }
+          }
 
           for (let i = 0; i < ops.length; i++) {
             const op = ops[i]
             switch (op.type) {
               case "add_node": {
                 if (nodeById.has(op.nodeId)) {
-                  firstError = firstError ?? `op ${i}: node id "${op.nodeId}" already exists`
-                  continue
+                  return reject(`op ${i}: node id "${op.nodeId}" already exists`)
                 }
                 const data: RFWorkflowNode["data"] = {
                   label: (op.data?.label as string | undefined) ?? defaultLabelFor(op.kind),
@@ -1209,7 +1228,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
                   disabled: op.data?.disabled as boolean | undefined,
                   authoredBy: (op.data?.authoredBy as "ai" | "user" | undefined) ?? "ai",
                   kind: op.kind,
-                  typeVersion: 1,
+                  typeVersion: op.typeVersion ?? authoringTypeVersionFor(op.kind),
                 }
                 nodeById.set(op.nodeId, {
                   id: op.nodeId,
@@ -1223,8 +1242,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
               }
               case "remove_node": {
                 if (!nodeById.has(op.nodeId)) {
-                  firstError = firstError ?? `op ${i}: node id "${op.nodeId}" does not exist`
-                  continue
+                  return reject(`op ${i}: node id "${op.nodeId}" does not exist`)
                 }
                 nodeById.delete(op.nodeId)
                 // drop incident edges
@@ -1239,18 +1257,27 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
               }
               case "connect_edge": {
                 if (edgeById.has(op.edgeId)) {
-                  firstError = firstError ?? `op ${i}: edge id "${op.edgeId}" already exists`
-                  continue
+                  return reject(`op ${i}: edge id "${op.edgeId}" already exists`)
                 }
                 if (!nodeById.has(op.source)) {
-                  firstError =
-                    firstError ?? `op ${i}: connect_edge source "${op.source}" does not exist`
-                  continue
+                  return reject(`op ${i}: connect_edge source "${op.source}" does not exist`)
                 }
                 if (!nodeById.has(op.target)) {
-                  firstError =
-                    firstError ?? `op ${i}: connect_edge target "${op.target}" does not exist`
-                  continue
+                  return reject(`op ${i}: connect_edge target "${op.target}" does not exist`)
+                }
+                const connectionValidation = validateConnection(
+                  {
+                    source: op.source,
+                    target: op.target,
+                    sourceHandle: op.sourceHandle,
+                    targetHandle: op.targetHandle,
+                  },
+                  [...nodeById.values()],
+                  [...edgeById.values()],
+                  { errorPolicy: get().baseWorkflow.settings.errorPolicy }
+                )
+                if (!connectionValidation.valid) {
+                  return reject(`op ${i}: ${connectionValidation.reason}`)
                 }
                 const data =
                   typeof op.label === "string" && op.label.length > 0
@@ -1270,8 +1297,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
               }
               case "disconnect_edge": {
                 if (!edgeById.has(op.edgeId)) {
-                  firstError = firstError ?? `op ${i}: edge id "${op.edgeId}" does not exist`
-                  continue
+                  return reject(`op ${i}: edge id "${op.edgeId}" does not exist`)
                 }
                 edgeById.delete(op.edgeId)
                 applied++
@@ -1280,8 +1306,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
               case "configure_node": {
                 const node = nodeById.get(op.nodeId)
                 if (!node) {
-                  firstError = firstError ?? `op ${i}: node id "${op.nodeId}" does not exist`
-                  continue
+                  return reject(`op ${i}: node id "${op.nodeId}" does not exist`)
                 }
                 // Stamp authoredBy: "ai" by default on patches so the
                 // touched node carries provenance even if the agent forgot.
@@ -1297,6 +1322,24 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
                 applied++
                 break
               }
+            }
+          }
+
+          // A configure op can change a node kind, version, handles, or error
+          // policy. Revalidate every resulting edge against the final graph so
+          // the batch cannot commit stale structural connections.
+          const finalNodes = [...nodeById.values()]
+          const finalEdges = [...edgeById.values()]
+          for (const edge of finalEdges) {
+            if (!touchedNodeIds.has(edge.source) && !touchedNodeIds.has(edge.target)) continue
+            const validation = validateConnection(
+              edge,
+              finalNodes,
+              finalEdges.filter((candidate) => candidate.id !== edge.id),
+              { errorPolicy: get().baseWorkflow.settings.errorPolicy }
+            )
+            if (!validation.valid) {
+              return reject(`final edge "${edge.id}": ${validation.reason}`)
             }
           }
 
@@ -1334,7 +1377,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
             dirty: true,
           })
           perfMark("apply-end")
-          return firstError ? { applied, firstError } : { applied }
+          return { applied }
         },
 
         groupSelected: (ids) => {

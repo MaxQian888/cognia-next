@@ -18,7 +18,7 @@ import { useShallow } from "zustand/react/shallow"
 import { toast } from "sonner"
 import { useTranslations } from "next-intl"
 import type { VisualWorkflow, WorkflowNodeKind } from "@/types/workflow/visual"
-import { createWorkflow, getWorkflow, regenerateNodeIds, replaceWorkflow } from "@/lib/db/workflows"
+import { createWorkflow, getWorkflow, regenerateNodeIds } from "@/lib/db/workflows"
 import { reactFlowToWorkflow } from "@/lib/workflow/editor/react-flow-converter"
 import { planExtraction } from "@/lib/workflow/editor/extract-subworkflow"
 import { autoLayout, applyAutoLayoutPositions } from "@/lib/workflow/editor/auto-layout"
@@ -99,7 +99,6 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     nodeCount,
     setSelectedNodes,
     setName,
-    markSaved,
     toWorkflow,
   } = useStore(
     useShallow((s: EditorState) => ({
@@ -110,7 +109,6 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
       nodeCount: s.nodes.length,
       setSelectedNodes: s.setSelectedNodes,
       setName: s.setName,
-      markSaved: s.markSaved,
       toWorkflow: s.toWorkflow,
     }))
   )
@@ -420,8 +418,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
       try {
         // Save dirty changes first so the run executes against what the user sees.
         if (dirty) {
-          await replaceWorkflow(toWorkflow())
-          markSaved()
+          await persistEditorWorkflow(useStore)
         }
         const wf = toWorkflow()
         toastId = toast.loading(`${t("running")} ${wf.name}`)
@@ -456,7 +453,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         setRunning(false)
       }
     },
-    [running, dirty, toWorkflow, markSaved, onRequestRun, t, tDiag, useStore]
+    [running, dirty, toWorkflow, onRequestRun, t, tDiag, useStore]
   )
 
   const handleRevert = useCallback(async () => {
@@ -628,8 +625,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
       let toastId: string | number | undefined
       try {
         if (dirty) {
-          await replaceWorkflow(toWorkflow())
-          markSaved()
+          await persistEditorWorkflow(useStore)
         }
         const wf = toWorkflow()
         toastId = toast.loading(`${t("running")} ${wf.name}`)
@@ -648,7 +644,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         setRunning(false)
       }
     },
-    [running, dirty, toWorkflow, markSaved, onRequestRun, t, tDiag, useStore]
+    [running, dirty, toWorkflow, onRequestRun, t, tDiag, useStore]
   )
 
   const requestedRunSingleStepId = useStore((s) => s.requestedRunSingleStepId)
@@ -710,14 +706,17 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     (jsonText: string) => {
       try {
         const parsed = parseWorkflowImport(jsonText)
-        useStore.getState().loadWorkflow({
-          ...useStore.getState().toWorkflow(),
-          ...parsed,
-          // Preserve current id so we don't accidentally overwrite a different
-          // workflow on save. If the user wants a fresh row, they should
-          // duplicate from the library afterwards.
-          id: useStore.getState().baseWorkflow.id,
-        } as VisualWorkflow)
+        useStore.getState().loadWorkflow(
+          {
+            ...useStore.getState().toWorkflow(),
+            ...parsed,
+            // Preserve current id so we don't accidentally overwrite a different
+            // workflow on save. If the user wants a fresh row, they should
+            // duplicate from the library afterwards.
+            id: useStore.getState().baseWorkflow.id,
+          } as VisualWorkflow,
+          { dirty: true }
+        )
         toast.success(t("imported"))
       } catch (err) {
         toast.error(
@@ -1164,6 +1163,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
             className="w-full gap-0 p-0 sm:max-w-none"
             inert={!mobileToolsOpen}
             aria-hidden={!mobileToolsOpen}
+            data-testid="context-workbench-mobile-sheet"
           >
             <SheetHeader className="sr-only">
               <SheetTitle>{tWorkbench("mobileTitle")}</SheetTitle>
@@ -1174,6 +1174,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
               className="h-full w-full border-l-0"
               reactFlowInstance={reactFlowInstance}
               onCollapse={collapseRightWorkbench}
+              placement="mobile-sheet"
             />
           </SheetContent>
         </Sheet>

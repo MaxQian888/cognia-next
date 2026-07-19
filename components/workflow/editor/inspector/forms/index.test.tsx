@@ -782,6 +782,15 @@ describe("DesktopEventTriggerConfig", () => {
     fireEvent.change(input, { target: { value: "-3" } })
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ cooldownMs: 0 }))
   })
+
+  it("edits an optional UIA element scope", () => {
+    const onChange = jest.fn()
+    wrap(<DesktopEventTriggerConfig params={{ scope: ["element-1"] }} onChange={onChange} />)
+    const input = screen.getByTestId("desktop-event-scope") as HTMLInputElement
+    expect(input.value).toBe("element-1")
+    fireEvent.change(input, { target: { value: "element-2" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ scope: "element-2" }))
+  })
 })
 
 describe("PetEventTriggerConfig", () => {

@@ -26,6 +26,7 @@ import {
   Pencil as EditIcon,
   Eye as ReadIcon,
   Sparkles as CopilotIcon,
+  PanelRight as WorkbenchIcon,
   Undo2 as UndoIcon,
   Redo2 as RedoIcon,
   LayoutGrid as AutoLayoutIcon,
@@ -64,6 +65,8 @@ export interface MobileEditorTopbarProps {
   onToggleMode: () => void
   /** Open the AI copilot sheet. */
   onOpenCopilot: () => void
+  /** Open the shared Context Workbench. */
+  onOpenWorkbench: () => void
 }
 
 export function MobileEditorTopbar({
@@ -72,9 +75,11 @@ export function MobileEditorTopbar({
   mode,
   onToggleMode,
   onOpenCopilot,
+  onOpenWorkbench,
 }: MobileEditorTopbarProps) {
   const t = useTranslations("mobile.workflow.editor")
   const tRun = useTranslations("mobile.workflow")
+  const tWorkbench = useTranslations("contextWorkbench")
 
   const { id, name, dirty, snapToGrid } = store(
     useShallow((s: EditorState) => ({
@@ -176,11 +181,14 @@ export function MobileEditorTopbar({
         try {
           const text = typeof reader.result === "string" ? reader.result : ""
           const parsed = parseWorkflowImport(text)
-          store.getState().loadWorkflow({
-            ...store.getState().toWorkflow(),
-            ...parsed,
-            id: store.getState().baseWorkflow.id,
-          } as VisualWorkflow)
+          store.getState().loadWorkflow(
+            {
+              ...store.getState().toWorkflow(),
+              ...parsed,
+              id: store.getState().baseWorkflow.id,
+            } as VisualWorkflow,
+            { dirty: true }
+          )
           toast.success(t("imported"))
         } catch (err) {
           toast.error(err instanceof Error ? `${t("importFailed")}: ${err.message}` : t("importFailed"))
@@ -237,11 +245,11 @@ export function MobileEditorTopbar({
         variant="ghost"
         size="icon"
         className="size-11 shrink-0"
-        onClick={onOpenCopilot}
-        aria-label={t("copilot")}
-        data-testid="mobile-editor-copilot"
+        onClick={onOpenWorkbench}
+        aria-label={tWorkbench("mobileTitle")}
+        data-testid="mobile-editor-workbench"
       >
-        <CopilotIcon className="size-5" aria-hidden="true" />
+        <WorkbenchIcon className="size-5" aria-hidden="true" />
       </Button>
 
       <Button
@@ -283,6 +291,11 @@ export function MobileEditorTopbar({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-48">
+          <DropdownMenuItem onSelect={onOpenCopilot} data-testid="mobile-editor-copilot">
+            <CopilotIcon className="mr-2 size-4" aria-hidden="true" />
+            {t("copilot")}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={handleUndo} disabled={!canUndo}>
             <UndoIcon className="mr-2 size-4" aria-hidden="true" />
             {t("undo")}

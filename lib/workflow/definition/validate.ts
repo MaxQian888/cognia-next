@@ -17,6 +17,7 @@ import {
   type VisualWorkflow,
   type WorkflowNodeKind,
 } from "@/types/workflow/visual"
+import { validateConnection } from "@/lib/workflow/editor/connection-validator"
 
 const workflowNodeKindSchema = z.custom<WorkflowNodeKind>(
   (val) =>
@@ -60,16 +61,22 @@ const errorHandlingSchema = z.object({
     .optional(),
 })
 
-const nodeDataSchema = z.object({
-  label: z.string().min(1, "Node label is required"),
-  params: z.record(z.string(), z.unknown()),
-  notes: z.string().optional(),
-  credentialRefs: z.record(z.string(), z.string()).optional(),
-  disabled: z.boolean().optional(),
-  errorHandling: errorHandlingSchema.optional(),
-  /** Canvas lock (editor affordance). Kept so saves don't strip it. */
-  locked: z.boolean().optional(),
-})
+const nodeDataSchema = z
+  .object({
+    label: z.string().min(1, "Node label is required"),
+    params: z.record(z.string(), z.unknown()),
+    notes: z.string().optional(),
+    credentialRefs: z.record(z.string(), z.string()).optional(),
+    disabled: z.boolean().optional(),
+    authoredBy: z.enum(["ai", "user"]).optional(),
+    errorHandling: errorHandlingSchema.optional(),
+    /** Canvas lock (editor affordance). Kept so saves don't strip it. */
+    locked: z.boolean().optional(),
+  })
+  // Plugin nodes may persist namespaced editor/runtime metadata alongside the
+  // shared fields. WorkflowNodeData deliberately has an index signature, so
+  // validating the envelope must not erase those plugin-owned values.
+  .catchall(z.unknown())
 
 const nodeSchema = z.object({
   id: z.string().min(1),
@@ -96,6 +103,7 @@ const edgeSchema = z.object({
       // Keep in sync with WorkflowEdgeKind — "error" marks error-branch
       // edges (orchestrator's isErrorEdge also accepts sourceHandle "error").
       kind: z.enum(["default", "conditional", "parallel", "loop", "error"]).optional(),
+      comment: z.string().optional(),
     })
     .optional(),
 })
@@ -154,6 +162,16 @@ const viewportSchema = z.object({
   zoom: z.number().positive(),
 })
 
+const workflowInterfaceSchema = z.object({
+  inputSchema: z.record(z.string(), z.unknown()).optional(),
+  outputSchema: z.record(z.string(), z.unknown()).optional(),
+})
+
+const workflowPublicationSchema = z.object({
+  at: z.number().int().min(0),
+  toolName: z.string().min(1),
+})
+
 /**
  * Top-level workflow envelope. Note: `nodes` and `edges` integrity (edge
  * endpoints reference real node ids; no cycles — iteration lives inside
@@ -170,6 +188,8 @@ export const visualWorkflowSchema = z.object({
   tags: z.array(z.string()).optional(),
   isTemplate: z.boolean().optional(),
   isBuiltIn: z.boolean().optional(),
+  complexity: z.enum(["starter", "intermediate", "advanced"]).optional(),
+  folderId: z.string().min(1).optional(),
   createdAt: z.number().int().min(0),
   updatedAt: z.number().int().min(0),
   nodes: z.array(nodeSchema),
@@ -180,6 +200,8 @@ export const visualWorkflowSchema = z.object({
   pinData: z.record(z.string(), z.unknown()).optional(),
   staticData: z.record(z.string(), z.unknown()).optional(),
   viewport: viewportSchema.optional(),
+  interface: workflowInterfaceSchema.optional(),
+  published: workflowPublicationSchema.optional(),
 })
 
 export type ValidatedVisualWorkflow = z.infer<typeof visualWorkflowSchema>
@@ -199,6 +221,7 @@ export type GraphIntegrityCode =
   | "duplicateEdgeId"
   | "danglingSource"
   | "danglingTarget"
+  | "invalidConnection"
   | "missingTrigger"
   | "selfParent"
   | "missingParent"
@@ -331,6 +354,38 @@ export function collectGraphIntegrityIssues(wf: VisualWorkflow): GraphIntegrityI
 
   // Loop-body integrity (schemaVersion 2 containers).
   const nodeById = new Map(wf.nodes.map((n) => [n.id, n]))
+
+  // Connection semantics are shared with every editor authoring path. This
+  // catches malformed imported/persisted graphs too, so branch/switch output
+  // handles, trigger targets, annotations, self-loops, duplicates, and error
+  // routing cannot bypass the canvas validator and fail later at execution.
+  const connectionNodes = wf.nodes.map((node) => ({
+    id: node.id,
+    data: {
+      kind: node.type,
+      typeVersion: node.typeVersion,
+      params: node.data.params,
+      errorHandling: node.data.errorHandling,
+    },
+  }))
+  wf.edges.forEach((edge, edgeIndex) => {
+    if (!nodeById.has(edge.source) || !nodeById.has(edge.target)) return
+    const validation = validateConnection(
+      edge,
+      connectionNodes,
+      wf.edges.filter((_, candidateIndex) => candidateIndex !== edgeIndex),
+      { errorPolicy: wf.settings.errorPolicy }
+    )
+    if (!validation.valid) {
+      issues.push({
+        severity: "error",
+        code: "invalidConnection",
+        edgeId: edge.id,
+        params: { reason: validation.reason },
+      })
+    }
+  })
+
   const isLoopContainer = (id: string | undefined): boolean => {
     if (!id) return false
     const n = nodeById.get(id)
@@ -440,6 +495,8 @@ function stringifyIntegrityIssue(issue: GraphIntegrityIssue): string {
       return `Edge ${issue.edgeId} sources unknown node ${p.ref}`
     case "danglingTarget":
       return `Edge ${issue.edgeId} targets unknown node ${p.ref}`
+    case "invalidConnection":
+      return `Edge ${issue.edgeId} is invalid: ${p.reason}`
     case "missingTrigger":
       return "Workflow has no trigger node; manual run only."
     case "selfParent":
