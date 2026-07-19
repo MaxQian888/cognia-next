@@ -53,6 +53,9 @@ const COMMAND_KINDS = [
   "plugin_set_enabled",
   "adapter_update_policy",
   "app_settings_update",
+  // Long-term memory
+  "memory_update",
+  "memory_forget",
   // External agents (ADR-0056, Wave 4)
   "external_agent_update",
 ] as const

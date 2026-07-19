@@ -26,8 +26,6 @@ test.describe("mobile interactions — pull-to-refresh", () => {
     await page.goto("/discover")
     const wrapper = page.getByTestId("pull-to-refresh").first()
     await expect(wrapper).toBeVisible({ timeout: 15_000 })
-    // Let entrance animations settle so the box measurement holds still.
-    await page.waitForTimeout(1_000)
 
     // Input channel: synthetic pointer events dispatched on the wrapper.
     // Both real channels are hijacked by browser-native behaviors before
@@ -40,7 +38,19 @@ test.describe("mobile interactions — pull-to-refresh", () => {
     // Until that's resolved, this spec pins the component contract:
     // pointerdown → move past triggerPx must translate the content and,
     // on release, run the full commit → refresh → reset lifecycle.
-    const translated = await wrapper.evaluate(async (el) => {
+    const result = await wrapper.evaluate(async (el) => {
+      const refreshLifecycle = new Promise<boolean>((resolve) => {
+        let sawRefreshing = el.getAttribute("data-refreshing") === "true"
+        const observer = new MutationObserver(() => {
+          if (el.getAttribute("data-refreshing") === "true") {
+            sawRefreshing = true
+          } else if (sawRefreshing) {
+            observer.disconnect()
+            resolve(true)
+          }
+        })
+        observer.observe(el, { attributes: true, attributeFilter: ["data-refreshing"] })
+      })
       const box = el.getBoundingClientRect()
       const x = box.x + box.width / 2
       const startY = box.y + box.height * 0.4
@@ -65,13 +75,13 @@ test.describe("mobile interactions — pull-to-refresh", () => {
       const m = /translateY\((-?\d+(?:\.\d+)?)px\)/.exec(t)
       const translatedNow = m ? Number(m[1]) : 0
       fire("pointerup", startY + 230)
-      return translatedNow
+      return { translated: translatedNow, completed: await refreshLifecycle }
     })
-    expect(translated).toBeGreaterThanOrEqual(64)
+    expect(result.translated).toBeGreaterThanOrEqual(64)
 
-    // After release the wrapper flips data-refreshing while onRefresh runs,
-    // then settles back to "false" — poll for the settle so the gesture's
-    // full lifecycle (commit → refresh → reset) actually executed.
-    await expect(wrapper).toHaveAttribute("data-refreshing", "false", { timeout: 10_000 })
+    // Mutation observation proves the transient true state was rendered before
+    // the wrapper settled, avoiding a vacuous final-state-only assertion.
+    expect(result.completed).toBe(true)
+    await expect(wrapper).toHaveAttribute("data-refreshing", "false")
   })
 })

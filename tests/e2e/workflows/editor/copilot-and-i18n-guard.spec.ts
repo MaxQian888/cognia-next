@@ -55,7 +55,10 @@ test.describe("workflow editor — copilot tab + i18n guard", () => {
 
     // Open the copilot tab — it must hydrate its own session, not stay stuck on
     // the loading/empty placeholder.
-    await page.getByTestId("workflow-right-sidebar-tab-chat").click()
+    await page
+      .getByTestId("context-workbench-activity-rail")
+      .getByRole("button", { name: "Chat" })
+      .click()
     await expect(page.getByTestId("workflow-chat-tab")).toBeVisible({ timeout: 15_000 })
 
     // Settle a tick so any deferred translation calls flush.

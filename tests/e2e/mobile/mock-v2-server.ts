@@ -132,7 +132,12 @@ export function createMockV2Server(): MockV2Server {
   const pairAttempts: PairRequestPayload[] = []
   const pairResolvers: Array<(payload: PairRequestPayload) => void> = []
   const rpcCalls: RpcCapture[] = []
-  const knownRpcCommands = new Set<string>(MOBILE_OUTBOUND_COMMANDS)
+  const knownRpcCommands = new Set<string>([
+    ...MOBILE_OUTBOUND_COMMANDS,
+    // Read-only health probe used by PairedStep. The native dispatcher
+    // exposes it on the same /_rpc route as outbound mobile commands.
+    "claude_sidecar_status",
+  ])
   const sseClients = new Set<{
     write: (chunk: string) => void
     close: () => void

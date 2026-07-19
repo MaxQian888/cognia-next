@@ -129,6 +129,9 @@ jobs:
       - name: Tauri command-name parity audit
         run: pnpm audit:command-parity
 
+      - name: E2E governance audit
+        run: pnpm audit:e2e-governance
+
       - name: Static-export node-builtin guard
         run: pnpm lint:static-export
 
@@ -142,7 +145,8 @@ jobs:
           pnpm config:sync:test
           pnpm audit:silent-flags:test
           pnpm audit:pii-boundaries:test
-          node --test scripts/plugin/check-author-imports.test.mjs scripts/plugin/generate-contract.test.mjs scripts/plugin/test-sdk-package.test.mjs scripts/plugin/test-author-scaffold.test.mjs
+          pnpm audit:e2e-governance:test
+          node --test scripts/plugin/check-author-imports.test.mjs scripts/plugin/generate-contract.test.mjs scripts/plugin/test-sdk-package.test.mjs scripts/plugin/test-author-scaffold.test.mjs scripts/plugin/node-plugin-host.test.mjs scripts/build/prepare-plugin-node.test.mjs
 
       - name: Security audit
         run: pnpm audit --audit-level=moderate
