@@ -8,7 +8,10 @@ import { renderHook, act } from "@testing-library/react"
 
 // ========== Helper ==========
 
-function createMockDeps(initialData: Record<string, Record<string, unknown>> = {}) {
+function createMockDeps(
+  initialData: Record<string, Record<string, unknown>> = {},
+  locale: "en" | "zh-CN" = "en"
+) {
   const appData = new Map<string, Record<string, unknown>>(Object.entries(initialData))
 
   const getAppData = jest.fn((appId: string) => appData.get(appId))
@@ -28,8 +31,17 @@ function createMockDeps(initialData: Record<string, Record<string, unknown>> = {
   const resetAppData = jest.fn((appId: string) => appData.delete(appId))
   const setDataValue = jest.fn()
   const onAction = jest.fn()
+  const getAppLocale = jest.fn(() => locale)
 
-  return { getAppData, setAppData, resetAppData, surfaces: {}, setDataValue, onAction }
+  return {
+    getAppData,
+    setAppData,
+    resetAppData,
+    surfaces: {},
+    setDataValue,
+    onAction,
+    getAppLocale,
+  }
 }
 
 // ========== Part 1: Pure Helper Function Tests ==========
@@ -166,6 +178,25 @@ describe("useAppActionHandlers", () => {
       })
 
       expect(deps.setAppData).not.toHaveBeenCalled()
+    })
+
+    it("writes generated task statistics in the app instance locale", () => {
+      const deps = createMockDeps(
+        {
+          [SURFACE]: { newTask: "买牛奶", tasks: [] },
+        },
+        "zh-CN"
+      )
+      const { result } = renderHook(() => useAppActionHandlers(deps))
+
+      act(() => result.current.handleAppAction(createAction("add_task")))
+
+      expect(deps.setDataValue).toHaveBeenCalledWith(SURFACE, "/stats", {
+        completed: 0,
+        pending: 1,
+        completedText: "已完成 0 项",
+        pendingText: "待完成 1 项",
+      })
     })
   })
 
@@ -472,7 +503,7 @@ describe("useAppActionHandlers", () => {
 
       // BMI = 65 / (1.7^2) ≈ 22.5
       expect(deps.setAppData).toHaveBeenCalledWith(SURFACE, "/bmi", expect.any(String))
-      expect(deps.setAppData).toHaveBeenCalledWith(SURFACE, "/status", expect.any(String))
+      expect(deps.setAppData).toHaveBeenCalledWith(SURFACE, "/status", "Normal")
 
       const bmiCall = deps.setAppData.mock.calls.find((c: unknown[]) => c[1] === "/bmi")
       const bmiValue = parseFloat(bmiCall![2] as string)
@@ -493,8 +524,16 @@ describe("useAppActionHandlers", () => {
         result.current.handleAppAction(createAction("calculate_age"))
       })
 
-      expect(deps.setAppData).toHaveBeenCalledWith(SURFACE, "/age", expect.stringContaining("岁"))
-      expect(deps.setAppData).toHaveBeenCalledWith(SURFACE, "/nextBirthday", expect.any(String))
+      expect(deps.setAppData).toHaveBeenCalledWith(
+        SURFACE,
+        "/age",
+        expect.stringContaining("years old")
+      )
+      expect(deps.setAppData).toHaveBeenCalledWith(
+        SURFACE,
+        "/nextBirthday",
+        expect.stringContaining("days until the next birthday")
+      )
     })
   })
 

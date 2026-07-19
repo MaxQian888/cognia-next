@@ -6,31 +6,75 @@
  */
 
 import React, { useCallback, useState } from "react"
-import { useTranslations } from "next-intl"
-import { Undo2, Redo2, Sparkles, Save, Download, Share2, Pencil, Eye, Database } from "lucide-react"
+import { useLocale, useTranslations } from "next-intl"
+import {
+  Database,
+  Download,
+  Eye,
+  PanelRight,
+  Pencil,
+  Redo2,
+  RotateCcw,
+  Save,
+  Share2,
+  Sparkles,
+  TreePine,
+  Undo2,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { useA2UIStore } from "@/stores/a2ui"
 import { useA2UIAppBuilder } from "@/hooks/a2ui/use-app-builder"
 import { useA2UISave } from "@/hooks/a2ui/use-a2ui-save"
+import { generateAppFromDescription } from "@/lib/a2ui/app-generator"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { ShareLinkDialog } from "@/components/share/share-link-dialog"
 import { a2uiPayload } from "@/lib/share/payload"
-import { useWorkspaceContext } from "./a2ui-workspace-context"
+import {
+  MAX_WORKSPACE_ZOOM,
+  MIN_WORKSPACE_ZOOM,
+  WORKSPACE_ZOOM_STEP,
+  useWorkspaceContext,
+} from "./a2ui-workspace-context"
 
 export function A2UIToolbar() {
   const t = useTranslations("a2ui")
-  const { surfaceId, workspaceMode, setWorkspaceMode } = useWorkspaceContext()
+  const locale = useLocale()
+  const {
+    surfaceId,
+    workspaceMode,
+    setWorkspaceMode,
+    zoom,
+    setZoom,
+    showTree,
+    setShowTree,
+    showProperties,
+    setShowProperties,
+  } = useWorkspaceContext()
 
   const canUndo = useA2UIStore((state) => (state.undoStacks[surfaceId]?.length || 0) > 0)
   const canRedo = useA2UIStore((state) => (state.redoStacks[surfaceId]?.length || 0) > 0)
   const undo = useA2UIStore((state) => state.undo)
   const redo = useA2UIStore((state) => state.redo)
+  const replaceSurfaceContent = useA2UIStore((state) => state.replaceSurfaceContent)
   const appBuilder = useA2UIAppBuilder({})
   const saveApp = useA2UISave(surfaceId)
   const [shareOpen, setShareOpen] = useState(false)
+  const [regenerateOpen, setRegenerateOpen] = useState(false)
+  const [regeneratePrompt, setRegeneratePrompt] = useState("")
 
   const handleUndo = useCallback(() => undo(surfaceId), [undo, surfaceId])
   const handleRedo = useCallback(() => redo(surfaceId), [redo, surfaceId])
@@ -60,12 +104,43 @@ export function A2UIToolbar() {
 
   const handleExport = useCallback(() => {
     try {
-      appBuilder.exportApp(surfaceId)
+      if (!appBuilder.downloadApp(surfaceId)) {
+        toast.error(t("generationFailed"))
+        return
+      }
       toast.success(t("appExported"))
     } catch {
       toast.error(t("generationFailed"))
     }
   }, [appBuilder, surfaceId, t])
+
+  const handleRegenerate = useCallback(() => {
+    const description = regeneratePrompt.trim()
+    if (!description) return
+
+    try {
+      const appLocale = appBuilder.getAppInstance(surfaceId)?.locale ?? locale
+      const generated = generateAppFromDescription({
+        description,
+        language: appLocale === "zh-CN" ? "zh" : "en",
+      })
+      const replaced = replaceSurfaceContent(
+        surfaceId,
+        generated.components,
+        generated.dataModel,
+        "root"
+      )
+      if (!replaced) {
+        toast.error(t("generationFailed"))
+        return
+      }
+      setRegenerateOpen(false)
+      setRegeneratePrompt("")
+      toast.success(t("appRegenerated"))
+    } catch {
+      toast.error(t("generationFailed"))
+    }
+  }, [appBuilder, locale, regeneratePrompt, replaceSurfaceContent, surfaceId, t])
 
   return (
     <div className="flex items-center gap-1 border-b px-2 py-1 bg-background/95 backdrop-blur shrink-0">
@@ -109,15 +184,49 @@ export function A2UIToolbar() {
           active={workspaceMode === "data"}
         />
         <Separator orientation="vertical" className="h-6 mx-1" />
+        {workspaceMode === "edit" && (
+          <>
+            <ToolbarButton
+              icon={<TreePine className="size-4" />}
+              label={t(showTree ? "hideComponentTree" : "showComponentTree")}
+              onClick={() => setShowTree(!showTree)}
+              active={showTree}
+            />
+            <ToolbarButton
+              icon={<PanelRight className="size-4" />}
+              label={t(showProperties ? "hidePropertiesPanel" : "showPropertiesPanel")}
+              onClick={() => setShowProperties(!showProperties)}
+              active={showProperties}
+            />
+            <Separator orientation="vertical" className="h-6 mx-1" />
+          </>
+        )}
+        <ToolbarButton
+          icon={<ZoomOut className="size-4" />}
+          label={t("zoomOut")}
+          onClick={() => setZoom(zoom - WORKSPACE_ZOOM_STEP)}
+          disabled={zoom <= MIN_WORKSPACE_ZOOM}
+        />
+        <ToolbarButton
+          icon={<RotateCcw className="size-4" />}
+          label={t("resetZoomWithLevel", { zoom })}
+          onClick={() => setZoom(100)}
+          disabled={zoom === 100}
+        />
+        <ToolbarButton
+          icon={<ZoomIn className="size-4" />}
+          label={t("zoomIn")}
+          onClick={() => setZoom(zoom + WORKSPACE_ZOOM_STEP)}
+          disabled={zoom >= MAX_WORKSPACE_ZOOM}
+        />
+        <Separator orientation="vertical" className="h-6 mx-1" />
       </div>
 
       {/* AI Generate */}
       <ToolbarButton
         icon={<Sparkles className="h-4 w-4" />}
         label={t("aiGenerate")}
-        onClick={() => {
-          /* TODO: AI regeneration dialog */
-        }}
+        onClick={() => setRegenerateOpen(true)}
         showLabel
       />
 
@@ -146,6 +255,30 @@ export function A2UIToolbar() {
         onOpenChange={setShareOpen}
         buildPayload={buildSharePayload}
       />
+
+      <Dialog open={regenerateOpen} onOpenChange={setRegenerateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("aiGenerate")}</DialogTitle>
+            <DialogDescription>{t("regenerateAppDescription")}</DialogDescription>
+          </DialogHeader>
+          <Textarea
+            value={regeneratePrompt}
+            onChange={(event) => setRegeneratePrompt(event.target.value)}
+            placeholder={t("aiRegeneratePrompt")}
+            rows={4}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRegenerateOpen(false)}>
+              {t("cancel")}
+            </Button>
+            <Button onClick={handleRegenerate} disabled={!regeneratePrompt.trim()}>
+              <Sparkles className="h-4 w-4" />
+              {t("regenerate")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -173,6 +306,7 @@ function ToolbarButton({
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
+          aria-label={label}
           variant={active ? "secondary" : "ghost"}
           size="sm"
           className={cn("h-7 px-2 gap-1", disabled && "opacity-40")}

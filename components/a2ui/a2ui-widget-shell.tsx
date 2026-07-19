@@ -4,16 +4,26 @@ import type { ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import type { A2UIWidgetHostStrategy, A2UIWidgetStatus } from "@/types/a2ui/schema"
+import type {
+  A2UIWidgetHostStrategy,
+  A2UIWidgetSizing,
+  A2UIWidgetStatus,
+  A2UIWidgetTheme,
+} from "@/types/a2ui/schema"
+
+const DEFAULT_FIXED_HEIGHT = 320
 
 interface A2UIWidgetShellProps {
   title?: string
   description?: string
   hostStrategy?: A2UIWidgetHostStrategy
+  sizing?: A2UIWidgetSizing
+  theme?: A2UIWidgetTheme
   status?: A2UIWidgetStatus
   statusLabel?: string
   fallbackText?: string
   showChrome?: boolean
+  minHeight?: number
   className?: string
   children: ReactNode
 }
@@ -22,20 +32,34 @@ export function A2UIWidgetShell({
   title,
   description,
   hostStrategy = "native",
+  sizing = "auto",
+  theme = "inherit",
   status = "ready",
   statusLabel,
   fallbackText,
   showChrome = true,
+  minHeight,
   className,
   children,
 }: A2UIWidgetShellProps) {
   const t = useTranslations("a2ui")
   const showFallback = status === "fallback" || status === "error"
+  const fixedHeight = sizing === "fixed-height" ? (minHeight ?? DEFAULT_FIXED_HEIGHT) : undefined
 
   return (
     <div
       data-testid="a2ui-widget-shell"
-      className={cn("space-y-3 rounded-xl border border-border/60 bg-background/70 p-4", className)}
+      data-host-strategy={hostStrategy}
+      data-sizing={sizing}
+      data-theme={theme}
+      style={{ minHeight, height: fixedHeight }}
+      className={cn(
+        "space-y-3 rounded-xl border border-border/60 bg-background/70 p-4",
+        theme === "light" && "a2ui-widget-theme-light",
+        theme === "dark" && "a2ui-widget-theme-dark dark",
+        sizing === "fixed-height" && "overflow-auto",
+        className
+      )}
     >
       {showChrome ? (
         <div className="space-y-2">

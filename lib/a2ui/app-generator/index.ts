@@ -17,6 +17,12 @@ export {
 } from "./config"
 
 export type { GeneratedApp } from "./generators"
+export type { GeneratorFactoryKind } from "./localization"
+export {
+  generatorFactoryKinds,
+  localizeDashboardDataModel,
+  localizeGeneratedComponents,
+} from "./localization"
 export {
   createAppMessages,
   generateCalculatorApp,
@@ -28,6 +34,7 @@ export {
   generateUnitConverterApp,
   generateCustomApp,
   generateDashboardApp,
+  generateWeatherApp,
 } from "./generators"
 
 export {
@@ -59,6 +66,7 @@ import {
   generateUnitConverterApp,
   generateCustomApp,
   generateDashboardApp,
+  generateWeatherApp,
 } from "./generators"
 
 /**
@@ -85,6 +93,11 @@ export function generateAppFromDescription(request: AppGenerationRequest): Gener
       return generateFormApp(name, description, "contact", ctx)
     case "dashboard":
       return generateDashboardApp(name, description, ctx)
+    case "weather":
+      if (/转换|换算|convert/i.test(description)) {
+        return generateUnitConverterApp(name, description, ctx)
+      }
+      return generateWeatherApp(name, description, ctx)
     default:
       if (/追踪|track|记录|log|打卡/i.test(description)) {
         return generateTrackerApp(name, description, ctx)

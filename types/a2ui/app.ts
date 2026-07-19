@@ -40,7 +40,10 @@ export interface AppDetailDialogProps {
   template?: A2UIAppTemplate
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSave?: (appId: string, metadata: Partial<A2UIAppInstance>) => void
+  onSave?: (
+    appId: string,
+    metadata: Partial<A2UIAppInstance>
+  ) => boolean | void | Promise<boolean | void>
   onGenerateThumbnail?: (appId: string) => void
   onPreparePublish?: (appId: string) => { valid: boolean; missing: string[] }
   className?: string

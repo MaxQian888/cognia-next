@@ -16,6 +16,16 @@ import {
   selectRecentEvents,
 } from "./a2ui-store"
 
+const mockSettingsState: { settings: { a2uiPersistenceLimit?: number } } = {
+  settings: { a2uiPersistenceLimit: 20 },
+}
+
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: {
+    getState: () => mockSettingsState,
+  },
+}))
+
 // Mock dependencies
 jest.mock("@/lib/a2ui/parser", () => ({
   isCreateSurfaceMessage: (msg: { type: string }) => msg.type === "createSurface",
@@ -76,6 +86,7 @@ jest.mock("@/lib/a2ui/events", () => ({
 describe("useA2UIStore", () => {
   beforeEach(() => {
     localStorage.clear()
+    mockSettingsState.settings.a2uiPersistenceLimit = 20
     act(() => {
       useA2UIStore.getState().reset()
     })
@@ -133,6 +144,537 @@ describe("useA2UIStore", () => {
           ])
       })
       expect(useA2UIStore.getState().surfaces["surface-1"].components["comp-1"]).toBeDefined()
+    })
+  })
+
+  describe("component-tree mutations", () => {
+    beforeEach(() => {
+      useA2UIStore.setState({
+        surfaces: {
+          "surface-1": {
+            id: "surface-1",
+            type: "inline",
+            components: {
+              root: {
+                id: "root",
+                component: "Column",
+                children: ["group", "overlay", "trigger"],
+              },
+              group: { id: "group", component: "Card", children: ["child"] },
+              child: { id: "child", component: "Text", text: "Child" },
+              overlay: {
+                id: "overlay",
+                component: "Popover",
+                trigger: "trigger",
+                children: ["overlay-content"],
+              } as never,
+              trigger: { id: "trigger", component: "Button", text: "Open", action: "open" },
+              "overlay-content": {
+                id: "overlay-content",
+                component: "Text",
+                text: "Content",
+              },
+            },
+            dataModel: {},
+            rootId: "root",
+            createdAt: 1,
+            updatedAt: 1,
+            ready: true,
+          },
+        },
+        undoStacks: {},
+        redoStacks: {},
+      })
+    })
+
+    it("deletes a complete subtree and restores it through undo", () => {
+      let removed = false
+      act(() => {
+        removed = useA2UIStore.getState().removeComponent("surface-1", "group")
+      })
+
+      expect(removed).toBe(true)
+      const updated = useA2UIStore.getState().surfaces["surface-1"]
+      expect(updated.components.group).toBeUndefined()
+      expect(updated.components.child).toBeUndefined()
+      expect((updated.components.root as { children: string[] }).children).toEqual([
+        "overlay",
+        "trigger",
+      ])
+      expect(useA2UIStore.getState().undoStacks["surface-1"]).toHaveLength(1)
+
+      act(() => {
+        useA2UIStore.getState().undo("surface-1")
+      })
+      expect(useA2UIStore.getState().surfaces["surface-1"].components.group).toBeDefined()
+      expect(useA2UIStore.getState().surfaces["surface-1"].components.child).toBeDefined()
+    })
+
+    it("cascades deletion through required trigger references", () => {
+      let removed = false
+      act(() => {
+        removed = useA2UIStore.getState().removeComponent("surface-1", "trigger")
+      })
+
+      expect(removed).toBe(true)
+      const updated = useA2UIStore.getState().surfaces["surface-1"]
+      expect(updated.components.trigger).toBeUndefined()
+      expect(updated.components.overlay).toBeUndefined()
+      expect(updated.components["overlay-content"]).toBeUndefined()
+      expect((updated.components.root as { children: string[] }).children).toEqual(["group"])
+    })
+
+    it("rejects deleting the root component", () => {
+      let removed = true
+      act(() => {
+        removed = useA2UIStore.getState().removeComponent("surface-1", "root")
+      })
+      expect(removed).toBe(false)
+      expect(useA2UIStore.getState().undoStacks["surface-1"]).toBeUndefined()
+    })
+
+    it("duplicates a subtree with collision-safe ids and remapped child references", () => {
+      useA2UIStore.setState((state) => ({
+        surfaces: {
+          ...state.surfaces,
+          "surface-1": {
+            ...state.surfaces["surface-1"],
+            components: {
+              ...state.surfaces["surface-1"].components,
+              "group-copy": {
+                id: "group-copy",
+                component: "Text",
+                text: "Existing collision",
+              },
+            },
+          },
+        },
+      }))
+
+      let duplicateId: string | null = null
+      act(() => {
+        duplicateId = useA2UIStore.getState().duplicateComponent("surface-1", "group")
+      })
+
+      expect(duplicateId).toBe("group-copy-2")
+      const updated = useA2UIStore.getState().surfaces["surface-1"]
+      expect((updated.components.root as { children: string[] }).children).toEqual([
+        "group",
+        "group-copy-2",
+        "overlay",
+        "trigger",
+      ])
+      expect(updated.components["group-copy-2"]).toMatchObject({
+        id: "group-copy-2",
+        children: ["child-copy"],
+      })
+      expect(updated.components["child-copy"]).toMatchObject({
+        id: "child-copy",
+        component: "Text",
+      })
+      expect(updated.components["group-copy-2"]).not.toBe(updated.components.group)
+      expect(useA2UIStore.getState().undoStacks["surface-1"]).toHaveLength(1)
+
+      act(() => {
+        useA2UIStore.getState().undo("surface-1")
+      })
+      expect(
+        useA2UIStore.getState().surfaces["surface-1"].components["group-copy-2"]
+      ).toBeUndefined()
+    })
+
+    it("rejects duplicating the root or a component attached only through a required slot", () => {
+      expect(useA2UIStore.getState().duplicateComponent("surface-1", "root")).toBeNull()
+      useA2UIStore.setState((state) => ({
+        surfaces: {
+          ...state.surfaces,
+          "surface-1": {
+            ...state.surfaces["surface-1"],
+            components: {
+              ...state.surfaces["surface-1"].components,
+              root: {
+                id: "root",
+                component: "Popover",
+                trigger: "trigger",
+                children: ["group"],
+              } as never,
+            },
+          },
+        },
+      }))
+
+      expect(useA2UIStore.getState().duplicateComponent("surface-1", "trigger")).toBeNull()
+      expect(useA2UIStore.getState().undoStacks["surface-1"]).toBeUndefined()
+    })
+
+    it("adds a component at an explicit collection placement and restores through undo", () => {
+      let added = false
+      act(() => {
+        added = useA2UIStore
+          .getState()
+          .addComponent(
+            "surface-1",
+            { id: "inserted", component: "Text", text: "Inserted" },
+            { parentId: "root", slotId: "/children", index: 1 }
+          )
+      })
+
+      expect(added).toBe(true)
+      const updated = useA2UIStore.getState().surfaces["surface-1"]
+      expect(updated.components.inserted).toMatchObject({ component: "Text", text: "Inserted" })
+      expect((updated.components.root as { children: string[] }).children).toEqual([
+        "group",
+        "inserted",
+        "overlay",
+        "trigger",
+      ])
+      expect(useA2UIStore.getState().undoStacks["surface-1"]).toHaveLength(1)
+
+      act(() => useA2UIStore.getState().undo("surface-1"))
+      expect(useA2UIStore.getState().surfaces["surface-1"].components.inserted).toBeUndefined()
+    })
+
+    it("adds a complete referenced subtree as one undoable transaction", () => {
+      let added = false
+      act(() => {
+        added = useA2UIStore.getState().addComponentSubtree(
+          "surface-1",
+          [
+            {
+              id: "new-popover",
+              component: "Popover",
+              trigger: "new-trigger",
+              children: ["new-content"],
+            } as never,
+            {
+              id: "new-trigger",
+              component: "Button",
+              text: "Open",
+              action: "open",
+            },
+            { id: "new-content", component: "Text", text: "Content" },
+          ],
+          "new-popover",
+          { parentId: "root", slotId: "/children", index: 1 }
+        )
+      })
+
+      expect(added).toBe(true)
+      const updated = useA2UIStore.getState().surfaces["surface-1"]
+      expect((updated.components.root as { children: string[] }).children).toEqual([
+        "group",
+        "new-popover",
+        "overlay",
+        "trigger",
+      ])
+      expect(updated.components["new-popover"]).toMatchObject({
+        trigger: "new-trigger",
+        children: ["new-content"],
+      })
+      expect(updated.components["new-trigger"]).toBeDefined()
+      expect(updated.components["new-content"]).toBeDefined()
+      expect(useA2UIStore.getState().undoStacks["surface-1"]).toHaveLength(1)
+
+      act(() => useA2UIStore.getState().undo("surface-1"))
+      expect(
+        useA2UIStore.getState().surfaces["surface-1"].components["new-popover"]
+      ).toBeUndefined()
+      expect(
+        useA2UIStore.getState().surfaces["surface-1"].components["new-trigger"]
+      ).toBeUndefined()
+      expect(
+        useA2UIStore.getState().surfaces["surface-1"].components["new-content"]
+      ).toBeUndefined()
+    })
+
+    it("rejects malformed component subtrees without partial insertion", () => {
+      const add = (components: never[], rootId: string, slotId = "/children") =>
+        useA2UIStore.getState().addComponentSubtree("surface-1", components, rootId, {
+          parentId: "root",
+          slotId,
+        })
+
+      expect(
+        add(
+          [
+            { id: "duplicate", component: "Text", text: "A" },
+            { id: "duplicate", component: "Text", text: "B" },
+          ] as never[],
+          "duplicate"
+        )
+      ).toBe(false)
+      expect(add([{ id: "group", component: "Text", text: "Collision" }] as never[], "group")).toBe(
+        false
+      )
+      expect(
+        add([{ id: "not-root", component: "Text", text: "Detached" }] as never[], "missing")
+      ).toBe(false)
+      expect(
+        add(
+          [{ id: "missing-ref-root", component: "Column", children: ["missing"] }] as never[],
+          "missing-ref-root"
+        )
+      ).toBe(false)
+      expect(
+        add(
+          [
+            { id: "bundle-root", component: "Column", children: [] },
+            { id: "detached", component: "Text", text: "Detached" },
+          ] as never[],
+          "bundle-root"
+        )
+      ).toBe(false)
+      expect(
+        add(
+          [
+            { id: "cycle-a", component: "Column", children: ["cycle-b"] },
+            { id: "cycle-b", component: "Column", children: ["cycle-a"] },
+          ] as never[],
+          "cycle-a"
+        )
+      ).toBe(false)
+      expect(
+        add(
+          [{ id: "parent-cycle", component: "Column", children: ["root"] }] as never[],
+          "parent-cycle"
+        )
+      ).toBe(false)
+      expect(
+        add(
+          [{ id: "stale-root", component: "Text", text: "Stale" }] as never[],
+          "stale-root",
+          "/footer"
+        )
+      ).toBe(false)
+
+      const current = useA2UIStore.getState()
+      expect(current.surfaces["surface-1"].components["bundle-root"]).toBeUndefined()
+      expect(current.surfaces["surface-1"].components["cycle-a"]).toBeUndefined()
+      expect(current.surfaces["surface-1"].components["parent-cycle"]).toBeUndefined()
+      expect(current.undoStacks["surface-1"]).toBeUndefined()
+    })
+
+    it("wraps a leaf surface root with an inserted subtree and restores the original root", () => {
+      useA2UIStore.setState((state) => ({
+        surfaces: {
+          ...state.surfaces,
+          "surface-1": {
+            ...state.surfaces["surface-1"],
+            rootId: "child",
+            components: {
+              child: state.surfaces["surface-1"].components.child,
+              "root-layout": { id: "root-layout", component: "Text", text: "Collision" },
+            },
+          },
+        },
+      }))
+
+      let added = false
+      act(() => {
+        added = useA2UIStore
+          .getState()
+          .addComponentSubtreeToRoot(
+            "surface-1",
+            [{ id: "new-card", component: "Card", children: [] }],
+            "new-card"
+          )
+      })
+
+      expect(added).toBe(true)
+      const updated = useA2UIStore.getState().surfaces["surface-1"]
+      expect(updated.rootId).toBe("root-layout-2")
+      expect(updated.components["root-layout-2"]).toMatchObject({
+        component: "Column",
+        children: ["child", "new-card"],
+      })
+      expect(updated.components["new-card"]).toBeDefined()
+      expect(useA2UIStore.getState().undoStacks["surface-1"]).toHaveLength(1)
+
+      act(() => useA2UIStore.getState().undo("surface-1"))
+      const restored = useA2UIStore.getState().surfaces["surface-1"]
+      expect(restored.rootId).toBe("child")
+      expect(restored.components["root-layout-2"]).toBeUndefined()
+      expect(restored.components["new-card"]).toBeUndefined()
+    })
+
+    it("rejects additions with missing references, cycles, duplicate ids, or stale slots", () => {
+      const add = (component: never, slotId = "/children") =>
+        useA2UIStore.getState().addComponent("surface-1", component, { parentId: "root", slotId })
+
+      expect(
+        add({ id: "missing-ref", component: "Column", children: ["does-not-exist"] } as never)
+      ).toBe(false)
+      expect(add({ id: "cycle", component: "Column", children: ["root"] } as never)).toBe(false)
+      expect(add({ id: "group", component: "Text", text: "Duplicate" } as never)).toBe(false)
+      expect(
+        add({ id: "stale-slot", component: "Text", text: "Stale" } as never, "/tabs/9/children")
+      ).toBe(false)
+
+      const current = useA2UIStore.getState()
+      expect(current.surfaces["surface-1"].components["missing-ref"]).toBeUndefined()
+      expect(current.surfaces["surface-1"].components.cycle).toBeUndefined()
+      expect(current.surfaces["surface-1"].components["stale-slot"]).toBeUndefined()
+      expect(current.undoStacks["surface-1"]).toBeUndefined()
+    })
+
+    it("moves a component between collection slots and restores through undo", () => {
+      let moved = false
+      act(() => {
+        moved = useA2UIStore.getState().moveComponent("surface-1", "child", {
+          parentId: "root",
+          slotId: "/children",
+          index: 1,
+        })
+      })
+
+      expect(moved).toBe(true)
+      const updated = useA2UIStore.getState().surfaces["surface-1"]
+      expect((updated.components.group as { children: string[] }).children).toEqual([])
+      expect((updated.components.root as { children: string[] }).children).toEqual([
+        "group",
+        "child",
+        "overlay",
+        "trigger",
+      ])
+      expect(updated.components.child).toBeDefined()
+      expect(useA2UIStore.getState().undoStacks["surface-1"]).toHaveLength(1)
+
+      act(() => useA2UIStore.getState().undo("surface-1"))
+      const restored = useA2UIStore.getState().surfaces["surface-1"]
+      expect((restored.components.group as { children: string[] }).children).toEqual(["child"])
+      expect((restored.components.root as { children: string[] }).children).toEqual([
+        "group",
+        "overlay",
+        "trigger",
+      ])
+    })
+
+    it("rejects root, descendant, missing, and stale-slot move targets atomically", () => {
+      const move = (componentId: string, parentId: string, slotId = "/children") =>
+        useA2UIStore.getState().moveComponent("surface-1", componentId, { parentId, slotId })
+
+      expect(move("root", "group")).toBe(false)
+      expect(move("group", "child")).toBe(false)
+      expect(move("missing", "root")).toBe(false)
+      expect(move("child", "missing")).toBe(false)
+      expect(move("child", "root", "/tabs/9/children")).toBe(false)
+
+      const current = useA2UIStore.getState()
+      expect(
+        (current.surfaces["surface-1"].components.group as { children: string[] }).children
+      ).toEqual(["child"])
+      expect(current.undoStacks["surface-1"]).toBeUndefined()
+    })
+
+    it("reorders within a slot by final index and ignores an exact no-op", () => {
+      let moved = false
+      act(() => {
+        moved = useA2UIStore.getState().moveComponent("surface-1", "group", {
+          parentId: "root",
+          slotId: "/children",
+          index: 2,
+        })
+      })
+
+      expect(moved).toBe(true)
+      expect(
+        (
+          useA2UIStore.getState().surfaces["surface-1"].components.root as {
+            children: string[]
+          }
+        ).children
+      ).toEqual(["overlay", "trigger", "group"])
+      expect(useA2UIStore.getState().undoStacks["surface-1"]).toHaveLength(1)
+
+      const updatedAt = useA2UIStore.getState().surfaces["surface-1"].updatedAt
+      act(() => {
+        moved = useA2UIStore.getState().moveComponent("surface-1", "group", {
+          parentId: "root",
+          slotId: "/children",
+          index: 2,
+        })
+      })
+
+      expect(moved).toBe(false)
+      expect(useA2UIStore.getState().surfaces["surface-1"].updatedAt).toBe(updatedAt)
+      expect(useA2UIStore.getState().undoStacks["surface-1"]).toHaveLength(1)
+    })
+  })
+
+  describe("replaceSurfaceContent", () => {
+    it("replaces the complete tree atomically and restores the previous root on undo", () => {
+      act(() => {
+        useA2UIStore.getState().createSurface("surface-1", "inline")
+        useA2UIStore.getState().updateComponents("surface-1", [
+          { id: "old-root", component: "Column", children: ["old-child"] },
+          { id: "old-child", component: "Text", text: "Before" },
+        ])
+        useA2UIStore.getState().updateDataModel("surface-1", { value: "before" }, false)
+        useA2UIStore.setState((state) => ({
+          surfaces: {
+            ...state.surfaces,
+            "surface-1": { ...state.surfaces["surface-1"], rootId: "old-root" },
+          },
+        }))
+      })
+
+      act(() => {
+        useA2UIStore.getState().replaceSurfaceContent(
+          "surface-1",
+          [
+            { id: "root", component: "Column", children: ["new-child"] },
+            { id: "new-child", component: "Text", text: "After" },
+          ],
+          { value: "after" },
+          "root"
+        )
+      })
+
+      const replaced = useA2UIStore.getState().surfaces["surface-1"]
+      expect(replaced.rootId).toBe("root")
+      expect(Object.keys(replaced.components)).toEqual(["root", "new-child"])
+      expect(replaced.dataModel).toEqual({ value: "after" })
+      expect(useA2UIStore.getState().undoStacks["surface-1"]).toHaveLength(3)
+
+      act(() => {
+        useA2UIStore.getState().undo("surface-1")
+      })
+
+      const restored = useA2UIStore.getState().surfaces["surface-1"]
+      expect(restored.rootId).toBe("old-root")
+      expect(Object.keys(restored.components)).toEqual(["old-root", "old-child"])
+      expect(restored.dataModel).toEqual({ value: "before" })
+    })
+  })
+
+  describe("restoreSurface", () => {
+    it("restores a complete persisted surface without creating undo history", () => {
+      let restored = false
+      act(() => {
+        restored = useA2UIStore.getState().restoreSurface({
+          id: "saved-app",
+          type: "inline",
+          title: "Saved App",
+          components: {
+            "saved-root": { id: "saved-root", component: "Column", children: ["saved-text"] },
+            "saved-text": { id: "saved-text", component: "Text", text: "Durable" },
+          },
+          dataModel: { persisted: true },
+          rootId: "saved-root",
+          createdAt: 10,
+          updatedAt: 20,
+          ready: true,
+        })
+      })
+
+      expect(restored).toBe(true)
+      expect(useA2UIStore.getState().surfaces["saved-app"]).toMatchObject({
+        rootId: "saved-root",
+        dataModel: { persisted: true },
+        ready: true,
+      })
+      expect(useA2UIStore.getState().undoStacks["saved-app"]).toBeUndefined()
+      expect(useA2UIStore.getState().redoStacks["saved-app"]).toBeUndefined()
     })
   })
 
@@ -404,6 +946,57 @@ describe("useA2UIStore", () => {
   })
 
   describe("persist round-trip (surface survives reload)", () => {
+    it("honors the configured LRU surface limit", () => {
+      mockSettingsState.settings.a2uiPersistenceLimit = 5
+
+      act(() => {
+        for (let index = 0; index < 7; index += 1) {
+          const surfaceId = `surface-${index}`
+          useA2UIStore.getState().createSurface(surfaceId, "inline")
+          useA2UIStore
+            .getState()
+            .updateComponents(surfaceId, [
+              { id: `root-${index}`, component: "Text", text: String(index) },
+            ])
+          useA2UIStore.getState().setSurfaceReady(surfaceId)
+        }
+      })
+
+      const raw = localStorage.getItem("cognia-a2ui-surfaces")
+      expect(raw).toBeTruthy()
+      expect(Object.keys(JSON.parse(raw as string).state.surfaces)).toHaveLength(5)
+    })
+
+    it("rewrites durable state immediately when the persistence limit changes", () => {
+      act(() => {
+        for (let index = 0; index < 7; index += 1) {
+          const surfaceId = `surface-${index}`
+          useA2UIStore.getState().createSurface(surfaceId, "inline")
+          useA2UIStore
+            .getState()
+            .updateComponents(surfaceId, [
+              { id: `root-${index}`, component: "Text", text: String(index) },
+            ])
+          useA2UIStore.getState().setSurfaceReady(surfaceId)
+        }
+      })
+
+      expect(
+        Object.keys(
+          JSON.parse(localStorage.getItem("cognia-a2ui-surfaces") as string).state.surfaces
+        )
+      ).toHaveLength(7)
+
+      mockSettingsState.settings.a2uiPersistenceLimit = 5
+      act(() => useA2UIStore.getState().flushPersistence())
+
+      expect(
+        Object.keys(
+          JSON.parse(localStorage.getItem("cognia-a2ui-surfaces") as string).state.surfaces
+        )
+      ).toHaveLength(5)
+    })
+
     it("persists the component tree + data model, not just metadata", () => {
       act(() => {
         useA2UIStore.getState().createSurface("surface-1", "inline", { title: "Calc" })

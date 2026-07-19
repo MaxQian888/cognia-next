@@ -2,6 +2,8 @@
  * A2UI App Builder - Shared Types
  */
 
+import type { Locale } from "@/i18n/config"
+
 /**
  * App author information
  */
@@ -31,6 +33,8 @@ export interface A2UIAppInstance {
   name: string
   createdAt: number
   lastModified: number
+  /** Locale used for template payloads and action-generated copy. */
+  locale?: Locale
 
   // Extended metadata
   description?: string

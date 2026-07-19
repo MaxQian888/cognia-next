@@ -3,10 +3,27 @@
  */
 
 import React from "react"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { AppDetailDialog, type AppDetailDialogProps } from "./app-detail-dialog"
 import type { A2UIAppInstance } from "@/hooks/a2ui/use-app-builder"
 import type { A2UIAppTemplate } from "@/lib/a2ui/templates"
+
+const mockToastError = jest.fn()
+const mockLoggerError = jest.fn()
+
+jest.mock("sonner", () => ({
+  toast: {
+    error: (...args: unknown[]) => mockToastError(...args),
+  },
+}))
+
+jest.mock("@cognia/logging", () => ({
+  loggers: {
+    ui: {
+      error: (...args: unknown[]) => mockLoggerError(...args),
+    },
+  },
+}))
 
 // Mock ResizeObserver
 global.ResizeObserver = jest.fn().mockImplementation(() => ({
@@ -404,6 +421,30 @@ describe("AppDetailDialog", () => {
           name: "Updated Name",
         })
       )
+      await waitFor(() => expect(screen.getByText("Edit Info")).toBeInTheDocument())
+    })
+
+    it("waits for durable metadata save and keeps edit mode open when it fails", async () => {
+      let rejectSave: ((error: Error) => void) | undefined
+      const onSave = jest.fn(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectSave = reject
+          })
+      )
+      renderDialog({ onSave })
+
+      fireEvent.click(screen.getByText("Edit Info"))
+      fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+      expect(screen.getByRole("button", { name: "Saving" })).toBeDisabled()
+      await act(async () => {
+        rejectSave?.(new Error("IndexedDB unavailable"))
+      })
+
+      await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("Failed to save app changes"))
+      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
+      expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument()
     })
   })
 

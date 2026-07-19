@@ -39,8 +39,10 @@ import {
   Filter,
   SortAsc,
   SortDesc,
+  Loader2,
 } from "lucide-react"
 import { loggers } from "@cognia/logging"
+import { toast } from "sonner"
 import { useA2UIAppBuilder, type A2UIAppInstance } from "@/hooks/a2ui/use-app-builder"
 import { useAppGalleryFilter } from "@/hooks/a2ui/use-app-gallery-filter"
 import { CATEGORY_KEYS, CATEGORY_I18N_MAP } from "@/lib/a2ui/constants"
@@ -73,6 +75,7 @@ export function AppGallery({
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const [renameDialogId, setRenameDialogId] = useState<string | null>(null)
   const [newName, setNewName] = useState("")
+  const [isRenaming, setIsRenaming] = useState(false)
   const [detailApp, setDetailApp] = useState<A2UIAppInstance | null>(null)
 
   const appBuilder = useA2UIAppBuilder({
@@ -109,22 +112,30 @@ export function AppGallery({
 
   // Handle delete
   const handleDelete = useCallback(
-    (appId: string) => {
-      appBuilder.deleteApp(appId)
-      if (selectedAppId === appId) {
-        setSelectedAppId(null)
+    async (appId: string) => {
+      try {
+        await appBuilder.deleteApp(appId)
+        if (selectedAppId === appId) {
+          setSelectedAppId(null)
+        }
+      } catch (error) {
+        loggers.ui.error("[AppGallery] Failed to delete app:", error)
+        toast.error(t("deleteFailed"))
+        throw error
       }
-      setDeleteConfirmId(null)
     },
-    [appBuilder, selectedAppId]
+    [appBuilder, selectedAppId, t]
   )
 
   // Handle thumbnail generation
   const handleThumbnailGenerated = useCallback(
     (appId: string, thumbnail: string) => {
-      appBuilder.setAppThumbnail(appId, thumbnail)
+      void appBuilder.setAppThumbnail(appId, thumbnail).catch((error) => {
+        loggers.ui.error("[AppGallery] Failed to save generated thumbnail:", error)
+        toast.error(t("saveFailed"))
+      })
     },
-    [appBuilder]
+    [appBuilder, t]
   )
 
   // Handle generate thumbnail for selected app
@@ -133,20 +144,21 @@ export function AppGallery({
       try {
         const result = await captureSurfaceThumbnail(appId)
         if (result) {
-          appBuilder.setAppThumbnail(appId, result.dataUrl)
+          const saved = await appBuilder.setAppThumbnail(appId, result.dataUrl)
+          if (!saved) throw new Error(`App thumbnail target not found: ${appId}`)
         }
       } catch (error) {
         loggers.ui.error("[AppGallery] Failed to generate thumbnail:", error)
+        toast.error(t("saveFailed"))
       }
     },
-    [appBuilder]
+    [appBuilder, t]
   )
 
   // Handle metadata save
   const handleMetadataSave = useCallback(
-    (appId: string, metadata: Partial<A2UIAppInstance>) => {
-      appBuilder.updateAppMetadata(appId, metadata)
-    },
+    (appId: string, metadata: Partial<A2UIAppInstance>): Promise<boolean> =>
+      appBuilder.updateAppMetadata(appId, metadata),
     [appBuilder]
   )
 
@@ -154,7 +166,9 @@ export function AppGallery({
   const handleViewDetails = useCallback(
     (app: A2UIAppInstance) => {
       setDetailApp(app)
-      appBuilder.incrementAppViews(app.id)
+      void appBuilder.incrementAppViews(app.id).catch((error) => {
+        loggers.ui.error("[AppGallery] Failed to persist app view count:", error)
+      })
     },
     [appBuilder]
   )
@@ -171,13 +185,21 @@ export function AppGallery({
   )
 
   // Handle rename
-  const handleRename = useCallback(() => {
-    if (renameDialogId && newName.trim()) {
-      appBuilder.renameApp(renameDialogId, newName.trim())
+  const handleRename = useCallback(async () => {
+    if (!renameDialogId || !newName.trim() || isRenaming) return
+    setIsRenaming(true)
+    try {
+      const renamed = await appBuilder.renameApp(renameDialogId, newName.trim())
+      if (!renamed) throw new Error(`App rename target not found: ${renameDialogId}`)
       setRenameDialogId(null)
       setNewName("")
+    } catch (error) {
+      loggers.ui.error("[AppGallery] Failed to rename app:", error)
+      toast.error(t("saveFailed"))
+    } finally {
+      setIsRenaming(false)
     }
-  }, [appBuilder, renameDialogId, newName])
+  }, [appBuilder, isRenaming, newName, renameDialogId, t])
 
   // Open rename dialog
   const openRenameDialog = useCallback((app: A2UIAppInstance) => {
@@ -300,8 +322,7 @@ export function AppGallery({
         </div>
         {/* Sort options */}
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          {/* i18n-exempt: pre-existing untranslated surface (repo i18n baseline); untouched by ADR-0068 import codemod */}
-          <span>Sort:</span>
+          <span>{t("sortByLabel")}</span>
           <Select value={sortField} onValueChange={(v) => setSortField(v as SortField)}>
             <SelectTrigger className="h-7 w-24 text-xs">
               <SelectValue />
@@ -312,7 +333,13 @@ export function AppGallery({
               <SelectItem value="name">{t("sortByName")}</SelectItem>
             </SelectContent>
           </Select>
-          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={toggleSortOrder}>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7"
+            aria-label={t(sortOrder === "asc" ? "sortDescending" : "sortAscending")}
+            onClick={toggleSortOrder}
+          >
             {sortOrder === "asc" ? (
               <SortAsc className="h-3 w-3" />
             ) : (
@@ -361,6 +388,7 @@ export function AppGallery({
                     size="icon"
                     variant="ghost"
                     className="h-8 w-8 touch-manipulation"
+                    aria-label={t("closePreview")}
                     onClick={() => setSelectedAppId(null)}
                   >
                     ×
@@ -395,6 +423,7 @@ export function AppGallery({
                     size="icon"
                     variant="ghost"
                     className="h-8 w-8 touch-manipulation"
+                    aria-label={t("closePreview")}
                     onClick={() => setSelectedAppId(null)}
                   >
                     ×
@@ -410,7 +439,7 @@ export function AppGallery({
       <DeleteConfirmDialog
         open={!!deleteConfirmId}
         onOpenChange={() => setDeleteConfirmId(null)}
-        onConfirm={() => deleteConfirmId && handleDelete(deleteConfirmId)}
+        onConfirm={() => (deleteConfirmId ? handleDelete(deleteConfirmId) : Promise.resolve())}
       />
 
       {/* Rename dialog */}
@@ -425,22 +454,26 @@ export function AppGallery({
             onChange={(e) => setNewName(e.target.value)}
             placeholder={t("appName")}
             className="text-sm sm:text-base"
-            onKeyDown={(e) => e.key === "Enter" && handleRename()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void handleRename()
+            }}
           />
           <DialogFooter className="flex-col sm:flex-row gap-2">
             <Button
               variant="outline"
               className="w-full sm:w-auto touch-manipulation"
               onClick={() => setRenameDialogId(null)}
+              disabled={isRenaming}
             >
               {t("cancel")}
             </Button>
             <Button
               className="w-full sm:w-auto touch-manipulation"
               onClick={handleRename}
-              disabled={!newName.trim()}
+              disabled={!newName.trim() || isRenaming}
             >
-              {t("save")}
+              {isRenaming && <Loader2 className="h-4 w-4 animate-spin" />}
+              {isRenaming ? t("saving") : t("save")}
             </Button>
           </DialogFooter>
         </DialogContent>

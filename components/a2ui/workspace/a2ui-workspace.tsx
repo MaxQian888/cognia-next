@@ -9,7 +9,7 @@
 
 import React, { useCallback } from "react"
 import { useTranslations } from "next-intl"
-import { TreePine, Eye, Settings2, Database } from "lucide-react"
+import { TreePine, Eye, Settings2, Database, History } from "lucide-react"
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { A2UIInlineSurface } from "@/components/a2ui/a2ui-surface"
@@ -20,14 +20,53 @@ import { A2UIToolbar } from "./a2ui-toolbar"
 import { ComponentTreePanel } from "./component-tree-panel"
 import { PropertyInspectorPanel } from "./property-inspector-panel"
 import { DataModelPanel } from "./data-model-panel"
+import { VersionHistoryPanel } from "./version-history-panel"
 import { A2UIErrorPanel } from "./a2ui-error-panel"
 import { useA2UIWorkspaceShortcuts } from "@/hooks/a2ui/use-a2ui-workspace-shortcuts"
 import { useA2UISave } from "@/hooks/a2ui/use-a2ui-save"
+import { useA2UIStore } from "@/stores/a2ui"
+import {
+  canDuplicateComponentSubtree,
+  type A2UIComponentPlacement,
+} from "@/lib/a2ui/component-tree"
+import {
+  createA2UIComponentBundle,
+  createAvailableComponentId,
+} from "@/lib/a2ui/component-definitions"
 import { toast } from "sonner"
 
 interface A2UIWorkspaceProps {
   surfaceId: string
   className?: string
+}
+
+function WorkspacePreview({
+  surfaceId,
+  compact = false,
+}: {
+  surfaceId: string
+  compact?: boolean
+}) {
+  const { zoom } = useWorkspaceContext()
+  const scale = zoom / 100
+
+  return (
+    <div className={cn("h-full overflow-auto bg-muted/20", compact ? "p-3" : "p-4")}>
+      <div
+        data-testid="workspace-preview-scale"
+        className="origin-top-left transition-transform"
+        style={{
+          transform: `scale(${scale})`,
+          width: `${100 / scale}%`,
+        }}
+      >
+        <A2UIInlineSurface
+          surfaceId={surfaceId}
+          className={compact ? undefined : "min-h-[200px]"}
+        />
+      </div>
+    </div>
+  )
 }
 
 function WorkspaceContent() {
@@ -38,10 +77,30 @@ function WorkspaceContent() {
     setWorkspaceMode,
     showTree,
     showProperties,
+    selectedComponentId,
     setSelectedComponentId,
   } = useWorkspaceContext()
   const [mobileTab, setMobileTab] = React.useState<string>("preview")
   const saveApp = useA2UISave(surfaceId)
+  const surface = useA2UIStore((state) => state.surfaces[surfaceId])
+  const removeComponent = useA2UIStore((state) => state.removeComponent)
+  const duplicateComponent = useA2UIStore((state) => state.duplicateComponent)
+  const addComponentSubtree = useA2UIStore((state) => state.addComponentSubtree)
+  const addComponentSubtreeToRoot = useA2UIStore((state) => state.addComponentSubtreeToRoot)
+  const moveComponent = useA2UIStore((state) => state.moveComponent)
+
+  const canDeleteSelected = Boolean(
+    selectedComponentId && surface && selectedComponentId !== surface.rootId
+  )
+  const canDuplicateSelected = React.useMemo(
+    () =>
+      Boolean(
+        selectedComponentId &&
+        surface &&
+        canDuplicateComponentSubtree(surface.components, surface.rootId, selectedComponentId)
+      ),
+    [selectedComponentId, surface]
+  )
 
   const handleSave = useCallback(async () => {
     try {
@@ -61,12 +120,71 @@ function WorkspaceContent() {
     setWorkspaceMode(workspaceMode === "edit" ? "preview" : "edit")
   }, [workspaceMode, setWorkspaceMode])
 
+  const handleDeleteComponent = useCallback(() => {
+    if (!selectedComponentId) return
+    if (removeComponent(surfaceId, selectedComponentId)) {
+      setSelectedComponentId(null)
+    }
+  }, [removeComponent, selectedComponentId, setSelectedComponentId, surfaceId])
+
+  const handleDuplicateComponent = useCallback(() => {
+    if (!selectedComponentId) return
+    const duplicateId = duplicateComponent(surfaceId, selectedComponentId)
+    if (duplicateId) setSelectedComponentId(duplicateId)
+  }, [duplicateComponent, selectedComponentId, setSelectedComponentId, surfaceId])
+
+  const handleAddComponent = useCallback(
+    (type: string, placement: A2UIComponentPlacement) => {
+      if (!surface) return false
+      const id = createAvailableComponentId(type, new Set(Object.keys(surface.components)))
+      const bundle = createA2UIComponentBundle(type, id)
+      const added = addComponentSubtree(surfaceId, bundle.components, bundle.rootId, placement)
+      if (added) setSelectedComponentId(bundle.rootId)
+      return added
+    },
+    [addComponentSubtree, setSelectedComponentId, surface, surfaceId]
+  )
+
+  const handleMoveComponent = useCallback(
+    (placement: A2UIComponentPlacement) => {
+      if (!selectedComponentId) return false
+      return moveComponent(surfaceId, selectedComponentId, placement)
+    },
+    [moveComponent, selectedComponentId, surfaceId]
+  )
+
+  const handleAddComponentToRoot = useCallback(
+    (type: string) => {
+      if (!surface) return false
+      const id = createAvailableComponentId(type, new Set(Object.keys(surface.components)))
+      const bundle = createA2UIComponentBundle(type, id)
+      const added = addComponentSubtreeToRoot(surfaceId, bundle.components, bundle.rootId)
+      if (added) setSelectedComponentId(bundle.rootId)
+      return added
+    },
+    [addComponentSubtreeToRoot, setSelectedComponentId, surface, surfaceId]
+  )
+
   useA2UIWorkspaceShortcuts({
     surfaceId,
     onSave: handleSave,
     onDeselect: handleDeselect,
     onToggleMode: handleToggleMode,
+    onDeleteComponent: handleDeleteComponent,
+    onDuplicateComponent: handleDuplicateComponent,
   })
+
+  const componentTree = (
+    <ComponentTreePanel
+      canDeleteSelected={canDeleteSelected}
+      canDuplicateSelected={canDuplicateSelected}
+      onDeleteSelected={handleDeleteComponent}
+      onDuplicateSelected={handleDuplicateComponent}
+      onAddComponent={handleAddComponent}
+      onAddComponentToRoot={handleAddComponentToRoot}
+      onMoveSelected={handleMoveComponent}
+    />
+  )
 
   // Desktop layout
   const desktopLayout = (
@@ -75,7 +193,7 @@ function WorkspaceContent() {
       {showTree && workspaceMode === "edit" && (
         <>
           <ResizablePanel defaultSize="20%" minSize="15%" maxSize="35%">
-            <ComponentTreePanel />
+            {componentTree}
           </ResizablePanel>
           <ResizableHandle withHandle />
         </>
@@ -83,9 +201,7 @@ function WorkspaceContent() {
 
       {/* Center: Preview */}
       <ResizablePanel defaultSize={workspaceMode === "data" ? "50%" : "60%"} minSize="30%">
-        <div className="h-full overflow-auto p-4 bg-muted/20">
-          <A2UIInlineSurface surfaceId={surfaceId} className="min-h-[200px]" />
-        </div>
+        <WorkspacePreview surfaceId={surfaceId} />
       </ResizablePanel>
 
       {/* Right: Property Inspector or Data Model */}
@@ -93,7 +209,18 @@ function WorkspaceContent() {
         <>
           <ResizableHandle withHandle />
           <ResizablePanel defaultSize="25%" minSize="15%" maxSize="40%">
-            <PropertyInspectorPanel />
+            <Tabs defaultValue="properties" className="h-full gap-0">
+              <TabsList className="grid h-9 w-full grid-cols-2 rounded-none border-b">
+                <TabsTrigger value="properties">{t("propertyInspector")}</TabsTrigger>
+                <TabsTrigger value="history">{t("versionHistory")}</TabsTrigger>
+              </TabsList>
+              <TabsContent value="properties" className="mt-0 min-h-0 flex-1">
+                <PropertyInspectorPanel />
+              </TabsContent>
+              <TabsContent value="history" className="mt-0 min-h-0 flex-1">
+                <VersionHistoryPanel />
+              </TabsContent>
+            </Tabs>
           </ResizablePanel>
         </>
       )}
@@ -114,12 +241,10 @@ function WorkspaceContent() {
     <Tabs value={mobileTab} onValueChange={setMobileTab} className="flex flex-col flex-1 min-h-0">
       <div className="flex-1 min-h-0 overflow-hidden">
         <TabsContent value="preview" className="h-full m-0 data-[state=inactive]:hidden">
-          <div className="h-full overflow-auto p-3 bg-muted/20">
-            <A2UIInlineSurface surfaceId={surfaceId} />
-          </div>
+          <WorkspacePreview surfaceId={surfaceId} compact />
         </TabsContent>
         <TabsContent value="tree" className="h-full m-0 data-[state=inactive]:hidden">
-          <ComponentTreePanel />
+          {componentTree}
         </TabsContent>
         <TabsContent value="properties" className="h-full m-0 data-[state=inactive]:hidden">
           <PropertyInspectorPanel />
@@ -127,9 +252,12 @@ function WorkspaceContent() {
         <TabsContent value="data" className="h-full m-0 data-[state=inactive]:hidden">
           <DataModelPanel />
         </TabsContent>
+        <TabsContent value="history" className="h-full m-0 data-[state=inactive]:hidden">
+          <VersionHistoryPanel />
+        </TabsContent>
       </div>
 
-      <TabsList className="grid grid-cols-4 h-14 rounded-none border-t bg-background/95 backdrop-blur shrink-0">
+      <TabsList className="grid grid-cols-5 h-14 rounded-none border-t bg-background/95 backdrop-blur shrink-0">
         <TabsTrigger
           value="preview"
           className="flex flex-col gap-0.5 data-[state=active]:bg-accent/50"
@@ -157,6 +285,13 @@ function WorkspaceContent() {
         >
           <Database className="h-4 w-4" />
           <span className="text-[10px]">{t("dataMode")}</span>
+        </TabsTrigger>
+        <TabsTrigger
+          value="history"
+          className="flex flex-col gap-0.5 data-[state=active]:bg-accent/50"
+        >
+          <History className="h-4 w-4" />
+          <span className="text-[10px]">{t("versionHistory")}</span>
         </TabsTrigger>
       </TabsList>
     </Tabs>

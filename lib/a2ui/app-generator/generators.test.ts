@@ -10,8 +10,10 @@ import {
   generateUnitConverterApp,
   generateCustomApp,
   generateDashboardApp,
+  generateWeatherApp,
 } from "./generators"
 import { createGenerationContext } from "./config"
+import { weatherTemplate } from "../templates"
 
 describe("createAppMessages", () => {
   it("emits the canonical 4-message bootstrap sequence", () => {
@@ -107,6 +109,28 @@ describe("generateTimerApp", () => {
   })
 })
 
+describe("generateWeatherApp", () => {
+  it("reuses the complete weather template with canonical generated messages", () => {
+    const app = generateWeatherApp("Weather", "Show local weather")
+    expectGenerated(app)
+    expect(app.components).toEqual(weatherTemplate.components)
+    expect(app.dataModel).toEqual(weatherTemplate.dataModel)
+    expect(app.components.find((component) => component.id === "weather-icon")).toBeDefined()
+    expect(new Set(app.messages.map((message) => message.surfaceId))).toEqual(new Set([app.id]))
+  })
+
+  it("deep-clones template content so generated apps cannot mutate the catalog template", () => {
+    const app = generateWeatherApp("Weather", "Show weather")
+    ;(app.dataModel.weather as Record<string, unknown>).location = "Changed"
+    ;(app.components[0] as { className?: string }).className = "changed"
+
+    expect((weatherTemplate.dataModel.weather as Record<string, unknown>).location).toBe(
+      "San Francisco, CA"
+    )
+    expect(weatherTemplate.components[0]).not.toHaveProperty("className", "changed")
+  })
+})
+
 describe("generateTodoApp", () => {
   it("threads description flags into the underlying factory", () => {
     const app = generateTodoApp("Todo", "带分类、优先级、截止日期的待办")
@@ -186,8 +210,7 @@ describe("generateUnitConverterApp", () => {
     expectGenerated(app)
     expect(app.dataModel).toMatchObject({ converterType: "temperature" })
     const fromUnit = app.components.find((c) => c.id === "from-unit") as
-      | { options: { value: string }[] }
-      | undefined
+      { options: { value: string }[] } | undefined
     expect(fromUnit?.options.map((o) => o.value)).toEqual(["celsius", "fahrenheit", "kelvin"])
   })
 
@@ -196,8 +219,7 @@ describe("generateUnitConverterApp", () => {
     const app = generateUnitConverterApp("Weight", "weight kg lb converter", ctx)
     expect(app.dataModel).toMatchObject({ converterType: "weight" })
     const fromUnit = app.components.find((c) => c.id === "from-unit") as
-      | { options: { value: string; label: string }[] }
-      | undefined
+      { options: { value: string; label: string }[] } | undefined
     expect(fromUnit?.options[0].label).toContain("Kilogram")
   })
 
@@ -252,8 +274,7 @@ describe("generateCustomApp", () => {
     const ctx = createGenerationContext({ description: "input something", language: "en" })
     const app = generateCustomApp("Custom", "needs input", ctx)
     const input = app.components.find((c) => c.id === "main-input") as
-      | { placeholder: string }
-      | undefined
+      { placeholder: string } | undefined
     expect(input?.placeholder).toBe("Enter value...")
   })
 })

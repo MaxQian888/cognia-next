@@ -76,6 +76,7 @@ export function makeHistoryEntry(over: Partial<A2UIHistoryEntry> = {}): A2UIHist
     description: "Edit component",
     components: {},
     dataModel: {},
+    rootId: "root",
     ...over,
   }
 }

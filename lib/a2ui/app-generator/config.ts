@@ -150,13 +150,13 @@ export const appPatterns = {
     keywords: ["笔记", "记事", "notes", "memo", "便签", "记录"],
     template: "notes",
   },
-  survey: {
-    keywords: ["问卷", "调查", "survey", "form", "表单", "反馈", "feedback"],
-    template: "survey-form",
-  },
   contact: {
     keywords: ["联系", "联络", "contact", "留言", "message"],
     template: "contact-form",
+  },
+  survey: {
+    keywords: ["问卷", "调查", "survey", "form", "表单", "反馈", "feedback"],
+    template: "survey-form",
   },
   weather: {
     keywords: ["天气", "weather", "气温", "温度"],

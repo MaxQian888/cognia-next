@@ -4,6 +4,8 @@
  */
 
 import { useCallback, useRef } from "react"
+import type { Locale } from "@/i18n/config"
+import { formatBuiltInRuntimeMessage } from "@/lib/a2ui/templates"
 import type { A2UIUserAction } from "@/types/a2ui/schema"
 import { loggers } from "@cognia/logging"
 
@@ -15,6 +17,7 @@ interface ActionHandlerDeps {
   resetAppData: (appId: string) => void
   surfaces: Record<string, { dataModel: Record<string, unknown> }>
   setDataValue: (surfaceId: string, path: string, value: unknown) => void
+  getAppLocale: (appId: string) => Locale
   onAction?: (action: A2UIUserAction) => void
 }
 
@@ -77,30 +80,34 @@ export function performUnitConversion(
 function updateTaskStats(
   setDataValue: (sid: string, path: string, value: unknown) => void,
   surfaceId: string,
-  tasks: unknown[]
+  tasks: unknown[],
+  locale: Locale
 ): void {
   const completed = tasks.filter((t) => (t as { completed: boolean }).completed).length
   const pending = tasks.length - completed
   setDataValue(surfaceId, "/stats", {
     completed,
     pending,
-    completedText: `${completed} completed`,
-    pendingText: `${pending} pending`,
+    completedText: formatBuiltInRuntimeMessage(locale, "taskCompleted", { count: completed }),
+    pendingText: formatBuiltInRuntimeMessage(locale, "taskPending", { count: pending }),
   })
 }
 
 function updateHabitStats(
   setDataValue: (sid: string, path: string, value: unknown) => void,
   surfaceId: string,
-  habits: unknown[]
+  habits: unknown[],
+  locale: Locale
 ): void {
   const completedToday = habits.filter((h) => (h as { completed: boolean }).completed).length
   const maxStreak = Math.max(0, ...habits.map((h) => (h as { streak: number }).streak || 0))
   setDataValue(surfaceId, "/stats", {
     streak: maxStreak,
-    streakText: `${maxStreak} day streak`,
+    streakText: formatBuiltInRuntimeMessage(locale, "habitStreak", { count: maxStreak }),
     todayCompleted: completedToday,
-    todayText: `${completedToday} completed today`,
+    todayText: formatBuiltInRuntimeMessage(locale, "habitCompletedToday", {
+      count: completedToday,
+    }),
   })
 }
 
@@ -133,7 +140,8 @@ function updateExpenseStats(
  * Hook providing default action handlers for A2UI app templates
  */
 export function useAppActionHandlers(deps: ActionHandlerDeps) {
-  const { getAppData, setAppData, resetAppData, surfaces, setDataValue, onAction } = deps
+  const { getAppData, setAppData, resetAppData, surfaces, setDataValue, getAppLocale, onAction } =
+    deps
   const timerIntervalsRef = useRef(new Map<string, NodeJS.Timeout>())
 
   const stopTimerInterval = useCallback((surfaceId: string): void => {
@@ -208,7 +216,12 @@ export function useAppActionHandlers(deps: ActionHandlerDeps) {
               const newTaskItem = { id: Date.now(), text: newTask.trim(), completed: false }
               setAppData(surfaceId, "/tasks", [...tasks, newTaskItem])
               setAppData(surfaceId, "/newTask", "")
-              updateTaskStats(setDataValue, surfaceId, [...tasks, newTaskItem])
+              updateTaskStats(
+                setDataValue,
+                surfaceId,
+                [...tasks, newTaskItem],
+                getAppLocale(surfaceId)
+              )
             }
           }
           break
@@ -223,7 +236,7 @@ export function useAppActionHandlers(deps: ActionHandlerDeps) {
               const task = tasks[taskIndex] as { completed: boolean }
               task.completed = !task.completed
               setAppData(surfaceId, "/tasks", tasks)
-              updateTaskStats(setDataValue, surfaceId, tasks)
+              updateTaskStats(setDataValue, surfaceId, tasks, getAppLocale(surfaceId))
             }
           }
           break
@@ -420,14 +433,22 @@ export function useAppActionHandlers(deps: ActionHandlerDeps) {
               const notes = (currentData.notes as unknown[]) || []
               const noteItem = {
                 id: Date.now(),
-                title: newNote.title || "Untitled",
+                title:
+                  newNote.title ||
+                  formatBuiltInRuntimeMessage(getAppLocale(surfaceId), "untitledNote"),
                 content: newNote.content || "",
                 createdAt: new Date().toISOString(),
               }
               const updatedNotes = [...notes, noteItem]
               setAppData(surfaceId, "/notes", updatedNotes)
               setAppData(surfaceId, "/newNote", { title: "", content: "" })
-              setAppData(surfaceId, "/notesCountText", `${updatedNotes.length} notes`)
+              setAppData(
+                surfaceId,
+                "/notesCountText",
+                formatBuiltInRuntimeMessage(getAppLocale(surfaceId), "noteCount", {
+                  count: updatedNotes.length,
+                })
+              )
             }
           }
           break
@@ -464,7 +485,13 @@ export function useAppActionHandlers(deps: ActionHandlerDeps) {
               const updatedItems = [...items, itemObj]
               setAppData(surfaceId, "/items", updatedItems)
               setAppData(surfaceId, "/newItem", { name: "", quantity: 1 })
-              setAppData(surfaceId, "/totalText", `${updatedItems.length} items`)
+              setAppData(
+                surfaceId,
+                "/totalText",
+                formatBuiltInRuntimeMessage(getAppLocale(surfaceId), "itemCount", {
+                  count: updatedItems.length,
+                })
+              )
             }
           }
           break
@@ -486,7 +513,11 @@ export function useAppActionHandlers(deps: ActionHandlerDeps) {
 
         case "clear_list": {
           setAppData(surfaceId, "/items", [])
-          setAppData(surfaceId, "/totalText", "0 items")
+          setAppData(
+            surfaceId,
+            "/totalText",
+            formatBuiltInRuntimeMessage(getAppLocale(surfaceId), "itemCount", { count: 0 })
+          )
           break
         }
 
@@ -507,7 +538,7 @@ export function useAppActionHandlers(deps: ActionHandlerDeps) {
               const updatedHabits = [...habits, habitObj]
               setAppData(surfaceId, "/habits", updatedHabits)
               setAppData(surfaceId, "/newHabit", "")
-              updateHabitStats(setDataValue, surfaceId, updatedHabits)
+              updateHabitStats(setDataValue, surfaceId, updatedHabits, getAppLocale(surfaceId))
             }
           }
           break
@@ -523,7 +554,7 @@ export function useAppActionHandlers(deps: ActionHandlerDeps) {
               habit.completed = !habit.completed
               if (habit.completed) habit.streak = (habit.streak || 0) + 1
               setAppData(surfaceId, "/habits", habits)
-              updateHabitStats(setDataValue, surfaceId, habits)
+              updateHabitStats(setDataValue, surfaceId, habits, getAppLocale(surfaceId))
             }
           }
           break
@@ -596,10 +627,11 @@ export function useAppActionHandlers(deps: ActionHandlerDeps) {
             const bmi = weight / (heightM * heightM)
             const bmiRounded = Math.round(bmi * 10) / 10
             let status: string
-            if (bmi < 18.5) status = "偏瘦"
-            else if (bmi < 24) status = "正常"
-            else if (bmi < 28) status = "偏胖"
-            else status = "肥胖"
+            const locale = getAppLocale(surfaceId)
+            if (bmi < 18.5) status = formatBuiltInRuntimeMessage(locale, "bmiUnderweight")
+            else if (bmi < 24) status = formatBuiltInRuntimeMessage(locale, "bmiNormal")
+            else if (bmi < 28) status = formatBuiltInRuntimeMessage(locale, "bmiOverweight")
+            else status = formatBuiltInRuntimeMessage(locale, "bmiObese")
             setAppData(surfaceId, "/bmi", String(bmiRounded))
             setAppData(surfaceId, "/status", status)
           }
@@ -622,8 +654,17 @@ export function useAppActionHandlers(deps: ActionHandlerDeps) {
               const daysUntil = Math.ceil(
                 (nextBirthday.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
               )
-              setAppData(surfaceId, "/age", `${age} 岁`)
-              setAppData(surfaceId, "/nextBirthday", `距离下次生日还有 ${daysUntil} 天`)
+              const locale = getAppLocale(surfaceId)
+              setAppData(
+                surfaceId,
+                "/age",
+                formatBuiltInRuntimeMessage(locale, "ageYears", { count: age })
+              )
+              setAppData(
+                surfaceId,
+                "/nextBirthday",
+                formatBuiltInRuntimeMessage(locale, "nextBirthday", { count: daysUntil })
+              )
             }
           }
           break
@@ -725,7 +766,13 @@ export function useAppActionHandlers(deps: ActionHandlerDeps) {
             if (noteIndex >= 0 && noteIndex < notes.length) {
               notes.splice(noteIndex, 1)
               setAppData(surfaceId, "/notes", notes)
-              setAppData(surfaceId, "/notesCountText", `${notes.length} notes`)
+              setAppData(
+                surfaceId,
+                "/notesCountText",
+                formatBuiltInRuntimeMessage(getAppLocale(surfaceId), "noteCount", {
+                  count: notes.length,
+                })
+              )
             }
           }
           break
@@ -767,7 +814,7 @@ export function useAppActionHandlers(deps: ActionHandlerDeps) {
             if (taskIndex >= 0 && taskIndex < tasks.length) {
               tasks.splice(taskIndex, 1)
               setAppData(surfaceId, "/tasks", tasks)
-              updateTaskStats(setDataValue, surfaceId, tasks)
+              updateTaskStats(setDataValue, surfaceId, tasks, getAppLocale(surfaceId))
             }
           }
           break
@@ -798,6 +845,7 @@ export function useAppActionHandlers(deps: ActionHandlerDeps) {
       setAppData,
       resetAppData,
       setDataValue,
+      getAppLocale,
       onAction,
       startTimerInterval,
       stopTimerInterval,

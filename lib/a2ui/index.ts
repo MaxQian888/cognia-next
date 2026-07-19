@@ -31,6 +31,8 @@ export {
   getValueByPath,
   setValueByPath,
   deleteValueByPath,
+  isA2UIDataModel,
+  isSafeDataModelKey,
   deepClone,
   deepMerge,
   isPathValue,
@@ -49,6 +51,24 @@ export {
   type ComputedFieldRegistry,
 } from "./data-model"
 
+// Portable app import validation
+export {
+  A2UI_APP_EXPORT_VERSION,
+  A2UI_MAX_IMPORT_BYTES,
+  A2UI_MAX_BACKUP_APPS,
+  A2UI_MAX_COMPONENTS_PER_APP,
+  parseA2UIAppImport,
+  parseA2UIBackupImport,
+  type A2UIImportErrorCode,
+  type A2UIImportError,
+  type A2UIImportResult,
+  type A2UIImportedAuthor,
+  type A2UIImportedStats,
+  type A2UIImportedMetadata,
+  type A2UIImportedApp,
+  type A2UIImportedBackup,
+} from "./app-import"
+
 // Component Catalog
 export {
   DEFAULT_CATALOG_ID,
@@ -57,6 +77,7 @@ export {
   getComponent,
   hasComponent,
   getRegisteredTypes,
+  getRegisteredCatalogIds,
   createCatalog,
   registerCatalog,
   getCatalog,
@@ -65,10 +86,21 @@ export {
   getStandardComponentTypes,
   componentCategories,
   getComponentCategory,
+  resolveWidgetDefaults,
   resolveWidgetMetadata,
   validateComponent,
   FALLBACK_COMPONENT_TYPE,
 } from "./catalog"
+
+export {
+  DEFAULT_A2UI_PERSISTENCE_LIMIT,
+  MIN_A2UI_PERSISTENCE_LIMIT,
+  MAX_A2UI_PERSISTENCE_LIMIT,
+  getA2UIPersistenceLimit,
+  resolveA2UICatalogId,
+  getA2UIWidgetSettingDefaults,
+} from "./runtime-settings"
+export type { A2UIRuntimeSettings } from "./runtime-settings"
 
 // Events
 export {
@@ -95,6 +127,12 @@ export {
   getTemplateById,
   getTemplatesByCategory,
   searchTemplates,
+  getLocalizedTemplates,
+  getLocalizedTemplateById,
+  getLocalizedTemplatesByCategory,
+  searchLocalizedTemplates,
+  localizeTemplate,
+  formatBuiltInRuntimeMessage,
   createAppFromTemplate,
   generateTemplateId,
   templateCategories,
@@ -118,6 +156,7 @@ export {
 export {
   generateAppFromDescription,
   generateUnitConverterApp,
+  generateWeatherApp,
   detectAppType,
   extractAppName,
   appPatterns,

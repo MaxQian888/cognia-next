@@ -4,8 +4,16 @@
  */
 
 import { useCallback } from "react"
-import type { A2UIComponent, A2UISurfaceState, A2UISurfaceType } from "@/types/a2ui/schema"
+import type { Locale } from "@/i18n/config"
+import type { A2UISurfaceState } from "@/types/a2ui/schema"
 import { generateTemplateId } from "@/lib/a2ui/templates"
+import {
+  A2UI_APP_EXPORT_VERSION,
+  A2UI_MAX_IMPORT_BYTES,
+  parseA2UIAppImport,
+  parseA2UIBackupImport,
+  type A2UIImportedApp,
+} from "@/lib/a2ui/app-import"
 import { loggers } from "@cognia/logging"
 import type { A2UIAppInstance } from "./types"
 import { getAppInstancesCache, saveAppInstances } from "./persistence"
@@ -14,18 +22,15 @@ const log = loggers.app
 
 interface ImportExportDeps {
   surfaces: Record<string, A2UISurfaceState>
-  createQuickSurface: (
-    surfaceId: string,
-    components: A2UIComponent[],
-    dataModel?: Record<string, unknown>,
-    opts?: { type?: A2UISurfaceType; title?: string }
-  ) => void
+  restoreSurface: (surface: A2UISurfaceState) => boolean
+  deleteSurface: (surfaceId: string) => void
   getAllApps: () => A2UIAppInstance[]
   onAppCreated?: (appId: string, templateId: string) => void
+  locale: Locale
 }
 
 export function useAppImportExport(deps: ImportExportDeps) {
-  const { surfaces, createQuickSurface, getAllApps, onAppCreated } = deps
+  const { surfaces, restoreSurface, deleteSurface, getAllApps, onAppCreated, locale } = deps
 
   const exportApp = useCallback(
     (appId: string): string | null => {
@@ -38,22 +43,34 @@ export function useAppImportExport(deps: ImportExportDeps) {
       }
 
       const exportData = {
-        version: "1.0",
+        version: A2UI_APP_EXPORT_VERSION,
         exportedAt: new Date().toISOString(),
         app: {
           id: appId,
           name: instance.name,
           templateId: instance.templateId,
+          locale: instance.locale ?? locale,
+          description: instance.description,
+          version: instance.version,
+          author: instance.author,
+          category: instance.category,
+          tags: instance.tags,
+          thumbnail: instance.thumbnail,
+          thumbnailUpdatedAt: instance.thumbnailUpdatedAt,
+          screenshots: instance.screenshots,
           components: Object.values(surface.components),
           dataModel: surface.dataModel,
           surfaceType: surface.type,
+          catalogId: surface.catalogId,
           title: surface.title,
+          widget: surface.widget,
+          rootId: surface.rootId,
         },
       }
 
       return JSON.stringify(exportData, null, 2)
     },
-    [surfaces]
+    [locale, surfaces]
   )
 
   const downloadApp = useCallback(
@@ -80,49 +97,97 @@ export function useAppImportExport(deps: ImportExportDeps) {
     [exportApp]
   )
 
-  const importApp = useCallback(
-    (jsonData: string, customName?: string): string | null => {
-      try {
-        const parsed = JSON.parse(jsonData)
+  const commitImportedApp = useCallback(
+    (
+      app: A2UIImportedApp,
+      customName: string | undefined,
+      restoreBackup: boolean
+    ): string | null => {
+      const instances = getAppInstancesCache()
+      const baseId = generateTemplateId("imported")
+      let newId = baseId
+      let suffix = 2
+      while (instances.has(newId) || surfaces[newId]) {
+        newId = `${baseId}-${suffix}`
+        suffix += 1
+      }
 
-        if (!parsed.app || !parsed.app.components || !Array.isArray(parsed.app.components)) {
-          log.error("A2UI AppBuilder: Invalid import format: missing app or components")
-          return null
-        }
-
-        const { app } = parsed
-        const newId = generateTemplateId("imported")
-        const name = customName || app.name || "Imported App"
-
-        createQuickSurface(newId, app.components, app.dataModel || {}, {
-          type: app.surfaceType || "inline",
-          title: app.title || name,
-        })
-
-        const instance: A2UIAppInstance = {
-          id: newId,
-          templateId: app.templateId || "imported",
-          name,
-          createdAt: Date.now(),
-          lastModified: Date.now(),
-        }
-
-        const instances = getAppInstancesCache()
-        instances.set(newId, instance)
-        saveAppInstances(instances)
-
-        onAppCreated?.(newId, "imported")
-        return newId
-      } catch (error) {
-        log.error("A2UI AppBuilder: Import failed", error as Error)
+      const now = Date.now()
+      const name = customName?.trim() || app.name
+      const {
+        createdAt: sourceCreatedAt,
+        lastModified: sourceLastModified,
+        stats,
+        publishedAt,
+        isPublished,
+        storeId,
+        ...portableMetadata
+      } = app.metadata
+      const createdAt = restoreBackup ? (sourceCreatedAt ?? now) : now
+      const lastModified = restoreBackup ? (sourceLastModified ?? createdAt) : now
+      const backupMetadata = restoreBackup
+        ? { stats, publishedAt, isPublished, storeId }
+        : undefined
+      const components = Object.fromEntries(
+        app.components.map((component) => [component.id, component])
+      )
+      const restored = restoreSurface({
+        id: newId,
+        type: app.surfaceType,
+        catalogId: app.catalogId,
+        title: customName?.trim() || app.title,
+        widget: app.widget,
+        components,
+        dataModel: app.dataModel,
+        rootId: app.rootId,
+        createdAt,
+        updatedAt: lastModified,
+        ready: true,
+      })
+      if (!restored) {
+        log.error("A2UI AppBuilder: Validated import could not be restored")
         return null
       }
+
+      const instance: A2UIAppInstance = {
+        ...portableMetadata,
+        ...backupMetadata,
+        id: newId,
+        templateId: app.templateId,
+        name,
+        createdAt,
+        lastModified,
+        locale: app.locale,
+      }
+      instances.set(newId, instance)
+      return newId
     },
-    [createQuickSurface, onAppCreated]
+    [restoreSurface, surfaces]
+  )
+
+  const importApp = useCallback(
+    (jsonData: string, customName?: string): string | null => {
+      const parsed = parseA2UIAppImport(jsonData, locale)
+      if (!parsed.success) {
+        log.error(`A2UI AppBuilder: Import rejected (${parsed.error.code})`)
+        return null
+      }
+
+      const committed = commitImportedApp(parsed.value, customName, false)
+      if (!committed) return null
+      saveAppInstances(getAppInstancesCache())
+      onAppCreated?.(committed, "imported")
+      return committed
+    },
+    [commitImportedApp, locale, onAppCreated]
   )
 
   const importAppFromFile = useCallback(
     (file: File): Promise<string | null> => {
+      if (file.size > A2UI_MAX_IMPORT_BYTES) {
+        log.error("A2UI AppBuilder: Import file exceeds the maximum payload size")
+        return Promise.resolve(null)
+      }
       return new Promise((resolve) => {
         const reader = new FileReader()
         reader.onload = (e) => {
@@ -146,56 +211,67 @@ export function useAppImportExport(deps: ImportExportDeps) {
 
   const exportAllApps = useCallback((): string => {
     const allApps = getAllApps()
-    const exportedApps = allApps.map((instance) => {
+    const skippedAppIds: string[] = []
+    const exportedApps = allApps.flatMap((instance) => {
       const surface = surfaces[instance.id]
-      return {
-        id: instance.id,
-        name: instance.name,
-        templateId: instance.templateId,
-        components: surface ? Object.values(surface.components) : [],
-        dataModel: surface?.dataModel || {},
-        surfaceType: surface?.type || "inline",
-        title: surface?.title,
-        createdAt: instance.createdAt,
-        lastModified: instance.lastModified,
+      if (!surface || !surface.components[surface.rootId]) {
+        skippedAppIds.push(instance.id)
+        return []
       }
+      return [
+        {
+          ...instance,
+          locale: instance.locale ?? locale,
+          components: Object.values(surface.components),
+          dataModel: surface.dataModel,
+          surfaceType: surface.type,
+          catalogId: surface.catalogId,
+          title: surface.title,
+          widget: surface.widget,
+          rootId: surface.rootId,
+        },
+      ]
     })
 
     const backupData = {
-      version: "1.0",
+      version: A2UI_APP_EXPORT_VERSION,
       exportedAt: new Date().toISOString(),
       appCount: exportedApps.length,
+      skippedAppIds,
       apps: exportedApps,
     }
 
     return JSON.stringify(backupData, null, 2)
-  }, [getAllApps, surfaces])
+  }, [getAllApps, locale, surfaces])
 
   const importAllApps = useCallback(
     (jsonData: string): number => {
-      try {
-        const parsed = JSON.parse(jsonData)
-
-        if (!parsed.apps || !Array.isArray(parsed.apps)) {
-          log.error("A2UI AppBuilder: Invalid backup format")
-          return 0
-        }
-
-        let importedCount = 0
-        for (const app of parsed.apps) {
-          const singleAppJson = JSON.stringify({ version: "1.0", app })
-          if (importApp(singleAppJson)) {
-            importedCount++
-          }
-        }
-
-        return importedCount
-      } catch (error) {
-        log.error("A2UI AppBuilder: Backup import failed", error as Error)
+      const parsed = parseA2UIBackupImport(jsonData, locale)
+      if (!parsed.success) {
+        log.error(`A2UI AppBuilder: Backup import rejected (${parsed.error.code})`)
         return 0
       }
+
+      const committedIds: string[] = []
+      for (const app of parsed.value.apps) {
+        const committed = commitImportedApp(app, undefined, true)
+        if (!committed) {
+          const instances = getAppInstancesCache()
+          for (const appId of committedIds) {
+            deleteSurface(appId)
+            instances.delete(appId)
+          }
+          saveAppInstances(instances)
+          return 0
+        }
+        committedIds.push(committed)
+      }
+
+      saveAppInstances(getAppInstancesCache())
+      for (const appId of committedIds) onAppCreated?.(appId, "imported")
+      return committedIds.length
     },
-    [importApp]
+    [commitImportedApp, deleteSurface, locale, onAppCreated]
   )
 
   return {

@@ -15,6 +15,8 @@ import {
   resolveArrayOrPath,
   getBindingPath,
   collectComponentDataPaths,
+  isA2UIDataModel,
+  isSafeDataModelKey,
 } from "./data-model"
 
 describe("A2UI Data Model", () => {
@@ -38,6 +40,11 @@ describe("A2UI Data Model", () => {
     it("should handle escaped characters", () => {
       expect(parseJsonPointer("/a~1b")).toEqual(["a/b"])
       expect(parseJsonPointer("/a~0b")).toEqual(["a~b"])
+    })
+
+    it("rejects malformed escape sequences", () => {
+      expect(() => parseJsonPointer("/a~2b")).toThrow(/invalid json pointer/i)
+      expect(() => parseJsonPointer("/trailing~")).toThrow(/invalid json pointer/i)
     })
   })
 
@@ -74,6 +81,11 @@ describe("A2UI Data Model", () => {
       expect(getValueByPath(data, "/nonexistent")).toBeUndefined()
       expect(getValueByPath(data, "/address/country")).toBeUndefined()
     })
+
+    it("does not traverse inherited properties or malformed array indices", () => {
+      expect(getValueByPath({}, "/toString")).toBeUndefined()
+      expect(getValueByPath({ items: ["a", "b"] }, "/items/1x")).toBeUndefined()
+    })
   })
 
   describe("setValueByPath", () => {
@@ -101,6 +113,14 @@ describe("A2UI Data Model", () => {
       expect(data.name).toBe("John")
       expect(result.name).toBe("Jane")
     })
+
+    it("rejects unsafe object segments and malformed array indices", () => {
+      const data = { items: ["a", "b"] }
+      expect(setValueByPath(data, "/__proto__/polluted", true)).toBe(data)
+      expect(setValueByPath(data, "/constructor/prototype/polluted", true)).toBe(data)
+      expect(setValueByPath(data, "/items/1x", "x")).toBe(data)
+      expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+    })
   })
 
   describe("deleteValueByPath", () => {
@@ -120,6 +140,35 @@ describe("A2UI Data Model", () => {
       const data = { name: "John", age: 30 }
       deleteValueByPath(data, "/age")
       expect(data).toEqual({ name: "John", age: 30 })
+    })
+
+    it("rejects unsafe object segments and malformed array indices", () => {
+      const data = { items: ["a", "b"] }
+      expect(deleteValueByPath(data, "/__proto__/polluted")).toBe(data)
+      expect(deleteValueByPath(data, "/items/1x")).toBe(data)
+    })
+  })
+
+  describe("data-model validation", () => {
+    it("accepts only safe, finite, acyclic JSON object models", () => {
+      expect(isA2UIDataModel({ text: "ok", count: 1, nested: [true, null] })).toBe(true)
+      expect(isA2UIDataModel([])).toBe(false)
+      expect(isA2UIDataModel({ count: Number.NaN })).toBe(false)
+      expect(isA2UIDataModel({ fn: () => undefined })).toBe(false)
+
+      const cyclic: Record<string, unknown> = {}
+      cyclic.self = cyclic
+      expect(isA2UIDataModel(cyclic)).toBe(false)
+    })
+
+    it("rejects keys that cannot be represented safely by the editor pointer contract", () => {
+      expect(isSafeDataModelKey("profile/name")).toBe(true)
+      expect(isSafeDataModelKey("~state")).toBe(true)
+      expect(isSafeDataModelKey("")).toBe(false)
+      expect(isSafeDataModelKey("__proto__")).toBe(false)
+      expect(isSafeDataModelKey("constructor")).toBe(false)
+      expect(isSafeDataModelKey("prototype")).toBe(false)
+      expect(isA2UIDataModel(JSON.parse('{"__proto__":{"polluted":true}}'))).toBe(false)
     })
   })
 

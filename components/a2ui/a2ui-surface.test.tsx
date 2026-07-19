@@ -26,6 +26,11 @@ const mockSurface: A2UISurfaceState = {
 
 const mockLoadingSurfaces = new Set<string>()
 const mockErrors: Record<string, string> = {}
+const mockRuntimeSettings = {
+  a2uiDefaultCatalogId: "cognia-standard-v1",
+  a2uiDefaultHostStrategy: "lazy-runtime" as const,
+  a2uiDefaultTheme: "dark" as const,
+}
 
 jest.mock("@/stores/a2ui", () => ({
   useA2UIStore: jest.fn((selector) => {
@@ -40,6 +45,10 @@ jest.mock("@/stores/a2ui", () => ({
   }),
 }))
 
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: jest.fn((selector) => selector({ settings: mockRuntimeSettings })),
+}))
+
 jest.mock("@/lib/a2ui/events", () => ({
   globalEventEmitter: {
     onAction: jest.fn(() => jest.fn()),
@@ -48,8 +57,10 @@ jest.mock("@/lib/a2ui/events", () => ({
 }))
 
 jest.mock("./a2ui-context", () => ({
-  A2UIProvider: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="a2ui-provider">{children}</div>
+  A2UIProvider: ({ children, catalogId }: { children: React.ReactNode; catalogId: string }) => (
+    <div data-testid="a2ui-provider" data-catalog-id={catalogId}>
+      {children}
+    </div>
   ),
 }))
 
@@ -68,6 +79,9 @@ describe("A2UISurface", () => {
     jest.clearAllMocks()
     mockLoadingSurfaces.clear()
     Object.keys(mockErrors).forEach((key) => delete mockErrors[key])
+    mockSurface.catalogId = "default"
+    delete mockSurface.widget
+    delete mockSurface.title
   })
 
   it("should render surface with root component", () => {
@@ -92,6 +106,38 @@ describe("A2UISurface", () => {
 
     delete mockSurface.widget
     delete mockSurface.title
+  })
+
+  it("applies runtime catalog and widget defaults only when surface fields are omitted", () => {
+    delete mockSurface.catalogId
+    mockSurface.widget = { minHeight: 180 }
+
+    render(<A2UISurface surfaceId="test-surface" />)
+
+    expect(screen.getByTestId("a2ui-provider")).toHaveAttribute(
+      "data-catalog-id",
+      "cognia-standard-v1"
+    )
+    expect(screen.getByTestId("a2ui-widget-shell")).toHaveAttribute(
+      "data-host-strategy",
+      "lazy-runtime"
+    )
+    expect(screen.getByTestId("a2ui-widget-shell")).toHaveAttribute("data-theme", "dark")
+    expect(screen.getByTestId("a2ui-widget-shell")).toHaveStyle({ minHeight: "180px" })
+  })
+
+  it("preserves explicit surface catalog and widget fields", () => {
+    mockSurface.catalogId = "late-plugin-catalog"
+    mockSurface.widget = { hostStrategy: "native", theme: "light" }
+
+    render(<A2UISurface surfaceId="test-surface" />)
+
+    expect(screen.getByTestId("a2ui-provider")).toHaveAttribute(
+      "data-catalog-id",
+      "late-plugin-catalog"
+    )
+    expect(screen.getByTestId("a2ui-widget-shell")).toHaveAttribute("data-host-strategy", "native")
+    expect(screen.getByTestId("a2ui-widget-shell")).toHaveAttribute("data-theme", "light")
   })
 
   it("should return null when surface not found", () => {
@@ -196,6 +242,9 @@ describe("A2UIInlineSurface", () => {
     jest.clearAllMocks()
     mockLoadingSurfaces.clear()
     Object.keys(mockErrors).forEach((key) => delete mockErrors[key])
+    mockSurface.catalogId = "default"
+    delete mockSurface.widget
+    delete mockSurface.title
   })
 
   it("should render with inline styles", () => {
@@ -229,6 +278,9 @@ describe("A2UIDialogSurface", () => {
     jest.clearAllMocks()
     mockLoadingSurfaces.clear()
     Object.keys(mockErrors).forEach((key) => delete mockErrors[key])
+    mockSurface.catalogId = "default"
+    delete mockSurface.widget
+    delete mockSurface.title
   })
 
   it("should render with dialog styles", () => {
@@ -237,6 +289,14 @@ describe("A2UIDialogSurface", () => {
     expect(container.firstChild).toHaveClass("fixed")
     expect(container.firstChild).toHaveClass("inset-0")
     expect(container.firstChild).toHaveClass("z-50")
+  })
+
+  it("uses the localized fallback dialog label when the surface has no title", () => {
+    delete mockSurface.title
+
+    render(<A2UIDialogSurface surfaceId="test-surface" />)
+
+    expect(screen.getByRole("dialog", { name: "A2UI dialog" })).toBeInTheDocument()
   })
 
   it("should close dialog on backdrop click", () => {

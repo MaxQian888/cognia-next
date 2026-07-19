@@ -16,7 +16,7 @@ import {
   useState,
 } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
-import { useTranslations } from "next-intl"
+import { useLocale, useTranslations } from "next-intl"
 import Link from "next/link"
 import {
   ArrowLeft,
@@ -59,9 +59,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useA2UIAppBuilder } from "@/hooks/a2ui/use-app-builder"
-import { type ViewMode } from "@/hooks/a2ui/use-app-gallery-filter"
+import { filterAndSortApps, type ViewMode } from "@/hooks/a2ui/use-app-gallery-filter"
 import { generateAppFromDescription } from "@/lib/a2ui/app-generator"
-import { appTemplates, getTemplatesByCategory, searchTemplates } from "@/lib/a2ui/templates"
 import { CATEGORY_KEYS, CATEGORY_I18N_MAP } from "@/lib/a2ui/constants"
 import { A2UIInlineSurface } from "@/components/a2ui/a2ui-surface"
 import { PageLoading } from "@/components/ui/loading-states"
@@ -76,14 +75,14 @@ import type { A2UIAppTemplate } from "@/lib/a2ui/templates"
 
 type SortOption = "newest" | "oldest" | "name" | "mostUsed"
 
-const QUICK_SUGGESTIONS = [
-  "Pomodoro Timer",
-  "Expense Tracker",
-  "BMI Calculator",
-  "Habit Tracker",
-  "Todo List",
-  "Unit Converter",
-]
+const QUICK_SUGGESTION_KEYS = [
+  "quickPromptPomodoro",
+  "quickPromptExpense",
+  "quickPromptBmi",
+  "quickPromptHabit",
+  "quickPromptTodo",
+  "quickPromptConverter",
+] as const
 
 function downloadJson(filename: string, content: string) {
   const blob = new Blob([content], { type: "application/json" })
@@ -101,6 +100,7 @@ function A2UIPageContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const t = useTranslations("a2ui")
+  const locale = useLocale()
   const promptRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -125,7 +125,7 @@ function A2UIPageContent() {
     // builder does not opt in — it is used here only for app CRUD/hydration.
     onAppCreated: (appId) => {
       setPreviewAppId(appId)
-      toast.success(t("appCreated") || "App created!")
+      toast.success(t("appCreated"))
     },
   })
 
@@ -136,55 +136,30 @@ function A2UIPageContent() {
   useEffect(() => {
     if (hydratedRef.current) return
     hydratedRef.current = true
-    appBuilder.hydratePersistedApps()
+    void appBuilder.hydratePersistedApps()
   }, [appBuilder])
 
   const allApps = useMemo(() => appBuilder.getAllApps(), [appBuilder])
 
   const filteredApps = useMemo(() => {
-    let list = [...allApps]
-
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase()
-      list = list.filter(
-        (app) =>
-          app.name.toLowerCase().includes(q) ||
-          app.description?.toLowerCase().includes(q) ||
-          app.tags?.some((tag) => tag.toLowerCase().includes(q))
-      )
-    }
-
-    if (selectedCategory) {
-      list = list.filter((app) => app.category === selectedCategory)
-    }
-
-    switch (sortBy) {
-      case "newest":
-        list.sort((a, b) => b.lastModified - a.lastModified)
-        break
-      case "oldest":
-        list.sort((a, b) => a.lastModified - b.lastModified)
-        break
-      case "name":
-        list.sort((a, b) => a.name.localeCompare(b.name))
-        break
-      case "mostUsed":
-        list.sort((a, b) => (b.stats?.uses || 0) - (a.stats?.uses || 0))
-        break
-    }
-
-    return list
-  }, [allApps, searchQuery, selectedCategory, sortBy])
+    return filterAndSortApps(allApps, {
+      searchQuery,
+      categoryFilter: selectedCategory ?? "all",
+      sortField: sortBy === "name" ? "name" : sortBy === "mostUsed" ? "uses" : "lastModified",
+      sortOrder: sortBy === "oldest" ? "asc" : "desc",
+      getTemplate: appBuilder.getTemplate,
+    })
+  }, [allApps, appBuilder.getTemplate, searchQuery, selectedCategory, sortBy])
 
   const filteredTemplates = useMemo(() => {
     if (searchQuery.trim()) {
-      return searchTemplates(searchQuery)
+      return appBuilder.searchTemplates(searchQuery)
     }
     if (selectedCategory) {
-      return getTemplatesByCategory(selectedCategory)
+      return appBuilder.getTemplatesByCategory(selectedCategory)
     }
-    return appTemplates
-  }, [searchQuery, selectedCategory])
+    return appBuilder.templates
+  }, [appBuilder, searchQuery, selectedCategory])
 
   const featuredTemplates = useMemo(() => filteredTemplates.slice(0, 3), [filteredTemplates])
   const recentApp = filteredApps[0] ?? null
@@ -219,16 +194,19 @@ function A2UIPageContent() {
     if (!heroPrompt.trim() || isGenerating) return
     setIsGenerating(true)
     try {
-      const result = generateAppFromDescription({ description: heroPrompt })
+      const result = generateAppFromDescription({
+        description: heroPrompt,
+        language: locale === "zh-CN" ? "zh" : "en",
+      })
       appBuilder.createCustomApp(result.name, result.components, result.dataModel)
       setHeroPrompt("")
     } catch (err) {
       loggers.a2ui?.error("Flash generation failed", err)
-      toast.error(t("generationFailed") || "Failed to generate app")
+      toast.error(t("generationFailed"))
     } finally {
       setIsGenerating(false)
     }
-  }, [appBuilder, heroPrompt, isGenerating, t])
+  }, [appBuilder, heroPrompt, isGenerating, locale, t])
 
   const handleSuggestionClick = useCallback((suggestion: string) => {
     setHeroPrompt(suggestion)
@@ -243,7 +221,7 @@ function A2UIPageContent() {
         appBuilder.createFromTemplate(template.id)
       } catch (err) {
         loggers.a2ui?.error("Template creation failed", err)
-        toast.error(t("generationFailed") || "Failed to create from template")
+        toast.error(t("generationFailed"))
       }
     },
     [appBuilder, t]
@@ -254,14 +232,24 @@ function A2UIPageContent() {
     setDeleteDialogOpen(true)
   }, [])
 
-  const handleConfirmDelete = useCallback(() => {
+  const handleConfirmDelete = useCallback(async () => {
     if (!appToDelete) return
-    appBuilder.deleteApp(appToDelete)
-    setDeleteDialogOpen(false)
-    setAppToDelete(null)
-    if (previewAppId === appToDelete) setPreviewAppId(null)
-    toast.success(t("appDeleted") || "App deleted")
+    try {
+      await appBuilder.deleteApp(appToDelete)
+      setAppToDelete(null)
+      if (previewAppId === appToDelete) setPreviewAppId(null)
+      toast.success(t("appDeleted"))
+    } catch (error) {
+      loggers.a2ui?.error("App deletion failed", error)
+      toast.error(t("deleteFailed"))
+      throw error
+    }
   }, [appBuilder, appToDelete, previewAppId, t])
+
+  const handleDeleteDialogOpenChange = useCallback((open: boolean) => {
+    setDeleteDialogOpen(open)
+    if (!open) setAppToDelete(null)
+  }, [])
 
   const handleDuplicate = useCallback(
     (appId: string) => {
@@ -269,7 +257,7 @@ function A2UIPageContent() {
         const duplicatedAppId = appBuilder.duplicateApp(appId)
         if (duplicatedAppId) {
           setPreviewAppId(duplicatedAppId)
-          toast.success(t("appDuplicated") || "App duplicated")
+          toast.success(t("appDuplicated"))
         }
       } catch (err) {
         loggers.a2ui?.error("Duplicate failed", err)
@@ -289,7 +277,7 @@ function A2UIPageContent() {
           if (!payload) throw new Error(`Unable to export app: ${appId}`)
           downloadJson(`${appId}-${Date.now()}.json`, payload)
         }
-        toast.success(t("appExported") || "App exported")
+        toast.success(t("appExported"))
       } catch (err) {
         loggers.a2ui?.error("Export failed", err)
       }
@@ -302,7 +290,7 @@ function A2UIPageContent() {
     try {
       const payload = appBuilder.exportAllApps()
       downloadJson(`a2ui-apps-${Date.now()}.json`, payload)
-      toast.success(t("appExported") || "App exported")
+      toast.success(t("appExported"))
     } catch (err) {
       loggers.a2ui?.error("Export all failed", err)
     }
@@ -320,11 +308,11 @@ function A2UIPageContent() {
       try {
         const appId = await appBuilder.importAppFromFile(file)
         if (!appId) {
-          toast.error(t("generationFailed") || "Failed to import app")
+          toast.error(t("generationFailed"))
         }
       } catch (err) {
         loggers.a2ui?.error("Import failed", err)
-        toast.error(t("generationFailed") || "Failed to import app")
+        toast.error(t("generationFailed"))
       } finally {
         event.target.value = ""
       }
@@ -356,14 +344,12 @@ function A2UIPageContent() {
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <Blocks className="h-5 w-5 shrink-0 text-cyan-500" />
-              <h1 className="truncate text-lg font-semibold sm:text-xl">
-                {t("pageTitle") || "Mini Apps"}
-              </h1>
+              <h1 className="truncate text-lg font-semibold sm:text-xl">{t("pageTitle")}</h1>
               <Badge variant="secondary" className="shrink-0">
                 {allApps.length}
               </Badge>
               <Badge variant="outline" className="shrink-0">
-                {appTemplates.length} {t("templatesTab")}
+                {appBuilder.templates.length} {t("templatesTab")}
               </Badge>
             </div>
             <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{t("hubSummary")}</p>
@@ -415,9 +401,7 @@ function A2UIPageContent() {
                     >
                       {t("continueWorking")}
                     </h2>
-                    <p className="text-sm text-muted-foreground">
-                      {t("manageApps") || "Manage your created apps"}
-                    </p>
+                    <p className="text-sm text-muted-foreground">{t("manageApps")}</p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="secondary">
@@ -762,9 +746,7 @@ function A2UIPageContent() {
                   <h2 id="template-library-heading" className="text-base font-semibold sm:text-lg">
                     {t("templateLibrary")}
                   </h2>
-                  <p className="text-sm text-muted-foreground">
-                    {t("browseTemplates") || "Browse pre-built templates"}
-                  </p>
+                  <p className="text-sm text-muted-foreground">{t("browseTemplates")}</p>
                 </div>
 
                 {filteredTemplates.length === 0 ? (
@@ -798,9 +780,7 @@ function A2UIPageContent() {
                   <h2 id="create-studio-heading" className="text-base font-semibold sm:text-lg">
                     {t("createStudio")}
                   </h2>
-                  <p className="text-sm text-muted-foreground">
-                    {t("flashDescription") || "Describe your app, generated in 30 seconds"}
-                  </p>
+                  <p className="text-sm text-muted-foreground">{t("flashDescription")}</p>
                 </div>
 
                 <div className="space-y-3">
@@ -839,16 +819,19 @@ function A2UIPageContent() {
                       {t("quickTry")}
                     </span>
                     <div className="flex flex-wrap gap-2">
-                      {QUICK_SUGGESTIONS.map((suggestion) => (
-                        <button
-                          key={suggestion}
-                          type="button"
-                          className="rounded-full border border-border/60 px-3 py-1 text-xs transition-colors hover:bg-accent/60"
-                          onClick={() => handleSuggestionClick(suggestion)}
-                        >
-                          {suggestion}
-                        </button>
-                      ))}
+                      {QUICK_SUGGESTION_KEYS.map((key) => {
+                        const suggestion = t(key)
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            className="rounded-full border border-border/60 px-3 py-1 text-xs transition-colors hover:bg-accent/60"
+                            onClick={() => handleSuggestionClick(suggestion)}
+                          >
+                            {suggestion}
+                          </button>
+                        )
+                      })}
                     </div>
                   </div>
                 </div>
@@ -895,7 +878,7 @@ function A2UIPageContent() {
 
       <DeleteConfirmDialog
         open={deleteDialogOpen}
-        onOpenChange={setDeleteDialogOpen}
+        onOpenChange={handleDeleteDialogOpenChange}
         onConfirm={handleConfirmDelete}
       />
 

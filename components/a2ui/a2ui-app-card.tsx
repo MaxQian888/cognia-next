@@ -38,6 +38,7 @@ import {
 import { loggers } from "@cognia/logging"
 import { generatePlaceholderThumbnail, captureSurfaceThumbnail } from "@/lib/a2ui/thumbnail"
 import { formatRelativeTime } from "@/lib/a2ui/format"
+import { CATEGORY_I18N_MAP } from "@/lib/a2ui/constants"
 import type { AppCardProps } from "@/types/a2ui/app"
 
 export type { AppCardProps } from "@/types/a2ui/app"
@@ -329,7 +330,7 @@ export function AppCard({
             : template &&
               !compact && (
                 <Badge variant="outline" className="text-xs py-0 hidden sm:inline-flex">
-                  {app.category || template.category}
+                  {app.category || t(CATEGORY_I18N_MAP[template.category]!)}
                 </Badge>
               )}
         </div>

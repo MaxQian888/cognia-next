@@ -3,8 +3,26 @@
  */
 
 import React from "react"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { QuickAppBuilder } from "./quick-app-builder"
+
+const mockToastError = jest.fn()
+const mockLoggerError = jest.fn()
+
+jest.mock("sonner", () => ({
+  toast: {
+    error: (...args: unknown[]) => mockToastError(...args),
+  },
+}))
+
+jest.mock("@cognia/logging", () => ({
+  loggers: {
+    ui: {
+      error: (...args: unknown[]) => mockLoggerError(...args),
+    },
+  },
+}))
 
 // Mock the hooks
 jest.mock("@/hooks/a2ui/use-app-builder", () => ({
@@ -60,8 +78,36 @@ jest.mock("./a2ui-surface", () => ({
   ),
 }))
 
+jest.mock("./quick-app-builder/quick-app-card", () => ({
+  QuickAppCard: ({
+    app,
+    onSelect,
+    onDelete,
+  }: {
+    app: { id: string; name: string }
+    onSelect: (id: string) => void
+    onDelete: (id: string) => void
+  }) => (
+    <div data-testid={`quick-app-card-${app.id}`}>
+      {app.name}
+      <button type="button" onClick={() => onSelect(app.id)}>
+        Select {app.name}
+      </button>
+      <button type="button" onClick={() => onDelete(app.id)}>
+        Delete {app.name}
+      </button>
+    </div>
+  ),
+}))
+
 jest.mock("@/lib/a2ui/templates", () => ({
-  templateCategories: ["productivity", "data", "form", "utility", "social"],
+  templateCategories: [
+    { id: "productivity", name: "Productivity", icon: "Briefcase" },
+    { id: "data", name: "Data", icon: "BarChart3" },
+    { id: "form", name: "Forms", icon: "ClipboardList" },
+    { id: "utility", name: "Utilities", icon: "Wrench" },
+    { id: "social", name: "Social", icon: "Users" },
+  ],
 }))
 
 jest.mock("@/lib/a2ui/app-generator", () => ({
@@ -151,6 +197,54 @@ describe("QuickAppBuilder", () => {
       render(<QuickAppBuilder />)
 
       expect(typeof mockUseA2UIAppBuilder().getAllApps).toBe("function")
+    })
+
+    it("keeps the selected preview and confirmation dialog open when deletion fails", async () => {
+      const user = userEvent.setup()
+      const app = {
+        id: "app-1",
+        templateId: "todo-list",
+        name: "Persistent App",
+        createdAt: Date.now(),
+        lastModified: Date.now(),
+      }
+      const deleteApp = jest.fn().mockRejectedValue(new Error("IndexedDB unavailable"))
+      mockUseA2UIAppBuilder.mockReturnValue({
+        templates: [],
+        getTemplate: jest.fn(),
+        getTemplatesByCategory: jest.fn(() => []),
+        searchTemplates: jest.fn(() => []),
+        getAllApps: jest.fn(() => [app]),
+        getAppInstance: jest.fn(() => app),
+        createFromTemplate: jest.fn(),
+        createCustomApp: jest.fn(),
+        duplicateApp: jest.fn(),
+        deleteApp,
+        renameApp: jest.fn(),
+        resetAppData: jest.fn(),
+        handleAppAction: jest.fn(),
+        exportApp: jest.fn(),
+        downloadApp: jest.fn(),
+        importApp: jest.fn(),
+        importAppFromFile: jest.fn(),
+        generateShareCode: jest.fn(),
+        copyAppToClipboard: jest.fn(),
+        getSocialShareUrls: jest.fn(),
+      })
+
+      render(<QuickAppBuilder />)
+
+      await user.click(screen.getByRole("tab", { name: /My Apps/ }))
+      await user.click(screen.getByRole("button", { name: "Select Persistent App" }))
+      expect(screen.getByTestId("surface-app-1")).toBeInTheDocument()
+
+      await user.click(screen.getByRole("button", { name: "Delete Persistent App" }))
+      await user.click(screen.getByRole("button", { name: "Delete" }))
+
+      await waitFor(() => expect(deleteApp).toHaveBeenCalledWith("app-1"))
+      await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("Failed to delete app"))
+      expect(screen.getByRole("heading", { name: "Delete App" })).toBeInTheDocument()
+      expect(screen.getByTestId("surface-app-1")).toBeInTheDocument()
     })
   })
 
