@@ -17,11 +17,11 @@ export interface UpdateExternalMemoryPatch {
   importance?: number
   tags?: string[]
   key?: string
+  pinned?: boolean
 }
 
 export type MutateExternalMemoryResult =
-  | { ok: true }
-  | { ok: false; reason: "disabled" | "temporary" | "pii_blocked" | "not_found" }
+  { ok: true } | { ok: false; reason: "disabled" | "temporary" | "pii_blocked" | "not_found" }
 
 export async function updateExternalMemory(
   id: string,
@@ -29,7 +29,13 @@ export async function updateExternalMemory(
 ): Promise<MutateExternalMemoryResult> {
   const text = patch.text?.trim()
   if (text === "") throw new Error("memory update: 'text' must be non-empty when provided")
-  if (text === undefined && patch.importance === undefined && !patch.tags && patch.key === undefined) {
+  if (
+    text === undefined &&
+    patch.importance === undefined &&
+    !patch.tags &&
+    patch.key === undefined &&
+    patch.pinned === undefined
+  ) {
     throw new Error("memory update requires at least one field to change")
   }
 
@@ -56,7 +62,29 @@ export async function updateExternalMemory(
     ...(patch.importance !== undefined ? { importance: clampImportance(patch.importance) } : {}),
     ...(patch.tags ? { tags: patch.tags.map((t) => t.trim()).filter(Boolean) } : {}),
     ...(patch.key !== undefined ? { key: patch.key } : {}),
+    ...(patch.pinned !== undefined ? { pinned: patch.pinned } : {}),
   })
+
+  const { appendMemoryAuditEvent } = await import("@/lib/db/memory-governance")
+  if (
+    text !== undefined ||
+    patch.importance !== undefined ||
+    patch.tags ||
+    patch.key !== undefined
+  ) {
+    await appendMemoryAuditEvent({
+      action: "revised",
+      memoryId: id,
+      reason: "external_update",
+    })
+  }
+  if (patch.pinned !== undefined && patch.pinned !== existing.pinned) {
+    await appendMemoryAuditEvent({
+      action: patch.pinned ? "pinned" : "unpinned",
+      memoryId: id,
+      reason: "external_update",
+    })
+  }
 
   // Keep the vector doc in sync with a text change — best-effort, the Dexie
   // update is authoritative and BM25 recall works without the vector.
@@ -86,5 +114,20 @@ export async function forgetExternalMemory(id: string): Promise<MutateExternalMe
   if (!existing) return { ok: false, reason: "not_found" }
 
   await memDb.invalidateMemory(id)
+  if (existing.vectorDocId) {
+    try {
+      const { tryBuildMemoryVectorSink } = await import("@/lib/memory/runtime/build-deps")
+      const sink = await tryBuildMemoryVectorSink(config)
+      await sink?.delete([existing.vectorDocId])
+    } catch {
+      // Canonical invalidation is authoritative; vector cleanup is best-effort.
+    }
+  }
+  const { appendMemoryAuditEvent } = await import("@/lib/db/memory-governance")
+  await appendMemoryAuditEvent({
+    action: "invalidated",
+    memoryId: id,
+    reason: "external_forget",
+  })
   return { ok: true }
 }

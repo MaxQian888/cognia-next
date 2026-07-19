@@ -29,11 +29,33 @@ describe("AddMemoryDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add memory" }))
     expect(onCreate).toHaveBeenCalledWith({
       type: "semantic",
+      scope: "global",
       text: "prefers pnpm",
       importance: 5,
       tags: ["tools", "cli"],
     })
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("requires and submits the workspace project namespace", () => {
+    const { onCreate } = setup()
+    fireEvent.change(screen.getByLabelText("Memory"), { target: { value: "Use pnpm here" } })
+    fireEvent.click(screen.getByLabelText("Scope"))
+    fireEvent.click(screen.getByRole("option", { name: "Workspace" }))
+
+    const submit = screen.getByRole("button", { name: "Add memory" }) as HTMLButtonElement
+    expect(submit.disabled).toBe(true)
+    fireEvent.change(screen.getByLabelText("Project ID"), { target: { value: " project-1 " } })
+    fireEvent.change(screen.getByLabelText("Branch (optional)"), { target: { value: " main " } })
+    fireEvent.click(submit)
+
+    expect(onCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: "workspace",
+        projectId: "project-1",
+        branch: "main",
+      })
+    )
   })
 
   it("carries the importance slider value into the payload", () => {

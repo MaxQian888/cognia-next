@@ -9,18 +9,29 @@
  */
 
 import type { ChatSession, AppSettings } from "@cognia/agent-config-types"
-import type { MemoryConfig, MemoryProvenance, MemoryScope } from "@/types/memory/memory"
+import type {
+  MemoryConfig,
+  MemoryContaminationState,
+  MemoryProvenance,
+  MemoryScope,
+} from "@/types/memory/memory"
 import {
   runEpisodicDistill,
   type RunEpisodicDistillDeps,
 } from "@/lib/memory/write/run-episodic-distill"
 import { evictOverflow, expireStale, type DecayDeps } from "@/lib/memory/forget/decay"
+import type { ConsolidationOp } from "@/lib/memory/consolidate/consolidator"
 
 export interface MemoryMaintenanceInput {
   transcript: { role: string; text: string }[]
   scope: MemoryScope
   characterId?: string
+  projectId?: string
+  agentId?: string
+  branch?: string
+  pathPattern?: string
   provenance: MemoryProvenance
+  contaminationState?: MemoryContaminationState
   source?: { sessionId?: string }
   config: MemoryConfig
   /** Clock injection for `expireStale` (tests); defaults to `Date.now()`. */
@@ -30,6 +41,10 @@ export interface MemoryMaintenanceInput {
 export interface MemoryMaintenanceDeps {
   distillDeps: RunEpisodicDistillDeps
   decayDeps: DecayDeps
+  recordDistillation?: (
+    input: MemoryMaintenanceInput,
+    operations: ConsolidationOp[]
+  ) => Promise<void>
 }
 
 /** Pure core: distill the session's episodes, then evict scope overflow. */
@@ -37,28 +52,39 @@ export async function runMemoryMaintenance(
   input: MemoryMaintenanceInput,
   deps: MemoryMaintenanceDeps
 ): Promise<void> {
-  await runEpisodicDistill(
+  const result = await runEpisodicDistill(
     {
       transcript: input.transcript,
       scope: input.scope,
       characterId: input.characterId,
+      projectId: input.projectId,
+      agentId: input.agentId,
+      branch: input.branch,
+      pathPattern: input.pathPattern,
       provenance: input.provenance,
       source: input.source,
       config: input.config,
     },
     deps.distillDeps
   )
+  await deps.recordDistillation?.(input, result.applied)
   // Global-scope memories are persisted with `characterId: undefined` (see
   // `Memory.characterId` — "Set iff scope === character"). The decay queries
   // filter rows by characterId, so passing a session's characterId while the
   // active scope is global matches *nothing*: eviction/expiry silently no-op and
   // `maxActivePerScope` is never enforced. Drop characterId for non-character
   // scopes, mirroring how the write path nulls it for global memories.
-  const decayCharacterId = input.scope === "character" ? input.characterId : undefined
+  const decayNamespace = {
+    characterId: input.scope === "character" ? input.characterId : undefined,
+    projectId: input.projectId,
+    agentId: input.scope === "agent" ? input.agentId : undefined,
+    branch: input.branch,
+    pathPattern: input.pathPattern,
+  }
   await evictOverflow(
     {
       scope: input.scope,
-      characterId: decayCharacterId,
+      ...decayNamespace,
       maxActivePerScope: input.config.maxActivePerScope,
     },
     deps.decayDeps
@@ -69,7 +95,7 @@ export async function runMemoryMaintenance(
   await expireStale(
     {
       scope: input.scope,
-      characterId: decayCharacterId,
+      ...decayNamespace,
       maxIdleDays: input.config.maxIdleDays ?? 0,
       now: input.now,
     },
@@ -77,9 +103,9 @@ export async function runMemoryMaintenance(
   )
 }
 
-// Once-per-session guard (per app run). Exposed for test reset.
-const distilledSessions = new Set<string>()
-export const __resetMaintenanceGuard = () => distilledSessions.clear()
+// Scheduling is deduped durably by `(session, transcript length)` in memoryJobs.
+// Retained as a compatibility test hook; no process-local correctness state remains.
+export const __resetMaintenanceGuard = () => undefined
 
 function onIdle(fn: () => void): void {
   const g = globalThis as { requestIdleCallback?: (cb: () => void) => void }
@@ -93,6 +119,7 @@ export interface ScheduleMemoryMaintenanceParams {
   appSettings: AppSettings | null | undefined
   transcript: { role: string; text: string }[]
   provenance: MemoryProvenance
+  contaminationState?: MemoryContaminationState
   config: MemoryConfig
   /** Min assistant turns before a session is worth distilling. Default 2. */
   minAssistantTurns?: number
@@ -105,43 +132,65 @@ export interface ScheduleMemoryMaintenanceParams {
  */
 export function scheduleMemoryMaintenance(params: ScheduleMemoryMaintenanceParams): void {
   const { config, sessionId } = params
-  if (!config.enabled || !config.autoExtract || config.temporary) return
+  if (!config.enabled || !config.learnFromChats || config.temporary) return
   if (params.provenance === "inbound") return
-  if (distilledSessions.has(sessionId)) return
 
   const minTurns = params.minAssistantTurns ?? 2
   const assistantTurns = params.transcript.filter((m) => m.role === "assistant").length
   if (assistantTurns < minTurns) return
 
-  distilledSessions.add(sessionId)
-  onIdle(() => {
-    void (async () => {
-      try {
-        const [{ buildEpisodicMaintenanceDeps }] = await Promise.all([
-          import("./build-maintenance-deps"),
-        ])
-        const deps = await buildEpisodicMaintenanceDeps(
-          { session: params.session, appSettings: params.appSettings },
-          config
-        )
-        if (!deps) {
-          distilledSessions.delete(sessionId) // allow a retry next turn
-          return
+  void (async () => {
+    const { enqueueMemoryJob } = await import("@/lib/db/memory-governance")
+    const job = await enqueueMemoryJob(
+      {
+        dedupeKey: `session-distill:${sessionId}:${params.transcript.length}`,
+        kind: "session-distill",
+        sessionId,
+        projectId: params.session?.projectId,
+        characterId: params.session?.characterId,
+        scope: config.scopeDefault,
+        provenance: params.provenance,
+        evidenceIds: [],
+      },
+      { reuseCompleted: true }
+    )
+    onIdle(() => {
+      void (async () => {
+        try {
+          const { claimMemoryJob, completeMemoryJob, failMemoryJob } =
+            await import("@/lib/db/memory-governance")
+          const claimed = await claimMemoryJob(job.id, "renderer-memory-maintenance")
+          if (!claimed) return
+          const [{ buildEpisodicMaintenanceDeps }] = await Promise.all([
+            import("./build-maintenance-deps"),
+          ])
+          const deps = await buildEpisodicMaintenanceDeps(
+            { session: params.session, appSettings: params.appSettings },
+            config
+          )
+          if (!deps) {
+            await failMemoryJob(job.id, "dependencies_unavailable")
+            return
+          }
+          await runMemoryMaintenance(
+            {
+              transcript: params.transcript,
+              scope: config.scopeDefault,
+              characterId: params.session?.characterId,
+              projectId: params.session?.projectId,
+              provenance: params.provenance,
+              contaminationState: params.contaminationState,
+              source: { sessionId },
+              config,
+            },
+            deps
+          )
+          await completeMemoryJob(job.id)
+        } catch {
+          const { failMemoryJob } = await import("@/lib/db/memory-governance")
+          await failMemoryJob(job.id, "maintenance_failed").catch(() => undefined)
         }
-        await runMemoryMaintenance(
-          {
-            transcript: params.transcript,
-            scope: config.scopeDefault,
-            characterId: params.session?.characterId,
-            provenance: params.provenance,
-            source: { sessionId },
-            config,
-          },
-          deps
-        )
-      } catch {
-        // best-effort
-      }
-    })()
-  })
+      })()
+    })
+  })().catch(() => undefined)
 }

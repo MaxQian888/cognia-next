@@ -181,6 +181,32 @@ describe("retrieveMemories", () => {
     expect(out2.map((r) => r.memory.id)).toContain("a")
   })
 
+  it("forwards the full reader and isolates BM25 caches by namespace", async () => {
+    const loadCandidates = jest.fn(async (reader?: { projectId?: string }) =>
+      reader?.projectId === "p1"
+        ? [mem("pnpm workspace", { id: "same", updatedAt: 100 })]
+        : [mem("yarn workspace", { id: "same", updatedAt: 100 })]
+    )
+    const deps: MemoryRetrieverDeps = { loadCandidates: loadCandidates as never }
+    const readerOne = {
+      projectId: "p1",
+      agentId: "a1",
+      branch: "main",
+      path: "src/memory",
+    }
+    const readerTwo = { ...readerOne, projectId: "p2" }
+    expect(
+      (await retrieveMemories({ queryText: "pnpm", reader: readerOne, ...base }, deps))[0]?.memory
+        .text
+    ).toBe("pnpm workspace")
+    expect(
+      (await retrieveMemories({ queryText: "yarn", reader: readerTwo, ...base }, deps))[0]?.memory
+        .text
+    ).toBe("yarn workspace")
+    expect(loadCandidates).toHaveBeenNthCalledWith(1, readerOne)
+    expect(loadCandidates).toHaveBeenNthCalledWith(2, readerTwo)
+  })
+
   it("reuses precomputedQueryEmbedding and skips deps.embed", async () => {
     const embed = jest.fn(async () => [0.1, 0.2])
     const vectorSearch = jest.fn(async () => [{ id: "vsem", score: 0.88 }])

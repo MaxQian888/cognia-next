@@ -20,6 +20,10 @@ export interface SearchMemoriesExternalInput {
   topK?: number
   types?: MemoryType[]
   characterId?: string
+  projectId?: string
+  agentId?: string
+  branch?: string
+  path?: string
   /** Default true; false = don't bump lastAccessedAt/accessCount. */
   touch?: boolean
 }
@@ -60,7 +64,13 @@ export async function searchMemoriesExternal(
   const hits = await retrieveMemories(
     {
       queryText: query,
-      characterId: input.characterId,
+      reader: {
+        characterId: input.characterId,
+        projectId: input.projectId,
+        agentId: input.agentId,
+        branch: input.branch,
+        path: input.path,
+      },
       topK: input.topK ?? config.retrievalTopK,
       relevanceFloor: config.relevanceFloor,
       types: input.types,

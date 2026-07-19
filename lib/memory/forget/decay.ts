@@ -17,17 +17,29 @@ import type { Memory, MemoryScope } from "@/types/memory/memory"
 import { scoreMemories } from "@/lib/memory/retrieve/scoring"
 
 export interface DecayDeps {
-  listActive: (scope: MemoryScope, characterId?: string) => Promise<Memory[]>
+  listActive: (scope: MemoryScope, namespace?: MemoryDecayNamespace) => Promise<Memory[]>
   invalidate: (id: string) => Promise<void>
+}
+
+export interface MemoryDecayNamespace {
+  characterId?: string
+  projectId?: string
+  agentId?: string
+  branch?: string
+  pathPattern?: string
+}
+
+export interface MemoryDecayInput extends MemoryDecayNamespace {
+  scope: MemoryScope
 }
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 
 export async function evictOverflow(
-  input: { scope: MemoryScope; characterId?: string; maxActivePerScope: number },
+  input: MemoryDecayInput & { maxActivePerScope: number },
   deps: DecayDeps
 ): Promise<{ evicted: string[] }> {
-  const active = await deps.listActive(input.scope, input.characterId)
+  const active = await deps.listActive(input.scope, decayNamespace(input))
   const overflow = active.length - input.maxActivePerScope
   if (overflow <= 0) return { evicted: [] }
 
@@ -51,13 +63,13 @@ export async function evictOverflow(
 }
 
 export async function expireStale(
-  input: { scope: MemoryScope; characterId?: string; maxIdleDays: number; now?: number },
+  input: MemoryDecayInput & { maxIdleDays: number; now?: number },
   deps: DecayDeps
 ): Promise<{ expired: string[] }> {
   if (input.maxIdleDays <= 0) return { expired: [] }
   const now = input.now ?? Date.now()
   const cutoff = now - input.maxIdleDays * MS_PER_DAY
-  const active = await deps.listActive(input.scope, input.characterId)
+  const active = await deps.listActive(input.scope, decayNamespace(input))
   const stale = active.filter((m) => !m.pinned && m.lastAccessedAt < cutoff)
   const expired: string[] = []
   for (const m of stale) {
@@ -65,4 +77,14 @@ export async function expireStale(
     expired.push(m.id)
   }
   return { expired }
+}
+
+function decayNamespace(input: MemoryDecayInput): MemoryDecayNamespace {
+  return {
+    characterId: input.characterId,
+    projectId: input.projectId,
+    agentId: input.agentId,
+    branch: input.branch,
+    pathPattern: input.pathPattern,
+  }
 }

@@ -107,7 +107,7 @@ describe("ExternalMemoryEditor", () => {
     fireEvent.change(editor, { target: { value: "edited body" } })
     fireEvent.click(screen.getByTestId("external-save"))
     // Confirmation dialog → confirm the write.
-    fireEvent.click(await screen.findByRole("button", { name: /back up & save/i }))
+    fireEvent.click(await screen.findByRole("button", { name: "confirm.action" }))
     await waitFor(() => expect(mockSave).toHaveBeenCalledTimes(1))
     expect(mockSave).toHaveBeenCalledWith("/Users/x/.claude/CLAUDE.md", "edited body", {
       allowedRoots: ROOTS,
@@ -127,7 +127,7 @@ describe("ExternalMemoryEditor", () => {
       target: { value: "x" },
     })
     fireEvent.click(screen.getByTestId("external-save"))
-    fireEvent.click(await screen.findByRole("button", { name: /back up & save/i }))
+    fireEvent.click(await screen.findByRole("button", { name: "confirm.action" }))
     await waitFor(() => expect(mockToastError).toHaveBeenCalled())
   })
 
@@ -136,7 +136,7 @@ describe("ExternalMemoryEditor", () => {
     render(
       <ExternalMemoryEditor file={file()} open onOpenChange={jest.fn()} allowedRoots={ROOTS} />
     )
-    await waitFor(() => expect(screen.getByText(/could not read/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText("loadError")).toBeTruthy())
   })
 
   it("starts from an empty buffer for a not-yet-created file and saves without a backup", async () => {
@@ -154,7 +154,7 @@ describe("ExternalMemoryEditor", () => {
     fireEvent.click(screen.getByTestId("external-edit"))
     fireEvent.change(screen.getByTestId("external-memory-editor"), { target: { value: "new" } })
     fireEvent.click(screen.getByTestId("external-save"))
-    fireEvent.click(await screen.findByRole("button", { name: /back up & save/i }))
+    fireEvent.click(await screen.findByRole("button", { name: "confirm.action" }))
     await waitFor(() => expect(mockSave).toHaveBeenCalled())
     expect(mockToastSuccess).toHaveBeenCalled()
   })

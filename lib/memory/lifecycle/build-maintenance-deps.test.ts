@@ -5,6 +5,9 @@ const mockBuildAutoDeps = jest.fn()
 const mockDistillEpisodes = jest.fn()
 const mockListMemories = jest.fn()
 const mockInvalidate = jest.fn()
+const mockUpdateMemory = jest.fn()
+const mockCreateEvidence = jest.fn()
+const mockAppendAudit = jest.fn()
 
 jest.mock("@/lib/ai/generation/utility-client", () => ({
   buildUtilityLlmClient: (...a: unknown[]) => mockBuildClient(...a),
@@ -18,6 +21,11 @@ jest.mock("@/lib/memory/write/run-episodic-distill", () => ({
 jest.mock("@/lib/db/memories", () => ({
   listMemories: (...a: unknown[]) => mockListMemories(...a),
   invalidateMemory: (...a: unknown[]) => mockInvalidate(...a),
+  updateMemory: (...a: unknown[]) => mockUpdateMemory(...a),
+}))
+jest.mock("@/lib/db/memory-governance", () => ({
+  createMemoryEvidence: (...a: unknown[]) => mockCreateEvidence(...a),
+  appendMemoryAuditEvent: (...a: unknown[]) => mockAppendAudit(...a),
 }))
 
 import { buildEpisodicMaintenanceDeps } from "./build-maintenance-deps"
@@ -57,15 +65,46 @@ describe("buildEpisodicMaintenanceDeps", () => {
     await deps!.distillDeps.distill([{ role: "user", text: "hi" }])
     expect(mockDistillEpisodes).toHaveBeenCalled()
 
-    const active = await deps!.decayDeps.listActive("global", "char_1")
+    const active = await deps!.decayDeps.listActive("workspace", {
+      projectId: "project_1",
+      branch: "main",
+    })
     expect(mockListMemories).toHaveBeenCalledWith({
-      scope: "global",
+      scope: "workspace",
       status: "active",
-      characterId: "char_1",
+      projectId: "project_1",
+      branch: "main",
+      exactNamespace: true,
     })
     expect(active).toEqual([{ id: "m1" }])
 
     await deps!.decayDeps.invalidate("m1")
     expect(mockInvalidate).toHaveBeenCalledWith("m1")
+
+    await deps!.recordDistillation?.(
+      {
+        transcript: [],
+        scope: "workspace",
+        projectId: "project_1",
+        provenance: "user",
+        contaminationState: "external-context",
+        source: { sessionId: "session_1" },
+        config: cfg(),
+      },
+      [{ op: "ADD", memory: { id: "mem_1" } } as never]
+    )
+    expect(mockUpdateMemory).toHaveBeenCalledWith(
+      "mem_1",
+      expect.objectContaining({
+        evidenceState: "supported",
+        contaminationState: "external-context",
+      })
+    )
+    expect(mockCreateEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({ memoryId: "mem_1", sourceId: "session-distill:session_1" })
+    )
+    expect(mockAppendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ memoryId: "mem_1", reason: "session_distillation" })
+    )
   })
 })

@@ -40,6 +40,10 @@ export interface StoreMemoryCoreInput {
   scope?: MemoryScope
   /** Required when `scope === "character"`. */
   characterId?: string
+  projectId?: string
+  agentId?: string
+  branch?: string
+  pathPattern?: string
   type?: MemoryType
   /** Stable key for procedural dedupe / "always X" overrides. */
   key?: string
@@ -78,6 +82,12 @@ export async function storeMemoryCore(input: StoreMemoryCoreInput): Promise<Stor
   if (scope === "character" && !input.characterId) {
     throw new Error("memory store: 'characterId' is required when scope is 'character'")
   }
+  if (scope === "workspace" && !input.projectId) {
+    throw new Error("memory store: 'projectId' is required when scope is 'workspace'")
+  }
+  if (scope === "agent" && !input.agentId) {
+    throw new Error("memory store: 'agentId' is required when scope is 'agent'")
+  }
   const type: MemoryType = input.type ?? "semantic"
   if (type === "procedural" && input.provenance !== "user" && input.provenance !== "explicit") {
     throw new Error(
@@ -105,6 +115,7 @@ export async function storeMemoryCore(input: StoreMemoryCoreInput): Promise<Stor
     const result = redactText(rawText)
     text = result.redacted
     piiRedacted = Object.keys(result.map).length > 0
+    if (!hasNoLeakingPii(text)) return { ok: false, reason: "pii_blocked" }
   }
 
   const tags = (input.tags ?? []).map((t) => t.trim()).filter(Boolean)
@@ -115,6 +126,8 @@ export async function storeMemoryCore(input: StoreMemoryCoreInput): Promise<Stor
     ...(input.key ? { key: input.key } : {}),
   }
   const characterId = scope === "character" ? input.characterId : undefined
+  const projectId = input.projectId
+  const agentId = scope === "agent" ? input.agentId : undefined
 
   // Preferred path: the shared consolidator (dedupe / ADD / UPDATE / DELETE).
   const { buildAutoExtractionDeps } = await import("@/lib/memory/write/run-memory-extraction")
@@ -125,6 +138,10 @@ export async function storeMemoryCore(input: StoreMemoryCoreInput): Promise<Stor
       candidates: [candidate],
       scope,
       characterId,
+      projectId,
+      agentId,
+      branch: input.branch,
+      pathPattern: input.pathPattern,
       provenance: input.provenance,
       source: input.source,
       attribution: input.attribution,
@@ -143,9 +160,58 @@ export async function storeMemoryCore(input: StoreMemoryCoreInput): Promise<Stor
       }
     }
     const added = applied.find(
-      (op): op is Extract<ConsolidationOp, { op: "ADD" }> => op.op === "ADD"
+      (op): op is Extract<ConsolidationOp, { op: "ADD" | "CONFLICT" }> =>
+        op.op === "ADD" || op.op === "CONFLICT"
     )
     const memoryId = added?.memory?.id
+    const governedIds = applied.flatMap((op) => {
+      if (op.op === "ADD" || op.op === "CONFLICT") return [op.memory.id]
+      if (op.op === "UPDATE") return [op.targetId]
+      return []
+    })
+    if (governedIds.length > 0) {
+      try {
+        const governance = await import("@/lib/db/memory-governance")
+        for (const id of governedIds) {
+          await memDb.updateMemory(id, {
+            evidenceState: "supported",
+            reviewStatus: applied.some((op) => op.op === "CONFLICT" && op.memory.id === id)
+              ? "conflict"
+              : input.provenance === "explicit"
+                ? "verified"
+                : "unreviewed",
+            contaminationState: input.provenance === "external" ? "external-context" : "clean",
+            sensitivity: "normal",
+          })
+          await governance.createMemoryEvidence({
+            memoryId: id,
+            kind: input.provenance === "external" ? "external" : "manual",
+            sourceId:
+              input.source?.messageId ??
+              input.source?.sessionId ??
+              input.attribution?.pluginId ??
+              input.attribution?.channel ??
+              `manual:${id}`,
+            sessionId: input.source?.sessionId,
+            messageId: input.source?.messageId,
+            contaminationState: input.provenance === "external" ? "external-context" : "clean",
+            reviewed: input.provenance === "explicit",
+          })
+          await governance.appendMemoryAuditEvent({
+            action: applied.some((op) => op.op === "CONFLICT" && op.memory.id === id)
+              ? "conflict"
+              : applied.some((op) => op.op === "UPDATE" && op.targetId === id)
+                ? "revised"
+                : "created",
+            memoryId: id,
+            sessionId: input.source?.sessionId,
+            reason: input.provenance,
+          })
+        }
+      } catch {
+        // The canonical memory already landed; governance persistence retries separately.
+      }
+    }
     return {
       ok: true,
       stored: applied.some((op) => op.op !== "NOOP"),
@@ -162,6 +228,10 @@ export async function storeMemoryCore(input: StoreMemoryCoreInput): Promise<Stor
   const row = await memDb.createMemory({
     scope,
     characterId,
+    projectId,
+    agentId,
+    branch: input.branch,
+    pathPattern: input.pathPattern,
     type,
     text,
     importance: candidate.importance,
@@ -172,7 +242,36 @@ export async function storeMemoryCore(input: StoreMemoryCoreInput): Promise<Stor
     sourceMessageId: input.source?.messageId,
     sourceChannel: input.attribution?.channel,
     sourcePluginId: input.attribution?.pluginId,
+    evidenceState: "supported",
+    reviewStatus: input.provenance === "explicit" ? "verified" : "unreviewed",
+    contaminationState: input.provenance === "external" ? "external-context" : "clean",
+    sensitivity: "normal",
   })
+  try {
+    const governance = await import("@/lib/db/memory-governance")
+    await governance.createMemoryEvidence({
+      memoryId: row.id,
+      kind: input.provenance === "external" ? "external" : "manual",
+      sourceId:
+        input.source?.messageId ??
+        input.source?.sessionId ??
+        input.attribution?.pluginId ??
+        input.attribution?.channel ??
+        `manual:${row.id}`,
+      sessionId: input.source?.sessionId,
+      messageId: input.source?.messageId,
+      contaminationState: input.provenance === "external" ? "external-context" : "clean",
+      reviewed: input.provenance === "explicit",
+    })
+    await governance.appendMemoryAuditEvent({
+      action: "created",
+      memoryId: row.id,
+      sessionId: input.source?.sessionId,
+      reason: input.provenance,
+    })
+  } catch {
+    // The canonical memory already landed; governance persistence retries separately.
+  }
   const sink = await tryBuildMemoryVectorSink(config)
   if (sink) {
     try {
@@ -198,6 +297,10 @@ export interface StoreExternalMemoryInput {
   type?: Extract<MemoryType, "semantic" | "episodic">
   scope?: MemoryScope
   characterId?: string
+  projectId?: string
+  agentId?: string
+  branch?: string
+  pathPattern?: string
   key?: string
   importance?: number
   tags?: string[]
@@ -220,6 +323,10 @@ export async function storeExternalMemory(
     type: input.type ?? "semantic",
     scope: input.scope,
     characterId: input.characterId,
+    projectId: input.projectId,
+    agentId: input.agentId,
+    branch: input.branch,
+    pathPattern: input.pathPattern,
     key: input.key,
     importance: input.importance,
     tags: input.tags,

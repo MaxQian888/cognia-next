@@ -66,6 +66,7 @@ import type {
 import type { Project } from "@/types"
 import { defaultLifecycleFirer } from "@/lib/claude/hooks/lifecycle-firer"
 import { resolveMemoryConfig } from "@/types/memory/memory"
+import { resolveMemoryTurnPolicy } from "@/lib/memory/control-plane/policy"
 import { resolveProjectKnowledgeSettings } from "@/types/project-knowledge"
 import type { ConnectorMode } from "@/types/connectors/policy"
 import { BUILT_IN_AGENT_MODES, type AgentModeConfig } from "@/types/agent/agent-mode"
@@ -362,6 +363,10 @@ export interface BuildOptionsContext {
    * agent to be defined. Direct chat only; team/connector paths leave it unset.
    */
   targetAgentId?: string
+  /** Active source-control namespace for branch-scoped learned memories. */
+  memoryBranch?: string
+  /** Workspace-relative active/referenced path for path-scoped learned memories. */
+  memoryPath?: string
   /**
    * Optional explicit Agent Mode override. When omitted, `resolveSendOptions`
    * reads the active mode id from `useAgentRuntimeStore` and looks it up in
@@ -1443,15 +1448,35 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   let memorySection = ""
   if (ctx.memoryDeps && ctx.memoryUserMessage && ctx.memoryUserMessage.trim()) {
     const memoryConfig = resolveMemoryConfig(appSettings?.memory)
-    if (memoryConfig.enabled && !memoryConfig.temporary) {
+    const memoryPolicy = resolveMemoryTurnPolicy({
+      config: memoryConfig,
+      session: session ?? undefined,
+    })
+    await import("@/lib/db/memory-governance")
+      .then(({ appendMemoryAuditEvent }) =>
+        appendMemoryAuditEvent({
+          action: memoryPolicy.canRecall ? "recall-allowed" : "recall-denied",
+          sessionId: session?.id,
+          reason: memoryPolicy.recallReason,
+        })
+      )
+      .catch(() => undefined)
+    if (memoryPolicy.canRecall) {
       try {
         const { applyMemoryContext } = await import("@/lib/memory/runtime/apply-memory-context")
         const twinChunkTexts = opts.twinContext?.retrievedChunks.map((c) => c.chunk.content) ?? []
         const result = await applyMemoryContext({
           userMessage: ctx.memoryUserMessage,
-          characterId: character?.id,
+          reader: {
+            characterId: character?.id,
+            projectId: session?.projectId ?? ctx.activeProject?.id,
+            agentId: ctx.targetAgentId,
+            branch: ctx.memoryBranch,
+            path: ctx.memoryPath,
+          },
           topK: memoryConfig.retrievalTopK,
           relevanceFloor: memoryConfig.relevanceFloor,
+          maxTokens: memoryConfig.recallTokenBudget,
           twinChunkTexts,
           enableQueryExpansion: memoryConfig.enableQueryExpansion,
           recencyHalfLifeDays: memoryConfig.decayHalfLifeDays,
@@ -1476,8 +1501,12 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
               type: m.type,
               text: m.text,
               score: m.score,
+              evidenceState: m.evidenceState,
+              reviewStatus: m.reviewStatus,
             })),
             proceduralCount: result.proceduralCount,
+            withheldCount: result.withheldCount,
+            budget: result.budget,
             degraded: result.degraded,
           }
         }

@@ -73,15 +73,29 @@ describe("searchMemoriesExternal", () => {
     )
   })
 
-  it("respects explicit topK / types / characterId", async () => {
+  it("respects explicit topK / types / reader namespace", async () => {
     await searchMemoriesExternal({
       query: "q",
       topK: 2,
       types: ["episodic"],
       characterId: "char1",
+      projectId: "project1",
+      agentId: "agent1",
+      branch: "main",
+      path: "lib/memory",
     })
     expect(mockRetrieveMemories).toHaveBeenCalledWith(
-      expect.objectContaining({ topK: 2, types: ["episodic"], characterId: "char1" }),
+      expect.objectContaining({
+        topK: 2,
+        types: ["episodic"],
+        reader: {
+          characterId: "char1",
+          projectId: "project1",
+          agentId: "agent1",
+          branch: "main",
+          path: "lib/memory",
+        },
+      }),
       expect.anything()
     )
   })

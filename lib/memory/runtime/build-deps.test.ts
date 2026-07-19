@@ -35,6 +35,12 @@ beforeEach(() => {
 describe("tryBuildMemoryDeps", () => {
   it("returns undefined when memory is disabled", async () => {
     expect(await tryBuildMemoryDeps(cfg({ enabled: false }))).toBeUndefined()
+    expect(await tryBuildMemoryDeps(cfg({ temporary: true }))).toBeUndefined()
+  })
+
+  it("builds local deps when global recall is off so a chat-level opt-in can work", async () => {
+    mockTryBuildTwinDeps.mockResolvedValue(undefined)
+    expect(await tryBuildMemoryDeps(cfg({ useMemory: false }))).toBeDefined()
   })
 
   it("returns base (BM25-only) deps when no twin backend is available", async () => {
@@ -144,8 +150,9 @@ describe("tryBuildMemoryVectorSink", () => {
 
   it("upserts a memory's text into the collection when a backend is available", async () => {
     const addDocuments = jest.fn(async () => undefined)
+    const deleteDocuments = jest.fn(async () => undefined)
     mockTryBuildTwinDeps.mockResolvedValue({
-      store: { searchByEmbedding: mockSearchByEmbedding, addDocuments },
+      store: { searchByEmbedding: mockSearchByEmbedding, addDocuments, deleteDocuments },
       embedding: { provider: "transformersjs", model: "x", apiKey: "" },
     })
     const sink = await tryBuildMemoryVectorSink(cfg())
@@ -154,6 +161,8 @@ describe("tryBuildMemoryVectorSink", () => {
     expect(addDocuments).toHaveBeenCalledWith(MEMORY_VECTOR_COLLECTION, [
       { id: "m1", content: "The user prefers pnpm" },
     ])
+    await sink!.delete(["m1"])
+    expect(deleteDocuments).toHaveBeenCalledWith(MEMORY_VECTOR_COLLECTION, ["m1"])
   })
 
   it("returns undefined when hybridEnabled is off", async () => {

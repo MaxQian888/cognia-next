@@ -13,6 +13,10 @@ export interface MemoryWireRow {
   type: MemoryType
   scope: MemoryScope
   characterId?: string
+  projectId?: string
+  agentId?: string
+  branch?: string
+  pathPattern?: string
   importance: number
   tags: string[]
   pinned: boolean
@@ -28,6 +32,10 @@ export function toMemoryWireRow(m: Memory): MemoryWireRow {
     type: m.type,
     scope: m.scope,
     ...(m.characterId ? { characterId: m.characterId } : {}),
+    ...(m.projectId ? { projectId: m.projectId } : {}),
+    ...(m.agentId ? { agentId: m.agentId } : {}),
+    ...(m.branch ? { branch: m.branch } : {}),
+    ...(m.pathPattern ? { pathPattern: m.pathPattern } : {}),
     importance: m.importance,
     tags: m.tags,
     pinned: m.pinned,

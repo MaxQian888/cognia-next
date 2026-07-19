@@ -13,15 +13,9 @@ import {
   XIcon,
 } from "lucide-react"
 import type { Memory, MemoryProvenance, MemoryScope, MemoryType } from "@/types/memory/memory"
-import {
-  createMemory,
-  hardDeleteMemories,
-  hardDeleteMemory,
-  listMemories,
-  setMemoriesPinned,
-  setMemoryPinned,
-  updateMemory,
-} from "@/lib/db/memories"
+import { listMemories } from "@/lib/db/memories"
+import { listMemoryAuditEvents, listMemoryEvidence } from "@/lib/db/memory-governance"
+import { manageMemory } from "@/lib/memory/control-plane/manage"
 import {
   computeMemoryStats,
   filterAndSortMemories,
@@ -56,14 +50,8 @@ import { MemoryBulkToolbar } from "./memory-bulk-toolbar"
 import { ExternalMemoryTab } from "./external/external-memory-tab"
 
 const TYPE_ORDER: MemoryType[] = ["semantic", "episodic", "procedural"]
-const SCOPE_OPTIONS: MemoryScope[] = ["global", "character"]
-const PROVENANCE_OPTIONS: MemoryProvenance[] = [
-  "user",
-  "explicit",
-  "inbound",
-  "system",
-  "external",
-]
+const SCOPE_OPTIONS: MemoryScope[] = ["global", "workspace", "character", "agent"]
+const PROVENANCE_OPTIONS: MemoryProvenance[] = ["user", "explicit", "inbound", "system", "external"]
 
 /**
  * Full-page `/memory` management panel. Lists every memory with search, type /
@@ -123,6 +111,16 @@ export function MemoryConsole() {
     activeTags.size > 0
 
   const selectedMemory = selectedId ? memoryById.get(selectedId) : undefined
+  const selectedEvidence = useLiveQuery(
+    () => (selectedId ? listMemoryEvidence(selectedId) : Promise.resolve([])),
+    [selectedId],
+    []
+  )
+  const selectedAuditEvents = useLiveQuery(
+    () => (selectedId ? listMemoryAuditEvents({ memoryId: selectedId }) : Promise.resolve([])),
+    [selectedId],
+    []
+  )
   const selectedIndex = selectedMemory ? rows.findIndex((m) => m.id === selectedId) : -1
 
   // Drop a dangling detail selection when the underlying row disappears.
@@ -208,13 +206,13 @@ export function MemoryConsole() {
     })
   }, [])
   const handleRowPin = useCallback((id: string, pinned: boolean) => {
-    void setMemoryPinned(id, pinned)
+    void manageMemory({ kind: "pin", id, pinned })
   }, [])
   const handleRowSave = useCallback((id: string, text: string) => {
-    void updateMemory(id, { text, bumpVersion: true })
+    void manageMemory({ kind: "update", id, patch: { text } })
   }, [])
   const handleRowDelete = useCallback((id: string) => {
-    void hardDeleteMemory(id)
+    void manageMemory({ kind: "delete", id })
     setSelectedId((cur) => (cur === id ? null : cur))
     setSelectedIds((prev) => {
       if (!prev.has(id)) return prev
@@ -226,7 +224,10 @@ export function MemoryConsole() {
 
   // Detail-panel handlers.
   const handleDetailSave = useCallback((id: string, patch: MemoryDetailPatch) => {
-    void updateMemory(id, { ...patch, bumpVersion: patch.text !== undefined })
+    void manageMemory({ kind: "update", id, patch })
+  }, [])
+  const handleReview = useCallback((id: string, status: "verified" | "conflict") => {
+    void manageMemory({ kind: "review", id, status })
   }, [])
   const resolveMemory = useCallback((id: string) => memoryById.get(id), [memoryById])
 
@@ -246,24 +247,20 @@ export function MemoryConsole() {
 
   const clearSelection = () => setSelectedIds(new Set())
   const bulkPin = (pinned: boolean) => {
-    void setMemoriesPinned([...selectedIds], pinned)
+    void Promise.all([...selectedIds].map((id) => manageMemory({ kind: "pin", id, pinned })))
     clearSelection()
   }
   const bulkDelete = () => {
     const ids = [...selectedIds]
-    void hardDeleteMemories(ids)
+    void Promise.all(ids.map((id) => manageMemory({ kind: "delete", id })))
     if (selectedId && ids.includes(selectedId)) setSelectedId(null)
     clearSelection()
   }
 
   const handleCreate = useCallback(async (input: AddMemoryInput) => {
-    await createMemory({
-      scope: "global",
-      type: input.type,
-      text: input.text,
-      importance: input.importance,
-      tags: input.tags,
-      provenance: "explicit",
+    await manageMemory({
+      kind: "create",
+      ...input,
     })
   }, [])
 
@@ -280,6 +277,9 @@ export function MemoryConsole() {
         onSave={handleDetailSave}
         onPinToggle={handleRowPin}
         onDelete={handleRowDelete}
+        onReview={handleReview}
+        evidence={selectedEvidence}
+        auditEvents={selectedAuditEvents}
         onNavigate={selectedIndex >= 0 ? navigate : undefined}
         navPosition={
           selectedIndex >= 0 ? { index: selectedIndex + 1, total: rows.length } : undefined

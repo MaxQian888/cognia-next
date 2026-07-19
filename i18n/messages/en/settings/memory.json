@@ -30,6 +30,25 @@
     "heading": "Hybrid retrieval",
     "label": "Hybrid retrieval"
   },
+  "useMemory": {
+    "description": "Allow eligible chats to recall saved memories. Each chat can override this.",
+    "heading": "Use memories",
+    "label": "Use memories"
+  },
+  "learnFromChats": {
+    "description": "Learn durable facts from eligible chats in the background. Each chat can override this independently from recall.",
+    "heading": "Learn from chats",
+    "label": "Learn from chats"
+  },
+  "externalContext": {
+    "description": "Do not learn automatically from turns that used web search, MCP, screen context, or connectors. Local code tools stay eligible.",
+    "heading": "Block external-context learning",
+    "label": "Block external-context learning"
+  },
+  "tokenBudget": { "label": "Recall token budget" },
+  "relevanceFloor": { "label": "Minimum recall relevance" },
+  "halfLife": { "label": "Recency half-life (days)" },
+  "maxIdle": { "label": "Forget after unused days (0 = never)" },
   "manage": "Manage memories",
   "queryExpansion": {
     "description": "Widen the keyword leg with synonym expansion when recalling memories.",
@@ -38,8 +57,9 @@
   },
   "scope": {
     "character": "Per character",
-    "description": "Where new memories are stored. Global is shared across all characters.",
+    "description": "Where new memories are stored. Narrower scopes override broader memories with the same stable key.",
     "global": "Global (all characters)",
+    "workspace": "Current workspace",
     "heading": "Default scope"
   },
   "temporary": {

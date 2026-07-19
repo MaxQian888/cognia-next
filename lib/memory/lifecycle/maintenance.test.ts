@@ -2,8 +2,18 @@ import { DEFAULT_MEMORY_CONFIG, type MemoryConfig } from "@/types/memory/memory"
 import type { Memory } from "@/types/memory/memory"
 
 const mockBuildDeps = jest.fn()
+const mockEnqueueJob = jest.fn()
+const mockClaimJob = jest.fn()
+const mockCompleteJob = jest.fn()
+const mockFailJob = jest.fn()
 jest.mock("./build-maintenance-deps", () => ({
   buildEpisodicMaintenanceDeps: (...a: unknown[]) => mockBuildDeps(...a),
+}))
+jest.mock("@/lib/db/memory-governance", () => ({
+  enqueueMemoryJob: (...a: unknown[]) => mockEnqueueJob(...a),
+  claimMemoryJob: (...a: unknown[]) => mockClaimJob(...a),
+  completeMemoryJob: (...a: unknown[]) => mockCompleteJob(...a),
+  failMemoryJob: (...a: unknown[]) => mockFailJob(...a),
 }))
 
 import {
@@ -89,8 +99,8 @@ describe("runMemoryMaintenance", () => {
     const deps: MemoryMaintenanceDeps = {
       distillDeps: { distill: async () => [], consolidate: async () => ({ applied: [] }) },
       decayDeps: {
-        listActive: async (scope, characterId) =>
-          globalRows.filter((m) => m.scope === scope && m.characterId === characterId),
+        listActive: async (scope, namespace) =>
+          globalRows.filter((m) => m.scope === scope && m.characterId === namespace?.characterId),
         invalidate: async (id) => {
           invalidated.push(id)
         },
@@ -125,8 +135,8 @@ describe("runMemoryMaintenance", () => {
     const deps: MemoryMaintenanceDeps = {
       distillDeps: { distill: async () => [], consolidate: async () => ({ applied: [] }) },
       decayDeps: {
-        listActive: async (scope, characterId) =>
-          rows.filter((m) => m.scope === scope && m.characterId === characterId),
+        listActive: async (scope, namespace) =>
+          rows.filter((m) => m.scope === scope && m.characterId === namespace?.characterId),
         invalidate: async (id) => {
           invalidated.push(id)
         },
@@ -143,6 +153,43 @@ describe("runMemoryMaintenance", () => {
       deps
     )
     expect(invalidated).toEqual(["c1"]) // only the character's overflow is touched
+  })
+
+  it("isolates workspace decay by the complete project namespace", async () => {
+    const seen: unknown[] = []
+    const deps: MemoryMaintenanceDeps = {
+      distillDeps: { distill: async () => [], consolidate: async () => ({ applied: [] }) },
+      decayDeps: {
+        listActive: async (_scope, namespace) => {
+          seen.push(namespace)
+          return []
+        },
+        invalidate: async () => undefined,
+      },
+    }
+
+    await runMemoryMaintenance(
+      {
+        transcript,
+        scope: "workspace",
+        projectId: "project-1",
+        branch: "feature/memory",
+        pathPattern: "lib/memory",
+        provenance: "user",
+        config: cfg(),
+      },
+      deps
+    )
+
+    expect(seen).toEqual([
+      {
+        characterId: undefined,
+        projectId: "project-1",
+        agentId: undefined,
+        branch: "feature/memory",
+        pathPattern: "lib/memory",
+      },
+    ])
   })
 
   it("expires stale non-pinned memories when maxIdleDays is set (access-time forgetting)", async () => {
@@ -203,12 +250,20 @@ describe("runMemoryMaintenance", () => {
 describe("scheduleMemoryMaintenance", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    mockEnqueueJob.mockReset()
+    mockClaimJob.mockReset()
+    mockCompleteJob.mockReset()
+    mockFailJob.mockReset()
     __resetMaintenanceGuard()
     jest.useFakeTimers()
     mockBuildDeps.mockResolvedValue({
       distillDeps: { distill: async () => [], consolidate: async () => ({ applied: [] }) },
       decayDeps: { listActive: async () => [], invalidate: async () => {} },
     })
+    mockEnqueueJob.mockResolvedValue({ id: "job-1" })
+    mockClaimJob.mockResolvedValueOnce({ id: "job-1" })
+    mockCompleteJob.mockResolvedValue(undefined)
+    mockFailJob.mockResolvedValue("queued")
   })
   afterEach(() => {
     jest.useRealTimers()
@@ -224,6 +279,7 @@ describe("scheduleMemoryMaintenance", () => {
 
   it("no-ops when memory disabled / temporary / inbound", () => {
     scheduleMemoryMaintenance({ ...base, config: cfg({ enabled: false }) })
+    scheduleMemoryMaintenance({ ...base, config: cfg({ learnFromChats: false }) })
     scheduleMemoryMaintenance({ ...base, config: cfg({ temporary: true }) })
     scheduleMemoryMaintenance({ ...base, provenance: "inbound", config: cfg() })
     jest.runAllTimers()
@@ -253,13 +309,10 @@ describe("scheduleMemoryMaintenance", () => {
     expect(mockBuildDeps).toHaveBeenCalledTimes(1)
   })
 
-  it("releases the guard for retry when deps cannot be built", async () => {
-    mockBuildDeps.mockResolvedValueOnce(null)
+  it("backs off durably when deps cannot be built", async () => {
+    mockBuildDeps.mockResolvedValue(null)
     scheduleMemoryMaintenance({ ...base, config: cfg() })
     await jest.runAllTimersAsync()
-    // guard released → a second schedule will try again
-    scheduleMemoryMaintenance({ ...base, config: cfg() })
-    await jest.runAllTimersAsync()
-    expect(mockBuildDeps).toHaveBeenCalledTimes(2)
+    expect(mockFailJob).toHaveBeenCalledWith("job-1", "dependencies_unavailable")
   })
 })

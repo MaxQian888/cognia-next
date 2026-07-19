@@ -23,11 +23,12 @@ import {
 } from "@/lib/memory/extract/extractor"
 import {
   consolidate,
+  sameMemoryNamespace,
   type ConsolidateDeps,
   type ConsolidateInput,
   type ConsolidationOp,
 } from "@/lib/memory/consolidate/consolidator"
-import { hasNoLeakingPii, redactText } from "@cognia/redact"
+import { hasNoLeakingPii, hasNoLeakingPiiDeep, redactText } from "@cognia/redact"
 
 export interface RunMemoryExtractionInput {
   rollingSummary?: string
@@ -35,6 +36,10 @@ export interface RunMemoryExtractionInput {
   newPair: { userText: string; assistantText: string }
   scope: MemoryScope
   characterId?: string
+  projectId?: string
+  agentId?: string
+  branch?: string
+  pathPattern?: string
   provenance: MemoryProvenance
   source?: { sessionId?: string; messageId?: string }
   config: MemoryConfig
@@ -45,6 +50,8 @@ export interface RunMemoryExtractionDeps {
   consolidate: (input: ConsolidateInput) => Promise<{ applied: ConsolidationOp[] }>
   /** PII gate; defaults to `hasNoLeakingPii`. */
   isPiiSafe?: (text: string) => boolean
+  /** Fail-closed gate for the complete redacted payload sent to the utility LLM. */
+  isPayloadPiiSafe?: (value: unknown) => boolean
   /**
    * Redact PII from the extraction inputs *before* they reach the utility LLM.
    * Defaults to the twin redactor. The extraction model can differ from the
@@ -83,7 +90,7 @@ export async function runMemoryExtraction(
     // Redact before the LLM extract call. PII spans become placeholders; the
     // rest of the turn is intact, so non-PII facts still extract normally.
     const redact = deps.redact ?? ((t: string) => redactText(t).redacted)
-    const candidates = await deps.extract({
+    const extractionInput: ExtractMemoriesInput = {
       rollingSummary: input.rollingSummary ? redact(input.rollingSummary) : undefined,
       recentMessages: input.recentMessages?.map((m) => ({ role: m.role, text: redact(m.text) })),
       newPair: {
@@ -91,7 +98,10 @@ export async function runMemoryExtraction(
         assistantText: redact(input.newPair.assistantText),
       },
       allowTypes: allowedTypes(input.provenance),
-    })
+    }
+    const isPayloadPiiSafe = deps.isPayloadPiiSafe ?? hasNoLeakingPiiDeep
+    if (!isPayloadPiiSafe(extractionInput)) return empty
+    const candidates = await deps.extract(extractionInput)
     if (candidates.length === 0) return empty
 
     const isPiiSafe = deps.isPiiSafe ?? hasNoLeakingPii
@@ -102,6 +112,10 @@ export async function runMemoryExtraction(
       candidates: safe,
       scope: input.scope,
       characterId: input.characterId,
+      projectId: input.projectId,
+      agentId: input.agentId,
+      branch: input.branch,
+      pathPattern: input.pathPattern,
       provenance: input.provenance,
       source: input.source,
     })
@@ -158,25 +172,25 @@ export async function buildAutoExtractionDeps(
 
   const consolidateDeps: ConsolidateDeps = {
     client,
-    findSimilar: async (candidate, _scope, characterId) => {
+    findSimilar: async (candidate, namespace) => {
       if (!memDeps) return []
       const hits = await retrieveMemories(
         {
           queryText: candidate.text,
-          characterId,
+          reader: namespace,
           topK: 5,
           relevanceFloor: 0,
           types: [candidate.type],
         },
         memDeps
       ).catch(() => [])
-      return hits.map((h) => h.memory)
+      return hits.map((h) => h.memory).filter((memory) => sameMemoryNamespace(memory, namespace))
     },
     persist: async (pInput) => {
       const row = await memDb.createMemory(pInput)
       // Make the new memory semantically searchable when embeddings are
       // configured. Best-effort: a vector failure must not lose the memory.
-      if (vectorSink) {
+      if (vectorSink && hasNoLeakingPii(row.text)) {
         try {
           await vectorSink.upsert(row.id, row.text)
           await memDb.updateMemory(row.id, { vectorDocId: row.id })
@@ -187,6 +201,7 @@ export async function buildAutoExtractionDeps(
       return row
     },
     update: async (id, text) => {
+      if (!hasNoLeakingPii(text)) return
       await memDb.updateMemory(id, { text, bumpVersion: true })
       if (vectorSink) {
         try {
@@ -197,6 +212,14 @@ export async function buildAutoExtractionDeps(
       }
     },
     invalidate: (id, supersededById) => memDb.invalidateMemory(id, supersededById),
+    markConflict: async (targetId, conflictId) => {
+      const target = await memDb.getMemory(targetId)
+      if (!target) return
+      await memDb.updateMemory(targetId, {
+        reviewStatus: "conflict",
+        conflictWithIds: [...new Set([...(target.conflictWithIds ?? []), conflictId])],
+      })
+    },
   }
 
   return {

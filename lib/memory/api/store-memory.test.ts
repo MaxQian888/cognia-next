@@ -48,13 +48,19 @@ describe("clampImportance", () => {
 })
 
 describe("storeMemoryCore", () => {
-  it("rejects empty text and character scope without characterId", async () => {
+  it("rejects empty text and scopes missing their required identity", async () => {
     await expect(storeMemoryCore({ text: "  ", provenance: "system" })).rejects.toThrow(
       /non-empty 'text'/
     )
     await expect(
       storeMemoryCore({ text: "x", scope: "character", provenance: "system" })
     ).rejects.toThrow(/'characterId' is required/)
+    await expect(
+      storeMemoryCore({ text: "x", scope: "workspace", provenance: "system" })
+    ).rejects.toThrow(/'projectId' is required/)
+    await expect(
+      storeMemoryCore({ text: "x", scope: "agent", provenance: "system" })
+    ).rejects.toThrow(/'agentId' is required/)
   })
 
   it("rejects procedural memories from untrusted provenance", async () => {
@@ -107,6 +113,51 @@ describe("storeMemoryCore", () => {
     })
     expect(mockConsolidate).toHaveBeenCalledWith(
       expect.objectContaining({ provenance: "external", attribution: ATTRIBUTION })
+    )
+  })
+
+  it("forwards the complete namespace to consolidation", async () => {
+    await storeMemoryCore({
+      text: "Scoped fact",
+      scope: "agent",
+      projectId: "p1",
+      agentId: "a1",
+      branch: "main",
+      pathPattern: "src",
+      provenance: "explicit",
+    })
+    expect(mockConsolidate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: "agent",
+        projectId: "p1",
+        agentId: "a1",
+        branch: "main",
+        pathPattern: "src",
+      })
+    )
+  })
+
+  it("returns conflict rows as stored and marks them for review", async () => {
+    mockConsolidate.mockResolvedValue({
+      applied: [
+        {
+          op: "CONFLICT",
+          memory: { id: "mem_conflict" },
+          targetId: "mem_existing",
+          candidate: { type: "semantic" },
+        },
+      ],
+    })
+    const result = await storeMemoryCore({ text: "Conflicting fact", provenance: "explicit" })
+    expect(result).toMatchObject({
+      ok: true,
+      stored: true,
+      memoryId: "mem_conflict",
+      applied: ["CONFLICT"],
+    })
+    expect(mockUpdateMemory).toHaveBeenCalledWith(
+      "mem_conflict",
+      expect.objectContaining({ reviewStatus: "conflict" })
     )
   })
 

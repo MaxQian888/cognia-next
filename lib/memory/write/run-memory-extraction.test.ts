@@ -93,6 +93,16 @@ describe("runMemoryExtraction", () => {
     expect(seen).toBe("I always use pnpm with a [X]")
   })
 
+  it("fails closed before extraction when redaction leaves PII in the payload", async () => {
+    const d = deps({
+      redact: (text) => text,
+      isPayloadPiiSafe: () => false,
+    })
+    const result = await runMemoryExtraction(input(), d)
+    expect(d.extract).not.toHaveBeenCalled()
+    expect(result.applied).toEqual([])
+  })
+
   it("allows procedural for user provenance, not for inbound", async () => {
     const d = deps()
     await runMemoryExtraction(input({ provenance: "user" }), d)
@@ -137,11 +147,9 @@ describe("runMemoryExtraction", () => {
 
   it("drops PII-leaking candidates before consolidation", async () => {
     const d = deps({
-      extract: jest.fn(
-        async (): Promise<MemoryCandidate[]> => [
-          { type: "semantic", text: "email me at bob@example.com", importance: 5 },
-        ]
-      ),
+      extract: jest.fn(async (): Promise<MemoryCandidate[]> => [
+        { type: "semantic", text: "email me at bob@example.com", importance: 5 },
+      ]),
     })
     const res = await runMemoryExtraction(input(), d)
     expect(d.consolidate).not.toHaveBeenCalled()

@@ -13,7 +13,12 @@
  * the Twin runtime.
  */
 
-import { DEFAULT_MEMORY_CONFIG, type Memory, type MemoryType } from "@/types/memory/memory"
+import {
+  DEFAULT_MEMORY_CONFIG,
+  type Memory,
+  type MemoryReaderContext,
+  type MemoryType,
+} from "@/types/memory/memory"
 import { BM25Index, normalizeScores, reciprocalRankFusion } from "@cognia/rag/hybrid-search"
 import { tokenizeMultilingual } from "@cognia/rag/cjk-tokenizer"
 import { buildExpandedKeywordQuery } from "@/lib/ai/retrieval/query-expansion"
@@ -162,7 +167,7 @@ function meaningfulTerms(text: string): Set<string> {
 
 export interface MemoryRetrieverDeps {
   /** Active candidate pool for the reader (global + character override layer). */
-  loadCandidates: (characterId?: string) => Promise<Memory[]>
+  loadCandidates: (reader?: MemoryReaderContext | string) => Promise<Memory[]>
   /** Embed the query; absent → BM25-only. */
   embed?: (text: string) => Promise<number[]>
   /** Vector search returning `{ id: vectorDocId, score }`; absent → BM25-only. */
@@ -174,6 +179,8 @@ export interface MemoryRetrieverDeps {
 export interface RetrieveMemoriesInput {
   queryText: string
   characterId?: string
+  /** Full namespace-aware reader context; supersedes `characterId` when present. */
+  reader?: MemoryReaderContext
   topK: number
   /** Drop candidates whose normalized fused relevance is below this. */
   relevanceFloor: number
@@ -263,7 +270,8 @@ export async function retrieveMemories(
   const query = input.queryText.trim()
   if (!query) return []
 
-  let candidates = await deps.loadCandidates(input.characterId)
+  const reader = input.reader ?? input.characterId
+  let candidates = await deps.loadCandidates(reader)
   if (input.types) {
     const allow = new Set(input.types)
     candidates = candidates.filter((m) => allow.has(m.type))
@@ -278,7 +286,12 @@ export async function retrieveMemories(
 
   // Keyword leg — always available. Index is cached by corpus signature so an
   // unchanged candidate set (same reader + type filter) isn't re-tokenised.
-  const cacheKey = `${input.characterId ?? "global"}::${(input.types ?? []).slice().sort().join(",")}`
+  const cacheKey = `${JSON.stringify(input.reader ?? { characterId: input.characterId })}::${(
+    input.types ?? []
+  )
+    .slice()
+    .sort()
+    .join(",")}`
   const bm25 = getMemoryBm25Index(cacheKey, candidates)
   const keywordQuery = input.enableQueryExpansion ? buildExpandedKeywordQuery(query) : query
   const rawKeywordHits = bm25.search(keywordQuery, input.topK * OVERFETCH)

@@ -37,6 +37,26 @@ function deps(active: Memory[]): DecayDeps & { invalidated: string[] } {
   }
 }
 
+it("forwards the complete exact namespace to maintenance reads", async () => {
+  const listActive = jest.fn(async () => [])
+  const d: DecayDeps = { listActive, invalidate: async () => undefined }
+  const namespace = {
+    scope: "agent" as const,
+    projectId: "p1",
+    agentId: "a1",
+    branch: "main",
+    pathPattern: "src",
+    maxActivePerScope: 10,
+  }
+  await evictOverflow(namespace, d)
+  expect(listActive).toHaveBeenCalledWith("agent", {
+    projectId: "p1",
+    agentId: "a1",
+    branch: "main",
+    pathPattern: "src",
+  })
+})
+
 describe("evictOverflow", () => {
   it("does nothing when under the cap", async () => {
     const d = deps([mem(), mem()])

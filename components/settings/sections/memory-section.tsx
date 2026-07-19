@@ -6,7 +6,7 @@ import Link from "next/link"
 import { BrainIcon, Trash2Icon, ExternalLinkIcon } from "lucide-react"
 import { useSettingsStore } from "@/stores/settings"
 import { resolveMemoryConfig, type MemoryConfig, type MemoryScope } from "@/types/memory/memory"
-import { clearMemories } from "@/lib/db/memories"
+import { manageMemory } from "@/lib/memory/control-plane/manage"
 import { SettingsCard } from "../common/settings-section"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
@@ -39,6 +39,10 @@ export function MemorySection() {
     const n = Number.parseInt(raw, 10)
     return Number.isFinite(n) && n > 0 ? n : fallback
   }
+  const parseFloatInRange = (raw: string, fallback: number, min: number, max: number) => {
+    const value = Number.parseFloat(raw)
+    return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback
+  }
 
   return (
     <SettingsCard
@@ -64,15 +68,43 @@ export function MemorySection() {
 
           <div className="flex items-center justify-between gap-4">
             <div className="space-y-0.5">
-              <Label htmlFor="mem-auto">{t("autoExtract.heading")}</Label>
-              <p className="text-sm text-muted-foreground">{t("autoExtract.description")}</p>
+              <Label htmlFor="mem-use">{t("useMemory.heading")}</Label>
+              <p className="text-sm text-muted-foreground">{t("useMemory.description")}</p>
             </div>
             <Switch
-              id="mem-auto"
-              aria-label={t("autoExtract.label")}
-              checked={config.autoExtract}
+              id="mem-use"
+              aria-label={t("useMemory.label")}
+              checked={config.useMemory}
               disabled={!config.enabled}
-              onCheckedChange={(v) => update({ autoExtract: v })}
+              onCheckedChange={(v) => update({ useMemory: v })}
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <Label htmlFor="mem-learn">{t("learnFromChats.heading")}</Label>
+              <p className="text-sm text-muted-foreground">{t("learnFromChats.description")}</p>
+            </div>
+            <Switch
+              id="mem-learn"
+              aria-label={t("learnFromChats.label")}
+              checked={config.learnFromChats}
+              disabled={!config.enabled}
+              onCheckedChange={(v) => update({ learnFromChats: v, autoExtract: v })}
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <Label htmlFor="mem-external-context">{t("externalContext.heading")}</Label>
+              <p className="text-sm text-muted-foreground">{t("externalContext.description")}</p>
+            </div>
+            <Switch
+              id="mem-external-context"
+              aria-label={t("externalContext.label")}
+              checked={config.disableLearningOnExternalContext}
+              disabled={!config.enabled || !config.learnFromChats}
+              onCheckedChange={(v) => update({ disableLearningOnExternalContext: v })}
             />
           </div>
 
@@ -104,6 +136,7 @@ export function MemorySection() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="global">{t("scope.global")}</SelectItem>
+                <SelectItem value="workspace">{t("scope.workspace")}</SelectItem>
                 <SelectItem value="character">{t("scope.character")}</SelectItem>
               </SelectContent>
             </Select>
@@ -149,7 +182,7 @@ export function MemorySection() {
             />
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <div className="space-y-1.5">
               <Label htmlFor="mem-topk">{t("topK.label")}</Label>
               <Input
@@ -158,6 +191,54 @@ export function MemorySection() {
                 min={1}
                 value={config.retrievalTopK}
                 onChange={(e) => update({ retrievalTopK: parseInt10(e.target.value, 8) })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="mem-token-budget">{t("tokenBudget.label")}</Label>
+              <Input
+                id="mem-token-budget"
+                type="number"
+                min={64}
+                value={config.recallTokenBudget}
+                onChange={(e) => update({ recallTokenBudget: parseInt10(e.target.value, 900) })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="mem-relevance">{t("relevanceFloor.label")}</Label>
+              <Input
+                id="mem-relevance"
+                type="number"
+                min={0}
+                max={1}
+                step={0.05}
+                value={config.relevanceFloor}
+                onChange={(e) =>
+                  update({
+                    relevanceFloor: parseFloatInRange(e.target.value, 0.35, 0, 1),
+                  })
+                }
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="mem-half-life">{t("halfLife.label")}</Label>
+              <Input
+                id="mem-half-life"
+                type="number"
+                min={1}
+                value={config.decayHalfLifeDays}
+                onChange={(e) => update({ decayHalfLifeDays: parseInt10(e.target.value, 30) })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="mem-max-idle">{t("maxIdle.label")}</Label>
+              <Input
+                id="mem-max-idle"
+                type="number"
+                min={0}
+                value={config.maxIdleDays ?? 0}
+                onChange={(e) =>
+                  update({ maxIdleDays: Math.max(0, Number.parseInt(e.target.value, 10) || 0) })
+                }
               />
             </div>
             <div className="space-y-1.5">
@@ -197,7 +278,7 @@ export function MemorySection() {
         cancelLabel={t("clearAll.cancel")}
         tone="destructive"
         onConfirm={async () => {
-          await clearMemories()
+          await manageMemory({ kind: "clear" })
         }}
       />
     </SettingsCard>

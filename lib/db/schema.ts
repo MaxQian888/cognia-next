@@ -132,7 +132,18 @@ import type { TeamPrObservationRow } from "./team-pr-observations"
 import type { AgentTeamBoardRow } from "./agent-team-board"
 import type { WasmGrantLedgerRow } from "./wasm-grant-ledger"
 import type { RunRecordRow } from "./run-records"
+import type {
+  SiteArtifactRow,
+  SiteDeploymentRow,
+  SiteEnvironmentRevisionRow,
+  SiteOperationEventRow,
+  SiteOperationRow,
+  SiteProjectRow,
+  SiteResourceRow,
+  SiteVersionRow,
+} from "@/types/sites"
 import type { Memory } from "@/types/memory/memory"
+import type { MemoryAuditEvent, MemoryEvidence, MemoryJob } from "@/types/memory/governance"
 import type {
   PetProfile,
   PetActivityRow,
@@ -156,6 +167,15 @@ export function backfillRootsForRow(row: Project): Project {
   if (row.roots) return row
   row.roots = rootsFromLegacy(row.rootDir, row.additionalDirs)
   return row
+}
+
+/** Mark pre-control-plane memory rows without fabricating evidence. */
+export function backfillMemoryGovernanceV118(memory: Memory): Memory {
+  memory.evidenceState ??= "legacy"
+  memory.reviewStatus ??= "unreviewed"
+  memory.contaminationState ??= "unknown"
+  memory.sensitivity ??= "normal"
+  return memory
 }
 
 export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
@@ -238,6 +258,15 @@ export class CogniaDB extends Dexie {
   executionRunBindings!: Table<ExecutionRunBinding, string>
   executionRunInterrupts!: Table<ExecutionRunInterrupt, string>
   notifications!: Table<NotificationRecord, string>
+  // v116 — Cognia Sites immutable lifecycle and recoverable provider operations.
+  siteProjects!: Table<SiteProjectRow, string>
+  siteVersions!: Table<SiteVersionRow, string>
+  siteArtifacts!: Table<SiteArtifactRow, string>
+  siteEnvironmentRevisions!: Table<SiteEnvironmentRevisionRow, string>
+  siteDeployments!: Table<SiteDeploymentRow, string>
+  siteOperations!: Table<SiteOperationRow, string>
+  siteOperationEvents!: Table<SiteOperationEventRow, string>
+  siteResources!: Table<SiteResourceRow, string>
   canvasDocuments!: Table<CanvasDocumentRow, string>
   canvasVersions!: Table<CanvasVersionRow, string>
   canvasComments!: Table<CanvasCommentRow, string>
@@ -2548,6 +2577,52 @@ export class CogniaDB extends Dexie {
         }
       })
 
+    // v116 — Cognia-owned Sites lifecycle. Separate tables preserve immutable
+    // versions/artifacts, operation recovery, and provider-resource ownership.
+    // Pure additions: there is no legacy row to backfill.
+    this.version(116).stores({
+      siteProjects:
+        "&id, projectId, updatedAt, lifecycle, executionTargetKey, &[projectId+sourceRoot+sourceSubpath+executionTargetKey]",
+      siteVersions: "&id, siteId, &[siteId+sequence], status, createdAt, artifactDigest",
+      siteArtifacts: "&digest, createdAt",
+      siteEnvironmentRevisions: "&id, siteId, &[siteId+sequence], createdAt",
+      siteDeployments: "&id, siteId, versionId, status, updatedAt, [siteId+updatedAt]",
+      siteOperations:
+        "&id, siteId, &idempotencyKey, executionTargetKey, status, createdAt, [executionTargetKey+status]",
+      siteOperationEvents: "&id, operationId, &[operationId+sequence], createdAt",
+      siteResources:
+        "&id, siteId, provider, kind, ownership, status, [provider+kind+providerResourceId]",
+    })
+
+    // v117 — Remote browser metadata. Both tables are host-local by design:
+    // profile ids point at protected WorkspaceRuntime volumes and domain grants
+    // are security decisions for this host, so neither belongs in sync.
+    this.version(117).stores({
+      browserProfiles: "&id, workspaceId, [workspaceId+updatedAt], name",
+      browserDomainGrants: "&id, workspaceId, &[workspaceId+domain], updatedAt",
+    })
+
+    // v118 — Learned-memory governance. Existing memories remain usable but
+    // are explicitly marked legacy/no-evidence; new immutable evidence,
+    // durable extraction jobs, and content-free audit events live separately.
+    this.version(118)
+      .stores({
+        memories:
+          "&id, scope, type, characterId, projectId, agentId, status, reviewStatus, lastAccessedAt, vectorDocId, sourceSessionId, pinned, [scope+type], [scope+status], [type+status], [projectId+status], [agentId+status]",
+        memoryEvidence: "&id, memoryId, kind, sessionId, createdAt, [memoryId+createdAt]",
+        memoryJobs:
+          "&id, dedupeKey, status, kind, sessionId, projectId, queuedAt, nextAttemptAt, [status+queuedAt]",
+        memoryAuditEvents: "&id, memoryId, sessionId, action, createdAt, [memoryId+createdAt]",
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table<Memory, string>("memories")
+          .toCollection()
+          .modify((memory) => {
+            backfillMemoryGovernanceV118(memory)
+          })
+      })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -2571,6 +2646,10 @@ export class CogniaDB extends Dexie {
   projectChunks!: Table<ProjectChunk, string>
   // v65 — Autonomous long-term memory. See `lib/db/memories.ts`.
   memories!: Table<Memory, string>
+  // v118 — immutable evidence, durable maintenance work, and decision audit.
+  memoryEvidence!: Table<MemoryEvidence, string>
+  memoryJobs!: Table<MemoryJob, string>
+  memoryAuditEvents!: Table<MemoryAuditEvent, string>
   // v61 — companion sync tombstones (deletions). See `lib/sync/tombstones.ts`.
   syncTombstones!: Table<SyncTombstoneRow, [SyncableTable, string]>
   // v49 — Inbox telemetry ring buffer (cap 3000). See `lib/db/inbox-telemetry.ts`.
@@ -2626,6 +2705,9 @@ export class CogniaDB extends Dexie {
   // v110 — Recorded browser flows (ADR-0072). See `lib/db/browser-recordings.ts`.
   browserRecordings!: Table<import("./browser-recordings").BrowserRecordingRow, string>
   browserAnnotations!: Table<import("./browser-annotations").BrowserAnnotationRow, string>
+  // v117 — host-local remote browser profile and public-domain grants.
+  browserProfiles!: Table<import("./browser-profiles").BrowserProfileRow, string>
+  browserDomainGrants!: Table<import("./browser-profiles").BrowserDomainGrantRow, string>
 }
 
 // Row types for these tables live next to their CRUD module (or a dedicated

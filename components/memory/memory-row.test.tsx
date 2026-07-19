@@ -154,4 +154,13 @@ describe("MemoryRow", () => {
     setup({}, { active: true })
     expect(screen.getByTestId("memory-row").className).toContain("ring-primary/50")
   })
+
+  it.each([
+    [{ reviewStatus: "conflict" as const }, "Conflict"],
+    [{ evidenceState: "supported" as const }, "Evidence-backed"],
+    [{}, "Legacy / no evidence"],
+  ])("renders the governed trust badge for %j", (overrides, label) => {
+    setup(overrides)
+    expect(screen.getByText(label)).toBeInTheDocument()
+  })
 })
