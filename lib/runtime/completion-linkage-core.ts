@@ -52,6 +52,7 @@ export async function dispatchCompletionFanout(input: CompletionFanoutInput): Pr
         dispatchTrigger({
           workflowId: match.workflowId,
           kind: input.kind,
+          triggerId: match.nodeId,
           payload: input.payload,
           originAt,
           binding: input.binding,

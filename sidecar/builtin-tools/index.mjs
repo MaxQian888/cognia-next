@@ -126,6 +126,7 @@ export const SERVER_VERSION = data.serverVersion
  *   enabled?: Record<string, boolean>,
  *   lspResolver?: unknown,
  *   readTracker?: unknown,
+ *   taskStore?: unknown,
  *   cwd?: string,
  *   dispatchPath?: "anthropic" | "ai-sdk",
  * }} [options]
@@ -136,6 +137,7 @@ export function collectCogniaToolDefs({
   lspResolver,
   codeGraphResolver,
   readTracker,
+  taskStore,
   cwd,
   dispatchPath,
   bgShells,
@@ -171,7 +173,17 @@ export function collectCogniaToolDefs({
     readTracker &&
     (dispatchPath !== "anthropic" || enabled.coreFilesOnAnthropic === true)
   if (coreWanted) {
-    tools.push(...createCoreTools({ cwd, readTracker, lspResolver, bgShells, model, provider }))
+    tools.push(
+      ...createCoreTools({
+        cwd,
+        readTracker,
+        lspResolver,
+        bgShells,
+        taskStore,
+        model,
+        provider,
+      })
+    )
   }
   // The cross-provider plan-ready signal tool. The Anthropic path uses the
   // SDK-native `ExitPlanMode`, so register ours ONLY on the explicit ai-sdk
@@ -191,6 +203,7 @@ export function buildCogniaToolsServer({
   lspResolver,
   codeGraphResolver,
   readTracker,
+  taskStore,
   cwd,
   dispatchPath,
   bgShells,
@@ -205,6 +218,7 @@ export function buildCogniaToolsServer({
     lspResolver,
     codeGraphResolver,
     readTracker,
+    taskStore,
     cwd,
     dispatchPath,
     bgShells,

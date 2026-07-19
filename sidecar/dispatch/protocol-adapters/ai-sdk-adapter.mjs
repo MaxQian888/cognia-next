@@ -347,6 +347,7 @@ export function makeAiSdkAdapter(protocol) {
       // provider HTTP request (cooperative `cancelled` flag alone let the call
       // run to completion and keep billing).
       if (req.abortSignal) streamArgs.abortSignal = req.abortSignal
+      if (req.prepareStep) streamArgs.prepareStep = req.prepareStep
       if (req.tools && Object.keys(req.tools).length > 0) {
         streamArgs.tools = req.tools
         // Multi-step agentic loop: AI SDK runs each tool's `execute` and feeds

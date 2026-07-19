@@ -202,6 +202,41 @@
           "riskLevel": "medium",
           "requiresApproval": true,
           "alwaysLoad": false
+        },
+        {
+          "name": "TaskCreate",
+          "descriptionKey": "tools.coreTaskCreate",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "TaskGet",
+          "descriptionKey": "tools.coreTaskGet",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "TaskList",
+          "descriptionKey": "tools.coreTaskList",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "TaskUpdate",
+          "descriptionKey": "tools.coreTaskUpdate",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "list_shells",
+          "descriptionKey": "tools.coreListShells",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
         }
       ]
     },

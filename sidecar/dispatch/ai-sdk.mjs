@@ -19,6 +19,7 @@ import { makeLazyLspResolver } from "./lsp-resolver-factory.mjs"
 import { makeLazyCodeGraphResolver } from "./codegraph-resolver-factory.mjs"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
 import { createBgShellRegistry } from "../builtin-tools/core/bash-sessions.mjs"
+import { createSessionTaskStore } from "../builtin-tools/core/tasks.mjs"
 import { resolveAdapter } from "./protocol-adapters/registry.mjs"
 import { buildModel } from "./protocol-adapters/ai-sdk-adapter.mjs"
 import {
@@ -512,6 +513,7 @@ export function dispatchAiSdk({
   // Tools are stable for the session — build once, reuse across turns.
   /** @type {Record<string, unknown> | undefined} */
   let toolsCache
+  let toolSearchController = null
   // Doom-loop guards owned by this session (the tool gate's + the MCP gate's).
   // The tools map is built once, so the guards live for the whole multi-turn
   // session; reset them per turn so a legitimate identical call repeated ACROSS
@@ -531,6 +533,9 @@ export function dispatchAiSdk({
   // Per-session background-shell registry (bash run_in_background); killed at
   // teardown so no background process outlives the session.
   const bgShells = createBgShellRegistry()
+  // Per-session structured task graph (TaskCreate/Get/List/Update). Unlike the
+  // legacy TodoWrite payload, ids and dependency edges persist across turns.
+  const taskStore = createSessionTaskStore()
   const lsp = makeLazyLspResolver({ sendOptions, log })
   // Per-session code-graph index (resolver-bound like LSP). Lazily built on
   // first tool call; disposed at session teardown.
@@ -1019,6 +1024,7 @@ export function dispatchAiSdk({
           codeGraphResolver: codeGraph.codeGraphResolver,
           readTracker,
           bgShells,
+          taskStore,
           doomGuard: toolDoomGuard,
           // PostToolUse rewrite at the execute layer (opt-in) — see
           // `reviewToolOutput` above.
@@ -1075,6 +1081,22 @@ export function dispatchAiSdk({
           } catch (err) {
             log("warn", `external MCP setup failed, continuing without it: ${err?.message ?? err}`)
           }
+        }
+
+        // Cross-provider deferred loading. The Anthropic Agent SDK handles
+        // ToolSearch/alwaysLoad natively; AI SDK providers need an explicit
+        // ToolSearch tool plus prepareStep(activeTools). Build it only after
+        // built-in, plugin, and external MCP tools have been permission-filtered
+        // and merged, so discovery can only activate tools the session already
+        // owns. The controller persists for this sidecar session, retaining
+        // discovered tools across manual-loop legs and user turns.
+        if (agentScopedSendOptions.toolSearchEnabled === true) {
+          const { createAiSdkToolSearchController } = await import("./ai-sdk-tool-search.mjs")
+          toolSearchController = createAiSdkToolSearchController({
+            tools: toolsCache,
+            sendOptions: agentScopedSendOptions,
+          })
+          if (toolSearchController) toolsCache = toolSearchController.tools
         }
       }
 
@@ -1157,6 +1179,7 @@ export function dispatchAiSdk({
           messages: messagesForSend,
           modelParams,
           tools: toolsCache,
+          ...(toolSearchController ? { prepareStep: toolSearchController.prepareStep } : {}),
           maxSteps: perLegCap,
           credentials: creds,
           // The built-in provider id (NOT the protocol): the openai endpoint

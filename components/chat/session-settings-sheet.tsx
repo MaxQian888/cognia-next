@@ -214,6 +214,15 @@ export function SessionSettingsSheet({
     if (typeof picked === "string") setForm((f) => ({ ...f, workingDir: picked }))
   }
 
+  const handleMemoryOverride = async (
+    key: "memoryUse" | "memoryLearn",
+    value: "inherit" | "on" | "off"
+  ) => {
+    await updateSession(session.id, {
+      [key]: value === "inherit" ? undefined : value === "on",
+    })
+  }
+
   const handleFork = async () => {
     try {
       const fork = await forkSessionFromParent(session.id)
@@ -470,6 +479,59 @@ export function SessionSettingsSheet({
                 checked={form.briefMode}
                 onCheckedChange={(v) => setForm((f) => ({ ...f, briefMode: v }))}
               />
+            </div>
+          </Section>
+
+          <Section label={t("sheet.sections.memory")}>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="session-memory-use" className="text-xs">
+                  {t("memoryUse")}
+                </Label>
+                <Select
+                  value={
+                    session.memoryUse === undefined ? "inherit" : session.memoryUse ? "on" : "off"
+                  }
+                  onValueChange={(value) =>
+                    void handleMemoryOverride("memoryUse", value as "inherit" | "on" | "off")
+                  }
+                >
+                  <SelectTrigger id="session-memory-use" aria-label={t("memoryUse")}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="inherit">{t("memoryInherit")}</SelectItem>
+                    <SelectItem value="on">{t("memoryOn")}</SelectItem>
+                    <SelectItem value="off">{t("memoryOff")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="session-memory-learn" className="text-xs">
+                  {t("memoryLearn")}
+                </Label>
+                <Select
+                  value={
+                    session.memoryLearn === undefined
+                      ? "inherit"
+                      : session.memoryLearn
+                        ? "on"
+                        : "off"
+                  }
+                  onValueChange={(value) =>
+                    void handleMemoryOverride("memoryLearn", value as "inherit" | "on" | "off")
+                  }
+                >
+                  <SelectTrigger id="session-memory-learn" aria-label={t("memoryLearn")}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="inherit">{t("memoryInherit")}</SelectItem>
+                    <SelectItem value="on">{t("memoryOn")}</SelectItem>
+                    <SelectItem value="off">{t("memoryOff")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </Section>
 

@@ -2262,10 +2262,13 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   async setConfigOption(
     sessionId: string,
     configId: string,
-    value: string
+    value: string | boolean
   ): Promise<AcpConfigOption[]> {
     const session = this._sessions.get(sessionId)
     if (!session) throw new Error(`Session not found: ${sessionId}`)
+    if (typeof value !== "string") {
+      throw new Error(`Config option ${configId} requires a string value`)
+    }
     if (configId === "reasoningEffort") {
       this.updateSession(sessionId, {
         metadata: { ...session.metadata, reasoningEffort: value },

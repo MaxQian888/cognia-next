@@ -532,6 +532,11 @@
     "hideArtifacts": "Hide artifacts panel",
     "hideConversations": "Hide conversation list",
     "insights": "Session insights",
+    "memoryInherit": "Inherit app setting",
+    "memoryLearn": "Learn from this chat",
+    "memoryOff": "Off",
+    "memoryOn": "On",
+    "memoryUse": "Use memories in this chat",
     "noApiKey": "No API key",
     "permissionModeAppDefault": "Use app default",
     "permissionModeLabel": "Permission mode",
@@ -569,6 +574,7 @@
         "actions": "Session actions",
         "behavior": "Behavior",
         "display": "Display",
+        "memory": "Memory",
         "role": "Role & abilities",
         "status": "Status"
       }

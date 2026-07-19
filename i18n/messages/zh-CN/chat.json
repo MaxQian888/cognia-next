@@ -532,6 +532,11 @@
     "hideArtifacts": "折叠产物面板",
     "hideConversations": "折叠会话列表",
     "insights": "会话洞察",
+    "memoryInherit": "继承应用设置",
+    "memoryLearn": "从此对话学习",
+    "memoryOff": "关闭",
+    "memoryOn": "开启",
+    "memoryUse": "在此对话使用记忆",
     "noApiKey": "未配置 API Key",
     "permissionModeAppDefault": "使用应用默认",
     "permissionModeLabel": "权限模式",
@@ -569,6 +574,7 @@
         "actions": "会话操作",
         "behavior": "行为",
         "display": "显示",
+        "memory": "记忆",
         "role": "角色与能力",
         "status": "状态"
       }

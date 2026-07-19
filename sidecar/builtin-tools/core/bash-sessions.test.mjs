@@ -69,6 +69,55 @@ test("read returns not_found for an unknown id", () => {
   assert.equal(r.reason, "not_found")
 })
 
+test("waitForOutput long-polls until new output arrives", async () => {
+  const reg = createBgShellRegistry()
+  const cmd = isWin ? "ping -n 2 127.0.0.1 >nul && echo later" : "sleep 0.1; echo later"
+  const entry = reg.spawnBackground(inv(cmd))
+  const started = Date.now()
+  const result = await reg.waitForOutput(entry.id, { waitMs: 2000 })
+  assert.equal(result.ok, true)
+  assert.match(result.data, /later/)
+  assert.ok(Date.now() - started >= 50)
+  reg.killAll()
+})
+
+test("waitForOutput returns after its deadline when a process stays quiet", async () => {
+  const reg = createBgShellRegistry()
+  const cmd = isWin ? "ping -n 3 127.0.0.1 >nul" : "sleep 2"
+  const entry = reg.spawnBackground(inv(cmd))
+  const started = Date.now()
+  const result = await reg.waitForOutput(entry.id, { waitMs: 75 })
+  assert.equal(result.ok, true)
+  assert.equal(result.data, "")
+  assert.equal(result.status, "running")
+  assert.ok(Date.now() - started >= 50)
+  reg.killAll()
+})
+
+test("read maxChars preserves unread output for the next call", async () => {
+  const reg = createBgShellRegistry()
+  const entry = reg.spawnBackground(inv(isWin ? "echo 1234567890" : "printf 1234567890"))
+  while (reg.list().find((shell) => shell.id === entry.id)?.status !== "exited") {
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  const first = reg.read(entry.id, { maxChars: 4 })
+  const second = reg.read(entry.id, { maxChars: 20 })
+  assert.equal(first.data, "1234")
+  assert.match(second.data, /^567890/)
+})
+
+test("list exposes command lifecycle details for inventory tools", () => {
+  const reg = createBgShellRegistry()
+  const entry = reg.spawnBackground(inv(isWin ? "ping -n 3 127.0.0.1 >nul" : "sleep 2"))
+  const [listed] = reg.list()
+  assert.equal(listed.id, entry.id)
+  assert.equal(listed.command, entry.command)
+  assert.equal(listed.status, "running")
+  assert.equal(typeof listed.startedAt, "number")
+  assert.equal(typeof listed.cwd, "string")
+  reg.killAll()
+})
+
 test("kill terminates a long-running shell; idempotent", async () => {
   const reg = createBgShellRegistry()
   const longCmd = isWin ? "ping -n 30 127.0.0.1 >nul" : "sleep 30"

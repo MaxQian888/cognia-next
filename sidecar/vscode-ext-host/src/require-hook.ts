@@ -17,19 +17,6 @@
 
 import Module from "node:module"
 
-export type PermissionGateDecision = "allow" | "deny"
-
-export interface PermissionGate {
-  /**
-   * Synchronously check whether the calling extension can require `module`.
-   * Returning `"allow"` lets the require proceed; returning `"deny"` makes
-   * the require throw `EPERM` with a cognia-shaped message.
-   *
-   * The gate may consult its own cache before prompting the renderer.
-   */
-  check(extensionId: string, moduleName: string): Promise<PermissionGateDecision>
-}
-
 const ORIGINAL_RESOLVE = (
   Module as unknown as {
     _resolveFilename: (request: string, parent: NodeModule | null) => string
@@ -65,7 +52,6 @@ const SENSITIVE_MODULES = new Set([
 let installed = false
 const vscodeShimByExtension = new Map<string, unknown>()
 let extensionResolver: ((parent: NodeModule | null) => string | null) | null = null
-let gate: PermissionGate | null = null
 const grantCache = new Map<string, Set<string>>()
 
 /**
@@ -91,8 +77,17 @@ export function unregisterVscodeShim(extensionId: string): void {
   grantCache.delete(extensionId)
 }
 
-export function setPermissionGate(g: PermissionGate | null): void {
-  gate = g
+/**
+ * Replace the sensitive-module grants for one extension.
+ *
+ * CommonJS `require()` is synchronous, so authorization must be resolved by
+ * the host before activation. The Rust host derives this list from the live,
+ * non-expired permission ledger and sends it in `extension:load`; trying to
+ * round-trip to JSON-RPC from inside `_load` would deadlock the Node event
+ * loop that has to receive that response.
+ */
+export function setGrantedModules(extensionId: string, modules: readonly string[]): void {
+  grantCache.set(extensionId, new Set(modules))
 }
 
 export function installRequireHook(): void {
@@ -126,13 +121,8 @@ export function installRequireHook(): void {
     }
     if (SENSITIVE_MODULES.has(request)) {
       const extId = resolveExtensionId(parent)
-      if (extId && gate) {
-        // Synchronous-blocking permission check via deasync-style poll.
-        // CommonJS require() can't be async, so we wait for the decision
-        // by spinning the event loop. The renderer responds within a
-        // few ms — this is acceptable for activate-time imports.
-        const decision = waitForGate(gate, extId, request)
-        if (decision === "deny") {
+      if (extId) {
+        if (!grantCache.get(extId)?.has(request)) {
           const err = new Error(`cognia denied "${request}" for extension "${extId}"`) as Error & {
             code?: string
           }
@@ -161,7 +151,6 @@ export function uninstallRequireHook(): void {
   vscodeShimByExtension.clear()
   grantCache.clear()
   extensionResolver = null
-  gate = null
 }
 
 function resolveExtensionId(parent: NodeModule | null): string | null {
@@ -171,60 +160,6 @@ function resolveExtensionId(parent: NodeModule | null): string | null {
   } catch {
     return null
   }
-}
-
-/**
- * Synchronously block until the gate resolves. Implemented via the
- * `Atomics.wait` trick on a SharedArrayBuffer — works in Node 16+. The
- * gate is expected to complete in low milliseconds.
- *
- * If `SharedArrayBuffer` is unavailable (eg sandboxed builds), we fall
- * back to a tight setImmediate spin — slower but correct.
- */
-function waitForGate(
-  g: PermissionGate,
-  extensionId: string,
-  moduleName: string
-): PermissionGateDecision {
-  const cached = grantCache.get(extensionId)
-  if (cached && cached.has(moduleName)) return "allow"
-
-  // Synchronous bridge: we set a flag in a polled object.
-  const state = { resolved: false, decision: "deny" as PermissionGateDecision }
-  void g.check(extensionId, moduleName).then((decision) => {
-    state.resolved = true
-    state.decision = decision
-  })
-
-  // Spin the loop with `Atomics.wait` if available — this lets the
-  // promise chain drain without busy-looping the CPU.
-  const deadline = Date.now() + 30_000
-  while (!state.resolved) {
-    if (Date.now() > deadline) {
-      process.stderr.write(
-        `[vscode-ext-host] permission check timed out for ${extensionId} / ${moduleName}\n`
-      )
-      return "deny"
-    }
-    // We can't really block sync in Node without native helpers. Use a
-    // tiny sleep — sufficient since the renderer responds in <50ms.
-    sleepMillis(2)
-  }
-  if (state.decision === "allow") {
-    let cache = grantCache.get(extensionId)
-    if (!cache) {
-      cache = new Set()
-      grantCache.set(extensionId, cache)
-    }
-    cache.add(moduleName)
-  }
-  return state.decision
-}
-
-function sleepMillis(ms: number): void {
-  const target = Date.now() + ms
-
-  while (Date.now() < target) {}
 }
 
 /**

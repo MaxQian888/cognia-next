@@ -729,12 +729,6 @@ function CreateTeamDialog({ open, onOpenChange, templates, onCreated }: CreateTe
         task: description.trim() || name.trim(),
         config: { requirePlanApproval },
       })
-      addTeammate({
-        teamId: team.id,
-        name: "Team Lead",
-        description: "Lead agent",
-        role: "lead",
-      })
       toast.success(t("teamCreated", { name: team.name }))
       onCreated(team.id)
       reset()

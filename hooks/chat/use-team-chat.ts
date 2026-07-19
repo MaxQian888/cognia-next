@@ -425,7 +425,11 @@ export function useTeamChat() {
         void runTurnMemory(sessionId, {
           userText,
           assistantText: lastAssistant ? textFromParts(lastAssistant.parts) : "",
-          transcript: finalMessages.map((m) => ({ role: m.role, text: textFromParts(m.parts) })),
+          transcript: finalMessages.map((m) => ({
+            role: m.role,
+            text: textFromParts(m.parts),
+            parts: m.parts,
+          })),
         })
 
         // Conversation-title upgrade — parity with direct chat. On the first team

@@ -161,4 +161,28 @@ describe("AgentTeamsListPage", () => {
       expect.objectContaining({ name: "Research Squad (copy)" })
     )
   })
+
+  it("relies on createTeam's seeded lead when creating from scratch", async () => {
+    const user = userEvent.setup()
+    render(<AgentTeamsListPage />)
+
+    await user.click(screen.getByRole("button", { name: "Create team" }))
+    const dialog = screen.getByRole("dialog", { name: "Create new team" })
+    await user.click(within(dialog).getByRole("button", { name: "From scratch" }))
+    await user.type(within(dialog).getByPlaceholderText("e.g., Security Audit Team"), "QA Team")
+    await user.type(
+      within(dialog).getByPlaceholderText("What should this team accomplish?"),
+      "Verify the release"
+    )
+    await user.click(within(dialog).getByRole("button", { name: "Create team" }))
+
+    expect(storeState.createTeam).toHaveBeenCalledWith({
+      name: "QA Team",
+      description: "Verify the release",
+      task: "Verify the release",
+      config: { requirePlanApproval: false },
+    })
+    expect(storeState.addTeammate).not.toHaveBeenCalled()
+    expect(pushMock).toHaveBeenCalledWith("/agent-teams/workspace?teamId=copy_1")
+  })
 })

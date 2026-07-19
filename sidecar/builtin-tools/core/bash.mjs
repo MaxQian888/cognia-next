@@ -73,6 +73,24 @@ export const bashOutputShape = {
     .string()
     .optional()
     .describe("Optional regular expression; only output lines matching it are returned."),
+  wait_ms: z
+    .number()
+    .int()
+    .min(0)
+    .max(30_000)
+    .optional()
+    .describe(
+      "Long-poll for new output or process exit for up to this many milliseconds (max 30000). Defaults to 0 (return immediately)."
+    ),
+  max_chars: z
+    .number()
+    .int()
+    .min(1)
+    .max(30_000)
+    .optional()
+    .describe(
+      "Maximum new characters to return in this call. Remaining output stays unread for the next call."
+    ),
 }
 
 export const killShellShape = {
@@ -310,7 +328,15 @@ export function createBashOutputTool({ bgShells }) {
     if (!bgShells) {
       return toolError("background shells are not available in this session")
     }
-    const r = bgShells.read(args.shellId, { filter: args.filter })
+    const readOptions = {
+      filter: args.filter,
+      maxChars: args.max_chars,
+      waitMs: args.wait_ms,
+    }
+    const r =
+      args.wait_ms && typeof bgShells.waitForOutput === "function"
+        ? await bgShells.waitForOutput(args.shellId, readOptions)
+        : bgShells.read(args.shellId, readOptions)
     if (!r.ok) return toolError(`no background shell with id ${args.shellId}`)
     const status =
       r.status === "exited"
@@ -322,9 +348,27 @@ export function createBashOutputTool({ bgShells }) {
 
   return tool(
     "bash_output",
-    "Read new output from a background shell started with bash(run_in_background). Returns only the output since the last poll plus the shell's status — call repeatedly to follow a long-running command.",
+    "Read new output from a background shell started with bash(run_in_background). Returns only the unread delta plus status. Use wait_ms to long-poll efficiently instead of repeatedly polling, and max_chars to page large output without losing the remainder.",
     bashOutputShape,
     execBashOutput
+  )
+}
+
+/** List every background shell owned by this Agent session. */
+export function createListShellsTool({ bgShells }) {
+  async function execListShells() {
+    if (!bgShells) {
+      return toolError("background shells are not available in this session")
+    }
+    return toolText(JSON.stringify({ shells: bgShells.list() }, null, 2))
+  }
+
+  return tool(
+    "list_shells",
+    "List background shells started by bash(run_in_background), including command, status, exit code, working directory, start/end times, and duration. Use it to recover shell ids before bash_output or kill_shell.",
+    {},
+    execListShells,
+    { alwaysLoad: true }
   )
 }
 

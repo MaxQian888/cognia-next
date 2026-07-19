@@ -69,6 +69,7 @@ jest.mock("@/components/plugins/plugin-extension-slot", () => ({
 }))
 
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { open as openDialog } from "@tauri-apps/plugin-dialog"
 import { isTauri } from "@/lib/tauri"
 import { closeSession } from "@/lib/claude/ipc"
@@ -373,6 +374,28 @@ describe("SessionSettingsSheet", () => {
     await waitFor(() =>
       expect(updateSession).toHaveBeenCalledWith("ses_9", { disabledSkillIds: ["s1"] })
     )
+  })
+
+  it("persists independent per-chat memory use and learning overrides", async () => {
+    const user = userEvent.setup()
+    const updateSession = jest.fn(async (_id: string, _patch: unknown) => undefined)
+    render(
+      <DataAdapterProvider adapter={makeAdapter({ updateSession })}>
+        <SessionSettingsSheet
+          session={mkSession({ id: "ses_memory" })}
+          open
+          onOpenChange={jest.fn()}
+        />
+      </DataAdapterProvider>
+    )
+
+    await user.click(screen.getByRole("combobox", { name: /use memories in this chat/i }))
+    await user.click(screen.getByRole("option", { name: /^off$/i }))
+    await user.click(screen.getByRole("combobox", { name: /learn from this chat/i }))
+    await user.click(screen.getByRole("option", { name: /^on$/i }))
+
+    expect(updateSession).toHaveBeenCalledWith("ses_memory", { memoryUse: false })
+    expect(updateSession).toHaveBeenCalledWith("ses_memory", { memoryLearn: true })
   })
 
   it("picks a working directory via the Tauri folder dialog", async () => {

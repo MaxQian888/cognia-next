@@ -108,7 +108,7 @@
         "name": "Code graph"
       },
       "coreFiles": {
-        "desc": "grep / glob / read / edit / write / bash — the full file-tool suite for non-Anthropic models. Mutating tools require approval.",
+        "desc": "Search, read, patch, shell, waitable background commands, and structured session tasks for non-Anthropic models. Filesystem and shell mutations require approval.",
         "name": "Core file tools"
       },
       "dependencyResearch": {

@@ -115,6 +115,8 @@ import { beginCodeAdoptionTurn } from "@/lib/code-adoption/client"
 import { beginTaskWorkspaceTurn, runIdForTurn, taskIdForMessage } from "@/lib/task-workspace/client"
 import { bumpUnread } from "@/lib/db/session-state"
 import { resolveSendOptions } from "@/lib/claude/build-options"
+import { useGitStore } from "@/stores/git/git-store"
+import { primaryRootOf } from "@/lib/workspace/roots"
 import { pendingRecoveryPhase } from "@/lib/usage/compaction-metrics"
 import {
   buildChatMentionTargets,
@@ -394,7 +396,11 @@ function runMemoryTasks(sessionId: string, messages: UIMessage[]): void {
   void runTurnMemory(sessionId, {
     userText: extractPlainText(lastUser),
     assistantText: extractAssistantText(lastAssistant),
-    transcript: messages.map((m) => ({ role: m.role, text: extractPlainText(m) })),
+    transcript: messages.map((m) => ({
+      role: m.role,
+      text: extractPlainText(m),
+      parts: m.parts,
+    })),
   })
 }
 
@@ -1911,6 +1917,18 @@ async function buildSendOptions(
     : chatState.messages
   const recoveryPhase = pendingRecoveryPhase(sessionMessages)
   const postCompaction = recoveryPhase !== null ? { phaseNumber: recoveryPhase } : undefined
+  const memoryBranch = useGitStore.getState().status?.branch ?? undefined
+  const primaryRoot = activeProject ? primaryRootOf(activeProject)?.path : undefined
+  const referencedMemoryPath =
+    primaryRoot && referencedPaths
+      ? referencedPaths
+          .map((item) => item.absolute)
+          .find((absolute) => absolute === primaryRoot || absolute.startsWith(`${primaryRoot}/`))
+      : undefined
+  const memoryPath =
+    referencedMemoryPath && primaryRoot
+      ? referencedMemoryPath.slice(primaryRoot.length).replace(/^\/+/, "") || undefined
+      : undefined
 
   return resolveSendOptions({
     postCompaction,
@@ -1920,6 +1938,8 @@ async function buildSendOptions(
     workspaceRestricted,
     referencedPaths,
     targetAgentId,
+    memoryBranch,
+    memoryPath,
     twinDeps: twinHandshake,
     twinUserMessage: twinHandshake ? userMessage : undefined,
     memoryDeps: memoryHandshake,

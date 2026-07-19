@@ -226,6 +226,34 @@ test("session exposes pendingApprovals AND pendingPluginToolCalls (gate-first co
   assert.ok(session.pendingPluginToolCalls instanceof Map)
 })
 
+test("AI SDK dispatch wires ToolSearch into prepareStep and retains discoveries", async () => {
+  const { events, emit } = captureEmit()
+  const captured = capturingStream([{ type: "finish", finishReason: "stop" }])
+  dispatchAiSdk({
+    provider: "openai",
+    sessionId: "tool-search-session",
+    firstPrompt: "update a file",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      builtinTools: { coreFiles: true },
+      toolSearchEnabled: true,
+    },
+    emit,
+    log: () => {},
+    streamText: captured.fn,
+  })
+
+  await waitForEvent(events, (event) => event.type === "session_ended")
+  const call = captured.calls[0]
+  assert.ok(call.tools.ToolSearch)
+  assert.equal(typeof call.prepareStep, "function")
+  assert.ok(!call.prepareStep().activeTools.includes("write"), "mutating tools start deferred")
+
+  await call.tools.ToolSearch.execute({ query: "select:write" })
+  assert.ok(call.prepareStep().activeTools.includes("write"), "discovery persists for later steps")
+})
+
 test("refuses to dispatch an OpenRouter key with no base URL (credential-leak guard)", async () => {
   const { events, emit } = captureEmit()
   let streamCalled = false

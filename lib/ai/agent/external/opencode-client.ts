@@ -1024,7 +1024,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
   async setConfigOption(
     sessionId: string,
     configId: string,
-    value: string
+    value: string | boolean
   ): Promise<AcpConfigOption[]> {
     try {
       await this.client.config.update({

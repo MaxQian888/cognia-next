@@ -7,6 +7,7 @@ import {
   createBashTool,
   createBashOutputTool,
   createKillShellTool,
+  createListShellsTool,
   resolveShellInvocation,
   tailTruncate,
   composeBashBody,
@@ -276,6 +277,36 @@ test("bash_output follows a background shell to completion", async () => {
   assert.match(acc, /exited/)
 })
 
+test("bash_output can wait for output and cap each returned chunk", async () => {
+  const bgShells = createBgShellRegistry()
+  const bash = createBashTool({ cwd: os.tmpdir(), bgShells, shell: legacyShell })
+  const output = createBashOutputTool({ bgShells })
+  const command =
+    process.platform === "win32"
+      ? "ping -n 2 127.0.0.1 >nul && echo 1234567890"
+      : "sleep 0.1; printf 1234567890"
+  const start = await bash.handler({ command, run_in_background: true }, {})
+  const id = extractShellId(textOf(start))
+  const first = await output.handler({ shellId: id, wait_ms: 2000, max_chars: 4 }, {})
+  assert.match(textOf(first), /^1234/)
+  const second = await output.handler({ shellId: id, max_chars: 20 }, {})
+  assert.match(textOf(second), /^567890/)
+})
+
+test("list_shells inventories running and completed background commands", async () => {
+  const bgShells = createBgShellRegistry()
+  const bash = createBashTool({ cwd: os.tmpdir(), bgShells, shell: legacyShell })
+  const list = createListShellsTool({ bgShells })
+  const command = process.platform === "win32" ? "ping -n 30 127.0.0.1 >nul" : "sleep 30"
+  const start = await bash.handler({ command, run_in_background: true }, {})
+  const id = extractShellId(textOf(start))
+  const result = await list.handler({}, {})
+  const payload = JSON.parse(textOf(result))
+  assert.equal(payload.shells[0].id, id)
+  assert.equal(payload.shells[0].status, "running")
+  bgShells.killAll()
+})
+
 test("bash_output reports no-new-output and unknown ids", async () => {
   const bgShells = createBgShellRegistry()
   const output = createBashOutputTool({ bgShells })
@@ -305,9 +336,11 @@ test("kill_shell terminates a background shell and is idempotent", async () => {
   assert.equal(missing.isError, true)
 })
 
-test("bash_output / kill_shell error without a registry", async () => {
+test("bash_output / kill_shell / list_shells error without a registry", async () => {
   const output = createBashOutputTool({})
   const kill = createKillShellTool({})
+  const list = createListShellsTool({})
   assert.equal((await output.handler({ shellId: "x" }, {})).isError, true)
   assert.equal((await kill.handler({ shellId: "x" }, {})).isError, true)
+  assert.equal((await list.handler({}, {})).isError, true)
 })
