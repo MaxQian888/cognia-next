@@ -12,15 +12,11 @@
  *     Desktop-lifecycle commands are host no-ops here: cognia-server always
  *     mounts the `/connectors` webhook ingress (no local axum server to
  *     start/stop) and the brain holds no local WS handles to reap.
- *   - Inbound events: `setConnectorListen` routes the webhook transports'
- *     `connectors://webhook/<adapterId>` subscriptions over
- *     `transport.subscribe()` (`/ws/v1/events` — `BusEventEmitter` publishes
- *     the byte-identical topic the desktop `AppHandleEmitter` emits).
- *
- * Tier 1 scope: webhook-transport rows only. Dial-out WS channels (Lark
- * long-conn, Discord/QQ/DingTalk gateways, OneBot, Slack socket mode) need
- * the Rust `EventEmitter` trait extension and are skipped with a log line —
- * the desktop keeps running them.
+ *   - Inbound events: `setConnectorListen` routes every connector topic over
+ *     `transport.subscribe()` (`/ws/v1/events`). The Rust command plane uses
+ *     `ConnectorEventEmitter` for webhook, generic WS, Lark long-connection,
+ *     and reverse-WS topics, preserving the byte-identical names emitted by
+ *     the desktop `AppHandleEmitter`.
  */
 
 import { transport } from "@/lib/tauri"
@@ -83,7 +79,6 @@ registerHeadlessRuntime({
     const prevListen = setConnectorListen(headlessConnectorListen)
     const dispose = installConnectorRuntime({
       skipHostGate: true,
-      rowFilter: (row) => row.transportMode === "webhook",
       log: (level, message) => ctx.log(level, message),
     })
     return () => {

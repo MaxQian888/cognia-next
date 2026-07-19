@@ -8,12 +8,14 @@
 
 import {
   getMcpServerStatus,
+  isMcpServerHostAvailable,
   restartMcpServer,
   startMcpServer,
   stopMcpServer,
 } from "./tauri-control"
 import { transport } from "@/lib/tauri"
 import type { ExternalBridgeSettings } from "@/types/wiki"
+import { setActiveRemoteTransport, __resetRoutingForTests } from "@/lib/tauri/transport-routing"
 
 const TAURI_KEY = "__TAURI_INTERNALS__"
 function setTauri(on: boolean) {
@@ -30,6 +32,7 @@ beforeEach(() => {
 
 afterEach(() => {
   setTauri(false)
+  __resetRoutingForTests()
   jest.restoreAllMocks()
 })
 
@@ -103,5 +106,22 @@ describe("getMcpServerStatus", () => {
     expect(status.running).toBe(true)
     expect(status.port).toBe(3001)
     expect(status.startedAt).toBe("2026-05-04T12:34:56Z")
+  })
+
+  it("queries the process-owned status through an active remote host", async () => {
+    setTauri(false)
+    setActiveRemoteTransport({
+      call: jest.fn(),
+      subscribe: jest.fn(() => () => {}),
+    })
+    expect(isMcpServerHostAvailable()).toBe(true)
+    callSpy.mockResolvedValueOnce({ running: true, port: 47890, startedAt: "remote" })
+
+    await expect(getMcpServerStatus()).resolves.toEqual({
+      running: true,
+      port: 47890,
+      startedAt: "remote",
+    })
+    expect(callSpy).toHaveBeenCalledWith("mcp_server_status")
   })
 })

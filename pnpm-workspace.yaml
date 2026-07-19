@@ -6,3 +6,4 @@ packages:
   - docs
   - mobile
   - packages/*
+  - services/workspace-runtime

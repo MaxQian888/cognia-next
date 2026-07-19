@@ -5,6 +5,14 @@
  */
 
 import type { VisualWorkflow } from "@/types/workflow/visual"
+import { DEFAULT_WORKFLOW_SETTINGS } from "@/types/workflow/visual"
+import {
+  validateGraphIntegrity,
+  validateWorkflow,
+  visualWorkflowSchema,
+} from "@/lib/workflow/definition/validate"
+
+const partialWorkflowSchema = visualWorkflowSchema.partial().required({ nodes: true, edges: true })
 
 function safeFileName(name: string): string {
   return name.replace(/[^a-z0-9-_]+/gi, "_") || "workflow"
@@ -37,11 +45,41 @@ function validateWorkflowShape(parsed: unknown): Partial<VisualWorkflow> {
   if (!parsed || typeof parsed !== "object") {
     throw new Error("Top-level must be an object")
   }
-  const wf = parsed as Partial<VisualWorkflow>
-  if (!Array.isArray(wf.nodes) || !Array.isArray(wf.edges)) {
+  const raw = parsed as Partial<VisualWorkflow>
+  if (!Array.isArray(raw.nodes) || !Array.isArray(raw.edges)) {
     throw new Error("Missing 'nodes' or 'edges' array")
   }
-  return wf
+  const complete =
+    typeof raw.id === "string" &&
+    raw.schemaVersion !== undefined &&
+    typeof raw.name === "string" &&
+    typeof raw.createdAt === "number" &&
+    typeof raw.updatedAt === "number" &&
+    raw.settings !== undefined
+  if (complete) {
+    const result = validateWorkflow(raw)
+    if (!result.ok) throw new Error(result.errors.join("; "))
+    return result.workflow as VisualWorkflow
+  }
+
+  const partial = partialWorkflowSchema.safeParse(raw)
+  if (!partial.success) {
+    throw new Error(
+      partial.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")
+    )
+  }
+  const graph = validateGraphIntegrity({
+    id: "wf_import_validation",
+    schemaVersion: partial.data.schemaVersion ?? 2,
+    name: partial.data.name ?? "Imported workflow",
+    createdAt: partial.data.createdAt ?? 0,
+    updatedAt: partial.data.updatedAt ?? 0,
+    nodes: partial.data.nodes,
+    edges: partial.data.edges,
+    settings: partial.data.settings ?? DEFAULT_WORKFLOW_SETTINGS,
+  })
+  if (graph.errors.length > 0) throw new Error(graph.errors.join("; "))
+  return partial.data as Partial<VisualWorkflow>
 }
 
 /** Bundle envelope produced by {@link downloadWorkflowsBundle}. */

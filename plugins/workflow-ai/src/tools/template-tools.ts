@@ -86,6 +86,7 @@ export function templateToProposalOps(
       type: "add_node",
       nodeId: realId,
       kind: node.type as WorkflowNodeKind,
+      typeVersion: node.typeVersion,
       position: node.position,
       data,
     })

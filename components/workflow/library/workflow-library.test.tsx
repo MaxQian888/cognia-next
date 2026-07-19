@@ -89,12 +89,30 @@ describe("WorkflowLibrary", () => {
   it("imports workflows from a picked JSON file into the current folder", async () => {
     render(<WorkflowLibrary />)
     await screen.findByTestId("workflow-empty-root")
-    const json = JSON.stringify({ name: "Imported WF", nodes: [], edges: [] })
+    const json = JSON.stringify({
+      name: "Imported WF",
+      nodes: [],
+      edges: [],
+      complexity: "advanced",
+      variables: { REGION: "eu" },
+      pinData: { preview: { value: 1 } },
+      staticData: { cursor: 4 },
+      interface: { inputSchema: { type: "object" } },
+      published: { at: 1, toolName: "source_tool" },
+    })
     const file = new File([json], "imported.json", { type: "application/json" })
     fireEvent.change(screen.getByTestId("workflow-import-input"), { target: { files: [file] } })
     await waitFor(async () => {
       const all = await listWorkflows()
-      expect(all.some((w) => w.name === "Imported WF")).toBe(true)
+      const imported = all.find((w) => w.name === "Imported WF")
+      expect(imported).toMatchObject({
+        complexity: "advanced",
+        variables: { REGION: "eu" },
+        pinData: { preview: { value: 1 } },
+        staticData: { cursor: 4 },
+        interface: { inputSchema: { type: "object" } },
+      })
+      expect(imported?.published).toBeUndefined()
     })
   })
 

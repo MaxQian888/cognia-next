@@ -82,7 +82,7 @@ export interface ResolveAssetFn {
    * The bridge does not bake this in so we can test it with a mock and so
    * Web Workers / other shells can supply their own resolver.
    */
-  (pluginRoot: string, relPath: string): string
+  (pluginRoot: string, relPath: string, mime?: string): string | Promise<string>
 }
 
 export interface ApplyPluginFontsArgs {
@@ -137,8 +137,8 @@ export async function applyPluginFonts(
   await Promise.all(
     args.fonts.flatMap((font) =>
       font.files.map(async (file) => {
-        const url = args.resolveAsset(args.pluginRoot, file.src)
         try {
+          const url = await args.resolveAsset(args.pluginRoot, file.src, fontMimeType(file.src))
           const response = await fetcher(url)
           if (!response.ok) {
             rejected.push({
@@ -199,6 +199,15 @@ export async function applyPluginFonts(
     registered.push(family)
   }
   return { registered, rejected }
+}
+
+function fontMimeType(path: string): string {
+  const extension = path.split(".").pop()?.toLowerCase()
+  if (extension === "woff2") return "font/woff2"
+  if (extension === "woff") return "font/woff"
+  if (extension === "otf") return "font/otf"
+  if (extension === "ttf") return "font/ttf"
+  return "application/octet-stream"
 }
 
 /** Remove a plugin's `<style>` block + every family it owned. */

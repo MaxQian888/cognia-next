@@ -3,10 +3,12 @@ import { act, renderHook } from "@testing-library/react"
 import type { ElementRect } from "@/lib/browser/protocol"
 
 let mockOnRect: ((r: ElementRect) => void) | undefined
+let mockOnRects: Array<(r: ElementRect) => void> = []
 
 jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
 jest.mock("@/lib/browser/client", () => ({
   browserClient: {
+    setEmbedOwnerToken: jest.fn(),
     embedCreate: jest.fn().mockResolvedValue("browser-embed"),
     embedSetBounds: jest.fn().mockResolvedValue(undefined),
     embedNavigate: jest.fn().mockResolvedValue(undefined),
@@ -17,6 +19,7 @@ jest.mock("@/lib/browser/client", () => ({
 jest.mock("./use-element-rect", () => ({
   useElementRect: (_ref: unknown, onChange?: (r: ElementRect) => void) => {
     mockOnRect = onChange
+    if (onChange) mockOnRects.push(onChange)
     return null
   },
 }))
@@ -32,6 +35,7 @@ const deliverRect = (rect: ElementRect = RECT) => act(() => mockOnRect?.(rect))
 
 beforeEach(() => {
   mockOnRect = undefined
+  mockOnRects = []
   ;(browserClient.embedCreate as jest.Mock).mockClear().mockResolvedValue("browser-embed")
   ;(browserClient.embedSetBounds as jest.Mock).mockClear().mockResolvedValue(undefined)
   ;(browserClient.embedNavigate as jest.Mock).mockClear().mockResolvedValue(undefined)
@@ -112,8 +116,33 @@ it("recovers when embedCreate rejects (allows a later retry)", async () => {
   })
   act(() => mockOnRect?.({ x: 1, y: 1, width: 10, height: 10 }))
   expect(browserClient.embedCreate).toHaveBeenCalledTimes(2)
-  // Bounds sync is skipped while not created.
-  expect(browserClient.embedSetBounds).not.toHaveBeenCalled()
+  expect(browserClient.embedCreate).toHaveBeenLastCalledWith("http://localhost:3000/", {
+    x: 1,
+    y: 1,
+    width: 10,
+    height: 10,
+  })
+})
+
+it("backs off instead of spinning while another native window owns the lease", async () => {
+  jest.useFakeTimers()
+  ;(browserClient.embedCreate as jest.Mock)
+    .mockRejectedValueOnce(new Error("embedded browser is owned by another Cognia surface"))
+    .mockResolvedValueOnce("browser-embed")
+
+  try {
+    renderHook(() => useBrowserPaneWebview(ref, { url: "http://localhost:3000/" }))
+    deliverRect()
+    await act(async () => Promise.resolve())
+    expect(browserClient.embedCreate).toHaveBeenCalledTimes(1)
+
+    act(() => jest.advanceTimersByTime(249))
+    expect(browserClient.embedCreate).toHaveBeenCalledTimes(1)
+    await act(async () => jest.advanceTimersByTime(1))
+    expect(browserClient.embedCreate).toHaveBeenCalledTimes(2)
+  } finally {
+    jest.useRealTimers()
+  }
 })
 
 it("destroys the webview on unmount", () => {
@@ -123,6 +152,27 @@ it("destroys the webview on unmount", () => {
   deliverRect()
   unmount()
   expect(browserClient.embedDestroy).toHaveBeenCalled()
+})
+
+it("leases the singleton webview and hands it to the next mounted owner", async () => {
+  const first = renderHook(() =>
+    useBrowserPaneWebview(ref, { url: "http://localhost:3000/", ownerId: "browser" })
+  )
+  act(() => mockOnRects[0]?.(RECT))
+  const second = renderHook(() =>
+    useBrowserPaneWebview(ref, { url: "http://localhost:4173/", ownerId: "sites" })
+  )
+  act(() => mockOnRects[1]?.(RECT))
+  expect(browserClient.embedCreate).toHaveBeenCalledTimes(1)
+
+  first.unmount()
+  await act(async () => {
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+  expect(browserClient.embedDestroy).toHaveBeenCalledTimes(1)
+  expect(browserClient.embedCreate).toHaveBeenLastCalledWith("http://localhost:4173/", RECT)
+  second.unmount()
 })
 
 it("setVisible is a no-op before the webview is created", async () => {

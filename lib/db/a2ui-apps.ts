@@ -3,6 +3,12 @@
 
 import { getDb } from "./schema"
 import type { A2UIAppRow } from "./a2ui-types"
+import type { A2UIAppInstance } from "@/hooks/a2ui/app-builder/types"
+
+export type A2UIAppMetadataPatch = Partial<
+  Omit<A2UIAppInstance, "id" | "templateId" | "createdAt"> &
+    Pick<A2UIAppRow, "isFavorite" | "sortOrder">
+>
 
 export async function listApps(): Promise<A2UIAppRow[]> {
   return getDb().a2uiApps.orderBy("updatedAt").reverse().toArray()
@@ -13,12 +19,49 @@ export async function getApp(id: string): Promise<A2UIAppRow | undefined> {
 }
 
 export async function upsertApp(row: A2UIAppRow): Promise<void> {
-  await getDb().a2uiApps.put(row)
+  const db = getDb()
+  await db.transaction("rw", db.a2uiApps, async () => {
+    const existing = await db.a2uiApps.get(row.id)
+    if (existing?.isBuiltIn) {
+      throw new Error(`Cannot modify built-in app ${row.id}`)
+    }
+    await db.a2uiApps.put(row)
+  })
 }
 
 export async function bulkUpsertApps(rows: A2UIAppRow[]): Promise<void> {
   if (rows.length === 0) return
-  await getDb().a2uiApps.bulkPut(rows)
+  const db = getDb()
+  await db.transaction("rw", db.a2uiApps, async () => {
+    const existingRows = await db.a2uiApps.bulkGet(rows.map((row) => row.id))
+    const protectedRow = existingRows.find((row) => row?.isBuiltIn)
+    if (protectedRow) {
+      throw new Error(`Cannot modify built-in app ${protectedRow.id}`)
+    }
+    await db.a2uiApps.bulkPut(rows)
+  })
+}
+
+/**
+ * Patch metadata on an existing durable app without replacing its component
+ * tree or creating a structurally incomplete row. Unsaved apps return false;
+ * callers can still update their local instance cache. Built-ins are read-only.
+ */
+export async function patchAppMetadata(
+  id: string,
+  patch: A2UIAppMetadataPatch,
+  when: number = Date.now()
+): Promise<boolean> {
+  const db = getDb()
+  return db.transaction("rw", db.a2uiApps, async () => {
+    const row = await db.a2uiApps.get(id)
+    if (!row) return false
+    if (row.isBuiltIn) {
+      throw new Error(`Cannot modify built-in app ${id}`)
+    }
+    await db.a2uiApps.update(id, { ...patch, updatedAt: when })
+    return true
+  })
 }
 
 export async function deleteApp(id: string): Promise<void> {

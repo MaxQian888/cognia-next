@@ -234,8 +234,7 @@ export function __resetIconThemesForTesting(): void {
 }
 
 // ── W5.1: enable-time registration from manifest.vscodeIconThemes ────────────
-import { readTextFile } from "@/lib/file/file-operations"
-import { isUnsafeRelativePath, joinPluginPath } from "./plugin-file-path"
+import { isUnsafeRelativePath, readContainedPluginFile } from "./plugin-file-path"
 
 export interface IconThemeManifestEntry {
   id: string
@@ -256,7 +255,7 @@ export async function registerIconThemesForPlugin(
       if (isUnsafeRelativePath(entry.path)) {
         throw new Error(`unsafe icon theme path "${entry.path}"`)
       }
-      const jsonText = await readTextFile(joinPluginPath(baseDir, entry.path))
+      const jsonText = await readContainedPluginFile(pluginId, baseDir, entry.path)
       registerIconTheme({
         pluginId,
         themeId: entry.id,

@@ -168,7 +168,7 @@ class MockAdapter {
   setSessionModel(_sid: string, _mid: string) {
     return this.setSessionModelImpl(_sid, _mid)
   }
-  setConfigOption(_sid: string, _id: string, _v: string) {
+  setConfigOption(_sid: string, _id: string, _v: string | boolean) {
     return this.setConfigOptionImpl(_sid, _id, _v)
   }
   getConfigOptions(sid: string) {
@@ -496,7 +496,9 @@ describe("Session extensions: list/fork/resume", () => {
       messages: [],
       permissionMode: "default" as const,
     }
-    currentMock.forkSessionImpl = jest.fn(async () => forked)
+    currentMock.forkSessionImpl = jest.fn(
+      async (_sessionId: string, _options?: SessionCreateOptions) => forked
+    )
 
     await m.forkSession("agent-1", "s_1", {
       cwd: "/work",

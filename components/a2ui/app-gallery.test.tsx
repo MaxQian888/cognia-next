@@ -3,8 +3,25 @@
  */
 
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { AppGallery } from "./app-gallery"
+
+const mockToastError = jest.fn()
+const mockLoggerError = jest.fn()
+
+jest.mock("sonner", () => ({
+  toast: {
+    error: (...args: unknown[]) => mockToastError(...args),
+  },
+}))
+
+jest.mock("@cognia/logging", () => ({
+  loggers: {
+    ui: {
+      error: (...args: unknown[]) => mockLoggerError(...args),
+    },
+  },
+}))
 
 // Mock the hooks and components
 jest.mock("@/hooks/a2ui/use-app-builder", () => ({
@@ -36,12 +53,36 @@ jest.mock("./a2ui-app-card", () => ({
   AppCard: ({
     app,
     onSelect,
+    onDelete,
+    onRename,
   }: {
     app: { id: string; name: string }
     onSelect: (id: string) => void
+    onDelete: (id: string) => void
+    onRename: (app: { id: string; name: string }) => void
   }) => (
     <div data-testid={`app-card-${app.id}`} onClick={() => onSelect(app.id)}>
       {app.name}
+      <button
+        type="button"
+        aria-label={`delete-${app.id}`}
+        onClick={(event) => {
+          event.stopPropagation()
+          onDelete(app.id)
+        }}
+      >
+        Delete
+      </button>
+      <button
+        type="button"
+        aria-label={`rename-${app.id}`}
+        onClick={(event) => {
+          event.stopPropagation()
+          onRename(app)
+        }}
+      >
+        Rename
+      </button>
     </div>
   ),
 }))
@@ -200,7 +241,7 @@ describe("AppGallery", () => {
   })
 
   describe("dialogs", () => {
-    it("should open delete confirmation dialog", async () => {
+    it("keeps the selected app and confirmation dialog open when durable deletion fails", async () => {
       const mockApps = [
         {
           id: "app-1",
@@ -210,6 +251,7 @@ describe("AppGallery", () => {
           lastModified: Date.now(),
         },
       ]
+      const deleteApp = jest.fn().mockRejectedValue(new Error("IndexedDB unavailable"))
       mockUseA2UIAppBuilder.mockReturnValue({
         templates: [],
         getTemplate: jest.fn(),
@@ -217,7 +259,7 @@ describe("AppGallery", () => {
         getAppInstance: jest.fn((id) => mockApps.find((app) => app.id === id)),
         createFromTemplate: jest.fn(),
         duplicateApp: jest.fn(),
-        deleteApp: jest.fn(),
+        deleteApp,
         renameApp: jest.fn(),
         resetAppData: jest.fn(),
         handleAppAction: jest.fn(),
@@ -229,8 +271,60 @@ describe("AppGallery", () => {
 
       render(<AppGallery />)
 
-      // Verify app card is rendered
-      expect(screen.getByTestId("app-card-app-1")).toBeInTheDocument()
+      fireEvent.click(screen.getByTestId("app-card-app-1"))
+      expect(screen.getAllByTestId("surface-app-1").length).toBeGreaterThan(0)
+
+      fireEvent.click(screen.getByRole("button", { name: "delete-app-1" }))
+      fireEvent.click(screen.getByRole("button", { name: "Delete" }))
+
+      expect(deleteApp).toHaveBeenCalledWith("app-1")
+      await act(async () => {})
+      expect(mockToastError).toHaveBeenCalledWith("Failed to delete app")
+      expect(screen.getByRole("heading", { name: "Delete App" })).toBeInTheDocument()
+      expect(screen.getAllByTestId("surface-app-1").length).toBeGreaterThan(0)
+    })
+
+    it("keeps the rename dialog open when durable metadata persistence fails", async () => {
+      const mockApps = [
+        {
+          id: "app-1",
+          templateId: "t1",
+          name: "Original App",
+          createdAt: Date.now(),
+          lastModified: Date.now(),
+        },
+      ]
+      const renameApp = jest.fn().mockRejectedValue(new Error("IndexedDB unavailable"))
+      mockUseA2UIAppBuilder.mockReturnValue({
+        templates: [],
+        getTemplate: jest.fn(),
+        getAllApps: jest.fn(() => mockApps),
+        getAppInstance: jest.fn((id) => mockApps.find((app) => app.id === id)),
+        createFromTemplate: jest.fn(),
+        duplicateApp: jest.fn(),
+        deleteApp: jest.fn(),
+        renameApp,
+        resetAppData: jest.fn(),
+        handleAppAction: jest.fn(),
+        setAppThumbnail: jest.fn(),
+        updateAppMetadata: jest.fn(),
+        incrementAppViews: jest.fn(),
+        prepareForPublish: jest.fn(() => ({ valid: false, missing: [] })),
+      })
+
+      render(<AppGallery />)
+
+      fireEvent.click(screen.getByRole("button", { name: "rename-app-1" }))
+      fireEvent.change(screen.getByPlaceholderText("App Name"), {
+        target: { value: "Renamed App" },
+      })
+      fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+      expect(renameApp).toHaveBeenCalledWith("app-1", "Renamed App")
+      await act(async () => {})
+      expect(mockToastError).toHaveBeenCalledWith("Failed to save app changes")
+      expect(screen.getByPlaceholderText("App Name")).toHaveValue("Renamed App")
+      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
     })
   })
 
@@ -260,7 +354,8 @@ describe("AppGallery", () => {
     it("should render sort options", () => {
       render(<AppGallery />)
 
-      expect(screen.getByText("Sort:")).toBeInTheDocument()
+      expect(screen.getByText("Sort by")).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: "Sort ascending" })).toBeInTheDocument()
     })
 
     it("should have sort toggle button", () => {

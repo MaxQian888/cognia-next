@@ -16,6 +16,9 @@ Use the packed `@cognia/plugin-sdk` package as the only Cognia dependency in a t
 | `@cognia/plugin-sdk/context` | `PluginContext`, `FullPluginContext`, and callable context API interfaces |
 | `@cognia/plugin-sdk/hooks` | hook payloads and hook interfaces |
 | `@cognia/plugin-sdk/contracts` | read-only canonical contract metadata |
+| `@cognia/plugin-sdk/events` | stable event constants and event payload types |
+| `@cognia/plugin-sdk/permissions` | public permission values and permission types |
+| `@cognia/plugin-sdk/extensions` | extension-point constants and contribution types |
 | `@cognia/plugin-sdk/api/tool`, `/api/native-anthropic-tool` | explicitly supported compatibility subpaths |
 
 Never import `@/lib`, `@/types`, `@cognia/plugin-sdk/host`, or an app-private `@cognia/*` package. The `host` entry exists only for one repository migration window and is deliberately absent from npm exports and tarballs.
@@ -28,13 +31,17 @@ Never import `@/lib`, `@/types`, `@cognia/plugin-sdk/host`, or an app-private `@
 | `python` | `pythonMain` | rejected | Python declarations cannot execute JavaScript contribution factories |
 | `hybrid` | `pythonMain`; `main` when JS contributions exist | allowed with `main` | Each runtime is loaded independently |
 | `wasm` | `wasmMain` and `wasm.apiVersion` | rejected | Desktop Component Model host |
-| `vscode-extension` | `vscodeMain`, except theme-only packages | VS Code contributions only | Desktop Node sidecar |
+| `vscode-extension` | one of `vscodeMain`, themes, grammars, icon themes, snippets, or languages | VS Code contributions only | Declarative-only extensions do not need `vscodeMain`; code extensions do |
 
 `engines.cognia` is the compatibility authority. Lint and install reject unknown capabilities and a lower bound older than any declared capability's catalog minimum.
 
+Desktop JavaScript plugins execute under Cognia's checksum-pinned bundled Node 26 runtime, with 26.3.1 as the minimum patched version. A plugin cannot choose a system Node binary. Filesystem grants are canonical, symlink-free paths; each path is passed as a separate Node permission flag, and grants cannot overlap the immutable install tree or host-owned permission ledger.
+
 ## Path rules
 
-Every executable or asset entry is relative to the plugin root. Empty paths, control/NUL bytes, URI schemes, POSIX or Windows absolute paths, drive-relative paths, UNC/extended paths, encoded path controls, and `..` using either slash style are rejected. Installed archives may contain regular files and directories only: symbolic and hard links are rejected. Runtime loaders re-check containment and reject symlinked path segments before consuming executable entries.
+Every executable or asset entry is relative to the plugin root. Empty paths, control/NUL bytes, URI schemes, POSIX or Windows absolute paths, drive-relative paths, UNC or Windows device-namespace paths, encoded path controls, and `..` using either slash style are rejected. Installed archives may contain regular files and directories only: symbolic and hard links are rejected. Runtime loaders re-check containment and reject symlinked path segments before consuming executable entries.
+
+Character-pack avatars accept only `webDataUrl`. The former `avatarImage.tauriPath` field was removed because it had no runtime consumer and bypassed the contained asset reader.
 
 Valid: `dist/index.js`, `providers/session/importer.js`.
 
@@ -42,7 +49,7 @@ Invalid: `../outside.js`, `C:outside.js`, `C:\\outside.js`, `\\\\server\\share\\
 
 ## Context surface
 
-`PluginContext` describes the intentionally partial/base context. `FullPluginContext` describes the host-created runtime surface. In the full context, `memory`, `pet`, `webview`, `auth`, and `uri` are required, alongside the core logger, storage, UI, agent, and other extended APIs. Implementations and `create*API` factories remain host-only.
+`PluginContext` describes the intentionally partial/base context. `FullPluginContext` describes the host-created runtime surface. In the full context, `memory`, `pet`, `webview`, `auth`, and `uri` are required, alongside the core logger, storage, UI, agent, and all other callable APIs. Implementations and `create*API` factories remain host-only.
 
 ```ts
 import { definePlugin, type PluginContext } from "@cognia/plugin-sdk"

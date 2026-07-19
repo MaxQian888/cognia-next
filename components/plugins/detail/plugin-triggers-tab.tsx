@@ -72,8 +72,8 @@ export function PluginTriggersTab({ pluginId }: Props) {
     const out: Subscription[] = []
     for (const reg of listPluginTriggers()) {
       if (reg.pluginId !== pluginId) continue
-      for (const workflowId of reg.instances.keys()) {
-        out.push({ kind: reg.kind, workflowId })
+      for (const instance of reg.instances.values()) {
+        out.push({ kind: reg.kind, workflowId: instance.workflowId })
       }
     }
     return out.sort((a, b) => a.kind.localeCompare(b.kind))

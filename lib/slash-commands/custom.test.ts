@@ -46,12 +46,12 @@ beforeEach(() => {
 })
 
 describe("loadCustomSlashCommands", () => {
-  it("returns [] and logs at debug when invoke throws", async () => {
+  it("returns [] without browser logging when invoke throws in Node", async () => {
     const consoleSpy = jest.spyOn(console, "debug").mockImplementation(() => {})
     mockedInvoke.mockRejectedValue(new Error("not Tauri"))
     const out = await loadCustomSlashCommands(null)
     expect(out).toEqual([])
-    expect(consoleSpy).toHaveBeenCalled()
+    expect(consoleSpy).not.toHaveBeenCalled()
     consoleSpy.mockRestore()
   })
 

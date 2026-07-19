@@ -110,6 +110,24 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            # ADR-0085 shared browser — default-off, and still requires the
+            # user's experiment toggle before capability advertisement.
+            - name: COGNIA_REMOTE_BROWSER_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: remoteBrowserEnabled
+                  optional: true
+            - name: COGNIA_WORKSPACE_RUNTIME_URL_TEMPLATE
+              value: http://workspace-runtime-{workspace_id}:27910
+            - name: COGNIA_WORKSPACE_RUNTIME_SECRET_DIR
+              value: /runtime-secrets
+            - name: COGNIA_WORKSPACE_RUNTIME_WORKSPACES
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: remoteBrowserWorkspaces
+                  optional: true
           readinessProbe:
             httpGet:
               path: /api/v1/healthz
@@ -134,6 +152,14 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+            - name: runtime-secrets
+              mountPath: /runtime-secrets
+              readOnly: true
+      volumes:
+        - name: runtime-secrets
+          secret:
+            secretName: workspace-runtime-secrets
+            optional: true
   volumeClaimTemplates:
     - metadata:
         name: data

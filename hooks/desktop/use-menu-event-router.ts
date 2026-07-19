@@ -166,6 +166,7 @@ export function useMenuEventRouter(options: UseMenuEventRouterOptions = {}): voi
             break
           case "go-inbox":
           case "go-workflows":
+          case "go-sites":
           case "go-twin":
           case "go-skills":
           case "go-plugins":

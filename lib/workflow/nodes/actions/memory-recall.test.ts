@@ -82,7 +82,7 @@ describe("runMemoryRecall", () => {
         queryText: "package manager",
         topK: 3,
         relevanceFloor: 0.1,
-        characterId: undefined,
+        reader: expect.objectContaining({ characterId: undefined }),
       }),
       expect.anything()
     )
@@ -91,7 +91,38 @@ describe("runMemoryRecall", () => {
   it("passes characterId through for character scope", async () => {
     await runMemoryRecall(makeCtx({ query: "q", scope: "character", characterId: "char1" }))
     expect(mockRetrieveMemories).toHaveBeenCalledWith(
-      expect.objectContaining({ characterId: "char1" }),
+      expect.objectContaining({ reader: expect.objectContaining({ characterId: "char1" }) }),
+      expect.anything()
+    )
+  })
+
+  it("validates and forwards workspace and agent namespaces", async () => {
+    await expect(runMemoryRecall(makeCtx({ query: "q", scope: "workspace" }))).rejects.toThrow(
+      /'projectId' is required/
+    )
+    await expect(runMemoryRecall(makeCtx({ query: "q", scope: "agent" }))).rejects.toThrow(
+      /'agentId' is required/
+    )
+
+    await runMemoryRecall(
+      makeCtx({
+        query: "q",
+        scope: "agent",
+        projectId: "project1",
+        agentId: "agent1",
+        branch: "main",
+        path: "lib/memory",
+      })
+    )
+    expect(mockRetrieveMemories).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reader: expect.objectContaining({
+          projectId: "project1",
+          agentId: "agent1",
+          branch: "main",
+          path: "lib/memory",
+        }),
+      }),
       expect.anything()
     )
   })

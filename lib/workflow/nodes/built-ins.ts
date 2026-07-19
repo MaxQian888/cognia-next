@@ -41,7 +41,11 @@ import type {
   PlanStepStatus,
   UpdatePlanInput,
 } from "@/types/agent/plan"
-import type { StepExecutionContext, WorkflowTriggeredFrom } from "@/types/workflow/visual"
+import type {
+  StepExecutionContext,
+  WorkflowNodeKind,
+  WorkflowTriggeredFrom,
+} from "@/types/workflow/visual"
 import type { McpServer } from "@cognia/agent-config-types"
 import { registerNodeExecutor } from "./registry"
 import { resolveExpression } from "@/lib/workflow/runtime/expression"
@@ -153,51 +157,36 @@ function coerceToType(value: unknown, typeHint: string): unknown {
   return value
 }
 
-// ── trigger.manual ────────────────────────────────────────────────────────
-registerNodeExecutor({
-  kind: "trigger.manual",
-  typeVersion: 1,
-  execute: async (ctx) => ({
-    output: {
-      firedAt: ctx.trigger.originAt,
-      payload: ctx.trigger.payload,
-    },
-  }),
-})
+// ── built-in trigger pass-throughs ────────────────────────────────────────
+// Trigger producers live outside the graph (Rust cron/webhook router or TS
+// event bridges), but their nodes are still executable graph roots: they
+// expose the event envelope to downstream expressions. Keep the side-effect-
+// free execution contract in one function so every built-in producer behaves
+// identically and adding a trigger cannot leave a catalog-only dormant node.
+const PASSTHROUGH_TRIGGER_KINDS = [
+  "trigger.manual",
+  "trigger.cron",
+  "trigger.connector.inbound",
+  "trigger.chat.message",
+  "trigger.goal.completed",
+  "trigger.webhook",
+  "trigger.github.webhook",
+  "trigger.team",
+  "trigger.workflow.completed",
+] as const satisfies readonly WorkflowNodeKind[]
 
-// ── trigger.team ──────────────────────────────────────────────────────────
-// Synthesizer-internal: real firing happens in the agent-team runtime. This
-// passthrough exists so the node round-trips when a workflow runs in
-// "manual + trigger.team" mode (mirrors trigger.manual). Must stay side-effect
-// free — it must NOT kick off a team run.
-registerNodeExecutor({
-  kind: "trigger.team",
-  typeVersion: 1,
-  execute: async (ctx) => ({
+async function runTriggerPassthrough(ctx: StepExecutionContext) {
+  return {
     output: {
       firedAt: ctx.trigger.originAt,
       payload: ctx.trigger.payload,
     },
-  }),
-})
+  }
+}
 
-// ── trigger.workflow.completed ────────────────────────────────────────────
-// Chained-workflow trigger (ADR-0081). Real firing happens in
-// `runtime/workflow-completion-fanout.ts`; this passthrough surfaces the
-// source run's payload ({ workflowId, runId, status, output, chainDepth })
-// as the trigger node's output so downstream expressions can read it via
-// `$node['<id>'].payload` in addition to `$trigger.payload`. Side-effect
-// free, mirroring trigger.manual / trigger.team / trigger.pet.event.
-registerNodeExecutor({
-  kind: "trigger.workflow.completed",
-  typeVersion: 1,
-  execute: async (ctx) => ({
-    output: {
-      firedAt: ctx.trigger.originAt,
-      payload: ctx.trigger.payload,
-    },
-  }),
-})
+for (const kind of PASSTHROUGH_TRIGGER_KINDS) {
+  registerNodeExecutor({ kind, typeVersion: 1, execute: runTriggerPassthrough })
+}
 
 // ── flow.set ──────────────────────────────────────────────────────────────
 registerNodeExecutor({

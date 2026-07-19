@@ -28,6 +28,34 @@ describe("workflow-json", () => {
     it("propagates JSON syntax errors", () => {
       expect(() => parseWorkflowImport("{not json")).toThrow()
     })
+
+    it("rejects a malformed complete export instead of accepting its shallow shape", () => {
+      const malformed: VisualWorkflow = {
+        id: "wf_bad",
+        schemaVersion: 2,
+        name: "Bad",
+        createdAt: 0,
+        updatedAt: 0,
+        nodes: [
+          {
+            id: "trigger",
+            type: "trigger.manual",
+            typeVersion: 1,
+            position: { x: 0, y: 0 },
+            data: { label: "Start", params: {} },
+          },
+        ],
+        edges: [{ id: "dangling", source: "trigger", target: "missing" }],
+        settings: {
+          errorPolicy: "stop",
+          timeoutMs: 60_000,
+          concurrency: 1,
+          retryDefaults: { attempts: 1, backoff: "fixed", baseMs: 0 },
+        },
+      }
+
+      expect(() => parseWorkflowImport(JSON.stringify(malformed))).toThrow(/unknown node/i)
+    })
   })
 
   describe("parseWorkflowsImport", () => {

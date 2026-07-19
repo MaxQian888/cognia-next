@@ -10,9 +10,9 @@ jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (s: unknown) => unknown) =>
     selector({ settings: mockSettings, save: mockSave }),
 }))
-const mockClear = jest.fn(async () => 0)
-jest.mock("@/lib/db/memories", () => ({
-  clearMemories: () => mockClear(),
+const mockManage = jest.fn(async (..._args: unknown[]) => ({ ok: true }))
+jest.mock("@/lib/memory/control-plane/manage", () => ({
+  manageMemory: (...args: unknown[]) => mockManage(...args),
 }))
 
 import { MemorySection } from "./memory-section"
@@ -48,7 +48,7 @@ describe("MemorySection", () => {
   it("disables auto-learn switch when memory is off", () => {
     mockSettings = { memory: { enabled: false } }
     render(<MemorySection />)
-    const auto = screen.getByRole("switch", { name: /learn automatically/i })
+    const auto = screen.getByRole("switch", { name: /learn from chats/i })
     expect(auto).toBeDisabled()
   })
 
@@ -68,7 +68,7 @@ describe("MemorySection", () => {
     // The dialog's confirm button
     const confirm = await screen.findByRole("button", { name: /delete everything/i })
     fireEvent.click(confirm)
-    expect(mockClear).toHaveBeenCalled()
+    expect(mockManage).toHaveBeenCalledWith({ kind: "clear" })
   })
 
   it("links to the management panel", () => {

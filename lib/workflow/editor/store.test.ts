@@ -32,7 +32,7 @@ describe("editor store — graph mutations", () => {
     const bId = useStore.getState().addNode("ai.prompt", { x: 200, y: 0 })
     expect(useStore.getState().nodes).toHaveLength(2)
 
-    const eId = useStore.getState().connect({ source: aId, target: bId })
+    const eId = useStore.getState().connect({ source: aId, target: bId })!
     expect(useStore.getState().edges).toHaveLength(1)
     expect(useStore.getState().edges[0].id).toBe(eId)
 
@@ -42,6 +42,17 @@ describe("editor store — graph mutations", () => {
     useStore.getState().removeNodes([aId])
     expect(useStore.getState().nodes).toHaveLength(1)
     expect(useStore.getState().edges).toHaveLength(0) // edge removed because endpoint is gone
+  })
+
+  it("rejects invalid connections without mutating the edge list", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const triggerA = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    const triggerB = useStore.getState().addNode("trigger.cron", { x: 200, y: 0 })
+
+    const edgeId = useStore.getState().connect({ source: triggerA, target: triggerB })
+
+    expect(edgeId).toBeNull()
+    expect(useStore.getState().edges).toEqual([])
   })
 
   it("tracks the dirty flag", () => {
@@ -159,6 +170,26 @@ describe("editor store — graph mutations", () => {
 
     expect(node.data.params).toEqual({ mode: "markdown", retries: 2 })
 
+    __resetPluginCatalogForTesting()
+  })
+
+  it("uses the registered plugin typeVersion for newly authored nodes", () => {
+    __resetPluginCatalogForTesting()
+    addPluginCatalogEntry({
+      kind: "demo.action.v7" as never,
+      category: "plugin",
+      label: "Versioned",
+      description: "Versioned plugin node",
+      iconName: "Wand",
+      keywords: [],
+      pluginId: "demo",
+      typeVersion: 7,
+    })
+
+    const useStore = createEditorStore(emptyWorkflow())
+    const id = useStore.getState().addNode("demo.action.v7" as never, { x: 0, y: 0 })
+
+    expect(useStore.getState().nodes.find((node) => node.id === id)?.data.typeVersion).toBe(7)
     __resetPluginCatalogForTesting()
   })
 })
@@ -298,6 +329,21 @@ describe("editor store — loadWorkflow", () => {
     useStore.getState().loadWorkflow(fresh)
 
     expect(useStore.getState().performanceTier).toBe("reduced")
+  })
+
+  it("can mark an imported workflow dirty while still clearing selection and history", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    useStore.getState().setSelectedNodes(["selected-before-import"])
+
+    const imported = emptyWorkflow()
+    imported.name = "Imported"
+    useStore.getState().loadWorkflow(imported, { dirty: true })
+
+    expect(useStore.getState().baseWorkflow.name).toBe("Imported")
+    expect(useStore.getState().selectedNodeIds).toEqual([])
+    expect(useStore.getState().dirty).toBe(true)
+    expect(useStore.temporal.getState().pastStates).toEqual([])
   })
 })
 
@@ -500,7 +546,7 @@ describe("editor store — edge mutators", () => {
     const useStore = createEditorStore(emptyWorkflow())
     const aId = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
     const bId = useStore.getState().addNode("ai.prompt", { x: 200, y: 0 })
-    const eId = useStore.getState().connect({ source: aId, target: bId })
+    const eId = useStore.getState().connect({ source: aId, target: bId })!
 
     expect(useStore.getState().updateEdgeData(eId, { kind: "then" })).toBe(true)
     const edge = useStore.getState().edges.find((e) => e.id === eId)
@@ -522,7 +568,7 @@ describe("editor store — edge mutators", () => {
     const useStore = createEditorStore(emptyWorkflow())
     const aId = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
     const bId = useStore.getState().addNode("ai.prompt", { x: 200, y: 0 })
-    const eId = useStore.getState().connect({ source: aId, target: bId })
+    const eId = useStore.getState().connect({ source: aId, target: bId })!
 
     expect(useStore.getState().replaceEdge(eId, { source: bId, target: aId })).toBe(true)
     const edge = useStore.getState().edges.find((e) => e.id === eId)
@@ -536,7 +582,7 @@ describe("editor store — edge mutators", () => {
     const useStore = createEditorStore(emptyWorkflow())
     const aId = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
     const bId = useStore.getState().addNode("ai.prompt", { x: 200, y: 0 })
-    const eId = useStore.getState().connect({ source: aId, target: bId })
+    const eId = useStore.getState().connect({ source: aId, target: bId })!
     useStore.getState().setSelectedEdges([eId])
 
     useStore.getState().removeEdges([eId])
@@ -963,7 +1009,7 @@ describe("editor store — applyProposalOps", () => {
     expect(useStore.getState().edges).toHaveLength(0)
   })
 
-  it("rejects duplicate node id but continues with subsequent ops", () => {
+  it("rejects the entire proposal when any op is invalid", () => {
     const useStore = createEditorStore(emptyWorkflow())
     useStore
       .getState()
@@ -973,24 +1019,79 @@ describe("editor store — applyProposalOps", () => {
     const result = useStore.getState().applyProposalOps([
       // Duplicate id — should fail.
       { type: "add_node", nodeId: "n_a", kind: "ai.prompt", position: { x: 200, y: 0 } },
-      // Valid follow-up — should still apply.
+      // This valid follow-up must not partially commit.
       { type: "add_node", nodeId: "n_b", kind: "ai.prompt", position: { x: 400, y: 0 } },
     ])
-    expect(result.applied).toBe(1)
+    expect(result.applied).toBe(0)
     expect(result.firstError).toMatch(/already exists/)
     expect(
       useStore
         .getState()
         .nodes.map((n) => n.id)
         .sort()
-    ).toEqual(["n_a", "n_b"])
+    ).toEqual(["n_a"])
+  })
+
+  it("rejects structurally invalid proposal edges atomically", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+
+    const result = useStore.getState().applyProposalOps([
+      {
+        type: "add_node",
+        nodeId: "n_action",
+        kind: "flow.set",
+        position: { x: 0, y: 0 },
+      },
+      {
+        type: "add_node",
+        nodeId: "n_trigger",
+        kind: "trigger.manual",
+        position: { x: 200, y: 0 },
+      },
+      {
+        type: "connect_edge",
+        edgeId: "e_invalid",
+        source: "n_action",
+        target: "n_trigger",
+      },
+    ])
+
+    expect(result.applied).toBe(0)
+    expect(result.firstError).toMatch(/Triggers are sources only/)
+    expect(useStore.getState().nodes).toEqual([])
+    expect(useStore.getState().edges).toEqual([])
+  })
+
+  it("preserves an explicit proposal typeVersion and otherwise uses the authoring default", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+
+    const result = useStore.getState().applyProposalOps([
+      {
+        type: "add_node",
+        nodeId: "n_legacy_branch",
+        kind: "flow.branch",
+        typeVersion: 1,
+        position: { x: 0, y: 0 },
+      },
+      {
+        type: "add_node",
+        nodeId: "n_current_branch",
+        kind: "flow.branch",
+        position: { x: 200, y: 0 },
+      },
+    ])
+
+    expect(result.applied).toBe(2)
+    const byId = (id: string) => useStore.getState().nodes.find((node) => node.id === id)!
+    expect(byId("n_legacy_branch").data.typeVersion).toBe(1)
+    expect(byId("n_current_branch").data.typeVersion).toBe(2)
   })
 
   it("removing a node also drops incident edges + prunes its selection + validation", () => {
     const useStore = createEditorStore(emptyWorkflow())
     useStore.getState().applyProposalOps([
       { type: "add_node", nodeId: "n_a", kind: "trigger.manual", position: { x: 0, y: 0 } },
-      { type: "add_node", nodeId: "n_b", kind: "trigger.cron", position: { x: 200, y: 0 } },
+      { type: "add_node", nodeId: "n_b", kind: "ai.prompt", position: { x: 200, y: 0 } },
       { type: "connect_edge", edgeId: "e_ab", source: "n_a", target: "n_b" },
     ])
     useStore.getState().setSelectedNodes(["n_a", "n_b"])
@@ -1137,7 +1238,7 @@ describe("editor store — insertNodeOnEdge", () => {
     const useStore = createEditorStore(emptyWorkflow())
     const a = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
     const b = useStore.getState().addNode("ai.prompt", { x: 400, y: 0 })
-    const e = useStore.getState().connect({ source: a, target: b })
+    const e = useStore.getState().connect({ source: a, target: b })!
     expect(useStore.getState().edges).toHaveLength(1)
 
     const mid = useStore.getState().insertNodeOnEdge(e, "ai.prompt", { x: 200, y: 0 })
@@ -1160,7 +1261,7 @@ describe("editor store — insertNodeOnEdge", () => {
     const useStore = createEditorStore(emptyWorkflow())
     const br = useStore.getState().addNode("flow.branch", { x: 0, y: 0 }) // typeVersion 2
     const b = useStore.getState().addNode("ai.prompt", { x: 400, y: 0 })
-    const e = useStore.getState().connect({ source: br, target: b, sourceHandle: "true" })
+    const e = useStore.getState().connect({ source: br, target: b, sourceHandle: "true" })!
     const mid = useStore.getState().insertNodeOnEdge(e, "ai.prompt", { x: 200, y: 0 })
     const upstream = useStore.getState().edges.find((x) => x.source === br && x.target === mid)
     expect(upstream?.sourceHandle).toBe("true")

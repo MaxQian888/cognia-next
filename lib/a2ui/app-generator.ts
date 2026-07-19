@@ -33,6 +33,7 @@ export {
   generateUnitConverterApp,
   generateCustomApp,
   generateDashboardApp,
+  generateWeatherApp,
   generateAppFromDescription,
 
   // Component factories

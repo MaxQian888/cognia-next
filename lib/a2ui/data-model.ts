@@ -11,6 +11,49 @@ import type {
   A2UIArrayOrPath,
 } from "@/types/a2ui/schema"
 
+const UNSAFE_DATA_MODEL_KEYS = new Set(["__proto__", "constructor", "prototype"])
+
+/** Whether a key is addressable and safe under the editor's JSON Pointer contract. */
+export function isSafeDataModelKey(key: string): boolean {
+  return key.length > 0 && !UNSAFE_DATA_MODEL_KEYS.has(key)
+}
+
+/** Narrow an unknown value to a safe, finite, acyclic JSON object data model. */
+export function isA2UIDataModel(value: unknown): value is Record<string, unknown> {
+  return isJsonDataValue(value, new Set(), true)
+}
+
+function isJsonDataValue(value: unknown, ancestors: Set<object>, root = false): boolean {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return !root
+  if (typeof value === "number") return !root && Number.isFinite(value)
+  if (typeof value !== "object" || ancestors.has(value)) return false
+  if (root && Array.isArray(value)) return false
+
+  const prototype = Object.getPrototypeOf(value)
+  if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) return false
+  const nextAncestors = new Set(ancestors).add(value)
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      if (!isJsonDataValue(entry, nextAncestors)) return false
+    }
+    return true
+  }
+
+  return Object.entries(value as Record<string, unknown>).every(
+    ([key, entry]) => isSafeDataModelKey(key) && isJsonDataValue(entry, nextAncestors)
+  )
+}
+
+function parseArrayIndex(segment: string): number | null {
+  if (!/^(0|[1-9]\d*)$/.test(segment)) return null
+  const index = Number(segment)
+  return Number.isSafeInteger(index) ? index : null
+}
+
+function hasUnsafePointerSegment(segments: string[]): boolean {
+  return segments.some((segment) => UNSAFE_DATA_MODEL_KEYS.has(segment))
+}
+
 /**
  * Parse a JSON Pointer string into path segments
  * RFC 6901: https://datatracker.ietf.org/doc/html/rfc6901
@@ -35,6 +78,9 @@ export function parseJsonPointer(pointer: string): string[] {
     .substring(1)
     .split("/")
     .map((segment) => {
+      if (/~(?![01])/.test(segment)) {
+        throw new Error(`Invalid JSON Pointer escape sequence in "${pointer}"`)
+      }
       // Unescape ~1 -> / and ~0 -> ~
       return segment.replace(/~1/g, "/").replace(/~0/g, "~")
     })
@@ -79,12 +125,18 @@ export function getValueByPath<T = unknown>(
       }
 
       if (Array.isArray(current)) {
-        const index = parseInt(segment, 10)
-        if (isNaN(index) || index < 0 || index >= current.length) {
+        const index = parseArrayIndex(segment)
+        if (index === null || index >= current.length) {
           return undefined
         }
         current = current[index]
       } else if (typeof current === "object") {
+        if (
+          !isSafeDataModelKey(segment) ||
+          !Object.prototype.hasOwnProperty.call(current, segment)
+        ) {
+          return undefined
+        }
         current = (current as Record<string, unknown>)[segment]
       } else {
         return undefined
@@ -133,6 +185,7 @@ export function setValueByPath(
   }
 
   const segments = parseJsonPointer(pointer)
+  if (hasUnsafePointerSegment(segments)) return obj
   return setInNode(obj, segments, 0, value) as Record<string, unknown>
 }
 
@@ -141,7 +194,8 @@ function setInNode(node: unknown, segments: string[], index: number, value: unkn
   const isLast = index === segments.length - 1
 
   if (Array.isArray(node)) {
-    const arrIndex = parseInt(segment, 10)
+    const arrIndex = parseArrayIndex(segment)
+    if (arrIndex === null) return node
     if (isLast) {
       if (arrIndex >= 0 && arrIndex < node.length && Object.is(node[arrIndex], value)) {
         return node
@@ -199,6 +253,7 @@ export function deleteValueByPath(
   }
 
   const segments = parseJsonPointer(pointer)
+  if (hasUnsafePointerSegment(segments)) return obj
   return deleteInNode(obj, segments, 0) as Record<string, unknown>
 }
 
@@ -208,8 +263,8 @@ function deleteInNode(node: unknown, segments: string[], index: number): unknown
   const isLast = index === segments.length - 1
 
   if (Array.isArray(node)) {
-    const arrIndex = parseInt(segment, 10)
-    if (arrIndex < 0 || arrIndex >= node.length) return node
+    const arrIndex = parseArrayIndex(segment)
+    if (arrIndex === null || arrIndex >= node.length) return node
     if (isLast) {
       const copy = node.slice()
       copy.splice(arrIndex, 1)

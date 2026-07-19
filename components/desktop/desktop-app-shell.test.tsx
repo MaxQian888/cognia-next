@@ -21,6 +21,13 @@ jest.mock("next/navigation", () => ({
 }))
 
 jest.mock("@cognia/logging", () => ({
+  createLogger: () => ({
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    child: jest.fn(),
+  }),
   loggers: {
     shell: {
       info: (...args: unknown[]) => logInfo(...args),
@@ -28,6 +35,13 @@ jest.mock("@cognia/logging", () => ({
       error: jest.fn(),
     },
     ui: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+    agent: {
+      debug: jest.fn(),
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+      child: () => ({ debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() }),
+    },
   },
 }))
 

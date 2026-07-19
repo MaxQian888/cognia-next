@@ -1307,6 +1307,196 @@ const FIXTURES = {
       params: { app: "notepad.exe", action: "launch" },
     }),
 
+  // Collaboration, mobile, pet, and composite nodes.
+  "action-team-task-review": () =>
+    single("E2E Team Task Review", {
+      id: "n_team_review",
+      type: "action.team.task.review",
+      label: "Review Team Task",
+      params: {
+        teamId: "team_fixture",
+        taskId: TASK_ID,
+        title: "Review fixture output",
+        description: "Verify the delegated task result.",
+        dispatchNodeId: "n_team_dispatch",
+        maxRevisions: 2,
+      },
+    }),
+  "action-team-reconcile": () =>
+    single("E2E Team Reconcile", {
+      id: "n_team_reconcile",
+      type: "action.team.reconcile",
+      label: "Reconcile Team",
+      params: {},
+    }),
+  "action-team-compose": () =>
+    single("E2E Team Compose", {
+      id: "n_team_compose",
+      type: "action.team.compose",
+      label: "Compose Team",
+      params: { objective: "Ship the workflow fixture catalog" },
+    }),
+  "action-team-status": () =>
+    single("E2E Team Status", {
+      id: "n_team_status",
+      type: "action.team.status",
+      label: "Team Status",
+      params: { teamId: "team_fixture" },
+    }),
+  "action-team-delegate": () =>
+    single("E2E Team Delegate", {
+      id: "n_team_delegate",
+      type: "action.team.delegate",
+      label: "Delegate Team Task",
+      params: {
+        teamId: "team_fixture",
+        target: "background",
+        prompt: "Validate the fixture output",
+      },
+    }),
+  "action-team-message": () =>
+    single("E2E Team Message", {
+      id: "n_team_message",
+      type: "action.team.message",
+      label: "Send Team Message",
+      params: { teamId: "team_fixture", content: "Fixture validation is ready." },
+    }),
+  "action-approval-request": () =>
+    single("E2E Approval Request", {
+      id: "n_approval",
+      type: "action.approval.request",
+      label: "Request Approval",
+      params: { title: "Approve fixture output" },
+    }),
+  "action-mobile-camera": () =>
+    single("E2E Mobile Camera", {
+      id: "n_mobile_camera",
+      type: "action.mobile.camera",
+      label: "Capture Photo",
+      params: {},
+    }),
+  "action-mobile-scan-barcode": () =>
+    single("E2E Mobile Barcode", {
+      id: "n_mobile_barcode",
+      type: "action.mobile.scanBarcode",
+      label: "Scan Barcode",
+      params: {},
+    }),
+  "action-mobile-location": () =>
+    single("E2E Mobile Location", {
+      id: "n_mobile_location",
+      type: "action.mobile.location",
+      label: "Read Location",
+      params: {},
+    }),
+  "action-mobile-share": () =>
+    single("E2E Mobile Share", {
+      id: "n_mobile_share",
+      type: "action.mobile.share",
+      label: "Share Text",
+      params: { text: "Fixture output" },
+    }),
+  "action-mobile-notify": () =>
+    single("E2E Mobile Notify", {
+      id: "n_mobile_notify",
+      type: "action.mobile.notify",
+      label: "Notify Mobile",
+      params: { title: "Fixture complete" },
+    }),
+  "action-connector-reaction": () =>
+    single("E2E Connector Reaction", {
+      id: "n_connector_reaction",
+      type: "action.connector.reaction",
+      label: "React To Message",
+      params: {
+        adapterId: "adapter_fixture",
+        messageId: "message_fixture",
+        emoji: "THUMBSUP",
+      },
+    }),
+  "action-connector-delete": () =>
+    single("E2E Connector Delete", {
+      id: "n_connector_delete",
+      type: "action.connector.delete",
+      label: "Delete Message",
+      params: { adapterId: "adapter_fixture", messageId: "message_fixture" },
+    }),
+  "action-connector-forward": () =>
+    single("E2E Connector Forward", {
+      id: "n_connector_forward",
+      type: "action.connector.forward",
+      label: "Forward Message",
+      params: {
+        adapterId: "adapter_fixture",
+        messageId: "message_fixture",
+        targetConversationKey: "platform:adapter_fixture:chat_fixture",
+      },
+    }),
+  "action-connector-wait-reply": () =>
+    single("E2E Connector Wait Reply", {
+      id: "n_connector_wait_reply",
+      type: "action.connector.waitReply",
+      label: "Wait For Reply",
+      params: { conversationKey: "platform:adapter_fixture:chat_fixture" },
+    }),
+  "trigger-pet-event": () =>
+    triggerOnly("E2E Pet Trigger", "trigger.pet.event", "Pet Event", {
+      kinds: ["levelUp"],
+    }),
+  "action-pet-interact": () =>
+    single("E2E Pet Interaction", {
+      id: "n_pet_interact",
+      type: "action.pet.interact",
+      label: "Interact With Pet",
+      params: { kind: "petted" },
+    }),
+  "trigger-workflow-completed": () =>
+    triggerOnly(
+      "E2E Workflow Completed Trigger",
+      "trigger.workflow.completed",
+      "Workflow Completed",
+      {}
+    ),
+  "ai-council": () =>
+    single("E2E AI Council", {
+      id: "n_ai_council",
+      type: "ai.council",
+      label: "AI Council",
+      params: {
+        prompt: "Review the fixture output",
+        councillors: [{ name: "Reviewer", modelAlias: "fast" }],
+        synthesizerAlias: "balanced",
+      },
+    }),
+  "ai-ensemble": () =>
+    single("E2E AI Ensemble", {
+      id: "n_ai_ensemble",
+      type: "ai.ensemble",
+      label: "AI Ensemble",
+      params: { prompt: "Generate fixture alternatives", n: 2 },
+    }),
+  "data-aggregate": () =>
+    single("E2E Data Aggregate", {
+      id: "n_data_aggregate",
+      type: "data.aggregate",
+      label: "Aggregate Data",
+      params: { operation: "collect" },
+    }),
+  "io-output": () =>
+    single("E2E IO Output", {
+      id: "n_io_output",
+      type: "io.output",
+      label: "Output",
+      params: { value: "{{ input }}" },
+    }),
+  "io-web-clone": () =>
+    single("E2E Web Clone", {
+      id: "n_web_clone",
+      type: "io.webClone",
+      label: "Clone Website",
+      params: { url: "https://example.com", output: "/tmp/web-clone", mode: "single" },
+    }),
+
   // Annotations.
   "annotation-note": () => ({
     name: "E2E Annotation Note",

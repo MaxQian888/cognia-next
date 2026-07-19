@@ -38,6 +38,10 @@
     "sound": "声音",
     "visual": "视觉闪烁"
   },
+  "boldBrightColors": {
+    "helper": "使用对应颜色的明亮变体渲染 ANSI 粗体文本。",
+    "label": "粗体使用明亮色"
+  },
   "colorScheme": {
     "auto": "自动（跟随应用主题）",
     "darkGroup": "深色方案",
@@ -60,8 +64,20 @@
     "bar": "竖线",
     "blink": "光标闪烁",
     "block": "方块",
+    "inactiveBar": "竖线",
+    "inactiveBlock": "方块",
+    "inactiveLabel": "非活动光标",
+    "inactiveNone": "隐藏",
+    "inactiveOutline": "轮廓",
+    "inactiveUnderline": "下划线",
     "label": "光标样式",
-    "underline": "下划线"
+    "underline": "下划线",
+    "width": "光标宽度",
+    "widthHelper": "光标宽度适用于竖线样式，并限制在 1–10 像素。"
+  },
+  "customGlyphs": {
+    "helper": "使用 xterm 内置的线框与方块字形，使终端界面更清晰。",
+    "label": "自定义终端字形"
   },
   "exposeDockToAgents": {
     "helper": "允许聊天智能体通过合成的 terminal_dock_* MCP 工具驱动你可见的终端标签。智能体与你共用同一个 PTY —— 同一个 shell、同一个 cwd、同一份历史。每个标签按会话需要单独授权。默认关闭。",
@@ -150,6 +166,10 @@
     "helper": "命令失败时在该命令处显示灯泡，提供修复建议：git push --set-upstream、“是否想输入”、创建 PR 链接、释放被占端口、pwsh 未找到命令等。",
     "label": "快速修复"
   },
+  "rescaleOverlappingGlyphs": {
+    "helper": "缩放可能覆盖相邻终端单元格的宽字形。",
+    "label": "缩放重叠字形"
+  },
   "renderer": {
     "auto": "自动",
     "canvas": "Canvas",
@@ -173,6 +193,10 @@
   "scrollback": {
     "helper": "xterm 历史缓冲区保留的行数。范围 1000–100000。",
     "label": "回滚行数"
+  },
+  "smoothScrolling": {
+    "helper": "为滚轮和触控板滚动添加动画，避免在终端行之间跳动。",
+    "label": "平滑滚动"
   },
   "shell": {
     "auto": "自动检测（推荐）",

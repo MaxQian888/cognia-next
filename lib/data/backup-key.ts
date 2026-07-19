@@ -8,11 +8,14 @@
 //   • Web    → localStorage, key `cognia-backup-encryption-key-v1`.
 
 import { nanoid } from "nanoid"
-import { isTauri } from "@/lib/tauri"
+import { isHeadlessHost } from "@/lib/platform/detect"
+import { isTauri, transport } from "@/lib/tauri"
 
 const WEB_BACKUP_KEY_STORAGE = "cognia-backup-encryption-key-v1"
 const DESKTOP_STORE_FILE = "cognia-backup-key.json"
 const DESKTOP_STORE_KEY = "backup.encryption.key.v1"
+const SERVER_SECRET_NAMESPACE = "backup"
+const SERVER_SECRET_KEY = "encryption.key.v1"
 
 function generateKeyMaterial(): string {
   if (typeof globalThis.crypto?.randomUUID === "function") {
@@ -51,11 +54,21 @@ function getWebBackupKey(): string {
   return generated
 }
 
+async function getHeadlessBackupKey(): Promise<string> {
+  const input = { namespace: SERVER_SECRET_NAMESPACE, key: SERVER_SECRET_KEY }
+  const existing = await transport.call<string | null>("keyring_secret_get", { input })
+  if (existing) return existing
+  const generated = generateKeyMaterial()
+  await transport.call("keyring_secret_set", { input: { ...input, value: generated } })
+  return generated
+}
+
 /**
  * Returns the device-stored auto-key, generating one on first call. Returns
  * null on the server (SSR), where neither localStorage nor Tauri is available.
  */
 export async function getDefaultBackupPassphrase(): Promise<string | null> {
+  if (isHeadlessHost()) return getHeadlessBackupKey()
   if (typeof window === "undefined") return null
   if (isTauri()) {
     const key = await getDesktopBackupKey()
@@ -72,8 +85,18 @@ export async function getDefaultBackupPassphrase(): Promise<string | null> {
  * new key (custom-passphrase files are unaffected).
  */
 export async function rotateBackupKey(): Promise<string | null> {
-  if (typeof window === "undefined") return null
   const generated = generateKeyMaterial()
+  if (isHeadlessHost()) {
+    await transport.call("keyring_secret_set", {
+      input: {
+        namespace: SERVER_SECRET_NAMESPACE,
+        key: SERVER_SECRET_KEY,
+        value: generated,
+      },
+    })
+    return generated
+  }
+  if (typeof window === "undefined") return null
   if (isTauri()) {
     try {
       const { LazyStore } = await import("@tauri-apps/plugin-store")
@@ -93,6 +116,12 @@ export async function rotateBackupKey(): Promise<string | null> {
 
 /** Wipe the stored auto-key. Next call to `getDefaultBackupPassphrase` regenerates. */
 export async function clearBackupKey(): Promise<void> {
+  if (isHeadlessHost()) {
+    await transport.call("keyring_secret_clear", {
+      input: { namespace: SERVER_SECRET_NAMESPACE, key: SERVER_SECRET_KEY },
+    })
+    return
+  }
   if (typeof window === "undefined") return
   if (isTauri()) {
     try {
@@ -114,4 +143,6 @@ export const __TESTING__ = {
   WEB_BACKUP_KEY_STORAGE,
   DESKTOP_STORE_FILE,
   DESKTOP_STORE_KEY,
+  SERVER_SECRET_NAMESPACE,
+  SERVER_SECRET_KEY,
 }

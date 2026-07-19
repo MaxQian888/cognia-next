@@ -6,11 +6,9 @@ import { act, fireEvent, render, screen } from "@testing-library/react"
 jest.mock("next-intl", () => ({ useTranslations: () => (k: string) => k }))
 jest.mock("sonner", () => ({ toast: { error: jest.fn() } }))
 
-const isTauriMock = jest.fn(() => true)
-jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
-const loadCompanionConfigMock = jest.fn(() => null)
+jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => true) }))
 jest.mock("@/lib/tauri/transport-companion", () => ({
-  loadCompanionConfig: () => loadCompanionConfigMock(),
+  loadCompanionConfig: jest.fn(() => null),
 }))
 jest.mock("@/stores/canvas/keybinding-store", () => ({
   useKeybindingStore: (sel: (s: unknown) => unknown) => sel({ bindings: {} }),
@@ -80,6 +78,11 @@ jest.mock("./code-server-pane", () => ({
 
 import { AgentTeamEditor } from "./agent-team-editor"
 import type { AgentTeam } from "@/types/agent/agent-team"
+
+const isTauriMock = (jest.requireMock("@/lib/tauri") as { isTauri: jest.Mock }).isTauri
+const loadCompanionConfigMock = (
+  jest.requireMock("@/lib/tauri/transport-companion") as { loadCompanionConfig: jest.Mock }
+).loadCompanionConfig
 
 function team(workingDir?: string): AgentTeam {
   return {

@@ -11,17 +11,21 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef } from "react"
+import { useLocale } from "next-intl"
 import { useA2UI } from "./use-a2ui"
 import { useA2UIStore } from "@/stores/a2ui"
 import { globalEventEmitter } from "@/lib/a2ui/events"
+import { deepClone } from "@/lib/a2ui/data-model"
 import {
-  appTemplates,
-  getTemplateById,
-  getTemplatesByCategory,
-  searchTemplates,
+  type A2UIAppTemplate,
+  getLocalizedTemplateById,
+  getLocalizedTemplates,
+  getLocalizedTemplatesByCategory,
+  searchLocalizedTemplates,
   createAppFromTemplate,
   generateTemplateId,
 } from "@/lib/a2ui/templates"
+import { defaultLocale, type Locale } from "@/i18n/config"
 import type {
   A2UIComponent,
   A2UIUserAction,
@@ -36,6 +40,35 @@ import { getAppInstancesCache, saveAppInstances } from "./app-builder/persistenc
 import { useAppActionHandlers } from "./app-builder/action-handlers"
 import { useAppImportExport } from "./app-builder/import-export"
 import { useAppShare } from "./app-builder/share"
+import {
+  deleteApp as deletePersistedApp,
+  listApps,
+  patchAppMetadata,
+  type A2UIAppMetadataPatch,
+} from "@/lib/db/a2ui-apps"
+import { loggers } from "@cognia/logging"
+
+const log = loggers.app
+
+function toMetadataPatch(instance: A2UIAppInstance): A2UIAppMetadataPatch {
+  return {
+    name: instance.name,
+    lastModified: instance.lastModified,
+    description: instance.description,
+    version: instance.version,
+    author: instance.author,
+    category: instance.category,
+    tags: instance.tags,
+    thumbnail: instance.thumbnail,
+    thumbnailUpdatedAt: instance.thumbnailUpdatedAt,
+    stats: instance.stats,
+    publishedAt: instance.publishedAt,
+    isPublished: instance.isPublished,
+    storeId: instance.storeId,
+    screenshots: instance.screenshots,
+    locale: instance.locale,
+  }
+}
 
 // Module-level singleton for the built-in-action emitter subscription. The A2UI
 // event emitter is global, so if two builders that both opted into
@@ -85,6 +118,8 @@ interface UseA2UIAppBuilderOptions {
    * workspace toolbar). Unhandled actions still escalate to `onAction`.
    */
   wireBuiltInActions?: boolean
+  /** Override the provider locale for deterministic embedding and tests. */
+  locale?: Locale
 }
 
 /**
@@ -92,6 +127,8 @@ interface UseA2UIAppBuilderOptions {
  * Composes sub-module hooks for action handling, import/export, and sharing
  */
 export function useA2UIAppBuilder(options: UseA2UIAppBuilderOptions = {}) {
+  const providerLocale = useLocale()
+  const locale = options.locale ?? (providerLocale === "zh-CN" ? "zh-CN" : defaultLocale)
   const { onAction, onDataChange, onAppCreated, onAppDeleted, wireBuiltInActions } = options
 
   // Data-model changes flow straight through to the consumer, but actions do
@@ -102,12 +139,13 @@ export function useA2UIAppBuilder(options: UseA2UIAppBuilderOptions = {}) {
   const a2ui = useA2UI({ onDataChange })
   const surfaces = useA2UIStore((state) => state.surfaces)
   const deleteSurfaceStore = useA2UIStore((state) => state.deleteSurface)
+  const restoreSurfaceStore = useA2UIStore((state) => state.restoreSurface)
 
   // ========== Core App CRUD ==========
 
   const createFromTemplate = useCallback(
     (templateId: string, customName?: string): string | null => {
-      const template = getTemplateById(templateId)
+      const template = getLocalizedTemplateById(templateId, locale)
       if (!template) return null
 
       const { surfaceId, messages } = createAppFromTemplate(template)
@@ -119,6 +157,7 @@ export function useA2UIAppBuilder(options: UseA2UIAppBuilderOptions = {}) {
         name: customName || template.name,
         createdAt: Date.now(),
         lastModified: Date.now(),
+        locale,
       }
       const instances = getAppInstancesCache()
       instances.set(surfaceId, instance)
@@ -126,7 +165,7 @@ export function useA2UIAppBuilder(options: UseA2UIAppBuilderOptions = {}) {
       onAppCreated?.(surfaceId, templateId)
       return surfaceId
     },
-    [a2ui, onAppCreated]
+    [a2ui, locale, onAppCreated]
   )
 
   const createCustomApp = useCallback(
@@ -147,6 +186,7 @@ export function useA2UIAppBuilder(options: UseA2UIAppBuilderOptions = {}) {
         name,
         createdAt: Date.now(),
         lastModified: Date.now(),
+        locale,
       }
       const instances = getAppInstancesCache()
       instances.set(surfaceId, instance)
@@ -154,7 +194,7 @@ export function useA2UIAppBuilder(options: UseA2UIAppBuilderOptions = {}) {
       onAppCreated?.(surfaceId, "custom")
       return surfaceId
     },
-    [a2ui, onAppCreated]
+    [a2ui, locale, onAppCreated]
   )
 
   const duplicateApp = useCallback(
@@ -163,15 +203,49 @@ export function useA2UIAppBuilder(options: UseA2UIAppBuilderOptions = {}) {
       const instance = getAppInstancesCache().get(appId)
       if (!surface) return null
 
-      const components = Object.values(surface.components)
       const name = newName || `${instance?.name || "App"} (Copy)`
-      return createCustomApp(name, components, surface.dataModel)
+      const surfaceId = generateTemplateId("custom")
+      const now = Date.now()
+      const restored = restoreSurfaceStore({
+        ...surface,
+        id: surfaceId,
+        title: name,
+        components: deepClone(surface.components),
+        dataModel: deepClone(surface.dataModel),
+        widget: deepClone(surface.widget),
+        createdAt: now,
+        updatedAt: now,
+      })
+      if (!restored) return null
+
+      const duplicate: A2UIAppInstance = {
+        id: surfaceId,
+        templateId: "custom",
+        name,
+        createdAt: now,
+        lastModified: now,
+        description: instance?.description,
+        version: instance?.version,
+        author: deepClone(instance?.author),
+        category: instance?.category,
+        tags: deepClone(instance?.tags),
+        thumbnail: instance?.thumbnail,
+        thumbnailUpdatedAt: instance?.thumbnailUpdatedAt,
+        screenshots: deepClone(instance?.screenshots),
+        locale: instance?.locale ?? locale,
+      }
+      const instances = getAppInstancesCache()
+      instances.set(surfaceId, duplicate)
+      saveAppInstances(instances)
+      onAppCreated?.(surfaceId, "custom")
+      return surfaceId
     },
-    [surfaces, createCustomApp]
+    [locale, onAppCreated, restoreSurfaceStore, surfaces]
   )
 
   const deleteApp = useCallback(
-    (appId: string): void => {
+    async (appId: string): Promise<void> => {
+      await deletePersistedApp(appId)
       deleteSurfaceStore(appId)
       const instances = getAppInstancesCache()
       instances.delete(appId)
@@ -181,15 +255,50 @@ export function useA2UIAppBuilder(options: UseA2UIAppBuilderOptions = {}) {
     [deleteSurfaceStore, onAppDeleted]
   )
 
-  const renameApp = useCallback((appId: string, newName: string): void => {
-    const instances = getAppInstancesCache()
-    const instance = instances.get(appId)
-    if (instance) {
-      instance.name = newName
-      instance.lastModified = Date.now()
+  const persistInstanceUpdate = useCallback(
+    async (
+      appId: string,
+      update: (instance: A2UIAppInstance) => A2UIAppInstance,
+      touchLastModified = true
+    ): Promise<boolean> => {
+      const instances = getAppInstancesCache()
+      const current = instances.get(appId)
+      if (!current) return false
+
+      const now = Date.now()
+      const candidate = update({ ...current })
+      const next: A2UIAppInstance = {
+        ...candidate,
+        id: current.id,
+        templateId: current.templateId,
+        createdAt: current.createdAt,
+        lastModified: touchLastModified ? now : candidate.lastModified,
+      }
+
+      // Update the local cache immediately so consecutive mutations compose.
+      // If the durable write fails, roll back only when no newer mutation has
+      // replaced this exact object in the meantime.
+      instances.set(appId, next)
       saveAppInstances(instances)
-    }
-  }, [])
+      try {
+        await patchAppMetadata(appId, toMetadataPatch(next), now)
+        return true
+      } catch (error) {
+        if (instances.get(appId) === next) {
+          instances.set(appId, current)
+          saveAppInstances(instances)
+        }
+        throw error
+      }
+    },
+    []
+  )
+
+  const renameApp = useCallback(
+    (appId: string, newName: string): Promise<boolean> =>
+      persistInstanceUpdate(appId, (instance) => ({ ...instance, name: newName })),
+    [persistInstanceUpdate]
+  )
 
   const getAppInstance = useCallback((appId: string): A2UIAppInstance | undefined => {
     return getAppInstancesCache().get(appId)
@@ -206,34 +315,100 @@ export function useA2UIAppBuilder(options: UseA2UIAppBuilderOptions = {}) {
 
   /**
    * Rebuild renderable surfaces for saved apps whose component tree is absent
-   * after a reload. Two cases produce an orphaned instance: apps created before
-   * full-surface persistence landed (their tree was stripped from storage), and
-   * apps evicted past the store's LRU persistence cap. Template-backed apps are
-   * regenerated deterministically from their template so they open instead of
-   * spinning forever; custom apps whose tree was lost cannot be reconstructed
-   * here and are left untouched. Idempotent — already-renderable surfaces are
-   * skipped, so it is safe to call on every mount. Returns the recovered count.
+   * after a reload. Durable Dexie rows are authoritative for missing surfaces,
+   * including custom apps. Legacy template-backed instances without a durable
+   * row are regenerated deterministically. An already-renderable local surface
+   * remains authoritative so hydration cannot overwrite unsaved edits. The
+   * operation is idempotent and returns the number of recovered surfaces.
    */
-  const hydratePersistedApps = useCallback((): number => {
+  const hydratePersistedApps = useCallback(async (): Promise<number> => {
     const instances = getAppInstancesCache()
-    if (instances.size === 0) return 0
-
     let recovered = 0
+    let cacheChanged = false
+    const restoredIds = new Set<string>()
+
+    try {
+      const durableApps = await listApps()
+      for (const row of durableApps) {
+        if (!instances.has(row.id)) {
+          const instance: A2UIAppInstance = {
+            id: row.id,
+            templateId: row.templateId,
+            name: row.name,
+            createdAt: row.createdAt,
+            lastModified: row.lastModified,
+            description: row.description,
+            version: row.version,
+            author: row.author,
+            category: row.category,
+            tags: row.tags,
+            thumbnail: row.thumbnail,
+            thumbnailUpdatedAt: row.thumbnailUpdatedAt,
+            stats: row.stats,
+            publishedAt: row.publishedAt,
+            isPublished: row.isPublished,
+            storeId: row.storeId,
+            screenshots: row.screenshots,
+            locale: row.locale ?? locale,
+          }
+          instances.set(row.id, instance)
+          cacheChanged = true
+        } else {
+          const cached = instances.get(row.id)!
+          if (!cached.locale) {
+            cached.locale = row.locale ?? locale
+            cacheChanged = true
+          }
+        }
+
+        const localSurface = surfaces[row.id]
+        const isRenderable =
+          Boolean(localSurface?.ready) && Object.keys(localSurface?.components ?? {}).length > 0
+        if (isRenderable) continue
+
+        const restored = restoreSurfaceStore({
+          id: row.id,
+          type: "inline",
+          catalogId: row.catalogId,
+          title: row.name,
+          widget: row.widget,
+          components: row.components,
+          dataModel: row.dataModel,
+          rootId: row.rootId,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+          ready: true,
+        })
+        if (restored) {
+          restoredIds.add(row.id)
+          recovered++
+        }
+      }
+    } catch (error) {
+      log.error("A2UI AppBuilder: Failed to restore durable apps", error as Error)
+    }
+
     for (const [id, instance] of instances) {
+      if (!instance.locale) {
+        instance.locale = locale
+        cacheChanged = true
+      }
+      if (restoredIds.has(id)) continue
       const surface = surfaces[id]
       const renderable =
         Boolean(surface?.ready) && Object.keys(surface?.components ?? {}).length > 0
       if (renderable) continue
 
-      const template = getTemplateById(instance.templateId)
+      const template = getLocalizedTemplateById(instance.templateId, instance.locale)
       if (!template) continue
 
       const { messages } = createAppFromTemplate(template, id)
       a2ui.processMessages(messages)
       recovered++
     }
+    if (cacheChanged) saveAppInstances(instances)
     return recovered
-  }, [surfaces, a2ui])
+  }, [surfaces, restoreSurfaceStore, a2ui, locale])
 
   // ========== App Data ==========
 
@@ -259,7 +434,7 @@ export function useA2UIAppBuilder(options: UseA2UIAppBuilderOptions = {}) {
     (appId: string): void => {
       const instance = getAppInstancesCache().get(appId)
       if (!instance) return
-      const template = getTemplateById(instance.templateId)
+      const template = getLocalizedTemplateById(instance.templateId, instance.locale ?? locale)
       if (template) {
         a2ui.processMessages([
           {
@@ -271,7 +446,12 @@ export function useA2UIAppBuilder(options: UseA2UIAppBuilderOptions = {}) {
         ])
       }
     },
-    [a2ui]
+    [a2ui, locale]
+  )
+
+  const getAppLocale = useCallback(
+    (appId: string): Locale => getAppInstancesCache().get(appId)?.locale ?? locale,
+    [locale]
   )
 
   // ========== Composed Sub-Hooks ==========
@@ -282,6 +462,7 @@ export function useA2UIAppBuilder(options: UseA2UIAppBuilderOptions = {}) {
     resetAppData,
     surfaces: surfaces as Record<string, { dataModel: Record<string, unknown> }>,
     setDataValue: a2ui.setDataValue,
+    getAppLocale,
     onAction,
   })
 
@@ -301,7 +482,9 @@ export function useA2UIAppBuilder(options: UseA2UIAppBuilderOptions = {}) {
     surfaces,
     getAllApps,
     onAppCreated,
-    createQuickSurface: a2ui.createQuickSurface,
+    restoreSurface: restoreSurfaceStore,
+    deleteSurface: deleteSurfaceStore,
+    locale,
   })
 
   const share = useAppShare({
@@ -312,65 +495,56 @@ export function useA2UIAppBuilder(options: UseA2UIAppBuilderOptions = {}) {
   // ========== Metadata / Thumbnail / Stats / Publish ==========
 
   const updateAppMetadata = useCallback(
-    (appId: string, metadata: Partial<A2UIAppInstance>): void => {
-      const instances = getAppInstancesCache()
-      const instance = instances.get(appId)
-      if (instance) {
-        const updatedInstance: A2UIAppInstance = {
-          ...instance,
-          ...metadata,
-          id: instance.id,
-          createdAt: instance.createdAt,
-          lastModified: Date.now(),
-        }
-        instances.set(appId, updatedInstance)
-        saveAppInstances(instances)
-      }
-    },
-    []
+    (appId: string, metadata: Partial<A2UIAppInstance>): Promise<boolean> =>
+      persistInstanceUpdate(appId, (instance) => ({ ...instance, ...metadata })),
+    [persistInstanceUpdate]
   )
 
-  const setAppThumbnail = useCallback((appId: string, thumbnail: string): void => {
-    const instances = getAppInstancesCache()
-    const instance = instances.get(appId)
-    if (instance) {
-      instance.thumbnail = thumbnail
-      instance.thumbnailUpdatedAt = Date.now()
-      instance.lastModified = Date.now()
-      saveAppInstances(instances)
-    }
-  }, [])
+  const setAppThumbnail = useCallback(
+    (appId: string, thumbnail: string): Promise<boolean> =>
+      persistInstanceUpdate(appId, (instance) => ({
+        ...instance,
+        thumbnail,
+        thumbnailUpdatedAt: Date.now(),
+      })),
+    [persistInstanceUpdate]
+  )
 
-  const clearAppThumbnail = useCallback((appId: string): void => {
-    const instances = getAppInstancesCache()
-    const instance = instances.get(appId)
-    if (instance) {
-      delete instance.thumbnail
-      delete instance.thumbnailUpdatedAt
-      instance.lastModified = Date.now()
-      saveAppInstances(instances)
-    }
-  }, [])
+  const clearAppThumbnail = useCallback(
+    (appId: string): Promise<boolean> =>
+      persistInstanceUpdate(appId, (instance) => ({
+        ...instance,
+        thumbnail: undefined,
+        thumbnailUpdatedAt: undefined,
+      })),
+    [persistInstanceUpdate]
+  )
 
-  const incrementAppViews = useCallback((appId: string): void => {
-    const instances = getAppInstancesCache()
-    const instance = instances.get(appId)
-    if (instance) {
-      if (!instance.stats) instance.stats = {}
-      instance.stats.views = (instance.stats.views || 0) + 1
-      saveAppInstances(instances)
-    }
-  }, [])
+  const incrementAppViews = useCallback(
+    (appId: string): Promise<boolean> =>
+      persistInstanceUpdate(
+        appId,
+        (instance) => ({
+          ...instance,
+          stats: { ...instance.stats, views: (instance.stats?.views || 0) + 1 },
+        }),
+        false
+      ),
+    [persistInstanceUpdate]
+  )
 
-  const incrementAppUses = useCallback((appId: string): void => {
-    const instances = getAppInstancesCache()
-    const instance = instances.get(appId)
-    if (instance) {
-      if (!instance.stats) instance.stats = {}
-      instance.stats.uses = (instance.stats.uses || 0) + 1
-      saveAppInstances(instances)
-    }
-  }, [])
+  const incrementAppUses = useCallback(
+    (appId: string): Promise<boolean> =>
+      persistInstanceUpdate(
+        appId,
+        (instance) => ({
+          ...instance,
+          stats: { ...instance.stats, uses: (instance.stats?.uses || 0) + 1 },
+        }),
+        false
+      ),
+    [persistInstanceUpdate]
+  )
 
   const prepareForPublish = useCallback((appId: string): { valid: boolean; missing: string[] } => {
     const instance = getAppInstancesCache().get(appId)
@@ -386,8 +560,21 @@ export function useA2UIAppBuilder(options: UseA2UIAppBuilderOptions = {}) {
     return { valid: missing.length === 0, missing }
   }, [])
 
-  // Memoized templates
-  const templates = useMemo(() => appTemplates, [])
+  // Memoized locale-owned template views. Canonical structures remain in
+  // `appTemplates`; localization returns isolated overlays.
+  const templates = useMemo(() => getLocalizedTemplates(locale), [locale])
+  const getTemplate = useCallback(
+    (templateId: string) => getLocalizedTemplateById(templateId, locale),
+    [locale]
+  )
+  const getTemplatesByCategory = useCallback(
+    (category: A2UIAppTemplate["category"]) => getLocalizedTemplatesByCategory(category, locale),
+    [locale]
+  )
+  const searchTemplates = useCallback(
+    (query: string) => searchLocalizedTemplates(query, locale),
+    [locale]
+  )
 
   // Wrap share.importFromShareCode to inject importApp dependency
   const importFromShareCode = useCallback(
@@ -400,7 +587,7 @@ export function useA2UIAppBuilder(options: UseA2UIAppBuilderOptions = {}) {
   return {
     // Template management
     templates,
-    getTemplate: getTemplateById,
+    getTemplate,
     getTemplatesByCategory,
     searchTemplates,
 

@@ -286,6 +286,7 @@ describe("password capture", () => {
     "section-blue current-password",
     "billing shipping new-password",
     "CURRENT-PASSWORD",
+    "one-time-code",
   ])("treats a text field autocompleted as %s as secret", (autocomplete) => {
     document.body.innerHTML = `<input type="text" id="pw" autocomplete="${autocomplete}" />`
     const field = document.querySelector("input")!
@@ -293,6 +294,23 @@ describe("password capture", () => {
     change(field)
     expect(api.recordedSteps()[0]).toMatchObject({ act: "fill", secret: true, value: "" })
     expect(window.sessionStorage.getItem(STEPS_KEY)).not.toContain("hunter2")
+  })
+
+  it.each([
+    ['name="otp"', "otp"],
+    ['id="verification-code"', "verification-code"],
+    ['aria-label="Access token"', "Access token"],
+  ])("redacts and visually masks credential-like field %s", (attribute) => {
+    document.body.innerHTML = `<input type="text" ${attribute} />`
+    const field = document.querySelector("input")!
+    focusin(field)
+    field.value = "credential-value"
+    change(field)
+    expect(field).toHaveAttribute("data-cognia-secret", "1")
+    expect(api.recordedSteps()[0]).toMatchObject({ act: "fill", secret: true, value: "" })
+    expect(document.getElementById("__cognia-credential-mask")?.textContent).toContain(
+      "-webkit-text-security:disc"
+    )
   })
 
   it("still flags a field switched to password via the JS property", () => {

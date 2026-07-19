@@ -1,4 +1,5 @@
-import { __TESTING__ } from "./standalone-entry"
+import { __TESTING__, isEntrypoint } from "./standalone-entry"
+import { pathToFileURL } from "node:url"
 import { DEFAULT_EXTERNAL_BRIDGE_SETTINGS } from "@/types/wiki"
 import fs from "node:fs/promises"
 import path from "node:path"
@@ -94,5 +95,14 @@ describe("resolveSettingsGetter", () => {
     delete process.env.COGNIA_DATA_DIR
     const getter = resolveSettingsGetter()
     expect(typeof getter).toBe("function")
+  })
+})
+
+describe("isEntrypoint", () => {
+  test("recognizes an ESM bundle launched directly by node", () => {
+    const entry = path.resolve("/tmp/cognia-mcp.mjs")
+    expect(isEntrypoint(pathToFileURL(entry).href, entry)).toBe(true)
+    expect(isEntrypoint(pathToFileURL(entry).href, "/tmp/other.mjs")).toBe(false)
+    expect(isEntrypoint(pathToFileURL(entry).href, undefined)).toBe(false)
   })
 })

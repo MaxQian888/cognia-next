@@ -10,77 +10,64 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "cognia-source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs",
       "default": "./dist/index.js"
     },
     "./manifest": {
-      "cognia-source": "./src/manifest/index.ts",
       "types": "./dist/manifest.d.ts",
       "import": "./dist/manifest.js",
       "require": "./dist/manifest.cjs",
       "default": "./dist/manifest.js"
     },
     "./context": {
-      "cognia-source": "./src/context/index.ts",
-      "types": "./dist/context.d.ts",
-      "import": "./dist/context.js",
-      "require": "./dist/context.cjs",
-      "default": "./dist/context.js"
-    },
-    "./context/extended": {
-      "cognia-source": "./src/context/extended.ts",
       "types": "./dist/context.d.ts",
       "import": "./dist/context.js",
       "require": "./dist/context.cjs",
       "default": "./dist/context.js"
     },
     "./contracts": {
-      "cognia-source": "./src/contracts/catalog.ts",
       "types": "./dist/contracts.d.ts",
       "import": "./dist/contracts.js",
       "require": "./dist/contracts.cjs",
       "default": "./dist/contracts.js"
     },
     "./api/tool": {
-      "cognia-source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs",
       "default": "./dist/index.js"
     },
     "./api/native-anthropic-tool": {
-      "cognia-source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs",
       "default": "./dist/index.js"
     },
     "./events": {
-      "cognia-source": "./src/events/index.ts",
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "types": "./dist/events.d.ts",
+      "import": "./dist/events.js",
+      "require": "./dist/events.cjs",
+      "default": "./dist/events.js"
     },
     "./hooks": {
-      "cognia-source": "./src/hooks/index.ts",
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "types": "./dist/hooks.d.ts",
+      "import": "./dist/hooks.js",
+      "require": "./dist/hooks.cjs",
+      "default": "./dist/hooks.js"
     },
     "./permissions": {
-      "cognia-source": "./src/permissions/index.ts",
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "types": "./dist/permissions.d.ts",
+      "import": "./dist/permissions.js",
+      "require": "./dist/permissions.cjs",
+      "default": "./dist/permissions.js"
     },
     "./extensions": {
-      "cognia-source": "./src/extensions/index.ts",
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "types": "./dist/extensions.d.ts",
+      "import": "./dist/extensions.js",
+      "require": "./dist/extensions.cjs",
+      "default": "./dist/extensions.js"
     },
     "./package.json": "./package.json"
   },
@@ -92,18 +79,20 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsup",
-    "typecheck": "tsc --noEmit",
+    "build": "NODE_OPTIONS=--max-old-space-size=8192 tsup",
+    "typecheck": "node ../../scripts/plugin/test-sdk-package.mjs",
     "pack:test": "node ../../scripts/plugin/test-sdk-package.mjs"
   },
   "peerDependencies": {
+    "@types/json-schema": "^7.0.0",
+    "@types/node": ">=20.0.0",
+    "@types/react": "^19.0.0",
+    "ai": "^6.0.0",
+    "dexie": "^4.0.0",
     "react": "^19.0.0",
     "typescript": ">=5.0.0"
   },
   "peerDependenciesMeta": {
-    "react": {
-      "optional": true
-    },
     "typescript": {
       "optional": true
     }

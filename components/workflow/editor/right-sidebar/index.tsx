@@ -53,7 +53,11 @@ import { InspectorPanel } from "../inspector-panel"
 import { EdgeInspector } from "../edge-inspector"
 import { ContextWorkbench } from "@/components/context-workbench/context-workbench"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
-import type { ContextPanelDefinition, ContextResource } from "@/types/context-workbench"
+import type {
+  ContextPanelDefinition,
+  ContextResource,
+  ContextWorkbenchPlacement,
+} from "@/types/context-workbench"
 import { workflowEditorRevision } from "@/lib/workflow/editor/editor-revision"
 import { useContextWorkbenchSurfaceFlag } from "@/hooks/context-workbench/use-context-workbench-surface-flag"
 import { useContextWorkbenchInstanceId } from "@/hooks/context-workbench/use-context-workbench-instance-id"
@@ -87,18 +91,21 @@ const ProblemsTab = lazy(() => import("./problems-tab").then((m) => ({ default: 
 type RightSidebarTab =
   "chat" | "inspector" | "problems" | "templates" | "changelog" | "settings" | "runs"
 
-function RightSidebarInner({
-  useStore,
-  className,
-  onOpenWorkflowSettings,
-  reactFlowInstance,
-}: {
+interface RightSidebarProps {
   useStore: EditorStore
   className?: string
   onOpenWorkflowSettings?: (tab?: string) => void
   reactFlowInstance?: ReactFlowInstance | null
   onCollapse?: () => void
-}) {
+  placement?: ContextWorkbenchPlacement
+}
+
+function RightSidebarInner({
+  useStore,
+  className,
+  onOpenWorkflowSettings,
+  reactFlowInstance,
+}: RightSidebarProps) {
   const t = useTranslations("workflowEditor.rightSidebar")
   const [tab, setTab] = useState<RightSidebarTab>("chat")
   // Pin the user's explicit choice so selecting a node after a manual
@@ -419,13 +426,8 @@ function WorkflowContextWorkbench({
   onOpenWorkflowSettings,
   reactFlowInstance,
   onCollapse,
-}: {
-  useStore: EditorStore
-  className?: string
-  onOpenWorkflowSettings?: (tab?: string) => void
-  reactFlowInstance?: ReactFlowInstance | null
-  onCollapse?: () => void
-}) {
+  placement,
+}: RightSidebarProps) {
   const workbenchInstanceId = useContextWorkbenchInstanceId("workflow")
   const {
     selectedNodeIds,
@@ -671,6 +673,7 @@ function WorkflowContextWorkbench({
       workbenchInstanceId={workbenchInstanceId}
       resource={resource}
       panels={panels}
+      placement={placement}
       onExitFocus={handleExitFocus}
       onCollapse={onCollapse}
       manageOwnWidth={false}

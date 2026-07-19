@@ -158,15 +158,13 @@ export function WorkflowLibrary() {
         const parsed = parseWorkflowsImport(text)
         for (const wf of parsed) {
           await createWorkflow({
+            ...wf,
             name: wf.name ?? "Imported workflow",
-            description: wf.description,
-            icon: wf.icon,
-            tags: wf.tags,
-            nodes: wf.nodes,
-            edges: wf.edges,
-            settings: wf.settings,
-            viewport: wf.viewport,
             folderId: currentFolderId,
+            // A publication belongs to the exported workflow id/tool name.
+            // Import the callable interface, then require an explicit publish
+            // for the fresh row to avoid two definitions claiming one tool.
+            published: undefined,
           })
           imported += 1
         }

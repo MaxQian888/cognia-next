@@ -18,9 +18,11 @@
  */
 
 import { useEffect } from "react"
+import { liveQuery } from "dexie"
 
 import { transport } from "@/lib/tauri"
 import { usePlatform } from "@/hooks/use-platform"
+import { getDb } from "@/lib/db/schema"
 import { createOutboundRunner, type OutboundDispatcher } from "@/lib/queue/outbound-queue"
 import { runSyncDown } from "@/lib/sync/companion-sync"
 
@@ -55,6 +57,26 @@ const liveDispatcher: OutboundDispatcher = {
   },
 }
 
+/**
+ * Wake the runner whenever UI code adds a pending job while the phone is
+ * already online. Network listeners only observe transitions, so without this
+ * Dexie subscription an online enqueue after the provider's mount-time kick
+ * can remain pending until the next connectivity change.
+ */
+function subscribeToPendingJobs(onPending: () => void): () => void {
+  const subscription = liveQuery(() =>
+    getDb().mobileOutboundQueue.where("status").equals("pending").count()
+  ).subscribe({
+    next(count) {
+      if (count > 0) onPending()
+    },
+    error(error) {
+      console.warn("mobile-outbound-runner: pending-job subscription failed", error)
+    },
+  })
+  return () => subscription.unsubscribe()
+}
+
 export interface MobileOutboundRunnerProviderProps {
   /**
    * Test seam — defaults to `liveDispatcher` which routes through the
@@ -79,14 +101,21 @@ export function MobileOutboundRunnerProvider({
     if (platform !== "mobile") return
 
     const runner = createOutboundRunner({ dispatcher })
+    const kick = () => {
+      void runner.kick().catch((err) => {
+        console.warn("mobile-outbound-runner: kick failed", err)
+      })
+    }
+    // Subscribe before the initial drain so an enqueue racing provider mount
+    // cannot land between the first `claimNext` and listener registration.
+    const unsubscribePendingJobs = subscribeToPendingJobs(kick)
     // Kick once at mount so any rows that were enqueued while the app was
     // backgrounded drain immediately on resume. Subsequent drains are
-    // driven by the runner's internal network-change subscription.
-    void runner.kick().catch((err) => {
-      console.warn("mobile-outbound-runner: initial kick failed", err)
-    })
+    // driven by network changes or the pending-row subscription above.
+    kick()
 
     return () => {
+      unsubscribePendingJobs()
       runner.stop()
     }
   }, [platform, dispatcher])

@@ -14,12 +14,16 @@
  */
 
 import type { StepExecutionContext, StepExecutionResult } from "@/types/workflow/visual"
-import type { MemoryProvenance, MemoryType } from "@/types/memory/memory"
+import type { MemoryProvenance, MemoryScope, MemoryType } from "@/types/memory/memory"
 
 export interface MemoryStoreParams {
   text?: string
-  scope?: "global" | "character"
+  scope?: MemoryScope
   characterId?: string
+  projectId?: string
+  agentId?: string
+  branch?: string
+  pathPattern?: string
   type?: MemoryType
   /** Stable key for procedural dedupe / "always X" overrides. */
   key?: string
@@ -37,6 +41,12 @@ export async function runMemoryStore(ctx: StepExecutionContext): Promise<StepExe
   if (scope === "character" && !params.characterId) {
     throw nonRetryable("action.memory.store: 'characterId' is required when scope is 'character'")
   }
+  if (scope === "workspace" && !params.projectId) {
+    throw nonRetryable("action.memory.store: 'projectId' is required when scope is 'workspace'")
+  }
+  if (scope === "agent" && !params.agentId) {
+    throw nonRetryable("action.memory.store: 'agentId' is required when scope is 'agent'")
+  }
   const type: MemoryType = params.type ?? "semantic"
   const provenance = params.provenance ?? "system"
   if (type === "procedural" && provenance !== "explicit") {
@@ -53,6 +63,10 @@ export async function runMemoryStore(ctx: StepExecutionContext): Promise<StepExe
       text: rawText,
       scope,
       characterId: params.characterId,
+      projectId: params.projectId,
+      agentId: params.agentId,
+      branch: params.branch,
+      pathPattern: params.pathPattern,
       type,
       key: params.key,
       importance: params.importance,

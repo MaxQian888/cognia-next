@@ -21,6 +21,8 @@
  */
 
 import { invokeVscodeRpc, isVscodeHostAvailable } from "@/lib/plugin/core/vscode-loader"
+import { transport } from "@/lib/tauri"
+import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import { registerMethod } from "@/lib/plugin/vscode-shim/rpc-dispatcher"
 import { lspPublishDiagnosticsToBridgePayload } from "@/lib/plugin/vscode-shim/lsp-protocol-adapter"
 import type { LspClientAdapter } from "./lsp-registry"
@@ -37,6 +39,22 @@ import { lspServerKey } from "./lsp-registry"
 export const LSP_TAURI_CHANNEL_ID = "cognia.lsp-service"
 
 type InvokeFn = (pluginId: string, method: string, payload: unknown) => Promise<unknown>
+
+async function invokeActiveLspHost(
+  pluginId: string,
+  method: string,
+  payload: unknown
+): Promise<unknown> {
+  if (!isRemoteHostActive()) return invokeVscodeRpc(pluginId, method, payload)
+  if (pluginId !== LSP_TAURI_CHANNEL_ID) {
+    throw new Error(`remote LSP facade rejects non-system channel ${pluginId}`)
+  }
+  const raw = await transport.call<string>("lsp_host_request", {
+    method,
+    payloadJson: JSON.stringify(payload ?? null),
+  })
+  return raw ? JSON.parse(raw) : null
+}
 
 type DiagnosticsForwarder = (
   uri: string,
@@ -70,9 +88,10 @@ export class TauriLspClientAdapter implements LspClientAdapter {
   private unregisterPublishDiagnostics: (() => void) | null = null
 
   constructor(deps: ConstructorDeps = {}) {
-    this.invoke = deps.invoke ?? invokeVscodeRpc
+    this.invoke = deps.invoke ?? invokeActiveLspHost
     this.registerHandler = deps.registerHandler ?? registerMethod
-    this.isHostAvailable = deps.isHostAvailable ?? isVscodeHostAvailable
+    this.isHostAvailable =
+      deps.isHostAvailable ?? (() => isVscodeHostAvailable() || isRemoteHostActive())
     this.channelId = deps.channelId ?? LSP_TAURI_CHANNEL_ID
   }
 

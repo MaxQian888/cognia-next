@@ -186,6 +186,19 @@ describe("MemoryRecallConfig", () => {
     )
     expect(screen.getByLabelText(/^Character\b/)).toBeInTheDocument()
   })
+
+  it("exposes workspace, agent, branch, and path namespace fields", () => {
+    wrap(
+      <MemoryRecallConfig
+        params={{ scope: "agent", projectId: "p1", agentId: "a1", branch: "main", path: "src" }}
+        onChange={jest.fn()}
+      />
+    )
+    expect(screen.getByLabelText(/^Project ID/)).toHaveValue("p1")
+    expect(screen.getByLabelText(/^Agent ID/)).toHaveValue("a1")
+    expect(screen.getByLabelText(/^Branch restriction/)).toHaveValue("main")
+    expect(screen.getByLabelText(/^Workspace-relative path/)).toHaveValue("src")
+  })
 })
 
 describe("MemoryStoreConfig", () => {
@@ -203,6 +216,25 @@ describe("MemoryStoreConfig", () => {
   it("defaults the PII gate select to block", () => {
     wrap(<MemoryStoreConfig params={{}} onChange={jest.fn()} />)
     expect(screen.getByLabelText("PII gate")).toHaveTextContent("Block (fail the step)")
+  })
+
+  it("exposes the complete storage namespace", () => {
+    wrap(
+      <MemoryStoreConfig
+        params={{
+          scope: "workspace",
+          projectId: "p1",
+          agentId: "a1",
+          branch: "main",
+          pathPattern: "src/memory",
+        }}
+        onChange={jest.fn()}
+      />
+    )
+    expect(screen.getByLabelText(/^Project ID/)).toHaveValue("p1")
+    expect(screen.getByLabelText(/^Agent ID/)).toHaveValue("a1")
+    expect(screen.getByLabelText(/^Branch restriction/)).toHaveValue("main")
+    expect(screen.getByLabelText(/^Workspace-relative path prefix/)).toHaveValue("src/memory")
   })
 })
 

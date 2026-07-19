@@ -17,7 +17,7 @@
  * in later phases of the plan (~/.claude/plans/vscode-snug-squid.md).
  */
 
-import { isTauri } from "@/lib/platform/detect"
+import { isHeadlessHost, isTauri } from "@/lib/platform/detect"
 import { loggers } from "@cognia/logging"
 import type { PluginDefinition, PluginManifest } from "@/types/plugin"
 import {
@@ -40,10 +40,17 @@ let dispatcherConfigured = false
 export async function ensureDispatcherConfigured(): Promise<void> {
   if (dispatcherConfigured) return
   if (!isVscodeHostAvailable()) return
-  const [{ invoke }, { listen }] = await Promise.all([
-    import("@tauri-apps/api/core"),
-    import("@tauri-apps/api/event"),
-  ])
+  const invoke = await getInvoke()
+  const listen: (event: string, cb: (event: { payload: string }) => void) => Promise<() => void> =
+    isHeadlessHost()
+      ? async (event, cb) => {
+          const { transport } = await import("@/lib/tauri/transport-instance")
+          return transport.subscribe<string>(event, (payload) => cb({ payload }))
+        }
+      : async (event, cb) => {
+          const { listen: listenTauri } = await import("@tauri-apps/api/event")
+          return listenTauri<string>(event, cb)
+        }
   configureRpcDispatcher({
     sendResponse: async (pluginId, responseJson) => {
       await invoke("plugin_vscode_send_response", {
@@ -51,13 +58,16 @@ export async function ensureDispatcherConfigured(): Promise<void> {
         responseJson,
       })
     },
-    listen: (event, cb) =>
-      listen<string>(event, (e) => cb({ payload: e.payload })) as Promise<() => void>,
+    listen: (event, cb) => listen(event, (e) => cb({ payload: e.payload })) as Promise<() => void>,
   })
   // Resolve cognia's currently configured Claude model for lm.selectChatModels.
   configureLmHandler({
     resolveDefaultModel: async () => {
       try {
+        if (isHeadlessHost()) {
+          const { useSettingsStore } = await import("@/stores/settings")
+          return useSettingsStore.getState().settings?.defaultModel
+        }
         const settings = await invoke<{ model?: string } | null>("read_claude_user_settings")
         return settings?.model
       } catch {
@@ -157,6 +167,11 @@ let cachedInvoke: InvokeFn | undefined
 
 async function getInvoke(): Promise<InvokeFn> {
   if (cachedInvoke) return cachedInvoke
+  if (isHeadlessHost()) {
+    const { transport } = await import("@/lib/tauri/transport-instance")
+    cachedInvoke = (cmd, args) => transport.call(cmd, args)
+    return cachedInvoke
+  }
   const mod = await import("@tauri-apps/api/core")
   cachedInvoke = mod.invoke as InvokeFn
   return cachedInvoke
@@ -167,7 +182,7 @@ async function getInvoke(): Promise<InvokeFn> {
  * only). Browser-mode users see a "desktop required" stub instead.
  */
 export function isVscodeHostAvailable(): boolean {
-  return isTauri()
+  return isTauri() || isHeadlessHost()
 }
 
 /**

@@ -23,20 +23,12 @@ jest.mock("@/hooks/ui", () => {
   return { ...actual, useMediaQuery: (q: string) => mockUseMediaQuery(q) }
 })
 
-const mockSetPinned = jest.fn()
-const mockSetManyPinned = jest.fn()
-const mockUpdate = jest.fn()
-const mockDelete = jest.fn()
-const mockDeleteMany = jest.fn()
-const mockCreate = jest.fn()
 jest.mock("@/lib/db/memories", () => ({
   listMemories: jest.fn(),
-  setMemoryPinned: (...a: unknown[]) => mockSetPinned(...a),
-  setMemoriesPinned: (...a: unknown[]) => mockSetManyPinned(...a),
-  updateMemory: (...a: unknown[]) => mockUpdate(...a),
-  hardDeleteMemory: (...a: unknown[]) => mockDelete(...a),
-  hardDeleteMemories: (...a: unknown[]) => mockDeleteMany(...a),
-  createMemory: (...a: unknown[]) => mockCreate(...a),
+}))
+const mockManage = jest.fn(async (..._args: unknown[]) => ({ ok: true }))
+jest.mock("@/lib/memory/control-plane/manage", () => ({
+  manageMemory: (...args: unknown[]) => mockManage(...args),
 }))
 
 import { MemoryConsole } from "./memory-console"
@@ -188,9 +180,9 @@ describe("MemoryConsole — row & detail", () => {
     render(<MemoryConsole />)
     const row = screen.getByTestId("memory-row")
     fireEvent.click(within(row).getByRole("button", { name: /^pin$/i }))
-    expect(mockSetPinned).toHaveBeenCalledWith("m1", true)
+    expect(mockManage).toHaveBeenCalledWith({ kind: "pin", id: "m1", pinned: true })
     fireEvent.click(within(row).getByRole("button", { name: /delete/i }))
-    expect(mockDelete).toHaveBeenCalledWith("m1")
+    expect(mockManage).toHaveBeenCalledWith({ kind: "delete", id: "m1" })
   })
 
   it("opens the detail sidebar on row click and navigates through the list", () => {
@@ -215,7 +207,15 @@ describe("MemoryConsole — row & detail", () => {
     fireEvent.click(within(panel).getByRole("button", { name: "Edit" }))
     fireEvent.change(within(panel).getByLabelText("Text"), { target: { value: "after" } })
     fireEvent.click(within(panel).getByRole("button", { name: "Save" }))
-    expect(mockUpdate).toHaveBeenCalledWith("m1", { text: "after", bumpVersion: true })
+    expect(mockManage).toHaveBeenCalledWith({ kind: "update", id: "m1", patch: { text: "after" } })
+  })
+
+  it("lets the user resolve a conflicting memory from the detail panel", () => {
+    mockData = [mem({ id: "m1", text: "conflict", reviewStatus: "conflict" })]
+    render(<MemoryConsole />)
+    fireEvent.click(screen.getByText("conflict"))
+    fireEvent.click(screen.getByRole("button", { name: /mark verified/i }))
+    expect(mockManage).toHaveBeenCalledWith({ kind: "review", id: "m1", status: "verified" })
   })
 
   it("renders the detail in a bottom sheet on narrow viewports", () => {
@@ -243,14 +243,14 @@ describe("MemoryConsole — add & bulk", () => {
     fireEvent.click(screen.getByTestId("memory-add-button"))
     fireEvent.change(screen.getByLabelText("Memory"), { target: { value: "new fact" } })
     fireEvent.click(screen.getByRole("button", { name: "Add memory" }))
-    await waitFor(() => expect(mockCreate).toHaveBeenCalled())
-    expect(mockCreate).toHaveBeenCalledWith({
-      scope: "global",
+    await waitFor(() => expect(mockManage).toHaveBeenCalled())
+    expect(mockManage).toHaveBeenCalledWith({
+      kind: "create",
       type: "semantic",
+      scope: "global",
       text: "new fact",
       importance: 5,
       tags: [],
-      provenance: "explicit",
     })
   })
 
@@ -265,7 +265,8 @@ describe("MemoryConsole — add & bulk", () => {
     fireEvent.click(within(toolbar).getByRole("button", { name: /^delete$/i }))
     const dialog = screen.getByRole("alertdialog")
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }))
-    expect(mockDeleteMany).toHaveBeenCalledWith(["a", "b"])
+    expect(mockManage).toHaveBeenCalledWith({ kind: "delete", id: "a" })
+    expect(mockManage).toHaveBeenCalledWith({ kind: "delete", id: "b" })
   })
 
   it("bulk-pins the selection", () => {
@@ -274,7 +275,7 @@ describe("MemoryConsole — add & bulk", () => {
     fireEvent.click(screen.getByTestId("memory-select"))
     const toolbar = screen.getByTestId("memory-bulk-toolbar")
     fireEvent.click(within(toolbar).getByRole("button", { name: /^pin$/i }))
-    expect(mockSetManyPinned).toHaveBeenCalledWith(["a"], true)
+    expect(mockManage).toHaveBeenCalledWith({ kind: "pin", id: "a", pinned: true })
   })
 
   it("select-all toggles every visible row", () => {

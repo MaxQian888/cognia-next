@@ -6,8 +6,9 @@
  * Uses AlertDialog for better accessibility with destructive confirmations
  */
 
-import React, { memo } from "react"
+import React, { memo, useCallback, useState } from "react"
 import { useTranslations } from "next-intl"
+import { Loader2 } from "lucide-react"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,6 +30,25 @@ export const DeleteConfirmDialog = memo(function DeleteConfirmDialog({
   descriptionKey = "deleteConfirmDescription",
 }: DeleteConfirmDialogProps) {
   const t = useTranslations("a2ui")
+  const [isConfirming, setIsConfirming] = useState(false)
+
+  const handleConfirm = useCallback(
+    async (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault()
+      if (isConfirming) return
+      setIsConfirming(true)
+      try {
+        await onConfirm()
+        onOpenChange(false)
+      } catch {
+        // The owning editor reports the operation-specific error. Keeping the
+        // controlled dialog open lets the user retry or cancel explicitly.
+      } finally {
+        setIsConfirming(false)
+      }
+    },
+    [isConfirming, onConfirm, onOpenChange]
+  )
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -38,7 +58,10 @@ export const DeleteConfirmDialog = memo(function DeleteConfirmDialog({
           <AlertDialogDescription>{t(descriptionKey)}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter className="flex-col sm:flex-row gap-2">
-          <AlertDialogCancel className="w-full sm:w-auto touch-manipulation">
+          <AlertDialogCancel
+            className="w-full sm:w-auto touch-manipulation"
+            disabled={isConfirming}
+          >
             {t("cancel")}
           </AlertDialogCancel>
           <AlertDialogAction
@@ -46,9 +69,11 @@ export const DeleteConfirmDialog = memo(function DeleteConfirmDialog({
               variant: "destructive",
               className: "w-full sm:w-auto touch-manipulation",
             })}
-            onClick={onConfirm}
+            onClick={handleConfirm}
+            disabled={isConfirming}
           >
-            {t("delete")}
+            {isConfirming && <Loader2 className="h-4 w-4 animate-spin" />}
+            {isConfirming ? t("deleting") : t("delete")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

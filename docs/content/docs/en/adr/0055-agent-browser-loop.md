@@ -8,6 +8,12 @@ description: "Give the product agent a snapshot→act-by-ref→re-snapshot brows
 **Status**: Accepted (2026-06-25)
 **Authors**: Max Qian + Claude
 
+> **2026-07-18 addendum**: ADR-0085 supersedes the old Phase-2 conclusion that
+> public automation can only be guidance to Playwright MCP. Cognia now owns a
+> `RemoteChromiumEngine` behind the same `BrowserEngine` contract for
+> cloud/headless sessions. Playwright MCP remains a separate optional tool; the
+> Tauri `EmbeddedEngine` remains the desktop localhost default.
+
 ## Context
 
 The in-app browser (`/browser`) shipped as a passive, human-facing design-feedback

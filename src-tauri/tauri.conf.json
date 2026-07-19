@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../out",
     "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "node scripts/dev/free-port.mjs 3000 && pnpm dev",
-    "beforeBuildCommand": "pnpm build"
+    "beforeDevCommand": "pnpm plugin-node:prepare && node scripts/dev/free-port.mjs 3000 && pnpm dev",
+    "beforeBuildCommand": "pnpm plugin-node:prepare && pnpm build"
   },
   "app": {
     "macOSPrivateApi": true,
@@ -54,6 +54,7 @@
       "resources/terminal/shell-integration.bash",
       "resources/terminal/shell-integration.zsh",
       "resources/terminal/shell-integration.ps1",
+      "resources/plugin-node/**/*",
       "../hooks/builtin/auto-context-loader.mjs",
       "../hooks/builtin/cost-quota-guard.mjs",
       "../hooks/builtin/pii-safety-guard.mjs"

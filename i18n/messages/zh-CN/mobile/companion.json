@@ -146,6 +146,33 @@
     "title": "允许远程控制",
     "toggleAria": "切换 {label} 的远程控制"
   },
+  "remoteBrowser": {
+    "description": "在已配对的工作区运行时中启动隔离的 Chromium 会话，并将画面串流到 Cognia。",
+    "domains": {
+      "description": "此工作区只能打开明确授权的域名。",
+      "domain": "域名",
+      "grant": "授权域名",
+      "placeholder": "example.com",
+      "revoke": "撤销 {domain}",
+      "title": "允许的域名"
+    },
+    "enable": "启用远程浏览器",
+    "error": "远程浏览器错误：{message}",
+    "experimental": "实验功能",
+    "gateHint": "此设置与服务端灰度开关必须同时启用。",
+    "operationFailed": "无法保存远程浏览器设置。",
+    "profiles": {
+      "create": "创建配置文件",
+      "description": "持久配置文件会在所选工作区内保留浏览器状态。",
+      "ephemeral": "临时会话",
+      "name": "配置文件名称",
+      "placeholder": "研究配置",
+      "title": "浏览器配置文件"
+    },
+    "title": "远程浏览器",
+    "toggle": "切换远程浏览器",
+    "workspaceHint": "请先选择工作区，再管理配置文件或域名。"
+  },
   "resume": {
     "blocked": "恢复未完成（{reason}）。",
     "description": "该设备的 JWT 会被移出拒绝名单并恢复访问。",

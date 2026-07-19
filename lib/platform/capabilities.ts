@@ -31,6 +31,7 @@ import { detectPlatform, type Platform } from "./detect"
  * - `push-display`      — can surface push/local notifications to a human.
  * - `biometric`         — biometric prompt available.
  * - `webview`           — an interactive webview UI is attached.
+ * - `browser`           — an Agent-operable browser engine is ready.
  * - `headless`          — runs without an interactive UI (ADR 0059 cloud
  *                         brain; assigned to no webview platform here).
  * - `always-on`         — process hosts long-lived listeners that outlive the
@@ -53,6 +54,7 @@ export const CORE_CAPABILITY_IDS = [
   "push-display",
   "biometric",
   "webview",
+  "browser",
   "headless",
   "always-on",
   "connector-runtime",
@@ -72,7 +74,9 @@ const CORE_ID_SET: ReadonlySet<string> = new Set(CORE_CAPABILITY_IDS)
 /** Capabilities implemented by the cognia-server + brain execution plane. */
 const SERVER_BACKED: readonly CapabilityId[] = Object.freeze([
   "shell",
+  "pty",
   "sidecar",
+  "keyring",
   "always-on",
   "connector-runtime",
   "mcp-runtime",
@@ -105,6 +109,7 @@ const PLATFORM_BASELINES: Record<Platform, readonly CapabilityId[]> = {
     "connector-runtime",
     "mcp-runtime",
     "push-display",
+    "browser",
   ] as const),
   mobile: Object.freeze([
     "webview",

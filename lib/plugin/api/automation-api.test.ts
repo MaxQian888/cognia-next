@@ -52,7 +52,7 @@ describe("createAutomationAPI", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     resetPermissionGuard()
-    guard = getPermissionGuard()
+    guard = getPermissionGuard({ confirmDangerousByDefault: false })
   })
 
   it("gates each method behind its specific automation permission", () => {

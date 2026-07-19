@@ -67,6 +67,8 @@ export function createBackupAPI(pluginId: string): PluginBackupAPI {
       buildExportEnvelope({
         includeSessions: opts?.includeSessions ?? true,
         includeBuiltIns: opts?.includeBuiltIns,
+        // backup:read is not memory:read. Plugins cannot exfiltrate learned memory.
+        includeMemories: false,
         // Hard-forced: a plugin never gets the raw API key in a backup.
         includeApiKey: false,
       }),

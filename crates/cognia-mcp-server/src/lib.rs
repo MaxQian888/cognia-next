@@ -44,12 +44,11 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use parking_lot::Mutex;
-use tauri::AppHandle;
 
 use automation_proxy::AutomationProxy;
 use cognia_automation::automation::dispatcher::Enforcement;
 use http_server::{spawn_server, ServerHandle};
-use orchestration_proxy::{OrchestrationProxy, OrchestrationReply};
+use orchestration_proxy::{OrchestrationEventSink, OrchestrationProxy, OrchestrationReply};
 use sidecar::SidecarProcess;
 use types::{ExternalBridgeSettings, McpServerError, McpServerStatus};
 
@@ -149,7 +148,7 @@ impl McpServerState {
         settings_json: String,
         sidecar_path: String,
         automation: Option<(AutomationHandle, Enforcement)>,
-        app_handle: Option<AppHandle>,
+        orchestration_sink: Option<OrchestrationEventSink>,
     ) -> Result<u16, McpServerError> {
         // Guard: reject empty token before attempting any I/O.
         if token.is_empty() {
@@ -216,13 +215,15 @@ impl McpServerState {
         // simply absent and the sidecar handlers return the desktop-required
         // error. Lifetime is tied to McpServerInner — drop aborts the listener.
         let (orch_proxy, orch_env): (Option<Arc<OrchestrationProxy>>, Vec<(String, String)>) =
-            match app_handle {
-                Some(app) => {
-                    let proxy = OrchestrationProxy::spawn(app).await.map_err(|e| {
-                        McpServerError::SidecarSpawn(format!(
-                            "orchestration_proxy bind failed: {e}"
-                        ))
-                    })?;
+            match orchestration_sink {
+                Some(sink) => {
+                    let proxy = OrchestrationProxy::spawn_with_sink(sink)
+                        .await
+                        .map_err(|e| {
+                            McpServerError::SidecarSpawn(format!(
+                                "orchestration_proxy bind failed: {e}"
+                            ))
+                        })?;
                     let env = vec![
                         ("COGNIA_ORCH_PROXY".to_string(), proxy.addr.to_string()),
                         ("COGNIA_ORCH_PROXY_TOKEN".to_string(), proxy.token.clone()),

@@ -27,6 +27,7 @@ describe("getSettings", () => {
     expect(s.searchProviders).toBeDefined()
     expect(s.updates).toEqual(DEFAULT_UPDATE_SETTINGS)
     expect(s.browserCookieImportEnabled).toBe(false)
+    expect(s.remoteBrowserEnabled).toBe(false)
   })
 
   it("keeps a user's update preference over the default", async () => {

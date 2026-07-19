@@ -10,6 +10,7 @@
 ##   brain-builder                Node stage bundling the brain (cognia-agent
 ##                                CLI layout) + sidecar via
 ##                                scripts/build/build-cli-binary.mjs --layout-only.
+##   plugin-node-runtime          pinned Node used only for sandboxed JS plugins.
 ##   runtime-slim                 binary + brain + sidecar (default image).
 ##   runtime-full                 + git + preinstalled external agent CLIs
 ##                                (deploy/runner/install-agents.sh — shared with
@@ -86,7 +87,7 @@ RUN echo placeholder > sidecar/node_modules/cognia-placeholder/keep.txt && echo 
 # container-exec + k8s-exec (R13): the headless image ships both flavors of
 # the container backend, so COGNIA_EXEC_BACKEND=container works at T2
 # (Docker socket proxy) and =kubernetes at T3 (runner Pods, in-cluster).
-RUN cargo build --release --locked --bin cognia-server --features container-exec,k8s-exec
+RUN cargo build --release --locked --bin cognia-server --features container-exec,k8s-exec,workspace-runtime-exec
 
 # PR CI target: type/borrow-check the whole graph without codegen or linking.
 FROM deps AS check
@@ -109,7 +110,7 @@ COPY hooks/builtin ./hooks/builtin
 # trees are desktop bundle content the headless bin never reads.
 RUN mkdir -p sidecar/node_modules/cognia-placeholder sidecar/vscode-ext-host/dist sidecar/vscode-ext-host/node_modules/cognia-placeholder sidecar/webclone/dist sidecar/webclone/node_modules/cognia-placeholder
 RUN echo placeholder > sidecar/node_modules/cognia-placeholder/keep.txt && echo placeholder > sidecar/vscode-ext-host/dist/keep.txt && echo placeholder > sidecar/vscode-ext-host/node_modules/cognia-placeholder/keep.txt && echo placeholder > sidecar/webclone/dist/keep.txt && echo placeholder > sidecar/webclone/node_modules/cognia-placeholder/keep.txt
-RUN cargo check --release --locked --bin cognia-server --features container-exec,k8s-exec
+RUN cargo check --release --locked --bin cognia-server --features container-exec,k8s-exec,workspace-runtime-exec
 
 # ── Node: brain (cognia-agent) + sidecar bundle ─────────────────────────────
 # Full (non-slim) image: node-gyp needs python3/make/g++ for the sidecar's
@@ -136,7 +137,15 @@ COPY sidecar/package.json sidecar/pnpm-lock.yaml ./sidecar/
 RUN pnpm --dir sidecar install --ignore-workspace --frozen-lockfile
 # Sources last; the bundle step reaches cli/ + lib/ + the wider @/* TS graph.
 COPY . .
+RUN npm --prefix sidecar/vscode-ext-host ci --no-audit --no-fund \
+    && npm --prefix sidecar/vscode-ext-host run build
 RUN NODE_OPTIONS=--max-old-space-size=8192 node scripts/build/build-cli-binary.mjs --layout-only
+
+# The plugin permission model is pinned independently from the brain's Node
+# runtime. cognia-plugin-runtime verifies this exact major/minimum patch before
+# executing any installed JavaScript plugin.
+FROM node:26.3.1-bookworm-slim AS plugin-node-runtime
+RUN node --version
 
 # ── Runtime: slim (sidecar-only execution plane) ────────────────────────────
 FROM node:22-bookworm-slim AS runtime-slim
@@ -151,13 +160,17 @@ RUN apt-get update \
 
 COPY --from=builder /work/target/release/cognia-server /usr/local/bin/cognia-server
 COPY --from=brain-builder /work/cli/dist/bin/cognia-agent-layout /app/brain
+COPY --from=plugin-node-runtime /usr/local/bin/node /opt/cognia/plugin-node/bin/node
 # Smoke stub agent (ADR-0059 D6): admitted by SpawnPolicy ONLY when
 # COGNIA_SMOKE_AGENT=1 is set on the server — inert otherwise.
 COPY scripts/smoke/stub-acp-agent.mjs /opt/cognia/smoke/stub-acp-agent.mjs
 
 ENV COGNIA_DATA_DIR=/data \
     COGNIA_BRAIN_ENTRY=/app/brain/cli.mjs \
-    COGNIA_SIDECAR_SCRIPT=/app/brain/sidecar/claude-host.mjs
+    COGNIA_PLUGIN_NODE_PATH=/opt/cognia/plugin-node/bin/node \
+    COGNIA_SIDECAR_SCRIPT=/app/brain/sidecar/claude-host.mjs \
+    COGNIA_VSCODE_EXT_HOST_SCRIPT=/app/brain/sidecar/vscode-ext-host/dist/host.js \
+    COGNIA_MCP_SIDECAR_PATH=/app/brain/sidecar/cognia-mcp.mjs
 VOLUME /data
 # 27890 tracks companion_api::server::DEFAULT_PORT — 7890/7891 are the Clash
 # mixed/SOCKS defaults and collide with a proxy on most dev hosts.

@@ -4,7 +4,7 @@
 import "fake-indexeddb/auto"
 import { dispatchTrigger, isTriggerEvent } from "./trigger-bridge"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
-import { createWorkflow } from "@/lib/db/workflows"
+import { createWorkflow, listWorkflowRuns } from "@/lib/db/workflows"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import type { TriggerEvent } from "@/types/workflow/visual"
 
@@ -37,12 +37,123 @@ describe("isTriggerEvent", () => {
     ["missing kind", { workflowId: "wf", originAt: 0 }],
     ["missing originAt", { workflowId: "wf", kind: "trigger.cron" }],
     ["non-numeric originAt", { workflowId: "wf", kind: "trigger.cron", originAt: "x" }],
+    ["non-string triggerId", { workflowId: "wf", kind: "trigger.cron", triggerId: 7, originAt: 0 }],
   ])("rejects %s", (_label, value) => {
     expect(isTriggerEvent(value as unknown)).toBe(false)
   })
 })
 
 describe("dispatchTrigger", () => {
+  it("runs a workflow from its real cron trigger node", async () => {
+    const wf = await createWorkflow({
+      name: "cron workflow",
+      nodes: [
+        {
+          id: "n_cron",
+          type: "trigger.cron",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "cron", params: { cron: "* * * * *" } },
+        },
+        {
+          id: "n_set",
+          type: "flow.set",
+          typeVersion: 1,
+          position: { x: 200, y: 0 },
+          data: { label: "set", params: { variable: "x", value: 1 } },
+        },
+      ],
+      edges: [{ id: "e1", source: "n_cron", target: "n_set" }],
+    })
+
+    await dispatchTrigger({
+      workflowId: wf.id,
+      kind: "trigger.cron",
+      payload: { triggerId: "n_cron" },
+      originAt: Date.now(),
+    })
+
+    const [run] = await listWorkflowRuns({ workflowId: wf.id })
+    expect(run.status).toBe("succeeded")
+  })
+
+  it("activates only the trigger node identified by a legacy Rust payload", async () => {
+    const wf = await createWorkflow({
+      name: "multi-trigger workflow",
+      nodes: [
+        {
+          id: "n_cron",
+          type: "trigger.cron",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "cron", params: { cron: "* * * * *" } },
+        },
+        {
+          id: "n_other_cron",
+          type: "trigger.cron",
+          typeVersion: 1,
+          position: { x: 0, y: 200 },
+          data: { label: "other cron", params: { cron: "0 * * * *" } },
+        },
+        {
+          id: "n_cron_out",
+          type: "flow.set",
+          typeVersion: 1,
+          position: { x: 200, y: 0 },
+          data: { label: "cron output", params: { variable: "branch", value: "cron" } },
+        },
+        {
+          id: "n_other_cron_out",
+          type: "flow.set",
+          typeVersion: 1,
+          position: { x: 200, y: 200 },
+          data: { label: "other output", params: { variable: "branch", value: "other" } },
+        },
+      ],
+      edges: [
+        { id: "e_cron", source: "n_cron", target: "n_cron_out" },
+        { id: "e_other", source: "n_other_cron", target: "n_other_cron_out" },
+      ],
+    })
+
+    await dispatchTrigger({
+      workflowId: wf.id,
+      kind: "trigger.cron",
+      payload: { triggerId: "n_cron" },
+      originAt: Date.now(),
+    })
+
+    const [run] = await listWorkflowRuns({ workflowId: wf.id })
+    expect(run.output).toEqual({ variable: "branch", value: "cron" })
+    expect(run.triggerId).toBe("n_cron")
+  })
+
+  it("ignores a stale trigger id instead of running another workflow root", async () => {
+    const wf = await createWorkflow({
+      name: "stale trigger workflow",
+      nodes: [
+        {
+          id: "n_cron",
+          type: "trigger.cron",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "cron", params: { cron: "* * * * *" } },
+        },
+      ],
+      edges: [],
+    })
+
+    await dispatchTrigger({
+      workflowId: wf.id,
+      kind: "trigger.cron",
+      triggerId: "n_deleted",
+      payload: {},
+      originAt: Date.now(),
+    })
+
+    expect(await listWorkflowRuns({ workflowId: wf.id })).toEqual([])
+  })
+
   it("runs the workflow when the id resolves", async () => {
     const wf = await createWorkflow({
       name: "x",

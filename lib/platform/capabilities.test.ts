@@ -54,7 +54,9 @@ describe("detectLocalCapabilities", () => {
     const caps = detectLocalCapabilities()
     expect(caps).toEqual([
       "shell",
+      "pty",
       "sidecar",
+      "keyring",
       "always-on",
       "connector-runtime",
       "mcp-runtime",
@@ -79,6 +81,7 @@ describe("detectLocalCapabilities", () => {
         "connector-runtime",
         "mcp-runtime",
         "push-display",
+        "browser",
       ])
     )
     expect(caps).not.toContain("camera")
@@ -180,12 +183,13 @@ describe("serverBackedCapabilities", () => {
     for (const profile of ["mobile-companion", "cloud-companion"] as const) {
       const caps = serverBackedCapabilities(profile)
       expect(caps).toContain("shell")
+      expect(caps).toContain("pty")
       expect(caps).toContain("sidecar")
+      expect(caps).toContain("keyring")
       expect(caps).toContain("headless")
       // Local-machine surfaces are NOT server-backed.
       expect(caps).not.toContain("uia-automation")
       expect(caps).not.toContain("ocr")
-      expect(caps).not.toContain("pty")
     }
   })
 

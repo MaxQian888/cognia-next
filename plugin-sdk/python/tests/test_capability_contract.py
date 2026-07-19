@@ -6,7 +6,14 @@ import pytest
 
 from cognia import (
     CANONICAL_CAPABILITY_CONTRACTS,
+    CATALOG_SCHEMA_VERSION,
     CapabilityContract,
+    MANIFEST_CONTRIBUTIONS,
+    PLUGIN_PATH_FIELD_CONTRACTS,
+    RUNTIME_ENTRY_CONTRACTS,
+    VALID_CAPABILITIES,
+    VALID_PERMISSIONS,
+    VALID_PLUGIN_TYPES,
     define_capability_contract,
     validate_capabilities,
 )
@@ -60,6 +67,26 @@ def test_generated_canonical_contract_is_the_default():
     assert any(contract.id == "context-panel" for contract in CANONICAL_CAPABILITY_CONTRACTS)
     assert validate_capabilities(["context-panel"]).allowed is True
     assert validate_capabilities(["not-canonical"]).allowed is False
+    context_panel = next(
+        contract
+        for contract in CANONICAL_CAPABILITY_CONTRACTS
+        if contract.id == "context-panel"
+    )
+    assert context_panel.introduced_in == "0.1.0"
+    assert context_panel.minimum_host_version == "0.1.0"
+
+
+def test_generated_catalog_metadata_is_public():
+    assert CATALOG_SCHEMA_VERSION >= 2
+    assert any(item["field"] == "sessionImporters" for item in MANIFEST_CONTRIBUTIONS)
+    assert RUNTIME_ENTRY_CONTRACTS["hybrid"]["required"] == ["pythonMain"]
+    assert any(
+        item["path"] == "vscodeExtension.contributes.chatPromptFiles[].path"
+        for item in PLUGIN_PATH_FIELD_CONTRACTS
+    )
+    assert "frontend" in VALID_PLUGIN_TYPES
+    assert "ipc:call" in VALID_PERMISSIONS
+    assert "context-panel" in VALID_CAPABILITIES
 
 
 def test_validate_unknown_is_error():

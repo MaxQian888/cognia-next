@@ -8,7 +8,7 @@
  *
  * Sources:
  *  - `types/plugin/plugin.ts` (base `PluginHooks` interface)
- *  - `types/plugin/plugin-hooks.ts` (extended hook event shapes,
+ *  - `types/plugin/plugin-hooks.ts` (additional hook event shapes,
  *    `HookPriority` type alias, sandbox execution result)
  */
 

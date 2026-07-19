@@ -205,6 +205,7 @@ describe("WallpaperTab", () => {
     })
     const chip = screen.getByTestId("wallpaper-contrast-chip")
     expect(chip.textContent).toMatch(/^FAIL\s/)
+    expect(screen.getByTestId("wallpaper-theme-generator")).toBeInTheDocument()
     expect(screen.getByText("opacity.fail")).toBeInTheDocument()
     fireEvent.click(screen.getByText("opacity.autoFix"))
     expect(setBackground).toHaveBeenCalledWith({ opacity: 0.4 })

@@ -82,6 +82,8 @@ export interface InjectCapacitorOptions {
   shareEnabled?: boolean
   /** Initial mDNS discovery results for the LAN-discovery flow. */
   mdnsResults?: Array<{ host: string; port: number; fingerprint?: string }>
+  /** Initial native Keychain/Keystore entries, re-created for every document. */
+  secureStorage?: Record<string, string>
 }
 
 export async function injectCapacitor(
@@ -101,6 +103,7 @@ export async function injectCapacitor(
     initialNotifications: options.initialNotifications ?? [],
     shareEnabled: options.shareEnabled ?? true,
     mdnsResults: options.mdnsResults ?? [],
+    secureStorage: options.secureStorage ?? {},
   }
 
   await page.addInitScript((init) => {
@@ -184,7 +187,7 @@ export async function injectCapacitor(
       localNotificationActionListeners: [],
       orientationListeners: [],
       mdnsListeners: [],
-      secureStore: {},
+      secureStore: { ...init.secureStorage },
       fsRoot: {},
       lockedOrientation: null,
       lastShare: null,
@@ -574,6 +577,9 @@ export async function injectCapacitor(
             // ignore listener errors
           }
         }
+      },
+      getNetworkListenerCount() {
+        return state.networkListeners.length
       },
       setBarcodeResult(payload: string | null) {
         state.barcodeResult = payload === null ? null : { rawValue: payload }

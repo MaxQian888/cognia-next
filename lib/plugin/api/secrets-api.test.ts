@@ -3,7 +3,11 @@
  */
 
 jest.mock("@/lib/native/utils", () => ({ isTauri: jest.fn() }))
-jest.mock("../core/transport", () => ({ invokePluginApi: jest.fn() }))
+const mockGatewayAvailable = jest.fn()
+jest.mock("../core/transport", () => ({
+  invokePluginApi: jest.fn(),
+  isPluginGatewayAvailable: () => mockGatewayAvailable(),
+}))
 jest.mock("@/lib/keyring", () => ({
   getSecret: jest.fn(),
   setSecret: jest.fn(async () => undefined),
@@ -36,6 +40,7 @@ const mockClearSecret = clearSecret as jest.MockedFunction<typeof clearSecret>
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockGatewayAvailable.mockImplementation(() => mockIsTauri())
   localStorage.clear()
   __resetSecretListenersForTesting()
 })
@@ -49,6 +54,16 @@ describe("createSecretsAPI — Tauri path", () => {
     await api.store("token", "abc")
     expect(mockInvoke).toHaveBeenCalledWith("p", "secrets:set", { key: "token", value: "abc" })
     expect(await api.keys()).toEqual(["token"])
+  })
+
+  it("uses the host gateway for a separated remote UI", async () => {
+    mockIsTauri.mockReturnValue(false)
+    mockGatewayAvailable.mockReturnValue(true)
+    mockInvoke.mockResolvedValue("remote-secret")
+
+    await expect(createSecretsAPI("p").get("token")).resolves.toBe("remote-secret")
+    expect(mockGetSecret).not.toHaveBeenCalled()
+    expect(getSecretsBackendKind()).toBe("os-keyring")
   })
 
   it("get/has route through the gateway", async () => {

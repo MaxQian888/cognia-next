@@ -92,6 +92,42 @@ describe("applyMemoryContext", () => {
     expect(res.systemPromptSection).toContain("- Reply in Chinese")
   })
 
+  it("withholds PII-bearing recalled and procedural rows from the provider prompt", async () => {
+    const res = await applyMemoryContext({
+      userMessage: "email",
+      ...base,
+      deps: deps({
+        loadCandidates: async () => [mem("Email alice@example.com", { id: "unsafe" })],
+        loadProcedural: async () => [
+          mem("Email admin@example.com before release", {
+            id: "unsafe-procedure",
+            type: "procedural",
+          }),
+        ],
+      }),
+    })
+    expect(res.systemPromptSection).toBeNull()
+    expect(res.retrievedMemories).toEqual([])
+    expect(res.withheldCount).toBe(2)
+  })
+
+  it("enforces one shared recall token budget and reports truncation", async () => {
+    const res = await applyMemoryContext({
+      userMessage: "memory",
+      ...base,
+      maxTokens: 24,
+      deps: deps({
+        loadCandidates: async () => [
+          mem(`memory ${"first ".repeat(20)}`, { id: "first" }),
+          mem(`memory ${"second ".repeat(20)}`, { id: "second" }),
+        ],
+      }),
+    })
+    expect(res.retrievedMemories.length).toBeLessThan(2)
+    expect(res.budget).toMatchObject({ limit: 24, truncated: true })
+    expect(res.withheldCount).toBeGreaterThan(0)
+  })
+
   it("dedupes recalled memories that overlap a Twin chunk", async () => {
     const res = await applyMemoryContext({
       userMessage: "shanghai",

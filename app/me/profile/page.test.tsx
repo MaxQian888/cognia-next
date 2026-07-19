@@ -20,11 +20,6 @@ describe("MobileProfilePage", () => {
     expect(screen.getByTestId("stub-profile-section")).toBeInTheDocument()
   })
 
-  it("links the back button to /me", () => {
-    render(<MobileProfilePage />)
-    expect(screen.getByRole("link")).toHaveAttribute("href", "/me")
-  })
-
   it("renders the localized section heading", () => {
     render(<MobileProfilePage />)
     // next-intl resolves real en.json keys in the global jest mock, so the

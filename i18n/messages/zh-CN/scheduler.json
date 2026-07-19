@@ -252,6 +252,7 @@
   "eventSourceLiteralPlaceholder": "来源",
   "eventSourcePlaceholder": "留空则匹配任意来源",
   "eventType": "事件类型",
+  "eventTypePlaceholder": "例如 message.created、workflow.completed",
   "eventTypeCustomLabel": "自定义事件类型…",
   "eventTypePresetLabel": "内置事件类型",
   "eventTypePresets": {
@@ -494,6 +495,7 @@
   },
   "pausedTasks": "已暂停",
   "payload": {
+    "jsonPlaceholder": "{\"key\": \"value\"}",
     "additionalDirectories": {
       "heading": "附加目录"
     },

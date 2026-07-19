@@ -1,7 +1,7 @@
 /**
  * Plugin API Module Index
  *
- * Exports all plugin API implementations for the extended SDK.
+ * Exports the host implementations behind the single public plugin context.
  */
 
 export { createSessionAPI } from "./session-api"

@@ -673,15 +673,20 @@
       "hint": "Minimum time between fires for this workflow — guards against the workflow's own desktop actions re-triggering it.",
       "label": "Cooldown (ms)"
     },
-    "desktopOnly": "Desktop only — fires on live UI Automation events (v1: focus-changed on Windows); has no effect in the browser.",
+    "desktopOnly": "Desktop only — fires on native Windows UI Automation focus, structure, and property changes; has no effect in the browser.",
     "kinds": {
-      "hint": "Fire when any of the selected UI Automation events occur. v1 delivers focus-changed; the other kinds are pending.",
+      "hint": "Fire when any of the selected native UI Automation events occur.",
       "label": "Event kinds",
       "options": {
         "focus-changed": "Focus changed",
         "property-changed": "Property changed",
         "structure-changed": "Structure changed"
       }
+    },
+    "scope": {
+      "hint": "Optional UIA element reference. Events are limited to this element and its descendants.",
+      "label": "UIA element scope",
+      "placeholder": "Paste an element reference"
     }
   },
   "desktopFindElement": {
@@ -1559,22 +1564,42 @@
     }
   },
   "memoryRecall": {
+    "agentId": {
+      "label": "Agent ID"
+    },
+    "branch": {
+      "label": "Branch restriction"
+    },
     "characterId": {
       "label": "Character"
+    },
+    "path": {
+      "label": "Workspace-relative path"
+    },
+    "projectId": {
+      "label": "Project ID"
     },
     "query": {
       "label": "Query"
     },
     "scope": {
+      "agent": "Agent",
       "character": "Character",
       "global": "Global",
-      "label": "Scope"
+      "label": "Scope",
+      "workspace": "Workspace"
     },
     "topK": {
       "label": "Top K"
     }
   },
   "memoryStore": {
+    "agentId": {
+      "label": "Agent ID"
+    },
+    "branch": {
+      "label": "Branch restriction"
+    },
     "characterId": {
       "label": "Character"
     },
@@ -1588,10 +1613,18 @@
       "label": "PII gate",
       "redact": "Redact placeholders"
     },
+    "pathPattern": {
+      "label": "Workspace-relative path prefix"
+    },
+    "projectId": {
+      "label": "Project ID"
+    },
     "scope": {
+      "agent": "Agent",
       "character": "Character",
       "global": "Global",
-      "label": "Scope"
+      "label": "Scope",
+      "workspace": "Workspace"
     },
     "text": {
       "hint": "One self-contained statement. Deduped against existing memories via the consolidator.",

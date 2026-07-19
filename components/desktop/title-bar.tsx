@@ -761,6 +761,9 @@ export function TitleBar() {
                     {tMenu("go.workflows")}
                     <DropdownMenuShortcut>{tMenu("shortcut.cmdOrCtrl2")}</DropdownMenuShortcut>
                   </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={handleGo("go-sites")}>
+                    {tMenu("go.sites")}
+                  </DropdownMenuItem>
                   <DropdownMenuItem onSelect={handleGo("go-twin")}>
                     {tMenu("go.twin")}
                     <DropdownMenuShortcut>{tMenu("shortcut.cmdOrCtrl3")}</DropdownMenuShortcut>
@@ -1071,6 +1074,7 @@ export function TitleBar() {
                       {tMenu("go.workflows")}
                       <MenubarShortcut>{tMenu("shortcut.cmdOrCtrl2")}</MenubarShortcut>
                     </MenubarItem>
+                    <MenubarItem onSelect={handleGo("go-sites")}>{tMenu("go.sites")}</MenubarItem>
                     <MenubarItem onSelect={handleGo("go-twin")}>
                       {tMenu("go.twin")}
                       <MenubarShortcut>{tMenu("shortcut.cmdOrCtrl3")}</MenubarShortcut>

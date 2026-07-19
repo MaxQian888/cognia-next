@@ -10,18 +10,28 @@ jest.mock("@/lib/tauri", () => ({
   isCapacitor: jest.fn(() => false),
   transport: { call: jest.fn() },
 }))
+jest.mock("@/lib/platform/detect", () => ({
+  isHeadlessHost: jest.fn(() => false),
+}))
+jest.mock("@tauri-apps/api/core", () => ({ invoke: jest.fn() }))
 
-import { createKeyringStore } from "./keyring-store"
+import { createKeyringStore, createLocalKeyringStore } from "./keyring-store"
 import { isCapacitor, isTauri, transport } from "@/lib/tauri"
+import { isHeadlessHost } from "@/lib/platform/detect"
+import { invoke } from "@tauri-apps/api/core"
 
 const mockIsTauri = isTauri as jest.Mock
 const mockIsCapacitor = isCapacitor as jest.Mock
 const mockCall = transport.call as jest.Mock
+const mockIsHeadless = isHeadlessHost as jest.Mock
+const mockInvoke = invoke as jest.Mock
 
 beforeEach(() => {
   mockIsTauri.mockReturnValue(false)
   mockIsCapacitor.mockReturnValue(false)
   mockCall.mockReset()
+  mockIsHeadless.mockReturnValue(false)
+  mockInvoke.mockReset()
 })
 
 describe("createKeyringStore — in-memory backend (web/dev fallback)", () => {
@@ -96,6 +106,56 @@ describe("createKeyringStore — Tauri OS keyring backend", () => {
     expect(mockCall).toHaveBeenCalledWith("keyring_secret_clear", {
       input: { namespace: "provider-ns", key: "k1" },
     })
+  })
+})
+
+describe("createKeyringStore — headless encrypted server backend", () => {
+  beforeEach(() => {
+    mockIsHeadless.mockReturnValue(true)
+  })
+
+  it("uses the process transport generic keyring RPCs", async () => {
+    mockCall
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce("secret")
+      .mockResolvedValueOnce(undefined)
+    const store = createKeyringStore("webdav")
+
+    await store.save("sync-passphrase", "secret")
+    expect(await store.load("sync-passphrase")).toBe("secret")
+    await store.delete("sync-passphrase")
+
+    expect(mockCall.mock.calls).toEqual([
+      [
+        "keyring_secret_set",
+        { input: { namespace: "webdav", key: "sync-passphrase", value: "secret" } },
+      ],
+      ["keyring_secret_get", { input: { namespace: "webdav", key: "sync-passphrase" } }],
+      ["keyring_secret_clear", { input: { namespace: "webdav", key: "sync-passphrase" } }],
+    ])
+  })
+})
+
+describe("createLocalKeyringStore — non-routable Tauri keyring backend", () => {
+  it("uses direct local invoke even when the global transport points elsewhere", async () => {
+    mockIsTauri.mockReturnValue(true)
+    mockInvoke.mockResolvedValue("local-token")
+    mockCall.mockResolvedValue("remote-token")
+
+    const store = createLocalKeyringStore("cognia-sites")
+    expect(await store.load("cloudflare:account_1")).toBe("local-token")
+    expect(mockInvoke).toHaveBeenCalledWith("keyring_secret_get", {
+      input: {
+        namespace: "cognia-sites",
+        key: "cloudflare:account_1",
+      },
+    })
+    expect(mockCall).not.toHaveBeenCalled()
+  })
+
+  it("fails closed outside the local Tauri host", () => {
+    mockIsTauri.mockReturnValue(false)
+    expect(() => createLocalKeyringStore("cognia-sites")).toThrow("local Tauri")
   })
 })
 

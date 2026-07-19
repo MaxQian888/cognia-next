@@ -1,19 +1,56 @@
 //! Plugin permission ledger Tauri commands (Batch 3a).
 //!
-//! Persists per-plugin permission grants to
-//! `<install_dir>/<plugin_id>/permissions.json`. The TS-side
+//! Persists per-plugin permission grants to the host-owned
+//! `<install_dir>/.host-state/<plugin_id>/permissions.json`. The TS-side
 //! `permission-guard.ts` is the runtime gate; this module is the disk
 //! authority that survives a webview reload.
 
 use std::fs;
+use std::io::Write;
 
+use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
+use cap_std::ambient_authority;
+use cap_std::fs::{Dir, OpenOptions};
 use chrono::Utc;
 use tauri::State;
 
 use super::{PermissionGrant, PluginError, PluginRuntimeState, Result};
 
-fn ledger_path(state: &PluginRuntimeState, plugin_id: &str) -> std::path::PathBuf {
-    state.plugin_dir(plugin_id).join("permissions.json")
+const HOST_STATE_DIR: &str = ".host-state";
+const LEDGER_FILE: &str = "permissions.json";
+
+fn open_ledger_dir(
+    state: &PluginRuntimeState,
+    plugin_id: &str,
+    create: bool,
+) -> Result<Option<Dir>> {
+    let plugin_id = crate::validate_plugin_id_path_component(plugin_id)?;
+    fs::create_dir_all(&state.plugin_install_dir)?;
+    let install = Dir::open_ambient_dir(&state.plugin_install_dir, ambient_authority())?;
+    if create {
+        match install.create_dir(HOST_STATE_DIR) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    let host_state = match install.open_dir_nofollow(HOST_STATE_DIR) {
+        Ok(dir) => dir,
+        Err(error) if !create && error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    if create {
+        match host_state.create_dir(&plugin_id) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    match host_state.open_dir_nofollow(&plugin_id) {
+        Ok(dir) => Ok(Some(dir)),
+        Err(error) if !create && error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
 }
 
 fn write_ledger(
@@ -21,25 +58,106 @@ fn write_ledger(
     plugin_id: &str,
     grants: &[PermissionGrant],
 ) -> Result<()> {
-    let dir = state.plugin_dir(plugin_id);
-    fs::create_dir_all(&dir)?;
-    fs::write(
-        ledger_path(state, plugin_id),
-        serde_json::to_vec_pretty(grants)?,
-    )?;
-    Ok(())
+    let dir = open_ledger_dir(state, plugin_id, true)?.ok_or_else(|| {
+        PluginError::Internal("failed to create plugin permission ledger directory".into())
+    })?;
+    let temporary = format!(".permissions-{}.tmp", uuid::Uuid::new_v4());
+    let mut options = OpenOptions::new();
+    options
+        .write(true)
+        .create_new(true)
+        .follow(FollowSymlinks::No);
+    let mut file = dir.open_with(&temporary, &options)?;
+    let result = (|| -> Result<()> {
+        file.write_all(&serde_json::to_vec_pretty(grants)?)?;
+        file.sync_all()?;
+        dir.rename(&temporary, &dir, LEDGER_FILE)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = dir.remove_file(&temporary);
+    }
+    result
 }
 
 pub(crate) fn read_ledger(
     state: &PluginRuntimeState,
     plugin_id: &str,
 ) -> Result<Vec<PermissionGrant>> {
-    let path = ledger_path(state, plugin_id);
-    if !path.exists() {
+    let Some(dir) = open_ledger_dir(state, plugin_id, false)? else {
         return Ok(Vec::new());
+    };
+    let mut options = OpenOptions::new();
+    options.read(true).follow(FollowSymlinks::No);
+    let mut file = match dir.open_with(LEDGER_FILE, &options) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.into()),
+    };
+    if !file.metadata()?.is_file() {
+        return Err(PluginError::InvalidArgument(
+            "plugin permission ledger must be a regular file".into(),
+        ));
     }
-    let bytes = fs::read(&path)?;
-    Ok(serde_json::from_slice(&bytes)?)
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut file, &mut bytes)?;
+    let grants: Vec<PermissionGrant> = serde_json::from_slice(&bytes)?;
+    for grant in &grants {
+        if grant.plugin_id != plugin_id {
+            return Err(PluginError::InvalidArgument(
+                "plugin permission ledger contains a mismatched plugin id".into(),
+            ));
+        }
+        crate::contract::validate_permission_name(&grant.permission)
+            .map_err(PluginError::InvalidArgument)?;
+    }
+    Ok(grants)
+}
+
+pub fn grant_permission_for_state(
+    state: &PluginRuntimeState,
+    plugin_id: String,
+    permission: String,
+    granted_by: String,
+    expires_at: Option<String>,
+) -> Result<PermissionGrant> {
+    crate::validate_plugin_id_path_component(&plugin_id)?;
+    crate::contract::validate_permission_name(&permission).map_err(PluginError::InvalidArgument)?;
+    let grant = PermissionGrant {
+        plugin_id: plugin_id.clone(),
+        permission: permission.clone(),
+        granted_by,
+        granted_at: Utc::now().to_rfc3339(),
+        expires_at,
+    };
+    let mut all = state.permissions.write();
+    let mut next = match all.get(&plugin_id) {
+        Some(grants) => grants.clone(),
+        None => read_ledger(state, &plugin_id)?,
+    };
+    next.retain(|existing| existing.permission != permission);
+    next.push(grant.clone());
+    write_ledger(state, &plugin_id, &next)?;
+    all.insert(plugin_id, next);
+    Ok(grant)
+}
+
+pub fn revoke_permission_for_state(
+    state: &PluginRuntimeState,
+    plugin_id: String,
+    permission: String,
+) -> Result<()> {
+    crate::validate_plugin_id_path_component(&plugin_id)?;
+    crate::contract::validate_permission_name(&permission).map_err(PluginError::InvalidArgument)?;
+    let mut all = state.permissions.write();
+    let mut next = match all.get(&plugin_id) {
+        Some(grants) => grants.clone(),
+        None => read_ledger(state, &plugin_id)?,
+    };
+    next.retain(|grant| grant.permission != permission);
+    write_ledger(state, &plugin_id, &next)?;
+    all.insert(plugin_id, next);
+    Ok(())
 }
 
 #[tauri::command]
@@ -50,25 +168,7 @@ pub async fn plugin_permission_grant(
     granted_by: String,
     expires_at: Option<String>,
 ) -> Result<PermissionGrant> {
-    if permission.trim().is_empty() {
-        return Err(PluginError::InvalidArgument("permission is empty".into()));
-    }
-    let grant = PermissionGrant {
-        plugin_id: plugin_id.clone(),
-        permission: permission.clone(),
-        granted_by,
-        granted_at: Utc::now().to_rfc3339(),
-        expires_at,
-    };
-    {
-        let mut all = state.permissions.write();
-        let entry = all.entry(plugin_id.clone()).or_default();
-        // De-dupe: if the same permission already exists, replace it.
-        entry.retain(|g| g.permission != permission);
-        entry.push(grant.clone());
-        write_ledger(&state, &plugin_id, entry)?;
-    }
-    Ok(grant)
+    grant_permission_for_state(&state, plugin_id, permission, granted_by, expires_at)
 }
 
 #[tauri::command]
@@ -76,6 +176,15 @@ pub async fn plugin_permission_list(
     state: State<'_, PluginRuntimeState>,
     plugin_id: String,
 ) -> Result<Vec<PermissionGrant>> {
+    list_permissions_for_state(&state, plugin_id)
+}
+
+/// Host-neutral permission-ledger read shared by Tauri and `cognia-server`.
+pub fn list_permissions_for_state(
+    state: &PluginRuntimeState,
+    plugin_id: String,
+) -> Result<Vec<PermissionGrant>> {
+    crate::validate_plugin_id_path_component(&plugin_id)?;
     if let Some(grants) = state.permissions.read().get(&plugin_id) {
         return Ok(grants.clone());
     }
@@ -96,12 +205,7 @@ pub async fn plugin_permission_revoke(
     plugin_id: String,
     permission: String,
 ) -> Result<()> {
-    let mut all = state.permissions.write();
-    if let Some(entry) = all.get_mut(&plugin_id) {
-        entry.retain(|g| g.permission != permission);
-        write_ledger(&state, &plugin_id, entry)?;
-    }
-    Ok(())
+    revoke_permission_for_state(&state, plugin_id, permission)
 }
 
 #[cfg(test)]
@@ -148,6 +252,119 @@ mod tests {
         let mut grants = read_ledger(&state, "demo").unwrap();
         grants.retain(|g| g.permission != "filesystem:read");
         write_ledger(&state, "demo", &grants).unwrap();
+        assert!(read_ledger(&state, "demo").unwrap().is_empty());
+    }
+
+    #[test]
+    fn cold_start_revoke_loads_and_removes_the_persisted_grant() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let grant = PermissionGrant {
+            plugin_id: "demo".into(),
+            permission: "filesystem:read".into(),
+            granted_by: "user".into(),
+            granted_at: Utc::now().to_rfc3339(),
+            expires_at: None,
+        };
+        write_ledger(&state, "demo", &[grant]).unwrap();
+        assert!(state.permissions.read().is_empty());
+
+        revoke_permission_for_state(&state, "demo".into(), "filesystem:read".into()).unwrap();
+
+        assert!(read_ledger(&state, "demo").unwrap().is_empty());
+        assert!(state
+            .permissions
+            .read()
+            .get("demo")
+            .is_some_and(Vec::is_empty));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_persistence_never_commits_a_grant_to_memory() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let attacker = tmp.path().join("attacker");
+        fs::create_dir_all(&attacker).unwrap();
+        symlink(&attacker, &state.plugin_state_dir).unwrap();
+
+        let result = grant_permission_for_state(
+            &state,
+            "demo".into(),
+            "filesystem:write".into(),
+            "user".into(),
+            None,
+        );
+
+        assert!(result.is_err());
+        assert!(!state.has_permission("demo", "filesystem:write"));
+        assert!(!attacker.join("demo/permissions.json").exists());
+    }
+
+    #[test]
+    fn ledger_apis_reject_reserved_plugin_ids() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        assert!(read_ledger(&state, ".host-state").is_err());
+        assert!(revoke_permission_for_state(
+            &state,
+            "_marketplace_cache".into(),
+            "filesystem:read".into()
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn ledger_rejects_unknown_permissions_and_mismatched_plugin_ids() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let mut grant = PermissionGrant {
+            plugin_id: "demo".into(),
+            permission: "unknown:permission".into(),
+            granted_by: "attacker".into(),
+            granted_at: Utc::now().to_rfc3339(),
+            expires_at: None,
+        };
+        write_ledger(&state, "demo", &[grant.clone()]).unwrap();
+        assert!(read_ledger(&state, "demo").is_err());
+
+        grant.permission = "filesystem:read".into();
+        grant.plugin_id = "someone-else".into();
+        write_ledger(&state, "demo", &[grant]).unwrap();
+        assert!(read_ledger(&state, "demo").is_err());
+
+        assert!(grant_permission_for_state(
+            &state,
+            "demo".into(),
+            "unknown:permission".into(),
+            "attacker".into(),
+            None,
+        )
+        .is_err());
+        assert!(state.permissions.read().is_empty());
+    }
+
+    #[test]
+    fn ignores_a_legacy_ledger_inside_the_plugin_tree() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let plugin_dir = state.plugin_dir("demo");
+        fs::create_dir_all(&plugin_dir).unwrap();
+        fs::write(
+            plugin_dir.join("permissions.json"),
+            serde_json::to_vec(&[PermissionGrant {
+                plugin_id: "demo".into(),
+                permission: "filesystem:write".into(),
+                granted_by: "plugin".into(),
+                granted_at: Utc::now().to_rfc3339(),
+                expires_at: None,
+            }])
+            .unwrap(),
+        )
+        .unwrap();
+
         assert!(read_ledger(&state, "demo").unwrap().is_empty());
     }
 }

@@ -23,6 +23,7 @@ export function useA2UISave(surfaceId: string) {
     if (!surface || !instance) return false
 
     const now = Date.now()
+    const previousLastModified = instance.lastModified
     instance.lastModified = now
     saveAppInstances(instances)
 
@@ -36,7 +37,15 @@ export function useA2UISave(surfaceId: string) {
       lastModified: now,
       updatedAt: now,
     }
-    await upsertApp(row)
-    return true
+    try {
+      await upsertApp(row)
+      return true
+    } catch (error) {
+      if (instances.get(surfaceId) === instance && instance.lastModified === now) {
+        instance.lastModified = previousLastModified
+        saveAppInstances(instances)
+      }
+      throw error
+    }
   }, [surfaceId])
 }

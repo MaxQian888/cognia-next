@@ -8,20 +8,43 @@ import { MemoryMobileBody } from "./memory-mobile-body"
 import { useLiveQuery } from "dexie-react-hooks"
 import type { Memory } from "@/types/memory/memory"
 
+const enqueueMock = jest.fn()
+const pinMock = jest.fn()
+const updateMock = jest.fn()
+const invalidateMock = jest.fn()
+
 jest.mock("dexie-react-hooks", () => ({ useLiveQuery: jest.fn() }))
 jest.mock("@/lib/sync/companion-sync", () => ({ runSyncDown: jest.fn().mockResolvedValue([]) }))
 jest.mock("@/lib/db/memories", () => ({
   listMemories: jest.fn(),
-  setMemoryPinned: jest.fn(),
-  updateMemory: jest.fn(),
-  hardDeleteMemory: jest.fn(),
+  setMemoryPinned: (...args: unknown[]) => pinMock(...args),
+  updateMemory: (...args: unknown[]) => updateMock(...args),
+  invalidateMemory: (...args: unknown[]) => invalidateMock(...args),
+}))
+jest.mock("@/lib/db/mobile-outbound-queue", () => ({
+  enqueue: (...args: unknown[]) => enqueueMock(...args),
 }))
 jest.mock("@/components/interactions/pull-to-refresh", () => ({
   PullToRefresh: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }))
 jest.mock("@/components/memory/memory-row", () => ({
-  MemoryRow: ({ memory }: { memory: { id: string; text: string } }) => (
-    <div data-testid={`memory-row-${memory.id}`}>{memory.text}</div>
+  MemoryRow: ({
+    memory,
+    onPinToggle,
+    onSave,
+    onDelete,
+  }: {
+    memory: { id: string; text: string }
+    onPinToggle: (id: string, pinned: boolean) => void
+    onSave: (id: string, text: string) => void
+    onDelete: (id: string) => void
+  }) => (
+    <div data-testid={`memory-row-${memory.id}`}>
+      {memory.text}
+      <button onClick={() => onPinToggle(memory.id, true)}>pin</button>
+      <button onClick={() => onSave(memory.id, "updated")}>save</button>
+      <button onClick={() => onDelete(memory.id)}>forget</button>
+    </div>
   ),
 }))
 
@@ -32,6 +55,14 @@ function mem(over: Partial<Memory>): Memory {
 }
 
 describe("<MemoryMobileBody />", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    enqueueMock.mockResolvedValue({ id: "job-1" })
+    pinMock.mockResolvedValue(undefined)
+    updateMock.mockResolvedValue(undefined)
+    invalidateMock.mockResolvedValue(undefined)
+  })
+
   it("renders the memory list", () => {
     liveQuery.mockReturnValue([mem({ id: "m1", text: "remember milk" })])
     render(<MemoryMobileBody />)
@@ -55,5 +86,31 @@ describe("<MemoryMobileBody />", () => {
     render(<MemoryMobileBody />)
     expect(screen.getByTestId("empty-state")).toBeInTheDocument()
     expect(screen.getByTestId("mobile-spot-icon-memory")).toBeInTheDocument()
+  })
+
+  it("queues desktop-authoritative edits before updating the local mirror", async () => {
+    liveQuery.mockReturnValue([mem({ id: "m1" })])
+    const user = userEvent.setup()
+    render(<MemoryMobileBody />)
+
+    await user.click(screen.getByRole("button", { name: "pin" }))
+    await user.click(screen.getByRole("button", { name: "save" }))
+    await user.click(screen.getByRole("button", { name: "forget" }))
+
+    expect(enqueueMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ command: "memory_update", payload: { id: "m1", pinned: true } })
+    )
+    expect(enqueueMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ command: "memory_update", payload: { id: "m1", text: "updated" } })
+    )
+    expect(enqueueMock).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({ command: "memory_forget", payload: { id: "m1" } })
+    )
+    expect(pinMock).toHaveBeenCalledWith("m1", true)
+    expect(updateMock).toHaveBeenCalledWith("m1", { text: "updated", bumpVersion: true })
+    expect(invalidateMock).toHaveBeenCalledWith("m1")
   })
 })

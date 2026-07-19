@@ -1,8 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { SidecarTab } from "./sidecar-tab"
-
-const isTauriRef = { current: true }
 const getSidecarStatusMock = jest.fn()
 const restartSidecarMock = jest.fn()
 const getSessionMock = jest.fn()
@@ -12,7 +9,7 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
-jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriRef.current }))
+jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => true) }))
 jest.mock("@/lib/claude/ipc", () => ({
   getSidecarStatus: (...args: unknown[]) => getSidecarStatusMock(...args),
   restartSidecar: (...args: unknown[]) => restartSidecarMock(...args),
@@ -60,9 +57,13 @@ jest.mock("sonner", () => ({
   toast: { success: jest.fn(), error: jest.fn(), message: jest.fn() },
 }))
 
+import { SidecarTab } from "./sidecar-tab"
+
+const isTauriMock = (jest.requireMock("@/lib/tauri") as { isTauri: jest.Mock }).isTauri
+
 describe("SidecarTab", () => {
   beforeEach(() => {
-    isTauriRef.current = true
+    isTauriMock.mockReturnValue(true)
     activeSessionRef.current = "s1"
     getSidecarStatusMock.mockReset()
     restartSidecarMock.mockReset()
@@ -70,7 +71,7 @@ describe("SidecarTab", () => {
   })
 
   it("shows the Desktop-only badge in web mode", () => {
-    isTauriRef.current = false
+    isTauriMock.mockReturnValue(false)
     render(<SidecarTab />)
     expect(screen.getByText("webOnly")).toBeInTheDocument()
     const button = screen.getByRole("button", { name: "restartBtn" })

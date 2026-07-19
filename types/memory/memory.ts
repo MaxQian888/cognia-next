@@ -28,7 +28,12 @@ export type MemoryType = "semantic" | "episodic" | "procedural"
  * an override layer scoped to one character (resolved with global at read time,
  * character wins on key/text collision).
  */
-export type MemoryScope = "global" | "character"
+export type MemoryScope = "global" | "workspace" | "character" | "agent"
+
+export type MemoryEvidenceState = "legacy" | "supported"
+export type MemoryReviewStatus = "unreviewed" | "verified" | "conflict"
+export type MemoryContaminationState = "clean" | "external-context" | "unknown"
+export type MemorySensitivity = "normal" | "sensitive"
 
 /**
  * `active` rows are retrievable; `invalidated` rows are soft-deleted (kept for
@@ -60,6 +65,14 @@ export interface Memory {
   scope: MemoryScope
   /** Set iff `scope === "character"`. */
   characterId?: string
+  /** Owning Project id for workspace-scoped memories and optional narrower layers. */
+  projectId?: string
+  /** Private namespace. Agent-scoped rows are invisible without the same id. */
+  agentId?: string
+  /** Optional exact branch restriction. */
+  branch?: string
+  /** Optional normalized workspace-relative path prefix restriction. */
+  pathPattern?: string
   type: MemoryType
   /** Redacted memory content, a single self-contained statement. */
   text: string
@@ -94,6 +107,24 @@ export interface Memory {
   sourceChannel?: MemorySourceChannel
   /** Set when `sourceChannel === "plugin"`: the writing plugin's id (unindexed). */
   sourcePluginId?: string
+
+  /** Undefined on pre-v118 rows is interpreted as `legacy`. */
+  evidenceState?: MemoryEvidenceState
+  /** Conflicts are retained for review but never injected. */
+  reviewStatus?: MemoryReviewStatus
+  /** IDs of contradictory rows retained for user review. */
+  conflictWithIds?: string[]
+  /** Whether the learning turn included external, untrusted context. */
+  contaminationState?: MemoryContaminationState
+  sensitivity?: MemorySensitivity
+}
+
+export interface MemoryReaderContext {
+  characterId?: string
+  projectId?: string
+  agentId?: string
+  branch?: string
+  path?: string
 }
 
 /**
@@ -103,8 +134,14 @@ export interface Memory {
 export interface MemoryConfig {
   /** Master switch. When false, neither read nor write paths run. */
   enabled: boolean
+  /** Whether eligible chats may recall saved memories. */
+  useMemory: boolean
+  /** Whether eligible chats may create or revise learned memories. */
+  learnFromChats: boolean
   /** Background per-turn extraction of semantic/procedural memories. */
   autoExtract: boolean
+  /** Refuse automatic learning when a turn contains untrusted external context. */
+  disableLearningOnExternalContext: boolean
   /** Default scope new auto-extracted memories land in. */
   scopeDefault: MemoryScope
   /** Vector+BM25 hybrid vs BM25-only retrieval. */
@@ -117,6 +154,8 @@ export interface MemoryConfig {
   allowCloudEmbedding: boolean
   /** Max memories injected per turn. */
   retrievalTopK: number
+  /** Approximate token budget shared by all learned memories injected per turn. */
+  recallTokenBudget: number
   /** Below this fused-relevance score a memory is not injected. */
   relevanceFloor: number
   /** Eviction cap of active memories per scope. */
@@ -143,11 +182,15 @@ export interface MemoryConfig {
 
 export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
   enabled: true,
+  useMemory: true,
+  learnFromChats: true,
   autoExtract: true,
+  disableLearningOnExternalContext: true,
   scopeDefault: "global",
   hybridEnabled: true,
   allowCloudEmbedding: false,
   retrievalTopK: 8,
+  recallTokenBudget: 900,
   relevanceFloor: 0.35,
   maxActivePerScope: 500,
   maxIdleDays: 0,
@@ -167,5 +210,15 @@ export function isMemoryType(value: unknown): value is MemoryType {
 
 /** Merge a possibly-partial stored config over the defaults. */
 export function resolveMemoryConfig(partial: Partial<MemoryConfig> | undefined): MemoryConfig {
-  return { ...DEFAULT_MEMORY_CONFIG, ...(partial ?? {}) }
+  const stored = partial ?? {}
+
+  return {
+    ...DEFAULT_MEMORY_CONFIG,
+    ...stored,
+    // `enabled` and `autoExtract` predate the independent per-chat controls.
+    // Preserve their old meaning for stored configs that do not have the new keys.
+    useMemory: stored.useMemory ?? stored.enabled ?? DEFAULT_MEMORY_CONFIG.useMemory,
+    learnFromChats:
+      stored.learnFromChats ?? stored.autoExtract ?? DEFAULT_MEMORY_CONFIG.learnFromChats,
+  }
 }

@@ -1,27 +1,10 @@
 import { runMemoryStore } from "./memory-store"
+import type { StoreMemoryCoreInput, StoreMemoryCoreResult } from "@/lib/memory/api/store-memory"
 import type { StepExecutionContext } from "@/types/workflow/visual"
 
-const mockGetSettings = jest.fn()
-jest.mock("@/lib/db/settings", () => ({
-  getSettings: () => mockGetSettings(),
-}))
-
-const mockConsolidate = jest.fn()
-const mockBuildDeps = jest.fn()
-jest.mock("@/lib/memory/write/run-memory-extraction", () => ({
-  buildAutoExtractionDeps: (...args: unknown[]) => mockBuildDeps(...(args as [])),
-}))
-
-const mockCreateMemory = jest.fn()
-const mockUpdateMemory = jest.fn()
-jest.mock("@/lib/db/memories", () => ({
-  createMemory: (...args: unknown[]) => mockCreateMemory(...(args as [])),
-  updateMemory: (...args: unknown[]) => mockUpdateMemory(...(args as [])),
-}))
-
-const mockVectorSink = jest.fn()
-jest.mock("@/lib/memory/runtime/build-deps", () => ({
-  tryBuildMemoryVectorSink: (...args: unknown[]) => mockVectorSink(...(args as [])),
+const mockStoreMemoryCore = jest.fn<Promise<StoreMemoryCoreResult>, [StoreMemoryCoreInput]>()
+jest.mock("@/lib/memory/api/store-memory", () => ({
+  storeMemoryCore: (input: StoreMemoryCoreInput) => mockStoreMemoryCore(input),
 }))
 
 const PII_TEXT = "reach me at bob@example.com"
@@ -42,11 +25,13 @@ function makeCtx(params: Record<string, unknown>): StepExecutionContext {
 
 beforeEach(() => {
   jest.clearAllMocks()
-  mockGetSettings.mockResolvedValue({ memory: { enabled: true } })
-  mockConsolidate.mockResolvedValue({ applied: [{ op: "ADD" }] })
-  mockBuildDeps.mockResolvedValue({ consolidate: mockConsolidate })
-  mockCreateMemory.mockResolvedValue({ id: "mem_new", text: "stored" })
-  mockVectorSink.mockResolvedValue(undefined)
+  mockStoreMemoryCore.mockResolvedValue({
+    ok: true,
+    stored: true,
+    consolidated: true,
+    memoryId: "mem_new",
+    applied: ["ADD"],
+  })
 })
 
 describe("runMemoryStore", () => {
@@ -55,104 +40,190 @@ describe("runMemoryStore", () => {
     await expect(runMemoryStore(makeCtx({ text: "x", scope: "character" }))).rejects.toThrow(
       /'characterId' is required/
     )
+    expect(mockStoreMemoryCore).not.toHaveBeenCalled()
+  })
+
+  it("validates workspace/agent ids and forwards the complete namespace", async () => {
+    await expect(runMemoryStore(makeCtx({ text: "x", scope: "workspace" }))).rejects.toThrow(
+      /'projectId' is required/
+    )
+    await expect(runMemoryStore(makeCtx({ text: "x", scope: "agent" }))).rejects.toThrow(
+      /'agentId' is required/
+    )
+
+    await runMemoryStore(
+      makeCtx({
+        text: "Agent-private fact",
+        scope: "agent",
+        projectId: "project1",
+        agentId: "agent1",
+        branch: "main",
+        pathPattern: "lib/memory",
+      })
+    )
+    expect(mockStoreMemoryCore).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: "agent",
+        projectId: "project1",
+        agentId: "agent1",
+        branch: "main",
+        pathPattern: "lib/memory",
+      })
+    )
   })
 
   it("rejects procedural memories without explicit provenance", async () => {
     await expect(
       runMemoryStore(makeCtx({ text: "always use pnpm", type: "procedural" }))
     ).rejects.toThrow(/provenance 'explicit'/)
-    // Explicit provenance is allowed.
+
     const result = await runMemoryStore(
       makeCtx({ text: "always use pnpm", type: "procedural", provenance: "explicit" })
     )
+
     expect((result.output as { stored: boolean }).stored).toBe(true)
+    expect(mockStoreMemoryCore).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "procedural", provenance: "explicit" })
+    )
   })
 
   it("throws a clear error when memory is disabled", async () => {
-    mockGetSettings.mockResolvedValue({ memory: { enabled: false } })
+    mockStoreMemoryCore.mockResolvedValue({ ok: false, reason: "disabled" })
     await expect(runMemoryStore(makeCtx({ text: "x" }))).rejects.toThrow(/disabled/)
   })
 
   it("no-ops with a warning in temporary mode", async () => {
-    mockGetSettings.mockResolvedValue({ memory: { enabled: true, temporary: true } })
+    mockStoreMemoryCore.mockResolvedValue({ ok: false, reason: "temporary" })
     const ctx = makeCtx({ text: "x" })
+
     const result = await runMemoryStore(ctx)
+
     expect(result.output).toEqual({ stored: false, reason: "temporary_mode" })
     expect(ctx.log).toHaveBeenCalledWith("warn", expect.stringContaining("temporary"))
   })
 
   it("blocks PII by default", async () => {
+    mockStoreMemoryCore.mockResolvedValue({ ok: false, reason: "pii_blocked" })
+
     await expect(runMemoryStore(makeCtx({ text: PII_TEXT }))).rejects.toThrow(/contains PII/)
-    expect(mockConsolidate).not.toHaveBeenCalled()
-  })
-
-  it("redacts PII when piiGate is redact and flags the output", async () => {
-    const result = await runMemoryStore(makeCtx({ text: PII_TEXT, piiGate: "redact" }))
-    expect((result.output as { piiRedacted?: boolean }).piiRedacted).toBe(true)
-    const candidate = mockConsolidate.mock.calls[0][0].candidates[0]
-    expect(candidate.text).not.toContain("bob@example.com")
-  })
-
-  it("consolidates through the shared pipeline on the happy path", async () => {
-    const result = await runMemoryStore(
-      makeCtx({ text: "User ships on Fridays", importance: 9, key: "ship-day" })
+    expect(mockStoreMemoryCore).toHaveBeenCalledWith(
+      expect.objectContaining({ text: PII_TEXT, piiGate: "block" })
     )
-    const output = result.output as Record<string, unknown>
-    expect(output).toEqual({ stored: true, consolidated: true, applied: ["ADD"] })
-    expect(mockConsolidate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        scope: "global",
-        provenance: "system",
-        candidates: [
-          expect.objectContaining({
-            type: "semantic",
-            text: "User ships on Fridays",
-            importance: 9,
-            key: "ship-day",
-          }),
-        ],
+  })
+
+  it("delegates redaction policy and flags the output", async () => {
+    mockStoreMemoryCore.mockResolvedValue({
+      ok: true,
+      stored: true,
+      consolidated: true,
+      applied: ["ADD"],
+      piiRedacted: true,
+    })
+
+    const result = await runMemoryStore(makeCtx({ text: PII_TEXT, piiGate: "redact" }))
+
+    expect((result.output as { piiRedacted?: boolean }).piiRedacted).toBe(true)
+    expect(mockStoreMemoryCore).toHaveBeenCalledWith(
+      expect.objectContaining({ text: PII_TEXT, piiGate: "redact" })
+    )
+  })
+
+  it("delegates all workflow inputs to the shared memory API", async () => {
+    const result = await runMemoryStore(
+      makeCtx({
+        text: "  User ships on Fridays  ",
+        scope: "character",
+        characterId: "char1",
+        type: "episodic",
+        importance: 9,
+        key: "ship-day",
+        provenance: "explicit",
       })
     )
+
+    expect(result.output).toEqual({ stored: true, consolidated: true, applied: ["ADD"] })
+    expect(mockStoreMemoryCore).toHaveBeenCalledWith({
+      text: "User ships on Fridays",
+      scope: "character",
+      characterId: "char1",
+      projectId: undefined,
+      agentId: undefined,
+      branch: undefined,
+      pathPattern: undefined,
+      type: "episodic",
+      key: "ship-day",
+      importance: 9,
+      provenance: "explicit",
+      piiGate: "block",
+    })
   })
 
   it("reports stored=false when consolidation NOOPs", async () => {
-    mockConsolidate.mockResolvedValue({ applied: [{ op: "NOOP" }] })
+    mockStoreMemoryCore.mockResolvedValue({
+      ok: true,
+      stored: false,
+      consolidated: true,
+      applied: ["NOOP"],
+    })
+
     const result = await runMemoryStore(makeCtx({ text: "already known" }))
-    expect((result.output as { stored: boolean }).stored).toBe(false)
+
+    expect(result.output).toEqual({ stored: false, consolidated: true, applied: ["NOOP"] })
   })
 
-  it("falls back to a direct insert when no utility LLM is available", async () => {
-    mockBuildDeps.mockResolvedValue(null)
+  it("maps degraded shared-core results without duplicating fallback persistence", async () => {
+    mockStoreMemoryCore.mockResolvedValue({
+      ok: true,
+      stored: true,
+      consolidated: false,
+      memoryId: "mem_new",
+      applied: ["ADD"],
+    })
     const ctx = makeCtx({ text: "fact without llm" })
+
     const result = await runMemoryStore(ctx)
-    const output = result.output as Record<string, unknown>
-    expect(output.consolidated).toBe(false)
-    expect(output.stored).toBe(true)
-    expect(output.memoryId).toBe("mem_new")
-    expect(mockCreateMemory).toHaveBeenCalledWith(
-      expect.objectContaining({ text: "fact without llm", provenance: "system" })
-    )
+
+    expect(result.output).toEqual({
+      stored: true,
+      consolidated: false,
+      memoryId: "mem_new",
+    })
     expect(ctx.log).toHaveBeenCalledWith("warn", expect.stringContaining("without consolidation"))
   })
 
-  it("upserts the vector and links vectorDocId in the fallback path", async () => {
-    mockBuildDeps.mockResolvedValue(null)
-    const upsert = jest.fn().mockResolvedValue(undefined)
-    mockVectorSink.mockResolvedValue({ upsert })
-    await runMemoryStore(makeCtx({ text: "fact" }))
-    expect(upsert).toHaveBeenCalledWith("mem_new", "stored")
-    expect(mockUpdateMemory).toHaveBeenCalledWith("mem_new", { vectorDocId: "mem_new" })
+  it("preserves the shared core's redaction flag on degraded results", async () => {
+    mockStoreMemoryCore.mockResolvedValue({
+      ok: true,
+      stored: true,
+      consolidated: false,
+      memoryId: "mem_redacted",
+      applied: ["ADD"],
+      piiRedacted: true,
+    })
+
+    const result = await runMemoryStore(makeCtx({ text: PII_TEXT, piiGate: "redact" }))
+
+    expect(result.output).toEqual({
+      stored: true,
+      consolidated: false,
+      memoryId: "mem_redacted",
+      piiRedacted: true,
+    })
   })
 
-  it("swallows vector failures in the fallback path (memory still stored)", async () => {
-    mockBuildDeps.mockResolvedValue(null)
-    mockVectorSink.mockResolvedValue({ upsert: jest.fn().mockRejectedValue(new Error("vec down")) })
-    const result = await runMemoryStore(makeCtx({ text: "fact" }))
-    expect((result.output as { stored: boolean }).stored).toBe(true)
-  })
-
-  it("clamps importance into 1..10", async () => {
+  it("delegates raw importance so the shared core remains the single clamping implementation", async () => {
     await runMemoryStore(makeCtx({ text: "fact", importance: 42 }))
-    expect(mockConsolidate.mock.calls[0][0].candidates[0].importance).toBe(10)
+
+    expect(mockStoreMemoryCore).toHaveBeenCalledWith(expect.objectContaining({ importance: 42 }))
+  })
+
+  it("marks shared-core failures as non-retryable", async () => {
+    mockStoreMemoryCore.mockRejectedValueOnce(new Error("database unavailable"))
+    const errorResult = runMemoryStore(makeCtx({ text: "fact" }))
+    await expect(errorResult).rejects.toThrow("database unavailable")
+    await expect(errorResult).rejects.toMatchObject({ retryable: false })
+
+    mockStoreMemoryCore.mockRejectedValueOnce("unknown failure")
+    await expect(runMemoryStore(makeCtx({ text: "fact" }))).rejects.toThrow("unknown failure")
   })
 })

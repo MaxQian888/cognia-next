@@ -5,6 +5,7 @@ name: Images
 #   ghcr.io/<owner>/cognia-signaling      services/signaling-server
 #   ghcr.io/<owner>/cognia-share          services/share-server
 #   ghcr.io/<owner>/cognia-runner        deploy/runner (external agent CLIs)
+#   ghcr.io/<owner>/cognia-workspace-runtime services/workspace-runtime
 #   ghcr.io/<owner>/cognia-server        Dockerfile.cognia-server (slim/full)
 #
 # Publish happens on version tags (and manual dispatch with push=true).
@@ -37,6 +38,8 @@ on:
       - "deploy/runner/**"
       - "services/signaling-server/Dockerfile"
       - "services/share-server/Dockerfile"
+      - "services/workspace-runtime/**"
+      - "lib/browser/overlay.injected.js"
       - ".github/workflows/images.yml"
       # cognia-server compile inputs: the `check` stage COPYs these, so a PR
       # touching them can break the image build without touching any
@@ -100,6 +103,9 @@ jobs:
           - name: cognia-runner
             context: deploy/runner
             file: deploy/runner/Dockerfile
+          - name: cognia-workspace-runtime
+            context: .
+            file: services/workspace-runtime/Dockerfile
     steps:
       - uses: actions/checkout@v6
 

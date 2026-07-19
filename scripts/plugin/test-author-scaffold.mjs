@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process"
+import assert from "node:assert/strict"
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
@@ -29,12 +30,33 @@ try {
     "debug",
     process.platform === "win32" ? "cognia.exe" : "cognia"
   )
-  run("pnpm", ["plugin:create", "--", "sdk-probe", "--dir", pluginDir, "--kind", "ts"], repoRoot, {
-    COGNIA_PLUGIN_CLI: cli,
-  })
+  run(
+    "pnpm",
+    [
+      "plugin:create",
+      "--",
+      "sdk-probe",
+      "--dir",
+      pluginDir,
+      "--kind",
+      "ts",
+      "--yes",
+      "--description",
+      "Standalone author SDK scaffold probe",
+      "--author",
+      "Cognia SDK Test",
+    ],
+    repoRoot,
+    { COGNIA_PLUGIN_CLI: cli }
+  )
 
   const packagePath = join(pluginDir, "package.json")
   const packageJson = JSON.parse(readFileSync(packagePath, "utf8"))
+  assert.equal(
+    packageJson.dependencies["@cognia/plugin-sdk"],
+    "^0.1.0",
+    "canonical scaffold must target the currently published SDK contract"
+  )
   packageJson.dependencies["@cognia/plugin-sdk"] = `file:${sdkTarball}`
   writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`)
 

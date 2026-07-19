@@ -8,7 +8,7 @@ description: 声明式真相层——声明插件可贡献什么、证明每个�
 <Status variant="experimental" />
 
 <TLDR>
-`lib/plugin/contracts/` 是声明式真相层：`plugin-points.ts` 与 `plugin-capabilities.ts` 用 binding/docs/requiredTests 证明字段编目每个扩展点与能力，`capability-bridge-map.ts` 与 `module-bridge-map.ts` 把 manifest 字段接到注册表/桥，`runtime-proof-audit.ts` 断言每个"已实现"表面都有证据。`lib/plugin/registries/` 是类型化的覆盖注册表存储（内置 ← 插件覆盖，按 id 去重）；`packages/plugin-sdk/src/define/` 保存纯 `define*()` 类型透传，并通过 `@cognia/plugin-sdk` 与 `@cognia/plugin-sdk/define/<name>` 暴露给插件作者。
+`lib/plugin/contracts/` 是声明式真相层：`plugin-points.ts` 与 `plugin-capabilities.ts` 用 binding/docs/requiredTests 证明字段编目每个扩展点与能力，`capability-bridge-map.ts` 与 `module-bridge-map.ts` 把 manifest 字段接到注册表/桥，`runtime-proof-audit.ts` 断言每个"已实现"表面都有证据。`lib/plugin/registries/` 是类型化的覆盖注册表存储（内置 ← 插件覆盖，按 id 去重）；`packages/plugin-sdk/src/define/` 保存纯 `define*()` 类型透传，并通过 `@cognia/plugin-sdk` 包根暴露给插件作者。
 </TLDR>
 
 <StatGrid>
@@ -29,7 +29,7 @@ description: 声明式真相层——声明插件可贡献什么、证明每个�
 
 `capability-contributions.ts:79` 把插件的能力标签映射到具体的 manifest 条目，供 UI 摘要使用。两个接线映射把 manifest 字段连到运行时存储：`capability-bridge-map.ts` 负责同步覆盖注册表分发，`module-bridge-map.ts` 负责异步模块加载桥。可证明性由 `runtime-proof-audit.ts`、`conflict-reporter.ts` 与 `diagnostics-store.ts` 强制执行，它们证明每个"已实现"表面都有证据，并上报冲突与诊断。
 
-`lib/plugin/registries/` 是建在 `createOverlayRegistry` 基底之上的类型化内存存储（内置 ← 插件覆盖，按 id 去重，带插件标签）。`packages/plugin-sdk/src/define/` 是面向作者的 `define*()` 辅助函数，用于收窄内联 manifest 条目。宿主运行时消费 manifest 与注册表，不消费这些辅助函数；辅助函数通过 `@cognia/plugin-sdk` 包根和 `@cognia/plugin-sdk/define/<name>` 作为公共作者接口暴露。工具代码可以从 `@cognia/plugin-sdk/contracts` 导入只读契约目录与贡献摘要辅助函数，而不需要直接依赖 `lib/plugin/contracts/*`。
+`lib/plugin/registries/` 是建在 `createOverlayRegistry` 基底之上的类型化内存存储（内置 ← 插件覆盖，按 id 去重，带插件标签）。`packages/plugin-sdk/src/define/` 是面向作者的 `define*()` 辅助函数，用于收窄内联 manifest 条目。宿主运行时消费 manifest 与注册表，不消费这些辅助函数；辅助函数通过 `@cognia/plugin-sdk` 包根作为公共作者接口暴露。工具代码可以从 `@cognia/plugin-sdk/contracts` 导入只读契约目录与贡献摘要辅助函数，而不需要直接依赖 `lib/plugin/contracts/*`。
 
 ## 覆盖注册表模式
 
@@ -140,7 +140,7 @@ export function reportRegistryConflict(info: RegistryConflictInfo): void {
 
 ## SDK define*() 目录
 
-所有辅助函数都是纯类型透传，**除了** `defineCharacterPack`，它会立即校验。包根会导出全部 helper，并提供直接子路径：`@cognia/plugin-sdk/define/<name>` 映射到 `packages/plugin-sdk/src/define/define-<name>.ts`。
+所有辅助函数都是纯类型透传，**除了** `defineCharacterPack`，它会立即校验。包根会导出所有受支持的 helper；按源码文件形状拼出的 `define/<name>` 导入不会发布。
 
 | 辅助函数分组 | 示例 | 产出 |
 | --- | --- | --- |

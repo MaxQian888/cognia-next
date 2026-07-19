@@ -24,7 +24,9 @@ const wrap = (ui: React.ReactNode) => (
   </NextIntlClientProvider>
 )
 
-function makeOption(overrides: Partial<AcpConfigOption> = {}): AcpConfigOption {
+type SelectConfigOption = Extract<AcpConfigOption, { type: "select" }>
+
+function makeOption(overrides: Partial<SelectConfigOption> = {}): SelectConfigOption {
   return {
     id: "model",
     name: "Model",

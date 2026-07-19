@@ -231,10 +231,12 @@ impl WebhookRouter {
             return Err("webhook path cannot be empty".into());
         }
         let mut entries = self.inner.entries.write();
-        // If another entry uses this path, update only when the trigger_id
-        // matches; otherwise reject so two workflows can't shadow each other.
+        // If another entry uses this path, update only when the full workflow
+        // + node identity matches; otherwise reject so copied node ids cannot
+        // shadow another workflow.
         if let Some(existing) = entries.get(&path) {
-            if existing.trigger_id != entry.trigger_id {
+            if existing.trigger_id != entry.trigger_id || existing.workflow_id != entry.workflow_id
+            {
                 return Err(format!(
                     "webhook path '{path}' is already registered by trigger {}",
                     existing.trigger_id
@@ -248,11 +250,11 @@ impl WebhookRouter {
     }
 
     /// Remove a trigger by id. Idempotent; missing ids return Ok(()).
-    pub fn unregister(&self, trigger_id: &str) {
+    pub fn unregister(&self, workflow_id: &str, trigger_id: &str) {
         let mut entries = self.inner.entries.write();
         let path = entries
             .iter()
-            .find(|(_, e)| e.trigger_id == trigger_id)
+            .find(|(_, e)| e.workflow_id == workflow_id && e.trigger_id == trigger_id)
             .map(|(p, _)| p.clone());
         if let Some(p) = path {
             entries.remove(&p);
@@ -260,11 +262,11 @@ impl WebhookRouter {
     }
 
     /// Look up the URL for an already-registered trigger.
-    pub fn url_for_trigger(&self, trigger_id: &str) -> Option<String> {
+    pub fn url_for_trigger(&self, workflow_id: &str, trigger_id: &str) -> Option<String> {
         let entries = self.inner.entries.read();
         let path = entries
             .iter()
-            .find(|(_, e)| e.trigger_id == trigger_id)
+            .find(|(_, e)| e.workflow_id == workflow_id && e.trigger_id == trigger_id)
             .map(|(p, _)| p.clone())?;
         self.bound_url_for_path(&path)
     }
@@ -482,6 +484,7 @@ async fn handle_webhook(
     let event = TriggerEvent {
         workflow_id: entry.workflow_id.clone(),
         kind: entry.kind.clone(),
+        trigger_id: Some(entry.trigger_id.clone()),
         payload: payload_value,
         origin_at: chrono::Utc::now().timestamp_millis(),
         binding: entry.binding.clone(),
@@ -649,9 +652,30 @@ mod tests {
     fn unregister_is_idempotent() {
         let r = WebhookRouter::new();
         r.upsert(entry("foo")).unwrap();
-        r.unregister("trg_foo");
-        r.unregister("trg_foo"); // second call is a no-op
+        r.unregister("wf_foo", "trg_foo");
+        r.unregister("wf_foo", "trg_foo"); // second call is a no-op
         assert_eq!(r.entry_count(), 0);
+    }
+
+    #[test]
+    fn copied_trigger_id_cannot_replace_or_unregister_another_workflow() {
+        let r = WebhookRouter::new();
+        let source = entry("source");
+        let mut copy = entry("source");
+        copy.workflow_id = "wf_copy".into();
+        r.upsert(source).unwrap();
+
+        assert!(r.upsert(copy).unwrap_err().contains("already registered"));
+        r.unregister("wf_copy", "trg_source");
+        assert_eq!(r.entry_count(), 1);
+        assert_eq!(
+            r.inner
+                .entries
+                .read()
+                .get("source")
+                .map(|entry| entry.workflow_id.as_str()),
+            Some("wf_source")
+        );
     }
 
     #[test]
@@ -1126,7 +1150,11 @@ mod tests {
             let message = err.to_string().to_ascii_lowercase();
             if message.contains("connectionaborted")
                 || message.contains("connection aborted")
+                || message.contains("connection reset")
+                || message.contains("broken pipe")
                 || message.contains("10053")
+                || message.contains("code: 54")
+                || message.contains("code: 32")
             {
                 return true;
             }

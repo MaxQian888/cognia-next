@@ -46,6 +46,7 @@ function MemoryRowImpl({
 }: MemoryRowProps) {
   const t = useTranslations("memory.panel")
   const tTypes = useTranslations("memory.types")
+  const tGovernance = useTranslations("memory.governance")
   const format = useFormatter()
   const now = useNow()
   const [editing, setEditing] = useState(false)
@@ -113,6 +114,14 @@ function MemoryRowImpl({
         <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
           <Badge variant="secondary" className="text-[10px]">
             {tTypes(memory.type)}
+          </Badge>
+          <Badge
+            variant={memory.reviewStatus === "conflict" ? "destructive" : "outline"}
+            className="text-[10px]"
+          >
+            {memory.reviewStatus === "conflict"
+              ? tGovernance("conflict")
+              : tGovernance(memory.evidenceState === "supported" ? "supported" : "legacy")}
           </Badge>
           <span data-testid="memory-importance">★ {memory.importance}</span>
           <span>

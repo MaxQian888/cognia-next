@@ -42,6 +42,7 @@ import type {
 import { cn, responsiveSelectClass } from "@/lib/utils"
 import { WallpaperCard } from "../components/wallpaper-card"
 import { WallpaperUploader, type UploadedWallpaper } from "../components/wallpaper-uploader"
+import { WallpaperThemeGenerator } from "../components/wallpaper-theme-generator"
 import { GradientBuilder } from "../components/gradient-builder"
 import {
   listPluginWallpapers,
@@ -513,6 +514,8 @@ export function WallpaperTab() {
             )}
           </div>
         )}
+
+        <WallpaperThemeGenerator key={activeWallpaper?.id} wallpaper={activeWallpaper} />
       </fieldset>
     </div>
   )

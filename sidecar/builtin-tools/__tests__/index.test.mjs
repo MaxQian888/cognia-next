@@ -158,6 +158,10 @@ test("no tool name collides with SDK built-ins", () => {
     "WebFetch",
     "WebSearch",
     "TodoWrite",
+    "TaskCreate",
+    "TaskGet",
+    "TaskList",
+    "TaskUpdate",
   ])
   for (const [category, names] of Object.entries(TOOL_NAMES_BY_CATEGORY)) {
     // The coreFiles suite intentionally names its todo tool exactly

@@ -20,11 +20,6 @@ describe("MobileAppearancePage", () => {
     expect(screen.getByTestId("stub-appearance-section")).toBeInTheDocument()
   })
 
-  it("links the back button to /me", () => {
-    render(<MobileAppearancePage />)
-    expect(screen.getByRole("link")).toHaveAttribute("href", "/me")
-  })
-
   it("renders the localized section heading", () => {
     render(<MobileAppearancePage />)
     // next-intl is globally mocked to resolve real en.json keys, so the

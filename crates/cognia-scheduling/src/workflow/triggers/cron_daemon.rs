@@ -209,6 +209,7 @@ impl DueEmitter<CronEntry> for CronDueAdapter {
         let event = TriggerEvent {
             workflow_id: entry.workflow_id.clone(),
             kind: "trigger.cron".into(),
+            trigger_id: Some(entry.trigger_id.clone()),
             payload: serde_json::json!({
                 "triggerId": entry.trigger_id,
                 "firedAt": fired_at.timestamp_millis(),
@@ -256,6 +257,7 @@ impl CronDaemon {
             })
             .transpose()?;
         let now = Utc::now();
+        let runtime_key = runtime_trigger_key(&workflow_id, &trigger_id);
         let mut entry = CronEntry {
             trigger_id: trigger_id.clone(),
             workflow_id,
@@ -266,12 +268,13 @@ impl CronDaemon {
             next_fire_at: None,
         };
         entry.recompute(now);
-        self.core.upsert(trigger_id, entry);
+        self.core.upsert(runtime_key, entry);
         Ok(())
     }
 
-    pub fn remove(&self, trigger_id: &str) {
-        self.core.remove(trigger_id);
+    pub fn remove(&self, workflow_id: &str, trigger_id: &str) {
+        self.core
+            .remove(&runtime_trigger_key(workflow_id, trigger_id));
     }
 
     #[allow(dead_code)]
@@ -305,6 +308,10 @@ impl CronDaemon {
     pub async fn run_loop(self) {
         self.core.run_loop().await;
     }
+}
+
+fn runtime_trigger_key(workflow_id: &str, trigger_id: &str) -> String {
+    format!("{workflow_id}\0{trigger_id}")
 }
 
 #[cfg(test)]
@@ -475,8 +482,28 @@ mod tests {
                 None,
             )
             .unwrap();
-        daemon.remove("trg_1");
+        daemon.remove("wf_1", "trg_1");
         assert_eq!(daemon.entry_count(), 0);
+    }
+
+    #[test]
+    fn identical_node_ids_in_different_workflows_do_not_replace_each_other() {
+        let (daemon, _) = daemon_with_recorder();
+        for workflow_id in ["wf_1", "wf_2"] {
+            daemon
+                .upsert(
+                    "shared_node".into(),
+                    workflow_id.into(),
+                    "0 9 * * 1-5",
+                    None,
+                    true,
+                    None,
+                )
+                .unwrap();
+        }
+        assert_eq!(daemon.entry_count(), 2);
+        daemon.remove("wf_1", "shared_node");
+        assert_eq!(daemon.entry_count(), 1);
     }
 
     #[test]

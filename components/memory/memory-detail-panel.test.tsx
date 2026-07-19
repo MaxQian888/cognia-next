@@ -36,6 +36,7 @@ function setup(
   const onSave = jest.fn()
   const onPinToggle = jest.fn()
   const onDelete = jest.fn()
+  const onReview = jest.fn()
   const onNavigate = jest.fn()
   const onSelectMemory = jest.fn()
   render(
@@ -45,13 +46,14 @@ function setup(
       onSave={onSave}
       onPinToggle={onPinToggle}
       onDelete={onDelete}
+      onReview={onReview}
       onNavigate={onNavigate}
       onSelectMemory={onSelectMemory}
       navPosition={{ index: 2, total: 3 }}
       {...props}
     />
   )
-  return { onClose, onSave, onPinToggle, onDelete, onNavigate, onSelectMemory }
+  return { onClose, onSave, onPinToggle, onDelete, onReview, onNavigate, onSelectMemory }
 }
 
 beforeEach(() => {
@@ -70,7 +72,7 @@ describe("MemoryDetailPanel", () => {
     })
     expect(screen.getByTestId("memory-detail-text").textContent).toBe("prefers pnpm")
     expect(screen.getByText("Preference")).toBeTruthy() // procedural label
-    expect(screen.getByText("Character")).toBeTruthy()
+    expect(screen.getAllByText("Character")).toHaveLength(2)
     expect(screen.getByText("Explicit")).toBeTruthy()
     expect(screen.getByText("v4")).toBeTruthy()
     expect(screen.getByText("9")).toBeTruthy() // access count
@@ -191,6 +193,44 @@ describe("MemoryDetailPanel", () => {
   it("shows an archived badge and archived-at for invalidated rows", () => {
     setup({ status: "invalidated", invalidatedAt: 1_700_000_500_000 })
     expect(screen.getByText("archived")).toBeTruthy()
+  })
+
+  it("reviews a memory and surfaces evidence and audit counts", () => {
+    const { onReview } = setup(
+      { id: "m1" },
+      {
+        evidence: [
+          {
+            id: "e1",
+            memoryId: "m1",
+            kind: "message",
+            sourceId: "s1",
+            contaminationState: "clean",
+            reviewed: false,
+            createdAt: 1,
+          },
+        ],
+        auditEvents: [
+          { id: "a1", action: "created", memoryId: "m1", reason: "user", createdAt: 1 },
+        ],
+      }
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Mark verified" }))
+    expect(onReview).toHaveBeenCalledWith("m1", "verified")
+    fireEvent.click(screen.getByRole("button", { name: "Mark conflict" }))
+    expect(onReview).toHaveBeenCalledWith("m1", "conflict")
+    expect(screen.getByTestId("memory-detail-evidence-count")).toHaveTextContent("1 record")
+    expect(screen.getByTestId("memory-detail-audit-count")).toHaveTextContent("1 record")
+  })
+
+  it("links unresolved conflict counterparts", () => {
+    const counterpart = mem({ id: "m2", text: "conflicting fact" })
+    const { onSelectMemory } = setup(
+      { id: "m1", reviewStatus: "conflict", conflictWithIds: ["m2"] },
+      { resolveMemory: (id) => (id === "m2" ? counterpart : undefined) }
+    )
+    fireEvent.click(screen.getByRole("button", { name: "conflicting fact" }))
+    expect(onSelectMemory).toHaveBeenCalledWith("m2")
   })
 })
 

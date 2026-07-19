@@ -86,6 +86,7 @@ async function onPetEvent(event: PetEvent): Promise<void> {
           await dispatchTrigger({
             workflowId: match.workflowId,
             kind: "trigger.pet.event",
+            triggerId: match.nodeId,
             payload,
             originAt: now,
           })

@@ -20,7 +20,7 @@ function withConfig(patch: Partial<RoutingConfig>) {
 
 beforeEach(() => {
   setRoutingConfig.mockClear()
-  withConfig({})
+  withConfig({ circuitBreaker: { enabled: false } })
 })
 
 describe("ReliabilitySection", () => {

@@ -48,11 +48,55 @@ services:
       # so a host bind would hand every runner an empty directory.
       COGNIA_WORKSPACES_DIR: /workspaces
       COGNIA_WORKSPACES_VOLUME: cognia_workspaces
+      # ADR-0085 hard gate. Both this server flag and each user's local
+      # experiment toggle must be true before `browser` is advertised.
+      COGNIA_REMOTE_BROWSER_ENABLED: ${COGNIA_REMOTE_BROWSER_ENABLED:-false}
+      COGNIA_WORKSPACE_RUNTIME_URL_TEMPLATE: http://workspace-runtime-{workspace_id}:27910
+      COGNIA_WORKSPACE_RUNTIME_SECRET_DIR: /runtime-secrets
+      COGNIA_WORKSPACE_RUNTIME_WORKSPACES: ${COGNIA_WORKSPACE_RUNTIME_WORKSPACES:-default}
     volumes:
       - cognia_workspaces:/workspaces
+      - cognia_workspace_default:/workspaces/default
+      - cognia_runtime_secrets:/runtime-secrets:ro
+
+  workspace-runtime-default:
+    profiles: [remote-browser]
+    image: ${COGNIA_WORKSPACE_RUNTIME_IMAGE:-ghcr.io/maxqian888/cognia-workspace-runtime:latest}
+    build:
+      context: ../../
+      dockerfile: services/workspace-runtime/Dockerfile
+    environment:
+      COGNIA_WORKSPACE_ID: default
+      COGNIA_WORKSPACE_RUNTIME_SECRET: ${COGNIA_WORKSPACE_RUNTIME_SECRET:?set a 32+ character runtime secret}
+    volumes:
+      - cognia_workspace_default:/workspace
+      - cognia_browser_profiles_default:/profiles
+      - cognia_runtime_secrets:/runtime-secrets
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS -H 'Authorization: Bearer '$$COGNIA_WORKSPACE_RUNTIME_SECRET http://localhost:27910/v1/health >/dev/null",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID]
+    pids_limit: 512
+    mem_limit: 2g
+    cpus: 2
+    shm_size: 1gb
+    restart: unless-stopped
 
 volumes:
   cognia_workspaces:
     # Fixed name so COGNIA_WORKSPACES_VOLUME above matches regardless of the
     # compose project name (`name: cognia` would otherwise prefix it).
     name: cognia_workspaces
+  cognia_workspace_default:
+  cognia_browser_profiles_default:
+  cognia_runtime_secrets:

@@ -49,7 +49,10 @@ import {
   CheckCircle,
   AlertCircle,
   Sparkles,
+  Loader2,
 } from "lucide-react"
+import { toast } from "sonner"
+import { loggers } from "@cognia/logging"
 import type { A2UIAppInstance } from "@/hooks/a2ui/use-app-builder"
 import type { AppDetailDialogProps } from "@/types/a2ui/app"
 
@@ -66,6 +69,7 @@ export function AppDetailDialog({
   className,
 }: AppDetailDialogProps) {
   const [isEditing, setIsEditing] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
   const [editedData, setEditedData] = useState<Partial<A2UIAppInstance>>({})
   const [publishCheck, setPublishCheck] = useState<{ valid: boolean; missing: string[] } | null>(
     null
@@ -80,6 +84,7 @@ export function AppDetailDialog({
   // Reset state when dialog opens/closes
   const handleOpenChange = useCallback(
     (newOpen: boolean) => {
+      if (isSaving && !newOpen) return
       if (!newOpen) {
         setIsEditing(false)
         setEditedData({})
@@ -87,7 +92,7 @@ export function AppDetailDialog({
       }
       onOpenChange(newOpen)
     },
-    [onOpenChange]
+    [isSaving, onOpenChange]
   )
 
   // Start editing
@@ -107,17 +112,26 @@ export function AppDetailDialog({
 
   // Cancel editing
   const handleCancelEdit = useCallback(() => {
+    if (isSaving) return
     setEditedData({})
     setIsEditing(false)
-  }, [])
+  }, [isSaving])
 
   // Save changes
-  const handleSave = useCallback(() => {
-    if (app && onSave) {
-      onSave(app.id, editedData)
+  const handleSave = useCallback(async () => {
+    if (!app || !onSave || isSaving) return
+    setIsSaving(true)
+    try {
+      const saved = await onSave(app.id, editedData)
+      if (saved === false) throw new Error(`App metadata target not found: ${app.id}`)
       setIsEditing(false)
+    } catch (error) {
+      loggers.ui.error("[AppDetailDialog] Failed to save app metadata:", error)
+      toast.error(t("saveFailed"))
+    } finally {
+      setIsSaving(false)
     }
-  }, [app, editedData, onSave])
+  }, [app, editedData, isSaving, onSave, t])
 
   // Check publish readiness
   const handleCheckPublish = useCallback(() => {
@@ -347,7 +361,7 @@ export function AppDetailDialog({
                     <Input
                       value={editedData.author?.email || ""}
                       onChange={(e) => updateAuthorField("email", e.target.value)}
-                      placeholder="email@example.com"
+                      placeholder={t("emailPlaceholder")}
                       className="h-8"
                     />
                   </div>
@@ -500,13 +514,17 @@ export function AppDetailDialog({
         <DialogFooter className="mt-4">
           {isEditing ? (
             <>
-              <Button variant="outline" onClick={handleCancelEdit}>
+              <Button variant="outline" onClick={handleCancelEdit} disabled={isSaving}>
                 <X className="h-4 w-4 mr-1" />
                 {t("cancel")}
               </Button>
-              <Button onClick={handleSave}>
-                <Save className="h-4 w-4 mr-1" />
-                {t("save")}
+              <Button onClick={handleSave} disabled={isSaving}>
+                {isSaving ? (
+                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4 mr-1" />
+                )}
+                {isSaving ? t("saving") : t("save")}
               </Button>
             </>
           ) : (

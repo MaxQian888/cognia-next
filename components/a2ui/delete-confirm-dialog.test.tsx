@@ -3,7 +3,7 @@
  */
 
 import React from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import { DeleteConfirmDialog } from "./delete-confirm-dialog"
 
@@ -45,13 +45,20 @@ jest.mock("@/components/ui/alert-dialog", () => {
     AlertDialogCancel: ({
       children,
       className,
+      disabled,
     }: {
       children: React.ReactNode
       className?: string
+      disabled?: boolean
     }) => {
       const ctx = ReactImpl.useContext(AlertDialogContext)
       return (
-        <button type="button" className={className} onClick={() => ctx.onOpenChange?.(false)}>
+        <button
+          type="button"
+          className={className}
+          disabled={disabled}
+          onClick={() => ctx.onOpenChange?.(false)}
+        >
           {children}
         </button>
       )
@@ -60,12 +67,14 @@ jest.mock("@/components/ui/alert-dialog", () => {
       children,
       className,
       onClick,
+      disabled,
     }: {
       children: React.ReactNode
       className?: string
-      onClick?: () => void
+      onClick?: React.MouseEventHandler<HTMLButtonElement>
+      disabled?: boolean
     }) => (
-      <button type="button" className={className} onClick={onClick}>
+      <button type="button" className={className} onClick={onClick} disabled={disabled}>
         {children}
       </button>
     ),
@@ -77,6 +86,7 @@ const messages = {
     deleteConfirmTitle: "Delete App",
     deleteConfirmDescription: "This action cannot be undone.",
     delete: "Delete",
+    deleting: "Deleting",
     cancel: "Cancel",
     customDeleteTitle: "Remove Item",
     customDeleteDescription: "Removing this item is irreversible.",
@@ -122,12 +132,34 @@ describe("DeleteConfirmDialog", () => {
     expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument()
   })
 
-  it("calls onConfirm when delete is clicked", () => {
+  it("calls onConfirm when delete is clicked", async () => {
     const onConfirm = jest.fn()
-    renderDialog({ onConfirm })
+    const onOpenChange = jest.fn()
+    renderDialog({ onConfirm, onOpenChange })
 
     fireEvent.click(screen.getByRole("button", { name: "Delete" }))
     expect(onConfirm).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+  })
+
+  it("waits for asynchronous deletion before closing the dialog", async () => {
+    let resolveDelete: (() => void) | undefined
+    const onConfirm = jest.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveDelete = resolve
+        })
+    )
+    const onOpenChange = jest.fn()
+    renderDialog({ onConfirm, onOpenChange })
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }))
+    expect(onConfirm).toHaveBeenCalledTimes(1)
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+    expect(screen.getByRole("button", { name: "Deleting" })).toBeDisabled()
+
+    resolveDelete?.()
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
   })
 
   it("calls onOpenChange(false) when cancel is clicked", () => {

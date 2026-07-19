@@ -1,6 +1,6 @@
 /**
  * Agent-facing browser engine abstraction. Phase 1 ships only the embedded
- * webview engine; Phase 2 adds an external-MCP engine behind the same router.
+ * webview and private WorkspaceRuntime Chromium engines behind the same router.
  * The trust tier (`resolveTrustTier`) decides routing and whether the page
  * content must be treated as untrusted. See ADR-0055.
  */
@@ -8,6 +8,12 @@ import type { Screenshot } from "@/lib/automation/types"
 import { emitAgentActivity } from "@/lib/browser/agent-activity"
 import { browserClient } from "@/lib/browser/client"
 import { getActivePaneRect } from "@/lib/browser/pane-rect"
+import {
+  BrowserSessionError,
+  type BrowserPageSummary,
+  type BrowserDownloadSummary,
+} from "@/lib/browser/session-types"
+import { detectHostProfile, type HostProfile } from "@/lib/platform/capabilities"
 import {
   resolveTrustTier,
   type BrowserActionResult,
@@ -40,6 +46,11 @@ export interface BrowserEngine {
   reload(): Promise<void>
   stop(): Promise<void>
   getPage(): Promise<{ url: string; title: string }>
+  listPages(): Promise<BrowserPageSummary[]>
+  activatePage(pageId: string): Promise<void>
+  closePage(pageId: string): Promise<void>
+  setFiles(reference: string, paths: string[]): Promise<void>
+  downloads(): Promise<BrowserDownloadSummary[]>
   waitForText(text: string, opts?: WaitForOptions): Promise<WaitForResult>
   waitForSelector(selector: string, opts?: WaitForOptions): Promise<WaitForResult>
   waitForNetworkIdle(opts?: NetworkIdleOptions): Promise<WaitForResult>
@@ -178,6 +189,32 @@ export class EmbeddedEngine implements BrowserEngine {
     ])
     return { url, title }
   }
+  async listPages(): Promise<BrowserPageSummary[]> {
+    const page = await this.getPage()
+    return [{ id: "embedded", ...page, active: true }]
+  }
+  async activatePage(pageId: string): Promise<void> {
+    if (pageId !== "embedded") {
+      throw new BrowserSessionError("browser_page_not_found", "Browser page not found")
+    }
+  }
+  async closePage(pageId: string): Promise<void> {
+    await this.activatePage(pageId)
+    await this.stop()
+    await this.navigate("about:blank")
+  }
+  async setFiles(_reference: string, _paths: string[]): Promise<void> {
+    throw new BrowserSessionError(
+      "browser_feature_unsupported",
+      "File upload is not supported by the embedded browser"
+    )
+  }
+  async downloads(): Promise<BrowserDownloadSummary[]> {
+    throw new BrowserSessionError(
+      "browser_feature_unsupported",
+      "Download quarantine is not supported by the embedded browser"
+    )
+  }
   waitForText(text: string, opts: WaitForOptions = {}): Promise<WaitForResult> {
     return pollUntil(() => browserClient.embedHasText(text), opts)
   }
@@ -254,21 +291,66 @@ const embedded = new EmbeddedEngine()
 
 export interface EngineRoute {
   engine: BrowserEngine
+  backend: "embedded" | "remote-chromium"
   tier: TrustTier
   /** Page content must be treated as untrusted (public origin). */
   untrusted: boolean
 }
 
+export interface EngineRoutingContext {
+  hostProfile?: HostProfile
+  backendPreference?: "auto" | "embedded" | "remote-chromium"
+  remoteEnabled?: boolean
+  remoteHealthy?: boolean
+  domainAuthorized?: boolean
+}
+
+let remoteEngine: BrowserEngine | null = null
+let remoteReadiness = { enabled: false, healthy: false }
+
+/** Install the per-chat remote adapter after BrowserSession ensure succeeds. */
+export function configureRemoteBrowserEngine(
+  engine: BrowserEngine | null,
+  readiness: { enabled: boolean; healthy: boolean } = { enabled: false, healthy: false }
+): void {
+  remoteEngine = engine
+  remoteReadiness = readiness
+}
+
 /**
- * Resolve the engine for a target URL. The embedded engine is the only in-app
- * engine; the `public` tier is flagged `untrusted`. Transparent delegation to an
- * external Playwright-MCP "engine" is NOT possible (a renderer plugin can only
- * invoke its own tools; external MCP tools live in the sidecar, callable only by
- * the model), so public-site automation is GUIDANCE-BASED: the `untrusted` flag
- * + the browser-tools availability context steer the model to the separately
- * attached `mcp__playwright__*` tools. See ADR-0055 §Phase 2.
+ * Resolve the host-neutral engine for a target URL. Desktop localhost remains
+ * embedded by default; cloud/mobile/headless and explicitly-authorized public
+ * origins use the currently-bound RemoteChromiumEngine. Active sessions never
+ * migrate implicitly between backends.
  */
-export function routeEngine(url: string): EngineRoute {
+export function routeEngine(url: string, context: EngineRoutingContext = {}): EngineRoute {
   const tier = resolveTrustTier(url)
-  return { engine: embedded, tier, untrusted: tier === "public" }
+  const preference = context.backendPreference ?? "auto"
+  const remoteReady =
+    !!remoteEngine &&
+    (context.remoteEnabled ?? remoteReadiness.enabled) &&
+    (context.remoteHealthy ?? remoteReadiness.healthy)
+  const profile = context.hostProfile ?? (remoteEngine ? detectHostProfile() : "desktop")
+  const useRemote =
+    preference === "remote-chromium" ||
+    (preference === "auto" &&
+      (profile === "cloud-companion" ||
+        profile === "mobile-companion" ||
+        profile === "headless" ||
+        (tier === "public" && context.domainAuthorized === true)))
+  if (useRemote) {
+    if (!remoteReady || !remoteEngine) {
+      throw new BrowserSessionError(
+        "browser_feature_unsupported",
+        "Remote browser is not enabled or healthy"
+      )
+    }
+    return {
+      engine: remoteEngine,
+      backend: "remote-chromium",
+      tier,
+      untrusted: tier === "public",
+    }
+  }
+  return { engine: embedded, backend: "embedded", tier, untrusted: tier === "public" }
 }

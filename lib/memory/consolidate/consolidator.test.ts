@@ -1,6 +1,6 @@
 import type { Memory } from "@/types/memory/memory"
 import type { MemoryCandidate } from "@/lib/memory/extract/extractor"
-import { consolidate, type ConsolidateDeps } from "./consolidator"
+import { consolidate, sameMemoryNamespace, type ConsolidateDeps } from "./consolidator"
 
 let seq = 0
 function existing(text: string, over: Partial<Memory> = {}): Memory {
@@ -34,17 +34,20 @@ function makeDeps(over: Partial<ConsolidateDeps> = {}): ConsolidateDeps & {
   persistInputs: Parameters<ConsolidateDeps["persist"]>[0][]
   updates: { id: string; text: string }[]
   invalidations: { id: string; supersededById?: string }[]
+  conflicts: { targetId: string; conflictId: string }[]
 } {
   const persisted: Memory[] = []
   const persistInputs: Parameters<ConsolidateDeps["persist"]>[0][] = []
   const updates: { id: string; text: string }[] = []
   const invalidations: { id: string; supersededById?: string }[] = []
+  const conflicts: { targetId: string; conflictId: string }[] = []
   let n = 0
   return {
     persisted,
     persistInputs,
     updates,
     invalidations,
+    conflicts,
     client: { complete: jest.fn(async () => "{}") },
     findSimilar: async () => [],
     persist: async (input) => {
@@ -56,6 +59,8 @@ function makeDeps(over: Partial<ConsolidateDeps> = {}): ConsolidateDeps & {
         importance: input.importance,
         scope: input.scope,
         characterId: input.characterId,
+        reviewStatus: input.reviewStatus,
+        conflictWithIds: input.conflictWithIds,
       })
       persisted.push(row)
       return row
@@ -66,11 +71,53 @@ function makeDeps(over: Partial<ConsolidateDeps> = {}): ConsolidateDeps & {
     invalidate: async (id, supersededById) => {
       invalidations.push({ id, supersededById })
     },
+    markConflict: async (targetId, conflictId) => {
+      conflicts.push({ targetId, conflictId })
+    },
     ...over,
   }
 }
 
 const baseInput = { scope: "global" as const, provenance: "user" as const }
+
+describe("sameMemoryNamespace", () => {
+  it("prevents consolidation across workspaces, agents, branches, and paths", () => {
+    const memory = existing("fact", {
+      scope: "agent",
+      projectId: "project-a",
+      agentId: "agent-a",
+      branch: "main",
+      pathPattern: "src/memory",
+    })
+    expect(
+      sameMemoryNamespace(memory, {
+        scope: "agent",
+        projectId: "project-a",
+        agentId: "agent-a",
+        branch: "main",
+        pathPattern: "src/memory",
+      })
+    ).toBe(true)
+    expect(
+      sameMemoryNamespace(memory, {
+        scope: "agent",
+        projectId: "project-b",
+        agentId: "agent-a",
+        branch: "main",
+        pathPattern: "src/memory",
+      })
+    ).toBe(false)
+    expect(
+      sameMemoryNamespace(memory, {
+        scope: "agent",
+        projectId: "project-a",
+        agentId: "agent-b",
+        branch: "main",
+        pathPattern: "src/memory",
+      })
+    ).toBe(false)
+  })
+})
 
 describe("consolidate", () => {
   it("ADDs directly (no LLM) when there are no similar memories", async () => {
@@ -112,6 +159,29 @@ describe("consolidate", () => {
     expect(deps.invalidations).toEqual([{ id: "t1", supersededById: deps.persisted[0].id }])
   })
 
+  it("CONFLICT retains the candidate for review without invalidating the existing fact", async () => {
+    const target = existing("The user prefers npm", { id: "t1" })
+    const deps = makeDeps({
+      findSimilar: async () => [target],
+      client: {
+        complete: jest.fn(async () => JSON.stringify({ op: "CONFLICT", targetId: "t1" })),
+      },
+    })
+
+    const result = await consolidate(
+      { ...baseInput, candidates: [cand("The user prefers pnpm")] },
+      deps
+    )
+
+    expect(result.applied).toEqual([expect.objectContaining({ op: "CONFLICT", targetId: "t1" })])
+    expect(deps.persisted[0]).toMatchObject({
+      reviewStatus: "conflict",
+      conflictWithIds: ["t1"],
+    })
+    expect(deps.invalidations).toEqual([])
+    expect(deps.conflicts).toEqual([{ targetId: "t1", conflictId: deps.persisted[0].id }])
+  })
+
   it("NOOP leaves everything untouched", async () => {
     const deps = makeDeps({
       findSimilar: async () => [existing("The user uses pnpm", { id: "t1" })],
@@ -122,6 +192,52 @@ describe("consolidate", () => {
     expect(deps.persisted).toHaveLength(0)
     expect(deps.updates).toHaveLength(0)
     expect(deps.invalidations).toHaveLength(0)
+  })
+
+  it("withholds unsafe existing rows from the consolidation LLM", async () => {
+    const complete = jest.fn(async () => JSON.stringify({ op: "NOOP" }))
+    const deps = makeDeps({
+      findSimilar: async () => [existing("Contact alice@example.com", { id: "unsafe" })],
+      client: { complete },
+    })
+    const result = await consolidate(
+      { ...baseInput, candidates: [cand("The user uses pnpm")] },
+      deps
+    )
+    expect(complete).not.toHaveBeenCalled()
+    expect(result.applied[0].op).toBe("ADD")
+  })
+
+  it("does not persist an unsafe candidate or send it to the LLM", async () => {
+    const complete = jest.fn(async () => JSON.stringify({ op: "ADD" }))
+    const deps = makeDeps({
+      findSimilar: async () => [existing("A similar fact")],
+      client: { complete },
+    })
+    const result = await consolidate(
+      { ...baseInput, candidates: [cand("Email bob@example.com")] },
+      deps
+    )
+    expect(result.applied).toEqual([])
+    expect(deps.persisted).toEqual([])
+    expect(complete).not.toHaveBeenCalled()
+  })
+
+  it("rejects PII introduced by a consolidation merge", async () => {
+    const deps = makeDeps({
+      findSimilar: async () => [existing("The user uses pnpm", { id: "t1" })],
+      client: {
+        complete: jest.fn(async () =>
+          JSON.stringify({
+            op: "UPDATE",
+            targetId: "t1",
+            mergedText: "The user uses pnpm; email bob@example.com",
+          })
+        ),
+      },
+    })
+    await consolidate({ ...baseInput, candidates: [cand("The user uses pnpm v9")] }, deps)
+    expect(deps.updates).toEqual([{ id: "t1", text: "The user uses pnpm v9" }])
   })
 
   it("falls back to ADD when the decision JSON is unparseable", async () => {

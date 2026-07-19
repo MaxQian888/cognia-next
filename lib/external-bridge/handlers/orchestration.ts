@@ -80,7 +80,10 @@ export async function agentDispatchCore(input: AgentDispatchInput): Promise<Agen
   }
 
   try {
-    const { redactText } = await import("@cognia/redact")
+    const { hasNoLeakingPii, redactText } = await import("@cognia/redact")
+    if (!hasNoLeakingPii(input.prompt)) {
+      return { ok: false, error: "agent_dispatch prompt failed the outbound PII gate" }
+    }
 
     let text: string
     let channel: string | undefined
@@ -348,6 +351,48 @@ export async function pluginToolInvokeCore(
 // Renderer dispatch entry — runs the `*Core` for a sidecar-proxied request.
 // ---------------------------------------------------------------------------
 
+type HostOperation = (...args: unknown[]) => unknown | Promise<unknown>
+
+const hostOperationLoaders: Record<string, () => Promise<HostOperation>> = {
+  wikiSearch: async () => (await import("./wiki")).wikiSearch as HostOperation,
+  wikiRead: async () => (await import("./wiki")).wikiRead as HostOperation,
+  ragSearch: async () => (await import("./rag")).ragSearch as HostOperation,
+  runtimeQuery: async () => (await import("./runtime")).runtimeQuery as HostOperation,
+  agentDispatch: async () => agentDispatchCore as HostOperation,
+  teamRun: async () => teamRunCore as HostOperation,
+  teamList: async () => teamListCore as HostOperation,
+  pluginToolInvoke: async () => pluginToolInvokeCore as HostOperation,
+  connectorsListAdapters: async () =>
+    (await import("./connectors")).connectorsListAdapters as HostOperation,
+  connectorsListConversations: async () =>
+    (await import("./connectors")).connectorsListConversations as HostOperation,
+  connectorsGetAudit: async () =>
+    (await import("./connectors")).connectorsGetAudit as HostOperation,
+  connectorsExportAudit: async () =>
+    (await import("./connectors")).connectorsExportAudit as HostOperation,
+  connectorsListDrafts: async () =>
+    (await import("./connectors")).connectorsListDrafts as HostOperation,
+  connectorsSendMessage: async () =>
+    (await import("./connectors")).connectorsSendMessage as HostOperation,
+  recordLesson: async () => (await import("./inbound")).recordLesson as HostOperation,
+  saveSkillDraft: async () => (await import("./inbound")).saveSkillDraft as HostOperation,
+  ingestNote: async () => (await import("./inbound")).ingestNote as HostOperation,
+  memorySearch: async () => (await import("./memory")).memorySearch as HostOperation,
+  memoryList: async () => (await import("./memory")).memoryList as HostOperation,
+  memoryStore: async () => (await import("./memory")).memoryStore as HostOperation,
+  memoryUpdate: async () => (await import("./memory")).memoryUpdate as HostOperation,
+  memoryForget: async () => (await import("./memory")).memoryForget as HostOperation,
+  listAllWikiArticles: async () =>
+    (await import("@/lib/db/wiki-articles")).listAllWikiArticles as HostOperation,
+  getWikiArticleBySlug: async () =>
+    (await import("@/lib/db/wiki-articles")).getWikiArticleBySlug as HostOperation,
+  listSkills: async () => (await import("@/lib/db/skills")).listSkills as HostOperation,
+  getSkill: async () => (await import("@/lib/db/skills")).getSkill as HostOperation,
+  listCharacters: async () => (await import("@/lib/db/characters")).listCharacters as HostOperation,
+  getCharacter: async () => (await import("@/lib/db/characters")).getCharacter as HostOperation,
+  recordCall: async () => (await import("../audit-log")).recordCall as HostOperation,
+}
+
 /**
  * Execute one orchestration command on the renderer for the sidecar's proxied
  * request (Thread D4). The dispatch provider calls this with the `command` +
@@ -358,7 +403,20 @@ export async function pluginToolInvokeCore(
 export async function runOrchestrationExec(
   command: string,
   args: Record<string, unknown>
-): Promise<AgentDispatchOutput | TeamRunOutput | TeamListOutput | PluginToolInvokeOutput> {
+): Promise<unknown> {
+  const hostOperationLoader = hostOperationLoaders[command]
+  if (hostOperationLoader) {
+    if (!Array.isArray(args.arguments)) {
+      return { ok: false, error: `host command '${command}' requires an arguments array` }
+    }
+    const operation = await hostOperationLoader()
+    const result = await operation(...args.arguments)
+    const { hasNoLeakingPiiDeep } = await import("@cognia/redact")
+    return hasNoLeakingPiiDeep(result)
+      ? result
+      : { ok: false, error: `host command '${command}' response failed the outbound PII gate` }
+  }
+
   switch (command) {
     case "agent_dispatch":
       return agentDispatchCore(args as unknown as AgentDispatchInput)

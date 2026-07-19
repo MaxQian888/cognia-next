@@ -45,6 +45,8 @@
     "0081-workflow-callable-unit-and-chained-triggers",
     "0082-remote-development-remote-host",
     "0083-context-workbench",
+    "0084-cognia-sites",
+    "0085-cloud-shared-browser",
     "0086-task-scoped-resource-workspaces"
   ]
 }

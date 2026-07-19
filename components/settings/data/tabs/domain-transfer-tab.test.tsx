@@ -4,7 +4,6 @@ import userEvent from "@testing-library/user-event"
 const buildExportMock = jest.fn(async (..._a: unknown[]) => ({ version: 3 }))
 const serializeMock = jest.fn((..._a: unknown[]) => '{"serialized":true}')
 const fileNameMock = jest.fn((..._a: unknown[]) => "cognia-skills-2026-06-04.json")
-const isTauriMock = jest.fn(() => false)
 const saveMock = jest.fn(async (..._a: unknown[]) => null as string | null)
 const writeTextFileMock = jest.fn(async (..._a: unknown[]) => undefined)
 
@@ -20,7 +19,7 @@ jest.mock("@/lib/data/domain", () => ({
   defaultDomainFileName: (...a: unknown[]) => fileNameMock(...a),
 }))
 jest.mock("@/lib/tauri", () => ({
-  isTauri: () => isTauriMock(),
+  isTauri: jest.fn(() => false),
 }))
 // Only meaningful inside Tauri; stubbed so the dynamic imports resolve under
 // jsdom when the isTauri() branch is exercised.
@@ -43,6 +42,8 @@ jest.mock("sonner", () => ({
 
 import { DomainTransferTab } from "./domain-transfer-tab"
 import { toast } from "sonner"
+
+const isTauriMock = (jest.requireMock("@/lib/tauri") as { isTauri: jest.Mock }).isTauri
 
 function skillsRow() {
   const row = screen.getByText("Skills").closest("li")

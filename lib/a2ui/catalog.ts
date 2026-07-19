@@ -197,6 +197,27 @@ export function getRegisteredTypes(catalogId: string = DEFAULT_CATALOG_ID): A2UI
 }
 
 /**
+ * List catalog ids currently available to the renderer.
+ *
+ * The standard catalog is always selectable because its built-in React
+ * implementations are bundled with the renderer. Custom ids are discovered
+ * from both complete catalog registrations and individual component
+ * registrations, without maintaining a second registry of ids.
+ */
+export function getRegisteredCatalogIds(): string[] {
+  const ids = new Set<string>([DEFAULT_CATALOG_ID, ...catalogRegistry.keys()])
+
+  for (const [key, entry] of componentRegistry.entries()) {
+    const suffix = `:${entry.type}`
+    if (key.endsWith(suffix)) {
+      ids.add(key.slice(0, -suffix.length))
+    }
+  }
+
+  return [DEFAULT_CATALOG_ID, ...[...ids].filter((id) => id !== DEFAULT_CATALOG_ID).sort()]
+}
+
+/**
  * Create a component catalog from registered components
  */
 export function createCatalog(catalogId: string = DEFAULT_CATALOG_ID): A2UIComponentCatalog {
@@ -311,6 +332,10 @@ export const componentCategories = {
     "Skeleton",
     "Spinner",
     "Toast",
+    "Loading",
+    "Error",
+    "Empty",
+    "Animation",
   ] as A2UIComponentType[],
   input: [
     "TextField",
@@ -327,6 +352,7 @@ export const componentCategories = {
     "Combobox",
     "InputOTP",
     "ToggleGroup",
+    "Toggle",
   ] as A2UIComponentType[],
   action: ["Button", "Link", "ButtonGroup"] as A2UIComponentType[],
   layout: [
@@ -340,8 +366,17 @@ export const componentCategories = {
     "InputGroup",
     "Collapsible",
     "ScrollArea",
+    "Tabs",
+    "Accordion",
+    "FormGroup",
   ] as A2UIComponentType[],
-  data: ["Chart", "Table", "Pagination"] as A2UIComponentType[],
+  data: [
+    "Chart",
+    "Table",
+    "Pagination",
+    "AcademicAnalysis",
+    "AcademicSearchResults",
+  ] as A2UIComponentType[],
   overlay: [
     "Tooltip",
     "Popover",
@@ -349,7 +384,14 @@ export const componentCategories = {
     "DropdownMenu",
     "ContextMenu",
   ] as A2UIComponentType[],
-  navigation: ["Breadcrumb", "Carousel", "Drawer", "Sheet", "Sidebar"] as A2UIComponentType[],
+  navigation: [
+    "Breadcrumb",
+    "Carousel",
+    "Drawer",
+    "Sheet",
+    "Sidebar",
+    "InteractiveGuide",
+  ] as A2UIComponentType[],
 }
 
 const DEFAULT_WIDGET_METADATA: Required<
@@ -362,8 +404,26 @@ const DEFAULT_WIDGET_METADATA: Required<
   showChrome: true,
 }
 
-export function resolveWidgetMetadata(component: A2UIComponent): A2UIWidgetMetadata {
-  const inferred: A2UIWidgetMetadata = { ...DEFAULT_WIDGET_METADATA }
+type A2UIWidgetDefaults = Partial<
+  Pick<A2UIWidgetMetadata, "hostStrategy" | "sizing" | "theme" | "status" | "showChrome">
+>
+
+export function resolveWidgetDefaults(
+  widget?: A2UIWidgetMetadata,
+  defaults: A2UIWidgetDefaults = {}
+): A2UIWidgetMetadata {
+  return {
+    ...DEFAULT_WIDGET_METADATA,
+    ...defaults,
+    ...widget,
+  }
+}
+
+export function resolveWidgetMetadata(
+  component: A2UIComponent,
+  defaults: A2UIWidgetDefaults = {}
+): A2UIWidgetMetadata {
+  const inferred = resolveWidgetDefaults(undefined, defaults)
 
   if (
     component.component === "RichOutput" &&

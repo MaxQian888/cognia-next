@@ -63,11 +63,13 @@ export async function tryBuildMemoryDeps(
   config: MemoryConfig,
   prebuiltTwinDeps?: PrebuiltTwinDeps
 ): Promise<ApplyMemoryContextDeps | undefined> {
-  if (!config.enabled) return undefined
+  // useMemory is resolved per session by resolveMemoryTurnPolicy. Building the
+  // local dependency layer must not make a chat-level opt-in impossible.
+  if (!config.enabled || config.temporary) return undefined
 
   const deps: ApplyMemoryContextDeps = {
-    loadCandidates: (characterId) => listActiveForReader(characterId),
-    loadProcedural: (characterId) => listActiveProcedural(characterId),
+    loadCandidates: (reader) => listActiveForReader(reader),
+    loadProcedural: (reader) => listActiveProcedural(reader),
     touch: (ids) => touchMemories(ids),
   }
 
@@ -96,6 +98,8 @@ export async function tryBuildMemoryDeps(
 export interface MemoryVectorSink {
   /** Embed + upsert a memory's text into the vector collection under `id`. */
   upsert: (id: string, text: string) => Promise<void>
+  /** Remove stale vector documents after forget/delete. */
+  delete: (ids: string[]) => Promise<void>
 }
 
 /**
@@ -106,17 +110,22 @@ export interface MemoryVectorSink {
 export async function tryBuildMemoryVectorSink(
   config: MemoryConfig
 ): Promise<MemoryVectorSink | undefined> {
-  if (!config.enabled) return undefined
+  if (!config.enabled || config.temporary) return undefined
   try {
     const backend = await resolveMemoryBackend(config)
     if (!backend) return undefined
     const store = backend.store as unknown as {
       addDocuments?: (collection: string, docs: { id: string; content: string }[]) => Promise<void>
+      deleteDocuments?: (collection: string, ids: string[]) => Promise<void>
     }
     if (typeof store.addDocuments !== "function") return undefined
     return {
       upsert: async (id, text) => {
         await store.addDocuments!(MEMORY_VECTOR_COLLECTION, [{ id, content: text }])
+      },
+      delete: async (ids) => {
+        if (ids.length === 0 || typeof store.deleteDocuments !== "function") return
+        await store.deleteDocuments(MEMORY_VECTOR_COLLECTION, ids)
       },
     }
   } catch {

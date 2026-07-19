@@ -31,7 +31,7 @@ function buildSeeded(): { store: EditorStore; triggerId: string; aiId: string; e
   const store = createEditorStore(makeWorkflow())
   const triggerId = store.getState().addNode("trigger.manual", { x: 0, y: 0 })
   const aiId = store.getState().addNode("ai.prompt", { x: 200, y: 0 })
-  const edgeId = store.getState().connect({ source: triggerId, target: aiId })
+  const edgeId = store.getState().connect({ source: triggerId, target: aiId })!
   return { store, triggerId, aiId, edgeId }
 }
 

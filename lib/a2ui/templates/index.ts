@@ -6,6 +6,13 @@
 // Types and utilities
 export type { A2UIAppTemplate } from "./types"
 export { generateTemplateId, createAppFromTemplate, templateCategories } from "./types"
+export {
+  applyComponentLocalization,
+  formatBuiltInRuntimeMessage,
+  localizeTemplate,
+  mergeLocalizationOverlay,
+  type BuiltInRuntimeMessageKey,
+} from "./localization"
 
 // Category templates
 export {
@@ -41,6 +48,8 @@ import { surveyFormTemplate, contactFormTemplate } from "./form"
 import { dataDashboardTemplate, expenseTrackerTemplate } from "./data"
 import { profileCardTemplate } from "./social"
 import type { A2UIAppTemplate } from "./types"
+import type { Locale } from "@/i18n/config"
+import { localizeTemplate } from "./localization"
 
 /**
  * All available templates
@@ -85,5 +94,34 @@ export function searchTemplates(query: string): A2UIAppTemplate[] {
       t.name.toLowerCase().includes(lowerQuery) ||
       t.description.toLowerCase().includes(lowerQuery) ||
       t.tags.some((tag) => tag.toLowerCase().includes(lowerQuery))
+  )
+}
+
+/** Return isolated, locale-owned copies of all canonical built-in templates. */
+export function getLocalizedTemplates(locale: Locale): A2UIAppTemplate[] {
+  return appTemplates.map((template) => localizeTemplate(template, locale))
+}
+
+/** Resolve one canonical template and return an isolated localized copy. */
+export function getLocalizedTemplateById(id: string, locale: Locale): A2UIAppTemplate | undefined {
+  const template = getTemplateById(id)
+  return template ? localizeTemplate(template, locale) : undefined
+}
+
+export function getLocalizedTemplatesByCategory(
+  category: A2UIAppTemplate["category"],
+  locale: Locale
+): A2UIAppTemplate[] {
+  return getTemplatesByCategory(category).map((template) => localizeTemplate(template, locale))
+}
+
+export function searchLocalizedTemplates(query: string, locale: Locale): A2UIAppTemplate[] {
+  const lowerQuery = query.trim().toLocaleLowerCase(locale)
+  if (!lowerQuery) return getLocalizedTemplates(locale)
+  return getLocalizedTemplates(locale).filter(
+    (template) =>
+      template.name.toLocaleLowerCase(locale).includes(lowerQuery) ||
+      template.description.toLocaleLowerCase(locale).includes(lowerQuery) ||
+      template.tags.some((tag) => tag.toLocaleLowerCase(locale).includes(lowerQuery))
   )
 }

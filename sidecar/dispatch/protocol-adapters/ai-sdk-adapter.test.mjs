@@ -292,6 +292,26 @@ test("start wires tools + the maxSteps stop condition when tools exist", async (
   assert.equal(captured.stopWhen({}), false)
 })
 
+test("start forwards prepareStep so callers can change active tools between steps", async () => {
+  let captured = null
+  const fakeStreamText = (args) => {
+    captured = args
+    return { fullStream: (async function* () {})(), usage: Promise.resolve({}) }
+  }
+  const prepareStep = () => ({ activeTools: ["read"] })
+
+  await makeAiSdkAdapter("openai").start({
+    model: "gpt-x",
+    messages: [],
+    tools: { read: { execute: async () => "ok" } },
+    prepareStep,
+    credentials: { apiKey: "k" },
+    streamTextFn: fakeStreamText,
+  })
+
+  assert.equal(captured.prepareStep, prepareStep)
+})
+
 test("buildReasoningProviderOptions(anthropic): a thinking budget enables extended thinking", () => {
   assert.deepEqual(
     buildReasoningProviderOptions("anthropic", undefined, { maxThinkingTokens: 8000 }),

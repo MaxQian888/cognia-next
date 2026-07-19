@@ -75,8 +75,11 @@ function randomBytes(len: number): Uint8Array {
   return buf
 }
 
-function bytesToBuffer(b: Uint8Array): ArrayBuffer {
-  return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer
+function bytesToBufferSource(bytes: Uint8Array): BufferSource {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(bytes) as BufferSource
+  }
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
 }
 
 function toBase64(bytes: Uint8Array): string {
@@ -101,7 +104,7 @@ function fromBase64(s: string): Uint8Array {
 async function deriveKey(passphrase: string, salt: Uint8Array): Promise<CryptoKey> {
   const keyMaterial = await subtle().importKey(
     "raw",
-    bytesToBuffer(new TextEncoder().encode(passphrase)),
+    bytesToBufferSource(new TextEncoder().encode(passphrase)),
     "PBKDF2",
     false,
     ["deriveKey"]
@@ -109,7 +112,7 @@ async function deriveKey(passphrase: string, salt: Uint8Array): Promise<CryptoKe
   return subtle().deriveKey(
     {
       name: "PBKDF2",
-      salt: bytesToBuffer(salt),
+      salt: bytesToBufferSource(salt),
       iterations: PBKDF2_ITERATIONS,
       hash: PBKDF2_HASH,
     },
@@ -167,9 +170,9 @@ export async function encryptSubscriptionPackage(
   const iv = randomBytes(12)
   const key = await deriveKey(passphrase, salt)
   const ciphertext = await subtle().encrypt(
-    { name: "AES-GCM", iv: bytesToBuffer(iv) },
+    { name: "AES-GCM", iv: bytesToBufferSource(iv) },
     key,
-    bytesToBuffer(new TextEncoder().encode(plaintext))
+    bytesToBufferSource(new TextEncoder().encode(plaintext))
   )
   return {
     format: "cogniabak-subscription-v1",
@@ -217,7 +220,7 @@ export async function decryptSubscriptionPackage(
   const ciphertext = fromBase64(envelope.ciphertextB64)
   const key = await subtle().importKey(
     "raw",
-    bytesToBuffer(new TextEncoder().encode(passphrase)),
+    bytesToBufferSource(new TextEncoder().encode(passphrase)),
     "PBKDF2",
     false,
     ["deriveKey"]
@@ -225,7 +228,7 @@ export async function decryptSubscriptionPackage(
   const aesKey = await subtle().deriveKey(
     {
       name: "PBKDF2",
-      salt: bytesToBuffer(salt),
+      salt: bytesToBufferSource(salt),
       iterations: envelope.kdf.iterations,
       hash: PBKDF2_HASH,
     },
@@ -237,9 +240,9 @@ export async function decryptSubscriptionPackage(
   let plaintextBuffer: ArrayBuffer
   try {
     plaintextBuffer = await subtle().decrypt(
-      { name: "AES-GCM", iv: bytesToBuffer(iv) },
+      { name: "AES-GCM", iv: bytesToBufferSource(iv) },
       aesKey,
-      bytesToBuffer(ciphertext)
+      bytesToBufferSource(ciphertext)
     )
   } catch {
     throw new SubscriptionPassphraseError()

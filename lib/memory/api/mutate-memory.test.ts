@@ -19,13 +19,19 @@ jest.mock("@/lib/memory/runtime/build-deps", () => ({
   tryBuildMemoryVectorSink: (...args: unknown[]) => mockVectorSink(...(args as [])),
 }))
 
+const mockAppendAudit = jest.fn()
+jest.mock("@/lib/db/memory-governance", () => ({
+  appendMemoryAuditEvent: (...args: unknown[]) => mockAppendAudit(...args),
+}))
+
 const PII_TEXT = "reach me at bob@example.com"
 
 beforeEach(() => {
   jest.clearAllMocks()
   mockGetSettings.mockResolvedValue({ memory: { enabled: true } })
-  mockGetMemory.mockResolvedValue({ id: "m1", text: "old", vectorDocId: "m1" })
+  mockGetMemory.mockResolvedValue({ id: "m1", text: "old", vectorDocId: "m1", pinned: false })
   mockVectorSink.mockResolvedValue(undefined)
+  mockAppendAudit.mockResolvedValue(undefined)
 })
 
 describe("updateExternalMemory", () => {
@@ -73,6 +79,17 @@ describe("updateExternalMemory", () => {
       tags: ["a", "b"],
       key: "k1",
     })
+    expect(mockAppendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "revised", memoryId: "m1" })
+    )
+  })
+
+  it("supports pinning and records the governance action", async () => {
+    expect(await updateExternalMemory("m1", { pinned: true })).toEqual({ ok: true })
+    expect(mockUpdateMemory).toHaveBeenCalledWith("m1", { pinned: true })
+    expect(mockAppendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "pinned", memoryId: "m1" })
+    )
   })
 
   it("re-upserts the vector doc on a text change, best-effort", async () => {
@@ -100,8 +117,14 @@ describe("updateExternalMemory", () => {
 
 describe("forgetExternalMemory", () => {
   it("soft-invalidates an existing row", async () => {
+    const deleteDocuments = jest.fn().mockResolvedValue(undefined)
+    mockVectorSink.mockResolvedValue({ delete: deleteDocuments })
     expect(await forgetExternalMemory("m1")).toEqual({ ok: true })
     expect(mockInvalidateMemory).toHaveBeenCalledWith("m1")
+    expect(deleteDocuments).toHaveBeenCalledWith(["m1"])
+    expect(mockAppendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "invalidated", memoryId: "m1" })
+    )
   })
 
   it("is allowed in temporary mode (forgetting reduces data)", async () => {

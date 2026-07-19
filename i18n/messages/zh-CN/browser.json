@@ -157,6 +157,16 @@
     "stopReplay": "停止回放",
     "title": "录制操作"
   },
+  "remote": {
+    "canvas": "远程浏览器画布",
+    "closePage": "关闭页面",
+    "error": "远程浏览器不可用（{code}）",
+    "humanControl": "由你控制",
+    "takeover": "接管控制",
+    "untitledPage": "未命名页面",
+    "url": "远程浏览器地址",
+    "waiting": "正在等待远程浏览器…"
+  },
   "screenshot": {
     "failed": "无法截取预览画面",
     "sent": "截图已发送到对话"

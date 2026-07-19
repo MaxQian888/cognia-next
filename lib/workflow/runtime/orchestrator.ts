@@ -252,6 +252,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     projectId,
     status: "running",
     triggerKind: trigger.kind,
+    ...(trigger.triggerId ? { triggerId: trigger.triggerId } : {}),
     triggerPayload: trigger.payload,
     triggerBinding: trigger.binding,
     startedAt,
@@ -482,6 +483,31 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     const keep = new Set(input.restrictToStepIds)
     for (const stepId of order) {
       if (!keep.has(stepId)) skipped.add(stepId)
+    }
+  }
+
+  // A workflow may expose multiple trigger roots. An event with an explicit
+  // triggerId must activate only that root; without an id, activate all roots
+  // of the matching kind for backward compatibility with older producers.
+  // When no root matches the event kind, preserve the legacy/manual behavior
+  // and do not prune the graph (external callers historically used a cron
+  // envelope to run manual-only workflows).
+  const triggerNodes = validated.nodes.filter(
+    (node) => !childNodeIds.has(node.id) && node.type.startsWith("trigger.")
+  )
+  const matchingTriggerNodes = triggerNodes.filter((node) => node.type === trigger.kind)
+  const activeTriggerIds = trigger.triggerId
+    ? new Set([trigger.triggerId])
+    : new Set(matchingTriggerNodes.map((node) => node.id))
+  if (trigger.triggerId || matchingTriggerNodes.length > 0) {
+    const inactiveTriggerNodes = triggerNodes.filter((node) => !activeTriggerIds.has(node.id))
+    for (const node of inactiveTriggerNodes) skipped.add(node.id)
+    for (const node of inactiveTriggerNodes) {
+      for (const edge of topLevelForwardEdges) {
+        if (edge.source === node.id) {
+          propagateSkip(validated as VisualWorkflow, edge.target, skipped)
+        }
+      }
     }
   }
 

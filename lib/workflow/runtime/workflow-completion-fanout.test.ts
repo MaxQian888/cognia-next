@@ -82,6 +82,7 @@ describe("emitWorkflowCompletedFanout", () => {
     expect(event).toMatchObject({
       workflowId: "wf_b",
       kind: "trigger.workflow.completed",
+      triggerId: "n1",
       payload: {
         workflowId: "wf_a",
         workflowName: "A",

@@ -161,10 +161,14 @@ async fn resolve_default_branch(
         .map_err(|e| format!("query repo metadata: {e}"))?
         .error_for_status()
         .map_err(|e| format!("repo metadata HTTP error (is the repo public?): {e}"))?;
-    let value: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("parse repo metadata: {e}"))?;
+    let bytes = crate::archive_limits::read_response_limited(
+        resp,
+        crate::archive_limits::MAX_METADATA_BYTES,
+        "GitHub repository metadata",
+    )
+    .await?;
+    let value: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|e| format!("parse repo metadata: {e}"))?;
     value
         .get("default_branch")
         .and_then(|b| b.as_str())
@@ -176,16 +180,39 @@ async fn resolve_default_branch(
 /// directory GitHub wraps every archive in (`{repo}-{ref}/`). Entries that
 /// would escape `dest` (via `..`) are skipped.
 fn extract_tar_gz_stripping_root(bytes: &[u8], dest: &Path) -> Result<(), String> {
+    extract_tar_gz_stripping_root_with_limits(
+        bytes,
+        dest,
+        crate::archive_limits::MAX_ARCHIVE_ENTRIES,
+        crate::archive_limits::MAX_UNPACKED_BYTES,
+    )
+}
+
+fn extract_tar_gz_stripping_root_with_limits(
+    bytes: &[u8],
+    dest: &Path,
+    max_entries: usize,
+    max_unpacked_bytes: u64,
+) -> Result<(), String> {
     use flate2::read::GzDecoder;
     use tar::Archive;
 
     std::fs::create_dir_all(dest).map_err(|e| format!("mkdir {dest:?}: {e}"))?;
     let gz = GzDecoder::new(bytes);
     let mut archive = Archive::new(gz);
+    let mut entry_count = 0_usize;
+    let mut total_written = 0_u64;
     for entry in archive
         .entries()
         .map_err(|e| format!("read tar entries: {e}"))?
     {
+        entry_count += 1;
+        if entry_count > max_entries {
+            return Err(format!(
+                "plugin archive contains more than {} entries",
+                max_entries
+            ));
+        }
         let mut entry = entry.map_err(|e| format!("read tar entry: {e}"))?;
         let path = entry
             .path()
@@ -203,8 +230,10 @@ fn extract_tar_gz_stripping_root(bytes: &[u8], dest: &Path) -> Result<(), String
             return Err(format!("unsafe tar entry path: {path:?}"));
         }
         let entry_type = entry.header().entry_type();
-        if entry_type.is_symlink() || entry_type.is_hard_link() {
-            return Err(format!("archive links are not allowed: {path:?}"));
+        if !entry_type.is_file() && !entry_type.is_dir() {
+            return Err(format!(
+                "archive entry must be a regular file or directory: {path:?}"
+            ));
         }
 
         let out = dest.join(rel);
@@ -215,9 +244,14 @@ fn extract_tar_gz_stripping_root(bytes: &[u8], dest: &Path) -> Result<(), String
         if let Some(parent) = out.parent() {
             std::fs::create_dir_all(parent).map_err(|e| format!("mkdir {parent:?}: {e}"))?;
         }
-        entry
-            .unpack(&out)
-            .map_err(|e| format!("unpack {out:?}: {e}"))?;
+        let mut file = std::fs::File::create(&out).map_err(|e| format!("create {out:?}: {e}"))?;
+        crate::archive_limits::copy_with_budget(
+            &mut entry,
+            &mut file,
+            &mut total_written,
+            max_unpacked_bytes,
+            out.to_string_lossy().as_ref(),
+        )?;
     }
     Ok(())
 }
@@ -328,7 +362,12 @@ pub(crate) fn copy_plugin_tree(src: &Path, dst: &Path) -> Result<(), String> {
         let name = entry.file_name();
         let rel = path.strip_prefix(src).unwrap();
         let target = dst.join(rel);
-        if path.is_dir() {
+        let metadata = std::fs::symlink_metadata(&path)
+            .map_err(|e| format!("stat plugin tree entry {path:?}: {e}"))?;
+        if metadata.file_type().is_symlink() {
+            return Err(format!("plugin tree contains a symbolic link: {path:?}"));
+        }
+        if metadata.is_dir() {
             if SKIP_DIRS.iter().any(|s| name == std::ffi::OsStr::new(s)) {
                 continue;
             }
@@ -347,6 +386,16 @@ pub(crate) fn copy_plugin_tree(src: &Path, dst: &Path) -> Result<(), String> {
 #[tauri::command]
 pub async fn plugin_install_from_github(
     state: State<'_, PluginRuntimeState>,
+    repo: String,
+    git_ref: Option<String>,
+    subdir: Option<String>,
+) -> Result<GithubInstallResult, String> {
+    plugin_install_from_github_for_state(state.inner(), repo, git_ref, subdir).await
+}
+
+/// Host-neutral GitHub install used by Tauri and the headless companion host.
+pub async fn plugin_install_from_github_for_state(
+    state: &PluginRuntimeState,
     repo: String,
     git_ref: Option<String>,
     subdir: Option<String>,
@@ -375,16 +424,21 @@ pub async fn plugin_install_from_github(
         "https://codeload.github.com/{}/{}/tar.gz/{}",
         gh.owner, gh.repo, resolved_ref
     );
-    let bytes = client
+    let response = client
         .get(&tar_url)
         .send()
         .await
         .map_err(|e| format!("download repository tarball: {e}"))?
         .error_for_status()
-        .map_err(|e| format!("download tarball (HTTP error — check the repo/ref is public): {e}"))?
-        .bytes()
-        .await
-        .map_err(|e| format!("read tarball body: {e}"))?;
+        .map_err(|e| {
+            format!("download tarball (HTTP error — check the repo/ref is public): {e}")
+        })?;
+    let bytes = crate::archive_limits::read_response_limited(
+        response,
+        crate::archive_limits::MAX_DOWNLOAD_BYTES,
+        "GitHub plugin tarball",
+    )
+    .await?;
 
     let staging = tempfile::tempdir().map_err(|e| format!("create temp dir: {e}"))?;
     extract_tar_gz_stripping_root(&bytes, staging.path())?;
@@ -411,6 +465,8 @@ pub async fn plugin_install_from_github(
     // Step 4 — parse + validate (no build).
     let manifest_path = plugin_root.join("plugin.json");
     let (manifest_value, parsed) = read_manifest(&manifest_path)?;
+    crate::contract::validate_manifest_contract(&manifest_value)?;
+    crate::contract::validate_existing_manifest_paths(&plugin_root, &manifest_value)?;
     validate_no_build(&plugin_root, &parsed)?;
 
     // Step 5 — read README / LICENSE text.
@@ -424,6 +480,7 @@ pub async fn plugin_install_from_github(
     }
     std::fs::create_dir_all(&plugin_dir).map_err(|e| format!("mkdir {plugin_dir:?}: {e}"))?;
     copy_plugin_tree(&plugin_root, &plugin_dir)?;
+    crate::contract::validate_existing_manifest_paths(&plugin_dir, &manifest_value)?;
 
     Ok(GithubInstallResult {
         manifest: manifest_value,
@@ -532,6 +589,22 @@ mod tests {
     }
 
     #[test]
+    fn extract_enforces_entry_and_unpacked_byte_limits() {
+        let tar = make_tar_gz(&[("repo-main/a.js", b"1234"), ("repo-main/b.js", b"5678")]);
+
+        let entry_dest = tempfile::tempdir().unwrap();
+        let entry_error =
+            extract_tar_gz_stripping_root_with_limits(&tar, entry_dest.path(), 1, 1024)
+                .unwrap_err();
+        assert!(entry_error.contains("more than 1 entries"));
+
+        let byte_dest = tempfile::tempdir().unwrap();
+        let byte_error =
+            extract_tar_gz_stripping_root_with_limits(&tar, byte_dest.path(), 10, 7).unwrap_err();
+        assert!(byte_error.contains("7-byte extraction limit"));
+    }
+
+    #[test]
     fn extract_rejects_symlink_entries() {
         use flate2::write::GzEncoder;
         use flate2::Compression;
@@ -554,8 +627,33 @@ mod tests {
 
         let dest = tempfile::tempdir().unwrap();
         let error = extract_tar_gz_stripping_root(&bytes, dest.path()).unwrap_err();
-        assert!(error.contains("links are not allowed"));
+        assert!(error.contains("regular file or directory"));
         assert!(!dest.path().join("link.js").exists());
+    }
+
+    #[test]
+    fn extract_rejects_other_special_entries() {
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+
+        let mut bytes = Vec::new();
+        {
+            let encoder = GzEncoder::new(&mut bytes, Compression::fast());
+            let mut builder = tar::Builder::new(encoder);
+            let mut header = tar::Header::new_gnu();
+            header.set_entry_type(tar::EntryType::Fifo);
+            header.set_size(0);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder
+                .append_data(&mut header, "repo-main/pipe", &[][..])
+                .unwrap();
+            builder.into_inner().unwrap().finish().unwrap();
+        }
+
+        let dest = tempfile::tempdir().unwrap();
+        let error = extract_tar_gz_stripping_root(&bytes, dest.path()).unwrap_err();
+        assert!(error.contains("regular file or directory"));
     }
 
     #[test]

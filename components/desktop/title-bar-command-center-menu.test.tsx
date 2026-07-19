@@ -93,6 +93,7 @@ describe("TitleBarCommandCenterMenu", () => {
     for (const id of [
       "go-inbox",
       "go-workflows",
+      "go-sites",
       "go-agent-teams",
       "go-scheduler",
       "go-discover",

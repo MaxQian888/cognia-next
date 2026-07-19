@@ -8,6 +8,8 @@ export interface PluginCapabilityContract {
   id: PluginCapability
   support: PluginCapabilitySupport
   manifestFields: readonly string[]
+  /** The capability also exposes callable context APIs and need not contribute a manifest field. */
+  manifestFieldsOptional?: boolean
   runtimeBinding: string
   hostBindings: readonly string[]
   typescriptSdk: readonly string[]
@@ -90,7 +92,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     hostBindings: ["lib/plugin/bridge/a2ui-bridge.ts", "lib/plugin/core/registry.ts"],
     typescriptSdk: [
       "packages/plugin-sdk/src/manifest/index.ts",
-      "packages/plugin-sdk/src/context/extended.ts",
+      "packages/plugin-sdk/src/context/index.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/a2ui.py", "plugin-sdk/python/src/cognia/context.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
@@ -131,7 +133,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     ],
     typescriptSdk: [
       "packages/plugin-sdk/src/api/skill.ts",
-      "packages/plugin-sdk/src/context/extended.ts",
+      "packages/plugin-sdk/src/context/index.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/agent.py"],
     builtinContributionPaths: ["plugins/anthropic-skills/src/index.ts"],
@@ -141,16 +143,13 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
   {
     id: "media",
     support: "supported",
-    // API-only (gated by the capability tag itself, like `tray`): listing
-    // "capabilities" here made the validator's field cross-check treat the
-    // manifest's own capabilities array as a contribution field and emit a
-    // bogus field_undeclared warning on every manifest.
-    manifestFields: [],
+    manifestFields: ["ocrProviders"],
+    manifestFieldsOptional: true,
     runtimeBinding: "context.media + AI-backed media helpers",
     hostBindings: ["lib/plugin/api/media-api.ts", "lib/plugin/core/context.ts"],
     typescriptSdk: [
       "packages/plugin-sdk/src/api/media.ts",
-      "packages/plugin-sdk/src/context/extended.ts",
+      "packages/plugin-sdk/src/context/index.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
@@ -165,7 +164,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     hostBindings: ["lib/plugin/api/canvas-api.ts", "lib/plugin/core/context.ts"],
     typescriptSdk: [
       "packages/plugin-sdk/src/api/canvas.ts",
-      "packages/plugin-sdk/src/context/extended.ts",
+      "packages/plugin-sdk/src/context/index.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
@@ -174,13 +173,13 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
   {
     id: "ai-provider",
     support: "supported",
-    // API-only — see the `media` contract note.
-    manifestFields: [],
+    manifestFields: ["aiProviders"],
+    manifestFieldsOptional: true,
     runtimeBinding: "context.ai + built-in provider fallback",
     hostBindings: ["lib/plugin/api/ai-provider-api.ts", "lib/plugin/core/context.ts"],
     typescriptSdk: [
       "packages/plugin-sdk/src/api/ai-provider.ts",
-      "packages/plugin-sdk/src/context/extended.ts",
+      "packages/plugin-sdk/src/context/index.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/providers.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
@@ -269,7 +268,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     typescriptSdk: [
       "packages/plugin-sdk/src/api/ai-provider.ts",
       "packages/plugin-sdk/src/index.ts",
-      "packages/plugin-sdk/src/context/extended.ts",
+      "packages/plugin-sdk/src/context/index.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
@@ -353,7 +352,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     hostBindings: ["lib/plugin/bridge/a2ui-bridge.ts", "lib/plugin/core/manager.ts"],
     typescriptSdk: [
       "packages/plugin-sdk/src/manifest/index.ts",
-      "packages/plugin-sdk/src/context/extended.ts",
+      "packages/plugin-sdk/src/context/index.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/a2ui.py", "plugin-sdk/python/src/cognia/context.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#a2ui-integration",
@@ -388,10 +387,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/scheduler/scheduler-plugin-executor.ts",
       "lib/plugin/core/manager.ts",
     ],
-    typescriptSdk: [
-      "packages/plugin-sdk/src/index.ts",
-      "packages/plugin-sdk/src/context/extended.ts",
-    ],
+    typescriptSdk: ["packages/plugin-sdk/src/index.ts", "packages/plugin-sdk/src/context/index.ts"],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: ["packages/plugin-sdk/src/manifest/index.test.ts"],
@@ -652,10 +648,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/ai/agent/external/presets.ts",
       "components/agent/external-agent/manager.tsx",
     ],
-    typescriptSdk: [
-      "packages/plugin-sdk/src/index.ts",
-      "packages/plugin-sdk/src/context/extended.ts",
-    ],
+    typescriptSdk: ["packages/plugin-sdk/src/index.ts", "packages/plugin-sdk/src/context/index.ts"],
     pythonSdk: [
       // Python plugins can declare external-agent presets through the same
       // manifest schema; the SDK helper is a thin pass-through to the Tauri
@@ -741,7 +734,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     ],
     typescriptSdk: [
       "packages/plugin-sdk/src/api/mcp-server-preset.ts",
-      "packages/plugin-sdk/src/context/extended.ts",
+      "packages/plugin-sdk/src/context/index.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/agent.py"],
     builtinContributionPaths: [
@@ -779,7 +772,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     ],
     typescriptSdk: [
       "packages/plugin-sdk/src/api/native-anthropic-tool.ts",
-      "packages/plugin-sdk/src/context/extended.ts",
+      "packages/plugin-sdk/src/context/index.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/agent.py"],
     builtinContributionPaths: ["plugins/computer-use/src/index.ts"],
@@ -787,7 +780,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     requiredTests: [
       "lib/plugin/registries/native-anthropic-tool-registry.test.ts",
       "packages/plugin-sdk/src/api/native-anthropic-tool.test.ts",
-      "packages/plugin-sdk/src/context/extended.test.ts",
+      "packages/plugin-sdk/src/context/index.test.ts",
     ],
   },
   {
@@ -1240,10 +1233,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "components/chat/composer/plugin-quick-actions-menu.tsx",
       "lib/tray/all-commands.ts",
     ],
-    typescriptSdk: [
-      "packages/plugin-sdk/src/context/extended.ts",
-      "packages/plugin-sdk/src/index.ts",
-    ],
+    typescriptSdk: ["packages/plugin-sdk/src/context/index.ts", "packages/plugin-sdk/src/index.ts"],
     pythonSdk: ["plugin-sdk/python/src/cognia/agent.py"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [

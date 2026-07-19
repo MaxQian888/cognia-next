@@ -20,13 +20,7 @@
  */
 
 import { ErrorCode, RpcConnection, type RpcError } from "./rpc"
-import {
-  installRequireHook,
-  setExtensionResolver,
-  setPermissionGate,
-  type PermissionGate,
-  type PermissionGateDecision,
-} from "./require-hook"
+import { installRequireHook, setExtensionResolver, setGrantedModules } from "./require-hook"
 import {
   activateExtension,
   deactivateExtension,
@@ -42,10 +36,12 @@ interface LoadRequest {
   extensionPath: string
   main: string
   bundleFormat: "cjs" | "esm" | "mixed"
+  grantedModules: string[]
 }
 
 interface ActivateRequest {
   extensionId: string
+  extensionPath: string
   globalStorageUri: string
   storageUri: string
   logUri: string
@@ -95,28 +91,6 @@ function ensureLspService(): import("./lsp-service").LspService {
   return lspService
 }
 
-// Wire the permission gate to the host: every sensitive require triggers
-// an RPC back to the renderer, which surfaces cognia's permission prompt.
-const gate: PermissionGate = {
-  async check(extensionId, moduleName): Promise<PermissionGateDecision> {
-    try {
-      const decision = await connection.sendRequest<"allow" | "deny">("permission:request", {
-        extensionId,
-        moduleName,
-      })
-      return decision
-    } catch (err) {
-      process.stderr.write(
-        `[vscode-ext-host] permission gate RPC failed: ${
-          err instanceof Error ? err.message : String(err)
-        }\n`
-      )
-      return "deny"
-    }
-  },
-}
-setPermissionGate(gate)
-
 // Map a require() call back to an extension by walking `parent.cogniaExtensionId`.
 setExtensionResolver((parent) => {
   let cur: NodeModule | null = parent
@@ -154,6 +128,7 @@ function registerProviderCallback(
 
 connection.onRequest("extension:load", async (params) => {
   const req = params as LoadRequest
+  setGrantedModules(req.extensionId, req.grantedModules ?? [])
   await loadExtension({
     extensionId: req.extensionId,
     extensionPath: req.extensionPath,
@@ -283,7 +258,7 @@ connection.onRequest("lsp:install", async (params) => {
 function buildContext(req: ActivateRequest): SidecarExtensionContext {
   const globalState = makeKvStore(req.initialGlobalState)
   const workspaceState = makeKvStore(req.initialWorkspaceState)
-  const extensionPath = req.extensionId
+  const extensionPath = req.extensionPath
   return {
     subscriptions: [] as Disposable[],
     globalState,

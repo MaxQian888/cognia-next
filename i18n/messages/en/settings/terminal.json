@@ -38,6 +38,10 @@
     "sound": "Sound",
     "visual": "Visual flash"
   },
+  "boldBrightColors": {
+    "helper": "Render bold ANSI text with the bright variant of its color.",
+    "label": "Bright colors for bold text"
+  },
   "colorScheme": {
     "auto": "Auto (follow app theme)",
     "darkGroup": "Dark schemes",
@@ -60,8 +64,20 @@
     "bar": "Bar",
     "blink": "Cursor blink",
     "block": "Block",
+    "inactiveBar": "Bar",
+    "inactiveBlock": "Block",
+    "inactiveLabel": "Inactive cursor",
+    "inactiveNone": "Hidden",
+    "inactiveOutline": "Outline",
+    "inactiveUnderline": "Underline",
     "label": "Cursor style",
-    "underline": "Underline"
+    "underline": "Underline",
+    "width": "Cursor width",
+    "widthHelper": "Cursor width applies to bar-style cursors and is clamped to 1–10 pixels."
+  },
+  "customGlyphs": {
+    "helper": "Use xterm's built-in box-drawing and block glyphs for crisp terminal UI.",
+    "label": "Custom terminal glyphs"
   },
   "exposeDockToAgents": {
     "helper": "Lets the chat agent drive your visible terminal tabs via the synthetic terminal_dock_* MCP tools. The agent shares the same PTY you see — one shell, one cwd, one history. Each tab requires per-session consent. Off by default.",
@@ -150,6 +166,10 @@
     "helper": "Show a lightbulb on a failed command offering a fix — git push --set-upstream, “did you mean”, create-PR link, freeing a busy port, pwsh command-not-found, and more.",
     "label": "Quick fixes"
   },
+  "rescaleOverlappingGlyphs": {
+    "helper": "Rescale wide glyphs that would otherwise overlap adjacent terminal cells.",
+    "label": "Rescale overlapping glyphs"
+  },
   "renderer": {
     "auto": "Auto",
     "canvas": "Canvas",
@@ -173,6 +193,10 @@
   "scrollback": {
     "helper": "Number of lines kept in xterm's history buffer. Range 1000–100000.",
     "label": "Scrollback lines"
+  },
+  "smoothScrolling": {
+    "helper": "Animate wheel and touchpad scrolling instead of jumping between terminal rows.",
+    "label": "Smooth scrolling"
   },
   "shell": {
     "auto": "Auto-detect (recommended)",

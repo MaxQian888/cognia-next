@@ -58,12 +58,14 @@
       "catalogHelp": "Used when a surface omits catalogId.",
       "catalogLabel": "Default catalog",
       "catalogPlaceholder": "Pick a catalog",
+      "standardCatalog": "Cognia Standard Catalog",
       "description": "Applied to new characters and surfaces.",
       "enabledHelp": "New characters inherit this value.",
       "enabledLabel": "Enable A2UI by default",
       "title": "Global defaults"
     },
     "loading": "Loading…",
+    "saveFailed": "Failed to save: {error}",
     "persistence": {
       "description": "How many surfaces survive a reload.",
       "limitHelp": "Higher values keep more state across reloads.",
@@ -72,8 +74,19 @@
     },
     "widget": {
       "description": "Used when a surface widget omits the field.",
+      "hostStrategies": {
+        "artifact-preview": "Artifact preview",
+        "lazy-runtime": "Lazy runtime",
+        "native": "Native",
+        "sandboxed-html": "Sandboxed HTML"
+      },
       "hostStrategyLabel": "Host strategy",
       "themeLabel": "Theme",
+      "themes": {
+        "dark": "Dark",
+        "inherit": "Inherit app theme",
+        "light": "Light"
+      },
       "title": "Widget defaults"
     }
   },

@@ -46,6 +46,15 @@ pub async fn plugin_backup_create(
     plugin_id: String,
     label: Option<String>,
 ) -> Result<BackupPayload> {
+    plugin_backup_create_for_state(state.inner(), plugin_id, label).await
+}
+
+/// Host-neutral backup creation used by Tauri and the headless companion host.
+pub async fn plugin_backup_create_for_state(
+    state: &PluginRuntimeState,
+    plugin_id: String,
+    label: Option<String>,
+) -> Result<BackupPayload> {
     let plugin_dir = state.plugin_dir(&plugin_id);
     if !plugin_dir.exists() {
         return Err(PluginError::NotFound(plugin_id));
@@ -82,6 +91,15 @@ pub async fn plugin_backup_restore(
     plugin_id: String,
     backup_id: String,
 ) -> Result<()> {
+    plugin_backup_restore_for_state(state.inner(), plugin_id, backup_id).await
+}
+
+/// Host-neutral backup restore used by Tauri and the headless companion host.
+pub async fn plugin_backup_restore_for_state(
+    state: &PluginRuntimeState,
+    plugin_id: String,
+    backup_id: String,
+) -> Result<()> {
     let archive_path = backups_dir(&state).join(format!("{backup_id}.tar.gz"));
     if !archive_path.exists() {
         return Err(PluginError::NotFound(format!("backup {backup_id}")));
@@ -102,6 +120,15 @@ pub async fn plugin_backup_restore(
 #[tauri::command]
 pub async fn plugin_backup_delete(
     state: State<'_, PluginRuntimeState>,
+    plugin_id: String,
+    backup_id: String,
+) -> Result<()> {
+    plugin_backup_delete_for_state(state.inner(), plugin_id, backup_id).await
+}
+
+/// Host-neutral backup deletion used by Tauri and the headless companion host.
+pub async fn plugin_backup_delete_for_state(
+    state: &PluginRuntimeState,
     plugin_id: String,
     backup_id: String,
 ) -> Result<()> {

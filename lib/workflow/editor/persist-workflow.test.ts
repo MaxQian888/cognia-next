@@ -8,11 +8,6 @@ jest.mock("@/lib/db/workflows", () => ({
   replaceWorkflow: (...a: unknown[]) => replaceWorkflow(...a),
 }))
 
-const syncWorkflowTriggers = jest.fn(async (..._a: unknown[]) => {})
-jest.mock("@/lib/workflow/runtime/webhook-bridge", () => ({
-  syncWorkflowTriggers: (...a: unknown[]) => syncWorkflowTriggers(...a),
-}))
-
 import { persistEditorWorkflow } from "./persist-workflow"
 import { createEditorStore } from "./store"
 import type { VisualWorkflow } from "@/types/workflow/visual"
@@ -45,11 +40,10 @@ function buildWorkflow(nodeType: string): VisualWorkflow {
 
 beforeEach(() => {
   replaceWorkflow.mockClear()
-  syncWorkflowTriggers.mockClear()
 })
 
 describe("persistEditorWorkflow", () => {
-  it("persists, syncs triggers, marks saved, and reports zero issues for a valid graph", async () => {
+  it("persists through the canonical database path, marks saved, and reports zero issues", async () => {
     const store = createEditorStore(buildWorkflow("trigger.manual"))
     store.getState().setName("Edited") // mark dirty
     expect(store.getState().dirty).toBe(true)
@@ -57,7 +51,6 @@ describe("persistEditorWorkflow", () => {
     const issueCount = await persistEditorWorkflow(store)
 
     expect(replaceWorkflow).toHaveBeenCalledTimes(1)
-    expect(syncWorkflowTriggers).toHaveBeenCalledTimes(1)
     expect(store.getState().dirty).toBe(false)
     expect(issueCount).toBe(0)
   })
@@ -68,11 +61,5 @@ describe("persistEditorWorkflow", () => {
     const issueCount = await persistEditorWorkflow(store)
     expect(issueCount).toBeGreaterThan(0)
     expect(replaceWorkflow).toHaveBeenCalledTimes(1)
-  })
-
-  it("does not throw when trigger sync fails", async () => {
-    syncWorkflowTriggers.mockRejectedValueOnce(new Error("offline"))
-    const store = createEditorStore(buildWorkflow("trigger.manual"))
-    await expect(persistEditorWorkflow(store)).resolves.toBe(0)
   })
 })

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * End-to-end regression for built-in plugin contribution registration.
  *
@@ -17,6 +18,8 @@
  * exercises every contribution lane at once (template + custom node +
  * character pack + skills + MCP presets + dexie-gated imperative wiring).
  */
+
+import "fake-indexeddb/auto"
 
 import { invoke } from "@tauri-apps/api/core"
 import { PluginManager } from "./manager"

@@ -22,17 +22,9 @@ import { listRegisteredKinds } from "./registry"
 import { WORKFLOW_NODE_KINDS, type WorkflowNodeKind } from "@/types/workflow/visual"
 
 // Kinds that legitimately have NO host executor:
-//  • externally-fired triggers — started by the Rust router / TS bridges,
-//    never executed as a graph step;
 //  • annotations — pure canvas decoration;
 //  • github actions — contributed by the github-delivery plugin, not the host.
 const KINDS_WITHOUT_HOST_EXECUTOR: ReadonlySet<WorkflowNodeKind> = new Set<WorkflowNodeKind>([
-  "trigger.cron",
-  "trigger.connector.inbound",
-  "trigger.chat.message",
-  "trigger.goal.completed",
-  "trigger.webhook",
-  "trigger.github.webhook",
   "annotation.note",
   "annotation.group",
   "action.github.openPr",

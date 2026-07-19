@@ -1,3 +1,18 @@
+const mockTransportCall = jest.fn()
+let mockRemoteActive = false
+const mockInvokeVscodeRpc = jest.fn()
+
+jest.mock("@/lib/tauri", () => ({
+  transport: { call: (...args: unknown[]) => mockTransportCall(...args) },
+}))
+jest.mock("@/lib/tauri/transport-routing", () => ({
+  isRemoteHostActive: jest.fn(() => mockRemoteActive),
+}))
+jest.mock("@/lib/plugin/core/vscode-loader", () => ({
+  invokeVscodeRpc: (...args: unknown[]) => mockInvokeVscodeRpc(...args),
+  isVscodeHostAvailable: jest.fn(() => true),
+}))
+
 /**
  * Tests for `TauriLspClientAdapter`. Mocks `invokeVscodeRpc` and the
  * rpc-dispatcher's `registerMethod` so the adapter is tested without
@@ -47,6 +62,33 @@ function makeAdapter(opts?: {
 }
 
 describe("TauriLspClientAdapter", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockRemoteActive = false
+  })
+
+  it("uses the confined Companion LSP facade when a remote host is active", async () => {
+    mockRemoteActive = true
+    mockTransportCall.mockResolvedValue(JSON.stringify([{ key: "user:eslint" }]))
+    const adapter = new TauriLspClientAdapter({ registerHandler: () => () => {} })
+
+    await expect(adapter.status()).resolves.toEqual([{ key: "user:eslint" }])
+    expect(mockTransportCall).toHaveBeenCalledWith("lsp_host_request", {
+      method: "lsp:status",
+      payloadJson: "{}",
+    })
+    expect(mockInvokeVscodeRpc).not.toHaveBeenCalled()
+  })
+
+  it("keeps the existing VS Code RPC path for the local host", async () => {
+    mockInvokeVscodeRpc.mockResolvedValue([{ key: "user:rust-analyzer" }])
+    const adapter = new TauriLspClientAdapter({ registerHandler: () => () => {} })
+
+    await expect(adapter.status()).resolves.toEqual([{ key: "user:rust-analyzer" }])
+    expect(mockInvokeVscodeRpc).toHaveBeenCalledWith(LSP_TAURI_CHANNEL_ID, "lsp:status", {})
+    expect(mockTransportCall).not.toHaveBeenCalled()
+  })
+
   it("start() calls invokeVscodeRpc with the canonical channel and lsp:start method", async () => {
     const { adapter, invokeCalls } = makeAdapter()
     await adapter.start({

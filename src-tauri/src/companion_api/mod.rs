@@ -33,6 +33,7 @@ pub mod acp;
 pub mod audit;
 pub mod auth;
 pub mod bridge_transport;
+pub mod browser_gateway;
 pub mod control_allow_list;
 pub mod data_plane;
 pub mod deny_list;

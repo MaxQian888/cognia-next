@@ -1,6 +1,4 @@
-import "fake-indexeddb/auto"
 import { act, renderHook, waitFor } from "@testing-library/react"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { useOcr } from "./use-ocr"
 import { createOcrRegistry } from "@/lib/ocr/registry"
 import { DEFAULT_OCR_SETTINGS, type OcrInput, type OcrProvider, type OcrResult } from "@/types/ocr"
@@ -46,14 +44,8 @@ function makeDeps(provider: OcrProvider): ExtractDeps {
 
 const input: OcrInput = {
   source: { kind: "data-url", dataUrl: "data:image/png;base64,YWJj", mimeType: "image/png" },
+  useCache: false,
 }
-
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
 
 describe("useOcr", () => {
   it("starts idle", () => {
@@ -84,7 +76,7 @@ describe("useOcr", () => {
       await result.current.run(input)
     })
     await waitFor(() => expect(result.current.status).toBe("error"))
-    expect(result.current.error?.code).toBe("rate_limited")
+    expect(result.current.error).toEqual({ code: "rate_limited", message: "slow" })
   })
 
   it("falls back to provider_failed on plain errors", async () => {

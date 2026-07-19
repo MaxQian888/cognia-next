@@ -16,7 +16,10 @@ import type {
 } from "@/types/a2ui/schema"
 import type { A2UISurfaceContainerProps } from "@/types/a2ui/renderer"
 import { useA2UIStore } from "@/stores/a2ui"
+import { useSettingsStore } from "@/stores/settings"
 import { globalEventEmitter } from "@/lib/a2ui/events"
+import { resolveWidgetDefaults } from "@/lib/a2ui/catalog"
+import { getA2UIWidgetSettingDefaults, resolveA2UICatalogId } from "@/lib/a2ui/runtime-settings"
 import { surfaceStyles, contentStyles } from "@/lib/a2ui/constants"
 import { A2UIProvider } from "./a2ui-context"
 import { A2UIRenderer } from "./a2ui-renderer"
@@ -40,6 +43,7 @@ export function A2UISurface({
   const isLoading = useA2UIStore((state) => surfaceId in state.loadingSurfaces)
   const isStreaming = useA2UIStore((state) => surfaceId in state.streamingSurfaces)
   const error = useA2UIStore((state) => state.errors[surfaceId])
+  const runtimeSettings = useSettingsStore((state) => state.settings)
   const resolvedLoadingText = loadingText ?? t("surface.loading")
 
   // Keep latest handlers in refs so inline-closure props don't tear the
@@ -132,13 +136,17 @@ export function A2UISurface({
   }
 
   const surfaceType = surface.type
+  const catalogId = resolveA2UICatalogId(surface.catalogId, runtimeSettings?.a2uiDefaultCatalogId)
+  const widget = surface.widget
+    ? resolveWidgetDefaults(surface.widget, getA2UIWidgetSettingDefaults(runtimeSettings))
+    : undefined
 
   const surfaceBody = (
     <div className={cn(surfaceStyles[surfaceType], className)}>
       <div className={contentStyles[surfaceType]}>
         <A2UIProvider
           surfaceId={surfaceId}
-          catalogId={surface.catalogId}
+          catalogId={catalogId}
           renderComponent={renderComponent}
           readOnly={readOnly}
         >
@@ -154,14 +162,17 @@ export function A2UISurface({
     </div>
   )
 
-  if (surface.widget) {
+  if (widget) {
     return (
       <A2UIWidgetShell
         title={surface.title}
-        hostStrategy={surface.widget.hostStrategy}
-        status={surface.widget.status}
-        fallbackText={surface.widget.fallbackText}
-        showChrome={surface.widget.showChrome}
+        hostStrategy={widget.hostStrategy}
+        sizing={widget.sizing}
+        theme={widget.theme}
+        status={widget.status}
+        fallbackText={widget.fallbackText}
+        showChrome={widget.showChrome}
+        minHeight={widget.minHeight}
       >
         {surfaceBody}
       </A2UIWidgetShell>
@@ -200,6 +211,7 @@ export function A2UIDialogSurface({
   onAction,
   onDataChange,
 }: A2UISurfaceProps) {
+  const t = useTranslations("a2ui")
   const deleteSurface = useA2UIStore((state) => state.deleteSurface)
   const surface = useA2UIStore((state) => state.surfaces[surfaceId])
 
@@ -233,7 +245,7 @@ export function A2UIDialogSurface({
       onKeyDown={handleKeyDown}
       role="dialog"
       aria-modal="true"
-      aria-label={surface?.title || "A2UI Dialog"}
+      aria-label={surface?.title || t("surface.dialogLabel")}
       tabIndex={-1}
     >
       <div className={contentStyles.dialog}>

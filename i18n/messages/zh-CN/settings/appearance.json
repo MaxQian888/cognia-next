@@ -571,6 +571,19 @@
       "start": "起始色",
       "title": "构建渐变"
     },
+    "generator": {
+      "accent": "生成的强调色",
+      "action": "生成匹配主题",
+      "created": "已创建并启用匹配的明暗双主题。",
+      "description": "在本地提取图片强调色，并生成可读的明暗双主题。",
+      "error": "无法分析这张图片，壁纸设置未受影响。",
+      "themeName": "{name} 配色",
+      "title": "从壁纸生成主题",
+      "variant": {
+        "dark": "暗色基底",
+        "light": "亮色基底"
+      }
+    },
     "invalidType": "不支持的文件类型，请使用 PNG / JPEG / WebP / GIF / AVIF。",
     "noActive": "未选择壁纸。",
     "opacity": {

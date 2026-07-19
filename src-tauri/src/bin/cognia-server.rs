@@ -27,7 +27,7 @@
 //! This skeleton proves that the abstraction compiles and is exercisable
 //! from a standalone binary; ADR-0014 follow-up tracks the rewrite.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use app_lib::companion_api::{
@@ -322,6 +322,10 @@ fn resolve_brain_entry() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+fn plugin_storage_dir(data_dir: &Path) -> PathBuf {
+    data_dir.join(".cognia").join("plugins")
+}
+
 async fn run_serve(
     store: &std::sync::Arc<SqliteAppStore>,
     tls_material: &tls::TlsMaterial,
@@ -388,12 +392,17 @@ async fn run_serve(
     // to in-container local processes would silently void the T2 isolation.
     let exec = exec_backend_from_env().map_err(|e| format!("exec backend: {e}"))?;
     eprintln!("[cognia-server] exec backend: {}", exec.kind());
+    let remote_browser =
+        app_lib::companion_api::browser_gateway::install_workspace_runtime_control_from_env()
+            .map_err(|error| format!("remote browser: {error}"))?;
+    eprintln!("[cognia-server] remote browser enabled: {remote_browser}");
     install_headless_services(Some(HeadlessServices::new_with_exec(
         sidecar_host,
         api_keys,
         Arc::clone(&shared.event_bus),
         SpawnPolicy::from_env(&data_dir),
         exec,
+        plugin_storage_dir(&data_dir),
     )));
 
     // Audit trail for the RCE-grade external-agent arms (ADR-0059 R11) —
@@ -470,4 +479,18 @@ async fn run_serve(
     // time to drain in-flight requests and the children observe their kills.
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::plugin_storage_dir;
+    use std::path::Path;
+
+    #[test]
+    fn plugin_storage_is_scoped_beneath_the_server_data_directory() {
+        assert_eq!(
+            plugin_storage_dir(Path::new("/srv/cognia")),
+            Path::new("/srv/cognia/.cognia/plugins")
+        );
+    }
 }

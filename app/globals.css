@@ -95,7 +95,8 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
-:root {
+:root,
+.a2ui-widget-theme-light {
   --radius: 0.625rem;
   /* v47 — Density, motion, and typography runtime knobs. Each is written by
      a dedicated applier under `lib/appearance/`; defaults below match the
@@ -170,7 +171,8 @@
   --sidebar-ring: oklch(0.708 0 0);
 }
 
-.dark {
+.dark,
+.a2ui-widget-theme-dark {
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);

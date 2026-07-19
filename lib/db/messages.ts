@@ -366,6 +366,7 @@ async function dispatchChatMessageTriggers(
         dispatchTrigger({
           workflowId: match.workflowId,
           kind: "trigger.chat.message",
+          triggerId: match.nodeId,
           payload: { messageId, sessionId, characterId },
           originAt,
           binding: { sessionId, characterId },

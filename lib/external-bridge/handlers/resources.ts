@@ -15,6 +15,9 @@ import { listAllWikiArticles, getWikiArticleBySlug } from "@/lib/db/wiki-article
 import { listSkills, getSkill } from "@/lib/db/skills"
 import { listCharacters, getCharacter } from "@/lib/db/characters"
 import type { BridgeScope } from "@/types/wiki"
+import { parseResourceUri } from "../mcp-server/resource-uri"
+
+export { parseResourceUri } from "../mcp-server/resource-uri"
 
 export interface ResourceDescriptor {
   uri: string
@@ -97,14 +100,6 @@ export async function listResources(
  * `undefined` when the URI doesn't match the scheme (lets callers map to
  * an MCP "invalid uri" response).
  */
-export function parseResourceUri(uri: string): { kind: string; id: string } | undefined {
-  if (!uri.startsWith(SCHEME)) return undefined
-  const rest = uri.slice(SCHEME.length)
-  const idx = rest.indexOf("/")
-  if (idx <= 0 || idx === rest.length - 1) return undefined
-  return { kind: rest.slice(0, idx), id: rest.slice(idx + 1) }
-}
-
 /**
  * Determine the permission scope a given URI requires (so the gate can
  * check before we hit Dexie). Returns `undefined` for unrecognized URIs.

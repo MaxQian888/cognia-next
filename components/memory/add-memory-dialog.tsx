@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import type { MemoryType } from "@/types/memory/memory"
+import type { MemoryScope, MemoryType } from "@/types/memory/memory"
 import { MEMORY_TYPES } from "@/types/memory/memory"
 import {
   Dialog,
@@ -30,6 +30,12 @@ export interface AddMemoryInput {
   text: string
   importance: number
   tags: string[]
+  scope: MemoryScope
+  characterId?: string
+  projectId?: string
+  agentId?: string
+  branch?: string
+  pathPattern?: string
 }
 
 export interface AddMemoryDialogProps {
@@ -56,10 +62,17 @@ function parseTags(raw: string): string[] {
 export function AddMemoryDialog({ open, onOpenChange, onCreate }: AddMemoryDialogProps) {
   const t = useTranslations("memory.add")
   const tTypes = useTranslations("memory.types")
+  const tScopes = useTranslations("memory.scopes")
   const [type, setType] = useState<MemoryType>("semantic")
+  const [scope, setScope] = useState<MemoryScope>("global")
   const [text, setText] = useState("")
   const [importance, setImportance] = useState(5)
   const [tags, setTags] = useState("")
+  const [characterId, setCharacterId] = useState("")
+  const [projectId, setProjectId] = useState("")
+  const [agentId, setAgentId] = useState("")
+  const [branch, setBranch] = useState("")
+  const [pathPattern, setPathPattern] = useState("")
 
   // Reset the form each time the dialog opens. Done in render (React's
   // "adjust state when a prop changes" pattern) rather than in an effect, so we
@@ -70,18 +83,39 @@ export function AddMemoryDialog({ open, onOpenChange, onCreate }: AddMemoryDialo
     setPrevOpen(open)
     if (open) {
       setType("semantic")
+      setScope("global")
       setText("")
       setImportance(5)
       setTags("")
+      setCharacterId("")
+      setProjectId("")
+      setAgentId("")
+      setBranch("")
+      setPathPattern("")
     }
   }
 
   const trimmed = text.trim()
-  const canSubmit = trimmed.length > 0
+  const hasRequiredNamespace =
+    (scope !== "character" || characterId.trim().length > 0) &&
+    (scope !== "workspace" || projectId.trim().length > 0) &&
+    (scope !== "agent" || agentId.trim().length > 0)
+  const canSubmit = trimmed.length > 0 && hasRequiredNamespace
 
   const submit = () => {
     if (!canSubmit) return
-    void onCreate({ type, text: trimmed, importance, tags: parseTags(tags) })
+    void onCreate({
+      type,
+      scope,
+      text: trimmed,
+      importance,
+      tags: parseTags(tags),
+      ...(characterId.trim() ? { characterId: characterId.trim() } : {}),
+      ...(projectId.trim() ? { projectId: projectId.trim() } : {}),
+      ...(agentId.trim() ? { agentId: agentId.trim() } : {}),
+      ...(branch.trim() ? { branch: branch.trim() } : {}),
+      ...(pathPattern.trim() ? { pathPattern: pathPattern.trim() } : {}),
+    })
     onOpenChange(false)
   }
 
@@ -139,6 +173,74 @@ export function AddMemoryDialog({ open, onOpenChange, onCreate }: AddMemoryDialo
             </div>
           </div>
 
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="add-mem-scope">{t("scopeLabel")}</Label>
+              <Select value={scope} onValueChange={(value) => setScope(value as MemoryScope)}>
+                <SelectTrigger id="add-mem-scope" aria-label={t("scopeLabel")}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(["global", "workspace", "character", "agent"] as const).map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {tScopes(value)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {scope === "workspace" ? (
+              <NamespaceInput
+                id="add-mem-project"
+                label={t("projectIdLabel")}
+                value={projectId}
+                onChange={setProjectId}
+                required
+              />
+            ) : scope === "character" ? (
+              <NamespaceInput
+                id="add-mem-character"
+                label={t("characterIdLabel")}
+                value={characterId}
+                onChange={setCharacterId}
+                required
+              />
+            ) : scope === "agent" ? (
+              <NamespaceInput
+                id="add-mem-agent"
+                label={t("agentIdLabel")}
+                value={agentId}
+                onChange={setAgentId}
+                required
+              />
+            ) : null}
+          </div>
+
+          {scope !== "global" ? (
+            <div className="grid grid-cols-2 gap-3">
+              {scope !== "workspace" ? (
+                <NamespaceInput
+                  id="add-mem-project-optional"
+                  label={t("projectIdOptionalLabel")}
+                  value={projectId}
+                  onChange={setProjectId}
+                />
+              ) : null}
+              <NamespaceInput
+                id="add-mem-branch"
+                label={t("branchLabel")}
+                value={branch}
+                onChange={setBranch}
+              />
+              <NamespaceInput
+                id="add-mem-path"
+                label={t("pathPatternLabel")}
+                value={pathPattern}
+                onChange={setPathPattern}
+              />
+            </div>
+          ) : null}
+
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="add-mem-tags">{t("tagsLabel")}</Label>
             <Input
@@ -160,5 +262,32 @@ export function AddMemoryDialog({ open, onOpenChange, onCreate }: AddMemoryDialo
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function NamespaceInput({
+  id,
+  label,
+  value,
+  onChange,
+  required = false,
+}: {
+  id: string
+  label: string
+  value: string
+  onChange: (value: string) => void
+  required?: boolean
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      <Input
+        id={id}
+        aria-label={label}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        required={required}
+      />
+    </div>
   )
 }

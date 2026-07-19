@@ -264,13 +264,30 @@ export function ExposeTestGlobals(): null {
 
       window.__cogniaSeedConnectorDraft = async (draft) => {
         const { createDraft } = await import("@/lib/db/connector-drafts")
-        const segments = [{ kind: "text", text: draft.content }] as unknown as Parameters<
-          typeof createDraft
-        >[0]["segments"]
+        const { parseConversationKey } = await import("@/types/connectors/event")
+        const parsed = parseConversationKey(draft.conversationKey)
+        if (parsed.adapterId !== draft.adapterId) {
+          throw new Error(
+            `connector draft adapter mismatch: ${draft.adapterId} !== ${parsed.adapterId}`
+          )
+        }
+        const segments: Parameters<typeof createDraft>[0]["segments"] = [
+          { type: "text", text: draft.content },
+        ]
         const d = await createDraft({
           conversationKey: draft.conversationKey,
           sessionId: "sess_e2e",
           segments,
+          outboundPreview: {
+            conversationRef: {
+              platform: parsed.platform,
+              adapterId: parsed.adapterId,
+              chatId: parsed.remoteChatId,
+              ...(parsed.threadId ? { threadId: parsed.threadId } : {}),
+            },
+            segments,
+            metadata: { idempotencyKey: crypto.randomUUID() },
+          },
         })
         return d.id
       }

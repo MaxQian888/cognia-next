@@ -28,7 +28,9 @@ import {
   AUTHOR_CAPABILITY_CONTRACTS,
   CANONICAL_PLUGIN_PERMISSIONS,
   CANONICAL_PLUGIN_TYPES,
+  PLUGIN_MANIFEST_CONTRIBUTIONS,
   PLUGIN_PATH_FIELD_CONTRACTS,
+  PLUGIN_RUNTIME_ENTRY_CONTRACTS,
 } from "@/packages/plugin-sdk/src/contracts/catalog"
 
 // =============================================================================
@@ -90,7 +92,13 @@ const WASM_API_VERSION_PATTERN = /^\d+\.\d+\.\d+$/
 const WASM_PREOPEN_PATH_PATTERN = /^[^\0]+$/
 
 const ID_PATTERN = /^[a-z0-9]([a-z0-9-_.]*[a-z0-9])?$/
+const RESERVED_PLUGIN_IDS = new Set([".host-state", "_marketplace_cache", "_backups"])
+const MAX_PLUGIN_ID_LENGTH = 128
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(-[a-z0-9]+)?$/i
+
+function isValidPluginId(id: string): boolean {
+  return id.length <= MAX_PLUGIN_ID_LENGTH && ID_PATTERN.test(id) && !RESERVED_PLUGIN_IDS.has(id)
+}
 
 // Shared validators for the ADR-0026 lazy-factory manifest fields.
 //
@@ -108,25 +116,33 @@ const VERSION_PATTERN = /^\d+\.\d+\.\d+(-[a-z0-9]+)?$/i
 
 const JS_IDENT_PATTERN = /^[$_a-zA-Z][$_a-zA-Z0-9]*$/
 
-const LAZY_FACTORY_VALIDATED_FIELDS = new Set([
-  "ocrProviders",
-  "workspaceBackends",
-  "messageRenderers",
-  "aiProviders",
-  "modalMounts",
-  "routingStrategies",
-  "chatMiddlewares",
-  "contextPanels",
-])
+function nestedContributionValue(value: unknown, path: string): unknown {
+  return path.split(".").reduce<unknown>((current, segment) => {
+    if (!isPlainObject(current)) return undefined
+    return current[segment]
+  }, value)
+}
 
-const JS_EXECUTABLE_CONTRIBUTION_FIELDS = PLUGIN_PATH_FIELD_CONTRACTS.flatMap((contract) => {
-  const match = /^([^.[\]]+)\[\]\.entry$/.exec(contract.path)
-  return contract.runtime === "javascript" && match ? [match[1]] : []
-})
-
-const ADDITIONAL_EXECUTABLE_CONTRIBUTION_FIELDS = JS_EXECUTABLE_CONTRIBUTION_FIELDS.filter(
-  (field) => !LAZY_FACTORY_VALIDATED_FIELDS.has(field)
-)
+function contributionRequiresJavascript(
+  manifest: Record<string, unknown>,
+  contract: (typeof PLUGIN_MANIFEST_CONTRIBUTIONS)[number]
+): boolean {
+  const contribution = manifest[contract.field]
+  const entries = Array.isArray(contribution)
+    ? contribution
+    : isPlainObject(contribution)
+      ? [contribution]
+      : []
+  if (entries.length === 0) return false
+  if (contract.execution === "javascript") return true
+  if (contract.execution !== "conditional" || !contract.javascriptWhen) return false
+  return entries.some((entry) => {
+    const value = nestedContributionValue(entry, contract.javascriptWhen!.path)
+    return contract.javascriptWhen!.equals === undefined
+      ? value !== undefined && value !== null && value !== ""
+      : value === contract.javascriptWhen!.equals
+  })
+}
 
 function pluginPathMessage(violation: PluginPathViolation): string {
   if (violation === "invalid_chars") return '"entry" contains unsafe or encoded path characters'
@@ -139,6 +155,53 @@ interface LazyFactoryEntry {
   label?: unknown
   entry?: unknown
   export?: unknown
+}
+
+interface CatalogPathValue {
+  field: string
+  value: unknown
+}
+
+function collectCatalogPathValues(
+  value: unknown,
+  segments: readonly string[],
+  concreteSegments: readonly string[] = [],
+  output: CatalogPathValue[] = []
+): CatalogPathValue[] {
+  const [segment, ...rest] = segments
+  if (!segment) {
+    output.push({ field: concreteSegments.join("."), value })
+    return output
+  }
+  if (!isPlainObject(value)) return output
+
+  const arrayField = segment.endsWith("[]") ? segment.slice(0, -2) : undefined
+  if (arrayField !== undefined) {
+    const entries = value[arrayField]
+    if (!Array.isArray(entries)) return output
+    entries.forEach((entry, index) => {
+      collectCatalogPathValues(
+        entry,
+        rest,
+        [...concreteSegments, `${arrayField}[${index}]`],
+        output
+      )
+    })
+    return output
+  }
+
+  if (Object.prototype.hasOwnProperty.call(value, segment) && value[segment] !== undefined) {
+    collectCatalogPathValues(value[segment], rest, [...concreteSegments, segment], output)
+  }
+  return output
+}
+
+function catalogPathDiagnosticCode(field: string, contractPath: string, violation: string): string {
+  const normalizedField = field.replace(/\[\d+\]/g, "")
+  const violationPath = contractPath.includes(".")
+    ? `${normalizedField}.${violation}`
+    : `${normalizedField}.entry.${violation}`
+  return `manifest.${violationPath}`
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -222,14 +285,6 @@ function validateLazyFactoryArray(
         `manifest.${field}.entry.missing`,
         `Entry at index ${i} requires a non-empty string "entry" (relative path)`
       )
-    } else {
-      for (const violation of getPluginPathViolations(entry.entry)) {
-        pushError(
-          `${path}.entry`,
-          `manifest.${field}.entry.${violation}`,
-          pluginPathMessage(violation)
-        )
-      }
     }
 
     if (typeof entry.export !== "string" || entry.export.length === 0) {
@@ -297,11 +352,11 @@ export function validatePluginManifest(
   // Required fields
   if (!m.id || typeof m.id !== "string") {
     pushError("id", "manifest.id.missing", 'Missing or invalid "id" field')
-  } else if (!ID_PATTERN.test(m.id)) {
+  } else if (!isValidPluginId(m.id)) {
     pushError(
       "id",
       "manifest.id.invalid_format",
-      `Invalid plugin ID "${m.id}". Must be lowercase alphanumeric with hyphens/underscores/dots`
+      `Invalid plugin ID "${m.id}". Must be 1-${MAX_PLUGIN_ID_LENGTH} lowercase alphanumeric/separator characters and must not use a host-reserved directory name`
     )
   }
 
@@ -408,7 +463,11 @@ export function validatePluginManifest(
       // array contributions.
       if (contract.id === "python") continue
       // declared-but-empty: capability tag present, no gating field populated.
-      if (declaredSet.has(contract.id) && !contract.manifestFields.some(hasField)) {
+      if (
+        declaredSet.has(contract.id) &&
+        !contract.manifestFieldsOptional &&
+        !contract.manifestFields.some(hasField)
+      ) {
         pushWarning(
           "capabilities",
           "manifest.capability.field_missing",
@@ -437,42 +496,64 @@ export function validatePluginManifest(
     }
   }
 
-  // Entry points validation based on type
-  if (m.type === "frontend" || m.type === "hybrid") {
-    if (!m.main || typeof m.main !== "string") {
-      if (m.type === "frontend") {
-        pushError(
-          "main",
-          "manifest.main.required",
-          'Frontend plugin must have a "main" entry point',
-          "Add a valid relative JS entry file path in `main`."
-        )
-      }
+  // Runtime ownership comes from the canonical contract. Hybrid plugins always
+  // own their Python entry; their JavaScript entry is conditional on declaring
+  // JavaScript-executed contributions.
+  const pluginType = typeof m.type === "string" ? m.type : undefined
+  const runtimeEntryContract = pluginType ? PLUGIN_RUNTIME_ENTRY_CONTRACTS[pluginType] : undefined
+  for (const field of runtimeEntryContract?.required ?? []) {
+    if (typeof m[field] === "string" && m[field].length > 0) continue
+    const messages: Record<string, [string, string]> = {
+      main: [
+        'Frontend plugin must have a "main" entry point',
+        "Add a valid relative JS entry file path in `main`.",
+      ],
+      pythonMain: [
+        'Python and hybrid plugins must have a "pythonMain" entry point',
+        "Add a valid relative Python entry file path in `pythonMain`.",
+      ],
+      wasmMain: [
+        'WASM plugin must have a "wasmMain" entry point',
+        "Set `wasmMain` to the relative path of the compiled `.wasm` component.",
+      ],
+      vscodeMain: [
+        'VS Code extension plugins must have a "vscodeMain" entry point',
+        "Set `vscodeMain` to the adapted extension runtime entry.",
+      ],
     }
+    const [message, hint] = messages[field] ?? [
+      `Plugin type "${pluginType}" requires a "${field}" entry point`,
+      `Add a valid relative entry path in \`${field}\`.`,
+    ]
+    pushError(field, `manifest.${field}.required`, message, hint)
   }
-
-  if (m.type === "python" || m.type === "hybrid") {
-    if (!m.pythonMain || typeof m.pythonMain !== "string") {
-      if (m.type === "python") {
-        pushError(
-          "pythonMain",
-          "manifest.pythonMain.required",
-          'Python plugin must have a "pythonMain" entry point',
-          "Add a valid relative Python entry file path in `pythonMain`."
-        )
-      }
-    }
+  const requiredAnyOf: readonly string[] =
+    runtimeEntryContract &&
+    "requiredAnyOf" in runtimeEntryContract &&
+    Array.isArray(runtimeEntryContract.requiredAnyOf)
+      ? (runtimeEntryContract.requiredAnyOf as string[])
+      : []
+  if (
+    requiredAnyOf.length > 0 &&
+    !requiredAnyOf.some((field) => {
+      const value = m[field]
+      return (
+        (typeof value === "string" && value.length > 0) ||
+        (Array.isArray(value) && value.length > 0) ||
+        (typeof value === "object" && value !== null && Object.keys(value).length > 0)
+      )
+    })
+  ) {
+    pushError(
+      requiredAnyOf[0],
+      "manifest.runtime_entry.required_any_of",
+      `Plugin type "${pluginType}" requires at least one of: ${requiredAnyOf.join(", ")}`,
+      "Add an executable entry or a supported declarative contribution."
+    )
   }
 
   if (m.type === "wasm") {
-    if (!m.wasmMain || typeof m.wasmMain !== "string") {
-      pushError(
-        "wasmMain",
-        "manifest.wasmMain.required",
-        'WASM plugin must have a "wasmMain" entry point',
-        "Set `wasmMain` to the relative path of the compiled `.wasm` component."
-      )
-    } else if (!m.wasmMain.toLowerCase().endsWith(".wasm")) {
+    if (typeof m.wasmMain === "string" && !m.wasmMain.toLowerCase().endsWith(".wasm")) {
       pushError(
         "wasmMain",
         "manifest.wasmMain.invalid_extension",
@@ -538,89 +619,49 @@ export function validatePluginManifest(
     }
   }
 
-  for (const field of ["main", "pythonMain", "wasmMain", "vscodeMain", "styles"] as const) {
-    const entry = m[field]
-    if (typeof entry !== "string") continue
-    for (const violation of getPluginPathViolations(entry)) {
-      pushError(field, `manifest.${field}.entry.${violation}`, pluginPathMessage(violation))
-    }
-  }
-
-  for (const field of ["vscodeGrammars", "vscodeIconThemes", "vscodeSnippets"] as const) {
-    const entries = m[field]
-    if (!Array.isArray(entries)) continue
-    entries.forEach((entry, index) => {
-      if (!entry || typeof entry !== "object") return
-      const candidate = (entry as { path?: unknown }).path
-      if (typeof candidate !== "string") return
-      for (const violation of getPluginPathViolations(candidate)) {
+  for (const contract of PLUGIN_PATH_FIELD_CONTRACTS) {
+    const values = collectCatalogPathValues(m, contract.path.split("."))
+    for (const { field, value } of values) {
+      for (const violation of getPluginPathViolations(value)) {
         pushError(
-          `${field}[${index}].path`,
-          `manifest.${field}.path.${violation}`,
-          pluginPathMessage(violation)
-        )
-      }
-    })
-  }
-
-  for (const field of ADDITIONAL_EXECUTABLE_CONTRIBUTION_FIELDS) {
-    const entries = (m as unknown as Record<string, unknown>)[field]
-    if (!Array.isArray(entries)) continue
-    entries.forEach((entry, index) => {
-      if (!entry || typeof entry !== "object") return
-      const candidate = (entry as { entry?: unknown }).entry
-      if (typeof candidate !== "string") return
-      for (const violation of getPluginPathViolations(candidate)) {
-        pushError(
-          `${field}[${index}].entry`,
-          `manifest.${field}.entry.${violation}`,
-          pluginPathMessage(violation)
-        )
-      }
-    })
-  }
-
-  if (m.configComponent && typeof m.configComponent === "object") {
-    const entry = (m.configComponent as { entry?: unknown }).entry
-    if (typeof entry === "string") {
-      for (const violation of getPluginPathViolations(entry)) {
-        pushError(
-          "configComponent.entry",
-          `manifest.configComponent.entry.${violation}`,
+          field,
+          catalogPathDiagnosticCode(field, contract.path, violation),
           pluginPathMessage(violation)
         )
       }
     }
   }
 
-  if (m.runtimeCompatibility && typeof m.runtimeCompatibility === "object") {
-    const compatibility = m.runtimeCompatibility as Record<string, unknown>
-    for (const runtime of ["browser", "tauri", "mobile"] as const) {
-      const block = compatibility[runtime]
-      if (!block || typeof block !== "object") continue
-      const entrypoint = (block as { entrypoint?: unknown }).entrypoint
-      if (typeof entrypoint !== "string") continue
-      for (const violation of getPluginPathViolations(entrypoint)) {
-        pushError(
-          `runtimeCompatibility.${runtime}.entrypoint`,
-          `manifest.runtimeCompatibility.${runtime}.entrypoint.${violation}`,
-          pluginPathMessage(violation)
-        )
-      }
-    }
-  }
-
-  const hasJsExecutableContributions =
-    JS_EXECUTABLE_CONTRIBUTION_FIELDS.some((field) => {
-      const entries = (m as unknown as Record<string, unknown>)[field]
-      return Array.isArray(entries) && entries.length > 0
-    }) || Boolean(m.configComponent)
-  if (m.type !== "frontend" && hasJsExecutableContributions && !m.main) {
+  const populatedJsContributionFields = PLUGIN_MANIFEST_CONTRIBUTIONS.filter((contract) =>
+    contributionRequiresJavascript(m, contract)
+  ).map((contract) => contract.field)
+  if (
+    populatedJsContributionFields.length > 0 &&
+    runtimeEntryContract &&
+    runtimeEntryContract.javascriptEntry === null
+  ) {
+    const isPythonOnly = m.type === "python"
     pushError(
-      "main",
-      "manifest.main.required_for_js_contributions",
-      'JavaScript-executed contributions require a relative "main" entry point',
-      'Use a hybrid plugin with "main", or remove JavaScript-executed contributions.'
+      populatedJsContributionFields[0],
+      isPythonOnly
+        ? "manifest.contributions.javascript.unsupported_for_python"
+        : "manifest.contributions.javascript.unsupported_for_plugin_type",
+      `Plugin type "${m.type}" cannot declare JavaScript-executed contributions`,
+      isPythonOnly
+        ? 'Change the plugin type to "hybrid" and add "main", or remove those contributions.'
+        : "Use a JavaScript-capable plugin type, or remove those contributions."
+    )
+  } else if (
+    runtimeEntryContract?.javascriptEntryRequiredForContributions &&
+    populatedJsContributionFields.length > 0 &&
+    runtimeEntryContract.javascriptEntry &&
+    typeof m[runtimeEntryContract.javascriptEntry] !== "string"
+  ) {
+    pushError(
+      runtimeEntryContract.javascriptEntry,
+      `manifest.${runtimeEntryContract.javascriptEntry}.required_for_js_contributions`,
+      `JavaScript-executed contributions require a relative "${runtimeEntryContract.javascriptEntry}" entry point`,
+      `Add "${runtimeEntryContract.javascriptEntry}", or remove JavaScript-executed contributions.`
     )
   }
 

@@ -36,6 +36,11 @@ import type { ScheduledTask } from "@/types/scheduler"
 jest.mock("@tauri-apps/api/core", () => ({
   invoke: jest.fn().mockResolvedValue(null),
 }))
+jest.mock("@/lib/tauri/transport-instance", () => ({
+  transport: {
+    call: (...args: unknown[]) => jest.requireMock("@tauri-apps/api/core").invoke(...args),
+  },
+}))
 
 // Mock the logger so it routes to console for test assertions
 jest.mock("./logger", () => ({
@@ -96,6 +101,14 @@ jest.mock("../contracts/diagnostics-store", () => ({
   clearAllPluginPointDiagnostics: jest.fn(),
   subscribePluginPointDiagnostics: jest.fn(() => () => {}),
   getPluginPointDiagnosticsRevision: jest.fn(() => 0),
+}))
+
+const dispatchPluginTrigger = jest.fn(async (_input: unknown) => ({
+  ok: true,
+  prefixedKind: "trigger.test-plugin.webhookLite",
+}))
+jest.mock("../bridge/plugin-trigger-dispatch", () => ({
+  dispatchPluginTrigger: (input: unknown) => dispatchPluginTrigger(input),
 }))
 
 // Mock IPC, message-bus, i18n-loader, debugger
@@ -268,6 +281,10 @@ describe("createPluginContext", () => {
   })
 
   describe("workflow extension API", () => {
+    beforeEach(() => {
+      dispatchPluginTrigger.mockClear()
+    })
+
     afterEach(() => {
       __resetPluginCatalogForTesting()
     })
@@ -288,6 +305,7 @@ describe("createPluginContext", () => {
 
       const entry = nodeCatalogEntry("test-plugin.action.format" as never)
       expect(entry.defaultParams).toEqual({ mode: "markdown", retries: 2 })
+      expect(entry.typeVersion).toBe(1)
 
       dispose()
     })
@@ -307,8 +325,29 @@ describe("createPluginContext", () => {
 
       const entry = nodeCatalogEntry("trigger.test-plugin.webhookLite" as never)
       expect(entry.defaultParams).toEqual({ path: "/demo", method: "POST" })
+      expect(entry.typeVersion).toBe(1)
 
       dispose()
+    })
+
+    it("forwards an exact workflow trigger-node id for plugin emissions", async () => {
+      const context = createPluginContext(createMockPlugin(), mockManager)
+
+      context.workflow.emitTriggerEvent(
+        "wf-1",
+        "trigger.webhookLite",
+        { event: "created" },
+        "root-b"
+      )
+      await Promise.resolve()
+
+      expect(dispatchPluginTrigger).toHaveBeenCalledWith({
+        pluginId: "test-plugin",
+        workflowId: "wf-1",
+        kind: "trigger.webhookLite",
+        payload: { event: "created" },
+        triggerId: "root-b",
+      })
     })
   })
 

@@ -300,5 +300,34 @@
       "list": "列表"
     },
     "timelineView": "时间线视图"
+  },
+  "worktrees": {
+    "baseRefLabel": "起始点（可选）",
+    "baseRefPlaceholder": "HEAD、分支、标签或提交",
+    "branchLabel": "新分支",
+    "branchPlaceholder": "feature/my-change",
+    "chooseDirectory": "选择",
+    "count": "{count} 个工作树",
+    "create": "创建工作树",
+    "created": "工作树已创建",
+    "deleteBranch": "同时删除分支",
+    "deleteBranchDescription": "移除工作树后永久删除 {branch}。",
+    "description": "创建和管理此仓库的并行检出。",
+    "detached": "分离的 HEAD",
+    "empty": "未找到工作树",
+    "error": "工作树操作失败：{message}",
+    "forceRemove": "强制移除",
+    "forceRemoveDescription": "丢弃此工作树中未提交的更改。",
+    "main": "主工作树",
+    "open": "打开",
+    "pathLabel": "空目录",
+    "pathPlaceholder": "选择一个空目录",
+    "prune": "清理失效项",
+    "pruned": "已清理失效的工作树记录",
+    "remove": "移除工作树",
+    "removeDescription": "确定移除位于 {path} 的关联工作树吗？",
+    "removed": "工作树已移除",
+    "removeTitle": "移除工作树？",
+    "title": "工作树"
   }
 }

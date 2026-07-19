@@ -1,11 +1,11 @@
 ---
 title: ADR-0069 — Long-term memory subsystem & external API surfaces
-description: "Documents the autonomous long-term memory subsystem (Dexie v65, hybrid retrieval, per-turn extraction) and de-silos it behind three callable surfaces: a ctx.memory plugin API (memory:read/memory:write), five MCP bridge tools on opt-in scopes, and five companion RPCs with a mobile read mirror — all writing through one shared, PII-gated helper layer with a new `external` provenance."
+description: "Documents the autonomous long-term memory subsystem (Dexie v65 + v118 governance, budgeted hybrid retrieval, durable learning jobs) and its plugin, MCP, workflow, companion, and governed mobile surfaces."
 ---
 
 # ADR-0069 — Long-term memory subsystem & external API surfaces
 
-**Status**: Accepted (2026-07-14)
+**Status**: Accepted (2026-07-14), amended (2026-07-19)
 **Authors**: Max Qian + Claude Fable 5
 **Builds on**: the Digital Twin runtime (ADR-0003, shared embedding/vector backend), the external bridge MCP server (ADR-0008), the companion remote-control surface (ADR-0005 / ADR-0060 / Wave 4.1), the plugin permission model (ADR-0032, `goal:read`/`goal:write` precedent), and the visual-workflow memory nodes (ADR-0011).
 
@@ -17,7 +17,7 @@ per-turn extraction (`runTurnMemory` from the chat + team hooks), hybrid
 BM25+vector recall injected via `resolveSendOptions` (the
 "What you remember about the user" section), connector auto-mode recall,
 `/remember` explicit capture, workflow store/recall nodes, the `/memory`
-console, and a mobile read-only sync mirror (`memories` in
+console, and a mobile sync mirror (`memories` in
 `sync_registry.rs`). It had **no ADR** — code comments pointed at a spec file
 that was never committed — and **no callable API surface**: plugins, external
 MCP agents, and paired devices could not read or write memory at all.
@@ -101,16 +101,41 @@ Classification: `memory_store`/`memory_update`/`memory_forget` are
 surface is gated); `memory_list` is `READ_ONLY_COMMANDS`;
 **`memory_search` is deliberately neither** — it bumps
 `lastAccessedAt`/`accessCount` (the recency signal), so idempotency-caching
-it would freeze decay. No `MOBILE_OUTBOUND_COMMANDS` entries (that list's
-invariant requires a production mobile enqueue site; the phone reads the
-existing `memories` sync mirror, which has `has_tombstones: false` — hard
-deletes age out passively).
+it would freeze decay. The mobile panel sends `memory_update` and
+`memory_forget` through the durable `MOBILE_OUTBOUND_COMMANDS` queue, then
+optimistically updates its local mirror only after enqueue succeeds. The
+desktop remains authoritative and re-applies PII, governance, audit, and
+vector-lifecycle rules.
 
 ### 6. `/memory` manage command
 
 `/memory` opens the console; `status` / `list [n]` / `forget <id>` manage it
 from chat — the read/manage counterpart to `/remember`, whose `openMemory`
 flag is now actually consumed (`ctx.openSettings("memory")`).
+
+### 7. Learned-memory governance and namespace control plane (2026-07-19 amendment)
+
+Dexie v118 adds `memoryEvidence`, `memoryJobs`, and `memoryAuditEvents` plus
+governance indexes on the canonical `memories` table. Older rows are preserved
+and explicitly backfilled as legacy/unreviewed/unknown rather than being sent
+back through an LLM. Source evidence stores durable identities and hashes, never
+raw transcripts. Extraction and session distillation use leased, retryable,
+deduplicated jobs; backup/restore carries all four tables and remaps references
+under duplicate imports.
+
+Recall and learning are independent controls globally and per chat. Temporary
+mode disables both. Turns containing Web, MCP, tool-search, screen, or connector
+context are blocked from automatic learning by default; local code/file tools do
+not contaminate a turn. If the user permits contaminated learning, the resulting
+memory and evidence remain labeled `external-context`.
+
+Learned memory supports `global`, `workspace`, `character`, and private `agent`
+scopes with optional project, branch, and path restrictions. Readers resolve a
+broad-to-narrow view where the narrowest stable-key definition wins; conflicts
+are retained for review but excluded from prompt injection. Capacity and stale
+memory maintenance run against the complete namespace rather than a whole scope.
+Recall shares an explicit token budget across semantic, episodic, and procedural
+memory and reports withheld/truncated counts to the chat runtime.
 
 ## Consequences
 
@@ -130,8 +155,8 @@ flag is now actually consumed (`ctx.openSettings("memory")`).
   embedding/vector backend (`tryBuildMemoryDeps` → `tryBuildTwinDeps`); a
   user who never configured twin embeddings silently gets BM25-only memory.
   An independent memory-embedding config remains future work.
-- **Maintenance-trigger redesign** — episodic distillation still fires on
-  idle-after-turn once per session per app run; sessions never revisited
-  after a restart are not re-distilled.
+- **Cross-device audit sync** — canonical memories are part of the companion
+  sync mirror, while evidence/jobs/audit history currently round-trip through
+  encrypted app backup rather than live device sync.
 - **Inbound IM content** continues to be excluded from memory writes by the
   provenance gate (read-recall only) — unchanged, by design.

@@ -383,3 +383,97 @@ describe("buildBackupPackage — twin tables", () => {
     expect(pkg.payload.twinJobs).toEqual([])
   })
 })
+
+describe("buildBackupPackage — learned memory", () => {
+  it("exports canonical memories with their evidence, jobs, and audit trail", async () => {
+    const db = getDb()
+    await db.memories.put({
+      id: "mem_1",
+      scope: "workspace",
+      projectId: "project_1",
+      type: "semantic",
+      text: "The project uses pnpm.",
+      tags: ["tooling"],
+      importance: 8,
+      createdAt: 1,
+      updatedAt: 1,
+      lastAccessedAt: 1,
+      accessCount: 0,
+      version: 1,
+      status: "active",
+      pinned: false,
+      provenance: "user",
+      evidenceState: "supported",
+      reviewStatus: "verified",
+      contaminationState: "clean",
+      sensitivity: "normal",
+    })
+    await db.memoryEvidence.put({
+      id: "mev_1",
+      memoryId: "mem_1",
+      kind: "message",
+      sourceId: "source_1",
+      contaminationState: "clean",
+      reviewed: true,
+      createdAt: 1,
+    })
+    await db.memoryJobs.put({
+      id: "mjob_1",
+      dedupeKey: "turn:s1:m1",
+      kind: "turn-extraction",
+      status: "completed",
+      scope: "workspace",
+      projectId: "project_1",
+      provenance: "user",
+      evidenceIds: ["mev_1"],
+      queuedAt: 1,
+      completedAt: 2,
+      retryCount: 0,
+    })
+    await db.memoryAuditEvents.put({
+      id: "maudit_1",
+      action: "created",
+      memoryId: "mem_1",
+      reason: "turn-extraction",
+      createdAt: 2,
+    })
+
+    const pkg = await buildBackupPackage(
+      { includeSessions: false, includeApiKey: false },
+      { storage: null }
+    )
+
+    expect(pkg.payload.memories?.map((row) => row.id)).toEqual(["mem_1"])
+    expect(pkg.payload.memoryEvidence?.[0].memoryId).toBe("mem_1")
+    expect(pkg.payload.memoryJobs?.[0].evidenceIds).toEqual(["mev_1"])
+    expect(pkg.payload.memoryAuditEvents?.[0].memoryId).toBe("mem_1")
+  })
+
+  it("can omit the learned-memory graph for callers without memory read authority", async () => {
+    const db = getDb()
+    await db.memories.put({
+      id: "mem_private",
+      scope: "global",
+      type: "semantic",
+      text: "Private preference",
+      tags: [],
+      importance: 5,
+      createdAt: 1,
+      updatedAt: 1,
+      lastAccessedAt: 1,
+      accessCount: 0,
+      version: 1,
+      status: "active",
+      pinned: false,
+      provenance: "user",
+    })
+    const pkg = await buildBackupPackage(
+      { includeSessions: false, includeApiKey: false, includeMemories: false },
+      { storage: null }
+    )
+    expect(pkg.payload.memories).toBeUndefined()
+    expect(pkg.payload.memoryEvidence).toBeUndefined()
+    expect(pkg.payload.memoryJobs).toBeUndefined()
+    expect(pkg.payload.memoryAuditEvents).toBeUndefined()
+  })
+})

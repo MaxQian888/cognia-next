@@ -20,6 +20,10 @@ jest.mock("@/components/desktop/desktop-app-shell", () => ({
   DesktopAppShell: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }))
 
+jest.mock("@/components/account/account-gate", () => ({
+  AccountGate: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}))
+
 // matchMedia isn't implemented by jsdom — next-themes reads it during SSR.
 if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
   Object.defineProperty(window, "matchMedia", {

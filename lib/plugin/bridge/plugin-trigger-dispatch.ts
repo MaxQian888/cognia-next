@@ -25,6 +25,7 @@
  */
 
 import { recordSilentFailure } from "../contracts/diagnostics-store"
+import { getWorkflow } from "@/lib/db/workflows"
 import {
   getPluginTrigger,
   isTriggerMuted,
@@ -39,13 +40,15 @@ export interface DispatchPluginTriggerInput {
   kind: string
   /** Arbitrary JSON-serializable payload that flows to the workflow. */
   payload: unknown
+  /** Exact trigger-node root. Required when the workflow has duplicate kinds. */
+  triggerId?: string
 }
 
 export interface DispatchPluginTriggerResult {
   ok: boolean
   prefixedKind: string
-  /** One of `not-registered` | `dispatch-failed` | `muted`. */
-  rejectedReason?: "not-registered" | "dispatch-failed" | "muted"
+  rejectedReason?:
+    "not-registered" | "dispatch-failed" | "muted" | "trigger-node-not-found" | "ambiguous-trigger"
 }
 
 /**
@@ -61,7 +64,7 @@ export interface DispatchPluginTriggerResult {
 export async function dispatchPluginTrigger(
   input: DispatchPluginTriggerInput
 ): Promise<DispatchPluginTriggerResult> {
-  const { pluginId, workflowId, kind, payload } = input
+  const { pluginId, workflowId, kind, payload, triggerId } = input
   const prefixedKind = prefixPluginKind(pluginId, kind)
 
   // No explicit not-owned check: `prefixPluginKind` always namespaces
@@ -97,6 +100,46 @@ export async function dispatchPluginTrigger(
   }
 
   try {
+    const workflow = await getWorkflow(workflowId)
+    const matchingNodes =
+      workflow?.nodes.filter((node) => node.type === prefixedKind && node.data.disabled !== true) ??
+      []
+    const explicitTriggerId = triggerId?.trim()
+    const triggerNode = explicitTriggerId
+      ? matchingNodes.find((node) => node.id === explicitTriggerId)
+      : matchingNodes.length === 1
+        ? matchingNodes[0]
+        : undefined
+
+    if (!triggerNode) {
+      const ambiguous = !explicitTriggerId && matchingNodes.length > 1
+      const rejectedReason = ambiguous ? "ambiguous-trigger" : "trigger-node-not-found"
+      const message = ambiguous
+        ? `Plugin trigger ${prefixedKind} has multiple enabled nodes on workflow ${workflowId}; emitTriggerEvent must include triggerId`
+        : `Plugin trigger ${prefixedKind} has no enabled node ${explicitTriggerId ?? ""} on workflow ${workflowId}`
+      recordSilentFailure(
+        pluginId,
+        { site: "trigger.dispatch", message, expected: false },
+        new Error(rejectedReason)
+      )
+      return { ok: false, prefixedKind, rejectedReason }
+    }
+
+    // Bind to the exact node-authored version. A newer registration must not
+    // silently execute a workflow node that still targets an older contract.
+    if (!getPluginTrigger(prefixedKind, triggerNode.typeVersion)) {
+      recordSilentFailure(
+        pluginId,
+        {
+          site: "trigger.dispatch",
+          message: `Plugin trigger ${prefixedKind}@${triggerNode.typeVersion} has no live registration; emit ignored`,
+          expected: false,
+        },
+        new Error("not-registered")
+      )
+      return { ok: false, prefixedKind, rejectedReason: "not-registered" }
+    }
+
     // Lazy-load the orchestrator to keep startup paths cheap — same
     // pattern as `lib/db/messages.ts:dispatchChatMessageTriggers`.
     const { dispatchTrigger } = await import("@/lib/workflow/runtime/trigger-bridge")
@@ -107,6 +150,7 @@ export async function dispatchPluginTrigger(
       // type while preserving the prefixed string for the orchestrator
       // catalog lookup. Same pattern as `lib/plugin/core/context.ts`.
       kind: prefixedKind as never,
+      triggerId: triggerNode.id,
       payload,
       originAt: Date.now(),
     })

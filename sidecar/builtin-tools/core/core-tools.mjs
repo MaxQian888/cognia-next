@@ -16,8 +16,14 @@ import { createReadTool } from "./read.mjs"
 import { createLsTool } from "./ls.mjs"
 import { createEditTool, createMultiEditTool } from "./edit.mjs"
 import { createWriteTool } from "./write.mjs"
-import { createBashTool, createBashOutputTool, createKillShellTool } from "./bash.mjs"
+import {
+  createBashTool,
+  createBashOutputTool,
+  createKillShellTool,
+  createListShellsTool,
+} from "./bash.mjs"
 import { createTodoWriteTool, TODO_WRITE_NAME } from "./todo.mjs"
+import { createSessionTaskTools, SESSION_TASK_TOOL_NAMES } from "./tasks.mjs"
 import { createNotebookEditTool, NOTEBOOK_EDIT_NAME } from "./notebook-edit.mjs"
 import { createApplyPatchTool } from "./apply-patch.mjs"
 
@@ -39,6 +45,8 @@ export const CORE_TOOL_NAMES = Object.freeze([
   "kill_shell",
   NOTEBOOK_EDIT_NAME,
   "apply_patch",
+  ...SESSION_TASK_TOOL_NAMES,
+  "list_shells",
 ])
 
 /** Core tools that mutate state (restricted mode / IM channels deny these). */
@@ -53,12 +61,21 @@ export const CORE_MUTATING_TOOL_NAMES = Object.freeze([
 
 /**
  * @param {{ cwd?: string, readTracker?: unknown, lspResolver?: unknown,
- *           bgShells?: unknown, model?: string, provider?: string }} ctx
+ *           bgShells?: unknown, taskStore?: unknown,
+ *           model?: string, provider?: string }} ctx
  *   `bgShells` is the per-session background-shell registry (Module: async
  *   bash); `model`/`provider` let `read` decide whether to inline images.
  * @returns {Array} SdkMcpToolDefinitions in CORE_TOOL_NAMES order.
  */
-export function createCoreTools({ cwd, readTracker, lspResolver, bgShells, model, provider } = {}) {
+export function createCoreTools({
+  cwd,
+  readTracker,
+  lspResolver,
+  bgShells,
+  taskStore,
+  model,
+  provider,
+} = {}) {
   const ctx = { cwd, readTracker, lspResolver, bgShells, model, provider }
   const tools = [
     createGrepTool(ctx),
@@ -74,6 +91,8 @@ export function createCoreTools({ cwd, readTracker, lspResolver, bgShells, model
     createKillShellTool(ctx),
     createNotebookEditTool(ctx),
     createApplyPatchTool(ctx),
+    ...createSessionTaskTools(taskStore),
+    createListShellsTool(ctx),
   ]
   // Defensive: the emitted order must match the public constant.
   for (let i = 0; i < tools.length; i++) {

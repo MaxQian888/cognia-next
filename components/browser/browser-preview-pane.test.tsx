@@ -14,6 +14,25 @@ const mockQueueAnnotation = jest.fn()
 const mockSendAnnotations = jest.fn().mockResolvedValue(true)
 const mockTransitionAnnotation = jest.fn().mockResolvedValue(true)
 let mockPendingAnnotations: Array<Record<string, unknown>> = []
+let mockRemoteBrowserEnabled = false
+
+jest.mock("@/stores/settings/settings-store", () => ({
+  useSettingsStore: (selector: (state: unknown) => unknown) =>
+    selector({ settings: { remoteBrowserEnabled: mockRemoteBrowserEnabled } }),
+}))
+jest.mock("@/stores/chat/chat-store", () => ({
+  useChatStore: (selector: (state: unknown) => unknown) =>
+    selector({ activeSessionId: "active-chat" }),
+}))
+jest.mock("@/stores/project/project-store", () => ({
+  useProjectStore: (selector: (state: unknown) => unknown) =>
+    selector({ activeProjectId: "active-workspace" }),
+}))
+jest.mock("@/components/browser/remote-browser-preview", () => ({
+  RemoteBrowserPreview: (props: Record<string, unknown>) => (
+    <div data-testid="remote-browser-preview" data-props={JSON.stringify(props)} />
+  ),
+}))
 
 // The recorder panel is a separately-tested unit (browser-recorder-panel.test.tsx)
 // and pulls in the Dexie graph; stub it here and assert only that the pane
@@ -39,6 +58,7 @@ let mockHasPainted = false
 const mockBeginLoad = jest.fn()
 let mockRegionVisible = true
 let mockWebviewVisible: boolean | undefined
+let mockPaneUrl: string | null | undefined
 
 jest.mock("@/lib/tauri", () => ({ isTauri: () => mockTauri }))
 jest.mock("@/lib/tauri/opener", () => ({
@@ -49,9 +69,10 @@ jest.mock("@/lib/browser/pane-rect", () => ({ setActivePaneRect: jest.fn() }))
 jest.mock("@/hooks/browser/use-browser-pane-webview", () => ({
   useBrowserPaneWebview: (
     _ref: unknown,
-    opts: { visible?: boolean; onRectChange?: (r: ElementRect) => void }
+    opts: { url?: string | null; visible?: boolean; onRectChange?: (r: ElementRect) => void }
   ) => {
     mockWebviewVisible = opts?.visible
+    mockPaneUrl = opts?.url
     mockOnRectChange = opts?.onRectChange
     return { getRect: () => mockRect, setVisible: jest.fn() }
   },
@@ -139,6 +160,7 @@ beforeEach(() => {
   mockHasPainted = false
   mockRegionVisible = true
   mockWebviewVisible = undefined
+  mockPaneUrl = undefined
   mockBeginLoad.mockClear()
   mockSetSelectMode.mockClear()
   mockClearSelection.mockClear()
@@ -148,6 +170,7 @@ beforeEach(() => {
   mockSendAnnotations.mockReset().mockResolvedValue(true)
   mockTransitionAnnotation.mockReset().mockResolvedValue(true)
   mockPendingAnnotations = []
+  mockRemoteBrowserEnabled = false
   mockOpenExternal.mockClear().mockResolvedValue(undefined)
   ;(browserClient.embedReload as jest.Mock).mockClear()
   ;(browserClient.embedBack as jest.Mock).mockClear()
@@ -157,6 +180,29 @@ beforeEach(() => {
   ;(browserClient.embedSetPanelLabels as jest.Mock).mockClear()
   ;(toast.success as jest.Mock).mockClear()
   ;(toast.error as jest.Mock).mockClear()
+})
+
+it("replaces the web iframe with remote Canvas after explicit opt-in", () => {
+  mockTauri = false
+  mockRemoteBrowserEnabled = true
+  renderPane(<BrowserPreviewPane initialUrl="https://example.com" />)
+  const preview = screen.getByTestId("remote-browser-preview")
+  expect(preview).toHaveAttribute(
+    "data-props",
+    JSON.stringify({
+      chatSessionId: "active-chat",
+      workspaceId: "active-workspace",
+      initialUrl: "https://example.com/",
+    })
+  )
+  expect(screen.queryByTestId("browser-web-preview")).not.toBeInTheDocument()
+})
+
+it("opens a caller-provided initial URL without requiring address-bar input", async () => {
+  renderPane(<BrowserPreviewPane initialUrl="http://localhost:4173" />)
+
+  await waitFor(() => expect(mockPaneUrl).toBe("http://localhost:4173/"))
+  expect(urlBar()).toHaveValue("http://localhost:4173/")
 })
 
 it("persists the selected annotation detail level", () => {

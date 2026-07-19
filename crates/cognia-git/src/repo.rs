@@ -33,7 +33,11 @@ pub async fn ignore_add(repo_path: &str, pattern: &str) -> Result<()> {
     let existing = match tokio::fs::read_to_string(&path).await {
         Ok(s) => s,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(e) => return Err(GitError::CommandFailed(format!("read .gitignore: {e}").into())),
+        Err(e) => {
+            return Err(GitError::CommandFailed(
+                format!("read .gitignore: {e}").into(),
+            ))
+        }
     };
     if existing.lines().any(|l| l.trim() == pattern) {
         return Ok(());

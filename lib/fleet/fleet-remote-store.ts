@@ -13,6 +13,7 @@ import { transport } from "@/lib/tauri"
 import { fleetRemoteGetSnapshot } from "@/lib/fleet/fleet-remote-actions"
 import { EMPTY_FLEET_SNAPSHOT } from "@/lib/fleet/fleet-stream-store"
 import { FLEET_UPDATE_EVENT, type FleetSnapshot } from "@/lib/fleet/types"
+import { hydrateCompanionConfig } from "@/lib/tauri/transport-companion"
 
 let snapshot: FleetSnapshot = EMPTY_FLEET_SNAPSHOT
 const listeners = new Set<() => void>()
@@ -35,18 +36,29 @@ const applyIfNewer = (next: FleetSnapshot) => {
 
 const attach = () => {
   const gen = generation
-  // Subscribe to live updates FIRST (no gap where an update could be missed),
-  // then backfill. `transport.subscribe` returns synchronously, so no stale
-  // guard is needed here; the guards below cover a detach that races the async
-  // handler / backfill of a superseded generation.
-  unsubscribe = transport.subscribe<FleetSnapshot>(FLEET_UPDATE_EVENT, (payload) => {
-    if (gen !== generation) return
-    applyIfNewer(payload)
-  })
-  void fleetRemoteGetSnapshot().then((fetched) => {
+  void (async () => {
+    // A cold deep link can mount before CompanionBootProvider has populated
+    // the transport's synchronous config cache. Hydrate the same persisted
+    // boundary first; otherwise subscribe() cannot open its WebSocket and the
+    // failed snapshot read is permanently cached as an empty fleet.
+    await hydrateCompanionConfig()
+    if (gen !== generation || listeners.size === 0) return
+
+    // Subscribe before the backfill so a live update cannot fall into a gap.
+    const detachSubscription = transport.subscribe<FleetSnapshot>(FLEET_UPDATE_EVENT, (payload) => {
+      if (gen !== generation) return
+      applyIfNewer(payload)
+    })
+    if (gen !== generation || listeners.size === 0) {
+      detachSubscription()
+      return
+    }
+    unsubscribe = detachSubscription
+
+    const fetched = await fleetRemoteGetSnapshot()
     if (gen !== generation) return
     applyIfNewer(fetched)
-  })
+  })()
 }
 
 const detach = () => {

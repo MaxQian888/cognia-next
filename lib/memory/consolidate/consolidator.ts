@@ -1,5 +1,5 @@
 /**
- * LLM-judged consolidation (Mem0's ADD / UPDATE / DELETE / NOOP). For each
+ * LLM-judged consolidation (ADD / UPDATE / DELETE / CONFLICT / NOOP). For each
  * candidate, fetch the top-k semantically similar existing memories and let the
  * LLM choose ONE operation — solving dedupe, update, and contradiction in one
  * place instead of brittle rules.
@@ -22,10 +22,15 @@ import type {
   MemorySourceChannel,
 } from "@/types/memory/memory"
 import type { MemoryCandidate } from "@/lib/memory/extract/extractor"
+import { hasNoLeakingPii } from "@cognia/redact"
 
 export interface PersistMemoryInput {
   scope: MemoryScope
   characterId?: string
+  projectId?: string
+  agentId?: string
+  branch?: string
+  pathPattern?: string
   type: MemoryCandidate["type"]
   text: string
   importance: number
@@ -35,6 +40,8 @@ export interface PersistMemoryInput {
   sourceMessageId?: string
   sourceChannel?: MemorySourceChannel
   sourcePluginId?: string
+  reviewStatus?: Memory["reviewStatus"]
+  conflictWithIds?: string[]
 }
 
 export interface ConsolidateDeps {
@@ -42,8 +49,7 @@ export interface ConsolidateDeps {
   /** Top-k active memories similar to the candidate (same scope/reader). */
   findSimilar: (
     candidate: MemoryCandidate,
-    scope: MemoryScope,
-    characterId?: string
+    namespace: MemoryConsolidationNamespace
   ) => Promise<Memory[]>
   /** ADD — create + persist a new memory; returns the row. */
   persist: (input: PersistMemoryInput) => Promise<Memory>
@@ -51,22 +57,53 @@ export interface ConsolidateDeps {
   update: (id: string, text: string) => Promise<void>
   /** DELETE — soft-invalidate, optionally linking the superseding memory. */
   invalidate: (id: string, supersededById?: string) => Promise<void>
+  /** Mark both sides of an unresolved contradiction for explicit review. */
+  markConflict?: (targetId: string, conflictId: string) => Promise<void>
 }
 
 export type ConsolidationOp =
   | { op: "ADD"; memory: Memory; candidate: MemoryCandidate }
   | { op: "UPDATE"; targetId: string }
   | { op: "DELETE"; targetId: string }
+  | { op: "CONFLICT"; memory: Memory; targetId: string; candidate: MemoryCandidate }
   | { op: "NOOP" }
 
 export interface ConsolidateInput {
   candidates: MemoryCandidate[]
   scope: MemoryScope
   characterId?: string
+  projectId?: string
+  agentId?: string
+  branch?: string
+  pathPattern?: string
   provenance: MemoryProvenance
   source?: { sessionId?: string; messageId?: string }
   /** API-surface attribution, stamped onto ADDed rows (external provenance). */
   attribution?: { channel: MemorySourceChannel; pluginId?: string }
+}
+
+export interface MemoryConsolidationNamespace {
+  scope: MemoryScope
+  characterId?: string
+  projectId?: string
+  agentId?: string
+  branch?: string
+  pathPattern?: string
+}
+
+/** Strict equality prevents a similarity hit from mutating a broader namespace. */
+export function sameMemoryNamespace(
+  memory: Memory,
+  namespace: MemoryConsolidationNamespace
+): boolean {
+  return (
+    memory.scope === namespace.scope &&
+    memory.projectId === namespace.projectId &&
+    memory.characterId === namespace.characterId &&
+    memory.agentId === namespace.agentId &&
+    memory.branch === namespace.branch &&
+    memory.pathPattern === namespace.pathPattern
+  )
 }
 
 const DECIDE_SYSTEM =
@@ -93,19 +130,26 @@ function buildDecidePrompt(candidate: MemoryCandidate, similar: Memory[]): strin
     `  (give its id + "mergedText" combining both).`,
     `- DELETE: the candidate directly CONTRADICTS an existing memory that is now`,
     `  false (give that memory's id; the candidate will be added fresh).`,
+    `- CONFLICT: the candidate contradicts an existing memory but the source is`,
+    `  not authoritative enough to decide which is true (give that memory's id).`,
     `- NOOP: the candidate is already fully captured.`,
-    `Return JSON: {"op":"ADD|UPDATE|DELETE|NOOP","targetId?":"<id>","mergedText?":"<text>"}.`,
+    `Return JSON: {"op":"ADD|UPDATE|DELETE|CONFLICT|NOOP","targetId?":"<id>","mergedText?":"<text>"}.`,
   ].join("\n")
 }
 
 async function persistCandidate(
   candidate: MemoryCandidate,
   input: ConsolidateInput,
-  deps: ConsolidateDeps
+  deps: ConsolidateDeps,
+  governance: Pick<PersistMemoryInput, "reviewStatus" | "conflictWithIds"> = {}
 ): Promise<Memory> {
   return deps.persist({
     scope: input.scope,
     characterId: input.scope === "character" ? input.characterId : undefined,
+    projectId: input.projectId,
+    agentId: input.scope === "agent" ? input.agentId : undefined,
+    branch: input.branch,
+    pathPattern: input.pathPattern,
     type: candidate.type,
     text: candidate.text,
     importance: candidate.importance,
@@ -115,6 +159,7 @@ async function persistCandidate(
     sourceMessageId: input.source?.messageId,
     sourceChannel: input.attribution?.channel,
     sourcePluginId: input.attribution?.pluginId,
+    ...governance,
   })
 }
 
@@ -125,10 +170,18 @@ export async function consolidate(
   const applied: ConsolidationOp[] = []
 
   for (const candidate of input.candidates) {
-    if (!candidate.text.trim()) continue
-    const similar = await deps
-      .findSimilar(candidate, input.scope, input.characterId)
-      .catch(() => [])
+    if (!candidate.text.trim() || !hasNoLeakingPii(candidate.text)) continue
+    const namespace: MemoryConsolidationNamespace = {
+      scope: input.scope,
+      characterId: input.scope === "character" ? input.characterId : undefined,
+      projectId: input.projectId,
+      agentId: input.scope === "agent" ? input.agentId : undefined,
+      branch: input.branch,
+      pathPattern: input.pathPattern,
+    }
+    const similar = (await deps.findSimilar(candidate, namespace).catch(() => [])).filter(
+      (memory) => hasNoLeakingPii(memory.text)
+    )
 
     // No neighbors → unambiguous ADD, no LLM call needed.
     if (similar.length === 0) {
@@ -162,7 +215,9 @@ export async function consolidate(
     if (op === "UPDATE" && targetId) {
       const mergedText =
         typeof decision.mergedText === "string" && decision.mergedText.trim()
-          ? decision.mergedText.trim()
+          ? hasNoLeakingPii(decision.mergedText.trim())
+            ? decision.mergedText.trim()
+            : candidate.text
           : candidate.text
       await deps.update(targetId, mergedText)
       applied.push({ op: "UPDATE", targetId })
@@ -171,6 +226,13 @@ export async function consolidate(
       await deps.invalidate(targetId, memory.id)
       applied.push({ op: "DELETE", targetId })
       applied.push({ op: "ADD", memory, candidate })
+    } else if (op === "CONFLICT" && targetId) {
+      const memory = await persistCandidate(candidate, input, deps, {
+        reviewStatus: "conflict",
+        conflictWithIds: [targetId],
+      })
+      await deps.markConflict?.(targetId, memory.id)
+      applied.push({ op: "CONFLICT", memory, targetId, candidate })
     } else if (op === "NOOP") {
       applied.push({ op: "NOOP" })
     } else {

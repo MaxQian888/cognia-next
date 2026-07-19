@@ -112,6 +112,9 @@ URL-credential redactor (`exec::redact`) before it leaves the backend.
   **porcelain blame** (`git_blame` → `blame-view.tsx`).
 - **`git init`** from the not-a-repo state (`git_init` in `repo.rs`) plus
   `git_ignore_add` — the not-a-repo state is no longer explainer-only.
+- **Worktree management** from the sync toolbar: list, create, open, remove,
+  optionally delete the linked branch, and prune stale worktree records through
+  the existing `git_worktree_*` command seam.
 
 ## Out of scope / follow-ups
 
@@ -120,7 +123,5 @@ URL-credential redactor (`exec::redact`) before it leaves the backend.
 - Migrating `twin/code_repo.rs` onto the crate's `read.rs` and converging
   `github/workspace.rs` onto the crate's `exec.rs`.
 - Not yet implemented (candidate follow-ups): `git clone` into the panel,
-  in-panel `git config` writes (empty-ident recovery), a worktree-management
-  section (backend `git_worktree_*` exists but is only consumed by the
-  agent-team allocator / project editor), reflog/recovery view, GPG `-S`
-  commit signing (only signoff today), and line-level / sub-hunk staging.
+  in-panel `git config` writes (empty-ident recovery), reflog/recovery view, GPG
+  `-S` commit signing (only signoff today), and line-level / sub-hunk staging.

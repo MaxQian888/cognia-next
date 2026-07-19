@@ -6,6 +6,7 @@ import React from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import enMessages from "@/i18n/messages/en.json"
+import { TooltipProvider } from "@/components/ui/tooltip"
 
 const storeState: { surfaces: Record<string, unknown> } = { surfaces: {} }
 
@@ -16,12 +17,14 @@ jest.mock("@/stores/a2ui", () => ({
 import { A2UIWorkspaceProvider } from "./a2ui-workspace-context"
 import { ComponentTreePanel } from "./component-tree-panel"
 
-function renderTree(surfaceId = "sx") {
+function renderTree(surfaceId = "sx", props: React.ComponentProps<typeof ComponentTreePanel> = {}) {
   return render(
     <NextIntlClientProvider locale="en" messages={enMessages as Record<string, unknown>}>
-      <A2UIWorkspaceProvider surfaceId={surfaceId}>
-        <ComponentTreePanel />
-      </A2UIWorkspaceProvider>
+      <TooltipProvider>
+        <A2UIWorkspaceProvider surfaceId={surfaceId}>
+          <ComponentTreePanel {...props} />
+        </A2UIWorkspaceProvider>
+      </TooltipProvider>
     </NextIntlClientProvider>
   )
 }
@@ -64,9 +67,72 @@ describe("ComponentTreePanel", () => {
     }
     renderTree()
     expect(screen.getByText("Button")).toBeInTheDocument()
-    // The first button in the tree is the chevron toggle of the root.
-    const toggleBtn = screen.getAllByRole("button")[0]
+    const toggleBtn = screen.getByRole("button", { name: "Collapse component" })
     fireEvent.click(toggleBtn)
     expect(screen.queryByText("Button")).toBeNull()
+  })
+
+  it("exposes localized duplicate and delete actions", () => {
+    storeState.surfaces = {
+      sx: {
+        rootId: "root",
+        components: {
+          root: { id: "root", component: "Column", children: [] },
+        },
+      },
+    }
+    const onDuplicateSelected = jest.fn()
+    const onDeleteSelected = jest.fn()
+    renderTree("sx", {
+      canDuplicateSelected: true,
+      canDeleteSelected: true,
+      onDuplicateSelected,
+      onDeleteSelected,
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Duplicate Component" }))
+    fireEvent.click(screen.getByRole("button", { name: "Delete Component" }))
+    expect(onDuplicateSelected).toHaveBeenCalledTimes(1)
+    expect(onDeleteSelected).toHaveBeenCalledTimes(1)
+  })
+
+  it("disables component actions when the current selection cannot be mutated", () => {
+    storeState.surfaces = {
+      sx: {
+        rootId: "root",
+        components: {
+          root: { id: "root", component: "Column", children: [] },
+        },
+      },
+    }
+    renderTree("sx", { canDuplicateSelected: false, canDeleteSelected: false })
+
+    expect(screen.getByRole("button", { name: "Duplicate Component" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Delete Component" })).toBeDisabled()
+  })
+
+  it("opens catalog add and selected-component move dialogs from visible controls", () => {
+    storeState.surfaces = {
+      sx: {
+        rootId: "root",
+        components: {
+          root: { id: "root", component: "Column", children: ["first", "second"] },
+          first: { id: "first", component: "Text", text: "First" },
+          second: { id: "second", component: "Text", text: "Second" },
+        },
+      },
+    }
+    renderTree("sx", {
+      onAddComponent: jest.fn(() => true),
+      onMoveSelected: jest.fn(() => true),
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Component" }))
+    expect(screen.getByRole("dialog", { name: "Add Component" })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+
+    fireEvent.click(screen.getByRole("treeitem", { name: /Text first/i }))
+    fireEvent.click(screen.getByRole("button", { name: "Move Component" }))
+    expect(screen.getByRole("dialog", { name: "Move Component" })).toBeInTheDocument()
   })
 })

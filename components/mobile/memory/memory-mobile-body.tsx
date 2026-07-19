@@ -5,7 +5,9 @@
  * gap). Read-mostly mirror of the desktop MemoryConsole: lists memories from
  * Dexie (warmed by the `memories` sync handler so it works offline) with a
  * text filter, reusing the same `MemoryRow` the desktop panel uses. The
- * pin/edit/delete affordances act on the local cache, matching desktop.
+ * mutations enter the durable mobile outbound queue and optimistically update
+ * the local mirror only after enqueue succeeds. The desktop remains the
+ * authority and applies the shared policy, PII, audit, and vector lifecycle.
  */
 
 import { useMemo, useState } from "react"
@@ -17,16 +19,17 @@ import { EmptyState } from "@/components/mobile/empty-state"
 import { PullToRefresh } from "@/components/interactions/pull-to-refresh"
 import { MemoryRow } from "@/components/memory/memory-row"
 import {
-  hardDeleteMemory,
+  invalidateMemory,
   listMemories,
   setMemoryPinned,
   updateMemory,
 } from "@/lib/db/memories"
+import { enqueue as enqueueOutbound } from "@/lib/db/mobile-outbound-queue"
 import { runSyncDown } from "@/lib/sync/companion-sync"
 
 export function MemoryMobileBody() {
   const t = useTranslations("mobile.memory")
-  const memories = useLiveQuery(() => listMemories(), [])
+  const memories = useLiveQuery(() => listMemories({ status: "active" }), [])
   const [query, setQuery] = useState("")
 
   const visible = useMemo(() => {
@@ -44,6 +47,33 @@ export function MemoryMobileBody() {
     } catch {
       // Orchestrator swallows handler-level failures.
     }
+  }
+
+  const handlePinToggle = async (id: string, pinned: boolean): Promise<void> => {
+    await enqueueOutbound({
+      command: "memory_update",
+      payload: { id, pinned },
+      label: t("queueUpdateLabel"),
+    })
+    await setMemoryPinned(id, pinned)
+  }
+
+  const handleSave = async (id: string, text: string): Promise<void> => {
+    await enqueueOutbound({
+      command: "memory_update",
+      payload: { id, text },
+      label: t("queueUpdateLabel"),
+    })
+    await updateMemory(id, { text, bumpVersion: true })
+  }
+
+  const handleForget = async (id: string): Promise<void> => {
+    await enqueueOutbound({
+      command: "memory_forget",
+      payload: { id },
+      label: t("queueForgetLabel"),
+    })
+    await invalidateMemory(id)
   }
 
   return (
@@ -71,9 +101,9 @@ export function MemoryMobileBody() {
               <MemoryRow
                 key={m.id}
                 memory={m}
-                onPinToggle={(id, pinned) => void setMemoryPinned(id, pinned)}
-                onSave={(id, text) => void updateMemory(id, { text })}
-                onDelete={(id) => void hardDeleteMemory(id)}
+                onPinToggle={(id, pinned) => void handlePinToggle(id, pinned)}
+                onSave={(id, text) => void handleSave(id, text)}
+                onDelete={(id) => void handleForget(id)}
               />
             ))
           )}

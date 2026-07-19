@@ -44,6 +44,7 @@ jest.mock("@/lib/desktop/menu-actions", () => {
     "toggle-reduce-motion",
     "go-inbox",
     "go-workflows",
+    "go-sites",
     "go-twin",
     "go-skills",
     "go-plugins",
@@ -169,9 +170,9 @@ beforeEach(() => {
 test("subscribes to one channel per menu id (minus zoom + reload + fullscreen) plus tray fallback", async () => {
   renderHook(() => useMenuEventRouter())
   await flush()
-  // 45 ids in our mocked list minus 5 skipped (reload, toggle-fullscreen, zoom-in/out/reset)
+  // 46 ids in our mocked list minus 5 skipped (reload, toggle-fullscreen, zoom-in/out/reset)
   // plus 1 tray fallback => exact count.
-  expect(subscribers.size).toBe(45 - 5 + 1)
+  expect(subscribers.size).toBe(46 - 5 + 1)
   // Spot-check both kinds of subscription.
   expect(subscribers.has("menu://new-chat")).toBe(true)
   expect(subscribers.has("tray://open-logs")).toBe(true)
@@ -212,6 +213,7 @@ test("each menu event routes to the right action helper", async () => {
     ["language-zh-cn", "setLanguageAction"],
     ["toggle-reduce-motion", "toggleReduceMotionAction"],
     ["go-inbox", "goAction"],
+    ["go-sites", "goAction"],
     ["go-twin", "goAction"],
     ["go-dms", "goAction"],
     ["go-canvas", "goAction"],

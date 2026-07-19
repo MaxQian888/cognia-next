@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "exceptions": [
+    {
+      "file": "tests/e2e/lsp/vscode-eslint.spec.ts",
+      "rule": "runtime-skip",
+      "occurrences": 1,
+      "reason": "The browser CI project cannot install a VSIX or reach the desktop extension-host sidecar.",
+      "reviewAfter": "2026-10-31"
+    },
+    {
+      "file": "tests/e2e/mobile/standalone-chat.spec.ts",
+      "rule": "runtime-skip",
+      "occurrences": 1,
+      "reason": "The mobile standalone composer is not yet wired to runStandaloneTurn; this spec is its acceptance pin.",
+      "reviewAfter": "2026-08-31"
+    },
+    {
+      "file": "tests/e2e/helpers/gestures.ts",
+      "rule": "arbitrary-timeout",
+      "occurrences": 3,
+      "reason": "Synthetic gesture frames and hold durations intentionally model elapsed pointer time rather than app readiness.",
+      "reviewAfter": "2026-10-31"
+    },
+    {
+      "file": "tests/e2e/mobile/composer-plus/voice.spec.ts",
+      "rule": "arbitrary-timeout",
+      "occurrences": 1,
+      "reason": "The mocked recorder currently exposes no completion event after the minimum voice capture duration.",
+      "reviewAfter": "2026-08-31"
+    },
+    {
+      "file": "tests/e2e/mobile/deeplink-pair.spec.ts",
+      "rule": "arbitrary-timeout",
+      "occurrences": 1,
+      "reason": "The Capacitor App listener mock currently has no observable subscription-ready signal before event delivery.",
+      "reviewAfter": "2026-08-31"
+    },
+    {
+      "file": "tests/e2e/mobile/interactions/long-press.spec.ts",
+      "rule": "arbitrary-timeout",
+      "occurrences": 3,
+      "reason": "The legacy long-press spec mixes intentional hold time with post-action settling and needs an event seam.",
+      "reviewAfter": "2026-08-31"
+    },
+    {
+      "file": "tests/e2e/mobile/interactions/swipe-row.spec.ts",
+      "rule": "arbitrary-timeout",
+      "occurrences": 2,
+      "reason": "The swipe-row transition and persistence path currently lack observable transition-end and save-complete seams.",
+      "reviewAfter": "2026-08-31"
+    },
+    {
+      "file": "tests/e2e/workflows/editor/copilot-and-i18n-guard.spec.ts",
+      "rule": "arbitrary-timeout",
+      "occurrences": 1,
+      "reason": "The copilot hydration guard currently waits for a quiet console window and has no explicit settled signal.",
+      "reviewAfter": "2026-08-31"
+    },
+    {
+      "file": "tests/e2e/workflows/editor-connection.spec.ts",
+      "rule": "arbitrary-timeout",
+      "occurrences": 1,
+      "reason": "The rejected connection drag currently exposes no semantic completion event after pointer release.",
+      "reviewAfter": "2026-08-31"
+    },
+    {
+      "file": "tests/e2e/workflows/nodes/action-character/send.spec.ts",
+      "rule": "stub-contract",
+      "occurrences": 1,
+      "reason": "The action.character.send executor is not implemented; the suite currently proves editor persistence only.",
+      "reviewAfter": "2026-09-30"
+    },
+    {
+      "file": "tests/e2e/workflows/nodes/action-mcp/invoke-tool.spec.ts",
+      "rule": "stub-contract",
+      "occurrences": 1,
+      "reason": "The action.mcp.invokeTool executor is not implemented; the suite currently proves editor persistence only.",
+      "reviewAfter": "2026-09-30"
+    },
+    {
+      "file": "tests/e2e/workflows/nodes/action-plugin/invoke.spec.ts",
+      "rule": "stub-contract",
+      "occurrences": 1,
+      "reason": "The action.plugin.invoke executor is not implemented; the suite currently proves editor persistence only.",
+      "reviewAfter": "2026-09-30"
+    },
+    {
+      "file": "tests/e2e/workflows/nodes/action-team/run.spec.ts",
+      "rule": "stub-contract",
+      "occurrences": 1,
+      "reason": "The action.team.run executor is not implemented; the suite currently proves editor persistence only.",
+      "reviewAfter": "2026-09-30"
+    },
+    {
+      "file": "tests/e2e/workflows/nodes/action-twin/ingest.spec.ts",
+      "rule": "stub-contract",
+      "occurrences": 1,
+      "reason": "The action.twin.ingest executor is not implemented; the suite currently proves editor persistence only.",
+      "reviewAfter": "2026-09-30"
+    },
+    {
+      "file": "tests/e2e/workflows/nodes/action-twin/rag.spec.ts",
+      "rule": "stub-contract",
+      "occurrences": 1,
+      "reason": "The action.twin.rag executor is not implemented; the suite currently proves editor persistence only.",
+      "reviewAfter": "2026-09-30"
+    }
+  ]
+}

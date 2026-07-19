@@ -8,7 +8,7 @@ description: The declarative truth layer that states what a plugin may contribut
 <Status variant="experimental" />
 
 <TLDR>
-`lib/plugin/contracts/` is the declarative truth layer: `plugin-points.ts` and `plugin-capabilities.ts` catalog every extension point and capability with binding/docs/requiredTests proof fields, `capability-bridge-map.ts` and `module-bridge-map.ts` wire manifest fields to registries/bridges, and `runtime-proof-audit.ts` asserts every "implemented" surface has evidence. `lib/plugin/registries/` are typed overlay-registry stores (builtin ← plugin overlay, deduped by id); `packages/plugin-sdk/src/define/` contains the pure `define*()` type pass-throughs surfaced through `@cognia/plugin-sdk` and `@cognia/plugin-sdk/define/<name>`.
+`lib/plugin/contracts/` is the declarative truth layer: `plugin-points.ts` and `plugin-capabilities.ts` catalog every extension point and capability with binding/docs/requiredTests proof fields, `capability-bridge-map.ts` and `module-bridge-map.ts` wire manifest fields to registries/bridges, and `runtime-proof-audit.ts` asserts every "implemented" surface has evidence. `lib/plugin/registries/` are typed overlay-registry stores (builtin ← plugin overlay, deduped by id); `packages/plugin-sdk/src/define/` contains the pure `define*()` type pass-throughs surfaced through the `@cognia/plugin-sdk` package root.
 </TLDR>
 
 <StatGrid>
@@ -29,7 +29,7 @@ description: The declarative truth layer that states what a plugin may contribut
 
 `capability-contributions.ts:79` maps a plugin's capability tags to concrete manifest entries for UI summaries. Two wiring maps connect manifest fields to runtime stores: `capability-bridge-map.ts` for synchronous overlay-registry dispatch, and `module-bridge-map.ts` for asynchronous module-loading bridges. Provability is enforced by `runtime-proof-audit.ts`, `conflict-reporter.ts`, and `diagnostics-store.ts`, which prove every "implemented" surface has evidence and report conflicts and diagnostics.
 
-`lib/plugin/registries/` are typed in-memory stores built on the `createOverlayRegistry` substrate (builtin ← plugin overlay, deduped by id, plugin-tagged). `packages/plugin-sdk/src/define/` contains author-facing `define*()` helpers that narrow inline manifest entries. The host runtime consumes manifests and registries, not the helper functions; the helpers are public authoring affordances exposed by the `@cognia/plugin-sdk` package root and `@cognia/plugin-sdk/define/<name>`. Tooling can import the read-only contract catalogs and contribution-summary helpers from `@cognia/plugin-sdk/contracts` instead of reaching into `lib/plugin/contracts/*`.
+`lib/plugin/registries/` are typed in-memory stores built on the `createOverlayRegistry` substrate (builtin ← plugin overlay, deduped by id, plugin-tagged). `packages/plugin-sdk/src/define/` contains author-facing `define*()` helpers that narrow inline manifest entries. The host runtime consumes manifests and registries, not the helper functions; the helpers are public authoring affordances exported from the `@cognia/plugin-sdk` package root. Tooling can import the read-only contract catalogs and contribution-summary helpers from `@cognia/plugin-sdk/contracts` instead of reaching into `lib/plugin/contracts/*`.
 
 ## Overlay-registry pattern
 
@@ -140,7 +140,7 @@ The pet subsystem (ADR-0058) exposes four coordinated plugin surfaces:
 
 ## SDK define*() catalog
 
-All helpers are pure type pass-throughs **except** `defineCharacterPack`, which validates eagerly. The package exposes every helper from the root barrel and as a direct subpath: `@cognia/plugin-sdk/define/<name>` maps to `packages/plugin-sdk/src/define/define-<name>.ts`.
+All helpers are pure type pass-throughs **except** `defineCharacterPack`, which validates eagerly. The package exposes every supported helper from the root barrel; source-file-shaped `define/<name>` imports are intentionally not exported.
 
 | Helper group | Examples | Produces |
 | --- | --- | --- |

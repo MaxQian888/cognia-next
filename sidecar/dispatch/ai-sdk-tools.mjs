@@ -36,6 +36,7 @@ import { awaitPluginToolResponse } from "../builtin-tools/plugin-tools.mjs"
 import { resolveForToolCall } from "./permission-resolver.mjs"
 import { classifyToolCallConfinement } from "../builtin-tools/confinement.mjs"
 import { createDoomLoopGuard } from "./doom-loop.mjs"
+import { markAiSdkToolSource } from "./ai-sdk-tool-search.mjs"
 
 const PLUGIN_TOOLS_SERVER_NAME = "cognia-plugin-tools"
 
@@ -565,6 +566,7 @@ function pluginToolToAiSdkTool(
  *   lspResolver?: unknown,
  *   codeGraphResolver?: unknown,
  *   readTracker?: unknown,
+ *   taskStore?: unknown,
  * }} params
  * @returns {Record<string, ReturnType<typeof tool>>}
  */
@@ -578,6 +580,7 @@ export function buildAiSdkTools({
   codeGraphResolver,
   readTracker,
   bgShells,
+  taskStore,
   doomGuard: providedDoomGuard,
   reviewToolOutput,
 }) {
@@ -634,6 +637,7 @@ export function buildAiSdkTools({
     cwd: sendOptions.cwd,
     dispatchPath: "ai-sdk",
     bgShells,
+    taskStore,
     model: sendOptions.model,
     provider: sendOptions.provider,
   })) {
@@ -642,7 +646,13 @@ export function buildAiSdkTools({
     const alias = CLAUDE_TOOL_NAME_BY_COGNIA_BARE[def.name]
     if (alias) candidates.push(alias)
     if (!passesAllowList(allowSet, candidates)) continue
-    tools[def.name] = builtinDefToAiSdkTool(def, gate, builtinToolTimeoutMs, reviewToolOutput)
+    tools[def.name] = markAiSdkToolSource(
+      builtinDefToAiSdkTool(def, gate, builtinToolTimeoutMs, reviewToolOutput),
+      {
+        serverName: SERVER_NAME,
+        alwaysLoad: def?._meta?.["anthropic/alwaysLoad"] === true,
+      }
+    )
   }
 
   if (Array.isArray(sendOptions.pluginTools) && pendingPluginToolCalls) {
@@ -662,13 +672,16 @@ export function buildAiSdkTools({
       ) {
         continue
       }
-      tools[manifest.name] = pluginToolToAiSdkTool(manifest, {
-        emit,
-        sessionId,
-        pendingPluginToolCalls,
-        gate,
-        reviewToolOutput,
-      })
+      tools[manifest.name] = markAiSdkToolSource(
+        pluginToolToAiSdkTool(manifest, {
+          emit,
+          sessionId,
+          pendingPluginToolCalls,
+          gate,
+          reviewToolOutput,
+        }),
+        { serverName: PLUGIN_TOOLS_SERVER_NAME }
+      )
     }
   }
 

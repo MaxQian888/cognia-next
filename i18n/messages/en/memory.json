@@ -1,8 +1,15 @@
 {
   "add": {
     "cancel": "Cancel",
-    "description": "Manually save a durable fact. Stored in global scope with explicit provenance.",
+    "agentIdLabel": "Agent ID",
+    "branchLabel": "Branch (optional)",
+    "characterIdLabel": "Character ID",
+    "description": "Manually save a durable fact with explicit provenance and an optional narrow scope.",
     "importanceLabel": "Importance",
+    "pathPatternLabel": "Path prefix (optional)",
+    "projectIdLabel": "Project ID",
+    "projectIdOptionalLabel": "Project ID (optional)",
+    "scopeLabel": "Scope",
     "submit": "Add memory",
     "tagsLabel": "Tags",
     "tagsPlaceholder": "comma, separated, tags",
@@ -26,22 +33,30 @@
     "unpin": "Unpin"
   },
   "detail": {
+    "auditTitle": "Audit history",
     "cancel": "Cancel",
     "close": "Close",
+    "conflictGone": "The conflicting memory was deleted.",
+    "conflictsWith": "Conflicts with",
     "deleteConfirm": {
       "cancel": "Cancel",
       "confirm": "Delete",
       "description": "This permanently removes the memory. This can't be undone.",
       "title": "Delete this memory?"
     },
+    "evidenceTitle": "Evidence records",
     "fields": {
       "accessCount": "Recalled",
       "archivedAt": "Archived",
       "created": "Created",
+      "contamination": "Context trust",
+      "evidence": "Evidence",
       "importance": "Importance",
       "indexed": "Indexed",
       "key": "Key",
       "lastUsed": "Last used",
+      "review": "Review",
+      "scope": "Scope",
       "updated": "Updated",
       "version": "Version"
     },
@@ -51,6 +66,7 @@
     "previous": "Previous memory",
     "replacedBy": "Replaced by",
     "replacedByGone": "The replacement was deleted.",
+    "recordCount": "{count, plural, one {# record} other {# records}}",
     "save": "Save",
     "source": "Source",
     "tagsLabel": "Tags",
@@ -114,10 +130,24 @@
     "system": "System",
     "user": "Auto (chat)"
   },
+  "governance": {
+    "clean": "Clean",
+    "conflict": "Conflict",
+    "external-context": "External context",
+    "legacy": "Legacy / no evidence",
+    "markConflict": "Mark conflict",
+    "markVerified": "Mark verified",
+    "supported": "Evidence-backed",
+    "unknown": "Unknown",
+    "unreviewed": "Unreviewed",
+    "verified": "Verified"
+  },
   "scopes": {
+    "agent": "Agent",
     "all": "All scopes",
     "character": "Character",
-    "global": "Global"
+    "global": "Global",
+    "workspace": "Workspace"
   },
   "types": {
     "episodic": "Event",

@@ -27,13 +27,17 @@ export const MAX_RING_BYTES = 256 * 1024
  * @property {"running"|"exited"} status
  * @property {number|null} exitCode
  * @property {number} startedAt
+ * @property {number|null} endedAt
+ * @property {string|undefined} cwd
+ * @property {Set<() => void>} waiters
  */
 
 /**
  * Create a fresh per-session background-shell registry.
  * @returns {{
  *   spawnBackground: (opts: { command: string, shell: string, shellArgs: string[], cwd?: string, isWin?: boolean, env?: NodeJS.ProcessEnv }) => BgShellEntry,
- *   read: (id: string, opts?: { filter?: string }) => ({ ok: true, data: string, status: string, exitCode: number|null } | { ok: false, reason: string }),
+ *   read: (id: string, opts?: { filter?: string, maxChars?: number }) => ({ ok: true, data: string, status: string, exitCode: number|null } | { ok: false, reason: string }),
+ *   waitForOutput: (id: string, opts?: { filter?: string, maxChars?: number, waitMs?: number }) => Promise<{ ok: true, data: string, status: string, exitCode: number|null } | { ok: false, reason: string }>,
  *   kill: (id: string, signal?: string) => ({ ok: true, exitCode: number|null } | { ok: false, reason: string }),
  *   killAll: () => void,
  *   list: () => Array<{ id: string, command: string, status: string, exitCode: number|null }>,
@@ -64,6 +68,12 @@ export function createBgShellRegistry() {
       status: "running",
       exitCode: null,
       startedAt: Date.now(),
+      endedAt: null,
+      cwd,
+      waiters: new Set(),
+    }
+    const notifyWaiters = () => {
+      for (const wake of [...entry.waiters]) wake()
     }
     // Decode bytes auto-detecting the console encoding (UTF-8, or the OEM code
     // page on Windows). One streaming decoder per shell, picked from the first
@@ -87,6 +97,7 @@ export function createBgShellRegistry() {
         // returns a clean delta rather than re-emitting shifted output.
         entry.cursor = Math.max(0, entry.cursor - drop)
       }
+      notifyWaiters()
     }
     child.stdout?.on("data", cap)
     child.stderr?.on("data", cap)
@@ -95,22 +106,28 @@ export function createBgShellRegistry() {
       if (entry.status !== "exited") {
         entry.status = "exited"
         entry.exitCode = entry.exitCode ?? null
+        entry.endedAt = Date.now()
+        notifyWaiters()
       }
     })
     child.on("close", (code) => {
       if (decoder) cap(decoder.decode())
       entry.status = "exited"
       entry.exitCode = code
+      entry.endedAt = Date.now()
+      notifyWaiters()
     })
     shells.set(id, entry)
     return entry
   }
 
-  function read(id, { filter } = {}) {
+  function read(id, { filter, maxChars } = {}) {
     const entry = shells.get(id)
     if (!entry) return { ok: false, reason: "not_found" }
-    let delta = entry.buffer.slice(entry.cursor)
-    entry.cursor = entry.buffer.length
+    const cap = Number.isFinite(maxChars) ? Math.max(1, Math.floor(maxChars)) : undefined
+    const end = cap ? Math.min(entry.buffer.length, entry.cursor + cap) : entry.buffer.length
+    let delta = entry.buffer.slice(entry.cursor, end)
+    entry.cursor = end
     if (filter && delta) {
       try {
         const re = new RegExp(filter)
@@ -123,6 +140,31 @@ export function createBgShellRegistry() {
       }
     }
     return { ok: true, data: delta, status: entry.status, exitCode: entry.exitCode }
+  }
+
+  async function waitForOutput(id, { filter, maxChars, waitMs = 0 } = {}) {
+    const immediate = read(id, { filter, maxChars })
+    if (!immediate.ok || immediate.data || immediate.status === "exited" || waitMs <= 0) {
+      return immediate
+    }
+    const entry = shells.get(id)
+    if (!entry) return { ok: false, reason: "not_found" }
+    const boundedWait = Math.min(Math.max(0, Math.floor(waitMs)), 30_000)
+    return new Promise((resolve) => {
+      let settled = false
+      const finish = () => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        entry.waiters.delete(finish)
+        resolve(read(id, { filter, maxChars }))
+      }
+      const timer = setTimeout(finish, boundedWait)
+      entry.waiters.add(finish)
+      // Close/output may have landed between the immediate read and waiter
+      // registration. Re-check once to avoid sleeping through that race.
+      if (entry.status === "exited" || entry.buffer.length > entry.cursor) finish()
+    })
   }
 
   function kill(id, signal) {
@@ -157,8 +199,12 @@ export function createBgShellRegistry() {
       command: e.command,
       status: e.status,
       exitCode: e.exitCode,
+      startedAt: e.startedAt,
+      endedAt: e.endedAt,
+      durationMs: Math.max(0, (e.endedAt ?? Date.now()) - e.startedAt),
+      cwd: e.cwd,
     }))
   }
 
-  return { spawnBackground, read, kill, killAll, list }
+  return { spawnBackground, read, waitForOutput, kill, killAll, list }
 }

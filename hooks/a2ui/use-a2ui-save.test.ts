@@ -84,4 +84,26 @@ describe("useA2UISave", () => {
     expect(ok).toBe(false)
     expect(upsertApp).not.toHaveBeenCalled()
   })
+
+  it("restores local modification metadata when the durable save fails", async () => {
+    mockSurface = {
+      components: { root: { id: "root" } },
+      dataModel: {},
+      rootId: "root",
+    }
+    const cache = getAppInstancesCache()
+    cache.set("s1", {
+      id: "s1",
+      templateId: "custom",
+      name: "Unsaved",
+      createdAt: 1,
+      lastModified: 10,
+    })
+    ;(upsertApp as jest.Mock).mockRejectedValueOnce(new Error("built-in is read-only"))
+
+    const { result } = renderHook(() => useA2UISave("s1"))
+    await expect(result.current()).rejects.toThrow("built-in is read-only")
+
+    expect(cache.get("s1")?.lastModified).toBe(10)
+  })
 })

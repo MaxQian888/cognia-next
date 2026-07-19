@@ -11,7 +11,7 @@
  */
 
 import React, { useState, useCallback, useMemo, useRef } from "react"
-import { useTranslations } from "next-intl"
+import { useLocale, useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -39,6 +39,7 @@ import {
 } from "lucide-react"
 import { resolveIcon } from "@/lib/a2ui/resolve-icon"
 import { loggers } from "@cognia/logging"
+import { toast } from "sonner"
 import { useA2UIAppBuilder } from "@/hooks/a2ui/use-app-builder"
 import { A2UIInlineSurface } from "./a2ui-surface"
 import { templateCategories, type A2UIAppTemplate } from "@/lib/a2ui/templates"
@@ -52,6 +53,7 @@ import { TemplateCard } from "./quick-app-builder/template-card"
 import { QuickAppCard } from "./quick-app-builder/quick-app-card"
 import { FlashAppTab } from "./quick-app-builder/flash-app-tab"
 import { DeleteConfirmDialog } from "./delete-confirm-dialog"
+import { CATEGORY_I18N_MAP } from "@/lib/a2ui/constants"
 
 export function QuickAppBuilder({
   className,
@@ -67,6 +69,7 @@ export function QuickAppBuilder({
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   const t = useTranslations("a2ui")
+  const locale = useLocale()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Surface plumbing only (processMessages for flash generation); action and
@@ -100,12 +103,15 @@ export function QuickAppBuilder({
 
   const handleFlashGenerate = useCallback(
     async (prompt: string) => {
-      const generatedApp = generateAppFromDescription({ description: prompt })
+      const generatedApp = generateAppFromDescription({
+        description: prompt,
+        language: locale === "zh-CN" ? "zh" : "en",
+      })
       a2ui.processMessages(generatedApp.messages)
       setPreviewAppId(generatedApp.id)
       onAppSelect?.(generatedApp.id)
     },
-    [a2ui, onAppSelect]
+    [a2ui, locale, onAppSelect]
   )
 
   const handleCreateFromTemplate = useCallback(
@@ -131,12 +137,17 @@ export function QuickAppBuilder({
     setDeleteConfirmId(appId)
   }, [])
 
-  const handleConfirmDelete = useCallback(() => {
+  const handleConfirmDelete = useCallback(async () => {
     if (!deleteConfirmId) return
-    appBuilder.deleteApp(deleteConfirmId)
-    if (previewAppId === deleteConfirmId) setPreviewAppId(null)
-    setDeleteConfirmId(null)
-  }, [appBuilder, deleteConfirmId, previewAppId])
+    try {
+      await appBuilder.deleteApp(deleteConfirmId)
+      if (previewAppId === deleteConfirmId) setPreviewAppId(null)
+    } catch (error) {
+      loggers.ui.error("[QuickAppBuilder] Failed to delete app:", error)
+      toast.error(t("deleteFailed"))
+      throw error
+    }
+  }, [appBuilder, deleteConfirmId, previewAppId, t])
 
   const handleDuplicateApp = useCallback(
     (appId: string) => {
@@ -338,7 +349,7 @@ export function QuickAppBuilder({
                       onClick={() => setSelectedCategory(cat.id)}
                     >
                       {CatIcon && <CatIcon className="h-3 w-3 mr-1" />}
-                      {cat.name}
+                      {t(CATEGORY_I18N_MAP[cat.id]!)}
                     </Button>
                   )
                 })}
@@ -361,7 +372,7 @@ export function QuickAppBuilder({
                       onClick={() => setSelectedCategory(cat.id)}
                     >
                       {CatIcon && <CatIcon className="h-4 w-4 mr-2" />}
-                      {cat.name}
+                      {t(CATEGORY_I18N_MAP[cat.id]!)}
                     </Button>
                   )
                 })}

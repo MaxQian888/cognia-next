@@ -108,7 +108,7 @@
         "name": "代码图谱"
       },
       "coreFiles": {
-        "desc": "grep / glob / read / edit / write / bash —— 面向非 Anthropic 模型的完整文件工具套件。写入类工具需审批。",
+        "desc": "面向非 Anthropic 模型的搜索、读取、补丁、Shell、可等待后台命令和结构化会话任务工具集。文件系统和 Shell 变更需审批。",
         "name": "核心文件工具"
       },
       "dependencyResearch": {

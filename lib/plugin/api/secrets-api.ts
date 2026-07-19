@@ -1,11 +1,12 @@
 /**
  * Plugin SecretStorage API — an encrypted, per-plugin secret store.
  *
- * - Desktop (Tauri): routes through the plugin gateway (`plugin_api_invoke` →
+ * - Native execution host (local Tauri, headless brain, or active remote):
+ *   routes through the plugin gateway (`plugin_api_invoke` →
  *   `handle_secrets`), which enforces the `secrets:read`/`secrets:write`
  *   permission tier host-side and persists to the OS keyring, namespaced
  *   `plugin:<id>`.
- * - Browser / mobile: the gateway `invoke` is unavailable, so we delegate to
+ * - Standalone browser / mobile: when no gateway host is active, delegate to
  *   the shared `lib/keyring` AES-GCM IndexedDB fallback under the SAME
  *   `plugin:<id>` namespace. Its passphrase is provisioned (once) from the
  *   stable per-install backup key — no user interaction required.
@@ -15,8 +16,7 @@
  * cannot list). `onDidChange` fires locally after each store/delete.
  */
 
-import { isTauri } from "@/lib/native/utils"
-import { invokePluginApi } from "../core/transport"
+import { invokePluginApi, isPluginGatewayAvailable } from "../core/transport"
 import { getSecret, setSecret, clearSecret, setWebKeyringPassphrase } from "@/lib/keyring"
 import { getDefaultBackupPassphrase } from "@/lib/data/backup-key"
 import { loggers } from "../core/logger"
@@ -88,7 +88,7 @@ export function __resetSecretListenersForTesting(): void {
 let webPassphraseProvisioned = false
 
 async function ensureWebPassphrase(): Promise<void> {
-  if (isTauri() || webPassphraseProvisioned) return
+  if (isPluginGatewayAvailable() || webPassphraseProvisioned) return
   const passphrase = await getDefaultBackupPassphrase()
   if (passphrase) {
     setWebKeyringPassphrase(passphrase)
@@ -98,12 +98,13 @@ async function ensureWebPassphrase(): Promise<void> {
 
 /** Reported on `ctx.capabilities` so a plugin can refuse weaker at-rest storage. */
 export function getSecretsBackendKind(): PluginSecretsBackend {
-  if (isTauri()) return "os-keyring"
+  if (isPluginGatewayAvailable()) return "os-keyring"
   return typeof indexedDB !== "undefined" ? "encrypted-web" : "memory"
 }
 
 async function readSecret(pluginId: string, key: string): Promise<string | null> {
-  if (isTauri()) return invokePluginApi<string | null>(pluginId, "secrets:get", { key })
+  if (isPluginGatewayAvailable())
+    return invokePluginApi<string | null>(pluginId, "secrets:get", { key })
   await ensureWebPassphrase()
   return getSecret({ namespace: namespaceFor(pluginId), key })
 }
@@ -111,7 +112,7 @@ async function readSecret(pluginId: string, key: string): Promise<string | null>
 export function createSecretsAPI(pluginId: string): PluginSecretsAPI {
   return {
     store: async (key: string, value: string): Promise<void> => {
-      if (isTauri()) {
+      if (isPluginGatewayAvailable()) {
         await invokePluginApi<void>(pluginId, "secrets:set", { key, value })
       } else {
         await ensureWebPassphrase()
@@ -124,7 +125,7 @@ export function createSecretsAPI(pluginId: string): PluginSecretsAPI {
     get: (key: string): Promise<string | null> => readSecret(pluginId, key),
 
     delete: async (key: string): Promise<void> => {
-      if (isTauri()) {
+      if (isPluginGatewayAvailable()) {
         await invokePluginApi<void>(pluginId, "secrets:delete", { key })
       } else {
         await ensureWebPassphrase()
@@ -161,7 +162,7 @@ export async function clearPluginSecrets(pluginId: string): Promise<void> {
   const keys = readIndex(pluginId)
   for (const key of keys) {
     try {
-      if (isTauri()) {
+      if (isPluginGatewayAvailable()) {
         await invokePluginApi<void>(pluginId, "secrets:delete", { key })
       } else {
         await ensureWebPassphrase()

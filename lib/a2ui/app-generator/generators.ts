@@ -4,7 +4,13 @@
  */
 
 import type { A2UIComponent, A2UIServerMessage } from "@/types/a2ui/schema"
-import { generateTemplateId } from "../templates"
+import { deepClone } from "../data-model"
+import {
+  formatBuiltInRuntimeMessage,
+  generateTemplateId,
+  localizeTemplate,
+  weatherTemplate,
+} from "../templates"
 import type { GenerationContext } from "./config"
 import { texts, styles } from "./config"
 import {
@@ -22,6 +28,19 @@ import {
   createHealthTrackerComponents,
   createHabitTrackerComponents,
 } from "./component-factories"
+import {
+  localizeDashboardDataModel,
+  localizeGeneratedComponents,
+  type GeneratorFactoryKind,
+} from "./localization"
+
+function localizeFactory(
+  kind: GeneratorFactoryKind,
+  components: A2UIComponent[],
+  ctx?: GenerationContext
+): A2UIComponent[] {
+  return localizeGeneratedComponents(kind, components, ctx?.language ?? "zh")
+}
 
 /**
  * Generated app result
@@ -58,7 +77,7 @@ export function createAppMessages(
 export function generateCalculatorApp(
   name: string,
   description: string,
-  _ctx?: GenerationContext
+  ctx?: GenerationContext
 ): GeneratedApp {
   const id = generateTemplateId("calc")
 
@@ -72,16 +91,16 @@ export function generateCalculatorApp(
   let dataModel: Record<string, unknown>
 
   if (isTipCalculator) {
-    components = createTipCalculatorComponents()
+    components = localizeFactory("tipCalculator", createTipCalculatorComponents(), ctx)
     dataModel = { bill: 0, tipPercent: 15, people: 1, tipAmount: 0, total: 0, perPerson: 0 }
   } else if (isBMI) {
-    components = createBMICalculatorComponents()
+    components = localizeFactory("bmiCalculator", createBMICalculatorComponents(), ctx)
     dataModel = { height: 170, weight: 65, bmi: 0, status: "" }
   } else if (isAge) {
-    components = createAgeCalculatorComponents()
+    components = localizeFactory("ageCalculator", createAgeCalculatorComponents(), ctx)
     dataModel = { birthDate: "", age: "", nextBirthday: "" }
   } else if (isLoan) {
-    components = createLoanCalculatorComponents()
+    components = localizeFactory("loanCalculator", createLoanCalculatorComponents(), ctx)
     dataModel = { principal: 100000, rate: 5, years: 30, monthly: 0, total: 0, interest: 0 }
   } else {
     components = createBasicCalculatorComponents()
@@ -104,7 +123,7 @@ export function generateCalculatorApp(
 export function generateTimerApp(
   name: string,
   description: string,
-  _ctx?: GenerationContext
+  ctx?: GenerationContext
 ): GeneratedApp {
   const id = generateTemplateId("timer")
 
@@ -117,7 +136,11 @@ export function generateTimerApp(
     presetMinutes = parseInt(minuteMatch[1], 10)
   }
 
-  const components = createTimerComponents(isPomodoro)
+  const components = localizeFactory(
+    isPomodoro ? "pomodoro" : "timer",
+    createTimerComponents(isPomodoro),
+    ctx
+  )
   const dataModel = {
     display: "00:00",
     seconds: 0,
@@ -137,13 +160,34 @@ export function generateTimerApp(
   }
 }
 
+/** Generate a weather app from the canonical catalog template. */
+export function generateWeatherApp(
+  name: string,
+  description: string,
+  ctx?: GenerationContext
+): GeneratedApp {
+  const id = generateTemplateId("weather")
+  const template = localizeTemplate(weatherTemplate, ctx?.language === "zh" ? "zh-CN" : "en")
+  const components = deepClone(template.components)
+  const dataModel = deepClone(template.dataModel)
+
+  return {
+    id,
+    name,
+    description,
+    components,
+    dataModel,
+    messages: createAppMessages(id, name, components, dataModel),
+  }
+}
+
 /**
  * Generate todo/task list app
  */
 export function generateTodoApp(
   name: string,
   description: string,
-  _ctx?: GenerationContext
+  ctx?: GenerationContext
 ): GeneratedApp {
   const id = generateTemplateId("todo")
 
@@ -151,12 +195,23 @@ export function generateTodoApp(
   const hasPriority = /优先|priority|重要/i.test(description)
   const hasDueDate = /截止|due|日期|时间/i.test(description)
 
-  const components = createTodoComponents(hasCategories, hasPriority, hasDueDate)
+  const components = localizeFactory(
+    "todo",
+    createTodoComponents(hasCategories, hasPriority, hasDueDate),
+    ctx
+  )
+  const locale = ctx?.language === "en" ? "en" : "zh-CN"
   const dataModel = {
     newTask: "",
     tasks: [],
     filter: "all",
-    stats: { completed: 0, pending: 0, total: 0 },
+    stats: {
+      completed: 0,
+      pending: 0,
+      total: 0,
+      completedText: formatBuiltInRuntimeMessage(locale, "taskCompleted", { count: 0 }),
+      pendingText: formatBuiltInRuntimeMessage(locale, "taskPending", { count: 0 }),
+    },
   }
 
   return {
@@ -175,11 +230,11 @@ export function generateTodoApp(
 export function generateNotesApp(
   name: string,
   description: string,
-  _ctx?: GenerationContext
+  ctx?: GenerationContext
 ): GeneratedApp {
   const id = generateTemplateId("notes")
 
-  const components = createNotesComponents()
+  const components = localizeFactory("notes", createNotesComponents(), ctx)
   const dataModel = {
     searchQuery: "",
     newNote: { title: "", content: "" },
@@ -204,11 +259,14 @@ export function generateFormApp(
   name: string,
   description: string,
   type: "survey" | "contact",
-  _ctx?: GenerationContext
+  ctx?: GenerationContext
 ): GeneratedApp {
   const id = generateTemplateId("form")
 
-  const components = type === "survey" ? createSurveyComponents() : createContactComponents()
+  const components =
+    type === "survey"
+      ? localizeFactory("survey", createSurveyComponents(), ctx)
+      : localizeFactory("contact", createContactComponents(), ctx)
   const dataModel = { form: {}, submitted: false, submitting: false }
 
   return {
@@ -227,7 +285,7 @@ export function generateFormApp(
 export function generateTrackerApp(
   name: string,
   description: string,
-  _ctx?: GenerationContext
+  ctx?: GenerationContext
 ): GeneratedApp {
   const id = generateTemplateId("tracker")
 
@@ -239,7 +297,7 @@ export function generateTrackerApp(
   let dataModel: Record<string, unknown>
 
   if (isExpense) {
-    components = createExpenseTrackerComponents()
+    components = localizeFactory("expenseTracker", createExpenseTrackerComponents(), ctx)
     dataModel = {
       newExpense: { amount: 0, category: "", description: "" },
       expenses: [],
@@ -247,15 +305,21 @@ export function generateTrackerApp(
       budget: 0,
     }
   } else if (isHealth) {
-    components = createHealthTrackerComponents()
+    components = localizeFactory("healthTracker", createHealthTrackerComponents(), ctx)
     dataModel = {
       todayStats: { steps: 0, calories: 0, water: 0, sleep: 0 },
       goals: { steps: 10000, calories: 2000, water: 8, sleep: 8 },
       history: [],
     }
   } else {
-    components = createHabitTrackerComponents()
-    dataModel = { habits: [], today: new Date().toISOString().split("T")[0], streak: 0 }
+    components = localizeFactory("habitTracker", createHabitTrackerComponents(), ctx)
+    const locale = ctx?.language === "en" ? "en" : "zh-CN"
+    dataModel = {
+      habits: [],
+      today: new Date().toISOString().split("T")[0],
+      streak: 0,
+      streakText: formatBuiltInRuntimeMessage(locale, "habitStreak", { count: 0 }),
+    }
   }
 
   return {
@@ -528,7 +592,7 @@ export function generateCustomApp(
     components.push({
       id: "action-btn",
       component: "Button",
-      text: "执行",
+      text: ctx?.texts.execute ?? texts.zh.execute,
       action: "execute",
       variant: "primary",
     } as A2UIComponent)
@@ -552,11 +616,11 @@ export function generateCustomApp(
 export function generateDashboardApp(
   name: string,
   description: string,
-  _ctx?: GenerationContext
+  ctx?: GenerationContext
 ): GeneratedApp {
   const id = generateTemplateId("dashboard")
 
-  const components: A2UIComponent[] = [
+  const baseComponents: A2UIComponent[] = [
     {
       id: "root",
       component: "Column",
@@ -604,8 +668,9 @@ export function generateDashboardApp(
       showGrid: true,
     },
   ] as A2UIComponent[]
+  const components = localizeFactory("dashboard", baseComponents, ctx)
 
-  const dataModel = {
+  const baseDataModel = {
     stats: { value1: "1,234", value2: "567", value3: "+12%" },
     summaryItems: [
       { id: "value-1", title: "数据1", value: "1,234", badge: "Live" },
@@ -626,6 +691,7 @@ export function generateDashboardApp(
       { name: "周日", value: 250 },
     ],
   }
+  const dataModel = localizeDashboardDataModel(baseDataModel, ctx?.language ?? "zh")
 
   return {
     id,

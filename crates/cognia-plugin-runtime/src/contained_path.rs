@@ -129,6 +129,36 @@ pub(crate) fn validate_claimed_plugin_root(
     Ok(expected)
 }
 
+/// Walk a host-owned plugin tree without following links and reject any
+/// symbolic-link entry. JavaScript and Python runtimes can load transitive
+/// sibling modules, so checking only the declared entry file is insufficient.
+pub(crate) fn validate_symlink_free_tree(root: &Path) -> Result<(), String> {
+    let root_metadata = std::fs::symlink_metadata(root)
+        .map_err(|error| format!("stat plugin tree root {root:?}: {error}"))?;
+    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+        return Err("plugin tree root must be a non-symlink directory".into());
+    }
+
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(&directory)
+            .map_err(|error| format!("read plugin directory {directory:?}: {error}"))?
+        {
+            let entry = entry.map_err(|error| format!("read plugin directory entry: {error}"))?;
+            let path = entry.path();
+            let metadata = std::fs::symlink_metadata(&path)
+                .map_err(|error| format!("stat plugin tree entry {path:?}: {error}"))?;
+            if metadata.file_type().is_symlink() {
+                return Err(format!("plugin tree contains a symbolic link: {path:?}"));
+            }
+            if metadata.is_dir() {
+                pending.push(path);
+            }
+        }
+    }
+    Ok(())
+}
+
 fn open_parent_dir(root: &Path, relative: &Path, create: bool) -> Result<(Dir, OsString), String> {
     let mut components = relative.components().peekable();
     let final_name = components
@@ -286,5 +316,6 @@ mod tests {
         symlink(root.path().join("real"), root.path().join("linked")).unwrap();
         let error = resolve_existing_plugin_file(root.path(), "linked/index.js").unwrap_err();
         assert!(error.contains("symbolic link"));
+        assert!(validate_symlink_free_tree(root.path()).is_err());
     }
 }

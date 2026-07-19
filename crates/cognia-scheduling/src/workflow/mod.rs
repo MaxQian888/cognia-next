@@ -69,6 +69,7 @@ mod tests {
         emitter.emit(TriggerEvent {
             workflow_id: "wf".into(),
             kind: "trigger.cron".into(),
+            trigger_id: Some("trg".into()),
             payload: serde_json::Value::Null,
             origin_at: 0,
             binding: None,

@@ -8,8 +8,7 @@
  *  - `types/plugin/plugin.ts` — `PluginPermission`,
  *    `PluginPermissionDecision`, `PluginPermissionPolicy`
  *  - `types/plugin/plugin.ts` — `PluginAPIPermission` (the
- *    extended permission union including the extension-API-only
- *    permissions added by the extended-context surface)
+ *    complete permission union including extension-API-only permissions)
  *
  * The runtime permission API (`PluginPermissionAPI`) lives on
  * `PluginContext` and is re-exported from `@cognia/plugin-sdk/context`.

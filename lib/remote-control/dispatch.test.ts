@@ -197,7 +197,11 @@ describe("dispatchRemoteCommand", () => {
     const ok = await dispatchRemoteCommand(
       cmd({ target: "goal.create", args: { sessionId: "s1", rawObjective: "ship it" } })
     )
-    expect(createGoal).toHaveBeenCalledWith({ sessionId: "s1", rawObjective: "ship it" })
+    expect(createGoal).toHaveBeenCalledWith({
+      sessionId: "s1",
+      rawObjective: "ship it",
+      origin: "remote",
+    })
     expect(ok.status).toBe("accepted")
 
     const bad = await dispatchRemoteCommand(

@@ -29,6 +29,12 @@ pub struct UiaEventPayload {
     pub name: Option<String>,
     pub control_type: Option<String>,
     pub process_id: Option<u32>,
+    /// Property identifier for `property-changed` events.
+    pub property: Option<String>,
+    /// UIA structure-change enum variant for `structure-changed` events.
+    pub structure_change_type: Option<String>,
+    /// Runtime id supplied by the structure event when the provider exposes it.
+    pub runtime_id: Option<Vec<i32>>,
     /// Wall-clock millis when the watcher observed the event.
     pub at: u64,
 }
@@ -87,6 +93,9 @@ mod tests {
             name: Some("OK".into()),
             control_type: Some("Button".into()),
             process_id: Some(42),
+            property: None,
+            structure_change_type: None,
+            runtime_id: None,
             at: 1_000,
         }
     }

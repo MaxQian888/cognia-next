@@ -228,8 +228,7 @@ export function __resetGrammarsForTesting(): void {
 // Mirrors themes-bridge.registerPluginThemes: read each contributed grammar
 // file from the plugin dir, register it, and collect per-entry errors so one
 // bad grammar can't block the rest of the plugin's contributions.
-import { readTextFile } from "@/lib/file/file-operations"
-import { isUnsafeRelativePath, joinPluginPath } from "./plugin-file-path"
+import { isUnsafeRelativePath, readContainedPluginFile } from "./plugin-file-path"
 
 export interface GrammarManifestEntry {
   scopeName: string
@@ -250,7 +249,7 @@ export async function registerGrammarsForPlugin(
       if (isUnsafeRelativePath(entry.path)) {
         throw new Error(`unsafe grammar path "${entry.path}"`)
       }
-      const payload = await readTextFile(joinPluginPath(baseDir, entry.path))
+      const payload = await readContainedPluginFile(pluginId, baseDir, entry.path)
       registerGrammar({
         pluginId,
         scopeName: entry.scopeName,

@@ -514,9 +514,12 @@
     "save": "保存",
     "saved": "WebDAV 设置已保存。",
     "startup": {
+      "autoKeyUnavailable": "此运行环境无法使用自动密钥。",
       "newerBody": "另一台设备上传了更新的快照。打开备份设置以查看并恢复。",
       "newerFound": "你的 WebDAV 服务器上有更新的备份。",
-      "restoreAction": "恢复"
+      "restoreAction": "恢复",
+      "scheduledMissingDestination": "已启用定时备份，但尚未配置可写的目标文件夹。",
+      "syncPassphraseLocked": "WebDAV 上传已跳过，因为本次会话尚未解锁同步密码。"
     },
     "syncFailed": "上传失败：{error}",
     "syncNow": "立即同步",

@@ -69,17 +69,17 @@ export function VersionHistoryPanel() {
                   </div>
                   {i === 0 && (
                     <Badge variant="secondary" className="text-[10px] h-4 px-1 shrink-0">
-                      Latest
+                      {t("latest")}
                     </Badge>
                   )}
                   {i > 0 && (
                     <Button
                       variant="ghost"
-                      size="sm"
-                      className="h-6 px-2 text-[10px] opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                      size="xs"
+                      className="opacity-0 transition-opacity group-hover:opacity-100"
                       onClick={() => handleRestore(originalIndex)}
                     >
-                      <RotateCcw className="h-3 w-3 mr-1" />
+                      <RotateCcw data-icon="inline-start" />
                       {t("restoreVersion")}
                     </Button>
                   )}

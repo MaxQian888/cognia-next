@@ -23,12 +23,12 @@ describe("nodePermissionArgs", () => {
     expect(nodePermissionArgs(EMPTY_SCOPE)).toEqual(["--permission"])
   })
 
-  it("emits --allow-fs-read with a comma-joined list", () => {
+  it("emits one --allow-fs-read flag per path", () => {
     const args = nodePermissionArgs({
       ...EMPTY_SCOPE,
       readPaths: ["/etc", "/var/log"],
     })
-    expect(args).toContain("--allow-fs-read=/etc,/var/log")
+    expect(args).toEqual(["--permission", "--allow-fs-read=/etc", "--allow-fs-read=/var/log"])
   })
 
   it("emits scoped filesystem read and write flags when fully populated", () => {
@@ -59,7 +59,7 @@ describe("nodePermissionArgs", () => {
     expect(args.join(" ")).not.toContain("*")
   })
 
-  it("rejects network host grants because Node 24 has no scoped network flag", () => {
+  it("rejects network host grants because Node has no host-scoped network flag", () => {
     expect(() =>
       nodePermissionArgs({
         permissions: [],
@@ -68,7 +68,7 @@ describe("nodePermissionArgs", () => {
         netHosts: ["api.example.com"],
         allowedSubprocesses: [],
       })
-    ).toThrow(/network grants require a host broker/)
+    ).toThrow(/network grants require a scoped host broker/)
   })
 
   it("rejects subprocess allowlists instead of emitting broad child-process access", () => {
@@ -80,7 +80,7 @@ describe("nodePermissionArgs", () => {
         netHosts: [],
         allowedSubprocesses: ["git"],
       })
-    ).toThrow(/subprocess grants require a host broker/)
+    ).toThrow(/subprocess grants require a scoped host broker/)
   })
 })
 
@@ -117,30 +117,21 @@ describe("buildLaunchArgv", () => {
 })
 
 describe("launchPluginJs", () => {
-  const originalNode24Path = process.env.COGNIA_NODE24_PATH
-  const originalFallbackNode24Path = process.env.NODE24_PATH
-
-  afterEach(() => {
-    if (originalNode24Path === undefined) {
-      delete process.env.COGNIA_NODE24_PATH
-    } else {
-      process.env.COGNIA_NODE24_PATH = originalNode24Path
-    }
-    if (originalFallbackNode24Path === undefined) {
-      delete process.env.NODE24_PATH
-    } else {
-      process.env.NODE24_PATH = originalFallbackNode24Path
-    }
-  })
-
-  it("spawns the plugin entry through buildLaunchArgv under the selected node binary", async () => {
-    const on = jest.fn()
-    const child = { pid: 42, killed: false, kill: jest.fn(), on } as never
-    const spawn = jest.fn(() => child)
+  it("launches through the native host and returns a stoppable process proxy", async () => {
+    const hostInvoker = jest
+      .fn()
+      .mockResolvedValueOnce({
+        command: "/opt/node26/bin/node",
+        argv: ["--permission", "--allow-fs-read=/plugins/demo", "/plugins/demo/index.mjs"],
+        generation: "11111111-1111-4111-8111-111111111111",
+        activation: { calls: [], hooks: {}, exports: {} },
+      })
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(undefined)
     const result = await launchPluginJs({
       pluginId: "demo.node",
-      entryPath: "/plugins/demo/index.mjs",
-      nodePath: "/opt/node24/bin/node",
+      entryPath: "index.mjs",
+      cwd: "/plugins/demo",
       scope: {
         permissions: ["filesystem:read"],
         readPaths: ["/plugins/demo"],
@@ -148,93 +139,38 @@ describe("launchPluginJs", () => {
         netHosts: [],
         allowedSubprocesses: [],
       },
-      spawn,
+      hostInvoker,
     })
 
-    expect(result.argv).toEqual([
-      "--permission",
-      "--allow-fs-read=/plugins/demo",
-      "/plugins/demo/index.mjs",
-    ])
-    expect(spawn).toHaveBeenCalledWith(
-      "/opt/node24/bin/node",
-      result.argv,
-      expect.objectContaining({
-        windowsHide: true,
-        stdio: ["ignore", "pipe", "pipe"],
-      })
-    )
-    expect(result.process).toBe(child)
-  })
-
-  it("resolves the Node 24 binary from COGNIA_NODE24_PATH when no explicit path is provided", async () => {
-    process.env.COGNIA_NODE24_PATH = "/opt/cognia/node24"
-    const child = { pid: 7, killed: false, kill: jest.fn(), on: jest.fn() } as never
-    const spawn = jest.fn(() => child)
-
-    const result = await launchPluginJs({
+    expect(hostInvoker).toHaveBeenNthCalledWith(1, "plugin_launch_js", {
       pluginId: "demo.node",
-      entryPath: "/plugins/demo/index.mjs",
-      scope: EMPTY_SCOPE,
-      spawn,
+      pluginPath: "/plugins/demo",
+      entry: "index.mjs",
+      extraArgs: [],
     })
-
-    expect(result.command).toBe("/opt/cognia/node24")
-    expect(spawn).toHaveBeenCalledWith(
-      "/opt/cognia/node24",
-      ["--permission", "/plugins/demo/index.mjs"],
-      expect.any(Object)
-    )
-  })
-
-  it("falls back to NODE24_PATH when COGNIA_NODE24_PATH is unset", async () => {
-    delete process.env.COGNIA_NODE24_PATH
-    process.env.NODE24_PATH = "/opt/node24"
-    const child = { pid: 8, killed: false, kill: jest.fn(), on: jest.fn() } as never
-    const spawn = jest.fn(() => child)
-
-    const result = await launchPluginJs({
+    await expect(result.process.isRunning()).resolves.toBe(true)
+    await result.process.kill()
+    expect(hostInvoker).toHaveBeenNthCalledWith(2, "plugin_js_status", {
       pluginId: "demo.node",
-      entryPath: "/plugins/demo/index.mjs",
-      scope: EMPTY_SCOPE,
-      spawn,
+      generation: "11111111-1111-4111-8111-111111111111",
     })
-
-    expect(result.command).toBe("/opt/node24")
-  })
-
-  it("uses the current Node 24 process when no env override is configured", async () => {
-    delete process.env.COGNIA_NODE24_PATH
-    delete process.env.NODE24_PATH
-    const major = Number.parseInt(process.versions.node.split(".")[0] ?? "", 10)
-    if (major < 24) return
-    const child = { pid: 9, killed: false, kill: jest.fn(), on: jest.fn() } as never
-    const spawn = jest.fn(() => child)
-
-    const result = await launchPluginJs({
+    expect(hostInvoker).toHaveBeenNthCalledWith(3, "plugin_stop_js", {
       pluginId: "demo.node",
-      entryPath: "/plugins/demo/index.mjs",
-      scope: EMPTY_SCOPE,
-      spawn,
+      generation: "11111111-1111-4111-8111-111111111111",
     })
-
-    expect(result.command).toBe(process.execPath)
-    expect(spawn).toHaveBeenCalledWith(
-      process.execPath,
-      ["--permission", "/plugins/demo/index.mjs"],
-      expect.any(Object)
-    )
+    expect(result.process.killed).toBe(true)
   })
 
   it("rejects missing plugin ids and entry paths before spawning", async () => {
-    const spawn = jest.fn()
+    const hostInvoker = jest.fn()
 
     await expect(
       launchPluginJs({
         pluginId: " ",
-        entryPath: "/plugins/demo/index.mjs",
+        entryPath: "index.mjs",
+        cwd: "/plugins/demo",
         scope: EMPTY_SCOPE,
-        spawn,
+        hostInvoker,
       })
     ).rejects.toThrow(/pluginId is required/)
 
@@ -242,23 +178,39 @@ describe("launchPluginJs", () => {
       launchPluginJs({
         pluginId: "demo.node",
         entryPath: " ",
+        cwd: "/plugins/demo",
         scope: EMPTY_SCOPE,
-        spawn,
+        hostInvoker,
       })
     ).rejects.toThrow(/entryPath is required/)
 
-    expect(spawn).not.toHaveBeenCalled()
+    expect(hostInvoker).not.toHaveBeenCalled()
+  })
+
+  it("rejects a missing installed plugin root before spawning", async () => {
+    const hostInvoker = jest.fn()
+
+    await expect(
+      launchPluginJs({
+        pluginId: "demo.node",
+        entryPath: "index.mjs",
+        scope: EMPTY_SCOPE,
+        hostInvoker,
+      })
+    ).rejects.toThrow(/cwd is required/)
+
+    expect(hostInvoker).not.toHaveBeenCalled()
   })
 
   it("rejects wildcard argv values after building the full launch command", async () => {
     await expect(
       launchPluginJs({
         pluginId: "demo.node",
-        entryPath: "/plugins/demo/index.mjs",
-        nodePath: "/opt/node24/bin/node",
+        entryPath: "index.mjs",
+        cwd: "/plugins/demo",
         scope: EMPTY_SCOPE,
         extraArgs: ["*"],
-        spawn: jest.fn(),
+        hostInvoker: jest.fn(),
       })
     ).rejects.toThrow(/wildcard grants are forbidden/)
   })

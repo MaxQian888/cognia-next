@@ -18,8 +18,8 @@ describe("StandaloneSearchPage", () => {
     expect(screen.getByTestId("standalone-search-panel")).toBeInTheDocument()
   })
 
-  it("links the back button to /me", () => {
+  it("renders the shared back control with the localized label", () => {
     render(<Page />)
-    expect(screen.getByTestId("mobile-sub-page-back").closest("a")).toHaveAttribute("href", "/me")
+    expect(screen.getByTestId("mobile-sub-page-back")).toHaveAccessibleName("Back to Me")
   })
 })

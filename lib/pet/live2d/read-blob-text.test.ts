@@ -1,3 +1,5 @@
+/** @jest-environment jsdom */
+
 import { readBlobText } from "./read-blob-text"
 
 describe("readBlobText", () => {
@@ -53,3 +55,4 @@ describe("readBlobText", () => {
     }
   })
 })
+/** @jest-environment jsdom */

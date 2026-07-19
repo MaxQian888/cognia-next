@@ -30,6 +30,25 @@
     "heading": "混合检索",
     "label": "混合检索"
   },
+  "useMemory": {
+    "description": "允许符合条件的对话召回已保存记忆；每个对话可单独覆盖。",
+    "heading": "使用记忆",
+    "label": "使用记忆"
+  },
+  "learnFromChats": {
+    "description": "在后台从符合条件的对话学习耐久事实；可与召回开关分别按对话覆盖。",
+    "heading": "从对话学习",
+    "label": "从对话学习"
+  },
+  "externalContext": {
+    "description": "使用网页搜索、MCP、屏幕上下文或连接器的轮次不自动学习；本地代码工具仍可学习。",
+    "heading": "阻止外部上下文学习",
+    "label": "阻止外部上下文学习"
+  },
+  "tokenBudget": { "label": "召回 Token 预算" },
+  "relevanceFloor": { "label": "最低召回相关度" },
+  "halfLife": { "label": "新近度半衰期（天）" },
+  "maxIdle": { "label": "未使用后遗忘天数（0 为永不）" },
   "manage": "管理记忆",
   "queryExpansion": {
     "description": "召回记忆时用同义词扩展加宽关键词检索。",
@@ -38,8 +57,9 @@
   },
   "scope": {
     "character": "按人格",
-    "description": "新记忆存放的位置。全局记忆在所有人格间共享。",
+    "description": "新记忆的存储位置。相同稳定键下，更窄的作用域覆盖更宽的记忆。",
     "global": "全局（所有人格）",
+    "workspace": "当前工作区",
     "heading": "默认作用域"
   },
   "temporary": {

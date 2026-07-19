@@ -52,6 +52,8 @@ function makeRegistration(overrides: Partial<TriggerRegistration> = {}): Trigger
 
 const startCtx: PluginTriggerStartContext = {
   workflowId: "wf-1",
+  triggerId: "root-1",
+  params: {},
 } as unknown as PluginTriggerStartContext
 
 beforeEach(() => {
@@ -136,10 +138,18 @@ describe("unregisterPluginTrigger", () => {
   it("stops live instances, clears the map, and emits an unregister event", async () => {
     const stop = jest.fn().mockResolvedValue(undefined)
     const reg = makeRegistration()
-    reg.instances.set("wf-a", { kind: reg.kind, workflowId: "wf-a", stop })
+    reg.instances.set("wf-a::root-a", {
+      kind: reg.kind,
+      workflowId: "wf-a",
+      triggerId: "root-a",
+      paramsSignature: "{}",
+      stop,
+    })
     reg.instances.set("wf-b", {
       kind: reg.kind,
       workflowId: "wf-b",
+      triggerId: "root-b",
+      paramsSignature: "{}",
       stop: jest.fn().mockResolvedValue(undefined),
     })
     registerPluginTrigger(reg)
@@ -171,10 +181,18 @@ describe("unregisterPluginTrigger", () => {
     reg.instances.set("wf-a", {
       kind: reg.kind,
       workflowId: "wf-a",
+      triggerId: "root-a",
+      paramsSignature: "{}",
       stop: jest.fn().mockRejectedValue(new Error("teardown failed")),
     })
     const otherStop = jest.fn().mockResolvedValue(undefined)
-    reg.instances.set("wf-b", { kind: reg.kind, workflowId: "wf-b", stop: otherStop })
+    reg.instances.set("wf-b", {
+      kind: reg.kind,
+      workflowId: "wf-b",
+      triggerId: "root-b",
+      paramsSignature: "{}",
+      stop: otherStop,
+    })
     registerPluginTrigger(reg)
 
     await unregisterPluginTrigger("trigger.foo.bar", 1)
@@ -205,8 +223,57 @@ describe("startPluginTriggerInstance", () => {
     expect(handle).toBeDefined()
     expect(handle?.kind).toBe("trigger.foo.bar")
     expect(handle?.workflowId).toBe("wf-1")
-    expect(reg.instances.get("wf-1")).toBe(handle)
-    expect(handle?.stop).toBe(stop)
+    expect(reg.instances.get("wf-1::root-1")).toBe(handle)
+    expect(handle?.triggerId).toBe("root-1")
+    await handle?.stop()
+    expect(stop).toHaveBeenCalledTimes(1)
+    expect(reg.instances.size).toBe(0)
+  })
+
+  it("keeps only the newest handle when the same exact binding starts concurrently", async () => {
+    const resolvers: Array<(handle: { stop: jest.Mock }) => void> = []
+    const startSpy = jest.fn(
+      () =>
+        new Promise<{ stop: jest.Mock }>((resolve) => {
+          resolvers.push(resolve)
+        })
+    )
+    const reg = makeRegistration({ def: makeDef({ start: startSpy }) })
+    registerPluginTrigger(reg)
+    const first = startPluginTriggerInstance("trigger.foo.bar", 1, startCtx)
+    const second = startPluginTriggerInstance("trigger.foo.bar", 1, startCtx)
+    await Promise.resolve()
+    const firstStop = jest.fn(async () => undefined)
+    const secondStop = jest.fn(async () => undefined)
+
+    resolvers[0]({ stop: firstStop })
+    await expect(first).resolves.toBeUndefined()
+    resolvers[1]({ stop: secondStop })
+    const live = await second
+
+    expect(firstStop).toHaveBeenCalledTimes(1)
+    expect(secondStop).not.toHaveBeenCalled()
+    expect(reg.instances.get("wf-1::root-1")).toBe(live)
+  })
+
+  it("stops an in-flight source when its registration is removed", async () => {
+    let resolveStart!: (handle: { stop: jest.Mock }) => void
+    const startSpy = jest.fn(
+      () =>
+        new Promise<{ stop: jest.Mock }>((resolve) => {
+          resolveStart = resolve
+        })
+    )
+    registerPluginTrigger(makeRegistration({ def: makeDef({ start: startSpy }) }))
+    const pending = startPluginTriggerInstance("trigger.foo.bar", 1, startCtx)
+    await Promise.resolve()
+    await unregisterPluginTrigger("trigger.foo.bar", 1)
+    const stop = jest.fn(async () => undefined)
+
+    resolveStart({ stop })
+
+    await expect(pending).resolves.toBeUndefined()
+    expect(stop).toHaveBeenCalledTimes(1)
   })
 })
 

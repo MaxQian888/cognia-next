@@ -1,8 +1,15 @@
 {
   "add": {
     "cancel": "取消",
-    "description": "手动保存一条耐久事实。以显式来源存入全局作用域。",
+    "agentIdLabel": "Agent ID",
+    "branchLabel": "分支（可选）",
+    "characterIdLabel": "角色 ID",
+    "description": "手动保存一条耐久事实，并以显式来源设置可选的精细作用域。",
     "importanceLabel": "重要度",
+    "pathPatternLabel": "路径前缀（可选）",
+    "projectIdLabel": "项目 ID",
+    "projectIdOptionalLabel": "项目 ID（可选）",
+    "scopeLabel": "作用域",
     "submit": "新增记忆",
     "tagsLabel": "标签",
     "tagsPlaceholder": "用逗号分隔的标签",
@@ -26,22 +33,30 @@
     "unpin": "取消置顶"
   },
   "detail": {
+    "auditTitle": "审计历史",
     "cancel": "取消",
     "close": "关闭",
+    "conflictGone": "冲突记忆已被删除。",
+    "conflictsWith": "冲突对象",
     "deleteConfirm": {
       "cancel": "取消",
       "confirm": "删除",
       "description": "这将永久删除该记忆，且无法撤销。",
       "title": "删除这条记忆？"
     },
+    "evidenceTitle": "证据记录",
     "fields": {
       "accessCount": "召回次数",
       "archivedAt": "归档于",
       "created": "创建于",
+      "contamination": "上下文信任",
+      "evidence": "证据",
       "importance": "重要度",
       "indexed": "已索引",
       "key": "键",
       "lastUsed": "最近使用",
+      "review": "审核",
+      "scope": "作用域",
       "updated": "更新于",
       "version": "版本"
     },
@@ -51,6 +66,7 @@
     "previous": "上一条记忆",
     "replacedBy": "已被替换为",
     "replacedByGone": "替换它的记忆已被删除。",
+    "recordCount": "{count} 条",
     "save": "保存",
     "source": "来源",
     "tagsLabel": "标签",
@@ -114,10 +130,24 @@
     "system": "系统",
     "user": "自动（对话）"
   },
+  "governance": {
+    "clean": "干净",
+    "conflict": "冲突",
+    "external-context": "外部上下文",
+    "legacy": "旧记忆 / 无证据",
+    "markConflict": "标记冲突",
+    "markVerified": "标记已验证",
+    "supported": "有证据",
+    "unknown": "未知",
+    "unreviewed": "未审核",
+    "verified": "已验证"
+  },
   "scopes": {
+    "agent": "Agent",
     "all": "所有作用域",
     "character": "角色",
-    "global": "全局"
+    "global": "全局",
+    "workspace": "工作区"
   },
   "types": {
     "episodic": "事件",

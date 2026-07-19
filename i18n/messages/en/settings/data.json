@@ -514,9 +514,12 @@
     "save": "Save",
     "saved": "WebDAV settings saved.",
     "startup": {
+      "autoKeyUnavailable": "Auto-key is unavailable on this runtime.",
       "newerBody": "Another device uploaded a newer snapshot. Open backup settings to review and restore it.",
       "newerFound": "A newer backup is available on your WebDAV server.",
-      "restoreAction": "Restore"
+      "restoreAction": "Restore",
+      "scheduledMissingDestination": "Scheduled backup is enabled, but no writable destination folder is configured.",
+      "syncPassphraseLocked": "WebDAV upload was skipped because the sync passphrase is locked for this session."
     },
     "syncFailed": "Upload failed: {error}",
     "syncNow": "Sync now",

@@ -102,6 +102,21 @@ pub fn record(kind: &str, device_id: &str, scope: &str, decision: &str, fields: 
     }
 }
 
+/// Append an audit record without blocking the async companion request loop on
+/// directory creation, rotation, or disk writes.
+pub async fn record_async(kind: &str, device_id: &str, scope: &str, decision: &str, fields: Value) {
+    let kind = kind.to_owned();
+    let device_id = device_id.to_owned();
+    let scope = scope.to_owned();
+    let decision = decision.to_owned();
+    if let Err(error) =
+        tokio::task::spawn_blocking(move || record(&kind, &device_id, &scope, &decision, fields))
+            .await
+    {
+        log::error!("audit log task failed: {error}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

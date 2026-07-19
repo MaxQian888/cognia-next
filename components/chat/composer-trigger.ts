@@ -5,9 +5,9 @@
 // unit-tested without rendering.
 //
 // Rules (intentionally close to Claude Code's behaviour):
-//   - `/cmd` and `!shell` and `#mem` only count when they are the **first**
-//     non-whitespace characters of the textarea — anywhere else, a `/` or `!`
-//     or `#` is a regular character (URLs, paths, math, hashtags).
+//   - `/cmd` counts at the start of any line. `!shell` and `#mem` only count
+//     when they are the **first** non-whitespace characters of the textarea —
+//     anywhere else they are regular characters (URLs, paths, math, hashtags).
 //   - `@path` triggers anywhere as long as the `@` follows whitespace or the
 //     line start. This skips email addresses (`user@host`).
 //   - The token ends at the next whitespace; backspacing over the trigger
@@ -16,15 +16,7 @@
 import { findTokenEnd, isMentionStart } from "@/lib/slash-commands/mention-boundary"
 
 export type TriggerKind =
-  | "slash"
-  | "file"
-  | "bash"
-  | "memory"
-  | "agent"
-  | "skill"
-  | "preset"
-  | "wfNode"
-  | "wfEdge"
+  "slash" | "file" | "bash" | "memory" | "agent" | "skill" | "preset" | "wfNode" | "wfEdge"
 
 export type MentionMode = "files" | "agents" | "combined" | "workflow"
 

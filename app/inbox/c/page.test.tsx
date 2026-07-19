@@ -42,6 +42,10 @@ jest.mock("@/components/inbox/draft-banner", () => ({
   DraftBanner: () => <div data-testid="draft-banner-stub" />,
 }))
 
+jest.mock("@/components/inbox/conversation-activity-log", () => ({
+  ConversationActivityLog: () => <div data-testid="conversation-activity-log-stub" />,
+}))
+
 jest.mock("@/components/chat/chat-view", () => ({
   ChatPane: () => <div data-testid="chat-pane-stub" />,
 }))

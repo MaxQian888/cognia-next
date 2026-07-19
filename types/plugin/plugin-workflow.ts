@@ -99,6 +99,8 @@ export interface PluginTriggerHandle {
 export interface PluginTriggerStartContext {
   /** The workflow this trigger feeds. */
   workflowId: string
+  /** Exact trigger-node root this live source instance feeds. */
+  triggerId: string
   /** Workflow author's per-instance trigger params. */
   params: Record<string, unknown>
   /**

@@ -2,7 +2,9 @@
  * @jest-environment jsdom
  */
 
-import { renderHook } from "@testing-library/react"
+import { act, renderHook } from "@testing-library/react"
+import type { Transport } from "@/lib/tauri/transport-types"
+import { __resetRoutingForTests, setActiveRemoteTransport } from "@/lib/tauri/transport-routing"
 
 import { capabilityAvailable, useCapability, useHostProfile } from "./use-host-profile"
 
@@ -13,9 +15,14 @@ jest.mock("@/lib/platform/detect", () => ({
 }))
 
 beforeEach(() => {
+  __resetRoutingForTests()
   platformMock = "web"
   delete process.env.NEXT_PUBLIC_COGNIA_SERVER_URL
   window.localStorage.clear()
+})
+
+afterEach(() => {
+  __resetRoutingForTests()
 })
 
 describe("useHostProfile", () => {
@@ -58,11 +65,32 @@ describe("useCapability — local OR server-backed", () => {
     expect(renderHook(() => useCapability("sidecar")).result.current).toBe(false)
     expect(renderHook(() => useCapability("webview")).result.current).toBe(true)
   })
+
+  it("reacts when a desktop starts and stops driving a remote headless host", () => {
+    platformMock = "tauri"
+    const { result } = renderHook(() => useCapability("headless"))
+    expect(result.current).toBe(false)
+
+    const remote: Transport = {
+      call: jest.fn(),
+      subscribe: jest.fn(() => () => undefined),
+    }
+    act(() => setActiveRemoteTransport(remote))
+    expect(result.current).toBe(true)
+
+    act(() => setActiveRemoteTransport(null))
+    expect(result.current).toBe(false)
+  })
 })
 
 describe("capabilityAvailable", () => {
   it("is the pure form of the same rule", () => {
     expect(capabilityAvailable("sidecar", "cloud-companion")).toBe(true)
     expect(capabilityAvailable("sidecar", "web-standalone")).toBe(false)
+  })
+
+  it("adds server-backed capabilities for a desktop with an active remote", () => {
+    expect(capabilityAvailable("headless", "desktop", true)).toBe(true)
+    expect(capabilityAvailable("uia-automation", "desktop", true)).toBe(false)
   })
 })

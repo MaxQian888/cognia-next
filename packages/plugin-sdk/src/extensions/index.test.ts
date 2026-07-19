@@ -1,10 +1,5 @@
 import * as sdk from "./index"
-import type {
-  CanonicalExtensionPoint,
-  ExtensionPoint,
-  ExtensionOptions,
-  PluginPointContract,
-} from "./index"
+import type { CanonicalExtensionPoint, ExtensionPoint, ExtensionOptions } from "./index"
 
 describe("plugin-sdk: extensions", () => {
   it("re-exports the canonical extension-point list as a non-empty const tuple", () => {
@@ -12,10 +7,8 @@ describe("plugin-sdk: extensions", () => {
     expect(sdk.CANONICAL_EXTENSION_POINTS.length).toBeGreaterThan(0)
   })
 
-  it("getExtensionPointContract resolves a canonical point", () => {
-    const point = sdk.CANONICAL_EXTENSION_POINTS[0]
-    const contract: PluginPointContract = sdk.getExtensionPointContract(point)
-    expect(contract.id).toBeDefined()
+  it("does not expose host proof lookup helpers", () => {
+    expect((sdk as Record<string, unknown>).getExtensionPointContract).toBeUndefined()
   })
 
   it("ExtensionPoint is an alias of CanonicalExtensionPoint", () => {

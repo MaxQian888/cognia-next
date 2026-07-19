@@ -6,6 +6,7 @@ import {
   applyDisabledPluginsToStore,
   ensurePluginRuntime,
   installPluginRuntimeShims,
+  pluginDiscoveryRoots,
 } from "./plugin-runtime"
 
 function makeStore(statuses: Record<string, string>) {
@@ -60,6 +61,25 @@ describe("installPluginRuntimeShims", () => {
     expect(JSON.parse((g.localStorage as Storage).getItem("cognia.plugins.policy")!)).toEqual({
       signatureRequired: true,
     })
+  })
+})
+
+describe("pluginDiscoveryRoots", () => {
+  it("adds the shared headless data directory without duplicating existing roots", () => {
+    expect(
+      pluginDiscoveryRoots(
+        { NODE_ENV: "test", COGNIA_DATA_DIR: "/data" },
+        "/workspace",
+        "/home/cognia"
+      )
+    ).toEqual(["/workspace", "/home/cognia", "/data"])
+    expect(
+      pluginDiscoveryRoots(
+        { NODE_ENV: "test", COGNIA_DATA_DIR: "/home/cognia" },
+        "/workspace",
+        "/home/cognia"
+      )
+    ).toEqual(["/workspace", "/home/cognia"])
   })
 })
 
@@ -199,5 +219,41 @@ describe("ensurePluginRuntime", () => {
       manifestCount: () => 0,
     })
     expect(result).toEqual({ ok: false, toolCount: 0, error: "guard boom" })
+  })
+
+  it("enables the canonical Python runtime only for the supervised headless brain", async () => {
+    jest.resetModules()
+    ;(globalThis as Record<string, unknown>).__COGNIA_HEADLESS__ = true
+    const initializePluginManager = jest.fn(async () => undefined)
+    const frontendImporter = jest.fn()
+    jest.doMock("@/lib/plugin/core/manager", () => ({ initializePluginManager }))
+    jest.doMock("./node-importer", () => ({
+      makeNodeFrontendImporter: () => frontendImporter,
+    }))
+
+    const fresh = await import("./plugin-runtime")
+    fresh.__resetPluginRuntimeForTesting()
+    const result = await fresh.ensurePluginRuntime({
+      installShims: () => {},
+      installIndexedDb: async () => {},
+      configureGuard: () => {},
+      applyDisabled: () => {},
+      registerDisk: () => {},
+      manifestCount: () => 0,
+    })
+
+    expect(result.ok).toBe(true)
+    expect(initializePluginManager).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeProfile: "headless",
+        enablePython: true,
+        frontendImporter,
+        nodeHostInvoker: expect.any(Function),
+      })
+    )
+
+    delete (globalThis as Record<string, unknown>).__COGNIA_HEADLESS__
+    jest.dontMock("@/lib/plugin/core/manager")
+    jest.dontMock("./node-importer")
   })
 })

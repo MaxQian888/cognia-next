@@ -20,6 +20,11 @@ jest.mock("@/lib/browser/agent-engine", () => {
     readConsole: jest.fn(async () => [{ level: "warn", text: "x", ts: 1 }]),
     readNetwork: jest.fn(async () => []),
     getPage: jest.fn(async () => ({ url: state.url, title: "t" })),
+    listPages: jest.fn(async () => [{ id: "page-1", url: state.url, title: "t", active: true }]),
+    activatePage: jest.fn(async () => {}),
+    closePage: jest.fn(async () => {}),
+    setFiles: jest.fn(async () => {}),
+    downloads: jest.fn(async () => []),
     back: jest.fn(async () => {}),
     forward: jest.fn(async () => {}),
     reload: jest.fn(async () => {}),
@@ -137,8 +142,27 @@ describe("browser-tools plugin", () => {
         "browser_press_key",
         "browser_scroll",
         "browser_evaluate",
+        "browser_pages",
+        "browser_switch_page",
+        "browser_close_page",
+        "browser_set_files",
+        "browser_downloads",
       ])
     )
+  })
+
+  it("exposes multi-page and file bridge operations without backend-specific names", async () => {
+    const tools = await collectTools()
+    await tools.browser_pages({})
+    await tools.browser_switch_page({ pageId: "page-2" })
+    await tools.browser_close_page({ pageId: "page-1" })
+    await tools.browser_set_files({ ref: "opaque", paths: ["fixtures/avatar.png"] })
+    await tools.browser_downloads({})
+    expect(engine.listPages).toHaveBeenCalled()
+    expect(engine.activatePage).toHaveBeenCalledWith("page-2")
+    expect(engine.closePage).toHaveBeenCalledWith("page-1")
+    expect(engine.setFiles).toHaveBeenCalledWith("opaque", ["fixtures/avatar.png"])
+    expect(engine.downloads).toHaveBeenCalled()
   })
 
   it("browser_annotate resolves the live ref and saves a pending annotation", async () => {
@@ -514,8 +538,8 @@ describe("browser-tools plugin", () => {
     expect(providers).toHaveLength(1)
     const text = providers[0].provide()
     expect(text).toMatch(/browser_snapshot/)
-    // Steers public-site automation to the separately-attached Playwright MCP.
-    expect(text).toMatch(/mcp__playwright__/)
+    expect(text).toMatch(/RemoteChromiumEngine/)
+    expect(text).toMatch(/human must take control/i)
     await expect(definition.deactivate!({} as never)).resolves.toBeUndefined()
   })
 

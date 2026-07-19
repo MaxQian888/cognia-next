@@ -383,6 +383,8 @@ export interface BrowserSnapshot {
   url: string
   title: string
   nodes: SnapshotNode[]
+  /** Third-party subresource domains blocked by the remote session policy. */
+  blockedDomains?: string[]
 }
 
 /** Result of a `browser_*` mutating action. `generation` is the live tree id. */

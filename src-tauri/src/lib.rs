@@ -375,6 +375,42 @@ pub fn run() {
         // the renderer heartbeat command, read by the polling loop spawned in
         // setup() once the main window exists.
         .manage(webview_watchdog::WebviewWatchdog::new())
+        .manage(browser::embedded::EmbeddedBrowserLease::default())
+        // Arm the boot-time force-show safety net only after the initial main
+        // document has finished loading. In dev, Next.js compiles `/` on its
+        // first request and can legitimately take longer than the 8s grace;
+        // measuring from process boot exposed the still-unpainted black webview.
+        .on_page_load(|webview, payload| {
+            if !webview_watchdog::should_arm_boot_reveal(
+                webview.label(),
+                payload.event() == tauri::webview::PageLoadEvent::Finished,
+            ) {
+                return;
+            }
+
+            let watchdog = webview.state::<webview_watchdog::WebviewWatchdog>();
+            if !watchdog.record_initial_load_finished(std::time::Instant::now()) {
+                return;
+            }
+
+            let handle = webview.app_handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(webview_watchdog::BOOT_REVEAL_GRACE).await;
+                let Some(window) = handle.get_webview_window("main") else {
+                    return;
+                };
+                let visible = window.is_visible().unwrap_or(true);
+                let watchdog = handle.state::<webview_watchdog::WebviewWatchdog>();
+                if watchdog.poll_boot_reveal(std::time::Instant::now(), visible)
+                    == webview_watchdog::BootRevealAction::Reveal
+                {
+                    log::warn!(
+                        "main window still hidden 8s after document load; force-showing (renderer never signaled first paint)"
+                    );
+                    window_utils::bring_window_to_front(&window);
+                }
+            });
+        })
         .manage(std::sync::Arc::new(shortcuts::ShortcutRegistry::default()))
         .manage(connectors::ConnectorsState::new())
         .manage(connectors::commands::ConnectorsServer(std::sync::Arc::new(
@@ -575,6 +611,7 @@ pub fn run() {
             window_behavior::get_close_behavior,
             window_behavior::resolve_close_request,
             webview_watchdog::webview_heartbeat,
+            webview_watchdog::webview_acknowledge_boot_reveal,
             webview_watchdog::webview_take_recovery_notice,
             pet_window::open_pet_window,
             pet_window::reveal_pet_window,
@@ -985,6 +1022,13 @@ pub fn run() {
             plugin_api::lifecycle::plugin_enable,
             plugin_api::lifecycle::plugin_disable,
             plugin_api::lifecycle::plugin_unload,
+            plugin_api::lifecycle::plugin_read_entry,
+            plugin_api::lifecycle::plugin_read_entry_base64,
+            plugin_api::lifecycle::plugin_launch_js,
+            plugin_api::lifecycle::plugin_invoke_js_callback,
+            plugin_api::lifecycle::plugin_deactivate_js,
+            plugin_api::lifecycle::plugin_stop_js,
+            plugin_api::lifecycle::plugin_js_status,
             plugin_api::lifecycle::plugin_install,
             plugin_api::lifecycle::plugin_uninstall,
             plugin_api::lifecycle::plugin_get_all,
@@ -1494,27 +1538,6 @@ pub fn run() {
                 // it centered on a live display. FULLSCREEN restore is already
                 // disabled at the plugin level above.
                 window_recovery::recenter_if_offscreen(&window);
-
-                // White-flash safety net. The window is created hidden
-                // (`visible:false`); the renderer reveals it via
-                // `getCurrentWindow().show()` after first paint. If the
-                // renderer never gets there (JS crash, hung hydrate), force the
-                // window visible after a grace period so a boot failure can
-                // never leave an alive-but-invisible process.
-                {
-                    let handle = app.handle().clone();
-                    tauri::async_runtime::spawn(async move {
-                        tokio::time::sleep(std::time::Duration::from_secs(8)).await;
-                        if let Some(window) = handle.get_webview_window("main") {
-                            if !window.is_visible().unwrap_or(true) {
-                                log::warn!(
-                                    "main window still hidden 8s after boot; force-showing (renderer never signaled first paint)"
-                                );
-                                window_utils::bring_window_to_front(&window);
-                            }
-                        }
-                    });
-                }
 
                 // Runtime white-screen watchdog. The renderer beats a
                 // realm-lifetime heartbeat; if it goes silent while the window

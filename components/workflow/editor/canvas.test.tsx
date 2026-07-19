@@ -10,7 +10,7 @@ import { runWorkflow } from "@/lib/workflow/runtime/orchestrator"
 import { toast } from "sonner"
 import type { VisualWorkflow } from "@/types/workflow/visual"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
-import { createWorkflow } from "@/lib/db/workflows"
+import { createWorkflow, getWorkflow } from "@/lib/db/workflows"
 
 function renderWithProviders(ui: React.ReactElement) {
   return render(<TooltipProvider>{ui}</TooltipProvider>)
@@ -181,6 +181,41 @@ describe("WorkflowEditorCanvas", () => {
     expect(screen.getByText("Saved")).toBeInTheDocument()
   })
 
+  it("marks imported JSON dirty and persists it under the current workflow id", async () => {
+    const wf = await createWorkflow({ name: "Current" })
+    const sample: VisualWorkflow = { ...buildSample(), id: wf.id }
+    renderWithProviders(<WorkflowEditorCanvas workflow={sample} />)
+    const imported = {
+      name: "Imported graph",
+      nodes: [
+        {
+          id: "imported-node",
+          type: "trigger.manual",
+          typeVersion: 1,
+          position: { x: 10, y: 20 },
+          data: { label: "Imported", params: {} },
+        },
+      ],
+      edges: [],
+    }
+
+    fireEvent.change(screen.getByTestId("workflow-import-input"), {
+      target: {
+        files: [
+          new File([JSON.stringify(imported)], "workflow.json", { type: "application/json" }),
+        ],
+      },
+    })
+
+    await waitFor(() => expect(screen.getByTestId("node-imported-node")).toBeInTheDocument())
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("workflow-save"))
+    await waitFor(async () => {
+      expect((await getWorkflow(wf.id))?.name).toBe("Imported graph")
+    })
+  })
+
   it("renders an empty state when the workflow has no nodes", async () => {
     const wf = await createWorkflow({ name: "x" })
     const sample: VisualWorkflow = { ...buildSample(), id: wf.id, nodes: [], edges: [] }
@@ -337,6 +372,31 @@ describe("WorkflowEditorCanvas — run gate", () => {
     renderWithProviders(<WorkflowEditorCanvas workflow={sample} />)
     fireEvent.click(screen.getByTestId("workflow-run"))
     await waitFor(() => expect(runWorkflow).toHaveBeenCalled())
+  })
+
+  it("persists a dirty workflow through the shared save path before running", async () => {
+    const { getEditorStore } = await import("@/lib/workflow/editor/store-registry")
+    const wf = await createWorkflow({ name: "dirty run" })
+    const sample: VisualWorkflow = {
+      ...buildSample(),
+      id: wf.id,
+      nodes: [
+        buildSample().nodes[0],
+        {
+          ...buildSample().nodes[1],
+          data: { label: "Prompt", params: { userPrompt: "hello" } },
+        },
+      ],
+    }
+    renderWithProviders(<WorkflowEditorCanvas workflow={sample} />)
+    const store = getEditorStore(wf.id)!
+    act(() => store.getState().setName("Saved before run"))
+
+    fireEvent.click(screen.getByTestId("workflow-run"))
+
+    await waitFor(() => expect(runWorkflow).toHaveBeenCalled())
+    await waitFor(async () => expect((await getWorkflow(wf.id))?.name).toBe("Saved before run"))
+    expect(store.getState().dirty).toBe(false)
   })
 })
 

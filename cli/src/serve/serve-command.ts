@@ -32,8 +32,10 @@ import { numberFlag, stringFlag } from "../cli/args"
 import type { OutputSink } from "../cli/output"
 import { VERSION } from "../version"
 import { ensureHeadlessAccount, HEADLESS_LOCAL_ACCOUNT_ID } from "./account"
+import { createNodeBackupFilesystem } from "./backup-filesystem"
 import { BridgeClient, type WebSocketLike } from "./bridge-client"
 import { startDurability } from "./durability"
+import { createNodePluginRuntimeAdapter } from "./plugin-runtime-adapter"
 
 export interface ServeDeps {
   out: OutputSink
@@ -131,6 +133,8 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
     accountId,
     bridge,
     notifyDbWrite: durability.notifyDbWrite,
+    backupFilesystem: createNodeBackupFilesystem(),
+    pluginRuntime: createNodePluginRuntimeAdapter(),
     resolveMessage,
     log: (level, message) => {
       if (level === "error") out.error(`serve: ${message}\n`)

@@ -89,7 +89,7 @@ export interface A2UIErrorBoundaryState {
 export interface DeleteConfirmDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onConfirm: () => void
+  onConfirm: () => void | Promise<void>
   titleKey?: string
   descriptionKey?: string
 }

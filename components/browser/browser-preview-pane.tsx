@@ -25,6 +25,7 @@ import {
 } from "@/components/browser/browser-agent-indicator"
 import { BrowserCookieImportAction } from "@/components/browser/browser-cookie-import-action"
 import { BrowserRecorderPanel } from "@/components/browser/browser-recorder-panel"
+import { RemoteBrowserPreview } from "@/components/browser/remote-browser-preview"
 import {
   WebPreview,
   WebPreviewBody,
@@ -59,6 +60,9 @@ import {
 import { isTauri } from "@/lib/tauri"
 import { openExternal } from "@/lib/tauri/opener"
 import { cn } from "@/lib/utils"
+import { useChatStore } from "@/stores/chat/chat-store"
+import { useProjectStore } from "@/stores/project/project-store"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 
 /** Common local dev-server addresses offered as one-click chips when empty. */
 const QUICK_OPEN_URLS = [
@@ -86,13 +90,28 @@ function hostOf(url: string | null): string {
  * selection + comment to the chat agent; a camera button ships a plain
  * screenshot the same way.
  */
-export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
+export function BrowserPreviewPane({
+  sessionId,
+  parentChatSessionId,
+  workspaceId,
+  profileId,
+  initialUrl,
+  ownerId,
+}: {
+  sessionId?: string
+  parentChatSessionId?: string
+  workspaceId?: string
+  profileId?: string
+  initialUrl?: string
+  ownerId?: string
+}) {
   const t = useTranslations("browser")
+  const normalizedInitialUrl = initialUrl ? normalizePreviewUrl(initialUrl) : null
   const reservedRef = useRef<HTMLDivElement>(null)
   const urlInputRef = useRef<HTMLInputElement>(null)
-  const [urlInput, setUrlInput] = useState("")
+  const [urlInput, setUrlInput] = useState(normalizedInitialUrl ?? "")
   const [editingUrl, setEditingUrl] = useState(false)
-  const [committedUrl, setCommittedUrl] = useState<string | null>(null)
+  const [committedUrl, setCommittedUrl] = useState<string | null>(normalizedInitialUrl)
   const [comment, setComment] = useState("")
   const [sending, setSending] = useState(false)
   const [capturing, setCapturing] = useState(false)
@@ -137,6 +156,7 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
 
   const { getRect } = useBrowserPaneWebview(reservedRef, {
     url: committedUrl,
+    ownerId,
     onRectChange: handleRectChange,
     visible: shouldShowLivePage,
   })
@@ -145,6 +165,11 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
   const { sendComment, queueAnnotation, sendAnnotations, sendScreenshot, sendText } =
     useSelectionToChat()
   const { driver, lastAction } = useBrowserAgentActivity()
+  const remoteBrowserEnabled = useSettingsStore(
+    (state) => state.settings?.remoteBrowserEnabled ?? false
+  )
+  const activeChatSessionId = useChatStore((state) => state.activeSessionId)
+  const activeProjectId = useProjectStore((state) => state.activeProjectId)
 
   useEffect(() => {
     committedUrlRef.current = committedUrl
@@ -370,6 +395,17 @@ export function BrowserPreviewPane({ sessionId }: { sessionId?: string }) {
   // still preview a local dev server (its primary use). Cross-origin sites that
   // forbid framing won't load, which is expected for a best-effort web preview.
   if (!isTauri()) {
+    if (remoteBrowserEnabled) {
+      return (
+        <RemoteBrowserPreview
+          chatSessionId={sessionId ?? activeChatSessionId ?? "browser-preview"}
+          parentChatSessionId={parentChatSessionId}
+          workspaceId={workspaceId ?? activeProjectId ?? "default"}
+          profileId={profileId}
+          initialUrl={normalizedInitialUrl ?? undefined}
+        />
+      )
+    }
     return (
       <WebPreview className="h-full rounded-none border-0" data-testid="browser-web-preview">
         <WebPreviewNavigation>

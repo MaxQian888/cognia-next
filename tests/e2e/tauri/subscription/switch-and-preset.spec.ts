@@ -1,23 +1,24 @@
 /**
- * Tauri E2E: multi-account switch + provider preset CRUD on the Anthropic tab.
+ * Tauri E2E: multi-account lifecycle + provider preset CRUD on the Anthropic tab.
  *
  * Seeds two Anthropic accounts directly via `subscription_save_account`, then
- * drives the AccountList switch button + PresetPicker dialog to verify both
- * the active-pointer flip and preset persistence round-trip through the
- * keyring-backed vault.
+ * drives AccountList switch/remove actions + the PresetPicker dialog to verify
+ * active-pointer changes, credential deletion, and preset persistence through
+ * the keyring-backed vault.
  */
 
 import { expect, test } from "../fixtures"
 import { resetCogniaDb } from "../../helpers/db-reset"
 import {
   getActiveAccountId,
+  listAccountsForProvider,
   readProviderPreset,
   resetSubscriptionState,
   seedAnthropicAccount,
   setActiveAccountId,
 } from "../../helpers/subscription"
 
-test.describe("tauri: Anthropic switch + preset", () => {
+test.describe("tauri: Anthropic account lifecycle + preset", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/")
     await resetCogniaDb(page)
@@ -37,18 +38,49 @@ test.describe("tauri: Anthropic switch + preset", () => {
 
     await page.goto("/settings?section=subscription&subTab=anthropic")
 
-    // Both account rows render. Click the second row's switch button — it's
-    // the <button> wrapping the email text. AccountList puts the email inside
-    // the switch trigger, so a click on the email also flips active.
-    const secondRow = page.getByRole("button").filter({ hasText: "e2e-second@example.com" }).first()
+    // Both account rows render. Activate the second account through the
+    // accessible radio-style action owned by that row.
+    const secondRow = page.locator("li").filter({ hasText: "e2e-second@example.com" })
     await expect(secondRow).toBeVisible({ timeout: 10_000 })
-    await secondRow.click()
+    await secondRow.getByRole("button", { name: "Set active" }).click()
 
     // The set-active call is async — wait for the IPC roundtrip to flip the
     // pointer. listAccountsForProvider is consistent with whatever Rust has.
     await expect
       .poll(async () => await getActiveAccountId(page, "anthropic"), { timeout: 10_000 })
       .toBe(idSecond)
+  })
+
+  test("removing the active account clears the vault entry and active pointer", async ({
+    page,
+  }) => {
+    const id = await seedAnthropicAccount(page, {
+      email: "e2e-remove@example.com",
+      label: "remove-me",
+    })
+    await setActiveAccountId(page, "anthropic", id)
+
+    await page.goto("/settings?section=subscription&subTab=anthropic")
+
+    const accountRow = page.locator("li").filter({ hasText: "e2e-remove@example.com" })
+    await expect(accountRow).toBeVisible({ timeout: 10_000 })
+    await accountRow.locator('button[aria-haspopup="menu"]').click()
+    await page.getByRole("menuitem", { name: "Remove" }).click()
+
+    const dialog = page.getByRole("dialog", { name: "Remove this account?" })
+    await expect(dialog).toBeVisible()
+    await dialog.getByRole("button", { name: "Remove", exact: true }).click()
+    await expect(dialog).toBeHidden({ timeout: 10_000 })
+
+    await expect
+      .poll(async () => await listAccountsForProvider(page, "anthropic"), { timeout: 10_000 })
+      .toEqual([])
+    await expect
+      .poll(async () => await getActiveAccountId(page, "anthropic"), { timeout: 10_000 })
+      .toBeNull()
+    await expect(
+      page.getByText("No accounts yet. Add one to start using this provider.")
+    ).toBeVisible()
   })
 
   test("preset CRUD round-trips through the keyring vault", async ({ page }) => {

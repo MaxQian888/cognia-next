@@ -943,6 +943,12 @@ importers:
         specifier: '*'
         version: 6.0.208(zod@4.4.3)
 
+  services/workspace-runtime:
+    dependencies:
+      playwright-core:
+        specifier: 1.61.1
+        version: 1.61.1
+
 packages:
 
   '@adobe/css-tools@4.5.0':

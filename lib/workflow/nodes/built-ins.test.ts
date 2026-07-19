@@ -160,6 +160,21 @@ describe("trigger.team", () => {
   })
 })
 
+describe("built-in trigger passthrough parity", () => {
+  it.each([
+    "trigger.cron",
+    "trigger.connector.inbound",
+    "trigger.chat.message",
+    "trigger.goal.completed",
+    "trigger.webhook",
+    "trigger.github.webhook",
+    "trigger.workflow.completed",
+  ] as const)("passes through %s events", async (kind) => {
+    const r = await exec(kind, makeCtx(kind, {}))
+    expect(r.output).toEqual({ firedAt: trigger.originAt, payload: trigger.payload })
+  })
+})
+
 describe("flow.set", () => {
   it("stores the value under the chosen variable name", async () => {
     const r = await exec("flow.set", makeCtx("flow.set", { variable: "name", value: "alex" }))

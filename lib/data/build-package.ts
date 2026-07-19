@@ -52,6 +52,7 @@ export async function buildBackupPackage(
 ): Promise<BackupPackageV3> {
   const db = getDb()
   const includeBuiltIns = opts.includeBuiltIns ?? false
+  const includeMemories = opts.includeMemories ?? true
 
   const [
     settingsRow,
@@ -78,6 +79,10 @@ export async function buildBackupPackage(
     twinProfile,
     twinDrafts,
     twinJobs,
+    memories,
+    memoryEvidence,
+    memoryJobs,
+    memoryAuditEvents,
   ] = await Promise.all([
     getSettings(),
     db.characters.toArray(),
@@ -103,6 +108,10 @@ export async function buildBackupPackage(
     db.twinProfile.toArray(),
     db.twinDrafts.toArray(),
     db.twinJobs.toArray(),
+    includeMemories ? db.memories.toArray() : Promise.resolve([]),
+    includeMemories ? db.memoryEvidence.toArray() : Promise.resolve([]),
+    includeMemories ? db.memoryJobs.toArray() : Promise.resolve([]),
+    includeMemories ? db.memoryAuditEvents.toArray() : Promise.resolve([]),
   ])
 
   // Strip the API key unless the user opted in.
@@ -147,6 +156,7 @@ export async function buildBackupPackage(
     twinProfile,
     twinDrafts,
     twinJobs,
+    ...(includeMemories ? { memories, memoryEvidence, memoryJobs, memoryAuditEvents } : {}),
   }
   if (opts.includeSessions) {
     const exportedSessions = filterExposedSessions(sessions, "standard-export")

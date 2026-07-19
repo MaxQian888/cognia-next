@@ -252,6 +252,7 @@
   "eventSourceLiteralPlaceholder": "Source",
   "eventSourcePlaceholder": "leave empty to fire on every source",
   "eventType": "Event Type",
+  "eventTypePlaceholder": "e.g., message.created, workflow.completed",
   "eventTypeCustomLabel": "Custom event type…",
   "eventTypePresetLabel": "Built-in event type",
   "eventTypePresets": {
@@ -494,6 +495,7 @@
   },
   "pausedTasks": "Paused",
   "payload": {
+    "jsonPlaceholder": "{\"key\": \"value\"}",
     "additionalDirectories": {
       "heading": "Additional directories"
     },

@@ -10,6 +10,7 @@ import {
   registerTrigger,
   reloadInFlightRuns,
   getWebhookUrl,
+  unregisterTrigger,
 } from "./tauri-bridge"
 
 describe("tauri-bridge (web mode, no Tauri globals)", () => {
@@ -40,8 +41,12 @@ describe("tauri-bridge (web mode, no Tauri globals)", () => {
     await expect(reloadInFlightRuns()).resolves.toEqual([])
   })
 
+  it("unregisterTrigger resolves with workflow-scoped identity in web mode", async () => {
+    await expect(unregisterTrigger("wf", "trg")).resolves.toBeUndefined()
+  })
+
   it("getWebhookUrl returns null in web mode", async () => {
-    await expect(getWebhookUrl("trg")).resolves.toBeNull()
+    await expect(getWebhookUrl("wf", "trg")).resolves.toBeNull()
   })
 
   it("listenTriggerEvents returns a no-op unsubscribe in web mode", async () => {

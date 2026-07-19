@@ -128,10 +128,10 @@ describe("collectMcpPresets", () => {
 
 describe("required / missing fields", () => {
   it("treats every non-header field as required", () => {
-    const github = getPreset("github")!
-    expect(requiredFieldKeys(github)).toContain("GITHUB_PERSONAL_ACCESS_TOKEN")
-    expect(missingPresetFields(github, {})).toHaveLength(1)
-    expect(missingPresetFields(github, { GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_x" })).toHaveLength(0)
+    const filesystem = getPreset("filesystem")!
+    expect(requiredFieldKeys(filesystem)).toContain("PATH")
+    expect(missingPresetFields(filesystem, {})).toHaveLength(1)
+    expect(missingPresetFields(filesystem, { PATH: "/workspace" })).toHaveLength(0)
   })
 
   it("does not require optional header fields", () => {

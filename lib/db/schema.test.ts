@@ -17,6 +17,7 @@ import {
   LEGACY_COGNIA_DB_NAME,
   __resetDbForTesting,
   activateAccountDatabase,
+  backfillMemoryGovernanceV118,
   backfillRootsForRow,
   clearAccountDatabaseSelection,
   getDb,
@@ -152,6 +153,14 @@ describe("getDb", () => {
     expect(db.trustedWorkspaces).toBeDefined()
     expect(db.backupHistory).toBeDefined()
     expect(db.notifications).toBeDefined()
+    expect(db.siteProjects).toBeDefined()
+    expect(db.siteVersions).toBeDefined()
+    expect(db.siteArtifacts).toBeDefined()
+    expect(db.siteEnvironmentRevisions).toBeDefined()
+    expect(db.siteDeployments).toBeDefined()
+    expect(db.siteOperations).toBeDefined()
+    expect(db.siteOperationEvents).toBeDefined()
+    expect(db.siteResources).toBeDefined()
     expect(db.canvasDocuments).toBeDefined()
     expect(db.canvasVersions).toBeDefined()
     expect(db.canvasComments).toBeDefined()
@@ -194,6 +203,54 @@ describe("getDb", () => {
     expect(db.codeAdoptionTurns).toBeDefined()
     // v109 — user-consent binary ledger.
     expect(db.approvedBinaries).toBeDefined()
+    expect(db.browserProfiles).toBeDefined()
+    expect(db.browserDomainGrants).toBeDefined()
+    expect(db.memoryEvidence).toBeDefined()
+    expect(db.memoryJobs).toBeDefined()
+    expect(db.memoryAuditEvents).toBeDefined()
+  })
+
+  it("v118 opens memory governance tables and preserves legacy rows explicitly", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(118)
+    expect(db.memoryEvidence.schema.indexes.map((index) => index.name)).toContain(
+      "[memoryId+createdAt]"
+    )
+    expect(db.memoryJobs.schema.indexes.map((index) => index.name)).toContain("[status+queuedAt]")
+
+    const legacy = backfillMemoryGovernanceV118({} as never)
+    expect(legacy).toMatchObject({
+      evidenceState: "legacy",
+      reviewStatus: "unreviewed",
+      contaminationState: "unknown",
+      sensitivity: "normal",
+    })
+  })
+
+  it("v117 opens host-local remote browser profile and domain-grant tables", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(117)
+    expect(db.browserProfiles.schema.indexes.map((index) => index.name)).toContain(
+      "[workspaceId+updatedAt]"
+    )
+    expect(db.browserDomainGrants.schema.indexes.map((index) => index.name)).toContain(
+      "[workspaceId+domain]"
+    )
+  })
+
+  it("v116 opens the Cognia Sites lifecycle tables and compound indexes", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(116)
+    expect(db.siteProjects.schema.indexes.map((index) => index.name)).toContain(
+      "[projectId+sourceRoot+sourceSubpath+executionTargetKey]"
+    )
+    expect(db.siteVersions.schema.indexes.map((index) => index.name)).toContain("[siteId+sequence]")
+    expect(db.siteOperationEvents.schema.indexes.map((index) => index.name)).toContain(
+      "[operationId+sequence]"
+    )
   })
 
   it("v114 opens the unified execution journal and its compound indexes", async () => {

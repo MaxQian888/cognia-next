@@ -51,6 +51,7 @@ import { PairedDevicesCard } from "./paired-devices-card"
 import { WebRtcCard } from "./webrtc-card"
 import { SyncStatusCard } from "./sync-status-card"
 import { LogtoLoginCard } from "./logto-login-card"
+import { RemoteBrowserCard } from "./remote-browser-card"
 
 // ---------------------------------------------------------------------------
 // Tauri command shapes — mirror src-tauri/src/companion_api/commands.rs
@@ -201,6 +202,7 @@ export function CompanionSection() {
         <PairedDevicesCard />
       </CompanionGroup>
       <CompanionGroup id="cloud" title={t("cloud")} defaultOpen={false}>
+        <RemoteBrowserCard />
         <LogtoLoginCard />
       </CompanionGroup>
       <CompanionGroup id="push" title={t("push")} defaultOpen>
@@ -760,7 +762,7 @@ function StatusBadge({
 }) {
   if (!desktop) {
     return (
-      <span className="text-[10px] uppercase text-muted-foreground" title="Desktop-only">
+      <span className="text-[10px] uppercase text-muted-foreground" title={t("desktopOnly")}>
         {t("statusWeb")}
       </span>
     )

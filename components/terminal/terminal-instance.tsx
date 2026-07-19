@@ -37,9 +37,9 @@
  *     doesn't overwrite the clipboard).
  *
  * Live settings:
- *   * Subscribes to `useSettingsStore` for fontFamily/fontSize/scrollback;
- *     mutates `term.options.*` in place when they change, so an open tab
- *     reflects setting tweaks without a full remount.
+ *   * Subscribes to `useSettingsStore` for font, cursor, glyph, scrolling,
+ *     contrast, and scrollback options; mutates `term.options.*` in place so
+ *     an open tab reflects setting tweaks without a full remount.
  *   * Tracks `<html class="dark">` via `MutationObserver` and switches
  *     the xterm theme accordingly.
  *
@@ -225,6 +225,7 @@ function cursorPixelPosition(term: unknown): { left: number; top: number } | nul
  */
 type TerminalFontWeight =
   "normal" | "bold" | "100" | "200" | "300" | "400" | "500" | "600" | "700" | "800" | "900"
+type TerminalCursorInactiveStyle = "outline" | "block" | "bar" | "underline" | "none"
 
 // Lead with the app-bundled Nerd Font (see the `@font-face` in globals.css) so
 // oh-my-posh / powerlevel10k prompt glyphs render out of the box — the rest are
@@ -236,6 +237,9 @@ const DEFAULT_FONT_FAMILY =
   '"MesloLGS NF", "JetBrains Mono", "Cascadia Code", "Menlo", "Consolas", monospace'
 const DEFAULT_FONT_SIZE = 13
 const DEFAULT_SCROLLBACK = 10000
+// VS Code's current xterm integration uses this duration when its boolean
+// `terminal.integrated.smoothScrolling` preference is enabled.
+const SMOOTH_SCROLL_DURATION_MS = 125
 const MIN_ZOOM_FONT_SIZE = 6
 const MAX_ZOOM_FONT_SIZE = 40
 
@@ -414,8 +418,29 @@ function TerminalInstanceImpl(
   const cursorBlink = useSettingsStore(
     (s) => (s.settings?.terminal as { cursorBlink?: boolean } | undefined)?.cursorBlink ?? true
   )
+  const cursorWidth = useSettingsStore(
+    (s) => (s.settings?.terminal as { cursorWidth?: number } | undefined)?.cursorWidth ?? 1
+  )
+  const cursorInactiveStyle = useSettingsStore(
+    (s) =>
+      (s.settings?.terminal as { cursorInactiveStyle?: TerminalCursorInactiveStyle } | undefined)
+        ?.cursorInactiveStyle ?? "outline"
+  )
   const fontLigatures = useSettingsStore(
     (s) => (s.settings?.terminal as { fontLigatures?: boolean } | undefined)?.fontLigatures ?? false
+  )
+  const customGlyphs = useSettingsStore(
+    (s) => (s.settings?.terminal as { customGlyphs?: boolean } | undefined)?.customGlyphs ?? true
+  )
+  const rescaleOverlappingGlyphs = useSettingsStore(
+    (s) =>
+      (s.settings?.terminal as { rescaleOverlappingGlyphs?: boolean } | undefined)
+        ?.rescaleOverlappingGlyphs ?? true
+  )
+  const drawBoldTextInBrightColors = useSettingsStore(
+    (s) =>
+      (s.settings?.terminal as { drawBoldTextInBrightColors?: boolean } | undefined)
+        ?.drawBoldTextInBrightColors ?? true
   )
   const colorScheme = useSettingsStore(
     (s) => (s.settings?.terminal as { colorScheme?: string } | undefined)?.colorScheme ?? "auto"
@@ -445,6 +470,10 @@ function TerminalInstanceImpl(
   const scrollSensitivity = useSettingsStore(
     (s) =>
       (s.settings?.terminal as { scrollSensitivity?: number } | undefined)?.scrollSensitivity ?? 1
+  )
+  const smoothScrolling = useSettingsStore(
+    (s) =>
+      (s.settings?.terminal as { smoothScrolling?: boolean } | undefined)?.smoothScrolling ?? false
   )
   const minimumContrastRatio = useSettingsStore(
     (s) =>
@@ -679,6 +708,8 @@ function TerminalInstanceImpl(
       const term = new Terminal({
         cursorBlink,
         cursorStyle,
+        cursorWidth,
+        cursorInactiveStyle,
         fontFamily,
         fontSize,
         fontWeight,
@@ -688,7 +719,11 @@ function TerminalInstanceImpl(
         scrollback,
         scrollSensitivity,
         fastScrollSensitivity: scrollSensitivity * 5,
+        smoothScrollDuration: smoothScrolling ? SMOOTH_SCROLL_DURATION_MS : 0,
         minimumContrastRatio,
+        customGlyphs,
+        rescaleOverlappingGlyphs,
+        drawBoldTextInBrightColors,
         allowProposedApi: true,
         theme: makeTheme(isHtmlDark(), colorScheme),
       })
@@ -889,24 +924,46 @@ function TerminalInstanceImpl(
       // escape hatch for "the terminal renders blank/garbled" reports.
       let webglAddon: { dispose: () => void } | null = null
       let canvasAddon: { dispose: () => void } | null = null
+      let webglContextLossDisposable: { dispose: () => void } | null = null
       const tryWebgl = renderer === "auto" || renderer === "webgl"
       const tryCanvas = renderer === "auto" || renderer === "webgl" || renderer === "canvas"
-      if (tryWebgl && webglCtor) {
-        try {
-          webglAddon = new webglCtor()
-          term.loadAddon(webglAddon as unknown as Parameters<typeof term.loadAddon>[0])
-        } catch {
-          webglAddon = null
-        }
-      }
-      if (!webglAddon && tryCanvas && canvasCtor) {
+      const loadCanvasFallback = () => {
+        if (disposedRef.current || canvasAddon || !tryCanvas || !canvasCtor) return
         try {
           canvasAddon = new canvasCtor()
           term.loadAddon(canvasAddon as unknown as Parameters<typeof term.loadAddon>[0])
         } catch {
           canvasAddon = null
+          // Disposing the WebGL addon restores xterm's built-in DOM renderer,
+          // which remains the final compatibility fallback.
         }
       }
+      if (tryWebgl && webglCtor) {
+        try {
+          const candidate = new webglCtor()
+          webglAddon = candidate
+          term.loadAddon(candidate as unknown as Parameters<typeof term.loadAddon>[0])
+          webglContextLossDisposable = candidate.onContextLoss(() => {
+            if (disposedRef.current || webglAddon !== candidate) return
+            try {
+              webglContextLossDisposable?.dispose()
+            } catch {
+              /* noop */
+            }
+            webglContextLossDisposable = null
+            try {
+              candidate.dispose()
+            } catch {
+              /* noop */
+            }
+            webglAddon = null
+            loadCanvasFallback()
+          })
+        } catch {
+          webglAddon = null
+        }
+      }
+      if (!webglAddon) loadCanvasFallback()
 
       // Programming-font ligatures (opt-in). Loaded after the renderer so it
       // shapes the active glyph cache. The dynamic import + try/catch mirror
@@ -1297,6 +1354,11 @@ function TerminalInstanceImpl(
         themeObserver.disconnect()
         bp.dispose()
         try {
+          webglContextLossDisposable?.dispose()
+        } catch {
+          /* noop */
+        }
+        try {
           webglAddon?.dispose()
         } catch {
           /* noop */
@@ -1379,13 +1441,30 @@ function TerminalInstanceImpl(
       if (term.options.scrollback !== scrollback) term.options.scrollback = scrollback
       if (term.options.cursorStyle !== cursorStyle) term.options.cursorStyle = cursorStyle
       if (term.options.cursorBlink !== cursorBlink) term.options.cursorBlink = cursorBlink
+      if (term.options.cursorWidth !== cursorWidth) term.options.cursorWidth = cursorWidth
+      if (term.options.cursorInactiveStyle !== cursorInactiveStyle) {
+        term.options.cursorInactiveStyle = cursorInactiveStyle
+      }
       // Scroll speed + contrast are pure render options — no re-fit needed.
       if (term.options.scrollSensitivity !== scrollSensitivity) {
         term.options.scrollSensitivity = scrollSensitivity
         term.options.fastScrollSensitivity = scrollSensitivity * 5
       }
+      const smoothScrollDuration = smoothScrolling ? SMOOTH_SCROLL_DURATION_MS : 0
+      if (term.options.smoothScrollDuration !== smoothScrollDuration) {
+        term.options.smoothScrollDuration = smoothScrollDuration
+      }
       if (term.options.minimumContrastRatio !== minimumContrastRatio) {
         term.options.minimumContrastRatio = minimumContrastRatio
+      }
+      if (term.options.customGlyphs !== customGlyphs) {
+        term.options.customGlyphs = customGlyphs
+      }
+      if (term.options.rescaleOverlappingGlyphs !== rescaleOverlappingGlyphs) {
+        term.options.rescaleOverlappingGlyphs = rescaleOverlappingGlyphs
+      }
+      if (term.options.drawBoldTextInBrightColors !== drawBoldTextInBrightColors) {
+        term.options.drawBoldTextInBrightColors = drawBoldTextInBrightColors
       }
       if (fontChanged) {
         // A font-metric change invalidates the accelerated renderer's glyph
@@ -1417,12 +1496,18 @@ function TerminalInstanceImpl(
     scrollback,
     cursorStyle,
     cursorBlink,
+    cursorWidth,
+    cursorInactiveStyle,
     fontWeight,
     fontWeightBold,
     lineHeight,
     letterSpacing,
     scrollSensitivity,
+    smoothScrolling,
     minimumContrastRatio,
+    customGlyphs,
+    rescaleOverlappingGlyphs,
+    drawBoldTextInBrightColors,
   ])
 
   // Live color-scheme switch: re-theme in place (no remount). Also keeps the

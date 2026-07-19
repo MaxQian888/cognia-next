@@ -1,15 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process"
-import {
-  cpSync,
-  mkdtempSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs"
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -54,13 +46,36 @@ try {
   }
 
   const consumer = join(workDir, "consumer")
-  const moduleDir = join(consumer, "node_modules/@cognia/plugin-sdk")
-  mkdirSync(dirname(moduleDir), { recursive: true })
-  cpSync(packedPackage, moduleDir, { recursive: true })
-  writeFileSync(join(consumer, "package.json"), '{"type":"module"}\n')
+  mkdirSync(consumer)
+  writeFileSync(
+    join(consumer, "package.json"),
+    '{"type":"module","private":true,"packageManager":"pnpm@10.30.3"}\n'
+  )
+  run(
+    "pnpm",
+    [
+      "add",
+      tarball,
+      "react@^19.0.0",
+      "ai@^6.0.0",
+      "dexie@^4.0.0",
+      "@types/react@^19.0.0",
+      "@types/node@^22.0.0",
+      "@types/json-schema@^7.0.0",
+    ],
+    consumer
+  )
   writeFileSync(
     join(consumer, "esm.mjs"),
-    'import { definePlugin } from "@cognia/plugin-sdk"; if (definePlugin({ manifest: {} }).manifest == null) process.exit(1)\n'
+    [
+      'import { definePlugin } from "@cognia/plugin-sdk";',
+      'import { SystemEvents } from "@cognia/plugin-sdk/events";',
+      'import { CANONICAL_EXTENSION_POINTS } from "@cognia/plugin-sdk/extensions";',
+      "if (definePlugin({ manifest: {} }).manifest == null) process.exit(1);",
+      'if (SystemEvents.PLUGIN_LOADED !== "system:plugin:loaded") process.exit(1);',
+      'if (!CANONICAL_EXTENSION_POINTS.includes("chat.input.above")) process.exit(1);',
+      "",
+    ].join("\n")
   )
   writeFileSync(
     join(consumer, "cjs.cjs"),
@@ -68,7 +83,20 @@ try {
   )
   writeFileSync(
     join(consumer, "index.ts"),
-    'import { defineContextPanel, type PluginManifest } from "@cognia/plugin-sdk";\nconst manifest: PluginManifest = { id: "x", name: "X", description: "X", version: "0.1.0", type: "frontend", capabilities: [], main: "index.js" };\ndefineContextPanel({ id: "x", entry: "panel.js", export: "Panel", resourceKinds: ["project-file"], activity: "inspect", labelKey: "x", label: "X" });\nvoid manifest;\n'
+    [
+      'import { defineContextPanel, type PluginManifest } from "@cognia/plugin-sdk";',
+      'import type { EventFilter } from "@cognia/plugin-sdk/events";',
+      'import type { PluginHooks } from "@cognia/plugin-sdk/hooks";',
+      'import type { PluginPermission } from "@cognia/plugin-sdk/permissions";',
+      'import type { ExtensionPoint } from "@cognia/plugin-sdk/extensions";',
+      "// @ts-expect-error definePlugin is not part of the hooks subpath",
+      'import { definePlugin as invalidHookExport } from "@cognia/plugin-sdk/hooks";',
+      'const manifest: PluginManifest = { id: "x", name: "X", description: "X", version: "0.1.0", type: "frontend", capabilities: [], main: "index.js" };',
+      "const probe: [EventFilter?, PluginHooks?, PluginPermission?, ExtensionPoint?] = [];",
+      'defineContextPanel({ id: "x", entry: "panel.js", export: "Panel", resourceKinds: ["project-file"], activity: "inspect", labelKey: "x", label: "X" });',
+      "void manifest; void probe; void invalidHookExport;",
+      "",
+    ].join("\n")
   )
 
   run("node", ["esm.mjs"], consumer)
@@ -86,13 +114,14 @@ try {
     join(repoRoot, "node_modules/.bin/tsc"),
     [
       "--noEmit",
-      "--skipLibCheck",
       "--module",
       "NodeNext",
       "--moduleResolution",
       "NodeNext",
       "--target",
       "ES2022",
+      "--types",
+      "node,react",
       "index.ts",
     ],
     consumer

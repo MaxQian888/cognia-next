@@ -58,14 +58,17 @@ registerHeadlessRuntime({
       { listWorkflows },
       { syncWorkflowTriggers },
       { resumeInFlightRuns },
+      { initPluginTriggerLifecycle, disposePluginTriggerLifecycle },
     ] = await Promise.all([
       import("@/lib/workflow/runtime/trigger-subscriptions"),
       import("@/lib/db/workflows"),
       import("@/lib/workflow/runtime/webhook-bridge"),
       import("@/lib/workflow/runtime/resume-controller"),
+      import("@/lib/workflow/triggers/lifecycle"),
     ])
 
     initTriggerSubscriptions()
+    initPluginTriggerLifecycle()
     try {
       const all = await listWorkflows()
       await Promise.allSettled(all.map((workflow) => syncWorkflowTriggers(workflow)))
@@ -83,7 +86,10 @@ registerHeadlessRuntime({
         `workflow resume failed: ${error instanceof Error ? error.message : String(error)}`
       )
     }
-    return () => disposeTriggerSubscriptions()
+    return async () => {
+      disposeTriggerSubscriptions()
+      await disposePluginTriggerLifecycle()
+    }
   },
 })
 

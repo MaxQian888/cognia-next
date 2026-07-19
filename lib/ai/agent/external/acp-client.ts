@@ -2703,7 +2703,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
           const activeItemPlan = currentActiveId
             ? (itemPlans.find(([planId]) => planId === currentActiveId) ?? itemPlans[0])
             : undefined
-          const metadata = { ...planSession.metadata, plans }
+          const metadata: Record<string, unknown> = { ...planSession.metadata, plans }
           if (currentActiveId) {
             metadata.plan = activeItemPlan?.[1].entries ?? []
             if (activeItemPlan) metadata.activeItemPlanId = activeItemPlan[0]

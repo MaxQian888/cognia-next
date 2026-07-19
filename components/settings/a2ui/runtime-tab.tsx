@@ -4,8 +4,9 @@
 // does not override them. All settings persist into the AppSettings
 // singleton row and round-trip through backup v3.
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
@@ -17,8 +18,15 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
-import { getSettings, saveSettings } from "@/lib/db/settings"
-import { CATEGORY_KEYS } from "@/lib/a2ui/constants"
+import { DEFAULT_CATALOG_ID, getRegisteredCatalogIds } from "@/lib/a2ui/catalog"
+import {
+  MAX_A2UI_PERSISTENCE_LIMIT,
+  MIN_A2UI_PERSISTENCE_LIMIT,
+  getA2UIPersistenceLimit,
+  resolveA2UICatalogId,
+} from "@/lib/a2ui/runtime-settings"
+import { useSettingsStore } from "@/stores/settings"
+import { useA2UIStore } from "@/stores/a2ui"
 import type { AppSettings } from "@cognia/agent-config-types"
 import type { A2UIWidgetHostStrategy, A2UIWidgetTheme } from "@/types/a2ui/schema"
 
@@ -32,13 +40,43 @@ const THEMES: A2UIWidgetTheme[] = ["inherit", "light", "dark"]
 
 export function RuntimeTab() {
   const t = useTranslations("settings.a2ui.runtime")
-  const [settings, setSettings] = useState<AppSettings | null>(null)
+  const settings = useSettingsStore((state) => state.settings)
+  const loaded = useSettingsStore((state) => state.loaded)
+  const load = useSettingsStore((state) => state.load)
+  const save = useSettingsStore((state) => state.save)
+  const flushA2UIPersistence = useA2UIStore((state) => state.flushPersistence)
+  const [saving, setSaving] = useState(false)
+  const [persistenceLimitDraft, setPersistenceLimitDraft] = useState<number | null>(null)
+  const catalogIds = useMemo(() => getRegisteredCatalogIds(), [])
 
   useEffect(() => {
-    void getSettings().then(setSettings)
-  }, [])
+    if (!loaded) {
+      void load()
+    }
+  }, [load, loaded])
 
-  if (!settings) {
+  const patch = useCallback(
+    async (value: Partial<AppSettings>): Promise<boolean> => {
+      setSaving(true)
+      try {
+        await save(value)
+        if (value.a2uiPersistenceLimit !== undefined) {
+          flushA2UIPersistence()
+        }
+        return true
+      } catch (error) {
+        toast.error(
+          t("saveFailed", { error: error instanceof Error ? error.message : String(error) })
+        )
+        return false
+      } finally {
+        setSaving(false)
+      }
+    },
+    [flushA2UIPersistence, save, t]
+  )
+
+  if (!loaded || !settings) {
     return (
       <Card>
         <CardContent className="py-8 text-center text-sm text-muted-foreground">
@@ -48,10 +86,8 @@ export function RuntimeTab() {
     )
   }
 
-  const patch = async (p: Partial<AppSettings>) => {
-    const next = await saveSettings(p)
-    setSettings(next)
-  }
+  const selectedCatalogId = resolveA2UICatalogId(undefined, settings.a2uiDefaultCatalogId)
+  const persistenceLimit = persistenceLimitDraft ?? getA2UIPersistenceLimit(settings)
 
   return (
     <div className="space-y-4">
@@ -69,23 +105,25 @@ export function RuntimeTab() {
             <Switch
               id="a2ui-default-enabled"
               checked={!!settings.a2uiDefaultEnabled}
+              disabled={saving}
               onCheckedChange={(v) => void patch({ a2uiDefaultEnabled: v })}
             />
           </div>
 
           <div className="space-y-1.5">
-            <Label>{t("global.catalogLabel")}</Label>
+            <Label htmlFor="a2ui-default-catalog">{t("global.catalogLabel")}</Label>
             <Select
-              value={settings.a2uiDefaultCatalogId ?? ""}
+              value={selectedCatalogId}
+              disabled={saving}
               onValueChange={(v) => void patch({ a2uiDefaultCatalogId: v || undefined })}
             >
-              <SelectTrigger>
+              <SelectTrigger id="a2ui-default-catalog">
                 <SelectValue placeholder={t("global.catalogPlaceholder")} />
               </SelectTrigger>
               <SelectContent>
-                {CATEGORY_KEYS.map((key) => (
-                  <SelectItem key={key} value={key}>
-                    {key}
+                {catalogIds.map((catalogId) => (
+                  <SelectItem key={catalogId} value={catalogId}>
+                    {catalogId === DEFAULT_CATALOG_ID ? t("global.standardCatalog") : catalogId}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -102,20 +140,21 @@ export function RuntimeTab() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-1.5">
-            <Label>{t("widget.hostStrategyLabel")}</Label>
+            <Label htmlFor="a2ui-default-host-strategy">{t("widget.hostStrategyLabel")}</Label>
             <Select
               value={settings.a2uiDefaultHostStrategy ?? "native"}
+              disabled={saving}
               onValueChange={(v) =>
                 void patch({ a2uiDefaultHostStrategy: v as A2UIWidgetHostStrategy })
               }
             >
-              <SelectTrigger>
+              <SelectTrigger id="a2ui-default-host-strategy">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 {HOST_STRATEGIES.map((s) => (
                   <SelectItem key={s} value={s}>
-                    {s}
+                    {t(`widget.hostStrategies.${s}`)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -123,18 +162,19 @@ export function RuntimeTab() {
           </div>
 
           <div className="space-y-1.5">
-            <Label>{t("widget.themeLabel")}</Label>
+            <Label htmlFor="a2ui-default-theme">{t("widget.themeLabel")}</Label>
             <Select
               value={settings.a2uiDefaultTheme ?? "inherit"}
+              disabled={saving}
               onValueChange={(v) => void patch({ a2uiDefaultTheme: v as A2UIWidgetTheme })}
             >
-              <SelectTrigger>
+              <SelectTrigger id="a2ui-default-theme">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {THEMES.map((t) => (
-                  <SelectItem key={t} value={t}>
-                    {t}
+                {THEMES.map((theme) => (
+                  <SelectItem key={theme} value={theme}>
+                    {t(`widget.themes.${theme}`)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -151,15 +191,23 @@ export function RuntimeTab() {
         <CardContent>
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <Label>{t("persistence.limitLabel")}</Label>
-              <span className="text-sm font-mono">{settings.a2uiPersistenceLimit ?? 20}</span>
+              <Label htmlFor="a2ui-persistence-limit">{t("persistence.limitLabel")}</Label>
+              <span className="text-sm font-mono">{persistenceLimit}</span>
             </div>
             <Slider
-              min={5}
-              max={100}
+              id="a2ui-persistence-limit"
+              aria-label={t("persistence.limitLabel")}
+              min={MIN_A2UI_PERSISTENCE_LIMIT}
+              max={MAX_A2UI_PERSISTENCE_LIMIT}
               step={1}
-              value={[settings.a2uiPersistenceLimit ?? 20]}
-              onValueChange={([v]) => void patch({ a2uiPersistenceLimit: v })}
+              disabled={saving}
+              value={[persistenceLimit]}
+              onValueChange={([value]) => setPersistenceLimitDraft(value)}
+              onValueCommit={([value]) => {
+                void patch({ a2uiPersistenceLimit: value }).then(() => {
+                  setPersistenceLimitDraft(null)
+                })
+              }}
             />
             <p className="text-xs text-muted-foreground">{t("persistence.limitHelp")}</p>
           </div>

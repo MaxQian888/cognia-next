@@ -164,7 +164,10 @@ pub fn start(state: &GitWatcherState, app: &AppHandle, repo_path: &str) -> Resul
 
     // Inserting under the canonical key replaces (and drops) any prior watcher
     // for this repo, regardless of the string form it was started with.
-    state.watchers.lock().insert(watcher_key(repo_path), watcher);
+    state
+        .watchers
+        .lock()
+        .insert(watcher_key(repo_path), watcher);
     Ok(())
 }
 
@@ -273,7 +276,11 @@ mod tests {
         let mut builder = ignore::gitignore::GitignoreBuilder::new(root);
         builder.add_line(None, "node_modules/").unwrap();
         let gi = builder.build().unwrap();
-        assert!(!path_is_relevant(root, Some(&gi), &root.join("node_modules")));
+        assert!(!path_is_relevant(
+            root,
+            Some(&gi),
+            &root.join("node_modules")
+        ));
         assert!(path_is_relevant(root, Some(&gi), &root.join("src/main.rs")));
     }
 

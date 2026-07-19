@@ -183,37 +183,40 @@ describe("pushAllToNative", () => {
   })
 
   it("uses crypto.subtle digest when available", async () => {
-    // jsdom may delete or replace `globalThis.crypto` between tests; make
-    // sure we have something to attach `.subtle` to before mutating it.
-    if (!(globalThis as { crypto?: unknown }).crypto) {
-      ;(globalThis as unknown as { crypto: { subtle?: SubtleCrypto } }).crypto = {}
-    }
-    // jsdom's `crypto` global lacks `.subtle`; patch a stub that returns a
-    // deterministic ArrayBuffer so the fingerprint() function exercises the
-    // hex-encoding branch.
-    const cryptoLike = globalThis.crypto as unknown as { subtle?: SubtleCrypto }
-    const origSubtle = cryptoLike.subtle
-    cryptoLike.subtle = {
-      digest: async () => new Uint8Array([0xab, 0xcd, 0x01, 0x02]).buffer,
-    } as unknown as SubtleCrypto
-    mockedIsTauri.mockReturnValue(true)
-    mockedListSkills.mockResolvedValue([{ id: "c", name: "C", source: "custom" }])
-    mockedListRes.mockResolvedValue([])
-    mockedInstall.mockResolvedValue({
-      targets: [{ target: "cognia", directory: "/x", writtenFiles: [] }],
-      trashedFrom: null,
+    const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto")
+    Object.defineProperty(globalThis, "crypto", {
+      configurable: true,
+      value: {
+        subtle: {
+          digest: async () => new Uint8Array([0xab, 0xcd, 0x01, 0x02]).buffer,
+        },
+      } as Crypto,
     })
-    mockedUpdateSkill.mockResolvedValue(undefined)
-    const r = await pushAllToNative()
-    expect(r.pushed).toBe(1)
-    expect(mockedUpdateSkill).toHaveBeenCalledWith(
-      "c",
-      expect.objectContaining({
-        // Hex-encoded SHA-256 from our stubbed digest; first byte 0xab → "ab".
-        syncFingerprint: "abcd0102",
+    try {
+      mockedIsTauri.mockReturnValue(true)
+      mockedListSkills.mockResolvedValue([{ id: "c", name: "C", source: "custom" }])
+      mockedListRes.mockResolvedValue([])
+      mockedInstall.mockResolvedValue({
+        targets: [{ target: "cognia", directory: "/x", writtenFiles: [] }],
+        trashedFrom: null,
       })
-    )
-    cryptoLike.subtle = origSubtle as SubtleCrypto
+      mockedUpdateSkill.mockResolvedValue(undefined)
+      const r = await pushAllToNative()
+      expect(r.pushed).toBe(1)
+      expect(mockedUpdateSkill).toHaveBeenCalledWith(
+        "c",
+        expect.objectContaining({
+          // Hex-encoded SHA-256 from our stubbed digest; first byte 0xab → "ab".
+          syncFingerprint: "abcd0102",
+        })
+      )
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(globalThis, "crypto", originalDescriptor)
+      } else {
+        delete (globalThis as { crypto?: Crypto }).crypto
+      }
+    }
   })
 })
 

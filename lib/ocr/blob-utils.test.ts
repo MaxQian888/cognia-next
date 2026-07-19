@@ -1,3 +1,5 @@
+/** @jest-environment jsdom */
+
 import { readBlobAsArrayBuffer } from "./blob-utils"
 
 describe("readBlobAsArrayBuffer", () => {
@@ -47,3 +49,4 @@ describe("readBlobAsArrayBuffer", () => {
     }
   })
 })
+/** @jest-environment jsdom */

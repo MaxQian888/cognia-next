@@ -177,7 +177,6 @@ describe("parseLocalPackFile", () => {
             avatarColor: "oklch(0.7 0.15 250)",
             systemPrompt: "Hello",
             avatarImage: {
-              tauriPath: "./avatars/alice.png",
               webDataUrl: "data:image/png;base64,X",
             },
             persona: {
@@ -200,7 +199,7 @@ describe("parseLocalPackFile", () => {
     expect(result.ok).toBe(true)
   })
 
-  it("rejects avatarImage with neither tauriPath nor webDataUrl", () => {
+  it("rejects avatarImage without webDataUrl", () => {
     const result = parseLocalPackFile({
       schemaVersion: 2,
       pack: {
@@ -218,6 +217,26 @@ describe("parseLocalPackFile", () => {
     })
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error).toMatch(/avatarImage/)
+  })
+
+  it("rejects the removed tauriPath avatar field", () => {
+    const result = parseLocalPackFile({
+      schemaVersion: 2,
+      pack: {
+        ...makePack(),
+        characters: [
+          {
+            localId: "alice",
+            name: "Alice",
+            avatarColor: "oklch(0.7 0.15 250)",
+            systemPrompt: "Hello",
+            avatarImage: { tauriPath: "./avatars/alice.png" },
+          },
+        ],
+      },
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error).toMatch(/tauriPath is no longer supported/)
   })
 
   it("rejects voiceProfile missing voiceId", () => {

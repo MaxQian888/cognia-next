@@ -40,6 +40,7 @@ import { makeLazyCodeGraphResolver } from "./codegraph-resolver-factory.mjs"
 import { createDoomLoopGuard } from "./doom-loop.mjs"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
 import { createBgShellRegistry } from "../builtin-tools/core/bash-sessions.mjs"
+import { createSessionTaskStore } from "../builtin-tools/core/tasks.mjs"
 import { createStderrLogSink, buildMcpLogEvent } from "./mcp-log.mjs"
 import { createMcpAutoReconnector } from "./mcp-auto-reconnect.mjs"
 
@@ -199,6 +200,9 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
   // Per-session background-shell registry (bash run_in_background). Killed at
   // session teardown so no background process outlives the chat (no orphans).
   const bgShells = createBgShellRegistry()
+  // Used only when the coreFiles-on-Anthropic escape hatch is enabled; native
+  // Claude sessions otherwise keep using the Agent SDK's own structured tasks.
+  const taskStore = createSessionTaskStore()
 
   const builtinServer = buildCogniaToolsServer({
     enabled: builtinEnabled,
@@ -209,6 +213,7 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     cwd: sendOptions.cwd,
     dispatchPath: "anthropic",
     bgShells,
+    taskStore,
     model: sendOptions.model,
     provider: sendOptions.provider ?? "anthropic",
     // Per-tool deadline for read-only built-ins on this channel too (parity with

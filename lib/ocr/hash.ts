@@ -24,7 +24,13 @@ import { readBlobAsArrayBuffer } from "./blob-utils"
 async function digest(data: ArrayBuffer): Promise<string> {
   const subtle = globalThis.crypto?.subtle
   if (!subtle) throw new Error("sha256: Web Crypto unavailable")
-  const buf = await subtle.digest("SHA-256", data)
+  // Jest/jsdom and hybrid WebViews can provide an ArrayBuffer from a different
+  // realm than the native SubtleCrypto implementation. Node's implementation
+  // rejects that object even though it is structurally valid; Buffer creates a
+  // host-realm BufferSource without changing the browser path.
+  const input: BufferSource =
+    typeof Buffer === "undefined" ? data : (Buffer.from(new Uint8Array(data)) as BufferSource)
+  const buf = await subtle.digest("SHA-256", input)
   return bytesToHex(buf)
 }
 

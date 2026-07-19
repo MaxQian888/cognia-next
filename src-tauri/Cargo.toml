@@ -544,6 +544,7 @@ container-exec = ["cognia-external-agent/container-exec"]
 # attached stdio, PVC-subPath workspace mounts. In-cluster only; enabled in
 # the headless image alongside `container-exec`.
 k8s-exec = ["cognia-external-agent/k8s-exec"]
+workspace-runtime-exec = ["cognia-external-agent/workspace-runtime-exec"]
 # Native PDF parsing with bounding boxes via `liteparse` (PDFium). Needs
 # network at build time (pdfium-sys downloads a prebuilt PDFium); the
 # PDFium dynamic library must ship next to the executable — see

@@ -84,6 +84,12 @@ describe("AppCard", () => {
       expect(screen.getByText("Test Template")).toBeInTheDocument()
     })
 
+    it("should render the localized built-in category label", () => {
+      renderAppCard()
+
+      expect(screen.getByText("Productivity")).toBeInTheDocument()
+    })
+
     it("should render description when provided", () => {
       renderAppCard({
         app: createMockApp({ description: "This is a test app description" }),

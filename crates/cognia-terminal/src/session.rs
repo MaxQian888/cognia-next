@@ -106,6 +106,10 @@ pub struct SpawnRequest {
     /// rejects a sandboxed spawn for now (restricted-token runner pending).
     #[serde(default)]
     pub sandboxed: bool,
+    /// Network egress for sandboxed interactive sessions. Defaults to true
+    /// for the terminal dock; Cognia Sites sets false for local preview
+    /// servers so untrusted project code cannot make outbound connections.
+    pub sandbox_network: Option<bool>,
 }
 
 fn default_true() -> bool {
@@ -428,7 +432,7 @@ fn resolve_sandbox_launch_prefix(req: &SpawnRequest) -> Result<Option<Vec<String
         cwd: cwd.clone(),
         writable: vec![cwd],
         readable: sandbox_home_readable(),
-        network: true,
+        network: req.sandbox_network.unwrap_or(true),
     };
     #[cfg(target_os = "linux")]
     {
@@ -972,6 +976,7 @@ mod tests {
             origin: SessionOrigin::Local,
             skip_user_profile: false,
             sandboxed: false,
+            sandbox_network: None,
         };
         let result = spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel);
         assert!(result.is_err());
@@ -992,6 +997,7 @@ mod tests {
             origin: SessionOrigin::Local,
             skip_user_profile: false,
             sandboxed,
+            sandbox_network: None,
         }
     }
 
@@ -1045,6 +1051,22 @@ mod tests {
     }
 
     #[test]
+    fn sandboxed_preview_can_disable_network_egress() {
+        let mut req = sandbox_req(true);
+        req.cwd = Some(std::env::temp_dir().to_string_lossy().into_owned());
+        req.sandbox_network = Some(false);
+        let result = resolve_sandbox_launch_prefix(&req);
+        #[cfg(target_os = "macos")]
+        if let Ok(Some(prefix)) = result {
+            assert!(prefix.join(" ").contains("deny network"));
+        }
+        #[cfg(target_os = "linux")]
+        if let Ok(Some(prefix)) = result {
+            assert!(prefix.iter().any(|part| part == "--unshare-net"));
+        }
+    }
+
+    #[test]
     fn spawn_real_shell_pipes_output_and_exits() {
         // Skip on platforms where we can't reliably find a shell binary.
         let Some(shell) = detect_default_shell() else {
@@ -1074,6 +1096,7 @@ mod tests {
             origin: SessionOrigin::Local,
             skip_user_profile: false,
             sandboxed: false,
+            sandbox_network: None,
         };
         let session =
             match spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel) {
@@ -1191,6 +1214,7 @@ mod tests {
             origin: SessionOrigin::Local,
             skip_user_profile: false,
             sandboxed: false,
+            sandbox_network: None,
         };
         let session =
             match spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel) {
@@ -1229,6 +1253,7 @@ mod tests {
             origin: SessionOrigin::Remote,
             skip_user_profile: false,
             sandboxed: false,
+            sandbox_network: None,
         };
         let session =
             match spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel) {
@@ -1241,7 +1266,10 @@ mod tests {
         assert_eq!(info.origin, SessionOrigin::Remote);
         assert_eq!(info.shell, shell);
         // The OS pid is captured at spawn for the managed-process registry.
-        assert!(info.pid.is_some(), "a real PTY child should report an OS pid");
+        assert!(
+            info.pid.is_some(),
+            "a real PTY child should report an OS pid"
+        );
     }
 
     fn spawn_echo(payload: &str) -> Option<PtySession> {
@@ -1266,6 +1294,7 @@ mod tests {
             origin: SessionOrigin::Local,
             skip_user_profile: false,
             sandboxed: false,
+            sandbox_network: None,
         };
         spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel).ok()
     }

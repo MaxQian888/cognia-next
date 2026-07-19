@@ -28,12 +28,15 @@
 mod tests {
     use crate::companion_api::{
         deny_list::DenyList, event_bus::EventBus, idempotency::IdempotencyCache,
-        jwt::issue_device_jwt, middleware, push, rate_limit, redemption_lru::RedemptionLru,
+        jwt::issue_device_jwt, middleware, push, rate_limit, redemption_lru::RedemptionLru, rpc,
         sync_bridge::SyncBridge, sync_registry::SyncTableRegistry, ws_terminal, CompanionState,
         SharedState,
     };
-    use axum::{routing::any, Router};
-    use futures_util::{SinkExt, StreamExt};
+    use axum::{
+        routing::{any, post},
+        Router,
+    };
+    use futures_util::StreamExt;
     use parking_lot::RwLock;
     use serde_json::Value;
     use std::sync::Arc;
@@ -67,6 +70,7 @@ mod tests {
     fn build_router(state: SharedState) -> Router {
         Router::new()
             .route("/ws/v1/terminal", any(ws_terminal::ws_terminal_handler))
+            .route("/api/v1/_rpc/{name}", post(rpc::rpc_handler))
             .layer(axum::middleware::from_fn_with_state(
                 state.clone(),
                 middleware::require_device_jwt,
@@ -111,6 +115,14 @@ mod tests {
             return;
         };
 
+        // `rpc_handler` resolves its host through the process registry when no
+        // Tauri AppHandle exists. Serialize the global slot and install the
+        // same minimal headless services used by the RPC unit tests.
+        let _slot_guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
+        crate::headless::install_headless_services(Some(
+            crate::headless::HeadlessServices::stub_for_tests(),
+        ));
+
         let state = test_state();
         let router = build_router(Arc::clone(&state));
         let addr = bind_and_serve(router).await;
@@ -122,7 +134,7 @@ mod tests {
 
         let token = issue_device_jwt(SECRET, DEVICE_ID, ACCOUNT_ID).expect("issue device jwt");
         let url = format!(
-            "ws://{addr}/ws/v1/terminal?token={token}&spawn=1&shell={shell_enc}&rows=24&cols=80",
+            "ws://{addr}/ws/v1/terminal?token={token}&spawn=1&shell={shell_enc}&rows=24&cols=80&projectId=project-a",
             shell_enc = urlencoding::encode(&shell),
         );
 
@@ -148,16 +160,33 @@ mod tests {
         };
         let frame: Value = serde_json::from_str(text.as_str()).expect("parse ready");
         assert_eq!(frame["kind"], "ready");
-        let session_id = frame["sessionId"].as_str().expect("sessionId present");
+        let session_id = frame["sessionId"]
+            .as_str()
+            .expect("sessionId present")
+            .to_string();
         assert!(!session_id.is_empty(), "session_id must be non-empty uuid");
 
-        // 2. Kill the session immediately — the goal of this test is
-        // the lifecycle handshake, not the byte-echo (which is harder
-        // to make deterministic across `cmd.exe` vs `sh`). The
-        // proxy must respond with an exit frame and close cleanly.
-        ws.send(Message::Text(r#"{"kind":"kill"}"#.into()))
+        // The companion RPC inventory reads this exact reconnect registry.
+        // It exposes the owner session, applies project filtering, and never
+        // leaks it to another authenticated device.
+        let registry = ws_terminal::ws_terminal_registry();
+        let owned = registry.list_for_device(DEVICE_ID);
+        assert!(owned.iter().any(|session| session.id == session_id));
+        let project = registry.list_for_device_project(DEVICE_ID, "project-a");
+        assert!(project.iter().any(|session| session.id == session_id));
+        assert!(registry.list_for_device("test-device-foreign").is_empty());
+
+        // 2. Kill through the public companion RPC. This is the headless
+        // inventory/control seam under test; the WS remains attached so it
+        // must still receive the terminal lifecycle completion event.
+        let kill = reqwest::Client::new()
+            .post(format!("http://{addr}/api/v1/_rpc/terminal_kill"))
+            .bearer_auth(&token)
+            .json(&serde_json::json!({ "id": &session_id }))
+            .send()
             .await
-            .expect("send kill");
+            .expect("terminal_kill request");
+        assert_eq!(kill.status(), reqwest::StatusCode::OK);
 
         // 3. Drain frames until we see exit or the socket closes.
         let mut saw_exit = false;
@@ -184,6 +213,11 @@ mod tests {
             }
         }
         assert!(saw_exit, "expected an exit text frame after kill");
+        assert!(registry
+            .list_for_device(DEVICE_ID)
+            .iter()
+            .all(|session| session.id != session_id));
+        crate::headless::install_headless_services(None);
     }
 
     /// Sad path: a request without the JWT must be rejected by the

@@ -36,9 +36,11 @@
 //!     `state.network_allowlist` (empty = unrestricted), fail-closed on an
 //!     unparseable URL.
 //!
-//! Domains without a real host backend (`db:*`, `shell:*`) return a well-formed
-//! `NOT_SUPPORTED` error instead of the previous silent echo, so the SDK fails
-//! honestly rather than pretending to succeed.
+//! UI-only operations (`clipboard:*`, `window:*`, `shell:open`, and
+//! `shell:showInFolder`) require a desktop `AppHandle`. The headless gateway
+//! reports them as typed `NOT_SUPPORTED` capabilities while retaining the
+//! canonical filesystem, secrets, network, database, and allowlisted
+//! `shell:execute` backends.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -981,7 +983,7 @@ async fn handle_network(
 /// command runs with a CLEARED environment (only `PATH` + any plugin-supplied
 /// `env` survive) so plugin code can't read host secrets like API keys.
 async fn handle_shell(
-    app: &AppHandle,
+    app: Option<&AppHandle>,
     state: &PluginRuntimeState,
     plugin_id: &str,
     op: &str,
@@ -1023,6 +1025,7 @@ async fn handle_shell(
         }
         "open" => {
             let path = payload_str(payload, "path")?;
+            let app = app.ok_or_else(|| PluginApiError::not_supported("shell:open"))?;
             app.opener()
                 .open_path(path.clone(), None::<&str>)
                 .map_err(|e| PluginApiError::internal(format!("shell:open: {e}")))?;
@@ -1030,6 +1033,7 @@ async fn handle_shell(
         }
         "showInFolder" => {
             let path = payload_str(payload, "path")?;
+            let app = app.ok_or_else(|| PluginApiError::not_supported("shell:showInFolder"))?;
             app.opener()
                 .reveal_item_in_dir(&path)
                 .map_err(|e| PluginApiError::internal(format!("shell:showInFolder: {e}")))?;
@@ -1142,7 +1146,7 @@ fn required_permission(domain: &str, op: &str) -> Option<&'static str> {
 
 /// Route one `domain:operation` api string to its handler.
 async fn dispatch(
-    app: &AppHandle,
+    app: Option<&AppHandle>,
     state: &PluginRuntimeState,
     plugin_id: &str,
     api: &str,
@@ -1163,8 +1167,14 @@ async fn dispatch(
     match domain {
         "fs" => handle_fs(state, plugin_id, op, payload),
         "secrets" => handle_secrets(plugin_id, op, payload),
-        "clipboard" => handle_clipboard(app, op, payload).await,
-        "window" => handle_window(app, plugin_id, op, payload).await,
+        "clipboard" => match app {
+            Some(app) => handle_clipboard(app, op, payload).await,
+            None => Err(PluginApiError::not_supported(api)),
+        },
+        "window" => match app {
+            Some(app) => handle_window(app, plugin_id, op, payload).await,
+            None => Err(PluginApiError::not_supported(api)),
+        },
         "network" => handle_network(state, plugin_id, op, payload).await,
         "db" => handle_db(state, plugin_id, op, payload),
         "shell" => handle_shell(app, state, plugin_id, op, payload).await,
@@ -1179,10 +1189,9 @@ async fn dispatch(
 // Commands
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[tauri::command]
-pub async fn plugin_api_invoke(
-    app: AppHandle,
-    state: State<'_, PluginRuntimeState>,
+async fn plugin_api_invoke_for_host(
+    app: Option<&AppHandle>,
+    state: &PluginRuntimeState,
     request: PluginApiInvokeRequest,
 ) -> Result<PluginApiInvokeResponse> {
     let PluginApiInvokeRequest {
@@ -1210,11 +1219,31 @@ pub async fn plugin_api_invoke(
     }
 
     Ok(
-        match dispatch(&app, &state, &plugin_id, &api, &payload).await {
+        match dispatch(app, state, &plugin_id, &api, &payload).await {
             Ok(data) => ok_response(&request_id, &sdk_version, data),
             Err(error) => err_response(&request_id, &sdk_version, error),
         },
     )
+}
+
+/// Invoke the canonical gateway without a desktop UI host. Filesystem,
+/// secrets, network, database, and allowlisted process execution keep their
+/// existing backends and permission gates; UI-only namespaces return the same
+/// typed `NOT_SUPPORTED` response as any unavailable capability.
+pub async fn plugin_api_invoke_for_state(
+    state: &PluginRuntimeState,
+    request: PluginApiInvokeRequest,
+) -> Result<PluginApiInvokeResponse> {
+    plugin_api_invoke_for_host(None, state, request).await
+}
+
+#[tauri::command]
+pub async fn plugin_api_invoke(
+    app: AppHandle,
+    state: State<'_, PluginRuntimeState>,
+    request: PluginApiInvokeRequest,
+) -> Result<PluginApiInvokeResponse> {
+    plugin_api_invoke_for_host(Some(&app), &state, request).await
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1245,10 +1274,9 @@ pub struct BatchInvokeResponse {
     pub results: Vec<PluginApiInvokeResponse>,
 }
 
-#[tauri::command]
-pub async fn plugin_api_batch_invoke(
-    app: AppHandle,
-    state: State<'_, PluginRuntimeState>,
+async fn plugin_api_batch_invoke_for_host(
+    app: Option<&AppHandle>,
+    state: &PluginRuntimeState,
     request: BatchInvokeRequest,
 ) -> Result<BatchInvokeResponse> {
     let BatchInvokeRequest {
@@ -1288,7 +1316,7 @@ pub async fn plugin_api_batch_invoke(
                 PluginApiError::new("NOT_FOUND", format!("plugin not loaded: {plugin_id}")),
             )
         } else {
-            match dispatch(&app, &state, &plugin_id, &item.api, &item.payload).await {
+            match dispatch(app, state, &plugin_id, &item.api, &item.payload).await {
                 Ok(data) => ok_response(&item.request_id, &sdk_version, data),
                 Err(error) => err_response(&item.request_id, &sdk_version, error),
             }
@@ -1309,6 +1337,22 @@ pub async fn plugin_api_batch_invoke(
     })
 }
 
+pub async fn plugin_api_batch_invoke_for_state(
+    state: &PluginRuntimeState,
+    request: BatchInvokeRequest,
+) -> Result<BatchInvokeResponse> {
+    plugin_api_batch_invoke_for_host(None, state, request).await
+}
+
+#[tauri::command]
+pub async fn plugin_api_batch_invoke(
+    app: AppHandle,
+    state: State<'_, PluginRuntimeState>,
+    request: BatchInvokeRequest,
+) -> Result<BatchInvokeResponse> {
+    plugin_api_batch_invoke_for_host(Some(&app), &state, request).await
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Capability advertisement — backs transport.ts:getPluginCapabilities()
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1323,9 +1367,8 @@ pub struct PluginApiCapability {
 }
 
 /// Single source of truth for which `api` strings the gateway actually
-/// services. Mirrors the routing table in [`dispatch`]; unsupported domains
-/// (`db:*`, `shell:*`) are advertised as `supported: false` so SDK authors get
-/// an honest answer instead of discovering NOT_SUPPORTED at call time.
+/// services. [`plugin_get_capabilities_for_host`] adjusts desktop-UI-only
+/// entries for a headless process so SDK authors can branch before invocation.
 fn capability_table() -> Vec<PluginApiCapability> {
     let cap = |api: &str, supported: bool, high_risk: bool, perms: &[&str]| PluginApiCapability {
         api: api.to_string(),
@@ -1370,9 +1413,24 @@ fn capability_table() -> Vec<PluginApiCapability> {
     ]
 }
 
+pub fn plugin_get_capabilities_for_host(has_desktop_ui: bool) -> Vec<PluginApiCapability> {
+    let mut capabilities = capability_table();
+    if !has_desktop_ui {
+        for capability in &mut capabilities {
+            if capability.api.starts_with("clipboard:")
+                || capability.api.starts_with("window:")
+                || matches!(capability.api.as_str(), "shell:open" | "shell:showInFolder")
+            {
+                capability.supported = false;
+            }
+        }
+    }
+    capabilities
+}
+
 #[tauri::command]
 pub async fn plugin_get_capabilities() -> Result<Vec<PluginApiCapability>> {
-    Ok(capability_table())
+    Ok(plugin_get_capabilities_for_host(true))
 }
 
 /// Push a plugin's declared `manifest.shellCommands` into the host so the
@@ -2020,5 +2078,90 @@ mod tests {
         assert!(state.has_permission("demo", "filesystem:read"));
         assert!(!state.has_permission("demo", "filesystem:write"));
         let _ = read_ledger(&state, "demo");
+    }
+
+    #[tokio::test]
+    async fn headless_invoke_reuses_the_permission_gate_and_plugin_sandbox() {
+        use crate::PermissionGrant;
+
+        let tmp = TempDir::new().unwrap();
+        let state = seeded_state(&tmp);
+        let now = chrono::Utc::now().to_rfc3339();
+        state.permissions.write().insert(
+            "demo".into(),
+            ["filesystem:read", "filesystem:write"]
+                .into_iter()
+                .map(|permission| PermissionGrant {
+                    plugin_id: "demo".into(),
+                    permission: permission.into(),
+                    granted_by: "test".into(),
+                    granted_at: now.clone(),
+                    expires_at: None,
+                })
+                .collect(),
+        );
+
+        let write = plugin_api_invoke_for_state(
+            &state,
+            PluginApiInvokeRequest {
+                sdk_version: "2.0.0".into(),
+                plugin_id: "demo".into(),
+                request_id: "write".into(),
+                api: "fs:writeText".into(),
+                payload: json!({ "path": "remote/note.txt", "content": "headless" }),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(write.success);
+
+        let read = plugin_api_invoke_for_state(
+            &state,
+            PluginApiInvokeRequest {
+                sdk_version: "2.0.0".into(),
+                plugin_id: "demo".into(),
+                request_id: "read".into(),
+                api: "fs:readText".into(),
+                payload: json!({ "path": "remote/note.txt" }),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(read.success);
+        assert_eq!(read.data, Some(Value::String("headless".into())));
+    }
+
+    #[tokio::test]
+    async fn headless_invoke_reports_ui_only_apis_as_unavailable() {
+        let tmp = TempDir::new().unwrap();
+        let state = seeded_state(&tmp);
+        let response = plugin_api_invoke_for_state(
+            &state,
+            PluginApiInvokeRequest {
+                sdk_version: "2.0.0".into(),
+                plugin_id: "demo".into(),
+                request_id: "window".into(),
+                api: "window:minimize".into(),
+                payload: json!({}),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(!response.success);
+        assert_eq!(response.error.unwrap().code, "NOT_SUPPORTED");
+    }
+
+    #[test]
+    fn headless_capabilities_hide_only_desktop_ui_backends() {
+        let caps = plugin_get_capabilities_for_host(false);
+        let supported = |api: &str| caps.iter().find(|cap| cap.api == api).unwrap().supported;
+        assert!(supported("fs:readText"));
+        assert!(supported("secrets:get"));
+        assert!(supported("network:fetch"));
+        assert!(supported("db:query"));
+        assert!(supported("shell:execute"));
+        assert!(!supported("clipboard:readText"));
+        assert!(!supported("window:minimize"));
+        assert!(!supported("shell:open"));
     }
 }

@@ -157,7 +157,8 @@ describe("cacheOptimizationEnabled = ON (cache-friendly assembly)", () => {
       twinUserMessage: "hello twin",
     })
     expect(opts.systemPrompt).toContain("STABLE_ONLY")
-    expect(opts.appendSystemPrompt ?? "").toBe("")
+    expect(opts.appendSystemPrompt).toContain("Context-compaction awareness")
+    expect(opts.appendSystemPrompt).toContain("Digital-twin grounding")
   })
 
   it("orders memory recall AFTER the twin dynamic segment in the tail", async () => {

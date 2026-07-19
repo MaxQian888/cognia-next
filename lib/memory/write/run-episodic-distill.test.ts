@@ -55,11 +55,9 @@ function input(over: Partial<RunEpisodicDistillInput> = {}): RunEpisodicDistillI
 
 function deps(over: Partial<RunEpisodicDistillDeps> = {}): RunEpisodicDistillDeps {
   return {
-    distill: jest.fn(
-      async (): Promise<MemoryCandidate[]> => [
-        { type: "episodic", text: "Decided to use Postgres", importance: 7 },
-      ]
-    ),
+    distill: jest.fn(async (): Promise<MemoryCandidate[]> => [
+      { type: "episodic", text: "Decided to use Postgres", importance: 7 },
+    ]),
     consolidate: jest.fn(async () => ({ applied: [{ op: "ADD" } as never] })),
     ...over,
   }
@@ -76,8 +74,23 @@ describe("runEpisodicDistill", () => {
     expect(res.applied).toHaveLength(1)
   })
 
-  it("skips when disabled / autoExtract off / temporary", async () => {
-    for (const c of [{ enabled: false }, { autoExtract: false }, { temporary: true }]) {
+  it("redacts the transcript before sending it to the distiller", async () => {
+    const distill = jest.fn(async (): Promise<MemoryCandidate[]> => [])
+    const d = deps({
+      distill,
+      redact: jest.fn((text) => text.replace("sk-ant-secret", "[REDACTED]")),
+    })
+
+    await runEpisodicDistill(
+      input({ transcript: [{ role: "user", text: "token sk-ant-secret" }] }),
+      d
+    )
+
+    expect(distill).toHaveBeenCalledWith([{ role: "user", text: "token [REDACTED]" }])
+  })
+
+  it("skips when disabled / learning off / temporary", async () => {
+    for (const c of [{ enabled: false }, { learnFromChats: false }, { temporary: true }]) {
       const d = deps()
       await runEpisodicDistill(input({ config: cfg(c) }), d)
       expect(d.distill).not.toHaveBeenCalled()
@@ -105,11 +118,9 @@ describe("runEpisodicDistill", () => {
 
   it("drops PII-leaking episodes", async () => {
     const d = deps({
-      distill: jest.fn(
-        async (): Promise<MemoryCandidate[]> => [
-          { type: "episodic", text: "shared key sk-ant-api03-AAAABBBBCCCCDDDD", importance: 6 },
-        ]
-      ),
+      distill: jest.fn(async (): Promise<MemoryCandidate[]> => [
+        { type: "episodic", text: "shared key sk-ant-api03-AAAABBBBCCCCDDDD", importance: 6 },
+      ]),
     })
     const res = await runEpisodicDistill(input(), d)
     expect(d.consolidate).not.toHaveBeenCalled()

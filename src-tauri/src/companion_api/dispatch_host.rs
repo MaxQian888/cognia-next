@@ -22,7 +22,9 @@
 //! | `claude_*` (send/interrupt/…, provider env) | R7 | `HeadlessServices` sidecar |
 //! | `spawn/send/kill/status_external_agent` | R11 | `ExecBackend` behind service scope |
 //! | `connectors_*` | R12 | `HeadlessServices.connectors` |
-//! | `git_*`, `fs_*`, `terminal_*`, `plugin_*`, `skills_*`, mcp, agent-config, backup, automation consent | ❌ Phase 1 | `headless_unsupported` (documented follow-up) |
+//! | `mcp_server_status` | ✅ | process-owned `McpServerState` |
+//! | `git_*`, `fs_*`, `skills_*`, agent-config, backup | ✅ | host-neutral command bodies / data plane |
+//! | live terminal registry, `plugin_*`, automation consent | ❌ | `headless_unsupported` (documented follow-up) |
 
 use std::sync::Arc;
 
@@ -94,6 +96,67 @@ impl DispatchHost {
         }
     }
 
+    /// Snapshot the embedded MCP server status from the process that owns it.
+    pub fn mcp_server_status(&self) -> crate::mcp_server::types::McpServerStatus {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                app.state::<crate::mcp_server::McpServerState>().status()
+            }
+            Self::Headless(services) => services.mcp_server.status(),
+        }
+    }
+
+    /// Snapshot terminal sessions visible to the caller. Desktop sessions
+    /// live in Tauri-managed state; headless remote sessions live in the
+    /// reconnect registry and are scoped to their creating device.
+    pub fn terminal_list_all(&self, device_id: &str) -> Vec<crate::terminal::TerminalSessionInfo> {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                app.state::<crate::terminal::TerminalState>().list_all()
+            }
+            Self::Headless(_) => {
+                super::ws_terminal::ws_terminal_registry().list_for_device(device_id)
+            }
+        }
+    }
+
+    pub fn terminal_list_for_project(
+        &self,
+        device_id: &str,
+        project_id: &str,
+    ) -> Vec<crate::terminal::TerminalSessionInfo> {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                app.state::<crate::terminal::TerminalState>()
+                    .list_for_project(project_id)
+            }
+            Self::Headless(_) => super::ws_terminal::ws_terminal_registry()
+                .list_for_device_project(device_id, project_id),
+        }
+    }
+
+    /// Idempotently kill a terminal session on its owning process. Headless
+    /// ownership is checked against the authenticated device id.
+    pub fn terminal_kill(&self, device_id: &str, session_id: &str) {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                if let Some(session) = app
+                    .state::<crate::terminal::TerminalState>()
+                    .remove(session_id)
+                {
+                    let _ = session.kill();
+                }
+            }
+            Self::Headless(_) => {
+                super::ws_terminal::ws_terminal_registry().kill_for_device(session_id, device_id)
+            }
+        }
+    }
+
     /// The sidecar host seam for this host — what `sidecar::spawn` needs.
     pub fn sidecar_host(&self) -> Arc<dyn crate::claude::host::SidecarHost> {
         match self {
@@ -150,5 +213,8 @@ mod tests {
         // sidecar_state shares the registry's supervisor (Arc-backed clone).
         assert!(!host.sidecar_state().is_ready().await);
         assert_eq!(host.sidecar_host().kind(), "headless");
+
+        // Process services stay available without a Tauri AppHandle.
+        assert!(!host.mcp_server_status().running);
     }
 }

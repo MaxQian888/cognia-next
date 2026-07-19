@@ -19,6 +19,9 @@
 
 import { expect, type Page } from "@playwright/test"
 
+const E2E_ACCOUNT_ID = "acct_e2e_seed_account"
+const ACCOUNT_REGISTRY_DB_NAME = "cognia-account-registry"
+
 declare global {
   interface Window {
     __cogniaResetDb?: () => Promise<void>
@@ -53,51 +56,190 @@ export async function waitForTestGlobals(page: Page, timeoutMs = 10_000): Promis
  * next load. Test-infra only — no product code changes, and `isTauri()` is left
  * false so the app stays in web/mobile mode.
  */
-export async function ensureCogniaAccount(page: Page): Promise<void> {
-  // Seed straight into the account-registry IndexedDB (`cognia-account-registry`,
-  // created by Dexie at app boot — it exists even with zero accounts because the
-  // store writes a `state` singleton). We open it raw (no version → current) and
-  // `put` an account + active pointer, then mark it dev-unlocked. This avoids
-  // both Tauri (`createPasswordVerifier`) AND `@/`-aliased imports, which don't
-  // resolve in raw `page.evaluate` (only in-bundle bridge fns can import them).
-  await page.evaluate(async () => {
-    const ACCOUNT_ID = "acct_e2e_seed_account"
-    const STATE_ID = "singleton"
-    const now = Date.now()
-    await new Promise<void>((resolve, reject) => {
-      const req = indexedDB.open("cognia-account-registry")
-      req.onerror = () => reject(req.error)
-      req.onsuccess = () => {
-        const db = req.result
-        if (!db.objectStoreNames.contains("accounts") || !db.objectStoreNames.contains("state")) {
-          db.close()
-          reject(new Error("account-registry stores missing — app not booted yet"))
-          return
+export async function ensureCogniaAccount(page: Page): Promise<string> {
+  // React can paint the onboarding route before AccountStoreInitializer's
+  // effect finishes the Dexie v1 upgrade. Opening the registry in that window
+  // creates/observes an empty database. Poll the schema and perform the seed
+  // through the SAME connection so there is no check-then-open race.
+  await page.waitForFunction(
+    async ({ accountId, databaseName }) => {
+      const exists = (await indexedDB.databases()).some((info) => info.name === databaseName)
+      if (!exists) return false
+
+      const seeded = await new Promise<boolean>((resolve) => {
+        const request = indexedDB.open(databaseName)
+        request.onerror = () => resolve(false)
+        request.onsuccess = () => {
+          const database = request.result
+          if (
+            !database.objectStoreNames.contains("accounts") ||
+            !database.objectStoreNames.contains("state")
+          ) {
+            database.close()
+            resolve(false)
+            return
+          }
+
+          const now = Date.now()
+          const transaction = database.transaction(["accounts", "state"], "readwrite")
+          transaction.objectStore("accounts").put({
+            id: accountId,
+            displayName: "E2E",
+            passwordVerifier: {
+              algorithm: "e2e-stub",
+              salt: "e2e-salt",
+              hash: "e2e-hash",
+              params: {},
+            },
+            createdAt: now,
+            updatedAt: now,
+          })
+          transaction.objectStore("state").put({
+            id: "singleton",
+            activeAccountId: accountId,
+            updatedAt: now,
+          })
+          transaction.oncomplete = () => {
+            database.close()
+            resolve(true)
+          }
+          transaction.onerror = () => {
+            database.close()
+            resolve(false)
+          }
+          transaction.onabort = () => {
+            database.close()
+            resolve(false)
+          }
         }
-        const tx = db.transaction(["accounts", "state"], "readwrite")
-        tx.objectStore("accounts").put({
-          id: ACCOUNT_ID,
-          displayName: "E2E",
-          passwordVerifier: {
-            algorithm: "e2e-stub",
-            salt: "e2e-salt",
-            hash: "e2e-hash",
-            params: {},
-          },
-          createdAt: now,
-          updatedAt: now,
-        })
-        tx.objectStore("state").put({ id: STATE_ID, activeAccountId: ACCOUNT_ID, updatedAt: now })
-        tx.oncomplete = () => {
-          db.close()
-          resolve()
-        }
-        tx.onerror = () => reject(tx.error)
+      })
+      if (seeded) {
+        window.sessionStorage.setItem("cognia-dev-unlocked-account", accountId)
       }
-    })
-    // Dev-unlock marker (sessionStorage) so AccountGate treats it as unlocked.
-    window.sessionStorage.setItem("cognia-dev-unlocked-account", ACCOUNT_ID)
-  })
+      return seeded
+    },
+    { accountId: E2E_ACCOUNT_ID, databaseName: ACCOUNT_REGISTRY_DB_NAME },
+    { timeout: 15_000 }
+  )
+
+  return E2E_ACCOUNT_ID
+}
+
+/**
+ * Bootstrap mobile past the runtime-mode chooser before the in-app bridge is
+ * available. AccountGate mounts first, while `ExposeTestGlobals` lives inside
+ * the gated app; after seeding an account, a mobile reload can therefore stop
+ * at `/welcome` before tests get a chance to call `setCogniaSettings`.
+ *
+ * Write the smallest valid settings singleton directly into whichever Cognia
+ * app DB is active. The exported bootstrap below deliberately does not wait
+ * for the heavier dev bridge, so queue/boot specs can stay independent from
+ * dynamic plugin-table upgrades.
+ */
+async function installMobileBootstrapMode(
+  page: Page,
+  mode: "standalone" | "paired"
+): Promise<void> {
+  await page.addInitScript((runtimeMode) => {
+    const bootstrapKey = "cognia-e2e-mobile-bootstrap-mode"
+    try {
+      if (window.sessionStorage.getItem(bootstrapKey) === runtimeMode) {
+        ;(
+          window as unknown as { __cogniaMobileBootstrapReady?: boolean }
+        ).__cogniaMobileBootstrapReady = true
+        return
+      }
+    } catch {
+      // about:blank has an opaque origin; continue on the next app document.
+    }
+    void (async () => {
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        try {
+          const databases = await indexedDB.databases()
+          const candidateNames = databases
+            .map((info) => info.name)
+            .filter((name): name is string => Boolean(name?.startsWith("cognia-")))
+          for (const candidateName of candidateNames) {
+            const seeded = await new Promise<boolean>((resolve) => {
+              const req = indexedDB.open(candidateName)
+              req.onerror = () => resolve(false)
+              req.onsuccess = () => {
+                const db = req.result
+                if (!db.objectStoreNames.contains("settings")) {
+                  db.close()
+                  resolve(false)
+                  return
+                }
+                const tx = db.transaction("settings", "readwrite")
+                const store = tx.objectStore("settings")
+                const get = store.get("singleton")
+                get.onerror = () => {
+                  db.close()
+                  resolve(false)
+                }
+                get.onsuccess = () => {
+                  store.put({
+                    ...(get.result ?? {}),
+                    id: "singleton",
+                    mobileRuntimeMode: runtimeMode,
+                  })
+                }
+                tx.oncomplete = () => {
+                  db.close()
+                  resolve(true)
+                }
+                tx.onerror = () => {
+                  db.close()
+                  resolve(false)
+                }
+              }
+            })
+            if (seeded) {
+              window.sessionStorage.setItem(bootstrapKey, runtimeMode)
+              ;(
+                window as unknown as { __cogniaMobileBootstrapReady?: boolean }
+              ).__cogniaMobileBootstrapReady = true
+              return
+            }
+          }
+        } catch {
+          // about:blank has an opaque origin; the script runs again on the
+          // next real app document where IndexedDB is available.
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+    })()
+  }, mode)
+}
+
+/**
+ * Mobile-only bootstrap that does not depend on `ExposeTestGlobals`.
+ * Useful for specs whose subject is the mobile boot/queue path itself: it
+ * seeds the account + runtime mode before the gated bridge can mount, then
+ * returns on the real app route. Each Playwright test gets a fresh context,
+ * so callers can use this instead of deleting an already-open Dexie database.
+ */
+export async function bootstrapCogniaMobile(
+  page: Page,
+  mode: "standalone" | "paired"
+): Promise<void> {
+  await ensureCogniaAccount(page)
+  await installMobileBootstrapMode(page, mode)
+  const appUrl = new URL("/", page.url()).toString()
+  const welcomeUrl = new URL("/welcome", page.url()).toString()
+  await page.goto("about:blank")
+  await page.goto(welcomeUrl, { waitUntil: "domcontentloaded" })
+  await page.waitForFunction(
+    () =>
+      Boolean(
+        (window as unknown as { __cogniaMobileBootstrapReady?: boolean })
+          .__cogniaMobileBootstrapReady
+      ),
+    undefined,
+    { timeout: 15_000 }
+  )
+  await page.goto("about:blank")
+  await page.goto(appUrl, { waitUntil: "domcontentloaded" })
 }
 
 /**
@@ -178,29 +320,89 @@ export async function readDexieRow<T>(
   page: Page,
   opts: { db?: string; table: string; key: string }
 ): Promise<T | undefined> {
-  return (await page.evaluate(async ({ db = "cognia-claude", table, key }) => {
-    return await new Promise((resolve, reject) => {
-      const req = indexedDB.open(db)
-      req.onerror = () => reject(req.error)
-      req.onsuccess = () => {
-        const conn = req.result
-        conn.onversionchange = () => conn.close()
-        if (!conn.objectStoreNames.contains(table)) {
-          conn.close()
-          resolve(undefined)
-          return
+  return (await page.evaluate(async ({ db, table, key }) => {
+    const names = db
+      ? [db]
+      : (await indexedDB.databases())
+          .map((info) => info.name)
+          .filter((name): name is string => Boolean(name))
+          .sort(
+            (a, b) =>
+              Number(b.startsWith("cognia-account-")) - Number(a.startsWith("cognia-account-"))
+          )
+
+    for (const name of names) {
+      const row = await new Promise<unknown>((resolve, reject) => {
+        const req = indexedDB.open(name)
+        req.onerror = () => reject(req.error)
+        req.onsuccess = () => {
+          const conn = req.result
+          conn.onversionchange = () => conn.close()
+          if (!conn.objectStoreNames.contains(table)) {
+            conn.close()
+            resolve(undefined)
+            return
+          }
+          const tx = conn.transaction(table, "readonly")
+          const get = tx.objectStore(table).get(key)
+          get.onsuccess = () => {
+            conn.close()
+            resolve(get.result)
+          }
+          get.onerror = () => {
+            conn.close()
+            reject(get.error)
+          }
         }
-        const tx = conn.transaction(table, "readonly")
-        const get = tx.objectStore(table).get(key)
-        get.onsuccess = () => {
-          conn.close()
-          resolve(get.result)
-        }
-        get.onerror = () => {
-          conn.close()
-          reject(get.error)
-        }
-      }
-    })
+      })
+      if (row !== undefined) return row
+    }
+    return undefined
   }, opts)) as T | undefined
+}
+
+/** Read every row from the first active Dexie database that owns `table`. */
+export async function readDexieRows<T>(
+  page: Page,
+  opts: { db?: string; table: string }
+): Promise<T[]> {
+  return (await page.evaluate(async ({ db, table }) => {
+    const names = db
+      ? [db]
+      : (await indexedDB.databases())
+          .map((info) => info.name)
+          .filter((name): name is string => Boolean(name))
+          .sort(
+            (a, b) =>
+              Number(b.startsWith("cognia-account-")) - Number(a.startsWith("cognia-account-"))
+          )
+
+    for (const name of names) {
+      const rows = await new Promise<unknown[] | undefined>((resolve, reject) => {
+        const req = indexedDB.open(name)
+        req.onerror = () => reject(req.error)
+        req.onsuccess = () => {
+          const conn = req.result
+          conn.onversionchange = () => conn.close()
+          if (!conn.objectStoreNames.contains(table)) {
+            conn.close()
+            resolve(undefined)
+            return
+          }
+          const tx = conn.transaction(table, "readonly")
+          const get = tx.objectStore(table).getAll()
+          get.onsuccess = () => {
+            conn.close()
+            resolve(get.result)
+          }
+          get.onerror = () => {
+            conn.close()
+            reject(get.error)
+          }
+        }
+      })
+      if (rows !== undefined) return rows
+    }
+    return []
+  }, opts)) as T[]
 }

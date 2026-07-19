@@ -168,7 +168,10 @@ mod tests {
         let raw = "fatal: unable to access 'https://alice:ghp_secret@github.com/o/r.git'";
         let json = serde_json::to_value(GitError::Libgit2(raw.into())).unwrap();
         let detail = json["detail"].as_str().unwrap();
-        assert!(!detail.contains("ghp_secret"), "token leaked in serde: {detail}");
+        assert!(
+            !detail.contains("ghp_secret"),
+            "token leaked in serde: {detail}"
+        );
         assert!(detail.contains("<redacted>"));
     }
 

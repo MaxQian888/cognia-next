@@ -53,6 +53,7 @@ function renderToolbar(actions = makeActions(), handlers = {}) {
     onOpenRemotes: jest.fn(),
     onOpenTags: jest.fn(),
     onOpenCompare: jest.fn(),
+    onOpenWorktrees: jest.fn(),
     onRefresh: jest.fn(),
     ...handlers,
   }
@@ -114,6 +115,14 @@ describe("SyncToolbar", () => {
     await user.click(screen.getByTestId("sync-more"))
     await user.click(await screen.findByTestId("more-compare"))
     expect(props.onOpenCompare).toHaveBeenCalled()
+  })
+
+  it("opens the worktree panel from the overflow menu", async () => {
+    const user = userEvent.setup()
+    const props = renderToolbar()
+    await user.click(screen.getByTestId("sync-more"))
+    await user.click(await screen.findByTestId("more-worktrees"))
+    expect(props.onOpenWorktrees).toHaveBeenCalled()
   })
 
   it("keeps the overflow menu mounted when an overlay item is selected (preventDefault)", async () => {

@@ -11,10 +11,14 @@ import enMessages from "@/i18n/messages/en.json"
 const undo = jest.fn()
 const redo = jest.fn()
 const exportApp = jest.fn()
+const downloadApp = jest.fn()
+const getAppInstance = jest.fn(() => ({ locale: "zh-CN" as const }))
+const replaceSurfaceContent = jest.fn()
 const saveApp = jest.fn(async () => true)
 const storeState: Record<string, unknown> = {
   undo,
   redo,
+  replaceSurfaceContent,
   undoStacks: { sx: [{ id: "s1" }] },
   redoStacks: {},
 }
@@ -24,7 +28,7 @@ jest.mock("@/stores/a2ui", () => ({
 }))
 
 jest.mock("@/hooks/a2ui/use-app-builder", () => ({
-  useA2UIAppBuilder: () => ({ exportApp }),
+  useA2UIAppBuilder: () => ({ exportApp, downloadApp, getAppInstance }),
 }))
 
 jest.mock("@/hooks/a2ui/use-a2ui-save", () => ({
@@ -69,6 +73,10 @@ describe("A2UIToolbar", () => {
     undo.mockReset()
     redo.mockReset()
     exportApp.mockReset()
+    downloadApp.mockReset()
+    downloadApp.mockReturnValue(true)
+    replaceSurfaceContent.mockReset()
+    replaceSurfaceContent.mockReturnValue(true)
     saveApp.mockReset()
     saveApp.mockResolvedValue(true)
     ;(toast.success as jest.Mock).mockReset()
@@ -129,27 +137,48 @@ describe("A2UIToolbar", () => {
     await waitFor(() => expect(toast.error).toHaveBeenCalled())
   })
 
-  it("export calls appBuilder.exportApp + success toast", () => {
+  it("export downloads the serialized app and toasts success", () => {
     renderToolbar()
     const exportButtons = screen
       .getAllByRole("button")
       .filter((b) => b.querySelector("svg.lucide-download"))
     expect(exportButtons.length).toBeGreaterThan(0)
     fireEvent.click(exportButtons[0])
-    expect(exportApp).toHaveBeenCalledWith("sx")
+    expect(downloadApp).toHaveBeenCalledWith("sx")
     expect(toast.success).toHaveBeenCalled()
   })
 
-  it("export shows an error toast when exportApp throws", () => {
-    exportApp.mockImplementation(() => {
-      throw new Error("nope")
-    })
+  it("export shows an error toast when the download cannot be created", () => {
+    downloadApp.mockReturnValueOnce(false)
     renderToolbar()
     const exportButtons = screen
       .getAllByRole("button")
       .filter((b) => b.querySelector("svg.lucide-download"))
     fireEvent.click(exportButtons[0])
     expect(toast.error).toHaveBeenCalled()
+  })
+
+  it("regenerates the current app from a prompt without changing its surface id", async () => {
+    renderToolbar()
+
+    fireEvent.click(screen.getByRole("button", { name: "AI Generate" }))
+    fireEvent.change(screen.getByPlaceholderText("Describe what you want to change..."), {
+      target: { value: "Turn this into a BMI calculator" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Regenerate" }))
+
+    await waitFor(() => expect(replaceSurfaceContent).toHaveBeenCalled())
+    expect(replaceSurfaceContent).toHaveBeenCalledWith(
+      "sx",
+      expect.arrayContaining([
+        expect.objectContaining({ id: "root" }),
+        expect.objectContaining({ id: "header", text: "🏃 BMI 计算器" }),
+      ]),
+      expect.objectContaining({ bmi: 0 }),
+      "root"
+    )
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(toast.success).toHaveBeenCalled()
   })
 
   it("share opens the dialog and creates an a2ui link from the exported app", async () => {

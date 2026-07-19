@@ -163,12 +163,100 @@ describe("listing & scope-union", () => {
     expect(charA.map((m) => m.id)).toEqual(["cA"])
   })
 
+  it("listMemories can match a complete maintenance namespace", async () => {
+    await createMemory(buildInput({ id: "p1-root", scope: "workspace", projectId: "p1" }))
+    await createMemory(
+      buildInput({ id: "p1-branch", scope: "workspace", projectId: "p1", branch: "main" })
+    )
+    await createMemory(buildInput({ id: "p2-root", scope: "workspace", projectId: "p2" }))
+
+    const rows = await listMemories({
+      scope: "workspace",
+      status: "active",
+      projectId: "p1",
+      exactNamespace: true,
+    })
+
+    expect(rows.map((memory) => memory.id)).toEqual(["p1-root"])
+  })
+
   it("listActiveForReader unions global with the character's own override layer", async () => {
     await seed()
     const forA = await listActiveForReader("charA")
     expect(forA.map((m) => m.id).sort()).toEqual(["cA", "g1"]) // g2 invalidated, cB other char
     const noChar = await listActiveForReader()
     expect(noChar.map((m) => m.id)).toEqual(["g1"])
+  })
+
+  it("layers workspace and character memories over global stable keys", async () => {
+    await createMemory(buildInput({ id: "global", key: "package-manager", text: "Use npm" }))
+    await createMemory(
+      buildInput({
+        id: "workspace",
+        scope: "workspace",
+        projectId: "project-a",
+        key: "package-manager",
+        text: "Use pnpm",
+      })
+    )
+    await createMemory(
+      buildInput({
+        id: "character",
+        scope: "character",
+        characterId: "char-a",
+        projectId: "project-a",
+        key: "package-manager",
+        text: "Use Bun",
+      })
+    )
+
+    const rows = await listActiveForReader({ projectId: "project-a", characterId: "char-a" })
+    expect(
+      rows.filter((memory) => memory.key === "package-manager").map((memory) => memory.id)
+    ).toEqual(["character"])
+  })
+
+  it("keeps agent namespaces private and applies branch/path restrictions", async () => {
+    await createMemory(buildInput({ id: "global" }))
+    await createMemory(
+      buildInput({ id: "agent-a", scope: "agent", agentId: "agent-a", projectId: "p" })
+    )
+    await createMemory(
+      buildInput({ id: "agent-b", scope: "agent", agentId: "agent-b", projectId: "p" })
+    )
+    await createMemory(
+      buildInput({
+        id: "path-match",
+        scope: "workspace",
+        projectId: "p",
+        branch: "main",
+        pathPattern: "src/features",
+      })
+    )
+    await createMemory(
+      buildInput({
+        id: "path-miss",
+        scope: "workspace",
+        projectId: "p",
+        branch: "other",
+        pathPattern: "src/features",
+      })
+    )
+
+    const rows = await listActiveForReader({
+      projectId: "p",
+      agentId: "agent-a",
+      branch: "main",
+      path: "src/features/memory/panel.tsx",
+    })
+    expect(rows.map((memory) => memory.id).sort()).toEqual(["agent-a", "global", "path-match"])
+  })
+
+  it("retains conflicts for review but excludes them from recall", async () => {
+    await createMemory(buildInput({ id: "safe" }))
+    await createMemory(buildInput({ id: "conflict", reviewStatus: "conflict" }))
+    expect((await listActiveForReader()).map((memory) => memory.id)).toEqual(["safe"])
+    expect((await listMemories()).map((memory) => memory.id)).toContain("conflict")
   })
 
   it("listActiveProcedural returns only active procedural for the reader", async () => {

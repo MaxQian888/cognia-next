@@ -162,8 +162,246 @@ describe("Plugin Validation", () => {
       expect(result.diagnostics).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            field: "main",
-            code: "manifest.main.required_for_js_contributions",
+            field: "sessionImporters",
+            code: "manifest.contributions.javascript.unsupported_for_python",
+            severity: "error",
+          }),
+        ])
+      )
+    })
+
+    it("rejects JavaScript contributions in Python-only plugins even when main is declared", () => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.type = "python"
+      manifest.main = "dist/index.js"
+      manifest.pythonMain = "main.py"
+      manifest.capabilities = ["session-importer"]
+      manifest.sessionImporters = [
+        {
+          id: "legacy-session",
+          label: "Legacy Session",
+          entry: "dist/importer.js",
+          export: "createImporter",
+        },
+      ]
+
+      expect(validatePluginManifest(manifest).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "sessionImporters",
+            code: "manifest.contributions.javascript.unsupported_for_python",
+            severity: "error",
+          }),
+        ])
+      )
+    })
+
+    it("rejects JavaScript contributions for a runtime without a JavaScript entry", () => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.type = "wasm"
+      delete manifest.main
+      manifest.wasmMain = "plugin.wasm"
+      manifest.wasm = { apiVersion: "0.1.0" }
+      manifest.contextPanels = [
+        { id: "panel", label: "Panel", entry: "dist/panel.js", export: "createPanel" },
+      ]
+
+      expect(validatePluginManifest(manifest).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "manifest.contributions.javascript.unsupported_for_plugin_type",
+            severity: "error",
+          }),
+        ])
+      )
+    })
+
+    it("accepts declarative-only VS Code extensions without vscodeMain", () => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.type = "vscode-extension"
+      delete manifest.main
+      manifest.themes = [{ id: "dark", name: "Dark", vscodeJsonPath: "themes/dark.json" }]
+
+      expect(validatePluginManifest(manifest).diagnostics).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ code: "manifest.runtime_entry.required_any_of" }),
+        ])
+      )
+    })
+
+    it.each([
+      ["ocrProviders", "media", { id: "ocr", label: "OCR", entry: "ocr.js", export: "createOcr" }],
+      [
+        "aiProviders",
+        "ai-provider",
+        {
+          id: "ai",
+          label: "AI",
+          entry: "ai.js",
+          export: "createAi",
+          kind: "embedding",
+          dimensions: 3,
+        },
+      ],
+    ])("rejects %s JavaScript providers in Python-only plugins", (field, capability, entry) => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.type = "python"
+      delete manifest.main
+      manifest.pythonMain = "main.py"
+      manifest.capabilities = [capability]
+      manifest[field] = [entry]
+
+      expect(validatePluginManifest(manifest).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field,
+            code: "manifest.contributions.javascript.unsupported_for_python",
+          }),
+        ])
+      )
+    })
+
+    it("rejects traversal in theme vscodeJsonPath", () => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.themes = [{ id: "escape", name: "Escape", vscodeJsonPath: "../../outside.json" }]
+
+      expect(validatePluginManifest(manifest).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "themes[0].vscodeJsonPath",
+            code: "manifest.themes.vscodeJsonPath.traversal",
+          }),
+        ])
+      )
+    })
+
+    it.each([
+      ["fonts", { fonts: [{ family: "X", files: [{ weight: 400, src: "../font.woff2" }] }] }],
+      [
+        "wallpapers",
+        {
+          wallpapers: [
+            {
+              id: "escape",
+              name: "Escape",
+              source: {
+                kind: "image",
+                relPath: "..\\wallpaper.png",
+                mime: "image/png",
+                width: 1,
+                height: 1,
+              },
+            },
+          ],
+        },
+      ],
+      [
+        "cliTools",
+        {
+          cliTools: [
+            {
+              id: "escape",
+              name: "Escape",
+              description: "Escape",
+              permission: "cli:execute",
+              binary: { kind: "plugin-dir", relPath: "../../tool" },
+              argv: [],
+            },
+          ],
+        },
+      ],
+      ["vscodeLanguages", { vscodeLanguages: [{ id: "x", configuration: "../language.json" }] }],
+      [
+        "vscodeLanguages",
+        { vscodeLanguages: [{ id: "x", icon: { light: "../light.svg", dark: "dark.svg" } }] },
+      ],
+    ])("rejects traversal in %s asset paths", (_field, contribution) => {
+      const manifest = Object.assign(createValidManifest(), contribution)
+      expect(validatePluginManifest(manifest as PluginManifest).valid).toBe(false)
+    })
+
+    it("accepts host-only variants in Python and rejects only code-backed variants", () => {
+      const base = createValidManifest() as unknown as Record<string, unknown>
+      base.type = "python"
+      delete base.main
+      base.pythonMain = "main.py"
+      base.protocolAdapters = [
+        {
+          id: "data",
+          label: "Data",
+          spec: {
+            kind: "openai-compatible-variant",
+            urlTemplate: "https://example.test",
+            responsePaths: { textDelta: "delta" },
+          },
+        },
+      ]
+      base.webviews = [{ id: "inline", containerId: "main", html: "<p>safe</p>" }]
+      expect(validatePluginManifest(base as unknown as PluginManifest).valid).toBe(true)
+
+      base.protocolAdapters = [
+        { id: "code", label: "Code", spec: { kind: "code" }, entry: "adapter.js", export: "x" },
+      ]
+      expect(validatePluginManifest(base as unknown as PluginManifest).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "protocolAdapters",
+            code: "manifest.contributions.javascript.unsupported_for_python",
+          }),
+        ])
+      )
+    })
+
+    it("treats connectors as JavaScript-backed contributions", () => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.type = "python"
+      delete manifest.main
+      manifest.pythonMain = "main.py"
+      manifest.connectors = [
+        {
+          type: "custom",
+          factory: "createConnector",
+          configSchema: {},
+          transportModes: ["polling"],
+        },
+      ]
+      expect(validatePluginManifest(manifest as unknown as PluginManifest).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: "connectors", severity: "error" }),
+        ])
+      )
+    })
+
+    it.each([
+      ["main", { main: "..\\outside.js" }],
+      ["browser", { browser: "..\\outside.js" }],
+      ["l10n", { l10n: "..\\outside" }],
+      ["languages", { contributes: { languages: [{ configuration: "..\\outside.json" }] } }],
+      [
+        "language icons",
+        {
+          contributes: {
+            languages: [{ icon: { light: "../../outside.svg", dark: "icons/dark.svg" } }],
+          },
+        },
+      ],
+      ["grammars", { contributes: { grammars: [{ path: "..\\outside.json" }] } }],
+      ["themes", { contributes: { themes: [{ path: "..\\outside.json" }] } }],
+      ["iconThemes", { contributes: { iconThemes: [{ path: "..\\outside.json" }] } }],
+      ["productIconThemes", { contributes: { productIconThemes: [{ path: "..\\outside.json" }] } }],
+      ["snippets", { contributes: { snippets: [{ path: "..\\outside.json" }] } }],
+      ["chatInstructions", { contributes: { chatInstructions: [{ path: "..\\outside.md" }] } }],
+      ["chatPromptFiles", { contributes: { chatPromptFiles: [{ path: "..\\outside.md" }] } }],
+    ])("rejects traversal in nested VS Code %s paths", (_field, vscodeExtension) => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.type = "vscode-extension"
+      manifest.vscodeMain = "dist/extension.js"
+      manifest.vscodeExtension = vscodeExtension
+
+      expect(validatePluginManifest(manifest).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: expect.stringMatching(/\.traversal$/),
             severity: "error",
           }),
         ])
@@ -217,6 +455,19 @@ describe("Plugin Validation", () => {
         manifest.id = id
         const result = validatePluginManifest(manifest)
         expect(result.valid).toBe(true)
+      }
+    })
+
+    it("should reject host-reserved and overlong plugin ids", () => {
+      for (const id of [".host-state", "_marketplace_cache", "_backups", "a".repeat(129)]) {
+        const manifest = createValidManifest()
+        manifest.id = id
+        const result = validatePluginManifest(manifest)
+        expect(result.diagnostics).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ code: "manifest.id.invalid_format", field: "id" }),
+          ])
+        )
       }
     })
 
@@ -457,10 +708,22 @@ describe("Plugin Validation", () => {
       delete pythonManifest.main
       expect(validatePluginManifest(pythonManifest).valid).toBe(true)
 
-      // Test hybrid type (needs main, pythonMain is optional)
+      // Hybrid plugins always own a Python runtime and therefore require pythonMain.
       const hybridManifest = createValidManifest()
       hybridManifest.type = "hybrid"
+      hybridManifest.pythonMain = "main.py"
       expect(validatePluginManifest(hybridManifest).valid).toBe(true)
+
+      delete hybridManifest.pythonMain
+      expect(validatePluginManifest(hybridManifest).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "pythonMain",
+            code: "manifest.pythonMain.required",
+            severity: "error",
+          }),
+        ])
+      )
     })
 
     it("should handle empty capabilities", () => {

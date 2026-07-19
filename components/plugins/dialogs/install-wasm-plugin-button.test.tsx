@@ -32,6 +32,16 @@ jest.mock("@/lib/plugin/package/http-installer", () => ({
   previewBundleManifest: (...args: unknown[]) => previewBundleManifestMock(...args),
 }))
 
+jest.mock("@/lib/plugin/security/wasm-grant", () => ({
+  applyWasmCapabilityGrant: async (decision: {
+    grantedPermissions: string[]
+    grantedPreopens: string[]
+  }) => ({
+    permissions: decision.grantedPermissions,
+    preopens: decision.grantedPreopens,
+  }),
+}))
+
 import { InstallWasmPluginButton } from "./install-wasm-plugin-button"
 
 const baseManifest = {

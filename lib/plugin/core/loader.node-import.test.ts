@@ -49,4 +49,13 @@ describe("PluginLoader frontendImporter seam", () => {
     await loader.load(frontendPlugin("a"))
     expect(ids).toEqual(["a", "a"])
   })
+
+  it("uses the Node importer for lazy secondary entries outside Tauri", async () => {
+    const frontendImporter = jest.fn(async () => ({ activate: jest.fn() }))
+    const loader = new PluginLoader({ frontendImporter })
+
+    await loader.importEntry("/abs/plugins/p/secondary.js", "p", "/abs/plugins/p")
+
+    expect(frontendImporter).toHaveBeenCalledWith("/abs/plugins/p/secondary.js", "p")
+  })
 })

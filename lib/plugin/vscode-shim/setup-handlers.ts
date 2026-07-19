@@ -22,6 +22,7 @@ import {
   handleCreateChatParticipant,
   handleDisposeChatParticipant,
   handleRegisterChatVariableResolver,
+  handleUnregisterChatVariableResolver,
 } from "./chat-participant-registry"
 import {
   handleExtensionCleanup,
@@ -34,6 +35,11 @@ import {
 } from "./languages-handler"
 import { vscodeDiagnosticToMonacoMarker, type VscodeDiagnostic } from "./lsp-protocol-adapter"
 import { listWorkspaceFolders, resolveWorkspaceFolder } from "./lsp-workspace-manager"
+import { listLanguages } from "@/lib/plugin/bridge/languages-bridge"
+import {
+  cleanupVscodeRuntimeRegistrations,
+  installVscodeRuntimeRpcHandlers,
+} from "./runtime-handlers"
 
 let installed = false
 
@@ -84,8 +90,19 @@ export function installVscodeRpcHandlers(): () => void {
     registerMethod("chat:disposeParticipant", (p) => handleDisposeChatParticipant(p as never))
   )
   disposers.push(
+    registerMethod("chat:registerChatVariableResolver", (p) =>
+      handleRegisterChatVariableResolver(p as never)
+    )
+  )
+  // Compatibility alias for early persisted sidecar builds.
+  disposers.push(
     registerMethod("chat:registerVariableResolver", (p) =>
       handleRegisterChatVariableResolver(p as never)
+    )
+  )
+  disposers.push(
+    registerMethod("chat:unregisterChatVariableResolver", (p) =>
+      handleUnregisterChatVariableResolver(p as never)
     )
   )
   disposers.push(
@@ -96,6 +113,11 @@ export function installVscodeRpcHandlers(): () => void {
 
   // languages:* — provider registration + diagnostics + decorations.
   disposers.push(registerMethod("languages:register", (p) => handleLanguagesRegister(p as never)))
+  disposers.push(
+    registerMethod("languages:list", () =>
+      [...new Set(listLanguages().map((item) => item.id))].sort()
+    )
+  )
   disposers.push(
     registerMethod("languages:unregister", (p) => handleLanguagesUnregister(p as never))
   )
@@ -143,10 +165,18 @@ export function installVscodeRpcHandlers(): () => void {
   disposers.push(
     registerMethod("languages:setDecorations", (p) => handleLanguagesSetDecorations(p as never))
   )
-  disposers.push(registerMethod("extension:cleanup", (p) => handleExtensionCleanup(p as never)))
+  disposers.push(
+    registerMethod("extension:cleanup", (p) => {
+      const payload = p as { extensionId: string }
+      cleanupVscodeRuntimeRegistrations(payload.extensionId)
+      return handleExtensionCleanup(payload)
+    })
+  )
   disposers.push(
     registerMethod("window:activeTextEditor:get", () => handleWindowActiveTextEditorGet())
   )
+
+  disposers.push(...installVscodeRuntimeRpcHandlers())
 
   // workspace:* — workspace folder lookups for the sidecar's
   // `vscode.workspace.workspaceFolders` / `getWorkspaceFolder(uri)` APIs.

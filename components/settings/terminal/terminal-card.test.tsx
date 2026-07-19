@@ -156,6 +156,39 @@ describe("TerminalCard", () => {
     })
   })
 
+  it("turns custom glyph rendering off (defaults on)", async () => {
+    render(<TerminalCard />)
+    const toggle = screen.getByTestId("terminal-card-custom-glyphs")
+    await act(async () => {
+      fireEvent.click(toggle)
+    })
+    expect(settingsSave).toHaveBeenLastCalledWith({
+      terminal: expect.objectContaining({ customGlyphs: false }),
+    })
+  })
+
+  it("turns overlapping glyph rescaling off (defaults on)", async () => {
+    render(<TerminalCard />)
+    const toggle = screen.getByTestId("terminal-card-rescale-overlapping-glyphs")
+    await act(async () => {
+      fireEvent.click(toggle)
+    })
+    expect(settingsSave).toHaveBeenLastCalledWith({
+      terminal: expect.objectContaining({ rescaleOverlappingGlyphs: false }),
+    })
+  })
+
+  it("turns bright ANSI colors for bold text off (defaults on)", async () => {
+    render(<TerminalCard />)
+    const toggle = screen.getByTestId("terminal-card-bold-bright-colors")
+    await act(async () => {
+      fireEvent.click(toggle)
+    })
+    expect(settingsSave).toHaveBeenLastCalledWith({
+      terminal: expect.objectContaining({ drawBoldTextInBrightColors: false }),
+    })
+  })
+
   it("turns force-UTF-8 off (defaults on)", async () => {
     render(<TerminalCard />)
     const toggle = screen.getByTestId("terminal-card-force-utf8")
@@ -188,6 +221,27 @@ describe("TerminalCard", () => {
     })
     expect(settingsSave).toHaveBeenLastCalledWith({
       terminal: expect.objectContaining({ cursorBlink: false }),
+    })
+  })
+
+  it("clamps the bar cursor width between 1 and 10 pixels", async () => {
+    render(<TerminalCard />)
+    const input = screen.getByTestId("terminal-card-cursor-width") as HTMLInputElement
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "99" } })
+    })
+    expect(settingsSave).toHaveBeenLastCalledWith({
+      terminal: expect.objectContaining({ cursorWidth: 10 }),
+    })
+  })
+
+  it("persists the inactive cursor style", async () => {
+    const user = userEvent.setup()
+    render(<TerminalCard />)
+    await user.click(screen.getByTestId("terminal-card-cursor-inactive-style"))
+    await user.click(await screen.findByText("settings.terminal.cursor.inactiveNone"))
+    expect(settingsSave).toHaveBeenLastCalledWith({
+      terminal: expect.objectContaining({ cursorInactiveStyle: "none" }),
     })
   })
 
@@ -249,6 +303,17 @@ describe("TerminalCard", () => {
     })
     expect(settingsSave).toHaveBeenLastCalledWith({
       terminal: expect.objectContaining({ scrollSensitivity: 10 }),
+    })
+  })
+
+  it("turns smooth scrolling on (defaults off)", async () => {
+    render(<TerminalCard />)
+    const toggle = screen.getByTestId("terminal-card-smooth-scrolling")
+    await act(async () => {
+      fireEvent.click(toggle)
+    })
+    expect(settingsSave).toHaveBeenLastCalledWith({
+      terminal: expect.objectContaining({ smoothScrolling: true }),
     })
   })
 

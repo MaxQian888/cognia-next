@@ -14,6 +14,7 @@ import {
   ArrowUpFromLineIcon,
   CloudIcon,
   GitCompareIcon,
+  GitBranchPlusIcon,
   GitMergeIcon,
   HistoryIcon,
   Undo2Icon,
@@ -60,6 +61,7 @@ interface SyncToolbarProps {
   onOpenRemotes: () => void
   onOpenTags: () => void
   onOpenCompare: () => void
+  onOpenWorktrees?: () => void
   onRefresh: () => void
 }
 
@@ -99,6 +101,7 @@ export function SyncToolbar({
   onOpenRemotes,
   onOpenTags,
   onOpenCompare,
+  onOpenWorktrees = () => {},
   onRefresh,
 }: SyncToolbarProps) {
   const t = useTranslations("sourceControl")
@@ -271,6 +274,16 @@ export function SyncToolbar({
           >
             <GitCompareIcon className="size-3.5" />
             {t("compare.menuItem")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={(e) => {
+              e.preventDefault()
+              onOpenWorktrees()
+            }}
+            data-testid="more-worktrees"
+          >
+            <GitBranchPlusIcon className="size-3.5" />
+            {t("worktrees.title")}
           </DropdownMenuItem>
           <DropdownMenuItem
             onSelect={() => void actions.reset("soft", "HEAD~1")}

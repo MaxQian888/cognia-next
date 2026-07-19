@@ -349,6 +349,7 @@ describe("call() — idempotency key", () => {
       "skills_load_registry",
       "skills_scan_native",
       "mcp_server_status",
+      "lsp_host_ensure",
       "read_agent_config",
       "session_list",
       "companion_can_control",
@@ -397,10 +398,13 @@ describe("call() — idempotency key", () => {
       "terminal_list_for_project",
       "plugin_list",
       "plugin_runtime_snapshot",
+      "plugin_permission_list",
+      "plugin_get_capabilities",
       "workflow_run_list",
       "twin_source_list",
       "twin_job_status",
       "backup_export",
+      "fleet_get_snapshot",
     ]
 
     for (const cmd of readOnlyCommands) {

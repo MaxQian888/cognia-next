@@ -1777,7 +1777,10 @@ describe("CodexAppServerAdapter", () => {
       const options = adapter.getConfigOptions(session.id)!
       const effort = options.find((o) => o.id === "reasoningEffort")!
       expect(effort.currentValue).toBe("medium")
-      expect(effort.options.map((o) => o.value)).toEqual(["low", "medium", "high"])
+      if (effort.type !== "select") throw new Error("reasoning effort must be a select option")
+      expect(effort.options.flatMap((option) => ("value" in option ? [option.value] : []))).toEqual(
+        ["low", "medium", "high"]
+      )
       const sandbox = options.find((o) => o.id === "sandboxMode")!
       expect(sandbox.currentValue).toBe("workspaceWrite")
 

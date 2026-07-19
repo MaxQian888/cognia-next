@@ -10,14 +10,20 @@
  */
 
 import type { StepExecutionContext, StepExecutionResult } from "@/types/workflow/visual"
-import type { MemoryType } from "@/types/memory/memory"
+import type { MemoryScope, MemoryType } from "@/types/memory/memory"
 
 export interface MemoryRecallParams {
   query?: string
   topK?: number
-  scope?: "global" | "character"
+  scope?: MemoryScope
   /** Required when scope === "character". */
   characterId?: string
+  /** Required when scope === "workspace". */
+  projectId?: string
+  /** Required when scope === "agent". */
+  agentId?: string
+  branch?: string
+  path?: string
   /** Drop hits whose normalized relevance is below this (0..1). */
   relevanceFloor?: number
   /** Restrict to memory types (semantic / episodic / procedural). */
@@ -31,6 +37,12 @@ export async function runMemoryRecall(ctx: StepExecutionContext): Promise<StepEx
   const scope = params.scope ?? "global"
   if (scope === "character" && !params.characterId) {
     throw nonRetryable("action.memory.recall: 'characterId' is required when scope is 'character'")
+  }
+  if (scope === "workspace" && !params.projectId) {
+    throw nonRetryable("action.memory.recall: 'projectId' is required when scope is 'workspace'")
+  }
+  if (scope === "agent" && !params.agentId) {
+    throw nonRetryable("action.memory.recall: 'agentId' is required when scope is 'agent'")
   }
 
   const [{ getSettings }, { resolveMemoryConfig }] = await Promise.all([
@@ -55,7 +67,13 @@ export async function runMemoryRecall(ctx: StepExecutionContext): Promise<StepEx
   const hits = await retrieveMemories(
     {
       queryText: query,
-      characterId: scope === "character" ? params.characterId : undefined,
+      reader: {
+        characterId: scope === "character" ? params.characterId : undefined,
+        projectId: params.projectId,
+        agentId: scope === "agent" ? params.agentId : undefined,
+        branch: params.branch,
+        path: params.path,
+      },
       topK: params.topK ?? 6,
       relevanceFloor: params.relevanceFloor ?? 0.1,
       types: params.types,

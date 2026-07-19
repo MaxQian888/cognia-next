@@ -17,6 +17,8 @@ export interface UseBrowserPaneWebview {
 
 export interface UseBrowserPaneWebviewOptions {
   url: string | null
+  /** Stable diagnostic owner for the process-wide embedded-webview lease. */
+  ownerId?: string
   /**
    * Fires on every reserved-rect change (rAF-coalesced). Rect tracking is
    * entirely ref-driven — a scroll/resize burst never re-renders the caller.
@@ -31,6 +33,23 @@ export interface UseBrowserPaneWebviewOptions {
   visible?: boolean
 }
 
+let activeLease: { token: string; ownerId: string } | null = null
+const leaseWaiters = new Set<() => void>()
+
+function acquireLease(token: string, ownerId: string): boolean {
+  if (activeLease && activeLease.token !== token) return false
+  activeLease = { token, ownerId }
+  browserClient.setEmbedOwnerToken(token)
+  return true
+}
+
+function releaseLease(token: string, notifyWaiters = true): void {
+  if (activeLease?.token !== token) return
+  activeLease = null
+  browserClient.setEmbedOwnerToken(null)
+  if (notifyWaiters) queueMicrotask(() => leaseWaiters.forEach((retry) => retry()))
+}
+
 /**
  * Owns the embedded preview webview's lifecycle: creates it over the reserved
  * `ref` div, keeps its bounds synced to that rect, navigates on url change, and
@@ -43,7 +62,11 @@ export function useBrowserPaneWebview(
   ref: RefObject<HTMLElement | null>,
   options: UseBrowserPaneWebviewOptions
 ): UseBrowserPaneWebview {
-  const { url, onRectChange, visible = true } = options
+  const { url, onRectChange, visible = true, ownerId = "browser-preview" } = options
+  const leaseTokenRef = useRef(`${ownerId}:${crypto.randomUUID()}`)
+  const retryAttemptRef = useRef(0)
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const syncRef = useRef<() => void>(() => undefined)
   const createdRef = useRef(false)
   const lastUrlRef = useRef<string | null>(null)
   const rectRef = useRef<ElementRect | null>(null)
@@ -62,25 +85,42 @@ export function useBrowserPaneWebview(
     const target = urlRef.current
     if (!isTauri() || !target || !rect) return
     if (!createdRef.current) {
+      if (!acquireLease(leaseTokenRef.current, ownerId)) return
       createdRef.current = true
       lastUrlRef.current = target
       void browserClient.embedCreate(target, rect).then(
         () => {
+          retryAttemptRef.current = 0
           // Created visible at `rect`; if the caller wants it hidden (e.g. the
           // first-load placeholder is showing), park it immediately.
           if (!visibleRef.current) {
             void browserClient.embedSetVisible(false, rectRef.current ?? rect).catch(() => {})
           }
         },
-        () => {
+        (error: unknown) => {
           createdRef.current = false
+          releaseLease(leaseTokenRef.current, false)
+          if (
+            String(error).includes("owned by another Cognia surface") &&
+            retryTimerRef.current === null
+          ) {
+            const delay = Math.min(250 * 2 ** retryAttemptRef.current, 4_000)
+            retryAttemptRef.current += 1
+            retryTimerRef.current = setTimeout(() => {
+              retryTimerRef.current = null
+              syncRef.current()
+            }, delay)
+          }
         }
       )
     } else if (target !== lastUrlRef.current) {
       lastUrlRef.current = target
       void browserClient.embedNavigate(target).catch(() => {})
     }
-  }, [])
+  }, [ownerId])
+  useEffect(() => {
+    syncRef.current = sync
+  }, [sync])
 
   const onRect = useCallback(
     (next: ElementRect) => {
@@ -105,6 +145,13 @@ export function useBrowserPaneWebview(
     sync()
   }, [url, sync])
 
+  useEffect(() => {
+    leaseWaiters.add(sync)
+    return () => {
+      leaseWaiters.delete(sync)
+    }
+  }, [sync])
+
   // Drive native visibility: reveal at the current rect, or park off-screen.
   useEffect(() => {
     visibleRef.current = visible
@@ -115,8 +162,22 @@ export function useBrowserPaneWebview(
   }, [visible])
 
   useEffect(() => {
+    const leaseToken = leaseTokenRef.current
     return () => {
-      if (createdRef.current) void browserClient.embedDestroy().catch(() => {})
+      if (retryTimerRef.current !== null) {
+        clearTimeout(retryTimerRef.current)
+        retryTimerRef.current = null
+      }
+      if (activeLease?.token === leaseToken) {
+        if (createdRef.current) {
+          void browserClient
+            .embedDestroy()
+            .catch(() => {})
+            .finally(() => releaseLease(leaseToken))
+        } else {
+          releaseLease(leaseToken)
+        }
+      }
     }
   }, [])
 

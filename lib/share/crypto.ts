@@ -40,7 +40,10 @@ function getSubtle(): SubtleCrypto {
   return subtle
 }
 
-function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+function toBufferSource(bytes: Uint8Array): BufferSource {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(bytes) as BufferSource
+  }
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
 }
 
@@ -52,7 +55,7 @@ function randomBytes(length: number): Uint8Array {
 }
 
 async function importRawAesKey(rawKey: Uint8Array): Promise<CryptoKey> {
-  return getSubtle().importKey("raw", toArrayBuffer(rawKey), { name: "AES-GCM" }, false, [
+  return getSubtle().importKey("raw", toBufferSource(rawKey), { name: "AES-GCM" }, false, [
     "encrypt",
     "decrypt",
   ])
@@ -71,11 +74,11 @@ async function derivePassphraseKey(
   material.set(rawKey, 0)
   material.set(passphraseBytes, rawKey.length)
 
-  const keyMaterial = await subtle.importKey("raw", toArrayBuffer(material), "PBKDF2", false, [
+  const keyMaterial = await subtle.importKey("raw", toBufferSource(material), "PBKDF2", false, [
     "deriveKey",
   ])
   return subtle.deriveKey(
-    { name: "PBKDF2", salt: toArrayBuffer(salt), iterations, hash: "SHA-256" },
+    { name: "PBKDF2", salt: toBufferSource(salt), iterations, hash: "SHA-256" },
     keyMaterial,
     { name: "AES-GCM", length: 256 },
     false,
@@ -112,9 +115,9 @@ export async function encryptSharePayload(
   }
 
   const encrypted = await subtle.encrypt(
-    { name: "AES-GCM", iv: toArrayBuffer(iv) },
+    { name: "AES-GCM", iv: toBufferSource(iv) },
     key,
-    toArrayBuffer(new TextEncoder().encode(plainText))
+    toBufferSource(new TextEncoder().encode(plainText))
   )
 
   return {
@@ -157,9 +160,9 @@ export async function decryptShareEnvelope(
   }
 
   const decrypted = await subtle.decrypt(
-    { name: "AES-GCM", iv: toArrayBuffer(iv) },
+    { name: "AES-GCM", iv: toBufferSource(iv) },
     key,
-    toArrayBuffer(ciphertext)
+    toBufferSource(ciphertext)
   )
   const plainText = new TextDecoder().decode(decrypted)
 

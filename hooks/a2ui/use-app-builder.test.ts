@@ -6,6 +6,9 @@ import { renderHook, act } from "@testing-library/react"
 import { useA2UIAppBuilder } from "./use-app-builder"
 import { getAppInstancesCache } from "./app-builder/persistence"
 import { globalEventEmitter, createUserAction } from "@/lib/a2ui/events"
+import type { A2UIAppMetadataPatch } from "@/lib/db/a2ui-apps"
+import type { A2UIAppRow } from "@/lib/db/a2ui-types"
+import type { A2UISurfaceState } from "@/types/a2ui/schema"
 
 // Mock localStorage
 const mockLocalStorage: Record<string, string> = {}
@@ -29,6 +32,28 @@ Object.defineProperty(window, "localStorage", {
 const mockProcessMessages = jest.fn()
 const mockCreateQuickSurface = jest.fn()
 const mockSetDataValue = jest.fn()
+const mockRestoreSurface = jest.fn((_surface: A2UISurfaceState) => true)
+const mockListApps = jest.fn<Promise<A2UIAppRow[]>, []>(async () => [])
+const mockDeletePersistedApp = jest.fn(async (_id: string) => {})
+const mockPatchAppMetadata = jest.fn(
+  async (_id: string, _patch: A2UIAppMetadataPatch, _when?: number) => false
+)
+const mockLoggerError = jest.fn()
+
+jest.mock("@cognia/logging", () => ({
+  loggers: {
+    app: {
+      error: (...args: unknown[]) => mockLoggerError(...args),
+    },
+  },
+}))
+
+jest.mock("@/lib/db/a2ui-apps", () => ({
+  listApps: () => mockListApps(),
+  deleteApp: (id: string) => mockDeletePersistedApp(id),
+  patchAppMetadata: (id: string, patch: A2UIAppMetadataPatch, when?: number) =>
+    mockPatchAppMetadata(id, patch, when),
+}))
 
 jest.mock("./use-a2ui", () => ({
   useA2UI: jest.fn(() => ({
@@ -45,10 +70,17 @@ const mockDeleteSurface = jest.fn()
 let mockSurfaces: Record<
   string,
   {
+    id?: string
     components: Record<string, unknown>
     dataModel: Record<string, unknown>
     type?: string
+    catalogId?: string
     title?: string
+    widget?: Record<string, unknown>
+    rootId?: string
+    createdAt?: number
+    updatedAt?: number
+    ready?: boolean
   }
 > = {}
 
@@ -57,6 +89,7 @@ jest.mock("@/stores/a2ui", () => ({
     const state = {
       surfaces: mockSurfaces,
       deleteSurface: mockDeleteSurface,
+      restoreSurface: mockRestoreSurface,
     }
     if (typeof selector === "function") {
       return selector(state)
@@ -92,13 +125,52 @@ jest.mock("@/lib/a2ui/templates", () => ({
     }
     return undefined
   }),
+  getLocalizedTemplateById: jest.fn((id: string) => {
+    if (id === "template-1") {
+      return {
+        id: "template-1",
+        name: "Test Template",
+        description: "A test template",
+        category: "productivity",
+        icon: "CheckSquare",
+        tags: [],
+        components: [{ type: "text", props: { content: "Hello" } }],
+        dataModel: { message: "Hello" },
+      }
+    }
+    return undefined
+  }),
+  getLocalizedTemplates: jest.fn(() => [
+    {
+      id: "template-1",
+      name: "Test Template",
+      description: "A test template",
+      category: "productivity",
+      icon: "CheckSquare",
+      tags: [],
+      components: [{ type: "text", props: { content: "Hello" } }],
+      dataModel: { message: "Hello" },
+    },
+  ]),
   getTemplatesByCategory: jest.fn((category: string) => {
     if (category === "productivity") {
       return [{ id: "template-1", name: "Test Template", category: "productivity" }]
     }
     return []
   }),
+  getLocalizedTemplatesByCategory: jest.fn((category: string) => {
+    if (category === "productivity") {
+      return [{ id: "template-1", name: "Test Template", category: "productivity" }]
+    }
+    return []
+  }),
   searchTemplates: jest.fn((query: string) => {
+    if (query.includes("test")) {
+      return [{ id: "template-1", name: "Test Template" }]
+    }
+    return []
+  }),
+  searchLocalizedTemplates: jest.fn((query: string) => {
     if (query.includes("test")) {
       return [{ id: "template-1", name: "Test Template" }]
     }
@@ -116,6 +188,10 @@ describe("useA2UIAppBuilder", () => {
     jest.clearAllMocks()
     Object.keys(mockLocalStorage).forEach((key) => delete mockLocalStorage[key])
     mockSurfaces = {}
+    mockListApps.mockResolvedValue([])
+    mockDeletePersistedApp.mockResolvedValue(undefined)
+    mockPatchAppMetadata.mockResolvedValue(false)
+    mockRestoreSurface.mockReturnValue(true)
   })
 
   describe("initialization", () => {
@@ -192,6 +268,16 @@ describe("useA2UIAppBuilder", () => {
       expect(appId!).toBeNull()
     })
 
+    it("stores the locale that owns template and action-generated copy", () => {
+      const { result } = renderHook(() => useA2UIAppBuilder({ locale: "zh-CN" }))
+
+      act(() => {
+        result.current.createFromTemplate("template-1")
+      })
+
+      expect(result.current.getAppInstance("app-surface-123")?.locale).toBe("zh-CN")
+    })
+
     it("should create custom app", () => {
       const onAppCreated = jest.fn()
       const { result } = renderHook(() => useA2UIAppBuilder({ onAppCreated }))
@@ -234,10 +320,128 @@ describe("useA2UIAppBuilder", () => {
 
       expect(newAppId!).toBe("custom-app-123")
     })
+
+    it("duplicates the complete surface and clone-owned metadata without publication identity", () => {
+      const sourceComponents = {
+        child: { id: "child", component: "Text", text: { literalString: "Hello" } },
+        root: { id: "root", component: "Column", children: ["child"] },
+      }
+      const sourceDataModel = { nested: { value: 1 } }
+      const sourceWidget = { preferredHost: "sidebar", minWidth: 320 }
+      mockSurfaces = {
+        "rich-app": {
+          id: "rich-app",
+          type: "panel",
+          catalogId: "general",
+          title: "Original surface title",
+          widget: sourceWidget,
+          components: sourceComponents,
+          dataModel: sourceDataModel,
+          rootId: "root",
+          createdAt: 100,
+          updatedAt: 200,
+          ready: true,
+        },
+      }
+      const sourceInstance = {
+        id: "rich-app",
+        templateId: "template-1",
+        name: "Original App",
+        createdAt: 100,
+        lastModified: 200,
+        description: "Clone this description",
+        version: "2.3.4",
+        author: { name: "Ada", email: "ada@example.com" },
+        category: "productivity",
+        tags: ["work", "shared"],
+        thumbnail: "data:image/png;base64,thumb",
+        thumbnailUpdatedAt: 150,
+        screenshots: ["shot-1", "shot-2"],
+        stats: { views: 99, uses: 42, rating: 4.8, ratingCount: 12 },
+        publishedAt: 175,
+        isPublished: true,
+        storeId: "store-original",
+      }
+      getAppInstancesCache().set("rich-app", sourceInstance)
+
+      const { result } = renderHook(() => useA2UIAppBuilder())
+
+      let newAppId: string | null
+      act(() => {
+        newAppId = result.current.duplicateApp("rich-app", "Copied App")
+      })
+
+      expect(newAppId!).toBe("custom-app-123")
+      expect(mockCreateQuickSurface).not.toHaveBeenCalled()
+      expect(mockRestoreSurface).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "custom-app-123",
+          type: "panel",
+          catalogId: "general",
+          title: "Copied App",
+          rootId: "root",
+          ready: true,
+        })
+      )
+      const restored = mockRestoreSurface.mock.calls.at(-1)?.[0]
+      expect(restored).toBeDefined()
+      if (!restored) throw new Error("Expected restored surface")
+      expect(restored.components).toEqual(sourceComponents)
+      expect(restored.components).not.toBe(sourceComponents)
+      expect(restored.dataModel).toEqual(sourceDataModel)
+      expect(restored.dataModel).not.toBe(sourceDataModel)
+      expect(restored.widget).toEqual(sourceWidget)
+      expect(restored.widget).not.toBe(sourceWidget)
+
+      const duplicate = getAppInstancesCache().get("custom-app-123")
+      expect(duplicate).toMatchObject({
+        id: "custom-app-123",
+        templateId: "custom",
+        name: "Copied App",
+        description: "Clone this description",
+        version: "2.3.4",
+        author: sourceInstance.author,
+        category: "productivity",
+        tags: sourceInstance.tags,
+        thumbnail: sourceInstance.thumbnail,
+        thumbnailUpdatedAt: 150,
+        screenshots: sourceInstance.screenshots,
+      })
+      expect(duplicate?.author).not.toBe(sourceInstance.author)
+      expect(duplicate?.tags).not.toBe(sourceInstance.tags)
+      expect(duplicate?.screenshots).not.toBe(sourceInstance.screenshots)
+      expect(duplicate?.stats).toBeUndefined()
+      expect(duplicate?.publishedAt).toBeUndefined()
+      expect(duplicate?.isPublished).toBeUndefined()
+      expect(duplicate?.storeId).toBeUndefined()
+    })
+
+    it("does not create an app instance when the cloned surface cannot be restored", () => {
+      mockSurfaces = {
+        "invalid-app": {
+          components: {},
+          dataModel: {},
+          rootId: "missing-root",
+        },
+      }
+      mockRestoreSurface.mockReturnValueOnce(false)
+      getAppInstancesCache().delete("custom-app-123")
+      const onAppCreated = jest.fn()
+      const { result } = renderHook(() => useA2UIAppBuilder({ onAppCreated }))
+
+      let newAppId: string | null
+      act(() => {
+        newAppId = result.current.duplicateApp("invalid-app")
+      })
+
+      expect(newAppId!).toBeNull()
+      expect(getAppInstancesCache().has("custom-app-123")).toBe(false)
+      expect(onAppCreated).not.toHaveBeenCalled()
+    })
   })
 
   describe("app management", () => {
-    it("should delete app", () => {
+    it("should delete app", async () => {
       const onAppDeleted = jest.fn()
       mockLocalStorage["a2ui-app-instances"] = JSON.stringify([
         { id: "app-to-delete", templateId: "template-1", name: "App" },
@@ -245,12 +449,31 @@ describe("useA2UIAppBuilder", () => {
 
       const { result } = renderHook(() => useA2UIAppBuilder({ onAppDeleted }))
 
-      act(() => {
-        result.current.deleteApp("app-to-delete")
+      await act(async () => {
+        await result.current.deleteApp("app-to-delete")
       })
 
+      expect(mockDeletePersistedApp).toHaveBeenCalledWith("app-to-delete")
       expect(mockDeleteSurface).toHaveBeenCalledWith("app-to-delete")
       expect(onAppDeleted).toHaveBeenCalledWith("app-to-delete")
+    })
+
+    it("keeps the local app intact when durable deletion fails", async () => {
+      const cache = getAppInstancesCache()
+      cache.clear()
+      cache.set("app-to-keep", {
+        id: "app-to-keep",
+        templateId: "custom",
+        name: "Keep Me",
+        createdAt: 1,
+        lastModified: 2,
+      })
+      mockDeletePersistedApp.mockRejectedValueOnce(new Error("database unavailable"))
+      const { result } = renderHook(() => useA2UIAppBuilder())
+
+      await expect(result.current.deleteApp("app-to-keep")).rejects.toThrow("database unavailable")
+      expect(mockDeleteSurface).not.toHaveBeenCalledWith("app-to-keep")
+      expect(cache.has("app-to-keep")).toBe(true)
     })
 
     it("should rename app", () => {
@@ -580,6 +803,67 @@ describe("useA2UIAppBuilder", () => {
       expect(jsonData!).toBeNull()
     })
 
+    it("round-trips the instance locale through a single-app export", () => {
+      mockSurfaces = {
+        "app-surface-123": {
+          components: { root: { id: "root", component: "Column" } },
+          dataModel: {},
+          type: "inline",
+          title: "Localized App",
+        },
+      }
+      const { result } = renderHook(() => useA2UIAppBuilder({ locale: "zh-CN" }))
+      act(() => {
+        result.current.createFromTemplate("template-1")
+      })
+
+      const exported = result.current.exportApp("app-surface-123")
+
+      expect(JSON.parse(exported!).app.locale).toBe("zh-CN")
+    })
+
+    it("exports the complete surface identity needed to restore a custom root", () => {
+      mockSurfaces = {
+        "app-surface-123": {
+          id: "app-surface-123",
+          components: {
+            "custom-root": { id: "custom-root", component: "Column" },
+          },
+          dataModel: {},
+          type: "panel",
+          catalogId: "catalog-v1",
+          title: "Custom root app",
+          widget: { theme: "dark" },
+          rootId: "custom-root",
+        },
+      }
+      const { result } = renderHook(() => useA2UIAppBuilder())
+      act(() => {
+        result.current.createFromTemplate("template-1")
+      })
+      Object.assign(getAppInstancesCache().get("app-surface-123")!, {
+        description: "Portable description",
+        author: { name: "Author" },
+        tags: ["portable"],
+        screenshots: ["data:image/png;base64,AA=="],
+      })
+
+      const exported = JSON.parse(result.current.exportApp("app-surface-123")!)
+
+      expect(exported.app).toEqual(
+        expect.objectContaining({
+          surfaceType: "panel",
+          catalogId: "catalog-v1",
+          widget: { theme: "dark" },
+          rootId: "custom-root",
+          description: "Portable description",
+          author: { name: "Author" },
+          tags: ["portable"],
+          screenshots: ["data:image/png;base64,AA=="],
+        })
+      )
+    })
+
     it("should import app from JSON", () => {
       const onAppCreated = jest.fn()
       const { result } = renderHook(() => useA2UIAppBuilder({ onAppCreated }))
@@ -601,8 +885,96 @@ describe("useA2UIAppBuilder", () => {
       })
 
       expect(appId!).toBeTruthy()
-      expect(mockCreateQuickSurface).toHaveBeenCalled()
+      expect(mockRestoreSurface).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: appId!,
+          rootId: "root",
+          ready: true,
+        })
+      )
       expect(onAppCreated).toHaveBeenCalled()
+    })
+
+    it("restores an imported custom root and surface metadata atomically", () => {
+      const { result } = renderHook(() => useA2UIAppBuilder())
+      const importData = JSON.stringify({
+        version: "1.0",
+        app: {
+          name: "Custom root",
+          components: [
+            { id: "layout", component: "Column", children: ["label"] },
+            { id: "label", component: "Text", text: "Hello" },
+          ],
+          rootId: "layout",
+          dataModel: {},
+          surfaceType: "fullscreen",
+          catalogId: "catalog-v1",
+          widget: { theme: "dark" },
+        },
+      })
+
+      let appId: string | null
+      act(() => {
+        appId = result.current.importApp(importData)
+      })
+
+      expect(mockRestoreSurface).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          id: appId!,
+          type: "fullscreen",
+          catalogId: "catalog-v1",
+          widget: { theme: "dark" },
+          rootId: "layout",
+          components: {
+            layout: { id: "layout", component: "Column", children: ["label"] },
+            label: { id: "label", component: "Text", text: "Hello" },
+          },
+        })
+      )
+    })
+
+    it("rejects an invalid component graph without mutating the store or instance cache", () => {
+      const { result } = renderHook(() => useA2UIAppBuilder())
+      mockRestoreSurface.mockClear()
+      const beforeIds = result.current.getAllApps().map((app) => app.id)
+
+      let appId: string | null
+      act(() => {
+        appId = result.current.importApp(
+          JSON.stringify({
+            version: "1.0",
+            app: {
+              name: "Broken",
+              components: [{ id: "root", component: "Column", children: ["missing"] }],
+            },
+          })
+        )
+      })
+
+      expect(appId!).toBeNull()
+      expect(mockRestoreSurface).not.toHaveBeenCalled()
+      expect(result.current.getAllApps().map((app) => app.id)).toEqual(beforeIds)
+    })
+
+    it("preserves an exported locale when importing into another active locale", () => {
+      const { result } = renderHook(() => useA2UIAppBuilder({ locale: "en" }))
+      const importData = JSON.stringify({
+        version: "1.0",
+        app: {
+          name: "中文应用",
+          templateId: "template-1",
+          locale: "zh-CN",
+          components: [{ id: "root", component: "Column" }],
+          dataModel: {},
+        },
+      })
+
+      let appId: string | null
+      act(() => {
+        appId = result.current.importApp(importData)
+      })
+
+      expect(result.current.getAppInstance(appId!)?.locale).toBe("zh-CN")
     })
 
     it("should return null for invalid import data", () => {
@@ -685,6 +1057,102 @@ describe("useA2UIAppBuilder", () => {
       })
 
       expect(importedCount!).toBe(2)
+    })
+
+    it("validates an entire backup before restoring any app", () => {
+      const { result } = renderHook(() => useA2UIAppBuilder())
+      mockRestoreSurface.mockClear()
+      const backupData = JSON.stringify({
+        version: "1.0",
+        apps: [
+          {
+            name: "Valid",
+            components: [{ id: "root", component: "Column" }],
+          },
+          {
+            name: "Broken",
+            components: [{ id: "root", component: "Column", children: ["missing"] }],
+          },
+        ],
+      })
+
+      let importedCount: number
+      act(() => {
+        importedCount = result.current.importAllApps(backupData)
+      })
+
+      expect(importedCount!).toBe(0)
+      expect(mockRestoreSurface).not.toHaveBeenCalled()
+    })
+
+    it("rolls back every staged app when a validated backup cannot be fully restored", () => {
+      const onAppCreated = jest.fn()
+      const { result } = renderHook(() => useA2UIAppBuilder({ onAppCreated }))
+      mockRestoreSurface.mockClear()
+      mockDeleteSurface.mockClear()
+      mockRestoreSurface.mockReturnValueOnce(true).mockReturnValueOnce(false)
+      const backupData = JSON.stringify({
+        version: "1.0",
+        apps: [
+          { name: "First", components: [{ id: "root", component: "Column" }] },
+          { name: "Second", components: [{ id: "root", component: "Column" }] },
+        ],
+      })
+
+      let importedCount: number
+      act(() => {
+        importedCount = result.current.importAllApps(backupData)
+      })
+
+      const stagedId = mockRestoreSurface.mock.calls[0][0].id
+      expect(importedCount!).toBe(0)
+      expect(mockDeleteSurface).toHaveBeenCalledWith(stagedId)
+      expect(result.current.getAppInstance(stagedId)).toBeUndefined()
+      expect(onAppCreated).not.toHaveBeenCalled()
+    })
+
+    it("restores complete instance metadata from a valid backup", () => {
+      const { result } = renderHook(() => useA2UIAppBuilder())
+      const backupData = JSON.stringify({
+        version: "1.0",
+        apps: [
+          {
+            name: "Metadata app",
+            templateId: "custom",
+            components: [{ id: "root", component: "Column" }],
+            createdAt: 100,
+            lastModified: 200,
+            description: "Description",
+            author: { name: "Author" },
+            tags: ["backup"],
+            stats: { views: 4, uses: 2, rating: 5, ratingCount: 1 },
+            publishedAt: 150,
+            isPublished: true,
+            storeId: "store-1",
+          },
+        ],
+      })
+
+      let importedCount: number
+      act(() => {
+        importedCount = result.current.importAllApps(backupData)
+      })
+
+      expect(importedCount!).toBe(1)
+      const importedId = mockRestoreSurface.mock.calls.at(-1)?.[0].id
+      expect(result.current.getAppInstance(importedId!)).toEqual(
+        expect.objectContaining({
+          createdAt: 100,
+          lastModified: 200,
+          description: "Description",
+          author: { name: "Author" },
+          tags: ["backup"],
+          stats: { views: 4, uses: 2, rating: 5, ratingCount: 1 },
+          publishedAt: 150,
+          isPublished: true,
+          storeId: "store-1",
+        })
+      )
     })
 
     it("should return 0 for invalid backup data", () => {
@@ -968,7 +1436,49 @@ describe("useA2UIAppBuilder", () => {
       getAppInstancesCache().clear()
     })
 
-    it("regenerates a template-backed app whose surface tree is missing", () => {
+    it("restores a durable custom app when its local surface is missing", async () => {
+      const cache = getAppInstancesCache()
+      cache.clear()
+      mockSurfaces = {}
+      mockListApps.mockResolvedValueOnce([
+        {
+          id: "durable-custom",
+          templateId: "custom",
+          name: "Durable Custom App",
+          description: "Saved in Dexie",
+          createdAt: 10,
+          lastModified: 20,
+          updatedAt: 20,
+          components: {
+            "custom-root": { id: "custom-root", component: "Column", children: [] },
+          },
+          dataModel: { durable: true },
+          rootId: "custom-root",
+        },
+      ])
+
+      const { result } = renderHook(() => useA2UIAppBuilder())
+      let recovered = 0
+      await act(async () => {
+        recovered = await result.current.hydratePersistedApps()
+      })
+
+      expect(recovered).toBe(1)
+      expect(mockRestoreSurface).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "durable-custom",
+          rootId: "custom-root",
+          dataModel: { durable: true },
+          ready: true,
+        })
+      )
+      expect(cache.get("durable-custom")).toMatchObject({
+        name: "Durable Custom App",
+        description: "Saved in Dexie",
+      })
+    })
+
+    it("regenerates a template-backed app whose surface tree is missing", async () => {
       const cache = getAppInstancesCache()
       cache.clear()
       cache.set("app-1", {
@@ -983,15 +1493,15 @@ describe("useA2UIAppBuilder", () => {
       const { result } = renderHook(() => useA2UIAppBuilder())
 
       let recovered = 0
-      act(() => {
-        recovered = result.current.hydratePersistedApps()
+      await act(async () => {
+        recovered = await result.current.hydratePersistedApps()
       })
 
       expect(recovered).toBe(1)
       expect(mockProcessMessages).toHaveBeenCalledWith([{ type: "createSurface" }])
     })
 
-    it("skips apps that already have a renderable surface", () => {
+    it("skips apps that already have a renderable surface", async () => {
       const cache = getAppInstancesCache()
       cache.clear()
       cache.set("app-ready", {
@@ -1004,19 +1514,63 @@ describe("useA2UIAppBuilder", () => {
       mockSurfaces = {
         "app-ready": { ready: true, components: { root: {} }, dataModel: {} } as never,
       }
+      mockListApps.mockResolvedValueOnce([
+        {
+          id: "app-ready",
+          templateId: "template-1",
+          name: "Durable Ready",
+          createdAt: 1,
+          lastModified: 3,
+          updatedAt: 3,
+          components: {
+            durableRoot: { id: "durableRoot", component: "Column", children: [] },
+          },
+          dataModel: { source: "durable" },
+          rootId: "durableRoot",
+        },
+      ])
 
       const { result } = renderHook(() => useA2UIAppBuilder())
 
       let recovered = 0
-      act(() => {
-        recovered = result.current.hydratePersistedApps()
+      await act(async () => {
+        recovered = await result.current.hydratePersistedApps()
       })
 
       expect(recovered).toBe(0)
+      expect(mockRestoreSurface).not.toHaveBeenCalled()
       expect(mockProcessMessages).not.toHaveBeenCalled()
     })
 
-    it("skips custom apps whose template cannot be resolved", () => {
+    it("falls back to deterministic template recovery when durable storage is unavailable", async () => {
+      const cache = getAppInstancesCache()
+      cache.clear()
+      cache.set("app-offline", {
+        id: "app-offline",
+        templateId: "template-1",
+        name: "Offline Template App",
+        createdAt: 1,
+        lastModified: 2,
+      })
+      mockSurfaces = {}
+      mockListApps.mockRejectedValueOnce(new Error("IndexedDB unavailable"))
+
+      const { result } = renderHook(() => useA2UIAppBuilder())
+
+      let recovered = 0
+      await act(async () => {
+        recovered = await result.current.hydratePersistedApps()
+      })
+
+      expect(recovered).toBe(1)
+      expect(mockProcessMessages).toHaveBeenCalledWith([{ type: "createSurface" }])
+      expect(mockLoggerError).toHaveBeenCalledWith(
+        "A2UI AppBuilder: Failed to restore durable apps",
+        expect.any(Error)
+      )
+    })
+
+    it("skips custom apps whose template cannot be resolved", async () => {
       const cache = getAppInstancesCache()
       cache.clear()
       cache.set("app-custom", {
@@ -1031,8 +1585,8 @@ describe("useA2UIAppBuilder", () => {
       const { result } = renderHook(() => useA2UIAppBuilder())
 
       let recovered = 0
-      act(() => {
-        recovered = result.current.hydratePersistedApps()
+      await act(async () => {
+        recovered = await result.current.hydratePersistedApps()
       })
 
       expect(recovered).toBe(0)
@@ -1140,17 +1694,39 @@ describe("useA2UIAppBuilder", () => {
       getAppInstancesCache().clear()
     })
 
-    it("renameApp updates the instance name", () => {
+    it("renameApp updates local and durable metadata", async () => {
       const { result } = renderHook(() => useA2UIAppBuilder())
-      act(() => result.current.renameApp("app-x", "Renamed"))
+      await act(async () => {
+        await result.current.renameApp("app-x", "Renamed")
+      })
       expect(result.current.getAppInstance("app-x")?.name).toBe("Renamed")
+      expect(mockPatchAppMetadata).toHaveBeenCalledWith(
+        "app-x",
+        expect.objectContaining({ name: "Renamed" }),
+        expect.any(Number)
+      )
     })
 
-    it("updateAppMetadata merges fields while preserving id/createdAt", () => {
+    it("preserves local metadata when the durable patch fails", async () => {
+      mockPatchAppMetadata.mockRejectedValueOnce(new Error("database unavailable"))
       const { result } = renderHook(() => useA2UIAppBuilder())
-      act(() =>
-        result.current.updateAppMetadata("app-x", { description: "Desc", version: "2.0.0" })
+
+      await expect(result.current.renameApp("app-x", "Renamed")).rejects.toThrow(
+        "database unavailable"
       )
+      expect(result.current.getAppInstance("app-x")?.name).toBe("Original")
+    })
+
+    it("updateAppMetadata merges fields while preserving id/createdAt", async () => {
+      const { result } = renderHook(() => useA2UIAppBuilder())
+      await act(async () => {
+        await result.current.updateAppMetadata("app-x", {
+          id: "ignored-id",
+          createdAt: 999,
+          description: "Desc",
+          version: "2.0.0",
+        })
+      })
       const inst = result.current.getAppInstance("app-x")
       expect(inst?.description).toBe("Desc")
       expect(inst?.version).toBe("2.0.0")
@@ -1158,20 +1734,24 @@ describe("useA2UIAppBuilder", () => {
       expect(inst?.createdAt).toBe(100)
     })
 
-    it("setAppThumbnail then clearAppThumbnail round-trips the thumbnail", () => {
+    it("setAppThumbnail then clearAppThumbnail round-trips the thumbnail", async () => {
       const { result } = renderHook(() => useA2UIAppBuilder())
-      act(() => result.current.setAppThumbnail("app-x", "data:image/png;base64,AAA"))
+      await act(async () => {
+        await result.current.setAppThumbnail("app-x", "data:image/png;base64,AAA")
+      })
       expect(result.current.getAppInstance("app-x")?.thumbnail).toBe("data:image/png;base64,AAA")
-      act(() => result.current.clearAppThumbnail("app-x"))
+      await act(async () => {
+        await result.current.clearAppThumbnail("app-x")
+      })
       expect(result.current.getAppInstance("app-x")?.thumbnail).toBeUndefined()
     })
 
-    it("incrementAppViews / incrementAppUses bump the stats counters", () => {
+    it("incrementAppViews / incrementAppUses bump the stats counters", async () => {
       const { result } = renderHook(() => useA2UIAppBuilder())
-      act(() => {
-        result.current.incrementAppViews("app-x")
-        result.current.incrementAppViews("app-x")
-        result.current.incrementAppUses("app-x")
+      await act(async () => {
+        await result.current.incrementAppViews("app-x")
+        await result.current.incrementAppViews("app-x")
+        await result.current.incrementAppUses("app-x")
       })
       const stats = result.current.getAppInstance("app-x")?.stats
       expect(stats?.views).toBe(2)

@@ -8,21 +8,35 @@ import type { VisualWorkflow, WorkflowNode } from "@/types/workflow/visual"
 const mockRegister = jest.fn().mockResolvedValue(undefined)
 const mockUnregister = jest.fn().mockResolvedValue(undefined)
 const mockGetUrl = jest.fn().mockResolvedValue("http://127.0.0.1:9999/webhook/x")
+const mockPluginSync = jest.fn().mockResolvedValue(undefined)
+const mockPluginUnsync = jest.fn().mockResolvedValue(undefined)
 
 jest.mock("./tauri-bridge", () => ({
   registerTrigger: (...args: unknown[]) => mockRegister(...args),
   unregisterTrigger: (...args: unknown[]) => mockUnregister(...args),
   getWebhookUrl: (...args: unknown[]) => mockGetUrl(...args),
 }))
+jest.mock("@/lib/workflow/triggers/lifecycle", () => ({
+  syncPluginTriggerInstances: (...args: unknown[]) => mockPluginSync(...args),
+  unsyncPluginTriggerInstances: (...args: unknown[]) => mockPluginUnsync(...args),
+}))
 
 // IMPORTANT: import after the mock is declared.
 
-import { syncWorkflowTriggers, unsyncWorkflowTriggers, getWebhookUrl } from "./webhook-bridge"
+import {
+  _resetSyncedTriggerStateForTest,
+  syncWorkflowTriggers,
+  unsyncWorkflowTriggers,
+  getWebhookUrl,
+} from "./webhook-bridge"
 
 beforeEach(() => {
+  _resetSyncedTriggerStateForTest()
   mockRegister.mockClear()
   mockUnregister.mockClear()
   mockGetUrl.mockClear()
+  mockPluginSync.mockClear()
+  mockPluginUnsync.mockClear()
 })
 
 function node(
@@ -60,8 +74,10 @@ function workflow(nodes: WorkflowNode[]): VisualWorkflow {
 
 describe("syncWorkflowTriggers", () => {
   it("registers nothing when the workflow has no trigger nodes", async () => {
-    await syncWorkflowTriggers(workflow([node("a", "ai.prompt")]))
+    const wf = workflow([node("a", "ai.prompt")])
+    await syncWorkflowTriggers(wf)
     expect(mockRegister).not.toHaveBeenCalled()
+    expect(mockPluginSync).toHaveBeenCalledWith(wf)
   })
 
   it("registers a trigger.cron with the cron expression", async () => {
@@ -146,11 +162,57 @@ describe("syncWorkflowTriggers", () => {
     })
   })
 
-  it("propagates the disabled flag to enabled=false", async () => {
+  it("does not register disabled triggers", async () => {
     await syncWorkflowTriggers(
       workflow([node("trg", "trigger.cron", { cron: "* * * * *" }, /*disabled*/ true)])
     )
-    expect(mockRegister.mock.calls[0][0]).toMatchObject({ enabled: false })
+    expect(mockRegister).not.toHaveBeenCalled()
+  })
+
+  it("does not register template or built-in gallery workflows", async () => {
+    const template = { ...workflow([node("a", "trigger.manual")]), isTemplate: true }
+    const builtIn = { ...workflow([node("b", "trigger.manual")]), isBuiltIn: true }
+
+    await syncWorkflowTriggers(template)
+    await syncWorkflowTriggers(builtIn)
+
+    expect(mockRegister).not.toHaveBeenCalled()
+  })
+
+  it("unregisters a trigger removed since the previous sync", async () => {
+    await syncWorkflowTriggers(workflow([node("trg", "trigger.cron", { cron: "* * * * *" })]))
+    mockRegister.mockClear()
+
+    await syncWorkflowTriggers(workflow([]))
+
+    expect(mockUnregister).toHaveBeenCalledWith("wf_a", "trg")
+    expect(mockRegister).not.toHaveBeenCalled()
+  })
+
+  it("unregisters before re-registering a trigger whose kind changed", async () => {
+    await syncWorkflowTriggers(workflow([node("trg", "trigger.cron", { cron: "* * * * *" })]))
+    mockRegister.mockClear()
+    mockUnregister.mockClear()
+
+    await syncWorkflowTriggers(workflow([node("trg", "trigger.webhook", { path: "incoming" })]))
+
+    expect(mockUnregister).toHaveBeenCalledWith("wf_a", "trg")
+    expect(mockUnregister.mock.invocationCallOrder[0]).toBeLessThan(
+      mockRegister.mock.invocationCallOrder[0]
+    )
+  })
+
+  it("removes the previous live projection when an edited cron becomes invalid", async () => {
+    await syncWorkflowTriggers(workflow([node("trg", "trigger.cron", { cron: "* * * * *" })]))
+    mockRegister.mockClear()
+    mockUnregister.mockClear()
+
+    await expect(
+      syncWorkflowTriggers(workflow([node("trg", "trigger.cron", { cron: "invalid" })]))
+    ).rejects.toThrow(/Cannot register workflow cron/)
+
+    expect(mockUnregister).toHaveBeenCalledWith("wf_a", "trg")
+    expect(mockRegister).not.toHaveBeenCalled()
   })
 
   it("registers TS-hook triggers with the base envelope only", async () => {
@@ -208,21 +270,42 @@ describe("syncWorkflowTriggers", () => {
     )
     expect(order).toEqual(["a-end", "b-end"])
   })
+
+  it("does not start plugin sources when startup sync is aborted during native registration", async () => {
+    let resolveRegister!: () => void
+    mockRegister.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRegister = resolve
+        })
+    )
+    const controller = new AbortController()
+    const pending = syncWorkflowTriggers(workflow([node("a", "trigger.manual")]), {
+      signal: controller.signal,
+    })
+    await Promise.resolve()
+
+    controller.abort()
+    resolveRegister()
+    await pending
+
+    expect(mockPluginSync).not.toHaveBeenCalled()
+  })
 })
 
 describe("unsyncWorkflowTriggers", () => {
   it("unregisters every trigger node by id", async () => {
-    await unsyncWorkflowTriggers(
-      workflow([
-        node("trg_1", "trigger.cron", { cron: "* * * * *" }),
-        node("a", "ai.prompt"),
-        node("trg_2", "trigger.webhook", { path: "x" }),
-      ])
-    )
+    const wf = workflow([
+      node("trg_1", "trigger.cron", { cron: "* * * * *" }),
+      node("a", "ai.prompt"),
+      node("trg_2", "trigger.webhook", { path: "x" }),
+    ])
+    await unsyncWorkflowTriggers(wf)
     expect(mockUnregister).toHaveBeenCalledTimes(2)
-    expect(mockUnregister.mock.calls.map((c) => c[0])).toEqual(
+    expect(mockUnregister.mock.calls.map((c) => c[1])).toEqual(
       expect.arrayContaining(["trg_1", "trg_2"])
     )
+    expect(mockPluginUnsync).toHaveBeenCalledWith(wf)
   })
 
   it("is a no-op when the workflow has no triggers", async () => {
@@ -233,8 +316,8 @@ describe("unsyncWorkflowTriggers", () => {
 
 describe("getWebhookUrl re-export", () => {
   it("forwards to the tauri-bridge implementation", async () => {
-    const url = await getWebhookUrl("trg")
-    expect(mockGetUrl).toHaveBeenCalledWith("trg")
+    const url = await getWebhookUrl("wf_a", "trg")
+    expect(mockGetUrl).toHaveBeenCalledWith("wf_a", "trg")
     expect(url).toBe("http://127.0.0.1:9999/webhook/x")
   })
 })

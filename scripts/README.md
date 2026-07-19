@@ -7,6 +7,7 @@ Each entry below lists what the script does, how it is triggered (a
 ```
 scripts/
   build/   asset copy + sidecar/CLI build steps (predev/prebuild)
+  e2e/     reviewed E2E governance data
   gates/   read-only CI gates and audits
   sync/    file generators / mirrors that double as drift gates
   smoke/   standalone runtime smoke harnesses
@@ -33,6 +34,7 @@ scripts/
 | Script                                 | Purpose                                                                                                              | Trigger                                                        | Test                                                                         |
 | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | `gates/check-all.mjs`                  | Run every read-only CI gate in one command, continue-on-error, print a ✓/✗ summary. `--bail` stops at first failure. | `pnpm check:all`                                               | `gates/check-all.test.mjs` (`pnpm check:all:test`)                           |
+| `gates/check-e2e-governance.mjs`       | Reject focused/vacuous E2E tests and require exact, time-bounded debt entries for skips, sleeps, and stub suites.    | `pnpm audit:e2e-governance`                                    | `gates/check-e2e-governance.test.mjs` (`pnpm audit:e2e-governance:test`)     |
 | `gates/lint-i18n.ts`                   | Key-parity between `en.json`/`zh-CN.json` + hard-coded UI-string scan against `i18n-baseline.json`.                  | `pnpm lint:i18n`; `pnpm lint:i18n:baseline` (rewrite baseline) | `gates/lint-i18n.test.ts`                                                    |
 | `gates/audit-plugin-slots.ts`          | Cross-check declared plugin extension-point contracts against actual `<PluginExtensionSlot>` mounts.                 | `pnpm audit:slots` (`--json` for machine output)               | `gates/audit-plugin-slots.test.ts`                                           |
 | `gates/check-silent-failure-flags.mjs` | Enforce the `expected: !isTauri()` ↔ registered-Rust-handler contract for `plugin_*` invokes.                        | `pnpm audit:silent-flags`                                      | `gates/check-silent-failure-flags.test.mjs` (`pnpm audit:silent-flags:test`) |
@@ -63,6 +65,10 @@ scripts and the `protect-generated-files` hook reference them by path.
 | `i18n-baseline.json`  | `gates/lint-i18n.ts` — snapshot of grandfathered hard-coded strings.                                                                      |
 | `i18n-ignore.txt`     | `gates/lint-i18n.ts` — paths/patterns excluded from the hard-coded-string scan.                                                           |
 | `tsconfig.audit.json` | `ts-node` project config for the TypeScript gates (`audit:slots`, `lint:i18n`); `include` globs `./**/*.ts` so it reaches the subfolders. |
+
+`e2e/governance-exceptions.json` is the reviewed debt ledger consumed by
+`gates/check-e2e-governance.mjs`. Counts are exact and entries expire for
+review; it is not a general ignore file.
 
 ## Conventions
 

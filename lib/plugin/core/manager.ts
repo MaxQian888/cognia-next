@@ -127,6 +127,7 @@ import {
   type WasmCapabilityGrantDecision,
 } from "@/lib/plugin/security/wasm-grant"
 import { canUseTauriInvoke } from "@/lib/native/utils"
+import { isHeadlessHost } from "@/lib/platform/detect"
 import {
   validateActivationEvent,
   validateHookPoint,
@@ -172,6 +173,17 @@ import { registerPluginI18n, unregisterPluginI18n } from "@/lib/i18n/plugin-i18n
 import { clearCustomThemesForPluginContext } from "@/lib/plugin/api/theme-api"
 import { dispatchPluginError } from "@/lib/plugin/error-bus"
 
+async function invokePluginRuntime<T = unknown>(
+  command: string,
+  args?: Record<string, unknown>
+): Promise<T> {
+  if (!isHeadlessHost()) {
+    return invoke<T>(command, args)
+  }
+  const { transport } = await import("@/lib/tauri/transport-instance")
+  return transport.call<T>(command, args)
+}
+
 // =============================================================================
 // Governance mode resolution
 // =============================================================================
@@ -213,6 +225,8 @@ export interface PluginManagerConfig {
    * under Node. See `cli/src/plugin/node-importer.ts`.
    */
   frontendImporter?: (absPath: string, pluginId: string) => Promise<Record<string, unknown>>
+  /** Host-neutral native lifecycle transport for Node-target plugins. */
+  nodeHostInvoker?: import("../launcher/launchPluginJs").PluginJsHostInvoker
   /**
    * Max plugins enabled concurrently within a single dependency layer at
    * startup restore. Bounds the thundering-herd of module loads against the
@@ -580,7 +594,10 @@ export class PluginManager {
 
   constructor(config: PluginManagerConfig) {
     this.config = config
-    this.loader = new PluginLoader({ frontendImporter: config.frontendImporter })
+    this.loader = new PluginLoader({
+      frontendImporter: config.frontendImporter,
+      nodeHostInvoker: config.nodeHostInvoker,
+    })
     this.registry = new PluginRegistry()
     this.hooksManager = getPluginLifecycleHooks()
     this.compatibilityMode = config.compatibilityMode || "warn"
@@ -669,23 +686,35 @@ export class PluginManager {
   private collectRuntimeProfileDiagnostics(
     manifest: PluginManifest
   ): ExtensionCompatibilityDiagnostic[] {
-    // The Tauri (desktop) profile trusts every built-in; runtime-surface gating
-    // applies only to the browser-class profiles — web `browser` and the
-    // Capacitor `mobile` WebView. `surface` is whichever of those is active.
+    // The Tauri (desktop) profile trusts every built-in. Other profiles gate
+    // against their declared surface, with compatibility fallbacks for older
+    // manifests that predate mobile/headless metadata.
     if (this.runtimeProfile === "tauri") {
       return []
     }
     const surface = this.runtimeProfile
 
-    // Mobile is a browser-class runtime: when a plugin omits an explicit
-    // `mobile` target we fall back to its `browser` availability. Every built-in
-    // declares `mobile` (enforced by builtin-manifest-shape.test.ts), so this
-    // fallback only catches third-party plugins authored before the mobile
-    // surface existed.
     const compat = manifest.runtimeCompatibility
-    const fellBackToBrowser = surface === "mobile" && !compat?.mobile
-    const compatibility = fellBackToBrowser ? compat?.browser : compat?.[surface]
-    const fallbackNote = fellBackToBrowser ? " (inherited from browser compatibility)" : ""
+    let compatibility = compat?.[surface]
+    let fallbackSurface: "browser" | "tauri" | undefined
+
+    // Mobile is a browser-class runtime. Headless frontend modules without a
+    // dedicated target inherit browser compatibility, while native/Node
+    // plugins inherit Tauri compatibility because their existing Rust/Node
+    // host contract is the one cognia-server exposes.
+    if (!compatibility && surface === "mobile") {
+      fallbackSurface = "browser"
+      compatibility = compat?.browser
+    } else if (!compatibility && surface === "headless") {
+      const nativeOrNodeTarget =
+        manifest.type !== "frontend" ||
+        Boolean(
+          manifest.engines?.node || manifest.runtimeCompatibility?.tauri?.entrypoint === "node"
+        )
+      fallbackSurface = nativeOrNodeTarget ? "tauri" : "browser"
+      compatibility = compat?.[fallbackSurface]
+    }
+    const fallbackNote = fallbackSurface ? ` (inherited from ${fallbackSurface} compatibility)` : ""
 
     if (!compatibility) {
       return [
@@ -939,7 +968,7 @@ export class PluginManager {
 
   private async initializePythonRuntime(): Promise<void> {
     try {
-      await invoke("plugin_python_initialize", {
+      await invokePluginRuntime("plugin_python_initialize", {
         pythonPath: this.config.pythonPath,
       })
       await this.subscribePythonEvents()
@@ -973,6 +1002,14 @@ export class PluginManager {
       return
     }
     try {
+      if (isHeadlessHost()) {
+        const { transport } = await import("@/lib/tauri/transport-instance")
+        this.pythonEventsUnlisten = transport.subscribe<PythonPluginEvent>(
+          "plugin:python",
+          appendPythonEvent
+        )
+        return
+      }
       const { listen } = await import("@tauri-apps/api/event")
       this.pythonEventsUnlisten = await listen<PythonPluginEvent>("plugin:python", (event) => {
         appendPythonEvent(event.payload)
@@ -1960,6 +1997,20 @@ export class PluginManager {
 
       this.registerPluginPermissions(pluginId, plugin.manifest.permissions || [])
 
+      // Native guests and frontend plugins can call host APIs from activate().
+      // Synchronize their silent-tier grants and declarative capability
+      // allowlists BEFORE loader.load() runs activation; doing this later in
+      // enablePlugin leaves WASM's retained Store permanently permissionless
+      // and races Python/frontend activation against their host gates.
+      await this.mirrorDeclaredPermissionsToLedger(pluginId, plugin.manifest.permissions || [])
+      await this.syncShellAllowlistToHost(pluginId, plugin.manifest.shellCommands || [])
+      if (plugin.manifest.networkAccess?.allowedDomains) {
+        await this.syncNetworkAllowlistToHost(
+          pluginId,
+          plugin.manifest.networkAccess.allowedDomains
+        )
+      }
+
       // Seed declarative-config defaults into the persisted row BEFORE building
       // the context, so the plugin's activate() sees `ctx.configuration.get()`
       // values without waiting for the user to open the settings form. Skipped
@@ -2210,20 +2261,6 @@ export class PluginManager {
 
       // Enable the plugin
       await store.enablePlugin(pluginId, { viaManager: false })
-
-      // Mirror the now-active plugin's declared permissions into the Rust
-      // ledger so the host-side gates honour them (best-effort, async).
-      void this.mirrorDeclaredPermissionsToLedger(pluginId, plugin.manifest.permissions || [])
-
-      // Push the declared shell-command allowlist so the host's deny-by-default
-      // shell:execute gate knows which programs this plugin may run.
-      void this.syncShellAllowlistToHost(pluginId, plugin.manifest.shellCommands || [])
-
-      // Push the declared network egress allowlist (if any) so the host clamps
-      // this plugin's fetch/download/upload to its allowedDomains.
-      if (plugin.manifest.networkAccess?.allowedDomains) {
-        void this.syncNetworkAllowlistToHost(pluginId, plugin.manifest.networkAccess.allowedDomains)
-      }
 
       // Register plugin contributions
       await this.registerPluginContributions(pluginId)
@@ -2914,7 +2951,7 @@ export class PluginManager {
     pluginId: string,
     permissions: PluginPermission[]
   ): Promise<void> {
-    if (!canUseTauriInvoke()) return
+    if (!canUseTauriInvoke() && !isHeadlessHost()) return
     const guard = getPermissionGuard()
     for (const permission of permissions) {
       if (guard.getTier(pluginId, permission) !== "silent") continue
@@ -2941,10 +2978,15 @@ export class PluginManager {
    * (where there is no shell backend at all).
    */
   private async syncShellAllowlistToHost(pluginId: string, commands: string[]): Promise<void> {
-    if (!canUseTauriInvoke()) return
+    if (!canUseTauriInvoke() && !isHeadlessHost()) return
     try {
-      const { invoke } = await import("@tauri-apps/api/core")
-      await invoke("plugin_set_shell_allowlist", { pluginId, commands })
+      if (isHeadlessHost()) {
+        const { transport } = await import("@/lib/tauri/transport-instance")
+        await transport.call("plugin_set_shell_allowlist", { pluginId, commands })
+      } else {
+        const { invoke } = await import("@tauri-apps/api/core")
+        await invoke("plugin_set_shell_allowlist", { pluginId, commands })
+      }
     } catch (error) {
       recordSilentFailure(
         pluginId,
@@ -2965,10 +3007,15 @@ export class PluginManager {
    * unrestricted). Best-effort; no-op in web mode.
    */
   private async syncNetworkAllowlistToHost(pluginId: string, domains: string[]): Promise<void> {
-    if (!canUseTauriInvoke()) return
+    if (!canUseTauriInvoke() && !isHeadlessHost()) return
     try {
-      const { invoke } = await import("@tauri-apps/api/core")
-      await invoke("plugin_set_network_allowlist", { pluginId, domains })
+      if (isHeadlessHost()) {
+        const { transport } = await import("@/lib/tauri/transport-instance")
+        await transport.call("plugin_set_network_allowlist", { pluginId, domains })
+      } else {
+        const { invoke } = await import("@tauri-apps/api/core")
+        await invoke("plugin_set_network_allowlist", { pluginId, domains })
+      }
     } catch (error) {
       recordSilentFailure(
         pluginId,
@@ -3695,8 +3742,8 @@ export class PluginManager {
       pluginId,
       manifest: plugin.manifest,
       installRoot: plugin.path ?? "",
-      importer: (entry: string) => this.loader.importEntry(entry),
-      resolveAsset: await createPluginAssetResolver(),
+      importer: (entry: string) => this.loader.importEntry(entry, pluginId, plugin.path),
+      resolveAsset: await createPluginAssetResolver(pluginId),
       moduleExports: this.loader.getModuleExports(pluginId) ?? {},
       hasPermission: (permission: string) => context.permissions.hasPermission(permission as never),
     }
@@ -4259,7 +4306,7 @@ export class PluginManager {
 
       // Load Python plugin via the subprocess host. The reply surfaces the
       // plugin's declared @hook handlers for TS-side dispatch.
-      const loadResult = await invoke<PythonLoadResult | null>("plugin_python_load", {
+      const loadResult = await invokePluginRuntime<PythonLoadResult | null>("plugin_python_load", {
         pluginId,
         pluginPath: plugin.path,
         mainModule: plugin.manifest.pythonMain,
@@ -4269,7 +4316,7 @@ export class PluginManager {
       })
 
       // Get registered tools from Python
-      const pythonTools = await invoke<
+      const pythonTools = await invokePluginRuntime<
         Array<{
           name: string
           description: string
@@ -4288,7 +4335,7 @@ export class PluginManager {
             parametersSchema: toolDef.parameters,
           },
           execute: async (args: Record<string, unknown>, _context: PluginToolContext) => {
-            return invoke("plugin_python_call_tool", {
+            return invokePluginRuntime("plugin_python_call_tool", {
               pluginId,
               toolName: toolDef.name,
               args,
@@ -4363,7 +4410,7 @@ export class PluginManager {
         continue
       }
       pythonHooks[event] = async (...args: unknown[]) =>
-        invoke("plugin_python_call_hook", {
+        invokePluginRuntime("plugin_python_call_hook", {
           pluginId,
           event,
           name,
@@ -4394,7 +4441,12 @@ export class PluginManager {
     name: string,
     payload: unknown
   ): Promise<T> {
-    return invoke<T>("plugin_python_call_hook", { pluginId, event, name, payload: payload ?? null })
+    return invokePluginRuntime<T>("plugin_python_call_hook", {
+      pluginId,
+      event,
+      name,
+      payload: payload ?? null,
+    })
   }
 
   /**
@@ -4402,7 +4454,7 @@ export class PluginManager {
    * (`on_config_updated`). A demoted host picks it up at respawn.
    */
   async pushPythonConfig(pluginId: string, config: Record<string, unknown>): Promise<void> {
-    await invoke("plugin_python_push_config", { pluginId, config })
+    await invokePluginRuntime("plugin_python_push_config", { pluginId, config })
   }
 
   /**
@@ -4411,7 +4463,7 @@ export class PluginManager {
    * obtain explicit user consent first (network + disk side effects).
    */
   async installPythonDeps(pluginId: string, dependencies: string[]): Promise<void> {
-    await invoke("plugin_python_install_deps", { pluginId, dependencies })
+    await invokePluginRuntime("plugin_python_install_deps", { pluginId, dependencies })
   }
 
   /** Host-level python settings (persisted on the Dexie plugins row). */
@@ -4453,7 +4505,7 @@ export class PluginManager {
   }
 
   async callPythonFunction<T>(pluginId: string, functionName: string, args: unknown[]): Promise<T> {
-    return invoke<T>("plugin_python_call", {
+    return invokePluginRuntime<T>("plugin_python_call", {
       pluginId,
       functionName,
       args,
@@ -4464,35 +4516,35 @@ export class PluginManager {
    * Get Python runtime information
    */
   async getPythonRuntimeInfo(): Promise<PythonRuntimeInfo> {
-    return invoke<PythonRuntimeInfo>("plugin_python_runtime_info")
+    return invokePluginRuntime<PythonRuntimeInfo>("plugin_python_runtime_info")
   }
 
   /**
    * Check if a Python plugin is initialized
    */
   async isPythonPluginInitialized(pluginId: string): Promise<boolean> {
-    return invoke<boolean>("plugin_python_is_initialized", { pluginId })
+    return invokePluginRuntime<boolean>("plugin_python_is_initialized", { pluginId })
   }
 
   /**
    * Get Python plugin info (tool/hook counts)
    */
   async getPythonPluginInfo(pluginId: string): Promise<PythonPluginInfo | null> {
-    return invoke<PythonPluginInfo | null>("plugin_python_get_info", { pluginId })
+    return invokePluginRuntime<PythonPluginInfo | null>("plugin_python_get_info", { pluginId })
   }
 
   /**
    * Unload a Python plugin
    */
   async unloadPythonPlugin(pluginId: string): Promise<void> {
-    return invoke("plugin_python_unload", { pluginId })
+    return invokePluginRuntime("plugin_python_unload", { pluginId })
   }
 
   /**
    * List all loaded Python plugins
    */
   async listPythonPlugins(): Promise<string[]> {
-    return invoke<string[]>("plugin_python_list")
+    return invokePluginRuntime<string[]>("plugin_python_list")
   }
 
   // ===========================================================================

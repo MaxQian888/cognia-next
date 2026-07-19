@@ -93,12 +93,12 @@ describe("nodeCatalogEntry", () => {
     expect(e.keywords).toEqual(expect.arrayContaining(["github", "webhook"]))
   })
 
-  it("flags the desktop UIA-event trigger as experimental (no real producer yet)", () => {
+  it("exposes the native desktop UIA-event trigger", () => {
     const e = nodeCatalogEntry("trigger.desktop.event")
     expect(e.category).toBe("trigger")
-    expect(e.experimental).toBe(true)
+    expect(e.experimental).not.toBe(true)
     expect(e.desktopOnly).toBe(true)
-    expect(e.description).toMatch(/experimental/i)
+    expect(e.description).toMatch(/native Windows UI Automation/i)
   })
 
   it("exposes goal lifecycle actions as user-placeable action entries", () => {

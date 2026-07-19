@@ -42,11 +42,33 @@ export default definePlugin({
 - `@cognia/plugin-sdk/manifest`: manifest and contribution types plus `definePlugin`.
 - `@cognia/plugin-sdk/context`: `PluginContext`, `FullPluginContext`, and callable API interfaces.
 - `@cognia/plugin-sdk/contracts`: capability, permission, runtime, and path-field metadata.
+- `@cognia/plugin-sdk/events`: stable event constants and event payload types.
+- `@cognia/plugin-sdk/hooks`: lifecycle hook payloads and hook interfaces.
+- `@cognia/plugin-sdk/permissions`: public permission values and permission types.
+- `@cognia/plugin-sdk/extensions`: extension-point constants and contribution types.
 - `@cognia/plugin-sdk/api/tool` and `/api/native-anthropic-tool`: explicit compatibility
   subpaths resolving to the safe author surface in the published package.
 
 The npm tarball ships ESM, CJS, declarations, the language-neutral contract catalog, and
 `wit/cognia-plugin.wit`. It has no dependency on Cognia monorepo aliases or private host packages.
+
+## Primary manifest contribution types
+
+| Manifest field    | Author type                |
+| ----------------- | -------------------------- |
+| `a2uiComponents`  | `A2UIPluginComponentDef`   |
+| `a2uiTemplates`   | `A2UITemplateDef`          |
+| `tools`           | `PluginToolDef`            |
+| `cliTools`        | `PluginCliToolDef`         |
+| `modes`           | `PluginModeDef`            |
+| `commands`        | `PluginManifestCommandDef` |
+| `quickActions`    | `PluginQuickActionDef`     |
+| `scheduledTasks`  | `PluginScheduledTaskDef`   |
+| `lspServers`      | `PluginLspServerDef`       |
+| `ocrProviders`    | `PluginOcrProviderDef`     |
+| `aiProviders`     | `PluginAiProviderDef`      |
+| `petAchievements` | `PluginPetAchievementDef`  |
+| `petItems`        | `PluginPetItemDef`         |
 
 ## Runtime and path rules
 
@@ -56,7 +78,9 @@ The npm tarball ships ESM, CJS, declarations, the language-neutral contract cata
 - `hybrid` plugins may use both entries; any JavaScript contribution requires `main`.
 - `wasm` plugins require `wasmMain`; VS Code extensions use the VS Code runtime entry.
 - Every plugin-controlled path is relative to the installed plugin root. Absolute, drive-relative,
-  UNC, extended Windows, encoded traversal, control-character, and `..` paths are rejected.
+  UNC, Windows device-namespace, encoded traversal, control-character, and `..` paths are rejected.
+- Desktop JavaScript plugins run under Cognia's checksum-pinned bundled Node 26 runtime (minimum
+  patched version 26.3.1); author manifests cannot select an arbitrary executable.
 
 `FullPluginContext` reflects the full host surface. In particular, `memory`, `pet`, `webview`,
 `auth`, and `uri` are required there; the intentionally partial base `PluginContext` retains

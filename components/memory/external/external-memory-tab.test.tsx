@@ -57,7 +57,7 @@ describe("ExternalMemoryTab", () => {
   it("renders an empty state when no files are found", () => {
     mockHook.mockReturnValue(hookValue({ files: [] }))
     render(<ExternalMemoryTab />)
-    expect(screen.getByText(/no external memory found/i)).toBeTruthy()
+    expect(screen.getByText("empty.title")).toBeTruthy()
   })
 
   it("groups files by agent and counts present files", () => {
@@ -76,8 +76,8 @@ describe("ExternalMemoryTab", () => {
     )
     render(<ExternalMemoryTab />)
     expect(screen.getAllByTestId("external-memory-row")).toHaveLength(2)
-    expect(screen.getByRole("heading", { name: "Claude Code" })).toBeTruthy()
-    expect(screen.getByRole("heading", { name: "Codex" })).toBeTruthy()
+    expect(screen.getByRole("heading", { name: "agents.claude-code" })).toBeTruthy()
+    expect(screen.getByRole("heading", { name: "agents.codex" })).toBeTruthy()
     expect(within(screen.getByTestId("external-stat-total")).getByText("2")).toBeTruthy()
   })
 

@@ -8,6 +8,9 @@ jest.mock("./agent-team-runtime-initializer", () => ({
 jest.mock("./code-adoption-tracker-initializer", () => ({
   CodeAdoptionTrackerInitializer: () => <span data-boot="task-workspace-tracker" />,
 }))
+jest.mock("./memory-job-worker-initializer", () => ({
+  MemoryJobWorkerInitializer: () => <span data-boot="memory-job-worker" />,
+}))
 jest.mock("@/components/scheduler/scheduler-initializer", () => ({
   SchedulerInitializer: () => <span data-boot="scheduler" />,
 }))
@@ -44,6 +47,7 @@ describe("DeferredBootInitializersImpl", () => {
     expect(order).toEqual([
       "agent-team",
       "task-workspace-tracker",
+      "memory-job-worker",
       "scheduler",
       "workflow",
       "provider-core",

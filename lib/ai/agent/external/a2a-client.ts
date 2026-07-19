@@ -529,7 +529,7 @@ export class A2aClientAdapter extends BaseProtocolAdapter {
       error: "A2A stream ended before a terminal task state",
       recoverable: false,
     }
-    yield { type: "done", timestamp: new Date(), success: false, stopReason: "error" }
+    yield { type: "done", timestamp: new Date(), success: false }
   }
 
   /** Open an SSE POST for a streaming method and validate the response. */

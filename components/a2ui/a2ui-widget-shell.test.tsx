@@ -3,27 +3,51 @@ import { render, screen } from "@testing-library/react"
 import { A2UIWidgetShell } from "./a2ui-widget-shell"
 
 describe("A2UIWidgetShell", () => {
-  it("renders shared widget chrome with title and host badge", () => {
+  it("applies dark theme and a fixed-height scrolling viewport", () => {
     render(
-      <A2UIWidgetShell title="Widget Title" hostStrategy="sandboxed-html">
+      <A2UIWidgetShell theme="dark" sizing="fixed-height" minHeight={240}>
         <div>Widget body</div>
       </A2UIWidgetShell>
     )
 
-    expect(screen.getByTestId("a2ui-widget-shell")).toBeInTheDocument()
-    expect(screen.getByText("Widget Title")).toBeInTheDocument()
-    expect(screen.getByText("sandboxed-html")).toBeInTheDocument()
-    expect(screen.getByText("Widget body")).toBeInTheDocument()
+    const shell = screen.getByTestId("a2ui-widget-shell")
+    expect(shell).toHaveAttribute("data-theme", "dark")
+    expect(shell).toHaveAttribute("data-sizing", "fixed-height")
+    expect(shell).toHaveClass("a2ui-widget-theme-dark", "overflow-auto")
+    expect(shell).toHaveStyle({ height: "240px", minHeight: "240px" })
   })
 
-  it("renders fallback copy when status is fallback", () => {
+  it("uses the fixed-height default when minHeight is omitted", () => {
     render(
-      <A2UIWidgetShell status="fallback" fallbackText="Using fallback presentation.">
-        <div>Hidden body</div>
+      <A2UIWidgetShell sizing="fixed-height">
+        <div>Widget body</div>
       </A2UIWidgetShell>
     )
 
-    expect(screen.getByText("Using fallback presentation.")).toBeInTheDocument()
-    expect(screen.queryByText("Hidden body")).not.toBeInTheDocument()
+    expect(screen.getByTestId("a2ui-widget-shell")).toHaveStyle({ height: "320px" })
+  })
+
+  it("applies a light content-height scope without forcing a height", () => {
+    render(
+      <A2UIWidgetShell theme="light" sizing="content-height" minHeight={120}>
+        <div>Widget body</div>
+      </A2UIWidgetShell>
+    )
+
+    const shell = screen.getByTestId("a2ui-widget-shell")
+    expect(shell).toHaveClass("a2ui-widget-theme-light")
+    expect(shell).toHaveStyle({ minHeight: "120px" })
+    expect(shell.style.height).toBe("")
+  })
+
+  it("renders fallback content instead of children for error states", () => {
+    render(
+      <A2UIWidgetShell status="error" fallbackText="Unavailable">
+        <div>Widget body</div>
+      </A2UIWidgetShell>
+    )
+
+    expect(screen.getByText("Unavailable")).toBeInTheDocument()
+    expect(screen.queryByText("Widget body")).not.toBeInTheDocument()
   })
 })

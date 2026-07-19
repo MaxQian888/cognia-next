@@ -14,6 +14,7 @@ import { useTranslations } from "next-intl"
 
 import { Card, CardContent } from "@/components/ui/card"
 import { listSessions } from "@/lib/claude/ipc"
+import { hydrateCompanionConfig } from "@/lib/tauri/transport-companion"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 export interface RemoteSessionsListProps {
@@ -29,6 +30,11 @@ export function RemoteSessionsList({ onSelect }: RemoteSessionsListProps) {
     let cancelled = false
     void (async () => {
       try {
+        // The mobile boot provider hydrates the transport cache asynchronously
+        // while route children are already mounted. Await the same idempotent
+        // boundary here so a cold deep link cannot issue session_list against
+        // an empty cache and get stuck in a false "not paired" error state.
+        await hydrateCompanionConfig()
         const page = await listSessions({ limit: 50, offset: 0 })
         if (!cancelled) setSessions(page.rows)
       } catch (err) {

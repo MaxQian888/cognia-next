@@ -73,7 +73,7 @@ function buildGraph(slots: CopilotSlotValues): VisualWorkflow {
           label: "Open draft PR",
           params: {
             repoFullName,
-            branch: "auto-fix/{{ $trigger.payload.body.issue.number }}",
+            head: "auto-fix/{{ $trigger.payload.body.issue.number }}",
             base: baseBranch,
             title: "[auto-fix] {{ $node['n_extract'].out.summary }}",
             body: "Closes #{{ $trigger.payload.body.issue.number }}\n\n## Acceptance criteria\n{{ $node['n_extract'].out.acceptanceCriteria }}",

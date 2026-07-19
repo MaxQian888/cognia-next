@@ -7,6 +7,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { buildAiSdkTools, createToolPermissionGate, __testing__ } from "./ai-sdk-tools.mjs"
+import { createSessionTaskStore } from "../builtin-tools/core/tasks.mjs"
 
 function mkConfRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "cognia-gate-conf-"))
@@ -565,9 +566,37 @@ test("coreFiles tools are registered on the ai-sdk path when enabled + tracked",
     "write",
     "bash",
     "TodoWrite",
+    "TaskCreate",
+    "TaskGet",
+    "TaskList",
+    "TaskUpdate",
+    "list_shells",
   ]) {
     assert.ok(tools[name], `${name} registered`)
   }
+})
+
+test("structured tasks persist when the ai-sdk tool map is rebuilt between turns", async () => {
+  const taskStore = createSessionTaskStore()
+  const shared = {
+    sendOptions: { builtinTools: { coreFiles: true }, cwd: "." },
+    emit: () => {},
+    sessionId: "s1",
+    readTracker: { record() {}, hasRead: () => false, assertReadBefore() {}, clear() {} },
+    taskStore,
+  }
+  const firstTurn = buildAiSdkTools(shared)
+  const created = JSON.parse(
+    await firstTurn.TaskCreate.execute({ subject: "Research", description: "Map gaps" })
+  )
+  assert.equal(created.task.id, "1")
+
+  const secondTurn = buildAiSdkTools(shared)
+  const listed = JSON.parse(await secondTurn.TaskList.execute({}))
+  assert.deepEqual(
+    listed.tasks.map((task) => task.subject),
+    ["Research"]
+  )
 })
 
 test("coreFiles tools are absent without a readTracker or when category disabled", () => {

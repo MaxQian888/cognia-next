@@ -1400,6 +1400,7 @@ test("View > Reduce Motion flips the persisted boolean", async () => {
 test.each([
   ["go.inbox", "/inbox/all"],
   ["go.workflows", "/workflows"],
+  ["go.sites", "/sites"],
   ["go.skills", "/skills"],
   ["go.plugins", "/plugins"],
   ["go.agentTeams", "/agent-teams"],

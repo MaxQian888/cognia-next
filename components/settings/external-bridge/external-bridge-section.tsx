@@ -42,7 +42,7 @@ import {
   stopMcpServer,
   type McpServerStatus,
 } from "@/lib/external-bridge/tauri-control"
-import { usePlatform } from "@/hooks/use-platform"
+import { useCapability } from "@/hooks/use-host-profile"
 import {
   ALL_BRIDGE_SCOPES,
   DEFAULT_EXTERNAL_BRIDGE_SETTINGS,
@@ -92,9 +92,15 @@ async function resolveSidecarPath(): Promise<string> {
 }
 
 /** Tiny status indicator used in the ServerStatusCard header. */
-function ServerStatusBadge({ status, desktop }: { status: McpServerStatus; desktop: boolean }) {
+function ServerStatusBadge({
+  status,
+  hostAvailable,
+}: {
+  status: McpServerStatus
+  hostAvailable: boolean
+}) {
   const t = useTranslations("settings.externalBridge")
-  if (!desktop) {
+  if (!hostAvailable) {
     return <span className="text-[10px] uppercase text-muted-foreground">{t("badgeWeb")}</span>
   }
   return status.running ? (
@@ -176,7 +182,7 @@ function ServerStatusCard({
     port: null,
     startedAt: null,
   })
-  const desktop = usePlatform() === "tauri"
+  const hostAvailable = useCapability("mcp-runtime")
 
   // Poll the Rust HTTP server status every 3 s while the section is mounted —
   // covers external `mcp_server_stop` triggers (e.g. Tauri shutdown handler)
@@ -211,7 +217,7 @@ function ServerStatusCard({
       }
       onChange(next)
       // Drive the Rust HTTP server. Web mode silently no-ops via the wrapper.
-      if (!desktop) return
+      if (!hostAvailable) return
       try {
         if (enabled) {
           const port = await startMcpServer({
@@ -230,7 +236,7 @@ function ServerStatusCard({
         toast.error(err instanceof Error ? err.message : String(err))
       }
     },
-    [settings, onChange, desktop, t]
+    [settings, onChange, hostAvailable, t]
   )
 
   const onRotateToken = useCallback(async () => {
@@ -260,7 +266,7 @@ function ServerStatusCard({
           <span className="flex items-center gap-2">
             <KeyRoundIcon className="h-4 w-4" />
             {t("server.title")}
-            <ServerStatusBadge status={serverStatus} desktop={desktop} />
+            <ServerStatusBadge status={serverStatus} hostAvailable={hostAvailable} />
           </span>
           <Switch
             checked={settings.enabled}

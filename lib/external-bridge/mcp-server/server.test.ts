@@ -166,6 +166,42 @@ describe("buildMcpServer — memory tools (ADR-0069)", () => {
     expect(result.structuredContent).toEqual({ ok: false, reason: "pii_blocked" })
     await client.close()
   })
+
+  it("forwards namespace fields and pinned updates through the registered tools", async () => {
+    const { client } = await makeWiredPair(
+      settings({ enabledScopes: ["memory:read", "memory:write"] })
+    )
+    const stored = await client.callTool({
+      name: "memory_store",
+      arguments: {
+        text: "Workspace uses pnpm",
+        scope: "workspace",
+        projectId: "project_1",
+        branch: "main",
+        pathPattern: "src",
+      },
+    })
+    const memoryId = (stored.structuredContent as { memoryId?: string }).memoryId
+    expect(memoryId).toBeTruthy()
+    const updated = await client.callTool({
+      name: "memory_update",
+      arguments: { id: memoryId!, pinned: true },
+    })
+    expect(updated.isError).not.toBe(true)
+    const listed = await client.callTool({
+      name: "memory_list",
+      arguments: {
+        scope: "workspace",
+        projectId: "project_1",
+        branch: "main",
+        pathPattern: "src",
+      },
+    })
+    expect(
+      (listed.structuredContent as { memories: Array<{ id: string; pinned: boolean }> }).memories
+    ).toEqual(expect.arrayContaining([expect.objectContaining({ id: memoryId, pinned: true })]))
+    await client.close()
+  })
 })
 
 describe("buildMcpServer — wiki_search dispatch", () => {

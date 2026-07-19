@@ -28,6 +28,20 @@ function nowMs(): number {
   return Date.now()
 }
 
+/**
+ * Project a committed workflow row into the trigger runtime. Persistence is
+ * authoritative: a temporarily unavailable runtime must not roll back the
+ * Dexie write, and startup reconciliation will retry the projection.
+ */
+async function projectPersistedWorkflowTriggers(workflow: VisualWorkflow): Promise<void> {
+  try {
+    const { syncWorkflowTriggers } = await import("@/lib/workflow/runtime/webhook-bridge")
+    await syncWorkflowTriggers(workflow)
+  } catch (error) {
+    console.warn(`Workflow ${workflow.id} trigger projection failed:`, error)
+  }
+}
+
 export async function listWorkflows(): Promise<WorkflowRow[]> {
   const rows = await getDb().workflows.orderBy("name").toArray()
   return rows.map(migrateWorkflow)
@@ -65,6 +79,12 @@ export type WorkflowDraft = Pick<VisualWorkflow, "name"> &
       | "viewport"
       | "isTemplate"
       | "folderId"
+      | "complexity"
+      | "variables"
+      | "pinData"
+      | "staticData"
+      | "interface"
+      | "published"
     >
   >
 
@@ -79,22 +99,29 @@ export async function createWorkflow(draft: WorkflowDraft): Promise<WorkflowRow>
     tags: draft.tags ?? [],
     isTemplate: draft.isTemplate ?? false,
     isBuiltIn: false,
+    complexity: draft.complexity,
     folderId: draft.folderId ?? ROOT_FOLDER_ID,
     createdAt: now,
     updatedAt: now,
     nodes: draft.nodes ?? [],
     edges: draft.edges ?? [],
-    // ADR-0070 Phase 3: new workflows are risk-gated; ones authored before it
-    // have no field and stay ungated, so shipping this pauses nothing that
-    // already runs. Merged over `draft.settings` rather than living in
-    // DEFAULT_WORKFLOW_SETTINGS, so a caller supplying its own settings still
-    // gets the gate — and an IMPORTED workflow (which never goes through here)
-    // keeps its own posture, which is what the migration promises.
-    settings: { ...(draft.settings ?? cloneSettings(DEFAULT_WORKFLOW_SETTINGS)), riskGating: true },
+    // ADR-0070 Phase 3: newly-authored workflows default to risk-gated. A
+    // complete imported/template draft may explicitly carry true OR false;
+    // preserve that authored posture instead of silently turning gating on.
+    settings: {
+      ...cloneSettings(draft.settings ?? DEFAULT_WORKFLOW_SETTINGS),
+      riskGating: draft.settings?.riskGating ?? true,
+    },
     credentials: draft.credentials,
+    variables: draft.variables,
+    pinData: draft.pinData,
+    staticData: draft.staticData,
     viewport: draft.viewport ?? { x: 0, y: 0, zoom: 1 },
+    interface: draft.interface,
+    published: draft.published,
   }
   await getDb().workflows.put(workflow)
+  await projectPersistedWorkflowTriggers(workflow)
   return workflow
 }
 
@@ -108,7 +135,10 @@ export type WorkflowPatch = Partial<
  * editors with stale clocks could rewind it).
  */
 export async function updateWorkflow(id: string, patch: WorkflowPatch): Promise<void> {
-  await getDb().workflows.update(id, { ...patch, updatedAt: nowMs() })
+  const updated = await getDb().workflows.update(id, { ...patch, updatedAt: nowMs() })
+  if (updated === 0) return
+  const workflow = await getDb().workflows.get(id)
+  if (workflow) await projectPersistedWorkflowTriggers(migrateWorkflow(workflow))
 }
 
 /**
@@ -121,7 +151,9 @@ export async function replaceWorkflow(workflow: VisualWorkflow): Promise<void> {
   if (!existing) {
     throw new Error(`Workflow ${workflow.id} not found`)
   }
-  await getDb().workflows.put({ ...workflow, schemaVersion: 2, updatedAt: nowMs() })
+  const replacement: VisualWorkflow = { ...workflow, schemaVersion: 2, updatedAt: nowMs() }
+  await getDb().workflows.put(replacement)
+  await projectPersistedWorkflowTriggers(replacement)
 }
 
 /** Query options for {@link listWorkflowRuns}. */
@@ -155,6 +187,10 @@ export async function deleteWorkflow(id: string): Promise<void> {
   const existing = await getDb().workflows.get(id)
   if (existing?.isBuiltIn) {
     throw new Error("Built-in workflows cannot be deleted. Duplicate first.")
+  }
+  if (existing) {
+    const { unsyncWorkflowTriggers } = await import("@/lib/workflow/runtime/webhook-bridge")
+    await unsyncWorkflowTriggers(existing)
   }
   await getDb().workflows.delete(id)
   // Mirror the deletion to paired phones via the companion sync (v61).
@@ -203,6 +239,7 @@ export async function duplicateWorkflow(id: string): Promise<WorkflowRow> {
     updatedAt: now,
   }
   await getDb().workflows.put(copy)
+  await projectPersistedWorkflowTriggers(copy)
   return copy
 }
 
@@ -236,20 +273,14 @@ export async function seedBuiltInWorkflows(builtIns: VisualWorkflow[]): Promise<
 }
 
 /**
- * Helper for `replaceWorkflow` callers: deep-clones a settings object so the
- * caller can mutate without touching the constant.
+ * Clone nested settings values so a new workflow never aliases the shared
+ * default object.
  */
 function cloneSettings(s: WorkflowSettings): WorkflowSettings {
   return {
-    errorPolicy: s.errorPolicy,
-    timeoutMs: s.timeoutMs,
-    concurrency: s.concurrency,
-    // Field-enumerated clone — every WorkflowSettings field must be carried
-    // explicitly, or new-workflow defaults silently lose it (caught by the
-    // smoke run when DEFAULT_WORKFLOW_SETTINGS gained maxConcurrency).
-    maxConcurrency: s.maxConcurrency,
+    ...s,
     retryDefaults: { ...s.retryDefaults },
-    timezone: s.timezone,
+    onFailure: s.onFailure ? { ...s.onFailure } : undefined,
   }
 }
 
@@ -456,17 +487,13 @@ export async function saveWorkflowAsTemplate(id: string): Promise<WorkflowRow> {
   const source = await getDb().workflows.get(id)
   if (!source) throw new Error(`Workflow ${id} not found`)
   return createWorkflow({
+    ...source,
     name: `${source.name} (template)`,
-    description: source.description,
-    icon: source.icon,
-    tags: source.tags,
-    nodes: source.nodes,
-    edges: source.edges,
-    settings: source.settings,
-    credentials: source.credentials,
-    viewport: source.viewport,
-    folderId: source.folderId,
     isTemplate: true,
+    // Publication is identity-bearing state tied to the source workflow id
+    // and stable tool name. The reusable interface is copied; the template
+    // must be explicitly published after instantiation.
+    published: undefined,
   })
 }
 
