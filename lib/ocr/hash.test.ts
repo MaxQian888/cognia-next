@@ -1,3 +1,5 @@
+/** @jest-environment jsdom */
+
 import { sha256Blob, sha256Bytes, sha256DataUrl, sha256String } from "./hash"
 
 describe("sha256String", () => {

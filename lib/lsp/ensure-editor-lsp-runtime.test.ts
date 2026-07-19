@@ -11,6 +11,17 @@ jest.mock("@cognia/logging", () => ({
   },
 }))
 
+const mockTransportCall = jest.fn(async (..._args: unknown[]) => undefined)
+jest.mock("@/lib/tauri", () => ({
+  isTauri: jest.fn(() => false),
+  transport: { call: (...args: unknown[]) => mockTransportCall(...args) },
+}))
+jest.mock("@/lib/platform/detect", () => ({ isHeadlessHost: jest.fn(() => false) }))
+jest.mock("@/lib/tauri/transport-routing", () => ({
+  getActiveRemoteTransport: jest.fn(() => null),
+  isRemoteHostActive: jest.fn(() => false),
+}))
+
 // Mocked so the DEFAULT (deps-omitted) branch resolves the real dynamic
 // imports without pulling Tauri APIs / the heavy monaco graph.
 jest.mock("@tauri-apps/api/core", () => ({ invoke: jest.fn(async () => undefined) }))
@@ -46,6 +57,7 @@ function makeDeps(overrides: Partial<EditorLspRuntimeDeps> = {}) {
 describe("ensureEditorLspRuntime", () => {
   beforeEach(() => {
     __resetEditorLspRuntimeForTesting()
+    mockTransportCall.mockClear()
   })
 
   it("no-ops off the desktop host and touches nothing", async () => {
@@ -83,6 +95,25 @@ describe("ensureEditorLspRuntime", () => {
     expect(subscribe).toHaveBeenCalledTimes(1)
   })
 
+  it("boots each newly active remote execution host exactly once", async () => {
+    const hosts = [{}, {}]
+    let selected = 0
+    const setup = makeDeps({ hostIdentity: () => hosts[selected] })
+    await ensureEditorLspRuntime(setup.deps)
+    await ensureEditorLspRuntime(setup.deps)
+    selected = 1
+    await ensureEditorLspRuntime(setup.deps)
+    expect(setup.invoke).toHaveBeenCalledTimes(2)
+    expect(setup.ensureDispatcher).toHaveBeenCalledTimes(2)
+    expect(setup.subscribe).toHaveBeenCalledTimes(2)
+  })
+
+  it("uses the confined Companion facade for the active remote host", async () => {
+    const setup = makeDeps({ remoteHostActive: () => true })
+    await ensureEditorLspRuntime(setup.deps)
+    expect(setup.invoke).toHaveBeenCalledWith("lsp_host_ensure")
+  })
+
   it("resets the guard and swallows the error when a step throws", async () => {
     const failing = makeDeps({
       invoke: jest.fn(async () => {
@@ -112,11 +143,10 @@ describe("ensureEditorLspRuntime", () => {
   it("resolves the real (mocked) module deps when none are injected", async () => {
     // Only force the host gate on; every other dep falls through the `??` to
     // its dynamic import (mocked at module scope above).
-    const core = await import("@tauri-apps/api/core")
     const loader = await import("@/lib/plugin/core/vscode-loader")
     const dispatcher = await import("@/lib/plugin/vscode-shim/rpc-dispatcher")
     await ensureEditorLspRuntime({ hostAvailable: () => true })
-    expect(core.invoke).toHaveBeenCalledWith("ensure_system_lsp_host")
+    expect(mockTransportCall).toHaveBeenCalledWith("ensure_system_lsp_host", undefined)
     expect(loader.ensureDispatcherConfigured).toHaveBeenCalledTimes(1)
     expect(dispatcher.subscribeToVscodeEvents).toHaveBeenCalledWith(LSP_TAURI_CHANNEL_ID)
   })

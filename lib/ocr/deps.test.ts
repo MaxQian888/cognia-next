@@ -1,3 +1,5 @@
+/** @jest-environment jsdom */
+
 import { buildOcrDeps, detectOcrOsTag } from "./deps"
 import { DEFAULT_OCR_SETTINGS, type UserOcrSettings } from "@/types/ocr"
 
@@ -83,3 +85,4 @@ describe("buildOcrDeps", () => {
     expect(deps.onResult).toBe(onResult)
   })
 })
+/** @jest-environment jsdom */

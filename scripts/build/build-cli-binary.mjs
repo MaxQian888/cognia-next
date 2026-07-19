@@ -37,11 +37,15 @@ import { createCliExternalAgentAliasPlugin } from "./cli-external-agent-aliases.
 const root = path.dirname(fileURLToPath(import.meta.url)) + "/../.."
 const cliEntry = path.join(root, "cli/src/cli/entry.ts")
 const sidecarEntry = path.join(root, "sidecar/claude-host.mjs")
+const mcpSidecarEntry = path.join(root, "lib/external-bridge/mcp-server/standalone-entry.ts")
+const mcpBridgeRuntime = path.join(root, "scripts/build/mcp-bridge-runtime.ts")
 const sidecarNodeModules = path.join(root, "sidecar/node_modules")
+const vscodeHostRoot = path.join(root, "sidecar/vscode-ext-host")
 const binDir = path.join(root, "cli/dist/bin")
 const cliBundle = path.join(binDir, "cli.mjs")
 const pkgBootstrap = path.join(binDir, "pkg-bootstrap.cjs")
 const sidecarOutDir = path.join(binDir, "sidecar")
+const vscodeHostOutDir = path.join(sidecarOutDir, "vscode-ext-host")
 const externalHostLauncherName = process.platform === "win32" ? "cognia-external-agent-launcher.exe" : "cognia-external-agent-launcher"
 const externalHostLauncher = path.join(root, "target", "release", externalHostLauncherName)
 
@@ -59,6 +63,44 @@ const SIDECAR_EXTERNALS = [
   "better-sqlite3",
   "web-tree-sitter",
   "tree-sitter-wasms",
+]
+
+const MCP_HOST_BRIDGED_IMPORTS = new Set([
+  "@/lib/db/wiki-articles",
+  "@/lib/db/skills",
+  "@/lib/db/characters",
+  "../audit-log",
+  "../handlers/orchestration",
+  "../handlers/rag",
+  "../handlers/runtime",
+  "../handlers/wiki",
+  "../handlers/connectors",
+  "../handlers/inbound",
+  "../handlers/memory",
+])
+
+const mcpHostBridgePlugin = {
+  name: "cognia-mcp-host-bridge",
+  setup(build) {
+    build.onResolve({ filter: /.*/ }, (args) => {
+      if (MCP_HOST_BRIDGED_IMPORTS.has(args.path)) return { path: mcpBridgeRuntime }
+      return undefined
+    })
+  },
+}
+
+// Runtime closure of @cognia/vscode-ext-host. Keep the TypeScript/@types dev
+// packages out of CLI and server distributions while preserving standalone
+// LSP installation/detection and extension execution.
+const VSCODE_HOST_RUNTIME_DEPS = [
+  "balanced-match",
+  "brace-expansion",
+  "minimatch",
+  "semver",
+  "vscode-jsonrpc",
+  "vscode-languageclient",
+  "vscode-languageserver-protocol",
+  "vscode-languageserver-types",
 ]
 
 // The TUI rendering stack MUST stay external. Inlining Ink + react-reconciler +
@@ -254,6 +296,26 @@ await esbuild.build({
 })
 console.log(`build-cli-binary: wrote ${path.relative(root, path.join(sidecarOutDir, "claude-host.mjs"))}`)
 
+// The embedded External Bridge MCP server is a separate stdio sidecar owned
+// by the Rust HTTP proxy. Bundle its canonical TypeScript implementation into
+// the same host layout so cognia-server never depends on a client-supplied
+// filesystem path.
+const mcpSidecarBundle = path.join(sidecarOutDir, "cognia-mcp.mjs")
+await esbuild.build({
+  entryPoints: [mcpSidecarEntry],
+  outfile: mcpSidecarBundle,
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  target: "node20",
+  tsconfig: path.join(root, "tsconfig.json"),
+  plugins: [mcpHostBridgePlugin],
+  banner: { js: CREATE_REQUIRE_BANNER },
+  loader: ASSET_LOADERS,
+  logLevel: "info",
+})
+console.log(`build-cli-binary: wrote ${path.relative(root, mcpSidecarBundle)}`)
+
 // 2b. Copy the sidecar's runtime-read data files next to the bundle. esbuild
 // inlines the JS but NOT files loaded via `fs.readFileSync(import.meta.url-
 // relative path)`; in the bundle `import.meta.url` resolves to claude-host.mjs,
@@ -269,6 +331,39 @@ for (const src of SIDECAR_DATA_FILES) {
   fs.cpSync(src, path.join(sidecarOutDir, path.basename(src)))
 }
 console.log(`build-cli-binary: copied ${SIDECAR_DATA_FILES.length} sidecar data file(s) → ${path.relative(root, sidecarOutDir)}`)
+
+// 2c. Ship the already-built VS Code extension host beside the brain. The
+// Rust server resolves this exact layout from COGNIA_BRAIN_ENTRY and owns the
+// process; only the runtime dependency closure is copied (no TypeScript toolchain).
+const vscodeHostMain = path.join(vscodeHostRoot, "dist", "host.js")
+const vscodeHostNodeModules = path.join(vscodeHostRoot, "node_modules")
+if (!fs.existsSync(vscodeHostMain) || !fs.existsSync(vscodeHostNodeModules)) {
+  console.error(
+    "build-cli-binary: VS Code extension host is not built — run `pnpm sidecar:vscode:build` first."
+  )
+  process.exit(1)
+}
+safeRm(vscodeHostOutDir)
+fs.mkdirSync(vscodeHostOutDir, { recursive: true })
+fs.cpSync(path.join(vscodeHostRoot, "dist"), path.join(vscodeHostOutDir, "dist"), {
+  recursive: true,
+  dereference: true,
+})
+fs.cpSync(path.join(vscodeHostRoot, "package.json"), path.join(vscodeHostOutDir, "package.json"))
+const vscodeRuntimeModules = path.join(vscodeHostOutDir, "node_modules")
+fs.mkdirSync(vscodeRuntimeModules, { recursive: true })
+for (const dep of VSCODE_HOST_RUNTIME_DEPS) {
+  const src = path.join(vscodeHostNodeModules, dep)
+  if (!fs.existsSync(src)) {
+    console.error(`build-cli-binary: missing VS Code host runtime dependency ${dep}`)
+    process.exit(1)
+  }
+  fs.cpSync(src, path.join(vscodeRuntimeModules, dep), {
+    recursive: true,
+    dereference: true,
+  })
+}
+console.log(`build-cli-binary: copied VS Code extension host → ${path.relative(root, vscodeHostOutDir)}`)
 
 // 3. Copy a pruned node_modules — just the externals (+ their nested deps).
 // Under pnpm's isolated layout each package nests its own deps, so a

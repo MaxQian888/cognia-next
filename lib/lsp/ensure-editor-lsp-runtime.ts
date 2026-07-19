@@ -19,14 +19,17 @@
  * path in the sidecar and is unaffected by this wiring.
  */
 
-import { isTauri } from "@/lib/tauri"
+import { isTauri, transport } from "@/lib/tauri"
+import { isHeadlessHost } from "@/lib/platform/detect"
+import { getActiveRemoteTransport, isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import { loggers } from "@cognia/logging"
 import { LSP_TAURI_CHANNEL_ID } from "@/lib/plugin/lsp/lsp-client-adapter-tauri"
 
 const log = loggers.plugin.child("editor-lsp-runtime")
 
-/** Module-level once-guard; reset on failure so the next trigger retries. */
-let started = false
+const LOCAL_HOST = Symbol("local-lsp-host")
+let startedHost: unknown | null = null
+let startup: { host: unknown; promise: Promise<void> } | null = null
 
 type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>
 
@@ -39,6 +42,10 @@ export interface EditorLspRuntimeDeps {
   subscribe?: (channelId: string) => Promise<() => void>
   /** Runtime host gate — injected for tests. */
   hostAvailable?: () => boolean
+  /** Active execution-host identity — injected to verify remote route switches. */
+  hostIdentity?: () => unknown
+  /** Whether the active execution host is the remote Companion route. */
+  remoteHostActive?: () => boolean
 }
 
 /**
@@ -48,42 +55,45 @@ export interface EditorLspRuntimeDeps {
  * (e.g. reopening Settings → Language Servers) can retry.
  */
 export async function ensureEditorLspRuntime(deps: EditorLspRuntimeDeps = {}): Promise<void> {
-  if (started) return
-  const hostAvailable = deps.hostAvailable ?? isTauri
+  const hostAvailable =
+    deps.hostAvailable ?? (() => isTauri() || isHeadlessHost() || isRemoteHostActive())
   if (!hostAvailable()) return
-  started = true
-  try {
-    const invoke = deps.invoke ?? (await import("@tauri-apps/api/core")).invoke
-    const ensureDispatcher =
-      deps.ensureDispatcher ??
-      (await import("@/lib/plugin/core/vscode-loader")).ensureDispatcherConfigured
-    const subscribe =
-      deps.subscribe ??
-      (await import("@/lib/plugin/vscode-shim/rpc-dispatcher")).subscribeToVscodeEvents
+  const host = (deps.hostIdentity ?? (() => getActiveRemoteTransport() ?? LOCAL_HOST))()
+  if (startedHost === host) return
+  const pendingStartup = startup
+  if (pendingStartup && pendingStartup.host === host) return pendingStartup.promise
 
-    // 1. Spawn the headless host FIRST so any subsequent `lsp:start` (emitted
-    //    by the registry bootstrap in step 2) lands on a live sidecar instead
-    //    of `not_loaded`.
-    await invoke("ensure_system_lsp_host")
-    // 2. Configure the RPC dispatcher transport + monaco-bridge, then bootstrap
-    //    the LSP registry (constructs the adapter, registers the global
-    //    `lsp:publishDiagnostics` handler) and run the settings migration.
-    await ensureDispatcher()
-    // 3. Route sidecar→renderer pushes for the system channel. MUST run after
-    //    step 2 — `subscribeToVscodeEvents` needs the dispatcher transport
-    //    configured by `ensureDispatcher()` or it throws.
-    await subscribe(LSP_TAURI_CHANNEL_ID)
-  } catch (err) {
-    // Sub-steps are individually idempotent, so a partial failure is safe to
-    // retry on the next trigger.
-    started = false
-    log.warn("editor LSP runtime bootstrap failed", {
-      error: err instanceof Error ? err.message : String(err),
-    })
-  }
+  const promise = (async () => {
+    try {
+      const invoke = deps.invoke ?? ((cmd, args) => transport.call(cmd, args))
+      const ensureDispatcher =
+        deps.ensureDispatcher ??
+        (await import("@/lib/plugin/core/vscode-loader")).ensureDispatcherConfigured
+      const subscribe =
+        deps.subscribe ??
+        (await import("@/lib/plugin/vscode-shim/rpc-dispatcher")).subscribeToVscodeEvents
+      const remoteHostActive = deps.remoteHostActive ?? isRemoteHostActive
+
+      // Spawn on the currently-routed host before the registry emits lsp:start.
+      await invoke(remoteHostActive() ? "lsp_host_ensure" : "ensure_system_lsp_host")
+      await ensureDispatcher()
+      // RoutingTransport owns live subscription rebinding across host changes.
+      await subscribe(LSP_TAURI_CHANNEL_ID)
+      startedHost = host
+    } catch (err) {
+      log.warn("editor LSP runtime bootstrap failed", {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    } finally {
+      if (startup?.host === host) startup = null
+    }
+  })()
+  startup = { host, promise }
+  return promise
 }
 
 /** Test-only: clear the once-guard between cases. */
 export function __resetEditorLspRuntimeForTesting(): void {
-  started = false
+  startedHost = null
+  startup = null
 }
