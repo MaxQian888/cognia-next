@@ -257,6 +257,10 @@ pub fn build_router(state: SharedState) -> Router {
     let protected_routes = Router::new()
         .route("/api/v1/whoami", get(auth::whoami_handler))
         .route("/api/v1/_rpc/{name}", post(rpc::rpc_handler))
+        .route(
+            "/api/v1/browser/stream-ticket",
+            post(super::browser_gateway::issue_ticket_handler),
+        )
         .route("/ws/v1/events", any(ws::ws_handler))
         // Headless-brain data plane (ADR-0059 W3). The JWT middleware already
         // enforces loopback for service-scope tokens; the handler additionally
@@ -280,6 +284,13 @@ pub fn build_router(state: SharedState) -> Router {
     let mut router = Router::new()
         .merge(metered_pre_auth_routes)
         .merge(unmetered_public_routes)
+        // Browser stream upgrades authenticate with a 60-second, single-use
+        // ticket obtained through the protected route above. Long-lived JWTs
+        // are deliberately never placed in the WebSocket URL.
+        .route(
+            "/ws/v1/browser/{session_id}",
+            any(super::browser_gateway::browser_ws_handler),
+        )
         .merge(protected_routes)
         .with_state(state);
 
@@ -369,6 +380,21 @@ mod tests {
             .no_proxy()
             .build()
             .expect("reqwest client")
+    }
+
+    async fn bind_test_router(router: Router) -> SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test router");
+        let addr = listener.local_addr().expect("test router address");
+        tokio::spawn(async move {
+            let _ = axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await;
+        });
+        addr
     }
 
     // ── Smoke: spawn + immediate shutdown ────────────────────────────────
@@ -558,6 +584,94 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status().as_u16(), 401, "no token → 401");
+    }
+
+    #[tokio::test]
+    async fn browser_stream_ticket_route_is_protected_bound_and_single_use() {
+        use crate::companion_api::browser_gateway::{
+            gateway, BrowserBackend, EnsureBrowserSession,
+        };
+        use tokio_tungstenite::tungstenite::Error as WebSocketError;
+
+        let device_id = format!("browser-route-device-{}", uuid::Uuid::new_v4());
+        let session = gateway()
+            .ensure_session(EnsureBrowserSession {
+                account_id: ACCOUNT_ID.to_string(),
+                device_id: device_id.clone(),
+                chat_session_id: format!("browser-route-chat-{}", uuid::Uuid::new_v4()),
+                parent_chat_session_id: None,
+                workspace_id: format!("browser-route-workspace-{}", uuid::Uuid::new_v4()),
+                backend: BrowserBackend::RemoteChromium,
+                profile_id: None,
+            })
+            .expect("seed browser session");
+        let state = test_state();
+        let addr = bind_test_router(build_router(state)).await;
+        let endpoint = format!("http://{addr}/api/v1/browser/stream-ticket");
+        let client = reqwest::Client::new();
+
+        let unauthorized = client
+            .post(&endpoint)
+            .json(&serde_json::json!({ "sessionId": session.id }))
+            .send()
+            .await
+            .expect("unauthorized ticket request");
+        assert_eq!(unauthorized.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+        let jwt = crate::companion_api::jwt::issue_device_jwt(SECRET, &device_id, ACCOUNT_ID)
+            .expect("issue browser route JWT");
+        let issue_ticket = || {
+            client
+                .post(&endpoint)
+                .bearer_auth(&jwt)
+                .json(&serde_json::json!({ "sessionId": session.id }))
+        };
+        let ticket: serde_json::Value = issue_ticket()
+            .send()
+            .await
+            .expect("ticket request")
+            .error_for_status()
+            .expect("ticket response")
+            .json()
+            .await
+            .expect("ticket JSON");
+        let ticket = ticket["ticket"].as_str().expect("ticket string");
+        let wrong_url = format!(
+            "ws://{addr}/ws/v1/browser/{}?ticket={ticket}",
+            uuid::Uuid::new_v4()
+        );
+        match tokio_tungstenite::connect_async(&wrong_url).await {
+            Err(WebSocketError::Http(response)) => {
+                assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED)
+            }
+            other => panic!("wrong-session ticket must be rejected, got {other:?}"),
+        }
+
+        let ticket: serde_json::Value = issue_ticket()
+            .send()
+            .await
+            .expect("replacement ticket request")
+            .error_for_status()
+            .expect("replacement ticket response")
+            .json()
+            .await
+            .expect("replacement ticket JSON");
+        let ticket = ticket["ticket"]
+            .as_str()
+            .expect("replacement ticket string");
+        let stream_url = format!("ws://{addr}/ws/v1/browser/{}?ticket={ticket}", session.id);
+        let (mut socket, response) = tokio_tungstenite::connect_async(&stream_url)
+            .await
+            .expect("valid ticket upgrades");
+        assert_eq!(response.status(), reqwest::StatusCode::SWITCHING_PROTOCOLS);
+        socket.close(None).await.expect("close browser stream");
+
+        match tokio_tungstenite::connect_async(&stream_url).await {
+            Err(WebSocketError::Http(response)) => {
+                assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED)
+            }
+            other => panic!("replayed ticket must be rejected, got {other:?}"),
+        }
     }
 
     /// The A2A Agent Card is a public discovery document — no JWT required.

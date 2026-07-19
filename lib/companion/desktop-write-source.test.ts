@@ -95,6 +95,7 @@ beforeEach(async () => {
   const db = getDb()
   await db.messages.clear().catch(() => undefined)
   await db.connectorDrafts.clear().catch(() => undefined)
+  await db.outboundQueue.clear().catch(() => undefined)
   await db.plugins.clear().catch(() => undefined)
 })
 
@@ -151,7 +152,7 @@ describe("dispatchCommand: connector_send", () => {
 })
 
 describe("dispatchCommand: connector_approve_draft", () => {
-  it("transitions a pending draft to approved", async () => {
+  it("transitions a pending draft without a preview to approved", async () => {
     const db = getDb()
     await db.connectorDrafts.add({
       id: "d1",
@@ -166,6 +167,66 @@ describe("dispatchCommand: connector_approve_draft", () => {
     expect(result).toBe(null)
     const row = await db.connectorDrafts.get("d1")
     expect(row?.status).toBe("approved")
+    expect(await db.outboundQueue.count()).toBe(0)
+  })
+
+  it("enqueues the draft preview before transitioning it to approved", async () => {
+    const db = getDb()
+    const outboundPreview = {
+      conversationRef: { platform: "telegram" as const, adapterId: "adapter-1", chatId: 5 },
+      segments: [{ type: "text" as const, text: "send this" }],
+      metadata: { idempotencyKey: "idem-draft-1" },
+    }
+    await db.connectorDrafts.add({
+      id: "d-preview",
+      conversationKey: "telegram:adapter-1:5",
+      sessionId: "s1",
+      segments: outboundPreview.segments,
+      outboundPreview,
+      status: "pending",
+      createdAt: Date.now(),
+    } as never)
+
+    await dispatchCommand("connector_approve_draft", { draftId: "d-preview" })
+
+    const draft = await db.connectorDrafts.get("d-preview")
+    expect(draft?.status).toBe("approved")
+    const jobs = await db.outboundQueue.toArray()
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0]).toMatchObject({
+      adapterId: "adapter-1",
+      conversationKey: "telegram:adapter-1:5",
+      request: outboundPreview,
+      idempotencyKey: "idem-draft-1",
+      source: "draft-approved",
+      status: "pending",
+    })
+  })
+
+  it("keeps the draft pending when the outbound enqueue fails", async () => {
+    const db = getDb()
+    await db.connectorDrafts.add({
+      id: "d-enqueue-fails",
+      conversationKey: "telegram:adapter-1:5",
+      sessionId: "s1",
+      segments: [{ type: "text", text: "send this" }],
+      outboundPreview: {
+        conversationRef: { platform: "telegram", adapterId: "adapter-1", chatId: 5 },
+        segments: [{ type: "text", text: "send this" }],
+        metadata: { idempotencyKey: "idem-draft-failure" },
+      },
+      status: "pending",
+      createdAt: Date.now(),
+    } as never)
+    const add = jest.spyOn(db.outboundQueue, "add").mockRejectedValueOnce(new Error("disk full"))
+
+    await expect(
+      dispatchCommand("connector_approve_draft", { draftId: "d-enqueue-fails" })
+    ).rejects.toThrow("disk full")
+
+    expect((await db.connectorDrafts.get("d-enqueue-fails"))?.status).toBe("pending")
+    expect(await db.outboundQueue.count()).toBe(0)
+    add.mockRestore()
   })
 
   it("rejects without a draftId", async () => {
@@ -722,8 +783,11 @@ describe("dispatchCommand: memory_* (ADR-0069)", () => {
     await expect(dispatchCommand("memory_forget", { id: " " })).rejects.toThrow(/id is required/)
     mockMemoryUpdate.mockResolvedValue({ ok: true })
     mockMemoryForget.mockResolvedValue({ ok: true })
-    await dispatchCommand("memory_update", { id: "m1", text: "new" })
-    expect(mockMemoryUpdate).toHaveBeenCalledWith("m1", expect.objectContaining({ text: "new" }))
+    await dispatchCommand("memory_update", { id: "m1", text: "new", pinned: true })
+    expect(mockMemoryUpdate).toHaveBeenCalledWith(
+      "m1",
+      expect.objectContaining({ text: "new", pinned: true })
+    )
     expect(await dispatchCommand("memory_forget", { id: "m1" })).toEqual({ ok: true })
     expect(mockMemoryForget).toHaveBeenCalledWith("m1")
   })

@@ -20,9 +20,11 @@ const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   "skills_load_registry",
   "skills_scan_native",
   "mcp_server_status",
+  "lsp_host_ensure",
   "read_agent_config",
   "session_list",
   "companion_can_control",
+  "fleet_get_snapshot",
   "browser_capability",
   "browser_session_get",
   "browser_snapshot",
@@ -86,6 +88,8 @@ const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   // Plugin registry reads.
   "plugin_list",
   "plugin_runtime_snapshot",
+  "plugin_permission_list",
+  "plugin_get_capabilities",
   // Workflow run listing.
   "workflow_run_list",
   // Twin reads.

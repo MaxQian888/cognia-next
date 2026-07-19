@@ -21,11 +21,13 @@
  *   ./initializers.ts for what is deliberately excluded and why).
  * - `connector-runtime` — the shared connector bootstrap with the Tauri
  *   command/event seams mapped onto the R12 `connectors_*` RPC arms and
- *   `/ws/v1/events`; webhook-transport channels only (T-A5). Dial-out WS
- *   channels stay desktop-only until the Rust EventEmitter extension lands.
+ *   `/ws/v1/events`, including webhook, polling, reverse/forward WS, gateway,
+ *   long-connection, and IMAP/SMTP transports (T-A5).
  *
- * Pending extraction (tracked ADR-0059 T-A6): backup-scheduler (needs an
- * injected fs seam).
+ * - `backup-scheduler` — the shared encrypted local/WebDAV scheduler with an
+ *   injected host filesystem and the server secret-store auto-key (T-A6).
+ * - `plugin-runtime` — boots the canonical Node PluginManager and serially
+ *   reconciles native install/restore/uninstall events from cognia-server.
  *
  * ## Deliberately NOT registered (desktop/mobile-UI-only provider effects)
  *
@@ -40,6 +42,9 @@
  *   by definition; anything inside them that belongs in the brain must be
  *   extracted out and registered individually.
  * - `pet` — desktop pet window runtime.
+ * - `sites-preview` / `sites-operation-recovery` — Sites uses a visible native terminal,
+ *   the singleton embedded webview, and the host-local credential keyring. Provider
+ *   reconciliation is deliberately initiated only by the owning desktop account.
  */
 
 import "./desktop-sync-source"
@@ -47,5 +52,8 @@ import "./desktop-message-source"
 import "./a2ui-dispatch"
 import "./initializers"
 import "./connector-runtime"
+import "./backup-scheduler"
+import "./plugin-runtime"
+import "./memory-job-worker"
 
 export {}

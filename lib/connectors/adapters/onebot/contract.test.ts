@@ -8,12 +8,17 @@
  * support (edit returns unsupported, typing is a no-op).
  */
 
-import { listen, emit } from "@tauri-apps/api/event"
+import { listen } from "@tauri-apps/api/event"
 import { createOneBotAdapter } from "./index"
 import type { AdapterContext, NormalizedInboundEvent } from "@/types/connectors"
 import { clearAllVariantCaches } from "./parse"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
+
+jest.mock("@/lib/connectors/tauri/commands", () => ({
+  connectorsOnebotSend: jest.fn(),
+}))
+import { connectorsOnebotSend } from "@/lib/connectors/tauri/commands"
 
 jest.mock("@/lib/db/adapter-instances", () => ({
   getAdapterInstance: jest.fn(),
@@ -21,8 +26,8 @@ jest.mock("@/lib/db/adapter-instances", () => ({
 }))
 
 const mockListen = listen as jest.Mock
-const mockEmit = emit as jest.Mock
 const mockGetAdapterInstance = getAdapterInstance as jest.Mock
+const mockOnebotSend = connectorsOnebotSend as jest.Mock
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -73,7 +78,7 @@ function makeCtx(): { ctx: AdapterContext; emitted: NormalizedInboundEvent[] } {
 
 /**
  * Wire up an adapter + started ctx, seed the v11 variant cache, then
- * set up `mockEmit` to deliver a round-trip RPC response for each outbound call.
+ * set up the native command seam to deliver a round-trip RPC response for each outbound call.
  */
 async function setupAdapter(bus: ReturnType<typeof createEventBus>, id: string) {
   const adapter = createOneBotAdapter({
@@ -99,7 +104,7 @@ async function setupAdapter(bus: ReturnType<typeof createEventBus>, id: string) 
   await new Promise((r) => setTimeout(r, 20))
 
   // Wire RPC responses
-  mockEmit.mockImplementation(async (_topic: string, payload: string) => {
+  mockOnebotSend.mockImplementation(async (_adapterId: string, payload: string) => {
     const call = JSON.parse(payload) as { echo: string }
     setTimeout(() => {
       bus.trigger(
@@ -114,7 +119,7 @@ async function setupAdapter(bus: ReturnType<typeof createEventBus>, id: string) 
 
 beforeEach(() => {
   mockListen.mockReset()
-  mockEmit.mockReset()
+  mockOnebotSend.mockReset()
   mockGetAdapterInstance.mockReset()
   // Default: unknown adapter row → undefined (mirrors a Dexie miss). The
   // inbound at-gate (`at-gate.ts`) calls `getAdapterInstance(id).catch(...)`
@@ -178,11 +183,11 @@ describe("OneBot adapter contract suite", () => {
       const result = await adapter.send(req)
       expect(result.ok).toBe(true)
 
-      const emitCall = mockEmit.mock.calls[0]
-      const topic = emitCall[0] as string
-      const payload = JSON.parse(emitCall[1] as string) as Record<string, unknown>
+      const sendCall = mockOnebotSend.mock.calls[0]
+      const adapterId = sendCall[0] as string
+      const payload = JSON.parse(sendCall[1] as string) as Record<string, unknown>
 
-      expect(topic).toBe("connectors://onebot/ob-text/send")
+      expect(adapterId).toBe("ob-text")
       expect(payload.action).toBe("send_private_msg")
       // v11 types user_id as number — numeric chatKey ids are converted.
       expect((payload.params as Record<string, unknown>).user_id).toBe(200001)
@@ -211,7 +216,10 @@ describe("OneBot adapter contract suite", () => {
       const result = await adapter.send(req)
       expect(result.ok).toBe(true)
 
-      const payload = JSON.parse(mockEmit.mock.calls[0][1] as string) as Record<string, unknown>
+      const payload = JSON.parse(mockOnebotSend.mock.calls[0][1] as string) as Record<
+        string,
+        unknown
+      >
       const msg = (payload.params as Record<string, unknown>).message as Array<{
         type: string
         data: Record<string, unknown>
@@ -243,7 +251,10 @@ describe("OneBot adapter contract suite", () => {
       const result = await adapter.send(req)
       expect(result.ok).toBe(true)
 
-      const payload = JSON.parse(mockEmit.mock.calls[0][1] as string) as Record<string, unknown>
+      const payload = JSON.parse(mockOnebotSend.mock.calls[0][1] as string) as Record<
+        string,
+        unknown
+      >
       const msg = (payload.params as Record<string, unknown>).message as Array<{
         type: string
         data: Record<string, unknown>
@@ -274,7 +285,10 @@ describe("OneBot adapter contract suite", () => {
 
       await adapter.send(req)
 
-      const payload = JSON.parse(mockEmit.mock.calls[0][1] as string) as Record<string, unknown>
+      const payload = JSON.parse(mockOnebotSend.mock.calls[0][1] as string) as Record<
+        string,
+        unknown
+      >
       const msg = (payload.params as Record<string, unknown>).message as Array<{
         type: string
         data: Record<string, unknown>
@@ -299,7 +313,10 @@ describe("OneBot adapter contract suite", () => {
 
       await adapter.delete!("12345")
 
-      const payload = JSON.parse(mockEmit.mock.calls[0][1] as string) as Record<string, unknown>
+      const payload = JSON.parse(mockOnebotSend.mock.calls[0][1] as string) as Record<
+        string,
+        unknown
+      >
       expect(payload.action).toBe("delete_msg")
       expect((payload.params as Record<string, unknown>).message_id).toBe(12345)
 
@@ -327,7 +344,9 @@ describe("OneBot adapter contract suite", () => {
       // reactionId feeds removeReaction.
       expect(ref).toEqual({ reactionId: "128077" })
 
-      const sendCall = mockEmit.mock.calls.find((c) => (c[0] as string).endsWith("/send"))
+      const sendCall = mockOnebotSend.mock.calls.find(
+        (call) => JSON.parse(call[1] as string).action === "set_msg_emoji_like"
+      )
       expect(sendCall).toBeDefined()
       const payload = JSON.parse(sendCall![1] as string) as Record<string, unknown>
       expect(payload.action).toBe("set_msg_emoji_like")
@@ -350,7 +369,9 @@ describe("OneBot adapter contract suite", () => {
 
       await adapter.removeReaction!("12345", "128077")
 
-      const sendCall = mockEmit.mock.calls.find((c) => (c[0] as string).endsWith("/send"))
+      const sendCall = mockOnebotSend.mock.calls.find(
+        (call) => JSON.parse(call[1] as string).action === "set_msg_emoji_like"
+      )
       expect(sendCall).toBeDefined()
       const payload = JSON.parse(sendCall![1] as string) as Record<string, unknown>
       expect(payload.action).toBe("set_msg_emoji_like")
@@ -374,8 +395,7 @@ describe("OneBot adapter contract suite", () => {
       await expect(adapter.addReaction!("1", "76")).rejects.toThrow(/set_msg_emoji_like/)
       await expect(adapter.removeReaction!("1", "76")).rejects.toThrow(/set_msg_emoji_like/)
 
-      const sendCalls = mockEmit.mock.calls.filter((c) => (c[0] as string).endsWith("/send"))
-      expect(sendCalls).toHaveLength(0)
+      expect(mockOnebotSend).not.toHaveBeenCalled()
 
       await adapter.stop()
     })
@@ -419,8 +439,7 @@ describe("OneBot adapter contract suite", () => {
       await expect(adapter.setTyping!("onebot:ob-typ:g:300001", true)).resolves.toBeUndefined()
 
       // No emit calls from typing
-      const sendCalls = mockEmit.mock.calls.filter((c) => (c[0] as string).endsWith("/send"))
-      expect(sendCalls).toHaveLength(0)
+      expect(mockOnebotSend).not.toHaveBeenCalled()
 
       await adapter.stop()
     })
@@ -441,9 +460,9 @@ describe("OneBot adapter contract suite", () => {
       mockListen.mockImplementation(bus.listenImpl)
       const { adapter } = await setupAdapter(bus, "ob-hist-g")
 
-      // Each emit returns a 2-message page; second emit returns empty to stop.
+      // Each command returns a 2-message page; the second returns empty to stop.
       let call = 0
-      mockEmit.mockImplementation(async (_topic: string, payload: string) => {
+      mockOnebotSend.mockImplementation(async (_adapterId: string, payload: string) => {
         const c = JSON.parse(payload) as {
           echo: string
           action: string
@@ -505,7 +524,7 @@ describe("OneBot adapter contract suite", () => {
       const { adapter } = await setupAdapter(bus, "ob-hist-p")
 
       const actions: string[] = []
-      mockEmit.mockImplementation(async (_topic: string, payload: string) => {
+      mockOnebotSend.mockImplementation(async (_adapterId: string, payload: string) => {
         const c = JSON.parse(payload) as { echo: string; action: string }
         actions.push(c.action)
         setTimeout(() => {
@@ -532,7 +551,7 @@ describe("OneBot adapter contract suite", () => {
       mockListen.mockImplementation(bus.listenImpl)
       const { adapter } = await setupAdapter(bus, "ob-hist-cap")
 
-      mockEmit.mockImplementation(async (_topic: string, payload: string) => {
+      mockOnebotSend.mockImplementation(async (_adapterId: string, payload: string) => {
         const c = JSON.parse(payload) as { echo: string }
         setTimeout(() => {
           bus.trigger(

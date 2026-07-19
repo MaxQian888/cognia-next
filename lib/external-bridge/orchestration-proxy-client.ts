@@ -57,11 +57,24 @@ export async function proxyToRenderer<T extends OrchestrationOutput>(
   command: string,
   input: Record<string, unknown>
 ): Promise<T> {
+  try {
+    return await proxyToHost<T>(command, input)
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) } as T
+  }
+}
+
+/**
+ * Forward a trusted sidecar operation to the active Cognia host and return its
+ * canonical handler result. Unlike `proxyToRenderer`, failures reject because
+ * most MCP handlers return domain values rather than `{ ok, error }` envelopes.
+ */
+export async function proxyToHost<T>(command: string, input: Record<string, unknown>): Promise<T> {
   const addr = typeof process !== "undefined" ? process.env?.COGNIA_ORCH_PROXY : undefined
   const token = typeof process !== "undefined" ? process.env?.COGNIA_ORCH_PROXY_TOKEN : undefined
 
   if (!addr || !token) {
-    return { ok: false, error: DESKTOP_REQUIRED } as T
+    throw new Error(DESKTOP_REQUIRED)
   }
 
   try {
@@ -75,15 +88,14 @@ export async function proxyToRenderer<T extends OrchestrationOutput>(
       args: input,
     })
     if (!resp.ok) {
-      return { ok: false, error: resp.error ?? "orchestration proxy error" } as T
+      throw new Error(resp.error ?? "host proxy error")
     }
-    // The renderer handler's full output object is carried in `result`.
     return resp.result as T
   } catch (err) {
     // Reset the cached client so the next call retries from scratch (e.g. after
     // a sidecar / renderer restart on the Rust side).
     proxyClient = null
-    return { ok: false, error: err instanceof Error ? err.message : String(err) } as T
+    throw err
   }
 }
 

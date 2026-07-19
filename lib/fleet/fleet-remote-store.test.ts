@@ -14,6 +14,11 @@ jest.mock("@/lib/tauri", () => ({
   invoke: jest.fn(),
 }))
 
+const hydrateCompanionConfigMock = jest.fn()
+jest.mock("@/lib/tauri/transport-companion", () => ({
+  hydrateCompanionConfig: () => hydrateCompanionConfigMock(),
+}))
+
 import { fleetRemoteStore } from "./fleet-remote-store"
 
 const flush = () => new Promise((r) => setTimeout(r, 0))
@@ -26,11 +31,13 @@ describe("fleetRemoteStore", () => {
     unsubscribeMock.mockClear()
     callMock.mockReset()
     callMock.mockResolvedValue({ sessions: [], generatedAt: 0 })
+    hydrateCompanionConfigMock.mockReset().mockResolvedValue(null)
   })
 
-  it("subscribes on cold attach and applies a live frame", () => {
+  it("subscribes on cold attach and applies a live frame", async () => {
     const notify = jest.fn()
     const unsub = fleetRemoteStore.subscribe(notify)
+    await flush()
     expect(subscribeMock).toHaveBeenCalledWith("fleet://update", expect.any(Function))
     handler!({ sessions: [{ sessionId: "a" }], generatedAt: 10 })
     expect(fleetRemoteStore.getSnapshot().generatedAt).toBe(10)
@@ -38,8 +45,9 @@ describe("fleetRemoteStore", () => {
     unsub()
   })
 
-  it("ignores a stale (older generatedAt) frame", () => {
+  it("ignores a stale (older generatedAt) frame", async () => {
     const unsub = fleetRemoteStore.subscribe(jest.fn())
+    await flush()
     handler!({ sessions: [], generatedAt: 20 })
     handler!({ sessions: [{ sessionId: "old" }], generatedAt: 5 })
     expect(fleetRemoteStore.getSnapshot().generatedAt).toBe(20)
@@ -55,9 +63,30 @@ describe("fleetRemoteStore", () => {
     unsub()
   })
 
-  it("shares one subscription and detaches on the last unsubscribe", () => {
+  it("waits for companion config hydration before subscribing and backfilling", async () => {
+    let finishHydration: (() => void) | undefined
+    hydrateCompanionConfigMock.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishHydration = resolve
+        })
+    )
+
+    const unsub = fleetRemoteStore.subscribe(jest.fn())
+    expect(subscribeMock).not.toHaveBeenCalled()
+    expect(callMock).not.toHaveBeenCalled()
+
+    finishHydration?.()
+    await flush()
+    expect(subscribeMock).toHaveBeenCalledTimes(1)
+    expect(callMock).toHaveBeenCalledWith("fleet_get_snapshot")
+    unsub()
+  })
+
+  it("shares one subscription and detaches on the last unsubscribe", async () => {
     const unsubA = fleetRemoteStore.subscribe(jest.fn())
     const unsubB = fleetRemoteStore.subscribe(jest.fn())
+    await flush()
     expect(subscribeMock).toHaveBeenCalledTimes(1)
     unsubA()
     expect(unsubscribeMock).not.toHaveBeenCalled()

@@ -768,8 +768,12 @@ export interface SendOptions {
       type: import("@/types/memory/memory").MemoryType
       text: string
       score: number
+      evidenceState?: import("@/types/memory/memory").MemoryEvidenceState
+      reviewStatus?: import("@/types/memory/memory").MemoryReviewStatus
     }>
     proceduralCount: number
+    withheldCount?: number
+    budget?: { limit: number; used: number; truncated: boolean }
     degraded: boolean
   }
 
@@ -1352,6 +1356,10 @@ export interface ChatSession {
   teamId?: string
   /** Skills the user has temporarily disabled for this session only. */
   disabledSkillIds?: string[]
+  /** Per-chat learned-memory recall override. */
+  memoryUse?: boolean
+  /** Per-chat automatic learned-memory write override. */
+  memoryLearn?: boolean
   pinned?: boolean
   /**
    * Manual sort position within this session's ChannelList section — the
@@ -1881,6 +1889,12 @@ export interface AppSettings {
   id: "singleton"
   /** Opt-in local Chromium-cookie import for the embedded desktop browser. */
   browserCookieImportEnabled?: boolean
+  /**
+   * Experimental Cloud/headless shared browser. The server hard gate and
+   * runtime health gate must also pass; this local preference alone never
+   * advertises or provisions a remote browser.
+   */
+  remoteBrowserEnabled?: boolean
   /**
    * Epoch ms of the last write, bumped by `lib/db/settings.ts:saveSettings`.
    * Drives the companion sync cursor for the settings singleton: the desktop
@@ -2417,6 +2431,10 @@ export interface AppSettings {
      * `cursorStyle` Terminal option.
      */
     cursorStyle?: "block" | "bar" | "underline"
+    /** Width in CSS pixels when `cursorStyle` is `bar`. Defaults to 1. */
+    cursorWidth?: number
+    /** Cursor shape when the terminal is not focused. Defaults to `outline`. */
+    cursorInactiveStyle?: "outline" | "block" | "bar" | "underline" | "none"
     /**
      * Whether the cursor blinks. Defaults to true (matches the xterm.js
      * `cursorBlink` default we set in `terminal-instance.tsx`).
@@ -2454,6 +2472,21 @@ export interface AppSettings {
      */
     fontLigatures?: boolean
     /**
+     * Draw xterm's built-in box, block, braille, Powerline, progress, git, and
+     * legacy-computing glyphs instead of relying on the configured font. This
+     * keeps adjoining strokes continuous under non-default line height and
+     * letter spacing. Accelerated renderers only; defaults to true.
+     */
+    customGlyphs?: boolean
+    /**
+     * Horizontally fit ambiguous-width single-cell glyphs that would otherwise
+     * overlap the following cell. Matches VS Code's enabled default and
+     * improves GB18030 rendering; ignored by xterm's DOM renderer.
+     */
+    rescaleOverlappingGlyphs?: boolean
+    /** Map bold ANSI colors to their bright variants. Defaults to true. */
+    drawBoldTextInBrightColors?: boolean
+    /**
      * Force the spawned shell's console output encoding to UTF-8 (PowerShell
      * `[Console]::OutputEncoding` / cmd `chcp 65001`). Defaults to true. The
      * Rust spawn path (`src-tauri/src/terminal/integration.rs`) honors this;
@@ -2481,6 +2514,11 @@ export interface AppSettings {
      * (Alt-scroll) is derived as 5× this value.
      */
     scrollSensitivity?: number
+    /**
+     * Animate terminal buffer scrolling. Maps to xterm's 125 ms smooth-scroll
+     * duration when enabled, matching VS Code; defaults to false.
+     */
+    smoothScrolling?: boolean
     /**
      * Minimum WCAG contrast ratio the renderer enforces between glyph and
      * background by lightening/darkening the foreground (xterm

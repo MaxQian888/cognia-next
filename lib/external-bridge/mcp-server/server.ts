@@ -34,7 +34,7 @@ import { wrapUntrusted } from "../untrusted"
 import { computerUse } from "../handlers/computer-use"
 import { agentDispatch, teamRun, teamList, pluginToolInvoke } from "../handlers/orchestration"
 import { ragSearch } from "../handlers/rag"
-import { parseResourceUri } from "../handlers/resources"
+import { parseResourceUri } from "./resource-uri"
 import { runtimeQuery, type RuntimeEntityType } from "../handlers/runtime"
 import { wikiRead, wikiSearch } from "../handlers/wiki"
 import {
@@ -755,7 +755,7 @@ function registerInboundTools(server: McpServer, settingsGetter: SettingsGetter)
 
 function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) {
   const memoryTypeSchema = z.enum(["semantic", "episodic", "procedural"])
-  const memoryScopeSchema = z.enum(["global", "character"])
+  const memoryScopeSchema = z.enum(["global", "workspace", "character", "agent"])
 
   // memory_search
   server.registerTool(
@@ -772,9 +772,19 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
       },
       inputSchema: {
         query: z.string().describe("Natural language query"),
-        k: z.number().int().min(1).max(20).optional().describe("Result count (default: configured topK)"),
+        k: z
+          .number()
+          .int()
+          .min(1)
+          .max(20)
+          .optional()
+          .describe("Result count (default: configured topK)"),
         types: z.array(memoryTypeSchema).optional().describe("Restrict to memory types"),
         characterId: z.string().optional().describe("Include this character's override layer"),
+        projectId: z.string().optional().describe("Include this project's workspace layer"),
+        agentId: z.string().optional().describe("Include this private agent layer"),
+        branch: z.string().optional().describe("Exact branch context"),
+        path: z.string().optional().describe("Workspace-relative path context"),
       },
     },
     async (args) =>
@@ -788,6 +798,10 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
             k: args.k,
             types: args.types,
             characterId: args.characterId,
+            projectId: args.projectId,
+            agentId: args.agentId,
+            branch: args.branch,
+            path: args.path,
           }),
       })
   )
@@ -808,6 +822,11 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
       inputSchema: {
         type: memoryTypeSchema.optional().describe("Restrict to one memory type"),
         scope: memoryScopeSchema.optional().describe("Restrict to one scope"),
+        characterId: z.string().optional(),
+        projectId: z.string().optional(),
+        agentId: z.string().optional(),
+        branch: z.string().optional(),
+        pathPattern: z.string().optional(),
         limit: z.number().int().min(1).max(200).optional().describe("Row cap (default 50)"),
       },
     },
@@ -816,7 +835,17 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
         tool: "memory_list",
         scope: "memory:read",
         check: checkToolCall(await settingsGetter(), "memory_list"),
-        body: () => memoryList({ type: args.type, scope: args.scope, limit: args.limit }),
+        body: () =>
+          memoryList({
+            type: args.type,
+            scope: args.scope,
+            characterId: args.characterId,
+            projectId: args.projectId,
+            agentId: args.agentId,
+            branch: args.branch,
+            pathPattern: args.pathPattern,
+            limit: args.limit,
+          }),
       })
   )
 
@@ -835,9 +864,16 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
       },
       inputSchema: {
         text: z.string().max(2000).describe("The fact to remember (one self-contained statement)"),
-        type: z.enum(["semantic", "episodic"]).optional().describe("Memory type (default semantic)"),
+        type: z
+          .enum(["semantic", "episodic"])
+          .optional()
+          .describe("Memory type (default semantic)"),
         scope: memoryScopeSchema.optional().describe("Scope (default global)"),
         characterId: z.string().optional().describe("Required when scope is character"),
+        projectId: z.string().optional().describe("Required when scope is workspace"),
+        agentId: z.string().optional().describe("Required when scope is agent"),
+        branch: z.string().optional().describe("Optional exact branch restriction"),
+        pathPattern: z.string().optional().describe("Optional workspace-relative path prefix"),
         key: z.string().optional().describe("Stable dedupe key"),
         importance: z.number().int().min(1).max(10).optional().describe("1..10 (default 7)"),
         tags: z.array(z.string()).optional(),
@@ -854,6 +890,10 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
             type: args.type,
             scope: args.scope,
             characterId: args.characterId,
+            projectId: args.projectId,
+            agentId: args.agentId,
+            branch: args.branch,
+            pathPattern: args.pathPattern,
             key: args.key,
             importance: args.importance,
             tags: args.tags,
@@ -880,6 +920,7 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
         importance: z.number().int().min(1).max(10).optional(),
         tags: z.array(z.string()).optional(),
         key: z.string().optional(),
+        pinned: z.boolean().optional(),
       },
     },
     async (args) =>
@@ -894,6 +935,7 @@ function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) 
             importance: args.importance,
             tags: args.tags,
             key: args.key,
+            pinned: args.pinned,
           }),
       })
   )

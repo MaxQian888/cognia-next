@@ -46,12 +46,11 @@ use axum::{
     Extension, Json,
 };
 use serde::de::DeserializeOwned;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::{
     agents::commands as agent_commands,
     claude::{commands as claude_commands, mcp_test, sidecar::kill_sidecar},
-    mcp_server::McpServerState,
     skills::{install, native as skills_native, registry},
 };
 
@@ -201,9 +200,18 @@ const KNOWN_COMMANDS: &[&str] = &[
     "skills_install_native",
     "skills_uninstall_native",
     "mcp_server_status",
+    "mcp_server_start",
+    "mcp_server_stop",
+    "mcp_server_restart",
+    "orchestration_proxy_response",
     "test_mcp_server",
     "read_agent_config",
     "write_agent_config",
+    // Generic encrypted secret-store facade for the headless brain. These
+    // mirror the desktop Tauri keyring commands but are SERVICE_ONLY below.
+    "keyring_secret_get",
+    "keyring_secret_set",
+    "keyring_secret_clear",
     "sync_pull",
     "sync_list_tables",
     "register_push_token",
@@ -441,8 +449,8 @@ const KNOWN_COMMANDS: &[&str] = &[
     "terminal_kill_port",
     // ── Plugins ─────────────────────────────────────────────────────────────
     // Native install/uninstall manage the on-disk plugin dir + Rust snapshot.
-    // A remote install takes effect on the next renderer reload (it does not
-    // hot-load into the running PluginManager — see the OpenAPI note).
+    // Headless mutations publish a Node-brain reconciliation event; desktop
+    // mutations remain renderer-reload scoped (see the OpenAPI note).
     "plugin_list",
     "plugin_runtime_snapshot",
     "plugin_install",
@@ -451,6 +459,53 @@ const KNOWN_COMMANDS: &[&str] = &[
     "plugin_backup_create",
     "plugin_backup_restore",
     "plugin_backup_delete",
+    "plugin_launch_js",
+    "plugin_invoke_js_callback",
+    "plugin_deactivate_js",
+    "plugin_stop_js",
+    "plugin_js_status",
+    // Native WASM Component execution used by the service-token-authenticated
+    // Node brain. Device tokens may manage packages but cannot call guests.
+    "plugin_wasm_load",
+    "plugin_wasm_activate",
+    "plugin_wasm_deactivate",
+    "plugin_wasm_call",
+    "plugin_wasm_unload",
+    "plugin_wasm_list",
+    "plugin_permission_grant",
+    "plugin_permission_list",
+    "plugin_permission_revoke",
+    "plugin_api_invoke",
+    "plugin_api_batch_invoke",
+    "plugin_get_capabilities",
+    "plugin_set_shell_allowlist",
+    "plugin_set_network_allowlist",
+    "plugin_python_initialize",
+    "plugin_python_runtime_info",
+    "plugin_python_load",
+    "plugin_python_call_hook",
+    "plugin_python_push_config",
+    "plugin_python_get_tools",
+    "plugin_python_call_tool",
+    "plugin_python_call",
+    "plugin_python_eval",
+    "plugin_python_import",
+    "plugin_python_module_call",
+    "plugin_python_module_getattr",
+    "plugin_python_is_initialized",
+    "plugin_python_get_info",
+    "plugin_python_install_deps",
+    "plugin_python_unload",
+    "plugin_python_list",
+    "lsp_host_ensure",
+    "lsp_host_request",
+    "ensure_system_lsp_host",
+    "plugin_load_vscode",
+    "plugin_activate_vscode",
+    "plugin_deactivate_vscode",
+    "plugin_unload_vscode",
+    "plugin_invoke_vscode_rpc",
+    "plugin_vscode_send_response",
     // ── Workflow CRUD (ADR-0027 Wave 4.1) ───────────────────────────────────
     // Definitions live in Dexie — round-trip through desktop_writes_bridge.
     "workflow_create",
@@ -527,6 +582,33 @@ const KNOWN_COMMANDS: &[&str] = &[
     "fleet_permission_respond",
     "fleet_opencode_send_message",
     "fleet_focus_terminal",
+    // ADR-0085 — host-neutral shared browser session and tool contract.
+    "browser_session_ensure",
+    "browser_session_get",
+    "browser_capability",
+    "browser_session_close",
+    "browser_stream_ticket_issue",
+    "browser_navigate",
+    "browser_snapshot",
+    "browser_act",
+    "browser_press_key",
+    "browser_scroll",
+    "browser_evaluate",
+    "browser_read_console",
+    "browser_read_network",
+    "browser_back",
+    "browser_forward",
+    "browser_reload",
+    "browser_stop",
+    "browser_get_page",
+    "browser_pages",
+    "browser_switch_page",
+    "browser_close_page",
+    "browser_wait_for",
+    "browser_wait_for_load",
+    "browser_screenshot",
+    "browser_set_files",
+    "browser_downloads",
 ];
 
 /// Public read-only accessor for the dispatch allowlist. Used by the
@@ -540,6 +622,17 @@ pub fn known_commands() -> &'static [&'static str] {
 /// Commands in this list skip the idempotency cache entirely.
 /// They are cheap to re-run and structurally idempotent.
 const READ_ONLY_COMMANDS: &[&str] = &[
+    "browser_capability",
+    "browser_session_get",
+    "browser_snapshot",
+    "browser_read_console",
+    "browser_read_network",
+    "browser_get_page",
+    "browser_pages",
+    "browser_wait_for",
+    "browser_wait_for_load",
+    "browser_screenshot",
+    "browser_downloads",
     "claude_sidecar_status",
     "claude_has_api_key",
     "claude_has_oauth_bearer",
@@ -547,6 +640,7 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "skills_scan_native",
     "mcp_server_status",
     "read_agent_config",
+    "keyring_secret_get",
     // Sync-down (M4.7) is structurally idempotent: same `(table, since)`
     // returns the same delta. Skip the cache to avoid stalling phone clients
     // behind a 60-second TTL when the desktop has fresh writes.
@@ -621,9 +715,15 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     // candidates). Like `read_text_file` it is simultaneously read-only
     // (idempotency axis) and control-gated (capability axis) — see below.
     "terminal_complete_paths",
+    // Ensuring the system host is structurally idempotent. Individual LSP
+    // requests are not: didOpen/didChange/start/install mutate sidecar state.
+    "lsp_host_ensure",
     // Plugin registry reads.
     "plugin_list",
     "plugin_runtime_snapshot",
+    "plugin_permission_list",
+    "plugin_get_capabilities",
+    "plugin_js_status",
     // Workflow run listing + pending-approval projection.
     "workflow_run_list",
     "workflow_approval_list",
@@ -663,6 +763,20 @@ const READ_ONLY_COMMANDS: &[&str] = &[
 /// Command arms are added by their respective milestones; the gate fires for a
 /// name as soon as it appears here (it runs before the dispatch `match`).
 const CONTROL_COMMANDS: &[&str] = &[
+    "browser_session_ensure",
+    "browser_session_close",
+    "browser_navigate",
+    "browser_act",
+    "browser_press_key",
+    "browser_scroll",
+    "browser_evaluate",
+    "browser_back",
+    "browser_forward",
+    "browser_reload",
+    "browser_stop",
+    "browser_switch_page",
+    "browser_close_page",
+    "browser_set_files",
     "session_attach",
     "session_detach",
     "goal_pause",
@@ -770,6 +884,27 @@ const CONTROL_COMMANDS: &[&str] = &[
     "plugin_backup_create",
     "plugin_backup_restore",
     "plugin_backup_delete",
+    // Permission mutations alter the execution authority of installed code.
+    // Paired devices therefore need remote-control authorization; the local
+    // brain's service token is admitted by `is_control_authorized` below.
+    "plugin_permission_grant",
+    "plugin_permission_revoke",
+    // Native gateway calls can read/write host data or execute allowlisted
+    // processes. The Rust permission ledger still gates each inner API, while
+    // this outer gate prevents a chat-only paired device from impersonating a
+    // loaded plugin.
+    "plugin_api_invoke",
+    "plugin_api_batch_invoke",
+    // Embedded MCP lifecycle and orchestration replies steer a host-owned
+    // tool surface and therefore require remote-control authorization.
+    "mcp_server_start",
+    "mcp_server_stop",
+    "mcp_server_restart",
+    "orchestration_proxy_response",
+    // Remote editor LSP can install/spawn language-server processes. Keep the
+    // narrow system-channel facade behind the same elevation as terminal RCE.
+    "lsp_host_ensure",
+    "lsp_host_request",
     // Workflow destructive ops + the HITL approval gate (approving a
     // workflow decision steers execution — same elevation as goal_*).
     "workflow_delete",
@@ -821,7 +956,21 @@ fn is_control_command(name: &str) -> bool {
 
 fn is_control_authorized(name: &str, device_id: &str, scope: Option<&str>) -> bool {
     !is_control_command(name)
-        || (name == "terminal_exec" && scope == Some("service"))
+        || (scope == Some("service")
+            && matches!(
+                name,
+                "terminal_exec"
+                    | "plugin_permission_grant"
+                    | "plugin_permission_revoke"
+                    | "plugin_api_invoke"
+                    | "plugin_api_batch_invoke"
+                    | "mcp_server_start"
+                    | "mcp_server_stop"
+                    | "mcp_server_restart"
+                    | "orchestration_proxy_response"
+                    | "lsp_host_ensure"
+                    | "lsp_host_request"
+            ))
         || super::control_allow_list::global().is_allowed(device_id)
 }
 
@@ -886,6 +1035,51 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "connectors_media_upload",
     "connectors_lark_upload_file",
     "connectors_lark_upload_image",
+    // The brain may persist non-connector secrets (backup auto-key, WebDAV,
+    // future runtime credentials) in the already-installed server store.
+    "keyring_secret_get",
+    "keyring_secret_set",
+    "keyring_secret_clear",
+    // Plugin guest execution is an internal brain↔front-door channel. Keeping
+    // it service-only prevents a paired device from invoking arbitrary plugin
+    // exports even when it has remote package-management permission.
+    "plugin_wasm_load",
+    "plugin_wasm_activate",
+    "plugin_wasm_deactivate",
+    "plugin_wasm_call",
+    "plugin_wasm_unload",
+    "plugin_wasm_list",
+    "plugin_launch_js",
+    "plugin_invoke_js_callback",
+    "plugin_deactivate_js",
+    "plugin_stop_js",
+    "plugin_js_status",
+    "plugin_set_shell_allowlist",
+    "plugin_set_network_allowlist",
+    "plugin_python_initialize",
+    "plugin_python_runtime_info",
+    "plugin_python_load",
+    "plugin_python_call_hook",
+    "plugin_python_push_config",
+    "plugin_python_get_tools",
+    "plugin_python_call_tool",
+    "plugin_python_call",
+    "plugin_python_eval",
+    "plugin_python_import",
+    "plugin_python_module_call",
+    "plugin_python_module_getattr",
+    "plugin_python_is_initialized",
+    "plugin_python_get_info",
+    "plugin_python_install_deps",
+    "plugin_python_unload",
+    "plugin_python_list",
+    "ensure_system_lsp_host",
+    "plugin_load_vscode",
+    "plugin_activate_vscode",
+    "plugin_deactivate_vscode",
+    "plugin_unload_vscode",
+    "plugin_invoke_vscode_rpc",
+    "plugin_vscode_send_response",
 ];
 
 static SERVICE_ONLY_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
@@ -1292,6 +1486,101 @@ fn to_json<T: serde::Serialize>(value: T) -> Result<Value, (StatusCode, Json<Rpc
     serde_json::to_value(value).map_err(|e| RpcError::internal(e.to_string()))
 }
 
+fn mcp_server_rpc_error(
+    error: crate::mcp_server::types::McpServerError,
+) -> (StatusCode, Json<RpcError>) {
+    use crate::mcp_server::types::McpServerError;
+
+    let message = error.to_string();
+    match error {
+        McpServerError::TokenMissing
+        | McpServerError::TokenTooWeak(_)
+        | McpServerError::InvalidSettings(_) => (
+            StatusCode::BAD_REQUEST,
+            Json(RpcError::new("mcp_server_invalid_request", message)),
+        ),
+        McpServerError::AlreadyRunning(_) => (
+            StatusCode::CONFLICT,
+            Json(RpcError::new("mcp_server_already_running", message)),
+        ),
+        McpServerError::NotRunning => (
+            StatusCode::CONFLICT,
+            Json(RpcError::new("mcp_server_not_running", message)),
+        ),
+        McpServerError::Bind { .. }
+        | McpServerError::SidecarSpawn(_)
+        | McpServerError::SidecarIo(_) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(RpcError::new("mcp_server_unavailable", message)),
+        ),
+    }
+}
+
+fn plugin_rpc_error(error: crate::plugin_api::PluginError) -> (StatusCode, Json<RpcError>) {
+    use crate::plugin_api::PluginError;
+
+    let message = error.to_string();
+    match error {
+        PluginError::PermissionDenied { .. } => (
+            StatusCode::FORBIDDEN,
+            Json(RpcError::new("plugin_permission_denied", message)),
+        ),
+        PluginError::NotFound(_) => (
+            StatusCode::NOT_FOUND,
+            Json(RpcError::new("plugin_not_found", message)),
+        ),
+        PluginError::InvalidManifest(_)
+        | PluginError::InvalidArgument(_)
+        | PluginError::Serde(_) => (
+            StatusCode::BAD_REQUEST,
+            Json(RpcError::new("plugin_invalid_request", message)),
+        ),
+        PluginError::PythonUnavailable(_) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(RpcError::new("python_runtime_unavailable", message)),
+        ),
+        PluginError::Io(_)
+        | PluginError::Crypto(_)
+        | PluginError::Internal(_)
+        | PluginError::PythonHost(_) => RpcError::internal(message),
+    }
+}
+
+fn vscode_rpc_error(
+    error: crate::plugin_api::vscode::commands::VscodeCommandError,
+) -> (StatusCode, Json<RpcError>) {
+    let status = match error.code.as_str() {
+        "bad_manifest" | "missing_main" | "bad_bundle_format" | "unsafe_main" | "bad_response"
+        | "decode_error" => StatusCode::BAD_REQUEST,
+        "not_loaded" => StatusCode::NOT_FOUND,
+        "timeout" => StatusCode::GATEWAY_TIMEOUT,
+        "host_script_missing"
+        | "event_sink_missing"
+        | "spawn_failed"
+        | "lsp_host_script_missing"
+        | "lsp_host_spawn_failed" => StatusCode::SERVICE_UNAVAILABLE,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    (status, Json(RpcError::new(error.code, error.message)))
+}
+
+fn remote_lsp_method_allowed(method: &str) -> bool {
+    matches!(
+        method,
+        "lsp:start"
+            | "lsp:stop"
+            | "lsp:didOpen"
+            | "lsp:didChange"
+            | "lsp:didClose"
+            | "lsp:request"
+            | "lsp:list"
+            | "lsp:status"
+            | "lsp:logs"
+            | "lsp:detect"
+            | "lsp:install"
+    )
+}
+
 // ---------------------------------------------------------------------------
 // Dispatch table — the explicit allowlist
 // ---------------------------------------------------------------------------
@@ -1348,6 +1637,28 @@ pub(super) async fn dispatch(
     // guarantees every reachable arm is a documented, allowlisted command.
     if !KNOWN_COMMANDS_SET.contains(name) {
         return Err(RpcError::unknown_command(name));
+    }
+
+    if super::browser_gateway::is_browser_rpc(name) {
+        let account_id = account_id.ok_or_else(|| {
+            RpcError::forbidden("browser RPC requires an account-bound device token")
+        })?;
+        return super::browser_gateway::dispatch_browser_rpc(name, args, account_id, device_id)
+            .await
+            .map_err(|error| {
+                let status = match error.code.as_str() {
+                    "browser_disabled"
+                    | "browser_runtime_unavailable"
+                    | "browser_runtime_unhealthy" => StatusCode::SERVICE_UNAVAILABLE,
+                    "browser_session_forbidden" | "browser_control_held_by_human" => {
+                        StatusCode::FORBIDDEN
+                    }
+                    "browser_session_quota_exceeded" => StatusCode::TOO_MANY_REQUESTS,
+                    "browser_session_not_found" => StatusCode::NOT_FOUND,
+                    _ => StatusCode::BAD_REQUEST,
+                };
+                (status, Json(RpcError::new(error.code, error.message)))
+            });
     }
 
     match name {
@@ -1515,6 +1826,51 @@ pub(super) async fn dispatch(
                 })
         }
 
+        // ── Generic server secret store ──────────────────────────────────────
+
+        "keyring_secret_get" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let input: crate::keyring_secrets::KeyringInput = required(&args, "input")?;
+            let value = tokio::task::spawn_blocking(move || {
+                crate::keyring_secrets::get(&input.namespace, &input.key)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)?;
+            to_json(value)
+        }
+
+        "keyring_secret_set" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let input: crate::keyring_secrets::KeyringInput = required(&args, "input")?;
+            let value = input
+                .value
+                .clone()
+                .ok_or_else(|| RpcError::malformed("keyring_secret_set.input.value is required".into()))?;
+            tokio::task::spawn_blocking(move || {
+                crate::keyring_secrets::set(&input.namespace, &input.key, &value)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)?;
+            Ok(Value::Null)
+        }
+
+        "keyring_secret_clear" => {
+            host.headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let input: crate::keyring_secrets::KeyringInput = required(&args, "input")?;
+            tokio::task::spawn_blocking(move || {
+                crate::keyring_secrets::clear(&input.namespace, &input.key)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)?;
+            Ok(Value::Null)
+        }
+
         // ── Skills ────────────────────────────────────────────────────────────
 
         "skills_scan_native" => {
@@ -1562,10 +1918,137 @@ pub(super) async fn dispatch(
 
         // ── MCP server ────────────────────────────────────────────────────────
 
+        "mcp_server_start" | "mcp_server_restart" => {
+            use tauri::Manager;
+
+            let port: u16 = required(&args, "port")?;
+            let token: String = required(&args, "token")?;
+            let settings_json: String = required_aliased(&args, "settings_json", "settingsJson")?;
+            if name == "mcp_server_restart" {
+                match &host {
+                    crate::companion_api::dispatch_host::DispatchHost::Tauri(app) => {
+                        crate::mcp_server::commands::mcp_server_stop_for_state(
+                            app.state::<crate::mcp_server::McpServerState>().inner(),
+                        )
+                        .map_err(mcp_server_rpc_error)?;
+                    }
+                    crate::companion_api::dispatch_host::DispatchHost::Headless(services) => {
+                        crate::mcp_server::commands::mcp_server_stop_for_state(
+                            services.mcp_server.as_ref(),
+                        )
+                        .map_err(mcp_server_rpc_error)?;
+                    }
+                }
+            }
+
+            match &host {
+                crate::companion_api::dispatch_host::DispatchHost::Tauri(app) => {
+                    let sidecar_path = app
+                        .path()
+                        .home_dir()
+                        .map_err(|error| RpcError::internal(error.to_string()))?
+                        .join(".cognia")
+                        .join("cognia-mcp.js");
+                    let automation =
+                        app.state::<crate::automation::commands::AutomationState>();
+                    app.state::<crate::mcp_server::McpServerState>()
+                        .start(
+                            port,
+                            token,
+                            settings_json,
+                            sidecar_path.to_string_lossy().into_owned(),
+                            Some((
+                                automation.handle.clone(),
+                                crate::automation::dispatcher::Enforcement::from_state(
+                                    &automation,
+                                ),
+                            )),
+                            Some(
+                                crate::mcp_server::orchestration_proxy::tauri_event_sink(
+                                    app.clone(),
+                                ),
+                            ),
+                        )
+                        .await
+                        .map(|bound| json!(bound))
+                        .map_err(mcp_server_rpc_error)
+                }
+                crate::companion_api::dispatch_host::DispatchHost::Headless(services) => {
+                    let event_bus = std::sync::Arc::clone(&services.event_bus);
+                    let sink: crate::mcp_server::orchestration_proxy::OrchestrationEventSink =
+                        std::sync::Arc::new(move |event| {
+                            let payload = serde_json::to_value(event)
+                                .map_err(|error| error.to_string())?;
+                            event_bus.publish(
+                                crate::mcp_server::orchestration_proxy::EXEC_EVENT.to_string(),
+                                payload,
+                            );
+                            Ok(())
+                        });
+                    crate::mcp_server::commands::mcp_server_start_for_state(
+                        services.mcp_server.as_ref(),
+                        port,
+                        token,
+                        settings_json,
+                        crate::headless::resolve_mcp_sidecar_path()
+                            .to_string_lossy()
+                            .into_owned(),
+                        Some(
+                            services
+                                .mcp_automation()
+                                .await
+                                .map_err(RpcError::internal)?,
+                        ),
+                        Some(sink),
+                    )
+                    .await
+                    .map(|bound| json!(bound))
+                    .map_err(mcp_server_rpc_error)
+                }
+            }
+        }
+        "mcp_server_stop" => match &host {
+            crate::companion_api::dispatch_host::DispatchHost::Tauri(app) => {
+                use tauri::Manager;
+                crate::mcp_server::commands::mcp_server_stop_for_state(
+                    app.state::<crate::mcp_server::McpServerState>().inner(),
+                )
+                .map(|_| Value::Null)
+                .map_err(mcp_server_rpc_error)
+            }
+            crate::companion_api::dispatch_host::DispatchHost::Headless(services) => {
+                crate::mcp_server::commands::mcp_server_stop_for_state(
+                    services.mcp_server.as_ref(),
+                )
+                .map(|_| Value::Null)
+                .map_err(mcp_server_rpc_error)
+            }
+        },
+        "orchestration_proxy_response" => {
+            let id: String = required(&args, "id")?;
+            let ok: bool = required(&args, "ok")?;
+            let result: Option<Value> = optional(&args, "result")?;
+            let error: Option<String> = optional(&args, "error")?;
+            let reply = crate::mcp_server::orchestration_proxy::OrchestrationReply {
+                ok,
+                result,
+                error,
+            };
+            match &host {
+                crate::companion_api::dispatch_host::DispatchHost::Tauri(app) => {
+                    use tauri::Manager;
+                    app.state::<crate::mcp_server::McpServerState>()
+                        .resolve_orchestration_reply(&id, reply);
+                }
+                crate::companion_api::dispatch_host::DispatchHost::Headless(services) => {
+                    services.mcp_server.resolve_orchestration_reply(&id, reply);
+                }
+            }
+            Ok(Value::Null)
+        }
+
         "mcp_server_status" => {
-            let app = host.tauri_app(name)?;
-            let state: tauri::State<'_, McpServerState> = app.state();
-            let status = state.status();
+            let status = host.mcp_server_status();
             serde_json::to_value(status).map_err(|e| RpcError::internal(e.to_string()))
         }
 
@@ -1842,13 +2325,14 @@ pub(super) async fn dispatch(
                 Err(violation) => {
                     let mut fields = summary;
                     fields["reason"] = Value::String(violation.to_string());
-                    super::audit::record(
+                    super::audit::record_async(
                         "external_agent_spawn",
                         device_id,
                         scope.unwrap_or(""),
                         "deny",
                         fields,
-                    );
+                    )
+                    .await;
                     Err(RpcError::forbidden(format!(
                         "spawn denied by policy: {violation}"
                     )))
@@ -1861,13 +2345,14 @@ pub(super) async fn dispatch(
                     fields["dropped_env_keys"] =
                         serde_json::to_value(&validated.dropped_env_keys)
                             .unwrap_or(Value::Null);
-                    super::audit::record(
+                    super::audit::record_async(
                         "external_agent_spawn",
                         device_id,
                         scope.unwrap_or(""),
                         "allow",
                         fields,
-                    );
+                    )
+                    .await;
                     let emitter: std::sync::Arc<
                         dyn crate::external_agent::exec_backend::AgentEventEmitter,
                     > = std::sync::Arc::new(BusAgentEmitter(std::sync::Arc::clone(
@@ -1891,13 +2376,14 @@ pub(super) async fn dispatch(
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let agent_id: String = required_aliased(&args, "agent_id", "agentId")?;
             let message: String = required(&args, "message")?;
-            super::audit::record(
+            super::audit::record_async(
                 "external_agent_send",
                 device_id,
                 scope.unwrap_or(""),
                 "allow",
                 serde_json::json!({ "agent_id": agent_id, "bytes": message.len() }),
-            );
+            )
+            .await;
             services
                 .exec
                 .send(&agent_id, &message)
@@ -1911,13 +2397,14 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let agent_id: String = required_aliased(&args, "agent_id", "agentId")?;
-            super::audit::record(
+            super::audit::record_async(
                 "external_agent_kill",
                 device_id,
                 scope.unwrap_or(""),
                 "allow",
                 serde_json::json!({ "agent_id": agent_id }),
-            );
+            )
+            .await;
             services
                 .exec
                 .kill(&agent_id)
@@ -2019,8 +2506,12 @@ pub(super) async fn dispatch(
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let credential: String = required(&args, "credential")?;
             let value: String = required(&args, "value")?;
-            crate::connectors::keyring::set(&adapter_id, &credential, &value)
-                .map_err(RpcError::internal)?;
+            tokio::task::spawn_blocking(move || {
+                crate::connectors::keyring::set(&adapter_id, &credential, &value)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)?;
             Ok(Value::Null)
         }
 
@@ -2029,8 +2520,12 @@ pub(super) async fn dispatch(
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let credential: String = required(&args, "credential")?;
-            let value = crate::connectors::keyring::get(&adapter_id, &credential)
-                .map_err(RpcError::internal)?;
+            let value = tokio::task::spawn_blocking(move || {
+                crate::connectors::keyring::get(&adapter_id, &credential)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)?;
             to_json(value)
         }
 
@@ -2039,8 +2534,12 @@ pub(super) async fn dispatch(
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let credential: String = required(&args, "credential")?;
-            crate::connectors::keyring::delete(&adapter_id, &credential)
-                .map_err(RpcError::internal)?;
+            tokio::task::spawn_blocking(move || {
+                crate::connectors::keyring::delete(&adapter_id, &credential)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)?;
             Ok(Value::Null)
         }
 
@@ -2049,8 +2548,12 @@ pub(super) async fn dispatch(
                 .ok_or_else(|| RpcError::headless_unsupported(name))?;
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let accounts: Vec<String> = required(&args, "accounts")?;
-            let present = crate::connectors::keyring::list(&adapter_id, &accounts)
-                .map_err(RpcError::internal)?;
+            let present = tokio::task::spawn_blocking(move || {
+                crate::connectors::keyring::list(&adapter_id, &accounts)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)?;
             to_json(present)
         }
 
@@ -3302,27 +3805,16 @@ pub(super) async fn dispatch(
         // Live PTY streaming stays on `/ws/v1/terminal`. These are
         // request/response only; `terminal_exec` is a one-shot command runner.
         "terminal_list_all" => {
-            let app = host.tauri_app(name)?;
-            let st: tauri::State<'_, crate::terminal::TerminalState> = app.state();
-            crate::terminal::commands::terminal_list_all(st)
-                .map_err(RpcError::internal)
-                .and_then(to_json)
+            to_json(host.terminal_list_all(device_id))
         }
         "terminal_list_for_project" => {
             let project_id: String = required(&args, "projectId")?;
-            let app = host.tauri_app(name)?;
-            let st: tauri::State<'_, crate::terminal::TerminalState> = app.state();
-            crate::terminal::commands::terminal_list_for_project(st, project_id)
-                .map_err(RpcError::internal)
-                .and_then(to_json)
+            to_json(host.terminal_list_for_project(device_id, &project_id))
         }
         "terminal_kill" => {
             let id: String = required(&args, "id")?;
-            let app = host.tauri_app(name)?;
-            let st: tauri::State<'_, crate::terminal::TerminalState> = app.state();
-            crate::terminal::commands::terminal_kill(st, id)
-                .map(|_| Value::Null)
-                .map_err(RpcError::internal)
+            host.terminal_kill(device_id, &id);
+            Ok(Value::Null)
         }
         "terminal_exec" => {
             let command: String = required(&args, "command")?;
@@ -3373,9 +3865,17 @@ pub(super) async fn dispatch(
 
         // ── Plugins ──────────────────────────────────────────────────────────
         // Native install/uninstall manage the on-disk plugin dir + Rust
-        // snapshot; a remote install takes effect on the next renderer reload
-        // (it does not hot-load into the running TS PluginManager).
+        // snapshot. Headless mutations notify the Node PluginManager; desktop
+        // mutations take effect on the next renderer reload.
         "plugin_list" => {
+            if let Some(services) = host.headless() {
+                return crate::plugin_api::lifecycle::plugin_get_all_for_state(
+                    services.plugin_runtime.as_ref(),
+                )
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))
+                .and_then(to_json);
+            }
             let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
             crate::plugin_api::lifecycle::plugin_get_all(st)
@@ -3385,6 +3885,15 @@ pub(super) async fn dispatch(
         }
         "plugin_runtime_snapshot" => {
             let plugin_id: String = required(&args, "pluginId")?;
+            if let Some(services) = host.headless() {
+                return crate::plugin_api::lifecycle::plugin_runtime_snapshot_for_state(
+                    services.plugin_runtime.as_ref(),
+                    plugin_id,
+                )
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))
+                .and_then(to_json);
+            }
             let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
             crate::plugin_api::lifecycle::plugin_runtime_snapshot(st, plugin_id)
@@ -3400,6 +3909,25 @@ pub(super) async fn dispatch(
             let payload: crate::plugin_api::lifecycle::InstallPayload =
                 serde_json::from_value(payload_val)
                     .map_err(|e| RpcError::malformed(format!("plugin_install.payload: {e}")))?;
+            if let Some(services) = host.headless() {
+                let snapshot = crate::plugin_api::lifecycle::plugin_install_for_state(
+                    services.plugin_runtime.as_ref(),
+                    plugin_id,
+                    source,
+                    payload,
+                )
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))?;
+                services.event_bus.publish(
+                    "plugin://runtime-changed".to_string(),
+                    serde_json::json!({
+                        "action": "installed",
+                        "pluginId": snapshot.plugin_id,
+                        "accountId": account_id,
+                    }),
+                );
+                return to_json(snapshot);
+            }
             let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
             crate::plugin_api::lifecycle::plugin_install(st, plugin_id, source, payload)
@@ -3411,6 +3939,26 @@ pub(super) async fn dispatch(
             let repo: String = required(&args, "repo")?;
             let git_ref: Option<String> = optional(&args, "gitRef")?;
             let subdir: Option<String> = optional(&args, "subdir")?;
+            if let Some(services) = host.headless() {
+                let result =
+                    crate::plugin_api::github::installer::plugin_install_from_github_for_state(
+                        services.plugin_runtime.as_ref(),
+                        repo,
+                        git_ref,
+                        subdir,
+                    )
+                    .await
+                    .map_err(RpcError::internal)?;
+                services.event_bus.publish(
+                    "plugin://runtime-changed".to_string(),
+                    serde_json::json!({
+                        "action": "installed",
+                        "pluginId": result.manifest.get("id").and_then(Value::as_str),
+                        "accountId": account_id,
+                    }),
+                );
+                return to_json(result);
+            }
             let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
             crate::plugin_api::github::installer::plugin_install_from_github(
@@ -3422,6 +3970,23 @@ pub(super) async fn dispatch(
         }
         "plugin_uninstall" => {
             let plugin_id: String = required(&args, "pluginId")?;
+            if let Some(services) = host.headless() {
+                crate::plugin_api::lifecycle::plugin_uninstall_for_state(
+                    services.plugin_runtime.as_ref(),
+                    plugin_id.clone(),
+                )
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))?;
+                services.event_bus.publish(
+                    "plugin://runtime-changed".to_string(),
+                    serde_json::json!({
+                        "action": "uninstalled",
+                        "pluginId": plugin_id,
+                        "accountId": account_id,
+                    }),
+                );
+                return Ok(Value::Null);
+            }
             let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
             crate::plugin_api::lifecycle::plugin_uninstall(st, plugin_id)
@@ -3432,6 +3997,16 @@ pub(super) async fn dispatch(
         "plugin_backup_create" => {
             let plugin_id: String = required(&args, "pluginId")?;
             let label: Option<String> = optional(&args, "label")?;
+            if let Some(services) = host.headless() {
+                return crate::plugin_api::backup::plugin_backup_create_for_state(
+                    services.plugin_runtime.as_ref(),
+                    plugin_id,
+                    label,
+                )
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))
+                .and_then(to_json);
+            }
             let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
             crate::plugin_api::backup::plugin_backup_create(st, plugin_id, label)
@@ -3442,6 +4017,24 @@ pub(super) async fn dispatch(
         "plugin_backup_restore" => {
             let plugin_id: String = required(&args, "pluginId")?;
             let backup_id: String = required(&args, "backupId")?;
+            if let Some(services) = host.headless() {
+                crate::plugin_api::backup::plugin_backup_restore_for_state(
+                    services.plugin_runtime.as_ref(),
+                    plugin_id.clone(),
+                    backup_id,
+                )
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))?;
+                services.event_bus.publish(
+                    "plugin://runtime-changed".to_string(),
+                    serde_json::json!({
+                        "action": "restored",
+                        "pluginId": plugin_id,
+                        "accountId": account_id,
+                    }),
+                );
+                return Ok(Value::Null);
+            }
             let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
             crate::plugin_api::backup::plugin_backup_restore(st, plugin_id, backup_id)
@@ -3452,12 +4045,732 @@ pub(super) async fn dispatch(
         "plugin_backup_delete" => {
             let plugin_id: String = required(&args, "pluginId")?;
             let backup_id: String = required(&args, "backupId")?;
+            if let Some(services) = host.headless() {
+                return crate::plugin_api::backup::plugin_backup_delete_for_state(
+                    services.plugin_runtime.as_ref(),
+                    plugin_id,
+                    backup_id,
+                )
+                .await
+                .map(|_| Value::Null)
+                .map_err(|e| RpcError::internal(e.to_string()));
+            }
             let app = host.tauri_app(name)?;
             let st: tauri::State<'_, crate::plugin_api::PluginRuntimeState> = app.state();
             crate::plugin_api::backup::plugin_backup_delete(st, plugin_id, backup_id)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
+        }
+
+        "plugin_permission_grant" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_runtime = std::sync::Arc::clone(&services.plugin_runtime);
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let permission: String = required(&args, "permission")?;
+            let granted_by: String = required_aliased(&args, "granted_by", "grantedBy")?;
+            let expires_at: Option<String> = match optional(&args, "expiresAt")? {
+                Some(value) => Some(value),
+                None => optional(&args, "expires_at")?,
+            };
+            let grant = tokio::task::spawn_blocking(move || {
+                crate::plugin_api::permissions::grant_permission_for_state(
+                    plugin_runtime.as_ref(),
+                    plugin_id,
+                    permission,
+                    granted_by,
+                    expires_at,
+                )
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(|error| RpcError::internal(error.to_string()))?;
+            to_json(grant)
+        }
+        "plugin_permission_list" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_runtime = std::sync::Arc::clone(&services.plugin_runtime);
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let permissions = tokio::task::spawn_blocking(move || {
+                crate::plugin_api::permissions::list_permissions_for_state(
+                    plugin_runtime.as_ref(),
+                    plugin_id,
+                )
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(|error| RpcError::internal(error.to_string()))?;
+            to_json(permissions)
+        }
+        "plugin_permission_revoke" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_runtime = std::sync::Arc::clone(&services.plugin_runtime);
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let permission: String = required(&args, "permission")?;
+            tokio::task::spawn_blocking(move || {
+                crate::plugin_api::permissions::revoke_permission_for_state(
+                    plugin_runtime.as_ref(),
+                    plugin_id,
+                    permission,
+                )
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map(|_| Value::Null)
+            .map_err(|error| RpcError::internal(error.to_string()))
+        }
+        "plugin_set_shell_allowlist" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let commands: Vec<String> = required(&args, "commands")?;
+            services
+                .plugin_runtime
+                .set_shell_allowlist(&plugin_id, commands);
+            Ok(Value::Null)
+        }
+        "plugin_set_network_allowlist" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let domains: Vec<String> = required(&args, "domains")?;
+            services
+                .plugin_runtime
+                .set_network_allowlist(&plugin_id, domains);
+            Ok(Value::Null)
+        }
+
+        "plugin_python_initialize" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let python_path: Option<String> = optional(&args, "pythonPath")?;
+            crate::plugin_api::python::commands::plugin_python_initialize_for_state(
+                services.python_plugins.as_ref(),
+                python_path,
+                None,
+            )
+            .await
+            .map(|_| Value::Null)
+            .map_err(plugin_rpc_error)
+        }
+        "plugin_python_runtime_info" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            to_json(
+                crate::plugin_api::python::commands::plugin_python_runtime_info_for_state(
+                    services.python_plugins.as_ref(),
+                ),
+            )
+        }
+        "plugin_python_load" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let plugin_path: String = required_aliased(&args, "plugin_path", "pluginPath")?;
+            let main_module: String = required_aliased(&args, "main_module", "mainModule")?;
+            let dependencies: Option<Vec<String>> = optional(&args, "dependencies")?;
+            let config: Option<Value> = optional(&args, "config")?;
+            let host_settings: Option<
+                crate::plugin_api::python::commands::PythonHostSettings,
+            > = optional(&args, "hostSettings")?;
+            crate::plugin_api::python::commands::plugin_python_load_for_state(
+                services.python_plugins.as_ref(),
+                services.plugin_runtime.as_ref(),
+                plugin_id,
+                plugin_path,
+                main_module,
+                dependencies,
+                config,
+                host_settings,
+            )
+            .await
+            .map_err(plugin_rpc_error)
+        }
+        "plugin_python_call_hook" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let event: String = required(&args, "event")?;
+            let hook_name: String = required(&args, "name")?;
+            let payload: Value = required(&args, "payload")?;
+            crate::plugin_api::python::commands::plugin_python_call_hook_for_state(
+                services.python_plugins.as_ref(),
+                services.plugin_runtime.as_ref(),
+                plugin_id,
+                event,
+                hook_name,
+                payload,
+            )
+            .await
+            .map_err(plugin_rpc_error)
+        }
+        "plugin_python_push_config" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let config: Value = required(&args, "config")?;
+            crate::plugin_api::python::commands::plugin_python_push_config_for_state(
+                services.python_plugins.as_ref(),
+                services.plugin_runtime.as_ref(),
+                plugin_id,
+                config,
+            )
+            .await
+            .map(|_| Value::Null)
+            .map_err(plugin_rpc_error)
+        }
+        "plugin_python_get_tools" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            crate::plugin_api::python::commands::plugin_python_get_tools_for_state(
+                services.python_plugins.as_ref(),
+                plugin_id,
+            )
+            .await
+            .map_err(plugin_rpc_error)
+        }
+        "plugin_python_call_tool" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let tool_name: String = required_aliased(&args, "tool_name", "toolName")?;
+            let tool_args: Value = required(&args, "args")?;
+            crate::plugin_api::python::commands::plugin_python_call_tool_for_state(
+                services.python_plugins.as_ref(),
+                services.plugin_runtime.as_ref(),
+                plugin_id,
+                tool_name,
+                tool_args,
+            )
+            .await
+            .map_err(plugin_rpc_error)
+        }
+        "plugin_python_call" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let function_name: String =
+                required_aliased(&args, "function_name", "functionName")?;
+            let call_args: Vec<Value> = required(&args, "args")?;
+            crate::plugin_api::python::commands::plugin_python_call_for_state(
+                services.python_plugins.as_ref(),
+                services.plugin_runtime.as_ref(),
+                plugin_id,
+                function_name,
+                call_args,
+            )
+            .await
+            .map_err(plugin_rpc_error)
+        }
+        "plugin_python_eval" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let code: String = required(&args, "code")?;
+            let locals: Option<Value> = optional(&args, "locals")?;
+            crate::plugin_api::python::commands::plugin_python_eval_for_state(
+                services.python_plugins.as_ref(),
+                services.plugin_runtime.as_ref(),
+                plugin_id,
+                code,
+                locals,
+            )
+            .await
+            .map_err(plugin_rpc_error)
+        }
+        "plugin_python_import" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let module_name: String = required_aliased(&args, "module_name", "moduleName")?;
+            crate::plugin_api::python::commands::plugin_python_import_for_state(
+                services.python_plugins.as_ref(),
+                services.plugin_runtime.as_ref(),
+                plugin_id,
+                module_name,
+            )
+            .await
+            .map_err(plugin_rpc_error)
+        }
+        "plugin_python_module_call" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let module_name: String = required_aliased(&args, "module_name", "moduleName")?;
+            let function_name: String =
+                required_aliased(&args, "function_name", "functionName")?;
+            let call_args: Vec<Value> = required(&args, "args")?;
+            crate::plugin_api::python::commands::plugin_python_module_call_for_state(
+                services.python_plugins.as_ref(),
+                services.plugin_runtime.as_ref(),
+                plugin_id,
+                module_name,
+                function_name,
+                call_args,
+            )
+            .await
+            .map_err(plugin_rpc_error)
+        }
+        "plugin_python_module_getattr" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let module_name: String = required_aliased(&args, "module_name", "moduleName")?;
+            let attr_name: String = required_aliased(&args, "attr_name", "attrName")?;
+            crate::plugin_api::python::commands::plugin_python_module_getattr_for_state(
+                services.python_plugins.as_ref(),
+                services.plugin_runtime.as_ref(),
+                plugin_id,
+                module_name,
+                attr_name,
+            )
+            .await
+            .map_err(plugin_rpc_error)
+        }
+        "plugin_python_is_initialized" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            crate::plugin_api::python::commands::plugin_python_is_initialized_for_state(
+                services.python_plugins.as_ref(),
+                plugin_id,
+            )
+            .await
+            .map(Value::Bool)
+            .map_err(plugin_rpc_error)
+        }
+        "plugin_python_get_info" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            to_json(
+                crate::plugin_api::python::commands::plugin_python_get_info_for_state(
+                    services.python_plugins.as_ref(),
+                    &plugin_id,
+                ),
+            )
+        }
+        "plugin_python_install_deps" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let dependencies: Vec<String> = required(&args, "dependencies")?;
+            crate::plugin_api::python::commands::plugin_python_install_deps_for_state(
+                services.python_plugins.as_ref(),
+                services.plugin_runtime.as_ref(),
+                &plugin_id,
+                &dependencies,
+            )
+            .await
+            .map(|_| Value::Null)
+            .map_err(plugin_rpc_error)
+        }
+        "plugin_python_unload" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            crate::plugin_api::python::commands::plugin_python_unload_for_state(
+                services.python_plugins.as_ref(),
+                &plugin_id,
+            )
+            .await
+            .map(|_| Value::Null)
+            .map_err(plugin_rpc_error)
+        }
+        "plugin_python_list" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            to_json(
+                crate::plugin_api::python::commands::plugin_python_list_for_state(
+                    services.python_plugins.as_ref(),
+                ),
+            )
+        }
+
+        "plugin_api_invoke" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let request: crate::plugin_api::api_bridge::PluginApiInvokeRequest =
+                required(&args, "request")?;
+            let response = crate::plugin_api::api_bridge::plugin_api_invoke_for_state(
+                services.plugin_runtime.as_ref(),
+                request,
+            )
+            .await
+            .map_err(plugin_rpc_error)?;
+            to_json(response)
+        }
+        "plugin_api_batch_invoke" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let request: crate::plugin_api::api_bridge::BatchInvokeRequest =
+                required(&args, "request")?;
+            let response = crate::plugin_api::api_bridge::plugin_api_batch_invoke_for_state(
+                services.plugin_runtime.as_ref(),
+                request,
+            )
+            .await
+            .map_err(plugin_rpc_error)?;
+            to_json(response)
+        }
+        "plugin_get_capabilities" => {
+            to_json(crate::plugin_api::api_bridge::plugin_get_capabilities_for_host(false))
+        }
+
+        "lsp_host_ensure" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            crate::plugin_api::vscode::commands::ensure_system_lsp_host_for_state(
+                services.vscode_plugins.as_ref(),
+            )
+            .await
+            .map(|_| Value::Null)
+            .map_err(vscode_rpc_error)
+        }
+        "lsp_host_request" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let method: String = required(&args, "method")?;
+            if !remote_lsp_method_allowed(&method) {
+                return Err(RpcError::malformed(format!(
+                    "lsp_host_request method is not allowed: {method}"
+                )));
+            }
+            let payload_json = match args.get("payloadJson").or_else(|| args.get("payload_json")) {
+                Some(Value::String(raw)) => raw.clone(),
+                Some(value) => value.to_string(),
+                None => "null".to_string(),
+            };
+            crate::plugin_api::vscode::commands::plugin_invoke_vscode_rpc_for_state(
+                services.vscode_plugins.as_ref(),
+                crate::plugin_api::vscode::commands::LSP_HOST_KEY.to_string(),
+                method,
+                payload_json,
+            )
+            .await
+            .map(Value::String)
+            .map_err(vscode_rpc_error)
+        }
+        "ensure_system_lsp_host" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            crate::plugin_api::vscode::commands::ensure_system_lsp_host_for_state(
+                services.vscode_plugins.as_ref(),
+            )
+            .await
+            .map(|_| Value::Null)
+            .map_err(vscode_rpc_error)
+        }
+        "plugin_load_vscode" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let manifest_json: String =
+                required_aliased(&args, "manifest_json", "manifestJson")?;
+            let plugin_path: String = required_aliased(&args, "plugin_path", "pluginPath")?;
+            crate::plugin_api::vscode::commands::plugin_load_vscode_for_state(
+                services.vscode_plugins.as_ref(),
+                services.plugin_runtime.as_ref(),
+                plugin_id,
+                manifest_json,
+                plugin_path,
+            )
+            .await
+            .map(|_| Value::Null)
+            .map_err(vscode_rpc_error)
+        }
+        "plugin_activate_vscode" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let config_json: String = required_aliased(&args, "config_json", "configJson")?;
+            crate::plugin_api::vscode::commands::plugin_activate_vscode_for_state(
+                services.vscode_plugins.as_ref(),
+                plugin_id,
+                config_json,
+            )
+            .await
+            .map_err(vscode_rpc_error)
+            .and_then(to_json)
+        }
+        "plugin_deactivate_vscode" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            crate::plugin_api::vscode::commands::plugin_deactivate_vscode_for_state(
+                services.vscode_plugins.as_ref(),
+                plugin_id,
+            )
+            .await
+            .map(|_| Value::Null)
+            .map_err(vscode_rpc_error)
+        }
+        "plugin_unload_vscode" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            crate::plugin_api::vscode::commands::plugin_unload_vscode_for_state(
+                services.vscode_plugins.as_ref(),
+                plugin_id,
+            )
+            .await
+            .map(|_| Value::Null)
+            .map_err(vscode_rpc_error)
+        }
+        "plugin_invoke_vscode_rpc" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let method: String = required(&args, "method")?;
+            let payload_json: String =
+                required_aliased(&args, "payload_json", "payloadJson")?;
+            crate::plugin_api::vscode::commands::plugin_invoke_vscode_rpc_for_state(
+                services.vscode_plugins.as_ref(),
+                plugin_id,
+                method,
+                payload_json,
+            )
+            .await
+            .map(Value::String)
+            .map_err(vscode_rpc_error)
+        }
+        "plugin_vscode_send_response" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let response_json: String =
+                required_aliased(&args, "response_json", "responseJson")?;
+            crate::plugin_api::vscode::commands::plugin_vscode_send_response_for_state(
+                services.vscode_plugins.as_ref(),
+                plugin_id,
+                response_json,
+            )
+            .map(|_| Value::Null)
+            .map_err(vscode_rpc_error)
+        }
+
+        // Node-target JavaScript stays inside cognia-server. The brain uses
+        // the same host-neutral lifecycle as desktop Tauri, backed by the
+        // verified COGNIA_PLUGIN_NODE_PATH runtime in server images.
+        "plugin_launch_js" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let plugin_path: String = required_aliased(&args, "plugin_path", "pluginPath")?;
+            let entry: String = required(&args, "entry")?;
+            let extra_args: Option<Vec<String>> = optional(&args, "extraArgs")?;
+            crate::plugin_api::lifecycle::plugin_launch_js_for_state(
+                services.plugin_runtime.as_ref(),
+                plugin_id,
+                plugin_path,
+                entry,
+                extra_args.unwrap_or_default(),
+                None,
+            )
+            .await
+            .map_err(plugin_rpc_error)
+            .and_then(to_json)
+        }
+        "plugin_invoke_js_callback" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let plugin_path: String = required_aliased(&args, "plugin_path", "pluginPath")?;
+            let entry: String = required(&args, "entry")?;
+            let callback_id: String = required_aliased(&args, "callback_id", "callbackId")?;
+            let callback_args: Value = required(&args, "args")?;
+            crate::plugin_api::lifecycle::plugin_invoke_js_callback_for_state(
+                services.plugin_runtime.as_ref(),
+                plugin_id,
+                plugin_path,
+                entry,
+                callback_id,
+                callback_args,
+                None,
+            )
+            .await
+            .map_err(plugin_rpc_error)
+        }
+        "plugin_deactivate_js" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let plugin_path: String = required_aliased(&args, "plugin_path", "pluginPath")?;
+            let entry: String = required(&args, "entry")?;
+            crate::plugin_api::lifecycle::plugin_deactivate_js_for_state(
+                services.plugin_runtime.as_ref(),
+                plugin_id,
+                plugin_path,
+                entry,
+                None,
+            )
+            .await
+            .map(|_| Value::Null)
+            .map_err(plugin_rpc_error)
+        }
+        "plugin_stop_js" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let generation: String = required(&args, "generation")?;
+            crate::plugin_api::lifecycle::plugin_stop_js_for_state(
+                services.plugin_runtime.as_ref(),
+                plugin_id,
+                generation,
+            )
+            .await
+            .map(|_| Value::Null)
+            .map_err(plugin_rpc_error)
+        }
+        "plugin_js_status" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let generation: String = required(&args, "generation")?;
+            crate::plugin_api::lifecycle::plugin_js_status_for_state(
+                services.plugin_runtime.as_ref(),
+                plugin_id,
+                generation,
+            )
+            .await
+            .map(Value::Bool)
+            .map_err(plugin_rpc_error)
+        }
+
+        // Native plugin execution stays inside cognia-server. The Node brain
+        // reaches the existing wasmtime host through its service transport;
+        // no guest code or capability decision is reimplemented in JS.
+        "plugin_wasm_load" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let manifest_json: String =
+                required_aliased(&args, "manifest_json", "manifestJson")?;
+            let plugin_path: String = required_aliased(&args, "plugin_path", "pluginPath")?;
+            crate::plugin_api::wasm::commands::plugin_wasm_load_for_state(
+                services.wasm_plugins.as_ref(),
+                services.plugin_runtime.as_ref(),
+                plugin_id,
+                manifest_json,
+                plugin_path,
+            )
+            .await
+            .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
+        "plugin_wasm_activate" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let config_json: String = required_aliased(&args, "config_json", "configJson")?;
+            crate::plugin_api::wasm::commands::plugin_wasm_activate_for_state(
+                services.wasm_plugins.as_ref(),
+                services.plugin_runtime.as_ref(),
+                plugin_id,
+                config_json,
+            )
+            .await
+            .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
+        "plugin_wasm_deactivate" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            crate::plugin_api::wasm::commands::plugin_wasm_deactivate_for_state(
+                services.wasm_plugins.as_ref(),
+                plugin_id,
+            )
+            .await
+            .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
+        "plugin_wasm_call" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            let export_name: String = required_aliased(&args, "export_name", "exportName")?;
+            let payload_json: String = required_aliased(&args, "payload_json", "payloadJson")?;
+            crate::plugin_api::wasm::commands::plugin_wasm_call_for_state(
+                services.wasm_plugins.as_ref(),
+                services.plugin_runtime.as_ref(),
+                plugin_id,
+                export_name,
+                payload_json,
+            )
+            .await
+            .map(Value::String)
+            .map_err(RpcError::internal)
+        }
+        "plugin_wasm_unload" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
+            crate::plugin_api::wasm::commands::plugin_wasm_unload_for_state(
+                services.wasm_plugins.as_ref(),
+                plugin_id,
+            )
+            .await
+            .map(Value::Bool)
+            .map_err(RpcError::internal)
+        }
+        "plugin_wasm_list" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            crate::plugin_api::wasm::commands::plugin_wasm_list_for_state(
+                services.wasm_plugins.as_ref(),
+            )
+            .await
+            .map_err(RpcError::internal)
+            .and_then(to_json)
         }
 
         // ── Native log read-back ────────────────────────────────────────────
@@ -3470,13 +4783,21 @@ pub(super) async fn dispatch(
             let raw = args.get("query").cloned().unwrap_or_else(|| args.clone());
             let query: crate::logging::query::NativeLogQuery = serde_json::from_value(raw)
                 .map_err(|e| RpcError::malformed(format!("invalid logs query: {e}")))?;
-            crate::logging::query::query_native_logs(&query)
-                .map_err(RpcError::internal)
-                .and_then(to_json)
+            let result = tokio::task::spawn_blocking(move || {
+                crate::logging::query::query_native_logs(&query)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)?;
+            to_json(result)
         }
-        "logs_list_files" => crate::logging::query::list_native_log_files()
-            .map_err(RpcError::internal)
-            .and_then(to_json),
+        "logs_list_files" => {
+            let files = tokio::task::spawn_blocking(crate::logging::query::list_native_log_files)
+                .await
+                .map_err(|error| RpcError::internal(error.to_string()))?
+                .map_err(RpcError::internal)?;
+            to_json(files)
+        }
 
         // ── Agent Fleet (ADR-0009) ──────────────────────────────────────────
         // Host-generic: these reach the process-global fleet runtime directly
@@ -3905,12 +5226,13 @@ mod tests {
         crate::companion_api::data_plane::install_headless_store(None);
     }
 
-    /// Desktop-only arms reply with the per-arm 503 `headless_unsupported`
-    /// naming the command — not a generic service_unavailable.
+    /// Process-owned service status is available without a WebView. A fresh
+    /// headless registry reports the same stopped state as a fresh desktop
+    /// `McpServerState`.
     #[tokio::test]
-    async fn headless_dispatch_rejects_desktop_only_arms() {
+    async fn headless_dispatch_reports_mcp_server_status() {
         let state = test_state();
-        let err = dispatch(
+        let status = dispatch(
             "mcp_server_status",
             json!({}),
             &state,
@@ -3920,10 +5242,81 @@ mod tests {
             Some("service"),
         )
         .await
-        .expect_err("desktop-only arm must 503 on a headless host");
-        assert_eq!(err.0, StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(err.1 .0.code, "headless_unsupported");
-        assert!(err.1 .0.message.contains("mcp_server_status"));
+        .expect("mcp_server_status must work on a headless host");
+        assert_eq!(status["running"], false);
+        assert_eq!(status["port"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn headless_mcp_lifecycle_reuses_validation_and_idempotent_stop() {
+        let state = test_state();
+        let host = headless_host();
+
+        let invalid = dispatch(
+            "mcp_server_start",
+            json!({
+                "port": 0,
+                "token": "short",
+                "settingsJson": r#"{"enabled":true,"enabledScopes":[]}"#,
+            }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect_err("weak MCP bearer must be rejected before sidecar spawn");
+        assert_eq!(invalid.0, StatusCode::BAD_REQUEST);
+        assert_eq!(invalid.1 .0.code, "mcp_server_invalid_request");
+
+        for _ in 0..2 {
+            let stopped = dispatch(
+                "mcp_server_stop",
+                json!({}),
+                &state,
+                &host,
+                "brain-local",
+                Some(ACCOUNT_ID),
+                Some("service"),
+            )
+            .await
+            .expect("stop is idempotent when MCP server is not running");
+            assert_eq!(stopped, Value::Null);
+        }
+
+        let reply = dispatch(
+            "orchestration_proxy_response",
+            json!({ "id": "already-gone", "ok": false, "error": "cancelled" }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("unknown orchestration reply remains a no-op");
+        assert_eq!(reply, Value::Null);
+    }
+
+    /// The live terminal inventory belongs to the companion WS process, not
+    /// to a WebView. A headless host therefore exposes an empty registry as a
+    /// successful read instead of claiming the command needs Tauri.
+    #[tokio::test]
+    async fn headless_dispatch_lists_live_terminal_sessions() {
+        let state = test_state();
+        let sessions = dispatch(
+            "terminal_list_all",
+            json!({}),
+            &state,
+            &headless_host(),
+            "terminal-list-headless-device",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("terminal_list_all must work on a headless host");
+        assert_eq!(sessions, json!([]));
     }
 
     /// The claude arms are host-generic after R7: `claude_sidecar_status` on
@@ -4026,12 +5419,26 @@ mod tests {
     }
 
     #[test]
-    fn service_scope_is_authorized_only_for_terminal_exec() {
-        assert!(is_control_authorized(
+    fn service_scope_is_authorized_for_internal_control_plane_commands() {
+        for command in [
             "terminal_exec",
-            "brain-local",
-            Some("service")
-        ));
+            "plugin_permission_grant",
+            "plugin_permission_revoke",
+            "plugin_api_invoke",
+            "plugin_api_batch_invoke",
+            "mcp_server_start",
+            "mcp_server_stop",
+            "mcp_server_restart",
+            "orchestration_proxy_response",
+            "lsp_host_ensure",
+            "lsp_host_request",
+        ] {
+            assert!(is_control_authorized(
+                command,
+                "brain-local",
+                Some("service")
+            ));
+        }
         assert!(!is_control_authorized(
             "terminal_exec",
             "unapproved-device",
@@ -4042,6 +5449,71 @@ mod tests {
             "brain-local",
             Some("service")
         ));
+    }
+
+    #[test]
+    fn plugin_permission_commands_have_remote_safe_classification() {
+        assert!(READ_ONLY_COMMANDS.contains(&"plugin_permission_list"));
+        assert!(CONTROL_COMMANDS.contains(&"plugin_permission_grant"));
+        assert!(CONTROL_COMMANDS.contains(&"plugin_permission_revoke"));
+        for command in [
+            "plugin_permission_grant",
+            "plugin_permission_list",
+            "plugin_permission_revoke",
+        ] {
+            assert!(!SERVICE_ONLY_COMMANDS.contains(&command));
+        }
+    }
+
+    #[test]
+    fn lsp_facade_is_control_gated_but_not_service_only() {
+        for command in ["lsp_host_ensure", "lsp_host_request"] {
+            assert!(CONTROL_COMMANDS.contains(&command));
+            assert!(!SERVICE_ONLY_COMMANDS.contains(&command));
+            assert!(!is_control_authorized(
+                command,
+                "unapproved-device",
+                Some("device")
+            ));
+        }
+        assert!(SERVICE_ONLY_COMMANDS.contains(&"ensure_system_lsp_host"));
+        assert!(SERVICE_ONLY_COMMANDS.contains(&"plugin_invoke_vscode_rpc"));
+    }
+
+    #[test]
+    fn plugin_api_facade_is_control_gated_and_capabilities_are_read_only() {
+        for command in ["plugin_api_invoke", "plugin_api_batch_invoke"] {
+            assert!(CONTROL_COMMANDS.contains(&command));
+            assert!(!READ_ONLY_COMMANDS.contains(&command));
+            assert!(!SERVICE_ONLY_COMMANDS.contains(&command));
+            assert!(!is_control_authorized(
+                command,
+                "unapproved-device",
+                Some("device")
+            ));
+        }
+        assert!(READ_ONLY_COMMANDS.contains(&"plugin_get_capabilities"));
+        assert!(!CONTROL_COMMANDS.contains(&"plugin_get_capabilities"));
+    }
+
+    #[test]
+    fn mcp_lifecycle_and_reply_are_control_gated_but_not_service_only() {
+        for command in [
+            "mcp_server_start",
+            "mcp_server_stop",
+            "mcp_server_restart",
+            "orchestration_proxy_response",
+        ] {
+            assert!(CONTROL_COMMANDS.contains(&command));
+            assert!(!READ_ONLY_COMMANDS.contains(&command));
+            assert!(!SERVICE_ONLY_COMMANDS.contains(&command));
+            assert!(!is_control_authorized(
+                command,
+                "unapproved-device",
+                Some("device")
+            ));
+        }
+        assert!(READ_ONLY_COMMANDS.contains(&"mcp_server_status"));
     }
 
     #[tokio::test]
@@ -4098,6 +5570,7 @@ mod tests {
                     tmp.path().join("workspaces"),
                     true,
                 ),
+                tmp.path().join("plugins"),
             )
         };
         let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
@@ -4212,6 +5685,11 @@ mod tests {
             "connectors_media_upload",
             "connectors_lark_upload_file",
             "connectors_lark_upload_image",
+            "plugin_launch_js",
+            "plugin_invoke_js_callback",
+            "plugin_deactivate_js",
+            "plugin_stop_js",
+            "plugin_js_status",
         ] {
             assert!(is_service_only_command(name), "{name} must be service-only");
             assert!(KNOWN_COMMANDS.contains(&name), "{name} must be allowlisted");
@@ -4220,6 +5698,28 @@ mod tests {
                 "{name} is scope-gated, not device-control-gated"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn headless_plugin_js_status_dispatches_to_the_native_runtime() {
+        let state = test_state();
+        let generation = uuid::Uuid::new_v4().to_string();
+        let result = dispatch(
+            "plugin_js_status",
+            json!({
+                "pluginId": "not-running",
+                "generation": generation,
+            }),
+            &state,
+            &headless_host(),
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("headless status query must reach the native plugin runtime");
+
+        assert_eq!(result, Value::Bool(false));
     }
 
     // ── Connector ingress registry arms (ADR-0059 R12) ──────────────────────
@@ -4302,7 +5802,7 @@ mod tests {
         let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
 
         macro_rules! call {
-            ($name:expr, $args:expr) => {
+            ($name:expr, $args:expr $(,)?) => {
                 dispatch(
                     $name,
                     $args,
@@ -4349,6 +5849,597 @@ mod tests {
         )
         .expect("get after delete");
         assert_eq!(got, Value::Null);
+    }
+
+    /// The headless brain's generic secret facade is service-only and delegates
+    /// to the same installed `cognia-secrets` backend as desktop keyring calls.
+    #[tokio::test]
+    async fn generic_keyring_arms_round_trip_for_the_headless_brain() {
+        let state = test_state();
+        let host = headless_host();
+
+        macro_rules! call {
+            ($name:expr, $args:expr $(,)?) => {
+                dispatch(
+                    $name,
+                    $args,
+                    &state,
+                    &host,
+                    "brain-local",
+                    Some(ACCOUNT_ID),
+                    Some("service"),
+                )
+                .await
+            };
+        }
+
+        call!(
+            "keyring_secret_set",
+            json!({ "input": { "namespace": "backup", "key": "encryption.key.v1", "value": "backup-secret" } }),
+        )
+        .expect("set");
+        let got = call!(
+            "keyring_secret_get",
+            json!({ "input": { "namespace": "backup", "key": "encryption.key.v1" } }),
+        )
+        .expect("get");
+        assert_eq!(got, json!("backup-secret"));
+
+        call!(
+            "keyring_secret_clear",
+            json!({ "input": { "namespace": "backup", "key": "encryption.key.v1" } }),
+        )
+        .expect("clear");
+        let got = call!(
+            "keyring_secret_get",
+            json!({ "input": { "namespace": "backup", "key": "encryption.key.v1" } }),
+        )
+        .expect("get after clear");
+        assert_eq!(got, Value::Null);
+    }
+
+    #[tokio::test]
+    async fn plugin_lifecycle_arms_use_the_headless_process_registry() {
+        let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
+        crate::companion_api::control_allow_list::global().allow("brain-test".to_string());
+        let state = test_state();
+        let host = headless_host();
+        let mut plugin_events = match host
+            .headless()
+            .expect("headless services")
+            .event_bus
+            .subscribe(None, 0)
+        {
+            crate::companion_api::event_bus::SubscribeResult::Ok { receiver, .. } => receiver,
+            crate::companion_api::event_bus::SubscribeResult::ResyncRequired => {
+                panic!("fresh plugin event subscription must not require resync")
+            }
+        };
+        macro_rules! call {
+            ($name:expr, $args:expr $(,)?) => {
+                dispatch(
+                    $name,
+                    $args,
+                    &state,
+                    &host,
+                    "brain-test",
+                    Some("account-test"),
+                    Some("service"),
+                )
+            };
+        }
+        let installed = call!(
+            "plugin_install",
+            json!({
+                "pluginId": "remote-demo",
+                "source": "remote-test",
+                "payload": {
+                    "manifestJson": serde_json::json!({
+                        "id": "remote-demo",
+                        "name": "Remote Demo",
+                        "version": "1.0.0",
+                        "type": "frontend",
+                        "main": "index.js"
+                    }).to_string()
+                }
+            }),
+        )
+        .await
+        .expect("headless plugin install");
+        assert_eq!(installed["plugin_id"], "remote-demo");
+
+        let listed = call!("plugin_list", json!({}))
+            .await
+            .expect("headless plugin list");
+        assert_eq!(listed.as_array().map(Vec::len), Some(1));
+
+        let snapshot = call!(
+            "plugin_runtime_snapshot",
+            json!({ "pluginId": "remote-demo" }),
+        )
+        .await
+        .expect("headless plugin snapshot");
+        assert_eq!(snapshot["version"], "1.0.0");
+
+        let backup = call!(
+            "plugin_backup_create",
+            json!({ "pluginId": "remote-demo", "label": "before-update" }),
+        )
+        .await
+        .expect("headless plugin backup create");
+        let backup_id = backup["backupId"].as_str().expect("backup id").to_string();
+        call!(
+            "plugin_backup_restore",
+            json!({ "pluginId": "remote-demo", "backupId": backup_id }),
+        )
+        .await
+        .expect("headless plugin backup restore");
+        call!(
+            "plugin_backup_delete",
+            json!({ "pluginId": "remote-demo", "backupId": backup_id }),
+        )
+        .await
+        .expect("headless plugin backup delete");
+
+        call!("plugin_uninstall", json!({ "pluginId": "remote-demo" }),)
+            .await
+            .expect("headless plugin uninstall");
+        assert!(call!("plugin_list", json!({}))
+            .await
+            .expect("empty headless plugin list")
+            .as_array()
+            .is_some_and(Vec::is_empty));
+        let actions = [
+            plugin_events.try_recv().expect("install event").payload["action"].clone(),
+            plugin_events.try_recv().expect("restore event").payload["action"].clone(),
+            plugin_events.try_recv().expect("uninstall event").payload["action"].clone(),
+        ];
+        assert_eq!(
+            actions,
+            [json!("installed"), json!("restored"), json!("uninstalled")]
+        );
+        crate::companion_api::control_allow_list::global().disallow("brain-test");
+    }
+
+    #[tokio::test]
+    async fn wasm_runtime_arms_use_the_headless_process_registry() {
+        let state = test_state();
+        let host = headless_host();
+
+        let listed = dispatch(
+            "plugin_wasm_list",
+            json!({}),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("headless WASM list");
+        assert_eq!(listed, json!([]));
+
+        let unloaded = dispatch(
+            "plugin_wasm_unload",
+            json!({ "pluginId": "missing" }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("unknown WASM unload remains a successful false result");
+        assert_eq!(unloaded, json!(false));
+
+        dispatch(
+            "plugin_permission_grant",
+            json!({
+                "pluginId": "demo",
+                "permission": "notification",
+                "grantedBy": "manifest",
+                "expiresAt": Value::Null,
+            }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("grant WASM permission");
+        let grants = dispatch(
+            "plugin_permission_list",
+            json!({ "pluginId": "demo" }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("list WASM permissions");
+        assert_eq!(grants[0]["permission"], json!("notification"));
+
+        dispatch(
+            "plugin_set_shell_allowlist",
+            json!({ "pluginId": "demo", "commands": ["git"] }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("set shell allowlist");
+        dispatch(
+            "plugin_set_network_allowlist",
+            json!({ "pluginId": "demo", "domains": ["example.com"] }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("set network allowlist");
+        let services = host.headless().expect("headless services");
+        assert!(services.plugin_runtime.shell_command_allowed("demo", "git"));
+        assert!(services
+            .plugin_runtime
+            .network_host_allowed("demo", "api.example.com"));
+
+        dispatch(
+            "plugin_permission_revoke",
+            json!({ "pluginId": "demo", "permission": "notification" }),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("revoke WASM permission");
+        assert!(!services
+            .plugin_runtime
+            .has_permission("demo", "notification"));
+    }
+
+    #[tokio::test]
+    async fn plugin_api_facade_uses_the_headless_gateway_and_capabilities() {
+        let state = test_state();
+        let host = headless_host();
+        let services = host.headless().expect("headless services");
+        let plugin_id = format!("rpc-native-{}", uuid::Uuid::new_v4());
+        let plugin_dir = services.plugin_runtime.plugin_dir(&plugin_id);
+        std::fs::create_dir_all(&plugin_dir).expect("create native plugin root");
+        services.plugin_runtime.plugins.write().insert(
+            plugin_id.clone(),
+            crate::plugin_api::PluginRecord {
+                snapshot: crate::plugin_api::PluginRuntimeSnapshot {
+                    plugin_id: plugin_id.clone(),
+                    version: "1.0.0".into(),
+                    status: "loaded".into(),
+                    last_error: None,
+                    loaded_at: None,
+                    install_path: plugin_dir.to_string_lossy().into_owned(),
+                },
+                runtime_state: Value::Null,
+            },
+        );
+
+        for permission in ["filesystem:read", "filesystem:write"] {
+            dispatch(
+                "plugin_permission_grant",
+                json!({
+                    "pluginId": plugin_id,
+                    "permission": permission,
+                    "grantedBy": "test",
+                    "expiresAt": Value::Null,
+                }),
+                &state,
+                &host,
+                "brain-local",
+                Some(ACCOUNT_ID),
+                Some("service"),
+            )
+            .await
+            .expect("grant native gateway permission");
+        }
+
+        let call = |api: &str, payload: Value, request_id: &str| {
+            json!({
+                "request": {
+                    "sdkVersion": "2.0.0",
+                    "pluginId": plugin_id,
+                    "requestId": request_id,
+                    "api": api,
+                    "payload": payload,
+                }
+            })
+        };
+        let written = dispatch(
+            "plugin_api_invoke",
+            call(
+                "fs:writeText",
+                json!({ "path": "remote/note.txt", "content": "companion" }),
+                "write",
+            ),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("write through headless plugin gateway");
+        assert_eq!(written["success"], json!(true));
+
+        let read = dispatch(
+            "plugin_api_invoke",
+            call("fs:readText", json!({ "path": "remote/note.txt" }), "read"),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("read through headless plugin gateway");
+        assert_eq!(read["data"], json!("companion"));
+
+        let unavailable = dispatch(
+            "plugin_api_invoke",
+            call("window:minimize", json!({}), "window"),
+            &state,
+            &host,
+            "brain-local",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect("UI-only capability returns a typed gateway response");
+        assert_eq!(unavailable["error"]["code"], json!("NOT_SUPPORTED"));
+
+        let capabilities = dispatch(
+            "plugin_get_capabilities",
+            json!({}),
+            &state,
+            &host,
+            "paired-reader",
+            Some(ACCOUNT_ID),
+            Some("device"),
+        )
+        .await
+        .expect("capability projection is readable without remote control");
+        let capability = |api: &str| {
+            capabilities
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|entry| entry["api"] == api)
+                .unwrap()["supported"]
+                .as_bool()
+                .unwrap()
+        };
+        assert!(capability("fs:readText"));
+        assert!(!capability("window:minimize"));
+    }
+
+    #[tokio::test]
+    async fn python_runtime_arms_use_the_headless_process_registry() {
+        let state = test_state();
+        let host = headless_host();
+        let services = host.headless().expect("headless services");
+        let plugin_id = format!("rpc-python-{}", uuid::Uuid::new_v4());
+        let plugin_dir = services.plugin_runtime.plugin_dir(&plugin_id);
+        std::fs::create_dir_all(&plugin_dir).expect("create Python plugin root");
+        std::fs::write(
+            plugin_dir.join("main.py"),
+            r#"
+from cognia import tool, hook
+
+@tool(description="Doubles a number")
+def double(x: int):
+    return x * 2
+
+@hook("onMessage")
+def on_message(payload):
+    return payload
+
+def helper(a, b):
+    return [a, b]
+"#,
+        )
+        .expect("write Python plugin");
+
+        macro_rules! call {
+            ($name:expr, $args:expr) => {
+                dispatch(
+                    $name,
+                    $args,
+                    &state,
+                    &host,
+                    "brain-local",
+                    Some(ACCOUNT_ID),
+                    Some("service"),
+                )
+                .await
+            };
+        }
+
+        call!("plugin_python_initialize", json!({})).expect("initialize Python runtime");
+        let runtime = call!("plugin_python_runtime_info", json!({})).expect("Python runtime info");
+        if runtime["available"] != json!(true) {
+            std::fs::remove_dir_all(&plugin_dir).expect("cleanup unavailable Python fixture");
+            return;
+        }
+
+        let load_args = json!({
+            "pluginId": plugin_id,
+            "pluginPath": plugin_dir.to_string_lossy(),
+            "mainModule": "main.py",
+            "dependencies": Value::Null,
+            "config": {},
+            "hostSettings": Value::Null,
+        });
+        let denied = call!("plugin_python_load", load_args.clone())
+            .expect_err("python:execute must be explicitly granted");
+        assert_eq!(denied.0, StatusCode::FORBIDDEN);
+        assert_eq!(denied.1 .0.code, "plugin_permission_denied");
+
+        call!(
+            "plugin_permission_grant",
+            json!({
+                "pluginId": plugin_id,
+                "permission": "python:execute",
+                "grantedBy": "test",
+                "expiresAt": Value::Null,
+            })
+        )
+        .expect("grant python:execute");
+        let loaded = call!("plugin_python_load", load_args).expect("load Python plugin");
+        assert_eq!(loaded["hooks"][0]["event"], "onMessage");
+
+        let tools = call!("plugin_python_get_tools", json!({ "pluginId": plugin_id }))
+            .expect("get Python tools");
+        assert_eq!(tools[0]["name"], "double");
+        let doubled = call!(
+            "plugin_python_call_tool",
+            json!({ "pluginId": plugin_id, "toolName": "double", "args": { "x": 21 } })
+        )
+        .expect("call Python tool");
+        assert_eq!(doubled, json!(42));
+
+        call!("plugin_python_unload", json!({ "pluginId": plugin_id }))
+            .expect("unload Python plugin");
+        assert_eq!(
+            call!("plugin_python_list", json!({})).expect("list Python plugins"),
+            json!([])
+        );
+        std::fs::remove_dir_all(&plugin_dir).expect("cleanup Python fixture");
+    }
+
+    #[tokio::test]
+    async fn vscode_runtime_arms_use_the_headless_process_registry() {
+        let state = test_state();
+        let services = crate::headless::HeadlessServices::stub_for_tests();
+        let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+        let plugin_id = format!("rpc-vscode-{}", uuid::Uuid::new_v4());
+        let plugin_dir = services.plugin_runtime.plugin_dir(&plugin_id);
+        std::fs::create_dir_all(plugin_dir.join("out")).expect("create VS Code plugin root");
+        std::fs::write(
+            plugin_dir.join("out/extension.js"),
+            "module.exports = { activate() {}, deactivate() {} };",
+        )
+        .expect("write VS Code plugin");
+
+        let host_script = plugin_dir.join("fake-vscode-host.cjs");
+        std::fs::write(
+            &host_script,
+            r#"
+const readline = require("node:readline");
+const rl = readline.createInterface({ input: process.stdin });
+process.stdout.write(JSON.stringify({ jsonrpc: "2.0", method: "sidecar:ready", params: {} }) + "\n");
+rl.on("line", (line) => {
+  const request = JSON.parse(line);
+  let result = { ok: true };
+  if (request.method === "extension:activate") {
+    result = { registeredCommands: ["headless.rpc"], registeredWebviewViews: [], registeredLanguageProviders: [] };
+  } else if (request.method === "test:echo") {
+    result = request.params;
+  }
+  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) + "\n");
+});
+"#,
+        )
+        .expect("write fake VS Code host");
+        services
+            .vscode_plugins
+            .configure_host(host_script, None, Arc::new(|_, _| {}));
+
+        macro_rules! call {
+            ($name:expr, $args:expr) => {
+                dispatch(
+                    $name,
+                    $args,
+                    &state,
+                    &host,
+                    "brain-local",
+                    Some(ACCOUNT_ID),
+                    Some("service"),
+                )
+                .await
+            };
+        }
+
+        call!("lsp_host_ensure", json!({})).expect("spawn system LSP host");
+        call!("lsp_host_ensure", json!({})).expect("system LSP host is idempotent");
+        assert!(services
+            .vscode_plugins
+            .sidecars
+            .read()
+            .contains_key(crate::plugin_api::vscode::commands::LSP_HOST_KEY));
+        assert_eq!(
+            call!(
+                "lsp_host_request",
+                json!({ "method": "lsp:status", "payloadJson": "{}" })
+            )
+            .expect("invoke system LSP host"),
+            json!(r#"{"ok":true}"#)
+        );
+        let denied_method = call!(
+            "lsp_host_request",
+            json!({ "method": "extension:activate", "payloadJson": "{}" })
+        )
+        .expect_err("remote LSP facade must reject non-LSP methods");
+        assert_eq!(denied_method.0, StatusCode::BAD_REQUEST);
+
+        call!(
+            "plugin_load_vscode",
+            json!({
+                "pluginId": plugin_id,
+                "manifestJson": json!({
+                    "id": plugin_id,
+                    "vscodeMain": "out/extension.js",
+                    "vscodeExtension": { "bundleFormat": "cjs" },
+                }).to_string(),
+                "pluginPath": plugin_dir.to_string_lossy(),
+            })
+        )
+        .expect("load VS Code extension");
+
+        let activated = call!(
+            "plugin_activate_vscode",
+            json!({ "pluginId": plugin_id, "configJson": "{}" })
+        )
+        .expect("activate VS Code extension");
+        assert_eq!(activated["registeredCommands"], json!(["headless.rpc"]));
+        assert!(activated["sidecarPid"].as_u64().is_some());
+
+        let echoed = call!(
+            "plugin_invoke_vscode_rpc",
+            json!({
+                "pluginId": plugin_id,
+                "method": "test:echo",
+                "payloadJson": r#"{"value":7}"#,
+            })
+        )
+        .expect("invoke VS Code sidecar RPC");
+        assert_eq!(echoed, json!(r#"{"value":7}"#));
+
+        call!("plugin_deactivate_vscode", json!({ "pluginId": plugin_id }))
+            .expect("deactivate VS Code extension");
+        call!("plugin_unload_vscode", json!({ "pluginId": plugin_id }))
+            .expect("unload VS Code extension");
+        assert_eq!(services.vscode_plugins.sidecars.read().len(), 1);
+        call!(
+            "plugin_unload_vscode",
+            json!({ "pluginId": crate::plugin_api::vscode::commands::LSP_HOST_KEY })
+        )
+        .expect("unload system LSP host");
+        assert!(services.vscode_plugins.sidecars.read().is_empty());
+        std::fs::remove_dir_all(&plugin_dir).expect("cleanup VS Code fixture");
     }
 
     /// `connectors_health` reflects the always-mounted headless ingress and

@@ -5,6 +5,7 @@
 
 use tauri::State;
 
+use super::orchestration_proxy::{tauri_event_sink, OrchestrationEventSink};
 use super::types::{McpServerError, McpServerStatus};
 use super::McpServerState;
 use cognia_automation::automation::commands::AutomationState;
@@ -42,7 +43,31 @@ pub async fn mcp_server_start(
                 automation.handle.clone(),
                 cognia_automation::automation::dispatcher::Enforcement::from_state(&automation),
             )),
-            Some(app),
+            Some(tauri_event_sink(app)),
+        )
+        .await
+}
+
+pub async fn mcp_server_start_for_state(
+    state: &McpServerState,
+    port: u16,
+    token: String,
+    settings_json: String,
+    sidecar_path: String,
+    automation: Option<(
+        cognia_automation::automation::worker::AutomationHandle,
+        cognia_automation::automation::dispatcher::Enforcement,
+    )>,
+    orchestration_sink: Option<OrchestrationEventSink>,
+) -> Result<u16, McpServerError> {
+    state
+        .start(
+            port,
+            token,
+            settings_json,
+            sidecar_path,
+            automation,
+            orchestration_sink,
         )
         .await
 }
@@ -50,7 +75,14 @@ pub async fn mcp_server_start(
 /// Stop the MCP HTTP server, draining in-flight requests first.
 #[tauri::command]
 pub async fn mcp_server_stop(state: State<'_, McpServerState>) -> Result<(), McpServerError> {
-    state.stop()
+    mcp_server_stop_for_state(&state)
+}
+
+pub fn mcp_server_stop_for_state(state: &McpServerState) -> Result<(), McpServerError> {
+    match state.stop() {
+        Ok(()) | Err(McpServerError::NotRunning) => Ok(()),
+        Err(error) => Err(error),
+    }
 }
 
 /// Restart the MCP HTTP server.
@@ -68,7 +100,7 @@ pub async fn mcp_server_restart(
     sidecar_path: String,
 ) -> Result<u16, McpServerError> {
     // Stop is best-effort — if it's not running, that's fine.
-    let _ = state.stop();
+    mcp_server_stop_for_state(&state)?;
     state
         .start(
             port,
@@ -79,9 +111,34 @@ pub async fn mcp_server_restart(
                 automation.handle.clone(),
                 cognia_automation::automation::dispatcher::Enforcement::from_state(&automation),
             )),
-            Some(app),
+            Some(tauri_event_sink(app)),
         )
         .await
+}
+
+pub async fn mcp_server_restart_for_state(
+    state: &McpServerState,
+    port: u16,
+    token: String,
+    settings_json: String,
+    sidecar_path: String,
+    automation: Option<(
+        cognia_automation::automation::worker::AutomationHandle,
+        cognia_automation::automation::dispatcher::Enforcement,
+    )>,
+    orchestration_sink: Option<OrchestrationEventSink>,
+) -> Result<u16, McpServerError> {
+    mcp_server_stop_for_state(state)?;
+    mcp_server_start_for_state(
+        state,
+        port,
+        token,
+        settings_json,
+        sidecar_path,
+        automation,
+        orchestration_sink,
+    )
+    .await
 }
 
 /// Renderer → Rust callback that completes one orchestration round-trip.
@@ -138,6 +195,30 @@ mod tests {
         let state = McpServerState::new();
         let err = state.stop().unwrap_err();
         assert!(matches!(err, McpServerError::NotRunning));
+    }
+
+    #[test]
+    fn host_neutral_stop_is_idempotent() {
+        let state = McpServerState::new();
+        assert!(mcp_server_stop_for_state(&state).is_ok());
+        assert!(mcp_server_stop_for_state(&state).is_ok());
+    }
+
+    #[tokio::test]
+    async fn host_neutral_start_keeps_the_canonical_validation() {
+        let state = McpServerState::new();
+        let error = mcp_server_start_for_state(
+            &state,
+            0,
+            String::new(),
+            r#"{"enabled":true,"enabledScopes":[]}"#.into(),
+            "/nonexistent/cognia-mcp.mjs".into(),
+            None,
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(error, McpServerError::TokenMissing));
     }
 
     /// Verify token-missing guard: empty token is rejected.

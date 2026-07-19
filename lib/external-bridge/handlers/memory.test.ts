@@ -60,7 +60,12 @@ beforeEach(() => {
     ok: true,
     hits: [{ memory: ROW, relevance: 0.9, score: 0.8 }],
   })
-  mockStoreExternal.mockResolvedValue({ ok: true, stored: true, consolidated: false, applied: ["ADD"] })
+  mockStoreExternal.mockResolvedValue({
+    ok: true,
+    stored: true,
+    consolidated: false,
+    applied: ["ADD"],
+  })
   mockUpdateExternal.mockResolvedValue({ ok: true })
   mockForgetExternal.mockResolvedValue({ ok: true })
   mockListMemories.mockResolvedValue([ROW])
@@ -69,12 +74,23 @@ beforeEach(() => {
 describe("memorySearch", () => {
   it("validates the query and forwards options", async () => {
     await expect(memorySearch({ query: "  " })).rejects.toThrow(/must not be empty/)
-    await memorySearch({ query: "pnpm", k: 3, types: ["semantic"], characterId: "c1" })
+    await memorySearch({
+      query: "pnpm",
+      k: 3,
+      types: ["semantic"],
+      characterId: "c1",
+      projectId: "p1",
+      branch: "main",
+    })
     expect(mockSearchExternal).toHaveBeenCalledWith({
       query: "pnpm",
       topK: 3,
       types: ["semantic"],
       characterId: "c1",
+      projectId: "p1",
+      agentId: undefined,
+      branch: "main",
+      path: undefined,
     })
   })
 
@@ -100,9 +116,7 @@ describe("memoryList", () => {
   it("lists active rows with a clamped limit", async () => {
     const result = await memoryList({ limit: 999 })
     expect(result.ok).toBe(true)
-    expect(mockListMemories).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "active" })
-    )
+    expect(mockListMemories).toHaveBeenCalledWith(expect.objectContaining({ status: "active" }))
   })
 
   it("returns policy blocks for disabled / temporary", async () => {
@@ -116,9 +130,9 @@ describe("memoryList", () => {
 
 describe("memoryStore", () => {
   it("validates length and stamps the mcp channel", async () => {
-    await expect(
-      memoryStore({ text: "x".repeat(MAX_MEMORY_TEXT_CHARS + 1) })
-    ).rejects.toThrow(/exceeds/)
+    await expect(memoryStore({ text: "x".repeat(MAX_MEMORY_TEXT_CHARS + 1) })).rejects.toThrow(
+      /exceeds/
+    )
     await memoryStore({ text: "User prefers pnpm", type: "episodic", importance: 9 })
     expect(mockStoreExternal).toHaveBeenCalledWith(
       expect.objectContaining({ text: "User prefers pnpm", type: "episodic", importance: 9 }),
@@ -136,6 +150,7 @@ describe("memoryUpdate / memoryForget", () => {
       importance: 4,
       tags: undefined,
       key: undefined,
+      pinned: undefined,
     })
     await expect(memoryForget({ id: "" })).rejects.toThrow(/must not be empty/)
     expect(await memoryForget({ id: "m1" })).toEqual({ ok: true })

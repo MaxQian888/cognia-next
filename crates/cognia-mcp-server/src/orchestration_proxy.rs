@@ -48,7 +48,17 @@ use tokio::task::JoinHandle;
 use super::proxy_common::{generate_token, token_matches, RateLimitOutcome, RateLimiter};
 
 /// Tauri event the renderer dispatch provider listens on.
-const EXEC_EVENT: &str = "orchestration-proxy:exec";
+pub const EXEC_EVENT: &str = "orchestration-proxy:exec";
+
+pub type OrchestrationEventSink = Arc<dyn Fn(ExecEvent) -> Result<(), String> + Send + Sync>;
+
+pub fn tauri_event_sink(app: AppHandle) -> OrchestrationEventSink {
+    let app = Arc::new(app);
+    Arc::new(move |event| {
+        app.emit(EXEC_EVENT, event)
+            .map_err(|error| error.to_string())
+    })
+}
 
 /// How long Rust waits for the renderer to answer before giving up.
 /// Orchestration runs (agent_dispatch / team_run) can be long, so this is
@@ -82,13 +92,18 @@ pub struct OrchestrationProxy {
 impl OrchestrationProxy {
     /// Bind a fresh listener on `127.0.0.1` and start accepting connections.
     pub async fn spawn(app: AppHandle) -> std::io::Result<Self> {
+        Self::spawn_with_sink(tauri_event_sink(app)).await
+    }
+
+    /// Bind a listener whose orchestration events are delivered through a
+    /// host-owned sink (Tauri emitter or the headless companion EventBus).
+    pub async fn spawn_with_sink(sink: OrchestrationEventSink) -> std::io::Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let addr = listener.local_addr()?;
         let token = generate_token();
         let expected = Arc::new(token.clone());
         let pending: Arc<PendingMap> = Arc::new(ParkingMutex::new(HashMap::new()));
         let rate_limiter = Arc::new(RateLimiter::default());
-        let app = Arc::new(app);
 
         let task = {
             let pending = Arc::clone(&pending);
@@ -104,11 +119,11 @@ impl OrchestrationProxy {
                     let expected = Arc::clone(&expected);
                     let rate_limiter = Arc::clone(&rate_limiter);
                     let pending = Arc::clone(&pending);
-                    let app = Arc::clone(&app);
+                    let sink = Arc::clone(&sink);
                     let peer_ip = peer_addr.ip();
                     tokio::spawn(async move {
                         if let Err(err) =
-                            serve_connection(stream, expected, rate_limiter, pending, app, peer_ip)
+                            serve_connection(stream, expected, rate_limiter, pending, sink, peer_ip)
                                 .await
                         {
                             eprintln!("[orchestration_proxy] connection error: {err}");
@@ -162,7 +177,7 @@ async fn serve_connection(
     expected_token: Arc<String>,
     rate_limiter: Arc<RateLimiter>,
     pending: Arc<PendingMap>,
-    app: Arc<AppHandle>,
+    sink: OrchestrationEventSink,
     peer_ip: IpAddr,
 ) -> std::io::Result<()> {
     let (read_half, write_half) = stream.into_split();
@@ -233,9 +248,9 @@ async fn serve_connection(
         // orchestration call can't block the read loop on this socket.
         let writer = Arc::clone(&writer);
         let pending = Arc::clone(&pending);
-        let app = Arc::clone(&app);
+        let sink = Arc::clone(&sink);
         tokio::spawn(async move {
-            let resp = dispatch(req, &pending, &app).await;
+            let resp = dispatch(req, &pending, &sink).await;
             if let Err(err) = write_response(&writer, &resp).await {
                 eprintln!("[orchestration_proxy] write failed: {err}");
             }
@@ -261,11 +276,12 @@ async fn write_response(
 // Dispatch — emit to the renderer and await its reply.
 // ---------------------------------------------------------------------------
 
-async fn dispatch(req: ProxyRequest, pending: &PendingMap, app: &AppHandle) -> ProxyResponse {
-    dispatch_with_emit(req, pending, RENDERER_TIMEOUT, |ev| {
-        app.emit(EXEC_EVENT, ev).map_err(|e| e.to_string())
-    })
-    .await
+async fn dispatch(
+    req: ProxyRequest,
+    pending: &PendingMap,
+    sink: &OrchestrationEventSink,
+) -> ProxyResponse {
+    dispatch_with_emit(req, pending, RENDERER_TIMEOUT, |event| sink(event)).await
 }
 
 /// Core dispatch, generic over the emit sink so the renderer round-trip is
@@ -357,10 +373,10 @@ impl ProxyResponse {
 /// Payload emitted to the renderer for one orchestration request.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ExecEvent {
-    id: String,
-    command: String,
-    args: Value,
+pub struct ExecEvent {
+    pub id: String,
+    pub command: String,
+    pub args: Value,
 }
 
 // ---------------------------------------------------------------------------

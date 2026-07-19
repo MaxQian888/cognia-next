@@ -67,3 +67,15 @@ rotate-master-key --new-key ...`, then update the Secret.
   (NetworkPolicy in `guardrails.yaml`). The pods-create/attach Role in
   `base/cognia-server-rbac.yaml` is attached via the `cognia-server`
   ServiceAccount and is inert while the backend is off.
+- **Persistent shared-browser runtimes (experimental)**: create the aggregate
+  per-tenant secret first (`kubectl -n <tenant> create secret generic
+workspace-runtime-secrets --from-literal=<workspace-id>=<32+ char secret>`),
+  then render `workspace-runtime-template.yaml` with `WORKSPACE_ID=<id>
+envsubst` and apply it in the same namespace. Each rendered runtime receives
+  dedicated workspace/profile PVCs, has no service-account token, and exposes
+  only an internal ClusterIP. Add `remoteBrowserEnabled=true` and
+  `remoteBrowserWorkspaces=<comma-separated ids>` to `cognia-config`; the base
+  server mounts the same Secret read-only and resolves runtimes through
+  `workspace-runtime-{workspace}:27910`. Keep the feature flag false until the
+  image, Secret, PVC, and health probe exist. Never mount another workspace,
+  the host filesystem, or a container-runtime socket into these pods.

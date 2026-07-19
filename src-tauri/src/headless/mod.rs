@@ -23,6 +23,56 @@ use parking_lot::RwLock;
 use crate::claude::SidecarState;
 use crate::companion_api::event_bus::EventBus;
 
+pub const VSCODE_EXT_HOST_SCRIPT_ENV: &str = "COGNIA_VSCODE_EXT_HOST_SCRIPT";
+pub const VSCODE_EXT_HOST_NODE_ENV: &str = "COGNIA_VSCODE_EXT_HOST_NODE";
+pub const MCP_SIDECAR_PATH_ENV: &str = "COGNIA_MCP_SIDECAR_PATH";
+
+fn resolve_vscode_ext_host_script() -> std::path::PathBuf {
+    if let Some(explicit) = std::env::var_os(VSCODE_EXT_HOST_SCRIPT_ENV) {
+        return explicit.into();
+    }
+    if let Some(brain_entry) = std::env::var_os("COGNIA_BRAIN_ENTRY") {
+        let brain_entry = std::path::PathBuf::from(brain_entry);
+        if let Some(parent) = brain_entry.parent() {
+            return parent
+                .join("sidecar")
+                .join("vscode-ext-host")
+                .join("dist")
+                .join("host.js");
+        }
+    }
+    std::env::current_dir()
+        .unwrap_or_default()
+        .join("sidecar")
+        .join("vscode-ext-host")
+        .join("dist")
+        .join("host.js")
+}
+
+pub fn resolve_mcp_sidecar_path() -> std::path::PathBuf {
+    resolve_mcp_sidecar_path_from(
+        std::env::var_os(MCP_SIDECAR_PATH_ENV),
+        std::env::var_os("COGNIA_BRAIN_ENTRY"),
+        std::env::current_dir().unwrap_or_default(),
+    )
+}
+
+fn resolve_mcp_sidecar_path_from(
+    explicit: Option<std::ffi::OsString>,
+    brain_entry: Option<std::ffi::OsString>,
+    current_dir: std::path::PathBuf,
+) -> std::path::PathBuf {
+    if let Some(explicit) = explicit {
+        return explicit.into();
+    }
+    if let Some(brain_entry) = brain_entry {
+        if let Some(parent) = std::path::Path::new(&brain_entry).parent() {
+            return parent.join("sidecar").join("cognia-mcp.mjs");
+        }
+    }
+    current_dir.join("sidecar").join("cognia-mcp.mjs")
+}
+
 // Re-exports for the `cognia-server` binary (the `api_key` / `claude` /
 // `secret_store` modules are crate-private; this module is the headless
 // boot surface). The `pub use` also brings the names into scope here.
@@ -48,6 +98,27 @@ pub struct HeadlessServices {
     pub sidecar_host: Arc<dyn SidecarHost>,
     /// Provider-env store fed by the `claude_set_*` RPC arms.
     pub api_keys: ApiKeyState,
+    /// Embedded MCP server lifecycle state. The status surface is host-neutral;
+    /// future start/stop wiring can reuse this same process-owned instance.
+    pub mcp_server: Arc<crate::mcp_server::McpServerState>,
+    /// Lazily-created native automation worker + canonical enforcement gate
+    /// used by the MCP `computer_use` tool in a no-Tauri host.
+    mcp_automation: tokio::sync::OnceCell<(
+        crate::automation::worker::AutomationHandle,
+        crate::automation::dispatcher::Enforcement,
+    )>,
+    /// Native plugin install/snapshot/backup service shared by every companion
+    /// RPC arm. The Node brain observes the same install directory.
+    pub plugin_runtime: Arc<crate::plugin_api::PluginRuntimeState>,
+    /// Process-owned WASM Component host. This is the same state type Tauri
+    /// manages; only its owner changes when there is no WebView.
+    pub wasm_plugins: Arc<crate::plugin_api::wasm::WasmPluginState>,
+    /// Existing per-plugin Python subprocess host, owned by cognia-server when
+    /// no Tauri state manager exists. Events are bridged onto `event_bus`.
+    pub python_plugins: Arc<crate::plugin_api::python::PythonRuntimeState>,
+    /// Existing VS Code extension sidecar registry, configured with a
+    /// server-owned host script and bridged onto the companion event bus.
+    pub vscode_plugins: Arc<crate::plugin_api::vscode::VscodeExtensionState>,
     /// The companion event bus — every host-emitted event rides
     /// `/ws/v1/events` from here.
     pub event_bus: Arc<EventBus>,
@@ -69,6 +140,7 @@ impl HeadlessServices {
         api_keys: ApiKeyState,
         event_bus: Arc<EventBus>,
         spawn_policy: crate::external_agent::presets::SpawnPolicy,
+        plugin_install_dir: std::path::PathBuf,
     ) -> Arc<Self> {
         Self::new_with_exec(
             sidecar_host,
@@ -76,6 +148,7 @@ impl HeadlessServices {
             event_bus,
             spawn_policy,
             crate::external_agent::exec_backend::LocalProcessBackend::new(),
+            plugin_install_dir,
         )
     }
 
@@ -89,16 +162,92 @@ impl HeadlessServices {
         event_bus: Arc<EventBus>,
         spawn_policy: crate::external_agent::presets::SpawnPolicy,
         exec: Arc<dyn crate::external_agent::exec_backend::ExecBackend>,
+        plugin_install_dir: std::path::PathBuf,
     ) -> Arc<Self> {
+        let python_dir = plugin_install_dir
+            .parent()
+            .unwrap_or(plugin_install_dir.as_path())
+            .join("python");
+        let python_plugins = Arc::new(crate::plugin_api::python::PythonRuntimeState::new(
+            python_dir,
+        ));
+        let python_event_bus = Arc::clone(&event_bus);
+        *python_plugins.event_sink.write() =
+            Some(Arc::new(move |event| match serde_json::to_value(event) {
+                Ok(payload) => {
+                    python_event_bus.publish(
+                        crate::plugin_api::python::events::PYTHON_EVENT.to_string(),
+                        payload,
+                    );
+                }
+                Err(error) => log::warn!("serialize headless Python plugin event: {error}"),
+            }));
+        let vscode_dir = plugin_install_dir
+            .parent()
+            .unwrap_or(plugin_install_dir.as_path())
+            .join("vscode-extensions");
+        let vscode_plugins = Arc::new(crate::plugin_api::vscode::VscodeExtensionState::new(
+            vscode_dir,
+        ));
+        let vscode_event_bus = Arc::clone(&event_bus);
+        vscode_plugins.configure_host(
+            resolve_vscode_ext_host_script(),
+            std::env::var(VSCODE_EXT_HOST_NODE_ENV).ok(),
+            Arc::new(move |event_name, raw_frame| {
+                vscode_event_bus.publish(event_name, serde_json::Value::String(raw_frame));
+            }),
+        );
         Arc::new(Self {
             sidecar: SidecarState::new(),
             sidecar_host,
             api_keys,
+            mcp_server: Arc::new(crate::mcp_server::McpServerState::new()),
+            mcp_automation: tokio::sync::OnceCell::new(),
+            plugin_runtime: Arc::new(crate::plugin_api::PluginRuntimeState::new(
+                plugin_install_dir,
+            )),
+            wasm_plugins: Arc::new(crate::plugin_api::wasm::WasmPluginState::default()),
+            python_plugins,
+            vscode_plugins,
             event_bus,
             exec,
             spawn_policy,
             connectors: ConnectorsState::new(),
         })
+    }
+
+    /// Return the process-owned MCP automation plane, creating the native
+    /// backend only when the embedded MCP server is first started.
+    pub async fn mcp_automation(
+        &self,
+    ) -> Result<
+        (
+            crate::automation::worker::AutomationHandle,
+            crate::automation::dispatcher::Enforcement,
+        ),
+        String,
+    > {
+        self.mcp_automation
+            .get_or_try_init(|| async {
+                tokio::task::spawn_blocking(|| {
+                    let handle = crate::automation::Worker::spawn(|| {
+                        crate::automation::make_default_backend_with_app(None)
+                    });
+                    let enforcement = crate::automation::dispatcher::Enforcement {
+                        gate: crate::automation::PermissionGate::new(
+                            crate::automation::persist::load_settings(),
+                        ),
+                        audit: crate::automation::AuditRing::new(),
+                        consent: crate::automation::ConsentBroker::new(),
+                        policy: crate::automation::persist::load_policy_state(),
+                    };
+                    (handle, enforcement)
+                })
+                .await
+                .map_err(|error| format!("initialize MCP automation plane: {error}"))
+            })
+            .await
+            .cloned()
     }
 
     /// A registry with a never-resolving sidecar script — for dispatch tests
@@ -122,6 +271,10 @@ impl HeadlessServices {
             api_keys,
             event_bus,
             crate::external_agent::presets::SpawnPolicy::new(workspaces, false),
+            std::env::temp_dir().join(format!(
+                "cognia-headless-test-plugins-{}",
+                std::process::id()
+            )),
         )
     }
 }
@@ -165,6 +318,7 @@ mod tests {
             Some("sk-headless")
         );
         assert!(!services.sidecar.is_ready().await);
+        assert!(!services.mcp_server.status().running);
         // The sidecar host publishes into the same bus the registry exposes.
         services
             .sidecar_host
@@ -178,5 +332,88 @@ mod tests {
             }
             _ => panic!("subscribe failed"),
         }
+    }
+
+    #[tokio::test]
+    async fn python_subprocess_events_bridge_to_the_companion_bus() {
+        let services = HeadlessServices::stub_for_tests();
+        let sink = services.python_plugins.sink().expect("Python event sink");
+        sink(crate::plugin_api::python::events::PythonEvent {
+            plugin_id: "demo".into(),
+            kind: "log".into(),
+            call_id: None,
+            data: serde_json::json!({ "line": "ready" }),
+        });
+
+        match services.event_bus.subscribe(Some(0), 0) {
+            crate::companion_api::event_bus::SubscribeResult::Ok { replay, .. } => {
+                assert_eq!(replay.len(), 1);
+                assert_eq!(replay[0].event_type, "plugin:python");
+                assert_eq!(replay[0].payload["pluginId"], "demo");
+                assert_eq!(replay[0].payload["data"]["line"], "ready");
+            }
+            _ => panic!("subscribe failed"),
+        }
+    }
+
+    #[tokio::test]
+    async fn vscode_sidecar_frames_bridge_to_the_companion_bus() {
+        let services = HeadlessServices::stub_for_tests();
+        services.vscode_plugins.emit_rpc_frame(
+            "vscode://rpc/publisher_ext".into(),
+            r#"{"jsonrpc":"2.0","method":"commands:register"}"#.into(),
+        );
+
+        match services.event_bus.subscribe(Some(0), 0) {
+            crate::companion_api::event_bus::SubscribeResult::Ok { replay, .. } => {
+                assert_eq!(replay.len(), 1);
+                assert_eq!(replay[0].event_type, "vscode://rpc/publisher_ext");
+                assert_eq!(
+                    replay[0].payload,
+                    serde_json::Value::String(
+                        r#"{"jsonrpc":"2.0","method":"commands:register"}"#.into()
+                    )
+                );
+            }
+            _ => panic!("subscribe failed"),
+        }
+    }
+
+    #[test]
+    fn mcp_sidecar_path_prefers_override_then_packaged_brain_layout() {
+        let explicit = resolve_mcp_sidecar_path_from(
+            Some("/srv/custom/mcp.mjs".into()),
+            Some("/srv/layout/cli.mjs".into()),
+            "/work".into(),
+        );
+        assert_eq!(explicit, std::path::PathBuf::from("/srv/custom/mcp.mjs"));
+
+        let packaged =
+            resolve_mcp_sidecar_path_from(None, Some("/srv/layout/cli.mjs".into()), "/work".into());
+        assert_eq!(
+            packaged,
+            std::path::PathBuf::from("/srv/layout/sidecar/cognia-mcp.mjs")
+        );
+
+        let source_tree = resolve_mcp_sidecar_path_from(None, None, "/repo".into());
+        assert_eq!(
+            source_tree,
+            std::path::PathBuf::from("/repo/sidecar/cognia-mcp.mjs")
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_automation_plane_is_lazy_and_process_owned() {
+        let services = HeadlessServices::stub_for_tests();
+        assert!(services.mcp_automation.get().is_none());
+        let _first = services
+            .mcp_automation()
+            .await
+            .expect("first initialization");
+        assert!(services.mcp_automation.get().is_some());
+        let _second = services
+            .mcp_automation()
+            .await
+            .expect("cached initialization");
     }
 }

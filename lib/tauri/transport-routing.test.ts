@@ -75,21 +75,28 @@ describe("RoutingTransport", () => {
     expect(local.calls.map((c) => c.name)).toEqual(["second"])
   })
 
-  it("resolves routing at invocation time for subscribe", () => {
+  it("moves an existing subscription across active-host changes without leaking listeners", () => {
     const local = fakeTransport("local")
     const remote = fakeTransport("remote")
     const routing = new RoutingTransport(local.transport)
 
-    const offLocal = routing.subscribe("evt", () => {})
-    setActiveRemoteTransport(remote.transport)
-    const offRemote = routing.subscribe("evt", () => {})
-
+    const off = routing.subscribe("evt", () => {})
     expect(local.subscriptions).toEqual(["evt"])
-    expect(remote.subscriptions).toEqual(["evt"])
-    // Each unsubscribe is the target's own unsubscribe, from subscribe time.
-    offLocal()
-    offRemote()
+
+    setActiveRemoteTransport(remote.transport)
     expect(local.unsubscribe).toHaveBeenCalledTimes(1)
+    expect(remote.subscriptions).toEqual(["evt"])
+
+    setActiveRemoteTransport(null)
+    expect(remote.unsubscribe).toHaveBeenCalledTimes(1)
+    expect(local.subscriptions).toEqual(["evt", "evt"])
+
+    off()
+    off()
+    expect(local.unsubscribe).toHaveBeenCalledTimes(2)
+
+    setActiveRemoteTransport(remote.transport)
+    expect(remote.subscriptions).toEqual(["evt"])
     expect(remote.unsubscribe).toHaveBeenCalledTimes(1)
   })
 })

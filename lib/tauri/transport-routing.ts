@@ -11,11 +11,10 @@
  *
  * Switching the active host is a single pointer swap on the module-level holder
  * below; the ~480 `transport.call` sites and the `subscribe` event stream
- * follow automatically because they read the live `transport` binding per call
- * (never capturing the instance). Routing is resolved *at invocation time*, so
- * a subscription binds to whichever transport is active when `subscribe()`
- * runs; surfaces that must follow a mid-session host switch re-subscribe on the
- * change (see {@link subscribeActiveRemoteTransport}).
+ * follow automatically because calls resolve the current target at invocation
+ * time and subscriptions are rebound by `RoutingTransport` on every active-host
+ * change. Long-lived providers therefore keep one logical subscription while
+ * the transport owns the local/remote listener lifecycle.
  *
  * This holder lives in `lib/tauri` with no heavy dependencies so it can be
  * imported from `transport-instance.ts` without pulling stores/UI into the
@@ -127,6 +126,23 @@ export class RoutingTransport implements Transport {
   }
 
   subscribe<T = unknown>(event: string, handler: (payload: T) => void): () => void {
-    return this.target().subscribe<T>(event, handler)
+    let disposed = false
+    let unsubscribeTarget = this.target().subscribe<T>(event, handler)
+    const unsubscribeRouting = subscribeActiveRemoteTransport((remote) => {
+      if (disposed) return
+      // Bind the new target before releasing the old listener so a synchronous
+      // host switch cannot create an event-loss window.
+      const unsubscribeNext = (remote ?? this.local).subscribe<T>(event, handler)
+      const unsubscribePrevious = unsubscribeTarget
+      unsubscribeTarget = unsubscribeNext
+      unsubscribePrevious()
+    })
+
+    return () => {
+      if (disposed) return
+      disposed = true
+      unsubscribeRouting()
+      unsubscribeTarget()
+    }
   }
 }

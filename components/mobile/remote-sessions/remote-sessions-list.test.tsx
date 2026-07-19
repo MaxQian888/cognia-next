@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { RemoteSessionsList } from "./remote-sessions-list"
@@ -8,8 +8,14 @@ jest.mock("@/lib/claude/ipc", () => ({
   listSessions: (...a: unknown[]) => listSessionsMock(...a),
 }))
 
+const hydrateCompanionConfigMock = jest.fn()
+jest.mock("@/lib/tauri/transport-companion", () => ({
+  hydrateCompanionConfig: () => hydrateCompanionConfigMock(),
+}))
+
 beforeEach(() => {
   listSessionsMock.mockReset()
+  hydrateCompanionConfigMock.mockReset().mockResolvedValue(null)
 })
 
 describe("<RemoteSessionsList />", () => {
@@ -41,5 +47,23 @@ describe("<RemoteSessionsList />", () => {
     listSessionsMock.mockRejectedValue(new Error("offline"))
     render(<RemoteSessionsList onSelect={jest.fn()} />)
     expect(await screen.findByTestId("remote-sessions-error")).toHaveTextContent(/offline/)
+  })
+
+  it("waits for persisted companion config hydration before listing sessions", async () => {
+    let finishHydration: (() => void) | undefined
+    hydrateCompanionConfigMock.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishHydration = resolve
+        })
+    )
+    listSessionsMock.mockResolvedValue({ rows: [], total: 0 })
+
+    render(<RemoteSessionsList onSelect={jest.fn()} />)
+    expect(listSessionsMock).not.toHaveBeenCalled()
+
+    await act(async () => finishHydration?.())
+    expect(await screen.findByTestId("remote-sessions-empty")).toBeInTheDocument()
+    expect(listSessionsMock).toHaveBeenCalledWith({ limit: 50, offset: 0 })
   })
 })

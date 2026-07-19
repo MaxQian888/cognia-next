@@ -8,6 +8,13 @@ description: "Defines the cloud deployment strategy: keep the desktop's proven t
 **Status**: Accepted — Phases 0–1 landed, Phase 2 partial (2026-07-13; proposed 2026-07-02)
 **Authors**: Max Qian + Claude
 
+> **2026-07-18 addendum**: ADR-0085 adds a second, opt-in T2 execution shape:
+> one persistent WorkspaceRuntime per migrated workspace, hosting repeated
+> external-Agent children, its dev server, and a private Playwright service.
+> The disposable per-Agent `ContainerBackend` remains the default and is not
+> removed. Clients reach the browser only through `cognia-server`; runtime and
+> CDP endpoints remain private.
+
 > **Implementation status (2026-07-13, `dev`)**: Phase 0 is fully landed —
 > `deploy.yml` is the real gated deploy workflow (P0.1), `images.yml`
 > publishes/compile-checks all four GHCR images (P0.2), the service

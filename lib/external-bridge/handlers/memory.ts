@@ -60,6 +60,10 @@ export interface MemorySearchInput {
   k?: number
   types?: MemoryType[]
   characterId?: string
+  projectId?: string
+  agentId?: string
+  branch?: string
+  path?: string
 }
 
 export type MemorySearchResult =
@@ -73,6 +77,10 @@ export async function memorySearch(input: MemorySearchInput): Promise<MemorySear
     topK: input.k,
     types: input.types,
     characterId: input.characterId,
+    projectId: input.projectId,
+    agentId: input.agentId,
+    branch: input.branch,
+    path: input.path,
   })
   if (!result.ok) return result
   return {
@@ -88,18 +96,31 @@ export async function memorySearch(input: MemorySearchInput): Promise<MemorySear
 export interface MemoryListInput {
   type?: MemoryType
   scope?: MemoryScope
+  characterId?: string
+  projectId?: string
+  agentId?: string
+  branch?: string
+  pathPattern?: string
   limit?: number
 }
 
 export type MemoryListResult =
-  | { ok: true; memories: MemoryWireRow[] }
-  | { ok: false; reason: "disabled" | "temporary" }
+  { ok: true; memories: MemoryWireRow[] } | { ok: false; reason: "disabled" | "temporary" }
 
 export async function memoryList(input: MemoryListInput): Promise<MemoryListResult> {
   const gate = await readsAllowed()
   if (!gate.allowed) return { ok: false, reason: gate.reason! }
   const { listMemories } = await import("@/lib/db/memories")
-  const rows = await listMemories({ type: input.type, scope: input.scope, status: "active" })
+  const rows = await listMemories({
+    type: input.type,
+    scope: input.scope,
+    characterId: input.characterId,
+    projectId: input.projectId,
+    agentId: input.agentId,
+    branch: input.branch,
+    pathPattern: input.pathPattern,
+    status: "active",
+  })
   const limit = Math.min(200, Math.max(1, input.limit ?? 50))
   return { ok: true, memories: rows.slice(0, limit).map(toWireRow) }
 }
@@ -113,6 +134,10 @@ export interface MemoryStoreInput {
   type?: "semantic" | "episodic"
   scope?: MemoryScope
   characterId?: string
+  projectId?: string
+  agentId?: string
+  branch?: string
+  pathPattern?: string
   key?: string
   importance?: number
   tags?: string[]
@@ -126,6 +151,10 @@ export async function memoryStore(input: MemoryStoreInput): Promise<StoreMemoryC
       type: input.type,
       scope: input.scope,
       characterId: input.characterId,
+      projectId: input.projectId,
+      agentId: input.agentId,
+      branch: input.branch,
+      pathPattern: input.pathPattern,
       key: input.key,
       importance: input.importance,
       tags: input.tags,
@@ -140,6 +169,7 @@ export interface MemoryUpdateInput {
   importance?: number
   tags?: string[]
   key?: string
+  pinned?: boolean
 }
 
 export async function memoryUpdate(input: MemoryUpdateInput): Promise<MutateExternalMemoryResult> {
@@ -150,6 +180,7 @@ export async function memoryUpdate(input: MemoryUpdateInput): Promise<MutateExte
     importance: input.importance,
     tags: input.tags,
     key: input.key,
+    pinned: input.pinned,
   })
 }
 

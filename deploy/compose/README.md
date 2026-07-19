@@ -22,13 +22,14 @@ SHARE_UPLOAD_SECRET=... node ../../scripts/smoke/compose-smoke.mjs   # tier-1 sm
 
 ## Profiles
 
-| Command                                            | Brings up                          | Smoke tier       |
-| -------------------------------------------------- | ---------------------------------- | ---------------- |
-| `docker compose up`                                | signaling (7892), share (8787)     | `services`       |
-| `docker compose --profile server up`               | + cognia-server (27890)            | `server`         |
-| `docker compose --profile server --profile tls up` | + Caddy (80/443)                   | `tls`            |
-| `docker compose --profile observability up`        | + Prometheus (9090)                | —                |
-| `docker compose --profile logto up`                | + Logto IdP (3001/3002, pg, redis) | — (see LOGTO.md) |
+| Command                                                                                                      | Brings up                            | Smoke tier       |
+| ------------------------------------------------------------------------------------------------------------ | ------------------------------------ | ---------------- |
+| `docker compose up`                                                                                          | signaling (7892), share (8787)       | `services`       |
+| `docker compose --profile server up`                                                                         | + cognia-server (27890)              | `server`         |
+| `docker compose --profile server --profile tls up`                                                           | + Caddy (80/443)                     | `tls`            |
+| `docker compose --profile observability up`                                                                  | + Prometheus (9090)                  | —                |
+| `docker compose --profile logto up`                                                                          | + Logto IdP (3001/3002, pg, redis)   | — (see LOGTO.md) |
+| `docker compose -f docker-compose.yml -f docker-compose.t2.yml --profile server --profile remote-browser up` | + isolated default workspace runtime | `remote-browser` |
 
 For the `server` profile, `.env` additionally needs `COGNIA_MASTER_KEY`
 (`openssl rand -hex 32`) — there is no OS keyring inside a container, so the
@@ -85,6 +86,22 @@ Optional per-runner knobs (read by `container_backend.rs`, all env on the
 Known limit: the fleet agent-monitor hook ingress is loopback-gated, so T2
 runner agents (separate containers, separate loopback) are not visible to
 fleet monitoring.
+
+### Experimental shared browser
+
+The `remote-browser` profile adds a persistent `workspace-runtime-default`
+container for the `default` workspace. It runs both external-agent children
+and Playwright Chromium behind a private, secret-authenticated protocol; no
+runtime, Playwright, or CDP port is published to the host. The runtime sees a
+dedicated workspace volume, never the host filesystem or Docker socket.
+
+Set `COGNIA_WORKSPACE_RUNTIME_SECRET` to at least 32 random characters and set
+`COGNIA_REMOTE_BROWSER_ENABLED=true`, then start both `server` and
+`remote-browser` profiles. The runtime writes its per-workspace secret into a
+private named volume mounted read-only by `cognia-server`. Users must still
+enable the experiment in Cognia settings. Add one identically isolated
+service/volume/secret per additional workspace; do not mount the aggregate
+`cognia_workspaces` volume into a runtime.
 
 ## Seccomp profile (`seccomp/cognia-userns.json`)
 

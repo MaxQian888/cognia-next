@@ -42,6 +42,10 @@ export interface HeadlessRuntimeContext {
    * schedule a snapshot flush.
    */
   notifyDbWrite: () => void
+  /** Host filesystem adapter for scheduled encrypted backups. */
+  backupFilesystem?: import("@/lib/data/backup-scheduler").BackupFilesystem
+  /** Node plugin host adapter; native disk lifecycle stays in cognia-server. */
+  pluginRuntime?: HeadlessPluginRuntimeAdapter
   /**
    * Resolve a user-facing message key (both locales live in `i18n/messages`)
    * — the headless stand-in for `useTranslations()`.
@@ -49,6 +53,18 @@ export interface HeadlessRuntimeContext {
   resolveMessage: (key: string, params?: Record<string, string | number>) => string
   /** Structured logging into the serve process's logger. */
   log: (level: "info" | "warn" | "error", message: string) => void
+}
+
+export interface HeadlessPluginChange {
+  action: "installed" | "restored" | "uninstalled"
+  pluginId: string
+  accountId?: string | null
+}
+
+export interface HeadlessPluginRuntimeAdapter {
+  start(): Promise<void>
+  reconcile(change: HeadlessPluginChange): Promise<void>
+  stop?(): Promise<void> | void
 }
 
 export interface HeadlessRuntime {

@@ -66,6 +66,16 @@ impl SidecarProcess {
         settings_json: &str,
         extra_env: &[(String, String)],
     ) -> Result<Self, McpServerError> {
+        let metadata = std::fs::metadata(sidecar_path).map_err(|error| {
+            McpServerError::SidecarSpawn(format!(
+                "MCP sidecar is unavailable at '{sidecar_path}': {error}"
+            ))
+        })?;
+        if !metadata.is_file() {
+            return Err(McpServerError::SidecarSpawn(format!(
+                "MCP sidecar path is not a file: '{sidecar_path}'"
+            )));
+        }
         let mut cmd = Command::new("node");
         cmd.arg(sidecar_path)
             .env("COGNIA_BRIDGED", "1")
@@ -166,6 +176,11 @@ pub(crate) async fn spawn_streaming_node(
     settings_json: &str,
     extra_env: &[(String, String)],
 ) -> Result<(Child, ChildStdin, BufReader<ChildStdout>), McpServerError> {
+    if !std::path::Path::new(sidecar_path).is_file() {
+        return Err(McpServerError::SidecarSpawn(format!(
+            "MCP streaming sidecar is unavailable at '{sidecar_path}'"
+        )));
+    }
     let mut cmd = Command::new("node");
     cmd.arg(sidecar_path)
         .env("COGNIA_BRIDGED", "1")
@@ -298,5 +313,20 @@ mod tests {
             let resp = sidecar.round_trip(&req).await.expect("round-trip");
             assert_eq!(resp, req, "response for id={i} should echo exactly");
         }
+    }
+
+    #[tokio::test]
+    async fn spawn_rejects_a_missing_sidecar_before_starting_node() {
+        let result = SidecarProcess::spawn_with_env(
+            "/definitely/missing/cognia-mcp.mjs",
+            r#"{"enabled":true,"enabledScopes":[]}"#,
+            &[],
+        )
+        .await;
+        let error = match result {
+            Ok(_) => panic!("missing sidecar path must be rejected"),
+            Err(error) => error,
+        };
+        assert!(matches!(error, McpServerError::SidecarSpawn(_)));
     }
 }

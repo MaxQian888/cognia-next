@@ -9,9 +9,8 @@
  *     from a `useEffect` with no options — behaviour is identical to the
  *     pre-extraction provider (including the `isTauri()` gate).
  *   - Headless brain: `lib/headless/runtimes/connector-runtime.ts` calls it
- *     with `skipHostGate`, a webhook-only `rowFilter`, and a serve-log
- *     `log`, after remapping the Tauri command/event seams onto the
- *     companion RPC arms and `/ws/v1/events`.
+ *     with `skipHostGate` and a serve-log `log`, after remapping the Tauri
+ *     command/event seams onto the companion RPC arms and `/ws/v1/events`.
  *
  * Boot sequence:
  *   0. Registers the two connector scheduler-task executors

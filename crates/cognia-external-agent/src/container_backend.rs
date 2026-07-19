@@ -555,13 +555,13 @@ impl ExecBackend for ContainerBackend {
 /// that cannot spawn runners must fail at boot, not degrade into running dev
 /// agents inside the server container.
 pub fn exec_backend_from_env() -> Result<Arc<dyn ExecBackend>, String> {
-    match std::env::var(EXEC_BACKEND_ENV).ok().as_deref() {
+    let legacy: Arc<dyn ExecBackend> = match std::env::var(EXEC_BACKEND_ENV).ok().as_deref() {
         Some("container") => {
             #[cfg(feature = "container-exec")]
             {
                 let config = ContainerBackendConfig::from_env()?;
                 let api = bollard_api::BollardContainerApi::connect()?;
-                Ok(ContainerBackend::new(api, config))
+                Ok::<Arc<dyn ExecBackend>, String>(ContainerBackend::new(api, config))
             }
             #[cfg(not(feature = "container-exec"))]
             {
@@ -580,7 +580,7 @@ pub fn exec_backend_from_env() -> Result<Arc<dyn ExecBackend>, String> {
                     ));
                 }
                 let api = super::kube_backend::kube_api::KubeContainerApi::connect()?;
-                Ok(ContainerBackend::new(api, config))
+                Ok::<Arc<dyn ExecBackend>, String>(ContainerBackend::new(api, config))
             }
             #[cfg(not(feature = "k8s-exec"))]
             {
@@ -590,10 +590,11 @@ pub fn exec_backend_from_env() -> Result<Arc<dyn ExecBackend>, String> {
             }
         }
         None | Some("") | Some("local-process") => {
-            Ok(super::exec_backend::LocalProcessBackend::new())
+            Ok::<Arc<dyn ExecBackend>, String>(super::exec_backend::LocalProcessBackend::new())
         }
         Some(other) => Err(format!("unknown {EXEC_BACKEND_ENV} value: {other}")),
-    }
+    }?;
+    super::workspace_runtime_backend::wrap_with_workspace_runtime_from_env(legacy)
 }
 
 // ---------------------------------------------------------------------------

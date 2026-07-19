@@ -27,8 +27,12 @@ jest.mock("@/lib/plugin/core/invoke-plugin-tool", () => ({
 }))
 
 const redactTextMock = jest.fn((text: string) => ({ redacted: text, map: {} }))
+const hasNoLeakingPiiMock = jest.fn<boolean, [string]>(() => true)
+const hasNoLeakingPiiDeepMock = jest.fn<boolean, [unknown]>(() => true)
 jest.mock("@cognia/redact", () => ({
   redactText: (...a: unknown[]) => redactTextMock(...(a as [string])),
+  hasNoLeakingPii: (...a: unknown[]) => hasNoLeakingPiiMock(...(a as [string])),
+  hasNoLeakingPiiDeep: (...a: unknown[]) => hasNoLeakingPiiDeepMock(...(a as [unknown])),
 }))
 
 const updateTeamMock = jest.fn()
@@ -46,6 +50,8 @@ beforeEach(() => {
   executeAgentMock.mockReset()
   invokePluginToolMock.mockReset()
   redactTextMock.mockReset().mockImplementation((text: string) => ({ redacted: text, map: {} }))
+  hasNoLeakingPiiMock.mockReset().mockReturnValue(true)
+  hasNoLeakingPiiDeepMock.mockReset().mockReturnValue(true)
   updateTeamMock.mockReset()
   storeTeams = {}
 })
@@ -66,6 +72,15 @@ describe("agentDispatch", () => {
     const out = await agentDispatch({ prompt: "hi" })
     expect(out.ok).toBe(false)
     expect(out.error).toMatch(/subagentId or characterId/)
+  })
+
+  it("fails closed before dispatch when the prompt contains PII", async () => {
+    hasNoLeakingPiiMock.mockReturnValue(false)
+
+    const out = await agentDispatch({ subagentId: "reviewer", prompt: "email alice@example.com" })
+
+    expect(out).toEqual({ ok: false, error: "agent_dispatch prompt failed the outbound PII gate" })
+    expect(dispatchSubagentMock).not.toHaveBeenCalled()
   })
 
   it("dispatches a subagent and returns its text", async () => {
@@ -380,6 +395,37 @@ describe("runOrchestrationExec (renderer dispatch entry for the sidecar path)", 
     }
     expect(out.ok).toBe(true)
     expect(out.teams?.[0]?.id).toBe("t9")
+  })
+
+  it("routes the generic host bridge envelope through the same core", async () => {
+    dispatchSubagentMock.mockResolvedValue({ text: "done", channel: "text" })
+    const out = (await runOrchestrationExec("agentDispatch", {
+      arguments: [{ subagentId: "x", prompt: "p" }],
+    })) as { ok: boolean; text?: string }
+
+    expect(out).toMatchObject({ ok: true, text: "done" })
+    expect(dispatchSubagentMock).toHaveBeenCalledWith(
+      "x",
+      "p",
+      expect.objectContaining({ toolsEnabled: true })
+    )
+  })
+
+  it("rejects a malformed generic host bridge envelope", async () => {
+    await expect(runOrchestrationExec("agentDispatch", {})).resolves.toEqual({
+      ok: false,
+      error: "host command 'agentDispatch' requires an arguments array",
+    })
+  })
+
+  it("fails closed when a generic host response contains PII", async () => {
+    storeTeams = { t9: { id: "t9", name: "N", status: "idle", task: "obj" } }
+    hasNoLeakingPiiDeepMock.mockReturnValue(false)
+
+    await expect(runOrchestrationExec("teamList", { arguments: [{}] })).resolves.toEqual({
+      ok: false,
+      error: "host command 'teamList' response failed the outbound PII gate",
+    })
   })
 
   it("returns a structured error for an unknown command", async () => {

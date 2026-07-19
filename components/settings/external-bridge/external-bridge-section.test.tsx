@@ -7,6 +7,21 @@
  */
 
 import "fake-indexeddb/auto"
+let mockMcpHostAvailable = false
+const mockStartMcpServer = jest.fn(async (_args: unknown) => 47890)
+const mockStopMcpServer = jest.fn(async () => undefined)
+jest.mock("@/hooks/use-host-profile", () => ({
+  useCapability: () => mockMcpHostAvailable,
+}))
+jest.mock("@/lib/external-bridge/tauri-control", () => ({
+  getMcpServerStatus: jest.fn(async () => ({
+    running: false,
+    port: null,
+    startedAt: null,
+  })),
+  startMcpServer: (...args: unknown[]) => mockStartMcpServer(args[0]),
+  stopMcpServer: () => mockStopMcpServer(),
+}))
 import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import enMessages from "@/i18n/messages/en.json"
@@ -18,6 +33,9 @@ import { getSettings, saveSettings } from "@/lib/db/settings"
 import { appendMcpAuditLog } from "@/lib/db/mcp-audit-log"
 
 beforeEach(async () => {
+  mockMcpHostAvailable = false
+  mockStartMcpServer.mockClear()
+  mockStopMcpServer.mockClear()
   await getDb().delete()
   __resetDbForTesting()
   getDb()
@@ -45,6 +63,19 @@ describe("ExternalBridgeSection", () => {
       const settings = await getSettings()
       expect(settings.externalBridge?.enabled).toBe(true)
     })
+  })
+
+  it("starts the process-owned MCP server when a remote host supplies the capability", async () => {
+    mockMcpHostAvailable = true
+    const user = userEvent.setup()
+    render(<ExternalBridgeSection />)
+
+    await user.click(await screen.findByLabelText(/Enable MCP server/i))
+
+    await waitFor(() => expect(mockStartMcpServer).toHaveBeenCalledTimes(1))
+    expect(mockStartMcpServer).toHaveBeenCalledWith(
+      expect.objectContaining({ port: 0, settings: expect.objectContaining({ enabled: true }) })
+    )
   })
 
   it("default-enabled scopes are wiki:cognia + rag:cognia", async () => {

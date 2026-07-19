@@ -13,6 +13,8 @@
  */
 
 import { isTauri, transport } from "@/lib/tauri"
+import { isHeadlessHost } from "@/lib/platform/detect"
+import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import type { ExternalBridgeSettings } from "@/types/wiki"
 
 export interface McpServerStatus {
@@ -30,6 +32,10 @@ export interface StartArgs {
   settings: ExternalBridgeSettings
   /** Filesystem path to `cognia-mcp.js` (the bundled standalone-entry). */
   sidecarPath: string
+}
+
+export function isMcpServerHostAvailable(): boolean {
+  return isTauri() || isHeadlessHost() || isRemoteHostActive()
 }
 
 /** Start the HTTP MCP server. Returns the bound port. */
@@ -65,7 +71,7 @@ export async function restartMcpServer(args: StartArgs): Promise<number> {
  * fall-through only fires when transport is the WebStub.
  */
 export async function getMcpServerStatus(): Promise<McpServerStatus> {
-  if (!isTauri()) {
+  if (!isMcpServerHostAvailable()) {
     return { running: false, port: null, startedAt: null }
   }
   return transport.call<McpServerStatus>("mcp_server_status")

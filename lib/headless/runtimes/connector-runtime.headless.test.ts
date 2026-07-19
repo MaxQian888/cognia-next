@@ -72,19 +72,13 @@ beforeEach(() => {
 })
 
 describe("connector-runtime (headless)", () => {
-  it("boots the shared installer with skipHostGate + webhook-only rowFilter", async () => {
+  it("boots every connector transport through the shared headless command and event seams", async () => {
     const { ctx, stop } = await bootConnectorRuntime()
 
     expect(mockInstall).toHaveBeenCalledTimes(1)
     const opts = mockInstall.mock.calls[0][0]!
     expect(opts.skipHostGate).toBe(true)
-
-    // Webhook rows pass; every dial-out transport mode is filtered.
-    const row = (transportMode: string) => ({ transportMode }) as never
-    expect(opts.rowFilter!(row("webhook"))).toBe(true)
-    for (const mode of ["longpoll", "reverse-ws", "forward-ws", "gateway", "imap-smtp"]) {
-      expect(opts.rowFilter!(row(mode))).toBe(false)
-    }
+    expect(opts.rowFilter).toBeUndefined()
 
     // The installer's log sink is the serve process logger.
     opts.log!("warn", "boot message")

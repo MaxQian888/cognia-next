@@ -2,7 +2,7 @@
  * @jest-environment node
  */
 import net from "node:net"
-import { proxyToRenderer, __testing__ } from "./orchestration-proxy-client"
+import { proxyToHost, proxyToRenderer, __testing__ } from "./orchestration-proxy-client"
 
 /** Boot a tiny newline-JSON echo server that answers each request by `id`. */
 async function startEchoServer(
@@ -91,5 +91,32 @@ describe("proxyToRenderer", () => {
     const out = await proxyToRenderer<{ ok: boolean; error?: string }>("agent_dispatch", {})
     expect(out.ok).toBe(false)
     expect(out.error).toMatch(/invalid COGNIA_ORCH_PROXY/)
+  })
+})
+
+describe("proxyToHost", () => {
+  it("returns arbitrary canonical handler values", async () => {
+    const srv = await startEchoServer(() => ({ ok: true, result: ["one", "two"] }))
+    process.env.COGNIA_ORCH_PROXY = srv.addr
+    process.env.COGNIA_ORCH_PROXY_TOKEN = "tok"
+    try {
+      await expect(proxyToHost<string[]>("listSkills", { arguments: [] })).resolves.toEqual([
+        "one",
+        "two",
+      ])
+    } finally {
+      srv.close()
+    }
+  })
+
+  it("rejects proxy-level failures for non-envelope handlers", async () => {
+    const srv = await startEchoServer(() => ({ ok: false, error: "host unavailable" }))
+    process.env.COGNIA_ORCH_PROXY = srv.addr
+    process.env.COGNIA_ORCH_PROXY_TOKEN = "tok"
+    try {
+      await expect(proxyToHost("wikiSearch", { arguments: [] })).rejects.toThrow("host unavailable")
+    } finally {
+      srv.close()
+    }
   })
 })

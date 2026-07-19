@@ -154,6 +154,59 @@ impl WsTerminalRegistry {
         guard.remove(session_id)
     }
 
+    /// Snapshot the live/resumable sessions owned by one authenticated
+    /// device. Device scoping mirrors reconnect lookup and prevents a paired
+    /// client from enumerating another client's shell metadata.
+    pub(crate) fn list_for_device(
+        &self,
+        device_id: &str,
+    ) -> Vec<crate::terminal::TerminalSessionInfo> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .values()
+            .filter(|entry| entry.device_id == device_id)
+            .map(|entry| entry.session.info())
+            .collect()
+    }
+
+    /// Device-scoped project projection over the same reconnect registry.
+    pub(crate) fn list_for_device_project(
+        &self,
+        device_id: &str,
+        project_id: &str,
+    ) -> Vec<crate::terminal::TerminalSessionInfo> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .values()
+            .filter(|entry| {
+                entry.device_id == device_id
+                    && entry.session.project_id.as_deref() == Some(project_id)
+            })
+            .map(|entry| entry.session.info())
+            .collect()
+    }
+
+    /// Kill and forget a session only when it belongs to the caller. Missing
+    /// and foreign ids are both an idempotent no-op so ownership is not leaked.
+    pub(crate) fn kill_for_device(&self, session_id: &str, device_id: &str) {
+        let entry = {
+            let mut guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+            if guard
+                .get(session_id)
+                .is_some_and(|entry| entry.device_id == device_id)
+            {
+                guard.remove(session_id)
+            } else {
+                None
+            }
+        };
+        if let Some(entry) = entry {
+            let _ = entry.session.kill();
+        }
+    }
+
     /// Reaper sweep: drop sessions whose consumer has been gone for
     /// longer than `RESUME_TTL`. Called by the background tokio task.
     fn reap(&self, now: Instant) {
@@ -476,6 +529,13 @@ async fn handle_terminal_socket(
                         match handle_control_frame(text.as_str(), &session) {
                             Ok(ControlAction::Continue) => {}
                             Ok(ControlAction::Killed) => {
+                                // We leave the select loop immediately, so the
+                                // waiter-thread Exit event may never be drained
+                                // from `rx`. Acknowledge the explicit kill on
+                                // the wire before closing; clients use this as
+                                // the terminal lifecycle completion signal.
+                                let payload = json!({ "kind": "exit", "code": null });
+                                let _ = socket.send(Message::Text(payload.to_string().into())).await;
                                 exited = true;
                                 break;
                             }
@@ -564,6 +624,7 @@ fn build_spawn_request(params: &WsTerminalParams) -> Result<SpawnRequest, String
         skip_user_profile: false,
         // Remote WS sessions are not wrapped in the local OS sandbox.
         sandboxed: false,
+        sandbox_network: None,
     })
 }
 
@@ -707,6 +768,7 @@ mod tests {
         assert_eq!(req.rows, 24);
         assert_eq!(req.cols, 80);
         assert_eq!(req.origin, SessionOrigin::Remote);
+        assert_eq!(req.sandbox_network, None);
         // Integration is always disabled on remote sessions for v1.
         assert!(!req.enable_shell_integration);
     }

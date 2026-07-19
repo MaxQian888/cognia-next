@@ -24,6 +24,8 @@ import { DEFAULT_EXTERNAL_BRIDGE_SETTINGS } from "@/types/wiki"
 import type { ExternalBridgeSettings } from "@/types/wiki"
 import * as fs from "node:fs/promises"
 import * as path from "node:path"
+// static-export-exempt: Node-only MCP stdio entry bundled as a Tauri sidecar, never imported by UI
+import { pathToFileURL } from "node:url"
 
 /** Resolve the settings getter for the current runtime mode. */
 export function resolveSettingsGetter(): SettingsGetter {
@@ -82,8 +84,11 @@ export async function runMcpServerStdio(): Promise<void> {
 
 // Auto-run when invoked as a CLI (node bin/cognia-mcp.js). Skipped when the
 // module is `import`-ed by tests.
-const isMainModule =
-  typeof require !== "undefined" && typeof module !== "undefined" && require.main === module
+export function isEntrypoint(moduleUrl: string, argvPath = process.argv[1]): boolean {
+  return Boolean(argvPath && pathToFileURL(path.resolve(argvPath)).href === moduleUrl)
+}
+
+const isMainModule = isEntrypoint(import.meta.url)
 if (isMainModule) {
   runMcpServerStdio().catch((err) => {
     console.error("[cognia-mcp] fatal:", err)

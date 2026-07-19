@@ -20,6 +20,7 @@
 import { createCharacter, deleteCharacter, updateCharacter } from "@/lib/db/characters"
 import type { CharacterDraft } from "@/lib/db/characters"
 import { approveDraft, rejectDraft } from "@/lib/db/connector-drafts"
+import { enqueueOutbound } from "@/lib/db/outbound-jobs"
 import { attachSession, detachSession } from "@/lib/companion/remote-attach-registry"
 import {
   handleTeamRunPause,
@@ -489,6 +490,10 @@ async function memorySearchRpc(payload: Record<string, unknown>): Promise<unknow
     topK: typeof payload.k === "number" ? payload.k : undefined,
     types: payload.types as never,
     characterId: payload.characterId as string | undefined,
+    projectId: payload.projectId as string | undefined,
+    agentId: payload.agentId as string | undefined,
+    branch: payload.branch as string | undefined,
+    path: payload.path as string | undefined,
   })
   if (!result.ok) return result
   const { toMemoryWireRow } = await import("@/lib/memory/api/wire")
@@ -518,6 +523,11 @@ async function memoryListRpc(payload: Record<string, unknown>): Promise<unknown>
   const rows = await listMemories({
     type: payload.type as never,
     scope: payload.scope as never,
+    characterId: payload.characterId as string | undefined,
+    projectId: payload.projectId as string | undefined,
+    agentId: payload.agentId as string | undefined,
+    branch: payload.branch as string | undefined,
+    pathPattern: payload.pathPattern as string | undefined,
     status: "active",
   })
   const limit = Math.min(200, Math.max(1, typeof payload.limit === "number" ? payload.limit : 50))
@@ -536,6 +546,10 @@ async function memoryStoreRpc(payload: Record<string, unknown>): Promise<unknown
       type: payload.type as never,
       scope: payload.scope as never,
       characterId: payload.characterId as string | undefined,
+      projectId: payload.projectId as string | undefined,
+      agentId: payload.agentId as string | undefined,
+      branch: payload.branch as string | undefined,
+      pathPattern: payload.pathPattern as string | undefined,
       key: payload.key as string | undefined,
       importance: typeof payload.importance === "number" ? payload.importance : undefined,
       tags: payload.tags as string[] | undefined,
@@ -555,6 +569,7 @@ async function memoryUpdateRpc(payload: Record<string, unknown>): Promise<unknow
     importance: typeof payload.importance === "number" ? payload.importance : undefined,
     tags: payload.tags as string[] | undefined,
     key: payload.key as string | undefined,
+    pinned: typeof payload.pinned === "boolean" ? payload.pinned : undefined,
   })
 }
 
@@ -767,6 +782,15 @@ async function connectorSend(payload: Record<string, unknown>): Promise<{ messag
 async function connectorApproveDraft(payload: Record<string, unknown>): Promise<null> {
   const draftId = payload.draftId as string | undefined
   if (!draftId) throw new Error("connector_approve_draft.draftId is required")
+  const draft = await getDb().connectorDrafts.get(draftId)
+  if (draft?.outboundPreview) {
+    await enqueueOutbound({
+      adapterId: draft.outboundPreview.conversationRef.adapterId,
+      conversationKey: draft.conversationKey,
+      request: draft.outboundPreview,
+      source: "draft-approved",
+    })
+  }
   await approveDraft(draftId)
   return null
 }

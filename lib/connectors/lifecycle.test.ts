@@ -105,12 +105,14 @@ describe("requeueAdapter", () => {
     expect(getRunningAdapter("r1")).toBeUndefined()
   })
 
-  it("propagates restart() rejections to the caller", async () => {
+  it("retries once and preserves a reconnect placeholder after repeated failure", async () => {
     const restart = jest.fn().mockRejectedValue(new Error("restart bombed"))
     const entry = makeEntry("r2", { restart })
     registerRunningAdapter("r2", entry)
-    await expect(requeueAdapter("r2")).rejects.toThrow(/restart bombed/)
+    await expect(requeueAdapter("r2")).resolves.toBe(false)
     expect(entry.abortController.signal.aborted).toBe(true)
+    expect(restart).toHaveBeenCalledTimes(2)
+    expect(getRunningAdapter("r2")).toBe(entry)
   })
 })
 
@@ -173,7 +175,7 @@ describe("subscribeCredentialsRotatedToLifecycle", () => {
     emitCredentialsRotated("slack-1")
     await new Promise((r) => setTimeout(r, 0))
     await new Promise((r) => setTimeout(r, 0))
-    expect(restart).toHaveBeenCalledTimes(1)
+    expect(restart).toHaveBeenCalledTimes(2)
     expect(consoleSpy).toHaveBeenCalled()
     consoleSpy.mockRestore()
     unsubscribe()

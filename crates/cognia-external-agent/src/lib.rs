@@ -13,6 +13,7 @@ pub mod presets;
 pub mod proc_group;
 pub mod process;
 pub mod terminal;
+pub mod workspace_runtime_backend;
 
 /// Env-mutating tests across this crate's modules serialize on one lock.
 /// (In app_lib they shared companion_api::ws_bridge's global test lock; as an

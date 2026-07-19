@@ -1874,6 +1874,132 @@ paths:
                 stopped: { value: { running: false } }
         "401": { $ref: "#/components/responses/JwtRejected" }
 
+  /api/v1/_rpc/mcp_server_start:
+    post:
+      operationId: rpcMcpServerStart
+      tags: [rpc-mcp]
+      summary: Start the process-owned External Bridge MCP server.
+      description: Requires remote-control authorization for device JWTs; the loopback brain service token is also accepted. The server resolves its packaged sidecar path and ignores a client-supplied path on headless hosts.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              { schema: { $ref: "#/components/schemas/McpServerLifecycleRequest" } },
+          }
+      responses:
+        "200":
+          {
+            description: Bound TCP port.,
+            content:
+              { application/json: { schema: { type: integer, minimum: 1, maximum: 65535 } } },
+          }
+        "400":
+          {
+            description: Invalid settings or bearer token.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "409":
+          {
+            description: Server is already running.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "503":
+          {
+            description: Packaged sidecar or TCP listener is unavailable.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/mcp_server_restart:
+    post:
+      operationId: rpcMcpServerRestart
+      tags: [rpc-mcp]
+      summary: Atomically stop and restart the process-owned MCP server.
+      description: Requires remote-control authorization for device JWTs; the loopback brain service token is also accepted.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              { schema: { $ref: "#/components/schemas/McpServerLifecycleRequest" } },
+          }
+      responses:
+        "200":
+          {
+            description: Newly bound TCP port.,
+            content:
+              { application/json: { schema: { type: integer, minimum: 1, maximum: 65535 } } },
+          }
+        "400":
+          {
+            description: Invalid settings or bearer token.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "503":
+          {
+            description: Packaged sidecar or TCP listener is unavailable.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/mcp_server_stop:
+    post:
+      operationId: rpcMcpServerStop
+      tags: [rpc-mcp]
+      summary: Gracefully stop the process-owned MCP server.
+      description: Idempotent when already stopped. Requires remote-control authorization for device JWTs; the loopback brain service token is also accepted.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object } } }
+      responses:
+        "200":
+          {
+            description: Server is stopped.,
+            content: { application/json: { schema: { type: "null" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+
+  /api/v1/_rpc/orchestration_proxy_response:
+    post:
+      operationId: rpcOrchestrationProxyResponse
+      tags: [rpc-mcp]
+      summary: Resolve one pending MCP orchestration request.
+      description: First reply wins; unknown or already-resolved ids are a no-op. Requires remote-control authorization so an observation-only paired device cannot spoof agent, team, or plugin-tool results.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, ok]
+              additionalProperties: false
+              properties:
+                id: { type: string }
+                ok: { type: boolean }
+                result: {}
+                error: { type: [string, "null"] }
+      responses:
+        "200":
+          {
+            description: Reply accepted or id was already resolved.,
+            content: { application/json: { schema: { type: "null" } } },
+          }
+        "400":
+          {
+            description: Invalid reply envelope.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+
   /api/v1/_rpc/test_mcp_server:
     post:
       operationId: rpcTestMcpServer
@@ -3015,6 +3141,115 @@ paths:
                   serverRunning: { type: boolean }
                   boundAddr: { type: string, nullable: true }
                   registeredAdapterCount: { type: integer }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "503":
+          {
+            description: not a headless install,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/keyring_secret_get:
+    post:
+      operationId: rpcKeyringSecretGet
+      tags: [rpc-control]
+      summary: Read a namespaced value from the headless encrypted secret store (service scope only).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [input]
+              properties:
+                input:
+                  type: object
+                  required: [namespace, key]
+                  properties:
+                    namespace: { type: string, minLength: 1 }
+                    key: { type: string, minLength: 1 }
+      responses:
+        "200":
+          description: The stored value, or null when unset.
+          content:
+            application/json:
+              schema: { type: string, nullable: true }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "503":
+          {
+            description: not a headless install,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/keyring_secret_set:
+    post:
+      operationId: rpcKeyringSecretSet
+      tags: [rpc-control]
+      summary: Store a namespaced value in the headless encrypted secret store (service scope only).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [input]
+              properties:
+                input:
+                  type: object
+                  required: [namespace, key, value]
+                  properties:
+                    namespace: { type: string, minLength: 1 }
+                    key: { type: string, minLength: 1 }
+                    value: { type: string }
+      responses:
+        "200": { description: Stored., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "503":
+          {
+            description: not a headless install,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/keyring_secret_clear:
+    post:
+      operationId: rpcKeyringSecretClear
+      tags: [rpc-control]
+      summary: Delete a namespaced value from the headless encrypted secret store (service scope only).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [input]
+              properties:
+                input:
+                  type: object
+                  required: [namespace, key]
+                  properties:
+                    namespace: { type: string, minLength: 1 }
+                    key: { type: string, minLength: 1 }
+      responses:
+        "200":
+          { description: Cleared., content: { application/json: { schema: { type: "null" } } } }
         "401": { $ref: "#/components/responses/JwtRejected" }
         "403":
           {
@@ -6549,7 +6784,11 @@ paths:
       tags: [rpc-task-workspace]
       summary: Read task-workspace capability and transfer limits.
       responses:
-        "200": { description: Capability status., content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "200":
+          {
+            description: Capability status.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
         "401": { $ref: "#/components/responses/JwtRejected" }
 
   /api/v1/_rpc/task_workspace_begin:
@@ -6558,20 +6797,70 @@ paths:
       tags: [rpc-task-workspace]
       summary: Begin an isolated task run. Requires remote control; built-in headless chat consumes the same envelope internally.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [input], properties: { input: { type: object, additionalProperties: true } } } } } }
+      requestBody:
+        {
+          required: true,
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    {
+                      type: object,
+                      required: [input],
+                      properties: { input: { type: object, additionalProperties: true } },
+                    },
+                },
+            },
+        }
       responses:
-        "200": { description: Created task run and isolated execution root., content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "200":
+          {
+            description: Created task run and isolated execution root.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
         "401": { $ref: "#/components/responses/JwtRejected" }
-        "403": { description: Remote-control permission required., content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+        "403":
+          {
+            description: Remote-control permission required.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
 
   /api/v1/_rpc/task_workspace_settle:
     post:
       operationId: rpcTaskWorkspaceSettle
       tags: [rpc-task-workspace]
       summary: Reconcile a run snapshot into authoritative resource changes; idempotent once ready.
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [runId], properties: { runId: { type: string }, finalState: { type: string, enum: [ready, failed, cancelled] } } } } } }
+      requestBody:
+        {
+          required: true,
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    {
+                      type: object,
+                      required: [runId],
+                      properties:
+                        {
+                          runId: { type: string },
+                          finalState: { type: string, enum: [ready, failed, cancelled] },
+                        },
+                    },
+                },
+            },
+        }
       responses:
-        "200": { description: Authoritative resource changes., content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
+        "200":
+          {
+            description: Authoritative resource changes.,
+            content:
+              {
+                application/json:
+                  { schema: { type: array, items: { type: object, additionalProperties: true } } },
+              },
+          }
         "401": { $ref: "#/components/responses/JwtRejected" }
 
   /api/v1/_rpc/task_workspace_get:
@@ -6579,9 +6868,28 @@ paths:
       operationId: rpcTaskWorkspaceGet
       tags: [rpc-task-workspace]
       summary: Read one task workspace by task id.
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [taskId], properties: { taskId: { type: string } } } } } }
+      requestBody:
+        {
+          required: true,
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    { type: object, required: [taskId], properties: { taskId: { type: string } } },
+                },
+            },
+        }
       responses:
-        "200": { description: Task workspace or null., content: { application/json: { schema: { type: [object, "null"], additionalProperties: true } } } }
+        "200":
+          {
+            description: Task workspace or null.,
+            content:
+              {
+                application/json:
+                  { schema: { type: [object, "null"], additionalProperties: true } },
+              },
+          }
         "401": { $ref: "#/components/responses/JwtRejected" }
 
   /api/v1/_rpc/task_workspace_list_runs:
@@ -6589,9 +6897,28 @@ paths:
       operationId: rpcTaskWorkspaceListRuns
       tags: [rpc-task-workspace]
       summary: List parent, retry, and child-agent runs for a task.
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [taskId], properties: { taskId: { type: string } } } } } }
+      requestBody:
+        {
+          required: true,
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    { type: object, required: [taskId], properties: { taskId: { type: string } } },
+                },
+            },
+        }
       responses:
-        "200": { description: Task runs., content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
+        "200":
+          {
+            description: Task runs.,
+            content:
+              {
+                application/json:
+                  { schema: { type: array, items: { type: object, additionalProperties: true } } },
+              },
+          }
         "401": { $ref: "#/components/responses/JwtRejected" }
 
   /api/v1/_rpc/task_workspace_list:
@@ -6599,9 +6926,25 @@ paths:
       operationId: rpcTaskWorkspaceList
       tags: [rpc-task-workspace]
       summary: List persisted task workspaces, optionally scoped to one chat session.
-      requestBody: { required: false, content: { application/json: { schema: { type: object, properties: { sessionId: { type: string } } } } } }
+      requestBody:
+        {
+          required: false,
+          content:
+            {
+              application/json:
+                { schema: { type: object, properties: { sessionId: { type: string } } } },
+            },
+        }
       responses:
-        "200": { description: Task workspaces newest first., content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
+        "200":
+          {
+            description: Task workspaces newest first.,
+            content:
+              {
+                application/json:
+                  { schema: { type: array, items: { type: object, additionalProperties: true } } },
+              },
+          }
         "401": { $ref: "#/components/responses/JwtRejected" }
 
   /api/v1/_rpc/task_workspace_list_resources:
@@ -6609,9 +6952,28 @@ paths:
       operationId: rpcTaskWorkspaceListResources
       tags: [rpc-task-workspace]
       summary: List authoritative resource changes for a task.
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [taskId], properties: { taskId: { type: string } } } } } }
+      requestBody:
+        {
+          required: true,
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    { type: object, required: [taskId], properties: { taskId: { type: string } } },
+                },
+            },
+        }
       responses:
-        "200": { description: Resource changes without file bodies., content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
+        "200":
+          {
+            description: Resource changes without file bodies.,
+            content:
+              {
+                application/json:
+                  { schema: { type: array, items: { type: object, additionalProperties: true } } },
+              },
+          }
         "401": { $ref: "#/components/responses/JwtRejected" }
 
   /api/v1/_rpc/task_workspace_get_resource:
@@ -6619,9 +6981,32 @@ paths:
       operationId: rpcTaskWorkspaceGetResource
       tags: [rpc-task-workspace]
       summary: Read the latest metadata for one task resource.
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [taskId, path], properties: { taskId: { type: string }, path: { type: string } } } } } }
+      requestBody:
+        {
+          required: true,
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    {
+                      type: object,
+                      required: [taskId, path],
+                      properties: { taskId: { type: string }, path: { type: string } },
+                    },
+                },
+            },
+        }
       responses:
-        "200": { description: Resource metadata or null., content: { application/json: { schema: { type: [object, "null"], additionalProperties: true } } } }
+        "200":
+          {
+            description: Resource metadata or null.,
+            content:
+              {
+                application/json:
+                  { schema: { type: [object, "null"], additionalProperties: true } },
+              },
+          }
         "401": { $ref: "#/components/responses/JwtRejected" }
 
   /api/v1/_rpc/task_workspace_get_patch_set:
@@ -6629,9 +7014,28 @@ paths:
       operationId: rpcTaskWorkspaceGetPatchSet
       tags: [rpc-task-workspace]
       summary: Read patch metadata and hunk ids for one run.
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [runId], properties: { runId: { type: string } } } } } }
+      requestBody:
+        {
+          required: true,
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    { type: object, required: [runId], properties: { runId: { type: string } } },
+                },
+            },
+        }
       responses:
-        "200": { description: Patch set metadata or null., content: { application/json: { schema: { type: [object, "null"], additionalProperties: true } } } }
+        "200":
+          {
+            description: Patch set metadata or null.,
+            content:
+              {
+                application/json:
+                  { schema: { type: [object, "null"], additionalProperties: true } },
+              },
+          }
         "401": { $ref: "#/components/responses/JwtRejected" }
 
   /api/v1/_rpc/task_resource_read_text:
@@ -6639,31 +7043,116 @@ paths:
       operationId: rpcTaskResourceReadText
       tags: [rpc-task-workspace]
       summary: Read bounded UTF-8 content with hash, truncation, and resume metadata.
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [runId, relPath], properties: { runId: { type: string }, relPath: { type: string }, offset: { type: integer }, maxBytes: { type: integer }, allowSensitive: { type: boolean, description: Requires remote-control permission. } } } } } }
+      requestBody:
+        {
+          required: true,
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    {
+                      type: object,
+                      required: [runId, relPath],
+                      properties:
+                        {
+                          runId: { type: string },
+                          relPath: { type: string },
+                          offset: { type: integer },
+                          maxBytes: { type: integer },
+                          allowSensitive:
+                            { type: boolean, description: Requires remote-control permission. },
+                        },
+                    },
+                },
+            },
+        }
       responses:
-        "200": { description: Structured resource read., content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "200":
+          {
+            description: Structured resource read.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
         "401": { $ref: "#/components/responses/JwtRejected" }
-        "403": { description: Sensitive resource authorization required., content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+        "403":
+          {
+            description: Sensitive resource authorization required.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
 
   /api/v1/_rpc/task_resource_read_diff:
     post:
       operationId: rpcTaskResourceReadDiff
       tags: [rpc-task-workspace]
       summary: Read a ledger-backed textual diff for one task resource.
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [runId, path], properties: { runId: { type: string }, path: { type: string }, allowSensitive: { type: boolean, description: Requires remote-control permission. } } } } } }
+      requestBody:
+        {
+          required: true,
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    {
+                      type: object,
+                      required: [runId, path],
+                      properties:
+                        {
+                          runId: { type: string },
+                          path: { type: string },
+                          allowSensitive:
+                            { type: boolean, description: Requires remote-control permission. },
+                        },
+                    },
+                },
+            },
+        }
       responses:
-        "200": { description: Unified diff text., content: { application/json: { schema: { type: string } } } }
+        "200":
+          {
+            description: Unified diff text.,
+            content: { application/json: { schema: { type: string } } },
+          }
         "401": { $ref: "#/components/responses/JwtRejected" }
-        "403": { description: Sensitive resource authorization required., content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+        "403":
+          {
+            description: Sensitive resource authorization required.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
 
   /api/v1/_rpc/task_resource_download_open:
     post:
       operationId: rpcTaskResourceDownloadOpen
       tags: [rpc-task-workspace]
       summary: Open a verified resumable download handle.
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [runId, relPath], properties: { runId: { type: string }, relPath: { type: string }, allowSensitive: { type: boolean, description: Requires remote-control permission. } } } } } }
+      requestBody:
+        {
+          required: true,
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    {
+                      type: object,
+                      required: [runId, relPath],
+                      properties:
+                        {
+                          runId: { type: string },
+                          relPath: { type: string },
+                          allowSensitive:
+                            { type: boolean, description: Requires remote-control permission. },
+                        },
+                    },
+                },
+            },
+        }
       responses:
-        "200": { description: Download handle with ETag hash., content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "200":
+          {
+            description: Download handle with ETag hash.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
         "401": { $ref: "#/components/responses/JwtRejected" }
 
   /api/v1/_rpc/task_resource_download_read_chunk:
@@ -6671,9 +7160,33 @@ paths:
       operationId: rpcTaskResourceDownloadReadChunk
       tags: [rpc-task-workspace]
       summary: Read at most 24 KiB from a download handle with a chunk hash.
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [handleId, offset], properties: { handleId: { type: string }, offset: { type: integer }, length: { type: integer, maximum: 24576 } } } } } }
+      requestBody:
+        {
+          required: true,
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    {
+                      type: object,
+                      required: [handleId, offset],
+                      properties:
+                        {
+                          handleId: { type: string },
+                          offset: { type: integer },
+                          length: { type: integer, maximum: 24576 },
+                        },
+                    },
+                },
+            },
+        }
       responses:
-        "200": { description: Base64 chunk and checksum., content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "200":
+          {
+            description: Base64 chunk and checksum.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
         "401": { $ref: "#/components/responses/JwtRejected" }
 
   /api/v1/_rpc/task_resource_download_close:
@@ -6681,7 +7194,22 @@ paths:
       operationId: rpcTaskResourceDownloadClose
       tags: [rpc-task-workspace]
       summary: Close a download handle.
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [handleId], properties: { handleId: { type: string } } } } } }
+      requestBody:
+        {
+          required: true,
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    {
+                      type: object,
+                      required: [handleId],
+                      properties: { handleId: { type: string } },
+                    },
+                },
+            },
+        }
       responses:
         "200": { description: Closed., content: { application/json: { schema: { type: "null" } } } }
         "401": { $ref: "#/components/responses/JwtRejected" }
@@ -6692,11 +7220,41 @@ paths:
       tags: [rpc-task-workspace]
       summary: Open a verified upload handle. Requires remote control.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [runId, relPath, expectedSize, expectedHash], properties: { runId: { type: string }, relPath: { type: string }, expectedSize: { type: integer }, expectedHash: { type: string }, allowSensitive: { type: boolean } } } } } }
+      requestBody:
+        {
+          required: true,
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    {
+                      type: object,
+                      required: [runId, relPath, expectedSize, expectedHash],
+                      properties:
+                        {
+                          runId: { type: string },
+                          relPath: { type: string },
+                          expectedSize: { type: integer },
+                          expectedHash: { type: string },
+                          allowSensitive: { type: boolean },
+                        },
+                    },
+                },
+            },
+        }
       responses:
-        "200": { description: Upload handle., content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "200":
+          {
+            description: Upload handle.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
         "401": { $ref: "#/components/responses/JwtRejected" }
-        "403": { description: Remote-control permission required., content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+        "403":
+          {
+            description: Remote-control permission required.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
 
   /api/v1/_rpc/task_resource_upload_write_chunk:
     post:
@@ -6704,11 +7262,40 @@ paths:
       tags: [rpc-task-workspace]
       summary: Append a verified upload chunk. Requires remote control.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [handleId, offset, dataBase64, chunkHash], properties: { handleId: { type: string }, offset: { type: integer }, dataBase64: { type: string }, chunkHash: { type: string } } } } } }
+      requestBody:
+        {
+          required: true,
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    {
+                      type: object,
+                      required: [handleId, offset, dataBase64, chunkHash],
+                      properties:
+                        {
+                          handleId: { type: string },
+                          offset: { type: integer },
+                          dataBase64: { type: string },
+                          chunkHash: { type: string },
+                        },
+                    },
+                },
+            },
+        }
       responses:
-        "200": { description: Next required offset., content: { application/json: { schema: { type: integer } } } }
+        "200":
+          {
+            description: Next required offset.,
+            content: { application/json: { schema: { type: integer } } },
+          }
         "401": { $ref: "#/components/responses/JwtRejected" }
-        "403": { description: Remote-control permission required., content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+        "403":
+          {
+            description: Remote-control permission required.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
 
   /api/v1/_rpc/task_resource_upload_commit:
     post:
@@ -6716,11 +7303,34 @@ paths:
       tags: [rpc-task-workspace]
       summary: Atomically publish a verified upload. Requires remote control.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [handleId], properties: { handleId: { type: string } } } } } }
+      requestBody:
+        {
+          required: true,
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    {
+                      type: object,
+                      required: [handleId],
+                      properties: { handleId: { type: string } },
+                    },
+                },
+            },
+        }
       responses:
-        "200": { description: Published SHA-256 hash., content: { application/json: { schema: { type: string } } } }
+        "200":
+          {
+            description: Published SHA-256 hash.,
+            content: { application/json: { schema: { type: string } } },
+          }
         "401": { $ref: "#/components/responses/JwtRejected" }
-        "403": { description: Remote-control permission required., content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+        "403":
+          {
+            description: Remote-control permission required.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
 
   /api/v1/_rpc/task_resource_upload_abort:
     post:
@@ -6728,11 +7338,31 @@ paths:
       tags: [rpc-task-workspace]
       summary: Abort an upload and remove its temporary content. Requires remote control.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [handleId], properties: { handleId: { type: string } } } } } }
+      requestBody:
+        {
+          required: true,
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    {
+                      type: object,
+                      required: [handleId],
+                      properties: { handleId: { type: string } },
+                    },
+                },
+            },
+        }
       responses:
-        "200": { description: Aborted., content: { application/json: { schema: { type: "null" } } } }
+        "200":
+          { description: Aborted., content: { application/json: { schema: { type: "null" } } } }
         "401": { $ref: "#/components/responses/JwtRejected" }
-        "403": { description: Remote-control permission required., content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+        "403":
+          {
+            description: Remote-control permission required.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
 
   /api/v1/_rpc/task_workspace_apply:
     post:
@@ -6740,11 +7370,45 @@ paths:
       tags: [rpc-task-workspace]
       summary: Atomically apply selected files or hunks with three-way conflict protection. Requires remote control.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [runId], properties: { runId: { type: string }, selection: { type: array, items: { type: object, additionalProperties: true } }, allowIrreversible: { type: boolean, default: false, description: Explicit one-shot override when inverse data cannot fit in the local ledger. } } } } } }
+      requestBody:
+        {
+          required: true,
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    {
+                      type: object,
+                      required: [runId],
+                      properties:
+                        {
+                          runId: { type: string },
+                          selection:
+                            { type: array, items: { type: object, additionalProperties: true } },
+                          allowIrreversible:
+                            {
+                              type: boolean,
+                              default: false,
+                              description: Explicit one-shot override when inverse data cannot fit in the local ledger.,
+                            },
+                        },
+                    },
+                },
+            },
+        }
       responses:
-        "200": { description: Applied or conflicted outcome., content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "200":
+          {
+            description: Applied or conflicted outcome.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
         "401": { $ref: "#/components/responses/JwtRejected" }
-        "403": { description: Remote-control permission required., content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+        "403":
+          {
+            description: Remote-control permission required.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
 
   /api/v1/_rpc/task_workspace_undo:
     post:
@@ -6752,11 +7416,30 @@ paths:
       tags: [rpc-task-workspace]
       summary: Apply the exact inverse contribution with conflict protection. Requires remote control.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [runId], properties: { runId: { type: string } } } } } }
+      requestBody:
+        {
+          required: true,
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    { type: object, required: [runId], properties: { runId: { type: string } } },
+                },
+            },
+        }
       responses:
-        "200": { description: Reverted or conflicted outcome., content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "200":
+          {
+            description: Reverted or conflicted outcome.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
         "401": { $ref: "#/components/responses/JwtRejected" }
-        "403": { description: Remote-control permission required., content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+        "403":
+          {
+            description: Remote-control permission required.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
 
   /api/v1/_rpc/task_workspace_resolve_conflict:
     post:
@@ -6764,11 +7447,41 @@ paths:
       tags: [rpc-task-workspace]
       summary: Resolve a conflicted patch by retrying merge, explicitly applying task bytes, or keeping current workspace bytes. Requires remote control.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [runId, resolution], properties: { runId: { type: string }, resolution: { type: string, enum: [retryMerge, applyTask, keepCurrent] }, selection: { type: array, items: { type: object, additionalProperties: true } }, allowIrreversible: { type: boolean, default: false } } } } } }
+      requestBody:
+        {
+          required: true,
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    {
+                      type: object,
+                      required: [runId, resolution],
+                      properties:
+                        {
+                          runId: { type: string },
+                          resolution: { type: string, enum: [retryMerge, applyTask, keepCurrent] },
+                          selection:
+                            { type: array, items: { type: object, additionalProperties: true } },
+                          allowIrreversible: { type: boolean, default: false },
+                        },
+                    },
+                },
+            },
+        }
       responses:
-        "200": { description: Resolved outcome., content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "200":
+          {
+            description: Resolved outcome.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
         "401": { $ref: "#/components/responses/JwtRejected" }
-        "403": { description: Remote-control permission required., content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+        "403":
+          {
+            description: Remote-control permission required.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
 
   /api/v1/_rpc/task_workspace_pin:
     post:
@@ -6776,11 +7489,34 @@ paths:
       tags: [rpc-task-workspace]
       summary: Protect or unprotect a task from retention pruning. Requires remote control.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [taskId, pinned], properties: { taskId: { type: string }, pinned: { type: boolean } } } } } }
+      requestBody:
+        {
+          required: true,
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    {
+                      type: object,
+                      required: [taskId, pinned],
+                      properties: { taskId: { type: string }, pinned: { type: boolean } },
+                    },
+                },
+            },
+        }
       responses:
-        "200": { description: Updated task workspace., content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "200":
+          {
+            description: Updated task workspace.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
         "401": { $ref: "#/components/responses/JwtRejected" }
-        "403": { description: Remote-control permission required., content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+        "403":
+          {
+            description: Remote-control permission required.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
 
   /api/v1/_rpc/task_workspace_prune:
     post:
@@ -6789,9 +7525,17 @@ paths:
       summary: Prune expired reversible task data while preserving pinned and unapplied tasks. Requires remote control.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       responses:
-        "200": { description: Prune counts and reclaimed bytes., content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "200":
+          {
+            description: Prune counts and reclaimed bytes.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
         "401": { $ref: "#/components/responses/JwtRejected" }
-        "403": { description: Remote-control permission required., content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } } }
+        "403":
+          {
+            description: Remote-control permission required.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
 
   /api/v1/_rpc/write_text_file:
     post:
@@ -7451,8 +8195,9 @@ paths:
 
   # ─────────────────────────────────────────────────────────────────────────
   # rpc — plugins (Wave 4.1). Native install/uninstall touch the on-disk plugin
-  # dir + Rust snapshot; a remote install takes effect on the next renderer
-  # reload (it does not hot-load into the running PluginManager).
+  # dir + Rust snapshot. A headless server publishes a serialized runtime-change
+  # event to its Node brain; a desktop host still applies the change on renderer
+  # reload because its PluginManager belongs to that renderer process.
   # ─────────────────────────────────────────────────────────────────────────
 
   /api/v1/_rpc/plugin_list:
@@ -7524,9 +8269,11 @@ paths:
         its `version` must be non-empty. A manifest-less, malformed, or
         id-mismatched install is rejected (no plugin directory is created).
         Signature verification stays renderer-side and is config-gated (off by
-        default). The install persists the on-disk plugin + Rust snapshot; it
-        does NOT hot-load into the running PluginManager — it takes effect on
-        the next renderer reload.
+        default). The install persists the on-disk plugin + Rust snapshot. On a
+        headless server, cognia-server publishes `plugin://runtime-changed` and
+        the Node brain refreshes the canonical PluginManager serially. On a
+        desktop companion host, the renderer observes the new plugin after its
+        next reload.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
         required: true
@@ -7720,6 +8467,1329 @@ paths:
         "500":
           {
             description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  # Headless native plugin authority. Permission reads are available to paired
+  # clients; grant/revoke require remote-control authorization. Guest execution
+  # and allowlist synchronization are reserved for the loopback service token.
+
+  /api/v1/_rpc/plugin_api_invoke:
+    post:
+      operationId: rpcPluginApiInvoke
+      tags: [rpc-plugin]
+      summary: Invoke one native plugin API on the active headless host.
+      description: Requires remote-control authorization for device JWTs; the loopback brain service token is also accepted. The gateway independently verifies the loaded plugin, persisted permission ledger, filesystem sandbox, network allowlist, and shell allowlist. Desktop-UI-only APIs return a typed NOT_SUPPORTED response.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [request]
+              additionalProperties: false
+              properties:
+                request: { $ref: "#/components/schemas/PluginApiInvokeRequest" }
+      responses:
+        "200":
+          {
+            description: Typed plugin gateway result.,
+            content:
+              {
+                application/json:
+                  { schema: { $ref: "#/components/schemas/PluginApiInvokeResponse" } },
+              },
+          }
+        "400":
+          {
+            description: Invalid request envelope.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+
+  /api/v1/_rpc/plugin_api_batch_invoke:
+    post:
+      operationId: rpcPluginApiBatchInvoke
+      tags: [rpc-plugin]
+      summary: Invoke an ordered batch of native plugin APIs on the headless host.
+      description: Uses the same permission and containment gates as plugin_api_invoke. abortOnError stops after the first failed item; continueOnError returns every item result. Requires remote-control authorization for device JWTs; the loopback brain service token is also accepted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [request]
+              additionalProperties: false
+              properties:
+                request: { $ref: "#/components/schemas/PluginApiBatchRequest" }
+      responses:
+        "200":
+          {
+            description: Ordered batch gateway results.,
+            content:
+              {
+                application/json:
+                  { schema: { $ref: "#/components/schemas/PluginApiBatchResponse" } },
+              },
+          }
+        "400":
+          {
+            description: Invalid request envelope.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+
+  /api/v1/_rpc/plugin_get_capabilities:
+    post:
+      operationId: rpcPluginGetCapabilities
+      tags: [rpc-plugin]
+      summary: List native plugin APIs available on the headless host.
+      description: Read-only capability projection. Desktop clipboard, window, and shell-open APIs are reported unsupported when the execution host has no desktop UI.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object } } }
+      responses:
+        "200":
+          {
+            description: Host-specific native plugin capabilities.,
+            content:
+              {
+                application/json:
+                  {
+                    schema:
+                      { type: array, items: { $ref: "#/components/schemas/PluginApiCapability" } },
+                  },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/plugin_permission_grant:
+    post:
+      operationId: rpcPluginPermissionGrant
+      tags: [rpc-plugin]
+      summary: Grant an installed plugin permission on the headless host.
+      description: Requires remote-control authorization for device JWTs; the loopback brain service token is also accepted for manifest reconciliation.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pluginId, permission, grantedBy]
+              properties:
+                pluginId: { type: string }
+                permission: { type: string }
+                grantedBy: { type: string }
+                expiresAt: { type: [string, "null"], format: date-time }
+      responses:
+        "200":
+          {
+            description: Persisted grant.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_permission_list:
+    post:
+      operationId: rpcPluginPermissionList
+      tags: [rpc-plugin]
+      summary: List persisted permissions for one installed plugin (read-only).
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId],
+                    properties: { pluginId: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Permission names.,
+            content: { application/json: { schema: { type: array, items: { type: string } } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_permission_revoke:
+    post:
+      operationId: rpcPluginPermissionRevoke
+      tags: [rpc-plugin]
+      summary: Revoke an installed plugin permission on the headless host.
+      description: Requires remote-control authorization for device JWTs; the loopback brain service token is also accepted for lifecycle reconciliation.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId, permission],
+                    properties: { pluginId: { type: string }, permission: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          { description: Revoked., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_set_shell_allowlist:
+    post:
+      operationId: rpcPluginSetShellAllowlist
+      tags: [rpc-plugin]
+      summary: Replace a plugin's shell-command allowlist in the headless runtime.
+      description: Internal brain control-plane command; requires the loopback service token.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId, commands],
+                    properties:
+                      {
+                        pluginId: { type: string },
+                        commands: { type: array, items: { type: string } },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Allowlist replaced.,
+            content: { application/json: { schema: { type: "null" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+
+  /api/v1/_rpc/plugin_set_network_allowlist:
+    post:
+      operationId: rpcPluginSetNetworkAllowlist
+      tags: [rpc-plugin]
+      summary: Replace a plugin's network-domain allowlist in the headless runtime.
+      description: Internal brain control-plane command; requires the loopback service token.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId, domains],
+                    properties:
+                      {
+                        pluginId: { type: string },
+                        domains: { type: array, items: { type: string } },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Allowlist replaced.,
+            content: { application/json: { schema: { type: "null" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+
+  /api/v1/_rpc/plugin_wasm_load:
+    post:
+      operationId: rpcPluginWasmLoad
+      tags: [rpc-plugin]
+      summary: Compile and register a WASM Component plugin in the headless host.
+      description: Internal brain control-plane command; requires the loopback service token. The host validates the manifest and uses the persisted permission ledger and capability allowlists.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId, manifestJson, pluginPath],
+                    properties:
+                      {
+                        pluginId: { type: string },
+                        manifestJson: { type: string },
+                        pluginPath: { type: string },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Runtime metadata.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+        "500":
+          {
+            description: Guest load failed.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_wasm_activate:
+    post:
+      operationId: rpcPluginWasmActivate
+      tags: [rpc-plugin]
+      summary: Activate a loaded WASM Component plugin.
+      description: Internal brain control-plane command; requires the loopback service token.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId, configJson],
+                    properties: { pluginId: { type: string }, configJson: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Activation result.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+        "500":
+          {
+            description: Guest activation failed.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_wasm_deactivate:
+    post:
+      operationId: rpcPluginWasmDeactivate
+      tags: [rpc-plugin]
+      summary: Deactivate a loaded WASM Component plugin.
+      description: Internal brain control-plane command; requires the loopback service token.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId],
+                    properties: { pluginId: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Deactivation result.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+        "500":
+          {
+            description: Guest deactivation failed.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_wasm_call:
+    post:
+      operationId: rpcPluginWasmCall
+      tags: [rpc-plugin]
+      summary: Call an export on a loaded WASM Component plugin.
+      description: Internal brain execution command; requires the loopback service token. The JSON payload and result remain encoded strings across the WIT boundary.
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId, exportName, payloadJson],
+                    properties:
+                      {
+                        pluginId: { type: string },
+                        exportName: { type: string },
+                        payloadJson: { type: string },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: JSON-encoded guest result.,
+            content: { application/json: { schema: { type: string } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+        "500":
+          {
+            description: Guest call failed.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_wasm_unload:
+    post:
+      operationId: rpcPluginWasmUnload
+      tags: [rpc-plugin]
+      summary: Remove a WASM Component plugin from the process registry.
+      description: Internal brain control-plane command; requires the loopback service token.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId],
+                    properties: { pluginId: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Whether a loaded entry was removed.,
+            content: { application/json: { schema: { type: boolean } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+        "500":
+          {
+            description: Guest unload failed.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_wasm_list:
+    post:
+      operationId: rpcPluginWasmList
+      tags: [rpc-plugin]
+      summary: List WASM Component plugins in the process registry.
+      description: Internal brain read command; requires the loopback service token.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object } } }
+      responses:
+        "200":
+          {
+            description: Loaded plugin metadata.,
+            content:
+              {
+                application/json:
+                  { schema: { type: array, items: { type: object, additionalProperties: true } } },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+        "500":
+          {
+            description: Registry read failed.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_python_initialize:
+    post:
+      operationId: rpcPluginPythonInitialize
+      tags: [rpc-plugin]
+      summary: Probe and initialize the headless Python subprocess runtime.
+      description: Internal brain control-plane command; requires the loopback service token. The interpreter must be Python 3.9 or newer.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              { schema: { type: object, properties: { pythonPath: { type: [string, "null"] } } } },
+          }
+      responses:
+        "200":
+          { description: Initialized., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+        "503":
+          {
+            description: No supported interpreter is available.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_python_runtime_info:
+    post:
+      operationId: rpcPluginPythonRuntimeInfo
+      tags: [rpc-plugin]
+      summary: Inspect the headless Python runtime and aggregate call metrics.
+      description: Internal brain read command; requires the loopback service token.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object } } }
+      responses:
+        "200":
+          {
+            description: Runtime availability,
+            version,
+            plugin count,
+            and call metrics.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+
+  /api/v1/_rpc/plugin_python_load:
+    post:
+      operationId: rpcPluginPythonLoad
+      tags: [rpc-plugin]
+      summary: Start and load one plugin's isolated Python host.
+      description: Internal brain control-plane command; requires the loopback service token and a persisted `python:execute` grant. Dependencies and host settings are applied by the existing subprocess runtime.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pluginId, pluginPath, mainModule]
+              properties:
+                pluginId: { type: string }
+                pluginPath: { type: string }
+                mainModule: { type: string }
+                dependencies: { type: [array, "null"], items: { type: string } }
+                config: { type: [object, "null"], additionalProperties: true }
+                hostSettings: { type: [object, "null"], additionalProperties: true }
+      responses:
+        "200":
+          {
+            description: Loaded hook/tool metadata.,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "400":
+          {
+            description: Invalid plugin arguments or manifest data.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+        "503":
+          {
+            description: Python runtime unavailable.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_python_call_hook:
+    post:
+      operationId: rpcPluginPythonCallHook
+      tags: [rpc-plugin]
+      summary: Invoke a declared Python plugin hook.
+      description: Internal brain execution command; requires the loopback service token and the plugin's persisted execution grant.
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId, event, name, payload],
+                    properties:
+                      {
+                        pluginId: { type: string },
+                        event: { type: string },
+                        name: { type: string },
+                        payload: {},
+                      },
+                  },
+              },
+          }
+      responses:
+        "200": { description: JSON hook result., content: { application/json: { schema: {} } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+        "404":
+          {
+            description: Plugin or hook not found.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_python_push_config:
+    post:
+      operationId: rpcPluginPythonPushConfig
+      tags: [rpc-plugin]
+      summary: Push a persisted config snapshot to a live Python plugin host.
+      description: Internal brain control-plane command; requires the loopback service token.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId, config],
+                    properties:
+                      {
+                        pluginId: { type: string },
+                        config: { type: object, additionalProperties: true },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Config delivered.,
+            content: { application/json: { schema: { type: "null" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+        "404":
+          {
+            description: Plugin not loaded.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_python_get_tools:
+    post:
+      operationId: rpcPluginPythonGetTools
+      tags: [rpc-plugin]
+      summary: List tool definitions registered by a live Python plugin.
+      description: Internal brain read command; requires the loopback service token.
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId],
+                    properties: { pluginId: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Python tool definitions.,
+            content:
+              {
+                application/json:
+                  { schema: { type: array, items: { type: object, additionalProperties: true } } },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+        "404":
+          {
+            description: Plugin not loaded.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_python_call_tool:
+    post:
+      operationId: rpcPluginPythonCallTool
+      tags: [rpc-plugin]
+      summary: Invoke a tool registered by a live Python plugin.
+      description: Internal brain execution command; requires the loopback service token and the plugin's persisted execution grant.
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId, toolName, args],
+                    properties:
+                      {
+                        pluginId: { type: string },
+                        toolName: { type: string },
+                        args: { type: object, additionalProperties: true },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200": { description: JSON tool result., content: { application/json: { schema: {} } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+        "404":
+          {
+            description: Plugin or tool not found.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_python_call:
+    post:
+      operationId: rpcPluginPythonCall
+      tags: [rpc-plugin]
+      summary: Invoke a named function in a live Python plugin module.
+      description: Internal brain execution command; requires the loopback service token and the plugin's persisted execution grant.
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId, functionName, args],
+                    properties:
+                      {
+                        pluginId: { type: string },
+                        functionName: { type: string },
+                        args: { type: array, items: {} },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200": { description: JSON function result., content: { application/json: { schema: {} } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+        "404":
+          {
+            description: Plugin or function not found.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_python_eval:
+    post:
+      operationId: rpcPluginPythonEval
+      tags: [rpc-plugin]
+      summary: Evaluate Python code inside one plugin's isolated host.
+      description: RCE-grade internal command; requires the loopback service token and the plugin's persisted execution grant.
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId, code],
+                    properties:
+                      {
+                        pluginId: { type: string },
+                        code: { type: string },
+                        locals: { type: [object, "null"], additionalProperties: true },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200":
+          { description: JSON evaluation result., content: { application/json: { schema: {} } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+        "404":
+          {
+            description: Plugin not loaded.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_python_import:
+    post:
+      operationId: rpcPluginPythonImport
+      tags: [rpc-plugin]
+      summary: Import a module inside one plugin's isolated Python host.
+      description: Internal brain execution command; requires the loopback service token and the plugin's persisted execution grant.
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId, moduleName],
+                    properties: { pluginId: { type: string }, moduleName: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Import metadata or JSON module projection.,
+            content: { application/json: { schema: {} } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+        "404":
+          {
+            description: Plugin or module not found.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_python_module_call:
+    post:
+      operationId: rpcPluginPythonModuleCall
+      tags: [rpc-plugin]
+      summary: Invoke a function on an imported Python module.
+      description: Internal brain execution command; requires the loopback service token and the plugin's persisted execution grant.
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId, moduleName, functionName, args],
+                    properties:
+                      {
+                        pluginId: { type: string },
+                        moduleName: { type: string },
+                        functionName: { type: string },
+                        args: { type: array, items: {} },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200": { description: JSON function result., content: { application/json: { schema: {} } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+        "404":
+          {
+            description: Plugin,
+            module,
+            or function not found.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_python_module_getattr:
+    post:
+      operationId: rpcPluginPythonModuleGetattr
+      tags: [rpc-plugin]
+      summary: Read one attribute from an imported Python module.
+      description: Internal brain execution command; requires the loopback service token and the plugin's persisted execution grant.
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId, moduleName, attrName],
+                    properties:
+                      {
+                        pluginId: { type: string },
+                        moduleName: { type: string },
+                        attrName: { type: string },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200": { description: JSON attribute value., content: { application/json: { schema: {} } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+        "404":
+          {
+            description: Plugin,
+            module,
+            or attribute not found.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_python_is_initialized:
+    post:
+      operationId: rpcPluginPythonIsInitialized
+      tags: [rpc-plugin]
+      summary: Check whether one Python plugin host is loaded.
+      description: Internal brain read command; requires the loopback service token.
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId],
+                    properties: { pluginId: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Initialization state.,
+            content: { application/json: { schema: { type: boolean } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+
+  /api/v1/_rpc/plugin_python_get_info:
+    post:
+      operationId: rpcPluginPythonGetInfo
+      tags: [rpc-plugin]
+      summary: Inspect one live Python plugin host and its tool/hook counts.
+      description: Internal brain read command; requires the loopback service token.
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId],
+                    properties: { pluginId: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Plugin runtime information,
+            or null when unloaded.,
+            content:
+              {
+                application/json:
+                  { schema: { type: [object, "null"], additionalProperties: true } },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+
+  /api/v1/_rpc/plugin_python_install_deps:
+    post:
+      operationId: rpcPluginPythonInstallDeps
+      tags: [rpc-plugin]
+      summary: Install declared dependencies into one plugin's managed virtual environment.
+      description: Network-and-disk mutating internal command; requires the loopback service token and a persisted `python:execute` grant. Progress streams on `plugin:python`.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId, dependencies],
+                    properties:
+                      {
+                        pluginId: { type: string },
+                        dependencies: { type: array, items: { type: string } },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Dependencies installed.,
+            content: { application/json: { schema: { type: "null" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+        "503":
+          {
+            description: Python or package installer unavailable.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_python_unload:
+    post:
+      operationId: rpcPluginPythonUnload
+      tags: [rpc-plugin]
+      summary: Stop and remove one Python plugin subprocess host.
+      description: Internal brain control-plane command; requires the loopback service token. Repeated unloads are idempotent.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId],
+                    properties: { pluginId: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          { description: Unloaded., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+
+  /api/v1/_rpc/plugin_python_list:
+    post:
+      operationId: rpcPluginPythonList
+      tags: [rpc-plugin]
+      summary: List Python plugin ids in the process registry.
+      description: Internal brain read command; requires the loopback service token.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object } } }
+      responses:
+        "200":
+          {
+            description: Loaded plugin ids.,
+            content: { application/json: { schema: { type: array, items: { type: string } } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+
+  /api/v1/_rpc/lsp_host_ensure:
+    post:
+      operationId: rpcLspHostEnsure
+      tags: [rpc-plugin]
+      summary: Ensure the confined system LSP sidecar is running.
+      description: Requires remote-control authorization for device JWTs; the loopback brain service token is also accepted. Unlike the internal VS Code lifecycle API, this facade exposes only the fixed system LSP channel.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object } } }
+      responses:
+        "200":
+          {
+            description: System LSP host is running.,
+            content: { application/json: { schema: { type: "null" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "503":
+          {
+            description: Bundled extension-host sidecar unavailable.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/lsp_host_request:
+    post:
+      operationId: rpcLspHostRequest
+      tags: [rpc-plugin]
+      summary: Invoke an allowlisted method on the confined system LSP channel.
+      description: Requires remote-control authorization for device JWTs; the loopback brain service token is also accepted. The server fixes the channel id and rejects every non-LSP method.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [method, payloadJson]
+              properties:
+                method: { type: string, pattern: "^lsp:" }
+                payloadJson: { type: string, description: Serialized JSON request payload. }
+      responses:
+        "200":
+          {
+            description: Serialized JSON result.,
+            content: { application/json: { schema: { type: string } } },
+          }
+        "400":
+          {
+            description: Method is outside the LSP allowlist or the payload is invalid.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "404":
+          {
+            description: System LSP host is not loaded.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/ensure_system_lsp_host:
+    post:
+      operationId: rpcEnsureSystemLspHost
+      tags: [rpc-plugin]
+      summary: Ensure the process-owned VS Code/LSP sidecar is running.
+      description: Internal brain lifecycle command; requires the loopback service token. Idempotent while the system LSP host is alive.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object } } }
+      responses:
+        "200":
+          {
+            description: System LSP host is running.,
+            content: { application/json: { schema: { type: "null" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+        "503":
+          {
+            description: Bundled extension-host sidecar unavailable.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_load_vscode:
+    post:
+      operationId: rpcPluginLoadVscode
+      tags: [rpc-plugin]
+      summary: Spawn a VS Code extension host and load one installed extension.
+      description: Internal brain lifecycle command; requires the loopback service token. The pluginPath is containment-checked against the server-owned plugin install root.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pluginId, manifestJson, pluginPath]
+              properties:
+                pluginId: { type: string }
+                manifestJson: { type: string, description: Serialized Cognia plugin manifest. }
+                pluginPath: { type: string }
+      responses:
+        "200": { description: Loaded., content: { application/json: { schema: { type: "null" } } } }
+        "400":
+          {
+            description: Invalid manifest or unsafe plugin path.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+        "503":
+          {
+            description: Extension-host sidecar unavailable.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_activate_vscode:
+    post:
+      operationId: rpcPluginActivateVscode
+      tags: [rpc-plugin]
+      summary: Activate a loaded VS Code extension.
+      description: Internal brain lifecycle command; requires the loopback service token.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pluginId, configJson]
+              properties:
+                pluginId: { type: string }
+                configJson: { type: string }
+      responses:
+        "200":
+          description: Activation result and runtime telemetry.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  [
+                    registeredCommands,
+                    registeredWebviewViews,
+                    registeredLanguageProviders,
+                    sidecarPid,
+                  ]
+                properties:
+                  registeredCommands: { type: array, items: { type: string } }
+                  registeredWebviewViews: { type: array, items: { type: string } }
+                  registeredLanguageProviders: { type: array, items: { type: string } }
+                  sidecarPid: { type: integer, format: uint32 }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+        "404":
+          {
+            description: Extension is not loaded.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_deactivate_vscode:
+    post:
+      operationId: rpcPluginDeactivateVscode
+      tags: [rpc-plugin]
+      summary: Deactivate a loaded VS Code extension without stopping its host.
+      description: Internal brain lifecycle command; requires the loopback service token.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId],
+                    properties: { pluginId: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          { description: Deactivated., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+        "404":
+          {
+            description: Extension is not loaded.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_unload_vscode:
+    post:
+      operationId: rpcPluginUnloadVscode
+      tags: [rpc-plugin]
+      summary: Stop and remove one VS Code extension host process.
+      description: Internal brain lifecycle command; requires the loopback service token. Repeated unloads are idempotent.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [pluginId],
+                    properties: { pluginId: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          { description: Unloaded., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+
+  /api/v1/_rpc/plugin_invoke_vscode_rpc:
+    post:
+      operationId: rpcPluginInvokeVscodeRpc
+      tags: [rpc-plugin]
+      summary: Send one JSON-RPC request to a loaded VS Code extension host.
+      description: Internal brain data-plane command; requires the loopback service token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pluginId, method, payloadJson]
+              properties:
+                pluginId: { type: string }
+                method: { type: string }
+                payloadJson: { type: string }
+      responses:
+        "200":
+          {
+            description: Serialized JSON result.,
+            content: { application/json: { schema: { type: string } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+        "404":
+          {
+            description: Extension is not loaded.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "504":
+          {
+            description: Sidecar request timed out.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/plugin_vscode_send_response:
+    post:
+      operationId: rpcPluginVscodeSendResponse
+      tags: [rpc-plugin]
+      summary: Return a host-built JSON-RPC response to a VS Code sidecar request.
+      description: Internal brain data-plane command; requires the loopback service token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pluginId, responseJson]
+              properties:
+                pluginId: { type: string }
+                responseJson: { type: string }
+      responses:
+        "200":
+          {
+            description: Response delivered.,
+            content: { application/json: { schema: { type: "null" } } },
+          }
+        "400":
+          {
+            description: responseJson is not valid JSON.,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/ServiceTokenRequired" }
+        "404":
+          {
+            description: Extension is not loaded.,
             content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
           }
 
@@ -8948,6 +11018,22 @@ components:
                   code: remote_control_forbidden,
                   message: "this device is not authorized for remote control; enable it from the desktop paired-devices settings",
                 }
+    ServiceTokenRequired:
+      description: |
+        This native plugin execution/control command is reserved for the
+        headless brain's short-lived service JWT. Device-scoped JWTs are
+        rejected even when `allowRemoteControl` is enabled; service tokens are
+        additionally accepted only from loopback by the JWT middleware.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/RpcError" }
+          examples:
+            forbidden:
+              value:
+                {
+                  code: remote_control_forbidden,
+                  message: "this command requires the headless service token",
+                }
 
   schemas:
     # ── Auth wire shapes ─────────────────────────────────────────────────────
@@ -9252,6 +11338,107 @@ components:
         iconUrl: { type: string }
         rawSkillUrl: { type: string }
 
+    # ── Native plugin gateway ────────────────────────────────────────────────
+
+    PluginApiInvokeRequest:
+      type: object
+      required: [sdkVersion, pluginId, requestId, api, payload]
+      additionalProperties: false
+      properties:
+        sdkVersion: { type: string }
+        pluginId: { type: string }
+        requestId: { type: string }
+        api: { type: string, pattern: "^[^:]+:[^:]+$" }
+        payload: {}
+        timeoutMs: { type: integer, minimum: 1 }
+        context: {}
+
+    PluginApiError:
+      type: object
+      required: [code, message]
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+            [
+              INVALID_REQUEST,
+              PERMISSION_REQUIRED,
+              PERMISSION_DENIED,
+              NOT_SUPPORTED,
+              NOT_FOUND,
+              CONFLICT,
+              TIMEOUT,
+              INCOMPATIBLE_SDK,
+              INTERNAL,
+            ]
+        message: { type: string }
+        details: {}
+
+    PluginApiCompat:
+      type: object
+      required: [sdkVersion, minSupportedSdk, compatible]
+      additionalProperties: false
+      properties:
+        sdkVersion: { type: string }
+        minSupportedSdk: { type: string }
+        compatible: { type: boolean }
+
+    PluginApiInvokeResponse:
+      type: object
+      required: [requestId, success, runtimeVersion, compat]
+      additionalProperties: false
+      properties:
+        requestId: { type: string }
+        success: { type: boolean }
+        data: {}
+        error: { $ref: "#/components/schemas/PluginApiError" }
+        runtimeVersion: { type: string }
+        compat: { $ref: "#/components/schemas/PluginApiCompat" }
+
+    PluginApiBatchItem:
+      type: object
+      required: [requestId, api, payload]
+      additionalProperties: false
+      properties:
+        requestId: { type: string }
+        api: { type: string, pattern: "^[^:]+:[^:]+$" }
+        payload: {}
+        timeoutMs: { type: integer, minimum: 1 }
+        context: {}
+
+    PluginApiBatchRequest:
+      type: object
+      required: [sdkVersion, pluginId, requests]
+      additionalProperties: false
+      properties:
+        sdkVersion: { type: string }
+        pluginId: { type: string }
+        strategy: { type: string, enum: [continueOnError, abortOnError] }
+        requests:
+          type: array
+          items: { $ref: "#/components/schemas/PluginApiBatchItem" }
+
+    PluginApiBatchResponse:
+      type: object
+      required: [success, results]
+      additionalProperties: false
+      properties:
+        success: { type: boolean }
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/PluginApiInvokeResponse" }
+
+    PluginApiCapability:
+      type: object
+      required: [api, supported, highRisk, requiredPermissions]
+      additionalProperties: false
+      properties:
+        api: { type: string }
+        supported: { type: boolean }
+        highRisk: { type: boolean }
+        requiredPermissions: { type: array, items: { type: string } }
+
     # ── MCP ──────────────────────────────────────────────────────────────────
 
     McpServerStatus:
@@ -9262,6 +11449,22 @@ components:
         running: { type: boolean }
         port: { type: integer, format: int32, minimum: 0, maximum: 65535 }
         startedAt: { type: string, format: date-time, description: "ISO-8601." }
+
+    McpServerLifecycleRequest:
+      type: object
+      required: [port, token, settingsJson]
+      additionalProperties: false
+      properties:
+        port: { type: integer, minimum: 0, maximum: 65535 }
+        token: { type: string, minLength: 32 }
+        settingsJson: { type: string, description: Serialized ExternalBridgeSettings snapshot. }
+        sidecarPath:
+          {
+            type: string,
+            deprecated: true,
+            description: Legacy local-Tauri hint; ignored by the headless Companion facade,
+            which resolves the packaged host sidecar.,
+          }
 
     McpTestResult:
       type: object

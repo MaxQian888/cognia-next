@@ -1,4 +1,4 @@
-import { listen, emit } from "@tauri-apps/api/event"
+import { listen } from "@tauri-apps/api/event"
 import { createOneBotAdapter } from "./index"
 import type { AdapterContext, NormalizedInboundEvent } from "@/types/connectors"
 import { clearAllVariantCaches } from "./parse"
@@ -6,11 +6,12 @@ import { clearAllVariantCaches } from "./parse"
 // Mock the generic WS client commands so the forward-ws path doesn't invoke
 // Tauri. The reverse-ws path (default in most tests) never touches these.
 jest.mock("@/lib/connectors/tauri/commands", () => ({
+  connectorsOnebotSend: jest.fn(),
   connectorsWsOpen: jest.fn().mockResolvedValue("fw-1"),
   connectorsWsSend: jest.fn().mockResolvedValue(undefined),
   connectorsWsClose: jest.fn().mockResolvedValue(undefined),
 }))
-import { connectorsWsOpen } from "@/lib/connectors/tauri/commands"
+import { connectorsOnebotSend, connectorsWsOpen } from "@/lib/connectors/tauri/commands"
 
 // Identity + impl probes persist through the adapter-instances repo — mock it
 // so the on-connect writes are observable without touching Dexie.
@@ -21,7 +22,7 @@ jest.mock("@/lib/db/adapter-instances", () => ({
 import { updateAdapterInstance } from "@/lib/db/adapter-instances"
 
 const mockListen = listen as jest.Mock
-const mockEmit = emit as jest.Mock
+const mockOnebotSend = connectorsOnebotSend as jest.Mock
 const mockUpdateAdapter = updateAdapterInstance as jest.Mock
 const mockWsOpen = connectorsWsOpen as jest.Mock
 
@@ -42,14 +43,12 @@ function createEventBus() {
       return jest.fn() // unlisten
     })
 
-  const emitImpl = jest.fn().mockResolvedValue(undefined)
-
   function trigger(topic: string, payload: string) {
     const handlers = listeners.get(topic) ?? []
     for (const h of handlers) h({ payload })
   }
 
-  return { listenImpl, emitImpl, trigger }
+  return { listenImpl, trigger }
 }
 
 function makeCtx(): { ctx: AdapterContext; emitted: NormalizedInboundEvent[] } {
@@ -84,7 +83,7 @@ function makeAdapter(id = "ob-1") {
 
 beforeEach(() => {
   mockListen.mockReset()
-  mockEmit.mockReset()
+  mockOnebotSend.mockReset()
   mockUpdateAdapter.mockClear()
   clearAllVariantCaches()
 })
@@ -205,8 +204,8 @@ describe("createOneBotAdapter", () => {
     bus.trigger("connectors://onebot/ob-send/event", JSON.stringify(v11Msg))
     await new Promise((r) => setTimeout(r, 20))
 
-    // Mock emit to respond immediately with a success response
-    mockEmit.mockImplementation(async (_topic: string, payload: string) => {
+    // Mock the native command to respond immediately with a success response.
+    mockOnebotSend.mockImplementation(async (_adapterId: string, payload: string) => {
       const call = JSON.parse(payload) as { echo: string }
       setTimeout(() => {
         bus.trigger(
@@ -223,8 +222,8 @@ describe("createOneBotAdapter", () => {
     })
 
     expect(result.ok).toBe(true)
-    expect(mockEmit).toHaveBeenCalledWith(
-      "connectors://onebot/ob-send/send",
+    expect(mockOnebotSend).toHaveBeenCalledWith(
+      "ob-send",
       expect.stringContaining("send_private_msg")
     )
 
@@ -333,7 +332,7 @@ function respondByAction(
   byAction: Record<string, unknown>,
   failedActions: string[] = []
 ) {
-  mockEmit.mockImplementation(async (_topic: string, payload: string) => {
+  mockOnebotSend.mockImplementation(async (_adapterId: string, payload: string) => {
     const call = JSON.parse(payload) as { echo: string; action: string }
     const failed = failedActions.includes(call.action)
     const data = byAction[call.action] ?? {}
@@ -403,9 +402,11 @@ describe("createOneBotAdapter — identity probe", () => {
     bus.trigger("connectors://onebot/ob-v12fresh/open", "")
     await new Promise((r) => setTimeout(r, 30))
 
-    const loginCall = mockEmit.mock.calls.find((c) => String(c[1]).includes("get_login_info"))
+    const loginCall = mockOnebotSend.mock.calls.find((c) => String(c[1]).includes("get_login_info"))
     expect(loginCall).toBeUndefined()
-    const selfInfoCall = mockEmit.mock.calls.find((c) => String(c[1]).includes("get_self_info"))
+    const selfInfoCall = mockOnebotSend.mock.calls.find((c) =>
+      String(c[1]).includes("get_self_info")
+    )
     expect(selfInfoCall).toBeDefined()
     expect(mockUpdateAdapter).toHaveBeenCalledWith(
       "ob-v12fresh",
@@ -447,7 +448,7 @@ describe("createOneBotAdapter — identity probe", () => {
     bus.trigger("connectors://onebot/ob-v12who/open", "")
     await new Promise((r) => setTimeout(r, 30))
 
-    const call = mockEmit.mock.calls.find((c) => String(c[1]).includes("get_self_info"))
+    const call = mockOnebotSend.mock.calls.find((c) => String(c[1]).includes("get_self_info"))
     expect(call).toBeDefined()
     expect(mockUpdateAdapter).toHaveBeenCalledWith(
       "ob-v12who",
@@ -548,7 +549,10 @@ describe("createOneBotAdapter — merged-forward", () => {
     respondByAction(bus, "ob-fwd", {
       get_forward_msg: {
         messages: [
-          { type: "node", data: { nickname: "Bob", content: [{ type: "text", data: { text: "hi" } }] } },
+          {
+            type: "node",
+            data: { nickname: "Bob", content: [{ type: "text", data: { text: "hi" } }] },
+          },
         ],
       },
     })
@@ -580,7 +584,11 @@ describe("createOneBotAdapter — merged-forward", () => {
     mockListen.mockImplementation(bus.listenImpl)
     respondByAction(bus, "ob-fwdsend", { send_group_forward_msg: { message_id: 555 } })
 
-    const adapter = createOneBotAdapter({ id: "ob-fwdsend", displayName: "T", selfBotUin: "100000" })
+    const adapter = createOneBotAdapter({
+      id: "ob-fwdsend",
+      displayName: "T",
+      selfBotUin: "100000",
+    })
     const { ctx } = makeCtx()
     await adapter.start(ctx)
     // RPCs are liveness-gated — a client must have connected.
@@ -590,8 +598,8 @@ describe("createOneBotAdapter — merged-forward", () => {
 
     expect(result.ok).toBe(true)
     expect(result.platformMessageId).toBe("555")
-    expect(mockEmit).toHaveBeenCalledWith(
-      "connectors://onebot/ob-fwdsend/send",
+    expect(mockOnebotSend).toHaveBeenCalledWith(
+      "ob-fwdsend",
       expect.stringContaining("send_group_forward_msg")
     )
     await adapter.stop()
@@ -614,8 +622,8 @@ describe("createOneBotAdapter — merged-forward", () => {
   it("forwardMessage() surfaces a retryable error when the transport send fails", async () => {
     const bus = createEventBus()
     mockListen.mockImplementation(bus.listenImpl)
-    // Reject the outbound emit so sendToOneBot rejects immediately.
-    mockEmit.mockImplementation(async () => {
+    // Reject the native command so sendToOneBot rejects immediately.
+    mockOnebotSend.mockImplementation(async () => {
       throw new Error("socket down")
     })
 
@@ -750,7 +758,7 @@ describe("createOneBotAdapter — health & activity", () => {
   it("send() surfaces the fast no-client failure as a retryable platform error", async () => {
     const bus = createEventBus()
     mockListen.mockImplementation(bus.listenImpl)
-    mockEmit.mockResolvedValue(undefined)
+    mockOnebotSend.mockResolvedValue(undefined)
 
     const adapter = makeAdapter("ob-noclient")
     const { ctx } = makeCtx()

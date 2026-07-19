@@ -945,6 +945,7 @@ export class ConnectorBus {
         await dispatchTrigger({
           workflowId: m.workflowId,
           kind: "trigger.connector.inbound",
+          triggerId: m.nodeId,
           payload: event,
           originAt,
           binding: {
