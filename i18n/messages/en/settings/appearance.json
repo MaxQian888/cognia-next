@@ -571,6 +571,19 @@
       "start": "Start",
       "title": "Build a gradient"
     },
+    "generator": {
+      "accent": "Generated accent color",
+      "action": "Generate matching theme",
+      "created": "A matching light/dark theme was created and activated.",
+      "description": "Extract a local accent color from this image and build a readable light/dark theme.",
+      "error": "Could not analyze this image. The wallpaper is unchanged.",
+      "themeName": "{name} palette",
+      "title": "Generate theme from wallpaper",
+      "variant": {
+        "dark": "Dark base",
+        "light": "Light base"
+      }
+    },
     "invalidType": "Unsupported file type. Use PNG, JPEG, WebP, GIF or AVIF.",
     "noActive": "No wallpaper selected.",
     "opacity": {
