@@ -1,6 +1,8 @@
 /** @jest-environment jsdom */
+import "fake-indexeddb/auto"
 import { render, waitFor, cleanup } from "@testing-library/react"
 import { ExposeTestGlobals } from "./expose-test-globals"
+import { getDb } from "@/lib/db/schema"
 
 const originalEnv = process.env.NEXT_PUBLIC_E2E
 
@@ -73,6 +75,37 @@ describe("ExposeTestGlobals", () => {
     expect(typeof window.__cogniaSaveCompanionConfig).toBe("function")
     expect(typeof window.__cogniaClearCompanionConfig).toBe("function")
     expect(typeof window.__cogniaSetSettings).toBe("function")
+  })
+
+  it("seeds a sendable connector draft with canonical segments and preview", async () => {
+    process.env.NEXT_PUBLIC_E2E = "1"
+    render(<ExposeTestGlobals />)
+    await waitFor(() => {
+      expect(window.__cogniaTestGlobalsReady).toBe(true)
+    })
+
+    const id = await window.__cogniaSeedConnectorDraft!({
+      adapterId: "adapter-e2e",
+      conversationKey: "lark:adapter-e2e:chat-e2e",
+      content: "Pending reply",
+    })
+    const row = await getDb().connectorDrafts.get(id)
+
+    expect(row).toMatchObject({
+      id,
+      conversationKey: "lark:adapter-e2e:chat-e2e",
+      segments: [{ type: "text", text: "Pending reply" }],
+      status: "pending",
+      outboundPreview: {
+        conversationRef: {
+          platform: "lark",
+          adapterId: "adapter-e2e",
+          chatId: "chat-e2e",
+        },
+        segments: [{ type: "text", text: "Pending reply" }],
+        metadata: { idempotencyKey: expect.any(String) },
+      },
+    })
   })
 
   it("removes every global on unmount", async () => {

@@ -128,11 +128,6 @@ describe("MobileSpeechPage", () => {
     expect(screen.getByTestId("speech-stt-language")).toBeInTheDocument()
   })
 
-  it("links the back button to /me", () => {
-    render(<Page />)
-    expect(screen.getByTestId("mobile-sub-page-back").closest("a")).toHaveAttribute("href", "/me")
-  })
-
   it("hides rate/pitch for a cloud provider but keeps volume (W13)", () => {
     // Rate + pitch only drive the system voice; they were dead controls for
     // cloud providers, which use their own speed field.

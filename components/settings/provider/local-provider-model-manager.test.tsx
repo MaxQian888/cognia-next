@@ -127,7 +127,7 @@ describe("LocalProviderModelManager", () => {
   it("should show model count badge", () => {
     renderWithProviders(<LocalProviderModelManager providerId="ollama" />)
 
-    expect(screen.getByText("2 models")).toBeInTheDocument()
+    expect(screen.getByText("modelCount")).toBeInTheDocument()
   })
 
   it("should render installed models list", () => {

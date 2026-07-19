@@ -1,3 +1,5 @@
+/** @jest-environment jsdom */
+
 import { useActiveConversationStore, isViewingConversation } from "./active-conversation-store"
 
 beforeEach(() => {
@@ -46,3 +48,4 @@ describe("isViewingConversation", () => {
     expect(isViewingConversation("conv:1")).toBe(false)
   })
 })
+/** @jest-environment jsdom */

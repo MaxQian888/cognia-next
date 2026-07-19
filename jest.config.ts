@@ -106,6 +106,10 @@ const baseTestPathIgnorePatterns = [
   "/out/",
   "/src-tauri/",
   "/sidecar/",
+  // `services/workspace-runtime/` uses Node's built-in `node:test` runner.
+  // Importing those TAP suites through Jest reports an empty Jest suite while
+  // the nested tests keep running in the background.
+  "/services/workspace-runtime/",
   // `services/share-server/` (worker + viewer) is a standalone Vitest
   // workspace with its own package.json/node_modules — same arrangement as
   // `sidecar/`. Its specs `import` from `vitest` and `cloudflare:test`, which
@@ -156,8 +160,12 @@ const projectCommon: Config = {
     "^@cognia/time(.*)$": "<rootDir>/packages/time/src$1",
     "^@cognia/latex(.*)$": "<rootDir>/packages/latex/src$1",
     "^@cognia/mermaid(.*)$": "<rootDir>/packages/mermaid/src$1",
-    "^@cognia/plugin-sdk/define/(.*)$": "<rootDir>/packages/plugin-sdk/src/define/define-$1",
-    "^@cognia/plugin-sdk(.*)$": "<rootDir>/packages/plugin-sdk/src$1",
+    "^@cognia/plugin-sdk$": "<rootDir>/packages/plugin-sdk/src/index.ts",
+    "^@cognia/plugin-sdk/(manifest|context|events|hooks|permissions|extensions)$":
+      "<rootDir>/packages/plugin-sdk/src/$1/index.ts",
+    "^@cognia/plugin-sdk/contracts$": "<rootDir>/packages/plugin-sdk/src/contracts/catalog.ts",
+    "^@cognia/plugin-sdk/api/(tool|native-anthropic-tool)$":
+      "<rootDir>/packages/plugin-sdk/src/api/$1.ts",
     "^@cognia/redact(.*)$": "<rootDir>/packages/redact/src$1",
     "^@cognia/web-search(.*)$": "<rootDir>/packages/web-search/src$1",
     "^@cognia/tts(.*)$": "<rootDir>/packages/tts/src$1",

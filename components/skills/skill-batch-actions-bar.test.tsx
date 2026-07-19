@@ -27,7 +27,23 @@ jest.mock("sonner", () => ({
 }))
 
 jest.mock("@cognia/logging", () => ({
-  loggers: { skills: { info: jest.fn(), error: jest.fn(), warn: jest.fn() } },
+  createLogger: () => ({
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    child: jest.fn(),
+  }),
+  loggers: {
+    skills: { debug: jest.fn(), info: jest.fn(), error: jest.fn(), warn: jest.fn() },
+    agent: {
+      debug: jest.fn(),
+      info: jest.fn(),
+      error: jest.fn(),
+      warn: jest.fn(),
+      child: () => ({ debug: jest.fn(), info: jest.fn(), error: jest.fn(), warn: jest.fn() }),
+    },
+  },
 }))
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
