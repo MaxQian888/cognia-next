@@ -19,11 +19,14 @@ import type {
   Team,
 } from "@cognia/agent-config-types"
 import type { TrustedWorkspace } from "@/lib/db/trusted-workspaces"
-import type { SessionStateRow, TtsProviderKeyRow } from "@/lib/db/schema"
+import type { CogniaDB, SessionStateRow, TtsProviderKeyRow } from "@/lib/db/schema"
 import { getDb } from "@/lib/db/schema"
 import { contextCommentRowFromCanvas } from "@/lib/db/context-comments"
 import type { PluginAnalyticsRow, PluginPermissionRow, PluginRow } from "@/lib/db/plugin-types"
 import type { TwinChunk, TwinDraft, TwinJob, TwinProfile, TwinSource } from "@/types/twin"
+import type { Memory } from "@/types/memory/memory"
+import type { MemoryAuditEvent, MemoryEvidence, MemoryJob } from "@/types/memory/governance"
+import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import {
   emptySummary,
   type BackupPackageV3,
@@ -120,6 +123,10 @@ export async function applyBackupPackage(
       db.twinProfile,
       db.twinDrafts,
       db.twinJobs,
+      db.memories,
+      db.memoryEvidence,
+      db.memoryJobs,
+      db.memoryAuditEvents,
     ],
     async () => {
       // --- settings (singleton) -------------------------------------------
@@ -406,6 +413,20 @@ export async function applyBackupPackage(
         respectBuiltIn: false,
       })
 
+      // --- learned memory + governance (schema v118) --------------------
+      // These tables form one referential bundle. The duplicate strategy
+      // remaps every colliding id and then rewrites child references so
+      // evidence, durable jobs, and audit history remain connected.
+      await applyMemoryBundle({
+        memories: env.memories,
+        evidence: env.memoryEvidence,
+        jobs: env.memoryJobs,
+        audits: env.memoryAuditEvents,
+        db,
+        opts,
+        summary,
+      })
+
       // --- sessions + messages + sessionState (off by default) -----------
       if (opts.includeSessions) {
         await applyCollection<ChatSession>({
@@ -575,6 +596,456 @@ async function applyKeyedCollection<T>(args: KeyedApplyArgs<T>): Promise<void> {
       incrementCounter(summary.overwritten, kind)
     }
   }
+}
+
+interface MemoryBundleArgs {
+  memories: Memory[] | undefined
+  evidence: MemoryEvidence[] | undefined
+  jobs: MemoryJob[] | undefined
+  audits: MemoryAuditEvent[] | undefined
+  db: CogniaDB
+  opts: ImportOptions
+  summary: ImportSummary
+}
+
+async function applyMemoryBundle(args: MemoryBundleArgs): Promise<void> {
+  const { db, opts, summary } = args
+  const memories = (args.memories ?? []).flatMap((row) => {
+    const safe = sanitizeImportedMemory(row)
+    return safe ? [safe] : []
+  })
+  const evidence = (args.evidence ?? []).flatMap((row) => {
+    const safe = sanitizeImportedEvidence(row)
+    return safe ? [safe] : []
+  })
+  const jobs = (args.jobs ?? []).flatMap((row) => {
+    const safe = sanitizeImportedJob(row)
+    return safe ? [safe] : []
+  })
+  const audits = (args.audits ?? []).flatMap((row) => {
+    const safe = sanitizeImportedAudit(row)
+    return safe ? [safe] : []
+  })
+  const importedMemoryIds = new Set(memories.map((memory) => memory.id))
+  const memoryIdMap = new Map<string, string>()
+  const evidenceIdMap = new Map<string, string>()
+
+  for (const memory of memories) {
+    const importedId = await applyMappedRow({
+      row: memory,
+      table: db.memories,
+      kind: "memories",
+      idPrefix: "mem",
+      opts,
+      summary,
+    })
+    if (importedId) memoryIdMap.set(memory.id, importedId)
+  }
+
+  for (const memory of memories) {
+    const importedId = memoryIdMap.get(memory.id)
+    if (!importedId) continue
+    const supersededById = memory.supersededById
+      ? (memoryIdMap.get(memory.supersededById) ?? memory.supersededById)
+      : undefined
+    const conflictWithIds = memory.conflictWithIds?.map((id) => memoryIdMap.get(id) ?? id)
+    if (
+      supersededById !== memory.supersededById ||
+      conflictWithIds?.some((id, index) => id !== memory.conflictWithIds?.[index])
+    ) {
+      await db.memories.update(importedId, { supersededById, conflictWithIds })
+    }
+  }
+
+  for (const item of evidence) {
+    if (item.memoryId && importedMemoryIds.has(item.memoryId) && !memoryIdMap.has(item.memoryId)) {
+      incrementCounter(summary.skipped, "memoryEvidence")
+      continue
+    }
+    const row: MemoryEvidence = {
+      ...item,
+      ...(item.memoryId ? { memoryId: memoryIdMap.get(item.memoryId) ?? item.memoryId } : {}),
+    }
+    const importedId = await applyMappedRow({
+      row,
+      table: db.memoryEvidence,
+      kind: "memoryEvidence",
+      idPrefix: "mev",
+      opts,
+      summary,
+    })
+    if (importedId) evidenceIdMap.set(item.id, importedId)
+  }
+
+  for (const item of jobs) {
+    await applyMappedRow<MemoryJob>({
+      row: {
+        ...item,
+        evidenceIds: item.evidenceIds.map((id) => evidenceIdMap.get(id) ?? id),
+      },
+      table: db.memoryJobs,
+      kind: "memoryJobs",
+      idPrefix: "mjob",
+      opts,
+      summary,
+    })
+  }
+
+  for (const item of audits) {
+    if (item.memoryId && importedMemoryIds.has(item.memoryId) && !memoryIdMap.has(item.memoryId)) {
+      incrementCounter(summary.skipped, "memoryAuditEvents")
+      continue
+    }
+    await applyMappedRow({
+      row: {
+        ...item,
+        ...(item.memoryId ? { memoryId: memoryIdMap.get(item.memoryId) ?? item.memoryId } : {}),
+      },
+      table: db.memoryAuditEvents,
+      kind: "memoryAuditEvents",
+      idPrefix: "maudit",
+      opts,
+      summary,
+    })
+  }
+}
+
+const MEMORY_SCOPES = new Set(["global", "workspace", "character", "agent"])
+const MEMORY_TYPES = new Set(["semantic", "episodic", "procedural"])
+const MEMORY_STATUSES = new Set(["active", "invalidated"])
+const MEMORY_PROVENANCE = new Set(["user", "explicit", "inbound", "system", "external"])
+const EVIDENCE_KINDS = new Set([
+  "message",
+  "file",
+  "external",
+  "manual",
+  "checkpoint",
+  "agent-finding",
+])
+const JOB_KINDS = new Set(["turn-extraction", "session-distill", "vector-reconcile"])
+const JOB_STATUSES = new Set(["queued", "running", "completed", "failed"])
+const AUDIT_ACTIONS = new Set([
+  "recall-allowed",
+  "recall-denied",
+  "learn-allowed",
+  "learn-denied",
+  "created",
+  "revised",
+  "promoted",
+  "invalidated",
+  "deleted",
+  "conflict",
+  "pinned",
+  "unpinned",
+])
+const SAFE_IDENTIFIER = /^[\w./:@-]{1,512}$/u
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value)
+}
+
+function optionalIdentifier(value: unknown): string | undefined {
+  return typeof value === "string" && SAFE_IDENTIFIER.test(value) && hasNoLeakingPii(value)
+    ? value
+    : undefined
+}
+
+function optionalFiniteNumber(value: unknown): number | undefined {
+  return isFiniteNumber(value) ? value : undefined
+}
+
+function sanitizeImportedMemory(value: unknown): Memory | undefined {
+  if (!isRecord(value)) return undefined
+  const {
+    id,
+    scope,
+    type,
+    text,
+    tags,
+    importance,
+    createdAt,
+    updatedAt,
+    lastAccessedAt,
+    accessCount,
+    version,
+    status,
+    pinned,
+    provenance,
+  } = value
+  if (
+    typeof id !== "string" ||
+    !SAFE_IDENTIFIER.test(id) ||
+    typeof scope !== "string" ||
+    !MEMORY_SCOPES.has(scope) ||
+    typeof type !== "string" ||
+    !MEMORY_TYPES.has(type) ||
+    typeof text !== "string" ||
+    !Array.isArray(tags) ||
+    !tags.every((tag) => typeof tag === "string" && tag.length <= 128) ||
+    !isFiniteNumber(importance) ||
+    importance < 1 ||
+    importance > 10 ||
+    !isFiniteNumber(createdAt) ||
+    !isFiniteNumber(updatedAt) ||
+    !isFiniteNumber(lastAccessedAt) ||
+    !isFiniteNumber(accessCount) ||
+    accessCount < 0 ||
+    !isFiniteNumber(version) ||
+    version < 1 ||
+    typeof status !== "string" ||
+    !MEMORY_STATUSES.has(status) ||
+    typeof pinned !== "boolean" ||
+    typeof provenance !== "string" ||
+    !MEMORY_PROVENANCE.has(provenance)
+  ) {
+    return undefined
+  }
+  const characterId = optionalIdentifier(value.characterId)
+  const projectId = optionalIdentifier(value.projectId)
+  const agentId = optionalIdentifier(value.agentId)
+  if (
+    (scope === "workspace" && !projectId) ||
+    (scope === "character" && !characterId) ||
+    (scope === "agent" && !agentId)
+  ) {
+    return undefined
+  }
+  const redacted = redactText(text).redacted.trim()
+  if (!redacted || !hasNoLeakingPii(redacted)) return undefined
+  const row: Memory = {
+    id,
+    scope: scope as Memory["scope"],
+    type: type as Memory["type"],
+    text: redacted,
+    tags: [...new Set(tags)],
+    importance,
+    createdAt,
+    updatedAt,
+    lastAccessedAt,
+    accessCount,
+    version,
+    status: status as Memory["status"],
+    pinned,
+    provenance: provenance as Memory["provenance"],
+    ...(characterId ? { characterId } : {}),
+    ...(projectId ? { projectId } : {}),
+    ...(agentId ? { agentId } : {}),
+  }
+  const stringFields = [
+    "branch",
+    "pathPattern",
+    "key",
+    "vectorDocId",
+    "supersededById",
+    "sourceSessionId",
+    "sourceMessageId",
+    "sourcePluginId",
+  ] as const
+  for (const field of stringFields) {
+    const safe = optionalIdentifier(value[field])
+    if (safe) row[field] = safe
+  }
+  if (
+    value.sourceChannel === "plugin" ||
+    value.sourceChannel === "mcp" ||
+    value.sourceChannel === "rpc"
+  ) {
+    row.sourceChannel = value.sourceChannel
+  }
+  if (value.evidenceState === "legacy" || value.evidenceState === "supported") {
+    row.evidenceState = value.evidenceState
+  }
+  if (
+    value.reviewStatus === "unreviewed" ||
+    value.reviewStatus === "verified" ||
+    value.reviewStatus === "conflict"
+  ) {
+    row.reviewStatus = value.reviewStatus
+  }
+  if (
+    value.contaminationState === "clean" ||
+    value.contaminationState === "external-context" ||
+    value.contaminationState === "unknown"
+  ) {
+    row.contaminationState = value.contaminationState
+  }
+  if (value.sensitivity === "normal" || value.sensitivity === "sensitive") {
+    row.sensitivity = value.sensitivity
+  }
+  if (Array.isArray(value.conflictWithIds)) {
+    row.conflictWithIds = value.conflictWithIds.flatMap((item) => {
+      const safe = optionalIdentifier(item)
+      return safe ? [safe] : []
+    })
+  }
+  const invalidatedAt = optionalFiniteNumber(value.invalidatedAt)
+  if (invalidatedAt !== undefined) row.invalidatedAt = invalidatedAt
+  return row
+}
+
+function sanitizeImportedEvidence(value: unknown): MemoryEvidence | undefined {
+  if (!isRecord(value)) return undefined
+  const id = optionalIdentifier(value.id)
+  const sourceId = optionalIdentifier(value.sourceId)
+  if (
+    !id ||
+    !sourceId ||
+    typeof value.kind !== "string" ||
+    !EVIDENCE_KINDS.has(value.kind) ||
+    typeof value.contaminationState !== "string" ||
+    !["clean", "external-context", "unknown"].includes(value.contaminationState) ||
+    typeof value.reviewed !== "boolean" ||
+    !isFiniteNumber(value.createdAt)
+  ) {
+    return undefined
+  }
+  return {
+    id,
+    kind: value.kind as MemoryEvidence["kind"],
+    sourceId,
+    contaminationState: value.contaminationState as MemoryEvidence["contaminationState"],
+    reviewed: value.reviewed,
+    createdAt: value.createdAt,
+    ...(optionalIdentifier(value.memoryId) ? { memoryId: optionalIdentifier(value.memoryId) } : {}),
+    ...(optionalIdentifier(value.sessionId)
+      ? { sessionId: optionalIdentifier(value.sessionId) }
+      : {}),
+    ...(optionalIdentifier(value.messageId)
+      ? { messageId: optionalIdentifier(value.messageId) }
+      : {}),
+    ...(optionalIdentifier(value.excerptHash)
+      ? { excerptHash: optionalIdentifier(value.excerptHash) }
+      : {}),
+  }
+}
+
+function sanitizeImportedJob(value: unknown): MemoryJob | undefined {
+  if (!isRecord(value)) return undefined
+  const id = optionalIdentifier(value.id)
+  const dedupeKey = optionalIdentifier(value.dedupeKey)
+  if (
+    !id ||
+    !dedupeKey ||
+    typeof value.kind !== "string" ||
+    !JOB_KINDS.has(value.kind) ||
+    typeof value.status !== "string" ||
+    !JOB_STATUSES.has(value.status) ||
+    typeof value.scope !== "string" ||
+    !MEMORY_SCOPES.has(value.scope) ||
+    typeof value.provenance !== "string" ||
+    !MEMORY_PROVENANCE.has(value.provenance) ||
+    !Array.isArray(value.evidenceIds) ||
+    !isFiniteNumber(value.queuedAt) ||
+    !isFiniteNumber(value.retryCount) ||
+    value.retryCount < 0
+  ) {
+    return undefined
+  }
+  const evidenceIds = value.evidenceIds.flatMap((item) => {
+    const safe = optionalIdentifier(item)
+    return safe ? [safe] : []
+  })
+  if (evidenceIds.length !== value.evidenceIds.length) return undefined
+  const row: MemoryJob = {
+    id,
+    dedupeKey,
+    kind: value.kind as MemoryJob["kind"],
+    status: value.status as MemoryJob["status"],
+    scope: value.scope as MemoryJob["scope"],
+    provenance: value.provenance as MemoryJob["provenance"],
+    evidenceIds,
+    queuedAt: value.queuedAt,
+    retryCount: value.retryCount,
+  }
+  for (const field of [
+    "sessionId",
+    "projectId",
+    "characterId",
+    "leaseOwner",
+    "errorCode",
+  ] as const) {
+    const safe = optionalIdentifier(value[field])
+    if (safe) row[field] = safe
+  }
+  for (const field of ["startedAt", "completedAt", "leaseExpiresAt", "nextAttemptAt"] as const) {
+    const safe = optionalFiniteNumber(value[field])
+    if (safe !== undefined) row[field] = safe
+  }
+  return row
+}
+
+function sanitizeImportedAudit(value: unknown): MemoryAuditEvent | undefined {
+  if (!isRecord(value)) return undefined
+  const id = optionalIdentifier(value.id)
+  if (
+    !id ||
+    typeof value.action !== "string" ||
+    !AUDIT_ACTIONS.has(value.action) ||
+    !isFiniteNumber(value.createdAt)
+  ) {
+    return undefined
+  }
+  const reason = optionalIdentifier(value.reason) ?? "imported"
+  const metadata: MemoryAuditEvent["metadata"] = isRecord(value.metadata)
+    ? (Object.fromEntries(
+        Object.entries(value.metadata).filter(
+          ([key, item]) =>
+            SAFE_IDENTIFIER.test(key) &&
+            (typeof item === "boolean" ||
+              (typeof item === "number" && Number.isFinite(item)) ||
+              (typeof item === "string" && SAFE_IDENTIFIER.test(item) && hasNoLeakingPii(item)))
+        )
+      ) as Record<string, string | number | boolean>)
+    : undefined
+  return {
+    id,
+    action: value.action as MemoryAuditEvent["action"],
+    reason,
+    createdAt: value.createdAt,
+    ...(optionalIdentifier(value.memoryId) ? { memoryId: optionalIdentifier(value.memoryId) } : {}),
+    ...(optionalIdentifier(value.sessionId)
+      ? { sessionId: optionalIdentifier(value.sessionId) }
+      : {}),
+    ...(metadata && Object.keys(metadata).length > 0 ? { metadata } : {}),
+  }
+}
+
+interface MappedRowArgs<T extends { id: string }> {
+  row: T
+  table: { get(id: string): Promise<T | undefined>; put(row: T): Promise<unknown> }
+  kind: string
+  idPrefix: string
+  opts: ImportOptions
+  summary: ImportSummary
+}
+
+async function applyMappedRow<T extends { id: string }>(
+  args: MappedRowArgs<T>
+): Promise<string | undefined> {
+  const { row, table, kind, idPrefix, opts, summary } = args
+  const existing = await table.get(row.id)
+  if (!existing) {
+    await table.put(row)
+    incrementCounter(summary.added, kind)
+    return row.id
+  }
+  if (opts.mergeStrategy === "skip") {
+    incrementCounter(summary.skipped, kind)
+    return undefined
+  }
+  if (opts.mergeStrategy === "overwrite") {
+    await table.put(row)
+    incrementCounter(summary.overwritten, kind)
+    return row.id
+  }
+  const id = newId(idPrefix)
+  await table.put({ ...row, id })
+  incrementCounter(summary.added, kind)
+  return id
 }
 
 function incrementCounter(target: Record<string, number>, key: string): void {

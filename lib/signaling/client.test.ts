@@ -1,3 +1,5 @@
+/** @jest-environment jsdom */
+
 /**
  * SignalingClient unit tests — pure-JS WebSocket mock, no network. Verifies
  * the full subscribe → relay → reconnect lifecycle plus HMAC + replay
@@ -357,3 +359,4 @@ describe("SignalingClient", () => {
     expect(instances.length).toBe(1)
   })
 })
+/** @jest-environment jsdom */

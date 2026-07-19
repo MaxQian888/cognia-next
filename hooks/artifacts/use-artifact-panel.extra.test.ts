@@ -10,6 +10,7 @@ jest.mock("next-intl", () => ({
 
 const revealInExplorer = jest.fn().mockResolvedValue(undefined)
 const openPath = jest.fn().mockResolvedValue(undefined)
+const saveExport = jest.fn().mockResolvedValue({ kind: "saved", location: "Page.html" })
 
 // `stores/index.ts` calls `isTauri()` at module top-level inside a Zustand
 // `create()`; that fires during ES import hoisting, before any `let` in this
@@ -35,6 +36,10 @@ jest.mock("@/lib/tauri/opener", () => ({
   openPath: (...args: unknown[]) => openPath(...args),
 }))
 
+jest.mock("@/lib/files/save-export", () => ({
+  saveExport: (...args: unknown[]) => saveExport(...args),
+}))
+
 jest.mock("@tauri-apps/api/path", () => ({
   downloadDir: jest.fn().mockResolvedValue("/Users/me/Downloads/"),
 }))
@@ -47,6 +52,7 @@ beforeEach(() => {
   localStorage.clear()
   revealInExplorer.mockClear()
   openPath.mockClear()
+  saveExport.mockClear().mockResolvedValue({ kind: "saved", location: "Page.html" })
   setIsTauriValue(true)
   useArtifactStore.setState({
     artifacts: {},
@@ -148,7 +154,9 @@ describe("useArtifactPanelState — extra coverage", () => {
       createObjectURL: jest.fn(() => "blob:x"),
       revokeObjectURL: jest.fn(),
     })
-    act(() => result.current.handleDownload())
+    await act(async () => {
+      await result.current.handleDownload()
+    })
     await act(async () => {
       await result.current.handleRevealInExplorer()
     })

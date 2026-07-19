@@ -1,3 +1,5 @@
+/** @jest-environment jsdom */
+
 import { parseMultiStatus } from "./propfind"
 
 const MULTISTATUS = `<?xml version="1.0" encoding="utf-8"?>
@@ -71,3 +73,4 @@ describe("parseMultiStatus", () => {
     expect(parseMultiStatus("<<<not xml")).toEqual([])
   })
 })
+/** @jest-environment jsdom */

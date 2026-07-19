@@ -743,3 +743,176 @@ describe("applyBackupPackage — twin tables", () => {
     expect(summary.added.twinJobs).toBeUndefined()
   })
 })
+
+describe("applyBackupPackage — learned memory", () => {
+  function memorySnapshot(): BackupPayloadV3 {
+    return {
+      memories: [
+        {
+          id: "mem_1",
+          scope: "workspace",
+          projectId: "project_1",
+          type: "semantic",
+          text: "The project uses pnpm.",
+          tags: ["tooling"],
+          importance: 8,
+          createdAt: 1,
+          updatedAt: 1,
+          lastAccessedAt: 1,
+          accessCount: 0,
+          version: 1,
+          status: "active",
+          pinned: false,
+          provenance: "user",
+          evidenceState: "supported",
+          reviewStatus: "verified",
+          contaminationState: "clean",
+          sensitivity: "normal",
+        },
+      ],
+      memoryEvidence: [
+        {
+          id: "mev_1",
+          memoryId: "mem_1",
+          kind: "message",
+          sourceId: "source_1",
+          contaminationState: "clean",
+          reviewed: true,
+          createdAt: 1,
+        },
+      ],
+      memoryJobs: [
+        {
+          id: "mjob_1",
+          dedupeKey: "turn:s1:m1",
+          kind: "turn-extraction",
+          status: "completed",
+          scope: "workspace",
+          projectId: "project_1",
+          provenance: "user",
+          evidenceIds: ["mev_1"],
+          queuedAt: 1,
+          completedAt: 2,
+          retryCount: 0,
+        },
+      ],
+      memoryAuditEvents: [
+        {
+          id: "maudit_1",
+          action: "created",
+          memoryId: "mem_1",
+          reason: "turn-extraction",
+          createdAt: 2,
+        },
+      ],
+    }
+  }
+
+  it("restores the complete memory provenance graph", async () => {
+    const db = getDb()
+    const summary = await applyBackupPackage(
+      pkg(memorySnapshot()),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+
+    expect((await db.memoryEvidence.get("mev_1"))?.memoryId).toBe("mem_1")
+    expect((await db.memoryJobs.get("mjob_1"))?.evidenceIds).toEqual(["mev_1"])
+    expect((await db.memoryAuditEvents.get("maudit_1"))?.memoryId).toBe("mem_1")
+    expect(summary.added.memories).toBe(1)
+    expect(summary.added.memoryEvidence).toBe(1)
+    expect(summary.added.memoryJobs).toBe(1)
+    expect(summary.added.memoryAuditEvents).toBe(1)
+  })
+
+  it("remaps child references when duplicate import ids collide", async () => {
+    const db = getDb()
+    await applyBackupPackage(
+      pkg(memorySnapshot()),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+    await applyBackupPackage(
+      pkg(memorySnapshot()),
+      { mergeStrategy: "duplicate", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+
+    const memories = await db.memories.toArray()
+    const duplicateMemory = memories.find((row) => row.id !== "mem_1")
+    const evidence = (await db.memoryEvidence.toArray()).find((row) => row.id !== "mev_1")
+    const job = (await db.memoryJobs.toArray()).find((row) => row.id !== "mjob_1")
+    const audit = (await db.memoryAuditEvents.toArray()).find((row) => row.id !== "maudit_1")
+
+    expect(duplicateMemory).toBeDefined()
+    expect(evidence?.memoryId).toBe(duplicateMemory?.id)
+    expect(job?.evidenceIds).toEqual([evidence?.id])
+    expect(audit?.memoryId).toBe(duplicateMemory?.id)
+  })
+
+  it("remaps supersession and conflict links inside duplicated memory rows", async () => {
+    const db = getDb()
+    const snapshot = memorySnapshot()
+    snapshot.memories!.push({
+      ...snapshot.memories![0],
+      id: "mem_2",
+      text: "The project uses npm.",
+      reviewStatus: "conflict",
+      conflictWithIds: ["mem_1"],
+    })
+    snapshot.memories![0] = {
+      ...snapshot.memories![0],
+      supersededById: "mem_2",
+      conflictWithIds: ["mem_2"],
+    }
+    await applyBackupPackage(
+      pkg(snapshot),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+    await applyBackupPackage(
+      pkg(snapshot),
+      { mergeStrategy: "duplicate", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+    const duplicated = (await db.memories.toArray()).filter(
+      (row) => row.id !== "mem_1" && row.id !== "mem_2"
+    )
+    const first = duplicated.find((row) => row.text === "The project uses pnpm.")
+    const second = duplicated.find((row) => row.text === "The project uses npm.")
+    expect(first?.supersededById).toBe(second?.id)
+    expect(first?.conflictWithIds).toEqual([second?.id])
+    expect(second?.conflictWithIds).toEqual([first?.id])
+  })
+
+  it("validates imported governance rows and redacts memory text before persistence", async () => {
+    const db = getDb()
+    const snapshot = memorySnapshot()
+    snapshot.memories![0] = {
+      ...snapshot.memories![0],
+      text: "Email alice@example.com about pnpm",
+    }
+    snapshot.memoryAuditEvents![0] = {
+      ...snapshot.memoryAuditEvents![0],
+      reason: "alice@example.com",
+      metadata: { safeCount: 1, leaked: "bob@example.com" },
+    }
+    snapshot.memoryEvidence!.push({ invalid: true } as never)
+
+    const summary = await applyBackupPackage(
+      pkg(snapshot),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+
+    const memory = await db.memories.get("mem_1")
+    expect(memory?.text).not.toContain("alice@example.com")
+    expect(memory?.text).toContain("<EMAIL_")
+    expect(await db.memoryEvidence.count()).toBe(1)
+    expect(summary.added.memoryEvidence).toBe(1)
+    expect(await db.memoryAuditEvents.get("maudit_1")).toMatchObject({
+      reason: "imported",
+      metadata: { safeCount: 1 },
+    })
+  })
+})

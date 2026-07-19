@@ -27,6 +27,8 @@ import type {
 } from "@/lib/db/canvas-types"
 import type { A2UIAppRow, A2UITemplateRow, A2UIEventHistoryRow } from "@/lib/db/a2ui-types"
 import type { TwinChunk, TwinDraft, TwinJob, TwinProfile, TwinSource } from "@/types/twin"
+import type { Memory } from "@/types/memory/memory"
+import type { MemoryAuditEvent, MemoryEvidence, MemoryJob } from "@/types/memory/governance"
 import type { LocalStorageSnapshot } from "./snapshots/types"
 
 /** Schema version currently emitted by `buildBackupPackage`. */
@@ -135,6 +137,15 @@ export interface BackupPayloadV3 {
   twinProfile?: TwinProfile[]
   twinDrafts?: TwinDraft[]
   twinJobs?: TwinJob[]
+  /**
+   * Learned-memory control-plane tables (schema v118). The canonical memory,
+   * its evidence identities, durable jobs, and content-free audit trail are
+   * exported together so restore never severs provenance links.
+   */
+  memories?: Memory[]
+  memoryEvidence?: MemoryEvidence[]
+  memoryJobs?: MemoryJob[]
+  memoryAuditEvents?: MemoryAuditEvent[]
 }
 
 /** The on-disk plaintext shape. JSON-serialized verbatim. */
@@ -242,6 +253,8 @@ export interface ExportOptions {
   includeApiKey: boolean
   /** Include built-in characters/skills/teams. Off by default — they re-seed locally. */
   includeBuiltIns?: boolean
+  /** Include learned memories and their governance graph. Defaults to true. */
+  includeMemories?: boolean
 }
 
 // ---- Errors ---------------------------------------------------------------

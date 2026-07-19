@@ -1,3 +1,5 @@
+/** @jest-environment jsdom */
+
 import { WebDavClient } from "./client"
 import { WebDavAuthError, WebDavNotFoundError, WebDavError } from "./errors"
 import type { WebDavRequest, WebDavResponse, WebDavTransport } from "./types"
@@ -90,3 +92,4 @@ describe("WebDavClient", () => {
     await expect(client.deleteFile("/gone")).resolves.toBeUndefined()
   })
 })
+/** @jest-environment jsdom */

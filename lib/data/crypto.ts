@@ -33,7 +33,10 @@ function decodeBase64(value: string): Uint8Array {
   return new Uint8Array(Buffer.from(value, "base64"))
 }
 
-function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+function toBufferSource(bytes: Uint8Array): BufferSource {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(bytes) as BufferSource
+  }
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
 }
 
@@ -47,7 +50,7 @@ function getSubtleCrypto(): SubtleCrypto {
 
 async function sha256Bytes(input: Uint8Array): Promise<Uint8Array> {
   const subtle = getSubtleCrypto()
-  const digest = await subtle.digest("SHA-256", toArrayBuffer(input))
+  const digest = await subtle.digest("SHA-256", toBufferSource(input))
   return new Uint8Array(digest)
 }
 
@@ -67,7 +70,7 @@ async function deriveAesKey(
   const subtle = getSubtleCrypto()
   const keyMaterial = await subtle.importKey(
     "raw",
-    toArrayBuffer(new TextEncoder().encode(passphrase)),
+    toBufferSource(new TextEncoder().encode(passphrase)),
     "PBKDF2",
     false,
     ["deriveKey"]
@@ -76,7 +79,7 @@ async function deriveAesKey(
   return subtle.deriveKey(
     {
       name: "PBKDF2",
-      salt: toArrayBuffer(salt),
+      salt: toBufferSource(salt),
       iterations,
       hash: "SHA-256",
     },
@@ -109,9 +112,9 @@ export async function encryptBackupPackage(
   const iv = randomBytes(12)
   const key = await deriveAesKey(passphrase, salt)
   const encrypted = await subtle.encrypt(
-    { name: "AES-GCM", iv: toArrayBuffer(iv) },
+    { name: "AES-GCM", iv: toBufferSource(iv) },
     key,
-    toArrayBuffer(new TextEncoder().encode(plainText))
+    toBufferSource(new TextEncoder().encode(plainText))
   )
 
   return {
@@ -147,9 +150,9 @@ export async function decryptBackupPackage(
   const ciphertext = decodeBase64(envelope.ciphertext)
   const key = await deriveAesKey(passphrase, salt, envelope.kdf.iterations)
   const decrypted = await subtle.decrypt(
-    { name: "AES-GCM", iv: toArrayBuffer(iv) },
+    { name: "AES-GCM", iv: toBufferSource(iv) },
     key,
-    toArrayBuffer(ciphertext)
+    toBufferSource(ciphertext)
   )
 
   const plainText = new TextDecoder().decode(decrypted)

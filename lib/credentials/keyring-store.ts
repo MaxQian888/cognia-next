@@ -15,10 +15,12 @@
  *   - **Tauri desktop** — `keyring_secret_*` commands → OS keyring.
  *   - **Capacitor mobile** — `SecureStoragePlugin` → iOS Keychain /
  *     Android Keystore.
+ *   - **Headless brain** — service-scoped companion RPC → encrypted server store.
  *   - **Web / SSR / dev** — in-memory fallback (per-instance).
  */
 
 import { isCapacitor, isTauri, transport } from "@/lib/tauri"
+import { isHeadlessHost } from "@/lib/platform/detect"
 import { makeDefaultLoader } from "@/lib/capacitor/_shared"
 
 export interface KeyringStore {
@@ -31,21 +33,26 @@ export interface KeyringStore {
 // Backend: Tauri (OS keyring)
 // ---------------------------------------------------------------------------
 
+type KeyringCall = (name: string, params: Record<string, unknown>) => Promise<unknown>
+
 class TauriKeyringStore implements KeyringStore {
-  constructor(private readonly namespace: string) {}
+  constructor(
+    private readonly namespace: string,
+    private readonly call: KeyringCall
+  ) {}
   async save(keyId: string, value: string): Promise<void> {
-    await transport.call<void>("keyring_secret_set", {
+    await this.call("keyring_secret_set", {
       input: { namespace: this.namespace, key: keyId, value },
     })
   }
   async load(keyId: string): Promise<string | null> {
-    const raw = await transport.call<string | null>("keyring_secret_get", {
+    const raw = await this.call("keyring_secret_get", {
       input: { namespace: this.namespace, key: keyId },
     })
-    return raw ?? null
+    return typeof raw === "string" ? raw : null
   }
   async delete(keyId: string): Promise<void> {
-    await transport.call<void>("keyring_secret_clear", {
+    await this.call("keyring_secret_clear", {
       input: { namespace: this.namespace, key: keyId },
     })
   }
@@ -145,7 +152,26 @@ class InMemoryStore implements KeyringStore {
  * Capacitor SecureStorage key, so distinct callers never collide.
  */
 export function createKeyringStore(namespace: string): KeyringStore {
-  if (isTauri()) return new TauriKeyringStore(namespace)
+  if (isTauri() || isHeadlessHost()) {
+    return new TauriKeyringStore(namespace, (name, params) => transport.call(name, params))
+  }
   if (isCapacitor()) return new CapacitorSecureStore(namespace)
   return new InMemoryStore()
+}
+
+/**
+ * Build a keyring store that is pinned to the current desktop process.
+ *
+ * Unlike {@link createKeyringStore}, this bypasses Cognia's process-wide
+ * local/remote routing transport. Use it when a credential must stay on the
+ * explicitly selected local execution host (for example a Sites provider
+ * token). It deliberately fails outside Tauri instead of falling back to an
+ * ambiguous remote or in-memory location.
+ */
+export function createLocalKeyringStore(namespace: string): KeyringStore {
+  if (!isTauri()) throw new Error("local Tauri keyring is unavailable")
+  return new TauriKeyringStore(namespace, async (name, params) => {
+    const { invoke } = await import("@tauri-apps/api/core")
+    return invoke(name, params)
+  })
 }
