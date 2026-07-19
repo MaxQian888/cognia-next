@@ -8,6 +8,11 @@ description: "为产品智能体提供基于内置 /browser 嵌入式 webview �
 **状态**：已采纳（2026-06-25）
 **作者**：Max Qian + Claude
 
+> **2026-07-18 补充**：ADR-0085 取代了“第二阶段只能引导到 Playwright MCP”的结论。
+> Cognia 现在通过同一个 `BrowserEngine` 契约为 cloud/headless session 提供自有
+> `RemoteChromiumEngine`。Playwright MCP 仍是独立的可选工具；Tauri
+> `EmbeddedEngine` 仍是桌面 localhost 默认实现。
+
 ## 背景
 
 内置浏览器（`/browser`）此前是一个被动的、面向人的设计反馈工具：预览本地开发服务器，

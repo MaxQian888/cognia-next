@@ -20,12 +20,19 @@ jest.mock("@/lib/browser/client", () => ({
 }))
 
 import { browserClient } from "@/lib/browser/client"
-import { routeEngine, EmbeddedEngine } from "@/lib/browser/agent-engine"
+import {
+  configureRemoteBrowserEngine,
+  routeEngine,
+  EmbeddedEngine,
+} from "@/lib/browser/agent-engine"
 import { setActivePaneRect } from "@/lib/browser/pane-rect"
 
 const mockClient = browserClient as unknown as Record<string, jest.Mock>
 
-beforeEach(() => Object.values(mockClient).forEach((m) => m.mockClear()))
+beforeEach(() => {
+  Object.values(mockClient).forEach((m) => m.mockClear())
+  configureRemoteBrowserEngine(null)
+})
 
 describe("routeEngine", () => {
   it("routes localhost to the embedded engine, trusted tier", () => {
@@ -41,9 +48,67 @@ describe("routeEngine", () => {
     expect(r.untrusted).toBe(true)
     expect(r.engine).toBeInstanceOf(EmbeddedEngine)
   })
+
+  it("routes cloud/mobile/headless and authorized public pages to a ready remote engine", () => {
+    const remote = new EmbeddedEngine()
+    configureRemoteBrowserEngine(remote, { enabled: true, healthy: true })
+    for (const hostProfile of ["cloud-companion", "mobile-companion", "headless"] as const) {
+      expect(routeEngine("http://localhost:3000", { hostProfile })).toMatchObject({
+        engine: remote,
+        backend: "remote-chromium",
+      })
+    }
+    expect(
+      routeEngine("https://app.example.com", {
+        hostProfile: "desktop",
+        domainAuthorized: true,
+      })
+    ).toMatchObject({ engine: remote, backend: "remote-chromium" })
+  })
+
+  it("keeps desktop localhost embedded and rejects unavailable explicit remote routing", () => {
+    expect(routeEngine("http://localhost:3000", { hostProfile: "desktop" }).backend).toBe(
+      "embedded"
+    )
+    expect(() =>
+      routeEngine("http://localhost:3000", { backendPreference: "remote-chromium" })
+    ).toThrow(expect.objectContaining({ code: "browser_feature_unsupported" }))
+  })
 })
 
 describe("EmbeddedEngine", () => {
+  it("exposes the embedded webview as one activatable page", async () => {
+    const engine = new EmbeddedEngine()
+    await expect(engine.listPages()).resolves.toEqual([
+      {
+        id: "embedded",
+        url: "http://localhost/",
+        title: "Home",
+        active: true,
+      },
+    ])
+    await expect(engine.activatePage("embedded")).resolves.toBeUndefined()
+    await expect(engine.activatePage("other")).rejects.toMatchObject({
+      code: "browser_page_not_found",
+    })
+  })
+
+  it("closes the embedded page by returning it to about:blank", async () => {
+    await new EmbeddedEngine().closePage("embedded")
+    expect(mockClient.embedStop).toHaveBeenCalled()
+    expect(mockClient.embedNavigate).toHaveBeenCalledWith("about:blank")
+  })
+
+  it("reports remote-only file capabilities as unsupported", async () => {
+    const engine = new EmbeddedEngine()
+    await expect(engine.setFiles("e1", ["fixture.txt"])).rejects.toMatchObject({
+      code: "browser_feature_unsupported",
+    })
+    await expect(engine.downloads()).rejects.toMatchObject({
+      code: "browser_feature_unsupported",
+    })
+  })
+
   it("act delegates to browserClient.embedAct", async () => {
     await new EmbeddedEngine().act("e1", "click", {})
     expect(mockClient.embedAct).toHaveBeenCalledWith("e1", "click", {})

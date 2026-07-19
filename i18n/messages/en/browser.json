@@ -157,6 +157,16 @@
     "recording": "Recording — {count} steps",
     "title": "Record actions"
   },
+  "remote": {
+    "canvas": "Remote browser canvas",
+    "closePage": "Close page",
+    "error": "Remote browser unavailable ({code})",
+    "humanControl": "You're controlling",
+    "takeover": "Take control",
+    "untitledPage": "Untitled page",
+    "url": "Remote browser URL",
+    "waiting": "Waiting for the remote browser…"
+  },
   "screenshot": {
     "failed": "Could not capture the preview",
     "sent": "Screenshot sent to chat"
