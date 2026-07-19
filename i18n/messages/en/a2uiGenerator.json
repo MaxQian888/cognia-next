@@ -1,0 +1,160 @@
+{
+  "factories": {
+    "ageCalculator": {
+      "header": { "text": "🎂 Age Calculator" },
+      "date-input": { "label": "Date of Birth" },
+      "calc-btn": { "text": "Calculate Age" }
+    },
+    "bmiCalculator": {
+      "header": { "text": "🏃 BMI Calculator" },
+      "height-input": { "label": "Height (cm)" },
+      "weight-input": { "label": "Weight (kg)" },
+      "calc-btn": { "text": "Calculate BMI" }
+    },
+    "contact": {
+      "header": { "text": "✉️ Contact Us" },
+      "first-name": { "label": "First Name" },
+      "last-name": { "label": "Last Name" },
+      "email": { "label": "Email" },
+      "subject": {
+        "label": "Subject",
+        "options": [
+          { "value": "general", "label": "General Inquiry" },
+          { "value": "support", "label": "Technical Support" },
+          { "value": "feedback", "label": "Feedback" }
+        ]
+      },
+      "message": { "label": "Message" },
+      "submit-btn": { "text": "Send" }
+    },
+    "dashboard": {
+      "refresh-btn": { "text": "Refresh" },
+      "summary": { "title": "Key Metrics" },
+      "status": { "title": "Data Status" },
+      "chart-section": { "title": "Trend" }
+    },
+    "expenseTracker": {
+      "header": { "text": "💰 Expense Tracker" },
+      "total-card": { "title": "Spent" },
+      "budget-card": { "title": "Budget" },
+      "amount-input": { "label": "Amount" },
+      "category-select": {
+        "label": "Category",
+        "options": [
+          { "value": "food", "label": "🍔 Food" },
+          { "value": "transport", "label": "🚗 Transport" },
+          { "value": "shopping", "label": "🛍️ Shopping" },
+          { "value": "entertainment", "label": "🎮 Entertainment" },
+          { "value": "other", "label": "📦 Other" }
+        ]
+      },
+      "add-btn": { "text": "Add Expense" },
+      "expense-list": { "emptyText": "No records yet" }
+    },
+    "habitTracker": {
+      "header": { "text": "🎯 Habit Tracker" },
+      "habits-list": { "emptyText": "Add your first habit" },
+      "habit-input": { "placeholder": "New habit name" },
+      "add-btn": { "text": "Add" }
+    },
+    "healthTracker": {
+      "header": { "text": "🏃 Health Tracker" },
+      "steps-card": { "title": "👟 Steps" },
+      "water-card": { "title": "💧 Water" },
+      "steps-input": { "placeholder": "Steps" },
+      "water-1": { "text": "+1 cup" },
+      "water-2": { "text": "+2 cups" },
+      "water-3": { "text": "+3 cups" }
+    },
+    "loanCalculator": {
+      "header": { "text": "🏠 Loan Calculator" },
+      "principal-input": { "label": "Loan Amount" },
+      "rate-input": { "label": "Annual Rate (%)" },
+      "years-input": { "label": "Loan Term (years)" },
+      "calc-btn": { "text": "Calculate" },
+      "monthly-card": { "title": "Monthly Payment" },
+      "total-card": { "title": "Total Payment" },
+      "interest-card": { "title": "Interest" }
+    },
+    "notes": {
+      "header": { "text": "📝 Quick Notes" },
+      "search": { "placeholder": "🔍 Search notes..." },
+      "note-title": { "placeholder": "Title", "label": "Title" },
+      "note-content": { "placeholder": "Write down your thoughts..." },
+      "save-btn": { "text": "Save Note" },
+      "notes-list": { "emptyText": "No notes yet" }
+    },
+    "pomodoro": {
+      "header": { "text": "🍅 Pomodoro Timer" },
+      "start-btn": { "text": "Start" },
+      "pause-btn": { "text": "Pause" },
+      "reset-btn": { "text": "Reset" },
+      "work-btn": { "text": "Work 25 min" },
+      "break-btn": { "text": "Break 5 min" },
+      "long-break-btn": { "text": "Long Break 15 min" }
+    },
+    "survey": {
+      "title": { "text": "📋 Quick Survey" },
+      "desc": { "text": "Please answer the following questions" },
+      "q1": { "label": "Your Name" },
+      "q2": {
+        "label": "Satisfaction",
+        "options": [
+          { "value": "very", "label": "Very Satisfied" },
+          { "value": "good", "label": "Satisfied" },
+          { "value": "neutral", "label": "Neutral" },
+          { "value": "poor", "label": "Dissatisfied" }
+        ]
+      },
+      "q3": { "label": "Additional Suggestions" },
+      "submit-btn": { "text": "Submit" }
+    },
+    "timer": {
+      "header": { "text": "⏱️ Timer" },
+      "start-btn": { "text": "Start" },
+      "pause-btn": { "text": "Pause" },
+      "reset-btn": { "text": "Reset" },
+      "1min-btn": { "text": "1 min" },
+      "5min-btn": { "text": "5 min" },
+      "10min-btn": { "text": "10 min" }
+    },
+    "tipCalculator": {
+      "header": { "text": "💰 Tip Calculator" },
+      "bill-input": { "label": "Bill Amount" },
+      "tip-slider": { "label": "Tip (%)" },
+      "people-input": { "label": "People" },
+      "tip-card": { "title": "Tip" },
+      "total-card": { "title": "Per Person" }
+    },
+    "todo": {
+      "header": { "text": "✅ Todo List" },
+      "task-input": { "placeholder": "Add a new task..." },
+      "due-date": { "placeholder": "Due date" },
+      "add-btn": { "text": "Add" },
+      "filter-all": { "text": "All" },
+      "filter-pending": { "text": "Pending" },
+      "filter-done": { "text": "Completed" },
+      "task-list": { "emptyText": "No tasks yet" }
+    }
+  },
+  "dashboardDataModel": {
+    "summaryItems": [
+      { "id": "value-1", "title": "Metric 1", "value": "1,234", "badge": "Live" },
+      { "id": "value-2", "title": "Metric 2", "value": "567", "badge": "Stable" },
+      { "id": "value-3", "title": "Metric 3", "value": "+12%", "badge": "Trend" }
+    ],
+    "status": {
+      "message": "The data source is synchronized and ready to refresh.",
+      "detail": "The latest update occurred within the past 5 minutes."
+    },
+    "chartData": [
+      { "name": "Mon", "value": 120 },
+      { "name": "Tue", "value": 180 },
+      { "name": "Wed", "value": 150 },
+      { "name": "Thu", "value": 220 },
+      { "name": "Fri", "value": 190 },
+      { "name": "Sat", "value": 280 },
+      { "name": "Sun", "value": 250 }
+    ]
+  }
+}

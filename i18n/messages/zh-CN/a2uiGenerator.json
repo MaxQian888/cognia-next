@@ -1,0 +1,160 @@
+{
+  "factories": {
+    "ageCalculator": {
+      "header": { "text": "🎂 年龄计算器" },
+      "date-input": { "label": "出生日期" },
+      "calc-btn": { "text": "计算年龄" }
+    },
+    "bmiCalculator": {
+      "header": { "text": "🏃 BMI 计算器" },
+      "height-input": { "label": "身高 (cm)" },
+      "weight-input": { "label": "体重 (kg)" },
+      "calc-btn": { "text": "计算 BMI" }
+    },
+    "contact": {
+      "header": { "text": "✉️ 联系我们" },
+      "first-name": { "label": "名" },
+      "last-name": { "label": "姓" },
+      "email": { "label": "邮箱" },
+      "subject": {
+        "label": "主题",
+        "options": [
+          { "value": "general", "label": "一般咨询" },
+          { "value": "support", "label": "技术支持" },
+          { "value": "feedback", "label": "意见反馈" }
+        ]
+      },
+      "message": { "label": "留言内容" },
+      "submit-btn": { "text": "发送" }
+    },
+    "dashboard": {
+      "refresh-btn": { "text": "刷新" },
+      "summary": { "title": "关键指标" },
+      "status": { "title": "数据状态" },
+      "chart-section": { "title": "趋势图" }
+    },
+    "expenseTracker": {
+      "header": { "text": "💰 支出记录" },
+      "total-card": { "title": "已支出" },
+      "budget-card": { "title": "预算" },
+      "amount-input": { "label": "金额" },
+      "category-select": {
+        "label": "类别",
+        "options": [
+          { "value": "food", "label": "🍔 餐饮" },
+          { "value": "transport", "label": "🚗 交通" },
+          { "value": "shopping", "label": "🛍️ 购物" },
+          { "value": "entertainment", "label": "🎮 娱乐" },
+          { "value": "other", "label": "📦 其他" }
+        ]
+      },
+      "add-btn": { "text": "添加支出" },
+      "expense-list": { "emptyText": "暂无记录" }
+    },
+    "habitTracker": {
+      "header": { "text": "🎯 习惯打卡" },
+      "habits-list": { "emptyText": "添加你的第一个习惯" },
+      "habit-input": { "placeholder": "新习惯名称" },
+      "add-btn": { "text": "添加" }
+    },
+    "healthTracker": {
+      "header": { "text": "🏃 健康追踪" },
+      "steps-card": { "title": "👟 步数" },
+      "water-card": { "title": "💧 饮水" },
+      "steps-input": { "placeholder": "步数" },
+      "water-1": { "text": "+1 杯" },
+      "water-2": { "text": "+2 杯" },
+      "water-3": { "text": "+3 杯" }
+    },
+    "loanCalculator": {
+      "header": { "text": "🏠 贷款计算器" },
+      "principal-input": { "label": "贷款金额" },
+      "rate-input": { "label": "年利率 (%)" },
+      "years-input": { "label": "贷款年限" },
+      "calc-btn": { "text": "计算" },
+      "monthly-card": { "title": "月供" },
+      "total-card": { "title": "总还款" },
+      "interest-card": { "title": "利息" }
+    },
+    "notes": {
+      "header": { "text": "📝 快速笔记" },
+      "search": { "placeholder": "🔍 搜索笔记……" },
+      "note-title": { "placeholder": "标题", "label": "标题" },
+      "note-content": { "placeholder": "写下你的想法……" },
+      "save-btn": { "text": "保存笔记" },
+      "notes-list": { "emptyText": "暂无笔记" }
+    },
+    "pomodoro": {
+      "header": { "text": "🍅 番茄钟" },
+      "start-btn": { "text": "开始" },
+      "pause-btn": { "text": "暂停" },
+      "reset-btn": { "text": "重置" },
+      "work-btn": { "text": "工作 25 分钟" },
+      "break-btn": { "text": "休息 5 分钟" },
+      "long-break-btn": { "text": "长休 15 分钟" }
+    },
+    "survey": {
+      "title": { "text": "📋 快速调查" },
+      "desc": { "text": "请填写以下问题" },
+      "q1": { "label": "您的名字" },
+      "q2": {
+        "label": "满意度",
+        "options": [
+          { "value": "very", "label": "非常满意" },
+          { "value": "good", "label": "满意" },
+          { "value": "neutral", "label": "一般" },
+          { "value": "poor", "label": "不满意" }
+        ]
+      },
+      "q3": { "label": "其他建议" },
+      "submit-btn": { "text": "提交" }
+    },
+    "timer": {
+      "header": { "text": "⏱️ 计时器" },
+      "start-btn": { "text": "开始" },
+      "pause-btn": { "text": "暂停" },
+      "reset-btn": { "text": "重置" },
+      "1min-btn": { "text": "1 分钟" },
+      "5min-btn": { "text": "5 分钟" },
+      "10min-btn": { "text": "10 分钟" }
+    },
+    "tipCalculator": {
+      "header": { "text": "💰 小费计算器" },
+      "bill-input": { "label": "账单金额" },
+      "tip-slider": { "label": "小费比例 (%)" },
+      "people-input": { "label": "人数" },
+      "tip-card": { "title": "小费" },
+      "total-card": { "title": "每人" }
+    },
+    "todo": {
+      "header": { "text": "✅ 待办事项" },
+      "task-input": { "placeholder": "添加新任务……" },
+      "due-date": { "placeholder": "截止日期" },
+      "add-btn": { "text": "添加" },
+      "filter-all": { "text": "全部" },
+      "filter-pending": { "text": "待完成" },
+      "filter-done": { "text": "已完成" },
+      "task-list": { "emptyText": "暂无任务" }
+    }
+  },
+  "dashboardDataModel": {
+    "summaryItems": [
+      { "id": "value-1", "title": "数据 1", "value": "1,234", "badge": "实时" },
+      { "id": "value-2", "title": "数据 2", "value": "567", "badge": "稳定" },
+      { "id": "value-3", "title": "数据 3", "value": "+12%", "badge": "趋势" }
+    ],
+    "status": {
+      "message": "数据源已同步，当前可安全刷新。",
+      "detail": "最近一次更新发生在过去 5 分钟内。"
+    },
+    "chartData": [
+      { "name": "周一", "value": 120 },
+      { "name": "周二", "value": 180 },
+      { "name": "周三", "value": 150 },
+      { "name": "周四", "value": 220 },
+      { "name": "周五", "value": 190 },
+      { "name": "周六", "value": 280 },
+      { "name": "周日", "value": 250 }
+    ]
+  }
+}
