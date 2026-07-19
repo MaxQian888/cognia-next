@@ -1,0 +1,166 @@
+{
+  "title": "站点",
+  "subtitle": "在 Cognia 中构建、预览与发布",
+  "empty": "创建或选择一个站点以开始。",
+  "desktopOnly": {
+    "title": "站点功能需要 Cognia 桌面端",
+    "description": "构建、服务商凭据与预览仅保留在所选的本地桌面主机上。"
+  },
+  "create": {
+    "project": "项目",
+    "name": "站点名称",
+    "subpath": "源码子路径（可选）",
+    "accountId": "Cloudflare 账户 ID",
+    "workerName": "Worker 名称"
+  },
+  "tabs": {
+    "build": "构建与预览",
+    "versions": "版本",
+    "access": "访问控制",
+    "domains": "域名",
+    "observability": "日志与分析",
+    "provider": "服务商"
+  },
+  "actions": {
+    "refresh": "刷新站点",
+    "create": "创建站点",
+    "saveEnvironment": "保存环境修订",
+    "provision": "配置资源绑定",
+    "build": "构建保存版本",
+    "preview": "启动预览",
+    "stopPreview": "停止预览",
+    "upload": "上传版本",
+    "approveTool": "批准当前工具文件",
+    "deploy": "部署",
+    "rollback": "重新部署 / 回滚",
+    "saveAccess": "应用访问策略",
+    "addDomain": "添加域名",
+    "remove": "移除",
+    "loadLogs": "加载最近 24 小时日志",
+    "loadAnalytics": "加载最近 24 小时分析",
+    "saveToken": "验证并保存令牌",
+    "saveAuthoring": "保存创作权限",
+    "reconcile": "对账服务商状态",
+    "takeDown": "下线",
+    "restore": "恢复",
+    "purge": "清除托管资源",
+    "deleteMetadata": "删除站点元数据",
+    "cancel": "取消",
+    "confirmPurge": "清除托管资源",
+    "confirmDeleteMetadata": "删除元数据"
+  },
+  "confirm": {
+    "purge": {
+      "title": "清除托管的服务商资源？",
+      "description": "此操作会永久删除符合条件的 Cognia 托管资源。已接管和共享的服务商资源会保持不变，并在结果中标记为已保留。"
+    },
+    "deleteMetadata": {
+      "title": "删除 Cognia 站点元数据？",
+      "description": "此操作会从 Cognia 中删除已清除的站点、版本、操作历史和保留资源报告，不会更改服务商资源。"
+    }
+  },
+  "environment": {
+    "title": "环境变量",
+    "description": "普通变量会随版本记录；密钥值只会进入当前主机的系统密钥环。",
+    "variables": "普通变量",
+    "secrets": "密钥",
+    "variablesPlaceholder": "API_ORIGIN=https://api.example.com",
+    "secretsPlaceholder": "API_TOKEN=secret-value"
+  },
+  "build": {
+    "title": "受限构建与本地预览",
+    "description": "Cognia 读取 .cognia/hosting.json，并在操作系统沙箱中执行其中的 argv 命令。",
+    "runtime": "运行时快照",
+    "packageManager": "包管理器快照",
+    "networkHosts": "已批准的安装网络主机"
+  },
+  "versions": {
+    "wranglerPath": "已批准 Wrangler 二进制文件的绝对路径",
+    "version": "版本 {sequence}"
+  },
+  "operations": {
+    "title": "操作日志",
+    "description": "用于崩溃恢复与云端状态校准的持久化生命周期事件。",
+    "empty": "暂无生命周期操作。",
+    "eventCount": "{count} 个事件"
+  },
+  "operationType": {
+    "build": "构建",
+    "provision": "创建资源",
+    "upload": "上传",
+    "deploy": "部署",
+    "access": "访问控制",
+    "environment": "环境变量",
+    "domain": "域名",
+    "takedown": "下线",
+    "restore": "恢复",
+    "reconcile": "校准",
+    "purge": "清除"
+  },
+  "operationStatus": {
+    "queued": "已排队",
+    "running": "运行中",
+    "waiting-reconcile": "等待校准",
+    "succeeded": "成功",
+    "failed": "失败",
+    "cancelled": "已取消"
+  },
+  "access": {
+    "title": "访客访问",
+    "description": "创作权限保留在 Cognia；访客策略会与 Cloudflare Access 对账。",
+    "mode": "访客访问模式",
+    "hostname": "受保护的主机名",
+    "values": "每行填写一个邮箱、域名或组织 ID",
+    "modes": {
+      "private": "私有（全部拒绝）",
+      "identities": "指定身份",
+      "domains": "邮箱域名",
+      "organization": "组织",
+      "public": "公开"
+    }
+  },
+  "domains": {
+    "title": "自定义域名",
+    "description": "挂载并对账 Cloudflare Worker 自定义域名。",
+    "hostname": "docs.example.com"
+  },
+  "observability": {
+    "title": "服务商可观测性",
+    "description": "直接查询 Cloudflare Worker 日志与请求分析，不复制到另一套运行时。",
+    "empty": "尚未执行查询。"
+  },
+  "provider": {
+    "title": "Cloudflare 服务商",
+    "description": "API 令牌会先验证，再写入本地操作系统密钥环。",
+    "token": "Cloudflare API 令牌",
+    "account": "账户",
+    "worker": "Worker"
+  },
+  "authoring": {
+    "editors": "编辑者账户 ID",
+    "deployers": "部署者账户 ID",
+    "accountsPlaceholder": "每行填写一个 Cognia 账户 ID"
+  },
+  "feedback": { "success": "站点状态已更新" },
+  "errors": {
+    "projectRoot": "所选项目没有工作区根目录。",
+    "environmentRequired": "请先保存一个环境修订。",
+    "wranglerRequired": "请选择已批准的 Wrangler 二进制文件绝对路径。",
+    "artifactRequired": "保存版本的构建产物不可用。"
+  },
+  "lifecycle": {
+    "active": "运行中",
+    "taken-down": "已下线",
+    "deleting": "删除中",
+    "deleted": "已删除"
+  },
+  "versionStatus": { "building": "构建中", "ready": "就绪", "failed": "失败" },
+  "deploymentStatus": {
+    "pending": "等待中",
+    "deploying": "部署中",
+    "active": "运行中",
+    "failed": "失败",
+    "superseded": "已被替代",
+    "taken-down": "已下线"
+  }
+}
