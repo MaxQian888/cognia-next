@@ -2,6 +2,10 @@ import { executeAgent } from "@/lib/ai/agent/agent-executor"
 import { __resetBackgroundAgentManagerForTesting } from "@/lib/ai/agent/background-agent-manager"
 import { runPluginAgent, runPluginAgentStreamed } from "./run"
 import type { PluginAgentStreamEvent } from "@/types/plugin/plugin-agent-sdk"
+import {
+  __resetContextProvidersForTesting,
+  registerContextProvider,
+} from "@/lib/plugin/registries/context-provider-registry"
 
 jest.mock("@/lib/ai/agent/agent-executor", () => ({
   __esModule: true,
@@ -19,6 +23,7 @@ const baseResult = {
 beforeEach(() => {
   jest.clearAllMocks()
   __resetBackgroundAgentManagerForTesting()
+  __resetContextProvidersForTesting()
   mockExecute.mockResolvedValue({ ...baseResult } as never)
 })
 
@@ -52,6 +57,26 @@ describe("runPluginAgent", () => {
   it("honours a caller-supplied agentId", async () => {
     const res = await runPluginAgent("hi", {}, { agentId: "fixed-id" })
     expect(res.agentId).toBe("fixed-id")
+  })
+
+  it("fails closed before execution when a context provider contributes PII", async () => {
+    registerContextProvider("contacts", {
+      id: "contacts",
+      provide: () => "Contact alice@example.com before continuing",
+    })
+
+    await expect(runPluginAgent("hi")).rejects.toThrow("outbound PII gate")
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it("fails closed before execution when the prompt or system input contains PII", async () => {
+    await expect(
+      runPluginAgent("Email alice@example.com", { system: "Use local context" })
+    ).rejects.toThrow("outbound PII gate")
+    await expect(
+      runPluginAgent("hello", { system: "Use the account alice@example.com" })
+    ).rejects.toThrow("outbound PII gate")
+    expect(mockExecute).not.toHaveBeenCalled()
   })
 
   it("maps every optional field (tools/characterId/cwd/maxSteps/timeoutMs) onto the config", async () => {
@@ -160,6 +185,13 @@ describe("runPluginAgent", () => {
 })
 
 describe("runPluginAgentStreamed", () => {
+  it("fails closed before streamed execution when the outbound input contains PII", async () => {
+    const run = runPluginAgentStreamed("Email alice@example.com", {})
+
+    await expect(run.result).rejects.toThrow("outbound PII gate")
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
   it("forwards executor events to the stream and resolves the result", async () => {
     mockExecute.mockImplementation(async (_p, cfg) => {
       cfg?.onEvent?.({ type: "text-delta", delta: "he" })

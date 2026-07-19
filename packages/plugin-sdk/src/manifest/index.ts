@@ -8,10 +8,9 @@
  *
  * Partitioning:
  *  - Permission types live in `@cognia/plugin-sdk/permissions`.
- *  - Capability def types remain available under focused
- *    `@cognia/plugin-sdk/api/<cap>` subpaths, while this manifest barrel also
- *    re-exports declarative manifest entry types so authors can type complete
- *    `PluginManifest` objects from one import.
+ *  - Declarative capability types are re-exported here so authors can type
+ *    complete `PluginManifest` objects from one import. Only the documented
+ *    `/api/tool` and `/api/native-anthropic-tool` compatibility paths exist.
  *  - Hook interfaces (`PluginHooks`, event-shape types) live in
  *    `@cognia/plugin-sdk/hooks`.
  *  - Extension-point types live in `@cognia/plugin-sdk/extensions`.

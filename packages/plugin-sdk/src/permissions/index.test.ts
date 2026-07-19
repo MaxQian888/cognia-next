@@ -18,7 +18,7 @@ describe("plugin-sdk: permissions", () => {
     expect(decision).toBe("allow")
   })
 
-  it("re-exports the extended permission union", () => {
+  it("re-exports the complete permission union", () => {
     const apiPerms: PluginAPIPermission[] = []
     expect(apiPerms).toEqual([])
   })

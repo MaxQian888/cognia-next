@@ -37,7 +37,7 @@ describe("createShareAPI", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     resetPermissionGuard()
-    guard = getPermissionGuard()
+    guard = getPermissionGuard({ confirmDangerousByDefault: false })
   })
 
   describe("permission gating", () => {

@@ -47,7 +47,12 @@ describe("createMemoryAPI", () => {
     guard = getPermissionGuard()
     mockGetSettings.mockResolvedValue({ memory: { enabled: true } })
     mockSearchExternal.mockResolvedValue({ ok: true, hits: [HIT] })
-    mockStoreExternal.mockResolvedValue({ ok: true, stored: true, consolidated: true, applied: ["ADD"] })
+    mockStoreExternal.mockResolvedValue({
+      ok: true,
+      stored: true,
+      consolidated: true,
+      applied: ["ADD"],
+    })
     mockUpdateExternal.mockResolvedValue({ ok: true })
     mockForgetExternal.mockResolvedValue({ ok: true })
     mockListMemories.mockResolvedValue([{ id: "m1" }, { id: "m2" }])
@@ -80,17 +85,46 @@ describe("createMemoryAPI", () => {
 
     it("search returns hits, degrading to [] on policy blocks", async () => {
       const api = createMemoryAPI(PLUGIN)
-      expect(await api.search("q", { topK: 3 })).toEqual([HIT])
-      expect(mockSearchExternal).toHaveBeenCalledWith({ query: "q", topK: 3 })
+      expect(
+        await api.search("q", {
+          topK: 3,
+          projectId: "p1",
+          agentId: "a1",
+          branch: "main",
+          path: "src",
+        })
+      ).toEqual([HIT])
+      expect(mockSearchExternal).toHaveBeenCalledWith({
+        query: "q",
+        topK: 3,
+        projectId: "p1",
+        agentId: "a1",
+        branch: "main",
+        path: "src",
+      })
       mockSearchExternal.mockResolvedValue({ ok: false, reason: "disabled" })
       expect(await api.search("q")).toEqual([])
     })
 
     it("list defaults to active rows with a limit and respects the config gate", async () => {
       const api = createMemoryAPI(PLUGIN)
-      expect(await api.list({ limit: 1 })).toEqual([{ id: "m1" }])
+      expect(
+        await api.list({
+          limit: 1,
+          projectId: "p1",
+          agentId: "a1",
+          branch: "main",
+          pathPattern: "src",
+        })
+      ).toEqual([{ id: "m1" }])
       expect(mockListMemories).toHaveBeenCalledWith(
-        expect.objectContaining({ status: "active" })
+        expect.objectContaining({
+          status: "active",
+          projectId: "p1",
+          agentId: "a1",
+          branch: "main",
+          pathPattern: "src",
+        })
       )
       mockGetSettings.mockResolvedValue({ memory: { enabled: false } })
       expect(await api.list()).toEqual([])

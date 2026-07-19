@@ -98,6 +98,22 @@ describe("templateToProposalOps", () => {
       if (op.type === "add_node") expect(existing.nodeIds.has(op.nodeId)).toBe(false)
     }
   })
+
+  it("preserves every template node typeVersion in its proposal op", () => {
+    const template = getCopilotTemplate("github-pr")!
+    const wf = template.build({ repoFullName: "acme/widgets" })
+    wf.nodes[0] = { ...wf.nodes[0], typeVersion: 7 }
+
+    let counter = 0
+    const { ops, idMap } = templateToProposalOps(
+      wf,
+      { nodeIds: new Set(), edgeIds: new Set() },
+      () => `stable${counter++}`
+    )
+    const proposed = ops.find((op) => op.type === "add_node" && op.nodeId === idMap[wf.nodes[0].id])
+
+    expect(proposed).toMatchObject({ type: "add_node", typeVersion: 7 })
+  })
 })
 
 describe("wf_list_templates tool", () => {

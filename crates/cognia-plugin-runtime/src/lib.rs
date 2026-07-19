@@ -25,6 +25,7 @@
 //! the plugin runtime is low-frequency (sub-100 Hz).
 
 pub mod api_bridge;
+mod archive_limits;
 pub mod backup;
 pub mod cli_exec;
 pub mod commands;
@@ -89,6 +90,16 @@ pub struct PluginRecord {
     pub runtime_state: serde_json::Value,
 }
 
+pub enum NodePluginProcessState {
+    Launching {
+        generation: uuid::Uuid,
+    },
+    Running {
+        generation: uuid::Uuid,
+        child: Arc<tokio::sync::Mutex<tokio::process::Child>>,
+    },
+}
+
 /// Tauri-managed state for the plugin runtime. Cloning a field's `Arc` is
 /// cheap; the lock granularity is per-field so map traversal doesn't block
 /// permission grants and vice-versa.
@@ -107,6 +118,9 @@ pub struct PluginRuntimeState {
     /// network).
     pub network_allowlist: Arc<RwLock<HashMap<String, Vec<String>>>>,
     pub plugin_install_dir: PathBuf,
+    /// Host-owned metadata stored outside every individual plugin directory.
+    /// Plugin filesystem grants are never allowed to overlap this tree.
+    pub plugin_state_dir: PathBuf,
     /// Filesystem watchers keyed by `watch_id`. Holding a watcher in this
     /// map is what keeps it alive — dropping it cancels the watch.
     pub fs_watchers: Arc<RwLock<HashMap<String, notify::RecommendedWatcher>>>,
@@ -120,6 +134,9 @@ pub struct PluginRuntimeState {
     pub tray_items: Arc<RwLock<HashMap<String, tray_items::TrayItemRecord>>>,
     /// Tracked spawned process IDs keyed by `process_id`.
     pub processes: Arc<RwLock<HashMap<String, process_ops::ProcessRecord>>>,
+    /// Verified bundled Node plugin launch state keyed by plugin id. The renderer only
+    /// receives an opaque lifecycle proxy and never imports Node APIs.
+    pub node_plugin_processes: Arc<Mutex<HashMap<String, NodePluginProcessState>>>,
     /// Lazily-opened per-plugin SQLite connections for `ctx.db.*`, keyed by
     /// plugin id. Each plugin gets a single connection to its own
     /// `<plugin_dir>/data/plugin.db`; transactions ride that one connection as
@@ -164,16 +181,19 @@ impl PluginRuntimeState {
     /// exist (the parent is `<app_data>/cognia` which `dirs::data_dir()` may
     /// also report as `None` on stripped platforms).
     pub fn new(install_dir: PathBuf) -> Self {
+        let plugin_state_dir = install_dir.join(".host-state");
         Self {
             plugins: Arc::new(RwLock::new(HashMap::new())),
             permissions: Arc::new(RwLock::new(HashMap::new())),
             network_allowlist: Arc::new(RwLock::new(HashMap::new())),
             plugin_install_dir: install_dir,
+            plugin_state_dir,
             fs_watchers: Arc::new(RwLock::new(HashMap::new())),
             shortcuts: Arc::new(RwLock::new(HashMap::new())),
             context_menus: Arc::new(RwLock::new(HashMap::new())),
             tray_items: Arc::new(RwLock::new(HashMap::new())),
             processes: Arc::new(RwLock::new(HashMap::new())),
+            node_plugin_processes: Arc::new(Mutex::new(HashMap::new())),
             db_connections: Arc::new(RwLock::new(HashMap::new())),
             shell_allowlist: Arc::new(RwLock::new(HashMap::new())),
         }
@@ -205,9 +225,13 @@ impl PluginRuntimeState {
         self.plugin_install_dir.join(sanitize_plugin_id(plugin_id))
     }
 
+    pub(crate) fn plugin_host_state_dir(&self, plugin_id: &str) -> PathBuf {
+        self.plugin_state_dir.join(sanitize_plugin_id(plugin_id))
+    }
+
     /// True when the plugin holds a live (non-expired) grant for
     /// `permission`. Checks the in-memory ledger first and falls back to
-    /// the on-disk `permissions.json` on cold-start, caching the result —
+    /// the host-owned permission ledger on cold-start, caching the result —
     /// mirroring `plugin_permission_list`. Used as the defense-in-depth
     /// gate by the `plugin_python_*` execution commands.
     pub fn has_permission(&self, plugin_id: &str, permission: &str) -> bool {
@@ -266,15 +290,15 @@ impl PluginRuntimeState {
     }
 }
 
-/// A grant with a parseable past `expires_at` is expired; absent or
-/// unparseable timestamps mean "no expiry" (matches the lenient ledger
-/// semantics — corrupted dates must not lock users out of revocation).
+/// A missing expiry is live. Past or malformed timestamps fail closed; grant
+/// revocation does not depend on this predicate, so corrupted ledgers never
+/// need to be treated as authorized.
 fn grant_expired(grant: &PermissionGrant) -> bool {
     match grant.expires_at.as_deref() {
         None => false,
         Some(raw) => chrono::DateTime::parse_from_rfc3339(raw)
             .map(|expiry| expiry < chrono::Utc::now())
-            .unwrap_or(false),
+            .unwrap_or(true),
     }
 }
 
@@ -296,6 +320,32 @@ pub(crate) fn sanitize_plugin_id(plugin_id: &str) -> String {
             }
         })
         .collect()
+}
+
+pub(crate) fn validate_plugin_id_path_component(plugin_id: &str) -> Result<String> {
+    if plugin_id.is_empty() {
+        return Err(PluginError::InvalidArgument(
+            "plugin id must be non-empty".into(),
+        ));
+    }
+    if plugin_id.len() > 128 {
+        return Err(PluginError::InvalidArgument(
+            "plugin id must be at most 128 bytes".into(),
+        ));
+    }
+    let bytes = plugin_id.as_bytes();
+    let boundary_is_valid = |byte: u8| byte.is_ascii_lowercase() || byte.is_ascii_digit();
+    if !boundary_is_valid(bytes[0])
+        || !boundary_is_valid(bytes[bytes.len() - 1])
+        || !bytes.iter().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-')
+        })
+    {
+        return Err(PluginError::InvalidArgument(
+            "plugin id must match ^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$".into(),
+        ));
+    }
+    Ok(plugin_id.to_string())
 }
 
 /// Maximum length of a single id component (`publisher` or `name`).
@@ -370,6 +420,33 @@ mod tests {
         assert_eq!(sanitize_plugin_id("../etc/passwd"), ".._etc_passwd");
         assert_eq!(sanitize_plugin_id("ok.plugin-id_1"), "ok.plugin-id_1");
         assert_eq!(sanitize_plugin_id("a/b\\c"), "a_b_c");
+    }
+
+    #[test]
+    fn plugin_id_path_component_rejects_root_aliases_and_rewrites() {
+        for value in [
+            "",
+            ".",
+            "..",
+            ".host-state",
+            "_marketplace_cache",
+            "_backups",
+            "../escape",
+            "a/b",
+            "a\\b",
+            "space id",
+            "Uppercase",
+            "trailing-",
+        ] {
+            assert!(
+                validate_plugin_id_path_component(value).is_err(),
+                "{value:?}"
+            );
+        }
+        assert_eq!(
+            validate_plugin_id_path_component("publisher.demo-plugin_1").unwrap(),
+            "publisher.demo-plugin_1"
+        );
     }
 
     #[test]
@@ -560,7 +637,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let state = PluginRuntimeState::new(tmp.path().to_path_buf());
         let grants = vec![make_grant("demo", "python:execute", None)];
-        let dir = state.plugin_dir("demo");
+        let dir = state.plugin_host_state_dir("demo");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("permissions.json"),
@@ -604,7 +681,7 @@ mod tests {
     }
 
     #[test]
-    fn has_permission_unparseable_expiry_is_lenient() {
+    fn has_permission_unparseable_expiry_fails_closed() {
         let tmp = tempfile::TempDir::new().unwrap();
         let state = PluginRuntimeState::new(tmp.path().to_path_buf());
         state.permissions.write().insert(
@@ -615,6 +692,6 @@ mod tests {
                 Some("not-a-date".into()),
             )],
         );
-        assert!(state.has_permission("demo", "python:execute"));
+        assert!(!state.has_permission("demo", "python:execute"));
     }
 }

@@ -37,8 +37,18 @@ import {
 } from "@/lib/plugin/bridge/wallpaper-bridge"
 import { listThemePacks, __resetThemePackRegistryForTesting } from "@/lib/theme/theme-pack-registry"
 
+const mockTransportCall = jest.fn()
+const mockTransportSubscribe = jest.fn()
+
 jest.mock("@tauri-apps/api/core", () => ({
   invoke: jest.fn(),
+}))
+
+jest.mock("@/lib/tauri/transport-instance", () => ({
+  transport: {
+    call: (...args: unknown[]) => mockTransportCall(...args),
+    subscribe: (...args: unknown[]) => mockTransportSubscribe(...args),
+  },
 }))
 
 jest.mock("@/stores/plugin-runtime", () => ({
@@ -148,6 +158,7 @@ import {
   unregisterSlashCommand,
 } from "@/lib/chat/slash-command-registry"
 import { __resetRegistryForTesting } from "@/lib/plugin/resilience/breaker-registry"
+import { MODULE_BRIDGE_CAPABILITIES } from "@/lib/plugin/contracts/module-bridge-map"
 import {
   __resetResilienceTelemetryForTesting,
   getRecentActivationFailures,
@@ -204,6 +215,9 @@ describe("PluginManager", () => {
 
   beforeEach(() => {
     mockInvoke.mockReset()
+    mockTransportCall.mockReset()
+    mockTransportSubscribe.mockReset()
+    delete (globalThis as Record<string, unknown>).__COGNIA_HEADLESS__
     mockGetState.mockReset()
     mockVerifier.verify.mockReset()
     mockVerifier.verify.mockResolvedValue({ valid: true })
@@ -1858,7 +1872,7 @@ describe("PluginManager", () => {
         capabilities: ["tools"],
         wasmMain: "main.wasm",
         wasm: { apiVersion: "0.1.0" },
-        permissions: [],
+        permissions: ["notification"],
         tools: [
           { name: "do_thing", description: "Does a thing", parametersSchema: { type: "object" } },
         ],
@@ -1902,7 +1916,23 @@ describe("PluginManager", () => {
       // loader still returns a stub definition in jsdom (no wasm host), but the
       // manifest-tool bridge runs regardless of the host being live.
       const manager = new PluginManager({ pluginDirectory: "" })
+      const loadSpy = jest.spyOn(
+        (
+          manager as unknown as {
+            loader: { load(plugin: Plugin): Promise<unknown> }
+          }
+        ).loader,
+        "load"
+      )
       await manager.enablePlugin("demo.wasm.tools")
+
+      const grantCallIndex = mockInvoke.mock.calls.findIndex(
+        ([command]) => command === "plugin_permission_grant"
+      )
+      expect(grantCallIndex).toBeGreaterThanOrEqual(0)
+      expect(mockInvoke.mock.invocationCallOrder[grantCallIndex]).toBeLessThan(
+        loadSpy.mock.invocationCallOrder[0]
+      )
 
       // The declared tool is registered under the namespaced name and is
       // resolvable from the registry — proving the manifest → tool-execute
@@ -2852,6 +2882,71 @@ describe("PluginManager", () => {
     })
   })
 
+  describe("headless runtime-profile gating", () => {
+    const collect = (manager: PluginManager, manifest: PluginManifest) =>
+      (
+        manager as unknown as {
+          collectRuntimeProfileDiagnostics(m: PluginManifest): Array<{
+            code: string
+            severity: string
+            message: string
+          }>
+        }
+      ).collectRuntimeProfileDiagnostics(manifest)
+
+    it("prefers an explicit headless declaration", () => {
+      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "headless" })
+      expect(
+        collect(manager, {
+          ...createManifest("server.explicit"),
+          runtimeCompatibility: {
+            browser: { availability: "blocked" },
+            headless: { availability: "supported" },
+          },
+        })
+      ).toEqual([])
+    })
+
+    it("inherits Tauri compatibility for native plugins and browser compatibility for frontend plugins", () => {
+      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "headless" })
+      const wasm = {
+        ...createManifest("server.wasm"),
+        type: "wasm" as const,
+        wasmMain: "plugin.wasm",
+        wasm: { apiVersion: "0.1.0" },
+        runtimeCompatibility: {
+          browser: { availability: "blocked" as const },
+          tauri: { availability: "supported" as const },
+        },
+      }
+      const frontend = {
+        ...createManifest("server.frontend"),
+        runtimeCompatibility: {
+          browser: { availability: "supported" as const },
+          tauri: { availability: "blocked" as const },
+        },
+      }
+
+      expect(collect(manager, wasm)).toEqual([])
+      expect(collect(manager, frontend)).toEqual([])
+    })
+
+    it("does not silently enable a native plugin blocked on the inherited Tauri target", () => {
+      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "headless" })
+      const diagnostics = collect(manager, {
+        ...createManifest("server.blocked"),
+        type: "python",
+        pythonMain: "main.py",
+        runtimeCompatibility: { tauri: { availability: "blocked" } },
+      })
+      expect(diagnostics[0]).toMatchObject({
+        code: "runtime.headless.unsupported",
+        severity: "error",
+      })
+      expect(diagnostics[0].message).toContain("inherited from tauri compatibility")
+    })
+  })
+
   describe("cliTools contributions", () => {
     const createCliPlugin = (): Plugin => ({
       manifest: {
@@ -3309,6 +3404,61 @@ describe("PluginManager", () => {
       expect(listThemePacks().some((p) => p.pluginId === "mb-plugin")).toBe(true)
     })
 
+    it("binds lazy module imports to the plugin id and install root", async () => {
+      const plugin = createWallpaperPlugin("loaded")
+      plugin.manifest.capabilities = ["ai-provider"]
+      plugin.manifest.wallpapers = undefined
+      plugin.manifest.themePacks = undefined
+      plugin.manifest.aiProviders = [
+        {
+          id: "provider",
+          label: "Provider",
+          kind: "llm",
+          entry: "providers/factory.js",
+          export: "createProvider",
+        },
+      ]
+      const store = {
+        plugins: { "mb-plugin": plugin } as Record<string, Plugin>,
+        enablePlugin: jest.fn(async (pluginId: string) => {
+          store.plugins[pluginId] = { ...store.plugins[pluginId], status: "enabled" }
+        }),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      ;(manager as unknown as { contexts: Map<string, unknown> }).contexts.set("mb-plugin", {
+        permissions: { hasPermission: jest.fn(() => true) },
+      })
+      const loader = (
+        manager as unknown as {
+          loader: {
+            isLoaded: (id: string) => boolean
+            importEntry: jest.Mock
+            getModuleExports: (id: string) => Record<string, unknown>
+          }
+        }
+      ).loader
+      loader.isLoaded = jest.fn(() => true)
+      loader.importEntry = jest.fn().mockResolvedValue({ createProvider: jest.fn() })
+      loader.getModuleExports = jest.fn(() => ({}))
+      const descriptor = MODULE_BRIDGE_CAPABILITIES["ai-provider"]
+      const register = jest
+        .spyOn(descriptor, "register")
+        .mockImplementation(
+          async (ctx) => void (await ctx.importer("/plugins/mb-plugin/providers/factory.js"))
+        )
+
+      await manager.enablePlugin("mb-plugin")
+
+      expect(register).toHaveBeenCalledTimes(1)
+      expect(loader.importEntry).toHaveBeenCalledWith(
+        "/plugins/mb-plugin/providers/factory.js",
+        "mb-plugin",
+        "/plugins/mb-plugin"
+      )
+      register.mockRestore()
+    })
+
     it("tears down module-bridge + theme-pack contributions on disable", async () => {
       // Real enable→disable round-trip so the lazily-created themes bridge
       // exists at disable time (mirrors production lifecycle).
@@ -3718,6 +3868,41 @@ describe("PluginManager", () => {
       mockGetState.mockReturnValue(wasmStore)
       await manager.disablePlugin("wasm-plugin")
       expect(mockInvoke).not.toHaveBeenCalledWith("plugin_python_unload", expect.anything())
+    })
+
+    it("initializes and subscribes through the service transport in the headless brain", async () => {
+      ;(globalThis as Record<string, unknown>).__COGNIA_HEADLESS__ = true
+      const unsubscribe = jest.fn()
+      mockTransportSubscribe.mockReturnValue(unsubscribe)
+      mockTransportCall.mockImplementation(async (cmd: string) => {
+        if (cmd === "plugin_python_runtime_info") {
+          return {
+            available: true,
+            version: "3.12.4",
+            plugin_count: 0,
+            total_calls: 0,
+            total_execution_time_ms: 0,
+            failed_calls: 0,
+          }
+        }
+        return undefined
+      })
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      await (
+        manager as unknown as { initializePythonRuntime: () => Promise<void> }
+      ).initializePythonRuntime()
+
+      expect(mockTransportCall).toHaveBeenCalledWith("plugin_python_initialize", {
+        pythonPath: undefined,
+      })
+      expect(mockTransportCall).toHaveBeenCalledWith("plugin_python_runtime_info", undefined)
+      expect(mockTransportSubscribe).toHaveBeenCalledWith("plugin:python", expect.any(Function))
+      expect(mockInvoke).not.toHaveBeenCalled()
+      await (
+        manager as unknown as { pythonEventsUnlisten: (() => void) | null }
+      ).pythonEventsUnlisten?.()
+      expect(unsubscribe).toHaveBeenCalledTimes(1)
     })
 
     it("initializePythonRuntime warns (not errors) when the backend reports unavailable", async () => {

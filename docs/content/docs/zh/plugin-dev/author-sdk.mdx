@@ -16,6 +16,9 @@ description: 面向可分发 Cognia 插件的受支持导入、运行时组合�
 | `@cognia/plugin-sdk/context` | `PluginContext`、`FullPluginContext` 与可调用 context API 接口 |
 | `@cognia/plugin-sdk/hooks` | hook 载荷与接口 |
 | `@cognia/plugin-sdk/contracts` | 只读规范契约元数据 |
+| `@cognia/plugin-sdk/events` | 稳定事件常量与事件载荷类型 |
+| `@cognia/plugin-sdk/permissions` | 公共权限值与权限类型 |
+| `@cognia/plugin-sdk/extensions` | 扩展点常量与 contribution 类型 |
 | `@cognia/plugin-sdk/api/tool`、`/api/native-anthropic-tool` | 明确支持的兼容子路径 |
 
 不要导入 `@/lib`、`@/types`、`@cognia/plugin-sdk/host` 或应用私有的 `@cognia/*` 包。`host` 入口只服务一次仓库内迁移，不在 npm exports 或 tarball 中。
@@ -28,13 +31,17 @@ description: 面向可分发 Cognia 插件的受支持导入、运行时组合�
 | `python` | `pythonMain` | 拒绝 | Python 声明不能执行 JavaScript contribution factory |
 | `hybrid` | `pythonMain`；存在 JS contribution 时还需 `main` | 提供 `main` 后允许 | 两个运行时分别加载 |
 | `wasm` | `wasmMain` 与 `wasm.apiVersion` | 拒绝 | 桌面 Component Model 宿主 |
-| `vscode-extension` | `vscodeMain`，纯主题包除外 | 仅 VS Code contribution | 桌面 Node sidecar |
+| `vscode-extension` | `vscodeMain`、theme、grammar、icon theme、snippet 或 language 至少一项 | 仅 VS Code contribution | 纯声明式扩展无需 `vscodeMain`；代码扩展仍需要 |
 
 `engines.cognia` 是兼容性权威。lint/install 会拒绝未知能力，也会拒绝低于任何已声明能力目录最低版本的下界。
 
+桌面 JavaScript 插件运行在 Cognia 校验固定 SHA-256 后随应用打包的 Node 26 runtime 中，最低已修补版本为 26.3.1；插件不能自行选择系统 Node。文件系统授权路径必须 canonical、无符号链接，每个路径使用独立的 Node permission flag，并且不得覆盖不可变安装树或宿主持有的权限账本。
+
 ## 路径规则
 
-所有可执行或资源入口都必须相对插件根目录。空路径、控制字符/NUL、URI scheme、POSIX/Windows 绝对路径、盘符相对路径、UNC/extended path、编码后的路径控制字符，以及使用任一斜杠形式的 `..` 都会被拒绝。安装归档只能包含常规文件和目录：符号链接与硬链接会导致整个归档失败。运行时在消费可执行入口前会重新校验 containment，并拒绝经过符号链接的路径段。
+所有可执行或资源入口都必须相对插件根目录。空路径、控制字符/NUL、URI scheme、POSIX/Windows 绝对路径、盘符相对路径、UNC 或 Windows 设备命名空间路径、编码后的路径控制字符，以及使用任一斜杠形式的 `..` 都会被拒绝。安装归档只能包含常规文件和目录：符号链接与硬链接会导致整个归档失败。运行时在消费可执行入口前会重新校验 containment，并拒绝经过符号链接的路径段。
+
+Character pack 头像仅接受 `webDataUrl`。原 `avatarImage.tauriPath` 没有运行时消费方，也绕过 contained asset reader，因此已移除。
 
 有效：`dist/index.js`、`providers/session/importer.js`。
 
@@ -42,7 +49,7 @@ description: 面向可分发 Cognia 插件的受支持导入、运行时组合�
 
 ## Context 表面
 
-`PluginContext` 描述有意保留为部分能力的基础 context；`FullPluginContext` 描述宿主创建的完整运行时表面。完整 context 中的 `memory`、`pet`、`webview`、`auth`、`uri` 均为必需字段，核心 logger、storage、UI、agent 和其他扩展 API 也由宿主挂载。实现与 `create*API` 工厂仍然只属于宿主。
+`PluginContext` 描述有意保留为部分能力的基础 context；`FullPluginContext` 描述宿主创建的完整运行时表面。完整 context 中的 `memory`、`pet`、`webview`、`auth`、`uri` 均为必需字段，核心 logger、storage、UI、agent 和其他全部可调用 API 也由宿主挂载。实现与 `create*API` 工厂仍然只属于宿主。
 
 ```ts
 import { definePlugin, type PluginContext } from "@cognia/plugin-sdk"

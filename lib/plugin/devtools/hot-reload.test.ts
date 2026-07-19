@@ -1,3 +1,5 @@
+/** @jest-environment jsdom */
+
 /**
  * Tests for Plugin Hot Reload
  */
@@ -275,3 +277,4 @@ describe("Singleton", () => {
     expect(instance1).toBe(instance2)
   })
 })
+/** @jest-environment jsdom */

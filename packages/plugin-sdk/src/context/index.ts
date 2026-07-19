@@ -4,13 +4,13 @@
  * Re-exports `PluginContext` / `FullPluginContext` plus every per-field API
  * interface a plugin receives during `activate(ctx)`. Source of truth is
  * `types/plugin/plugin.ts` (core APIs), `types/plugin/plugin.ts`
- * (extended context APIs available through the runtime extension surface), and
+ * (additional callable APIs available through the runtime surface), and
  * `lib/plugin/core/context.ts` (the full host-mounted context).
  *
  * Partitioning rules — see `../manifest/index.ts`. This module owns:
  *  - `PluginContext` / `FullPluginContext`
  *  - Every `PluginXxxAPI` interface plus its companion option/result types
- *  - The extended-context API (`PluginContextAPI`)
+ *  - The complete callable API (`PluginContextAPI`)
  */
 
 import type { PluginContext as CtxPluginContext } from "@/types/plugin/plugin"
@@ -123,7 +123,7 @@ export type {
 } from "@/types/plugin/plugin-context-provider"
 
 // =============================================================================
-// Optional runtime APIs mounted on PluginContext by feature-specific host
+// Additional runtime APIs mounted on PluginContext by feature-specific host
 // modules. These are part of the public ctx surface even though their owning
 // implementations live under lib/plugin/api.
 // =============================================================================
@@ -262,10 +262,8 @@ export type FullPluginContext = Omit<
 export type { PluginSchedulerAPI } from "@/types/plugin/plugin-scheduler"
 
 // =============================================================================
-// Extended-context APIs (from types/plugin/plugin.ts).
-// These are surfaced through the extended context wrapper; plugin authors
-// see them as additional fields on the context object when the host exposes
-// the extended surface.
+// Additional callable APIs (from types/plugin/plugin.ts). These are merged
+// directly into the one public context contract.
 // =============================================================================
 export type {
   PluginSessionAPI,

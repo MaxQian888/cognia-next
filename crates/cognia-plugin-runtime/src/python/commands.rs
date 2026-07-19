@@ -91,23 +91,44 @@ pub async fn plugin_python_initialize(
     state: State<'_, PythonRuntimeState>,
     python_path: Option<String>,
 ) -> Result<()> {
-    // Install the renderer event sink first so hosts loaded right after
-    // initialization stream their notifications.
-    *state.event_sink.write() = Some(super::events::tauri_sink(app));
+    plugin_python_initialize_for_state(
+        state.inner(),
+        python_path,
+        Some(super::events::tauri_sink(app)),
+    )
+    .await
+}
+
+/// Host-neutral Python-runtime initialization shared by Tauri and
+/// `cognia-server`. The caller owns the event sink so subprocess notifications
+/// reach either a WebView event or the companion EventBus without coupling the
+/// plugin-runtime crate to either host.
+pub async fn plugin_python_initialize_for_state(
+    state: &PythonRuntimeState,
+    python_path: Option<String>,
+    event_sink: Option<super::events::EventSink>,
+) -> Result<()> {
+    if let Some(event_sink) = event_sink {
+        *state.event_sink.write() = Some(event_sink);
+    }
     state.ensure_sweep_started(std::time::Duration::from_secs(60));
     // The probe runs subprocesses synchronously — keep it off the async core.
     let interpreter =
         tokio::task::spawn_blocking(move || discover_interpreter(python_path.as_deref()))
             .await
             .map_err(|e| PluginError::Internal(format!("probe task panicked: {e}")))?;
-    apply_initialize(&state, interpreter)
+    apply_initialize(state, interpreter)
 }
 
 #[tauri::command]
 pub async fn plugin_python_runtime_info(
     state: State<'_, PythonRuntimeState>,
 ) -> Result<PythonRuntimeInfo> {
-    Ok(runtime_info_inner(&state))
+    Ok(plugin_python_runtime_info_for_state(state.inner()))
+}
+
+pub fn plugin_python_runtime_info_for_state(state: &PythonRuntimeState) -> PythonRuntimeInfo {
+    runtime_info_inner(state)
 }
 
 #[tauri::command]
@@ -121,17 +142,44 @@ pub async fn plugin_python_load(
     config: Option<Value>,
     host_settings: Option<PythonHostSettings>,
 ) -> Result<Value> {
+    plugin_python_load_for_state(
+        state.inner(),
+        plugins.inner(),
+        plugin_id,
+        plugin_path,
+        main_module,
+        dependencies,
+        config,
+        host_settings,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn plugin_python_load_for_state(
+    state: &PythonRuntimeState,
+    plugins: &PluginRuntimeState,
+    plugin_id: String,
+    plugin_path: String,
+    main_module: String,
+    dependencies: Option<Vec<String>>,
+    config: Option<Value>,
+    host_settings: Option<PythonHostSettings>,
+) -> Result<Value> {
     let expected_root = plugins.plugin_dir(&plugin_id);
     let claimed_root = PathBuf::from(&plugin_path);
     let safe_root = tokio::task::spawn_blocking(move || {
-        crate::contained_path::validate_claimed_plugin_root(&expected_root, &claimed_root)
+        let root =
+            crate::contained_path::validate_claimed_plugin_root(&expected_root, &claimed_root)?;
+        crate::contained_path::validate_symlink_free_tree(&root)?;
+        Ok::<_, String>(root)
     })
     .await
     .map_err(|error| PluginError::Internal(format!("plugin path task panicked: {error}")))?
     .map_err(|error| PluginError::Internal(format!("invalid plugin root: {error}")))?;
     load_inner(
-        &state,
-        &plugins,
+        state,
+        plugins,
         plugin_id,
         safe_root.to_string_lossy().into_owned(),
         main_module,
@@ -152,7 +200,26 @@ pub async fn plugin_python_call_hook(
     name: String,
     payload: Value,
 ) -> Result<Value> {
-    call_hook_inner(&state, &plugins, plugin_id, event, name, payload).await
+    plugin_python_call_hook_for_state(
+        state.inner(),
+        plugins.inner(),
+        plugin_id,
+        event,
+        name,
+        payload,
+    )
+    .await
+}
+
+pub async fn plugin_python_call_hook_for_state(
+    state: &PythonRuntimeState,
+    plugins: &PluginRuntimeState,
+    plugin_id: String,
+    event: String,
+    name: String,
+    payload: Value,
+) -> Result<Value> {
+    call_hook_inner(state, plugins, plugin_id, event, name, payload).await
 }
 
 /// Push the plugin's persisted config into the host (`on_config_updated`).
@@ -163,12 +230,28 @@ pub async fn plugin_python_push_config(
     plugin_id: String,
     config: Value,
 ) -> Result<()> {
-    push_config_inner(&state, &plugins, plugin_id, config).await
+    plugin_python_push_config_for_state(state.inner(), plugins.inner(), plugin_id, config).await
+}
+
+pub async fn plugin_python_push_config_for_state(
+    state: &PythonRuntimeState,
+    plugins: &PluginRuntimeState,
+    plugin_id: String,
+    config: Value,
+) -> Result<()> {
+    push_config_inner(state, plugins, plugin_id, config).await
 }
 
 #[tauri::command]
 pub async fn plugin_python_get_tools(
     state: State<'_, PythonRuntimeState>,
+    plugin_id: String,
+) -> Result<Value> {
+    plugin_python_get_tools_for_state(state.inner(), plugin_id).await
+}
+
+pub async fn plugin_python_get_tools_for_state(
+    state: &PythonRuntimeState,
     plugin_id: String,
 ) -> Result<Value> {
     let host = state.materialize(&plugin_id).await?;
@@ -183,7 +266,18 @@ pub async fn plugin_python_call_tool(
     tool_name: String,
     args: Value,
 ) -> Result<Value> {
-    call_tool_inner(&state, &plugins, plugin_id, tool_name, args).await
+    plugin_python_call_tool_for_state(state.inner(), plugins.inner(), plugin_id, tool_name, args)
+        .await
+}
+
+pub async fn plugin_python_call_tool_for_state(
+    state: &PythonRuntimeState,
+    plugins: &PluginRuntimeState,
+    plugin_id: String,
+    tool_name: String,
+    args: Value,
+) -> Result<Value> {
+    call_tool_inner(state, plugins, plugin_id, tool_name, args).await
 }
 
 #[tauri::command]
@@ -194,7 +288,24 @@ pub async fn plugin_python_call(
     function_name: String,
     args: Vec<Value>,
 ) -> Result<Value> {
-    call_inner(&state, &plugins, plugin_id, function_name, args).await
+    plugin_python_call_for_state(
+        state.inner(),
+        plugins.inner(),
+        plugin_id,
+        function_name,
+        args,
+    )
+    .await
+}
+
+pub async fn plugin_python_call_for_state(
+    state: &PythonRuntimeState,
+    plugins: &PluginRuntimeState,
+    plugin_id: String,
+    function_name: String,
+    args: Vec<Value>,
+) -> Result<Value> {
+    call_inner(state, plugins, plugin_id, function_name, args).await
 }
 
 /// Evaluate a Python expression (or run a statement block) in the plugin host.
@@ -207,9 +318,19 @@ pub async fn plugin_python_eval(
     code: String,
     locals: Option<Value>,
 ) -> Result<Value> {
+    plugin_python_eval_for_state(state.inner(), plugins.inner(), plugin_id, code, locals).await
+}
+
+pub async fn plugin_python_eval_for_state(
+    state: &PythonRuntimeState,
+    plugins: &PluginRuntimeState,
+    plugin_id: String,
+    code: String,
+    locals: Option<Value>,
+) -> Result<Value> {
     host_request_inner(
-        &state,
-        &plugins,
+        state,
+        plugins,
         plugin_id,
         "eval",
         json!({ "code": code, "locals": locals.unwrap_or(Value::Null) }),
@@ -226,9 +347,18 @@ pub async fn plugin_python_import(
     plugin_id: String,
     module_name: String,
 ) -> Result<Value> {
+    plugin_python_import_for_state(state.inner(), plugins.inner(), plugin_id, module_name).await
+}
+
+pub async fn plugin_python_import_for_state(
+    state: &PythonRuntimeState,
+    plugins: &PluginRuntimeState,
+    plugin_id: String,
+    module_name: String,
+) -> Result<Value> {
     host_request_inner(
-        &state,
-        &plugins,
+        state,
+        plugins,
         plugin_id,
         "import",
         json!({ "module_name": module_name }),
@@ -247,9 +377,28 @@ pub async fn plugin_python_module_call(
     function_name: String,
     args: Vec<Value>,
 ) -> Result<Value> {
+    plugin_python_module_call_for_state(
+        state.inner(),
+        plugins.inner(),
+        plugin_id,
+        module_name,
+        function_name,
+        args,
+    )
+    .await
+}
+
+pub async fn plugin_python_module_call_for_state(
+    state: &PythonRuntimeState,
+    plugins: &PluginRuntimeState,
+    plugin_id: String,
+    module_name: String,
+    function_name: String,
+    args: Vec<Value>,
+) -> Result<Value> {
     host_request_inner(
-        &state,
-        &plugins,
+        state,
+        plugins,
         plugin_id,
         "module_call",
         json!({ "module_name": module_name, "function_name": function_name, "args": args }),
@@ -267,9 +416,26 @@ pub async fn plugin_python_module_getattr(
     module_name: String,
     attr_name: String,
 ) -> Result<Value> {
+    plugin_python_module_getattr_for_state(
+        state.inner(),
+        plugins.inner(),
+        plugin_id,
+        module_name,
+        attr_name,
+    )
+    .await
+}
+
+pub async fn plugin_python_module_getattr_for_state(
+    state: &PythonRuntimeState,
+    plugins: &PluginRuntimeState,
+    plugin_id: String,
+    module_name: String,
+    attr_name: String,
+) -> Result<Value> {
     host_request_inner(
-        &state,
-        &plugins,
+        state,
+        plugins,
         plugin_id,
         "module_getattr",
         json!({ "module_name": module_name, "attr_name": attr_name }),
@@ -280,6 +446,13 @@ pub async fn plugin_python_module_getattr(
 #[tauri::command]
 pub async fn plugin_python_is_initialized(
     state: State<'_, PythonRuntimeState>,
+    plugin_id: String,
+) -> Result<bool> {
+    plugin_python_is_initialized_for_state(state.inner(), plugin_id).await
+}
+
+pub async fn plugin_python_is_initialized_for_state(
+    state: &PythonRuntimeState,
     plugin_id: String,
 ) -> Result<bool> {
     // A demoted (lazy) plugin is still "initialized" — its tools are
@@ -295,7 +468,14 @@ pub async fn plugin_python_get_info(
     state: State<'_, PythonRuntimeState>,
     plugin_id: String,
 ) -> Result<Option<PythonPluginInfo>> {
-    Ok(get_info_inner(&state, &plugin_id))
+    Ok(plugin_python_get_info_for_state(state.inner(), &plugin_id))
+}
+
+pub fn plugin_python_get_info_for_state(
+    state: &PythonRuntimeState,
+    plugin_id: &str,
+) -> Option<PythonPluginInfo> {
+    get_info_inner(state, plugin_id)
 }
 
 /// Create the plugin's venv (if missing) and `pip install` its declared
@@ -308,7 +488,17 @@ pub async fn plugin_python_install_deps(
     plugin_id: String,
     dependencies: Vec<String>,
 ) -> Result<()> {
-    install_deps_inner(&state, &plugins, &plugin_id, &dependencies).await
+    plugin_python_install_deps_for_state(state.inner(), plugins.inner(), &plugin_id, &dependencies)
+        .await
+}
+
+pub async fn plugin_python_install_deps_for_state(
+    state: &PythonRuntimeState,
+    plugins: &PluginRuntimeState,
+    plugin_id: &str,
+    dependencies: &[String],
+) -> Result<()> {
+    install_deps_inner(state, plugins, plugin_id, dependencies).await
 }
 
 #[tauri::command]
@@ -316,12 +506,23 @@ pub async fn plugin_python_unload(
     state: State<'_, PythonRuntimeState>,
     plugin_id: String,
 ) -> Result<()> {
-    unload_inner(&state, &plugin_id).await
+    plugin_python_unload_for_state(state.inner(), &plugin_id).await
+}
+
+pub async fn plugin_python_unload_for_state(
+    state: &PythonRuntimeState,
+    plugin_id: &str,
+) -> Result<()> {
+    unload_inner(state, plugin_id).await
 }
 
 #[tauri::command]
 pub async fn plugin_python_list(state: State<'_, PythonRuntimeState>) -> Result<Vec<String>> {
-    Ok(state.hosts.read().keys().cloned().collect())
+    Ok(plugin_python_list_for_state(state.inner()))
+}
+
+pub fn plugin_python_list_for_state(state: &PythonRuntimeState) -> Vec<String> {
+    state.hosts.read().keys().cloned().collect()
 }
 
 // ============================================================================
@@ -722,6 +923,26 @@ mod tests {
                 expires_at: None,
             }],
         );
+    }
+
+    #[tokio::test]
+    async fn host_neutral_registry_wrappers_start_empty_and_unload_idempotently() {
+        let tmp = TempDir::new().unwrap();
+        let state = py_state(&tmp);
+
+        let info = plugin_python_runtime_info_for_state(&state);
+        assert!(!info.available);
+        assert_eq!(info.plugin_count, 0);
+        assert!(plugin_python_list_for_state(&state).is_empty());
+        assert!(plugin_python_get_info_for_state(&state, "missing").is_none());
+        assert!(
+            !plugin_python_is_initialized_for_state(&state, "missing".into())
+                .await
+                .unwrap()
+        );
+        plugin_python_unload_for_state(&state, "missing")
+            .await
+            .unwrap();
     }
 
     #[test]

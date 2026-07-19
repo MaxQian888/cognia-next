@@ -159,8 +159,7 @@ export function __resetSnippetsForTesting(): void {
 }
 
 // ── W5.1: enable-time registration from manifest.vscodeSnippets ──────────────
-import { readTextFile } from "@/lib/file/file-operations"
-import { isUnsafeRelativePath, joinPluginPath } from "./plugin-file-path"
+import { isUnsafeRelativePath, readContainedPluginFile } from "./plugin-file-path"
 
 export interface SnippetManifestEntry {
   language: string
@@ -180,7 +179,7 @@ export async function registerSnippetsForPlugin(
       if (isUnsafeRelativePath(entry.path)) {
         throw new Error(`unsafe snippet path "${entry.path}"`)
       }
-      const source = await readTextFile(joinPluginPath(baseDir, entry.path))
+      const source = await readContainedPluginFile(pluginId, baseDir, entry.path)
       registered += registerSnippetFile(pluginId, entry.language, source).length
     } catch (err) {
       errors.push(`${entry.language || entry.path}: ${(err as Error).message}`)

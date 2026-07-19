@@ -42,6 +42,24 @@ pub async fn plugin_wasm_load(
     manifest_json: String,
     plugin_path: String,
 ) -> Result<WasmLoadResult, String> {
+    plugin_wasm_load_for_state(
+        state.inner(),
+        runtime.inner(),
+        plugin_id,
+        manifest_json,
+        plugin_path,
+    )
+    .await
+}
+
+/// Host-neutral WASM load entry point shared by Tauri and `cognia-server`.
+pub async fn plugin_wasm_load_for_state(
+    state: &WasmPluginState,
+    runtime: &PluginRuntimeState,
+    plugin_id: String,
+    manifest_json: String,
+    plugin_path: String,
+) -> Result<WasmLoadResult, String> {
     let manifest: WasmManifestSlice =
         serde_json::from_str(&manifest_json).map_err(|e| format!("manifest parse: {e}"))?;
     if manifest.id != plugin_id {
@@ -52,7 +70,7 @@ pub async fn plugin_wasm_load(
     }
     let expected_root = runtime.plugin_dir(&plugin_id);
     let claimed_root = PathBuf::from(plugin_path);
-    let wasm_state = state.inner().clone();
+    let wasm_state = state.clone();
     let plugin_api_version = tokio::task::spawn_blocking(move || {
         let plugin_root =
             crate::contained_path::validate_claimed_plugin_root(&expected_root, &claimed_root)?;
@@ -88,6 +106,16 @@ fn granted_shell_commands(runtime: &PluginRuntimeState, plugin_id: &str) -> Vec<
 pub async fn plugin_wasm_activate(
     state: State<'_, WasmPluginState>,
     runtime: State<'_, PluginRuntimeState>,
+    plugin_id: String,
+    config_json: String,
+) -> Result<ActivateOutcome, String> {
+    plugin_wasm_activate_for_state(state.inner(), runtime.inner(), plugin_id, config_json).await
+}
+
+/// Host-neutral activation entry point shared by Tauri and `cognia-server`.
+pub async fn plugin_wasm_activate_for_state(
+    state: &WasmPluginState,
+    runtime: &PluginRuntimeState,
     plugin_id: String,
     config_json: String,
 ) -> Result<ActivateOutcome, String> {
@@ -159,6 +187,14 @@ pub async fn plugin_wasm_activate(
 #[tauri::command]
 pub async fn plugin_wasm_deactivate(
     state: State<'_, WasmPluginState>,
+    plugin_id: String,
+) -> Result<bool, String> {
+    plugin_wasm_deactivate_for_state(state.inner(), plugin_id).await
+}
+
+/// Host-neutral deactivation entry point shared by Tauri and `cognia-server`.
+pub async fn plugin_wasm_deactivate_for_state(
+    state: &WasmPluginState,
     plugin_id: String,
 ) -> Result<bool, String> {
     // Drop the live instance (frees the Store / guest memory); the compiled
@@ -245,6 +281,24 @@ fn encode_output(bytes: Vec<u8>) -> String {
 pub async fn plugin_wasm_call(
     state: State<'_, WasmPluginState>,
     runtime: State<'_, PluginRuntimeState>,
+    plugin_id: String,
+    export_name: String,
+    payload_json: String,
+) -> Result<String, String> {
+    plugin_wasm_call_for_state(
+        state.inner(),
+        runtime.inner(),
+        plugin_id,
+        export_name,
+        payload_json,
+    )
+    .await
+}
+
+/// Host-neutral guest-call entry point shared by Tauri and `cognia-server`.
+pub async fn plugin_wasm_call_for_state(
+    state: &WasmPluginState,
+    runtime: &PluginRuntimeState,
     plugin_id: String,
     export_name: String,
     payload_json: String,
@@ -338,14 +392,29 @@ pub async fn plugin_wasm_unload(
     state: State<'_, WasmPluginState>,
     plugin_id: String,
 ) -> Result<bool, String> {
-    Ok(WasmPluginHost::unload(&state, &plugin_id))
+    plugin_wasm_unload_for_state(state.inner(), plugin_id).await
+}
+
+/// Host-neutral unload entry point shared by Tauri and `cognia-server`.
+pub async fn plugin_wasm_unload_for_state(
+    state: &WasmPluginState,
+    plugin_id: String,
+) -> Result<bool, String> {
+    Ok(WasmPluginHost::unload(state, &plugin_id))
 }
 
 #[tauri::command]
 pub async fn plugin_wasm_list(
     state: State<'_, WasmPluginState>,
 ) -> Result<Vec<WasmPluginSnapshot>, String> {
-    Ok(WasmPluginHost::snapshot(&state))
+    plugin_wasm_list_for_state(state.inner()).await
+}
+
+/// Host-neutral snapshot entry point shared by Tauri and `cognia-server`.
+pub async fn plugin_wasm_list_for_state(
+    state: &WasmPluginState,
+) -> Result<Vec<WasmPluginSnapshot>, String> {
+    Ok(WasmPluginHost::snapshot(state))
 }
 
 #[cfg(test)]

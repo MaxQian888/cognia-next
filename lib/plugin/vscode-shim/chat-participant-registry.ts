@@ -59,9 +59,11 @@ interface DisposeParticipantPayload {
 interface RegisterVariableResolverPayload {
   extensionId: string
   /** Participant the resolver belongs to. */
-  participantId: string
-  /** Variable name (e.g. `selection`). */
-  name: string
+  participantId?: string
+  /** Canonical sidecar field; retained separately from participantId for legacy callers. */
+  id?: string
+  /** Legacy metadata field accepted from older callers. */
+  name?: string
   token: string
 }
 
@@ -176,15 +178,26 @@ export async function handleDisposeChatParticipant(
 export function handleRegisterChatVariableResolver(payload: RegisterVariableResolverPayload): {
   registered: true
 } {
-  const key = `${payload.extensionId}::${payload.participantId}`
+  const participantId = payload.participantId ?? payload.id
+  if (!participantId) throw new Error("chat variable resolver requires participant id")
+  const key = `${payload.extensionId}::${participantId}`
   const handle = participants.get(key)
   if (!handle) {
     throw new Error(
-      `chat.registerChatVariableResolver: participant ${payload.participantId} from ${payload.extensionId} is not registered`
+      `chat.registerChatVariableResolver: participant ${participantId} from ${payload.extensionId} is not registered`
     )
   }
   handle.variableResolverToken = payload.token
   return { registered: true }
+}
+
+export function handleUnregisterChatVariableResolver(
+  payload: Omit<RegisterVariableResolverPayload, "token">
+): void {
+  const participantId = payload.participantId ?? payload.id
+  if (!participantId) return
+  const handle = participants.get(`${payload.extensionId}::${participantId}`)
+  if (handle) handle.variableResolverToken = undefined
 }
 
 /**

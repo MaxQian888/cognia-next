@@ -90,6 +90,7 @@ describe("PluginGovernancePolicyTab", () => {
       governance: "block",
       signatureRequired: true,
       trustedPublishersOnly: false,
+      trustedFrontendPlugins: [],
       autoUpdate: true,
     })
   })

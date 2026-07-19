@@ -15,6 +15,7 @@ import {
   handleCreateChatParticipant,
   handleDisposeChatParticipant,
   handleRegisterChatVariableResolver,
+  handleUnregisterChatVariableResolver,
 } from "./chat-participant-registry"
 import type { Character } from "@cognia/agent-config-types"
 
@@ -145,6 +146,16 @@ describe("chat-participant-registry", () => {
           token: "t",
         })
       ).toThrow(/missing.*is not registered/)
+    })
+
+    it("accepts the canonical sidecar id field and clears it on unregister", async () => {
+      makeMemoryStore()
+      await handleCreateChatParticipant({ extensionId: "ext", id: "p" })
+      handleRegisterChatVariableResolver({ extensionId: "ext", id: "p", token: "var-2" })
+      expect(__listParticipantsForTesting()[0]!.variableResolverToken).toBe("var-2")
+
+      handleUnregisterChatVariableResolver({ extensionId: "ext", id: "p" })
+      expect(__listParticipantsForTesting()[0]!.variableResolverToken).toBeUndefined()
     })
   })
 

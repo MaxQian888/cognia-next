@@ -74,7 +74,7 @@ describe("createGitAPI", () => {
     mockRootDir = "/repo"
     storeSubscribers.clear()
     resetPermissionGuard()
-    guard = getPermissionGuard()
+    guard = getPermissionGuard({ confirmDangerousByDefault: false })
   })
 
   describe("permission gating", () => {

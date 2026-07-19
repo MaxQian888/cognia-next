@@ -22,6 +22,7 @@ import { createPluginAgentRun } from "./stream"
 import { runInputGuardrails, runOutputGuardrails } from "./guardrails"
 import { resolveContextContributions } from "./context-providers"
 import { withRunTrace } from "./tracing"
+import { hasNoLeakingPii, hasNoLeakingPiiDeep } from "@cognia/redact"
 import type {
   PluginAgentRun,
   PluginAgentRunOptions,
@@ -161,6 +162,9 @@ async function withContextContributions(
   const contribution = await resolveContextContributions({ prompt })
   if (!contribution) return options
   const appendSystem = [options.appendSystem, contribution].filter(Boolean).join("\n\n")
+  if (!hasNoLeakingPii(appendSystem)) {
+    throw new Error("Plugin context contribution failed the outbound PII gate")
+  }
   return { ...options, appendSystem }
 }
 
@@ -177,6 +181,15 @@ function executeWithRobustness(
   onEvent: ExecuteAgentConfig["onEvent"] | undefined,
   enableFallback: boolean
 ): Promise<ExecuteAgentResult> {
+  if (
+    !hasNoLeakingPiiDeep({
+      prompt,
+      system: opts.system,
+      appendSystem: opts.appendSystem,
+    })
+  ) {
+    throw new Error("Plugin agent input failed the outbound PII gate")
+  }
   const runOnce = (model?: string): Promise<ExecuteAgentResult> => {
     const cfg = toExecuteConfig(model ? { ...opts, model } : opts, signal, onEvent)
     const traceModel = model ?? opts.model

@@ -14,6 +14,8 @@ import {
   deriveScopeFromManifest,
   launchPluginJs,
   type LaunchPluginJsResult,
+  type NodePluginActivationSnapshot,
+  type PluginJsHostInvoker,
 } from "../launcher/launchPluginJs"
 import { resolvePluginPath } from "./plugin-path"
 
@@ -96,6 +98,53 @@ function deriveNodePermissionScope(manifest: PluginManifest) {
   })
 }
 
+const UNSAFE_CONTEXT_SEGMENTS = new Set(["__proto__", "prototype", "constructor"])
+
+function reviveNodePluginValue(value: unknown, launch: LaunchPluginJsResult): unknown {
+  if (Array.isArray(value)) return value.map((item) => reviveNodePluginValue(item, launch))
+  if (!value || typeof value !== "object") return value
+  const record = value as Record<string, unknown>
+  if (typeof record.$callback === "string") {
+    return async (...args: unknown[]) =>
+      reviveNodePluginValue(await launch.invokeCallback(record.$callback as string, args), launch)
+  }
+  if (record.$undefined === true) return undefined
+  return Object.fromEntries(
+    Object.entries(record).map(([key, item]) => [key, reviveNodePluginValue(item, launch)])
+  )
+}
+
+function replayNodePluginActivation(
+  context: object,
+  activation: NodePluginActivationSnapshot,
+  launch: LaunchPluginJsResult
+): void {
+  for (const call of activation.calls) {
+    const segments = call.path.split(".")
+    if (
+      segments.length === 0 ||
+      segments.some((segment) => !segment || UNSAFE_CONTEXT_SEGMENTS.has(segment))
+    ) {
+      throw new Error(`Node plugin requested an unsafe context path: ${call.path}`)
+    }
+    const methodName = segments.pop() as string
+    let owner: unknown = context
+    for (const segment of segments) {
+      if (!owner || typeof owner !== "object") break
+      owner = (owner as Record<string, unknown>)[segment]
+    }
+    const method =
+      owner && (typeof owner === "object" || typeof owner === "function")
+        ? (owner as Record<string, unknown>)[methodName]
+        : undefined
+    if (typeof method !== "function") {
+      throw new Error(`Node plugin requested unavailable context method: ${call.path}`)
+    }
+    const args = reviveNodePluginValue(call.args, launch) as unknown[]
+    method.apply(owner, args)
+  }
+}
+
 // =============================================================================
 // Plugin Loader
 // =============================================================================
@@ -116,6 +165,8 @@ export interface PluginLoaderOptions {
    * importer cache-bust per plugin for hot reload).
    */
   frontendImporter?: (absPath: string, pluginId: string) => Promise<Record<string, unknown>>
+  /** Host-neutral native lifecycle transport used by Node-target plugins. */
+  nodeHostInvoker?: PluginJsHostInvoker
 }
 
 export class PluginLoader {
@@ -124,10 +175,12 @@ export class PluginLoader {
   private dirtyTeardowns: Map<string, DirtyTeardownRecord> = new Map()
   private readonly teardownTimeoutMs: number
   private readonly frontendImporter?: PluginLoaderOptions["frontendImporter"]
+  private readonly nodeHostInvoker?: PluginJsHostInvoker
 
   constructor(options: PluginLoaderOptions = {}) {
     this.teardownTimeoutMs = options.teardownTimeoutMs ?? DEFAULT_TEARDOWN_TIMEOUT_MS
     this.frontendImporter = options.frontendImporter
+    this.nodeHostInvoker = options.nodeHostInvoker
   }
 
   /**
@@ -247,14 +300,15 @@ export class PluginLoader {
 
       // Dynamic import of the plugin module
       // In production, plugins would be bundled and served from a known location
-      const modulePath = resolveRuntimeEntry(pluginPath, selectRuntimeEntry(manifest))
+      const runtimeEntry = selectRuntimeEntry(manifest)
+      const modulePath = resolveRuntimeEntry(pluginPath, runtimeEntry)
 
       // CLI / Node hosts inject a `frontendImporter` (the Tauri / fetch / eval
       // strategies below don't exist under Node). Otherwise fall back to the
       // browser / Tauri strategies in `importModule`.
       const moduleExports = this.frontendImporter
         ? await this.frontendImporter(modulePath, manifest.id)
-        : await this.importModule(modulePath)
+        : await this.importInstalledEntry(manifest.id, pluginPath, runtimeEntry!, modulePath)
 
       // Extract the plugin definition
       const definition = this.extractDefinition(moduleExports, manifest)
@@ -275,26 +329,43 @@ export class PluginLoader {
     manifest: PluginManifest,
     pluginPath: string
   ): Promise<PluginDefinition> {
-    const entryPath = resolveRuntimeEntry(pluginPath, selectRuntimeEntry(manifest))
+    const entryPath = selectRuntimeEntry(manifest)
+    resolveRuntimeEntry(pluginPath, entryPath)
+    const validatedEntryPath = entryPath as string
     const scope = deriveNodePermissionScope(manifest)
     let launch: LaunchPluginJsResult | null = null
+    let activeHooks: unknown
     const definition: PluginDefinition = {
       manifest,
-      activate: async () => {
-        if (launch && !launch.process.killed) return
+      activate: async (context) => {
+        if (launch && (await launch.process.isRunning())) return activeHooks as never
         launch = await launchPluginJs({
           pluginId: manifest.id,
-          entryPath,
+          entryPath: validatedEntryPath,
           cwd: pluginPath,
           scope,
+          hostInvoker: this.nodeHostInvoker,
         })
+        replayNodePluginActivation(context, launch.activation, launch)
+        activeHooks = reviveNodePluginValue(launch.activation.hooks, launch)
+        const namedExports = reviveNodePluginValue(launch.activation.exports, launch) as Record<
+          string,
+          unknown
+        >
+        this.loadedModules.set(manifest.id, {
+          definition,
+          exports: { default: definition, ...namedExports },
+        })
+        return activeHooks as never
       },
       deactivate: async () => {
         if (!launch) return
+        await launch.deactivate()
         if (!launch.process.killed) {
-          launch.process.kill()
+          await launch.process.kill()
         }
         launch = null
+        activeHooks = undefined
       },
     }
     this.loadedModules.set(manifest.id, {
@@ -315,6 +386,20 @@ export class PluginLoader {
     manifest: PluginManifest,
     pluginPath: string
   ): Promise<PluginDefinition> {
+    // In the supervised headless brain the canonical PluginManager owns the
+    // Python subprocess lifecycle through `plugin_python_*` service RPCs. This
+    // loader still needs a definition so hybrid/frontend activation can run,
+    // but it must neither create a duplicate host nor stamp the web-only
+    // degraded warning. `PluginManager.loadPythonPlugin()` performs the real
+    // load immediately after this definition activates.
+    if (detectPlatform() === "headless") {
+      return {
+        manifest,
+        activate: async () => ({}),
+        deactivate: async () => {},
+      }
+    }
+
     // Check if Tauri is available for native Python execution
     const isTauriAvailable = await this.checkTauriAvailable()
 
@@ -569,7 +654,10 @@ export class PluginLoader {
     }
 
     const code = await response.text()
+    return this.evaluatePluginCode(code, originalPath)
+  }
 
+  private evaluatePluginCode(code: string, originalPath: string): unknown {
     // Create a module-like environment for the plugin
     const pluginExports: Record<string, unknown> = {}
     const pluginModule: { exports: Record<string, unknown> } = { exports: pluginExports }
@@ -590,6 +678,29 @@ export class PluginLoader {
     } catch (error) {
       throw new Error(`Failed to evaluate plugin code from ${originalPath}: ${error}`)
     }
+  }
+
+  private async importInstalledEntry(
+    pluginId: string,
+    pluginRoot: string,
+    relativeEntry: string,
+    absolutePath: string
+  ): Promise<unknown> {
+    if (pluginRoot.startsWith("builtin://")) {
+      return this.importModule(absolutePath)
+    }
+    if (!isTauri()) {
+      return this.frontendImporter
+        ? this.frontendImporter(absolutePath, pluginId)
+        : this.importModule(absolutePath)
+    }
+    const { invoke } = await import("@tauri-apps/api/core")
+    const code = await invoke<string>("plugin_read_entry", {
+      pluginId,
+      pluginPath: pluginRoot,
+      entry: relativeEntry,
+    })
+    return this.evaluatePluginCode(code, absolutePath)
   }
 
   /**
@@ -787,8 +898,26 @@ export class PluginLoader {
    * default `importer` so lazy-factory entries resolve identically to the
    * plugin's main bundle. Tests inject their own importer and never hit this.
    */
-  async importEntry(absolutePath: string): Promise<Record<string, unknown>> {
-    return (await this.importModule(absolutePath)) as Record<string, unknown>
+  async importEntry(
+    absolutePath: string,
+    pluginId?: string,
+    pluginRoot?: string
+  ): Promise<Record<string, unknown>> {
+    if (!pluginId || !pluginRoot) {
+      return (await this.importModule(absolutePath)) as Record<string, unknown>
+    }
+    const normalizedRoot = pluginRoot.replace(/[\\/]+$/, "")
+    const prefix = `${normalizedRoot}/`
+    if (!absolutePath.startsWith(prefix)) {
+      throw new Error(`Plugin entry is outside the declared root: ${absolutePath}`)
+    }
+    const relativeEntry = absolutePath.slice(prefix.length)
+    return (await this.importInstalledEntry(
+      pluginId,
+      pluginRoot,
+      relativeEntry,
+      absolutePath
+    )) as Record<string, unknown>
   }
 
   /**

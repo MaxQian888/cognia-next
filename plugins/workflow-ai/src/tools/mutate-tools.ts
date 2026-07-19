@@ -22,6 +22,9 @@
 import type { PluginTool } from "@/types/plugin"
 import { formatToolError, resolveStore } from "../store-bridge"
 import type { WorkflowNodeKind } from "@/types/workflow/visual"
+import type { ProposalOp } from "@/lib/workflow/editor/proposal-types"
+import { coerceProposalOp, KNOWN_PROPOSAL_OP_TYPES } from "@/lib/workflow/editor/proposal-schema"
+import { nanoid } from "nanoid"
 
 const PLUGIN_ID = "cognia-workflow-ai"
 
@@ -115,10 +118,14 @@ export function buildMutateTools(): PluginTool[] {
             workflowId: args.workflowId as string | undefined,
           })
           const nodeId = String(args.nodeId)
-          const before = store.getState().nodes.length
+          if (!store.getState().nodes.some((node) => node.id === nodeId)) {
+            return {
+              ok: false,
+              error: { code: "node-not-found", message: `Node "${nodeId}" does not exist.` },
+            }
+          }
           store.getState().removeNodes([nodeId])
-          const removed = before - store.getState().nodes.length
-          return { ok: true, workflowId, removed }
+          return { ok: true, workflowId, removed: 1 }
         } catch (err) {
           return formatToolError(err)
         }
@@ -157,6 +164,12 @@ export function buildMutateTools(): PluginTool[] {
             sourceHandle: args.sourceHandle as string | undefined,
             targetHandle: args.targetHandle as string | undefined,
           })
+          if (!id) {
+            return {
+              ok: false,
+              error: { code: "invalid-connection", message: "The requested edge is not valid." },
+            }
+          }
           if (typeof args.label === "string" && args.label.length > 0) {
             store.getState().updateEdgeData(id, { label: args.label })
           }
@@ -189,10 +202,14 @@ export function buildMutateTools(): PluginTool[] {
             workflowId: args.workflowId as string | undefined,
           })
           const edgeId = String(args.edgeId)
-          const before = store.getState().edges.length
+          if (!store.getState().edges.some((edge) => edge.id === edgeId)) {
+            return {
+              ok: false,
+              error: { code: "edge-not-found", message: `Edge "${edgeId}" does not exist.` },
+            }
+          }
           store.getState().removeEdges([edgeId])
-          const removed = before - store.getState().edges.length
-          return { ok: true, workflowId, removed }
+          return { ok: true, workflowId, removed: 1 }
         } catch (err) {
           return formatToolError(err)
         }
@@ -227,6 +244,12 @@ export function buildMutateTools(): PluginTool[] {
             workflowId: args.workflowId as string | undefined,
           })
           const nodeId = String(args.nodeId)
+          if (!store.getState().nodes.some((node) => node.id === nodeId)) {
+            return {
+              ok: false,
+              error: { code: "node-not-found", message: `Node "${nodeId}" does not exist.` },
+            }
+          }
           const patch = (args.patch as Record<string, unknown>) ?? {}
           store.getState().updateNodeData(nodeId, markAuthoredByAi(patch))
           const result = store.getState().revalidateNode(nodeId)
@@ -242,7 +265,7 @@ export function buildMutateTools(): PluginTool[] {
       definition: {
         name: "wf_batch_apply",
         description:
-          "Apply a sequence of edits as a single user-visible operation. Each op is one of { type: 'add_node' | 'remove_node' | 'connect_edge' | 'disconnect_edge' | 'configure_node', ... } with the same fields as the single-op tools. Returns per-op results in order; STOPS on the first failure (no partial rollback — the user can Ctrl+Z each step or call wf_remove_node manually).",
+          "Atomically apply a sequence of edits as one undoable operation. Each op is one of { type: 'add_node' | 'remove_node' | 'connect_edge' | 'disconnect_edge' | 'configure_node', ... } with the same fields as the single-op tools. Returns per-op results in order; any invalid op rejects the entire batch with no graph changes.",
         category: "workflow",
         requiresApproval: false,
         parametersSchema: {
@@ -263,78 +286,88 @@ export function buildMutateTools(): PluginTool[] {
             workflowId: args.workflowId as string | undefined,
           })
           const ops = (args.ops as Array<Record<string, unknown>>) ?? []
-          const state = () => store.getState()
+          const proposalOps: ProposalOp[] = []
           const results: Array<Record<string, unknown>> = []
           for (let i = 0; i < ops.length; i++) {
             const op = ops[i]
             const type = String(op.type ?? "")
-            try {
-              switch (type) {
-                case "add_node": {
-                  const pos = op.position as { x: number; y: number }
-                  const data = (op.data as Record<string, unknown> | undefined) ?? {}
-                  const id = state().addNode(
-                    op.kind as WorkflowNodeKind,
-                    pos,
-                    markAuthoredByAi(data)
-                  )
-                  state().revalidateNode(id)
-                  results.push({ type, nodeId: id })
-                  break
-                }
-                case "remove_node": {
-                  state().removeNodes([String(op.nodeId)])
-                  results.push({ type, removed: 1 })
-                  break
-                }
-                case "connect_edge": {
-                  const id = state().connect({
-                    source: String(op.source),
-                    target: String(op.target),
-                    sourceHandle: op.sourceHandle as string | undefined,
-                    targetHandle: op.targetHandle as string | undefined,
-                  })
-                  if (typeof op.label === "string" && op.label.length > 0) {
-                    state().updateEdgeData(id, { label: op.label })
-                  }
-                  results.push({ type, edgeId: id })
-                  break
-                }
-                case "disconnect_edge": {
-                  state().removeEdges([String(op.edgeId)])
-                  results.push({ type, removed: 1 })
-                  break
-                }
-                case "configure_node": {
-                  state().updateNodeData(
-                    String(op.nodeId),
-                    markAuthoredByAi((op.patch as Record<string, unknown>) ?? {})
-                  )
-                  const r = state().revalidateNode(String(op.nodeId))
-                  results.push({ type, hasErrors: r.hasErrors })
-                  break
-                }
-                default:
-                  return {
-                    ok: false,
-                    error: { code: "unknown-op", message: `Unknown op type: "${type}"` },
-                    workflowId,
-                    applied: results,
-                    failedAt: i,
-                  }
-              }
-            } catch (innerErr) {
+            if (!KNOWN_PROPOSAL_OP_TYPES.has(type)) {
               return {
                 ok: false,
-                error: {
-                  code: "op-failed",
-                  message: innerErr instanceof Error ? innerErr.message : String(innerErr),
-                },
+                error: { code: "unknown-op", message: `Unknown op type: "${type}"` },
                 workflowId,
-                applied: results,
+                applied: [],
                 failedAt: i,
               }
             }
+            const raw =
+              type === "add_node"
+                ? {
+                    ...op,
+                    nodeId:
+                      typeof op.nodeId === "string" && op.nodeId.length > 0
+                        ? op.nodeId
+                        : `n_${nanoid(8)}`,
+                    data: markAuthoredByAi((op.data as Record<string, unknown> | undefined) ?? {}),
+                  }
+                : type === "connect_edge"
+                  ? {
+                      ...op,
+                      edgeId:
+                        typeof op.edgeId === "string" && op.edgeId.length > 0
+                          ? op.edgeId
+                          : `e_${nanoid(8)}`,
+                    }
+                  : type === "configure_node"
+                    ? {
+                        ...op,
+                        patch: markAuthoredByAi(
+                          (op.patch as Record<string, unknown> | undefined) ?? {}
+                        ),
+                      }
+                    : op
+            const coerced = coerceProposalOp(raw, i)
+            if (typeof coerced === "string") {
+              return {
+                ok: false,
+                error: { code: "invalid-op", message: coerced },
+                workflowId,
+                applied: [],
+                failedAt: i,
+              }
+            }
+            proposalOps.push(coerced)
+            switch (coerced.type) {
+              case "add_node":
+                results.push({ type, nodeId: coerced.nodeId })
+                break
+              case "remove_node":
+              case "disconnect_edge":
+                results.push({ type, removed: 1 })
+                break
+              case "connect_edge":
+                results.push({ type, edgeId: coerced.edgeId })
+                break
+              case "configure_node":
+                results.push({ type, nodeId: coerced.nodeId })
+                break
+            }
+          }
+          const applied = store.getState().applyProposalOps(proposalOps)
+          if (applied.firstError) {
+            const failedAt = Number(applied.firstError.match(/^op (\d+):/)?.[1] ?? 0)
+            return {
+              ok: false,
+              error: { code: "op-failed", message: applied.firstError },
+              workflowId,
+              applied: [],
+              failedAt,
+            }
+          }
+          for (const result of results) {
+            if (result.type !== "configure_node" || typeof result.nodeId !== "string") continue
+            result.hasErrors = Boolean(store.getState().validationByStepId[result.nodeId])
+            delete result.nodeId
           }
           return { ok: true, workflowId, applied: results }
         } catch (err) {

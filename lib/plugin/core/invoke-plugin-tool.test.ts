@@ -212,9 +212,12 @@ describe("invokePluginTool", () => {
       expect.objectContaining({
         sessionId: "sess-1",
         messageId: "msg-1",
-        signal: controller.signal,
+        signal: expect.any(AbortSignal),
       })
     )
+    const forwardedSignal = execute.mock.calls[0][1].signal as AbortSignal
+    controller.abort()
+    expect(forwardedSignal.aborted).toBe(true)
   })
 
   it("defaults config to {} when the plugin has none", async () => {

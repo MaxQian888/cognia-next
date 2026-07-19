@@ -202,7 +202,7 @@ Text-only runs, context-provider/guardrail **registration**, and `onStop` are un
 
 ## Authoring helpers
 
-`@cognia/plugin-sdk` re-exports `defineAgentTool()`, `defineGuardrail()`, and `defineContextProvider()` (typed pass-through for either a runtime provider object or a declarative `manifest.contextProviders[]` entry). Direct helper subpaths are also available under `@cognia/plugin-sdk/define/<name>`. Host PII factories are intentionally excluded from the published author SDK.
+`@cognia/plugin-sdk` re-exports `defineAgentTool()`, `defineGuardrail()`, and `defineContextProvider()` (typed pass-through for either a runtime provider object or a declarative `manifest.contextProviders[]` entry). Define helpers are imported from the package root; arbitrary `define/<name>` subpaths are not public. Host PII factories are intentionally excluded from the published author SDK.
 
 ## Dogfood
 

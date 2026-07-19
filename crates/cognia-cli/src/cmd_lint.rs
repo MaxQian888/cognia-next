@@ -20,8 +20,9 @@ use crate::ui::RuntimeUi;
 #[path = "generated_plugin_contract.rs"]
 mod generated_plugin_contract;
 use generated_plugin_contract::{
-    CAPABILITY_FIELDS, CAPABILITY_MINIMUM_HOST_VERSIONS, EXECUTABLE_CONTRIBUTION_FIELDS,
-    PLUGIN_PATH_FIELDS, VALID_CAPABILITIES, VALID_PERMISSIONS, VALID_PLUGIN_TYPES,
+    CAPABILITY_FIELDS, CAPABILITY_MINIMUM_HOST_VERSIONS, MANIFEST_CONTRIBUTIONS,
+    PLUGIN_PATH_FIELDS, RUNTIME_ENTRY_CONTRACTS, VALID_CAPABILITIES, VALID_PERMISSIONS,
+    VALID_PLUGIN_TYPES,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -543,16 +544,39 @@ pub fn validate_manifest(manifest: &Value) -> Vec<Diagnostic> {
         }
     }
 
-    // ── type-specific entry points ──────────────────────────────────────
+    // ── type-specific entry points (canonical catalog) ─────────────────
+    if let Some(plugin_type) = plugin_type {
+        if let Some((_, required, _, _, required_any_of)) = RUNTIME_ENTRY_CONTRACTS
+            .iter()
+            .find(|(candidate, _, _, _, _)| *candidate == plugin_type)
+        {
+            for field in *required {
+                require_string(obj, field, &format!("manifest.{field}.required"), &mut out);
+            }
+            if !required_any_of.is_empty()
+                && !required_any_of.iter().any(|field| match obj.get(*field) {
+                    Some(Value::String(value)) => !value.is_empty(),
+                    Some(Value::Array(values)) => !values.is_empty(),
+                    Some(Value::Object(values)) => !values.is_empty(),
+                    _ => false,
+                })
+            {
+                out.push(Diagnostic {
+                    severity: Severity::Error,
+                    field: required_any_of[0].into(),
+                    code: "manifest.runtime_entry.required_any_of".into(),
+                    message: format!(
+                        "Plugin type \"{plugin_type}\" requires at least one of: {}",
+                        required_any_of.join(", ")
+                    ),
+                    hint: None,
+                });
+            }
+        }
+    }
+
     match plugin_type {
-        Some("frontend") => {
-            require_string(obj, "main", "manifest.main.required", &mut out);
-        }
-        Some("python") => {
-            require_string(obj, "pythonMain", "manifest.pythonMain.required", &mut out);
-        }
         Some("wasm") => {
-            require_string(obj, "wasmMain", "manifest.wasmMain.required", &mut out);
             if let Some(wm) = obj.get("wasmMain").and_then(Value::as_str) {
                 if !wm.to_lowercase().ends_with(".wasm") {
                     out.push(Diagnostic {
@@ -566,9 +590,7 @@ pub fn validate_manifest(manifest: &Value) -> Vec<Diagnostic> {
             }
             validate_wasm_block(obj.get("wasm"), &mut out);
         }
-        Some("vscode-extension") => {
-            require_string(obj, "vscodeMain", "manifest.vscodeMain.required", &mut out);
-        }
+        Some("vscode-extension") => {}
         _ => {}
     }
 
@@ -670,26 +692,88 @@ pub fn validate_manifest(manifest: &Value) -> Vec<Diagnostic> {
     // ── lazy-factory contribution fields: `entry` path safety ────────────
     lint_manifest_paths(obj, &mut out);
 
-    let has_js_contributions = EXECUTABLE_CONTRIBUTION_FIELDS.iter().any(|field| {
-        obj.get(*field)
-            .and_then(Value::as_array)
-            .is_some_and(|entries| !entries.is_empty())
-    }) || obj.get("configComponent").is_some();
-    if obj.get("type").and_then(Value::as_str) != Some("frontend")
-        && has_js_contributions
-        && obj.get("main").and_then(Value::as_str).is_none()
+    let populated_js_contribution = MANIFEST_CONTRIBUTIONS.iter().find_map(
+        |(field, _, execution, _, condition_path, condition_equals)| {
+            let entries: Vec<&Value> = match obj.get(*field) {
+                Some(Value::Array(entries)) if !entries.is_empty() => entries.iter().collect(),
+                Some(value @ Value::Object(_)) => vec![value],
+                _ => return None,
+            };
+            let requires_javascript = if *execution == "javascript" {
+                true
+            } else if *execution == "conditional" {
+                condition_path.is_some_and(|path| {
+                    entries.iter().any(|entry| {
+                        let value = path
+                            .split('.')
+                            .try_fold(*entry, |current, segment| current.get(segment));
+                        match condition_equals {
+                            Some(expected) => value.and_then(Value::as_str) == Some(*expected),
+                            None => value.is_some_and(|value| match value {
+                                Value::Null => false,
+                                Value::String(value) => !value.is_empty(),
+                                _ => true,
+                            }),
+                        }
+                    })
+                })
+            } else {
+                false
+            };
+            requires_javascript.then_some(*field)
+        },
+    );
+    let runtime_entry_contract = plugin_type.and_then(|plugin_type| {
+        RUNTIME_ENTRY_CONTRACTS
+            .iter()
+            .find(|(candidate, _, _, _, _)| *candidate == plugin_type)
+    });
+    if populated_js_contribution.is_some()
+        && runtime_entry_contract
+            .is_some_and(|(_, _, javascript_entry, _, _)| javascript_entry.is_none())
     {
+        let is_python_only = plugin_type == Some("python");
         out.push(Diagnostic {
             severity: Severity::Error,
-            field: "main".into(),
-            code: "manifest.main.required_for_js_contributions".into(),
-            message: "JavaScript-executed contributions require a relative \"main\" entry point"
-                .into(),
-            hint: Some(
-                "Use a hybrid plugin with \"main\", or remove JavaScript-executed contributions."
-                    .into(),
+            field: populated_js_contribution.unwrap().into(),
+            code: if is_python_only {
+                "manifest.contributions.javascript.unsupported_for_python"
+            } else {
+                "manifest.contributions.javascript.unsupported_for_plugin_type"
+            }
+            .into(),
+            message: format!(
+                "Plugin type \"{}\" cannot declare JavaScript-executed contributions",
+                plugin_type.unwrap_or("unknown")
             ),
+            hint: Some(if is_python_only {
+                "Change the plugin type to \"hybrid\" and add \"main\", or remove those contributions."
+                    .into()
+            } else {
+                "Use a JavaScript-capable plugin type, or remove those contributions.".into()
+            }),
         });
+    } else if let (Some(plugin_type), Some(_)) = (plugin_type, populated_js_contribution) {
+        if let Some((_, _, Some(javascript_entry), true, _)) = RUNTIME_ENTRY_CONTRACTS
+            .iter()
+            .find(|(candidate, _, _, _, _)| *candidate == plugin_type)
+        {
+            if obj.get(*javascript_entry).and_then(Value::as_str).is_none() {
+                out.push(Diagnostic {
+                    severity: Severity::Error,
+                    field: (*javascript_entry).into(),
+                    code: format!(
+                        "manifest.{javascript_entry}.required_for_js_contributions"
+                    ),
+                    message: format!(
+                        "JavaScript-executed contributions require a relative \"{javascript_entry}\" entry point"
+                    ),
+                    hint: Some(format!(
+                        "Add \"{javascript_entry}\", or remove JavaScript-executed contributions."
+                    )),
+                });
+            }
+        }
     }
 
     // ── commands[]: each must have id + name ────────────────────────────
@@ -1466,7 +1550,10 @@ fn require_string(
 
 /// `^[a-z0-9]([a-z0-9-_.]*[a-z0-9])?$` — mirrors validation.ts:89.
 fn is_valid_id(id: &str) -> bool {
-    if id.is_empty() {
+    if id.is_empty()
+        || id.len() > 128
+        || matches!(id, ".host-state" | "_marketplace_cache" | "_backups")
+    {
         return false;
     }
     let bytes = id.as_bytes();
@@ -1650,7 +1737,26 @@ mod tests {
             "pythonMain": "main.py",
             "sessionImporters": contribution
         });
-        assert_has_error_code(python_only, "manifest.main.required_for_js_contributions");
+        assert_has_error_code(
+            python_only,
+            "manifest.contributions.javascript.unsupported_for_python",
+        );
+
+        let python_with_main = json!({
+            "id": "python-only-with-main",
+            "name": "Python only",
+            "version": "0.1.0",
+            "description": "Python plugin",
+            "type": "python",
+            "capabilities": ["python", "session-importer"],
+            "main": "dist/index.js",
+            "pythonMain": "main.py",
+            "sessionImporters": contribution
+        });
+        assert_has_error_code(
+            python_with_main,
+            "manifest.contributions.javascript.unsupported_for_python",
+        );
 
         let hybrid = json!({
             "id": "hybrid-plugin",
@@ -1665,6 +1771,18 @@ mod tests {
         });
         assert_clean(hybrid);
 
+        let hybrid_without_python = json!({
+            "id": "hybrid-without-python",
+            "name": "Hybrid",
+            "version": "0.1.0",
+            "description": "Hybrid plugin",
+            "type": "hybrid",
+            "capabilities": ["session-importer"],
+            "main": "dist/index.js",
+            "sessionImporters": contribution
+        });
+        assert_has_error_code(hybrid_without_python, "manifest.pythonMain.required");
+
         let javascript = json!({
             "id": "javascript-plugin",
             "name": "JavaScript",
@@ -1676,6 +1794,50 @@ mod tests {
             "sessionImporters": contribution
         });
         assert_clean(javascript);
+
+        for contribution in [
+            json!({ "protocolAdapters": [{ "spec": { "kind": "declarative" } }] }),
+            json!({ "webviews": [{ "html": "<p>safe inline view</p>" }] }),
+        ] {
+            let mut manifest = json!({
+                "id": "python-declarative",
+                "name": "Python declarative",
+                "version": "0.1.0",
+                "description": "Host-rendered contribution",
+                "type": "python",
+                "capabilities": [],
+                "pythonMain": "main.py"
+            });
+            manifest
+                .as_object_mut()
+                .unwrap()
+                .extend(contribution.as_object().unwrap().clone());
+            assert_clean(manifest);
+        }
+
+        for contribution in [
+            json!({ "protocolAdapters": [{ "spec": { "kind": "code" }, "entry": "dist/adapter.js" }] }),
+            json!({ "webviews": [{ "entry": "dist/view.js" }] }),
+            json!({ "connectors": [{ "id": "mail" }] }),
+        ] {
+            let mut manifest = json!({
+                "id": "python-executable",
+                "name": "Python executable",
+                "version": "0.1.0",
+                "description": "Executable contribution",
+                "type": "python",
+                "capabilities": [],
+                "pythonMain": "main.py"
+            });
+            manifest
+                .as_object_mut()
+                .unwrap()
+                .extend(contribution.as_object().unwrap().clone());
+            assert_has_error_code(
+                manifest,
+                "manifest.contributions.javascript.unsupported_for_python",
+            );
+        }
     }
 
     #[test]
@@ -1905,6 +2067,20 @@ mod tests {
         let mut m = minimal_frontend();
         m["id"] = json!("a");
         assert_clean(m);
+    }
+
+    #[test]
+    fn id_rejects_host_reserved_and_overlong_names() {
+        for id in [
+            ".host-state".to_string(),
+            "_marketplace_cache".to_string(),
+            "_backups".to_string(),
+            "a".repeat(129),
+        ] {
+            let mut manifest = minimal_frontend();
+            manifest["id"] = json!(id);
+            assert_has_error_code(manifest, "manifest.id.invalid_format");
+        }
     }
 
     #[test]
@@ -2236,11 +2412,30 @@ mod tests {
     }
 
     #[test]
-    fn vscode_extension_requires_vscode_main() {
+    fn vscode_extension_requires_runtime_or_declarative_contribution() {
         let mut m = minimal_frontend();
         m["type"] = json!("vscode-extension");
         m.as_object_mut().unwrap().remove("main");
-        assert_has_error_code(m, "manifest.vscodeMain.required");
+        assert_has_error_code(m, "manifest.runtime_entry.required_any_of");
+    }
+
+    #[test]
+    fn vscode_extension_accepts_declarative_theme_without_vscode_main() {
+        let mut m = minimal_frontend();
+        m["type"] = json!("vscode-extension");
+        m.as_object_mut().unwrap().remove("main");
+        m["themes"] = json!([{
+            "id": "dark",
+            "name": "Dark",
+            "vscodeJsonPath": "themes/dark.json"
+        }]);
+        let diagnostics = validate_manifest(&m);
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code != "manifest.runtime_entry.required_any_of"),
+            "declarative extension should not require vscodeMain: {diagnostics:?}"
+        );
     }
 
     #[test]

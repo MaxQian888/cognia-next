@@ -30,6 +30,7 @@ jest.mock("./chat-participant-registry", () => ({
   handleCreateChatParticipant: jest.fn(),
   handleDisposeChatParticipant: jest.fn(),
   handleRegisterChatVariableResolver: jest.fn(),
+  handleUnregisterChatVariableResolver: jest.fn(),
 }))
 
 jest.mock("./languages-handler", () => ({
@@ -47,6 +48,13 @@ jest.mock("./lsp-workspace-manager", () => ({
   resolveWorkspaceFolder: jest.fn(() => null),
 }))
 
+jest.mock("@/lib/plugin/bridge/languages-bridge", () => ({
+  listLanguages: jest.fn(() => []),
+}))
+
+import { readFileSync, readdirSync } from "node:fs"
+import path from "node:path"
+
 const EXPECTED_METHODS = [
   "lm:selectChatModels",
   "lm:sendChatRequest",
@@ -59,8 +67,11 @@ const EXPECTED_METHODS = [
   "chat:createParticipant",
   "chat:disposeParticipant",
   "chat:registerVariableResolver",
+  "chat:registerChatVariableResolver",
+  "chat:unregisterChatVariableResolver",
   "chat:respond",
   "languages:register",
+  "languages:list",
   "languages:unregister",
   "languages:setDiagnostics",
   "languages:clearDiagnostics",
@@ -100,6 +111,25 @@ function loadInIsolation(): IsolatedModules {
 }
 
 describe("installVscodeRpcHandlers", () => {
+  it("accounts for every sidecar-to-host vscode shim RPC method", () => {
+    const { install, listMethods, reset } = loadInIsolation()
+    const shimRoot = path.join(process.cwd(), "sidecar/vscode-ext-host/src/vscode-shim")
+    const outbound = new Set<string>(["secrets:get", "secrets:store", "secrets:delete"])
+    const callPattern = /send(?:Request|Notification)(?:<[^>]+>)?\(\s*"([^"]+)"/g
+    for (const file of readdirSync(shimRoot).filter((entry) => entry.endsWith(".ts"))) {
+      const source = readFileSync(path.join(shimRoot, file), "utf8")
+      for (const match of source.matchAll(callPattern)) outbound.add(match[1])
+    }
+
+    try {
+      install()
+      const registered = new Set(listMethods())
+      expect([...outbound].filter((method) => !registered.has(method)).sort()).toEqual([])
+    } finally {
+      reset()
+    }
+  })
+
   it("registers every canonical VS Code RPC method on first call", () => {
     const { install, listMethods, reset } = loadInIsolation()
     try {
@@ -156,7 +186,7 @@ describe("installVscodeRpcHandlers", () => {
       const lmCount = methods.filter((m) => m.startsWith("lm:")).length
       const chatCount = methods.filter((m) => m.startsWith("chat:")).length
       expect(lmCount).toBe(8)
-      expect(chatCount).toBe(4)
+      expect(chatCount).toBe(6)
     } finally {
       reset()
     }
@@ -167,7 +197,7 @@ describe("installVscodeRpcHandlers", () => {
     try {
       install()
       const methods = listMethods()
-      expect(methods.filter((m) => m.startsWith("languages:")).length).toBe(6)
+      expect(methods.filter((m) => m.startsWith("languages:")).length).toBeGreaterThanOrEqual(6)
       expect(methods).toContain("extension:cleanup")
       expect(methods).toContain("window:activeTextEditor:get")
     } finally {

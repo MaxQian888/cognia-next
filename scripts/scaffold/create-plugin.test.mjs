@@ -15,7 +15,7 @@ test("translates the legacy frontend flags to the canonical Rust CLI", () => {
       "./plugins/weather",
       "--yes",
     ]),
-    ["plugin", "new", "--dir", "./plugins/weather", "weather-plugin", "--kind", "ts"]
+    ["plugin", "new", "--dir", "./plugins/weather", "--yes", "weather-plugin", "--kind", "ts"]
   )
 })
 

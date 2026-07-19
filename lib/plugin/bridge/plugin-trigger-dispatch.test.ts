@@ -15,6 +15,9 @@ jest.mock("@/lib/workflow/triggers/registry", () => ({
 jest.mock("@/lib/workflow/runtime/trigger-bridge", () => ({
   dispatchTrigger: jest.fn().mockResolvedValue(undefined),
 }))
+jest.mock("@/lib/db/workflows", () => ({
+  getWorkflow: jest.fn(),
+}))
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const diag = require("../contracts/diagnostics-store") as { recordSilentFailure: jest.Mock }
@@ -28,6 +31,8 @@ const registry = require("@/lib/workflow/triggers/registry") as {
 const orchestrator = require("@/lib/workflow/runtime/trigger-bridge") as {
   dispatchTrigger: jest.Mock
 }
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const workflows = require("@/lib/db/workflows") as { getWorkflow: jest.Mock }
 
 const FAKE_REG: TriggerRegistration = {
   kind: "trigger.foo.bar",
@@ -47,8 +52,27 @@ beforeEach(() => {
   diag.recordSilentFailure.mockReset()
   registry.getPluginTrigger.mockReset()
   registry.listPluginTriggers.mockReset().mockReturnValue([])
+  registry.getPluginTrigger.mockImplementation((kind: string, typeVersion: number) =>
+    registry
+      .listPluginTriggers()
+      .find(
+        (registration: TriggerRegistration) =>
+          registration.kind === kind && registration.typeVersion === typeVersion
+      )
+  )
   registry.isTriggerMuted.mockReset().mockReturnValue(false)
   orchestrator.dispatchTrigger.mockReset().mockResolvedValue(undefined)
+  workflows.getWorkflow.mockReset().mockResolvedValue({
+    id: "wf-1",
+    nodes: [
+      {
+        id: "trigger-node",
+        type: "trigger.foo.bar",
+        typeVersion: 1,
+        data: { params: {} },
+      },
+    ],
+  })
 })
 
 describe("dispatchPluginTrigger", () => {
@@ -65,6 +89,7 @@ describe("dispatchPluginTrigger", () => {
       expect.objectContaining({
         workflowId: "wf-1",
         kind: "trigger.foo.bar",
+        triggerId: "trigger-node",
         payload: { hello: "world" },
         originAt: expect.any(Number),
       })
@@ -131,6 +156,82 @@ describe("dispatchPluginTrigger", () => {
       expect.any(Error)
     )
   })
+
+  it("routes an explicit triggerId when multiple same-kind roots exist", async () => {
+    registry.listPluginTriggers.mockReturnValue([FAKE_REG])
+    workflows.getWorkflow.mockResolvedValue({
+      id: "wf-1",
+      nodes: [
+        { id: "root-a", type: "trigger.foo.bar", typeVersion: 1, data: { params: {} } },
+        { id: "root-b", type: "trigger.foo.bar", typeVersion: 1, data: { params: {} } },
+      ],
+    })
+
+    const result = await dispatchPluginTrigger({
+      pluginId: "foo",
+      workflowId: "wf-1",
+      kind: "trigger.bar",
+      triggerId: "root-b",
+      payload: { selected: "b" },
+    })
+
+    expect(result.ok).toBe(true)
+    expect(orchestrator.dispatchTrigger).toHaveBeenCalledWith(
+      expect.objectContaining({ triggerId: "root-b" })
+    )
+  })
+
+  it("rejects an ambiguous legacy emission instead of starting every same-kind root", async () => {
+    registry.listPluginTriggers.mockReturnValue([FAKE_REG])
+    workflows.getWorkflow.mockResolvedValue({
+      id: "wf-1",
+      nodes: [
+        { id: "root-a", type: "trigger.foo.bar", typeVersion: 1, data: { params: {} } },
+        { id: "root-b", type: "trigger.foo.bar", typeVersion: 1, data: { params: {} } },
+      ],
+    })
+
+    const result = await dispatchPluginTrigger({
+      pluginId: "foo",
+      workflowId: "wf-1",
+      kind: "trigger.bar",
+      payload: null,
+    })
+
+    expect(result).toMatchObject({ ok: false, rejectedReason: "ambiguous-trigger" })
+    expect(orchestrator.dispatchTrigger).not.toHaveBeenCalled()
+    expect(diag.recordSilentFailure).toHaveBeenCalledWith(
+      "foo",
+      expect.objectContaining({ message: expect.stringContaining("multiple enabled nodes") }),
+      expect.any(Error)
+    )
+  })
+
+  it("rejects an explicit id that is disabled, missing, or owned by another kind", async () => {
+    registry.listPluginTriggers.mockReturnValue([FAKE_REG])
+    workflows.getWorkflow.mockResolvedValue({
+      id: "wf-1",
+      nodes: [
+        {
+          id: "root-a",
+          type: "trigger.foo.bar",
+          typeVersion: 1,
+          data: { params: {}, disabled: true },
+        },
+      ],
+    })
+
+    const result = await dispatchPluginTrigger({
+      pluginId: "foo",
+      workflowId: "wf-1",
+      kind: "trigger.bar",
+      triggerId: "root-a",
+      payload: null,
+    })
+
+    expect(result).toMatchObject({ ok: false, rejectedReason: "trigger-node-not-found" })
+    expect(orchestrator.dispatchTrigger).not.toHaveBeenCalled()
+  })
 })
 
 // ── W4.4: version lookup scans real registrations (no 1..50 cap) ─────────────
@@ -140,6 +241,17 @@ describe("findAnyTriggerVersion via registry scan (W4.4)", () => {
       { ...FAKE_REG, typeVersion: 99 },
       { ...FAKE_REG, typeVersion: 51 },
     ])
+    workflows.getWorkflow.mockResolvedValue({
+      id: "wf-1",
+      nodes: [
+        {
+          id: "trigger-node",
+          type: "trigger.foo.bar",
+          typeVersion: 99,
+          data: { params: {} },
+        },
+      ],
+    })
     const result = await dispatchPluginTrigger({
       pluginId: "foo",
       workflowId: "wf-1",

@@ -13,7 +13,20 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
-from ._generated_contract import CAPABILITY_FIELDS, CAPABILITY_SUPPORT
+from ._generated_contract import (
+    CAPABILITY_FIELDS,
+    CAPABILITY_INTRODUCED_VERSIONS,
+    CAPABILITY_MINIMUM_HOST_VERSIONS,
+    CAPABILITY_SUPPORT,
+    CATALOG_SCHEMA_VERSION,
+    MANIFEST_CONTRIBUTIONS,
+    MINIMUM_HOST_VERSION,
+    PLUGIN_PATH_FIELD_CONTRACTS,
+    RUNTIME_ENTRY_CONTRACTS,
+    VALID_CAPABILITIES,
+    VALID_PERMISSIONS,
+    VALID_PLUGIN_TYPES,
+)
 
 # Support levels, identical to the TypeScript `PluginCapabilitySupport` union.
 SUPPORTED = "supported"
@@ -31,6 +44,8 @@ class CapabilityContract:
     id: str
     support: str
     manifest_fields: Sequence[str] = field(default_factory=tuple)
+    introduced_in: str = ""
+    minimum_host_version: str = ""
     runtime_binding: str = ""
     host_bindings: Sequence[str] = field(default_factory=tuple)
     typescript_sdk: Sequence[str] = field(default_factory=tuple)
@@ -45,6 +60,8 @@ class CapabilityContract:
             "id": self.id,
             "support": self.support,
             "manifestFields": list(self.manifest_fields),
+            "introducedIn": self.introduced_in,
+            "minimumHostVersion": self.minimum_host_version,
             "runtimeBinding": self.runtime_binding,
             "hostBindings": list(self.host_bindings),
             "typescriptSdk": list(self.typescript_sdk),
@@ -60,6 +77,8 @@ def define_capability_contract(
     support: str,
     *,
     manifest_fields: Optional[Sequence[str]] = None,
+    introduced_in: str = "",
+    minimum_host_version: str = "",
     runtime_binding: str = "",
     host_bindings: Optional[Sequence[str]] = None,
     typescript_sdk: Optional[Sequence[str]] = None,
@@ -80,6 +99,8 @@ def define_capability_contract(
         id=id,
         support=support,
         manifest_fields=tuple(manifest_fields or ()),
+        introduced_in=introduced_in,
+        minimum_host_version=minimum_host_version,
         runtime_binding=runtime_binding,
         host_bindings=tuple(host_bindings or ()),
         typescript_sdk=tuple(typescript_sdk or ()),
@@ -194,6 +215,8 @@ def capability_contract_from_dict(raw: Mapping[str, Any]) -> CapabilityContract:
         id=str(raw["id"]),
         support=str(raw["support"]),
         manifest_fields=tuple(raw.get("manifestFields", ())),
+        introduced_in=str(raw.get("introducedIn", "")),
+        minimum_host_version=str(raw.get("minimumHostVersion", "")),
         runtime_binding=str(raw.get("runtimeBinding", "")),
         host_bindings=tuple(raw.get("hostBindings", ())),
         typescript_sdk=tuple(raw.get("typescriptSdk", ())),
@@ -209,6 +232,8 @@ CANONICAL_CAPABILITY_CONTRACTS = tuple(
         capability_id,
         CAPABILITY_SUPPORT[capability_id],
         manifest_fields=CAPABILITY_FIELDS[capability_id],
+        introduced_in=CAPABILITY_INTRODUCED_VERSIONS[capability_id],
+        minimum_host_version=CAPABILITY_MINIMUM_HOST_VERSIONS[capability_id],
     )
     for capability_id in CAPABILITY_SUPPORT
 )

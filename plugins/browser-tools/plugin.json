@@ -2,7 +2,7 @@
   "id": "cognia-browser-tools",
   "name": "Browser Tools",
   "version": "0.1.0",
-  "description": "Agent browser loop over the embedded preview: navigate, accessibility-tree snapshot with refs, click/type/fill/select/hover by ref, console + network inspection.",
+  "description": "Host-neutral Agent browser loop with structured snapshots, ref actions, multi-page control, file bridge, console, and network inspection.",
   "type": "frontend",
   "capabilities": ["tools"],
   "main": "src/index.ts",
@@ -13,14 +13,8 @@
   "permissions": ["agent:control"],
   "activationEvents": ["startup"],
   "runtimeCompatibility": {
-    "browser": {
-      "availability": "blocked",
-      "reason": "Drives the Tauri embedded webview via browser_embed_* commands — desktop only."
-    },
+    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
     "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
-    "mobile": {
-      "availability": "blocked",
-      "reason": "Drives the Tauri embedded webview via browser_embed_* commands — unavailable in the mobile WebView."
-    }
+    "mobile": { "availability": "supported", "entrypoint": "src/index.ts" }
   }
 }

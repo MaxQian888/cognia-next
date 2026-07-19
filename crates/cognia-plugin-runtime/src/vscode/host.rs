@@ -66,6 +66,7 @@ pub struct InboundFrame {
 /// Owned reference to one running sidecar. Drop kills the child.
 pub struct Sidecar {
     pub extension_id: String,
+    pub extension_path: String,
     pub pid: u32,
     /// Tx for outgoing frames written to the sidecar's stdin.
     pub stdin_tx: mpsc::UnboundedSender<String>,
@@ -192,6 +193,7 @@ impl Sidecar {
 
         Ok(Self {
             extension_id: req.extension_id,
+            extension_path: req.extension_path,
             pid,
             stdin_tx,
             pending,

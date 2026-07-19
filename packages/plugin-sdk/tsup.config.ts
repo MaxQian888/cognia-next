@@ -1,16 +1,35 @@
 import { defineConfig } from "tsup"
 
-export default defineConfig({
-  entry: {
-    index: "src/index.ts",
-    manifest: "src/manifest/index.ts",
-    context: "src/context/index.ts",
-    contracts: "src/contracts/catalog.ts",
+const runtimeEntries = {
+  index: "src/index.ts",
+  manifest: "src/manifest/index.ts",
+  context: "src/context/index.ts",
+  contracts: "src/contracts/catalog.ts",
+  events: "src/events/index.ts",
+  hooks: "src/hooks/index.ts",
+  permissions: "src/permissions/index.ts",
+  extensions: "src/extensions/index.ts",
+}
+
+const shared = {
+  target: "es2022" as const,
+  platform: "neutral" as const,
+}
+
+export default defineConfig([
+  {
+    ...shared,
+    entry: runtimeEntries,
+    format: ["esm", "cjs"],
+    dts: false,
+    sourcemap: true,
+    clean: true,
   },
-  format: ["esm", "cjs"],
-  dts: true,
-  sourcemap: true,
-  clean: true,
-  target: "es2022",
-  platform: "neutral",
-})
+  {
+    ...shared,
+    entry: runtimeEntries,
+    format: ["esm"],
+    dts: { only: true },
+    clean: false,
+  },
+])

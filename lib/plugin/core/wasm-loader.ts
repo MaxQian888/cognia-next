@@ -9,7 +9,7 @@
  * and `python` types.
  */
 
-import { isTauri } from "@/lib/platform/detect"
+import { isHeadlessHost, isTauri } from "@/lib/platform/detect"
 import { loggers } from "@cognia/logging"
 import type { PluginDefinition, PluginManifest, PluginTool } from "@/types/plugin"
 import type { PluginNodeDef } from "@/types/plugin/plugin-workflow"
@@ -27,23 +27,22 @@ export interface WasmActivateResult {
   exports: string[]
 }
 
-type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>
-
-let cachedInvoke: InvokeFn | undefined
-
-async function getInvoke(): Promise<InvokeFn> {
-  if (cachedInvoke) return cachedInvoke
-  const mod = await import("@tauri-apps/api/core")
-  cachedInvoke = mod.invoke as InvokeFn
-  return cachedInvoke
+async function invokeWasmHost<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  if (isTauri()) {
+    const { invoke } = await import("@tauri-apps/api/core")
+    return invoke<T>(command, args)
+  }
+  const { transport } = await import("@/lib/tauri/transport-instance")
+  return transport.call<T>(command, args)
 }
 
 /**
- * True when the current runtime can host WASM plugins (Tauri webview only).
- * Browser-mode users see a "desktop required" stub instead.
+ * True when the current runtime can reach a native WASM host. Desktop owns it
+ * in-process; the headless brain reaches cognia-server over its service
+ * transport. Browser/mobile clients do not execute plugin guests themselves.
  */
 export function isWasmHostAvailable(): boolean {
-  return isTauri()
+  return isTauri() || isHeadlessHost()
 }
 
 /**
@@ -51,7 +50,7 @@ export function isWasmHostAvailable(): boolean {
  * `activate` / `deactivate` hooks delegate to Tauri commands; the host then
  * instantiates the component inside its capability-gated wasmtime store.
  *
- * Browser-mode (non-Tauri) returns a stub that warns at activate time, the
+ * Browser/mobile mode returns a stub that warns at activate time, the
  * same pattern as `loadPythonModule` uses for Python-runtime-unavailable.
  */
 export async function loadWasmDefinition(
@@ -70,7 +69,7 @@ export async function loadWasmDefinition(
       manifest,
       activate: async (context) => {
         context.logger.warn(
-          `WASM plugin ${manifest.id} requires the Tauri desktop runtime. Running in stub mode.`
+          `WASM plugin ${manifest.id} requires a native Cognia host. Running in stub mode.`
         )
         return {}
       },
@@ -78,7 +77,6 @@ export async function loadWasmDefinition(
     }
   }
 
-  const invoke = await getInvoke()
   const args: WasmInvokeArgs = {
     pluginId: manifest.id,
     manifestJson: JSON.stringify(manifest),
@@ -86,7 +84,7 @@ export async function loadWasmDefinition(
   }
 
   try {
-    await invoke("plugin_wasm_load", { ...args })
+    await invokeWasmHost("plugin_wasm_load", { ...args })
   } catch (error) {
     throw new Error(
       `Failed to load WASM plugin ${manifest.id}: ${error instanceof Error ? error.message : String(error)}`
@@ -98,7 +96,7 @@ export async function loadWasmDefinition(
     activate: async (context) => {
       context.logger.info(`Activating WASM plugin ${manifest.id}`)
       try {
-        const result = await invoke<WasmActivateResult>("plugin_wasm_activate", {
+        const result = await invokeWasmHost<WasmActivateResult>("plugin_wasm_activate", {
           pluginId: manifest.id,
           configJson: JSON.stringify(context.config ?? {}),
         })
@@ -114,7 +112,7 @@ export async function loadWasmDefinition(
     },
     deactivate: async () => {
       try {
-        await invoke("plugin_wasm_deactivate", { pluginId: manifest.id })
+        await invokeWasmHost("plugin_wasm_deactivate", { pluginId: manifest.id })
       } catch (error) {
         wasmLoaderLogger.warn("WASM deactivate failed", {
           pluginId: manifest.id,
@@ -135,10 +133,9 @@ export async function callWasmExport<T = unknown>(
   payload: unknown
 ): Promise<T> {
   if (!isWasmHostAvailable()) {
-    throw new Error("WASM host unavailable (browser mode)")
+    throw new Error("WASM host unavailable in this runtime")
   }
-  const invoke = await getInvoke()
-  const result = await invoke<string>("plugin_wasm_call", {
+  const result = await invokeWasmHost<string>("plugin_wasm_call", {
     pluginId,
     exportName,
     payloadJson: JSON.stringify(payload ?? null),
@@ -225,9 +222,8 @@ export function buildWasmNodeDefs(manifest: PluginManifest): PluginNodeDef[] {
  */
 export async function unloadWasmPlugin(pluginId: string): Promise<void> {
   if (!isWasmHostAvailable()) return
-  const invoke = await getInvoke()
   try {
-    await invoke("plugin_wasm_unload", { pluginId })
+    await invokeWasmHost("plugin_wasm_unload", { pluginId })
   } catch (error) {
     wasmLoaderLogger.warn("WASM unload failed", {
       pluginId,

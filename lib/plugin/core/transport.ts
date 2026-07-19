@@ -1,4 +1,19 @@
-import { invoke } from "@tauri-apps/api/core"
+import { isTauri } from "@/lib/native/utils"
+import { isHeadlessHost } from "@/lib/platform/detect"
+import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
+
+async function invokePluginHost<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  // Always use the shared transport: it resolves to Tauri locally and to the
+  // active Companion route for a separated remote UI. Direct `invoke` here
+  // would mutate the viewer's local permission ledger instead of the brain's.
+  const { transport } = await import("@/lib/tauri/transport-instance")
+  return transport.call<T>(command, args)
+}
+
+/** True when the canonical Rust plugin gateway is reachable on this host. */
+export function isPluginGatewayAvailable(): boolean {
+  return isTauri() || isHeadlessHost() || isRemoteHostActive()
+}
 
 export type PluginApiErrorCode =
   | "INVALID_REQUEST"
@@ -132,7 +147,7 @@ export async function invokePluginApi<T = unknown>(
   let attempt = 0
   while (true) {
     attempt += 1
-    const response = await invoke<PluginApiInvokeResponse<T>>("plugin_api_invoke", {
+    const response = await invokePluginHost<PluginApiInvokeResponse<T>>("plugin_api_invoke", {
       request,
     })
 
@@ -186,7 +201,7 @@ export async function invokePluginApiBatch(
     })),
   }
 
-  const response = await invoke<{
+  const response = await invokePluginHost<{
     success: boolean
     results: PluginApiInvokeResponse[]
   }>("plugin_api_batch_invoke", { request: payload })
@@ -195,7 +210,7 @@ export async function invokePluginApiBatch(
 }
 
 export async function getPluginCapabilities() {
-  return invoke<
+  return invokePluginHost<
     Array<{
       api: string
       supported: boolean
@@ -216,7 +231,7 @@ export async function grantPluginPermission(
   // `plugin_permission_grant(plugin_id, permission, granted_by, expires_at)`.
   // The old `{ request: { … } }` wrapper never deserialized, so grants
   // silently failed to persist. Tauri maps camelCase JS keys to snake_case.
-  await invoke("plugin_permission_grant", {
+  await invokePluginHost("plugin_permission_grant", {
     pluginId,
     permission,
     grantedBy,
@@ -225,9 +240,16 @@ export async function grantPluginPermission(
 }
 
 export async function revokePluginPermission(pluginId: string, permission: string): Promise<void> {
-  await invoke("plugin_permission_revoke", { pluginId, permission })
+  await invokePluginHost("plugin_permission_revoke", { pluginId, permission })
 }
 
 export async function listPluginPermissions(pluginId: string): Promise<string[]> {
-  return invoke<string[]>("plugin_permission_list", { pluginId })
+  const grants = await invokePluginHost<Array<string | { permission?: unknown }>>(
+    "plugin_permission_list",
+    { pluginId }
+  )
+  return grants.flatMap((grant) => {
+    if (typeof grant === "string") return [grant]
+    return typeof grant?.permission === "string" ? [grant.permission] : []
+  })
 }

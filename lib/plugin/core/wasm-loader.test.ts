@@ -9,9 +9,14 @@
 import type { PluginManifest } from "@/types/plugin"
 
 const invokeMock = jest.fn()
+const transportCallMock = jest.fn()
 
 jest.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
+}))
+
+jest.mock("@/lib/tauri/transport-instance", () => ({
+  transport: { call: (...args: unknown[]) => transportCallMock(...args) },
 }))
 
 import {
@@ -52,12 +57,17 @@ function setTauri(present: boolean) {
 
 beforeEach(() => {
   invokeMock.mockReset()
+  transportCallMock.mockReset()
+  delete (globalThis as Record<string, unknown>).__COGNIA_HEADLESS__
 })
 
 describe("isWasmHostAvailable", () => {
-  it("returns true only when Tauri internals are present", () => {
+  it("returns true for either a Tauri or headless native host", () => {
     setTauri(false)
     expect(isWasmHostAvailable()).toBe(false)
+    ;(globalThis as Record<string, unknown>).__COGNIA_HEADLESS__ = true
+    expect(isWasmHostAvailable()).toBe(true)
+    delete (globalThis as Record<string, unknown>).__COGNIA_HEADLESS__
     setTauri(true)
     expect(isWasmHostAvailable()).toBe(true)
   })
@@ -190,6 +200,20 @@ describe("loadWasmDefinition", () => {
     expect(def.manifest.id).toBe("demo.wasm")
   })
 
+  it("routes a headless load through the installed service transport", async () => {
+    setTauri(false)
+    ;(globalThis as Record<string, unknown>).__COGNIA_HEADLESS__ = true
+    transportCallMock.mockResolvedValueOnce({ pluginApiVersion: "0.1.0" })
+
+    await loadWasmDefinition(baseManifest, "/plugins/demo")
+
+    expect(transportCallMock).toHaveBeenCalledWith(
+      "plugin_wasm_load",
+      expect.objectContaining({ pluginId: "demo.wasm", pluginPath: "/plugins/demo" })
+    )
+    expect(invokeMock).not.toHaveBeenCalled()
+  })
+
   it("propagates plugin_wasm_load errors with the plugin id", async () => {
     invokeMock.mockRejectedValueOnce(new Error("compile failed"))
     await expect(loadWasmDefinition(baseManifest, "/p")).rejects.toThrow(
@@ -223,7 +247,7 @@ describe("loadWasmDefinition", () => {
       config: {},
     } as unknown as Parameters<typeof def.activate>[0]
     await def.activate(ctx)
-    expect(ctx.logger.warn).toHaveBeenCalledWith(expect.stringContaining("Tauri desktop runtime"))
+    expect(ctx.logger.warn).toHaveBeenCalledWith(expect.stringContaining("native Cognia host"))
   })
 })
 

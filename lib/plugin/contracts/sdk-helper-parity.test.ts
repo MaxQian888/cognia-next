@@ -76,7 +76,7 @@ describe("plugin SDK helper parity (content-level)", () => {
   // proof audit + the content checks above). Otherwise an expired "no helper yet"
   // justification hides forever — the exact cli-tools / lsp-server drift this
   // guard was added to prevent. (Generic SDK surfaces a capability may legitimately
-  // reference while experimental — `index.ts`, `context/extended.ts`,
+  // reference while experimental — `index.ts`, `context/index.ts`,
   // `capability_contract.py` — are intentionally not a promotion signal.)
   it("no experimental capability advertises a typed define-* SDK helper", () => {
     const offenders = PLUGIN_CAPABILITY_CONTRACTS.filter((c) => c.support === "experimental")

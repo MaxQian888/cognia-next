@@ -361,6 +361,84 @@ describe("vscode-loader — Tauri mode", () => {
   })
 })
 
+describe("vscode-loader — headless brain mode", () => {
+  beforeEach(() => {
+    removeTauriWindow()
+    jest.resetModules()
+    jest.clearAllMocks()
+    ;(globalThis as Record<string, unknown>).__COGNIA_HEADLESS__ = true
+  })
+
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).__COGNIA_HEADLESS__
+    jest.dontMock("@/lib/tauri/transport-instance")
+    jest.dontMock("monaco-editor")
+  })
+
+  it("runs lifecycle and bidirectional sidecar RPC over the service transport", async () => {
+    const unsubscribe = jest.fn()
+    let inbound: ((payload: string) => void) | undefined
+    const call = jest.fn(async (command: string) => {
+      if (command === "plugin_activate_vscode") {
+        return {
+          registeredCommands: ["test.hello"],
+          registeredWebviewViews: [],
+          registeredLanguageProviders: [],
+          sidecarPid: 4321,
+        }
+      }
+      return undefined
+    })
+    const subscribe = jest.fn((_event: string, callback: (payload: string) => void) => {
+      inbound = callback
+      return unsubscribe
+    })
+    jest.doMock("@/lib/tauri/transport-instance", () => ({
+      transport: { call, subscribe },
+    }))
+    jest.doMock("monaco-editor", () => {
+      throw new Error("monaco unavailable in headless runtime")
+    })
+
+    const { loadVscodeDefinition } = await import("./vscode-loader")
+    const definition = await loadVscodeDefinition(baseManifest, "/data/.cognia/plugins/demo")
+    expect(call).toHaveBeenCalledWith(
+      "plugin_load_vscode",
+      expect.objectContaining({ pluginId: "cognia.test-ext" })
+    )
+    expect(subscribe).toHaveBeenCalledWith("vscode://rpc/cognia_test-ext", expect.any(Function))
+
+    await definition.activate!(mockContext)
+    expect(call).toHaveBeenCalledWith(
+      "plugin_activate_vscode",
+      expect.objectContaining({ pluginId: "cognia.test-ext" })
+    )
+
+    inbound?.(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 91,
+        method: "workspace:listFolders",
+        params: {},
+      })
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(call).toHaveBeenCalledWith(
+      "plugin_vscode_send_response",
+      expect.objectContaining({
+        pluginId: "cognia.test-ext",
+        responseJson: expect.stringContaining('"id":91'),
+      })
+    )
+
+    await definition.deactivate!(mockContext)
+    expect(call).toHaveBeenCalledWith("plugin_deactivate_vscode", {
+      pluginId: "cognia.test-ext",
+    })
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe("vscode-loader — ensureDispatcherConfigured export", () => {
   beforeEach(() => {
     removeTauriWindow()

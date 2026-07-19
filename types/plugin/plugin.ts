@@ -215,7 +215,7 @@ export type PluginSource =
   | "git" // Cloned from git repository
   | "dev" // Development mode (hot reload enabled)
 
-export type PluginRuntimeProfile = "browser" | "tauri" | "mobile"
+export type PluginRuntimeProfile = "browser" | "tauri" | "mobile" | "headless"
 
 export type PluginRuntimeAvailability = "supported" | "degraded" | "blocked"
 
@@ -228,6 +228,12 @@ export interface PluginRuntimeCompatibilityTarget {
 export interface PluginRuntimeCompatibilityMap {
   browser?: PluginRuntimeCompatibilityTarget
   tauri?: PluginRuntimeCompatibilityTarget
+  /**
+   * Node brain plus cognia-server native hosts. Legacy manifests inherit the
+   * browser target for renderer-style frontend plugins and the Tauri target
+   * for Node/native plugin types; new packages should declare this explicitly.
+   */
+  headless?: PluginRuntimeCompatibilityTarget
   /**
    * Capacitor mobile (WebView) shell. A browser-class runtime that lacks the
    * Tauri invoke bridge, Node sidecar, desktop automation, and several WebView
@@ -2186,9 +2192,11 @@ export interface PluginWorkflowAPI {
    * Convenience for plugins whose triggers want to forward an event
    * synthesized from outside the trigger context (e.g. a webhook the
    * plugin registered with the host's HTTP router). Routes to the
-   * orchestrator's standard trigger queue.
+   * orchestrator's standard trigger queue. Pass `triggerId` when a workflow
+   * can contain multiple enabled nodes of this kind; legacy calls are
+   * inferred only when exactly one matching root exists.
    */
-  emitTriggerEvent(workflowId: string, kind: string, payload: unknown): void
+  emitTriggerEvent(workflowId: string, kind: string, payload: unknown, triggerId?: string): void
 }
 
 export interface PluginLogger {

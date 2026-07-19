@@ -586,13 +586,17 @@ mod tests {
         assert!(source.contains("@cognia/plugin-sdk"));
         assert!(source.contains("ctx.agent.registerTool"));
         assert!(source.contains("onCommand"));
+        assert!(!ts::TSCONFIG_JSON.contains("skipLibCheck"));
+        assert!(ts::TSCONFIG_JSON.contains(r#""module": "NodeNext""#));
+        assert!(ts::TSCONFIG_JSON.contains(r#""moduleResolution": "NodeNext""#));
+        assert!(ts::TSCONFIG_JSON.contains(r#""isolatedModules": true"#));
         for forbidden in ["@/lib", "@/types", "plugin-sdk/host"] {
             assert!(
                 !source.contains(forbidden),
                 "TypeScript template must not import host-only module {forbidden}"
             );
         }
-        assert!(ts::PACKAGE_JSON.contains(r#""@cognia/plugin-sdk": "^0.2.0""#));
+        assert!(ts::PACKAGE_JSON.contains(r#""@cognia/plugin-sdk": "^0.1.0""#));
     }
 
     #[test]

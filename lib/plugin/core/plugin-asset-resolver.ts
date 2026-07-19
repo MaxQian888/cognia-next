@@ -3,12 +3,9 @@
  * (`lib/plugin/contracts/module-bridge-map.ts`).
  *
  * Two distinct needs:
- *   - Some bridges (fonts, wallpapers) call a SYNC `resolveAsset(root, rel)`
- *     to turn a relative bundled-asset path into a browser-loadable URL.
- *     Under Tauri that means `convertFileSrc(absolutePath)`; in web/test it
- *     is the joined path verbatim. Because `@tauri-apps/api/core` loads
- *     asynchronously, `createPluginAssetResolver()` resolves the converter
- *     once (async) and hands back a sync closure the bridges can call freely.
+ *   - Asset bridges resolve relative paths to browser-loadable URLs. Tauri
+ *     reads bytes through the native no-follow boundary and returns a data URL;
+ *     web/test runtimes keep the validated joined URL.
  *   - The import-based bridges (ai/ocr/workspace/message-renderer) and the
  *     connectors bridge resolve JS entry modules via the PluginLoader's
  *     proven `importEntry` (Tauri asset-protocol → fetch+eval → script tag);
@@ -30,25 +27,22 @@ export function joinPluginPath(root: string, rel: string): string {
 }
 
 /**
- * A synchronous `(pluginRoot, relPath) => url` resolver, matching the
- * signature the font/wallpaper bridges expect.
+ * A `(pluginRoot, relPath) => url` resolver shared by asset bridges. Native
+ * reads are asynchronous because the host consumes the file through its
+ * contained, no-follow boundary.
  */
-export type PluginAssetResolver = (pluginRoot: string, relPath: string) => string
+export type PluginAssetResolver = (
+  pluginRoot: string,
+  relPath: string,
+  mime?: string
+) => string | Promise<string>
 
 /**
- * Build the asset resolver for the current runtime. Under Tauri the returned
- * closure runs `convertFileSrc` over the joined absolute path; everywhere else
- * (web shell, tests, SSR) it returns the joined path unchanged. Resolving the
- * Tauri converter is async (dynamic module load), but the returned resolver is
- * synchronous so font/wallpaper bridges can call it inside tight loops.
+ * Build the asset resolver for the current runtime. Under Tauri, the returned
+ * closure requests bytes from the native contained-file command and returns a
+ * data URL. Web, test, and SSR runtimes retain the validated joined URL.
  */
-export async function createPluginAssetResolver(): Promise<PluginAssetResolver> {
-  try {
-    const { convertFileSrc } = await import("@tauri-apps/api/core")
-    return (root, rel) => convertFileSrc(joinPluginPath(root, rel))
-  } catch {
-    // Not running under Tauri (web/test): the joined path is already a
-    // browser-loadable URL relative to the served plugin assets.
-    return (root, rel) => joinPluginPath(root, rel)
-  }
+export async function createPluginAssetResolver(pluginId: string): Promise<PluginAssetResolver> {
+  const { readContainedPluginAsset } = await import("@/lib/plugin/bridge/plugin-file-path")
+  return (root, rel, mime) => readContainedPluginAsset(pluginId, root, rel, mime)
 }

@@ -46,7 +46,7 @@ function makeRow(overrides: Partial<Character> = {}): Character {
 describe("buildPristineSnapshot", () => {
   it("captures every pack-managed field listed in PACK_MANAGED_FIELD_LIST", () => {
     const overlay = makeOverlay({
-      avatarImage: { tauriPath: "./alice.png" },
+      avatarImage: { webDataUrl: "data:image/png;base64,AAAA" },
       persona: { tone: "warm" },
       voiceProfile: { provider: "openai", voiceId: "alloy" },
     })
@@ -57,7 +57,7 @@ describe("buildPristineSnapshot", () => {
       expect(Object.prototype.hasOwnProperty.call(snap, field)).toBe(true)
     }
     expect(snap.systemPrompt).toBe("v2 prompt")
-    expect(snap.avatarImage?.tauriPath).toBe("./alice.png")
+    expect(snap.avatarImage?.webDataUrl).toBe("data:image/png;base64,AAAA")
     expect(snap.voiceProfile?.voiceId).toBe("alloy")
   })
 

@@ -225,7 +225,64 @@ describe("mutate tools", () => {
     expect(result.ok).toBe(false)
     expect(result.failedAt).toBe(1)
     expect(result.error.code).toBe("unknown-op")
-    expect(store.getState().nodes.length).toBe(1)
+    expect(store.getState().nodes.length).toBe(0)
+  })
+
+  it("wf_batch_apply rolls back every op when a connection is invalid", async () => {
+    const store = createEditorStore(workflow("wf_a"))
+    registerEditorStore("wf_a", store)
+    const tool = findTool(buildMutateTools(), "wf_batch_apply")
+
+    const result = (await tool.execute(
+      {
+        ops: [
+          {
+            type: "add_node",
+            nodeId: "n_action",
+            kind: "flow.set",
+            position: { x: 0, y: 0 },
+          },
+          {
+            type: "add_node",
+            nodeId: "n_trigger",
+            kind: "trigger.manual",
+            position: { x: 200, y: 0 },
+          },
+          { type: "connect_edge", source: "n_action", target: "n_trigger" },
+        ],
+      },
+      EMPTY_CTX
+    )) as { ok: false; failedAt: number }
+
+    expect(result.ok).toBe(false)
+    expect(result.failedAt).toBe(2)
+    expect(store.getState().nodes).toEqual([])
+    expect(store.getState().edges).toEqual([])
+  })
+
+  it("single-op mutation tools reject missing node and edge ids", async () => {
+    const store = createEditorStore(workflow("wf_a"))
+    registerEditorStore("wf_a", store)
+    const tools = buildMutateTools()
+
+    await expect(
+      findTool(tools, "wf_remove_node").execute({ nodeId: "missing" }, EMPTY_CTX)
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "node-not-found" },
+    })
+    await expect(
+      findTool(tools, "wf_configure_node").execute({ nodeId: "missing", patch: {} }, EMPTY_CTX)
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "node-not-found" },
+    })
+    await expect(
+      findTool(tools, "wf_disconnect_edge").execute({ edgeId: "missing" }, EMPTY_CTX)
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "edge-not-found" },
+    })
   })
 })
 

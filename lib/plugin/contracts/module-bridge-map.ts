@@ -125,7 +125,7 @@ export interface ModuleBridgeContext {
   installRoot: string
   /** Resolve & import a plugin entry module by absolute path. */
   importer: (entry: string) => Promise<Record<string, unknown>>
-  /** Sync relative-asset → loadable-URL resolver (fonts/wallpapers). */
+  /** Contained relative-asset → loadable-URL resolver (fonts/wallpapers). */
   resolveAsset: PluginAssetResolver
   /** The plugin's already-loaded main-module exports (connectors factories). */
   moduleExports: Record<string, unknown>
@@ -229,11 +229,24 @@ export const MODULE_BRIDGE_CAPABILITIES = {
     key: "wallpapers",
     manifestField: "wallpapers",
     register: async (ctx) => {
+      const resolved = new Map<string, string>()
+      for (const wallpaper of ctx.manifest.wallpapers ?? []) {
+        if (wallpaper.source.kind === "image") {
+          resolved.set(
+            wallpaper.source.relPath,
+            await ctx.resolveAsset(ctx.installRoot, wallpaper.source.relPath, wallpaper.source.mime)
+          )
+        }
+      }
       applyPluginWallpapers({
         pluginId: ctx.pluginId,
         pluginRoot: ctx.installRoot,
         wallpapers: ctx.manifest.wallpapers ?? [],
-        resolveAsset: ctx.resolveAsset,
+        resolveAsset: (_root, relPath) => {
+          const url = resolved.get(relPath)
+          if (!url) throw new Error(`wallpaper asset was not resolved: ${relPath}`)
+          return url
+        },
       })
     },
     unregister: (pluginId) => {

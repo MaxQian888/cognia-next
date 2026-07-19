@@ -82,7 +82,14 @@ describe("PluginLoader", () => {
     launcherModule.launchPluginJs.mockResolvedValue({
       command: "/opt/node24/bin/node",
       argv: ["--permission", "/plugins/node-plugin/index.js"],
-      process: { killed: false, kill: jest.fn() },
+      process: {
+        killed: false,
+        kill: jest.fn(),
+        isRunning: jest.fn().mockResolvedValue(true),
+      },
+      activation: { calls: [], hooks: {}, exports: {} },
+      invokeCallback: jest.fn(),
+      deactivate: jest.fn(),
     })
     jest.useFakeTimers()
   })
@@ -251,7 +258,7 @@ describe("PluginLoader", () => {
       expect(launcherModule.launchPluginJs).toHaveBeenCalledWith(
         expect.objectContaining({
           pluginId: "node-plugin",
-          entryPath: "/plugins/node-plugin/index.js",
+          entryPath: "index.js",
           cwd: "/plugins/node-plugin",
           scope: {
             permissions: plugin.manifest.permissions,
@@ -264,12 +271,74 @@ describe("PluginLoader", () => {
       )
     })
 
+    it("forwards the host-neutral invoker to Node-target plugin lifecycle calls", async () => {
+      const hostInvoker = jest.fn()
+      const nodeLoader = new PluginLoader({ nodeHostInvoker: hostInvoker })
+      const plugin = createMockPlugin("node-host-plugin")
+      plugin.manifest.engines = { node: ">=26" }
+
+      const definition = await nodeLoader.load(plugin)
+      await definition.activate({} as never)
+
+      expect(launcherModule.launchPluginJs).toHaveBeenCalledWith(
+        expect.objectContaining({ hostInvoker })
+      )
+    })
+
+    it("replays Node activation registrations and routes callbacks through the host", async () => {
+      const invokeCallback = jest.fn().mockResolvedValue({ ok: true })
+      launcherModule.launchPluginJs.mockResolvedValueOnce({
+        command: "/opt/node26/bin/node",
+        argv: ["--permission"],
+        process: { killed: false, kill: jest.fn(), isRunning: jest.fn().mockResolvedValue(true) },
+        activation: {
+          calls: [
+            {
+              path: "agent.registerTool",
+              args: [
+                {
+                  name: "node_echo",
+                  execute: { $callback: "call.0.args.0.execute" },
+                },
+              ],
+            },
+          ],
+          hooks: { onCommand: { $callback: "hooks.onCommand" } },
+          exports: { createConnector: { $callback: "exports.createConnector" } },
+        },
+        invokeCallback,
+        deactivate: jest.fn(),
+      })
+      const registerTool = jest.fn()
+      const plugin = createMockPlugin("node-plugin")
+      plugin.manifest.engines = { node: ">=26.3.1" }
+      const definition = await loader.load(plugin)
+
+      const hooks = await definition.activate({ agent: { registerTool } } as never)
+      const tool = registerTool.mock.calls[0][0]
+      await expect(tool.execute({ message: "hello" })).resolves.toEqual({ ok: true })
+      await expect(hooks?.onCommand?.("greet", ["Ada"])).resolves.toEqual({ ok: true })
+      const exports = loader.getModuleExports("node-plugin")
+      await expect(
+        (exports?.createConnector as (config: { id: string }) => Promise<unknown>)({ id: "mail" })
+      ).resolves.toEqual({ ok: true })
+
+      expect(invokeCallback).toHaveBeenNthCalledWith(1, "call.0.args.0.execute", [
+        { message: "hello" },
+      ])
+      expect(invokeCallback).toHaveBeenNthCalledWith(2, "hooks.onCommand", ["greet", ["Ada"]])
+      expect(invokeCallback).toHaveBeenNthCalledWith(3, "exports.createConnector", [{ id: "mail" }])
+    })
+
     it("kills the Node permission executor process during deactivate", async () => {
       const kill = jest.fn()
       launcherModule.launchPluginJs.mockResolvedValueOnce({
         command: "/opt/node24/bin/node",
         argv: ["--permission", "/plugins/node-plugin/index.js"],
-        process: { killed: false, kill },
+        process: { killed: false, kill, isRunning: jest.fn().mockResolvedValue(true) },
+        activation: { calls: [], hooks: {}, exports: {} },
+        invokeCallback: jest.fn(),
+        deactivate: jest.fn(),
       })
       const plugin = createMockPlugin("node-plugin")
       plugin.manifest.engines = { node: ">=24" }
@@ -294,7 +363,7 @@ describe("PluginLoader", () => {
       expect(launcherModule.launchPluginJs).toHaveBeenCalledWith(
         expect.objectContaining({
           pluginId: "node-compat",
-          entryPath: "/plugins/node-compat/dist/entry.mjs",
+          entryPath: "dist\\entry.mjs",
           cwd: "/plugins/node-compat",
           scope: expect.objectContaining({
             readPaths: [],
@@ -328,7 +397,10 @@ describe("PluginLoader", () => {
       launcherModule.launchPluginJs.mockResolvedValueOnce({
         command: "/opt/node24/bin/node",
         argv: ["--permission", "/plugins/node-killed/index.js"],
-        process: { killed: true, kill },
+        process: { killed: true, kill, isRunning: jest.fn().mockResolvedValue(false) },
+        activation: { calls: [], hooks: {}, exports: {} },
+        invokeCallback: jest.fn(),
+        deactivate: jest.fn(),
       })
       await definition.activate({ logger: { info: jest.fn(), warn: jest.fn() } } as never)
       await definition.deactivate?.()
@@ -368,6 +440,40 @@ describe("PluginLoader", () => {
   })
 
   describe("loadPythonModule", () => {
+    it("leaves Python subprocess ownership to PluginManager in the headless brain", async () => {
+      jest.useRealTimers()
+      jest.resetModules()
+      const invoke = jest.fn()
+      const updatePlugin = jest.fn()
+      jest.doMock("@/lib/platform/detect", () => ({
+        ...jest.requireActual("@/lib/platform/detect"),
+        detectPlatform: () => "headless",
+        isHeadlessHost: () => true,
+        isTauri: () => false,
+      }))
+      jest.doMock("@tauri-apps/api/core", () => ({ invoke }))
+      jest.doMock("@/lib/db/plugins", () => ({
+        getPlugin: jest.fn(),
+        updatePlugin,
+      }))
+
+      const { PluginLoader: FreshLoader } = await import("./loader")
+      const fresh = new FreshLoader()
+      const definition = await fresh.load(createMockPlugin("python-headless", "python"))
+      const logger = { info: jest.fn(), warn: jest.fn() }
+
+      await expect(definition.activate({ logger } as never)).resolves.toEqual({})
+      await expect(definition.deactivate?.()).resolves.toBeUndefined()
+      expect(invoke).not.toHaveBeenCalled()
+      expect(logger.warn).not.toHaveBeenCalled()
+      expect(updatePlugin).not.toHaveBeenCalled()
+
+      jest.dontMock("@/lib/platform/detect")
+      jest.dontMock("@tauri-apps/api/core")
+      jest.dontMock("@/lib/db/plugins")
+      jest.useFakeTimers()
+    })
+
     it("should return minimal definition for Python plugins", async () => {
       const plugin = createMockPlugin("python-plugin", "python")
 
@@ -405,7 +511,11 @@ describe("PluginLoader", () => {
         }
         return undefined
       })
-      jest.doMock("@/lib/platform/detect", () => ({ isTauri: () => true }))
+      jest.doMock("@/lib/platform/detect", () => ({
+        ...jest.requireActual("@/lib/platform/detect"),
+        detectPlatform: () => "tauri",
+        isTauri: () => true,
+      }))
       jest.doMock("@tauri-apps/api/core", () => ({ invoke }))
 
       const { PluginLoader: FreshLoader } = await import("./loader")
@@ -730,6 +840,35 @@ describe("PluginLoader", () => {
       })
 
       await expect(loader.importEntry("/plugins/demo/secondary.js")).resolves.toEqual({ value: 42 })
+    })
+
+    it("reads installed Tauri entries through the no-follow host command", async () => {
+      jest.useRealTimers()
+      jest.resetModules()
+      const invoke = jest.fn().mockResolvedValue("module.exports = { value: 7 }")
+      jest.doMock("@/lib/platform/detect", () => ({ isTauri: () => true }))
+      jest.doMock("@tauri-apps/api/core", () => ({ invoke }))
+
+      const { PluginLoader: FreshLoader } = await import("./loader")
+      const fresh = new FreshLoader()
+      await expect(
+        fresh.importEntry("/plugins/demo/dist/secondary.js", "demo", "/plugins/demo")
+      ).resolves.toEqual({ value: 7 })
+      expect(invoke).toHaveBeenCalledWith("plugin_read_entry", {
+        pluginId: "demo",
+        pluginPath: "/plugins/demo",
+        entry: "dist/secondary.js",
+      })
+
+      jest.dontMock("@/lib/platform/detect")
+      jest.dontMock("@tauri-apps/api/core")
+      jest.useFakeTimers()
+    })
+
+    it("rejects secondary entries outside the plugin root", async () => {
+      await expect(
+        loader.importEntry("/plugins/outside.js", "demo", "/plugins/demo")
+      ).rejects.toThrow(/outside the declared root/i)
     })
 
     it("restores module definitions and exports", () => {

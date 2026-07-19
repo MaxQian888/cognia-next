@@ -28,8 +28,7 @@ import {
   type PluginTheme,
 } from "@/lib/theme/theme-registry"
 import { registerThemePack, unregisterThemePacksByPlugin } from "@/lib/theme/theme-pack-registry"
-import { readTextFile } from "@/lib/file/file-operations"
-import { isUnsafeRelativePath, joinPluginPath } from "./plugin-file-path"
+import { isUnsafeRelativePath, readContainedPluginFile } from "./plugin-file-path"
 import {
   stripJsonComments,
   vscodeThemeToCustomTheme,
@@ -182,8 +181,11 @@ async function resolveContribution(
         `Unsafe vscodeJsonPath rejected: "${contribution.vscodeJsonPath}". Path must be relative and free of ".." segments.`
       )
     }
-    const fullPath = joinPluginPath(baseDir, contribution.vscodeJsonPath)
-    const text = await readTextFile(fullPath)
+    const text = await readContainedPluginFile(
+      pluginId ?? "<unknown>",
+      baseDir,
+      contribution.vscodeJsonPath
+    )
     const cleaned = stripJsonComments(text)
     let parsed: VscodeThemeJson
     try {

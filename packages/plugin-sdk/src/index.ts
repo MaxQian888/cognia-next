@@ -7,11 +7,13 @@ export type * from "./permissions"
 export type * from "./extensions"
 export type {
   BusEvent,
+  EventFilter,
   EventSource,
   EventSubscription,
-  MessageBusConfig,
   PluginEventAPI,
 } from "./events"
+export { SystemEvents } from "./events"
+export { CANONICAL_EXTENSION_POINTS } from "./extensions"
 
 export {
   AUTHOR_CAPABILITY_CONTRACTS,
@@ -20,7 +22,9 @@ export {
   CANONICAL_PLUGIN_TYPES,
   PLUGIN_CONTRACT_MINIMUM_HOST_VERSION,
   PLUGIN_CONTRACT_SCHEMA_VERSION,
+  PLUGIN_MANIFEST_CONTRIBUTIONS,
   PLUGIN_PATH_FIELD_CONTRACTS,
+  PLUGIN_RUNTIME_ENTRY_CONTRACTS,
 } from "./contracts/catalog"
 
 export { definePlugin } from "./manifest"

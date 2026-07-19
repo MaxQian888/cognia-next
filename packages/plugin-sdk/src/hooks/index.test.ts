@@ -31,9 +31,9 @@ import { join } from "node:path"
 describe("plugin-sdk: hooks", () => {
   it("re-exports the manifest-side hooks interfaces", () => {
     const baseHooks: PluginHooks = {}
-    const extendedHooks: PluginHooksAll = {}
+    const completeHooks: PluginHooksAll = {}
     expect(baseHooks).toEqual({})
-    expect(extendedHooks).toEqual({})
+    expect(completeHooks).toEqual({})
   })
 
   it("HookPriority is a string-literal union for manifest declarations", () => {

@@ -22,7 +22,10 @@ export function toCanonicalCliArgs(argv) {
     if (UNSUPPORTED_FLAGS.has(arg)) {
       throw new Error(`${arg} is not supported; use 'cognia plugin new --help'`)
     }
-    if (arg === "--yes" || arg === "-y") continue
+    if (arg === "--yes" || arg === "-y") {
+      args.push("--yes")
+      continue
+    }
     if (!arg.startsWith("-")) {
       if (name) throw new Error(`unexpected positional argument: ${arg}`)
       name = arg

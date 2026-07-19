@@ -202,7 +202,7 @@ await ctx.agent.run("...", {
 
 ## 作者辅助
 
-`@cognia/plugin-sdk` 再导出 `defineAgentTool()`、`defineGuardrail()`、`defineContextProvider()`（带类型直通，可定义运行时 provider 对象，也可定义声明式 `manifest.contextProviders[]` 条目）。直接 helper 子路径也可通过 `@cognia/plugin-sdk/define/<name>` 使用。宿主 PII factory 被有意排除在发布的作者 SDK 之外。
+`@cognia/plugin-sdk` 再导出 `defineAgentTool()`、`defineGuardrail()`、`defineContextProvider()`（带类型直通，可定义运行时 provider 对象，也可定义声明式 `manifest.contextProviders[]` 条目）。define helper 统一从包根导入；任意 `define/<name>` 子路径不属于公共 API。宿主 PII factory 被有意排除在发布的作者 SDK 之外。
 
 ## Dogfood
 

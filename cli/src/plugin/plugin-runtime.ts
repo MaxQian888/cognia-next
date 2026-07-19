@@ -23,6 +23,8 @@
  */
 import os from "node:os"
 
+import { isHeadlessHost } from "@/lib/platform/detect"
+
 import { installFakeIndexedDb } from "../db/bootstrap"
 import { resolveHome } from "../config/load"
 import { readDisabledPlugins } from "./plugin-state"
@@ -82,6 +84,20 @@ function makeStorage(): Storage {
 }
 
 const PLUGIN_POLICY_KEY = "cognia.plugins.policy"
+
+/**
+ * Disk roots shared by standalone CLI and the supervised headless brain.
+ * `COGNIA_DATA_DIR` is appended because cognia-server installs remote plugins
+ * into `<data>/.cognia/plugins`, while a standalone CLI keeps the established
+ * project/home discovery locations.
+ */
+export function pluginDiscoveryRoots(
+  env: NodeJS.ProcessEnv = process.env,
+  cwd = process.cwd(),
+  home = resolveHome(env, os.homedir())
+): string[] {
+  return [...new Set([cwd, home, env.COGNIA_DATA_DIR].filter((root): root is string => !!root))]
+}
 
 /**
  * Install the browser globals the plugin subsystem reads, and seed the plugin
@@ -173,13 +189,24 @@ async function bootstrap(deps: PluginRuntimeDeps): Promise<PluginRuntimeResult> 
       (async () => {
         const { initializePluginManager } = await import("@/lib/plugin/core/manager")
         const { makeNodeFrontendImporter } = await import("./node-importer")
+        const headless = isHeadlessHost()
+        const nodeHostInvoker = headless
+          ? async <T>(command: string, args: Record<string, unknown>): Promise<T> => {
+              const { transport } = await import("@/lib/tauri")
+              return transport.call<T>(command, args)
+            }
+          : undefined
         await initializePluginManager({
           pluginDirectory: "",
-          runtimeProfile: "browser",
-          enablePython: false,
+          runtimeProfile: headless ? "headless" : "browser",
+          // The supervised brain owns the host-neutral Python subprocess
+          // registry through its service transport. A standalone CLI has no
+          // companion service, so it keeps the established browser-only path.
+          enablePython: headless,
           // Frontend plugins load via dynamic `import()` under Node — the
           // Tauri/fetch/eval strategies in the loader don't exist here.
           frontendImporter: makeNodeFrontendImporter(),
+          nodeHostInvoker,
         })
       })
     await initManager()
@@ -208,7 +235,7 @@ async function bootstrap(deps: PluginRuntimeDeps): Promise<PluginRuntimeResult> 
       deps.registerDisk ??
       (async () => {
         const home = resolveHome(process.env, os.homedir())
-        const roots = [process.cwd(), home]
+        const roots = pluginDiscoveryRoots(process.env, process.cwd(), home)
         const disabled = readDisabledPlugins(home)
         const { getPluginManager } = await import("@/lib/plugin/core/manager")
         const { usePluginStore } = await import("@/stores/plugin-runtime")

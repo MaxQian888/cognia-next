@@ -29,16 +29,13 @@ import type { TTSProvider } from "@cognia/tts/types"
 import type { PluginRuntimeProfile } from "./plugin"
 
 /**
- * v2 — optional avatar image. Authors can ship a Tauri-relative path
- * (resolved via `convertFileSrc` at render time) and/or a `data:` URL
- * for web builds. UI falls back to `avatarEmoji + avatarColor` when
- * neither resolves in the current shell.
+ * v2 — optional portable avatar image. Only `data:image/*` URLs are accepted;
+ * the former `tauriPath` field was never consumed by the UI and was removed
+ * so character packs cannot retain an unguarded filesystem path.
  */
 export interface PluginCharacterAvatarImage {
-  /** Filesystem-style path relative to the plugin bundle (Tauri only). */
-  tauriPath?: string
-  /** `data:image/*` URL — works in every shell, larger payload. */
-  webDataUrl?: string
+  /** `data:image/*` URL — works in every shell. */
+  webDataUrl: string
 }
 
 /**

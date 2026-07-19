@@ -76,6 +76,14 @@ describe("plugin-sdk root barrel", () => {
     expect(rootBarrel.__makeSession).toBeUndefined()
     expect(rootBarrel.createPiiRedactionGate).toBeUndefined()
     expect(rootBarrel.createPiiOutputGuardrail).toBeUndefined()
+    expect(rootBarrel.MessageBusConfig).toBeUndefined()
+  })
+
+  it("publishes the catalog-backed runtime constants", () => {
+    expect(rootBarrel.SystemEvents).toBeDefined()
+    expect(rootBarrel.CANONICAL_EXTENSION_POINTS).toBeDefined()
+    expect(rootBarrel.PLUGIN_MANIFEST_CONTRIBUTIONS).toBeDefined()
+    expect(rootBarrel.PLUGIN_RUNTIME_ENTRY_CONTRACTS).toBeDefined()
   })
 
   it("does not publish registry-backed host functions from the package root", () => {

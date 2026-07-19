@@ -57,6 +57,7 @@ describe("PluginTriggersTab", () => {
     registerPluginTrigger(reg)
     await startPluginTriggerInstance("trigger.foo.alpha", 1, {
       workflowId: "wf-1",
+      triggerId: "root-1",
       params: {},
       emit: () => undefined,
       signal: new AbortController().signal,
@@ -69,6 +70,7 @@ describe("PluginTriggersTab", () => {
     })
     await startPluginTriggerInstance("trigger.foo.alpha", 1, {
       workflowId: "wf-2",
+      triggerId: "root-2",
       params: {},
       emit: () => undefined,
       signal: new AbortController().signal,
@@ -90,6 +92,7 @@ describe("PluginTriggersTab", () => {
     registerPluginTrigger(makeRegistration("bar", "trigger.bar.beta"))
     await startPluginTriggerInstance("trigger.bar.beta", 1, {
       workflowId: "wf-bar",
+      triggerId: "root-bar",
       params: {},
       emit: () => undefined,
       signal: new AbortController().signal,
@@ -111,6 +114,7 @@ describe("PluginTriggersTab", () => {
     await act(async () => {
       await startPluginTriggerInstance("trigger.foo.alpha", 1, {
         workflowId: "wf-1",
+        triggerId: "root-1",
         params: {},
         emit: () => undefined,
         signal: new AbortController().signal,

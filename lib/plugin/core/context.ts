@@ -155,7 +155,12 @@ import { createIPCAPI } from "../messaging/ipc"
 import { createEventAPI } from "../messaging/message-bus"
 import { getPluginI18nLoader } from "../utils/i18n-loader"
 import { getPluginDebugger } from "../devtools/debugger"
-import { invokePluginApi, PluginGatewayError, grantPluginPermission } from "./transport"
+import {
+  invokePluginApi,
+  PluginGatewayError,
+  grantPluginPermission,
+  isPluginGatewayAvailable,
+} from "./transport"
 import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
 import { isTauri } from "@/lib/native/utils"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
@@ -188,8 +193,8 @@ import type {
 import type { FullPluginContext as PublicFullPluginContext } from "@cognia/plugin-sdk/context"
 
 /**
- * Full plugin context combining base and extended APIs.
- * The extended storage API intentionally replaces the legacy async storage shape.
+ * Full plugin context combining the base and host-mounted APIs.
+ * The runtime storage API intentionally replaces the legacy async storage shape.
  *
  * ADR-0026 v2 namespaces (`ocr`, `workspace`) are intersected at the end so
  * the existing `PluginContextAPI` interface stays untouched — plugins gain
@@ -254,13 +259,10 @@ export function createPluginContext(
     pluginPath: plugin.path,
     config: plugin.config,
     logger: createLogger(pluginId),
-    // Base context intentionally exposes the legacy `PluginStorage` surface,
-    // which satisfies the required `storage` field of the base `PluginContext`.
-    // This is NOT a duplicate/shadowed key: every runtime plugin is built via
-    // `createFullPluginContext` (see manager.ts), where `contextAPI.storage`
-    // (the extended `createStorageAPI`) overrides this through the
-    // `{ ...baseContext, ...contextAPI }` spread — so `ctx.storage` is the
-    // extended `PluginStorageAPI` at runtime.
+    // The initial context uses the local storage implementation. Manager
+    // construction then supplies the public author-context storage API through
+    // the final object spread, so every activated plugin sees one `storage`
+    // field with the complete runtime contract.
     storage: createStorage(pluginId),
     events: createEventEmitter(pluginId),
     ui: createUIAPI(pluginId),
@@ -313,7 +315,7 @@ export function createPluginContext(
 }
 
 /**
- * Create a full plugin context with all APIs (base + extended)
+ * Create a full plugin context with every host-mounted API.
  */
 export function createFullPluginContext(
   plugin: Plugin,
@@ -1114,7 +1116,7 @@ function createPythonAPI(pluginId: string, _manager: PluginManager): PluginPytho
  * the very next gateway call is denied. No-op in the browser (no Rust ledger).
  */
 function persistHostConsentGrant(pluginId: string, permission: string): void {
-  if (!isTauri()) return
+  if (!isPluginGatewayAvailable()) return
   void grantPluginPermission(pluginId, permission, "user").catch(() => undefined)
 }
 
@@ -1235,7 +1237,7 @@ function createNetworkAPI(
     // (defense-in-depth); this is the SOLE enforcement in web/mobile mode where
     // there is no Rust host. Mirrors `manifest.networkAccess.allowedDomains`.
     assertEgressAllowed(pluginId, url, networkAccess, getPluginSecurityPosture())
-    if (!isTauri()) {
+    if (!isPluginGatewayAvailable()) {
       const response = await fetch(url, {
         method: options?.method,
         headers: options?.headers,
@@ -1274,7 +1276,7 @@ function createNetworkAPI(
       options?: DownloadOptions
     ): Promise<DownloadResult> => {
       rateLimiter.check(pluginId, "network:download")
-      if (!isTauri()) {
+      if (!isPluginGatewayAvailable()) {
         const response = await fetch(url)
         if (!response.ok) {
           throw new PluginGatewayError({
@@ -1352,13 +1354,13 @@ function createFileSystemAPI(pluginId: string): PluginFileSystemAPI {
   return {
     readText: (path: string) => {
       rateLimiter.check(pluginId, "fs:read")
-      if (!isTauri()) return notSupported("fs:readText")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:readText")
       return invokePluginApi<string>(pluginId, "fs:readText", { path })
     },
 
     readBinary: (path: string) => {
       rateLimiter.check(pluginId, "fs:read")
-      if (!isTauri()) return notSupported("fs:readBinary")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:readBinary")
       return invokePluginApi<number[]>(pluginId, "fs:readBinary", { path }).then((bytes) =>
         Uint8Array.from(bytes)
       )
@@ -1366,20 +1368,20 @@ function createFileSystemAPI(pluginId: string): PluginFileSystemAPI {
 
     readJson: async <T>(path: string) => {
       rateLimiter.check(pluginId, "fs:read")
-      if (!isTauri()) return notSupported("fs:readText")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:readText")
       const raw = await invokePluginApi<string>(pluginId, "fs:readText", { path })
       return JSON.parse(raw) as T
     },
 
     writeText: (path: string, content: string) => {
       rateLimiter.check(pluginId, "fs:write")
-      if (!isTauri()) return notSupported("fs:writeText")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:writeText")
       return invokePluginApi<void>(pluginId, "fs:writeText", { path, content })
     },
 
     writeBinary: (path: string, content: Uint8Array) => {
       rateLimiter.check(pluginId, "fs:write")
-      if (!isTauri()) return notSupported("fs:writeBinary")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:writeBinary")
       return invokePluginApi<void>(pluginId, "fs:writeBinary", {
         path,
         content: Array.from(content),
@@ -1388,14 +1390,14 @@ function createFileSystemAPI(pluginId: string): PluginFileSystemAPI {
 
     writeJson: async (path: string, data: unknown, pretty = true) => {
       rateLimiter.check(pluginId, "fs:write")
-      if (!isTauri()) return notSupported("fs:writeText")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:writeText")
       const content = pretty ? JSON.stringify(data, null, 2) : JSON.stringify(data)
       await invokePluginApi<void>(pluginId, "fs:writeText", { path, content })
     },
 
     appendText: async (path: string, content: string) => {
       rateLimiter.check(pluginId, "fs:write")
-      if (!isTauri()) return notSupported("fs:writeText")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:writeText")
       let current = ""
       try {
         current = await invokePluginApi<string>(pluginId, "fs:readText", { path })
@@ -1410,43 +1412,43 @@ function createFileSystemAPI(pluginId: string): PluginFileSystemAPI {
 
     exists: (path: string) => {
       rateLimiter.check(pluginId, "fs:read")
-      if (!isTauri()) return notSupported("fs:exists")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:exists")
       return invokePluginApi<boolean>(pluginId, "fs:exists", { path })
     },
 
     mkdir: (path: string, recursive = true) => {
       rateLimiter.check(pluginId, "fs:write")
-      if (!isTauri()) return notSupported("fs:mkdir")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:mkdir")
       return invokePluginApi<void>(pluginId, "fs:mkdir", { path, recursive })
     },
 
     remove: (path: string, recursive = false) => {
       rateLimiter.check(pluginId, "fs:delete")
-      if (!isTauri()) return notSupported("fs:remove")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:remove")
       return invokePluginApi<void>(pluginId, "fs:remove", { path, recursive })
     },
 
     copy: (src: string, dest: string) => {
       rateLimiter.check(pluginId, "fs:write")
-      if (!isTauri()) return notSupported("fs:copy")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:copy")
       return invokePluginApi<void>(pluginId, "fs:copy", { src, dest })
     },
 
     move: (src: string, dest: string) => {
       rateLimiter.check(pluginId, "fs:write")
-      if (!isTauri()) return notSupported("fs:move")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:move")
       return invokePluginApi<void>(pluginId, "fs:move", { src, dest })
     },
 
     readDir: (path: string) => {
       rateLimiter.check(pluginId, "fs:read")
-      if (!isTauri()) return notSupported("fs:readDir")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:readDir")
       return invokePluginApi<FileEntry[]>(pluginId, "fs:readDir", { path })
     },
 
     stat: (path: string) => {
       rateLimiter.check(pluginId, "fs:read")
-      if (!isTauri()) return notSupported("fs:stat")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:stat")
       return invokePluginApi<FileStat>(pluginId, "fs:stat", { path })
     },
 
@@ -2432,6 +2434,7 @@ export function createWorkflowAPI(pluginId: string): PluginWorkflowAPI {
       })
       const catalogEntry: NodeCatalogEntry = {
         kind: prefixed as never,
+        typeVersion: def.typeVersion,
         category: def.category,
         label: def.label,
         description: def.description,
@@ -2471,6 +2474,7 @@ export function createWorkflowAPI(pluginId: string): PluginWorkflowAPI {
       // category so authors can drag them onto canvases.
       addPluginCatalogEntry({
         kind: prefixed as never,
+        typeVersion: def.typeVersion,
         category: "trigger",
         label: def.label,
         description: def.description,
@@ -2491,7 +2495,7 @@ export function createWorkflowAPI(pluginId: string): PluginWorkflowAPI {
       }
     },
 
-    emitTriggerEvent(workflowId: string, kind: string, payload: unknown): void {
+    emitTriggerEvent(workflowId: string, kind: string, payload: unknown, triggerId?: string): void {
       // Phase 2: route into the orchestrator via `dispatchPluginTrigger`,
       // which prefixes the kind, verifies registration, and hands off to
       // `lib/workflow/runtime/trigger-bridge.dispatchTrigger`. Fire-and-
@@ -2502,6 +2506,7 @@ export function createWorkflowAPI(pluginId: string): PluginWorkflowAPI {
         workflowId,
         kind,
         payload,
+        triggerId,
       }).then((result) => {
         if (!result.ok) {
           loggers.manager.debug("plugin emitTriggerEvent rejected", {

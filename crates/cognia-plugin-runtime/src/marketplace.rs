@@ -101,6 +101,7 @@ pub async fn plugin_marketplace_versions(
     registry_url: Option<String>,
     #[allow(unused_variables)] cache_only: Option<bool>,
 ) -> Result<Vec<MarketplaceVersion>> {
+    crate::validate_plugin_id_path_component(&plugin_id)?;
     let base = registry_url.unwrap_or_default();
     let base = base.trim().trim_end_matches('/');
     // No registry configured → empty list (the TS UI shows "No versions").
@@ -108,15 +109,21 @@ pub async fn plugin_marketplace_versions(
         return Ok(Vec::new());
     }
     let url = format!("{base}/plugins/{plugin_id}/versions");
-    let json: serde_json::Value = http_client()?
+    let response = http_client()?
         .get(&url)
         .send()
         .await
         .map_err(|e| PluginError::Internal(format!("fetch versions: {e}")))?
         .error_for_status()
-        .map_err(|e| PluginError::Internal(format!("fetch versions (HTTP error): {e}")))?
-        .json()
-        .await
+        .map_err(|e| PluginError::Internal(format!("fetch versions (HTTP error): {e}")))?;
+    let bytes = crate::archive_limits::read_response_limited(
+        response,
+        crate::archive_limits::MAX_METADATA_BYTES,
+        "marketplace versions metadata",
+    )
+    .await
+    .map_err(PluginError::Internal)?;
+    let json: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|e| PluginError::Internal(format!("parse versions json: {e}")))?;
     Ok(parse_marketplace_versions(&json))
 }
@@ -151,15 +158,38 @@ pub async fn plugin_read_verification(
 /// (marketplace archives may pack the plugin at the root or one level deep —
 /// `find_plugin_manifest` probes both). Traversal/absolute segments are dropped.
 fn extract_tar_gz(bytes: &[u8], dest: &Path) -> std::result::Result<(), String> {
+    extract_tar_gz_with_limits(
+        bytes,
+        dest,
+        crate::archive_limits::MAX_ARCHIVE_ENTRIES,
+        crate::archive_limits::MAX_UNPACKED_BYTES,
+    )
+}
+
+fn extract_tar_gz_with_limits(
+    bytes: &[u8],
+    dest: &Path,
+    max_entries: usize,
+    max_unpacked_bytes: u64,
+) -> std::result::Result<(), String> {
     use flate2::read::GzDecoder;
     use tar::Archive;
 
     fs::create_dir_all(dest).map_err(|e| format!("mkdir {dest:?}: {e}"))?;
     let mut archive = Archive::new(GzDecoder::new(bytes));
+    let mut entry_count = 0_usize;
+    let mut total_written = 0_u64;
     for entry in archive
         .entries()
         .map_err(|e| format!("read tar entries: {e}"))?
     {
+        entry_count += 1;
+        if entry_count > max_entries {
+            return Err(format!(
+                "plugin archive contains more than {} entries",
+                max_entries
+            ));
+        }
         let mut entry = entry.map_err(|e| format!("read tar entry: {e}"))?;
         let path = entry
             .path()
@@ -174,8 +204,10 @@ fn extract_tar_gz(bytes: &[u8], dest: &Path) -> std::result::Result<(), String> 
             return Err(format!("unsafe tar entry path: {path:?}"));
         }
         let entry_type = entry.header().entry_type();
-        if entry_type.is_symlink() || entry_type.is_hard_link() {
-            return Err(format!("archive links are not allowed: {path:?}"));
+        if !entry_type.is_file() && !entry_type.is_dir() {
+            return Err(format!(
+                "archive entry must be a regular file or directory: {path:?}"
+            ));
         }
         let out = dest.join(&path);
         if entry.header().entry_type().is_dir() {
@@ -185,9 +217,14 @@ fn extract_tar_gz(bytes: &[u8], dest: &Path) -> std::result::Result<(), String> 
         if let Some(parent) = out.parent() {
             fs::create_dir_all(parent).map_err(|e| format!("mkdir {parent:?}: {e}"))?;
         }
-        entry
-            .unpack(&out)
-            .map_err(|e| format!("unpack {out:?}: {e}"))?;
+        let mut file = fs::File::create(&out).map_err(|e| format!("create {out:?}: {e}"))?;
+        crate::archive_limits::copy_with_budget(
+            &mut entry,
+            &mut file,
+            &mut total_written,
+            max_unpacked_bytes,
+            out.to_string_lossy().as_ref(),
+        )?;
     }
     Ok(())
 }
@@ -316,7 +353,7 @@ pub(crate) fn install_archive_into_plugin_dir(
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| staging.path().to_path_buf());
-    let (_, parsed) = read_manifest(&manifest_path).map_err(PluginError::Internal)?;
+    let (manifest_value, parsed) = read_manifest(&manifest_path).map_err(PluginError::Internal)?;
 
     // Defend against a registry serving the wrong plugin under a given id.
     if !expected_plugin_id.is_empty() && parsed.id != expected_plugin_id {
@@ -325,6 +362,9 @@ pub(crate) fn install_archive_into_plugin_dir(
             parsed.id, expected_plugin_id
         )));
     }
+    crate::contract::validate_manifest_contract(&manifest_value).map_err(PluginError::Internal)?;
+    crate::contract::validate_existing_manifest_paths(&plugin_root, &manifest_value)
+        .map_err(PluginError::Internal)?;
     validate_no_build(&plugin_root, &parsed).map_err(PluginError::Internal)?;
 
     let plugin_dir = state.plugin_dir(&parsed.id);
@@ -335,6 +375,8 @@ pub(crate) fn install_archive_into_plugin_dir(
     fs::create_dir_all(&plugin_dir)
         .map_err(|e| PluginError::Internal(format!("mkdir {plugin_dir:?}: {e}")))?;
     copy_plugin_tree(&plugin_root, &plugin_dir).map_err(PluginError::Internal)?;
+    crate::contract::validate_existing_manifest_paths(&plugin_dir, &manifest_value)
+        .map_err(PluginError::Internal)?;
 
     // Persist a verification receipt so the TS load gate can confirm this
     // install cleared an integrity/signature check. Only written when a claim
@@ -370,21 +412,26 @@ pub async fn plugin_download_version(
     public_key_hex: Option<String>,
     require_signature: Option<bool>,
 ) -> Result<DownloadPayload> {
+    crate::validate_plugin_id_path_component(&plugin_id)?;
     if download_url.trim().is_empty() {
         return Err(PluginError::Internal(
             "plugin_download_version: downloadUrl is required".into(),
         ));
     }
-    let bytes = http_client()?
+    let response = http_client()?
         .get(download_url.trim())
         .send()
         .await
         .map_err(|e| PluginError::Internal(format!("download plugin archive: {e}")))?
         .error_for_status()
-        .map_err(|e| PluginError::Internal(format!("download plugin archive (HTTP error): {e}")))?
-        .bytes()
-        .await
-        .map_err(|e| PluginError::Internal(format!("read archive body: {e}")))?;
+        .map_err(|e| PluginError::Internal(format!("download plugin archive (HTTP error): {e}")))?;
+    let bytes = crate::archive_limits::read_response_limited(
+        response,
+        crate::archive_limits::MAX_DOWNLOAD_BYTES,
+        "marketplace plugin archive",
+    )
+    .await
+    .map_err(PluginError::InvalidArgument)?;
 
     let integrity = DownloadIntegrity {
         checksum: checksum.filter(|s| !s.trim().is_empty()),
@@ -563,8 +610,47 @@ mod tests {
 
         let dest = TempDir::new().unwrap();
         let error = extract_tar_gz(&bytes, dest.path()).unwrap_err();
-        assert!(error.contains("links are not allowed"));
+        assert!(error.contains("regular file or directory"));
         assert!(!dest.path().join("plugin/link.js").exists());
+    }
+
+    #[test]
+    fn extraction_rejects_other_special_entries() {
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+
+        let mut bytes = Vec::new();
+        {
+            let encoder = GzEncoder::new(&mut bytes, Compression::fast());
+            let mut builder = tar::Builder::new(encoder);
+            let mut header = tar::Header::new_gnu();
+            header.set_entry_type(tar::EntryType::Fifo);
+            header.set_size(0);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder
+                .append_data(&mut header, "plugin/pipe", &[][..])
+                .unwrap();
+            builder.into_inner().unwrap().finish().unwrap();
+        }
+
+        let dest = TempDir::new().unwrap();
+        let error = extract_tar_gz(&bytes, dest.path()).unwrap_err();
+        assert!(error.contains("regular file or directory"));
+    }
+
+    #[test]
+    fn extraction_enforces_entry_and_unpacked_byte_limits() {
+        let archive = make_tar_gz(&[("plugin/a.js", b"1234"), ("plugin/b.js", b"5678")]);
+
+        let entry_dest = TempDir::new().unwrap();
+        let entry_error =
+            extract_tar_gz_with_limits(&archive, entry_dest.path(), 1, 1024).unwrap_err();
+        assert!(entry_error.contains("more than 1 entries"));
+
+        let byte_dest = TempDir::new().unwrap();
+        let byte_error = extract_tar_gz_with_limits(&archive, byte_dest.path(), 10, 7).unwrap_err();
+        assert!(byte_error.contains("7-byte extraction limit"));
     }
 
     fn sha256_hex(bytes: &[u8]) -> String {

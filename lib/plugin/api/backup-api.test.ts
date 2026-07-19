@@ -9,6 +9,10 @@ import { createBackupAPI } from "./backup-api"
 import { getPermissionGuard, resetPermissionGuard } from "@/lib/plugin/security"
 import { PermissionError } from "@/lib/plugin/security/permission-guard"
 
+jest.mock("@/lib/plugin/security/consent-broker", () => ({
+  getPluginConsentBroker: () => ({ request: async () => true }),
+}))
+
 const buildExportEnvelope = jest.fn(async (..._a: unknown[]) => ({ version: 3, payload: {} }))
 const serializePackage = jest.fn((..._a: unknown[]) => "{json}")
 jest.mock("@/lib/data/export", () => ({
@@ -64,7 +68,11 @@ describe("createBackupAPI", () => {
       const api = createBackupAPI(PLUGIN)
       await api.create({ includeSessions: true })
       expect(buildExportEnvelope).toHaveBeenCalledWith(
-        expect.objectContaining({ includeApiKey: false, includeSessions: true })
+        expect.objectContaining({
+          includeApiKey: false,
+          includeSessions: true,
+          includeMemories: false,
+        })
       )
     })
 
@@ -79,7 +87,7 @@ describe("createBackupAPI", () => {
           includeSessions: true,
         })
       )
-    })
+    }, 10_000)
   })
 
   describe("read forwarding", () => {

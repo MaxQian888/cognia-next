@@ -24,10 +24,7 @@ import {
   type StoreExternalMemoryInput,
   type StoreMemoryCoreResult,
 } from "@/lib/memory/api/store-memory"
-import {
-  searchMemoriesExternal,
-  type ExternalMemoryHit,
-} from "@/lib/memory/api/search-memory"
+import { searchMemoriesExternal, type ExternalMemoryHit } from "@/lib/memory/api/search-memory"
 import {
   updateExternalMemory,
   forgetExternalMemory,
@@ -43,6 +40,10 @@ export interface PluginMemorySearchOptions {
   topK?: number
   types?: MemoryType[]
   characterId?: string
+  projectId?: string
+  agentId?: string
+  branch?: string
+  path?: string
   /** Default true; false = don't bump lastAccessedAt/accessCount. */
   touch?: boolean
 }
@@ -51,6 +52,10 @@ export interface PluginMemoryListFilter {
   type?: MemoryType
   scope?: MemoryScope
   characterId?: string
+  projectId?: string
+  agentId?: string
+  branch?: string
+  pathPattern?: string
   /** Defaults to `"active"`; pass `"invalidated"` to inspect history. */
   status?: MemoryStatus
   /** Newest-first cap, default 100. */
@@ -117,6 +122,10 @@ export function createMemoryAPI(pluginId: string): PluginMemoryAPI {
         type: filter?.type,
         scope: filter?.scope,
         characterId: filter?.characterId,
+        projectId: filter?.projectId,
+        agentId: filter?.agentId,
+        branch: filter?.branch,
+        pathPattern: filter?.pathPattern,
         status: filter?.status ?? "active",
       })
       return rows.slice(0, Math.max(1, filter?.limit ?? DEFAULT_LIST_LIMIT))

@@ -9,12 +9,19 @@
 //! does enforce the install directory boundary so callers can't escape it.
 
 use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
 
+use base64::Engine as _;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{Manager, State};
+use tokio::io::{AsyncBufReadExt, BufReader};
 
-use super::{PluginError, PluginRecord, PluginRuntimeSnapshot, PluginRuntimeState, Result};
+use super::{
+    NodePluginProcessState, PermissionGrant, PluginError, PluginRecord, PluginRuntimeSnapshot,
+    PluginRuntimeState, Result,
+};
 
 /// Subset of the manifest the Rust side persists. Anything richer stays in TS.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -143,13 +150,967 @@ pub async fn plugin_enable(state: State<'_, PluginRuntimeState>, plugin_id: Stri
 
 #[tauri::command]
 pub async fn plugin_disable(state: State<'_, PluginRuntimeState>, plugin_id: String) -> Result<()> {
+    stop_node_plugin_process(state.inner(), &plugin_id, None).await?;
     flip_status(&state, &plugin_id, "disabled")
 }
 
 #[tauri::command]
 pub async fn plugin_unload(state: State<'_, PluginRuntimeState>, plugin_id: String) -> Result<()> {
+    stop_node_plugin_process(state.inner(), &plugin_id, None).await?;
     state.plugins.write().remove(&plugin_id);
     Ok(())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NodeLaunchResult {
+    pub command: String,
+    pub argv: Vec<String>,
+    pub generation: String,
+    pub activation: serde_json::Value,
+}
+
+const NODE_PLUGIN_HOST_SOURCE: &str = include_str!("../../../scripts/plugin/node-plugin-host.mjs");
+const NODE_PLUGIN_RESULT_PREFIX: &str = "COGNIA_PLUGIN_RESULT:";
+const NODE_PLUGIN_FRAME_LIMIT: usize = 2 * 1024 * 1024;
+const NODE_PLUGIN_CALLBACK_ID_LIMIT: usize = 96 * 1024;
+const NODE_PLUGIN_ARGUMENT_LIMIT: usize = 64 * 1024;
+
+fn node_plugin_host_argv(
+    mut argv: Vec<String>,
+    action: &str,
+    plugin_id: &str,
+    callback_id: &str,
+    args_json: &str,
+) -> Result<Vec<String>> {
+    let entry_index = argv
+        .iter()
+        .position(|argument| !argument.starts_with("--"))
+        .ok_or_else(|| PluginError::Internal("Node launch argv has no plugin entry".into()))?;
+    let plugin_entry = argv.remove(entry_index);
+    let plugin_args = argv.split_off(entry_index);
+    argv.extend([
+        "--input-type=module".into(),
+        "--eval".into(),
+        NODE_PLUGIN_HOST_SOURCE.into(),
+        action.into(),
+        plugin_entry,
+        plugin_id.into(),
+        callback_id.into(),
+        args_json.into(),
+    ]);
+    argv.extend(plugin_args);
+    Ok(argv)
+}
+
+fn parse_node_plugin_frame(line: &str) -> Result<serde_json::Value> {
+    let payload = line
+        .strip_prefix(NODE_PLUGIN_RESULT_PREFIX)
+        .ok_or_else(|| {
+            PluginError::InvalidManifest(
+                "Node plugin host emitted an invalid protocol frame".into(),
+            )
+        })?;
+    let value: serde_json::Value = serde_json::from_str(payload).map_err(|error| {
+        PluginError::InvalidManifest(format!("Node plugin host emitted invalid JSON: {error}"))
+    })?;
+    if let Some(error) = value.get("error").and_then(serde_json::Value::as_str) {
+        return Err(PluginError::InvalidManifest(format!(
+            "Node plugin activation failed: {error}"
+        )));
+    }
+    Ok(value)
+}
+
+async fn read_node_plugin_activation(
+    child: &std::sync::Arc<tokio::sync::Mutex<tokio::process::Child>>,
+) -> Result<serde_json::Value> {
+    let stdout = child
+        .lock()
+        .await
+        .stdout
+        .take()
+        .ok_or_else(|| PluginError::Internal("Node plugin stdout was not piped".into()))?;
+    let read = async move {
+        let mut lines = BufReader::new(stdout).lines();
+        let mut observed = 0_usize;
+        while let Some(line) = lines.next_line().await.map_err(PluginError::Io)? {
+            observed = observed.saturating_add(line.len());
+            if observed > NODE_PLUGIN_FRAME_LIMIT {
+                return Err(PluginError::InvalidManifest(
+                    "Node plugin activation output exceeded the protocol limit".into(),
+                ));
+            }
+            if line.starts_with(NODE_PLUGIN_RESULT_PREFIX) {
+                return parse_node_plugin_frame(&line);
+            }
+        }
+        Err(PluginError::InvalidManifest(
+            "Node plugin exited before reporting activation".into(),
+        ))
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(30), read)
+        .await
+        .map_err(|_| PluginError::InvalidManifest("Node plugin activation timed out".into()))?
+}
+
+fn checked_scope_paths(
+    values: Vec<String>,
+    label: &str,
+    forbidden_roots: &[(&Path, &str)],
+) -> Result<Vec<String>> {
+    let mut cleaned = Vec::new();
+    for value in values {
+        let value = value.trim();
+        if value.is_empty() {
+            continue;
+        }
+        if value.contains('*') || value.contains(',') || value.chars().any(char::is_control) {
+            return Err(PluginError::InvalidArgument(format!(
+                "Node {label} grant contains a wildcard, delimiter, or control character"
+            )));
+        }
+        let path = Path::new(value);
+        if !path.is_absolute() {
+            return Err(PluginError::InvalidArgument(format!(
+                "Node {label} grant must be an absolute path: {value}"
+            )));
+        }
+        if path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::CurDir | std::path::Component::ParentDir
+            )
+        }) {
+            return Err(PluginError::InvalidArgument(format!(
+                "Node {label} grant must not contain dot segments: {value}"
+            )));
+        }
+        let mut current = PathBuf::new();
+        for component in path.components() {
+            current.push(component);
+            let metadata = std::fs::symlink_metadata(&current).map_err(|error| {
+                PluginError::InvalidArgument(format!(
+                    "Node {label} grant must resolve to an existing path without symlinks: {value}: {error}"
+                ))
+            })?;
+            if metadata.file_type().is_symlink() {
+                return Err(PluginError::InvalidArgument(format!(
+                    "Node {label} grant must not contain symlink segments: {value}"
+                )));
+            }
+        }
+        let canonical = path.canonicalize().map_err(|error| {
+            PluginError::InvalidArgument(format!(
+                "Node {label} grant cannot be canonicalized: {value}: {error}"
+            ))
+        })?;
+        for (forbidden, description) in forbidden_roots {
+            if canonical.starts_with(forbidden) || forbidden.starts_with(&canonical) {
+                return Err(PluginError::InvalidArgument(format!(
+                    "Node {label} grant overlaps {description}: {}",
+                    canonical.display()
+                )));
+            }
+        }
+        let canonical = canonical.to_string_lossy().into_owned();
+        if !cleaned.contains(&canonical) {
+            cleaned.push(canonical);
+        }
+    }
+    Ok(cleaned)
+}
+
+const BUNDLED_NODE_VERSION: (u64, u64, u64) = (26, 3, 1);
+
+fn parse_node_version(version: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = version.trim().strip_prefix('v')?.split('.');
+    Some((
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+    ))
+}
+
+fn validate_node_runtime(path: PathBuf) -> Result<PathBuf> {
+    if !path.is_absolute() {
+        return Err(PluginError::InvalidArgument(
+            "bundled Node executable path must be absolute".into(),
+        ));
+    }
+    let metadata = std::fs::symlink_metadata(&path).map_err(PluginError::Io)?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(PluginError::InvalidArgument(
+            "bundled Node executable must be a non-symlink regular file".into(),
+        ));
+    }
+    let output = std::process::Command::new(&path)
+        .arg("--version")
+        .output()
+        .map_err(PluginError::Io)?;
+    let version = String::from_utf8_lossy(&output.stdout);
+    let parsed = parse_node_version(&version);
+    if !output.status.success()
+        || parsed.is_none_or(|parsed| {
+            parsed.0 != BUNDLED_NODE_VERSION.0 || parsed < BUNDLED_NODE_VERSION
+        })
+    {
+        return Err(PluginError::InvalidArgument(format!(
+            "plugin runtime requires a patched Node 26 release at or above 26.3.1, got {}",
+            version.trim()
+        )));
+    }
+    Ok(path)
+}
+
+fn resolve_node_runtime(resource_dir: Option<&Path>) -> Result<PathBuf> {
+    let executable = if cfg!(windows) { "node.exe" } else { "node" };
+    if let Some(resource_dir) = resource_dir {
+        for candidate in [
+            resource_dir
+                .join("resources/plugin-node/bin")
+                .join(executable),
+            resource_dir.join("plugin-node/bin").join(executable),
+        ] {
+            if candidate.is_file() {
+                return validate_node_runtime(candidate);
+            }
+        }
+    }
+    #[cfg(debug_assertions)]
+    if let Some(repository_root) = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+    {
+        let candidate = repository_root
+            .join("src-tauri/resources/plugin-node/bin")
+            .join(executable);
+        if candidate.is_file() {
+            return validate_node_runtime(candidate);
+        }
+    }
+    if let Some(value) = std::env::var_os("COGNIA_PLUGIN_NODE_PATH") {
+        return validate_node_runtime(PathBuf::from(value));
+    }
+    Err(PluginError::InvalidArgument(
+        "the verified bundled Node 26.3.1+ plugin runtime is missing; rerun the Tauri build preparation"
+            .into(),
+    ))
+}
+
+fn grant_is_live(grant: &PermissionGrant) -> bool {
+    grant.expires_at.as_ref().is_none_or(|expires_at| {
+        chrono::DateTime::parse_from_rfc3339(expires_at)
+            .map(|expires| expires > Utc::now())
+            .unwrap_or(false)
+    })
+}
+
+fn read_node_manifest(root: &Path) -> Result<serde_json::Value> {
+    for name in ["manifest.json", "plugin.json"] {
+        match crate::contained_path::read_existing_plugin_file(root, name) {
+            Ok(bytes) => {
+                let manifest = serde_json::from_slice(&bytes).map_err(PluginError::Serde)?;
+                crate::contract::validate_manifest_contract(&manifest)
+                    .map_err(PluginError::InvalidManifest)?;
+                return Ok(manifest);
+            }
+            Err(error) if error.contains("No such file") => continue,
+            Err(error) => return Err(PluginError::InvalidArgument(error)),
+        }
+    }
+    Err(PluginError::InvalidManifest(
+        "installed Node plugin is missing manifest.json/plugin.json".into(),
+    ))
+}
+
+fn manifest_string_array(manifest: &serde_json::Value, path: &[&str]) -> Result<Vec<String>> {
+    let mut value = manifest;
+    for segment in path {
+        let Some(next) = value.get(*segment) else {
+            return Ok(Vec::new());
+        };
+        value = next;
+    }
+    value
+        .as_array()
+        .ok_or_else(|| {
+            PluginError::InvalidManifest(format!("{} must be an array", path.join(".")))
+        })?
+        .iter()
+        .map(|item| {
+            item.as_str().map(str::to_string).ok_or_else(|| {
+                PluginError::InvalidManifest(format!(
+                    "{} must contain only strings",
+                    path.join(".")
+                ))
+            })
+        })
+        .collect()
+}
+
+fn prepare_node_launch(
+    expected_root: &Path,
+    claimed_root: &Path,
+    plugin_install_dir: &Path,
+    plugin_state_dir: &Path,
+    entry: &str,
+    grants: Vec<PermissionGrant>,
+    extra_args: Vec<String>,
+) -> Result<(PathBuf, Vec<String>)> {
+    if extra_args
+        .iter()
+        .any(|arg| arg.contains('*') || arg.chars().any(char::is_control))
+    {
+        return Err(PluginError::InvalidArgument(
+            "Node plugin arguments contain a wildcard or control character".into(),
+        ));
+    }
+    let root = crate::contained_path::validate_claimed_plugin_root(expected_root, claimed_root)
+        .map_err(PluginError::InvalidArgument)?;
+    crate::contained_path::validate_symlink_free_tree(&root)
+        .map_err(PluginError::InvalidArgument)?;
+    let manifest = read_node_manifest(&root)?;
+    let declared_entry = manifest
+        .get("main")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| PluginError::InvalidManifest("Node plugin main is required".into()))?;
+    let normalized_entry = crate::contained_path::validate_plugin_relative_path(entry)
+        .map_err(PluginError::InvalidArgument)?;
+    let normalized_declared = crate::contained_path::validate_plugin_relative_path(declared_entry)
+        .map_err(PluginError::InvalidManifest)?;
+    if normalized_entry != normalized_declared {
+        return Err(PluginError::InvalidArgument(
+            "Node runtime entry must match the host-validated manifest main".into(),
+        ));
+    }
+    let executable = crate::contained_path::resolve_existing_plugin_file(&root, entry)
+        .map_err(PluginError::InvalidArgument)?;
+    let canonical_install_dir = plugin_install_dir.canonicalize().map_err(PluginError::Io)?;
+    let canonical_state_dir =
+        if plugin_state_dir.exists() {
+            plugin_state_dir.canonicalize().map_err(PluginError::Io)?
+        } else {
+            canonical_install_dir.join(plugin_state_dir.file_name().ok_or_else(|| {
+                PluginError::Internal("plugin state directory has no name".into())
+            })?)
+        };
+    let granted = grants
+        .iter()
+        .filter(|grant| grant_is_live(grant))
+        .map(|grant| grant.permission.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let declared_permissions = manifest_string_array(&manifest, &["permissions"])?;
+    let declares = |permission: &str| {
+        declared_permissions.iter().any(|value| value == permission) && granted.contains(permission)
+    };
+    if declares("network:fetch") || declares("network:websocket") {
+        return Err(PluginError::InvalidArgument(
+            "Node network grants require a scoped host broker and cannot run in-process".into(),
+        ));
+    }
+    if declares("shell:execute") || declares("process:spawn") {
+        return Err(PluginError::InvalidArgument(
+            "Node subprocess grants require a scoped host broker".into(),
+        ));
+    }
+    let mut read_paths = if declares("filesystem:read") {
+        checked_scope_paths(
+            manifest_string_array(&manifest, &["fileScope", "readPaths"])?,
+            "read",
+            &[(&canonical_state_dir, "host-owned plugin metadata")],
+        )?
+    } else {
+        Vec::new()
+    };
+    let root_string = root.to_string_lossy().into_owned();
+    if !read_paths.contains(&root_string) {
+        read_paths.push(root_string);
+    }
+    let write_paths = if declares("filesystem:write") {
+        checked_scope_paths(
+            manifest_string_array(&manifest, &["fileScope", "writePaths"])?,
+            "write",
+            &[
+                (
+                    &canonical_install_dir,
+                    "the immutable plugin installation tree",
+                ),
+                (&canonical_state_dir, "host-owned plugin metadata"),
+            ],
+        )?
+    } else {
+        Vec::new()
+    };
+    let mut argv = vec!["--permission".to_string()];
+    argv.extend(
+        read_paths
+            .into_iter()
+            .map(|path| format!("--allow-fs-read={path}")),
+    );
+    argv.extend(
+        write_paths
+            .into_iter()
+            .map(|path| format!("--allow-fs-write={path}")),
+    );
+    argv.push(executable.to_string_lossy().into_owned());
+    argv.extend(extra_args);
+    Ok((root, argv))
+}
+
+fn generation_matches(state: &NodePluginProcessState, generation: uuid::Uuid) -> bool {
+    match state {
+        NodePluginProcessState::Launching {
+            generation: current,
+        }
+        | NodePluginProcessState::Running {
+            generation: current,
+            ..
+        } => *current == generation,
+    }
+}
+
+fn remove_node_generation(
+    state: &PluginRuntimeState,
+    plugin_id: &str,
+    generation: uuid::Uuid,
+) -> bool {
+    let mut processes = state.node_plugin_processes.lock();
+    if processes
+        .get(plugin_id)
+        .is_some_and(|process| generation_matches(process, generation))
+    {
+        processes.remove(plugin_id);
+        true
+    } else {
+        false
+    }
+}
+
+async fn stop_node_plugin_process(
+    state: &PluginRuntimeState,
+    plugin_id: &str,
+    generation: Option<uuid::Uuid>,
+) -> Result<bool> {
+    let process = {
+        let mut processes = state.node_plugin_processes.lock();
+        if generation.is_some_and(|generation| {
+            processes
+                .get(plugin_id)
+                .is_none_or(|process| !generation_matches(process, generation))
+        }) {
+            return Ok(false);
+        }
+        match processes.get(plugin_id) {
+            Some(NodePluginProcessState::Launching { .. }) => {
+                processes.remove(plugin_id);
+                return Ok(true);
+            }
+            Some(NodePluginProcessState::Running {
+                generation, child, ..
+            }) => Some((*generation, child.clone())),
+            None => None,
+        }
+    };
+    let had_process = process.is_some();
+    if let Some((process_generation, child)) = process {
+        let mut child = child.lock().await;
+        if child.try_wait().map_err(PluginError::Io)?.is_none() {
+            child.kill().await.map_err(PluginError::Io)?;
+        }
+        drop(child);
+        remove_node_generation(state, plugin_id, process_generation);
+    }
+    Ok(had_process)
+}
+
+fn spawn_node_reaper(
+    processes: std::sync::Arc<
+        parking_lot::Mutex<std::collections::HashMap<String, NodePluginProcessState>>,
+    >,
+    plugin_id: String,
+    generation: uuid::Uuid,
+    child: std::sync::Arc<tokio::sync::Mutex<tokio::process::Child>>,
+) {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            let finished = child
+                .lock()
+                .await
+                .try_wait()
+                .map(|status| status.is_some())
+                .unwrap_or(true);
+            if finished {
+                let mut processes = processes.lock();
+                if processes
+                    .get(&plugin_id)
+                    .is_some_and(|process| generation_matches(process, generation))
+                {
+                    processes.remove(&plugin_id);
+                }
+                break;
+            }
+        }
+    });
+}
+
+fn spawn_reserved_node_process(
+    state: &PluginRuntimeState,
+    plugin_id: &str,
+    generation: uuid::Uuid,
+    command: &Path,
+    argv: &[String],
+    root: &Path,
+) -> Result<std::sync::Arc<tokio::sync::Mutex<tokio::process::Child>>> {
+    let mut processes = state.node_plugin_processes.lock();
+    if !processes
+        .get(plugin_id)
+        .is_some_and(|process| generation_matches(process, generation))
+    {
+        return Err(PluginError::InvalidArgument(
+            "Node plugin launch was cancelled".into(),
+        ));
+    }
+    let spawned = tokio::process::Command::new(command)
+        .args(argv)
+        .current_dir(root)
+        .env_clear()
+        .env("COGNIA_PLUGIN_ID", plugin_id)
+        .env("NO_COLOR", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn();
+    let child = match spawned {
+        Ok(child) => child,
+        Err(error) => {
+            processes.remove(plugin_id);
+            return Err(PluginError::Io(error));
+        }
+    };
+    let child = std::sync::Arc::new(tokio::sync::Mutex::new(child));
+    processes.insert(
+        plugin_id.to_string(),
+        NodePluginProcessState::Running {
+            generation,
+            child: child.clone(),
+        },
+    );
+    Ok(child)
+}
+
+/// Launch an installed Node plugin entirely in the native host. This keeps
+/// `node:*` imports and process handles out of the static-export renderer.
+#[tauri::command]
+pub async fn plugin_launch_js(
+    app: tauri::AppHandle,
+    state: State<'_, PluginRuntimeState>,
+    plugin_id: String,
+    plugin_path: String,
+    entry: String,
+    extra_args: Vec<String>,
+) -> Result<NodeLaunchResult> {
+    let resource_dir = app.path().resource_dir().map_err(|error| {
+        PluginError::Internal(format!("cannot resolve resource directory: {error}"))
+    })?;
+    plugin_launch_js_for_state(
+        state.inner(),
+        plugin_id,
+        plugin_path,
+        entry,
+        extra_args,
+        Some(resource_dir),
+    )
+    .await
+}
+
+pub async fn plugin_launch_js_for_state(
+    state: &PluginRuntimeState,
+    plugin_id: String,
+    plugin_path: String,
+    entry: String,
+    extra_args: Vec<String>,
+    resource_dir: Option<PathBuf>,
+) -> Result<NodeLaunchResult> {
+    crate::validate_plugin_id_path_component(&plugin_id)?;
+    let grants = match state.permissions.read().get(&plugin_id).cloned() {
+        Some(grants) => grants,
+        None => crate::permissions::read_ledger(state, &plugin_id)?,
+    };
+    let generation = uuid::Uuid::new_v4();
+    {
+        let mut processes = state.node_plugin_processes.lock();
+        if processes.contains_key(&plugin_id) {
+            return Err(PluginError::InvalidArgument(format!(
+                "Node plugin is already launching or running: {plugin_id}"
+            )));
+        }
+        processes.insert(
+            plugin_id.clone(),
+            NodePluginProcessState::Launching { generation },
+        );
+    }
+    let expected_root = state.plugin_dir(&plugin_id);
+    let claimed_root = PathBuf::from(plugin_path);
+    let plugin_install_dir = state.plugin_install_dir.clone();
+    let plugin_state_dir = state.plugin_state_dir.clone();
+    let prepared = match tokio::task::spawn_blocking(move || {
+        let (root, argv) = prepare_node_launch(
+            &expected_root,
+            &claimed_root,
+            &plugin_install_dir,
+            &plugin_state_dir,
+            &entry,
+            grants,
+            extra_args,
+        )?;
+        Ok::<_, PluginError>((root, argv, resolve_node_runtime(resource_dir.as_deref())?))
+    })
+    .await
+    {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            remove_node_generation(state, &plugin_id, generation);
+            return Err(PluginError::Internal(format!(
+                "Node launch validator failed: {error}"
+            )));
+        }
+    };
+    let (root, argv, command) = match prepared {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            remove_node_generation(state, &plugin_id, generation);
+            return Err(error);
+        }
+    };
+    let argv = node_plugin_host_argv(argv, "activate-wait", &plugin_id, "", "[]")?;
+    let child = spawn_reserved_node_process(state, &plugin_id, generation, &command, &argv, &root)?;
+    let activation = match read_node_plugin_activation(&child).await {
+        Ok(activation) => activation,
+        Err(error) => {
+            let _ = child.lock().await.kill().await;
+            remove_node_generation(state, &plugin_id, generation);
+            return Err(error);
+        }
+    };
+    spawn_node_reaper(
+        state.node_plugin_processes.clone(),
+        plugin_id,
+        generation,
+        child,
+    );
+    Ok(NodeLaunchResult {
+        command: command.to_string_lossy().into_owned(),
+        argv,
+        generation: generation.to_string(),
+        activation,
+    })
+}
+
+async fn run_node_plugin_action(
+    state: &PluginRuntimeState,
+    plugin_id: &str,
+    plugin_path: &str,
+    entry: &str,
+    action: &str,
+    callback_id: &str,
+    args: &serde_json::Value,
+    resource_dir: Option<&Path>,
+) -> Result<serde_json::Value> {
+    crate::validate_plugin_id_path_component(plugin_id)?;
+    if callback_id.len() > NODE_PLUGIN_CALLBACK_ID_LIMIT
+        || callback_id.chars().any(char::is_control)
+    {
+        return Err(PluginError::InvalidArgument(
+            "Node plugin callback id is invalid".into(),
+        ));
+    }
+    let args_json = serde_json::to_string(args)?;
+    if args_json.len() > NODE_PLUGIN_ARGUMENT_LIMIT {
+        return Err(PluginError::InvalidArgument(
+            "Node plugin callback arguments exceed the protocol limit".into(),
+        ));
+    }
+    let grants = match state.permissions.read().get(plugin_id).cloned() {
+        Some(grants) => grants,
+        None => crate::permissions::read_ledger(state, plugin_id)?,
+    };
+    let expected_root = state.plugin_dir(plugin_id);
+    let claimed_root = PathBuf::from(plugin_path);
+    let (root, argv) = prepare_node_launch(
+        &expected_root,
+        &claimed_root,
+        &state.plugin_install_dir,
+        &state.plugin_state_dir,
+        entry,
+        grants,
+        Vec::new(),
+    )?;
+    let argv = node_plugin_host_argv(argv, action, plugin_id, callback_id, &args_json)?;
+    let command = resolve_node_runtime(resource_dir)?;
+    let mut process = tokio::process::Command::new(command);
+    process
+        .args(argv)
+        .current_dir(root)
+        .env_clear()
+        .env("COGNIA_PLUGIN_ID", plugin_id)
+        .env("NO_COLOR", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let output = tokio::time::timeout(std::time::Duration::from_secs(120), process.output())
+        .await
+        .map_err(|_| PluginError::InvalidManifest("Node plugin callback timed out".into()))??;
+    if output.stdout.len() > NODE_PLUGIN_FRAME_LIMIT
+        || output.stderr.len() > NODE_PLUGIN_FRAME_LIMIT
+    {
+        return Err(PluginError::InvalidManifest(
+            "Node plugin callback output exceeded the protocol limit".into(),
+        ));
+    }
+    let stdout = String::from_utf8(output.stdout)
+        .map_err(|_| PluginError::InvalidManifest("Node plugin host stdout is not UTF-8".into()))?;
+    let frame = stdout
+        .lines()
+        .rev()
+        .find(|line| line.starts_with(NODE_PLUGIN_RESULT_PREFIX))
+        .ok_or_else(|| {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            PluginError::InvalidManifest(format!(
+                "Node plugin host returned no protocol frame: {}",
+                stderr.trim()
+            ))
+        })?;
+    parse_node_plugin_frame(frame)
+}
+
+#[tauri::command]
+pub async fn plugin_invoke_js_callback(
+    app: tauri::AppHandle,
+    state: State<'_, PluginRuntimeState>,
+    plugin_id: String,
+    plugin_path: String,
+    entry: String,
+    callback_id: String,
+    args: serde_json::Value,
+) -> Result<serde_json::Value> {
+    let resource_dir = app.path().resource_dir().map_err(|error| {
+        PluginError::Internal(format!("cannot resolve resource directory: {error}"))
+    })?;
+    plugin_invoke_js_callback_for_state(
+        state.inner(),
+        plugin_id,
+        plugin_path,
+        entry,
+        callback_id,
+        args,
+        Some(resource_dir),
+    )
+    .await
+}
+
+pub async fn plugin_invoke_js_callback_for_state(
+    state: &PluginRuntimeState,
+    plugin_id: String,
+    plugin_path: String,
+    entry: String,
+    callback_id: String,
+    args: serde_json::Value,
+    resource_dir: Option<PathBuf>,
+) -> Result<serde_json::Value> {
+    let frame = run_node_plugin_action(
+        state,
+        &plugin_id,
+        &plugin_path,
+        &entry,
+        "callback",
+        &callback_id,
+        &args,
+        resource_dir.as_deref(),
+    )
+    .await?;
+    Ok(frame
+        .get("result")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null))
+}
+
+#[tauri::command]
+pub async fn plugin_deactivate_js(
+    app: tauri::AppHandle,
+    state: State<'_, PluginRuntimeState>,
+    plugin_id: String,
+    plugin_path: String,
+    entry: String,
+) -> Result<()> {
+    let resource_dir = app.path().resource_dir().map_err(|error| {
+        PluginError::Internal(format!("cannot resolve resource directory: {error}"))
+    })?;
+    plugin_deactivate_js_for_state(
+        state.inner(),
+        plugin_id,
+        plugin_path,
+        entry,
+        Some(resource_dir),
+    )
+    .await
+}
+
+pub async fn plugin_deactivate_js_for_state(
+    state: &PluginRuntimeState,
+    plugin_id: String,
+    plugin_path: String,
+    entry: String,
+    resource_dir: Option<PathBuf>,
+) -> Result<()> {
+    run_node_plugin_action(
+        state,
+        &plugin_id,
+        &plugin_path,
+        &entry,
+        "deactivate",
+        "",
+        &serde_json::Value::Array(Vec::new()),
+        resource_dir.as_deref(),
+    )
+    .await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn plugin_stop_js(
+    state: State<'_, PluginRuntimeState>,
+    plugin_id: String,
+    generation: String,
+) -> Result<()> {
+    plugin_stop_js_for_state(state.inner(), plugin_id, generation).await
+}
+
+pub async fn plugin_stop_js_for_state(
+    state: &PluginRuntimeState,
+    plugin_id: String,
+    generation: String,
+) -> Result<()> {
+    let generation = uuid::Uuid::parse_str(&generation)
+        .map_err(|_| PluginError::InvalidArgument("invalid Node process generation".into()))?;
+    stop_node_plugin_process(state, &plugin_id, Some(generation)).await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn plugin_js_status(
+    state: State<'_, PluginRuntimeState>,
+    plugin_id: String,
+    generation: String,
+) -> Result<bool> {
+    plugin_js_status_for_state(state.inner(), plugin_id, generation).await
+}
+
+pub async fn plugin_js_status_for_state(
+    state: &PluginRuntimeState,
+    plugin_id: String,
+    generation: String,
+) -> Result<bool> {
+    let generation = uuid::Uuid::parse_str(&generation)
+        .map_err(|_| PluginError::InvalidArgument("invalid Node process generation".into()))?;
+    let child = {
+        let processes = state.node_plugin_processes.lock();
+        match processes.get(&plugin_id) {
+            Some(NodePluginProcessState::Running {
+                generation: current,
+                child,
+            }) if *current == generation => child.clone(),
+            Some(NodePluginProcessState::Launching {
+                generation: current,
+            }) if *current == generation => return Ok(true),
+            _ => return Ok(false),
+        }
+    };
+    let running = child
+        .lock()
+        .await
+        .try_wait()
+        .map_err(PluginError::Io)?
+        .is_none();
+    if !running {
+        let mut processes = state.node_plugin_processes.lock();
+        if processes
+            .get(&plugin_id)
+            .is_some_and(|process| generation_matches(process, generation))
+        {
+            processes.remove(&plugin_id);
+        }
+    }
+    Ok(running)
+}
+
+fn read_plugin_entry_bytes_inner(
+    expected_root: &std::path::Path,
+    claimed_root: &std::path::Path,
+    entry: &str,
+) -> Result<Vec<u8>> {
+    let root = crate::contained_path::validate_claimed_plugin_root(expected_root, claimed_root)
+        .map_err(PluginError::InvalidArgument)?;
+    crate::contained_path::validate_symlink_free_tree(&root)
+        .map_err(PluginError::InvalidArgument)?;
+    crate::contained_path::read_existing_plugin_file(&root, entry)
+        .map_err(PluginError::InvalidArgument)
+}
+
+fn read_plugin_entry_inner(
+    expected_root: &std::path::Path,
+    claimed_root: &std::path::Path,
+    entry: &str,
+) -> Result<String> {
+    String::from_utf8(read_plugin_entry_bytes_inner(
+        expected_root,
+        claimed_root,
+        entry,
+    )?)
+    .map_err(|_| PluginError::InvalidManifest("plugin JavaScript entry is not UTF-8".into()))
+}
+
+/// Read one installed JavaScript bundle through a no-follow host handle.
+/// Renderer code never fetches arbitrary `file://` paths directly.
+#[tauri::command]
+pub async fn plugin_read_entry(
+    state: State<'_, PluginRuntimeState>,
+    plugin_id: String,
+    plugin_path: String,
+    entry: String,
+) -> Result<String> {
+    crate::validate_plugin_id_path_component(&plugin_id)?;
+    let expected_root = state.plugin_dir(&plugin_id);
+    let claimed_root = std::path::PathBuf::from(plugin_path);
+    tokio::task::spawn_blocking(move || {
+        read_plugin_entry_inner(&expected_root, &claimed_root, &entry)
+    })
+    .await
+    .map_err(|error| PluginError::Internal(format!("plugin entry reader task failed: {error}")))?
+}
+
+/// Read a binary plugin asset with the same no-follow containment guarantees
+/// and return base64 for renderer-side data URLs.
+#[tauri::command]
+pub async fn plugin_read_entry_base64(
+    state: State<'_, PluginRuntimeState>,
+    plugin_id: String,
+    plugin_path: String,
+    entry: String,
+) -> Result<String> {
+    crate::validate_plugin_id_path_component(&plugin_id)?;
+    let expected_root = state.plugin_dir(&plugin_id);
+    let claimed_root = std::path::PathBuf::from(plugin_path);
+    let bytes = tokio::task::spawn_blocking(move || {
+        read_plugin_entry_bytes_inner(&expected_root, &claimed_root, &entry)
+    })
+    .await
+    .map_err(|error| {
+        PluginError::Internal(format!("plugin asset reader task failed: {error}"))
+    })??;
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
 /// Validate the install manifest before any disk write. Mirrors the always-on
@@ -189,6 +1150,16 @@ fn validate_install_manifest(plugin_id: &str, payload: &InstallPayload) -> Resul
 #[tauri::command]
 pub async fn plugin_install(
     state: State<'_, PluginRuntimeState>,
+    plugin_id: String,
+    source: String,
+    payload: InstallPayload,
+) -> Result<PluginRuntimeSnapshot> {
+    plugin_install_for_state(state.inner(), plugin_id, source, payload).await
+}
+
+/// Host-neutral install entry used by Tauri and the headless companion host.
+pub async fn plugin_install_for_state(
+    state: &PluginRuntimeState,
     plugin_id: String,
     source: String,
     payload: InstallPayload,
@@ -234,10 +1205,35 @@ pub async fn plugin_uninstall(
     state: State<'_, PluginRuntimeState>,
     plugin_id: String,
 ) -> Result<()> {
+    plugin_uninstall_for_state(state.inner(), plugin_id).await
+}
+
+/// Host-neutral uninstall entry used by Tauri and the headless companion host.
+pub async fn plugin_uninstall_for_state(
+    state: &PluginRuntimeState,
+    plugin_id: String,
+) -> Result<()> {
+    crate::validate_plugin_id_path_component(&plugin_id)?;
+    stop_node_plugin_process(state, &plugin_id, None).await?;
     let install_path = state.plugin_dir(&plugin_id);
-    if install_path.exists() {
-        fs::remove_dir_all(&install_path)?;
-    }
+    let host_state_path = state.plugin_host_state_dir(&plugin_id);
+    tokio::task::spawn_blocking(move || {
+        if install_path.exists() {
+            fs::remove_dir_all(&install_path)?;
+        }
+        if host_state_path.exists() {
+            let metadata = fs::symlink_metadata(&host_state_path)?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(PluginError::InvalidArgument(
+                    "plugin host state path is not a trusted directory".into(),
+                ));
+            }
+            fs::remove_dir_all(&host_state_path)?;
+        }
+        Result::<()>::Ok(())
+    })
+    .await
+    .map_err(|error| PluginError::Internal(format!("plugin uninstall task failed: {error}")))??;
     state.plugins.write().remove(&plugin_id);
     state.permissions.write().remove(&plugin_id);
     Ok(())
@@ -246,6 +1242,13 @@ pub async fn plugin_uninstall(
 #[tauri::command]
 pub async fn plugin_get_all(
     state: State<'_, PluginRuntimeState>,
+) -> Result<Vec<PluginRuntimeSnapshot>> {
+    plugin_get_all_for_state(state.inner()).await
+}
+
+/// Host-neutral runtime inventory used by Tauri and the headless companion host.
+pub async fn plugin_get_all_for_state(
+    state: &PluginRuntimeState,
 ) -> Result<Vec<PluginRuntimeSnapshot>> {
     Ok(state
         .plugins
@@ -258,6 +1261,14 @@ pub async fn plugin_get_all(
 #[tauri::command]
 pub async fn plugin_runtime_snapshot(
     state: State<'_, PluginRuntimeState>,
+    plugin_id: String,
+) -> Result<PluginRuntimeSnapshot> {
+    plugin_runtime_snapshot_for_state(state.inner(), plugin_id).await
+}
+
+/// Host-neutral snapshot lookup used by Tauri and the headless companion host.
+pub async fn plugin_runtime_snapshot_for_state(
+    state: &PluginRuntimeState,
     plugin_id: String,
 ) -> Result<PluginRuntimeSnapshot> {
     state
@@ -318,6 +1329,349 @@ mod tests {
 
     fn make_state(tmp: &TempDir) -> PluginRuntimeState {
         PluginRuntimeState::new(PathBuf::from(tmp.path()))
+    }
+
+    #[test]
+    fn reads_only_utf8_entries_from_the_registered_symlink_free_tree() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let root = state.plugin_dir("demo");
+        std::fs::create_dir_all(root.join("dist")).unwrap();
+        std::fs::write(root.join("dist/index.js"), "module.exports = {};").unwrap();
+
+        assert_eq!(
+            read_plugin_entry_inner(&root, &root, "dist/index.js").unwrap(),
+            "module.exports = {};"
+        );
+        assert!(read_plugin_entry_inner(&root, &root, "../outside.js").is_err());
+        assert!(read_plugin_entry_inner(
+            &root,
+            tmp.path().join("outside").as_path(),
+            "dist/index.js"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn reads_binary_assets_without_utf8_conversion() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let root = state.plugin_dir("demo");
+        std::fs::create_dir_all(root.join("assets")).unwrap();
+        std::fs::write(root.join("assets/image.bin"), [0_u8, 159, 146, 150]).unwrap();
+
+        assert_eq!(
+            read_plugin_entry_bytes_inner(&root, &root, "assets/image.bin").unwrap(),
+            vec![0, 159, 146, 150]
+        );
+        assert!(read_plugin_entry_inner(&root, &root, "assets/image.bin").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn binary_asset_reads_reject_symlinked_segments() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let root = state.plugin_dir("demo");
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("secret.bin"), b"secret").unwrap();
+        symlink(&outside, root.join("assets")).unwrap();
+
+        assert!(read_plugin_entry_bytes_inner(&root, &root, "assets/secret.bin").is_err());
+    }
+
+    #[test]
+    fn prepares_node_launch_with_host_owned_containment_and_scoped_paths() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let root = state.plugin_dir("demo");
+        std::fs::create_dir_all(root.join("dist")).unwrap();
+        std::fs::write(root.join("dist/index.mjs"), "export default {};").unwrap();
+        let canonical_root = root.canonicalize().unwrap();
+        std::fs::write(
+            root.join("manifest.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "id": "demo",
+                "name": "Demo",
+                "version": "1.0.0",
+                "type": "frontend",
+                "main": "dist/index.mjs",
+                "capabilities": [],
+                "permissions": ["filesystem:read"],
+                "fileScope": { "readPaths": [canonical_root.to_string_lossy()] }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let (resolved_root, argv) = prepare_node_launch(
+            &root,
+            &root,
+            &state.plugin_install_dir,
+            &state.plugin_state_dir,
+            "dist/index.mjs",
+            vec![PermissionGrant {
+                plugin_id: "demo".into(),
+                permission: "filesystem:read".into(),
+                granted_by: "test".into(),
+                granted_at: Utc::now().to_rfc3339(),
+                expires_at: None,
+            }],
+            vec!["--mode=test".into()],
+        )
+        .unwrap();
+
+        assert_eq!(resolved_root, root.canonicalize().unwrap());
+        assert_eq!(argv.first().map(String::as_str), Some("--permission"));
+        let read_flags = argv
+            .iter()
+            .filter(|arg| arg.starts_with("--allow-fs-read="))
+            .collect::<Vec<_>>();
+        assert_eq!(read_flags.len(), 1);
+        assert!(!read_flags[0].contains(','));
+        assert_eq!(argv.last().map(String::as_str), Some("--mode=test"));
+    }
+
+    #[test]
+    fn emits_repeated_node_flags_for_multiple_scopes() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let root = state.plugin_dir("demo");
+        let shared = tmp.path().join("shared");
+        std::fs::create_dir_all(root.join("dist")).unwrap();
+        std::fs::create_dir_all(&shared).unwrap();
+        std::fs::write(root.join("dist/index.mjs"), "export default {};").unwrap();
+        let root = root.canonicalize().unwrap();
+        let shared = shared.canonicalize().unwrap();
+        std::fs::write(
+            root.join("manifest.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "id": "demo",
+                "name": "Demo",
+                "version": "1.0.0",
+                "type": "frontend",
+                "main": "dist/index.mjs",
+                "capabilities": [],
+                "permissions": ["filesystem:read"],
+                "fileScope": { "readPaths": [root, shared] }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let (_, argv) = prepare_node_launch(
+            &root,
+            &root,
+            &state.plugin_install_dir,
+            &state.plugin_state_dir,
+            "dist/index.mjs",
+            vec![PermissionGrant {
+                plugin_id: "demo".into(),
+                permission: "filesystem:read".into(),
+                granted_by: "test".into(),
+                granted_at: Utc::now().to_rfc3339(),
+                expires_at: None,
+            }],
+            vec![],
+        )
+        .unwrap();
+
+        let flags = argv
+            .iter()
+            .filter(|arg| arg.starts_with("--allow-fs-read="))
+            .collect::<Vec<_>>();
+        assert_eq!(flags.len(), 2);
+        assert!(flags.iter().all(|flag| !flag.contains(',')));
+    }
+
+    #[test]
+    fn scope_paths_cannot_cover_install_or_host_state_trees() {
+        let tmp = TempDir::new().unwrap();
+        let install = tmp.path().join("plugins");
+        let state_dir = install.join(".host-state");
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&state_dir).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let install = install.canonicalize().unwrap();
+        let state_dir = state_dir.canonicalize().unwrap();
+        let outside = outside.canonicalize().unwrap();
+
+        assert!(checked_scope_paths(
+            vec![outside.to_string_lossy().into_owned()],
+            "read",
+            &[(&state_dir, "host metadata")]
+        )
+        .is_ok());
+        assert!(checked_scope_paths(
+            vec![install.to_string_lossy().into_owned()],
+            "write",
+            &[(&install, "install tree"), (&state_dir, "host metadata")]
+        )
+        .is_err());
+        assert!(checked_scope_paths(
+            vec![state_dir.to_string_lossy().into_owned()],
+            "read",
+            &[(&state_dir, "host metadata")]
+        )
+        .is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scope_paths_reject_symlink_segments() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = TempDir::new().unwrap();
+        let real = tmp.path().join("real");
+        let link = tmp.path().join("link");
+        std::fs::create_dir_all(&real).unwrap();
+        symlink(&real, &link).unwrap();
+
+        assert!(
+            checked_scope_paths(vec![link.to_string_lossy().into_owned()], "read", &[]).is_err()
+        );
+    }
+
+    #[test]
+    fn node_runtime_version_requires_patched_node_26() {
+        assert_eq!(parse_node_version("v26.3.1\n"), Some((26, 3, 1)));
+        assert!(parse_node_version("26.3.1").is_none());
+        assert!((26, 3, 0) < BUNDLED_NODE_VERSION);
+        assert_ne!((25, 99, 99).0, BUNDLED_NODE_VERSION.0);
+    }
+
+    #[test]
+    fn rejects_unsafe_node_launch_inputs_before_process_creation() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let root = state.plugin_dir("demo");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("index.mjs"), "export default {};").unwrap();
+        let write_manifest = |permissions: &[&str], read_paths: &[&str]| {
+            std::fs::write(
+                root.join("manifest.json"),
+                serde_json::to_vec(&serde_json::json!({
+                    "id": "demo",
+                    "name": "Demo",
+                    "version": "1.0.0",
+                    "type": "frontend",
+                    "main": "index.mjs",
+                    "capabilities": [],
+                    "permissions": permissions,
+                    "fileScope": { "readPaths": read_paths }
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        };
+        write_manifest(&[], &[]);
+
+        assert!(prepare_node_launch(
+            &root,
+            &root,
+            &state.plugin_install_dir,
+            &state.plugin_state_dir,
+            "../outside.mjs",
+            vec![],
+            vec![]
+        )
+        .is_err());
+        write_manifest(&["filesystem:read"], &["relative"]);
+        let read_grant = PermissionGrant {
+            plugin_id: "demo".into(),
+            permission: "filesystem:read".into(),
+            granted_by: "test".into(),
+            granted_at: Utc::now().to_rfc3339(),
+            expires_at: None,
+        };
+        assert!(prepare_node_launch(
+            &root,
+            &root,
+            &state.plugin_install_dir,
+            &state.plugin_state_dir,
+            "index.mjs",
+            vec![read_grant],
+            vec![],
+        )
+        .is_err());
+        write_manifest(&["network:fetch"], &[]);
+        let network_grant = PermissionGrant {
+            plugin_id: "demo".into(),
+            permission: "network:fetch".into(),
+            granted_by: "test".into(),
+            granted_at: Utc::now().to_rfc3339(),
+            expires_at: None,
+        };
+        assert!(prepare_node_launch(
+            &root,
+            &root,
+            &state.plugin_install_dir,
+            &state.plugin_state_dir,
+            "index.mjs",
+            vec![network_grant],
+            vec![],
+        )
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn node_launch_generation_prevents_stale_stop_and_cancels_inflight_launch() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let current = uuid::Uuid::new_v4();
+        state.node_plugin_processes.lock().insert(
+            "demo".into(),
+            NodePluginProcessState::Launching {
+                generation: current,
+            },
+        );
+
+        assert!(
+            !stop_node_plugin_process(&state, "demo", Some(uuid::Uuid::new_v4()))
+                .await
+                .unwrap()
+        );
+        assert!(state.node_plugin_processes.lock().contains_key("demo"));
+        assert!(stop_node_plugin_process(&state, "demo", Some(current))
+            .await
+            .unwrap());
+        assert!(!state.node_plugin_processes.lock().contains_key("demo"));
+    }
+
+    #[tokio::test]
+    async fn spawn_failure_clears_reservation_for_retry() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        let first = uuid::Uuid::new_v4();
+        state.node_plugin_processes.lock().insert(
+            "demo".into(),
+            NodePluginProcessState::Launching { generation: first },
+        );
+
+        assert!(spawn_reserved_node_process(
+            &state,
+            "demo",
+            first,
+            &tmp.path().join("missing-node"),
+            &[],
+            tmp.path(),
+        )
+        .is_err());
+        assert!(!state.node_plugin_processes.lock().contains_key("demo"));
+
+        let retry = uuid::Uuid::new_v4();
+        state.node_plugin_processes.lock().insert(
+            "demo".into(),
+            NodePluginProcessState::Launching { generation: retry },
+        );
+        assert!(state
+            .node_plugin_processes
+            .lock()
+            .get("demo")
+            .is_some_and(|process| generation_matches(process, retry)));
     }
 
     #[tokio::test]
@@ -481,7 +1835,9 @@ mod tests {
             "demo".into(),
             "local".into(),
             InstallPayload {
-                manifest_json: Some(r#"{"id":"demo","version":"2.0.0"}"#.into()),
+                manifest_json: Some(
+                    r#"{"id":"demo","version":"2.0.0","type":"frontend","main":"index.js"}"#.into(),
+                ),
             },
         )
         .await
@@ -489,9 +1845,13 @@ mod tests {
         assert_eq!(snap.version, "2.0.0");
         let manifest_path = tmp.path().join("demo").join("manifest.json");
         assert!(manifest_path.exists());
+        let host_state = state.plugin_host_state_dir("demo");
+        std::fs::create_dir_all(&host_state).unwrap();
+        std::fs::write(host_state.join("permissions.json"), "[]").unwrap();
 
         plugin_uninstall_inner(&state, "demo".into()).await.unwrap();
         assert!(!tmp.path().join("demo").exists());
+        assert!(!host_state.exists());
         assert!(state.plugins.read().is_empty());
     }
 
@@ -525,7 +1885,10 @@ mod tests {
             "expected".into(),
             "local".into(),
             InstallPayload {
-                manifest_json: Some(r#"{"id":"other","version":"1.0.0"}"#.into()),
+                manifest_json: Some(
+                    r#"{"id":"other","version":"1.0.0","type":"frontend","main":"index.js"}"#
+                        .into(),
+                ),
             },
         )
         .await
@@ -560,7 +1923,9 @@ mod tests {
             "demo".into(),
             "local".into(),
             InstallPayload {
-                manifest_json: Some(r#"{"id":"demo","version":"  "}"#.into()),
+                manifest_json: Some(
+                    r#"{"id":"demo","version":"  ","type":"frontend","main":"index.js"}"#.into(),
+                ),
             },
         )
         .await
@@ -671,8 +2036,12 @@ mod tests {
     }
     async fn plugin_uninstall_inner(state: &PluginRuntimeState, plugin_id: String) -> Result<()> {
         let install_path = state.plugin_dir(&plugin_id);
+        let host_state_path = state.plugin_host_state_dir(&plugin_id);
         if install_path.exists() {
             fs::remove_dir_all(&install_path)?;
+        }
+        if host_state_path.exists() {
+            fs::remove_dir_all(&host_state_path)?;
         }
         state.plugins.write().remove(&plugin_id);
         state.permissions.write().remove(&plugin_id);

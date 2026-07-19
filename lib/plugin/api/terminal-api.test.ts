@@ -60,7 +60,7 @@ describe("createTerminalAPI", () => {
     storeSessions = {}
     liveSessions.clear()
     resetPermissionGuard()
-    guard = getPermissionGuard()
+    guard = getPermissionGuard({ confirmDangerousByDefault: false })
   })
 
   describe("permission gating", () => {
