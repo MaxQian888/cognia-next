@@ -25200,7 +25200,11 @@
         "renamePlaceholder": "例如：公司 Pro",
         "secretsHidden": "Token 不显示——如需查看请打开 OS 钥匙串管理器。",
         "setActive": "设为激活",
-        "title": "账号"
+        "title": "账号",
+        "unlink": "解绑",
+        "unlinkConfirm": "解绑",
+        "unlinkDialogBody": "仅从 Cognia 保险库中移除这条发现到的凭证；磁盘上的 OpenCode auth.json 文件不受影响。",
+        "unlinkDialogTitle": "解绑这个发现到的账户？"
       },
       "accountPreset": {
         "ariaLabel": "该账户的端点预设",

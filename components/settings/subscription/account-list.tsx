@@ -124,7 +124,7 @@ export function AccountList({ provider, onAdd, secondaryAction }: AccountListPro
                       onSelect={() => setRemoveTarget(account)}
                       className="text-destructive focus:text-destructive"
                     >
-                      {t("remove")}
+                      {account.variant === "opencode-discovered" ? t("unlink") : t("remove")}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -223,16 +223,21 @@ function RemoveDialog({
 }) {
   const t = useTranslations("subscription.common.accountList")
   const [busy, setBusy] = useState(false)
+  // A "discovered" OpenCode row is only a pointer to an external auth.json —
+  // removing it unlinks the pointer and never touches that file. Say so.
+  const isDiscovered = account.variant === "opencode-discovered"
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{t("removeDialogTitle")}</DialogTitle>
+          <DialogTitle>{t(isDiscovered ? "unlinkDialogTitle" : "removeDialogTitle")}</DialogTitle>
           <DialogDescription>
             {account.label || account.email || account.id.slice(0, 8)}
           </DialogDescription>
         </DialogHeader>
-        <p className="text-sm text-muted-foreground">{t("removeDialogBody")}</p>
+        <p className="text-sm text-muted-foreground">
+          {t(isDiscovered ? "unlinkDialogBody" : "removeDialogBody")}
+        </p>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={busy}>
             {t("cancel")}
@@ -250,7 +255,7 @@ function RemoveDialog({
             disabled={busy}
           >
             {busy && <Loader2Icon className="mr-2 size-4 animate-spin" />}
-            {t("removeConfirm")}
+            {t(isDiscovered ? "unlinkConfirm" : "removeConfirm")}
           </Button>
         </DialogFooter>
       </DialogContent>

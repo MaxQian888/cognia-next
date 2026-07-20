@@ -25200,7 +25200,11 @@
         "renamePlaceholder": "e.g. Company Pro",
         "secretsHidden": "Token is hidden — view the OS keychain to inspect.",
         "setActive": "Set active",
-        "title": "Accounts"
+        "title": "Accounts",
+        "unlink": "Unlink",
+        "unlinkConfirm": "Unlink",
+        "unlinkDialogBody": "Removes this discovered credential from Cognia's vault. Your OpenCode auth.json file on disk is left untouched.",
+        "unlinkDialogTitle": "Unlink this discovered account?"
       },
       "accountPreset": {
         "ariaLabel": "Endpoint preset for this account",
