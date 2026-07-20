@@ -45,6 +45,7 @@ const ALL_AUDIT_KINDS: AuditKind[] = [
   "circuit.closed",
   "rate_limit.tripped",
   "credential.refreshed",
+  "oauth.scope_changed",
   "adapter.started",
   "adapter.stopped",
   "adapter.error",

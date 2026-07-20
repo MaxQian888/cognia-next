@@ -22,6 +22,7 @@ import {
   connectorsKeyringGet,
   connectorsKeyringSet,
 } from "@/lib/connectors/tauri/commands"
+import { recordGrantedScopes, type ConnectedScopes } from "@/lib/connectors/oauth-scope-audit"
 
 export function buildSlackOAuthState(adapterId: string, nonce: string): string {
   return `slack:${adapterId}:${nonce}`
@@ -120,15 +121,24 @@ export async function handleSlackOAuth(
     await connectorsKeyringSet(adapterId, "userToken", body.authed_user.access_token)
   }
 
+  const now = Date.now()
   const connectedTeam: SlackConnectedTeam = {
     teamId: body.team?.id ?? "",
     teamName: body.team?.name,
     botUserId: body.bot_user_id,
     authedUserId: body.authed_user?.id,
-    connectedAtMs: Date.now(),
+    connectedAtMs: now,
   }
+  // Persist the granted scopes (and audit a change vs the prior grant) so the
+  // Connections detail can show what this adapter was authorized for.
+  const { connectedScopes } = await recordGrantedScopes({
+    adapterId,
+    raw: body.scope,
+    previous: adapter.settings.connectedScopes as ConnectedScopes | undefined,
+    now,
+  })
   await updateAdapterInstance(adapterId, {
-    settings: { ...adapter.settings, connectedTeam },
+    settings: { ...adapter.settings, connectedTeam, connectedScopes },
     credentialsRef: {
       ...adapter.credentialsRef,
       accounts: Array.from(

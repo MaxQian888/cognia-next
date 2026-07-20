@@ -56,6 +56,7 @@ describe("handleSlackOAuth", () => {
         ok: true,
         access_token: "xoxb-123",
         bot_user_id: "U_BOT",
+        scope: "chat:write,channels:read",
         team: { id: "T1", name: "Acme" },
         authed_user: { id: "U_USER", access_token: "xoxp-456" },
       }),
@@ -83,6 +84,10 @@ describe("handleSlackOAuth", () => {
       expect.objectContaining({
         settings: expect.objectContaining({
           connectedTeam: expect.objectContaining({ teamId: "T1" }),
+          // Granted scopes are normalized (split, deduped, sorted) and stored.
+          connectedScopes: expect.objectContaining({
+            scopes: ["channels:read", "chat:write"],
+          }),
         }),
       })
     )

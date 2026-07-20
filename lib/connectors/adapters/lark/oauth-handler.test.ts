@@ -162,6 +162,8 @@ describe("handleLarkOAuth — happy path", () => {
     expect(mockUpdateAdapter).toHaveBeenCalledTimes(1)
     const patch = mockUpdateAdapter.mock.calls[0][1]
     expect(patch.settings.connectedUser.openId).toBe("ou_alice")
+    // Granted scopes normalized (split, deduped, sorted) and stamped.
+    expect(patch.settings.connectedScopes.scopes).toEqual(["im:message", "offline_access"])
     expect(patch.credentialsRef.accounts).toEqual(
       expect.arrayContaining(["appSecret", "user_token", "user_refresh_token"])
     )

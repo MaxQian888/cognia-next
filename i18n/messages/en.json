@@ -19134,6 +19134,9 @@
             "im_pushed": "Notification pushed",
             "im_skipped": "Notification skipped"
           },
+          "oauth": {
+            "scope_changed": "OAuth scopes changed"
+          },
           "outbound": {
             "ai_run_enqueued": "AI reply queued",
             "enqueued": "Queued to send",

@@ -69,6 +69,12 @@ export type AuditKind =
   | "circuit.closed"
   | "rate_limit.tripped"
   | "credential.refreshed"
+  // A re-authorization granted a different OAuth scope set than the prior
+  // grant. Since OAuth completion is a non-interactive deep-link callback,
+  // this after-the-fact row is how a silent scope change surfaces. Carries
+  // `fields.added`, `fields.removed`, `fields.scopes` (the new full set).
+  // Written by `lib/connectors/oauth-scope-audit.ts:recordGrantedScopes`.
+  | "oauth.scope_changed"
   | "adapter.started"
   | "adapter.stopped"
   | "adapter.error"

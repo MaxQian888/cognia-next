@@ -19134,6 +19134,9 @@
             "im_pushed": "通知已推送",
             "im_skipped": "通知已跳过"
           },
+          "oauth": {
+            "scope_changed": "OAuth 授权范围变更"
+          },
           "outbound": {
             "ai_run_enqueued": "AI 回复已入队",
             "enqueued": "已入队待发",

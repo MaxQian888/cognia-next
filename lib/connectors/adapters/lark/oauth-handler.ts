@@ -29,6 +29,7 @@
 
 import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { connectorsKeyringGet, connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
+import { recordGrantedScopes, type ConnectedScopes } from "@/lib/connectors/oauth-scope-audit"
 import { exchangeCodeForUserAccessToken, fetchLarkUserInfo } from "./auth"
 import { clearLarkOAuthPending, getLarkOAuthPending } from "./oauth-pending"
 
@@ -167,8 +168,16 @@ export async function handleLarkOAuth(
     expiresAtMs: now + tokens.expiresInSec * 1000,
     refreshExpiresAtMs: now + tokens.refreshExpiresInSec * 1000,
   }
+  // Persist the granted scopes (and audit a change vs the prior grant) so the
+  // Connections detail can show what this adapter was authorized for.
+  const { connectedScopes } = await recordGrantedScopes({
+    adapterId,
+    raw: tokens.scope,
+    previous: adapter.settings.connectedScopes as ConnectedScopes | undefined,
+    now,
+  })
   await updateAdapterInstance(adapterId, {
-    settings: { ...adapter.settings, connectedUser },
+    settings: { ...adapter.settings, connectedUser, connectedScopes },
     credentialsRef: {
       ...adapter.credentialsRef,
       accounts: Array.from(
