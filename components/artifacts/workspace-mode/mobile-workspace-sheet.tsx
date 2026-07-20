@@ -25,7 +25,12 @@ export function MobileWorkspaceSheet() {
       <SheetContent
         side="bottom"
         showCloseButton={false}
-        className="h-[92dvh] max-h-[92dvh] gap-0 overflow-hidden rounded-t-2xl px-0 pt-0 pb-[env(safe-area-inset-bottom)]"
+        // Decelerate-in / quicker-out: a tall bottom sheet reads better easing in
+        // slightly slower (300ms) than it dismisses (200ms), and both beat the
+        // sluggish shadcn 500/300ms default. Overrides `animation-duration` (the
+        // property driving the slide) rather than `transition-duration`, and
+        // keeps `--motion-duration-scale` so motion-speed still applies.
+        className="h-[92dvh] max-h-[92dvh] gap-0 overflow-hidden rounded-t-2xl px-0 pt-0 pb-[env(safe-area-inset-bottom)] data-[state=open]:[animation-duration:calc(300ms*var(--motion-duration-scale,1))] data-[state=closed]:[animation-duration:calc(200ms*var(--motion-duration-scale,1))]"
         data-testid="mobile-workspace-sheet"
       >
         <div className="relative shrink-0 px-4 pb-2 pt-3">

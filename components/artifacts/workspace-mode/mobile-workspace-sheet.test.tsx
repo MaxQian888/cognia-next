@@ -89,3 +89,21 @@ it("closes through the shared runtime sheet state", () => {
   expect(useArtifactDockLayoutStore.getState().workspaceRevealRequest).toBeNull()
   expect(useArtifactDockLayoutStore.getState().workspaceContext).toBeNull()
 })
+
+it("uses a snappier decelerate-in/quick-out slide that honors motion-speed", () => {
+  act(() => {
+    useArtifactDockLayoutStore.getState().setDockMode("workspace")
+    useArtifactDockLayoutStore.getState().setMobileSheetOpen(true)
+  })
+  render(<MobileWorkspaceSheet />)
+
+  const content = screen.getByTestId("mobile-workspace-sheet")
+  // Overrides the slide via animation-duration (the property that drives it),
+  // scaled by --motion-duration-scale so the motion-speed setting applies.
+  expect(content.className).toContain(
+    "data-[state=open]:[animation-duration:calc(300ms*var(--motion-duration-scale,1))]"
+  )
+  expect(content.className).toContain(
+    "data-[state=closed]:[animation-duration:calc(200ms*var(--motion-duration-scale,1))]"
+  )
+})

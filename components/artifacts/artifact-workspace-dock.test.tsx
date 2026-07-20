@@ -45,12 +45,16 @@ jest.mock("@/components/ui/resizable", () => {
       children,
       id,
       defaultSize,
+      minSize,
+      maxSize,
       elementRef,
       panelRef,
     }: {
       children: React.ReactNode
       id: string
       defaultSize?: number | string
+      minSize?: number | string
+      maxSize?: number | string
       elementRef?: React.Ref<HTMLDivElement>
       panelRef?: React.Ref<MockPanelHandle>
     }) => {
@@ -73,7 +77,13 @@ jest.mock("@/components/ui/resizable", () => {
         },
       }))
       return (
-        <div ref={elementRef} data-testid={`resizable-panel-${id}`} data-size={size}>
+        <div
+          ref={elementRef}
+          data-testid={`resizable-panel-${id}`}
+          data-size={size}
+          data-min={minSize}
+          data-max={maxSize}
+        >
           {children}
         </div>
       )
@@ -219,7 +229,7 @@ describe("ArtifactWorkspaceDock", () => {
     expect(useArtifactDockLayoutStore.getState().dockSize).toBe(42)
   })
 
-  it("matches the left sidebar animation while applying dock visibility changes", async () => {
+  it("animates collapse/expand via a motion-speed-scaled inline transition", async () => {
     render(
       <ArtifactWorkspaceDock>
         <div data-testid="chat" />
@@ -231,12 +241,52 @@ describe("ArtifactWorkspaceDock", () => {
     act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
     const dockPanel = screen.getByTestId("resizable-panel-artifact-dock")
     expect(dockPanel).toHaveAttribute("data-size", "34%")
-    expect(dockPanel).toHaveClass("transition-[flex-grow]", "duration-200", "ease-in-out")
+    // Inline styles (not Tailwind classes) so the duration can consume the
+    // user's --motion-duration-scale preference.
+    expect(dockPanel.style.transitionProperty).toBe("flex-grow")
+    expect(dockPanel.style.transitionTimingFunction).toBe("ease-in-out")
+    expect(dockPanel.getAttribute("style") ?? "").toContain("--motion-duration-scale")
 
-    await waitFor(() => expect(dockPanel).not.toHaveClass("transition-[flex-grow]"))
+    // Transition is removed after the (scaled) animation so manual dragging stays immediate.
+    await waitFor(() => expect(dockPanel.style.transitionProperty).toBe(""))
 
     act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
     expect(dockPanel).toHaveAttribute("data-size", "0%")
-    expect(dockPanel).toHaveClass("transition-[flex-grow]", "duration-200", "ease-in-out")
+    expect(dockPanel.style.transitionProperty).toBe("flex-grow")
+  })
+
+  it("widens the dock bounds and reclaims chat width in workspace mode", () => {
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+
+    // Artifact mode (default): 24–50% dock, 50% chat floor.
+    expect(screen.getByTestId("resizable-panel-artifact-dock")).toHaveAttribute("data-min", "24%")
+    expect(screen.getByTestId("resizable-panel-artifact-dock")).toHaveAttribute("data-max", "50%")
+    expect(screen.getByTestId("resizable-panel-artifact-chat")).toHaveAttribute("data-min", "50%")
+
+    // Workspace mode: absolute pixel floor, wider cap, chat floor drops to 35%.
+    act(() => useArtifactDockLayoutStore.getState().setDockMode("workspace"))
+    expect(screen.getByTestId("resizable-panel-artifact-dock")).toHaveAttribute("data-min", "480px")
+    expect(screen.getByTestId("resizable-panel-artifact-dock")).toHaveAttribute("data-max", "65%")
+    expect(screen.getByTestId("resizable-panel-artifact-chat")).toHaveAttribute("data-min", "35%")
+  })
+
+  it("does not force-expand a dismissed dock — only flags it unread", () => {
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+    // User manually dismisses the dock.
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
+    expect(useArtifactDockLayoutStore.getState().userDismissed).toBe(true)
+
+    // A fresh artifact must not yank it open again.
+    act(() => useArtifactStore.setState({ activeArtifactId: "a-new" }))
+    expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
+    expect(useArtifactDockLayoutStore.getState().unreadArtifact).toBe(true)
   })
 })

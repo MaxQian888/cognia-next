@@ -160,4 +160,22 @@ describe("ArtifactPanel", () => {
     fireEvent.click(buttons[0])
     expect(useArtifactStore.getState().panelOpen).toBe(false)
   })
+
+  it("overrides the Sheet slide to a snappier pace that honors motion-speed (not the 500/300ms default)", async () => {
+    makeArtifact()
+    render(<ArtifactPanel />)
+    const content = await screen.findByTestId("artifact-panel")
+    // Overrides via animation-duration (the property that drives the slide),
+    // scaled by --motion-duration-scale so motion-speed applies.
+    expect(content.className).toContain(
+      "data-[state=open]:[animation-duration:calc(300ms*var(--motion-duration-scale,1))]"
+    )
+    expect(content.className).toContain(
+      "data-[state=closed]:[animation-duration:calc(200ms*var(--motion-duration-scale,1))]"
+    )
+    // tailwind-merge must drop the base 500ms enter so the override actually wins.
+    expect(content.className).not.toContain(
+      "data-[state=open]:[animation-duration:calc(500ms*var(--motion-duration-scale,1))]"
+    )
+  })
 })

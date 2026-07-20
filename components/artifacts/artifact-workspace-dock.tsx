@@ -25,6 +25,8 @@ import { useBreakpoint } from "@/hooks/ui"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import {
   ARTIFACT_DOCK_BOUNDS,
+  CHAT_MIN_PERCENT,
+  WORKSPACE_DOCK_BOUNDS,
   useArtifactDockLayoutStore,
 } from "@/stores/artifact/artifact-dock-layout-store"
 import { useArtifactDockShortcuts } from "@/hooks/artifacts/use-artifact-dock-shortcuts"
@@ -32,8 +34,6 @@ import { ArtifactPanel } from "./artifact-panel"
 import { ArtifactDock } from "./artifact-dock"
 import { MobileWorkspaceSheet } from "./workspace-mode/mobile-workspace-sheet"
 import { WorkspaceRevealOpener } from "./workspace-mode/workspace-reveal-opener"
-
-const CHAT_MIN = "50%"
 
 export function ArtifactWorkspaceDock({ children }: { children: ReactNode }) {
   useArtifactDockShortcuts()
@@ -85,16 +85,19 @@ function ArtifactWorkspaceDockNarrow({ children }: { children: ReactNode }) {
 function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
   const dockSize = useArtifactDockLayoutStore((s) => s.dockSize)
   const dockCollapsed = useArtifactDockLayoutStore((s) => s.dockCollapsed)
+  const dockMode = useArtifactDockLayoutStore((s) => s.dockMode)
   const layoutVersion = useArtifactDockLayoutStore((s) => s.layoutVersion)
   const setDockSize = useArtifactDockLayoutStore((s) => s.setDockSize)
-  const setDockCollapsed = useArtifactDockLayoutStore((s) => s.setDockCollapsed)
-  const setDockMode = useArtifactDockLayoutStore((s) => s.setDockMode)
+  const notifyNewArtifact = useArtifactDockLayoutStore((s) => s.notifyNewArtifact)
   const dockPanelRef = useRef<PanelImperativeHandle | null>(null)
   const dockPanelElementRef = useRef<HTMLDivElement | null>(null)
   const previousDockCollapsedRef = useRef(dockCollapsed)
 
-  // Match the conversation sidebar: animate only collapse/expand for 200ms,
+  // Match the conversation sidebar: animate only collapse/expand for ~200ms,
   // then remove the transition so manual divider dragging remains immediate.
+  // Uses inline styles (not Tailwind classes) so the duration can consume the
+  // user's `--motion-duration-scale` preference — a runtime `classList.add` of
+  // an arbitrary Tailwind class would never be JIT-compiled into the CSS.
   useEffect(() => {
     if (previousDockCollapsedRef.current === dockCollapsed) return
     previousDockCollapsedRef.current = dockCollapsed
@@ -103,34 +106,51 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
     const element = dockPanelElementRef.current
     if (!panel || !element) return
 
-    element.classList.add("transition-[flex-grow]", "duration-200", "ease-in-out")
+    const clearTransition = () => {
+      element.style.transitionProperty = ""
+      element.style.transitionDuration = ""
+      element.style.transitionTimingFunction = ""
+    }
+
+    element.style.transitionProperty = "flex-grow"
+    element.style.transitionDuration = "calc(200ms * var(--motion-duration-scale, 1))"
+    element.style.transitionTimingFunction = "ease-in-out"
     // Commit the transition style before react-resizable-panels updates flex-grow.
     void element.offsetWidth
     if (dockCollapsed) panel.collapse()
     else panel.resize(`${dockSize}%`)
 
-    const timer = window.setTimeout(() => {
-      element.classList.remove("transition-[flex-grow]", "duration-200", "ease-in-out")
-    }, 220)
+    // Scale the cleanup delay by the same motion multiplier so a slower (1.5×)
+    // preference isn't cut short — reduce-motion still collapses it via the
+    // global CSS guard, so a slight over-wait here is harmless.
+    const scale = Number(getComputedStyle(element).getPropertyValue("--motion-duration-scale")) || 1
+    const timer = window.setTimeout(clearTransition, 200 * scale + 40)
     return () => {
       window.clearTimeout(timer)
-      element.classList.remove("transition-[flex-grow]", "duration-200", "ease-in-out")
+      clearTransition()
     }
   }, [dockCollapsed, dockSize])
 
-  // Auto-expand the dock when a fresh artifact becomes active. Keyed on the id
-  // so re-collapsing while the same artifact stays active is respected (we only
-  // expand on a *new* artifact, not on every render).
+  // Auto-expand the dock when a fresh artifact becomes active — unless the user
+  // manually dismissed it, in which case `notifyNewArtifact` only flags it
+  // unread (a dot on the chat-header toggle) instead of yanking it open. Keyed
+  // on the id so it only reacts to a *new* artifact, not every render.
   const activeArtifactId = useArtifactStore((s) => s.activeArtifactId)
   const prevActiveIdRef = useRef<string | null>(activeArtifactId)
   useEffect(() => {
     const prev = prevActiveIdRef.current
     prevActiveIdRef.current = activeArtifactId
     if (activeArtifactId && activeArtifactId !== prev) {
-      setDockMode("artifact")
-      setDockCollapsed(false)
+      notifyNewArtifact()
     }
-  }, [activeArtifactId, setDockCollapsed, setDockMode])
+  }, [activeArtifactId, notifyNewArtifact])
+
+  const chatMinSize =
+    dockMode === "workspace" ? `${CHAT_MIN_PERCENT.workspace}%` : `${CHAT_MIN_PERCENT.default}%`
+  const dockMinSize =
+    dockMode === "workspace" ? WORKSPACE_DOCK_BOUNDS.minPx : `${ARTIFACT_DOCK_BOUNDS.min}%`
+  const dockMaxSize =
+    dockMode === "workspace" ? `${WORKSPACE_DOCK_BOUNDS.max}%` : `${ARTIFACT_DOCK_BOUNDS.max}%`
 
   return (
     <div
@@ -149,7 +169,7 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
           }
         }}
       >
-        <ResizablePanel id="artifact-chat" minSize={CHAT_MIN}>
+        <ResizablePanel id="artifact-chat" minSize={chatMinSize}>
           <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">{children}</div>
         </ResizablePanel>
 
@@ -160,8 +180,8 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
           panelRef={dockPanelRef}
           elementRef={dockPanelElementRef}
           defaultSize={dockCollapsed ? "0%" : `${dockSize}%`}
-          minSize={`${ARTIFACT_DOCK_BOUNDS.min}%`}
-          maxSize={`${ARTIFACT_DOCK_BOUNDS.max}%`}
+          minSize={dockMinSize}
+          maxSize={dockMaxSize}
           collapsible
           collapsedSize="0%"
         >

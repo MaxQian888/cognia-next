@@ -152,6 +152,7 @@ function WorkspaceEditorBody({
     workingDir,
     beforeOpen: showFileSurface,
   })
+  const { gotoLine } = workbench
   const editor = workbench.editor
   const taskWorkspaceEnabled = useSettingsStore(
     (state) => state.settings?.developer?.taskWorkspace === true
@@ -193,7 +194,6 @@ function WorkspaceEditorBody({
     activePath,
     dirtyCount,
     selectRoot,
-    openFile,
     closeFile,
     setActivePath,
   } = editor
@@ -226,18 +226,21 @@ function WorkspaceEditorBody({
     processedRequest.current = request.id
     if (request.kind === "review") {
       if (request.relPath) selectFile(request.relPath, false)
+      // Always target the review surface. `visibleSurface` below falls back to
+      // the file surface until git status hydrates, then flips to review once
+      // `hasReview` resolves — so a review reveal fired before git finished
+      // loading (the common terminal "view diff" case) no longer gets stuck on
+      // the file surface. Deferred to a microtask so we don't setState
+      // synchronously inside the effect body.
       queueMicrotask(() => {
-        if (processedRequest.current === request.id) {
-          setSurface(hasReview ? "review" : "file")
-        }
+        if (processedRequest.current === request.id) setSurface("review")
         clearRequest(request.id)
       })
       return
     }
-    void openFile(request.relPath).finally(() => {
-      if (processedRequest.current === request.id) setSurface("file")
-      clearRequest(request.id)
-    })
+    gotoLine(request.relPath, request.line, request.column)
+    if (processedRequest.current === request.id) setSurface("file")
+    clearRequest(request.id)
   }, [
     request,
     sessionId,
@@ -245,9 +248,8 @@ function WorkspaceEditorBody({
     rootKey,
     rootPath,
     selectRoot,
-    hasReview,
     selectFile,
-    openFile,
+    gotoLine,
     clearRequest,
   ])
 

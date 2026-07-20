@@ -188,6 +188,7 @@ jest.mock("@/components/source-control/diff-pane", () => ({
 
 import { DockWorkspace } from "./dock-workspace"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
+import { PROJECT_EDITOR_GOTO_EVENT } from "@/components/editor/project/editor-events"
 
 beforeEach(() => {
   backendAvailable = true
@@ -246,17 +247,26 @@ describe("DockWorkspace", () => {
   })
 
   it("consumes a queued file reveal after mounting the editor", async () => {
+    const gotoListener = jest.fn()
+    window.addEventListener(PROJECT_EDITOR_GOTO_EVENT, gotoListener)
     act(() => {
       useArtifactDockLayoutStore.getState().revealWorkspaceFile({
         sessionId: "split-session",
         rootPath: "/repo",
         relPath: "src/a.ts",
+        line: 7,
+        column: 2,
       })
     })
 
     render(<DockWorkspace activeSessionId="session-1" />)
 
     await waitFor(() => expect(openFile).toHaveBeenCalledWith("src/a.ts"))
+    await waitFor(() =>
+      expect(gotoListener).toHaveBeenCalledWith(
+        expect.objectContaining({ detail: { relPath: "src/a.ts", line: 7, column: 2 } })
+      )
+    )
     expect(clearReveal).toHaveBeenCalledWith(expect.stringMatching(/^workspace-reveal-/))
     expect(screen.getByTestId("workspace-file-layout")).toBeInTheDocument()
     expect(screen.getByTestId("file-tree")).toBeInTheDocument()
@@ -264,6 +274,7 @@ describe("DockWorkspace", () => {
       scopeKey: "session:split-session",
       workingDir: "/repo",
     })
+    window.removeEventListener(PROJECT_EDITOR_GOTO_EVENT, gotoListener)
   })
 
   it("opens the fixed review surface only for the bound Git repository", async () => {
@@ -360,6 +371,28 @@ describe("DockWorkspace", () => {
     expect(await screen.findByTestId("workspace-review-layout")).toBeInTheDocument()
     expect(screen.queryByTestId("workspace-file-layout")).not.toBeInTheDocument()
     expect(screen.queryByTestId("monaco")).not.toBeInTheDocument()
+  })
+
+  it("flips to review once Git hydrates for a reveal fired before it loaded", async () => {
+    // Git not yet resolved for this root — hasReview is false at reveal time,
+    // which previously locked the surface onto the file view permanently.
+    gitState = { ...gitState, repoState: undefined }
+    const { rerender } = render(<DockWorkspace activeSessionId="session-1" />)
+    act(() => {
+      useArtifactDockLayoutStore.getState().revealWorkspaceReview({
+        sessionId: "session-1",
+        rootPath: "/repo",
+        relPath: "src/a.ts",
+      })
+    })
+    // While git is unresolved the file surface shows (review needs a repo).
+    expect(await screen.findByTestId("workspace-file-layout")).toBeInTheDocument()
+
+    // Once git hydrates the surface flips to review instead of staying stuck.
+    gitState = { ...gitState, repoState: { isRepo: true }, rootDir: "/repo" }
+    rerender(<DockWorkspace activeSessionId="session-1" />)
+    expect(await screen.findByTestId("workspace-review-layout")).toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-file-layout")).not.toBeInTheDocument()
   })
 
   it("uses a single-column Changes/Diff review flow on mobile", async () => {

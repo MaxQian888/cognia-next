@@ -33,9 +33,14 @@ export function ArtifactPanel() {
 
   return (
     <Sheet open={open} onOpenChange={(open) => !open && closePanel()}>
+      {/* Snappier than the shadcn default (500/300ms): decelerate-in / quicker-out,
+          the standard motion convention for a tablet/mobile sheet. Overrides the
+          base Sheet's slide via `animation-duration` (the property that actually
+          drives it) and keeps the `--motion-duration-scale` multiplier so the
+          panel still honors the user's motion-speed preference. */}
       <SheetContent
         side={panelMode === "mobile" ? "bottom" : "right"}
-        className={`${panelWidth} p-0 transition-all duration-200 ${
+        className={`${panelWidth} p-0 data-[state=open]:[animation-duration:calc(300ms*var(--motion-duration-scale,1))] data-[state=closed]:[animation-duration:calc(200ms*var(--motion-duration-scale,1))] ${
           panelMode === "mobile" ? "pb-[env(safe-area-inset-bottom)]" : ""
         }`}
         data-testid="artifact-panel"

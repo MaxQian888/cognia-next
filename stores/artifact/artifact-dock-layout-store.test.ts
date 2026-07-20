@@ -7,6 +7,7 @@ import { act, renderHook } from "@testing-library/react"
 import {
   ARTIFACT_DOCK_BOUNDS,
   ARTIFACT_DOCK_PERSIST_DEBOUNCE_MS,
+  WORKSPACE_DOCK_BOUNDS,
   useArtifactDockLayoutStore,
 } from "./artifact-dock-layout-store"
 
@@ -48,16 +49,18 @@ describe("useArtifactDockLayoutStore", () => {
       expect(result.current.dockSize).toBe(40)
     })
 
-    it("clamps below the min and above the max", () => {
+    it("clamps below the min and above the workspace max", () => {
       const { result } = renderHook(() => useArtifactDockLayoutStore())
       act(() => {
         result.current.setDockSize(5)
       })
       expect(result.current.dockSize).toBe(ARTIFACT_DOCK_BOUNDS.min)
+      // Upper bound spans both modes so a wide workspace size survives; the
+      // per-mode artifact cap (50%) is enforced at render by the ResizablePanel.
       act(() => {
         result.current.setDockSize(99)
       })
-      expect(result.current.dockSize).toBe(ARTIFACT_DOCK_BOUNDS.max)
+      expect(result.current.dockSize).toBe(WORKSPACE_DOCK_BOUNDS.max)
     })
 
     it("falls back to default on non-finite input", () => {
@@ -112,7 +115,68 @@ describe("useArtifactDockLayoutStore", () => {
     })
   })
 
+  describe("dismiss + unread artifact", () => {
+    it("notifyNewArtifact expands and clears unread when not dismissed", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+      act(() => result.current.notifyNewArtifact())
+      expect(result.current.dockCollapsed).toBe(false)
+      expect(result.current.dockMode).toBe("artifact")
+      expect(result.current.unreadArtifact).toBe(false)
+      expect(result.current.userDismissed).toBe(false)
+    })
+
+    it("manual collapse marks dismissed so a new artifact only flags unread", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+      act(() => result.current.setDockCollapsed(false))
+      // User manually collapses the dock.
+      act(() => result.current.setDockCollapsed(true))
+      expect(result.current.userDismissed).toBe(true)
+      // A fresh artifact must NOT yank the dock open — only flag it unread.
+      act(() => result.current.notifyNewArtifact())
+      expect(result.current.dockCollapsed).toBe(true)
+      expect(result.current.unreadArtifact).toBe(true)
+    })
+
+    it("re-opening the dock clears the dismissed + unread flags", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+      act(() => result.current.setDockCollapsed(true))
+      act(() => result.current.notifyNewArtifact())
+      expect(result.current.unreadArtifact).toBe(true)
+      act(() => result.current.toggleDock())
+      expect(result.current.dockCollapsed).toBe(false)
+      expect(result.current.userDismissed).toBe(false)
+      expect(result.current.unreadArtifact).toBe(false)
+    })
+
+    it("switching dock mode clears the unread flag", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+      act(() => result.current.setDockCollapsed(true))
+      act(() => result.current.notifyNewArtifact())
+      expect(result.current.unreadArtifact).toBe(true)
+      act(() => result.current.setDockMode("workspace"))
+      expect(result.current.unreadArtifact).toBe(false)
+    })
+
+    it("never persists the runtime dismiss/unread flags", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+      act(() => result.current.setDockCollapsed(true))
+      act(() => result.current.notifyNewArtifact())
+      const persisted = JSON.parse(localStorage.getItem(PERSIST_NAME) ?? "{}")
+      expect(persisted.state).not.toHaveProperty("userDismissed")
+      expect(persisted.state).not.toHaveProperty("unreadArtifact")
+    })
+  })
+
   describe("dock mode + workspace reveal", () => {
+    it("opens the browser in the expanded right dock", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+
+      act(() => result.current.openBrowser())
+
+      expect(result.current.dockMode).toBe("browser")
+      expect(result.current.dockCollapsed).toBe(false)
+    })
+
     it("migrates a v1 snapshot to artifact mode", async () => {
       window.localStorage.setItem(
         PERSIST_NAME,
@@ -138,6 +202,8 @@ describe("useArtifactDockLayoutStore", () => {
           sessionId: "session-1",
           rootPath: "/repo",
           relPath: "src/a.ts",
+          line: 12,
+          column: 4,
         })
       })
 
@@ -149,10 +215,29 @@ describe("useArtifactDockLayoutStore", () => {
         sessionId: "session-1",
         rootPath: "/repo",
         relPath: "src/a.ts",
+        line: 12,
+        column: 4,
       })
       expect(readPersisted()?.state.dockMode).toBe("workspace")
       expect(readPersisted()?.state).not.toHaveProperty("workspaceRevealRequest")
       expect(readPersisted()?.state).not.toHaveProperty("workspaceContext")
+    })
+
+    it("restores a persisted browser mode", async () => {
+      window.localStorage.setItem(
+        PERSIST_NAME,
+        JSON.stringify({
+          state: { dockSize: 38, dockCollapsed: false, dockMode: "browser", layoutVersion: 2 },
+          version: 2,
+        })
+      )
+
+      await act(async () => {
+        await useArtifactDockLayoutStore.persist.rehydrate()
+      })
+
+      expect(useArtifactDockLayoutStore.getState().dockMode).toBe("browser")
+      expect(useArtifactDockLayoutStore.getState().dockSize).toBe(38)
     })
 
     it("queues review reveals and lets the consumer clear only the matching request", () => {

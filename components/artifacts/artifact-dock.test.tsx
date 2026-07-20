@@ -24,6 +24,9 @@ jest.mock("@/components/context-workbench/resource-workbench-chat-panel", () => 
 jest.mock("@/hooks/chat/use-resource-workbench-session", () => ({
   useResourceWorkbenchSession: () => ({ id: "artifact-resource-session" }),
 }))
+jest.mock("@/hooks/context-workbench/use-context-workbench-instance-id", () => ({
+  useContextWorkbenchInstanceId: () => "test-workbench",
+}))
 
 jest.mock("@/lib/files/workspace-backend", () => ({
   hasWorkspaceFsBackend: () => workspaceAvailable,
@@ -32,6 +35,12 @@ jest.mock("@/lib/files/workspace-backend", () => ({
 jest.mock("./workspace-mode/dock-workspace", () => ({
   DockWorkspace: ({ activeSessionId }: { activeSessionId: string | null }) => (
     <div data-testid="workspace" data-session={activeSessionId ?? ""} />
+  ),
+}))
+
+jest.mock("@/components/browser/browser-preview-pane", () => ({
+  BrowserPreviewPane: ({ sessionId }: { sessionId?: string }) => (
+    <div data-testid="browser-preview" data-session={sessionId ?? ""} />
   ),
 }))
 
@@ -51,6 +60,7 @@ jest.mock("@/stores/chat", () => ({
 import { ArtifactDock } from "./artifact-dock"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 
 beforeEach(() => {
   localStorage.clear()
@@ -59,6 +69,7 @@ beforeEach(() => {
   act(() => {
     useArtifactDockLayoutStore.getState().resetLayout()
     useArtifactStore.setState({ activeArtifactId: null, artifacts: {} })
+    useContextWorkbenchStore.setState({ layouts: {}, sessionOverrides: {} })
   })
 })
 
@@ -81,6 +92,59 @@ describe("ArtifactDock", () => {
     expect(screen.getByTestId("workspace")).toHaveAttribute("data-session", "sess-1")
     expect(screen.queryByTestId("panel-content")).not.toBeInTheDocument()
     expect(screen.queryByTestId("artifact-dock-history-toggle")).not.toBeInTheDocument()
+  })
+
+  it("opens the browser mode linked to the active chat session", () => {
+    act(() => useArtifactDockLayoutStore.getState().openBrowser())
+    render(<ArtifactDock />)
+
+    expect(screen.getByTestId("artifact-dock-mode-browser")).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
+    expect(screen.getByTestId("browser-preview")).toHaveAttribute("data-session", "sess-1")
+    expect(screen.queryByTestId("panel-content")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("workspace")).not.toBeInTheDocument()
+  })
+
+  it("preserves explicit workspace and artifact switches after leaving browser mode", () => {
+    act(() => {
+      useArtifactStore.setState({
+        activeArtifactId: "artifact-1",
+        artifacts: {
+          "artifact-1": {
+            id: "artifact-1",
+            sessionId: "sess-1",
+            messageId: "message-1",
+            type: "document",
+            title: "Document",
+            content: "content",
+            version: 1,
+            createdAt: new Date(0),
+            updatedAt: new Date(0),
+          },
+        },
+      })
+      useContextWorkbenchStore
+        .getState()
+        .navigatePanel("test-workbench::artifact:artifact-1", "preview", "narrow")
+      useArtifactDockLayoutStore.getState().openBrowser()
+    })
+    const { rerender } = render(<ArtifactDock />)
+
+    fireEvent.click(screen.getByTestId("artifact-dock-mode-workspace"))
+    expect(
+      useContextWorkbenchStore.getState().layouts["test-workbench::artifact:artifact-1"]
+        .activePanelId
+    ).toBe("workspace")
+
+    act(() => useArtifactDockLayoutStore.getState().openBrowser())
+    rerender(<ArtifactDock />)
+    fireEvent.click(screen.getByTestId("artifact-dock-mode-artifact"))
+    expect(
+      useContextWorkbenchStore.getState().layouts["test-workbench::artifact:artifact-1"]
+        .activePanelId
+    ).toBe("preview")
   })
 
   it("disables workspace without a backend but preserves a persisted workspace selection", () => {
