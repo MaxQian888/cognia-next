@@ -35,7 +35,11 @@ import type { ToolUIPart } from "ai"
 
 import { ToolBody } from "@/components/ai-elements/tool"
 import { summarizeToolCall, type ToolIconKey } from "@/lib/chat/tool-summary"
-import { describeToolResult, type ToolResultDescriptor } from "@/lib/chat/tool-result-summary"
+import {
+  describeRunningProgress,
+  describeToolResult,
+  type ToolResultDescriptor,
+} from "@/lib/chat/tool-result-summary"
 import { MotionCollapse, MotionStatusSwap } from "@/components/chat/motion/motion-reveal"
 import { cn } from "@/lib/utils"
 
@@ -109,6 +113,9 @@ export const ToolCallRow = memo(function ToolCallRow({
   // so they don't re-run when an unrelated sibling row toggles or streams.
   const summary = useMemo(() => summarizeToolCall(part), [part])
   const result = useMemo(() => describeToolResult(part), [part])
+  // Live output size while the tool is still running (Bash streams stdout);
+  // null for tools that don't stream, leaving just the pulsing status glyph.
+  const running = useMemo(() => describeRunningProgress(part), [part])
   const Icon = ICON_MAP[summary.iconKey]
   const glyph = STATUS_GLYPH[part.state]
   const statusLabel = t(`status.${glyph.key}`)
@@ -144,7 +151,11 @@ export const ToolCallRow = memo(function ToolCallRow({
         ) : (
           <span className="flex-1" />
         )}
-        {result ? <ToolResultChip descriptor={result} /> : null}
+        {result ? (
+          <ToolResultChip descriptor={result} />
+        ) : running ? (
+          <RunningProgressChip lines={running.lines} />
+        ) : null}
         <MotionStatusSwap swapKey={part.state} className="shrink-0">
           <glyph.Icon className={cn("size-3.5", glyph.className)} aria-hidden />
         </MotionStatusSwap>
@@ -197,13 +208,26 @@ const ToolResultChip = memo(function ToolResultChip({
   return (
     <span
       className={cn(
-        "max-w-[40%] shrink-0 truncate font-mono text-[11px] tabular-nums",
+        "max-w-[40%] shrink-0 truncate rounded bg-muted/40 px-1 py-0.5 font-mono text-[11px] tabular-nums",
         TONE_CLASS[descriptor.tone]
       )}
       data-testid="tool-result-chip"
       data-kind={descriptor.kind}
     >
       {label}
+    </span>
+  )
+})
+
+/** Live "N lines…" chip shown while a tool streams output (Bash stdout). */
+const RunningProgressChip = memo(function RunningProgressChip({ lines }: { lines: number }) {
+  const t = useTranslations("chat.agentFlow")
+  return (
+    <span
+      className="shrink-0 animate-pulse truncate rounded bg-muted/40 px-1 py-0.5 font-mono text-[11px] tabular-nums text-muted-foreground"
+      data-testid="tool-running-chip"
+    >
+      {t("progress.streaming", { count: lines })}
     </span>
   )
 })

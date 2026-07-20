@@ -199,6 +199,46 @@ describe("ChatHeader", () => {
     expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
   })
 
+  it("shows an unread dot + hint when an artifact arrived while the dock is dismissed", () => {
+    act(() => useArtifactDockLayoutStore.setState({ dockCollapsed: true, unreadArtifact: true }))
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+    expect(screen.getByTestId("chat-artifact-dock-unread")).toBeInTheDocument()
+    expect(screen.getByTestId("chat-artifact-dock-toggle")).toHaveAttribute(
+      "aria-label",
+      "New artifacts — open panel"
+    )
+  })
+
+  it("hides the unread dot once the dock is open", () => {
+    act(() => useArtifactDockLayoutStore.setState({ dockCollapsed: false, unreadArtifact: true }))
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+    expect(screen.queryByTestId("chat-artifact-dock-unread")).not.toBeInTheDocument()
+  })
+
+  it("opens the browser in the right dock", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+
+    fireEvent.click(screen.getByTestId("chat-browser-dock-open"))
+
+    expect(useArtifactDockLayoutStore.getState().dockMode).toBe("browser")
+    expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
+  })
+
   it("mounts the agent-flow display quick toggle", () => {
     const Wrapper = withAdapter(makeAdapter())
     render(

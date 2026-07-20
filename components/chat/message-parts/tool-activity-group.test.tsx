@@ -72,18 +72,53 @@ describe("ToolActivityGroup", () => {
     expect(tally.textContent).toContain('"name":"Grep","count":1')
   })
 
-  it("renders a natural-language action summary in simplified mode (no count/tally)", () => {
-    const entries = [entry("tool-Edit"), entry("tool-Bash"), entry("tool-Read")]
+  it("renders a TUI-style count summary in simplified mode (no tool-count label/tally)", () => {
+    const entries = [entry("tool-Read"), entry("tool-Read"), entry("tool-Grep")]
     const { getByTestId, queryByTestId } = render(
       <ToolActivityGroup entries={entries} mode="simplified" renderCard={() => null} />
     )
     const actions = getByTestId("tool-activity-group-actions")
-    // Mocked t echoes `action.<category>:{params}` — assert each verb bucket.
-    expect(actions.textContent).toContain("action.edit")
-    expect(actions.textContent).toContain("action.run")
-    expect(actions.textContent).toContain("action.read")
-    // The count label + per-type tally are standard/detailed only.
+    // Mocked t echoes `count.<category>:{params}` — assert each count bucket.
+    expect(actions.textContent).toContain('count.read:{"count":2}')
+    expect(actions.textContent).toContain('count.search:{"count":1}')
+    // The tool-call count label + per-type tally are standard/detailed only.
     expect(queryByTestId("tool-activity-group-tally")).toBeNull()
+  })
+
+  it("stays open in simplified mode while a child is still running", () => {
+    const entries = [entry("tool-Read"), entry("tool-Grep", "input-available")]
+    const { getByTestId } = render(
+      <ToolActivityGroup entries={entries} mode="simplified" renderCard={() => null} />
+    )
+    // Running → auto-open, so the rows render without a manual toggle.
+    expect(getByTestId("row-tool-Read")).toBeTruthy()
+  })
+
+  it("stays open and shows an N-failed badge when a child errored (simplified)", () => {
+    const entries = [entry("tool-Read", "output-error"), entry("tool-Grep")]
+    const { getByTestId } = render(
+      <ToolActivityGroup entries={entries} mode="simplified" renderCard={() => null} />
+    )
+    expect(getByTestId("row-tool-Read")).toBeTruthy() // auto-open on error
+    expect(getByTestId("tool-activity-group-failed").textContent).toContain('{"count":1}')
+  })
+
+  it("a manual toggle overrides the running auto-open (collapses live)", () => {
+    const entries = [entry("tool-Read"), entry("tool-Grep", "input-available")]
+    const { getByTestId, queryByTestId } = render(
+      <ToolActivityGroup entries={entries} mode="simplified" renderCard={() => null} />
+    )
+    expect(getByTestId("row-tool-Read")).toBeTruthy()
+    fireEvent.click(getByTestId("tool-activity-group-toggle"))
+    expect(queryByTestId("row-tool-Read")).toBeNull()
+  })
+
+  it("shows the N-failed badge in standard mode too", () => {
+    const entries = [entry("tool-Read", "output-error"), entry("tool-Grep", "output-error")]
+    const { getByTestId } = render(
+      <ToolActivityGroup entries={entries} mode="standard" renderCard={() => null} />
+    )
+    expect(getByTestId("tool-activity-group-failed").textContent).toContain('{"count":2}')
   })
 
   it("marks running aggregate status", () => {

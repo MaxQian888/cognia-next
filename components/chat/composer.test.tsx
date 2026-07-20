@@ -408,6 +408,25 @@ describe("Composer — mobile (Claude-style) layout", () => {
     expect(screen.queryByTestId("composer-plus-toggle")).toBeNull()
   })
 
+  it("keeps the drag overlay up when a non-file dragleave interleaves a file drag", () => {
+    mockUsePlatform.mockReturnValue("web")
+    renderComposer()
+    const dropZone = document.querySelector("[data-composer-layout]") as HTMLElement
+    const overlay = dropZone.querySelector(".border-dashed") as HTMLElement
+
+    fireEvent.dragEnter(dropZone, { dataTransfer: { types: ["Files"] } })
+    expect(overlay).toHaveClass("opacity-100")
+
+    // A non-file dragleave (e.g. selected text leaving a child) must NOT drop
+    // the file-drag counter and flicker the overlay off.
+    fireEvent.dragLeave(dropZone, { dataTransfer: { types: ["text/plain"] } })
+    expect(overlay).toHaveClass("opacity-100")
+
+    // A real file dragleave does dismiss it.
+    fireEvent.dragLeave(dropZone, { dataTransfer: { types: ["Files"] } })
+    expect(overlay).toHaveClass("opacity-0")
+  })
+
   it("renders the opt-in compact composer as one unified control surface", () => {
     mockUsePlatform.mockReturnValue("web")
     useSettingsStore.setState({
@@ -418,7 +437,11 @@ describe("Composer — mobile (Claude-style) layout", () => {
     const textarea = document.querySelector("textarea") as HTMLTextAreaElement
     const surface = textarea.closest('[data-composer-layout="compact"]')
     expect(surface).not.toBeNull()
-    expect(screen.getByTestId("composer-plus-toggle")).toBeInTheDocument()
+    // Desktop compact keeps the paperclip (the "+" menu is mobile-only): its
+    // camera/album branches both degrade to the same file picker off-mobile, so
+    // three entries would be redundant there.
+    expect(screen.queryByTestId("composer-plus-toggle")).toBeNull()
+    expect(screen.getByLabelText("Attach image")).toBeInTheDocument()
     expect(surface).toContainElement(screen.getByTestId("composer-toolbar-embedded"))
   })
 

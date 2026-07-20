@@ -148,5 +148,23 @@ export function describeToolResult(part: ToolPartLike): ToolResultDescriptor | n
     return { kind: "lines", count: countLines(text), tone: "neutral" }
   }
 
-  return null
+  // Any other completed tool that produced output text still gets a size hint —
+  // a raw line count — so *every* collapsed row shows some result体量, matching
+  // the TUI's "N lines" hint rather than leaving generic/MCP tools blank.
+  return { kind: "lines", count: countLines(text), tone: "neutral" }
+}
+
+/**
+ * Live size of a still-running tool's streamed output (stdout/stderr), for the
+ * simplified row's progress chip. Only tools whose output streams while
+ * `input-available` (e.g. Bash via the sidecar) yield a value; everything else
+ * returns null and the row keeps just its pulsing status glyph. Never throws.
+ */
+export function describeRunningProgress(
+  part: ToolPartLike
+): { lines: number; bytes: number } | null {
+  if (part.state !== "input-available") return null
+  const text = coerceResultText((part as { output?: unknown }).output)
+  if (!text) return null
+  return { lines: countLines(text), bytes: text.length }
 }

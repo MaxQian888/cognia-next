@@ -74,10 +74,16 @@ jest.mock("@/hooks/shortcuts/use-app-shortcut", () => ({
 
 jest.mock("./message-renderer", () => {
   return {
-    MessageRenderer: ({ message }: { message: { id: string; parts: { text?: string }[] } }) =>
+    MessageRenderer: ({
+      message,
+      projectRoot,
+    }: {
+      message: { id: string; parts: { text?: string }[] }
+      projectRoot?: string
+    }) =>
       ReactForMocks.createElement(
         "div",
-        { "data-test": `msg-${message.id}` },
+        { "data-test": `msg-${message.id}`, "data-project-root": projectRoot },
         message.parts.map((p, i) => ReactForMocks.createElement("span", { key: i }, p.text ?? ""))
       ),
   }
@@ -209,6 +215,19 @@ describe("MessageList", () => {
     )
     expect(screen.getByText("hello")).toBeInTheDocument()
     expect(screen.getByText("world")).toBeInTheDocument()
+  })
+
+  it("passes the bound conversation root to each message renderer", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <MessageList messages={[userMsg("m1", "hello")]} status="idle" projectRoot="/repo" />
+      </Wrapper>
+    )
+    expect(document.querySelector("[data-test='msg-m1']")).toHaveAttribute(
+      "data-project-root",
+      "/repo"
+    )
   })
 
   it("routes a hook-notice system message to HookNoticeMarker, not MessageRenderer", () => {
@@ -602,6 +621,44 @@ describe("MessageList", () => {
     })
   })
 
+  it("re-pins to the bottom on finalise when the user is parked at the bottom", async () => {
+    // Exercises the estimate→actual reconciliation on the status→idle flip: the
+    // just-finalised streaming row is re-measured and, since the user is at the
+    // bottom, the view is re-pinned on the next frame.
+    const Wrapper = withAdapter(makeAdapter())
+    const streaming: UIMessage = {
+      id: "a1",
+      role: "assistant",
+      parts: [{ type: "text", text: "..." }],
+    }
+    const { container, rerender } = render(
+      <Wrapper>
+        <MessageList messages={[userMsg("u1", "hi"), streaming]} status="streaming" />
+      </Wrapper>
+    )
+    const scrollEl = container.querySelector('[role="log"]')!
+    Object.defineProperty(scrollEl, "scrollHeight", { value: 1000, configurable: true })
+    Object.defineProperty(scrollEl, "clientHeight", { value: 200, configurable: true })
+    const box = { scrollTop: 0 }
+    Object.defineProperty(scrollEl, "scrollTop", {
+      configurable: true,
+      get: () => box.scrollTop,
+      set: (v: number) => {
+        box.scrollTop = v
+      },
+    })
+    const done: UIMessage = { id: "a1", role: "assistant", parts: [{ type: "text", text: "done" }] }
+    await act(async () => {
+      rerender(
+        <Wrapper>
+          <MessageList messages={[userMsg("u1", "hi"), done]} status="idle" />
+        </Wrapper>
+      )
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
+    })
+    expect(box.scrollTop).toBe(1000)
+  })
+
   it("shows and clicks scroll-to-bottom button when scrolled up", async () => {
     const Wrapper = withAdapter(makeAdapter())
     const { container } = render(
@@ -763,19 +820,51 @@ describe("MessageList — auto-scroll gate (composerBehavior.autoScrollOnStream)
     )
     expect(screen.getByText("hi")).toBeInTheDocument()
   })
+
+  it("skips the finalise re-pin when autoScrollOnStream is off", async () => {
+    useSettingsStore.setState({
+      settings: { composerBehavior: { autoScrollOnStream: false } } as never,
+    })
+    const Wrapper = withAdapter(makeAdapter())
+    const streaming: UIMessage = {
+      id: "a1",
+      role: "assistant",
+      parts: [{ type: "text", text: "..." }],
+    }
+    const { rerender } = render(
+      <Wrapper>
+        <MessageList messages={[userMsg("m1", "hi"), streaming]} status="streaming" />
+      </Wrapper>
+    )
+    const done: UIMessage = { id: "a1", role: "assistant", parts: [{ type: "text", text: "done" }] }
+    await act(async () => {
+      rerender(
+        <Wrapper>
+          <MessageList messages={[userMsg("m1", "hi"), done]} status="idle" />
+        </Wrapper>
+      )
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
+    })
+    // The finalise effect's `!enabled` guard short-circuits (no throw / pin).
+    expect(screen.getByText("done")).toBeInTheDocument()
+  })
 })
 
 describe("MessageList — content-resize follow (deferred markdown growth)", () => {
   const RealResizeObserver = globalThis.ResizeObserver
-  let roCallbacks: ResizeObserverCallback[]
+  let observers: { cb: ResizeObserverCallback; target: Element | null }[]
 
   beforeEach(() => {
-    roCallbacks = []
+    observers = []
     class CapturingResizeObserver {
+      private entry: { cb: ResizeObserverCallback; target: Element | null }
       constructor(cb: ResizeObserverCallback) {
-        roCallbacks.push(cb)
+        this.entry = { cb, target: null }
+        observers.push(this.entry)
       }
-      observe() {}
+      observe(el: Element) {
+        this.entry.target = el
+      }
       unobserve() {}
       disconnect() {}
     }
@@ -806,9 +895,19 @@ describe("MessageList — content-resize follow (deferred markdown growth)", () 
     }
   }
 
+  // The content observer watches the inner content box; the viewport observer
+  // watches the scroll container (role="log"). Fire them separately so a test
+  // can model deferred content growth vs a viewport resize (dock toggle / drag
+  // / window resize) independently.
+  const isViewport = (el: Element | null) =>
+    el instanceof Element && el.getAttribute("role") === "log"
   const fireResize = () =>
     act(() => {
-      roCallbacks.forEach((cb) => cb([], {} as ResizeObserver))
+      observers.filter((o) => !isViewport(o.target)).forEach((o) => o.cb([], {} as ResizeObserver))
+    })
+  const fireViewportResize = () =>
+    act(() => {
+      observers.filter((o) => isViewport(o.target)).forEach((o) => o.cb([], {} as ResizeObserver))
     })
 
   it("re-pins to the bottom when the content box grows after a streamed commit", () => {
@@ -829,7 +928,7 @@ describe("MessageList — content-resize follow (deferred markdown growth)", () 
     )
     const scrollEl = container.querySelector('[role="log"]')!
     const scroll = primeScroll(scrollEl)
-    expect(roCallbacks.length).toBeGreaterThan(0)
+    expect(observers.length).toBeGreaterThan(0)
     // Default isAtBottom = true → the observer pins to scrollHeight.
     fireResize()
     expect(scroll.scrollTop).toBe(1000)
@@ -892,6 +991,57 @@ describe("MessageList — content-resize follow (deferred markdown growth)", () 
     const scrollEl = container.querySelector('[role="log"]')!
     const scroll = primeScroll(scrollEl)
     fireResize()
+    expect(scroll.scrollTop).toBe(0)
+  })
+
+  it("re-pins to the bottom on a viewport resize while idle (dock toggle / drag / window resize)", () => {
+    // B fix: resizing the scroll viewport — dragging the artifact dock divider,
+    // toggling it with Cmd/Ctrl+J, or resizing the window — rewraps text taller,
+    // so a user parked at the bottom drifts up. The viewport observer re-pins
+    // even when idle, dropping the `active` gate the content observer keeps.
+    useSettingsStore.setState({ settings: {} as never })
+    const Wrapper = withAdapter(makeAdapter())
+    const { container } = render(
+      <Wrapper>
+        <MessageList messages={[userMsg("m1", "hi")]} status="idle" />
+      </Wrapper>
+    )
+    const scrollEl = container.querySelector('[role="log"]')!
+    const scroll = primeScroll(scrollEl)
+    fireViewportResize()
+    expect(scroll.scrollTop).toBe(1000)
+  })
+
+  it("does not re-pin on a viewport resize once the user has scrolled up", async () => {
+    useSettingsStore.setState({ settings: {} as never })
+    const Wrapper = withAdapter(makeAdapter())
+    const { container } = render(
+      <Wrapper>
+        <MessageList messages={[userMsg("m1", "hi")]} status="idle" />
+      </Wrapper>
+    )
+    const scrollEl = container.querySelector('[role="log"]')!
+    const scroll = primeScroll(scrollEl)
+    await act(async () => {
+      fireEvent.scroll(scrollEl)
+    })
+    fireViewportResize()
+    expect(scroll.scrollTop).toBe(0)
+  })
+
+  it("does not re-pin on a viewport resize when autoScrollOnStream is disabled", () => {
+    useSettingsStore.setState({
+      settings: { composerBehavior: { autoScrollOnStream: false } } as never,
+    })
+    const Wrapper = withAdapter(makeAdapter())
+    const { container } = render(
+      <Wrapper>
+        <MessageList messages={[userMsg("m1", "hi")]} status="idle" />
+      </Wrapper>
+    )
+    const scrollEl = container.querySelector('[role="log"]')!
+    const scroll = primeScroll(scrollEl)
+    fireViewportResize()
     expect(scroll.scrollTop).toBe(0)
   })
 })

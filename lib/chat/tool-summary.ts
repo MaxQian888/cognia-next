@@ -100,6 +100,31 @@ function iconFor(name: string): ToolIconKey {
 }
 
 /**
+ * Icon buckets whose bursts fold in the "simplified" agent-flow display — the
+ * TUI's `groupContextRuns` philosophy: noisy *context-gathering* (read / search
+ * / glob / list / web) collapses into one summary row, while the actual actions
+ * (edit / write / run) stay their own prominent rows. Mirrors the CLI set
+ * (`cli/src/tui/format/context-group.ts`), plus `web` per product decision.
+ */
+const CONTEXT_FOLD_ICONS: ReadonlySet<ToolIconKey> = new Set([
+  "read",
+  "search",
+  "glob",
+  "folder",
+  "web",
+])
+
+/**
+ * True for a `tool-*` part type whose tool is a context-gathering read (its icon
+ * bucket is in {@link CONTEXT_FOLD_ICONS}). Used by the simplified-mode grouping
+ * to fold only read/search bursts and leave edits/commands standing.
+ */
+export function isContextFoldTool(type: string | undefined): boolean {
+  if (typeof type !== "string" || !type.startsWith("tool-")) return false
+  return CONTEXT_FOLD_ICONS.has(iconFor(bareToolName(type)))
+}
+
+/**
  * Produce a compact, human-readable summary of a tool call. Never throws;
  * unknown shapes fall back to `{ name, target: null }`.
  */
@@ -176,44 +201,60 @@ export function tallyToolNames(parts: ToolPartLike[]): ToolTally[] {
   return order.map((key) => byKey.get(key)!)
 }
 
-/**
- * Coarse action category for a tool, used by the simplified activity-group
- * header's natural-language summary ("Edited files · Ran commands · Read
- * files"). Folds the fine-grained icon buckets into verb-shaped groups.
- */
-export type ToolActionCategory = "edit" | "run" | "read" | "search" | "web" | "other"
+/** Aggregate status for a run of tool calls, used by the activity-group header. */
+export type AggregateStatus = "running" | "error" | "complete" | "pending"
 
-const CATEGORY_BY_ICON: Record<ToolIconKey, ToolActionCategory> = {
+export function aggregateToolStatus(states: ToolPartLike["state"][]): AggregateStatus {
+  if (states.some((s) => s === "output-error")) return "error"
+  if (states.some((s) => s === "input-available" || s === "approval-requested")) return "running"
+  if (states.some((s) => s === "input-streaming")) return "pending"
+  return "complete"
+}
+
+/** How many tool calls in a run errored — drives the group header's "N failed". */
+export function countErroredTools(states: ToolPartLike["state"][]): number {
+  return states.reduce((n, s) => (s === "output-error" ? n + 1 : n), 0)
+}
+
+/**
+ * Count category for the simplified group's TUI-style summary ("3 reads · 2
+ * searches"). Finer-grained than the verb-shaped {@link ToolActionCategory}:
+ * it keeps globs and lists distinct from plain reads, mirroring the CLI's
+ * `summarizeContextGroup`.
+ */
+export type ToolCountCategory = "read" | "search" | "glob" | "list" | "web" | "other"
+
+const COUNT_BY_ICON: Record<ToolIconKey, ToolCountCategory> = {
   read: "read",
-  write: "edit",
-  edit: "edit",
-  notebook: "edit",
   search: "search",
-  glob: "read",
-  folder: "read",
-  terminal: "run",
+  glob: "glob",
+  folder: "list",
   web: "web",
+  write: "other",
+  edit: "other",
+  notebook: "other",
+  terminal: "other",
   task: "other",
   generic: "other",
 }
 
-/** One action-category bucket for the simplified group's verb-phrase summary. */
-export interface ToolActionTally {
-  category: ToolActionCategory
+/** One count bucket for the simplified group summary. */
+export interface ToolCountTally {
+  category: ToolCountCategory
   count: number
 }
 
 /**
- * Summarise a run of tool calls into ordered action categories — the input to
- * the Codex-style verb phrase ("Edited files · Ran commands"). Buckets by the
- * same icon mapping the rows use, preserving first-seen order. The component
- * maps each `category` (+ count) to a pluralised i18n label.
+ * Tally a run of context tool calls into ordered count categories — the input
+ * to the TUI-style "3 reads · 2 searches" summary. Buckets by the same icon
+ * mapping the rows use, preserving first-seen order. The component maps each
+ * `category` (+ count) to a pluralised i18n label.
  */
-export function summarizeToolActivity(parts: ToolPartLike[]): ToolActionTally[] {
-  const order: ToolActionCategory[] = []
-  const byCategory = new Map<ToolActionCategory, ToolActionTally>()
+export function summarizeContextCounts(parts: ToolPartLike[]): ToolCountTally[] {
+  const order: ToolCountCategory[] = []
+  const byCategory = new Map<ToolCountCategory, ToolCountTally>()
   for (const part of parts) {
-    const category = CATEGORY_BY_ICON[iconFor(normalizeToolName(part))]
+    const category = COUNT_BY_ICON[iconFor(normalizeToolName(part))]
     const existing = byCategory.get(category)
     if (existing) {
       existing.count += 1
@@ -223,14 +264,4 @@ export function summarizeToolActivity(parts: ToolPartLike[]): ToolActionTally[] 
     }
   }
   return order.map((category) => byCategory.get(category)!)
-}
-
-/** Aggregate status for a run of tool calls, used by the activity-group header. */
-export type AggregateStatus = "running" | "error" | "complete" | "pending"
-
-export function aggregateToolStatus(states: ToolPartLike["state"][]): AggregateStatus {
-  if (states.some((s) => s === "output-error")) return "error"
-  if (states.some((s) => s === "input-available" || s === "approval-requested")) return "running"
-  if (states.some((s) => s === "input-streaming")) return "pending"
-  return "complete"
 }

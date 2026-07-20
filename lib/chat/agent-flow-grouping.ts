@@ -3,10 +3,18 @@
  * the agent-flow display: runs of ≥2 consecutive tool calls collapse into one
  * "activity group", everything else stays a single segment.
  *
+ * Grouping is *mode-aware*. In `standard` / `detailed` every tool (bar
+ * TodoWrite) folds. In `simplified` only context-gathering reads fold (the
+ * TUI's `groupContextRuns` philosophy) — see {@link isContextFoldTool} — so
+ * edits, writes and commands stand as their own prominent rows.
+ *
  * Sub-agent parts are transparent to grouping — they render once as a dispatch
  * tree at the message level, so they neither join nor break a tool run.
  * `TodoWrite` is excluded because it renders as a structured plan, not a card.
  */
+
+import { isContextFoldTool } from "./tool-summary"
+import type { AgentFlowMode } from "@/types/appearance"
 
 export const MIN_GROUP_SIZE = 2
 
@@ -69,7 +77,15 @@ export function isToolOnlyFlow<P extends { type?: string }>(parts: P[]): boolean
   return sawTool
 }
 
-export function groupAgentParts<P extends { type?: string }>(parts: P[]): AgentFlowSegment<P>[] {
+export function groupAgentParts<P extends { type?: string }>(
+  parts: P[],
+  mode: AgentFlowMode = "standard"
+): AgentFlowSegment<P>[] {
+  // Simplified mode adopts the TUI's selective folding: only context-gathering
+  // reads (read/search/glob/list/web) fold; every other tool breaks the run and
+  // stands alone. Standard/detailed keep the "any tool folds" behaviour.
+  const isGroupable = mode === "simplified" ? isContextFoldTool : isGroupableToolType
+
   const segments: AgentFlowSegment<P>[] = []
   let run: PartEntry<P>[] = []
 
@@ -84,7 +100,7 @@ export function groupAgentParts<P extends { type?: string }>(parts: P[]): AgentF
 
   parts.forEach((part, index) => {
     if (isTransparentPart(part)) return
-    if (isGroupableToolType(part?.type)) {
+    if (isGroupable(part?.type)) {
       run.push({ part, index })
       return
     }

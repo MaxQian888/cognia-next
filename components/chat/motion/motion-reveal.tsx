@@ -17,7 +17,7 @@
  */
 
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
-import type { ReactNode } from "react"
+import type { CSSProperties, ReactNode } from "react"
 
 import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_MOTION } from "@/types/appearance"
@@ -86,13 +86,14 @@ export interface MotionCollapseProps {
 }
 
 /**
- * Unified expand/collapse for the agent-flow surfaces — a gentle spring on
- * height + opacity so the tool rows, the activity group, and the sub-agent
- * rows all reveal their bodies the same way. Collapses to a plain show/hide
- * when motion is reduced (OS hint or user opt-in).
+ * Unified expand/collapse for the agent-flow surfaces — the tool rows, the
+ * activity group, and the sub-agent rows all reveal their bodies the same way.
+ * Collapses to a plain show/hide when motion is reduced (OS hint or user opt-in).
  *
- * The spring is tuned for low overshoot (height clipping under `overflow:
- * hidden` would otherwise flash), giving a crisp-but-soft settle.
+ * Height animates on a *monotonic* eased tween rather than a spring: a spring
+ * overshoots `auto`, and under `overflow: hidden` that overshoot clips the last
+ * rows of content for a frame. A 0→auto tween never exceeds the final height, so
+ * the body is never clipped. Opacity keeps its quick ease-out.
  */
 export function MotionCollapse({ open, children, className }: MotionCollapseProps) {
   const { reduce, speed } = useFlowMotion()
@@ -111,9 +112,7 @@ export function MotionCollapse({ open, children, className }: MotionCollapseProp
           animate={{ height: "auto", opacity: 1 }}
           exit={{ height: 0, opacity: 0 }}
           transition={{
-            type: "spring",
-            stiffness: 340,
-            damping: 34 / Math.max(speed, 0.25),
+            height: { duration: 0.2 * speed, ease: [0.2, 0.8, 0.2, 1] },
             opacity: { duration: 0.16 * speed, ease: "easeOut" },
           }}
           style={{ overflow: "hidden" }}
@@ -157,6 +156,78 @@ export function MotionStatusSwap({ swapKey, children, className }: MotionStatusS
       >
         {children}
       </motion.span>
+    </AnimatePresence>
+  )
+}
+
+/** Entry/exit offset for {@link MotionPopover}. */
+export interface MotionPopoverOffset {
+  opacity?: number
+  scale?: number
+  x?: number | string
+  y?: number | string
+}
+
+export interface MotionPopoverProps {
+  /** When true the overlay is shown (and animates in); false animates it out. */
+  open: boolean
+  children: ReactNode
+  className?: string
+  /** Positioning styles (left/top/etc.) are forwarded to the animated wrapper. */
+  style?: CSSProperties
+  /**
+   * Where the overlay starts from / exits to. Defaults to a subtle pop
+   * (fade + slight scale + small downward nudge). Pass e.g.
+   * `{ opacity: 0, x: "100%" }` for a slide-in-from-right rail.
+   */
+  from?: MotionPopoverOffset
+}
+
+/**
+ * Enter/exit transition for an explicitly-triggered floating overlay — the
+ * terminal command menu, quick-fix, find box, and history rail. Unlike
+ * {@link MotionCollapse} (which animates height) this fades + transforms, so a
+ * positioned popover pops in place instead of appearing instantly.
+ *
+ * `AnimatePresence` keeps the outgoing node mounted through its exit, so the
+ * parent can toggle `open` while always rendering `<MotionPopover>`. Only
+ * `opacity`/`transform` animate (no layout, no backdrop-filter) to stay on the
+ * compositor. Collapses to a plain show/hide when motion is reduced (OS hint or
+ * user opt-in) and scales duration by `motion.speed`.
+ *
+ * Deliberately NOT used for the high-frequency, follow-the-cursor overlays
+ * (ghost text, completion popup, sticky scroll, command decorations): those
+ * open/close on every keystroke or scroll frame, where an entrance animation
+ * would flicker rather than polish.
+ */
+export function MotionPopover({ open, children, className, style, from }: MotionPopoverProps) {
+  const { reduce, speed } = useFlowMotion()
+
+  if (reduce) {
+    return open ? (
+      <div className={className} style={style}>
+        {children}
+      </div>
+    ) : null
+  }
+
+  const offset: MotionPopoverOffset = { opacity: 0, scale: 0.96, y: 4, ...from }
+
+  return (
+    <AnimatePresence initial={false}>
+      {open ? (
+        <motion.div
+          key="popover"
+          className={className}
+          style={style}
+          initial={offset}
+          animate={{ opacity: 1, scale: 1, x: 0, y: 0 }}
+          exit={offset}
+          transition={{ duration: 0.15 * speed, ease: "easeOut" }}
+        >
+          {children}
+        </motion.div>
+      ) : null}
     </AnimatePresence>
   )
 }

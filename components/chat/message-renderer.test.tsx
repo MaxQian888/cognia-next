@@ -78,8 +78,12 @@ jest.mock("@/components/ai-elements/error-trace", () => ({
 }))
 
 jest.mock("./markdown-renderer", () => ({
-  MarkdownRenderer: ({ content }: { content: string }) =>
-    ReactForMocks.createElement("div", { "data-test": "markdown" }, content),
+  MarkdownRenderer: ({ content, projectRoot }: { content: string; projectRoot?: string }) =>
+    ReactForMocks.createElement(
+      "div",
+      { "data-test": "markdown", "data-project-root": projectRoot },
+      content
+    ),
 }))
 
 jest.mock("@/components/chat/message-parts/a2ui-part", () => ({
@@ -193,7 +197,7 @@ jest.mock("@/components/chat/message-parts/tool-call-row", () => ({
     ReactForMocks.createElement("div", { "data-test": "tool-call-row", "data-type": part.type }),
 }))
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type { UIMessage } from "ai"
 import { MessageRenderer } from "./message-renderer"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -220,6 +224,14 @@ describe("text parts", () => {
     render(<MessageRenderer message={assistantMsg()} />)
     expect(document.querySelector("[data-test='markdown']")).toBeTruthy()
     expect(screen.getByText("Hello")).toBeInTheDocument()
+  })
+
+  it("passes the conversation project root to completed Markdown", () => {
+    render(<MessageRenderer message={assistantMsg()} projectRoot="/repo" />)
+    expect(document.querySelector("[data-test='markdown']")).toHaveAttribute(
+      "data-project-root",
+      "/repo"
+    )
   })
 
   it("renders streaming text via MessageResponse (not MarkdownRenderer)", () => {
@@ -318,6 +330,78 @@ describe("file parts", () => {
     // No link and no img rendered
     expect(container.querySelector("a")).toBeNull()
     expect(container.querySelector("img")).toBeNull()
+  })
+
+  it("copies an image-only message as rich clipboard content", async () => {
+    const write = jest.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { write, writeText: jest.fn() },
+    })
+    Object.defineProperty(globalThis, "ClipboardItem", {
+      configurable: true,
+      value: class {
+        constructor(readonly entries: Record<string, Blob>) {}
+      },
+    })
+    const msg: UIMessage = {
+      id: "copy-images",
+      role: "user",
+      parts: [
+        { type: "file", url: "data:image/png;base64,YQ==", mediaType: "image/png" },
+        { type: "file", url: "data:image/png;base64,Yg==", mediaType: "image/png" },
+      ],
+    }
+
+    render(<MessageRenderer message={msg} />)
+    fireEvent.click(screen.getByLabelText("copyTooltip"))
+
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(1))
+    const item = write.mock.calls[0][0][0] as { entries: Record<string, Blob> }
+    expect(Object.keys(item.entries)).toEqual(["text/plain", "text/html"])
+  })
+
+  it("shares every inline image as a native file", async () => {
+    const share = jest.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "share", { configurable: true, value: share })
+    Object.defineProperty(navigator, "canShare", {
+      configurable: true,
+      value: ({ files }: ShareData) => Boolean(files?.length),
+    })
+    const msg: UIMessage = {
+      id: "share-images",
+      role: "user",
+      parts: [
+        { type: "text", text: "Two images" },
+        {
+          type: "file",
+          url: "data:image/png;base64,YQ==",
+          mediaType: "image/png",
+          filename: "one.png",
+        },
+        {
+          type: "file",
+          url: "data:image/png;base64,Yg==",
+          mediaType: "image/png",
+          filename: "two.png",
+        },
+        {
+          type: "source-url",
+          sourceId: "source-1",
+          url: "https://example.com/source",
+          title: "Source",
+        },
+      ],
+    }
+
+    render(<MessageRenderer message={msg} />)
+    fireEvent.click(screen.getByLabelText("shareTooltip"))
+
+    await waitFor(() => expect(share).toHaveBeenCalledTimes(1))
+    expect(share.mock.calls[0][0]).toMatchObject({
+      text: "Two images\n\none.png\n\ntwo.png\n\n[Source](https://example.com/source)",
+    })
+    expect(share.mock.calls[0][0].files).toHaveLength(2)
   })
 })
 

@@ -94,6 +94,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { ReadAloudButton } from "./read-aloud-button"
 import { TodoList } from "./todo-list"
 import { useCopy } from "@/hooks/ui/use-copy"
+import { buildMessageShareContent, writeMessageToClipboard } from "@/lib/chat/message-share"
 import { loggers } from "@cognia/logging"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { MessagePluginMenu } from "@/components/chat/message-plugin-menu"
@@ -105,6 +106,7 @@ import {
 } from "@/lib/plugin/api/message-part-renderers"
 import { useSyncExternalStore } from "react"
 import { PerfBoundary } from "@/lib/perf"
+import { useAgentFileAutoFollow } from "@/hooks/agent/use-agent-file-auto-follow"
 
 interface Props {
   message: UIMessage
@@ -122,6 +124,8 @@ interface Props {
   onCopy?: () => void
   onRegenerate?: () => void | Promise<void>
   onEditResend?: (messageId: string, newText: string) => void | Promise<void>
+  /** Root used to resolve project-relative links in assistant Markdown. */
+  projectRoot?: string | null
 }
 
 function usePluginPartRegistryRevision(): number {
@@ -179,7 +183,9 @@ function MessageRendererInner({
   onCopy,
   onRegenerate,
   onEditResend,
+  projectRoot,
 }: Props) {
+  useAgentFileAutoFollow({ parts: message.parts, isStreaming, projectRoot })
   // Re-render when a plugin registers / unregisters a message-part renderer.
   usePluginPartRegistryRevision()
   const t = useTranslations("chat.message")
@@ -191,6 +197,7 @@ function MessageRendererInner({
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState("")
   const [shared, setShared] = useState(false)
+  const [richCopied, setRichCopied] = useState(false)
   const [branchOpen, setBranchOpen] = useState(false)
   const [cardOpen, setCardOpen] = useState(false)
   // Stable "now" for messages that carry no createdAt (impure Date read kept
@@ -218,10 +225,14 @@ function MessageRendererInner({
   // Segment the parts into tool-activity groups + standalone parts. Memoized on
   // `message.parts` so it doesn't re-run on every token or on unrelated local
   // state (editing/draft/shared/branchOpen) before the memoized children skip.
-  const segments = useMemo(() => groupAgentParts(message.parts), [message.parts])
+  const segments = useMemo(
+    () => groupAgentParts(message.parts, agentFlowMode),
+    [message.parts, agentFlowMode]
+  )
 
   // Plain text of the message, for the "share as card" action + gate.
   const messageText = useMemo(() => extractText(message), [message])
+  const messageShareContent = useMemo(() => buildMessageShareContent(message), [message])
 
   // A turn that is nothing but tool calls has no prose to copy, quote, read
   // aloud or card, so it renders no action bar. The bar is `opacity-0` until
@@ -273,20 +284,38 @@ function MessageRendererInner({
   }
 
   const handleCopy = useCallback(async () => {
-    const text = extractText(message)
-    if (!text) return
-    const ok = await copy(text)
+    if (!messageShareContent.hasContent) return
+    const needsRichClipboard = messageShareContent.plainText !== messageText
+    const ok = needsRichClipboard
+      ? await writeMessageToClipboard(messageShareContent)
+      : await copy(messageShareContent.plainText)
+    if (ok && needsRichClipboard) {
+      setRichCopied(true)
+      window.setTimeout(() => setRichCopied(false), 1500)
+    }
     if (ok) onCopy?.()
-  }, [message, copy, onCopy])
+  }, [messageShareContent, messageText, copy, onCopy])
 
   const handleShare = useCallback(async () => {
-    const text = extractText(message)
-    if (!text) return
+    if (!messageShareContent.hasContent) return
     try {
       if (typeof navigator.share === "function") {
-        await navigator.share({ text })
+        const files = messageShareContent.shareFiles
+        if (files.length > 0 && navigator.canShare?.({ files })) {
+          await navigator.share({
+            ...(messageShareContent.nativeShareText.trim()
+              ? { text: messageShareContent.nativeShareText }
+              : {}),
+            files,
+          })
+        } else if (files.length === 0) {
+          await navigator.share({ text: messageShareContent.plainText })
+        } else if (!(await writeMessageToClipboard(messageShareContent))) {
+          throw new Error("No compatible native share or clipboard target")
+        }
       } else {
-        await navigator.clipboard.writeText(text)
+        const ok = await writeMessageToClipboard(messageShareContent)
+        if (!ok) throw new Error("Clipboard unavailable")
       }
       setShared(true)
       window.setTimeout(() => setShared(false), 1500)
@@ -299,7 +328,7 @@ function MessageRendererInner({
         })
       }
     }
-  }, [message])
+  }, [messageShareContent])
 
   const usage = (message as { metadata?: { usage?: UsageInfo } }).metadata?.usage
 
@@ -433,6 +462,7 @@ function MessageRendererInner({
                   sessionId={branchSessionId ?? undefined}
                   mode={agentFlowMode}
                   t={t}
+                  projectRoot={projectRoot}
                 />
               )
               // Give tool cards/rows and dispatch banners a one-shot entrance;
@@ -517,11 +547,15 @@ function MessageRendererInner({
             )}
 
             <MessageAction
-              tooltip={copied ? t("copyDone") : t("copyTooltip")}
+              tooltip={copied || richCopied ? t("copyDone") : t("copyTooltip")}
               label={t("copyLabel")}
               onClick={handleCopy}
             >
-              {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+              {copied || richCopied ? (
+                <CheckIcon className="size-3.5" />
+              ) : (
+                <CopyIcon className="size-3.5" />
+              )}
             </MessageAction>
 
             <MessageAction
@@ -532,7 +566,7 @@ function MessageRendererInner({
               <Share2Icon className="size-3.5" />
             </MessageAction>
 
-            {messageText.trim() && (
+            {messageShareContent.hasContent && (
               <MessageAction
                 tooltip={t("shareCardTooltip")}
                 label={t("shareCardLabel")}
@@ -610,7 +644,7 @@ function MessageRendererInner({
             onOpenChange={setCardOpen}
             role={message.role}
             authorName={speaker?.name}
-            text={messageText}
+            text={messageShareContent.plainText}
             model={(message as { metadata?: { model?: string } }).metadata?.model}
             timestamp={((): Date => {
               const createdAt = (message as { metadata?: { createdAt?: number } }).metadata
@@ -634,7 +668,8 @@ export const MessageRenderer = memo(
     prev.directCharacter === next.directCharacter &&
     prev.onCopy === next.onCopy &&
     prev.onRegenerate === next.onRegenerate &&
-    prev.onEditResend === next.onEditResend
+    prev.onEditResend === next.onEditResend &&
+    prev.projectRoot === next.projectRoot
 )
 
 MessageRenderer.displayName = "MessageRenderer"
@@ -701,6 +736,7 @@ const MessagePart = memo(function MessagePart({
   sessionId,
   mode,
   t,
+  projectRoot,
 }: {
   part: UIMessage["parts"][number]
   partKey: string
@@ -711,6 +747,7 @@ const MessagePart = memo(function MessagePart({
   sessionId: string | undefined
   mode: AgentFlowMode
   t: ReturnType<typeof useTranslations>
+  projectRoot?: string | null
 }) {
   return renderPart(
     part,
@@ -721,7 +758,8 @@ const MessagePart = memo(function MessagePart({
     messageId,
     sessionId,
     mode,
-    t
+    t,
+    projectRoot
   )
 })
 MessagePart.displayName = "MessagePart"
@@ -851,7 +889,8 @@ function renderPart(
   messageId: string | undefined,
   sessionId: string | undefined,
   mode: AgentFlowMode,
-  t: ReturnType<typeof useTranslations>
+  t: ReturnType<typeof useTranslations>,
+  projectRoot?: string | null
 ) {
   const type = (part as { type?: string }).type
   if (!type) return null
@@ -927,6 +966,7 @@ function renderPart(
         content={text}
         messageId={messageId}
         isStreaming={isStreaming}
+        projectRoot={projectRoot}
         className="size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
       />
     )

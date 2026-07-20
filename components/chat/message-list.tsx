@@ -67,6 +67,8 @@ interface Props {
   onCopy?: () => void
   onRegenerate?: () => void | Promise<void>
   onEditResend?: (messageId: string, newText: string) => void | Promise<void>
+  /** Root used to resolve project-relative links inside rendered messages. */
+  projectRoot?: string | null
 }
 
 export function MessageList({
@@ -77,6 +79,7 @@ export function MessageList({
   onCopy,
   onRegenerate,
   onEditResend,
+  projectRoot,
 }: Props) {
   const lastIndex = messages.length - 1
   const sessionId = useChatStore((s) => s.activeSessionId)
@@ -229,9 +232,22 @@ export function MessageList({
   // use-claude-chat's turn seal), so this re-measure lands at transition
   // priority.
   useEffect(() => {
-    if (status === "idle") {
-      rowVirtualizer.measure()
-    }
+    if (status !== "idle") return
+    rowVirtualizer.measure()
+    // Reconcile the just-finalised streaming row's estimate→actual height. That
+    // row was sized by `estimateSize` alone (it carries no measureElement ref),
+    // so if the projection undershot the real height, re-measuring here shifts
+    // the total size and a user pinned at the bottom is left drifted up. Re-pin
+    // on the next frame — after the measure lands — when still stuck to bottom.
+    // Skips when the user scrolled away or auto-scroll is off; setting scrollTop
+    // never resizes content, so this can't loop.
+    const { enabled, atBottom } = stickRef.current
+    if (!enabled || !atBottom) return
+    const raf = requestAnimationFrame(() => {
+      const el = scrollParentRef.current
+      if (el) el.scrollTop = el.scrollHeight
+    })
+    return () => cancelAnimationFrame(raf)
   }, [status, rowVirtualizer])
 
   // Switching sessions invalidates every cached row height — left over
@@ -290,6 +306,27 @@ export function MessageList({
       if (el) el.scrollTop = el.scrollHeight
     })
     ro.observe(content)
+    return () => ro.disconnect()
+  }, [])
+
+  // Viewport-resize follow. The observer above watches the *content* box (grows
+  // when messages render); this one watches the *scroll viewport* box, which
+  // changes when the container itself is resized — dragging the artifact dock
+  // divider, toggling it with Cmd/Ctrl+J, or resizing the window. Narrowing the
+  // viewport rewraps text taller, so a user parked at the bottom drifts up
+  // unless we re-pin. Unlike the content observer this drops the `active`
+  // (streaming) gate: staying pinned across a layout change is a scroll-
+  // stability concern, not a streaming one. Setting scrollTop never resizes the
+  // viewport, so this can't loop.
+  useEffect(() => {
+    const el = scrollParentRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => {
+      const { enabled, atBottom } = stickRef.current
+      if (!enabled || !atBottom) return
+      el.scrollTop = el.scrollHeight
+    })
+    ro.observe(el)
     return () => ro.disconnect()
   }, [])
 
@@ -383,6 +420,7 @@ export function MessageList({
           onCopy={onCopy}
           onRegenerate={onRegenerate}
           onEditResend={onEditResend}
+          projectRoot={projectRoot}
         />
       </LongPress>
     ) : (
@@ -394,6 +432,7 @@ export function MessageList({
         onCopy={onCopy}
         onRegenerate={onRegenerate}
         onEditResend={onEditResend}
+        projectRoot={projectRoot}
       />
     )
 
@@ -401,12 +440,14 @@ export function MessageList({
     <PerfBoundary id="chat:list">
       <div className="relative flex flex-1 flex-col overflow-hidden">
         {searchOpen ? (
-          <MessageSearchBar
-            messages={messages}
-            onJump={jumpToHit}
-            onActiveHitChange={setActiveHitId}
-            onClose={closeSearch}
-          />
+          <div data-computer-use-pip-obstacle>
+            <MessageSearchBar
+              messages={messages}
+              onJump={jumpToHit}
+              onActiveHitChange={setActiveHitId}
+              onClose={closeSearch}
+            />
+          </div>
         ) : null}
         {showLongPressHint ? (
           <div

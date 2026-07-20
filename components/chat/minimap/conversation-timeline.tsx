@@ -200,6 +200,7 @@ export const ConversationTimeline = memo(function ConversationTimeline({
       className="absolute right-0 top-0 bottom-0 z-20 hidden lg:flex"
       onMouseLeave={() => setScrub(null)}
       data-testid="conversation-timeline"
+      data-computer-use-pip-obstacle
     >
       {expanded ? (
         <div className="flex h-full w-64 flex-col border-l bg-background/95 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/80">

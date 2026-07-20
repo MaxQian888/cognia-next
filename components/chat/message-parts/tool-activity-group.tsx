@@ -31,7 +31,8 @@ import { ToolCallRow } from "@/components/chat/message-parts/tool-call-row"
 import { MotionCollapse, MotionStatusSwap } from "@/components/chat/motion/motion-reveal"
 import {
   aggregateToolStatus,
-  summarizeToolActivity,
+  countErroredTools,
+  summarizeContextCounts,
   tallyToolNames,
   type AggregateStatus,
 } from "@/lib/chat/tool-summary"
@@ -61,8 +62,6 @@ export interface ToolActivityGroupProps {
 export function ToolActivityGroup({ entries, mode, renderCard }: ToolActivityGroupProps) {
   const t = useTranslations("chat.agentFlow")
 
-  const defaultOpen = mode !== "simplified"
-  const [groupOpen, setGroupOpen] = useState(defaultOpen)
   // Simplified: per-row open set. Standard/detailed: remount generation + value.
   const [expandedRows, setExpandedRows] = useState<Set<number>>(() => new Set())
   const [cardsOpen, setCardsOpen] = useState<boolean | null>(null)
@@ -70,10 +69,19 @@ export function ToolActivityGroup({ entries, mode, renderCard }: ToolActivityGro
 
   const status = useMemo(() => aggregateToolStatus(entries.map((e) => e.part.state)), [entries])
   const glyph = AGG_GLYPH[status]
+  const errorCount = useMemo(() => countErroredTools(entries.map((e) => e.part.state)), [entries])
   // Type-count preview ("read ×3 · grep ×1 · edit ×1") for the collapsed header
-  // (standard/detailed). Simplified swaps in a Codex-style verb phrase instead.
+  // (standard/detailed). Simplified swaps in a TUI-style count summary instead.
   const tally = useMemo(() => tallyToolNames(entries.map((e) => e.part)), [entries])
-  const actions = useMemo(() => summarizeToolActivity(entries.map((e) => e.part)), [entries])
+  const counts = useMemo(() => summarizeContextCounts(entries.map((e) => e.part)), [entries])
+
+  // Open state follows the run's status until the user takes over: a simplified
+  // group opens while any child is still running or has errored (so live
+  // progress / failures aren't hidden) and auto-collapses once every child has
+  // settled error-free. A manual toggle pins `override` and wins thereafter.
+  const autoOpen = mode !== "simplified" || status === "running" || status === "error"
+  const [override, setOverride] = useState<boolean | null>(null)
+  const groupOpen = override ?? autoOpen
 
   const allRowsExpanded = expandedRows.size === entries.length && entries.length > 0
   const expandAllActive = mode === "simplified" ? allRowsExpanded : cardsOpen === true
@@ -140,7 +148,7 @@ export function ToolActivityGroup({ entries, mode, renderCard }: ToolActivityGro
       <div className={cn("flex items-center gap-2", simplified ? "px-1.5 py-1" : "p-2.5")}>
         <button
           type="button"
-          onClick={() => setGroupOpen((v) => !v)}
+          onClick={() => setOverride(!groupOpen)}
           aria-expanded={groupOpen}
           className="flex min-w-0 flex-1 items-center gap-2 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
           data-testid="tool-activity-group-toggle"
@@ -153,16 +161,16 @@ export function ToolActivityGroup({ entries, mode, renderCard }: ToolActivityGro
           />
           <LayersIcon className="size-4 shrink-0 text-muted-foreground" />
           {simplified ? (
-            // Codex-style natural-language verb phrase ("Edited files · Ran
-            // commands · Read files") — the compact summary of the whole run.
+            // TUI-style count summary ("3 reads · 2 searches") — the compact
+            // tally of the whole context-read burst.
             <span
               className="min-w-0 flex-1 truncate text-sm font-medium text-muted-foreground"
               data-testid="tool-activity-group-actions"
             >
-              {actions.map((bucket, i) => (
+              {counts.map((bucket, i) => (
                 <span key={bucket.category}>
                   {i > 0 ? <span aria-hidden> · </span> : null}
-                  {t(`action.${bucket.category}`, { count: bucket.count })}
+                  {t(`count.${bucket.category}`, { count: bucket.count })}
                 </span>
               ))}
             </span>
@@ -185,6 +193,14 @@ export function ToolActivityGroup({ entries, mode, renderCard }: ToolActivityGro
               </span>
             </>
           )}
+          {errorCount > 0 ? (
+            <span
+              className="shrink-0 text-xs font-medium text-red-600 dark:text-red-500"
+              data-testid="tool-activity-group-failed"
+            >
+              {t("group.failed", { count: errorCount })}
+            </span>
+          ) : null}
           <MotionStatusSwap swapKey={status} className="shrink-0">
             <glyph.Icon className={cn("size-4", glyph.className)} aria-hidden />
           </MotionStatusSwap>

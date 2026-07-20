@@ -115,6 +115,48 @@ describe("groupAgentParts", () => {
   })
 })
 
+describe("groupAgentParts — simplified mode (TUI selective folding)", () => {
+  it("folds a context-read burst but leaves an edit standing", () => {
+    const parts: P[] = [
+      { type: "tool-Read" },
+      { type: "tool-Grep" },
+      { type: "tool-Edit" },
+      { type: "tool-Glob" },
+      { type: "tool-Read" },
+    ]
+    const segs = groupAgentParts(parts, "simplified")
+    // [group(Read,Grep), single(Edit), group(Glob,Read)]
+    expect(segs.map((s) => s.kind)).toEqual(["group", "single", "group"])
+    if (segs[0].kind === "group") expect(segs[0].entries.map((e) => e.index)).toEqual([0, 1])
+    if (segs[2].kind === "group") expect(segs[2].entries.map((e) => e.index)).toEqual([3, 4])
+  })
+
+  it("keeps a lone context tool as a single (a burst needs ≥2)", () => {
+    const segs = groupAgentParts([{ type: "tool-Read" }, { type: "tool-Bash" }], "simplified")
+    expect(segs.map((s) => s.kind)).toEqual(["single", "single"])
+  })
+
+  it("does not fold consecutive action tools (edit/bash/write)", () => {
+    const parts: P[] = [{ type: "tool-Edit" }, { type: "tool-Write" }, { type: "tool-Bash" }]
+    const segs = groupAgentParts(parts, "simplified")
+    expect(segs.map((s) => s.kind)).toEqual(["single", "single", "single"])
+  })
+
+  it("folds web fetches together with reads", () => {
+    const parts: P[] = [{ type: "tool-WebFetch" }, { type: "tool-WebSearch" }]
+    const segs = groupAgentParts(parts, "simplified")
+    expect(segs).toHaveLength(1)
+    expect(segs[0].kind).toBe("group")
+  })
+
+  it("standard mode still folds actions (mode defaults preserve old behaviour)", () => {
+    const parts: P[] = [{ type: "tool-Edit" }, { type: "tool-Bash" }]
+    expect(groupAgentParts(parts).map((s) => s.kind)).toEqual(["group"])
+    expect(groupAgentParts(parts, "standard").map((s) => s.kind)).toEqual(["group"])
+    expect(groupAgentParts(parts, "detailed").map((s) => s.kind)).toEqual(["group"])
+  })
+})
+
 describe("isTransparentPart", () => {
   it("is transparent for parts that render nothing", () => {
     expect(isTransparentPart({ type: "subagent" })).toBe(true)

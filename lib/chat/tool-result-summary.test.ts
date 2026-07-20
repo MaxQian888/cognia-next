@@ -1,5 +1,6 @@
 import {
   coerceResultText,
+  describeRunningProgress,
   describeToolResult,
   diffCounts,
   resultErrorPreview,
@@ -167,11 +168,48 @@ describe("describeToolResult", () => {
     expect(describeToolResult(tool("tool-Edit", { state: "input-available" }))).toBeNull()
   })
 
-  it("returns null for tools with no natural summary", () => {
-    expect(describeToolResult(tool("tool-WebSearch", { output: "stuff" }))).toBeNull()
+  it("falls back to a raw line count for tools with no specific summary", () => {
+    // Unified size hint: a WebSearch / generic / MCP tool with output text still
+    // reports its体量 as lines rather than showing nothing.
+    expect(describeToolResult(tool("tool-WebSearch", { output: "one\ntwo" }))).toEqual({
+      kind: "lines",
+      count: 2,
+      tone: "neutral",
+    })
+    expect(describeToolResult(tool("tool-mcp__x__frobnicate", { output: "stuff" }))?.kind).toBe(
+      "lines"
+    )
   })
 
   it("returns null when output is empty", () => {
     expect(describeToolResult(tool("tool-Grep", { output: "" }))).toBeNull()
+    // No output text at all → no hint even for the generic fallback.
+    expect(describeToolResult(tool("tool-WebSearch", { output: "" }))).toBeNull()
+  })
+})
+
+describe("describeRunningProgress", () => {
+  it("reports live line/byte size while a tool streams output", () => {
+    expect(
+      describeRunningProgress(tool("tool-Bash", { state: "input-available", output: "a\nb\nc" }))
+    ).toEqual({ lines: 3, bytes: 5 })
+  })
+
+  it("coerces object stdout/stderr shapes via coerceResultText", () => {
+    const progress = describeRunningProgress(
+      tool("tool-Bash", { state: "input-available", output: { stdout: "x", stderr: "y" } as never })
+    )
+    // JSON-stringified object is one line of text.
+    expect(progress?.lines).toBe(1)
+  })
+
+  it("returns null when not running or with no streamed output yet", () => {
+    expect(
+      describeRunningProgress(tool("tool-Bash", { state: "output-available", output: "x" }))
+    ).toBeNull()
+    expect(describeRunningProgress(tool("tool-Bash", { state: "input-available" }))).toBeNull()
+    expect(
+      describeRunningProgress(tool("tool-Bash", { state: "input-available", output: "" }))
+    ).toBeNull()
   })
 })

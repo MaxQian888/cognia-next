@@ -1,18 +1,22 @@
 {
   "agentFlow": {
-    "action": {
-      "edit": "{count, plural, =1 {Edited a file} other {Edited files}}",
-      "other": "{count, plural, =1 {Used a tool} other {Used tools}}",
-      "read": "{count, plural, =1 {Read a file} other {Read files}}",
-      "run": "{count, plural, =1 {Ran a command} other {Ran commands}}",
-      "search": "{count, plural, =1 {Searched} other {Searched files}}",
-      "web": "{count, plural, =1 {Fetched the web} other {Fetched the web}}"
+    "count": {
+      "glob": "{count, plural, =1 {1 glob} other {# globs}}",
+      "list": "{count, plural, =1 {1 list} other {# lists}}",
+      "other": "{count, plural, =1 {1 tool} other {# tools}}",
+      "read": "{count, plural, =1 {1 read} other {# reads}}",
+      "search": "{count, plural, =1 {1 search} other {# searches}}",
+      "web": "{count, plural, =1 {1 fetch} other {# fetches}}"
     },
     "group": {
       "collapseAll": "Collapse all",
       "expandAll": "Expand all",
+      "failed": "{count, plural, =1 {1 failed} other {# failed}}",
       "summary": "{count, plural, =1 {1 tool call} other {# tool calls}}",
       "tally": "{name} ×{count}"
+    },
+    "progress": {
+      "streaming": "{count, plural, =1 {1 line…} other {# lines…}}"
     },
     "result": {
       "diff": "+{added} −{removed}",
@@ -530,6 +534,7 @@
       "other": "Other"
     },
     "hideArtifacts": "Hide artifacts panel",
+    "openBrowser": "Open browser panel",
     "hideConversations": "Hide conversation list",
     "insights": "Session insights",
     "memoryInherit": "Inherit app setting",
@@ -596,6 +601,7 @@
     "systemPromptPlaceholder": "Empty = use global default",
     "title": "Session settings",
     "tokensLabel": "{input} in / {output} out",
+    "unreadArtifacts": "New artifacts — open panel",
     "untitledSession": "(untitled)",
     "workingDirLabel": "Working directory",
     "workingDirPlaceholder": "/path/to/project"

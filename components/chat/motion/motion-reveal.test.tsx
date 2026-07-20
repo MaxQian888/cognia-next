@@ -4,7 +4,13 @@
 
 import { render, renderHook } from "@testing-library/react"
 
-import { MotionCollapse, MotionReveal, MotionStatusSwap, useFlowMotion } from "./motion-reveal"
+import {
+  MotionCollapse,
+  MotionPopover,
+  MotionReveal,
+  MotionStatusSwap,
+  useFlowMotion,
+} from "./motion-reveal"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
 describe("useFlowMotion", () => {
@@ -121,5 +127,52 @@ describe("MotionStatusSwap", () => {
       </MotionStatusSwap>
     )
     expect(getByTestId("glyph")).toBeTruthy()
+  })
+})
+
+describe("MotionPopover", () => {
+  it("renders a plain positioned div when open and reduced", () => {
+    useSettingsStore.setState({ settings: { motion: { reduce: true, speed: 1 } } as never })
+    const { container, getByTestId } = render(
+      <MotionPopover open className="pop" style={{ left: 4, top: 8 }}>
+        <span data-testid="body">x</span>
+      </MotionPopover>
+    )
+    const wrapper = container.firstChild as HTMLElement
+    expect(wrapper.tagName).toBe("DIV")
+    expect(wrapper.className).toBe("pop")
+    expect(wrapper.style.left).toBe("4px")
+    expect(getByTestId("body")).toBeTruthy()
+  })
+
+  it("renders nothing when closed and reduced", () => {
+    useSettingsStore.setState({ settings: { motion: { reduce: true, speed: 1 } } as never })
+    const { queryByTestId } = render(
+      <MotionPopover open={false}>
+        <span data-testid="body">x</span>
+      </MotionPopover>
+    )
+    expect(queryByTestId("body")).toBeNull()
+  })
+
+  it("renders nothing when closed and motion is enabled", () => {
+    useSettingsStore.setState({ settings: { motion: { reduce: false, speed: 1 } } as never })
+    const { queryByTestId } = render(
+      <MotionPopover open={false}>
+        <span data-testid="body">x</span>
+      </MotionPopover>
+    )
+    expect(queryByTestId("body")).toBeNull()
+  })
+
+  it("renders the body in an animated wrapper when open and motion is enabled", () => {
+    useSettingsStore.setState({ settings: { motion: { reduce: false, speed: 1 } } as never })
+    const { container, getByTestId } = render(
+      <MotionPopover open from={{ opacity: 0, x: "100%" }}>
+        <span data-testid="body">x</span>
+      </MotionPopover>
+    )
+    expect((container.firstChild as HTMLElement)?.tagName).toBe("DIV")
+    expect(getByTestId("body")).toBeTruthy()
   })
 })

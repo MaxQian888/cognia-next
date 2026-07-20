@@ -109,6 +109,27 @@ describe("ToolCallRow", () => {
       <ToolCallRow part={part("tool-Read", { file_path: "x.ts" })} />
     )
     expect(queryByTestId("tool-result-chip")).toBeNull()
+    expect(queryByTestId("tool-running-chip")).toBeNull()
+  })
+
+  it("shows a unified line-count chip for a generic/MCP tool with output", () => {
+    const { getByTestId } = render(
+      <ToolCallRow part={partWith("tool-WebSearch", { output: "a\nb\nc" })} />
+    )
+    const chip = getByTestId("tool-result-chip")
+    expect(chip.getAttribute("data-kind")).toBe("lines")
+    expect(chip.textContent).toContain("result.lines")
+  })
+
+  it("shows a live progress chip while a tool streams output (no result chip yet)", () => {
+    const { getByTestId, queryByTestId } = render(
+      <ToolCallRow
+        part={partWith("tool-Bash", { state: "input-available", output: "line1\nline2" })}
+      />
+    )
+    const chip = getByTestId("tool-running-chip")
+    expect(chip.textContent).toContain("progress.streaming")
+    expect(queryByTestId("tool-result-chip")).toBeNull()
   })
 
   it("exposes the data-status attribute for styling/tests", () => {

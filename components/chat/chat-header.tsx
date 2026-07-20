@@ -10,6 +10,7 @@ import {
   PanelRightCloseIcon,
   PanelRightOpenIcon,
   Settings2Icon,
+  GlobeIcon,
 } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
@@ -67,10 +68,31 @@ export function ChatHeader({ session, onOpenSettings }: Props) {
   // title-bar layout controls and ⌘J also drive — a single source of truth.
   const dockCollapsed = useArtifactDockLayoutStore((s) => s.dockCollapsed)
   const toggleDock = useArtifactDockLayoutStore((s) => s.toggleDock)
-  const dockToggleLabel = dockCollapsed ? t("showArtifacts") : t("hideArtifacts")
+  const openBrowser = useArtifactDockLayoutStore((s) => s.openBrowser)
+  // A new artifact arrived while the dock was dismissed — surface it as an
+  // unread dot instead of force-expanding the panel.
+  const unreadArtifact = useArtifactDockLayoutStore((s) => s.unreadArtifact)
+  const showDockUnread = dockCollapsed && unreadArtifact
+  const dockToggleLabel = showDockUnread
+    ? t("unreadArtifacts")
+    : dockCollapsed
+      ? t("showArtifacts")
+      : t("hideArtifacts")
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="hidden size-8 shrink-0 md:inline-flex"
+        onClick={openBrowser}
+        aria-label={t("openBrowser")}
+        title={t("openBrowser")}
+        data-testid="chat-browser-dock-open"
+      >
+        <GlobeIcon className="size-4" />
+      </Button>
+
       <Button
         variant="ghost"
         size="icon"
@@ -159,7 +181,7 @@ export function ChatHeader({ session, onOpenSettings }: Props) {
       <Button
         variant="ghost"
         size="icon"
-        className="hidden size-8 shrink-0 md:inline-flex"
+        className="relative hidden size-8 shrink-0 md:inline-flex"
         onClick={toggleDock}
         aria-label={dockToggleLabel}
         aria-pressed={!dockCollapsed}
@@ -170,6 +192,13 @@ export function ChatHeader({ session, onOpenSettings }: Props) {
           <PanelRightOpenIcon className="size-4" />
         ) : (
           <PanelRightCloseIcon className="size-4" />
+        )}
+        {showDockUnread && (
+          <span
+            aria-hidden
+            data-testid="chat-artifact-dock-unread"
+            className="absolute right-1 top-1 size-1.5 rounded-full bg-primary"
+          />
         )}
       </Button>
 

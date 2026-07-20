@@ -18,7 +18,9 @@ import type { RichSegment } from "@/lib/slash-commands/parse-segments"
  * Typography + box metrics shared by the textarea and this overlay. MUST stay
  * identical on both or the pills drift out from under the glyphs.
  */
-export const TEXTAREA_TYPOGRAPHY = "px-1 py-1.5 pr-10 text-sm leading-6"
+// `pe-10` (logical padding-inline-end) reserves room for the CharCounter in the
+// trailing corner so it stays clear of the text under both LTR and RTL.
+export const TEXTAREA_TYPOGRAPHY = "px-1 py-1.5 pe-10 text-sm leading-6"
 
 /**
  * The composer textarea's EFFECTIVE font size. A global, unlayered rule in

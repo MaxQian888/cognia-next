@@ -1,8 +1,10 @@
 import {
   aggregateToolStatus,
   clampTarget,
+  countErroredTools,
+  isContextFoldTool,
   normalizeToolName,
-  summarizeToolActivity,
+  summarizeContextCounts,
   summarizeToolCall,
   tallyToolNames,
   type ToolPartLike,
@@ -157,40 +159,68 @@ describe("aggregateToolStatus", () => {
   })
 })
 
-describe("summarizeToolActivity", () => {
-  it("buckets tools into action categories, first-seen order, with counts", () => {
-    expect(
-      summarizeToolActivity([
-        tool("tool-Edit"),
-        tool("tool-Bash"),
-        tool("tool-Write"),
-        tool("tool-Read"),
-        tool("tool-Grep"),
-      ])
-    ).toEqual([
-      { category: "edit", count: 2 }, // Edit + Write
-      { category: "run", count: 1 }, // Bash
-      { category: "read", count: 1 }, // Read
-      { category: "search", count: 1 }, // Grep
-    ])
+describe("isContextFoldTool", () => {
+  it("is true for read/search/glob/list/web context tools", () => {
+    expect(isContextFoldTool("tool-Read")).toBe(true)
+    expect(isContextFoldTool("tool-Grep")).toBe(true)
+    expect(isContextFoldTool("tool-Glob")).toBe(true)
+    expect(isContextFoldTool("tool-ls")).toBe(true)
+    expect(isContextFoldTool("tool-WebFetch")).toBe(true)
+    expect(isContextFoldTool("tool-WebSearch")).toBe(true)
   })
 
-  it("folds glob/ls into read and web tools into web", () => {
+  it("is false for actions (edit/write/bash), tasks and non-tools", () => {
+    expect(isContextFoldTool("tool-Edit")).toBe(false)
+    expect(isContextFoldTool("tool-Write")).toBe(false)
+    expect(isContextFoldTool("tool-Bash")).toBe(false)
+    expect(isContextFoldTool("tool-TodoWrite")).toBe(false)
+    expect(isContextFoldTool("tool-mcp__x__frobnicate")).toBe(false)
+    expect(isContextFoldTool("text")).toBe(false)
+    expect(isContextFoldTool(undefined)).toBe(false)
+  })
+
+  it("folds mcp-namespaced context tools by their bare name", () => {
+    expect(isContextFoldTool("tool-mcp__cognia-tools__grep")).toBe(true)
+  })
+})
+
+describe("countErroredTools", () => {
+  it("counts only output-error states", () => {
     expect(
-      summarizeToolActivity([tool("tool-Glob"), tool("tool-ls"), tool("tool-WebFetch")])
+      countErroredTools(["output-available", "output-error", "input-available", "output-error"])
+    ).toBe(2)
+    expect(countErroredTools(["output-available", "input-available"])).toBe(0)
+    expect(countErroredTools([])).toBe(0)
+  })
+})
+
+describe("summarizeContextCounts", () => {
+  it("keeps read/search/glob/list/web distinct, first-seen order, with counts", () => {
+    expect(
+      summarizeContextCounts([
+        tool("tool-Read"),
+        tool("tool-Grep"),
+        tool("tool-Read"),
+        tool("tool-Glob"),
+        tool("tool-ls"),
+        tool("tool-WebFetch"),
+      ])
     ).toEqual([
       { category: "read", count: 2 },
+      { category: "search", count: 1 },
+      { category: "glob", count: 1 },
+      { category: "list", count: 1 },
       { category: "web", count: 1 },
     ])
   })
 
-  it("maps unknown tools to the other bucket", () => {
-    expect(summarizeToolActivity([tool("tool-mcp__x__frobnicate")])).toEqual([
-      { category: "other", count: 1 },
+  it("buckets non-context tools as other", () => {
+    expect(summarizeContextCounts([tool("tool-Edit"), tool("tool-Bash")])).toEqual([
+      { category: "other", count: 2 },
     ])
   })
 
   it("returns an empty array for no parts", () => {
-    expect(summarizeToolActivity([])).toEqual([])
+    expect(summarizeContextCounts([])).toEqual([])
   })
 })
