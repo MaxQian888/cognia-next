@@ -21,7 +21,17 @@ jest.mock("@/lib/subscription/codex/scheduler", () => ({
 jest.mock("@/lib/subscription/core/transport", () => ({
   getActiveAccount: (...args: unknown[]) => getActiveAccountMock(...args),
 }))
-const mockStoreState = { settings: { codexSubscriptionSettings: { probeEnabled: true } } }
+const mockStoreState: {
+  settings: {
+    codexSubscriptionSettings: { probeEnabled: boolean }
+    limitsQueryEnabledAccounts: string[]
+  }
+} = {
+  settings: {
+    codexSubscriptionSettings: { probeEnabled: true },
+    limitsQueryEnabledAccounts: ["codex:acc-1"],
+  },
+}
 jest.mock("@/stores/settings/settings-store", () => ({
   useSettingsStore: Object.assign(
     <T,>(selector: (s: typeof mockStoreState) => T) => selector(mockStoreState),
@@ -36,6 +46,7 @@ beforeEach(() => {
   stopMock.mockClear()
   isTauriMock.mockReturnValue(true)
   getActiveAccountMock.mockClear()
+  mockStoreState.settings.limitsQueryEnabledAccounts = ["codex:acc-1"]
 })
 
 describe("CodexUsageSchedulerInitializer", () => {
@@ -67,6 +78,16 @@ describe("CodexUsageSchedulerInitializer", () => {
     const deps = startMock.mock.calls[0][1] as {
       getActiveAccountId: () => Promise<string | null>
     }
+    await expect(deps.getActiveAccountId()).resolves.toBeNull()
+  })
+
+  it("does not hand an account to the scheduler before that account opts in", async () => {
+    mockStoreState.settings.limitsQueryEnabledAccounts = []
+    render(<CodexUsageSchedulerInitializer />)
+    const deps = startMock.mock.calls[0][1] as {
+      getActiveAccountId: () => Promise<string | null>
+    }
+
     await expect(deps.getActiveAccountId()).resolves.toBeNull()
   })
 

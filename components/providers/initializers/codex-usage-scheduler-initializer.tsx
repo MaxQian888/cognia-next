@@ -15,6 +15,7 @@ import { useEffect } from "react"
 import { isTauri } from "@/lib/tauri"
 import { getActiveAccount } from "@/lib/subscription/core/transport"
 import { startCodexUsageScheduler } from "@/lib/subscription/codex/scheduler"
+import { isLimitsQueryEnabled } from "@/lib/subscription/limits/policy"
 import {
   DEFAULT_CODEX_SUBSCRIPTION_SETTINGS,
   type CodexSubscriptionSettings,
@@ -38,7 +39,10 @@ export function CodexUsageSchedulerInitializer() {
         getActiveAccountId: async () => {
           try {
             const active = await getActiveAccount("codex")
-            return active.activeAccountId ?? null
+            const accountId = active.activeAccountId ?? null
+            if (!accountId) return null
+            const enabledAccounts = useSettingsStore.getState().settings?.limitsQueryEnabledAccounts
+            return isLimitsQueryEnabled(enabledAccounts, "codex", accountId) ? accountId : null
           } catch {
             return null
           }
