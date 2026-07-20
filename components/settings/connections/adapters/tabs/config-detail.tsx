@@ -48,6 +48,7 @@ import { OutboundTuning } from "../../forms/outbound-tuning"
 import { UsagePresence } from "../../forms/usage-presence"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { getAdapterTransportLabelKey } from "../platform-meta"
+import { ConnectedScopesCard } from "./connected-scopes-card"
 
 export interface ConfigDetailProps {
   row: AdapterInstanceRow
@@ -110,6 +111,10 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
       ) : (
         <AdapterWhoamiPanel adapterId={row.id} platform={row.type} />
       )}
+
+      {/* Read-only granted OAuth scopes (persisted by the platform OAuth
+       * handlers). Renders only for adapters that recorded scopes. */}
+      <ConnectedScopesCard row={row} />
 
       {/* Mention strategy + chat allow/blocklist — applies to every
        * platform that distinguishes private / group / channel contexts.

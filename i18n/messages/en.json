@@ -19009,6 +19009,11 @@
           "down": "Down",
           "rateLimited": "Rate limited"
         },
+        "scopes": {
+          "grantedAt": "Granted {date}",
+          "readOnlyHint": "Managed by the platform. Reconnect to change scopes; changes appear in the Audit tab.",
+          "title": "Access"
+        },
         "sidebar": {
           "filterAll": "All",
           "filterDisabled": "Disabled",

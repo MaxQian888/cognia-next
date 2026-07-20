@@ -19009,6 +19009,11 @@
           "down": "离线",
           "rateLimited": "已限流"
         },
+        "scopes": {
+          "grantedAt": "授权于 {date}",
+          "readOnlyHint": "由平台管理。重新连接以变更授权范围;变更会显示在审计标签页。",
+          "title": "访问权限"
+        },
         "sidebar": {
           "filterAll": "全部",
           "filterDisabled": "未启用",
