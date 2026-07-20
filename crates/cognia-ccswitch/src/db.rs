@@ -73,9 +73,13 @@ pub struct CcswitchProvider {
     /// window on relays that gate it behind the beta header.
     #[serde(rename = "customHeaders", skip_serializing_if = "Option::is_none")]
     pub custom_headers: Option<BTreeMap<String, String>>,
-    /// Free-form JSON — `sharedConfig` / `extra` / `meta`. Preserved verbatim.
+    /// Free-form JSON — `sharedConfig` / `extra`. Preserved verbatim.
     #[serde(rename = "sharedConfig", skip_serializing_if = "Option::is_none")]
     pub shared_config: Option<serde_json::Value>,
+    /// CCSwitch's optional `meta.usage_script` descriptor. Cognia exposes the
+    /// metadata for safe, declarative import but never executes its JavaScript.
+    #[serde(rename = "usageScript", skip_serializing_if = "Option::is_none")]
+    pub usage_script: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
 }
@@ -383,6 +387,7 @@ pub fn list_providers(conn: &Connection) -> Result<Vec<CcswitchProvider>, Ccswit
     let sql = format!("SELECT * FROM {}", quote_ident(&table));
     let mut stmt = conn.prepare(&sql)?;
     let mapped = stmt.query_map([], |row| {
+        let meta = pick_json(row, &cols, &["meta"]);
         let id = pick_str(row, &cols, &["id", "uuid", "key", "name"])
             .unwrap_or_else(|| String::from(""));
         let name = pick_str(row, &cols, &["name", "title", "label", "id"])
@@ -420,8 +425,13 @@ pub fn list_providers(conn: &Connection) -> Result<Vec<CcswitchProvider>, Ccswit
             shared_config: pick_json(
                 row,
                 &cols,
-                &["shared_config", "sharedConfig", "config", "extra", "meta"],
-            ),
+                &["shared_config", "sharedConfig", "config", "extra"],
+            )
+            .or_else(|| meta.clone()),
+            usage_script: meta
+                .as_ref()
+                .and_then(|value| value.get("usage_script"))
+                .cloned(),
             notes: pick_str(row, &cols, &["notes", "note", "description"]),
         };
         // CCSwitch v3 keeps credentials inside the per-app `settings_config`
@@ -703,6 +713,70 @@ mod tests {
         let s2 = skills.iter().find(|s| s.id == "s2").unwrap();
         assert!(s2.content.is_empty());
         assert_eq!(s2.source_path.as_deref(), Some("/tmp/external.md"));
+    }
+
+    #[test]
+    fn provider_usage_script_is_extracted_from_modern_meta() {
+        let conn = open_inmem();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE providers (
+                id TEXT NOT NULL,
+                app_type TEXT NOT NULL,
+                name TEXT NOT NULL,
+                settings_config TEXT NOT NULL,
+                meta TEXT NOT NULL DEFAULT '{}',
+                PRIMARY KEY (id, app_type)
+            );
+            INSERT INTO providers VALUES (
+                'kimi',
+                'claude',
+                'Kimi Coding',
+                '{"env":{"ANTHROPIC_AUTH_TOKEN":"sk-kimi","ANTHROPIC_BASE_URL":"https://api.kimi.com/coding"}}',
+                '{"usage_script":{"enabled":true,"language":"javascript","code":"ignored","templateType":"token_plan","codingPlanProvider":"kimi","autoQueryInterval":15}}'
+            );
+            "#,
+        )
+        .unwrap();
+
+        let providers = list_providers(&conn).unwrap();
+        let usage = providers[0].usage_script.as_ref().unwrap();
+        assert_eq!(usage["templateType"].as_str(), Some("token_plan"));
+        assert_eq!(usage["codingPlanProvider"].as_str(), Some("kimi"));
+        assert_eq!(usage["autoQueryInterval"].as_u64(), Some(15));
+        assert_eq!(
+            providers[0].shared_config.as_ref().unwrap()["usage_script"]["templateType"].as_str(),
+            Some("token_plan")
+        );
+
+        let wire = serde_json::to_value(&providers[0]).unwrap();
+        assert_eq!(
+            wire["usageScript"]["codingPlanProvider"].as_str(),
+            Some("kimi")
+        );
+        assert!(wire.get("usage_script").is_none());
+    }
+
+    #[test]
+    fn provider_malformed_or_null_meta_is_tolerated() {
+        let conn = open_inmem();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE providers (id TEXT, name TEXT, meta TEXT);
+            INSERT INTO providers VALUES ('bad', 'Bad meta', '{not-json');
+            INSERT INTO providers VALUES ('null', 'Null meta', NULL);
+            "#,
+        )
+        .unwrap();
+
+        let providers = list_providers(&conn).unwrap();
+        assert_eq!(providers.len(), 2);
+        assert!(providers
+            .iter()
+            .all(|provider| provider.usage_script.is_none()));
+        assert!(providers
+            .iter()
+            .all(|provider| provider.shared_config.is_none()));
     }
 
     #[test]

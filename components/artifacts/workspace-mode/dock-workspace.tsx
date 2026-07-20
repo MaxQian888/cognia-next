@@ -152,6 +152,7 @@ function WorkspaceEditorBody({
     workingDir,
     beforeOpen: showFileSurface,
   })
+  const { gotoLine } = workbench
   const editor = workbench.editor
   const taskWorkspaceEnabled = useSettingsStore(
     (state) => state.settings?.developer?.taskWorkspace === true
@@ -193,7 +194,6 @@ function WorkspaceEditorBody({
     activePath,
     dirtyCount,
     selectRoot,
-    openFile,
     closeFile,
     setActivePath,
   } = editor
@@ -234,10 +234,9 @@ function WorkspaceEditorBody({
       })
       return
     }
-    void openFile(request.relPath).finally(() => {
-      if (processedRequest.current === request.id) setSurface("file")
-      clearRequest(request.id)
-    })
+    gotoLine(request.relPath, request.line, request.column)
+    if (processedRequest.current === request.id) setSurface("file")
+    clearRequest(request.id)
   }, [
     request,
     sessionId,
@@ -247,7 +246,7 @@ function WorkspaceEditorBody({
     selectRoot,
     hasReview,
     selectFile,
-    openFile,
+    gotoLine,
     clearRequest,
   ])
 

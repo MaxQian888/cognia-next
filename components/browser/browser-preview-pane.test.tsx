@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 
 import { TooltipProvider } from "@/components/ui/tooltip"
 import type { BrowserNavigated, BrowserSelection, ElementRect } from "@/lib/browser/protocol"
@@ -47,6 +47,8 @@ jest.mock("@/components/browser/browser-cookie-import-action", () => ({
     <div data-testid="cookie-import-action" data-current-url={currentUrl ?? ""} />
   ),
 }))
+// The history dropdown uses the shared manual mock so its items render inline.
+jest.mock("@/components/ui/dropdown-menu")
 const mockOpenExternal = jest.fn().mockResolvedValue(undefined)
 let mockSelection: BrowserSelection | null = null
 let mockNavigated: BrowserNavigated | null = null
@@ -113,6 +115,9 @@ jest.mock("@/lib/db/browser-annotations", () => ({
 jest.mock("@/lib/browser/client", () => ({
   browserClient: {
     embedReload: jest.fn().mockResolvedValue(undefined),
+    embedSetZoom: jest.fn().mockResolvedValue(undefined),
+    embedFind: jest.fn().mockResolvedValue({ matches: 0, index: 0 }),
+    embedFindClear: jest.fn().mockResolvedValue(undefined),
     embedBack: jest.fn().mockResolvedValue(undefined),
     embedForward: jest.fn().mockResolvedValue(undefined),
     embedNavigate: jest.fn().mockResolvedValue(undefined),
@@ -173,6 +178,9 @@ beforeEach(() => {
   mockRemoteBrowserEnabled = false
   mockOpenExternal.mockClear().mockResolvedValue(undefined)
   ;(browserClient.embedReload as jest.Mock).mockClear()
+  ;(browserClient.embedSetZoom as jest.Mock).mockClear()
+  ;(browserClient.embedFind as jest.Mock).mockClear().mockResolvedValue({ matches: 0, index: 0 })
+  ;(browserClient.embedFindClear as jest.Mock).mockClear()
   ;(browserClient.embedBack as jest.Mock).mockClear()
   ;(browserClient.embedForward as jest.Mock).mockClear()
   ;(browserClient.embedNavigate as jest.Mock).mockClear()
@@ -291,6 +299,15 @@ it("renders the empty state and URL bar in Tauri", () => {
   renderPane(<BrowserPreviewPane />)
   expect(screen.getByText("Preview a web page")).toBeInTheDocument()
   expect(urlBar()).toBeInTheDocument()
+})
+
+it("wraps the browser toolbar and moves the URL row on narrow right rails", () => {
+  renderPane(<BrowserPreviewPane />)
+  const toolbar = screen.getByTestId("browser-toolbar")
+  const form = toolbar.querySelector("form")
+
+  expect(toolbar).toHaveClass("flex-wrap", "@lg:flex-nowrap")
+  expect(form).toHaveClass("order-last", "basis-full", "@lg:order-none", "@lg:basis-auto")
 })
 
 it("commits a typed URL via Enter and clears the empty state", async () => {
@@ -601,5 +618,127 @@ describe("recorder panel wiring", () => {
       "data-page-url",
       "http://localhost:3000/"
     )
+  })
+})
+
+// The selection panel + annotation queue live in a slide-in rail beside the
+// reserved region (not stacked below it) so the native webview rect changes at
+// most once per enter/leave — see use-browser-pane-webview's single embedSetBounds.
+describe("inspection rail", () => {
+  it("opens the rail beside the reserved region when an element is selected", () => {
+    mockSelection = SELECTION
+    renderPane(<BrowserPreviewPane />)
+    const rail = screen.getByTestId("browser-inspection-rail")
+    expect(rail).toHaveClass("w-80", "shrink-0")
+    expect(rail).toHaveAttribute("data-state", "open")
+    // Horizontal sibling of the reserved region, not a descendant of it.
+    const reserved = screen.getByTestId("browser-reserved-region")
+    expect(rail).not.toContainElement(reserved)
+    expect(reserved.parentElement).toBe(rail.parentElement)
+    expect(rail.parentElement).toHaveClass("flex")
+  })
+
+  it("keeps the rail unmounted with no selection or queued annotations", () => {
+    renderPane(<BrowserPreviewPane />)
+    expect(screen.queryByTestId("browser-inspection-rail")).not.toBeInTheDocument()
+  })
+
+  it("renders queued annotations inside the rail", () => {
+    mockPendingAnnotations = [
+      {
+        id: "a1",
+        comment: "increase contrast",
+        selection: SELECTION,
+        status: "pending",
+        intent: "change",
+        severity: "suggestion",
+      },
+    ]
+    renderPane(<BrowserPreviewPane sessionId="s1" />)
+    const rail = screen.getByTestId("browser-inspection-rail")
+    expect(within(rail).getByRole("button", { name: "Send 1" })).toBeInTheDocument()
+  })
+
+  it("unmounts the rail after its slide-out animation completes", () => {
+    mockSelection = SELECTION
+    const { rerender } = renderPane(<BrowserPreviewPane />)
+    expect(screen.getByTestId("browser-inspection-rail")).toHaveAttribute("data-state", "open")
+    // Selection cleared → stay mounted in the closed state to play the exit…
+    mockSelection = null
+    rerender(<TooltipProvider>{<BrowserPreviewPane />}</TooltipProvider>)
+    const rail = screen.getByTestId("browser-inspection-rail")
+    expect(rail).toHaveAttribute("data-state", "closed")
+    // …then unmount once that animation finishes.
+    fireEvent.animationEnd(rail)
+    expect(screen.queryByTestId("browser-inspection-rail")).not.toBeInTheDocument()
+  })
+
+  it("does not tear the rail down when a child animation ends mid-close", () => {
+    mockSelection = SELECTION
+    const { rerender } = renderPane(<BrowserPreviewPane />)
+    mockSelection = null
+    rerender(<TooltipProvider>{<BrowserPreviewPane />}</TooltipProvider>)
+    const rail = screen.getByTestId("browser-inspection-rail")
+    const child = rail.querySelector("div")
+    if (child) fireEvent.animationEnd(child)
+    expect(screen.getByTestId("browser-inspection-rail")).toBeInTheDocument()
+  })
+
+  it("fades the empty state and first-load placeholder in", () => {
+    renderPane(<BrowserPreviewPane />)
+    expect(screen.getByText("Preview a web page").closest(".animate-in")).toHaveClass("fade-in")
+    commitUrl("localhost:3000")
+    expect(screen.getByTestId("browser-loading")).toHaveClass("animate-in", "fade-in")
+  })
+})
+
+describe("zoom", () => {
+  it("applies persisted zoom once the page is live and re-applies on change", async () => {
+    mockHasPainted = true
+    window.localStorage.setItem("cognia.browser.zoom", "1.5")
+    renderPane(<BrowserPreviewPane />)
+    commitUrl("localhost:3000")
+    await waitFor(() => expect(browserClient.embedSetZoom).toHaveBeenCalledWith(1.5))
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }))
+    await waitFor(() => expect(browserClient.embedSetZoom).toHaveBeenCalledWith(1.75))
+  })
+
+  it("disables the zoom control until a URL is committed", () => {
+    renderPane(<BrowserPreviewPane />)
+    expect(screen.getByRole("button", { name: "Zoom in" })).toBeDisabled()
+  })
+})
+
+describe("find-in-page", () => {
+  it("opens the find bar from the toolbar and searches the page", async () => {
+    ;(browserClient.embedFind as jest.Mock).mockResolvedValue({ matches: 2, index: 0 })
+    renderPane(<BrowserPreviewPane />)
+    commitUrl("localhost:3000")
+    fireEvent.click(screen.getByRole("button", { name: "Find" }))
+    fireEvent.change(screen.getByPlaceholderText("Find in page"), { target: { value: "hello" } })
+    await waitFor(() =>
+      expect(browserClient.embedFind).toHaveBeenCalledWith("hello", { forward: true })
+    )
+  })
+
+  it("closes the find bar and clears highlights", async () => {
+    renderPane(<BrowserPreviewPane />)
+    commitUrl("localhost:3000")
+    fireEvent.click(screen.getByRole("button", { name: "Find" }))
+    expect(screen.getByTestId("browser-find-bar")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Close find" }))
+    await waitFor(() => expect(browserClient.embedFindClear).toHaveBeenCalled())
+    expect(screen.queryByTestId("browser-find-bar")).not.toBeInTheDocument()
+  })
+})
+
+describe("history", () => {
+  it("records visited pages and re-navigates from the history menu", () => {
+    renderPane(<BrowserPreviewPane />)
+    commitUrl("localhost:3000")
+    commitUrl("localhost:5173")
+    // The manual dropdown mock renders items inline; click the earlier page.
+    fireEvent.click(screen.getByText("localhost:3000"))
+    expect(urlBar()).toHaveValue("http://localhost:3000/")
   })
 })

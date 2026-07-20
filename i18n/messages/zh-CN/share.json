@@ -9,6 +9,7 @@
   "dialogTitle": "生成分享链接",
   "done": "完成",
   "errorGeneric": "创建分享链接失败。",
+  "errorTooLarge": "分享内容过大，请移除部分图片或导出到本地。",
   "limit": {
     "burn": "阅后即焚",
     "count": "限制次数",

@@ -52,6 +52,8 @@ export const DEFAULTS: AppSettings = {
     watchDb: true,
     defaultPropagation: [],
   },
+  customLimitsSources: [],
+  limitsQueryEnabledAccounts: [],
   lastUpdateCheckAt: undefined,
   updates: { ...DEFAULT_UPDATE_SETTINGS },
   browserCookieImportEnabled: false,

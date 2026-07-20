@@ -15,6 +15,7 @@ import { useSettingsStore } from "@/stores/settings"
 
 import { queryAccountLimitsCoalesced } from "./coalesce"
 import { queryAllConfiguredLimits } from "./aggregate"
+import { isLimitsQueryEnabled, setLimitsQueryEnabled } from "./policy"
 import { recordLimitsSnapshot } from "./store"
 
 import type { ProviderId, ProviderLimits, ProviderLimitsRow } from "@/types/subscription"
@@ -26,6 +27,10 @@ export interface UseProviderLimitsResult {
   refreshing: boolean
   /** `true` when no source matched the account on the last refresh. */
   unavailable: boolean
+  /** False until this exact provider account opts into outbound quota requests. */
+  queryEnabled: boolean
+  /** Persist this exact account's outbound quota-query permission. */
+  setQueryEnabled: (enabled: boolean) => Promise<void>
   /**
    * Run the query runner + persist the result. No-op outside Tauri. Automatic
    * callers omit `force` so they share the coalescer's throttle; an explicit
@@ -44,6 +49,11 @@ export function useProviderLimits(
   provider: ProviderId,
   accountId: string
 ): UseProviderLimitsResult {
+  const enabledAccounts = useSettingsStore(
+    (state) => state.settings?.limitsQueryEnabledAccounts
+  )
+  const saveSettings = useSettingsStore((state) => state.save)
+  const queryEnabled = isLimitsQueryEnabled(enabledAccounts, provider, accountId)
   const [refreshing, setRefreshing] = useState(false)
   const [unavailable, setUnavailable] = useState(false)
 
@@ -59,7 +69,7 @@ export function useProviderLimits(
 
   const refresh = useCallback(
     async (options?: { force?: boolean }) => {
-      if (!isTauri()) return
+      if (!isTauri() || !queryEnabled) return
       setRefreshing(true)
       try {
         const result = await queryAccountLimitsCoalesced(provider, accountId, {
@@ -75,10 +85,32 @@ export function useProviderLimits(
         setRefreshing(false)
       }
     },
-    [provider, accountId]
+    [provider, accountId, queryEnabled]
   )
 
-  return { snapshot, refreshing, unavailable, refresh }
+  const setQueryEnabledForAccount = useCallback(
+    async (enabled: boolean) => {
+      if (!accountId) return
+      await saveSettings({
+        limitsQueryEnabledAccounts: setLimitsQueryEnabled(
+          enabledAccounts,
+          provider,
+          accountId,
+          enabled
+        ),
+      })
+    },
+    [accountId, enabledAccounts, provider, saveSettings]
+  )
+
+  return {
+    snapshot,
+    refreshing,
+    unavailable,
+    queryEnabled,
+    setQueryEnabled: setQueryEnabledForAccount,
+    refresh,
+  }
 }
 
 export interface UseAllConfiguredLimitsResult {
@@ -94,6 +126,9 @@ export interface UseAllConfiguredLimitsResult {
  * each snapshot, and exposes the in-memory result. No-op outside Tauri.
  */
 export function useAllConfiguredLimits(activeProvider?: ProviderId): UseAllConfiguredLimitsResult {
+  const enabledAccounts = useSettingsStore(
+    (state) => state.settings?.limitsQueryEnabledAccounts
+  )
   const [snapshots, setSnapshots] = useState<ProviderLimits[]>([])
   const [refreshing, setRefreshing] = useState(false)
 
@@ -109,7 +144,10 @@ export function useAllConfiguredLimits(activeProvider?: ProviderId): UseAllConfi
         // status bar + tray + settings tabs don't stampede the rate-limited
         // usage endpoints (they all fire refresh on mount and on every
         // subscription-changed event).
-        runAccount: (provider, accountId) => queryAccountLimitsCoalesced(provider, accountId),
+        runAccount: (provider, accountId) =>
+          isLimitsQueryEnabled(enabledAccounts, provider, accountId)
+            ? queryAccountLimitsCoalesced(provider, accountId)
+            : Promise.resolve(null),
       })
       setSnapshots(all)
       for (const snap of all) {
@@ -118,7 +156,7 @@ export function useAllConfiguredLimits(activeProvider?: ProviderId): UseAllConfi
     } finally {
       setRefreshing(false)
     }
-  }, [activeProvider])
+  }, [activeProvider, enabledAccounts])
 
   return { snapshots, refreshing, refresh }
 }

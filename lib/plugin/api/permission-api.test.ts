@@ -20,6 +20,7 @@ jest.mock("@/lib/plugin/security/permission-requests", () => ({
 }))
 jest.mock("@/lib/plugin/core/transport", () => ({
   grantPluginPermission: jest.fn().mockResolvedValue(undefined),
+  isPluginGatewayAvailable: jest.fn().mockReturnValue(true),
   listPluginPermissions: jest.fn().mockResolvedValue([]),
   revokePluginPermission: jest.fn().mockResolvedValue(undefined),
 }))
@@ -29,6 +30,7 @@ jest.mock("../contracts/diagnostics-store", () => ({
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const transport = require("@/lib/plugin/core/transport") as {
   grantPluginPermission: jest.Mock
+  isPluginGatewayAvailable: jest.Mock
   listPluginPermissions: jest.Mock
   revokePluginPermission: jest.Mock
 }
@@ -45,6 +47,7 @@ describe("Permission API", () => {
     revokePluginPermissions(testPluginId)
     ;(requestPluginPermission as jest.Mock).mockReset()
     transport.grantPluginPermission.mockReset().mockResolvedValue(undefined)
+    transport.isPluginGatewayAvailable.mockReset().mockReturnValue(true)
     transport.listPluginPermissions.mockReset().mockResolvedValue([])
     transport.revokePluginPermission.mockReset().mockResolvedValue(undefined)
     diag.recordSilentFailure.mockReset()
@@ -60,6 +63,32 @@ describe("Permission API", () => {
       expect(typeof api.getGrantedPermissions).toBe("function")
       expect(typeof api.hasAllPermissions).toBe("function")
       expect(typeof api.hasAnyPermission).toBe("function")
+    })
+
+    it("does not prime host grants when the plugin gateway is unavailable", async () => {
+      transport.isPluginGatewayAvailable.mockReturnValue(false)
+
+      createPermissionAPI(testPluginId, [])
+      await Promise.resolve()
+
+      expect(transport.listPluginPermissions).not.toHaveBeenCalled()
+      expect(diag.recordSilentFailure).not.toHaveBeenCalled()
+    })
+
+    it("keeps browser permission changes local when the plugin gateway is unavailable", async () => {
+      transport.isPluginGatewayAvailable.mockReturnValue(false)
+      ;(requestPluginPermission as jest.Mock).mockResolvedValue(true)
+      const api = createPermissionAPI(testPluginId, [])
+
+      await expect(api.requestPermission("canvas:write", "browser test")).resolves.toBe(true)
+      grantPermission(testPluginId, "vector:write")
+      revokePermission(testPluginId, "vector:write")
+      await Promise.resolve()
+
+      expect(api.hasPermission("canvas:write")).toBe(true)
+      expect(transport.grantPluginPermission).not.toHaveBeenCalled()
+      expect(transport.revokePluginPermission).not.toHaveBeenCalled()
+      expect(diag.recordSilentFailure).not.toHaveBeenCalled()
     })
   })
 

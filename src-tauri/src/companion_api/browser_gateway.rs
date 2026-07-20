@@ -776,6 +776,9 @@ pub const BROWSER_RPC_COMMANDS: &[&str] = &[
     "browser_screenshot",
     "browser_set_files",
     "browser_downloads",
+    "browser_set_zoom",
+    "browser_find",
+    "browser_find_clear",
 ];
 
 pub fn is_browser_rpc(name: &str) -> bool {
@@ -1166,6 +1169,9 @@ pub async fn dispatch_browser_rpc(
         "browser_screenshot" => ("browser.screenshot", false),
         "browser_set_files" => ("browser.files.set", true),
         "browser_downloads" => ("browser.downloads", false),
+        "browser_set_zoom" => ("browser.set-zoom", true),
+        "browser_find" => ("browser.find", false),
+        "browser_find_clear" => ("browser.find.clear", false),
         "browser_wait_for" => {
             let operation = if args.get("networkIdle").and_then(Value::as_bool) == Some(true) {
                 "browser.wait.network-idle"

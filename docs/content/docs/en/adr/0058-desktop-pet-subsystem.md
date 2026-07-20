@@ -1,6 +1,6 @@
 ---
 title: ADR-0058 — Desktop Pet Subsystem
-description: "Backfills the architecture record for the pet subsystem (components/pet/, lib/pet/, hooks/pet/, stores/pet/, types/pet/, src-tauri/src/pet_window/) against its actual, current shape — a three-window-role model (main/overlay/popup), a Dexie-vs-Zustand state split, a subsystem-agnostic event bus, and a two-skin (SVG/Live2D) renderer — none of which is recorded anywhere else. Also records this wave's additions: unified drag/throw physics between the browser widget and the Tauri overlay, an opt-in ambient Twin-awareness signal, a global hotkey + persisted custom-shortcut fix, macOS window-climbing, and tray quick actions/mood display."
+description: "Backfills the architecture record for the pet subsystem (components/pet/, lib/pet/, hooks/pet/, stores/pet/, types/pet/, src-tauri/src/pet_window/) against its actual, current shape — a three-window-role model (main/overlay/popup), a Dexie-vs-Zustand state split, a subsystem-agnostic event bus, and a three-skin (SVG/Live2D/sprite-v2) renderer — none of which is recorded anywhere else. Also records this wave's additions: unified drag/throw physics between the browser widget and the Tauri overlay, an opt-in ambient Twin-awareness signal, a global hotkey + persisted custom-shortcut fix, macOS window-climbing, tray quick actions/mood display, and Codex-compatible sprite-pet imports."
 ---
 
 # ADR-0058 — Desktop Pet Subsystem
@@ -45,7 +45,7 @@ subsystems (chat/agent-team/goal/scheduler/connector/terminal/workflow/twin)
     → Dexie (lib/db/pet.ts) persists the durable PetProfile
     → stores/pet/pet-store.ts (Zustand — ephemeral visualState/oneShotQueue/bubble/minimized/position only)
     → hooks/pet/use-pet.ts (Dexie useLiveQuery + lib/pet/runtime/pet-view.ts's pure view derivation)
-    → components/pet/pet-renderer.tsx → skins/{svg-skin.tsx | live2d-skin.tsx}
+    → components/pet/pet-renderer.tsx → skins/{svg-skin.tsx | live2d-skin.tsx | sprite-v2-skin.tsx}
 ```
 
 **Dexie vs. Zustand split** is deliberate: the durable record (profile, needs, XP/level/stage, achievements, bindings) lives only in Dexie and is read reactively; `usePetStore` (Zustand) holds only frame-to-frame ephemeral state, persisting just `{ minimized, position }` to `localStorage` (key `cognia-pet-ui`) via `partialize`. This is what let cross-window sync ride Dexie's own cross-tab reactivity instead of a bespoke sync protocol.
@@ -56,7 +56,7 @@ subsystems (chat/agent-team/goal/scheduler/connector/terminal/workflow/twin)
 
 ### Skin system
 
-`components/pet/skins/resolve-effective-skin.ts` picks between `svg` (default, built-in vector, `motion/react` variants) and `live2d` (user-imported models, lazily-loaded pixi.js canvas host with a strict-mode-safe init gate and automatic fallback to SVG on any runtime error). The `PetSkin` interface (`types/pet/skin.ts`) is a stable seam — adding a third skin needs zero state-machine changes.
+`components/pet/skins/resolve-effective-skin.ts` picks among `svg` (default, built-in vector, `motion/react` variants), `live2d` (user-imported models, lazily-loaded pixi.js canvas host with a strict-mode-safe init gate), and `sprite-v2` (validated Codex-compatible v2 atlases stored in Dexie). Imported skins fall back to SVG when their selected asset is missing or cannot render. The `PetSkin` interface (`types/pet/skin.ts`) remains the stable seam, so all three renderers share the same visual-state machine and surfaces.
 
 ## This wave's decisions
 
@@ -88,8 +88,14 @@ Wiring this up surfaced a pre-existing gap: custom (non-built-in) shortcut bindi
 
 `TrayStateSnapshot` gained an optional `pet` field (optional, not required, so existing synthetic test snapshots didn't need updating) populated by `lib/tray/state-snapshot.ts` from the same `computePetView` lazy-decay path the widget itself uses. `lib/tray/status-section.ts` shows a coarse 3-band emoji mood row (not exact percentages — the tray is a screenshot-able OS surface) and a lowest-priority `petNeedsAttention` tooltip/status state (behind automation/goal/streaming). A new `tray.pet` submenu (Feed/Play/Pet + a settings link), gated by `when: "pet.enabled"`, dispatches through the same `pet.feed`/`pet.play`/`pet.pet` commands D3 introduced — zero new Rust-side dispatch logic, since `{kind: "command", commandId}` tray payloads already route through `executeCommand`.
 
+### D6 — Codex-compatible v2 sprite pets through the existing skin seam
+
+The external `$hatch-pet` workflow produces a fixed v2 contract (`pet.json` plus a PNG/WebP `1536×2288` atlas). Cognia does not execute that filesystem-oriented skill inside the browser. On Tauri, the appearance settings instead seed a main-chat Codex task draft containing the user's concept and the `$hatch-pet` instruction; the user reviews and sends it, then imports the completed files through the same settings panel. Web and mobile can import and render an already-produced package, but do not show the agent-task launcher.
+
+The import boundary treats generated files as untrusted: it requires contract version 2, a filesystem-safe stable id, matching path/MIME, the exact atlas dimensions, unique ids, bounded metadata, and a 25 MiB image cap before decoding. Validated blobs and manifest metadata live in the additive Dexie v119 `petSpritePacks` table; `PetSettings.activeSpritePackId` stores only the selected id. A reactive lookup is contained within `sprite-v2-skin.tsx`, so every existing renderer surface gains the skin without duplicating persistence logic. Cognia maps its richer state vocabulary onto the contract's idle/run/wave/jump/failed/waiting/running/review rows and honors pause/reduced-motion preferences. Missing or deleted packs degrade to the built-in SVG skin.
+
 ## Consequences
 
 - The pet subsystem's real architecture is now discoverable without spelunking through two stale specs and the source tree.
-- D1–D5 are each individually reversible (a settings flag, a hook swap, an additive Rust module, an additive DTO field) — none required a Dexie migration.
+- D1–D5 are each individually reversible (a settings flag, a hook swap, an additive Rust module, an additive DTO field) — none required a Dexie migration. D6 is isolated behind a third skin registration and one additive Dexie table/version.
 - Documentation debt intentionally not fully closed: `docs/superpowers/specs/2026-06-0{2,5}-*.md` are marked superseded in-place (not deleted — they retain historical value per the project's "flag, don't delete" convention) rather than rewritten, so the *decision history* they capture (why SVG-over-sprite-sheet, why side-channel-only LLM, the prior-art research) stays intact.

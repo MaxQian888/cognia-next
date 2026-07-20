@@ -56,13 +56,16 @@ export async function resolveAccountEnv(
   const localAccountId = useAccountStore.getState().unlockedAccountId
   if (!localAccountId) return {}
   try {
-    const pairs = await transport.call<Array<[string, string]> | null>("claude_env_for_account", {
-      provider: providerId,
-      localAccountId,
-      accountId,
-    })
-    if (!pairs) return {}
-    return Object.fromEntries(pairs)
+    const entries = await transport.call<Array<{ key: string; value: string }> | null>(
+      "claude_env_for_account",
+      {
+        provider: providerId,
+        localAccountId,
+        accountId,
+      }
+    )
+    if (!entries) return {}
+    return Object.fromEntries(entries.map(({ key, value }) => [key, value]))
   } catch (err) {
     // Vault load failure or unknown provider — surface in logs but don't
     // block the send. The next layer (ActiveAccountState defaults) still
@@ -84,10 +87,11 @@ export async function resolveProxyEnv(
   sessionId: string | null | undefined
 ): Promise<Record<string, string>> {
   try {
-    const pairs = await transport.call<Array<[string, string]>>("claude_proxy_env_for_session", {
-      sessionId: sessionId ?? "",
-    })
-    return Object.fromEntries(pairs ?? [])
+    const entries = await transport.call<Array<{ key: string; value: string }>>(
+      "claude_proxy_env_for_session",
+      { sessionId: sessionId ?? "" }
+    )
+    return Object.fromEntries((entries ?? []).map(({ key, value }) => [key, value]))
   } catch (err) {
     console.warn("resolveProxyEnv failed", err)
     return {}

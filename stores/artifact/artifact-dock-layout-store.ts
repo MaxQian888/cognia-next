@@ -15,7 +15,7 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 
-export type DockMode = "artifact" | "workspace"
+export type DockMode = "artifact" | "workspace" | "browser"
 
 type WorkspaceRevealFileRequest = {
   id: string
@@ -23,6 +23,8 @@ type WorkspaceRevealFileRequest = {
   rootPath: string
   kind: "file"
   relPath: string
+  line?: number
+  column?: number
 }
 
 type WorkspaceRevealReviewRequest = {
@@ -70,7 +72,15 @@ export interface ArtifactDockLayoutState {
   toggleListRail: () => void
   setListRailOpen: (open: boolean) => void
   setDockMode: (mode: DockMode) => void
-  revealWorkspaceFile: (request: { sessionId: string; rootPath: string; relPath: string }) => void
+  /** Reveal the browser surface in the expanded chat right rail. */
+  openBrowser: () => void
+  revealWorkspaceFile: (request: {
+    sessionId: string
+    rootPath: string
+    relPath: string
+    line?: number
+    column?: number
+  }) => void
   revealWorkspaceReview: (request: {
     sessionId: string
     rootPath: string
@@ -141,6 +151,14 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
       setListRailOpen: (open) => set({ listRailOpen: open }),
       setDockMode: (dockMode) =>
         set({ dockMode, workspaceRevealRequest: null, workspaceContext: null }),
+      openBrowser: () =>
+        set({
+          dockMode: "browser",
+          dockCollapsed: false,
+          mobileSheetOpen: false,
+          workspaceRevealRequest: null,
+          workspaceContext: null,
+        }),
       revealWorkspaceFile: (request) =>
         set({
           dockMode: "workspace",
@@ -211,7 +229,8 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
           ...current,
           ...p,
           dockSize: clampDockSize(p.dockSize ?? current.dockSize),
-          dockMode: p.dockMode === "workspace" ? "workspace" : "artifact",
+          dockMode:
+            p.dockMode === "workspace" || p.dockMode === "browser" ? p.dockMode : "artifact",
           // mobileSheetOpen is runtime-only — never restore it from disk.
           mobileSheetOpen: false,
           workspaceRevealRequest: null,

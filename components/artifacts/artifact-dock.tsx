@@ -15,6 +15,7 @@ import {
   PanelsTopLeftIcon,
   SearchCodeIcon,
   InfoIcon,
+  GlobeIcon,
 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
@@ -44,11 +45,13 @@ import { ContextCommentsPanel } from "@/components/context-workbench/context-com
 import { ContextCapabilityUnavailable } from "@/components/context-workbench/context-capability-unavailable"
 import { resolveContextCapabilities } from "@/lib/context-workbench/capabilities"
 import { useContextCommentBadge } from "@/hooks/context-workbench/use-context-comment-badge"
+import { BrowserPreviewPane } from "@/components/browser/browser-preview-pane"
 
 export function ArtifactDock() {
   const enabled = useContextWorkbenchSurfaceFlag("artifact")
   const activeArtifactId = useArtifactStore((state) => state.activeArtifactId)
-  return enabled && activeArtifactId ? (
+  const dockMode = useArtifactDockLayoutStore((state) => state.dockMode)
+  return enabled && activeArtifactId && dockMode !== "browser" ? (
     <ArtifactContextWorkbench artifactId={activeArtifactId} />
   ) : (
     <LegacyArtifactDock />
@@ -371,6 +374,7 @@ function ArtifactSelectionCommentPanel({
 
 function LegacyArtifactDock() {
   const t = useTranslations("artifacts")
+  const tBrowser = useTranslations("browser")
   const listRailOpen = useArtifactDockLayoutStore((s) => s.listRailOpen)
   const toggleListRail = useArtifactDockLayoutStore((s) => s.toggleListRail)
   const setDockCollapsed = useArtifactDockLayoutStore((s) => s.setDockCollapsed)
@@ -378,6 +382,20 @@ function LegacyArtifactDock() {
   const setDockMode = useArtifactDockLayoutStore((s) => s.setDockMode)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const workspaceAvailable = hasWorkspaceFsBackend()
+  const activeArtifactId = useArtifactStore((state) => state.activeArtifactId)
+  const workbenchInstanceId = useContextWorkbenchInstanceId("artifact")
+  const navigatePanel = useContextWorkbenchStore((state) => state.navigatePanel)
+
+  const selectDockMode = (mode: "artifact" | "workspace") => {
+    if (activeArtifactId) {
+      navigatePanel(
+        `${workbenchInstanceId}::artifact:${activeArtifactId}`,
+        mode === "workspace" ? "workspace" : "preview",
+        mode === "workspace" ? "wide" : "narrow"
+      )
+    }
+    setDockMode(mode)
+  }
 
   return (
     <div
@@ -395,9 +413,23 @@ function LegacyArtifactDock() {
               "rounded px-2 py-1 text-xs",
               dockMode === "artifact" ? "bg-background shadow-sm" : "text-muted-foreground"
             )}
-            onClick={() => setDockMode("artifact")}
+            onClick={() => selectDockMode("artifact")}
           >
             {t("dock.artifactMode")}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={dockMode === "browser"}
+            data-testid="artifact-dock-mode-browser"
+            className={cn(
+              "flex items-center gap-1 rounded px-2 py-1 text-xs",
+              dockMode === "browser" ? "bg-background shadow-sm" : "text-muted-foreground"
+            )}
+            onClick={() => setDockMode("browser")}
+          >
+            <GlobeIcon className="size-3" aria-hidden />
+            {tBrowser("title")}
           </button>
           <button
             type="button"
@@ -410,7 +442,7 @@ function LegacyArtifactDock() {
               "rounded px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50",
               dockMode === "workspace" ? "bg-background shadow-sm" : "text-muted-foreground"
             )}
-            onClick={() => setDockMode("workspace")}
+            onClick={() => selectDockMode("workspace")}
           >
             {t("dock.workspaceMode")}
           </button>
@@ -473,6 +505,8 @@ function LegacyArtifactDock() {
         <div className="min-h-0 min-w-0 flex-1">
           {dockMode === "artifact" ? (
             <ArtifactPanelContent panelMode="desktop" />
+          ) : dockMode === "browser" ? (
+            <BrowserPreviewPane sessionId={activeSessionId ?? undefined} />
           ) : (
             <DockWorkspace activeSessionId={activeSessionId} />
           )}

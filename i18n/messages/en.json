@@ -2075,6 +2075,7 @@
         "disabledTooltip": "Not available on this platform — use your local VS Code instead.",
         "downloading": "Downloading VS Code… {percent}%",
         "errorTitle": "Couldn't start VS Code",
+        "openFileFailed": "Couldn't open the file in VS Code: {error}",
         "retry": "Retry",
         "starting": "Starting VS Code…",
         "switchLabel": "Editor engine",
@@ -2910,6 +2911,10 @@
         "help": "Type actions longer than this many characters paste via the clipboard instead of typing key-by-key. 0 disables.",
         "label": "Paste threshold (characters)"
       },
+      "pictureInPicture": {
+        "help": "Prevent Computer Use activity from appearing over the active conversation.",
+        "label": "Always hide picture in picture"
+      },
       "scaling": {
         "help": "Resize captures to fit the target size before sending to the model. Improves click accuracy and cuts token cost (1280×800 recommended).",
         "label": "Downscale screenshots",
@@ -3079,6 +3084,21 @@
         "whitelist": "Whitelist"
       }
     },
+    "pictureInPicture": {
+      "activity": "Activity: {action}",
+      "close": "Close",
+      "done": "Done",
+      "failed": "Computer Use action failed",
+      "hide": "Hide picture in picture",
+      "justNow": "Just now",
+      "move": "Move picture in picture",
+      "screenAlt": "Computer Use screen",
+      "secondsAgo": "{seconds}s ago",
+      "show": "Show picture in picture",
+      "title": "Computer Use",
+      "viewLarger": "View larger",
+      "waitingForFrame": "Waiting for the first screenshot…"
+    },
     "sandboxConnections": {
       "addConnection": "Add connection",
       "cancel": "Cancel",
@@ -3164,6 +3184,7 @@
     "actions": {
       "back": "Back",
       "cancelSelect": "Cancel selection",
+      "find": "Find",
       "forward": "Forward",
       "openExternal": "Open in external browser",
       "reload": "Reload",
@@ -3267,6 +3288,19 @@
     "errors": {
       "navigate": "Could not navigate to that URL"
     },
+    "find": {
+      "close": "Close find",
+      "count": "{current}/{total}",
+      "next": "Next match",
+      "noMatches": "No matches",
+      "placeholder": "Find in page",
+      "previous": "Previous match"
+    },
+    "history": {
+      "clear": "Clear history",
+      "empty": "No recent pages",
+      "label": "History"
+    },
     "loading": {
       "label": "Loading page",
       "title": "Loading {host}…"
@@ -3275,12 +3309,17 @@
       "collapse": "Collapse",
       "details": "Details"
     },
+    "rail": {
+      "label": "Element inspection"
+    },
     "record": {
       "addAssertion": "Expect text…",
       "assertionPlaceholder": "Text that should appear",
+      "collapse": "Collapse recorder",
       "delete": "Delete flow",
       "deleted": "Flow deleted",
       "empty": "Interact with the page — your clicks, typing and key presses are captured here.",
+      "expand": "Expand recorder",
       "export": "Export",
       "exportAgent": "Send to chat",
       "exportJson": "Flow JSON",
@@ -3308,9 +3347,18 @@
       "startHint": "Load a page first",
       "step": {
         "click": "Click {target}",
+        "direction": {
+          "down": "down",
+          "left": "left",
+          "right": "right",
+          "up": "up"
+        },
+        "doubleClick": "Double-click {target}",
         "fill": "Fill {target}",
+        "hover": "Hover over {target}",
         "navigate": "Go to {url}",
         "pressKey": "Press {key}",
+        "scroll": "Scroll {direction} by {amount}px",
         "secret": "Fill {target} (secret)",
         "select": "Select {value} in {target}",
         "waitFor": "Expect \"{text}\""
@@ -3323,6 +3371,7 @@
       "canvas": "Remote browser canvas",
       "closePage": "Close page",
       "error": "Remote browser unavailable ({code})",
+      "find": "Find in page",
       "humanControl": "You're controlling",
       "takeover": "Take control",
       "untitledPage": "Untitled page",
@@ -3339,6 +3388,12 @@
     "title": "Browser",
     "url": {
       "placeholder": "http://localhost:3000"
+    },
+    "zoom": {
+      "in": "Zoom in",
+      "level": "{percent}%",
+      "out": "Zoom out",
+      "reset": "Reset zoom"
     }
   },
   "canvas": {
@@ -3779,8 +3834,20 @@
       "emptyTitle": "No providers in CCSwitch",
       "errorTitle": "Could not list providers",
       "headerHint": "CCSwitch is the editor for these records — go back to CCSwitch to add, rename or delete.",
+      "importQuota": "Import quota",
       "model": "Model",
       "officialEndpoint": "Official Anthropic endpoint",
+      "quotaImportErrorTitle": "Quota metadata wasn't imported",
+      "quotaImportFailed": "Couldn't save the imported quota source: {error}",
+      "quotaImportReason": {
+        "invalid-endpoint": "The quota endpoint is missing or invalid.",
+        "missing-credentials": "The CCSwitch record does not contain the credential required by this quota endpoint.",
+        "missing-script": "This provider does not include CCSwitch quota metadata.",
+        "unsupported-provider": "This provider requires native signing or another unsupported authentication flow.",
+        "unsupported-template": "Only recognized declarative CCSwitch quota templates can be imported; arbitrary JavaScript is never executed."
+      },
+      "quotaImportSuccess": "Imported {name} as a disabled custom quota source. Review it under Subscription settings, then enable it explicitly.",
+      "quotaImportSuccessTitle": "Quota metadata imported",
       "refresh": "Refresh",
       "useHere": "Use here",
       "useHereAndIn": "Use here & in…"
@@ -4364,6 +4431,7 @@
       "memoryOn": "On",
       "memoryUse": "Use memories in this chat",
       "noApiKey": "No API key",
+      "openBrowser": "Open browser panel",
       "permissionModeAppDefault": "Use app default",
       "permissionModeLabel": "Permission mode",
       "pickDirAria": "Pick directory",
@@ -12520,6 +12588,8 @@
       "look": {
         "description": "Restyle your pet without changing who it is.",
         "descriptionLive2d": "Preview and fine-tune your active Live2D model.",
+        "descriptionSprite": "Preview your active AI-generated v2 sprite pet.",
+        "spriteManagedBelow": "Create, import, and switch v2 sprite pets in the Appearance section below.",
         "title": "Look"
       },
       "openSettings": "Open full pet settings",
@@ -15833,6 +15903,7 @@
     "eventSourcePlaceholder": "leave empty to fire on every source",
     "eventType": "Event Type",
     "eventTypeCustomLabel": "Custom event type…",
+    "eventTypePlaceholder": "e.g., message.created, workflow.completed",
     "eventTypePresetLabel": "Built-in event type",
     "eventTypePresets": {
       "agent:completed": "Agent completed",
@@ -16122,6 +16193,7 @@
         "objectivePlaceholder": "What should the goal accomplish?",
         "timeoutMinutes": "Timeout (min)"
       },
+      "jsonPlaceholder": "'{'\"key\": \"value\"'}'",
       "maxTurns": "Max turns",
       "maxTurnsPlaceholder": "1–100",
       "mcp": {
@@ -22233,6 +22305,7 @@
         "label": "Skin",
         "options": {
           "live2d": "Live2D model",
+          "sprite-v2": "AI sprite (v2)",
           "svg": "Vector mascot"
         }
       },
@@ -22248,6 +22321,29 @@
         "volume": {
           "label": "Volume ({value}%)"
         }
+      },
+      "spriteV2": {
+        "activate": "Use",
+        "active": "Active",
+        "agentPrompt": {
+          "concept": "Pet concept: {concept}",
+          "defaultConcept": "a friendly custom pet that fits Cognia",
+          "instruction": "Use the $hatch-pet skill to create a Codex-compatible v2 animated pet.",
+          "outputFiles": "Keep the final pet.json and spritesheet.webp files and report their absolute paths.",
+          "qa": "Complete every required animation row and QA gate.",
+          "scope": "This is for Cognia's v2 sprite importer; do not modify Cognia source code."
+        },
+        "conceptLabel": "Describe your pet",
+        "conceptPlaceholder": "A tiny clay fox with a teal scarf…",
+        "create": "Continue in chat",
+        "createDescription": "Prepare an agent task draft using the installed hatch-pet skill. Review and send it in chat to continue generation and QA.",
+        "createTitle": "AI Hatch Studio",
+        "delete": "Delete {name}",
+        "empty": "No v2 sprite pets installed yet.",
+        "import": "Import v2 sprite pet",
+        "importHint": "Select pet.json and its spritesheet.webp or spritesheet.png together. Cognia validates the v2 manifest and 1536×2288 atlas before installing.",
+        "installed": "Sprite pet installed and activated.",
+        "invalid": "This is not a valid Codex-compatible v2 pet package. Check the manifest, image format, and atlas dimensions."
       },
       "title": "Pet",
       "twinAwareness": {
@@ -23721,6 +23817,7 @@
     "dialogTitle": "Share via link",
     "done": "Done",
     "errorGeneric": "Could not create the share link.",
+    "errorTooLarge": "This share is too large. Remove some images or export it locally.",
     "limit": {
       "burn": "Burn after reading",
       "count": "Limit views",
@@ -23883,21 +23980,22 @@
     },
     "actions": {
       "addDomain": "Add domain",
-      "approveTool": "Approve exact tool bytes",
       "build": "Build saved version",
       "cancel": "Cancel",
       "confirmDeleteMetadata": "Delete metadata",
       "confirmPurge": "Purge managed resources",
       "create": "Create Site",
+      "creating": "Creating…",
       "deleteMetadata": "Delete Site metadata",
       "deploy": "Deploy",
       "loadAnalytics": "Load last 24 hours of analytics",
       "loadLogs": "Load last 24 hours of logs",
+      "newSite": "New Site",
       "preview": "Start preview",
       "provision": "Provision bindings",
       "purge": "Purge managed resources",
       "reconcile": "Reconcile provider state",
-      "refresh": "Refresh Sites",
+      "redetectWrangler": "Re-detect Wrangler",
       "remove": "Remove",
       "restore": "Restore",
       "rollback": "Redeploy / Roll back",
@@ -23908,6 +24006,9 @@
       "stopPreview": "Stop preview",
       "takeDown": "Take down",
       "upload": "Upload version"
+    },
+    "advanced": {
+      "title": "Advanced configuration"
     },
     "authoring": {
       "accountsPlaceholder": "One Cognia account ID per line",
@@ -23933,9 +24034,11 @@
     },
     "create": {
       "accountId": "Cloudflare account ID",
+      "description": "Publish a project's build output to Cloudflare Workers.",
       "name": "Site name",
       "project": "Project",
       "subpath": "Source subpath (optional)",
+      "title": "New Site",
       "workerName": "Worker name"
     },
     "deploymentStatus": {
@@ -24018,24 +24121,48 @@
       "token": "Cloudflare API token",
       "worker": "Worker"
     },
+    "publish": {
+      "noVersions": "Build a version first to upload and deploy."
+    },
+    "sidebarEmpty": "No Sites yet. Create one to get started.",
+    "stepState": {
+      "done": "Done",
+      "failed": "Needs attention",
+      "idle": "Not started",
+      "running": "In progress"
+    },
+    "steps": {
+      "build": {
+        "description": "Provision bindings and build an immutable version.",
+        "title": "Build"
+      },
+      "connect": {
+        "description": "Verify and store the API token for this Site.",
+        "title": "Connect Cloudflare"
+      },
+      "environment": {
+        "description": "Save the variables and secrets the build needs.",
+        "title": "Environment"
+      },
+      "preview": {
+        "description": "Run the build locally before publishing.",
+        "title": "Preview"
+      },
+      "publish": {
+        "description": "Upload a version and deploy it to production.",
+        "title": "Publish"
+      }
+    },
     "subtitle": "Build, preview, and publish from Cognia",
-    "tabs": {
-      "access": "Access",
-      "build": "Build & Preview",
-      "domains": "Domains",
-      "observability": "Logs & Analytics",
-      "provider": "Provider",
-      "versions": "Versions"
-    },
     "title": "Sites",
-    "versionStatus": {
-      "building": "Building",
-      "failed": "Failed",
-      "ready": "Ready"
-    },
     "versions": {
-      "version": "Version {sequence}",
-      "wranglerPath": "Absolute path to the approved Wrangler binary"
+      "version": "Version {sequence}"
+    },
+    "wrangler": {
+      "detecting": "Detecting the Wrangler CLI…",
+      "installHint": "Install it with npm i -g wrangler, then re-detect.",
+      "notFound": "Wrangler CLI was not found on this host.",
+      "ready": "Wrangler ready ({version})."
     }
   },
   "skills": {
@@ -25187,13 +25314,16 @@
       "add": "Add custom source",
       "cancel": "Cancel",
       "description": "Wire any coding-plan or relay provider into the limits panel by describing its balance/usage endpoint — no code needed.",
+      "disableSource": "Disable quota queries for {name}",
       "edit": "Edit",
       "empty": "No custom sources yet.",
+      "enableSource": "Enable quota queries for {name}",
       "fields": {
         "auth": "Authorization",
         "authBearer": "Bearer token",
         "authRaw": "Raw key (no scheme)",
         "baseUrl": "Base URL",
+        "enabled": "Enable after saving",
         "extraHeaderName": "Extra header (name)",
         "extraHeaderValue": "Extra header (value)",
         "kind": "Reading type",
@@ -25202,6 +25332,7 @@
         "name": "Name",
         "namePlaceholder": "My relay",
         "path": "Request path",
+        "refreshMinutes": "Minimum refresh interval (minutes)",
         "remainingPath": "Remaining field path",
         "resetAtPath": "Reset time path",
         "scale": "Scale",
@@ -25218,8 +25349,12 @@
         "custom": "Custom (blank)",
         "genericBalance": "Generic credit balance",
         "githubCopilot": "GitHub Copilot",
+        "glmCoding": "GLM Coding Plan",
+        "kimiCoding": "Kimi Coding Plan",
         "label": "Preset",
-        "newApi": "New-API relay (one-api)"
+        "minimaxTokenPlan": "MiniMax Token Plan",
+        "newApi": "New-API relay (one-api)",
+        "zenmux": "ZenMux coding plan"
       },
       "remove": "Remove",
       "save": "Save",
@@ -25251,6 +25386,14 @@
       "noMeters": "No limit windows reported for this account.",
       "noValue": "—",
       "percentUsed": "{pct}% used",
+      "query": {
+        "disable": "Disable quota queries",
+        "disabledBody": "No provider request is sent until this exact account is enabled. Turn it on only if you accept the provider, relay, and network-path risk.",
+        "disabledTitle": "Network quota query is off",
+        "enable": "Enable quota queries",
+        "enabledBody": "This account may query its provider or relay quota endpoint. Requests are coalesced, throttled, and backed off after rate limits.",
+        "enabledTitle": "Network quota query is on"
+      },
       "refresh": "Refresh",
       "resetExpired": "Resets shortly",
       "resetsInHm": "Resets in {hours}h {minutes}m",
@@ -25399,6 +25542,8 @@
     "overview": {
       "noDataBody": "Fetch your quota straight from Anthropic's free usage endpoint — no token cost, no chat message needed.",
       "noDataTitle": "No usage data yet",
+      "officialQuotaDisabledBody": "Enable it in Subscription settings only if you accept the upstream compatibility and network-path risk. Passive usage from normal work remains available.",
+      "officialQuotaDisabledTitle": "Official quota query is off",
       "refresh": "Refresh",
       "signInCta": "Sign in",
       "signedOutBody": "Sign in with your Claude account to monitor 5h/7d rate-limit windows.",

@@ -4,7 +4,7 @@
 // in `AppSettings.subscriptionSettings`; the store's `save({...})` method
 // persists to Dexie and re-broadcasts.
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 
 import { Button } from "@/components/ui/button"
@@ -22,16 +22,15 @@ import { PROBE_CADENCE_FLOOR_MS, clampCadence } from "@/lib/subscription/anthrop
 import { isTauri } from "@/lib/tauri"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
-function loadSettings(
-  app: { subscriptionSettings?: SubscriptionSettings } | null
-): SubscriptionSettings {
-  return app?.subscriptionSettings ?? DEFAULT_SUBSCRIPTION_SETTINGS
+function loadSettings(stored: SubscriptionSettings | undefined): SubscriptionSettings {
+  return { ...DEFAULT_SUBSCRIPTION_SETTINGS, ...stored }
 }
 
 export function SubscriptionSettingsTab() {
   const t = useTranslations("subscription")
   const tabReady = isTauri()
-  const settings = useSettingsStore((s) => loadSettings(s.settings))
+  const storedSettings = useSettingsStore((s) => s.settings?.subscriptionSettings)
+  const settings = useMemo(() => loadSettings(storedSettings), [storedSettings])
   const save = useSettingsStore((s) => s.save)
 
   const [draft, setDraft] = useState<SubscriptionSettings>(settings)

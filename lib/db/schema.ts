@@ -2623,6 +2623,13 @@ export class CogniaDB extends Dexie {
           })
       })
 
+    // v119 — Installed Codex-compatible v2 sprite pet packs. The atlas blob
+    // and manifest metadata share one row so installation/deletion is atomic;
+    // displayName and createdAt support picker search/sort surfaces.
+    this.version(119).stores({
+      petSpritePacks: "&id, displayName, createdAt",
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -2677,6 +2684,8 @@ export class CogniaDB extends Dexie {
   // v73 — Pet Live2D models + asset blobs. See `lib/db/pet-models.ts`.
   petModels!: Table<PetModelRow, string>
   petModelFiles!: Table<PetModelFileRow, string>
+  // v119 — Codex-compatible v2 sprite pet packs. See `lib/db/pet-sprite-packs.ts`.
+  petSpritePacks!: Table<import("./pet-sprite-packs").PetSpritePackRow, string>
   // v74 — Terminal durable history + unattended-exec audit.
   terminalHistory!: Table<TerminalHistoryRow, string>
   unattendedExecAudit!: Table<UnattendedExecAuditRow, string>
@@ -2736,6 +2745,7 @@ export type { BackgroundTaskJournalRow } from "./background-tasks"
 export type { WasmGrantLedgerRow, WasmGrantSource } from "./wasm-grant-ledger"
 export type { RunRecordRow } from "./run-records"
 export type { PetModelRow, PetModelFileRow } from "./pet-models"
+export type { PetSpritePackRow } from "./pet-sprite-packs"
 export type { TerminalHistoryRow } from "./terminal-history"
 export type { ProviderCostDailyRow } from "./provider-cost-daily"
 export type { UnattendedExecAuditRow } from "./terminal-audit"

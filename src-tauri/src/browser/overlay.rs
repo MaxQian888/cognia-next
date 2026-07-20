@@ -75,6 +75,7 @@ mod tests {
         assert!(OVERLAY_JS.contains("__cognia_select"));
         assert!(OVERLAY_JS.contains("__cognia_nav"));
         assert!(OVERLAY_JS.contains("__cognia_loaded"));
+        assert!(OVERLAY_JS.contains("__cogniaFind"));
     }
 
     #[test]

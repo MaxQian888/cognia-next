@@ -169,6 +169,20 @@ function parseMarkdown(text, components) {
       continue
     }
 
+    // ── image ![alt](url) ─────────────────────────────────
+    const imageMatch = line.match(/^!\[([^\]]*)\]\(([^)]+)\)$/)
+    if (imageMatch) {
+      elements.push(
+        callComp(components, "img", {
+          key: key++,
+          src: imageMatch[2],
+          alt: imageMatch[1],
+        })
+      )
+      i++
+      continue
+    }
+
     // ── link [text](url) ──────────────────────────────────
     const linkMatch = line.match(/\[([^\]]+)\]\(([^)]+)\)/)
     if (linkMatch) {

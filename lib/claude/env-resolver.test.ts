@@ -114,9 +114,9 @@ describe("resolveAccountEnv", () => {
 
   it("forwards provider + accountId via transport.call and returns the merged record", async () => {
     mockCall.mockResolvedValueOnce([
-      ["CLAUDE_CODE_OAUTH_TOKEN", "oat-01"],
-      ["CLAUDE_CONFIG_DIR", "/tmp/configs/abc"],
-      ["ANTHROPIC_BASE_URL", "https://example.com"],
+      { key: "CLAUDE_CODE_OAUTH_TOKEN", value: "oat-01" },
+      { key: "CLAUDE_CONFIG_DIR", value: "/tmp/configs/abc" },
+      { key: "ANTHROPIC_BASE_URL", value: "https://example.com" },
     ])
     const env = await resolveAccountEnv("anthropic", "abc")
     expect(mockCall).toHaveBeenCalledWith("claude_env_for_account", {
@@ -159,8 +159,8 @@ describe("resolveAccountEnv", () => {
 describe("resolveProxyEnv", () => {
   it("returns parsed pairs when proxy is active", async () => {
     mockCall.mockResolvedValueOnce([
-      ["HTTPS_PROXY", "http://proxy:8080"],
-      ["HTTP_PROXY", "http://proxy:8080"],
+      { key: "HTTPS_PROXY", value: "http://proxy:8080" },
+      { key: "HTTP_PROXY", value: "http://proxy:8080" },
     ])
     const env = await resolveProxyEnv("session-x")
     expect(mockCall).toHaveBeenCalledWith("claude_proxy_env_for_session", {

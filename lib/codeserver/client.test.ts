@@ -28,6 +28,14 @@ it("maps process commands to the right invoke names + args", () => {
 
   void codeServerClient.download()
   expect(call).toHaveBeenCalledWith("codeserver_download", {})
+
+  void codeServerClient.openFile("/work/proj", "src/index.ts", 12, 4)
+  expect(call).toHaveBeenCalledWith("codeserver_open_file", {
+    root: "/work/proj",
+    path: "src/index.ts",
+    line: 12,
+    column: 4,
+  })
 })
 
 it("spreads the rect into the embed command payloads", () => {

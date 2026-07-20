@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 const isTauriMock = jest.fn(() => true)
 jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
@@ -12,14 +13,26 @@ jest.mock("@/lib/subscription/core/hooks", () => ({
 }))
 
 const refreshMock = jest.fn()
-let limitsResult: { snapshot: unknown; refreshing: boolean } = { snapshot: null, refreshing: false }
+const setQueryEnabledMock = jest.fn(async () => {})
+let limitsResult: { snapshot: unknown; refreshing: boolean; queryEnabled?: boolean } = {
+  snapshot: null,
+  refreshing: false,
+}
 jest.mock("@/lib/subscription/limits/hooks", () => ({
-  useProviderLimits: () => ({ ...limitsResult, unavailable: false, refresh: refreshMock }),
+  useProviderLimits: () => ({
+    ...limitsResult,
+    unavailable: false,
+    queryEnabled: limitsResult.queryEnabled ?? true,
+    setQueryEnabled: setQueryEnabledMock,
+    refresh: refreshMock,
+  }),
 }))
 
 jest.mock("@/components/settings/subscription/balance-card", () => ({
-  BalanceCard: ({ provider, accountId, label }: Record<string, string>) => (
-    <div data-testid={`balance-${provider}-${accountId}`}>{label}</div>
+  BalanceCard: ({ provider, accountId, label, queryEnabled }: Record<string, unknown>) => (
+    <div data-testid={`balance-${provider}-${accountId}`} data-query-enabled={String(queryEnabled)}>
+      {String(label)}
+    </div>
   ),
 }))
 
@@ -60,6 +73,27 @@ describe("ProviderQuotaPanel", () => {
   it("auto-fetches once when no fresh snapshot exists", async () => {
     render(<ProviderQuotaPanel provider="codex" now={NOW} />)
     await waitFor(() => expect(refreshMock).toHaveBeenCalledTimes(1))
+  })
+
+  it("does not auto-fetch Anthropic quota before explicit opt-in", async () => {
+    limitsResult = { snapshot: null, refreshing: false, queryEnabled: false }
+    render(<ProviderQuotaPanel provider="anthropic" now={NOW} />)
+    await waitFor(() => expect(screen.getByTestId("balance-anthropic-acc-1")).toBeInTheDocument())
+    expect(screen.getByTestId("balance-anthropic-acc-1")).toHaveAttribute(
+      "data-query-enabled",
+      "false"
+    )
+    expect(refreshMock).not.toHaveBeenCalled()
+  })
+
+  it("lets the user opt the active account into quota queries", async () => {
+    limitsResult = { snapshot: null, refreshing: false, queryEnabled: false }
+    render(<ProviderQuotaPanel provider="codex" now={NOW} />)
+
+    await userEvent.click(screen.getByRole("button", { name: "Enable quota queries" }))
+
+    expect(setQueryEnabledMock).toHaveBeenCalledWith(true)
+    expect(refreshMock).not.toHaveBeenCalled()
   })
 
   it("skips the auto-fetch when the stored snapshot is fresh", async () => {

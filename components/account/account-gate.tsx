@@ -12,6 +12,7 @@ import { isTauri } from "@/lib/tauri"
 import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
 import { PASSWORD_MIN_LENGTH } from "@/lib/accounts/password-policy"
 import { selectActiveAccount, useAccountStore } from "@/stores/account/account-store"
+import { useAutoLock } from "@/hooks/account/use-auto-lock"
 import { PasswordStrengthMeter } from "./password-strength-meter"
 
 export interface AccountGateProps {
@@ -41,6 +42,10 @@ export function AccountGate({ children }: AccountGateProps) {
     [accounts, activeAccount]
   )
   const visibleError = actionError ?? storeError
+
+  // Idle auto-lock (Settings → Account → Security). Inert until the user sets a
+  // non-zero timeout; lives here because the gate wraps the whole desktop app.
+  useAutoLock()
 
   if (!loaded || loading) {
     return <GateShell>{t("loading")}</GateShell>

@@ -530,6 +530,7 @@
       "other": "其他"
     },
     "hideArtifacts": "折叠产物面板",
+    "openBrowser": "打开浏览器面板",
     "hideConversations": "折叠会话列表",
     "insights": "会话洞察",
     "memoryInherit": "继承应用设置",

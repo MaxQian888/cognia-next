@@ -121,4 +121,42 @@ describe("custom source presets", () => {
       )
     })
   })
+
+  describe("coding plan providers", () => {
+    it("reads Kimi remaining/count utilization", async () => {
+      const applied = presetById("kimi-coding").apply(
+        draft({ baseUrl: "https://api.kimi.com" })
+      )
+      const snap = await runCustomLimitsSource(
+        applied,
+        deps(JSON.stringify({ usage: { remaining: 75, limit: 100, resetTime: 1_800_000_000 } }))
+      )
+
+      expect(snap?.meters[0]).toMatchObject({ usedPct: 25, resetAt: 1_800_000_000_000 })
+    })
+
+    it("reads ZenMux's fractional 5h and weekly windows", async () => {
+      const applied = presetById("zenmux").apply(draft())
+      const snap = await runCustomLimitsSource(
+        applied,
+        deps(
+          JSON.stringify({
+            success: true,
+            data: {
+              quota_5_hour: {
+                usage_percentage: 0.42,
+                resets_at: "2026-07-20T10:00:00Z",
+              },
+              quota_7_day: {
+                usage_percentage: 0.6,
+                resets_at: "2026-07-27T10:00:00Z",
+              },
+            },
+          })
+        )
+      )
+
+      expect(snap?.meters).toMatchObject([{ usedPct: 42 }, { usedPct: 60 }])
+    })
+  })
 })

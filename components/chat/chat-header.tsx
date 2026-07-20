@@ -10,6 +10,7 @@ import {
   PanelRightCloseIcon,
   PanelRightOpenIcon,
   Settings2Icon,
+  GlobeIcon,
 } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
@@ -67,10 +68,23 @@ export function ChatHeader({ session, onOpenSettings }: Props) {
   // title-bar layout controls and ⌘J also drive — a single source of truth.
   const dockCollapsed = useArtifactDockLayoutStore((s) => s.dockCollapsed)
   const toggleDock = useArtifactDockLayoutStore((s) => s.toggleDock)
+  const openBrowser = useArtifactDockLayoutStore((s) => s.openBrowser)
   const dockToggleLabel = dockCollapsed ? t("showArtifacts") : t("hideArtifacts")
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="hidden size-8 shrink-0 md:inline-flex"
+        onClick={openBrowser}
+        aria-label={t("openBrowser")}
+        title={t("openBrowser")}
+        data-testid="chat-browser-dock-open"
+      >
+        <GlobeIcon className="size-4" />
+      </Button>
+
       <Button
         variant="ghost"
         size="icon"

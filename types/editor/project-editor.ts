@@ -8,4 +8,6 @@ export interface ProjectEditorSession {
   activePath: string | null
   /** Optional persisted resizable layout owned by the rendering surface. */
   layout?: number[]
+  /** Preferred project editor engine for surfaces that offer CodeServer. */
+  editorMode?: "monaco" | "codeserver"
 }

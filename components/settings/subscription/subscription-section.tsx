@@ -31,6 +31,8 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 
+import { PanelTransition } from "@/components/settings/common/panel-transition"
+
 import { CloudSyncCard } from "./cloud-sync-card"
 import { ImportExportButtons } from "./import-export-buttons"
 import { ProviderTabCodex } from "./provider-tab-codex"
@@ -152,7 +154,9 @@ export function SubscriptionSection() {
             className="@container/subscription-pane min-h-0 flex-1 overflow-y-auto p-3"
             data-testid="subscription-panel-body"
           >
-            {renderPanel(activePanel, goToClaudeAccounts)}
+            <PanelTransition activeKey={activePanel}>
+              {renderPanel(activePanel, goToClaudeAccounts)}
+            </PanelTransition>
           </div>
         </div>
       </div>

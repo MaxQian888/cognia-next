@@ -91,10 +91,12 @@ import { ProjectEditorFileWorkbench, useProjectEditorWorkbench } from "./project
 
 function Harness({
   beforeOpen,
+  registerProjectOpener,
   sidebarPosition = "right",
   showContextWorkbench = true,
 }: {
   beforeOpen?: () => void
+  registerProjectOpener?: boolean
   sidebarPosition?: "left" | "right"
   showContextWorkbench?: boolean
 }) {
@@ -102,6 +104,7 @@ function Harness({
     scopeKey: "session:s1",
     workingDir: "/repo",
     beforeOpen,
+    registerProjectOpener,
   })
   return (
     <div onKeyDown={workbench.onKeyDown}>
@@ -163,6 +166,11 @@ it("registers the root opener and removes it on unmount", () => {
   expect(registerOpener).toHaveBeenCalledWith(expect.objectContaining({ root: "/repo" }))
   unmount()
   expect(disposeOpener).toHaveBeenCalled()
+})
+
+it("can suspend Monaco routing while another editor owns the root", () => {
+  render(<Harness registerProjectOpener={false} />)
+  expect(registerOpener).not.toHaveBeenCalled()
 })
 
 it("supports the shared left-sidebar composition used by Agent Team", () => {

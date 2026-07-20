@@ -3,6 +3,25 @@
 // struct's `serde(rename = "...")` attributes; everything not marked optional
 // is always present (the Rust side fills empty strings before dropping rows).
 
+export interface CcswitchUsageScript {
+  enabled?: boolean
+  language?: string
+  /** Never executed by Cognia; retained only so unsupported scripts can be rejected explicitly. */
+  code?: string
+  timeout?: number
+  apiKey?: string
+  baseUrl?: string
+  accessToken?: string
+  userId?: string
+  templateType?: string
+  autoQueryInterval?: number
+  codingPlanProvider?: string
+  accessKeyId?: string
+  secretAccessKey?: string
+  teamOrganizationId?: string
+  teamProjectId?: string
+}
+
 /**
  * Shape of a single provider/subscription entry in `cc-switch.db`. CCSwitch
  * pre-fills 50+ providers (Anthropic, Kimi, DeepSeek, Qwen, …); users can
@@ -40,6 +59,8 @@ export interface CcswitchProvider {
   customHeaders?: Record<string, string>
   /** Free-form `sharedConfig` blob CCSwitch preserves across switches. */
   sharedConfig?: unknown
+  /** Optional quota metadata extracted from CCSwitch `meta.usage_script`. */
+  usageScript?: CcswitchUsageScript
   notes?: string
 }
 

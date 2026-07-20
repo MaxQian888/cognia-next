@@ -23,10 +23,13 @@ import {
 } from "@/components/settings/common/settings-section"
 
 import { useCcswitchProviders, useCcswitchStatus } from "@/lib/ccswitch/hooks"
+import { fromCcswitchUsageScript } from "@/lib/ccswitch/import"
 import { detectActive } from "@/lib/ccswitch/switch"
+import { upsertCustomSource } from "@/lib/subscription/limits/custom/store"
 import type { ActiveProviderState, CcswitchAgentId, CcswitchProvider } from "@/types/ccswitch"
 import { getSettings } from "@/lib/db/settings"
 import { isTauri } from "@/lib/tauri"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 
 import { ProviderSwitchDialog } from "../provider-switch-dialog"
 
@@ -57,6 +60,13 @@ export function CcswitchProvidersTab() {
   const [active, setActive] = useState<ActiveProviderState | null>(null)
   const [dialogProvider, setDialogProvider] = useState<CcswitchProvider | null>(null)
   const [dialogPrefill, setDialogPrefill] = useState<CcswitchAgentId[]>([])
+  const [quotaImportResult, setQuotaImportResult] = useState<{
+    ok: boolean
+    message: string
+  } | null>(null)
+  const customLimitsSources =
+    useSettingsStore((state) => state.settings?.customLimitsSources) ?? []
+  const saveSettings = useSettingsStore((state) => state.save)
 
   useEffect(() => {
     if (!providers) return
@@ -126,8 +136,47 @@ export function CcswitchProvidersTab() {
     setDialogPrefill(defaultPropagation)
   }
 
+  const onImportQuota = async (provider: CcswitchProvider) => {
+    const converted = fromCcswitchUsageScript(provider)
+    if (!converted.ok) {
+      setQuotaImportResult({
+        ok: false,
+        message: t(`providers.quotaImportReason.${converted.reason}`),
+      })
+      return
+    }
+    try {
+      await saveSettings({
+        customLimitsSources: upsertCustomSource(customLimitsSources, converted.source),
+      })
+      setQuotaImportResult({
+        ok: true,
+        message: t("providers.quotaImportSuccess", { name: provider.name }),
+      })
+    } catch (error) {
+      setQuotaImportResult({
+        ok: false,
+        message: t("providers.quotaImportFailed", {
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      })
+    }
+  }
+
   return (
     <div className="space-y-3">
+      {quotaImportResult && (
+        <SettingsAlert
+          variant={quotaImportResult.ok ? "default" : "destructive"}
+          title={
+            quotaImportResult.ok
+              ? t("providers.quotaImportSuccessTitle")
+              : t("providers.quotaImportErrorTitle")
+          }
+        >
+          {quotaImportResult.message}
+        </SettingsAlert>
+      )}
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">{t("providers.headerHint")}</p>
         <Button variant="ghost" size="sm" onClick={refresh}>
@@ -155,6 +204,11 @@ export function CcswitchProvidersTab() {
                     <Badge variant="outline" className="text-[10px]">
                       {p.kind}
                     </Badge>
+                  )}
+                  {p.usageScript && (
+                    <Button size="sm" variant="outline" onClick={() => void onImportQuota(p)}>
+                      {t("providers.importQuota")}
+                    </Button>
                   )}
                   <Button size="sm" variant="outline" onClick={() => onUseHere(p)}>
                     {t("providers.useHere")}

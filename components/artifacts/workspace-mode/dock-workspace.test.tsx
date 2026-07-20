@@ -188,6 +188,7 @@ jest.mock("@/components/source-control/diff-pane", () => ({
 
 import { DockWorkspace } from "./dock-workspace"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
+import { PROJECT_EDITOR_GOTO_EVENT } from "@/components/editor/project/editor-events"
 
 beforeEach(() => {
   backendAvailable = true
@@ -246,17 +247,26 @@ describe("DockWorkspace", () => {
   })
 
   it("consumes a queued file reveal after mounting the editor", async () => {
+    const gotoListener = jest.fn()
+    window.addEventListener(PROJECT_EDITOR_GOTO_EVENT, gotoListener)
     act(() => {
       useArtifactDockLayoutStore.getState().revealWorkspaceFile({
         sessionId: "split-session",
         rootPath: "/repo",
         relPath: "src/a.ts",
+        line: 7,
+        column: 2,
       })
     })
 
     render(<DockWorkspace activeSessionId="session-1" />)
 
     await waitFor(() => expect(openFile).toHaveBeenCalledWith("src/a.ts"))
+    await waitFor(() =>
+      expect(gotoListener).toHaveBeenCalledWith(
+        expect.objectContaining({ detail: { relPath: "src/a.ts", line: 7, column: 2 } })
+      )
+    )
     expect(clearReveal).toHaveBeenCalledWith(expect.stringMatching(/^workspace-reveal-/))
     expect(screen.getByTestId("workspace-file-layout")).toBeInTheDocument()
     expect(screen.getByTestId("file-tree")).toBeInTheDocument()
@@ -264,6 +274,7 @@ describe("DockWorkspace", () => {
       scopeKey: "session:split-session",
       workingDir: "/repo",
     })
+    window.removeEventListener(PROJECT_EDITOR_GOTO_EVENT, gotoListener)
   })
 
   it("opens the fixed review surface only for the bound Git repository", async () => {

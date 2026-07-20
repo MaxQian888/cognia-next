@@ -1,9 +1,22 @@
-# Pro IDE — Phase 2: Agent-drive (PENDING / not yet implemented)
+# Pro IDE — Phase 2: Agent-drive (implemented via shared editor bridge)
 
-Status: **design complete, not built.** Phase 0/1 (the human-usable embedded
-code-server) is shipped and unit-tested; this document is the ready-to-implement
-spec for making the **agent drive the code-server editor**. Approved plan:
-`~/.claude/plans/replicated-nibbling-pony.md`. Deferred by request on 2026-07-14.
+Status: **auto-follow and conversation navigation built.** Phase 0/1 (the
+human-usable embedded code-server) and the shared editor-driving path are
+shipped and unit-tested. The custom WebSocket/VSIX sections below remain a
+reference for future generic editor control methods beyond open/reveal.
+
+> **Implementation update (2026-07-20):** bridge-driven file open/reveal is now
+> built without the custom extension described below. The pinned code-server
+> 4.128.0 CLI already routes `--reuse-window <file>:<line>:<column>` through its
+> user-data-dir session socket, so `codeserver_open_file` uses that native IPC
+> path. `CodeServerPane` registers it with `project-editor-bridge`, which makes
+> terminal and other existing project-editor jumps follow the active Pro IDE.
+> Agent file-activity auto-follow is now wired at the normalized Agent Team
+> runtime-event boundary. Read events reveal immediately; successful writes and
+> edits reveal after their result, so newly-created files exist before the
+> editor is asked to open them. Conversation Markdown links and inline-code
+> references route through the same bridge. Sections A-C are retained as
+> historical design for capabilities that eventually need a generic channel.
 
 ## Chosen scope
 
@@ -177,8 +190,9 @@ so `applyEdit` / `readActive` can be added later without a protocol change.
 
 - **`.vsix` packaging + bundling** is the fiddliest part (build toolchain, Tauri
   resource, install-once marker, Open VSX has no bearing since we side-load).
-- **Auto-follow event site**: confirm exactly where the renderer parses agent
-  file-op `tool_use` events before wiring #2 (not yet pinned to a file).
+- **Auto-follow event sites (resolved):** Agent Team streams are observed in
+  `team-runtime-dispatcher.ts`; primary chat AI SDK tool parts are observed by
+  `use-agent-file-auto-follow.ts`. Both normalize through `file-activity.ts`.
 - **Token CSPRNG**: verify a random source dep exists in `src-tauri`; never use a
   counter for the shared token.
 - **Multiple roots / worktrees**: one code-server + one WS token per canonical

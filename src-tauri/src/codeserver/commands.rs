@@ -71,3 +71,25 @@ pub async fn codeserver_download(app: tauri::AppHandle) -> Result<InstallInfo, S
         .await
         .map_err(|e| format!("{e:#}"))
 }
+
+/// Open a project-relative file in an already-running CodeServer window.
+#[tauri::command]
+pub async fn codeserver_open_file(
+    state: State<'_, CodeServerState>,
+    root: String,
+    path: String,
+    line: Option<u32>,
+    column: Option<u32>,
+) -> Result<(), String> {
+    state.open_file(&root, &path, line, column).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn supported_command_matches_the_download_platform_gate() {
+        assert_eq!(codeserver_supported(), download::resolve_platform().is_ok());
+    }
+}

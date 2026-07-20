@@ -208,6 +208,8 @@ pub struct AutomationSettings {
     /// of a duplicate image when consecutive screenshots hash identically.
     /// Default ON.
     pub screenshot_dedup: bool,
+    /// Prevent the renderer from showing Computer Use activity in PiP.
+    pub always_hide_picture_in_picture: bool,
     /// `type` calls longer than this many chars transparently use the
     /// clipboard-paste fast path. 0 disables. Default 200.
     pub paste_threshold_chars: u32,
@@ -224,6 +226,7 @@ impl Default for AutomationSettings {
             redact_screenshots: false,
             screenshot_scaling: ScreenshotScalingSettings::default(),
             screenshot_dedup: true,
+            always_hide_picture_in_picture: false,
             paste_threshold_chars: 200,
         }
     }
@@ -567,6 +570,7 @@ mod tests {
         assert_eq!(s.screenshot_scaling.max_width, 1280);
         assert_eq!(s.screenshot_scaling.max_height, 800);
         assert!(s.screenshot_dedup);
+        assert!(!s.always_hide_picture_in_picture);
         assert_eq!(s.paste_threshold_chars, 200);
     }
 
@@ -578,6 +582,7 @@ mod tests {
         let s: AutomationSettings = serde_json::from_str(json).unwrap();
         assert!(s.enabled);
         assert!(s.screenshot_dedup);
+        assert!(!s.always_hide_picture_in_picture);
         assert_eq!(s.paste_threshold_chars, 200);
         assert!(!s.screenshot_scaling.enabled);
     }

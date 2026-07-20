@@ -67,6 +67,11 @@ import { TeamWorkspaceMobile } from "@/components/mobile/agent-teams/team-worksp
 import { useRuntimeAvailability } from "@/lib/agent-team/use-runtime-availability"
 import { buildConversationHistory } from "@/lib/agent-team/conversation-context"
 import { buildTeamClaudeRuntimeModel } from "@/lib/agent-team/provider-model"
+import type { AgentFileActivity } from "@/lib/agent-team/file-activity"
+import { resolveLinkPath } from "@/lib/terminal/terminal-links"
+import { deferProjectEditorOpen, openInProjectEditor } from "@/lib/files/project-editor-bridge"
+import type { ProjectFileReference } from "@/lib/files/project-file-reference"
+import { useProjectEditorSessionStore } from "@/stores/editor/project-editor-session-store"
 import type {
   AgentTeamEvent,
   AgentTeamMessage,
@@ -136,6 +141,9 @@ function AgentTeamWorkspaceInner() {
   const setWorkspaceTab = useAgentTeamStore((s) => s.setWorkspaceTab)
   const setWorkspaceTeamFromRoute = useAgentTeamStore((s) => s.setWorkspaceTeamFromRoute)
   const updateTeam = useAgentTeamStore((s) => s.updateTeam)
+  const selectedEditorRoot = useProjectEditorSessionStore((s) =>
+    teamId ? s.sessions[`team:${teamId}`]?.rootKey : undefined
+  )
 
   const externalAgent = useExternalAgent()
   const { setActiveAgent, executeStreaming } = externalAgent
@@ -154,6 +162,28 @@ function AgentTeamWorkspaceInner() {
 
   const mentionables = useMemo(() => buildMentionableTargets(teammates), [teammates])
   const availability = useRuntimeAvailability()
+
+  const handleAgentFileActivity = useCallback(
+    (activity: AgentFileActivity): void => {
+      if (!teamId || useAgentTeamStore.getState().workspaceTab !== "editor") return
+      const currentTeam = useAgentTeamStore.getState().teams[teamId]
+      const workingDir = currentTeam?.config.workingDir
+      if (!workingDir) return
+      const root =
+        useProjectEditorSessionStore.getState().sessions[`team:${teamId}`]?.rootKey ?? workingDir
+      const absolutePath = resolveLinkPath(root, activity.path)
+      openInProjectEditor(absolutePath, activity.line, activity.column)
+    },
+    [teamId]
+  )
+
+  const handleConversationFileOpen = useCallback(
+    (target: ProjectFileReference): void => {
+      deferProjectEditorOpen(target.absolutePath, target.line, target.column)
+      setWorkspaceTab("editor")
+    },
+    [setWorkspaceTab]
+  )
 
   const dispatchPair = useCallback(
     async (params: { targetId: string; prompt: string; rawText: string }): Promise<void> => {
@@ -198,6 +228,7 @@ function AgentTeamWorkspaceInner() {
           {
             writer: { upsertMessage },
             streamer,
+            onFileActivity: handleAgentFileActivity,
           }
         )
       } catch (err) {
@@ -214,7 +245,16 @@ function AgentTeamWorkspaceInner() {
         setIsSending(false)
       }
     },
-    [teamId, mentionables, settings, setActiveAgent, executeStreaming, upsertMessage, tComposer]
+    [
+      teamId,
+      mentionables,
+      settings,
+      setActiveAgent,
+      executeStreaming,
+      upsertMessage,
+      tComposer,
+      handleAgentFileActivity,
+    ]
   )
 
   const handleSendMention = useCallback(
@@ -354,6 +394,8 @@ function AgentTeamWorkspaceInner() {
               availability={availability}
               onRetry={handleRetry}
               onDelete={handleDelete}
+              projectRoot={selectedEditorRoot ?? team.config.workingDir}
+              onOpenProjectFile={handleConversationFileOpen}
             />
           )}
           {tab === "activity" && (

@@ -25,7 +25,10 @@ export function MobileWorkspaceSheet() {
       <SheetContent
         side="bottom"
         showCloseButton={false}
-        className="h-[92dvh] max-h-[92dvh] gap-0 overflow-hidden rounded-t-2xl px-0 pt-0 pb-[env(safe-area-inset-bottom)]"
+        // Decelerate-in / quicker-out: a tall bottom sheet reads better easing in
+        // slightly slower (300ms) than it dismisses (200ms), and both beat the
+        // sluggish shadcn 500/300ms default.
+        className="h-[92dvh] max-h-[92dvh] gap-0 overflow-hidden rounded-t-2xl px-0 pt-0 pb-[env(safe-area-inset-bottom)] data-[state=open]:duration-300 data-[state=closed]:duration-200"
         data-testid="mobile-workspace-sheet"
       >
         <div className="relative shrink-0 px-4 pb-2 pt-3">

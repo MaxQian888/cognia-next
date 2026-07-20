@@ -316,6 +316,7 @@
       "disabledTooltip": "此平台不支持，请改用本机 VS Code。",
       "downloading": "正在下载 VS Code… {percent}%",
       "errorTitle": "无法启动 VS Code",
+      "openFileFailed": "无法在 VS Code 中打开文件：{error}",
       "retry": "重试",
       "starting": "正在启动 VS Code…",
       "switchLabel": "编辑器引擎",

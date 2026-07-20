@@ -8,9 +8,9 @@
 // per poll) as the primary reading for the unified limits panel; the probe
 // stays as a fallback. The 7-day opus/sonnet windows are not visible through
 // the header path at all, so this also surfaces two windows we couldn't show
-// before.
+// before. Calling this undocumented endpoint is an explicit opt-in; requests
+// never spoof the official Claude Code User-Agent.
 
-import { CLAUDE_CLI_USER_AGENT } from "@/lib/subscription/anthropic/constants"
 import { balanceMeter, windowMeter } from "@/lib/subscription/limits/meters"
 
 import type { BalanceSnapshot, LimitsMeter } from "@/types/subscription"
@@ -211,11 +211,6 @@ export async function fetchOAuthUsage(
       Authorization: `Bearer ${token}`,
       "anthropic-beta": OAUTH_USAGE_BETA,
       Accept: "application/json",
-      // A `claude-cli/...`-shaped User-Agent is required: without it the endpoint
-      // serves an aggressively rate-limited 429 bucket, which would silently push
-      // every poll onto the paid probe fallback (~10 tokens/poll). Anthropic
-      // validates the shape, not the version (see constants.ts).
-      "User-Agent": CLAUDE_CLI_USER_AGENT,
     })
   } catch (err) {
     return classifyUsageError(err)

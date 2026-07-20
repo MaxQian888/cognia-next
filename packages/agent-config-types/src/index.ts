@@ -2354,6 +2354,12 @@ export interface AppSettings {
    * mirroring the CLI's plaintext provider tokens — the UI surfaces a caveat.
    */
   customLimitsSources?: import("@/types/subscription").CustomLimitsSource[]
+  /**
+   * Account-scoped opt-ins for outbound quota/balance requests. Keys are
+   * produced by `limitsQueryAccountKey(provider, accountId)`; missing means no
+   * vault account may be queried automatically.
+   */
+  limitsQueryEnabledAccounts?: string[]
   /** Last time the auto-updater check ran (ms since epoch). Daily debounce. */
   lastUpdateCheckAt?: number
   /** UI theme; "system" follows OS preference. */

@@ -453,6 +453,26 @@ pub async fn subscription_set_preset(
 // Generic authed GET (Phase 3 balance queries)
 // ---------------------------------------------------------------------------
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthedGetHeader {
+    name: String,
+    value: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvEntry {
+    key: String,
+    value: String,
+}
+
+impl From<(String, String)> for EnvEntry {
+    fn from((key, value): (String, String)) -> Self {
+        Self { key, value }
+    }
+}
+
 /// Perform an authenticated GET request to an arbitrary URL, merging in the
 /// caller-supplied headers. Designed for balance/quota queries that the
 /// renderer cannot make directly due to CORS.
@@ -484,15 +504,14 @@ pub(crate) fn build_authed_get_client(url: &str) -> Result<reqwest::Client, Stri
 #[tauri::command]
 pub async fn subscription_authed_get(
     url: String,
-    headers: Vec<(String, String)>,
+    headers: Vec<AuthedGetHeader>,
 ) -> Result<String, String> {
     let client = build_authed_get_client(&url)?;
-    // The caller-supplied headers (including a `claude-cli/...` User-Agent that
-    // the usage endpoint requires — omitting it earns a rate-limited 429) win:
-    // reqwest attaches no default User-Agent, so we never clobber it here.
+    // Caller-supplied headers win. The Anthropic quota client deliberately does
+    // not impersonate Claude Code's User-Agent; reqwest attaches no default one.
     let mut req = client.get(&url);
-    for (k, v) in &headers {
-        req = req.header(k.as_str(), v.as_str());
+    for header in &headers {
+        req = req.header(header.name.as_str(), header.value.as_str());
     }
     let resp = req
         .send()
@@ -518,13 +537,13 @@ pub async fn subscription_authed_get(
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub async fn claude_env_for_account(
+pub fn claude_env_for_account(
     app: AppHandle,
     state: tauri::State<'_, super::anthropic::credential::WatcherRegistry>,
     provider: String,
     local_account_id: String,
     account_id: String,
-) -> Result<Option<Vec<(String, String)>>, String> {
+) -> Result<Option<Vec<EnvEntry>>, String> {
     let id = ProviderId::parse(&provider)?;
     let app_data_dir = app
         .path()
@@ -542,17 +561,20 @@ pub async fn claude_env_for_account(
         }
     }
     active::env_for_local_account(&app_data_dir, &local_account_id, id, &account_id)
+        .map(|entries| entries.map(|items| items.into_iter().map(EnvEntry::from).collect()))
 }
 
 #[tauri::command]
-pub async fn claude_proxy_env_for_session(
-    _session_id: String,
-) -> Result<Vec<(String, String)>, String> {
+pub fn claude_proxy_env_for_session(_session_id: String) -> Result<Vec<EnvEntry>, String> {
     // _session_id is forward-compat for per-session proxy overrides (ADR-0028
     // open follow-up). V1 returns the process-level proxy as-is, identical to
     // what `src-tauri/src/claude/sidecar.rs:163` already injects at sidecar
     // spawn — but now also reachable per-`query()` from the renderer.
-    Ok(crate::proxy_config::current().env_vars())
+    Ok(crate::proxy_config::current()
+        .env_vars()
+        .into_iter()
+        .map(EnvEntry::from)
+        .collect())
 }
 
 #[cfg(test)]
@@ -565,6 +587,16 @@ mod tests {
 
     fn keyring_available() -> bool {
         std::env::var("COGNIA_TEST_KEYRING").ok().as_deref() == Some("1")
+    }
+
+    #[test]
+    fn env_entry_serializes_as_named_object() {
+        let value =
+            serde_json::to_value(EnvEntry::from(("HTTP_PROXY".into(), "proxy".into()))).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({ "key": "HTTP_PROXY", "value": "proxy" })
+        );
     }
 
     fn sample_anthropic_account() -> Account {

@@ -9,6 +9,7 @@
   "dialogTitle": "Share via link",
   "done": "Done",
   "errorGeneric": "Could not create the share link.",
+  "errorTooLarge": "This share is too large. Remove some images or export it locally.",
   "limit": {
     "burn": "Burn after reading",
     "count": "Limit views",

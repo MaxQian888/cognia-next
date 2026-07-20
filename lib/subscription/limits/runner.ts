@@ -128,11 +128,18 @@ export async function queryAccountLimits(
       ? account.credential
       : null
 
-  const refreshBearer: (() => Promise<string | null>) | undefined = anthropicCred
+  const runRefresh: (() => Promise<string | null>) | undefined = anthropicCred
     ? () => refreshAnthropicToken(accountId)
     : codexCred
       ? () => refreshCodexToken(accountId)
       : undefined
+  let refreshAttempt: Promise<string | null> | null = null
+  const refreshBearer: (() => Promise<string | null>) | undefined = runRefresh
+    ? () => {
+        refreshAttempt ??= runRefresh()
+        return refreshAttempt
+      }
+    : undefined
 
   const isStale =
     (anthropicCred && !isCredentialFresh(anthropicCred, now())) ||

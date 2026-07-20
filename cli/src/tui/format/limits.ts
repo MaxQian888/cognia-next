@@ -105,7 +105,8 @@ export function formatPresetSnippets(): string {
     "# Custom limits-source presets",
     "",
     "Add one of these to `customLimitsSources` in your config.json, then fill",
-    "`baseUrl` + `token` (and any `New-Api-User` / placeholder paths):",
+    "`baseUrl` + `token` (and any `New-Api-User` / placeholder paths), then",
+    "set `enabled` to true only after reviewing the outbound quota request:",
     "",
   ]
   for (const preset of CUSTOM_SOURCE_PRESETS) {
@@ -115,6 +116,7 @@ export function formatPresetSnippets(): string {
       name: preset.id,
       baseUrl: "https://provider.example.com",
       token: "<token>",
+      enabled: false,
       request: { path: "" },
       extract: { kind: "balance", remainingPath: "" },
     })

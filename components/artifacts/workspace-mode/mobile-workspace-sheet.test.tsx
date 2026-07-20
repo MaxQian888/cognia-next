@@ -89,3 +89,15 @@ it("closes through the shared runtime sheet state", () => {
   expect(useArtifactDockLayoutStore.getState().workspaceRevealRequest).toBeNull()
   expect(useArtifactDockLayoutStore.getState().workspaceContext).toBeNull()
 })
+
+it("uses a snappier decelerate-in/quick-out sheet animation (300ms in, 200ms out)", () => {
+  act(() => {
+    useArtifactDockLayoutStore.getState().setDockMode("workspace")
+    useArtifactDockLayoutStore.getState().setMobileSheetOpen(true)
+  })
+  render(<MobileWorkspaceSheet />)
+
+  const content = screen.getByTestId("mobile-workspace-sheet")
+  expect(content.className).toContain("data-[state=open]:duration-300")
+  expect(content.className).toContain("data-[state=closed]:duration-200")
+})

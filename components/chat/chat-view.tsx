@@ -43,6 +43,8 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { mobileTransition } from "@/lib/ui/motion"
 import { useIsMobile } from "@/hooks/ui/use-mobile"
 import { WorkspaceChangesCard } from "./workspace-changes-card"
+import { useEffectiveCwd } from "@/hooks/chat/use-effective-cwd"
+import { ComputerUsePictureInPicture } from "./computer-use-picture-in-picture"
 
 /**
  * Attach `node` to a (possibly absent) callback or object ref. Defined at
@@ -191,6 +193,7 @@ export function ChatPane({
   // chips on the empty inline state. `useCharacter` resolves Dexie + overlay
   // characters; returns undefined for legacy/unset ids.
   const activeCharacter = useCharacter(activeSession?.characterId)
+  const projectRoot = useEffectiveCwd(activeSession)
   const characterSamples = activeCharacter?.persona?.exemplarPrompts
   const aiStarters = useStarterSuggestions(activeSession, {
     name: activeCharacter?.name,
@@ -417,13 +420,17 @@ export function ChatPane({
             animate={{ opacity: 1 }}
             transition={mobileTransition("normal")}
           >
-            <ChatMessages
-              sessionId={boundId}
-              directCharacter={activeCharacter ?? null}
-              onCopy={handleCopySuccess}
-              onRegenerate={handleRegenerate}
-              onEditResend={handleEditResend}
-            />
+            <div className="relative flex min-h-0 flex-1 flex-col" data-computer-use-pip-host>
+              <ChatMessages
+                sessionId={boundId}
+                directCharacter={activeCharacter ?? null}
+                projectRoot={projectRoot}
+                onCopy={handleCopySuccess}
+                onRegenerate={handleRegenerate}
+                onEditResend={handleEditResend}
+              />
+              {boundId && <ComputerUsePictureInPicture sessionId={boundId} />}
+            </div>
             <FollowUpSuggestions session={activeSession} onUseSample={onUseSample} />
             {errorAndFooter}
             {boundId && onResumeAfterPlanApproval && (
@@ -456,12 +463,14 @@ export function ChatPane({
 function ChatMessages({
   sessionId,
   directCharacter,
+  projectRoot,
   onCopy,
   onRegenerate,
   onEditResend,
 }: {
   sessionId: string | null
   directCharacter?: Character | null
+  projectRoot?: string | null
   onCopy: () => void
   onRegenerate: () => void
   onEditResend: (messageId: string, newText: string) => void
@@ -474,6 +483,7 @@ function ChatMessages({
       status={status}
       paneSessionId={sessionId}
       directCharacter={directCharacter}
+      projectRoot={projectRoot}
       onCopy={onCopy}
       onRegenerate={onRegenerate}
       onEditResend={onEditResend}

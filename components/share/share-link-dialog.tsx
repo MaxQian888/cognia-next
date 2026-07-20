@@ -28,7 +28,13 @@ import {
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
-import { createShareLink, revokeShareLink, ShareNotConfiguredError } from "@/lib/share/client"
+import {
+  createShareLink,
+  revokeShareLink,
+  ShareNotConfiguredError,
+  SharePayloadTooLargeError,
+  ShareRequestError,
+} from "@/lib/share/client"
 import type { SharePayload } from "@/lib/share/types"
 import type { CreatedShare } from "@/lib/share/client"
 import { PayloadView } from "@/components/share/payload-view"
@@ -115,6 +121,11 @@ export function ShareLinkDialog({ buildPayload, trigger, open, onOpenChange, onC
     } catch (err) {
       if (err instanceof ShareNotConfiguredError) {
         setNotConfigured(true)
+      } else if (
+        err instanceof SharePayloadTooLargeError ||
+        (err instanceof ShareRequestError && err.status === 413)
+      ) {
+        setError(t("errorTooLarge"))
       } else {
         log.error("share-create-failed", {
           error: err instanceof Error ? err.message : String(err),

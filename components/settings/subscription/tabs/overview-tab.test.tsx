@@ -25,9 +25,20 @@ jest.mock("@/lib/subscription/anthropic/hooks", () => ({
 }))
 
 const refreshMock = jest.fn()
-let limitsResult: { snapshot: unknown; refreshing: boolean } = { snapshot: null, refreshing: false }
+const setQueryEnabledMock = jest.fn(async () => {})
+let limitsResult: { snapshot: unknown; refreshing: boolean; queryEnabled?: boolean } = {
+  snapshot: null,
+  refreshing: false,
+  queryEnabled: true,
+}
 jest.mock("@/lib/subscription/limits/hooks", () => ({
-  useProviderLimits: () => ({ ...limitsResult, unavailable: false, refresh: refreshMock }),
+  useProviderLimits: () => ({
+    queryEnabled: true,
+    ...limitsResult,
+    unavailable: false,
+    setQueryEnabled: setQueryEnabledMock,
+    refresh: refreshMock,
+  }),
 }))
 
 jest.mock("@/stores/settings/settings-store", () => ({
@@ -104,7 +115,7 @@ beforeEach(() => {
   isTauriMock.mockReturnValue(true)
   credentialResult = { credential: { mode: "subscription" }, activeAccountId: "acc-1" }
   latestRow = null
-  limitsResult = { snapshot: null, refreshing: false }
+  limitsResult = { snapshot: null, refreshing: false, queryEnabled: true }
 })
 
 describe("SubscriptionOverviewTab", () => {
@@ -130,6 +141,16 @@ describe("SubscriptionOverviewTab", () => {
     await waitFor(() => expect(refreshMock).toHaveBeenCalledTimes(1))
     await userEvent.click(screen.getByTestId("overview-refresh"))
     expect(refreshMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not auto-fetch and offers an account-scoped opt-in when quota queries are disabled", async () => {
+    limitsResult = { snapshot: null, refreshing: false, queryEnabled: false }
+    render(<SubscriptionOverviewTab />)
+
+    expect(screen.getByText("Official quota query is off")).toBeInTheDocument()
+    await userEvent.click(screen.getByRole("button", { name: "Enable quota queries" }))
+    expect(setQueryEnabledMock).toHaveBeenCalledWith(true)
+    expect(refreshMock).not.toHaveBeenCalled()
   })
 
   // A failed query used to render the same "No usage data yet" copy as an idle

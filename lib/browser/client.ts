@@ -81,6 +81,12 @@ export const browserClient = {
     }),
   embedReload: () =>
     transport.call<void>("browser_embed_reload", { ownerToken: requiredEmbedOwnerToken() }),
+  /** Native page zoom on the embedded webview (persists across navigations). */
+  embedSetZoom: (zoom: number) =>
+    transport.call<void>("browser_embed_set_zoom", {
+      zoom,
+      ownerToken: requiredEmbedOwnerToken(),
+    }),
   embedSetSelectMode: (on: boolean) =>
     transport.call<void>("browser_embed_set_select_mode", {
       on,
@@ -169,6 +175,31 @@ export const browserClient = {
       ownerToken: requiredEmbedOwnerToken(),
     })
     return JSON.parse(raw) as EvaluateResult
+  },
+  /**
+   * Find-in-page over the embedded webview. Rides `browser_embed_evaluate`
+   * (ungated at the command layer) to run the injected `__cogniaFind` helper,
+   * unwrapping the `{ ok, value }` evaluate envelope to `{ matches, index }`.
+   */
+  embedFind: async (
+    query: string,
+    options?: { forward?: boolean; matchCase?: boolean }
+  ): Promise<{ matches: number; index: number }> => {
+    const expr = `window.__cogniaFind(${JSON.stringify(query)},${JSON.stringify(options ?? {})})`
+    const raw = await transport.call<string>("browser_embed_evaluate", {
+      expr,
+      ownerToken: requiredEmbedOwnerToken(),
+    })
+    const env = JSON.parse(raw) as EvaluateResult
+    if (!env.ok) throw new Error(env.error ?? "find failed")
+    const value = env.value as { matches?: number; index?: number } | null
+    return { matches: value?.matches ?? 0, index: value?.index ?? 0 }
+  },
+  embedFindClear: async (): Promise<void> => {
+    await transport.call<string>("browser_embed_evaluate", {
+      expr: "window.__cogniaFindClear()",
+      ownerToken: requiredEmbedOwnerToken(),
+    })
   },
   /** Whether the embedded page has an element matching the CSS selector. */
   embedHasSelector: (selector: string) =>

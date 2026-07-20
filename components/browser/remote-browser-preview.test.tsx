@@ -24,6 +24,9 @@ jest.mock("@/lib/db/browser-profiles", () => ({
 const navigate = jest.fn().mockResolvedValue(undefined)
 const activatePage = jest.fn().mockResolvedValue(undefined)
 const closePage = jest.fn().mockResolvedValue(undefined)
+const setZoom = jest.fn().mockResolvedValue({ ok: true, zoom: 1.1 })
+const find = jest.fn().mockResolvedValue({ matches: 2, index: 0 })
+const findClear = jest.fn().mockResolvedValue(undefined)
 const listPages = jest
   .fn()
   .mockResolvedValue([{ id: "page-1", url: "https://example.com", title: "Example", active: true }])
@@ -33,8 +36,13 @@ jest.mock("@/lib/browser/remote-chromium-engine", () => ({
     activatePage,
     closePage,
     listPages,
+    setZoom,
+    find,
+    findClear,
   })),
 }))
+// History dropdown renders inline via the shared manual mock.
+jest.mock("@/components/ui/dropdown-menu")
 
 import type { RemoteBrowserStreamOptions } from "@/lib/browser/remote-stream"
 import { RemoteBrowserPreview } from "./remote-browser-preview"
@@ -120,10 +128,26 @@ it("takes human control before forwarding pointer input", async () => {
   Object.defineProperty(canvas, "getBoundingClientRect", {
     value: () => ({ left: 0, top: 0, width: 800, height: 600 }),
   })
-  fireEvent.pointerDown(canvas, { clientX: 400, clientY: 300, button: 0 })
+  fireEvent(
+    canvas,
+    new MouseEvent("pointerdown", { bubbles: true, clientX: 400, clientY: 300, button: 0 })
+  )
   expect(sendInput).toHaveBeenCalledWith({
     kind: "mouse",
     payload: expect.objectContaining({ type: "mousePressed", button: "left" }),
+  })
+  expect(screen.getByTestId("remote-browser-click-pointer")).toHaveStyle({
+    left: "50%",
+    top: "50%",
+  })
+
+  fireEvent(
+    canvas,
+    new MouseEvent("pointerdown", { bubbles: true, clientX: -10, clientY: 700, button: 0 })
+  )
+  expect(screen.getByTestId("remote-browser-click-pointer")).toHaveStyle({
+    left: "0%",
+    top: "100%",
   })
 })
 
@@ -144,6 +168,26 @@ it("automatically binds a team child session to its parent browser", async () =>
       })
     )
   )
+})
+
+it("zooms and searches the remote page through the engine", async () => {
+  render(
+    <RemoteBrowserPreview
+      chatSessionId="chat-1"
+      workspaceId="workspace-1"
+      createStream={createStream}
+    />
+  )
+  await waitFor(() => expect(streamOptions).not.toBeNull())
+  // Controls enable once the stream reports connected.
+  act(() => streamOptions?.onState?.("connected"))
+  fireEvent.click(screen.getByRole("button", { name: "browser.zoom.in" }))
+  await waitFor(() => expect(setZoom).toHaveBeenCalledWith(1.1))
+  fireEvent.click(screen.getByRole("button", { name: "browser.remote.find" }))
+  fireEvent.change(screen.getByPlaceholderText("browser.find.placeholder"), {
+    target: { value: "abc" },
+  })
+  await waitFor(() => expect(find).toHaveBeenCalledWith("abc", { forward: true }))
 })
 
 it("switches and closes pages through the host-neutral engine", async () => {

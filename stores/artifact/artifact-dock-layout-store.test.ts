@@ -113,6 +113,15 @@ describe("useArtifactDockLayoutStore", () => {
   })
 
   describe("dock mode + workspace reveal", () => {
+    it("opens the browser in the expanded right dock", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+
+      act(() => result.current.openBrowser())
+
+      expect(result.current.dockMode).toBe("browser")
+      expect(result.current.dockCollapsed).toBe(false)
+    })
+
     it("migrates a v1 snapshot to artifact mode", async () => {
       window.localStorage.setItem(
         PERSIST_NAME,
@@ -138,6 +147,8 @@ describe("useArtifactDockLayoutStore", () => {
           sessionId: "session-1",
           rootPath: "/repo",
           relPath: "src/a.ts",
+          line: 12,
+          column: 4,
         })
       })
 
@@ -149,10 +160,29 @@ describe("useArtifactDockLayoutStore", () => {
         sessionId: "session-1",
         rootPath: "/repo",
         relPath: "src/a.ts",
+        line: 12,
+        column: 4,
       })
       expect(readPersisted()?.state.dockMode).toBe("workspace")
       expect(readPersisted()?.state).not.toHaveProperty("workspaceRevealRequest")
       expect(readPersisted()?.state).not.toHaveProperty("workspaceContext")
+    })
+
+    it("restores a persisted browser mode", async () => {
+      window.localStorage.setItem(
+        PERSIST_NAME,
+        JSON.stringify({
+          state: { dockSize: 38, dockCollapsed: false, dockMode: "browser", layoutVersion: 2 },
+          version: 2,
+        })
+      )
+
+      await act(async () => {
+        await useArtifactDockLayoutStore.persist.rehydrate()
+      })
+
+      expect(useArtifactDockLayoutStore.getState().dockMode).toBe("browser")
+      expect(useArtifactDockLayoutStore.getState().dockSize).toBe(38)
     })
 
     it("queues review reveals and lets the consumer clear only the matching request", () => {

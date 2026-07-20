@@ -53,4 +53,23 @@ describe("RemoteChromiumEngine", () => {
       ["browser_downloads", { browserSessionId: "session-1" }],
     ])
   })
+
+  it("drives zoom and find-in-page through companion RPC", async () => {
+    call
+      .mockResolvedValueOnce({ ok: true, zoom: 1.5 })
+      .mockResolvedValueOnce({ matches: 3, index: 0 })
+      .mockResolvedValueOnce(undefined)
+    const engine = new RemoteChromiumEngine("session-1")
+    await engine.setZoom(1.5)
+    await engine.find("hello", { forward: true })
+    await engine.findClear()
+    expect(call.mock.calls).toEqual([
+      ["browser_set_zoom", { browserSessionId: "session-1", zoom: 1.5 }],
+      [
+        "browser_find",
+        { browserSessionId: "session-1", query: "hello", options: { forward: true } },
+      ],
+      ["browser_find_clear", { browserSessionId: "session-1" }],
+    ])
+  })
 })

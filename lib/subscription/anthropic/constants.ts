@@ -61,10 +61,3 @@ export const OAUTH_REQUEST_HEADERS = {
   "anthropic-beta": OAUTH_REQUIRED_BETA_FEATURES.join(","),
   "x-app": "cli",
 } as const
-
-/**
- * The Claude Code CLI's user-agent string. Pinned to the version captured in
- * [hermes-agent#15080](https://github.com/NousResearch/hermes-agent/issues/15080);
- * Anthropic does *not* validate the version, only the `claude-cli/...` shape.
- */
-export const CLAUDE_CLI_USER_AGENT = "claude-cli/2.1.119 (external, cli)"

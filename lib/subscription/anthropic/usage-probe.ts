@@ -11,7 +11,7 @@
 // the UI must surface this so the user understands the cost.
 
 import type { AnthropicCredentialData, UsageSnapshot } from "@/types/subscription"
-import { CLAUDE_CLI_USER_AGENT, OAUTH_REQUEST_HEADERS } from "./constants"
+import { OAUTH_REQUEST_HEADERS } from "./constants"
 import { hasUsageHeaders, parseUsageHeaders } from "./parser"
 import { recordUsageSnapshot } from "./usage-collector"
 
@@ -53,7 +53,6 @@ export async function probeOnce(
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${credential.accessToken}`,
-        "User-Agent": CLAUDE_CLI_USER_AGENT,
         ...OAUTH_REQUEST_HEADERS,
       },
       body,

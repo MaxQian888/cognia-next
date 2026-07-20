@@ -36,6 +36,10 @@
       "help": "超过该字符数的输入操作改走剪贴板粘贴，而不是逐键输入。0 表示禁用。",
       "label": "粘贴阈值（字符数）"
     },
+    "pictureInPicture": {
+      "help": "阻止桌面自动化活动浮层显示在当前对话上方。",
+      "label": "始终隐藏画中画"
+    },
     "scaling": {
       "help": "发送给模型前将截图缩放到目标尺寸内。可提升点击精度并降低 token 成本（推荐 1280×800）。",
       "label": "截图降采样",
@@ -43,6 +47,21 @@
       "maxWidth": "最大宽度"
     },
     "title": "模型行为"
+  },
+  "pictureInPicture": {
+    "activity": "当前操作：{action}",
+    "close": "关闭",
+    "done": "已完成",
+    "failed": "桌面自动化操作失败",
+    "hide": "隐藏画中画",
+    "justNow": "刚刚",
+    "move": "移动画中画",
+    "screenAlt": "桌面自动化画面",
+    "secondsAgo": "{seconds} 秒前",
+    "show": "显示画中画",
+    "title": "桌面自动化",
+    "viewLarger": "查看大图",
+    "waitingForFrame": "正在等待第一张截图……"
   },
   "consent": {
     "actions": {

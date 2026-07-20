@@ -165,6 +165,33 @@ describe("arming", () => {
     render(<BrowserRecorderPanel pageUrl={BASE} />)
     expect(screen.getByText("record.empty")).toBeInTheDocument()
   })
+
+  it("collapses and restores the recorder body while keeping its controls available", async () => {
+    const user = userEvent.setup()
+    render(<BrowserRecorderPanel pageUrl={BASE} />)
+
+    const toggle = screen.getByRole("button", { name: "record.collapse" })
+    expect(toggle).toHaveAttribute("aria-expanded", "true")
+    await user.click(toggle)
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    expect(screen.queryByText("record.empty")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "record.start" })).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "record.expand" }))
+    expect(screen.getByText("record.empty")).toBeInTheDocument()
+  })
+
+  it("expands the body when recording starts", async () => {
+    const user = userEvent.setup()
+    const rec = recorderMock()
+    render(<BrowserRecorderPanel pageUrl={BASE} />)
+    await user.click(screen.getByRole("button", { name: "record.collapse" }))
+
+    await user.click(screen.getByRole("button", { name: "record.start" }))
+
+    expect(rec.start).toHaveBeenCalledWith(BASE)
+    expect(screen.getByText("record.empty")).toBeInTheDocument()
+  })
 })
 
 describe("step list", () => {
@@ -178,6 +205,9 @@ describe("step list", () => {
         { act: "select", at: 3, target: target("Plan", "#plan"), value: "pro" },
         { act: "press_key", at: 4, key: "Enter" },
         { act: "wait_for", at: 5, text: "Welcome" },
+        { act: "double_click", at: 6, target: target("Card", "#card") },
+        { act: "hover", at: 7, target: target("Menu", "#menu") },
+        { act: "scroll", at: 8, direction: "down", amount: 200 },
       ],
     })
     render(<BrowserRecorderPanel pageUrl={BASE} />)
@@ -189,6 +219,11 @@ describe("step list", () => {
     ).toBeInTheDocument()
     expect(screen.getByText('record.step.pressKey:{"key":"Enter"}')).toBeInTheDocument()
     expect(screen.getByText('record.step.waitFor:{"text":"Welcome"}')).toBeInTheDocument()
+    expect(screen.getByText('record.step.doubleClick:{"target":"Card"}')).toBeInTheDocument()
+    expect(screen.getByText('record.step.hover:{"target":"Menu"}')).toBeInTheDocument()
+    expect(
+      screen.getByText('record.step.scroll:{"direction":"record.step.direction.down","amount":200}')
+    ).toBeInTheDocument()
   })
 
   it("marks a secret fill as such rather than showing a value", () => {

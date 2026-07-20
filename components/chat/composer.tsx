@@ -163,7 +163,10 @@ import { applyComposerOcr } from "./composer/ocr-attachment-action"
 import { useOcr } from "@/hooks/use-ocr"
 import { buildOcrDeps } from "@/lib/ocr/deps"
 import type { OcrResult } from "@/types/ocr"
+import { AnimatePresence, motion } from "motion/react"
+import { mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
 import { BottomToolbar } from "./composer/bottom-toolbar"
+import { Collapse } from "./composer/collapse"
 import { SkillChipRow } from "./composer/skill-chip-row"
 import { GoalStatusPill } from "@/components/goal/goal-status-pill"
 import { PlanModeBanner } from "@/components/chat/plan-mode-banner"
@@ -240,6 +243,12 @@ export interface ComposerHandle {
 
 const MAX_FILES = 6
 const MAX_FILE_SIZE = 10 * 1024 * 1024
+// Max composer textarea height before it scrolls. Single source of truth so the
+// CSS cap (`maxHeight`) and the JS auto-resize fallback can't drift apart. The
+// px form assumes the app's default 16px root (the JS path only runs on old
+// WebViews lacking `field-sizing`).
+const COMPOSER_MAX_HEIGHT_REM = 12
+const COMPOSER_MAX_HEIGHT_PX = COMPOSER_MAX_HEIGHT_REM * 16
 
 // --- Helpers ---------------------------------------------------------------
 
@@ -590,6 +599,11 @@ function ComposerInner(props: InnerProps) {
       const cur = controller.textInput.value
       const result = spliceToken(cur, trigger.tokenStart, trigger.tokenEnd, replacement)
       controller.textInput.setInput(result.value)
+      // Keep the caret STATE in step with the programmatic move (the DOM
+      // selection is set in rAF below, but setSelectionRange does not fire a
+      // `select` event, so trigger detection / ghost suppression would read a
+      // stale caret without this).
+      setCaret(result.caret)
       requestAnimationFrame(() => {
         const ta2 = textareaRef.current
         if (ta2) {
@@ -612,6 +626,7 @@ function ComposerInner(props: InnerProps) {
     const after = cur.slice(trigger.tokenEnd)
     const next = before + after
     controller.textInput.setInput(next)
+    setCaret(before.length)
     requestAnimationFrame(() => {
       const ta = textareaRef.current
       if (ta) {
@@ -793,18 +808,32 @@ function ComposerInner(props: InnerProps) {
     let cleared = false
     const clearInputOptimistically = () => {
       if (!clearAfterSendEnabled || cleared) return
+      // Optimistically clear ONLY the text + folded-paste chips. Attachments are
+      // deliberately held back until the send is confirmed (`finalizeSend`):
+      // `attachments.clear()` revokes every staged blob URL, so clearing here
+      // would irrecoverably destroy the files on any rejected / cancelled /
+      // thrown send (e.g. declining the oversize dialog).
       controller.textInput.clear()
-      attachments.clear()
-      setRestoredAttachments([])
       setPastedBlocks({})
-      if (sessionId) void clearChatDraft(sessionId)
       cleared = true
+    }
+    // Run only once a send is CONFIRMED successful: now it is safe to drop (and
+    // revoke) the staged attachments, the reminder chips, and the saved draft.
+    const finalizeSend = () => {
+      if (clearAfterSendEnabled) {
+        attachments.clear()
+        setRestoredAttachments([])
+        if (sessionId) void clearChatDraft(sessionId)
+      }
+      settleFocusAfterSend()
     }
     const restoreInputAfterFailure = () => {
       if (!cleared) return
       controller.textInput.setInput(text)
       setPastedBlocks(pasteMap)
       cleared = false
+      // Attachments were never cleared, so there is nothing to restore — the
+      // staged files are still live in the controller.
     }
     clearInputOptimistically()
 
@@ -859,7 +888,7 @@ function ComposerInner(props: InnerProps) {
           restoreInputAfterFailure()
           return
         }
-        if (sent) settleFocusAfterSend()
+        if (sent) finalizeSend()
         else {
           restoreInputAfterFailure()
           if (isMobile) void notify("error")
@@ -868,7 +897,7 @@ function ComposerInner(props: InnerProps) {
       }
 
       const sent = await props.onSubmit(expandPastes(text, pasteMap), filesToSend)
-      if (sent) settleFocusAfterSend()
+      if (sent) finalizeSend()
       else {
         restoreInputAfterFailure()
         if (isMobile) void notify("error")
@@ -911,6 +940,7 @@ function ComposerInner(props: InnerProps) {
     const next = ghost.accept()
     if (next === null) return false
     controller.textInput.setInput(next)
+    setCaret(next.length)
     requestAnimationFrame(() => {
       const ta = textareaRef.current
       if (ta) {
@@ -1006,6 +1036,7 @@ function ComposerInner(props: InnerProps) {
             const cur = controller.textInput.value
             const next = cur.slice(0, range.start) + cur.slice(range.end)
             controller.textInput.setInput(next)
+            setCaret(range.start)
             requestAnimationFrame(() => {
               const ta2 = textareaRef.current
               if (ta2) {
@@ -1054,6 +1085,7 @@ function ComposerInner(props: InnerProps) {
         if (next !== null) {
           e.preventDefault()
           controller.textInput.setInput(next)
+          setCaret(next.length)
           requestAnimationFrame(() => {
             const t = textareaRef.current
             if (t) {
@@ -1098,6 +1130,13 @@ function ComposerInner(props: InnerProps) {
     (e: ChangeEvent<HTMLTextAreaElement>) => {
       controller.textInput.setInput(e.target.value)
       setCaret(e.target.selectionStart ?? e.target.value.length)
+      // Re-mirror the scroll onto the chip + ghost overlays. Shrinking the text
+      // (or clearing it) can reset the textarea's scrollTop WITHOUT firing a
+      // scroll event, which would otherwise strand the overlays at a stale
+      // translateY from the last scroll.
+      const offset = `translateY(${-e.target.scrollTop}px)`
+      if (chipOverlayRef.current) chipOverlayRef.current.style.transform = offset
+      if (ghostOverlayRef.current) ghostOverlayRef.current.style.transform = offset
       // Typing exits history-recall mode so the next ↑ starts from the newest.
       history.noteEdit()
     },
@@ -1184,6 +1223,7 @@ function ComposerInner(props: InnerProps) {
       const end = ta?.selectionEnd ?? cur.length
       const result = spliceToken(cur, start, end, folded.display)
       controller.textInput.setInput(result.value)
+      setCaret(result.caret)
       setPastedBlocks((prev) => ({ ...prev, [folded.display]: folded.stored }))
       requestAnimationFrame(() => {
         const ta2 = textareaRef.current
@@ -1221,7 +1261,11 @@ function ComposerInner(props: InnerProps) {
   const onDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     if (e.dataTransfer?.types?.includes("Files")) e.preventDefault()
   }, [])
-  const onDragLeave = useCallback(() => {
+  const onDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    // Symmetric with onDragEnter: only file drags incremented the depth, so
+    // only file drags may decrement it. An interleaved non-file dragleave would
+    // otherwise prematurely drop the counter and flicker the overlay off.
+    if (!e.dataTransfer?.types?.includes("Files")) return
     setDragDepth((d) => Math.max(0, d - 1))
   }, [])
   const onDrop = useCallback(
@@ -1280,21 +1324,35 @@ function ComposerInner(props: InnerProps) {
     tDraftRef.current = tDraft
   }, [tDraft])
 
+  // Tracks the session we last reset the box for. A ref (not state) so it can't
+  // race the async draft load below.
+  const clearedForSessionRef = useRef<string | null>(null)
   useEffect(() => {
     if (!persistDrafts) return
     if (!sessionId) return
     if (draftHydratedFor === sessionId) return
+    // Reset the input SYNCHRONOUSLY, once per session change. The Composer is
+    // not remounted per session (no `key`), so without this the previous
+    // session's text + staged attachments bleed into this one and then get
+    // persisted into its draft. The ref guard means a re-render during the
+    // async load (e.g. the user typing in the gap) doesn't wipe their input a
+    // second time.
+    if (clearedForSessionRef.current !== sessionId) {
+      clearedForSessionRef.current = sessionId
+      controller.textInput.setInput("")
+      attachments.clear()
+      // Folded-paste bodies are in-memory only (not persisted); drop them too.
+      setPastedBlocks({})
+    }
     let cancelled = false
     getChatDraft(sessionId)
       .then((row) => {
         if (cancelled) return
+        // Populate the saved draft only when the target actually has one — never
+        // clobber text the user typed during this async gap with an empty draft.
         if (row?.text) {
           controller.textInput.setInput(row.text)
         }
-        // Folded-paste bodies are in-memory only (not persisted). Switching
-        // sessions drops them; any `[Pasted …]` placeholder in the restored
-        // draft becomes "orphaned" and surfaces a re-paste reminder.
-        setPastedBlocks({})
         // Reset (or populate) the reminder chips for the session we just
         // switched to — a session with no staged attachments clears them.
         const restored = row?.attachments ?? []
@@ -1312,22 +1370,25 @@ function ComposerInner(props: InnerProps) {
     return () => {
       cancelled = true
     }
-  }, [persistDrafts, sessionId, draftHydratedFor, controller.textInput])
+  }, [persistDrafts, sessionId, draftHydratedFor, controller.textInput, attachments])
 
+  // Serialising staged attachments to draft rows walks every base64 data-URL, so
+  // memoise it on `attachments.files`. Otherwise the persist effect below — which
+  // also depends on the text value — re-does that work on every keystroke.
+  const draftAttachments = useMemo(
+    () => draftAttachmentsFromFiles(attachments.files),
+    [attachments.files]
+  )
   useEffect(() => {
     if (!persistDrafts) return
     if (!sessionId) return
     if (draftHydratedFor !== sessionId) return
     try {
-      setChatDraftDebounced(
-        sessionId,
-        controller.textInput.value,
-        draftAttachmentsFromFiles(attachments.files)
-      )
+      setChatDraftDebounced(sessionId, controller.textInput.value, draftAttachments)
     } catch {
       // Dexie unavailable (e.g., SSR / tests without fake-indexeddb) — drafts are best-effort.
     }
-  }, [controller.textInput.value, attachments.files, sessionId, draftHydratedFor, persistDrafts])
+  }, [controller.textInput.value, draftAttachments, sessionId, draftHydratedFor, persistDrafts])
 
   // Auto-resize textarea (JS fallback for browsers without field-sizing:content
   // support, e.g. older iOS/Android WebViews). field-sizing-content in the
@@ -1346,7 +1407,7 @@ function ComposerInner(props: InnerProps) {
     if (typeof CSS !== "undefined" && CSS.supports?.("field-sizing", "content")) return
     if (isComposing) return
     ta.style.height = "auto"
-    ta.style.height = `${Math.min(ta.scrollHeight, 12 * 16)}px`
+    ta.style.height = `${Math.min(ta.scrollHeight, COMPOSER_MAX_HEIGHT_PX)}px`
   }, [controller.textInput.value, isComposing])
 
   // Imperative handle: insert `@name ` at the caret. Used by the desktop
@@ -1381,6 +1442,8 @@ function ComposerInner(props: InnerProps) {
   )
 
   const isStreaming = props.status === "streaming"
+  // Cross-fade transition for the send/stop button icon swap (reduced-motion aware).
+  const sendIconTransition = useReducedMotionTransition(mobileTransition("fast"))
 
   // Drive the inline ghost-text engine off the current draft. Suppress while a
   // `/@!#` trigger popover is open, the caret isn't at the end of the text, or
@@ -1412,63 +1475,75 @@ function ComposerInner(props: InnerProps) {
         onCopyPage={(_page, text) => void navigator.clipboard?.writeText(text)}
       />
       <PluginExtensionSlot point="chat.input.above" className="px-1 empty:hidden" />
-      <SkillChipRow
-        ids={ephemeralSkillIds}
-        onRemove={toggleEphemeralSkill}
-        disabledIds={props.session?.disabledSkillIds}
-      />
+      <Collapse>
+        <SkillChipRow
+          ids={ephemeralSkillIds}
+          onRemove={toggleEphemeralSkill}
+          disabledIds={props.session?.disabledSkillIds}
+        />
+      </Collapse>
       {/* Folded large-paste chips — only those whose placeholder is still in the
           text (manual deletion drops the chip too). */}
-      {(() => {
-        const chips = Object.entries(pastedBlocks).filter(([ph]) =>
-          controller.textInput.value.includes(ph)
-        )
-        if (chips.length === 0) return null
-        return (
-          <div className="flex flex-wrap gap-1 px-1 pb-1" data-testid="composer-pasted-chips">
-            {chips.map(([ph, body]) => (
-              <span
-                key={ph}
-                className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground"
-              >
-                <FileTextIcon className="size-3 shrink-0" aria-hidden />
-                {t("pastedChip", { count: body.split("\n").length })}
-                <button
-                  type="button"
-                  onClick={() => removePastedBlock(ph)}
-                  aria-label={t("removePastedChip")}
-                  className="text-muted-foreground/60 hover:text-foreground"
+      <Collapse>
+        {(() => {
+          const chips = Object.entries(pastedBlocks).filter(([ph]) =>
+            controller.textInput.value.includes(ph)
+          )
+          if (chips.length === 0) return null
+          return (
+            <div className="flex flex-wrap gap-1 px-1 pb-1" data-testid="composer-pasted-chips">
+              {chips.map(([ph, body]) => (
+                <span
+                  key={ph}
+                  className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground"
                 >
-                  <XIcon className="size-3" aria-hidden />
-                </button>
-              </span>
-            ))}
-          </div>
-        )
-      })()}
+                  <FileTextIcon className="size-3 shrink-0" aria-hidden />
+                  {t("pastedChip", { count: body.split("\n").length })}
+                  <button
+                    type="button"
+                    onClick={() => removePastedBlock(ph)}
+                    aria-label={t("removePastedChip")}
+                    className="text-muted-foreground/60 hover:text-foreground"
+                  >
+                    <XIcon className="size-3" aria-hidden />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )
+        })()}
+      </Collapse>
       {/* Re-paste reminder: a restored draft can carry `[Pasted …]` placeholders
           whose bodies weren't persisted. Nudge the user to re-paste (the
           placeholder text stays visible so they see exactly where). */}
-      {(() => {
-        const orphans = findPastePlaceholders(controller.textInput.value).filter(
-          (ph) => !(ph in pastedBlocks)
-        )
-        if (orphans.length === 0) return null
-        return (
-          <div
-            className="px-1 pb-1 text-[11px] text-amber-600 dark:text-amber-500"
-            data-testid="composer-paste-reminder"
-          >
-            {t("pasteReminder", { count: orphans.length })}
-          </div>
-        )
-      })()}
+      <Collapse>
+        {(() => {
+          const orphans = findPastePlaceholders(controller.textInput.value).filter(
+            (ph) => !(ph in pastedBlocks)
+          )
+          if (orphans.length === 0) return null
+          return (
+            <div
+              className="px-1 pb-1 text-[11px] text-amber-600 dark:text-amber-500"
+              data-testid="composer-paste-reminder"
+            >
+              {t("pasteReminder", { count: orphans.length })}
+            </div>
+          )
+        })()}
+      </Collapse>
       {/* ADR-0019 — active/paused goal status + controls; self-hides when none. */}
-      <GoalStatusPill sessionId={sessionId} />
+      <Collapse>
+        <GoalStatusPill sessionId={sessionId} />
+      </Collapse>
       {/* /loop status + controls; self-hides when no open loop. */}
-      <LoopStatusPill sessionId={sessionId} />
+      <Collapse>
+        <LoopStatusPill sessionId={sessionId} />
+      </Collapse>
       {/* Plan-mode state banner; self-hides outside plan mode. */}
-      <PlanModeBanner />
+      <Collapse>
+        <PlanModeBanner />
+      </Collapse>
       <div
         className={cn(
           // Claude-style stack on every platform when the container is narrow:
@@ -1518,12 +1593,15 @@ function ComposerInner(props: InnerProps) {
             !isMobile && !compactLayout && "@sm/composer:order-none"
           )}
         >
-          {isMobile || compactLayout ? (
+          {isMobile ? (
             // Mobile: one WeChat-style "+" menu (camera / album multi-pick /
             // files) replaces the paperclip + camera button pair — fewer
             // 44px targets competing for composer width. Voice stays with
             // the transcription bridge below (speech → text), so the menu's
-            // record-as-attachment branch is hidden.
+            // record-as-attachment branch is hidden. Desktop compact keeps the
+            // paperclip: the "+" menu's camera/album branches both degrade to
+            // the same file picker off-mobile, so three entries would be
+            // redundant there.
             <ComposerPlusMenu
               showVoice={false}
               fileAccept={ATTACHMENT_ACCEPT}
@@ -1608,7 +1686,7 @@ function ComposerInner(props: InnerProps) {
             }
             ref={textareaRef}
             rows={1}
-            style={{ maxHeight: "12rem" }}
+            style={{ maxHeight: `${COMPOSER_MAX_HEIGHT_REM}rem` }}
             value={controller.textInput.value}
           />
           <CharCounter />
@@ -1625,8 +1703,8 @@ function ComposerInner(props: InnerProps) {
 
         <div
           className={cn(
-            "order-3 ml-auto flex shrink-0 items-center",
-            !isMobile && !compactLayout && "@sm/composer:order-none @sm/composer:ml-0"
+            "order-3 ms-auto flex shrink-0 items-center",
+            !isMobile && !compactLayout && "@sm/composer:order-none @sm/composer:ms-0"
           )}
         >
           <Tooltip>
@@ -1648,7 +1726,7 @@ function ComposerInner(props: InnerProps) {
                     isStreaming ? t("ariaStop") : isSending ? t("ariaSending") : t("ariaSend")
                   }
                   className={cn(
-                    "size-9 rounded-full transition-transform duration-200 ease-out will-change-transform active:scale-90 disabled:scale-100",
+                    "size-9 rounded-full transition-transform duration-200 ease-out active:scale-90 disabled:scale-100",
                     // Mobile: 44px minimum tap target (primary send/stop action).
                     isMobile && "touch-target"
                   )}
@@ -1668,21 +1746,34 @@ function ComposerInner(props: InnerProps) {
                   size="icon"
                   type="button"
                 >
-                  {/* Icon swap cross-fades + zooms on each state change for a
-                      natural send→running→stop morph (keys force the enter anim). */}
-                  {isStreaming ? (
-                    <SquareIcon
-                      key="stop"
-                      className="size-4 duration-200 animate-in fade-in-0 zoom-in-75"
-                    />
-                  ) : isSending || props.status === "submitted" ? (
-                    <Loader2Icon key="sending" className="size-4 animate-spin" />
-                  ) : (
-                    <ArrowUpIcon
-                      key="send"
-                      className="size-4 duration-200 animate-in fade-in-0 zoom-in-75"
-                    />
-                  )}
+                  {/* Icon swap genuinely cross-fades + zooms on each state
+                      change (send → running → stop): AnimatePresence keeps the
+                      outgoing icon mounted through its exit while the incoming
+                      one fades in, keyed by state. Honors reduced motion. */}
+                  <AnimatePresence mode="wait" initial={false}>
+                    <motion.span
+                      key={
+                        isStreaming
+                          ? "stop"
+                          : isSending || props.status === "submitted"
+                            ? "sending"
+                            : "send"
+                      }
+                      className="inline-flex"
+                      initial={{ opacity: 0, scale: 0.75 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.75 }}
+                      transition={sendIconTransition}
+                    >
+                      {isStreaming ? (
+                        <SquareIcon className="size-4" />
+                      ) : isSending || props.status === "submitted" ? (
+                        <Loader2Icon className="size-4 animate-spin" />
+                      ) : (
+                        <ArrowUpIcon className="size-4" />
+                      )}
+                    </motion.span>
+                  </AnimatePresence>
                 </Button>
               )}
             </TooltipTrigger>

@@ -67,6 +67,8 @@ interface Props {
   onCopy?: () => void
   onRegenerate?: () => void | Promise<void>
   onEditResend?: (messageId: string, newText: string) => void | Promise<void>
+  /** Root used to resolve project-relative links inside rendered messages. */
+  projectRoot?: string | null
 }
 
 export function MessageList({
@@ -77,6 +79,7 @@ export function MessageList({
   onCopy,
   onRegenerate,
   onEditResend,
+  projectRoot,
 }: Props) {
   const lastIndex = messages.length - 1
   const sessionId = useChatStore((s) => s.activeSessionId)
@@ -293,6 +296,27 @@ export function MessageList({
     return () => ro.disconnect()
   }, [])
 
+  // Viewport-resize follow. The observer above watches the *content* box (grows
+  // when messages render); this one watches the *scroll viewport* box, which
+  // changes when the container itself is resized — dragging the artifact dock
+  // divider, toggling it with Cmd/Ctrl+J, or resizing the window. Narrowing the
+  // viewport rewraps text taller, so a user parked at the bottom drifts up
+  // unless we re-pin. Unlike the content observer this drops the `active`
+  // (streaming) gate: staying pinned across a layout change is a scroll-
+  // stability concern, not a streaming one. Setting scrollTop never resizes the
+  // viewport, so this can't loop.
+  useEffect(() => {
+    const el = scrollParentRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => {
+      const { enabled, atBottom } = stickRef.current
+      if (!enabled || !atBottom) return
+      el.scrollTop = el.scrollHeight
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
   const handleScroll = useCallback(() => {
     const el = scrollParentRef.current
     if (!el) return
@@ -383,6 +407,7 @@ export function MessageList({
           onCopy={onCopy}
           onRegenerate={onRegenerate}
           onEditResend={onEditResend}
+          projectRoot={projectRoot}
         />
       </LongPress>
     ) : (
@@ -394,6 +419,7 @@ export function MessageList({
         onCopy={onCopy}
         onRegenerate={onRegenerate}
         onEditResend={onEditResend}
+        projectRoot={projectRoot}
       />
     )
 
@@ -401,12 +427,14 @@ export function MessageList({
     <PerfBoundary id="chat:list">
       <div className="relative flex flex-1 flex-col overflow-hidden">
         {searchOpen ? (
-          <MessageSearchBar
-            messages={messages}
-            onJump={jumpToHit}
-            onActiveHitChange={setActiveHitId}
-            onClose={closeSearch}
-          />
+          <div data-computer-use-pip-obstacle>
+            <MessageSearchBar
+              messages={messages}
+              onJump={jumpToHit}
+              onActiveHitChange={setActiveHitId}
+              onClose={closeSearch}
+            />
+          </div>
         ) : null}
         {showLongPressHint ? (
           <div

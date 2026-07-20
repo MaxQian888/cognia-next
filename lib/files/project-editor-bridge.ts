@@ -12,16 +12,23 @@ export interface ProjectEditorOpener {
 }
 
 const openers = new Set<ProjectEditorOpener>()
+let pendingOpen: { absolutePath: string; line?: number; column?: number } | null = null
 
 /** Register a live project-editor opener. Returns an unregister disposer. */
 export function registerProjectEditorOpener(opener: ProjectEditorOpener): () => void {
   openers.add(opener)
+  if (
+    pendingOpen &&
+    openInProjectEditor(pendingOpen.absolutePath, pendingOpen.line, pendingOpen.column)
+  ) {
+    pendingOpen = null
+  }
   return () => {
     openers.delete(opener)
   }
 }
 
-const trimTrailing = (p: string) => p.replace(/[\\/]+$/, "")
+const normalizePath = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "")
 
 /**
  * Route an absolute path to the project editor rooted at (or above) it. Returns
@@ -31,9 +38,10 @@ const trimTrailing = (p: string) => p.replace(/[\\/]+$/, "")
 export function openInProjectEditor(absolutePath: string, line?: number, column?: number): boolean {
   let best: ProjectEditorOpener | null = null
   let bestBase = ""
+  const normalizedPath = normalizePath(absolutePath)
   for (const o of openers) {
-    const base = trimTrailing(o.root)
-    if (absolutePath === base || absolutePath.startsWith(`${base}/`)) {
+    const base = normalizePath(o.root)
+    if (normalizedPath === base || normalizedPath.startsWith(`${base}/`)) {
       // Equal roots intentionally prefer the latest registration. A dormant
       // dock reveal opener mounts before the live Monaco editor; once Monaco
       // is present it must receive line/column-aware terminal jumps directly.
@@ -44,13 +52,40 @@ export function openInProjectEditor(absolutePath: string, line?: number, column?
     }
   }
   if (!best) return false
-  const rel = absolutePath === bestBase ? "" : absolutePath.slice(bestBase.length + 1)
+  const rel = normalizedPath === bestBase ? "" : normalizedPath.slice(bestBase.length + 1)
   if (!rel) return false
   best.open(rel, line, column)
   return true
 }
 
+/**
+ * Open immediately when an editor is mounted, otherwise retain the latest
+ * request until a matching editor registers (for example after a tab switch).
+ */
+export function requestProjectEditorOpen(
+  absolutePath: string,
+  line?: number,
+  column?: number
+): boolean {
+  if (openInProjectEditor(absolutePath, line, column)) {
+    pendingOpen = null
+    return true
+  }
+  pendingOpen = { absolutePath, line, column }
+  return false
+}
+
+/**
+ * Retain a request for the next matching editor registration without offering
+ * it to an already-mounted dormant opener. This is used when navigation also
+ * changes tabs and the destination editor has not mounted yet.
+ */
+export function deferProjectEditorOpen(absolutePath: string, line?: number, column?: number): void {
+  pendingOpen = { absolutePath, line, column }
+}
+
 /** Test-only: drop every registered opener. */
 export function __resetProjectEditorBridgeForTesting(): void {
   openers.clear()
+  pendingOpen = null
 }

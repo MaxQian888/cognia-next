@@ -115,8 +115,9 @@ export interface PetSettings {
   /** Render box size in px. */
   size: number
   /**
-   * Which skin renders the pet. `"svg"` is the built-in vector mascot;
-   * `"live2d"` renders a user-imported Live2D model. Defaults to `"svg"`.
+   * Which skin renders the pet. `"svg"` is the built-in vector mascot,
+   * `"live2d"` renders an imported Live2D model, and `"sprite-v2"` renders
+   * a validated Codex-compatible v2 atlas. Defaults to `"svg"`.
    */
   skinId?: string
   /**
@@ -124,6 +125,8 @@ export interface PetSettings {
    * resolver prefers a per-character binding override when present.
    */
   activeLive2dModelId?: string
+  /** Id of the active validated Codex-compatible v2 sprite pack. */
+  activeSpritePackId?: string
   /** Transparent desktop-pet overlay window settings (Tauri only). */
   desktopPet?: PetDesktopOverlaySettings
   /**

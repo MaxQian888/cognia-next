@@ -116,6 +116,10 @@ class TaskSchedulerImpl {
   private queues: Map<string, QueuedStart[]> = new Map()
   private retryChains: Set<string> = new Set()
   private isInitialized = false
+  /** Shared by concurrent early callers so the timing driver starts once. */
+  private initializationPromise: Promise<void> | null = null
+  /** Becomes true immediately after driver.start(), before boot tasks are armed. */
+  private driverReady = false
   /** Guards the one-shot boot reconcile so multiple authority transitions in a
    * single process don't re-cancel executions repeatedly. */
   private staleExecutionsReconciled = false
@@ -171,7 +175,17 @@ class TaskSchedulerImpl {
    */
   async initialize(): Promise<void> {
     if (this.isInitialized) return
+    if (this.initializationPromise) return this.initializationPromise
 
+    this.initializationPromise = this.initializeOnce()
+    try {
+      await this.initializationPromise
+    } finally {
+      this.initializationPromise = null
+    }
+  }
+
+  private async initializeOnce(): Promise<void> {
     log.info("Initializing task scheduler...")
 
     try {
@@ -187,6 +201,7 @@ class TaskSchedulerImpl {
         void this.handleTaskDue(taskId, firedAtMs)
       })
       await driver.start()
+      this.driverReady = true
 
       if (driver.supportsLeaderElection) {
         // Renderer: only the leader tab arms/executes. Subscribe to leadership
@@ -243,6 +258,7 @@ class TaskSchedulerImpl {
       this.isInitialized = true
       log.info("Task scheduler initialized successfully")
     } catch (error) {
+      this.driverReady = false
       log.error("Failed to initialize task scheduler:", error)
       throw SchedulerError.initFailed(
         error instanceof Error ? error.message : String(error),
@@ -581,6 +597,7 @@ class TaskSchedulerImpl {
     this.executionChannel = null
 
     this.isInitialized = false
+    this.driverReady = false
     // A stop → start cycle is a fresh boot; reconcile orphaned executions again.
     this.staleExecutionsReconciled = false
     log.info("Task scheduler stopped")
@@ -862,11 +879,17 @@ class TaskSchedulerImpl {
       return
     }
 
-    const driver = this.driver
-    if (!driver) {
-      log.warn("Cannot schedule task before scheduler initialization")
-      return
+    let driver = this.driver
+    if (!driver || !this.driverReady) {
+      // Lifecycle writes can legitimately arrive before React/headless startup
+      // mounts the scheduler initializer (notably plugin activation). Start it
+      // here. The boot sweep normally arms the persisted task; if its read view
+      // missed the concurrent write, continue below and arm it directly.
+      await this.initialize()
+      if (this.armedTaskIds.has(task.id)) return
+      driver = this.driver
     }
+    if (!driver || !this.driverReady || !this.isTimingAuthority()) return
 
     this.armedTaskIds.add(task.id)
     // Arm with optional jitter; remember the canonical slot for handleTaskDue.

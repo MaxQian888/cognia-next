@@ -49,6 +49,45 @@ describe("browserClient (embedded pane)", () => {
     })
   })
 
+  it("embedSetZoom forwards the zoom factor", async () => {
+    await browserClient.embedSetZoom(1.5)
+    expect(call).toHaveBeenCalledWith("browser_embed_set_zoom", {
+      zoom: 1.5,
+      ownerToken: "owner-1",
+    })
+  })
+
+  it("embedFind runs the injected helper and unwraps the evaluate envelope", async () => {
+    call.mockResolvedValueOnce(JSON.stringify({ ok: true, value: { matches: 3, index: 1 } }))
+    await expect(browserClient.embedFind("hello", { forward: true })).resolves.toEqual({
+      matches: 3,
+      index: 1,
+    })
+    expect(call).toHaveBeenCalledWith("browser_embed_evaluate", {
+      expr: `window.__cogniaFind("hello",{"forward":true})`,
+      ownerToken: "owner-1",
+    })
+  })
+
+  it("embedFind defaults missing envelope fields to zero", async () => {
+    call.mockResolvedValueOnce(JSON.stringify({ ok: true, value: null }))
+    await expect(browserClient.embedFind("x")).resolves.toEqual({ matches: 0, index: 0 })
+  })
+
+  it("embedFind throws when the evaluate envelope reports failure", async () => {
+    call.mockResolvedValueOnce(JSON.stringify({ ok: false, error: "boom" }))
+    await expect(browserClient.embedFind("x")).rejects.toThrow("boom")
+  })
+
+  it("embedFindClear runs the clear helper", async () => {
+    call.mockResolvedValueOnce(JSON.stringify({ ok: true, value: { matches: 0, index: 0 } }))
+    await browserClient.embedFindClear()
+    expect(call).toHaveBeenCalledWith("browser_embed_evaluate", {
+      expr: "window.__cogniaFindClear()",
+      ownerToken: "owner-1",
+    })
+  })
+
   it("embedSetSelectMode forwards the flag", async () => {
     await browserClient.embedSetSelectMode(true)
     expect(call).toHaveBeenCalledWith("browser_embed_set_select_mode", {

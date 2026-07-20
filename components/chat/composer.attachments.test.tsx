@@ -33,13 +33,14 @@ jest.mock("@/lib/db/chat-drafts", () => ({
   setDraftDebounced: jest.fn(),
 }))
 
-import { act, fireEvent, render } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Composer } from "./composer"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
 import { useChatStore } from "@/stores/chat"
+import { useSettingsStore } from "@/stores/settings"
 import { buildSendContent } from "@/lib/chat/attachments/dispatch"
 import type { ChatSession } from "@cognia/agent-config-types"
 
@@ -94,6 +95,18 @@ async function typeAndEnter(ta: HTMLTextAreaElement, value: string) {
   })
 }
 
+// Stage an image attachment through the hidden file input, exactly as the
+// paperclip button does. jsdom has no object-URL support, so it is polyfilled
+// in beforeEach below.
+async function stageImage(name = "shot.png") {
+  const input = document.querySelector('input[type="file"]') as HTMLInputElement
+  const file = new File(["x"], name, { type: "image/png" })
+  await act(async () => {
+    fireEvent.change(input, { target: { files: [file] } })
+    await new Promise((r) => setTimeout(r, 0))
+  })
+}
+
 async function clickButton(label: string) {
   const btn = Array.from(document.body.querySelectorAll("button")).find(
     (b) => b.textContent?.trim() === label
@@ -111,7 +124,13 @@ function dialogOpen(): boolean {
 
 beforeEach(() => {
   useChatStore.getState().clear()
+  // Reset composer settings to defaults (clearAfterSend on) so per-test overrides
+  // don't leak between cases.
+  useSettingsStore.setState({ settings: undefined })
   buildSendContentMock.mockReset()
+  // jsdom lacks object-URL support; the composer creates one per staged file.
+  global.URL.createObjectURL = jest.fn(() => "blob:mock")
+  global.URL.revokeObjectURL = jest.fn()
 })
 
 describe("Composer — attachment send contract", () => {
@@ -160,5 +179,68 @@ describe("Composer — attachment send contract", () => {
     expect(dialogOpen()).toBe(false)
     expect(onSend).not.toHaveBeenCalled()
     expect(ta.value).toBe("x")
+  })
+
+  // Regression: a cancelled/failed send must not destroy staged attachments.
+  // The optimistic clear used to call attachments.clear() (which revokes the
+  // blob URLs), so declining the oversize dialog silently deleted the images.
+  it("keeps a staged attachment when the user cancels the oversize dialog", async () => {
+    buildSendContentMock.mockResolvedValue({
+      content: [{ type: "text", text: "big" }],
+      rejected: [],
+      tokens: 20_000,
+    })
+    const onSend = jest.fn(async () => undefined)
+    const ta = renderComposer(onSend)
+
+    await stageImage("shot.png")
+    expect(screen.getByAltText("shot.png")).toBeInTheDocument()
+
+    await typeAndEnter(ta, "x")
+    expect(dialogOpen()).toBe(true)
+
+    await clickButton("Cancel")
+    expect(onSend).not.toHaveBeenCalled()
+    expect(ta.value).toBe("x")
+    // The attachment survives — it was NOT cleared/revoked by the optimistic clear.
+    expect(screen.getByAltText("shot.png")).toBeInTheDocument()
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith("blob:mock")
+  })
+
+  it("clears a staged attachment only after a confirmed successful send", async () => {
+    buildSendContentMock.mockResolvedValue({ content: "hi", rejected: [], tokens: 0 })
+    const onSend = jest.fn(async () => undefined)
+    const ta = renderComposer(onSend)
+
+    await stageImage("shot.png")
+    expect(screen.getByAltText("shot.png")).toBeInTheDocument()
+
+    await typeAndEnter(ta, "hi")
+
+    expect(onSend).toHaveBeenCalled()
+    expect(ta.value).toBe("")
+    // On a confirmed send the staged attachment is dropped and its blob revoked.
+    // (Asserting the revoke is deterministic; the chip itself lingers briefly in
+    // the DOM while its AnimatePresence exit animation plays.)
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:mock")
+  })
+
+  it("keeps the text and attachment after sending when clearAfterSend is off", async () => {
+    useSettingsStore.setState({
+      settings: { composerBehavior: { clearAfterSend: false } } as never,
+    })
+    buildSendContentMock.mockResolvedValue({ content: "hi", rejected: [], tokens: 0 })
+    const onSend = jest.fn(async () => undefined)
+    const ta = renderComposer(onSend)
+
+    await stageImage("shot.png")
+    await typeAndEnter(ta, "hi")
+
+    expect(onSend).toHaveBeenCalled()
+    // clearAfterSend off: the composer keeps everything for a resend/tweak — no
+    // optimistic clear, and finalizeSend must not drop/revoke the attachment.
+    expect(ta.value).toBe("hi")
+    expect(screen.getByAltText("shot.png")).toBeInTheDocument()
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith("blob:mock")
   })
 })

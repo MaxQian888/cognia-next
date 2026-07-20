@@ -28,6 +28,21 @@ jest.mock("./store", () => ({
   recordLimitsSnapshot: (...a: unknown[]) => recordLimitsSnapshotMock(...a),
 }))
 
+const saveSettingsMock = jest.fn(async () => {})
+let enabledAccounts: string[] = []
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: Object.assign(
+    (selector: (state: { settings: unknown; save: typeof saveSettingsMock }) => unknown) =>
+      selector({ settings: { limitsQueryEnabledAccounts: enabledAccounts }, save: saveSettingsMock }),
+    {
+      getState: () => ({
+        settings: { limitsQueryEnabledAccounts: enabledAccounts, customLimitsSources: [] },
+        save: saveSettingsMock,
+      }),
+    }
+  ),
+}))
+
 import { useAllConfiguredLimits, useProviderLimits } from "./hooks"
 
 function snap(over: Partial<ProviderLimits> = {}): ProviderLimits {
@@ -38,6 +53,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   isTauriMock.mockReturnValue(true)
   useLiveQueryMock.mockReturnValue(null)
+  enabledAccounts = ["anthropic:acc-1", "codex:acc-2"]
 })
 
 describe("useProviderLimits", () => {
@@ -90,6 +106,31 @@ describe("useProviderLimits", () => {
     })
     expect(queryAccountLimitsCoalescedMock).not.toHaveBeenCalled()
   })
+
+  it("does not query any account until the user opts in", async () => {
+    enabledAccounts = []
+    const { result } = renderHook(() => useProviderLimits("anthropic", "acc-1"))
+
+    expect(result.current.queryEnabled).toBe(false)
+    await act(async () => {
+      await result.current.refresh({ force: true })
+    })
+
+    expect(queryAccountLimitsCoalescedMock).not.toHaveBeenCalled()
+  })
+
+  it("persists an account-scoped opt-in without enabling sibling accounts", async () => {
+    enabledAccounts = ["codex:other"]
+    const { result } = renderHook(() => useProviderLimits("codex", "acc-1"))
+
+    await act(async () => {
+      await result.current.setQueryEnabled(true)
+    })
+
+    expect(saveSettingsMock).toHaveBeenCalledWith({
+      limitsQueryEnabledAccounts: ["codex:other", "codex:acc-1"],
+    })
+  })
 })
 
 describe("useAllConfiguredLimits", () => {
@@ -125,5 +166,24 @@ describe("useAllConfiguredLimits", () => {
       await result.current.refresh()
     })
     expect(queryAllConfiguredLimitsMock).not.toHaveBeenCalled()
+  })
+
+  it("filters every account that has not opted into network quota queries", async () => {
+    enabledAccounts = ["codex:acc-2"]
+    queryAllConfiguredLimitsMock.mockImplementation(
+      async (deps: { runAccount: (p: string, a: string) => Promise<unknown> }) => {
+        await deps.runAccount("anthropic", "acc-1")
+        await deps.runAccount("codex", "acc-2")
+        return []
+      }
+    )
+
+    const { result } = renderHook(() => useAllConfiguredLimits())
+    await act(async () => {
+      await result.current.refresh()
+    })
+
+    expect(queryAccountLimitsCoalescedMock).toHaveBeenCalledTimes(1)
+    expect(queryAccountLimitsCoalescedMock).toHaveBeenCalledWith("codex", "acc-2")
   })
 })

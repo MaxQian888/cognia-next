@@ -2,35 +2,71 @@
   "title": "站点",
   "subtitle": "在 Cognia 中构建、预览与发布",
   "empty": "创建或选择一个站点以开始。",
+  "sidebarEmpty": "还没有站点，创建一个开始吧。",
   "desktopOnly": {
     "title": "站点功能需要 Cognia 桌面端",
     "description": "构建、服务商凭据与预览仅保留在所选的本地桌面主机上。"
   },
   "create": {
+    "title": "新建站点",
+    "description": "将项目的构建产物发布到 Cloudflare Workers。",
     "project": "项目",
     "name": "站点名称",
     "subpath": "源码子路径（可选）",
     "accountId": "Cloudflare 账户 ID",
     "workerName": "Worker 名称"
   },
-  "tabs": {
-    "build": "构建与预览",
-    "versions": "版本",
-    "access": "访问控制",
-    "domains": "域名",
-    "observability": "日志与分析",
-    "provider": "服务商"
+  "steps": {
+    "connect": {
+      "title": "连接 Cloudflare",
+      "description": "验证并保存该站点的 API 令牌。"
+    },
+    "environment": {
+      "title": "环境变量",
+      "description": "保存构建所需的变量与密钥。"
+    },
+    "build": {
+      "title": "构建",
+      "description": "配置资源绑定并构建不可变版本。"
+    },
+    "preview": {
+      "title": "预览",
+      "description": "发布前在本地运行构建产物。"
+    },
+    "publish": {
+      "title": "发布",
+      "description": "上传版本并部署到生产环境。"
+    }
+  },
+  "stepState": {
+    "idle": "未开始",
+    "running": "进行中",
+    "done": "完成",
+    "failed": "需处理"
+  },
+  "wrangler": {
+    "detecting": "正在检测 Wrangler CLI…",
+    "ready": "Wrangler 就绪（{version}）。",
+    "notFound": "未在此主机找到 Wrangler CLI。",
+    "installHint": "用 npm i -g wrangler 安装后重新检测。"
+  },
+  "publish": {
+    "noVersions": "请先构建一个版本以上传并部署。"
+  },
+  "advanced": {
+    "title": "高级配置"
   },
   "actions": {
-    "refresh": "刷新站点",
+    "newSite": "新建站点",
+    "creating": "创建中…",
     "create": "创建站点",
+    "redetectWrangler": "重新检测 Wrangler",
     "saveEnvironment": "保存环境修订",
     "provision": "配置资源绑定",
     "build": "构建保存版本",
     "preview": "启动预览",
     "stopPreview": "停止预览",
     "upload": "上传版本",
-    "approveTool": "批准当前工具文件",
     "deploy": "部署",
     "rollback": "重新部署 / 回滚",
     "saveAccess": "应用访问策略",
@@ -75,7 +111,6 @@
     "networkHosts": "已批准的安装网络主机"
   },
   "versions": {
-    "wranglerPath": "已批准 Wrangler 二进制文件的绝对路径",
     "version": "版本 {sequence}"
   },
   "operations": {
@@ -154,7 +189,6 @@
     "deleting": "删除中",
     "deleted": "已删除"
   },
-  "versionStatus": { "building": "构建中", "ready": "就绪", "failed": "失败" },
   "deploymentStatus": {
     "pending": "等待中",
     "deploying": "部署中",

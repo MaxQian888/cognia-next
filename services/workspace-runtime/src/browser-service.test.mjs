@@ -16,7 +16,9 @@ class FakeFrame {
   url() {
     return this._url
   }
-  async evaluate(_fn, argument) {
+  async evaluate(fn, argument) {
+    if (String(fn).includes("__cogniaFindClear")) return { ok: true }
+    if (String(fn).includes("__cogniaFind")) return { matches: 2, index: 0 }
     if (argument?.includeText !== undefined) {
       this.snapshotGeneration += 1
       return JSON.stringify({
@@ -180,6 +182,26 @@ async function fixture(t) {
   })
   return { service, chromium }
 }
+
+test("clamps page zoom and re-applies it after navigation", async (t) => {
+  const { service } = await fixture(t)
+  await service.createSession({ id: "session-1", grants: ["app.example.com"] })
+  // Out-of-range zoom saturates to the supported bound.
+  assert.deepEqual(await service.setZoom("session-1", 9), { ok: true, zoom: 5 })
+  assert.deepEqual(await service.setZoom("session-1", 0.1), { ok: true, zoom: 0.25 })
+  // Navigation (which resets CSS zoom) re-applies the session factor cleanly.
+  await service.navigate("session-1", "http://localhost:3000/next")
+})
+
+test("runs find-in-page via the injected helper, not the gated evaluate", async (t) => {
+  const { service } = await fixture(t)
+  await service.createSession({ id: "session-1", grants: ["app.example.com"] })
+  assert.deepEqual(await service.find("session-1", "hello", { forward: true }), {
+    matches: 2,
+    index: 0,
+  })
+  assert.deepEqual(await service.findClear("session-1"), { ok: true })
+})
 
 test("creates one isolated context with pinned DNS and a single active page", async (t) => {
   const { service, chromium } = await fixture(t)

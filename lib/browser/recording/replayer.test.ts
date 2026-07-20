@@ -84,6 +84,38 @@ describe("replayFlow", () => {
     expect(engine.act).toHaveBeenCalledWith("e7", "click", { modifiers: ["ctrl"] })
   })
 
+  it("replays double-click, hover, and scroll events", async () => {
+    const engine = engineMock({ scroll: jest.fn().mockResolvedValue({ ok: true }) })
+    await replayFlow(
+      flow([
+        { act: "double_click", at: 1, target: target(), modifiers: ["shift"] },
+        { act: "hover", at: 2, target: target("#menu") },
+        { act: "scroll", at: 3, direction: "down", amount: 240 },
+      ]),
+      engine
+    )
+
+    expect(engine.act).toHaveBeenNthCalledWith(1, "e7", "double_click", {
+      modifiers: ["shift"],
+    })
+    expect(engine.act).toHaveBeenNthCalledWith(2, "e7", "hover", {})
+    expect(engine.scroll).toHaveBeenCalledWith({ direction: "down", amount: 240 })
+  })
+
+  it("reports a rejected scroll event", async () => {
+    const engine = engineMock({
+      scroll: jest.fn().mockResolvedValue({ ok: false, error: "scroll blocked" }),
+    })
+
+    const result = await replayFlow(
+      flow([{ act: "scroll", at: 1, direction: "up", amount: 120 }]),
+      engine
+    )
+
+    expect(result.ok).toBe(false)
+    expect(result.steps[0].error).toBe("scroll blocked")
+  })
+
   // The arg NAME is the whole contract, and this mock is the only thing checking
   // it: the real overlay is a Tauri init script that jest cannot reach, and it
   // coerces a missing `args.text` to "" and still returns `{ ok: true }`. So a

@@ -1,7 +1,18 @@
 "use client"
 
 import { useLiveQuery } from "dexie-react-hooks"
-import { Circle, Download, Pencil, Play, Plus, Save, Square, Trash2 } from "lucide-react"
+import {
+  ChevronDown,
+  ChevronUp,
+  Circle,
+  Download,
+  Pencil,
+  Play,
+  Plus,
+  Save,
+  Square,
+  Trash2,
+} from "lucide-react"
 import { useTranslations } from "next-intl"
 import { useCallback, useState, type Dispatch, type SetStateAction } from "react"
 import { toast } from "sonner"
@@ -52,6 +63,15 @@ function useStepLabel() {
           return t("record.step.navigate", { url: step.url })
         case "click":
           return t("record.step.click", { target: named(step) })
+        case "double_click":
+          return t("record.step.doubleClick", { target: named(step) })
+        case "hover":
+          return t("record.step.hover", { target: named(step) })
+        case "scroll":
+          return t("record.step.scroll", {
+            direction: t(`record.step.direction.${step.direction}`),
+            amount: step.amount,
+          })
         case "fill":
           return step.secret
             ? t("record.step.secret", { target: named(step) })
@@ -313,6 +333,7 @@ export function BrowserRecorderPanel({
   const [name, setName] = useState("")
   const [assertion, setAssertion] = useState("")
   const [secrets, setSecrets] = useState<Record<string, string>>({})
+  const [expanded, setExpanded] = useState(true)
   /**
    * The flows saved for the loaded origin. `useLiveQuery` re-runs this whenever
    * `browserRecordings` is written, so saving, renaming and deleting all land in
@@ -329,6 +350,7 @@ export function BrowserRecorderPanel({
 
   const start = useCallback(async () => {
     if (!pageUrl) return
+    setExpanded(true)
     setFlow(null)
     await recorder.start(pageUrl)
   }, [pageUrl, recorder])
@@ -385,6 +407,16 @@ export function BrowserRecorderPanel({
           </Badge>
         )}
         <div className="ml-auto flex items-center gap-1">
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-7"
+            aria-label={expanded ? t("record.collapse") : t("record.expand")}
+            aria-expanded={expanded}
+            onClick={() => setExpanded((value) => !value)}
+          >
+            {expanded ? <ChevronDown aria-hidden /> : <ChevronUp aria-hidden />}
+          </Button>
           {recorder.recording ? (
             <Button size="sm" variant="secondary" onClick={() => void stop()}>
               <Square aria-hidden />
@@ -405,67 +437,73 @@ export function BrowserRecorderPanel({
         </div>
       </header>
 
-      {steps.length === 0 ? (
-        <p className="text-muted-foreground py-4 text-center text-xs">{t("record.empty")}</p>
-      ) : (
-        <ScrollArea className="max-h-48">
-          <ol className="flex flex-col gap-1">
-            {steps.map((step, index) => (
-              <li
-                key={`${step.act}-${index}-${step.at}`}
-                className="flex items-center gap-2 text-xs"
-              >
-                <span className="text-muted-foreground w-4 shrink-0 text-right">{index + 1}</span>
-                <span className="truncate">{stepLabel(step)}</span>
-                {recorder.recording && (
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="ml-auto size-6 shrink-0"
-                    aria-label={t("record.removeStep")}
-                    onClick={() => recorder.removeStep(index)}
+      {expanded && (
+        <>
+          {steps.length === 0 ? (
+            <p className="text-muted-foreground py-4 text-center text-xs">{t("record.empty")}</p>
+          ) : (
+            <ScrollArea className="max-h-48">
+              <ol className="flex flex-col gap-1">
+                {steps.map((step, index) => (
+                  <li
+                    key={`${step.act}-${index}-${step.at}`}
+                    className="flex items-center gap-2 text-xs"
                   >
-                    <Trash2 aria-hidden />
-                  </Button>
-                )}
-              </li>
-            ))}
-          </ol>
-        </ScrollArea>
-      )}
+                    <span className="text-muted-foreground w-4 shrink-0 text-right">
+                      {index + 1}
+                    </span>
+                    <span className="truncate">{stepLabel(step)}</span>
+                    {recorder.recording && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="ml-auto size-6 shrink-0"
+                        aria-label={t("record.removeStep")}
+                        onClick={() => recorder.removeStep(index)}
+                      >
+                        <Trash2 aria-hidden />
+                      </Button>
+                    )}
+                  </li>
+                ))}
+              </ol>
+            </ScrollArea>
+          )}
 
-      {recorder.recording && (
-        <div className="flex items-center gap-1">
-          <Input
-            value={assertion}
-            onChange={(e) => setAssertion(e.target.value)}
-            placeholder={t("record.assertionPlaceholder")}
-            aria-label={t("record.addAssertion")}
-            className="h-8 text-xs"
-          />
-          <Button size="sm" variant="ghost" onClick={addAssertion} disabled={!assertion.trim()}>
-            <Plus aria-hidden />
-            {t("record.addAssertion")}
-          </Button>
-        </div>
-      )}
+          {recorder.recording && (
+            <div className="flex items-center gap-1">
+              <Input
+                value={assertion}
+                onChange={(e) => setAssertion(e.target.value)}
+                placeholder={t("record.assertionPlaceholder")}
+                aria-label={t("record.addAssertion")}
+                className="h-8 text-xs"
+              />
+              <Button size="sm" variant="ghost" onClick={addAssertion} disabled={!assertion.trim()}>
+                <Plus aria-hidden />
+                {t("record.addAssertion")}
+              </Button>
+            </div>
+          )}
 
-      {flow && (
-        <FlowReview
-          flow={flow}
-          recorder={recorder}
-          name={name}
-          setName={setName}
-          secrets={secrets}
-          setSecrets={setSecrets}
-          onSendToChat={onSendToChat}
-        />
-      )}
+          {flow && (
+            <FlowReview
+              flow={flow}
+              recorder={recorder}
+              name={name}
+              setName={setName}
+              secrets={secrets}
+              setSecrets={setSecrets}
+              onSendToChat={onSendToChat}
+            />
+          )}
 
-      {/* Hidden while a take is live: mid-recording, loading another flow would
+          {/* Hidden while a take is live: mid-recording, loading another flow would
           throw away the take in progress. */}
-      {!recorder.recording && savedRows.length > 0 && (
-        <SavedFlows rows={savedRows} onSelect={select} onRename={rename} onDelete={remove} />
+          {!recorder.recording && savedRows.length > 0 && (
+            <SavedFlows rows={savedRows} onSelect={select} onRename={rename} onDelete={remove} />
+          )}
+        </>
       )}
     </section>
   )

@@ -222,8 +222,32 @@
     "label": "皮肤",
     "options": {
       "live2d": "Live2D 模型",
+      "sprite-v2": "AI 精灵图（v2）",
       "svg": "矢量吉祥物"
     }
+  },
+  "spriteV2": {
+    "active": "使用中",
+    "activate": "使用",
+    "agentPrompt": {
+      "concept": "宠物设定：{concept}",
+      "defaultConcept": "一只适合 Cognia 的友好自定义宠物",
+      "instruction": "使用 $hatch-pet skill 创建一个与 Codex 兼容的 v2 动画宠物。",
+      "outputFiles": "保留最终的 pet.json 和 spritesheet.webp 文件，并报告它们的绝对路径。",
+      "qa": "完成所有必需的动画行和质量检查关卡。",
+      "scope": "这是为 Cognia 的 v2 精灵图导入器生成的；不要修改 Cognia 源代码。"
+    },
+    "conceptLabel": "描述你的宠物",
+    "conceptPlaceholder": "一只戴青绿色围巾的迷你黏土狐狸……",
+    "create": "前往聊天继续",
+    "createDescription": "使用已安装的 hatch-pet skill 准备智能体任务草稿；请在聊天中确认并发送，以继续生成和质量检查。",
+    "createTitle": "AI 外观孵化室",
+    "delete": "删除 {name}",
+    "empty": "还没有安装 v2 精灵图宠物。",
+    "import": "导入 v2 精灵图宠物",
+    "importHint": "同时选择 pet.json 与对应的 spritesheet.webp 或 spritesheet.png。安装前 Cognia 会校验 v2 清单和 1536×2288 图集。",
+    "installed": "精灵图宠物已安装并启用。",
+    "invalid": "这不是有效的 Codex 兼容 v2 宠物包。请检查清单、图片格式与图集尺寸。"
   },
   "sound": {
     "description": "在你抚摸宠物或它作出反应时播放短促音效。默认关闭。",

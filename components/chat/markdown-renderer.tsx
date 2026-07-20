@@ -29,6 +29,11 @@ import { TaskListItem } from "@/components/chat/renderers/task-list"
 import { withRendererErrorBoundary } from "@/components/chat/renderers/renderer-error-boundary"
 import { ArtifactCreateButton } from "@/components/artifacts/artifact-create-button"
 import { ExternalLink } from "@/components/shared/external-link"
+import { ProjectFileLink } from "@/components/chat/project-file-link"
+import {
+  parseProjectFileReference,
+  type ProjectFileReference,
+} from "@/lib/files/project-file-reference"
 
 // Heavy block renderers are code-split via next/dynamic so the initial
 // chat-tab bundle drops their parse cost. Mermaid is ~200KB minified,
@@ -165,7 +170,7 @@ const sanitizeSchema = {
   },
   protocols: {
     ...defaultSchema.protocols,
-    href: ["http", "https", "mailto"],
+    href: ["http", "https", "mailto", "file"],
     src: ["http", "https", "data:image"],
   },
 }
@@ -207,6 +212,10 @@ export interface MarkdownRendererProps {
    * the branch from `<StreamingTextPart>` to `<MarkdownRenderer>`.
    */
   isStreaming?: boolean
+  /** Root used to resolve workspace-relative Markdown file links. */
+  projectRoot?: string | null
+  /** Optional owner override, used when opening a file must first mount an editor tab. */
+  onOpenProjectFile?: (target: ProjectFileReference) => void
 }
 
 export const MarkdownRenderer = memo(function MarkdownRenderer({
@@ -225,6 +234,8 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   mathShowCopyButton = true,
   messageId,
   isStreaming = false,
+  projectRoot,
+  onOpenProjectFile,
 }: MarkdownRendererProps) {
   const remarkPlugins = useMemo(() => {
     const plugins: NonNullable<Parameters<typeof ReactMarkdown>[0]["remarkPlugins"]> = [remarkGfm]
@@ -241,10 +252,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   }, [])
 
   const processedContent = useMemo(() => {
-    if (enableMath) {
-      return preprocessLatex(content)
-    }
-    return content
+    return enableMath ? preprocessLatex(content) : content
   }, [content, enableMath])
 
   const components = useMemo(
@@ -263,6 +271,8 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         mathShowCopyButton,
         messageId,
         isStreaming,
+        projectRoot,
+        onOpenProjectFile,
       }),
     [
       enableMermaid,
@@ -278,6 +288,8 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       mathShowCopyButton,
       messageId,
       isStreaming,
+      projectRoot,
+      onOpenProjectFile,
     ]
   )
 
@@ -310,6 +322,8 @@ interface BuildComponentsOptions {
   mathShowCopyButton: boolean
   messageId?: string
   isStreaming: boolean
+  projectRoot?: string | null
+  onOpenProjectFile?: (target: ProjectFileReference) => void
 }
 
 function buildComponents(
@@ -329,6 +343,8 @@ function buildComponents(
     mathShowCopyButton,
     messageId,
     isStreaming,
+    projectRoot,
+    onOpenProjectFile,
   } = opts
 
   return {
@@ -361,6 +377,16 @@ function buildComponents(
       }
 
       if (isInline) {
+        const target = parseProjectFileReference(codeContent, projectRoot)
+        if (target) {
+          return (
+            <ProjectFileLink target={target} onOpenFile={onOpenProjectFile}>
+              <code className="rounded bg-muted px-1.5 py-0.5 text-sm font-mono" {...props}>
+                {children}
+              </code>
+            </ProjectFileLink>
+          )
+        }
         return (
           <code className="rounded bg-muted px-1.5 py-0.5 text-sm font-mono" {...props}>
             {children}
@@ -423,6 +449,14 @@ function buildComponents(
       return <td className="border border-border px-4 py-2">{children}</td>
     },
     a({ href, children }) {
+      const target = href ? parseProjectFileReference(href, projectRoot) : null
+      if (target) {
+        return (
+          <ProjectFileLink target={target} onOpenFile={onOpenProjectFile}>
+            {children}
+          </ProjectFileLink>
+        )
+      }
       // `ExternalLink` keeps `target="_blank"` on web but routes http(s) clicks
       // through `openExternal` on Capacitor/Tauri (the WebView can't rely on
       // `target="_blank"` — Android blocks new-window creation, WKWebView is

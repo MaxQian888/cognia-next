@@ -30,11 +30,13 @@ export function WorkspaceRevealOpener() {
     if (!session || !rootPath || !hasWorkspaceFsBackend()) return
     return registerProjectEditorOpener({
       root: rootPath,
-      open: (relPath) => {
+      open: (relPath, line, column) => {
         useArtifactDockLayoutStore.getState().revealWorkspaceFile({
           sessionId: session.id,
           rootPath,
           relPath,
+          line,
+          column,
         })
       },
     })

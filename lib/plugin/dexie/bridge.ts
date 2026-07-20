@@ -26,6 +26,7 @@ import {
 } from "./meta"
 
 export type RetentionMode = "keep" | "purge"
+type DexieSource = Dexie | (() => Dexie)
 
 /**
  * A single process-wide lock serializing every schema mutation. The schema
@@ -36,6 +37,29 @@ export type RetentionMode = "keep" | "purge"
  * only this critical section mutually exclusive. Reuses `createMutex`.
  */
 const schemaMutex = createMutex()
+
+const SCHEMA_LOCK_PREFIX = "cognia-plugin-schema:"
+
+interface SchemaLockManager {
+  request<T>(name: string, callback: () => Promise<T>): Promise<T>
+}
+
+/**
+ * Serialize schema mutations both inside this realm and across same-origin
+ * tabs/Tauri webviews. A module mutex alone is realm-local, so two windows can
+ * otherwise perform competing version upgrades against the same IndexedDB.
+ */
+function runSchemaMutationExclusive<T>(dbName: string, operation: () => Promise<T>): Promise<T> {
+  return schemaMutex.runExclusive(() => {
+    const locks = (globalThis as { navigator?: { locks?: SchemaLockManager } }).navigator?.locks
+    if (!locks?.request) return operation()
+    return locks.request(`${SCHEMA_LOCK_PREFIX}${dbName}`, operation)
+  })
+}
+
+function resolveDb(source: DexieSource): Dexie {
+  return typeof source === "function" ? source() : source
+}
 
 /**
  * The next Dexie version to declare for a schema bump, derived from the TRUE
@@ -79,7 +103,7 @@ async function nextSchemaVersion(db: Dexie): Promise<number> {
  * and then re-apply.
  */
 export async function applyPluginTables(
-  db: Dexie,
+  dbSource: DexieSource,
   pluginId: string,
   dexieBlock: PluginManifestDexieBlock
 ): Promise<void> {
@@ -91,7 +115,12 @@ export async function applyPluginTables(
 
   // Whole body under the lock so the meta read → schema bump → meta write is
   // atomic against any other concurrent apply/remove (check-then-act safety).
-  await schemaMutex.runExclusive(async () => {
+  const dbName = resolveDb(dbSource).name
+  await runSchemaMutationExclusive(dbName, async () => {
+    // A foreign upgrade request can close and replace the cached CogniaDB while
+    // this call waits for the Web Lock. Resolve it only after lock acquisition
+    // so the schema is applied to the instance plugin activation will consume.
+    const db = resolveDb(dbSource)
     const existing = await getPluginDexieMeta(pluginId)
     const namespacedNames = dexieBlock.tables.map((t) => toNamespacedTableName(pluginId, t.name))
 
@@ -159,12 +188,14 @@ export async function applyPluginTables(
  * @returns the namespaced table names that were re-declared (empty if none).
  */
 export async function restorePluginTables(
-  db: Dexie,
+  dbSource: DexieSource,
   manifestDexie: Map<string, PluginManifestDexieBlock>
 ): Promise<string[]> {
   // Serialized against applyPluginTables/removePluginTables via the shared lock
   // so the launch-time consolidated bump can't race a concurrent enable.
-  return schemaMutex.runExclusive(async () => {
+  const dbName = resolveDb(dbSource).name
+  return runSchemaMutationExclusive(dbName, async () => {
+    const db = resolveDb(dbSource)
     const metas = await getAllPluginDexiaMeta()
     if (metas.length === 0) return []
 
@@ -222,12 +253,14 @@ export async function restorePluginTables(
  * dropping a store) which permanently deletes the data.
  */
 export async function removePluginTables(
-  db: Dexie,
+  dbSource: DexieSource,
   pluginId: string,
   retentionMode: RetentionMode = "keep"
 ): Promise<void> {
   // Serialized against applyPluginTables/removePluginTables via the shared lock.
-  await schemaMutex.runExclusive(async () => {
+  const dbName = resolveDb(dbSource).name
+  await runSchemaMutationExclusive(dbName, async () => {
+    const db = resolveDb(dbSource)
     const meta = await getPluginDexieMeta(pluginId)
     if (!meta) return // nothing registered, no-op
 

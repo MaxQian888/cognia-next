@@ -34,6 +34,7 @@ jest.mock("@/lib/automation/client", () => ({
 import { desktop } from "@/lib/automation/client"
 import type { AutomationSettings } from "@/lib/automation/client"
 import { dispatchAnthropicAction, resetMapperState } from "./anthropic-action-mapper"
+import { clearComputerUsePipState, getComputerUsePipSnapshot } from "./computer-use-pip"
 
 const mockedDesktop = desktop as jest.Mocked<typeof desktop>
 const ctx = { surface: "computerUse" as const }
@@ -66,6 +67,7 @@ beforeEach(() => {
 
 afterEach(() => {
   resetMapperState()
+  clearComputerUsePipState()
   jest.clearAllMocks()
 })
 
@@ -87,6 +89,21 @@ describe("dispatchAnthropicAction", () => {
       output: "BASE64",
       display_width_px: 1280,
       display_height_px: 800,
+    })
+  })
+
+  it("publishes live activity and the latest frame for its chat session", async () => {
+    mockedDesktop.screenshot.mockResolvedValueOnce(shot("FRAME", 1280, 800))
+
+    await dispatchAnthropicAction(
+      { action: "screenshot" },
+      { surface: "computerUse", sessionKey: "session-1" }
+    )
+
+    expect(getComputerUsePipSnapshot("session-1")).toMatchObject({
+      action: "screenshot",
+      phase: "complete",
+      frame: { src: "data:image/png;base64,FRAME", width: 1280, height: 800 },
     })
   })
 

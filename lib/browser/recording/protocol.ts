@@ -14,7 +14,16 @@
  */
 
 /** Discriminator for {@link RecordedStep}. */
-export type RecordedStepAct = "navigate" | "click" | "fill" | "select" | "press_key" | "wait_for"
+export type RecordedStepAct =
+  | "navigate"
+  | "click"
+  | "double_click"
+  | "hover"
+  | "scroll"
+  | "fill"
+  | "select"
+  | "press_key"
+  | "wait_for"
 
 /**
  * How to find an element again at replay time. Captured at record time from the
@@ -53,6 +62,23 @@ export interface ClickStep extends StepBase {
   target: RecordedTarget
   /** Modifier keys held during the click, e.g. `["ctrl"]`. Omitted when none. */
   modifiers?: string[]
+}
+
+export interface DoubleClickStep extends StepBase {
+  act: "double_click"
+  target: RecordedTarget
+  modifiers?: string[]
+}
+
+export interface HoverStep extends StepBase {
+  act: "hover"
+  target: RecordedTarget
+}
+
+export interface ScrollStep extends StepBase {
+  act: "scroll"
+  direction: "up" | "down" | "left" | "right"
+  amount: number
 }
 
 /** A settled value for a text input / textarea (recorded on `change`, not per keystroke). */
@@ -95,7 +121,15 @@ export interface WaitForStep extends StepBase {
 }
 
 export type RecordedStep =
-  NavigateStep | ClickStep | FillStep | SelectStep | PressKeyStep | WaitForStep
+  | NavigateStep
+  | ClickStep
+  | FillStep
+  | SelectStep
+  | PressKeyStep
+  | WaitForStep
+  | DoubleClickStep
+  | HoverStep
+  | ScrollStep
 
 export interface RecordedFlow {
   id: string
@@ -111,7 +145,13 @@ export interface RecordedFlow {
 /** Steps that address an element. Narrowing helper for exporters and the UI. */
 export function hasTarget(
   step: RecordedStep
-): step is ClickStep | FillStep | SelectStep | (PressKeyStep & { target: RecordedTarget }) {
+): step is
+  | ClickStep
+  | DoubleClickStep
+  | HoverStep
+  | FillStep
+  | SelectStep
+  | (PressKeyStep & { target: RecordedTarget }) {
   return "target" in step && step.target != null
 }
 

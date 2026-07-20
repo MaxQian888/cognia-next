@@ -211,8 +211,8 @@ export async function authedGet(
   url: string,
   headers: Record<string, string> = {}
 ): Promise<string> {
-  const pairs = Object.entries(headers)
-  return await transport.call<string>("subscription_authed_get", { url, headers: pairs })
+  const entries = Object.entries(headers).map(([name, value]) => ({ name, value }))
+  return await transport.call<string>("subscription_authed_get", { url, headers: entries })
 }
 
 /** One usage window returned by `subscription_volcengine_usage`. */

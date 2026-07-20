@@ -193,7 +193,8 @@ function renderPart(part: UIMessage["parts"][number]): string {
   if (part.type === "file") {
     const fp = part as { url?: string; mediaType?: string; filename?: string }
     const name = fp.filename ?? fp.mediaType ?? "file"
-    return fp.url ? `📎 [${name}](${fp.url})` : `📎 ${name}`
+    if (!fp.url) return `📎 ${name}`
+    return isImageFile(fp) ? `![${name}](${fp.url})` : `📎 [${name}](${fp.url})`
   }
   if (part.type === "source-url") {
     const sp = part as { url: string; title?: string }
@@ -208,6 +209,14 @@ function renderPart(part: UIMessage["parts"][number]): string {
   }
   // Fallback for unknown / data-* parts.
   return ""
+}
+
+function isImageFile(file: { url?: string; mediaType?: string; filename?: string }): boolean {
+  return Boolean(
+    file.mediaType?.startsWith("image/") ||
+    file.url?.startsWith("data:image/") ||
+    file.filename?.match(/\.(?:avif|gif|jpe?g|png|svg|webp)$/i)
+  )
 }
 
 function textOfPart(part: UIMessage["parts"][number]): string {

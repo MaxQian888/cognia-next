@@ -48,6 +48,21 @@ describe("renderQuoteCardFragment", () => {
     expect(frag).toContain('<a href="https://example.com"')
   })
 
+  it("renders Markdown links and images without consuming trailing punctuation", () => {
+    const frag = renderQuoteCardFragment({
+      ...base,
+      text: "See [docs](https://example.com/a_(b)).\n![plot](data:image/png;base64,YQ==)",
+    })
+    expect(frag).toContain('<a href="https://example.com/a_(b)"')
+    expect(frag).toContain(">docs</a>.")
+    expect(frag).toContain('<img src="data:image/png;base64,YQ==" alt="plot"')
+  })
+
+  it("does not activate unsafe Markdown destinations", () => {
+    const frag = renderQuoteCardFragment({ ...base, text: "[run](javascript:alert(1))" })
+    expect(frag).not.toContain('href="javascript:')
+  })
+
   it("renders across the flagship and immersive presets without throwing", () => {
     for (const theme of [
       "cyberpunk",

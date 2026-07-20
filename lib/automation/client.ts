@@ -545,6 +545,8 @@ export interface AutomationSettings {
    * Default ON.
    */
   screenshotDedup: boolean
+  /** Suppress the thread-scoped Computer Use picture-in-picture surface. */
+  alwaysHidePictureInPicture: boolean
   /**
    * `type` calls longer than this many chars transparently use the
    * clipboard-paste fast path. 0 disables. Default 200.
@@ -567,6 +569,7 @@ export function defaultAutomationSettings(): AutomationSettings {
     redactScreenshots: false,
     screenshotScaling: { enabled: false, maxWidth: 1280, maxHeight: 800 },
     screenshotDedup: true,
+    alwaysHidePictureInPicture: false,
     pasteThresholdChars: 200,
   }
 }

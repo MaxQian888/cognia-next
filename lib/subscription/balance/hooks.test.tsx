@@ -46,13 +46,13 @@ beforeEach(() => {
 describe("useAccountBalance", () => {
   it("exposes the live snapshot", () => {
     useLiveQueryMock.mockReturnValue(snap())
-    const { result } = renderHook(() => useAccountBalance("codex", "acc-1"))
+    const { result } = renderHook(() => useAccountBalance("codex", "acc-1", true))
     expect(result.current.snapshot?.remaining).toBe(42)
   })
 
   it("refreshes: queries the runner and persists the result", async () => {
     queryAccountBalanceMock.mockResolvedValue(snap())
-    const { result } = renderHook(() => useAccountBalance("codex", "acc-1"))
+    const { result } = renderHook(() => useAccountBalance("codex", "acc-1", true))
     await act(async () => {
       await result.current.refresh()
     })
@@ -63,7 +63,7 @@ describe("useAccountBalance", () => {
 
   it("marks unavailable when the runner returns null", async () => {
     queryAccountBalanceMock.mockResolvedValue(null)
-    const { result } = renderHook(() => useAccountBalance("codex", "acc-1"))
+    const { result } = renderHook(() => useAccountBalance("codex", "acc-1", true))
     await act(async () => {
       await result.current.refresh()
     })
@@ -73,7 +73,15 @@ describe("useAccountBalance", () => {
 
   it("is a no-op outside Tauri", async () => {
     isTauriMock.mockReturnValue(false)
-    const { result } = renderHook(() => useAccountBalance("codex", "acc-1"))
+    const { result } = renderHook(() => useAccountBalance("codex", "acc-1", true))
+    await act(async () => {
+      await result.current.refresh()
+    })
+    expect(queryAccountBalanceMock).not.toHaveBeenCalled()
+  })
+
+  it("does not query before the exact account opts in", async () => {
+    const { result } = renderHook(() => useAccountBalance("codex", "acc-1", false))
     await act(async () => {
       await result.current.refresh()
     })

@@ -1362,6 +1362,87 @@ describe("TaskScheduler", () => {
       sched.stop()
     })
 
+    it("initializes lazily before arming a task created during early startup", async () => {
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+
+      const task = await sched.createTask({
+        name: "Early Startup Task",
+        type: "plugin",
+        trigger: { type: "interval", intervalMs: 60_000 },
+      })
+
+      expect(driver.start).toHaveBeenCalledTimes(1)
+      expect(driver.arm).toHaveBeenCalledWith(task.id, expect.any(Number))
+      expect(sched.getStatus().initialized).toBe(true)
+      sched.stop()
+    })
+
+    it("does not double-arm an early task already found by the boot sweep", async () => {
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+      let persisted: ScheduledTask | undefined
+      mockSchedulerDb.createTask.mockImplementationOnce(async (task) => {
+        persisted = task
+      })
+      mockSchedulerDb.getTasksByStatus.mockImplementationOnce(async () =>
+        persisted ? [persisted] : []
+      )
+
+      const task = await sched.createTask({
+        name: "Boot Sweep Task",
+        type: "plugin",
+        trigger: { type: "interval", intervalMs: 60_000 },
+      })
+
+      expect(driver.arm).toHaveBeenCalledTimes(1)
+      expect(driver.arm).toHaveBeenCalledWith(task.id, expect.any(Number))
+      sched.stop()
+    })
+
+    it("shares one initialization across concurrent early task writes", async () => {
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+
+      const [first, second] = await Promise.all([
+        sched.createTask({
+          name: "Early Task One",
+          type: "plugin",
+          trigger: { type: "interval", intervalMs: 60_000 },
+        }),
+        sched.createTask({
+          name: "Early Task Two",
+          type: "plugin",
+          trigger: { type: "interval", intervalMs: 60_000 },
+        }),
+      ])
+
+      expect(driver.start).toHaveBeenCalledTimes(1)
+      expect(driver.arm).toHaveBeenCalledWith(first.id, expect.any(Number))
+      expect(driver.arm).toHaveBeenCalledWith(second.id, expect.any(Number))
+      sched.stop()
+    })
+
+    it("does not arm a new task from a follower tab", async () => {
+      const driver = {
+        ...makeMockDriver(),
+        supportsLeaderElection: true,
+        isLeader: jest.fn(() => false),
+        onLeaderChange: jest.fn(() => jest.fn()),
+      }
+      const sched = createTaskScheduler(driver)
+      await sched.initialize()
+
+      await sched.createTask({
+        name: "Follower Task",
+        type: "plugin",
+        trigger: { type: "interval", intervalMs: 60_000 },
+      })
+
+      expect(driver.arm).not.toHaveBeenCalled()
+      sched.stop()
+    })
+
     it("disarms and re-arms tasks across pause and resume", async () => {
       const driver = makeMockDriver()
       const sched = createTaskScheduler(driver)
@@ -1619,7 +1700,10 @@ describe("TaskScheduler", () => {
         expect(firstExec?.terminalReason).toBe("overlap-cancelled")
         expect(second?.status).toBe("completed")
         // Cancelled runs are terminal: no retry of the first execution.
-        await jest.advanceTimersByTimeAsync(60_000)
+        // Cover the full retry window without reaching the task's next
+        // legitimate 60-second interval fire now that early writes lazily
+        // initialize and arm the scheduler.
+        await jest.advanceTimersByTimeAsync(10_000)
         expect(executor).toHaveBeenCalledTimes(2)
       })
     })

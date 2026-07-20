@@ -110,6 +110,9 @@ function createDispatcher(browser, supervisor, media, eventJournal) {
     "browser.screenshot": ({ sessionId }) => browser.screenshot(sessionId),
     "browser.files.set": ({ sessionId, ref, paths }) => browser.setFiles(sessionId, ref, paths),
     "browser.downloads": ({ sessionId }) => browser.listDownloads(sessionId),
+    "browser.set-zoom": ({ sessionId, zoom }) => browser.setZoom(sessionId, zoom),
+    "browser.find": ({ sessionId, query, options }) => browser.find(sessionId, query, options),
+    "browser.find.clear": ({ sessionId }) => browser.findClear(sessionId),
     "browser.screencast.start": async ({ sessionId, quality }) => {
       await browser.startScreencast(sessionId, (frame) => media.publish(sessionId, frame), {
         quality,

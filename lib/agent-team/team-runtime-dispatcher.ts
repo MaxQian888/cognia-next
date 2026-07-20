@@ -26,6 +26,7 @@ import { TEAM_USER_SENDER_ID } from "@/types/agent/agent-team"
 import type { SubAgentTokenUsage } from "@/types/agent/sub-agent"
 import type { MentionTarget } from "./runtime-targets"
 import type { ConversationTurn } from "./conversation-context"
+import { extractAgentFileActivity, type AgentFileActivity } from "./file-activity"
 
 // ---------------------------------------------------------------------------
 // Stream event shape the dispatcher consumes from any runtime adapter.
@@ -53,6 +54,12 @@ export interface ToolCallEntry {
 
 export interface TeamMessageWriter {
   upsertMessage: (message: AgentTeamMessage) => void
+}
+
+export interface TeamRuntimeDispatcherDeps {
+  writer: TeamMessageWriter
+  streamer: RuntimeStreamer
+  onFileActivity?: (activity: AgentFileActivity) => void
 }
 
 /**
@@ -120,10 +127,10 @@ const DISPATCH_PROMPT_KEY = "dispatchPrompt"
  */
 export async function dispatchTeamMention(
   params: DispatchTeamMentionParams,
-  deps: { writer: TeamMessageWriter; streamer: RuntimeStreamer }
+  deps: TeamRuntimeDispatcherDeps
 ): Promise<DispatchTeamMentionResult> {
   const { teamId, target, prompt, rawText, userDisplayName = "You", signal, history } = params
-  const { writer, streamer } = deps
+  const { writer, streamer, onFileActivity } = deps
   const now = () => new Date()
 
   const userMessageId = nanoid()
@@ -177,6 +184,7 @@ export async function dispatchTeamMention(
   let tokenUsage: SubAgentTokenUsage | undefined
   let error: string | undefined
   const toolCallMap = new Map<string, ToolCallEntry>()
+  const pendingFileActivity = new Map<string, AgentFileActivity>()
 
   const writeProgress = () => {
     writer.upsertMessage({
@@ -219,6 +227,9 @@ export async function dispatchTeamMention(
             input: event.input,
             status: "running",
           })
+          const activity = extractAgentFileActivity(event.name, event.input)
+          if (activity?.timing === "start") onFileActivity?.(activity)
+          else if (activity) pendingFileActivity.set(event.id, activity)
           writeProgress()
           break
         }
@@ -231,6 +242,9 @@ export async function dispatchTeamMention(
             output: event.output,
             status: event.isError ? "error" : "complete",
           })
+          const activity = pendingFileActivity.get(event.id)
+          pendingFileActivity.delete(event.id)
+          if (activity && !event.isError) onFileActivity?.(activity)
           writeProgress()
           break
         }

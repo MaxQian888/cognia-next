@@ -1,5 +1,5 @@
-// Appearance controls for the pet: dock anchor, motion preference, skin (SVG vs
-// Live2D, with the model manager), and the widget size. Presentational over a
+// Appearance controls for the pet: dock anchor, motion preference, skin
+// (SVG, Live2D, or v2 sprite with their asset managers), and widget size. Presentational over a
 // `{ pet, patch }` interface so both Settings → Pet and the /pet Customize tab
 // render identical controls against the same persisted PetSettings.
 
@@ -11,10 +11,11 @@ import { Slider } from "@/components/ui/slider"
 import { useCubismCoreAvailable } from "@/hooks/pet/use-active-live2d-model"
 import type { PetAnchor, PetMotionPreference, PetSettings } from "@/types/pet"
 import { PetModelManager } from "@/components/settings/pet/pet-model-manager"
+import { PetSpritePackManager } from "@/components/settings/pet/pet-sprite-pack-manager"
 
 const ANCHORS: PetAnchor[] = ["bottom-right", "bottom-left", "top-right", "top-left"]
 const MOTIONS: PetMotionPreference[] = ["auto", "full", "reduced"]
-const SKINS: string[] = ["svg", "live2d"]
+const SKINS: string[] = ["svg", "live2d", "sprite-v2"]
 
 export interface PetControlsProps {
   pet: PetSettings
@@ -86,6 +87,7 @@ export function PetAppearanceControls({ pet, patch }: PetControlsProps) {
       </div>
 
       {skinId === "live2d" && <PetModelManager settings={pet} onPatch={patch} />}
+      {skinId === "sprite-v2" && <PetSpritePackManager settings={pet} onPatch={patch} />}
 
       <div className="space-y-2">
         <Label>{t("size.label", { size: pet.size })}</Label>

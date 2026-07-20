@@ -141,6 +141,43 @@ describe("MarkdownRenderer", () => {
     expect(mockOpenExternal).not.toHaveBeenCalled()
   })
 
+  it("routes workspace file links through the owning conversation", () => {
+    const onOpenProjectFile = jest.fn()
+    render(
+      <MarkdownRenderer
+        content="[app](src/app.ts#L7C2)"
+        projectRoot="/repo"
+        onOpenProjectFile={onOpenProjectFile}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "app" }))
+
+    expect(onOpenProjectFile).toHaveBeenCalledWith({
+      absolutePath: "/repo/src/app.ts",
+      line: 7,
+      column: 2,
+    })
+  })
+
+  it("preserves file URLs through sanitization and routes them as project files", () => {
+    const onOpenProjectFile = jest.fn()
+    render(
+      <MarkdownRenderer
+        content="[app](file:///repo/src/app.ts#L5C3)"
+        projectRoot="/repo"
+        onOpenProjectFile={onOpenProjectFile}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "app" }))
+    expect(onOpenProjectFile).toHaveBeenCalledWith({
+      absolutePath: "/repo/src/app.ts",
+      line: 5,
+      column: 3,
+    })
+  })
+
   // ── code blocks ─────────────────────────────────────────────────────────────
 
   it("renders fenced code block via CodeBlock", () => {
@@ -154,6 +191,24 @@ describe("MarkdownRenderer", () => {
     render(<MarkdownRenderer content="use `const` here" />)
     expect(document.querySelector("code")).toBeTruthy()
     expect(document.querySelector("[data-test='code-block']")).toBeNull()
+  })
+
+  it("makes an inline project file reference navigable", () => {
+    const onOpenProjectFile = jest.fn()
+    render(
+      <MarkdownRenderer
+        content="see `src/app.ts:9:2`"
+        projectRoot="/repo"
+        onOpenProjectFile={onOpenProjectFile}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "src/app.ts:9:2" }))
+    expect(onOpenProjectFile).toHaveBeenCalledWith({
+      absolutePath: "/repo/src/app.ts",
+      line: 9,
+      column: 2,
+    })
   })
 
   // ── mermaid ─────────────────────────────────────────────────────────────────

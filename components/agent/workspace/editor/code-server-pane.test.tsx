@@ -4,6 +4,7 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({ useTranslations: () => (k: string) => k }))
+jest.mock("sonner", () => ({ toast: { error: jest.fn() } }))
 
 const paneState = {
   phase: "starting" as "idle" | "unsupported" | "starting" | "downloading" | "ready" | "error",
@@ -14,6 +15,18 @@ const paneState = {
 jest.mock("@/hooks/codeserver/use-code-server-pane", () => ({
   useCodeServerPane: () => paneState,
 }))
+const driveOpen = jest.fn()
+jest.mock("@/lib/codeserver/client", () => ({
+  codeServerClient: { openFile: (...args: unknown[]) => driveOpen(...args) },
+}))
+let registeredOpener: { root: string; open: (path: string, line?: number, column?: number) => void }
+const unregister = jest.fn()
+jest.mock("@/lib/files/project-editor-bridge", () => ({
+  registerProjectEditorOpener: (opener: typeof registeredOpener) => {
+    registeredOpener = opener
+    return unregister
+  },
+}))
 
 import { CodeServerPane } from "./code-server-pane"
 
@@ -22,6 +35,30 @@ beforeEach(() => {
   paneState.progress = null
   paneState.error = null
   paneState.retry = jest.fn()
+  driveOpen.mockReset().mockResolvedValue(undefined)
+  unregister.mockReset()
+})
+
+it("registers file navigation for the active CodeServer root", () => {
+  const { unmount } = render(<CodeServerPane root="/repo" />)
+
+  registeredOpener.open("src/index.ts", 9, 2)
+
+  expect(registeredOpener.root).toBe("/repo")
+  expect(driveOpen).toHaveBeenCalledWith("/repo", "src/index.ts", 9, 2)
+  unmount()
+  expect(unregister).toHaveBeenCalled()
+})
+
+it("reports file navigation failures", async () => {
+  const { toast } = jest.requireMock("sonner") as { toast: { error: jest.Mock } }
+  driveOpen.mockRejectedValueOnce(new Error("session socket unavailable"))
+  render(<CodeServerPane root="/repo" />)
+
+  registeredOpener.open("src/index.ts", 9, 2)
+  await Promise.resolve()
+
+  expect(toast.error).toHaveBeenCalledWith("proIde.openFileFailed")
 })
 
 it("always renders the reserved region the webview is positioned over", () => {

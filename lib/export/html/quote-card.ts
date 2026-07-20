@@ -8,6 +8,7 @@
 import { THEMES, type ThemeId, type ThemeTokens } from "./syntax-themes"
 import { getStylePreset } from "./style-presets"
 import { buildCardWallpaperCss } from "./theme-wallpaper"
+import { renderSafeInlineMarkdown } from "./safe-inline-markdown"
 
 export interface QuoteCardOptions {
   role: "user" | "assistant" | "system" | string
@@ -42,7 +43,7 @@ export function renderQuoteCardFragment(options: QuoteCardOptions): string {
   const title = options.sessionTitle
     ? `<span class="qcard-title">${escapeHtml(options.sessionTitle)}</span>`
     : "<span></span>"
-  const body = linkify(inlineMarkdown(escapeHtml(options.text)))
+  const body = renderSafeInlineMarkdown(escapeHtml(options.text))
   const wallpaperCss = options.wallpaperDataUrl
     ? buildCardWallpaperCss(options.wallpaperDataUrl, t)
     : ""
@@ -95,13 +96,6 @@ export function inlineMarkdown(escaped: string): string {
     .replace(/\*([^*\n]+)\*/g, "<em>$1</em>")
 }
 
-function linkify(html: string): string {
-  return html.replace(
-    /(https?:\/\/[^\s<>"']+)/g,
-    (m) => `<a href="${m}" target="_blank" rel="noreferrer">${m}</a>`
-  )
-}
-
 function roleGlyph(role: string): string {
   switch (role) {
     case "user":
@@ -141,6 +135,7 @@ function cardStylesheet(t: ThemeTokens): string {
 .qcard-body { margin: 16px 0 0; padding: 14px 16px; border-left: 3px solid ${t.accent}; border-radius: 8px; background: ${t.assistantBg}; color: ${t.text}; font-size: 15px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: anywhere; }
 .qcard-body a { color: ${t.accent}; }
 .qcard-body code { background: ${t.codeBg}; color: ${t.codeText}; padding: 1px 5px; border-radius: 4px; font-family: ${MONO_STACK}; font-size: 13px; }
+.qcard-body img { display: block; max-width: 100%; max-height: 420px; margin-top: 10px; border-radius: 8px; object-fit: contain; }
 .qcard-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: 16px; font-size: 11px; color: ${t.muted}; }
 .qcard-title { overflow-wrap: anywhere; }
 .qcard-brand { white-space: nowrap; }

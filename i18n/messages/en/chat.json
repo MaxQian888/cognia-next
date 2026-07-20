@@ -530,6 +530,7 @@
       "other": "Other"
     },
     "hideArtifacts": "Hide artifacts panel",
+    "openBrowser": "Open browser panel",
     "hideConversations": "Hide conversation list",
     "insights": "Session insights",
     "memoryInherit": "Inherit app setting",

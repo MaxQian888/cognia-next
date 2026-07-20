@@ -160,4 +160,15 @@ describe("ArtifactPanel", () => {
     fireEvent.click(buttons[0])
     expect(useArtifactStore.getState().panelOpen).toBe(false)
   })
+
+  it("overrides the Sheet enter/exit to a snappier decelerate-in/quick-out pace (not the 500/300ms default)", async () => {
+    makeArtifact()
+    render(<ArtifactPanel />)
+    const content = await screen.findByTestId("artifact-panel")
+    expect(content.className).toContain("data-[state=open]:duration-300")
+    expect(content.className).toContain("data-[state=closed]:duration-200")
+    // tailwind-merge must drop the base 500/300ms so the override actually wins.
+    expect(content.className).not.toContain("data-[state=open]:duration-500")
+    expect(content.className).not.toContain("data-[state=closed]:duration-300")
+  })
 })

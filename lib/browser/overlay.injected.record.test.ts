@@ -26,6 +26,8 @@ type Step = {
   secret?: boolean
   key?: string
   modifiers?: string[]
+  direction?: string
+  amount?: number
 }
 
 type RecordApi = {
@@ -48,6 +50,20 @@ const api = install()
 
 function click(el: Element, init: MouseEventInit = {}) {
   el.dispatchEvent(new MouseEvent("click", { bubbles: true, ...init }))
+}
+
+function doubleClick(el: Element, init: MouseEventInit = {}) {
+  click(el, init)
+  click(el, init)
+  el.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, ...init }))
+}
+
+function hover(el: Element) {
+  el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }))
+}
+
+function wheel(el: Element, init: WheelEventInit) {
+  el.dispatchEvent(new WheelEvent("wheel", { bubbles: true, ...init }))
 }
 
 function change(el: Element) {
@@ -168,6 +184,53 @@ describe("click capture", () => {
     document.body.innerHTML = `<select><option value="a">A</option></select>`
     click(document.querySelector("select")!)
     expect(api.recordedSteps()).toEqual([])
+  })
+
+  it("shows a pointer at the click coordinates", () => {
+    document.body.innerHTML = `<button>go</button>`
+    click(document.querySelector("button")!, { clientX: 120, clientY: 80 })
+
+    const pointer = document.querySelector<HTMLElement>("#__cognia-click-pointer")
+    expect(pointer).not.toBeNull()
+    expect(pointer).toHaveStyle({ left: "120px", top: "80px" })
+  })
+
+  it("collapses the native click-click-dblclick sequence into one double click", () => {
+    document.body.innerHTML = `<button>Open</button>`
+    doubleClick(document.querySelector("button")!)
+
+    expect(api.recordedSteps()).toHaveLength(1)
+    expect(api.recordedSteps()[0]).toMatchObject({
+      act: "double_click",
+      target: { role: "button", name: "Open" },
+    })
+  })
+})
+
+describe("pointer and scroll capture", () => {
+  it("records hover targets without duplicating a consecutive hover", () => {
+    document.body.innerHTML = `<button>Preview</button>`
+    const button = document.querySelector("button")!
+    hover(button)
+    hover(button)
+
+    expect(api.recordedSteps()).toHaveLength(1)
+    expect(api.recordedSteps()[0]).toMatchObject({
+      act: "hover",
+      target: { role: "button", name: "Preview" },
+    })
+  })
+
+  it("records vertical and horizontal wheel gestures", () => {
+    document.body.innerHTML = `<main>Content</main>`
+    const main = document.querySelector("main")!
+    wheel(main, { deltaY: 180 })
+    wheel(main, { deltaX: -60 })
+
+    expect(api.recordedSteps()).toEqual([
+      expect.objectContaining({ act: "scroll", direction: "down", amount: 180 }),
+      expect.objectContaining({ act: "scroll", direction: "left", amount: 60 }),
+    ])
   })
 })
 

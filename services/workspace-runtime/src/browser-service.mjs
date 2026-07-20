@@ -262,6 +262,7 @@ export class RemoteChromiumService {
       throw error
     }
     this.invalidatePage(session.id, session.activePageId)
+    await this.applyZoom(session)
   }
 
   async snapshot(sessionId, options = {}) {
@@ -419,6 +420,52 @@ export class RemoteChromiumService {
     return { url: page.url(), title: await page.title() }
   }
 
+  // CSS `zoom` reflows into the JPEG screencast (unlike CDP setPageScaleFactor,
+  // which is pinch-only). It resets on navigation, so `applyZoom` re-applies the
+  // session's factor after every navigate/history.
+  async setZoom(sessionId, zoom) {
+    const session = this.requireSession(sessionId)
+    const { page } = this.activeRecord(session)
+    const numeric = Number(zoom)
+    const factor = Number.isFinite(numeric) ? Math.min(5, Math.max(0.25, numeric)) : 1
+    session.zoom = factor
+    await page.evaluate((value) => {
+      document.documentElement.style.zoom = String(value)
+    }, factor)
+    return { ok: true, zoom: factor }
+  }
+
+  async applyZoom(session) {
+    const factor = session.zoom
+    if (!factor || factor === 1) return
+    try {
+      const { page } = this.activeRecord(session)
+      await page.evaluate((value) => {
+        document.documentElement.style.zoom = String(value)
+      }, factor)
+    } catch {
+      // Page may be mid-navigation; the next navigate re-applies.
+    }
+  }
+
+  // Find-in-page runs the injected `__cogniaFind` helper directly (NOT the
+  // localhost-gated `evaluate`), so it works on any origin the session allows.
+  async find(sessionId, query, options = {}) {
+    const session = this.requireSession(sessionId)
+    const { page } = this.activeRecord(session)
+    return page.evaluate((args) => window.__cogniaFind(args.query, args.options || {}), {
+      query: String(query ?? ""),
+      options: options ?? {},
+    })
+  }
+
+  async findClear(sessionId) {
+    const session = this.requireSession(sessionId)
+    const { page } = this.activeRecord(session)
+    await page.evaluate(() => window.__cogniaFindClear())
+    return { ok: true }
+  }
+
   async readConsole(sessionId) {
     const session = this.requireSession(sessionId)
     return session.console.splice(0)
@@ -434,6 +481,7 @@ export class RemoteChromiumService {
     const { pageId, page } = this.activeRecord(session)
     await page[operation]({ waitUntil: "domcontentloaded" })
     this.invalidatePage(sessionId, pageId)
+    await this.applyZoom(session)
   }
 
   back(sessionId) {

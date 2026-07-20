@@ -31,6 +31,7 @@ import {
   PluginExtensionSlot,
   usePluginSlotHasExtensions,
 } from "@/components/plugins/plugin-extension-slot"
+import { PanelTransition } from "@/components/settings/common/panel-transition"
 import { ThemeTab } from "./tabs/theme-tab"
 import { WallpaperTab } from "./tabs/wallpaper-tab"
 import { CustomThemeTab } from "./tabs/custom-theme-tab"
@@ -201,7 +202,7 @@ export function AppearanceSection() {
               className="min-h-0 flex-1 overflow-y-auto p-3 @container/appearance-pane"
               data-testid="appearance-panel-body"
             >
-              {renderPanel(activePanel)}
+              <PanelTransition activeKey={activePanel}>{renderPanel(activePanel)}</PanelTransition>
             </div>
           </div>
         </div>

@@ -1,4 +1,9 @@
-import { customProviderId, runCustomLimitsSource, runCustomLimitsSources } from "./runner"
+import {
+  __resetCustomLimitsRunnerForTesting,
+  customProviderId,
+  runCustomLimitsSource,
+  runCustomLimitsSources,
+} from "./runner"
 
 import type { CustomLimitsSource } from "@/types/subscription"
 
@@ -8,6 +13,7 @@ function src(over: Partial<CustomLimitsSource> = {}): CustomLimitsSource {
     name: "My Relay",
     baseUrl: "https://relay.example.com/v1",
     token: "tok",
+    enabled: true,
     request: { path: "/balance" },
     extract: { kind: "balance", remainingPath: "data.balance", unit: "USD", currency: "USD" },
     ...over,
@@ -17,6 +23,10 @@ function src(over: Partial<CustomLimitsSource> = {}): CustomLimitsSource {
 const deps = (authedGet: (url: string, h?: Record<string, string>) => Promise<string>) => ({
   authedGet,
   now: () => 1_000_000,
+})
+
+beforeEach(() => {
+  __resetCustomLimitsRunnerForTesting()
 })
 
 describe("customProviderId", () => {
@@ -54,6 +64,31 @@ describe("runCustomLimitsSource", () => {
 })
 
 describe("runCustomLimitsSources", () => {
+  it("does not query sources that are not explicitly enabled", async () => {
+    const authedGet = jest.fn(async () => JSON.stringify({ data: { balance: 7 } }))
+    const out = await runCustomLimitsSources(
+      [src({ enabled: false })],
+      deps(authedGet)
+    )
+
+    expect(out).toEqual([])
+    expect(authedGet).not.toHaveBeenCalled()
+  })
+
+  it("replays the last successful result inside the source refresh interval", async () => {
+    let clock = 1_000
+    const authedGet = jest.fn(async () => JSON.stringify({ data: { balance: 7 } }))
+    const source = src({ enabled: true, refreshIntervalMs: 15 * 60_000 })
+    const runnerDeps = { authedGet, now: () => clock }
+
+    const first = await runCustomLimitsSources([source], runnerDeps)
+    clock += 60_000
+    const replayed = await runCustomLimitsSources([source], runnerDeps)
+
+    expect(authedGet).toHaveBeenCalledTimes(1)
+    expect(replayed).toEqual(first)
+  })
+
   it("drops incomplete sources and keeps the complete ones", async () => {
     const sources = [src({ id: "ok" }), src({ id: "bad", name: "" }), src({ id: "ok2" })]
     const out = await runCustomLimitsSources(

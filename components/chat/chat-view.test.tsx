@@ -94,6 +94,10 @@ jest.mock("@/hooks/ui/use-mobile", () => ({
   useIsMobile: () => false,
 }))
 
+jest.mock("@/hooks/chat/use-effective-cwd", () => ({
+  useEffectiveCwd: () => "/repo",
+}))
+
 import { render, screen } from "@testing-library/react"
 import { SparklesIcon } from "lucide-react"
 import { ChatPane } from "./chat-view"
@@ -118,6 +122,14 @@ function makeProps() {
 }
 
 describe("ChatPane", () => {
+  it("passes the effective session cwd to the message list", () => {
+    render(<ChatPane {...makeProps()} />)
+    expect(MessageList).toHaveBeenCalledWith(
+      expect.objectContaining({ projectRoot: "/repo" }),
+      undefined
+    )
+  })
+
   it("mounts the workspace changes card for this pane's session", () => {
     render(<ChatPane {...makeProps()} />)
     expect(screen.getByTestId("workspace-changes-card")).toHaveAttribute("data-session", "s1")

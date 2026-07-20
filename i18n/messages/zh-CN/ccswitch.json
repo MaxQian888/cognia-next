@@ -93,8 +93,20 @@
     "emptyTitle": "CCSwitch 中没有服务商",
     "errorTitle": "无法列出服务商",
     "headerHint": "CCSwitch 是这些记录的唯一编辑入口 — 添加 / 改名 / 删除请回到 CCSwitch。",
+    "importQuota": "导入额度",
     "model": "模型",
     "officialEndpoint": "Anthropic 官方端点",
+    "quotaImportErrorTitle": "未导入额度元数据",
+    "quotaImportFailed": "无法保存导入的额度源：{error}",
+    "quotaImportReason": {
+      "invalid-endpoint": "额度接口地址缺失或无效。",
+      "missing-credentials": "CCSwitch 记录中没有该额度接口所需的凭证。",
+      "missing-script": "该服务商没有 CCSwitch 额度元数据。",
+      "unsupported-provider": "该服务商需要原生签名或其他暂不支持的认证流程。",
+      "unsupported-template": "只能导入已识别的声明式 CCSwitch 额度模板；不会执行任意 JavaScript。"
+    },
+    "quotaImportSuccess": "已把 {name} 导入为默认关闭的自定义额度源。请在订阅设置中检查后再显式启用。",
+    "quotaImportSuccessTitle": "已导入额度元数据",
     "refresh": "刷新",
     "useHere": "在此使用",
     "useHereAndIn": "在此并同步至…"

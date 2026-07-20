@@ -66,6 +66,8 @@ it("queues a workspace file reveal while the workspace dock is not mounted", () 
     rootPath: "/repo",
     kind: "file",
     relPath: "src/a.ts",
+    line: 3,
+    column: 4,
   })
   expect(useArtifactDockLayoutStore.getState().dockMode).toBe("workspace")
   expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
