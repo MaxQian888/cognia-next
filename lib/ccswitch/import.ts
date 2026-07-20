@@ -10,7 +10,127 @@ import { createSkill } from "@/lib/db/skills"
 import { listSkills } from "@/lib/db/skills"
 import type { McpTransport } from "@cognia/agent-config-types"
 
-import type { CcswitchMcpServer, CcswitchPrompt, CcswitchSkill } from "@/types/ccswitch"
+import { presetById } from "@/lib/subscription/limits/custom/presets"
+
+import type {
+  CcswitchMcpServer,
+  CcswitchPrompt,
+  CcswitchProvider,
+  CcswitchSkill,
+} from "@/types/ccswitch"
+import type { CustomLimitsSource } from "@/types/subscription"
+
+/* ---- Provider usage metadata ------------------------------------------ */
+
+export type CcswitchUsageImportFailure =
+  | "missing-script"
+  | "missing-credentials"
+  | "unsupported-template"
+  | "unsupported-provider"
+  | "invalid-endpoint"
+
+export type CcswitchUsageImportResult =
+  { ok: true; source: CustomLimitsSource } | { ok: false; reason: CcswitchUsageImportFailure }
+
+function endpointParts(raw: string): { baseUrl: string; path: string } | null {
+  try {
+    const url = new URL(raw)
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null
+    return { baseUrl: url.origin, path: `${url.pathname}${url.search}` || "/" }
+  } catch {
+    return null
+  }
+}
+
+function usageSourceDraft(provider: CcswitchProvider): CustomLimitsSource | null {
+  const script = provider.usageScript
+  const token = script?.apiKey?.trim() || script?.accessToken?.trim() || provider.apiKey?.trim()
+  const endpoint = script?.baseUrl?.trim() || provider.baseUrl?.trim()
+  if (!token || !endpoint) return null
+  const parts = endpointParts(endpoint)
+  if (!parts) return null
+  const intervalMinutes = script?.autoQueryInterval
+  return {
+    id: `ccswitch:${provider.kind ?? "provider"}:${provider.id}`,
+    name: provider.name.trim() || provider.id,
+    baseUrl: parts.baseUrl,
+    token,
+    enabled: false,
+    refreshIntervalMs:
+      typeof intervalMinutes === "number" && intervalMinutes > 0
+        ? Math.min(intervalMinutes, 1440) * 60_000
+        : undefined,
+    request: { path: parts.path },
+    extract: { kind: "balance", remainingPath: "" },
+  }
+}
+
+/**
+ * Convert only CCSwitch's recognized template metadata. The script body is
+ * deliberately ignored: importing arbitrary JavaScript would turn a read-only
+ * database integration into remote-code execution with renderer credentials.
+ */
+export function fromCcswitchUsageScript(provider: CcswitchProvider): CcswitchUsageImportResult {
+  const script = provider.usageScript
+  if (!script) return { ok: false, reason: "missing-script" }
+  const endpoint = script.baseUrl?.trim() || provider.baseUrl?.trim()
+  const token = script.apiKey?.trim() || script.accessToken?.trim() || provider.apiKey?.trim()
+  if (!endpoint || !endpointParts(endpoint)) return { ok: false, reason: "invalid-endpoint" }
+  if (!token) return { ok: false, reason: "missing-credentials" }
+  const draft = usageSourceDraft(provider)
+  if (!draft) return { ok: false, reason: "invalid-endpoint" }
+
+  if (script.templateType === "token_plan") {
+    if (script.codingPlanProvider === "zhipu_team") {
+      if (!script.teamOrganizationId?.trim() || !script.teamProjectId?.trim()) {
+        return { ok: false, reason: "missing-credentials" }
+      }
+      const source = presetById("glm-coding").apply(draft)
+      source.request = {
+        ...source.request,
+        path: "/api/monitor/usage/quota/limit?type=2",
+        headers: {
+          ...(source.request.headers ?? {}),
+          "bigmodel-organization": script.teamOrganizationId.trim(),
+          "bigmodel-project": script.teamProjectId.trim(),
+        },
+      }
+      return { ok: true, source }
+    }
+    const presetId =
+      script.codingPlanProvider === "kimi"
+        ? "kimi-coding"
+        : script.codingPlanProvider === "zhipu"
+          ? "glm-coding"
+          : script.codingPlanProvider === "minimax"
+            ? "minimax-token-plan"
+            : script.codingPlanProvider === "zenmux"
+              ? "zenmux"
+              : null
+    if (!presetId) return { ok: false, reason: "unsupported-provider" }
+    const source = presetById(presetId).apply(draft)
+    // ZenMux stores the complete quota URL rather than an inference base URL.
+    if (presetId === "zenmux") source.request.path = draft.request.path
+    return { ok: true, source }
+  }
+
+  if (script.templateType === "newapi") {
+    const source = presetById("new-api").apply(draft)
+    if (script.userId) {
+      source.request.headers = {
+        ...(source.request.headers ?? {}),
+        "New-Api-User": script.userId,
+      }
+    }
+    return { ok: true, source }
+  }
+
+  if (script.templateType === "github_copilot") {
+    return { ok: true, source: presetById("github-copilot").apply(draft) }
+  }
+
+  return { ok: false, reason: "unsupported-template" }
+}
 
 /* ---- MCP servers ------------------------------------------------------- */
 
