@@ -228,7 +228,7 @@ describe("exportToRichMarkdown — additional rendering branches", () => {
       ],
       exportedAt: data.exportedAt,
     })
-    expect(md).toContain("📎 [a.png](https://files/a.png)")
+    expect(md).toContain("![a.png](https://files/a.png)")
     expect(md).toContain("📎 noLink.txt")
     expect(md).toContain("📎 image/png")
   })

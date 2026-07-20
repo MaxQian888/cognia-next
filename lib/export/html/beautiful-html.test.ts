@@ -233,8 +233,34 @@ describe("exportToBeautifulHtml — additional rendering branches", () => {
       ],
       exportedAt,
     })
-    expect(html).toContain('href="https://files/x.png"')
+    expect(html).toContain('<img src="https://files/x.png" alt="x.png"')
     expect(html).toContain("noLink.txt")
+  })
+
+  it("renders Markdown links with balanced parentheses without swallowing punctuation", () => {
+    const html = exportToBeautifulHtml({
+      session,
+      messages: [
+        {
+          id: "links",
+          sessionId: "s1",
+          role: "assistant",
+          parts: [
+            {
+              type: "text",
+              text: "Read [the docs](https://example.com/a_(b)). Then visit https://example.org/x).",
+            },
+          ],
+          createdAt: 1_700_000_000_000,
+        },
+      ],
+      exportedAt,
+    })
+
+    expect(html).toContain('<a href="https://example.com/a_(b)"')
+    expect(html).toContain(">the docs</a>.")
+    expect(html).toContain('<a href="https://example.org/x"')
+    expect(html).toContain(">https://example.org/x</a>).")
   })
 
   it("renders source-url parts as plain anchor links", () => {
