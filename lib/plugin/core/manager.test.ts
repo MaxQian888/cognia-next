@@ -1537,6 +1537,33 @@ describe("PluginManager", () => {
   })
 
   describe("browser runtime activation", () => {
+    it("passes a lazy active-database provider to startup schema restoration", async () => {
+      const { restorePluginTables } = jest.requireMock("@/lib/plugin/dexie/bridge") as {
+        restorePluginTables: jest.Mock
+      }
+      restorePluginTables.mockClear().mockResolvedValueOnce([])
+      mockGetState.mockReturnValue({
+        plugins: {
+          "db-plugin": {
+            manifest: {
+              ...createManifest("db-plugin"),
+              dexie: { tables: [{ name: "items", schema: "++id" }] },
+            },
+            status: "installed",
+            source: "builtin",
+            config: {},
+          },
+        },
+      })
+      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "browser" })
+
+      await (
+        manager as unknown as { restorePluginDexieTables: () => Promise<void> }
+      ).restorePluginDexieTables()
+
+      expect(restorePluginTables.mock.calls[0][0]).toEqual(expect.any(Function))
+    })
+
     it("loads a browser-compatible builtin plugin and registers its tools", async () => {
       Object.defineProperty(global.navigator, "clipboard", {
         configurable: true,
@@ -1856,6 +1883,7 @@ describe("PluginManager", () => {
       await manager.enablePlugin("github-delivery")
 
       expect(applyPluginTables).toHaveBeenCalledTimes(1)
+      expect(applyPluginTables.mock.calls[0][0]).toEqual(expect.any(Function))
       expect(loadSpy).toHaveBeenCalledTimes(1)
       expect(applyPluginTables.mock.invocationCallOrder[0]).toBeLessThan(
         loadSpy.mock.invocationCallOrder[0]
@@ -1965,6 +1993,10 @@ describe("PluginManager", () => {
 
   describe("uninstallPlugin", () => {
     it("should call plugin_uninstall and then store.uninstallPlugin with skipFileRemoval=true", async () => {
+      const { removePluginTables } = jest.requireMock("@/lib/plugin/dexie/bridge") as {
+        removePluginTables: jest.Mock
+      }
+      removePluginTables.mockClear()
       const manifest = createManifest("to-remove")
 
       const store: {
@@ -2009,6 +2041,7 @@ describe("PluginManager", () => {
         skipFileRemoval: true,
         viaManager: false,
       })
+      expect(removePluginTables.mock.calls[0][0]).toEqual(expect.any(Function))
     })
   })
 

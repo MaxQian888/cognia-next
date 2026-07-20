@@ -77,6 +77,7 @@ describe("applyPluginTables", () => {
 
   afterEach(async () => {
     await db.delete()
+    delete (navigator as unknown as { locks?: unknown }).locks
   })
 
   it("registers plugin tables with the namespace prefix", async () => {
@@ -84,6 +85,36 @@ describe("applyPluginTables", () => {
       tables: [{ name: "repos", schema: "++id, fullName" }],
     })
 
+    expect(db.tables.map((t) => t.name)).toContain("github-delivery:repos")
+  })
+
+  it("serializes schema upgrades across tabs with a database-scoped Web Lock", async () => {
+    const request = jest.fn(async (_name: string, callback: () => Promise<void>) => callback())
+    Object.defineProperty(navigator, "locks", {
+      value: { request },
+      configurable: true,
+    })
+
+    await applyPluginTables(db, "github-delivery", {
+      tables: [{ name: "repos", schema: "++id, fullName" }],
+    })
+
+    expect(request).toHaveBeenCalledWith(`cognia-plugin-schema:${db.name}`, expect.any(Function))
+  })
+
+  it("re-resolves the active database after acquiring the cross-tab lock", async () => {
+    const request = jest.fn(async (_name: string, callback: () => Promise<void>) => callback())
+    Object.defineProperty(navigator, "locks", {
+      value: { request },
+      configurable: true,
+    })
+    const getActiveDb = jest.fn(() => db)
+
+    await applyPluginTables(getActiveDb, "github-delivery", {
+      tables: [{ name: "repos", schema: "++id, fullName" }],
+    })
+
+    expect(getActiveDb).toHaveBeenCalledTimes(2)
     expect(db.tables.map((t) => t.name)).toContain("github-delivery:repos")
   })
 

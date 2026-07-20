@@ -15,6 +15,7 @@ import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
 import { requestPluginPermission } from "@/lib/plugin/security/permission-requests"
 import {
   grantPluginPermission as grantHostPermission,
+  isPluginGatewayAvailable,
   listPluginPermissions as listHostPermissions,
   revokePluginPermission as revokeHostPermission,
 } from "@/lib/plugin/core/transport"
@@ -154,18 +155,22 @@ export function createPermissionAPI(
     initializePluginPermissions(pluginId, manifestPermissions)
   }
 
-  // Prime host-side grants list (best effort).
-  void listHostPermissions(pluginId).catch((error) =>
-    recordSilentFailure(
-      pluginId,
-      {
-        site: "permission.listHost",
-        message: "Failed to prime host-side permission grants",
-        expected: false,
-      },
-      error
+  // Prime native/remote host grants only when that gateway exists. Browser and
+  // Capacitor-local plugins use the in-memory permission set; issuing a Tauri-
+  // only command there creates a false warning and cannot persist anything.
+  if (isPluginGatewayAvailable()) {
+    void listHostPermissions(pluginId).catch((error) =>
+      recordSilentFailure(
+        pluginId,
+        {
+          site: "permission.listHost",
+          message: "Failed to prime host-side permission grants",
+          expected: false,
+        },
+        error
+      )
     )
-  )
+  }
 
   const getPermissions = () => grantedPermissions.get(pluginId) || new Set()
 
@@ -200,17 +205,19 @@ export function createPermissionAPI(
       if (granted) {
         existing.add(permission)
         contextPanelRegistry.refresh()
-        void grantHostPermission(pluginId, permission).catch((error) =>
-          recordSilentFailure(
-            pluginId,
-            {
-              site: "permission.grantHost",
-              message: `Failed to persist grant for ${permission}`,
-              expected: false,
-            },
-            error
+        if (isPluginGatewayAvailable()) {
+          void grantHostPermission(pluginId, permission).catch((error) =>
+            recordSilentFailure(
+              pluginId,
+              {
+                site: "permission.grantHost",
+                message: `Failed to persist grant for ${permission}`,
+                expected: false,
+              },
+              error
+            )
           )
-        )
+        }
         logger.info(`Granted permission: ${permission}`)
       } else {
         logger.info(`Denied permission: ${permission}`)
@@ -264,17 +271,19 @@ export function grantPermission(pluginId: string, permission: PluginAPIPermissio
   permissions.add(permission)
   grantedPermissions.set(pluginId, permissions)
   contextPanelRegistry.refresh()
-  void grantHostPermission(pluginId, permission).catch((error) =>
-    recordSilentFailure(
-      pluginId,
-      {
-        site: "permission.grantHost",
-        message: `Failed to persist grant for ${permission}`,
-        expected: false,
-      },
-      error
+  if (isPluginGatewayAvailable()) {
+    void grantHostPermission(pluginId, permission).catch((error) =>
+      recordSilentFailure(
+        pluginId,
+        {
+          site: "permission.grantHost",
+          message: `Failed to persist grant for ${permission}`,
+          expected: false,
+        },
+        error
+      )
     )
-  )
+  }
 }
 
 /**
@@ -286,15 +295,17 @@ export function revokePermission(pluginId: string, permission: PluginAPIPermissi
     permissions.delete(permission)
   }
   contextPanelRegistry.refresh()
-  void revokeHostPermission(pluginId, permission).catch((error) =>
-    recordSilentFailure(
-      pluginId,
-      {
-        site: "permission.revokeHost",
-        message: `Failed to persist revocation for ${permission}`,
-        expected: false,
-      },
-      error
+  if (isPluginGatewayAvailable()) {
+    void revokeHostPermission(pluginId, permission).catch((error) =>
+      recordSilentFailure(
+        pluginId,
+        {
+          site: "permission.revokeHost",
+          message: `Failed to persist revocation for ${permission}`,
+          expected: false,
+        },
+        error
+      )
     )
-  )
+  }
 }

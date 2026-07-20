@@ -1151,7 +1151,7 @@ export class PluginManager {
 
     try {
       const restored = await restorePluginTables(
-        getDb() as unknown as import("dexie").default,
+        () => getDb() as unknown as import("dexie").default,
         manifestDexie
       )
       if (restored.length > 0) {
@@ -2223,7 +2223,7 @@ export class PluginManager {
       // later boot either. Applying tables first breaks that deadlock.
       if (plugin.manifest.dexie) {
         await applyPluginTables(
-          getDb() as unknown as import("dexie").default,
+          () => getDb() as unknown as import("dexie").default,
           pluginId,
           plugin.manifest.dexie
         )
@@ -2568,7 +2568,7 @@ export class PluginManager {
       // Remove plugin Dexie tables. Default: keep data (allows reinstall to resume).
       // Pass purgeData: true from the settings "Delete plugin data" action.
       await removePluginTables(
-        getDb() as unknown as import("dexie").default,
+        () => getDb() as unknown as import("dexie").default,
         pluginId,
         options?.purgeData ? "purge" : "keep"
       )
