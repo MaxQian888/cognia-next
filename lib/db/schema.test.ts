@@ -208,6 +208,19 @@ describe("getDb", () => {
     expect(db.memoryEvidence).toBeDefined()
     expect(db.memoryJobs).toBeDefined()
     expect(db.memoryAuditEvents).toBeDefined()
+    expect(db.petSpritePacks).toBeDefined()
+  })
+
+  it("v119 opens petSpritePacks with displayName and createdAt indexes", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(119)
+    expect(db.petSpritePacks.schema.primKey.name).toBe("id")
+    expect(db.petSpritePacks.schema.primKey.unique).toBe(true)
+    expect(db.petSpritePacks.schema.indexes.map((index) => index.name)).toEqual([
+      "displayName",
+      "createdAt",
+    ])
   })
 
   it("v118 opens memory governance tables and preserves legacy rows explicitly", async () => {

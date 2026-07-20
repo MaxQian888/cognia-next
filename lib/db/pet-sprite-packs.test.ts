@@ -1,0 +1,102 @@
+/** @jest-environment jsdom */
+
+import "fake-indexeddb/auto"
+import {
+  addPetSpritePack,
+  deletePetSpritePack,
+  getPetSpritePack,
+  getPetSpritePackStorageUsage,
+  listPetSpritePacks,
+} from "./pet-sprite-packs"
+import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+
+beforeEach(async () => {
+  await getDb().delete()
+  __resetDbForTesting()
+  getDb()
+  await whenSeeded()
+  await getDb().petSpritePacks.clear()
+})
+
+function pack(id: string, displayName = id, bytes = "sprite") {
+  return {
+    id,
+    displayName,
+    description: `${displayName} description`,
+    spriteVersionNumber: 2 as const,
+    spritesheet: new Blob([bytes], { type: "image/webp" }),
+  }
+}
+
+describe("pet sprite pack CRUD", () => {
+  it("adds and gets a complete v2 pack row", async () => {
+    const input = pack("momo", "Momo", "12345")
+    const row = await addPetSpritePack(input, 123)
+
+    expect(row).toMatchObject({
+      id: "momo",
+      displayName: "Momo",
+      description: "Momo description",
+      spriteVersionNumber: 2,
+      totalBytes: 5,
+      createdAt: 123,
+    })
+    expect(row.spritesheet).toBe(input.spritesheet)
+    await expect(getPetSpritePack("momo")).resolves.toMatchObject({ id: "momo", totalBytes: 5 })
+  })
+
+  it("returns undefined for a missing pack", async () => {
+    await expect(getPetSpritePack("missing")).resolves.toBeUndefined()
+  })
+
+  it("lists packs oldest-first using the createdAt index", async () => {
+    await addPetSpritePack(pack("latest", "Latest"), 300)
+    await addPetSpritePack(pack("first", "First"), 100)
+    await addPetSpritePack(pack("middle", "Middle"), 200)
+
+    await expect(listPetSpritePacks()).resolves.toEqual([
+      expect.objectContaining({ id: "first" }),
+      expect.objectContaining({ id: "middle" }),
+      expect.objectContaining({ id: "latest" }),
+    ])
+  })
+
+  it("rejects duplicate ids without replacing the installed pack", async () => {
+    await addPetSpritePack(pack("momo", "Original"), 100)
+
+    await expect(addPetSpritePack(pack("momo", "Replacement"), 200)).rejects.toThrow(
+      "already installed"
+    )
+    await expect(getPetSpritePack("momo")).resolves.toMatchObject({
+      displayName: "Original",
+      createdAt: 100,
+    })
+  })
+
+  it("rejects malformed ids and non-v2 rows at the persistence boundary", async () => {
+    await expect(addPetSpritePack(pack("../momo"), 100)).rejects.toThrow(
+      "Invalid pet sprite pack id"
+    )
+    await expect(
+      addPetSpritePack({ ...pack("momo"), spriteVersionNumber: 1 as never }, 100)
+    ).rejects.toThrow("spriteVersionNumber")
+  })
+
+  it("deletes an installed pack and treats a missing id as a no-op", async () => {
+    await addPetSpritePack(pack("momo"), 100)
+    await addPetSpritePack(pack("nori"), 200)
+
+    await deletePetSpritePack("momo")
+    await deletePetSpritePack("missing")
+
+    await expect(getPetSpritePack("momo")).resolves.toBeUndefined()
+    await expect(listPetSpritePacks()).resolves.toEqual([expect.objectContaining({ id: "nori" })])
+  })
+
+  it("reports pack count and total persisted sprite bytes", async () => {
+    await expect(getPetSpritePackStorageUsage()).resolves.toEqual({ packs: 0, totalBytes: 0 })
+    await addPetSpritePack(pack("momo", "Momo", "12345"), 100)
+    await addPetSpritePack(pack("nori", "Nori", "1234567"), 200)
+    await expect(getPetSpritePackStorageUsage()).resolves.toEqual({ packs: 2, totalBytes: 12 })
+  })
+})

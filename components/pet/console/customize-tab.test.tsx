@@ -71,6 +71,15 @@ describe("CustomizeTab", () => {
     expect(screen.queryByTestId("cosmetic")).toBeNull()
   })
 
+  it("shows sprite management guidance instead of incompatible look controls", () => {
+    settingsValue = { petSettings: { enabled: true, skinId: "sprite-v2" } }
+    render(<CustomizeTab />)
+    expect(screen.getByText(/preview your active AI-generated v2 sprite pet/i)).toBeInTheDocument()
+    expect(screen.getByText(/create, import, and switch v2 sprite pets/i)).toBeInTheDocument()
+    expect(screen.queryByTestId("cosmetic")).toBeNull()
+    expect(screen.queryByTestId("live2d-look")).toBeNull()
+  })
+
   it("routes a control patch through save({ petSettings }) merged over current", () => {
     render(<CustomizeTab />)
     fireEvent.click(screen.getByTestId("appearance"))

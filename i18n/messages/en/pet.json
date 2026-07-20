@@ -334,6 +334,8 @@
     "look": {
       "description": "Restyle your pet without changing who it is.",
       "descriptionLive2d": "Preview and fine-tune your active Live2D model.",
+      "descriptionSprite": "Preview your active AI-generated v2 sprite pet.",
+      "spriteManagedBelow": "Create, import, and switch v2 sprite pets in the Appearance section below.",
       "title": "Look"
     },
     "openSettings": "Open full pet settings",

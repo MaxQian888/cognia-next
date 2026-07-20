@@ -47,16 +47,25 @@ export function CustomizeTab() {
     hasActiveModel: Boolean(modelId),
   })
   const live2dChosen = pet.skinId === "live2d"
+  const spriteChosen = pet.skinId === "sprite-v2"
 
   return (
     <div data-testid="pet-customize-tab" className="mx-auto w-full max-w-3xl space-y-4">
       <SettingsCard
         icon={<BrushIcon className="size-5" />}
         title={t("look.title")}
-        description={live2dChosen ? t("look.descriptionLive2d") : t("look.description")}
+        description={
+          live2dChosen
+            ? t("look.descriptionLive2d")
+            : spriteChosen
+              ? t("look.descriptionSprite")
+              : t("look.description")
+        }
       >
         {live2dChosen ? (
           <PetLive2dLookControls pet={pet} />
+        ) : spriteChosen ? (
+          <p className="text-sm text-muted-foreground">{t("look.spriteManagedBelow")}</p>
         ) : (
           <PetCosmeticControls skinId={effectiveSkin} />
         )}

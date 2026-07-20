@@ -331,6 +331,8 @@
     "look": {
       "description": "在不改变身份的前提下重新装扮宠物。",
       "descriptionLive2d": "预览并微调当前使用的 Live2D 模型。",
+      "descriptionSprite": "预览当前 AI 生成的 v2 精灵图宠物。",
+      "spriteManagedBelow": "可在下方“外观”区域创建、导入和切换 v2 精灵图宠物。",
       "title": "造型"
     },
     "openSettings": "打开完整宠物设置",
