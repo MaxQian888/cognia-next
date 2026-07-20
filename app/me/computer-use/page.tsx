@@ -10,8 +10,9 @@
  *     in the mobile shell).
  */
 
+import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { MonitorIcon } from "lucide-react"
+import { Loader2Icon, MonitorIcon } from "lucide-react"
 
 import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -26,8 +27,18 @@ export default function MobileComputerUsePage() {
 
   const enabled = useSettingsStore((s) => s.settings?.mobileComputerUseEnabled ?? false)
   const update = useSettingsPatch()
+  // Persisting the flag is an async round-trip (settings store + outbound RPC);
+  // surface it so a slow write doesn't look like a dead toggle.
+  const [pending, setPending] = useState(false)
 
-  const toggle = (next: boolean) => update({ mobileComputerUseEnabled: next })
+  const toggle = async (next: boolean) => {
+    setPending(true)
+    try {
+      await update({ mobileComputerUseEnabled: next })
+    } finally {
+      setPending(false)
+    }
+  }
 
   return (
     <SubPageShell
@@ -48,12 +59,22 @@ export default function MobileComputerUsePage() {
             <div className="text-xs text-muted-foreground">
               {enabled ? tCu("masterStateOn") : tCu("masterStateOff")}
             </div>
-            <Switch
-              checked={enabled}
-              onCheckedChange={(v) => void toggle(v)}
-              aria-label={tCu("masterToggleAria")}
-              data-testid="computer-use-master-switch"
-            />
+            <div className="flex items-center gap-2">
+              {pending && (
+                <Loader2Icon
+                  className="size-4 animate-spin text-muted-foreground"
+                  aria-hidden="true"
+                  data-testid="computer-use-saving"
+                />
+              )}
+              <Switch
+                checked={enabled}
+                disabled={pending}
+                onCheckedChange={(v) => void toggle(v)}
+                aria-label={tCu("masterToggleAria")}
+                data-testid="computer-use-master-switch"
+              />
+            </div>
           </CardContent>
         </Card>
         <AutomationSection />

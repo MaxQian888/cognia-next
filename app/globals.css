@@ -279,18 +279,23 @@
   --density-line-height: 1.65;
 }
 
-/* Reduce-motion guard. The motion applier toggles this class on <html> when
-   the user enables "Reduce motion" in Settings → Appearance → A11y, OR when
-   the OS reports `prefers-reduced-motion: reduce` and the user has not
-   explicitly opted into full motion. Collapses all transitions and
-   animations to ~0.01ms — same approach the W3C accessibility guideline
-   recommends. */
+/* Reduce-motion guards. All three paths collapse motion to ~1ms — 1ms rather
+   than 0 so existing `transitionend` listeners still fire (W3C-recommended).
+   Two root markers drive the *user opt-in* path, written by two different
+   providers (both kept so neither breaks): `.reduce-motion` (motion-applier,
+   Settings → Appearance → A11y) and `[data-reduce-motion="true"]`
+   (SettingsSyncProvider, persisted setting). The OS `prefers-reduced-motion`
+   path is separate below because it carries a `data-motion-respect="off"`
+   opt-out for users who want full motion despite the OS hint. */
 html.reduce-motion *,
 html.reduce-motion *::before,
-html.reduce-motion *::after {
-  animation-duration: 0.01ms !important;
+html.reduce-motion *::after,
+html[data-reduce-motion="true"] *,
+html[data-reduce-motion="true"] *::before,
+html[data-reduce-motion="true"] *::after {
+  animation-duration: 1ms !important;
   animation-iteration-count: 1 !important;
-  transition-duration: 0.01ms !important;
+  transition-duration: 1ms !important;
   scroll-behavior: auto !important;
 }
 
@@ -298,9 +303,9 @@ html.reduce-motion *::after {
   html:not([data-motion-respect="off"]) *,
   html:not([data-motion-respect="off"]) *::before,
   html:not([data-motion-respect="off"]) *::after {
-    animation-duration: 0.01ms !important;
+    animation-duration: 1ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    transition-duration: 1ms !important;
     scroll-behavior: auto !important;
   }
 }
@@ -392,18 +397,6 @@ html.reduce-motion *::after {
     opacity: 1;
     transition: opacity 120ms ease-out;
   }
-}
-
-/* Honor the user's reduce-motion preference. SettingsSyncProvider toggles
-   the data attribute on the <html> root from the persisted setting. We use
-   `1ms` instead of `0` so existing transitionend listeners still fire. */
-html[data-reduce-motion="true"] *,
-html[data-reduce-motion="true"] *::before,
-html[data-reduce-motion="true"] *::after {
-  animation-duration: 1ms !important;
-  animation-iteration-count: 1 !important;
-  transition-duration: 1ms !important;
-  scroll-behavior: auto !important;
 }
 
 /* -------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 const saveMock = jest.fn(async (_patch: Record<string, unknown>): Promise<void> => undefined)
 const enqueueMock = jest.fn(async (_arg: unknown): Promise<void> => undefined)
@@ -57,5 +57,25 @@ describe("MobileComputerUsePage", () => {
     await waitFor(() => expect(saveMock).toHaveBeenCalled())
     expect(saveMock).toHaveBeenCalledWith({ mobileComputerUseEnabled: true })
     expect(enqueueMock).toHaveBeenCalled()
+  })
+
+  it("disables the switch and shows a spinner while the patch is in flight", async () => {
+    let release: () => void = () => undefined
+    saveMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        })
+    )
+    render(<Page />)
+    const sw = screen.getByTestId("computer-use-master-switch")
+    fireEvent.click(sw)
+
+    await waitFor(() => expect(sw).toBeDisabled())
+    expect(screen.getByTestId("computer-use-saving")).toBeInTheDocument()
+
+    act(() => release())
+    await waitFor(() => expect(sw).not.toBeDisabled())
+    expect(screen.queryByTestId("computer-use-saving")).not.toBeInTheDocument()
   })
 })

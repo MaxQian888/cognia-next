@@ -56,7 +56,9 @@ function SheetContent({
         forceMount={forceMount}
         data-slot="sheet-content"
         className={cn(
-          "fixed z-50 flex flex-col gap-4 bg-background shadow-lg transition ease-in-out data-[state=closed]:animate-out data-[state=closed]:duration-300 data-[state=open]:animate-in data-[state=open]:duration-500",
+          // enter 500ms / exit 300ms, each scaled by the user's motion-speed
+          // preference (`--motion-duration-scale`, from motion-applier).
+          "fixed z-50 flex flex-col gap-4 bg-background shadow-lg transition ease-in-out data-[state=closed]:animate-out data-[state=closed]:[animation-duration:calc(300ms*var(--motion-duration-scale,1))] data-[state=open]:animate-in data-[state=open]:[animation-duration:calc(500ms*var(--motion-duration-scale,1))]",
           side === "right" &&
             "inset-y-0 right-0 h-full w-3/4 border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:max-w-sm",
           side === "left" &&
