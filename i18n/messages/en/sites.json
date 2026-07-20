@@ -2,35 +2,71 @@
   "title": "Sites",
   "subtitle": "Build, preview, and publish from Cognia",
   "empty": "Create or select a Site to begin.",
+  "sidebarEmpty": "No Sites yet. Create one to get started.",
   "desktopOnly": {
     "title": "Sites requires Cognia Desktop",
     "description": "Builds, provider credentials, and previews stay on the selected local desktop host."
   },
   "create": {
+    "title": "New Site",
+    "description": "Publish a project's build output to Cloudflare Workers.",
     "project": "Project",
     "name": "Site name",
     "subpath": "Source subpath (optional)",
     "accountId": "Cloudflare account ID",
     "workerName": "Worker name"
   },
-  "tabs": {
-    "build": "Build & Preview",
-    "versions": "Versions",
-    "access": "Access",
-    "domains": "Domains",
-    "observability": "Logs & Analytics",
-    "provider": "Provider"
+  "steps": {
+    "connect": {
+      "title": "Connect Cloudflare",
+      "description": "Verify and store the API token for this Site."
+    },
+    "environment": {
+      "title": "Environment",
+      "description": "Save the variables and secrets the build needs."
+    },
+    "build": {
+      "title": "Build",
+      "description": "Provision bindings and build an immutable version."
+    },
+    "preview": {
+      "title": "Preview",
+      "description": "Run the build locally before publishing."
+    },
+    "publish": {
+      "title": "Publish",
+      "description": "Upload a version and deploy it to production."
+    }
+  },
+  "stepState": {
+    "idle": "Not started",
+    "running": "In progress",
+    "done": "Done",
+    "failed": "Needs attention"
+  },
+  "wrangler": {
+    "detecting": "Detecting the Wrangler CLI…",
+    "ready": "Wrangler ready ({version}).",
+    "notFound": "Wrangler CLI was not found on this host.",
+    "installHint": "Install it with npm i -g wrangler, then re-detect."
+  },
+  "publish": {
+    "noVersions": "Build a version first to upload and deploy."
+  },
+  "advanced": {
+    "title": "Advanced configuration"
   },
   "actions": {
-    "refresh": "Refresh Sites",
+    "newSite": "New Site",
+    "creating": "Creating…",
     "create": "Create Site",
+    "redetectWrangler": "Re-detect Wrangler",
     "saveEnvironment": "Save environment revision",
     "provision": "Provision bindings",
     "build": "Build saved version",
     "preview": "Start preview",
     "stopPreview": "Stop preview",
     "upload": "Upload version",
-    "approveTool": "Approve exact tool bytes",
     "deploy": "Deploy",
     "rollback": "Redeploy / Roll back",
     "saveAccess": "Apply access policy",
@@ -75,7 +111,6 @@
     "networkHosts": "Approved install hosts"
   },
   "versions": {
-    "wranglerPath": "Absolute path to the approved Wrangler binary",
     "version": "Version {sequence}"
   },
   "operations": {
@@ -154,7 +189,6 @@
     "deleting": "Deleting",
     "deleted": "Deleted"
   },
-  "versionStatus": { "building": "Building", "ready": "Ready", "failed": "Failed" },
   "deploymentStatus": {
     "pending": "Pending",
     "deploying": "Deploying",
