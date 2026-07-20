@@ -233,6 +233,25 @@ describe("computer-use plugin activate()", () => {
       )
     })
 
+    it("uses the originating session when a background tool runs after focus changes", async () => {
+      const tool = await getTool("computer_use")
+      mockedGetSettings.mockReturnValueOnce({ screenOffMode: false })
+      mockedDispatchAction.mockResolvedValueOnce({ ok: true })
+
+      await tool!.execute({ action: "screenshot" }, { config: {}, sessionId: "origin-session" })
+
+      expect(mockedGetSettings).toHaveBeenCalledWith("origin-session")
+      expect(mockedDispatchAction).toHaveBeenCalledWith(
+        { action: "screenshot" },
+        {
+          surface: "computerUse",
+          pluginId: "cognia-computer-use",
+          sessionKey: "origin-session",
+        }
+      )
+      expect(mockedGetState).not.toHaveBeenCalled()
+    })
+
     it("find_text → findScreenText with the query + gated ctx", async () => {
       const tool = await getTool("find_text")
       mockedFindText.mockResolvedValueOnce({ ok: true, matches: [], providerId: "p", capture: {} })

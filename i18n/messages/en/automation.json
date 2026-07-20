@@ -36,6 +36,10 @@
       "help": "Type actions longer than this many characters paste via the clipboard instead of typing key-by-key. 0 disables.",
       "label": "Paste threshold (characters)"
     },
+    "pictureInPicture": {
+      "help": "Prevent Computer Use activity from appearing over the active conversation.",
+      "label": "Always hide picture in picture"
+    },
     "scaling": {
       "help": "Resize captures to fit the target size before sending to the model. Improves click accuracy and cuts token cost (1280×800 recommended).",
       "label": "Downscale screenshots",
@@ -43,6 +47,21 @@
       "maxWidth": "Max width"
     },
     "title": "Model behavior"
+  },
+  "pictureInPicture": {
+    "activity": "Activity: {action}",
+    "close": "Close",
+    "done": "Done",
+    "failed": "Computer Use action failed",
+    "hide": "Hide picture in picture",
+    "justNow": "Just now",
+    "move": "Move picture in picture",
+    "screenAlt": "Computer Use screen",
+    "secondsAgo": "{seconds}s ago",
+    "show": "Show picture in picture",
+    "title": "Computer Use",
+    "viewLarger": "View larger",
+    "waitingForFrame": "Waiting for the first screenshot…"
   },
   "consent": {
     "actions": {

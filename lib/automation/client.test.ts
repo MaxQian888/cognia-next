@@ -323,6 +323,7 @@ describe("defaultAutomationSettings", () => {
     const s = defaultAutomationSettings()
     expect(s.screenshotScaling).toEqual({ enabled: false, maxWidth: 1280, maxHeight: 800 })
     expect(s.screenshotDedup).toBe(true)
+    expect(s.alwaysHidePictureInPicture).toBe(false)
     expect(s.pasteThresholdChars).toBe(200)
   })
 })

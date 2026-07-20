@@ -48,12 +48,13 @@ import type { CallContext } from "@/lib/automation/client"
 // (stashed by `applyComputerUseTools` at chat-send time, keyed by
 // session id) and stamps `forceTier: "perCall"` when set. The Rust
 // `command_body!` macro then upgrades the gate decision to
-// `RequireConsent` so the floating overlay fires. Session id is read
-// from a chat-session-aware host helper; we keep this defensive
-// because the plugin SDK doesn't (yet) expose session id directly to
-// the execute callback.
-function buildChatCallContext(): CallContext {
-  const sessionId = resolveActiveSessionId()
+// `RequireConsent` so the floating overlay fires. The PluginTool execution
+// context supplies the originating session; the focused-session lookup is a
+// defensive fallback for non-chat callers that omit it.
+function buildChatCallContext(originSessionId?: string): CallContext {
+  // The invocation context is authoritative in split/concurrent chat. Focus
+  // can move while a background session's tool call is still executing.
+  const sessionId = originSessionId ?? resolveActiveSessionId()
   const ctx: CallContext = {
     surface: "computerUse",
     pluginId: PLUGIN_ID,
@@ -337,13 +338,16 @@ function buildPluginTools(): PluginTool[] {
         requiresApproval: true,
         parametersSchema: COMPUTER_USE_SCHEMA as unknown as Record<string, unknown>,
       },
-      execute: async (args) => {
+      execute: async (args, context) => {
         // Surface stays "computerUse" — chat-driven invocations route
         // through the Anthropic native tool semantics. The Rust permission
         // gate uses this to pick the right tier. ADR-0020 W1 audit-fix —
         // `buildChatCallContext` adds `forceTier: "perCall"` when the
         // active character's `requireConsent` is on.
-        return dispatchAnthropicAction(args as unknown as ComputerAction, buildChatCallContext())
+        return dispatchAnthropicAction(
+          args as unknown as ComputerAction,
+          buildChatCallContext(context.sessionId)
+        )
       },
     },
     {
@@ -356,8 +360,11 @@ function buildPluginTools(): PluginTool[] {
         requiresApproval: true,
         parametersSchema: BASH_SCHEMA as unknown as Record<string, unknown>,
       },
-      execute: async (args) => {
-        return pluginComputerUseBash(args as unknown as BashAction, buildChatCallContext())
+      execute: async (args, context) => {
+        return pluginComputerUseBash(
+          args as unknown as BashAction,
+          buildChatCallContext(context.sessionId)
+        )
       },
     },
     {
@@ -370,10 +377,10 @@ function buildPluginTools(): PluginTool[] {
         requiresApproval: true,
         parametersSchema: TEXT_EDITOR_SCHEMA as unknown as Record<string, unknown>,
       },
-      execute: async (args) => {
+      execute: async (args, context) => {
         return pluginComputerUseTextEditor(
           args as unknown as TextEditorAction,
-          buildChatCallContext()
+          buildChatCallContext(context.sessionId)
         )
       },
     },
@@ -387,13 +394,13 @@ function buildPluginTools(): PluginTool[] {
         requiresApproval: true,
         parametersSchema: FIND_TEXT_SCHEMA as unknown as Record<string, unknown>,
       },
-      execute: async (args) => {
+      execute: async (args, context) => {
         const a = (args ?? {}) as { text?: string; languages?: string[] }
         try {
           return await findScreenText({
             query: a.text,
             languages: a.languages,
-            ctx: buildChatCallContext(),
+            ctx: buildChatCallContext(context.sessionId),
           })
         } catch (err) {
           return { ok: false, error: err instanceof Error ? err.message : String(err) }
@@ -410,7 +417,7 @@ function buildPluginTools(): PluginTool[] {
         requiresApproval: true,
         parametersSchema: CLICK_TEXT_SCHEMA as unknown as Record<string, unknown>,
       },
-      execute: async (args) => {
+      execute: async (args, context) => {
         const a = (args ?? {}) as {
           text?: string
           occurrence?: number
@@ -425,7 +432,7 @@ function buildPluginTools(): PluginTool[] {
             button: a.button,
             doubleClick: a.double,
             languages: a.languages,
-            ctx: buildChatCallContext(),
+            ctx: buildChatCallContext(context.sessionId),
           })
         } catch (err) {
           return { ok: false, error: err instanceof Error ? err.message : String(err) }

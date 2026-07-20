@@ -13,7 +13,7 @@
 
 import { useEffect, useState } from "react"
 
-import { Images, Sparkles } from "lucide-react"
+import { Images, MonitorPlay, Sparkles } from "lucide-react"
 import { useTranslations } from "next-intl"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { desktop, type AutomationSettings } from "@/lib/automation/client"
+import { setComputerUsePipAlwaysHidden } from "@/lib/automation/computer-use-pip"
 
 export function BehaviorCard() {
   const t = useTranslations("automation.behavior")
@@ -32,7 +33,10 @@ export function BehaviorCard() {
     desktop
       .settingsGet()
       .then((s) => {
-        if (!cancelled) setSettings(s)
+        if (!cancelled) {
+          setSettings(s)
+          setComputerUsePipAlwaysHidden(s.alwaysHidePictureInPicture)
+        }
       })
       .catch((e) => {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e))
@@ -44,6 +48,7 @@ export function BehaviorCard() {
 
   async function save(next: AutomationSettings) {
     setSettings(next)
+    setComputerUsePipAlwaysHidden(next.alwaysHidePictureInPicture)
     setError(null)
     try {
       await desktop.settingsSet(next)
@@ -83,6 +88,23 @@ export function BehaviorCard() {
         <CardDescription>{t("description")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="space-y-0.5">
+            <Label htmlFor="behavior-hide-pip" className="flex items-center gap-2">
+              <MonitorPlay className="size-4" aria-hidden="true" />
+              {t("pictureInPicture.label")}
+            </Label>
+            <p className="text-xs text-muted-foreground">{t("pictureInPicture.help")}</p>
+          </div>
+          <Switch
+            id="behavior-hide-pip"
+            checked={settings.alwaysHidePictureInPicture}
+            onCheckedChange={(v) =>
+              void save({ ...settings, alwaysHidePictureInPicture: Boolean(v) })
+            }
+          />
+        </div>
+
         {/* Screenshot down-scaling */}
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-0.5">

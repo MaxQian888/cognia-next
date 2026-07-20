@@ -89,6 +89,20 @@ describe("BehaviorCard", () => {
     )
   })
 
+  it("persists the global picture-in-picture visibility preference", async () => {
+    render(<BehaviorCard />)
+    const toggle = await screen.findByRole("switch", {
+      name: /always hide picture in picture/i,
+    })
+    expect(toggle).not.toBeChecked()
+    fireEvent.click(toggle)
+    await waitFor(() =>
+      expect(settingsSet).toHaveBeenCalledWith(
+        expect.objectContaining({ alwaysHidePictureInPicture: true })
+      )
+    )
+  })
+
   it("changing the paste threshold clamps to >= 0 and persists", async () => {
     render(<BehaviorCard />)
     const input = await screen.findByLabelText(/paste threshold/i)
