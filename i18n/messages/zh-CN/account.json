@@ -36,8 +36,12 @@
     "currentPasswordPlaceholder": "当前密码",
     "delete": "删除",
     "deleteBlockedLast": "无法删除唯一的本地账户。",
+    "deleteConfirmPlaceholder": "输入账户名",
+    "deleteConfirmPrompt": "输入「{name}」以确认永久删除。",
     "deleteHeading": "删除账户",
     "deleteHelp": "永久删除此账户及其所有本地数据，此操作无法撤销。",
+    "deleteScheduledInline": "已排定删除——点撤销可保留。",
+    "deleteScheduledToast": "正在删除「{name}」",
     "description": "创建、重命名和移除此设备上的本地账户。",
     "editDisplayNameLabel": "账户名称",
     "empty": "选择账户",
@@ -70,6 +74,7 @@
     "tabProfile": "资料",
     "tabSecurity": "安全",
     "title": "本地账户",
+    "undo": "撤销",
     "updatedAtLabel": "更新于"
   },
   "passwordStrength": {

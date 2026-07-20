@@ -1462,8 +1462,12 @@
       "currentPasswordPlaceholder": "当前密码",
       "delete": "删除",
       "deleteBlockedLast": "无法删除唯一的本地账户。",
+      "deleteConfirmPlaceholder": "输入账户名",
+      "deleteConfirmPrompt": "输入「{name}」以确认永久删除。",
       "deleteHeading": "删除账户",
       "deleteHelp": "永久删除此账户及其所有本地数据，此操作无法撤销。",
+      "deleteScheduledInline": "已排定删除——点撤销可保留。",
+      "deleteScheduledToast": "正在删除「{name}」",
       "description": "创建、重命名和移除此设备上的本地账户。",
       "editDisplayNameLabel": "账户名称",
       "empty": "选择账户",
@@ -1496,6 +1500,7 @@
       "tabProfile": "资料",
       "tabSecurity": "安全",
       "title": "本地账户",
+      "undo": "撤销",
       "updatedAtLabel": "更新于"
     },
     "passwordStrength": {
@@ -2075,6 +2080,7 @@
         "disabledTooltip": "此平台不支持，请改用本机 VS Code。",
         "downloading": "正在下载 VS Code… {percent}%",
         "errorTitle": "无法启动 VS Code",
+        "openFileFailed": "无法在 VS Code 中打开文件：{error}",
         "retry": "重试",
         "starting": "正在启动 VS Code…",
         "switchLabel": "编辑器引擎",
@@ -2910,6 +2916,10 @@
         "help": "超过该字符数的输入操作改走剪贴板粘贴，而不是逐键输入。0 表示禁用。",
         "label": "粘贴阈值（字符数）"
       },
+      "pictureInPicture": {
+        "help": "阻止桌面自动化活动浮层显示在当前对话上方。",
+        "label": "始终隐藏画中画"
+      },
       "scaling": {
         "help": "发送给模型前将截图缩放到目标尺寸内。可提升点击精度并降低 token 成本（推荐 1280×800）。",
         "label": "截图降采样",
@@ -3079,6 +3089,21 @@
         "whitelist": "白名单"
       }
     },
+    "pictureInPicture": {
+      "activity": "当前操作：{action}",
+      "close": "关闭",
+      "done": "已完成",
+      "failed": "桌面自动化操作失败",
+      "hide": "隐藏画中画",
+      "justNow": "刚刚",
+      "move": "移动画中画",
+      "screenAlt": "桌面自动化画面",
+      "secondsAgo": "{seconds} 秒前",
+      "show": "显示画中画",
+      "title": "桌面自动化",
+      "viewLarger": "查看大图",
+      "waitingForFrame": "正在等待第一张截图……"
+    },
     "sandboxConnections": {
       "addConnection": "添加连接",
       "cancel": "取消",
@@ -3164,6 +3189,7 @@
     "actions": {
       "back": "后退",
       "cancelSelect": "取消选择",
+      "find": "查找",
       "forward": "前进",
       "openExternal": "在外部浏览器打开",
       "reload": "刷新",
@@ -3267,6 +3293,19 @@
     "errors": {
       "navigate": "无法导航到该地址"
     },
+    "find": {
+      "close": "关闭查找",
+      "count": "{current}/{total}",
+      "next": "下一个",
+      "noMatches": "无匹配",
+      "placeholder": "在页面中查找",
+      "previous": "上一个"
+    },
+    "history": {
+      "clear": "清空历史",
+      "empty": "暂无最近页面",
+      "label": "历史"
+    },
     "loading": {
       "label": "页面加载中",
       "title": "正在加载 {host}…"
@@ -3275,12 +3314,17 @@
       "collapse": "收起",
       "details": "详情"
     },
+    "rail": {
+      "label": "元素审阅"
+    },
     "record": {
       "addAssertion": "断言文本…",
       "assertionPlaceholder": "预期出现的文本",
+      "collapse": "折叠录制面板",
       "delete": "删除流程",
       "deleted": "流程已删除",
       "empty": "在页面上操作 —— 你的点击、输入和按键都会记录到这里。",
+      "expand": "展开录制面板",
       "export": "导出",
       "exportAgent": "发送到对话",
       "exportJson": "流程 JSON",
@@ -3308,9 +3352,18 @@
       "startHint": "请先加载页面",
       "step": {
         "click": "点击 {target}",
+        "direction": {
+          "down": "下",
+          "left": "左",
+          "right": "右",
+          "up": "上"
+        },
+        "doubleClick": "双击 {target}",
         "fill": "填写 {target}",
+        "hover": "悬停在 {target}",
         "navigate": "打开 {url}",
         "pressKey": "按下 {key}",
+        "scroll": "向{direction}滚动 {amount}px",
         "secret": "填写 {target}（密钥）",
         "select": "在 {target} 中选择 {value}",
         "waitFor": "预期出现「{text}」"
@@ -3323,6 +3376,7 @@
       "canvas": "远程浏览器画布",
       "closePage": "关闭页面",
       "error": "远程浏览器不可用（{code}）",
+      "find": "在页面中查找",
       "humanControl": "由你控制",
       "takeover": "接管控制",
       "untitledPage": "未命名页面",
@@ -3339,6 +3393,12 @@
     "title": "浏览器",
     "url": {
       "placeholder": "http://localhost:3000"
+    },
+    "zoom": {
+      "in": "放大",
+      "level": "{percent}%",
+      "out": "缩小",
+      "reset": "重置缩放"
     }
   },
   "canvas": {
@@ -3779,8 +3839,20 @@
       "emptyTitle": "CCSwitch 中没有服务商",
       "errorTitle": "无法列出服务商",
       "headerHint": "CCSwitch 是这些记录的唯一编辑入口 — 添加 / 改名 / 删除请回到 CCSwitch。",
+      "importQuota": "导入额度",
       "model": "模型",
       "officialEndpoint": "Anthropic 官方端点",
+      "quotaImportErrorTitle": "未导入额度元数据",
+      "quotaImportFailed": "无法保存导入的额度源：{error}",
+      "quotaImportReason": {
+        "invalid-endpoint": "额度接口地址缺失或无效。",
+        "missing-credentials": "CCSwitch 记录中没有该额度接口所需的凭证。",
+        "missing-script": "该服务商没有 CCSwitch 额度元数据。",
+        "unsupported-provider": "该服务商需要原生签名或其他暂不支持的认证流程。",
+        "unsupported-template": "只能导入已识别的声明式 CCSwitch 额度模板；不会执行任意 JavaScript。"
+      },
+      "quotaImportSuccess": "已把 {name} 导入为默认关闭的自定义额度源。请在订阅设置中检查后再显式启用。",
+      "quotaImportSuccessTitle": "已导入额度元数据",
       "refresh": "刷新",
       "useHere": "在此使用",
       "useHereAndIn": "在此并同步至…"
@@ -4364,6 +4436,7 @@
       "memoryOn": "开启",
       "memoryUse": "在此对话使用记忆",
       "noApiKey": "未配置 API Key",
+      "openBrowser": "打开浏览器面板",
       "permissionModeAppDefault": "使用应用默认",
       "permissionModeLabel": "权限模式",
       "pickDirAria": "选择目录",
@@ -12520,6 +12593,8 @@
       "look": {
         "description": "在不改变身份的前提下重新装扮宠物。",
         "descriptionLive2d": "预览并微调当前使用的 Live2D 模型。",
+        "descriptionSprite": "预览当前 AI 生成的 v2 精灵图宠物。",
+        "spriteManagedBelow": "可在下方“外观”区域创建、导入和切换 v2 精灵图宠物。",
         "title": "造型"
       },
       "openSettings": "打开完整宠物设置",
@@ -15833,6 +15908,7 @@
     "eventSourcePlaceholder": "留空则匹配任意来源",
     "eventType": "事件类型",
     "eventTypeCustomLabel": "自定义事件类型…",
+    "eventTypePlaceholder": "例如 message.created、workflow.completed",
     "eventTypePresetLabel": "内置事件类型",
     "eventTypePresets": {
       "agent:completed": "代理任务完成",
@@ -16122,6 +16198,7 @@
         "objectivePlaceholder": "这个目标要完成什么？",
         "timeoutMinutes": "超时 (分钟)"
       },
+      "jsonPlaceholder": "'{'\"key\": \"value\"'}'",
       "maxTurns": "最大轮次",
       "maxTurnsPlaceholder": "1–100",
       "mcp": {
@@ -22233,6 +22310,7 @@
         "label": "皮肤",
         "options": {
           "live2d": "Live2D 模型",
+          "sprite-v2": "AI 精灵图（v2）",
           "svg": "矢量吉祥物"
         }
       },
@@ -22248,6 +22326,29 @@
         "volume": {
           "label": "音量（{value}%）"
         }
+      },
+      "spriteV2": {
+        "activate": "使用",
+        "active": "使用中",
+        "agentPrompt": {
+          "concept": "宠物设定：{concept}",
+          "defaultConcept": "一只适合 Cognia 的友好自定义宠物",
+          "instruction": "使用 $hatch-pet skill 创建一个与 Codex 兼容的 v2 动画宠物。",
+          "outputFiles": "保留最终的 pet.json 和 spritesheet.webp 文件，并报告它们的绝对路径。",
+          "qa": "完成所有必需的动画行和质量检查关卡。",
+          "scope": "这是为 Cognia 的 v2 精灵图导入器生成的；不要修改 Cognia 源代码。"
+        },
+        "conceptLabel": "描述你的宠物",
+        "conceptPlaceholder": "一只戴青绿色围巾的迷你黏土狐狸……",
+        "create": "前往聊天继续",
+        "createDescription": "使用已安装的 hatch-pet skill 准备智能体任务草稿；请在聊天中确认并发送，以继续生成和质量检查。",
+        "createTitle": "AI 外观孵化室",
+        "delete": "删除 {name}",
+        "empty": "还没有安装 v2 精灵图宠物。",
+        "import": "导入 v2 精灵图宠物",
+        "importHint": "同时选择 pet.json 与对应的 spritesheet.webp 或 spritesheet.png。安装前 Cognia 会校验 v2 清单和 1536×2288 图集。",
+        "installed": "精灵图宠物已安装并启用。",
+        "invalid": "这不是有效的 Codex 兼容 v2 宠物包。请检查清单、图片格式与图集尺寸。"
       },
       "title": "宠物",
       "twinAwareness": {
@@ -23721,6 +23822,7 @@
     "dialogTitle": "生成分享链接",
     "done": "完成",
     "errorGeneric": "创建分享链接失败。",
+    "errorTooLarge": "分享内容过大，请移除部分图片或导出到本地。",
     "limit": {
       "burn": "阅后即焚",
       "count": "限制次数",
@@ -23883,21 +23985,22 @@
     },
     "actions": {
       "addDomain": "添加域名",
-      "approveTool": "批准当前工具文件",
       "build": "构建保存版本",
       "cancel": "取消",
       "confirmDeleteMetadata": "删除元数据",
       "confirmPurge": "清除托管资源",
       "create": "创建站点",
+      "creating": "创建中…",
       "deleteMetadata": "删除站点元数据",
       "deploy": "部署",
       "loadAnalytics": "加载最近 24 小时分析",
       "loadLogs": "加载最近 24 小时日志",
+      "newSite": "新建站点",
       "preview": "启动预览",
       "provision": "配置资源绑定",
       "purge": "清除托管资源",
       "reconcile": "对账服务商状态",
-      "refresh": "刷新站点",
+      "redetectWrangler": "重新检测 Wrangler",
       "remove": "移除",
       "restore": "恢复",
       "rollback": "重新部署 / 回滚",
@@ -23908,6 +24011,9 @@
       "stopPreview": "停止预览",
       "takeDown": "下线",
       "upload": "上传版本"
+    },
+    "advanced": {
+      "title": "高级配置"
     },
     "authoring": {
       "accountsPlaceholder": "每行填写一个 Cognia 账户 ID",
@@ -23933,9 +24039,11 @@
     },
     "create": {
       "accountId": "Cloudflare 账户 ID",
+      "description": "将项目的构建产物发布到 Cloudflare Workers。",
       "name": "站点名称",
       "project": "项目",
       "subpath": "源码子路径（可选）",
+      "title": "新建站点",
       "workerName": "Worker 名称"
     },
     "deploymentStatus": {
@@ -24018,24 +24126,48 @@
       "token": "Cloudflare API 令牌",
       "worker": "Worker"
     },
+    "publish": {
+      "noVersions": "请先构建一个版本以上传并部署。"
+    },
+    "sidebarEmpty": "还没有站点，创建一个开始吧。",
+    "stepState": {
+      "done": "完成",
+      "failed": "需处理",
+      "idle": "未开始",
+      "running": "进行中"
+    },
+    "steps": {
+      "build": {
+        "description": "配置资源绑定并构建不可变版本。",
+        "title": "构建"
+      },
+      "connect": {
+        "description": "验证并保存该站点的 API 令牌。",
+        "title": "连接 Cloudflare"
+      },
+      "environment": {
+        "description": "保存构建所需的变量与密钥。",
+        "title": "环境变量"
+      },
+      "preview": {
+        "description": "发布前在本地运行构建产物。",
+        "title": "预览"
+      },
+      "publish": {
+        "description": "上传版本并部署到生产环境。",
+        "title": "发布"
+      }
+    },
     "subtitle": "在 Cognia 中构建、预览与发布",
-    "tabs": {
-      "access": "访问控制",
-      "build": "构建与预览",
-      "domains": "域名",
-      "observability": "日志与分析",
-      "provider": "服务商",
-      "versions": "版本"
-    },
     "title": "站点",
-    "versionStatus": {
-      "building": "构建中",
-      "failed": "失败",
-      "ready": "就绪"
-    },
     "versions": {
-      "version": "版本 {sequence}",
-      "wranglerPath": "已批准 Wrangler 二进制文件的绝对路径"
+      "version": "版本 {sequence}"
+    },
+    "wrangler": {
+      "detecting": "正在检测 Wrangler CLI…",
+      "installHint": "用 npm i -g wrangler 安装后重新检测。",
+      "notFound": "未在此主机找到 Wrangler CLI。",
+      "ready": "Wrangler 就绪（{version}）。"
     }
   },
   "skills": {
@@ -25187,13 +25319,16 @@
       "add": "添加自定义源",
       "cancel": "取消",
       "description": "通过描述余额/用量接口，把任意 CodingPlan 或中转提供商接入限额面板——无需写代码。",
+      "disableSource": "关闭 {name} 的额度查询",
       "edit": "编辑",
       "empty": "暂无自定义源。",
+      "enableSource": "启用 {name} 的额度查询",
       "fields": {
         "auth": "鉴权方式",
         "authBearer": "Bearer 令牌",
         "authRaw": "原始密钥（无前缀）",
         "baseUrl": "基础 URL",
+        "enabled": "保存后立即启用",
         "extraHeaderName": "额外请求头（名称）",
         "extraHeaderValue": "额外请求头（值）",
         "kind": "读取类型",
@@ -25202,6 +25337,7 @@
         "name": "名称",
         "namePlaceholder": "我的中转",
         "path": "请求路径",
+        "refreshMinutes": "最短刷新间隔（分钟）",
         "remainingPath": "剩余字段路径",
         "resetAtPath": "重置时间路径",
         "scale": "缩放系数",
@@ -25218,8 +25354,12 @@
         "custom": "自定义（空白）",
         "genericBalance": "通用余额",
         "githubCopilot": "GitHub Copilot",
+        "glmCoding": "GLM 编程套餐",
+        "kimiCoding": "Kimi 编程套餐",
         "label": "预设模板",
-        "newApi": "New-API 中转（one-api）"
+        "minimaxTokenPlan": "MiniMax Token Plan",
+        "newApi": "New-API 中转（one-api）",
+        "zenmux": "ZenMux 编程套餐"
       },
       "remove": "删除",
       "save": "保存",
@@ -25251,6 +25391,14 @@
       "noMeters": "该账号未上报任何限额窗口。",
       "noValue": "—",
       "percentUsed": "已用 {pct}%",
+      "query": {
+        "disable": "关闭额度查询",
+        "disabledBody": "启用当前账号前不会向提供商发送请求。仅在你接受提供商、中转站及网络路径风险时开启。",
+        "disabledTitle": "网络额度查询已关闭",
+        "enable": "启用额度查询",
+        "enabledBody": "当前账号可以查询提供商或中转站额度；请求会合并、节流，并在限流后自动退避。",
+        "enabledTitle": "网络额度查询已启用"
+      },
       "refresh": "刷新",
       "resetExpired": "即将重置",
       "resetsInHm": "{hours} 小时 {minutes} 分后重置",
@@ -25399,6 +25547,8 @@
     "overview": {
       "noDataBody": "点击刷新可直接从 Anthropic 免费用量接口获取额度——不消耗 token，也无需先发消息。",
       "noDataTitle": "暂无用量数据",
+      "officialQuotaDisabledBody": "仅在你接受上游兼容性和网络路径风险时前往订阅设置启用。正常工作产生的被动用量仍可显示。",
+      "officialQuotaDisabledTitle": "官方额度查询已关闭",
       "refresh": "刷新",
       "signInCta": "登录",
       "signedOutBody": "登录 Claude 账号即可监控 5 小时 / 7 天速率限制窗口。",
