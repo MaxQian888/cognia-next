@@ -28,6 +28,7 @@ import { A2UISurface } from "@/components/a2ui/a2ui-surface"
 import type { A2UIComponent, A2UISurfaceType } from "@/types/a2ui/schema"
 import type { SharePayload } from "@/lib/share/types"
 import type { SharedDiscoverDefinition } from "@/lib/share/discover-item"
+import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 
 export function PayloadView({ payload, className }: { payload: SharePayload; className?: string }) {
   switch (payload.kind) {
@@ -40,6 +41,7 @@ export function PayloadView({ payload, className }: { payload: SharePayload; cla
     case "chat-animated":
       return <HtmlFrame html={payload.data} allowScripts className={className} />
     case "chat-md":
+      return <MarkdownText text={payload.data} title={payload.title} className={className} />
     case "chat-json":
     case "chat-text":
       return <PreText text={payload.data} title={payload.title} className={className} />
@@ -59,6 +61,27 @@ export function PayloadView({ payload, className }: { payload: SharePayload; cla
     case "discover-item":
       return <DiscoverItemView payload={payload} className={className} />
   }
+}
+
+function MarkdownText({
+  text,
+  title,
+  className,
+}: {
+  text: string
+  title?: string
+  className?: string
+}) {
+  return (
+    <article className={cn("mx-auto w-full max-w-3xl", className)}>
+      {title ? <h1 className="mb-4 text-xl font-semibold text-foreground">{title}</h1> : null}
+      <MarkdownRenderer
+        content={text}
+        enableEnhancedImages={false}
+        className="rounded-lg border border-border bg-muted/20 p-4"
+      />
+    </article>
+  )
 }
 
 function DiscoverItemView({ payload, className }: { payload: SharePayload; className?: string }) {

@@ -12,14 +12,26 @@ jest.mock("@/lib/share/client", () => {
       this.name = "ShareNotConfiguredError"
     }
   }
+  class SharePayloadTooLargeError extends Error {}
+  class ShareRequestError extends Error {
+    constructor(readonly status: number) {
+      super(`HTTP ${status}`)
+    }
+  }
   return {
     createShareLink: (...a: unknown[]) => mockCreate(...a),
     revokeShareLink: (...a: unknown[]) => mockRevoke(...a),
     ShareNotConfiguredError,
+    SharePayloadTooLargeError,
+    ShareRequestError,
   }
 })
 
-import { ShareNotConfiguredError } from "@/lib/share/client"
+import {
+  ShareNotConfiguredError,
+  SharePayloadTooLargeError,
+  ShareRequestError,
+} from "@/lib/share/client"
 
 const PAYLOAD: SharePayload = {
   kind: "chat-html",
@@ -110,6 +122,18 @@ describe("ShareLinkDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create link" }))
     expect(await screen.findByText("Could not create the share link.")).toBeInTheDocument()
   })
+
+  it.each([new SharePayloadTooLargeError(11, 10), new ShareRequestError(413, "too large")])(
+    "explains how to recover from an oversized multi-image share",
+    async (error) => {
+      mockCreate.mockRejectedValue(error)
+      open()
+      fireEvent.click(screen.getByRole("button", { name: "Create link" }))
+      expect(
+        await screen.findByText("This share is too large. Remove some images or export it locally.")
+      ).toBeInTheDocument()
+    }
+  )
 
   it("previews the payload locally without creating a link", async () => {
     open()

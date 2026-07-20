@@ -9,7 +9,9 @@ import {
   revokeShareLink,
   getShareStats,
   ShareNotConfiguredError,
+  SharePayloadTooLargeError,
   ShareRequestError,
+  assertShareRequestSize,
 } from "./client"
 import type { ShareEndpoint } from "./config"
 import { decryptShareEnvelope } from "./crypto"
@@ -52,6 +54,11 @@ function mockFetchOnce(status: number, json: unknown): void {
 }
 
 describe("createShareLink", () => {
+  it("rejects an encrypted request body that exceeds the upload limit", () => {
+    expect(() => assertShareRequestSize("12345678901", 10)).toThrow(SharePayloadTooLargeError)
+    expect(() => assertShareRequestSize("1234567890", 10)).not.toThrow()
+  })
+
   it("encrypts, posts the envelope, and returns a url whose #fragment key decrypts it", async () => {
     let posted: ShareEnvelopeV1 | undefined
     fetchMock.mockImplementation(async (_url: string, init: RequestInit) => {

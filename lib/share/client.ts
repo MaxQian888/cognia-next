@@ -37,6 +37,34 @@ export class ShareRequestError extends Error {
   }
 }
 
+/** The share worker's default maximum JSON request size. */
+export const DEFAULT_SHARE_MAX_BODY_BYTES = 10 * 1024 * 1024
+
+/** Raised before upload when the encrypted request cannot fit on the worker. */
+export class SharePayloadTooLargeError extends Error {
+  constructor(
+    readonly actualBytes: number,
+    readonly maxBytes: number
+  ) {
+    super(`Encrypted share request is ${actualBytes} bytes; maximum is ${maxBytes} bytes`)
+    this.name = "SharePayloadTooLargeError"
+  }
+}
+
+export function assertShareRequestSize(
+  serializedBody: string,
+  maxBytes = DEFAULT_SHARE_MAX_BODY_BYTES
+): void {
+  let actualBytes = 0
+  for (const character of serializedBody) {
+    const codePoint = character.codePointAt(0) ?? 0
+    actualBytes += codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4
+  }
+  if (actualBytes > maxBytes) {
+    throw new SharePayloadTooLargeError(actualBytes, maxBytes)
+  }
+}
+
 export interface CreateShareInput {
   payload: SharePayload
   ttlSeconds?: number
@@ -101,11 +129,13 @@ export async function createShareLink(
     maxViews: input.burnAfterRead ? 1 : input.maxViews,
     burnAfterRead: input.burnAfterRead,
   }
+  const serializedBody = JSON.stringify(body)
+  assertShareRequestSize(serializedBody)
 
   const res = await fetch(`${ep.baseUrl}/v1/share`, {
     method: "POST",
     headers,
-    body: JSON.stringify(body),
+    body: serializedBody,
   })
   if (!res.ok) throw new ShareRequestError(res.status, await readError(res))
 

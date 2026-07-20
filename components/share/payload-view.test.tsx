@@ -39,10 +39,25 @@ describe("PayloadView", () => {
     expect(frame.getAttribute("sandbox")).toBe("allow-scripts")
   })
 
-  it("renders text formats as preformatted text", () => {
-    render(<PayloadView payload={payload({ kind: "chat-md", data: "# title", title: "Doc" })} />)
-    expect(screen.getByText("Doc")).toBeInTheDocument()
-    expect(screen.getByText("# title")).toBeInTheDocument()
+  it("renders shared Markdown with interactive links and images", () => {
+    render(
+      <PayloadView
+        payload={payload({
+          kind: "chat-md",
+          data: "# title\n\n[Docs](https://example.com)\n\n![Plot](data:image/png;base64,YQ==)",
+          title: "Doc",
+        })}
+      />
+    )
+    expect(screen.getByRole("heading", { name: "title" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Docs" })).toHaveAttribute(
+      "href",
+      "https://example.com"
+    )
+    expect(screen.getByRole("img", { name: "Plot" })).toHaveAttribute(
+      "src",
+      "data:image/png;base64,YQ=="
+    )
   })
 
   it("renders untitled text without a heading", () => {
