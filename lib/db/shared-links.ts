@@ -82,6 +82,11 @@ export async function markSharedLinkRevoked(code: string): Promise<void> {
   await getDb().sharedLinks.where("code").equals(code).modify({ revoked: true })
 }
 
+/** Update the local mirror's cached expiry after a successful worker renew. */
+export async function updateSharedLinkExpiry(code: string, expiresAt: number): Promise<void> {
+  await getDb().sharedLinks.where("code").equals(code).modify({ expiresAt })
+}
+
 export async function deleteSharedLink(code: string): Promise<void> {
   await getDb().sharedLinks.where("code").equals(code).delete()
 }

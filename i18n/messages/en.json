@@ -4495,6 +4495,7 @@
       "systemPromptPlaceholder": "Empty = use global default",
       "title": "Session settings",
       "tokensLabel": "{input} in / {output} out",
+      "unreadArtifacts": "New artifacts — open panel",
       "untitledSession": "(untitled)",
       "workingDirLabel": "Working directory",
       "workingDirPlaceholder": "/path/to/project"
@@ -23862,6 +23863,9 @@
       "never": "Never",
       "open": "Open",
       "passphraseBadge": "Passphrase",
+      "renew": "Extend expiry",
+      "renewError": "Could not extend the link.",
+      "renewed": "Link extended — now expires {date}.",
       "revoke": "Revoke",
       "statsError": "Could not load view stats.",
       "title": "My shared links",

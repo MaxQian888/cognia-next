@@ -4495,6 +4495,7 @@
       "systemPromptPlaceholder": "留空则使用全局默认",
       "title": "会话设置",
       "tokensLabel": "{input} in / {output} out",
+      "unreadArtifacts": "有新产物 · 展开面板",
       "untitledSession": "（未命名）",
       "workingDirLabel": "工作目录",
       "workingDirPlaceholder": "/path/to/project"
@@ -23862,6 +23863,9 @@
       "never": "永久",
       "open": "打开",
       "passphraseBadge": "口令保护",
+      "renew": "延长有效期",
+      "renewError": "无法延长链接有效期。",
+      "renewed": "已延长——现于 {date} 过期。",
       "revoke": "撤销",
       "statsError": "无法加载查看统计。",
       "title": "我的分享链接",

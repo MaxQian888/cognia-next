@@ -6,11 +6,12 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { CopyIcon, ExternalLinkIcon, EyeIcon, Trash2Icon } from "lucide-react"
+import { CalendarClockIcon, CopyIcon, ExternalLinkIcon, EyeIcon, Trash2Icon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { listSharedLinks } from "@/lib/db/shared-links"
 import { revokeShareLink, getShareStats } from "@/lib/share/client"
+import { extendShareLink } from "@/lib/share/renew"
 import { toast } from "sonner"
 import { createLogger } from "@cognia/logging"
 
@@ -21,6 +22,7 @@ export function MySharesPanel() {
   // Reactive: revoking a link flips its Dexie row and this list re-renders.
   const rows = useLiveQuery(() => listSharedLinks(), [])
   const [revoking, setRevoking] = useState<string | null>(null)
+  const [renewing, setRenewing] = useState<string | null>(null)
   // Lazily fetched per-link view counts (avoid N network calls on mount).
   const [views, setViews] = useState<Record<string, number>>({})
   const [loadingStats, setLoadingStats] = useState<string | null>(null)
@@ -41,6 +43,23 @@ export function MySharesPanel() {
       toast.error(t("statsError"))
     } finally {
       setLoadingStats(null)
+    }
+  }
+
+  // Extend a link's lifetime to a week from now (the worker clamps to its
+  // hard ceiling). A fresh window is simpler than "add N days" and matches the
+  // worker's set-from-now semantics.
+  const RENEW_SECONDS = 7 * 24 * 60 * 60
+  const onRenew = async (code: string) => {
+    setRenewing(code)
+    try {
+      const expiresAt = await extendShareLink(code, RENEW_SECONDS)
+      toast.success(t("renewed", { date: new Date(expiresAt).toLocaleDateString() }))
+    } catch (err) {
+      log.error("renew-failed", { error: err instanceof Error ? err.message : String(err) })
+      toast.error(t("renewError"))
+    } finally {
+      setRenewing(null)
     }
   }
 
@@ -118,6 +137,15 @@ export function MySharesPanel() {
               <a href={row.url} target="_blank" rel="noreferrer">
                 <ExternalLinkIcon className="size-4" />
               </a>
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={t("renew")}
+              disabled={renewing === row.code}
+              onClick={() => void onRenew(row.code)}
+            >
+              <CalendarClockIcon className="size-4" />
             </Button>
             <Button
               variant="ghost"

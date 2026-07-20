@@ -9,6 +9,7 @@
   "dialogTitle": "Share via link",
   "done": "Done",
   "errorGeneric": "Could not create the share link.",
+  "errorTooLarge": "This share is too large. Remove some images or export it locally.",
   "limit": {
     "burn": "Burn after reading",
     "count": "Limit views",
@@ -40,6 +41,9 @@
     "never": "Never",
     "open": "Open",
     "passphraseBadge": "Passphrase",
+    "renew": "Extend expiry",
+    "renewError": "Could not extend the link.",
+    "renewed": "Link extended — now expires {date}.",
     "revoke": "Revoke",
     "statsError": "Could not load view stats.",
     "title": "My shared links",

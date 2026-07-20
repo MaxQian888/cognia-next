@@ -188,6 +188,47 @@ describe("delete", () => {
   })
 })
 
+describe("renew", () => {
+  function patch(body: unknown, ownerToken?: string): RequestInit {
+    return {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        ...(ownerToken ? { "X-Owner-Token": ownerToken } : {}),
+      },
+      body: JSON.stringify(body),
+    }
+  }
+
+  it("extends the expiry with the owner token", async () => {
+    const { code, ownerToken } = await create({ ttlSeconds: 60 })
+    const before = await run(req(`/v1/share/${code}/stats`, owner("GET", ownerToken)))
+    const beforeExpiry = (await before.json<{ expiresAt: number }>()).expiresAt
+
+    const res = await run(req(`/v1/share/${code}`, patch({ ttlSeconds: 3600 }, ownerToken)))
+    expect(res.status).toBe(200)
+    const { expiresAt } = await res.json<{ expiresAt: number }>()
+    expect(expiresAt).toBeGreaterThan(beforeExpiry)
+
+    const after = await run(req(`/v1/share/${code}/stats`, owner("GET", ownerToken)))
+    expect((await after.json<{ expiresAt: number }>()).expiresAt).toBe(expiresAt)
+  })
+
+  it("rejects renew without the owner token", async () => {
+    const { code } = await create({ ttlSeconds: 60 })
+    expect((await run(req(`/v1/share/${code}`, patch({ ttlSeconds: 3600 })))).status).toBe(401)
+  })
+
+  it("400s when ttlSeconds is missing", async () => {
+    const { code, ownerToken } = await create({ ttlSeconds: 60 })
+    expect((await run(req(`/v1/share/${code}`, patch({}, ownerToken)))).status).toBe(400)
+  })
+
+  it("404s for an unknown code", async () => {
+    expect((await run(req(`/v1/share/unknown-code`, patch({ ttlSeconds: 3600 })))).status).toBe(404)
+  })
+})
+
 describe("cors + size guards", () => {
   it("answers preflight", async () => {
     const res = await run(req("/v1/share", { method: "OPTIONS" }))

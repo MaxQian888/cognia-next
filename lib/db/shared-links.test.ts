@@ -7,6 +7,7 @@ import {
   listSharedLinks,
   getSharedLinkByCode,
   markSharedLinkRevoked,
+  updateSharedLinkExpiry,
   deleteSharedLink,
   pruneExpiredSharedLinks,
   type SharedLinkRow,
@@ -67,6 +68,14 @@ describe("markSharedLinkRevoked / deleteSharedLink", () => {
     await recordSharedLink(input("Y"))
     await deleteSharedLink("Y")
     expect(await getSharedLinkByCode("Y")).toBeUndefined()
+  })
+})
+
+describe("updateSharedLinkExpiry", () => {
+  it("updates the cached expiry for a code", async () => {
+    await recordSharedLink(input("Z", { expiresAt: 1000 }))
+    await updateSharedLinkExpiry("Z", 9_000_000_000_000)
+    expect((await getSharedLinkByCode("Z"))?.expiresAt).toBe(9_000_000_000_000)
   })
 })
 

@@ -14,9 +14,18 @@ jest.mock("@/lib/share/client", () => ({
   getShareStats: (code: string) => getShareStats(code),
 }))
 
+const extendShareLink = jest.fn()
+jest.mock("@/lib/share/renew", () => ({
+  extendShareLink: (...a: unknown[]) => extendShareLink(...a),
+}))
+
 const toastError = jest.fn()
+const toastSuccess = jest.fn()
 jest.mock("sonner", () => ({
-  toast: { success: jest.fn(), error: (...a: unknown[]) => toastError(...a) },
+  toast: {
+    success: (...a: unknown[]) => toastSuccess(...a),
+    error: (...a: unknown[]) => toastError(...a),
+  },
 }))
 
 beforeEach(async () => {
@@ -133,5 +142,33 @@ describe("MySharesPanel", () => {
     await waitFor(() => expect(revokeShareLink).toHaveBeenCalledWith("AbC"))
     // Revoke failed → the row stays.
     expect(screen.getByText("My chat")).toBeInTheDocument()
+  })
+
+  it("extends a link's expiry by a week", async () => {
+    extendShareLink.mockResolvedValueOnce(1_900_000_000_000)
+    await seed()
+    render(<MySharesPanel />)
+    await screen.findByText("My chat")
+    fireEvent.click(screen.getByRole("button", { name: "Extend expiry" }))
+    await waitFor(() => expect(extendShareLink).toHaveBeenCalledWith("AbC", 7 * 24 * 60 * 60))
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
+  })
+
+  it("toasts an error when extending fails", async () => {
+    extendShareLink.mockRejectedValueOnce(new Error("network"))
+    await seed()
+    render(<MySharesPanel />)
+    await screen.findByText("My chat")
+    fireEvent.click(screen.getByRole("button", { name: "Extend expiry" }))
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+  })
+
+  it("toasts an error when extending rejects with a non-Error value", async () => {
+    extendShareLink.mockRejectedValueOnce("boom")
+    await seed()
+    render(<MySharesPanel />)
+    await screen.findByText("My chat")
+    fireEvent.click(screen.getByRole("button", { name: "Extend expiry" }))
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
   })
 })

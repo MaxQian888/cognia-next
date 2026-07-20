@@ -57,7 +57,7 @@ const OWNER_TOKEN_BYTES = 32
 const CORS_HEADERS: Record<string, string> = {
   // The bearer secret — not cookies — is the gate, so a wildcard origin is safe.
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Owner-Token",
   "Access-Control-Max-Age": "86400",
 }
@@ -282,6 +282,40 @@ async function handleStats(request: Request, env: Env, code: string): Promise<Re
   })
 }
 
+/**
+ * Extend a share's lifetime (owner-only). Sets a fresh window of `ttlSeconds`
+ * from now, clamped to the hard `maxTtl` ceiling, and re-arms the KV
+ * `expirationTtl` so the metadata row survives that long. Owner-token gated —
+ * possessing the global upload secret never renews another tenant's share.
+ */
+async function handleRenew(request: Request, env: Env, code: string): Promise<Response> {
+  const meta = await readMeta(env, code)
+  if (!meta) return json({ error: "not found" }, 404)
+  if (meta.expiresAt && Date.now() >= meta.expiresAt) {
+    await deleteShare(env, code)
+    return json({ error: "not found" }, 404)
+  }
+  if (!isShareOwner(request, meta, env)) return json({ error: "unauthorized" }, 401)
+
+  let body: { ttlSeconds?: number }
+  try {
+    body = JSON.parse(await request.text())
+  } catch {
+    return json({ error: "invalid json" }, 400)
+  }
+  const requested =
+    typeof body.ttlSeconds === "number" && body.ttlSeconds > 0 ? body.ttlSeconds : undefined
+  if (!requested) return json({ error: "ttlSeconds required" }, 400)
+
+  const ttl = Math.min(requested, maxTtlSeconds(env))
+  const expiresAt = Date.now() + ttl * 1000
+  const updated: ShareMeta = { ...meta, expiresAt }
+  await env.SHARE_KV.put(`meta:${code}`, JSON.stringify(updated), {
+    expirationTtl: Math.max(ttl, KV_MIN_TTL_SECONDS),
+  })
+  return json({ expiresAt })
+}
+
 async function handleDelete(request: Request, env: Env, code: string): Promise<Response> {
   const meta = await readMeta(env, code)
   // Already gone (expired / burned / never existed) → idempotent success
@@ -317,6 +351,8 @@ export default {
         if (request.method === "GET") return handleStats(request, env, code)
       } else if (request.method === "GET") {
         return handleRead(env, code, ctx)
+      } else if (request.method === "PATCH") {
+        return handleRenew(request, env, code)
       } else if (request.method === "DELETE") {
         return handleDelete(request, env, code)
       }
