@@ -22,6 +22,7 @@ const EXPECTED = [
   "scheduler",
   "workflow-runtime",
   "agent-team-runtime",
+  "external-agent",
   "automation-policy",
   "audit-retention",
   "storage-retention",

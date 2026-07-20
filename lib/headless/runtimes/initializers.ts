@@ -1,5 +1,5 @@
 /**
- * Headless registrations for the boot initializers (ADR-0059 T-A7..A9).
+ * Headless registrations for the boot initializers (ADR-0059 T-A7..A10).
  *
  * Each entry mirrors one provider/initializer effect body 1:1 — the desktop
  * components keep their own effects (thin, unchanged); the brain starts the
@@ -11,9 +11,6 @@
  * - `subscription-initializer` — keyed to the interactive account unlock and
  *   uses toast i18n; the brain's provider creds arrive via the `claude_set_*`
  *   arms instead (R7).
- * - `external-agent-initializer` — rehydrates the RENDERER-side manager; the
- *   brain drives agents through the service-scope RPC arms (R11) until
- *   T-A10 reroutes acp-client through the transport seam.
  */
 import { registerHeadlessRuntime } from "../registry"
 
@@ -104,6 +101,17 @@ registerHeadlessRuntime({
       import("@/lib/ai/agent/agent-team-runtime-deps"),
     ])
     configureAgentTeamRuntime(buildAgentTeamRuntimeDeps())
+  },
+})
+
+// ── A10: external-agent rehydrate (acp-client routes via the transport seam) ─
+
+registerHeadlessRuntime({
+  name: "external-agent",
+  hosts: ["brain"],
+  start: async () => {
+    const { startExternalAgentRehydration } = await import("@/lib/ai/agent/external/rehydrate")
+    return startExternalAgentRehydration()
   },
 })
 
