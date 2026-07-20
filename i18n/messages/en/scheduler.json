@@ -495,7 +495,7 @@
   },
   "pausedTasks": "Paused",
   "payload": {
-    "jsonPlaceholder": "{\"key\": \"value\"}",
+    "jsonPlaceholder": "'{'\"key\": \"value\"'}'",
     "additionalDirectories": {
       "heading": "Additional directories"
     },
