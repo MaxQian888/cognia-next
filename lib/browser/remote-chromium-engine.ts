@@ -96,4 +96,16 @@ export class RemoteChromiumEngine implements BrowserEngine {
   screenshot(): Promise<Screenshot> {
     return this.call("browser_screenshot")
   }
+  setZoom(zoom: number): Promise<{ ok: boolean; zoom: number }> {
+    return this.call("browser_set_zoom", { zoom })
+  }
+  find(
+    query: string,
+    options?: { forward?: boolean; matchCase?: boolean }
+  ): Promise<{ matches: number; index: number }> {
+    return this.call("browser_find", { query, options })
+  }
+  findClear(): Promise<void> {
+    return this.call("browser_find_clear")
+  }
 }

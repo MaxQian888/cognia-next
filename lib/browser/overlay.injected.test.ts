@@ -48,6 +48,11 @@ type OverlayApi = {
   selectedElements: () => Element[]
   selectedPayloads: () => Record<string, unknown>[]
   snapshot: (options: unknown) => string
+  find: (
+    query: string,
+    options?: { forward?: boolean; matchCase?: boolean }
+  ) => { matches: number; index: number }
+  findClear: () => { matches: number; index: number }
 }
 
 function install(): OverlayApi {
@@ -63,6 +68,61 @@ beforeEach(() => {
   sessionStorage.clear()
   delete (window as unknown as Record<string, unknown>).__cogniaSignal
   delete (window as unknown as Record<string, unknown>).__cogniaSetSelectMode
+})
+
+describe("overlay.injected find-in-page", () => {
+  // jsdom has no CSS Custom Highlight API, so these exercise the <mark> fallback.
+  it("wraps matches in <mark> and reports the count", () => {
+    document.body.innerHTML = `<p>alpha beta alpha gamma</p>`
+    const api = install()
+    expect(api.find("alpha")).toEqual({ matches: 2, index: 0 })
+    expect(document.querySelectorAll("mark[data-cognia-find]")).toHaveLength(2)
+    expect(document.querySelectorAll("mark[data-cognia-find-current]")).toHaveLength(1)
+  })
+
+  it("is case-insensitive by default and case-sensitive on request", () => {
+    document.body.innerHTML = `<p>Foo foo FOO</p>`
+    const api = install()
+    expect(api.find("foo").matches).toBe(3)
+    expect(api.find("foo", { matchCase: true }).matches).toBe(1)
+  })
+
+  it("advances and rewinds the current match without re-wrapping", () => {
+    document.body.innerHTML = `<p>x x x</p>`
+    const api = install()
+    expect(api.find("x")).toEqual({ matches: 3, index: 0 })
+    expect(api.find("x")).toEqual({ matches: 3, index: 1 })
+    expect(api.find("x")).toEqual({ matches: 3, index: 2 })
+    expect(api.find("x")).toEqual({ matches: 3, index: 0 })
+    expect(api.find("x", { forward: false })).toEqual({ matches: 3, index: 2 })
+    expect(document.querySelectorAll("mark[data-cognia-find]")).toHaveLength(3)
+  })
+
+  it("restores the original DOM text when cleared", () => {
+    document.body.innerHTML = `<p>hello world</p>`
+    const api = install()
+    api.find("world")
+    expect(document.querySelector("mark[data-cognia-find]")).not.toBeNull()
+    expect(api.findClear()).toEqual({ matches: 0, index: 0 })
+    expect(document.querySelector("mark[data-cognia-find]")).toBeNull()
+    expect(document.querySelector("p")!.textContent).toBe("hello world")
+  })
+
+  it("skips script/style text and reports zero for an absent query", () => {
+    document.body.innerHTML = `<style>.a{color:red}</style><p>visible</p>`
+    const api = install()
+    expect(api.find("color").matches).toBe(0)
+    expect(api.find("nope")).toEqual({ matches: 0, index: 0 })
+    expect(api.find("visible").matches).toBe(1)
+  })
+
+  it("clears highlights when the query becomes empty", () => {
+    document.body.innerHTML = `<p>keep keep</p>`
+    const api = install()
+    expect(api.find("keep").matches).toBe(2)
+    expect(api.find("")).toEqual({ matches: 0, index: 0 })
+    expect(document.querySelectorAll("mark[data-cognia-find]")).toHaveLength(0)
+  })
 })
 
 describe("overlay.injected cssSelector", () => {
@@ -562,6 +622,17 @@ describe("__cogniaAct", () => {
     const res = JSON.parse(win().__cogniaAct(refFor("button"), "click", "{}"))
     expect(res.ok).toBe(true)
     expect(clicked).toBe(true)
+  })
+  it("replays the native click-click-dblclick sequence", () => {
+    const button = document.getElementById("b") as HTMLButtonElement
+    const events: string[] = []
+    button.addEventListener("click", () => events.push("click"))
+    button.addEventListener("dblclick", () => events.push("dblclick"))
+
+    const res = JSON.parse(win().__cogniaAct(refFor("button"), "double_click", "{}"))
+
+    expect(res.ok).toBe(true)
+    expect(events).toEqual(["click", "click", "dblclick"])
   })
   it("returns an error for an unknown ref", () => {
     const res = JSON.parse(win().__cogniaAct("e999", "click", "{}"))

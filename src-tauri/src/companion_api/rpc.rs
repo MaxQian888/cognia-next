@@ -609,6 +609,9 @@ const KNOWN_COMMANDS: &[&str] = &[
     "browser_screenshot",
     "browser_set_files",
     "browser_downloads",
+    "browser_set_zoom",
+    "browser_find",
+    "browser_find_clear",
 ];
 
 /// Public read-only accessor for the dispatch allowlist. Used by the
@@ -633,6 +636,8 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "browser_wait_for_load",
     "browser_screenshot",
     "browser_downloads",
+    "browser_find",
+    "browser_find_clear",
     "claude_sidecar_status",
     "claude_has_api_key",
     "claude_has_oauth_bearer",
@@ -777,6 +782,7 @@ const CONTROL_COMMANDS: &[&str] = &[
     "browser_switch_page",
     "browser_close_page",
     "browser_set_files",
+    "browser_set_zoom",
     "session_attach",
     "session_detach",
     "goal_pause",

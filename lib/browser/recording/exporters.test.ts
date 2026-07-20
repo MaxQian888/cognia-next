@@ -131,6 +131,32 @@ describe("toPlaywrightSpec", () => {
     expect(spec).toContain('await page.getByRole("combobox", { name: "Plan" }).selectOption("pro")')
   })
 
+  it("exports double-click, hover, and scroll events", () => {
+    const spec = toPlaywrightSpec(
+      flow([
+        { act: "double_click", at: 1, target: target() },
+        { act: "hover", at: 2, target: target() },
+        { act: "scroll", at: 3, direction: "left", amount: 80 },
+      ])
+    )
+
+    expect(spec).toContain(".dblclick()")
+    expect(spec).toContain(".hover()")
+    expect(spec).toContain("await page.mouse.wheel(-80, 0)")
+  })
+
+  it("exports double-click modifiers and vertical scroll direction", () => {
+    const spec = toPlaywrightSpec(
+      flow([
+        { act: "double_click", at: 1, target: target(), modifiers: ["ctrl"] },
+        { act: "scroll", at: 2, direction: "down", amount: 160 },
+      ])
+    )
+
+    expect(spec).toContain('.dblclick({ modifiers: ["Control"] })')
+    expect(spec).toContain("await page.mouse.wheel(0, 160)")
+  })
+
   it("escapes a flow name that would otherwise break the generated source", () => {
     const spec = toPlaywrightSpec(flow([], { name: 'the "quoted" flow' }))
     expect(spec).toContain('test("the \\"quoted\\" flow", async ({ page }) => {')
@@ -166,6 +192,19 @@ describe("toAgentContext", () => {
       flow([{ act: "click", at: 1, target: target(), modifiers: ["ctrl"] }])
     )
     expect(md).toContain("(holding ctrl)")
+  })
+
+  it("describes double-click, hover, and scroll events", () => {
+    const md = toAgentContext(
+      flow([
+        { act: "double_click", at: 1, target: target() },
+        { act: "hover", at: 2, target: target() },
+        { act: "scroll", at: 3, direction: "down", amount: 120 },
+      ])
+    )
+    expect(md).toContain('double-click button "Sign in"')
+    expect(md).toContain('hover button "Sign in"')
+    expect(md).toContain("scroll down by 120px")
   })
 
   it("says so explicitly when nothing was recorded", () => {

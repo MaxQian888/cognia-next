@@ -1148,6 +1148,7 @@ pub fn run() {
             browser::embedded::browser_embed_set_visible,
             browser::embedded::browser_embed_navigate,
             browser::embedded::browser_embed_reload,
+            browser::embedded::browser_embed_set_zoom,
             browser::embedded::browser_embed_set_select_mode,
             browser::embedded::browser_embed_clear_selection,
             browser::embedded::browser_embed_set_panel_labels,

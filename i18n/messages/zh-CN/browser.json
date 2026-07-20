@@ -2,6 +2,7 @@
   "actions": {
     "back": "后退",
     "cancelSelect": "取消选择",
+    "find": "查找",
     "forward": "前进",
     "openExternal": "在外部浏览器打开",
     "reload": "刷新",
@@ -105,6 +106,19 @@
   "errors": {
     "navigate": "无法导航到该地址"
   },
+  "find": {
+    "close": "关闭查找",
+    "count": "{current}/{total}",
+    "next": "下一个",
+    "noMatches": "无匹配",
+    "placeholder": "在页面中查找",
+    "previous": "上一个"
+  },
+  "history": {
+    "clear": "清空历史",
+    "empty": "暂无最近页面",
+    "label": "历史"
+  },
   "loading": {
     "label": "页面加载中",
     "title": "正在加载 {host}…"
@@ -113,10 +127,15 @@
     "collapse": "收起",
     "details": "详情"
   },
+  "rail": {
+    "label": "元素审阅"
+  },
   "record": {
     "addAssertion": "断言文本…",
     "assertionPlaceholder": "预期出现的文本",
+    "collapse": "折叠录制面板",
     "empty": "在页面上操作 —— 你的点击、输入和按键都会记录到这里。",
+    "expand": "展开录制面板",
     "export": "导出",
     "exportAgent": "发送到对话",
     "exportJson": "流程 JSON",
@@ -146,11 +165,20 @@
     "startHint": "请先加载页面",
     "step": {
       "click": "点击 {target}",
+      "doubleClick": "双击 {target}",
+      "direction": {
+        "down": "下",
+        "left": "左",
+        "right": "右",
+        "up": "上"
+      },
       "fill": "填写 {target}",
+      "hover": "悬停在 {target}",
       "navigate": "打开 {url}",
       "pressKey": "按下 {key}",
       "secret": "填写 {target}（密钥）",
       "select": "在 {target} 中选择 {value}",
+      "scroll": "向{direction}滚动 {amount}px",
       "waitFor": "预期出现「{text}」"
     },
     "stop": "停止",
@@ -161,6 +189,7 @@
     "canvas": "远程浏览器画布",
     "closePage": "关闭页面",
     "error": "远程浏览器不可用（{code}）",
+    "find": "在页面中查找",
     "humanControl": "由你控制",
     "takeover": "接管控制",
     "untitledPage": "未命名页面",
@@ -177,5 +206,11 @@
   "title": "浏览器",
   "url": {
     "placeholder": "http://localhost:3000"
+  },
+  "zoom": {
+    "in": "放大",
+    "level": "{percent}%",
+    "out": "缩小",
+    "reset": "重置缩放"
   }
 }

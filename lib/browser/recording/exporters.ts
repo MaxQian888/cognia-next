@@ -67,6 +67,22 @@ function playwrightLine(flow: RecordedFlow, step: RecordedStep): string | null {
       }
       return `  await ${locator}.click()`
     }
+    case "double_click": {
+      const locator = toPlaywrightLocator(step.target)
+      if (step.modifiers?.length) {
+        const mods = step.modifiers.map((m) => quote(toPlaywrightKey(m))).join(", ")
+        return `  await ${locator}.dblclick({ modifiers: [${mods}] })`
+      }
+      return `  await ${locator}.dblclick()`
+    }
+    case "hover":
+      return `  await ${toPlaywrightLocator(step.target)}.hover()`
+    case "scroll": {
+      const horizontal = step.direction === "left" || step.direction === "right"
+      const signed =
+        step.direction === "left" || step.direction === "up" ? -step.amount : step.amount
+      return `  await page.mouse.wheel(${horizontal ? signed : 0}, ${horizontal ? 0 : signed})`
+    }
     case "fill": {
       // A password's value was never captured (see FillStep.secret) — read it
       // from the environment so the generated spec stays credential-free.
@@ -123,6 +139,14 @@ function agentLine(flow: RecordedFlow, step: RecordedStep): string | null {
       const mods = step.modifiers?.length ? ` (holding ${step.modifiers.join("+")})` : ""
       return `click ${describeTarget(step.target)}${mods} — selector: ${step.target.selector}`
     }
+    case "double_click": {
+      const mods = step.modifiers?.length ? ` (holding ${step.modifiers.join("+")})` : ""
+      return `double-click ${describeTarget(step.target)}${mods} — selector: ${step.target.selector}`
+    }
+    case "hover":
+      return `hover ${describeTarget(step.target)} — selector: ${step.target.selector}`
+    case "scroll":
+      return `scroll ${step.direction} by ${step.amount}px`
     case "fill":
       return step.secret
         ? `fill ${describeTarget(step.target)} with the ${secretKey(step.target)} secret (value not recorded; ask the user) — selector: ${step.target.selector}`

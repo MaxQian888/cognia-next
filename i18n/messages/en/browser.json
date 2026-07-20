@@ -2,6 +2,7 @@
   "actions": {
     "back": "Back",
     "cancelSelect": "Cancel selection",
+    "find": "Find",
     "forward": "Forward",
     "openExternal": "Open in external browser",
     "reload": "Reload",
@@ -105,6 +106,19 @@
   "errors": {
     "navigate": "Could not navigate to that URL"
   },
+  "find": {
+    "close": "Close find",
+    "count": "{current}/{total}",
+    "next": "Next match",
+    "noMatches": "No matches",
+    "placeholder": "Find in page",
+    "previous": "Previous match"
+  },
+  "history": {
+    "clear": "Clear history",
+    "empty": "No recent pages",
+    "label": "History"
+  },
   "loading": {
     "label": "Loading page",
     "title": "Loading {host}…"
@@ -113,10 +127,15 @@
     "collapse": "Collapse",
     "details": "Details"
   },
+  "rail": {
+    "label": "Element inspection"
+  },
   "record": {
     "addAssertion": "Expect text…",
     "assertionPlaceholder": "Text that should appear",
+    "collapse": "Collapse recorder",
     "empty": "Interact with the page — your clicks, typing and key presses are captured here.",
+    "expand": "Expand recorder",
     "export": "Export",
     "exportAgent": "Send to chat",
     "exportJson": "Flow JSON",
@@ -145,11 +164,20 @@
     "startHint": "Load a page first",
     "step": {
       "click": "Click {target}",
+      "doubleClick": "Double-click {target}",
+      "direction": {
+        "down": "down",
+        "left": "left",
+        "right": "right",
+        "up": "up"
+      },
       "fill": "Fill {target}",
+      "hover": "Hover over {target}",
       "navigate": "Go to {url}",
       "pressKey": "Press {key}",
       "secret": "Fill {target} (secret)",
       "select": "Select {value} in {target}",
+      "scroll": "Scroll {direction} by {amount}px",
       "waitFor": "Expect \"{text}\""
     },
     "stop": "Stop",
@@ -161,6 +189,7 @@
     "canvas": "Remote browser canvas",
     "closePage": "Close page",
     "error": "Remote browser unavailable ({code})",
+    "find": "Find in page",
     "humanControl": "You're controlling",
     "takeover": "Take control",
     "untitledPage": "Untitled page",
@@ -177,5 +206,11 @@
   "title": "Browser",
   "url": {
     "placeholder": "http://localhost:3000"
+  },
+  "zoom": {
+    "in": "Zoom in",
+    "level": "{percent}%",
+    "out": "Zoom out",
+    "reset": "Reset zoom"
   }
 }

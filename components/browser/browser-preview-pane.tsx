@@ -10,6 +10,7 @@ import {
   Loader2Icon,
   MousePointerSquareDashedIcon,
   RotateCwIcon,
+  SearchIcon,
   SendIcon,
   Trash2Icon,
   XIcon,
@@ -24,7 +25,10 @@ import {
   useBrowserAgentActivity,
 } from "@/components/browser/browser-agent-indicator"
 import { BrowserCookieImportAction } from "@/components/browser/browser-cookie-import-action"
+import { BrowserFindBar } from "@/components/browser/browser-find-bar"
+import { BrowserHistoryMenu } from "@/components/browser/browser-history-menu"
 import { BrowserRecorderPanel } from "@/components/browser/browser-recorder-panel"
+import { BrowserZoomControl, MAX_ZOOM, MIN_ZOOM } from "@/components/browser/browser-zoom-control"
 import { RemoteBrowserPreview } from "@/components/browser/remote-browser-preview"
 import {
   WebPreview,
@@ -36,8 +40,10 @@ import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
+import { useBrowserHistory } from "@/hooks/browser/use-browser-history"
 import { useBrowserLoading } from "@/hooks/browser/use-browser-loading"
 import { useBrowserPaneWebview } from "@/hooks/browser/use-browser-pane-webview"
 import { useElementSelection } from "@/hooks/browser/use-element-selection"
@@ -71,6 +77,7 @@ const QUICK_OPEN_URLS = [
   "http://localhost:8080",
 ] as const
 const DETAIL_LEVEL_STORAGE_KEY = "cognia.browser.output-detail"
+const ZOOM_STORAGE_KEY = "cognia.browser.zoom"
 const DETAIL_LEVELS: OutputDetailLevel[] = ["compact", "standard", "detailed", "forensic"]
 
 /** Host of a URL for display, or the raw string / "" if it can't be parsed. */
@@ -125,6 +132,13 @@ export function BrowserPreviewPane({
       ? (stored as OutputDetailLevel)
       : "standard"
   })
+  const [zoom, setZoom] = useState<number>(() => {
+    if (typeof window === "undefined") return 1
+    const stored = Number(window.localStorage.getItem(ZOOM_STORAGE_KEY))
+    return Number.isFinite(stored) && stored >= MIN_ZOOM && stored <= MAX_ZOOM ? stored : 1
+  })
+  const [findOpen, setFindOpen] = useState(false)
+  const { recent: recentHistory, push: pushHistory, clear: clearHistory } = useBrowserHistory()
   const annotationQueue =
     useLiveQuery(
       () => (sessionId ? listActionableBrowserAnnotations(sessionId) : Promise.resolve([])),
@@ -180,6 +194,14 @@ export function BrowserPreviewPane({
     window.localStorage.setItem(DETAIL_LEVEL_STORAGE_KEY, detailLevel)
   }, [detailLevel])
   useEffect(() => {
+    window.localStorage.setItem(ZOOM_STORAGE_KEY, String(zoom))
+  }, [zoom])
+  // Re-apply zoom whenever the page becomes live (covers webview recreation)
+  // or the user changes it. Native zoom persists across in-page navigations.
+  useEffect(() => {
+    if (shouldShowLivePage) void browserClient.embedSetZoom(zoom).catch(() => {})
+  }, [shouldShowLivePage, zoom])
+  useEffect(() => {
     void deleteExpiredBrowserAnnotations(new Date().getTime())
   }, [])
 
@@ -197,6 +219,11 @@ export function BrowserPreviewPane({
   // The preview's real location (follows in-page navigations and redirects).
   const currentUrl = navigated?.url ?? committedUrl
 
+  // Record each visited location for the address-bar history menu.
+  useEffect(() => {
+    if (currentUrl) pushHistory(currentUrl)
+  }, [currentUrl, pushHistory])
+
   // Keep the address bar synced to where the preview actually is — unless the
   // user is mid-edit, in which case their draft wins. Render-time derivation
   // (not an effect) per the React "adjusting state on prop change" pattern.
@@ -205,6 +232,14 @@ export function BrowserPreviewPane({
     setSyncedNavUrl(navigated.url)
     if (!editingUrl) setUrlInput(navigated.url)
   }
+
+  // The inspection rail (selection + annotation queue) slides in beside the
+  // reserved region. Keep it mounted through its slide-out so the exit
+  // animation can play, then unmount on animationEnd. Set-state-during-render
+  // (not an effect) — same "adjust state on prop change" pattern as syncedNavUrl.
+  const railWanted = !!selection || annotationQueue.length > 0
+  const [railRendered, setRailRendered] = useState(railWanted)
+  if (railWanted && !railRendered) setRailRendered(true)
 
   const commitUrl = useCallback(
     (e: FormEvent) => {
@@ -389,6 +424,23 @@ export function BrowserPreviewPane({
     await browserClient.embedReload()
   }, [beginLoad])
 
+  const runFind = useCallback(
+    (query: string, options: { forward: boolean }) => browserClient.embedFind(query, options),
+    []
+  )
+  const closeFind = useCallback(() => {
+    setFindOpen(false)
+    void browserClient.embedFindClear().catch(() => {})
+  }, [])
+  const navigateHistory = useCallback(
+    (url: string) => {
+      setUrlInput(url)
+      beginLoad()
+      setCommittedUrl(url)
+    },
+    [beginLoad]
+  )
+
   // Outside Tauri (web / Capacitor) there is no native webview to track a
   // reserved region, so element-selection is unavailable. Fall back to the
   // ai-elements WebPreview: a sandboxed iframe with a URL bar so web users can
@@ -417,8 +469,22 @@ export function BrowserPreviewPane({
   }
 
   return (
-    <div className="@container flex h-full min-h-0 flex-col">
-      <div className="relative flex items-center gap-1.5 border-b px-2 py-1.5">
+    <div
+      className="@container flex h-full min-h-0 flex-col"
+      onKeyDown={(e) => {
+        // Best-effort Cmd/Ctrl+F while the React chrome has focus; when the
+        // native webview holds focus the toolbar Find button is the trigger.
+        if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === "f" || e.key === "F")) {
+          if (!committedUrl) return
+          e.preventDefault()
+          setFindOpen(true)
+        }
+      }}
+    >
+      <div
+        className="relative flex flex-wrap items-center gap-1.5 border-b px-2 py-1.5 @lg:flex-nowrap"
+        data-testid="browser-toolbar"
+      >
         {phase === "loading" && (
           <div
             className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 overflow-hidden"
@@ -475,8 +541,17 @@ export function BrowserPreviewPane({
           >
             <RotateCwIcon />
           </TooltipIconButton>
+          <BrowserHistoryMenu
+            recent={recentHistory}
+            onNavigate={navigateHistory}
+            onClear={clearHistory}
+            disabled={recentHistory.length === 0}
+          />
         </div>
-        <form onSubmit={commitUrl} className="min-w-0 flex-1">
+        <form
+          onSubmit={commitUrl}
+          className="order-last min-w-0 basis-full @lg:order-none @lg:flex-1 @lg:basis-auto"
+        >
           <div className="relative">
             <GlobeIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -500,6 +575,7 @@ export function BrowserPreviewPane({
           </div>
         </form>
         <div className="flex items-center">
+          <BrowserZoomControl zoom={zoom} onZoomChange={setZoom} disabled={!committedUrl} />
           <BrowserCookieImportAction currentUrl={currentUrl} onReload={reloadAfterCookieImport} />
           <TooltipIconButton
             tooltip={t("actions.screenshot")}
@@ -528,187 +604,236 @@ export function BrowserPreviewPane({
           >
             <MousePointerSquareDashedIcon />
           </TooltipIconButton>
-        </div>
-        <BrowserAgentIndicator driver={driver} lastAction={lastAction} />
-      </div>
-
-      <div ref={reservedRef} className="relative min-h-0 flex-1">
-        {committedUrl && !hasPainted && (
-          <div
-            className="absolute inset-0 flex flex-col items-center justify-center gap-5 bg-background p-6 text-center"
-            role="status"
-            aria-live="polite"
-            data-testid="browser-loading"
+          <TooltipIconButton
+            tooltip={t("actions.find")}
+            aria-label={t("actions.find")}
+            disabled={!committedUrl}
+            className={cn(findOpen && "bg-primary/15 text-primary")}
+            onClick={() => (findOpen ? closeFind() : setFindOpen(true))}
           >
-            <div className="flex flex-col items-center gap-3">
-              <Loader2Icon className="size-6 animate-spin text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">
-                {t("loading.title", { host: hostOf(currentUrl) })}
-              </p>
-            </div>
-            <div className="w-full max-w-sm space-y-2.5" aria-hidden>
-              <Skeleton className="h-3 w-1/2" />
-              <Skeleton className="h-3 w-full" />
-              <Skeleton className="h-3 w-5/6" />
-              <Skeleton className="h-3 w-2/3" />
-            </div>
-          </div>
-        )}
-        {!committedUrl && (
-          <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
-            <div className="flex size-12 items-center justify-center rounded-2xl bg-muted">
-              <GlobeIcon className="size-6 text-muted-foreground" />
-            </div>
-            <div className="space-y-1">
-              <p className="text-sm font-medium">{t("empty.title")}</p>
-              <p className="max-w-sm text-xs text-muted-foreground">{t("empty.hint")}</p>
-            </div>
-            <div className="flex flex-wrap items-center justify-center gap-2">
-              <span className="text-xs text-muted-foreground">{t("empty.quickOpen")}</span>
-              {QUICK_OPEN_URLS.map((url) => (
-                <Button
-                  key={url}
-                  size="sm"
-                  variant="outline"
-                  className="h-7 rounded-full px-3 font-mono text-xs font-normal"
-                  onClick={() => openQuickUrl(url)}
-                >
-                  {new URL(url).host}
-                </Button>
-              ))}
-            </div>
-          </div>
-        )}
+            <SearchIcon />
+          </TooltipIconButton>
+        </div>
+        <div className="ml-auto min-w-0 @lg:ml-0">
+          <BrowserAgentIndicator driver={driver} lastAction={lastAction} />
+        </div>
       </div>
 
-      {selection && (
-        <div className="border-t bg-background p-3">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-2">
-              <Badge variant="secondary" className="shrink-0 font-mono text-[10px]">
-                {selection.tagName.toLowerCase()}
-              </Badge>
-              <p className="truncate font-mono text-xs text-muted-foreground">
-                {selection.componentName ? `<${selection.componentName}>` : selection.selector}
-              </p>
-            </div>
-            <TooltipIconButton
-              tooltip={t("comment.cancel")}
-              aria-label={t("comment.cancel")}
-              size="icon-xs"
-              onClick={cancelComment}
-            >
-              <XIcon />
-            </TooltipIconButton>
-          </div>
-          <Textarea
-            autoFocus
-            value={comment}
-            onChange={(e) => setComment(e.target.value)}
-            onKeyDown={onCommentKeyDown}
-            placeholder={t("comment.placeholder")}
-            aria-label={t("comment.title")}
-            rows={2}
-            className="resize-none text-sm"
-          />
-          <div className="mt-2 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1">
-              <select
-                value={annotationIntent}
-                onChange={(event) =>
-                  setAnnotationIntent(event.target.value as BrowserAnnotationIntent)
-                }
-                aria-label={t("annotation.intent.label")}
-                className="h-7 rounded-md border bg-background px-1 text-xs"
-              >
-                {(["fix", "change", "question", "approve"] as const).map((intent) => (
-                  <option key={intent} value={intent}>
-                    {t(`annotation.intent.${intent}`)}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={annotationSeverity}
-                onChange={(event) =>
-                  setAnnotationSeverity(event.target.value as BrowserAnnotationSeverity)
-                }
-                aria-label={t("annotation.severity.label")}
-                className="h-7 rounded-md border bg-background px-1 text-xs"
-              >
-                {(["blocking", "important", "suggestion"] as const).map((severity) => (
-                  <option key={severity} value={severity}>
-                    {t(`annotation.severity.${severity}`)}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={sending || !comment.trim()}
-                onClick={() => void onQueue()}
-              >
-                {t("annotation.add")}
-              </Button>
-              <Button size="sm" disabled={sending || !comment.trim()} onClick={() => void onSend()}>
-                <SendIcon className="size-3.5" />
-                {t("comment.send")}
-              </Button>
-            </div>
-          </div>
+      {findOpen && (
+        <div className="flex justify-end border-b bg-background px-2 py-1">
+          <BrowserFindBar onSearch={runFind} onClose={closeFind} />
         </div>
       )}
 
-      {annotationQueue.length > 0 && (
-        <div className="border-t bg-muted/30 p-3">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <span className="text-xs font-medium">
-              {t("annotation.queued", { count: annotationQueue.length })}
-            </span>
-            <Button
-              size="sm"
-              disabled={sending || pendingAnnotations.length === 0}
-              onClick={() => void onSendQueue()}
+      <div className="flex min-h-0 flex-1">
+        <div
+          ref={reservedRef}
+          className="relative min-h-0 min-w-0 flex-1"
+          data-testid="browser-reserved-region"
+        >
+          {committedUrl && !hasPainted && (
+            <div
+              className="absolute inset-0 flex flex-col items-center justify-center gap-5 bg-background p-6 text-center animate-in fade-in duration-200"
+              role="status"
+              aria-live="polite"
+              data-testid="browser-loading"
             >
-              <SendIcon className="size-3.5" />
-              {t("annotation.send", { count: pendingAnnotations.length })}
-            </Button>
-          </div>
-          <div className="space-y-1">
-            {annotationQueue.map((annotation, index) => (
-              <div key={annotation.id} className="flex items-center gap-2 text-xs">
-                <span className="min-w-0 flex-1 truncate">
-                  {index + 1}. {annotation.comment}
-                </span>
-                <Badge variant="outline" className="text-[10px]">
-                  {t(`annotation.status.${annotation.status}`)}
-                </Badge>
-                <Badge variant="outline" className="text-[10px]">
-                  {t(`annotation.intent.${annotation.intent}`)} ·{" "}
-                  {t(`annotation.severity.${annotation.severity}`)}
-                </Badge>
-                <TooltipIconButton
-                  tooltip={t("annotation.resolve")}
-                  aria-label={t("annotation.resolve")}
-                  size="icon-xs"
-                  onClick={() => void transitionQueuedAnnotation(annotation.id, "resolved")}
-                >
-                  <CheckIcon />
-                </TooltipIconButton>
-                <TooltipIconButton
-                  tooltip={t("annotation.remove")}
-                  aria-label={t("annotation.remove")}
-                  size="icon-xs"
-                  onClick={() => void transitionQueuedAnnotation(annotation.id, "dismissed")}
-                >
-                  <Trash2Icon />
-                </TooltipIconButton>
+              <div className="flex flex-col items-center gap-3">
+                <Loader2Icon className="size-6 animate-spin text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">
+                  {t("loading.title", { host: hostOf(currentUrl) })}
+                </p>
               </div>
-            ))}
-          </div>
+              <div className="w-full max-w-sm space-y-2.5" aria-hidden>
+                <Skeleton className="h-3 w-1/2" />
+                <Skeleton className="h-3 w-full" />
+                <Skeleton className="h-3 w-5/6" />
+                <Skeleton className="h-3 w-2/3" />
+              </div>
+            </div>
+          )}
+          {!committedUrl && (
+            <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center animate-in fade-in duration-200">
+              <div className="flex size-12 items-center justify-center rounded-2xl bg-muted">
+                <GlobeIcon className="size-6 text-muted-foreground" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm font-medium">{t("empty.title")}</p>
+                <p className="max-w-sm text-xs text-muted-foreground">{t("empty.hint")}</p>
+              </div>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <span className="text-xs text-muted-foreground">{t("empty.quickOpen")}</span>
+                {QUICK_OPEN_URLS.map((url) => (
+                  <Button
+                    key={url}
+                    size="sm"
+                    variant="outline"
+                    className="h-7 rounded-full px-3 font-mono text-xs font-normal"
+                    onClick={() => openQuickUrl(url)}
+                  >
+                    {new URL(url).host}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
-      )}
+        {railRendered && (
+          <aside
+            data-testid="browser-inspection-rail"
+            data-state={railWanted ? "open" : "closed"}
+            role="region"
+            aria-label={t("rail.label")}
+            onAnimationEnd={(e) => {
+              if (e.target === e.currentTarget && !railWanted) setRailRendered(false)
+            }}
+            className={cn(
+              "flex w-80 shrink-0 flex-col overflow-hidden border-l bg-background duration-200",
+              "data-[state=open]:animate-in data-[state=open]:fade-in data-[state=open]:slide-in-from-right",
+              "data-[state=closed]:animate-out data-[state=closed]:fade-out data-[state=closed]:slide-out-to-right"
+            )}
+          >
+            <ScrollArea className="min-h-0 flex-1">
+              {selection && (
+                <div className="bg-background p-3">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Badge variant="secondary" className="shrink-0 font-mono text-[10px]">
+                        {selection.tagName.toLowerCase()}
+                      </Badge>
+                      <p className="truncate font-mono text-xs text-muted-foreground">
+                        {selection.componentName
+                          ? `<${selection.componentName}>`
+                          : selection.selector}
+                      </p>
+                    </div>
+                    <TooltipIconButton
+                      tooltip={t("comment.cancel")}
+                      aria-label={t("comment.cancel")}
+                      size="icon-xs"
+                      onClick={cancelComment}
+                    >
+                      <XIcon />
+                    </TooltipIconButton>
+                  </div>
+                  <Textarea
+                    autoFocus
+                    value={comment}
+                    onChange={(e) => setComment(e.target.value)}
+                    onKeyDown={onCommentKeyDown}
+                    placeholder={t("comment.placeholder")}
+                    aria-label={t("comment.title")}
+                    rows={2}
+                    className="resize-none text-sm"
+                  />
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1">
+                      <select
+                        value={annotationIntent}
+                        onChange={(event) =>
+                          setAnnotationIntent(event.target.value as BrowserAnnotationIntent)
+                        }
+                        aria-label={t("annotation.intent.label")}
+                        className="h-7 rounded-md border bg-background px-1 text-xs"
+                      >
+                        {(["fix", "change", "question", "approve"] as const).map((intent) => (
+                          <option key={intent} value={intent}>
+                            {t(`annotation.intent.${intent}`)}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={annotationSeverity}
+                        onChange={(event) =>
+                          setAnnotationSeverity(event.target.value as BrowserAnnotationSeverity)
+                        }
+                        aria-label={t("annotation.severity.label")}
+                        className="h-7 rounded-md border bg-background px-1 text-xs"
+                      >
+                        {(["blocking", "important", "suggestion"] as const).map((severity) => (
+                          <option key={severity} value={severity}>
+                            {t(`annotation.severity.${severity}`)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={sending || !comment.trim()}
+                        onClick={() => void onQueue()}
+                      >
+                        {t("annotation.add")}
+                      </Button>
+                      <Button
+                        size="sm"
+                        disabled={sending || !comment.trim()}
+                        onClick={() => void onSend()}
+                      >
+                        <SendIcon className="size-3.5" />
+                        {t("comment.send")}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {annotationQueue.length > 0 && (
+                <div className="border-t bg-muted/30 p-3">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <span className="text-xs font-medium">
+                      {t("annotation.queued", { count: annotationQueue.length })}
+                    </span>
+                    <Button
+                      size="sm"
+                      disabled={sending || pendingAnnotations.length === 0}
+                      onClick={() => void onSendQueue()}
+                    >
+                      <SendIcon className="size-3.5" />
+                      {t("annotation.send", { count: pendingAnnotations.length })}
+                    </Button>
+                  </div>
+                  <div className="space-y-1">
+                    {annotationQueue.map((annotation, index) => (
+                      <div key={annotation.id} className="flex items-center gap-2 text-xs">
+                        <span className="min-w-0 flex-1 truncate">
+                          {index + 1}. {annotation.comment}
+                        </span>
+                        <Badge variant="outline" className="text-[10px]">
+                          {t(`annotation.status.${annotation.status}`)}
+                        </Badge>
+                        <Badge variant="outline" className="text-[10px]">
+                          {t(`annotation.intent.${annotation.intent}`)} ·{" "}
+                          {t(`annotation.severity.${annotation.severity}`)}
+                        </Badge>
+                        <TooltipIconButton
+                          tooltip={t("annotation.resolve")}
+                          aria-label={t("annotation.resolve")}
+                          size="icon-xs"
+                          onClick={() => void transitionQueuedAnnotation(annotation.id, "resolved")}
+                        >
+                          <CheckIcon />
+                        </TooltipIconButton>
+                        <TooltipIconButton
+                          tooltip={t("annotation.remove")}
+                          aria-label={t("annotation.remove")}
+                          size="icon-xs"
+                          onClick={() =>
+                            void transitionQueuedAnnotation(annotation.id, "dismissed")
+                          }
+                        >
+                          <Trash2Icon />
+                        </TooltipIconButton>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </ScrollArea>
+          </aside>
+        )}
+      </div>
 
       <BrowserRecorderPanel
         pageUrl={currentUrl ?? null}

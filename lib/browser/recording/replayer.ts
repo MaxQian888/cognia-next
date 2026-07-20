@@ -101,6 +101,25 @@ async function runStep(
       await engine.waitForLoad({ timeoutMs: SETTLE_MS })
       return
     }
+    case "double_click": {
+      await act(
+        engine,
+        step.target,
+        "double_click",
+        step.modifiers?.length ? { modifiers: step.modifiers } : {}
+      )
+      await engine.waitForLoad({ timeoutMs: SETTLE_MS })
+      return
+    }
+    case "hover": {
+      await act(engine, step.target, "hover")
+      return
+    }
+    case "scroll": {
+      const result = await engine.scroll({ direction: step.direction, amount: step.amount })
+      if (!result.ok) throw new StepError(result.error ?? `scroll ${step.direction} failed`)
+      return
+    }
     case "fill": {
       const value = step.secret ? secretValue(step.target, opts.secrets ?? {}) : step.value
       // `fill` takes `text`, not `value`: that is what the overlay reads

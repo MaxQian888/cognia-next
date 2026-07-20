@@ -66,6 +66,7 @@ commands.allow = [
   "browser_embed_set_panel_labels",
   "browser_embed_set_select_mode",
   "browser_embed_set_visible",
+  "browser_embed_set_zoom",
   "browser_embed_snapshot",
   "browser_embed_start_record",
   "browser_embed_stop",

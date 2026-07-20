@@ -876,6 +876,43 @@ pub async fn browser_embed_reload(
     }
 }
 
+/// Clamp a requested page zoom factor to the supported range. Non-finite input
+/// (NaN / ±∞) falls back to 1.0 (100%).
+fn clamp_zoom(zoom: f64) -> f64 {
+    if !zoom.is_finite() {
+        return 1.0;
+    }
+    zoom.clamp(0.25, 5.0)
+}
+
+#[tauri::command]
+pub async fn browser_embed_set_zoom(
+    app: AppHandle,
+    invoking_window: WebviewWindow,
+    lease: State<'_, EmbeddedBrowserLease>,
+    owner_token: String,
+    zoom: f64,
+) -> Result<(), String> {
+    lease.assert_owner(&owner_token, invoking_window.label())?;
+    let zoom = clamp_zoom(zoom);
+    #[cfg(desktop)]
+    {
+        use tauri::Manager;
+        // Native page zoom persists at the webview level across navigations
+        // (WKWebView / WebView2 / WebKitGTK all keep it), so this is one call
+        // and the reserved rect never changes.
+        app.get_webview(EMBED_LABEL)
+            .ok_or_else(|| "embedded preview is not open".to_string())?
+            .set_zoom(zoom)
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = (app, zoom);
+        Err("desktop only".to_string())
+    }
+}
+
 #[tauri::command]
 pub async fn browser_embed_set_select_mode(
     app: AppHandle,
@@ -1316,5 +1353,18 @@ mod tests {
         assert!(call.contains("alert(1)"));
         // The break-out attempt stays inside the string literal.
         assert!(!call.contains(r#"a"});alert"#));
+    }
+
+    #[test]
+    fn clamp_zoom_bounds_and_rejects_non_finite() {
+        assert_eq!(clamp_zoom(1.0), 1.0);
+        assert_eq!(clamp_zoom(2.5), 2.5);
+        // Out-of-range values saturate to the supported bounds.
+        assert_eq!(clamp_zoom(0.1), 0.25);
+        assert_eq!(clamp_zoom(9.0), 5.0);
+        // Non-finite input falls back to 100%.
+        assert_eq!(clamp_zoom(f64::NAN), 1.0);
+        assert_eq!(clamp_zoom(f64::INFINITY), 1.0);
+        assert_eq!(clamp_zoom(f64::NEG_INFINITY), 1.0);
     }
 }
