@@ -187,6 +187,40 @@ describe("queryAccountLimits", () => {
     expect(snap?.meters[0].usedPct).toBe(1)
   })
 
+  it("reuses one refresh result across proactive and reactive retry paths", async () => {
+    let reactiveToken: string | null | undefined
+    registerLimitsSource(
+      "stub:anthropic",
+      {
+        id: "stub:anthropic",
+        key: "anthropic",
+        matches: (q) => q.provider === "anthropic",
+        fetch: async (ctx) => {
+          reactiveToken = await ctx.refreshToken?.()
+          return {
+            provider: "anthropic",
+            accountId: ctx.accountId,
+            fetchedAt: ctx.now,
+            meters: [{ id: "session", kind: "window", usedPct: 1, status: "ok" }],
+          }
+        },
+      },
+      { pluginId: "stub" }
+    )
+    const refreshAnthropicToken = jest.fn(async () => "fresh-token")
+
+    await queryAccountLimits("anthropic", "acc-1", {
+      getAccount: async () => anthropicAccount(),
+      listPresets: async () => [],
+      authedGet: async () => "",
+      refreshAnthropicToken,
+      isCredentialFresh: () => false,
+    })
+
+    expect(reactiveToken).toBe("fresh-token")
+    expect(refreshAnthropicToken).toHaveBeenCalledTimes(1)
+  })
+
   it("does not refresh a fresh anthropic token", async () => {
     let seenToken: string | null = null
     registerLimitsSource(

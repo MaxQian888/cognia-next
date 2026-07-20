@@ -5,6 +5,9 @@
 
 import type { CustomLimitsSource, DescriptorExtract, WindowSpec } from "@/types/subscription"
 
+export const CUSTOM_LIMITS_MIN_REFRESH_MS = 5 * 60_000
+export const CUSTOM_LIMITS_MAX_REFRESH_MS = 24 * 60 * 60_000
+
 /** Stable id generator that doesn't need `crypto` (sufficient for a local list). */
 export function newCustomSourceId(seed: number): string {
   return `cls-${seed.toString(36)}-${Math.floor(seed % 1000).toString(36)}`
@@ -17,6 +20,7 @@ export function emptyCustomSource(id: string): CustomLimitsSource {
     name: "",
     baseUrl: "",
     token: "",
+    enabled: false,
     request: { path: "" },
     extract: { kind: "balance", remainingPath: "" },
   }
@@ -34,6 +38,14 @@ export function normalizeCustomSource(src: CustomLimitsSource): CustomLimitsSour
     name: src.name.trim(),
     baseUrl: src.baseUrl.trim().replace(/\/+$/, ""),
     token: src.token.trim(),
+    enabled: src.enabled === true,
+    refreshIntervalMs:
+      typeof src.refreshIntervalMs === "number" && Number.isFinite(src.refreshIntervalMs)
+        ? Math.max(
+            CUSTOM_LIMITS_MIN_REFRESH_MS,
+            Math.min(CUSTOM_LIMITS_MAX_REFRESH_MS, Math.round(src.refreshIntervalMs))
+          )
+        : undefined,
     request: {
       ...src.request,
       path: src.request.path.trim(),

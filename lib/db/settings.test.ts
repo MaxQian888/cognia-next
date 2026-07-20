@@ -28,6 +28,8 @@ describe("getSettings", () => {
     expect(s.updates).toEqual(DEFAULT_UPDATE_SETTINGS)
     expect(s.browserCookieImportEnabled).toBe(false)
     expect(s.remoteBrowserEnabled).toBe(false)
+    expect(s.customLimitsSources).toEqual([])
+    expect(s.limitsQueryEnabledAccounts).toEqual([])
   })
 
   it("keeps a user's update preference over the default", async () => {
@@ -132,6 +134,8 @@ describe("getSettings", () => {
     // Missing field is filled from defaults.
     expect(s.theme).toBe("system")
     expect(s.searchProviders).toBeDefined()
+    expect(s.customLimitsSources).toEqual([])
+    expect(s.limitsQueryEnabledAccounts).toEqual([])
     // Newly-introduced nested object is populated from DEFAULT_BUILTIN_TOOLS.
     expect(s.builtinTools).toBeDefined()
     expect(s.builtinTools.fileExtras).toBe(true)

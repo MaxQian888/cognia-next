@@ -82,6 +82,7 @@ describe("queryAllConfiguredLimits", () => {
           name: "My Relay",
           baseUrl: "https://relay.example.com/v1",
           token: "tok",
+          enabled: true,
           request: { path: "/balance" },
           extract: { kind: "balance", remainingPath: "data.balance", unit: "USD" },
         },

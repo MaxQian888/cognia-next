@@ -222,14 +222,14 @@ describe("subscription core transport", () => {
     })
   })
 
-  it("authedGet serializes headers as pairs", async () => {
+  it("authedGet serializes headers as named entries", async () => {
     mockedCall.mockResolvedValueOnce('{"ok":true}')
     await expect(
       authedGet("https://example.test/balance", { Authorization: "Bearer x" })
     ).resolves.toBe('{"ok":true}')
     expect(mockedCall).toHaveBeenCalledWith("subscription_authed_get", {
       url: "https://example.test/balance",
-      headers: [["Authorization", "Bearer x"]],
+      headers: [{ name: "Authorization", value: "Bearer x" }],
     })
   })
 

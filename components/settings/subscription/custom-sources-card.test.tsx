@@ -97,6 +97,17 @@ describe("CustomSourcesCard", () => {
     expect(saveMock).toHaveBeenCalledWith({ customLimitsSources: [] })
   })
 
+  it("enables a saved source only after an explicit per-source opt-in", async () => {
+    storeSettings = { customLimitsSources: [source({ enabled: false })] }
+    render(<CustomSourcesCard />)
+
+    await userEvent.click(screen.getByRole("switch", { name: "Enable quota queries for My Relay" }))
+
+    expect(saveMock).toHaveBeenCalledWith({
+      customLimitsSources: [expect.objectContaining({ id: "relay1", enabled: true })],
+    })
+  })
+
   it("adds a balance source and persists the normalized payload", async () => {
     render(<CustomSourcesCard />)
     await userEvent.click(screen.getByRole("button", { name: /Add custom source/i }))

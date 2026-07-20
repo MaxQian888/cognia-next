@@ -4,7 +4,9 @@ jest.mock("./runner", () => ({
 }))
 
 import {
+  LIMITS_QUERY_FORCE_MIN_INTERVAL_MS,
   LIMITS_QUERY_MIN_INTERVAL_MS,
+  LIMITS_QUERY_RATE_LIMIT_BACKOFF_MS,
   queryAccountLimitsCoalesced,
   __resetLimitsCoalescerForTesting,
 } from "./coalesce"
@@ -70,14 +72,16 @@ describe("queryAccountLimitsCoalesced", () => {
     expect(third).toEqual(limits("acc-1", 2))
   })
 
-  it("force bypasses the throttle", async () => {
+  it("force bypasses the normal throttle after the hard click cooldown", async () => {
     const run = jest
       .fn<Promise<ProviderLimits | null>, [ProviderId, string]>()
       .mockResolvedValueOnce(limits("acc-1", 1))
       .mockResolvedValueOnce(limits("acc-1", 2))
-    const now = () => 1000
+    let clock = 1000
+    const now = () => clock
 
     await queryAccountLimitsCoalesced("anthropic", "acc-1", { run, now })
+    clock += LIMITS_QUERY_FORCE_MIN_INTERVAL_MS
     const forced = await queryAccountLimitsCoalesced("anthropic", "acc-1", {
       run,
       now,
@@ -86,6 +90,46 @@ describe("queryAccountLimitsCoalesced", () => {
 
     expect(run).toHaveBeenCalledTimes(2)
     expect(forced).toEqual(limits("acc-1", 2))
+  })
+
+  it("does not let force bypass the hard click cooldown", async () => {
+    const run = jest.fn(async () => limits("acc-1", 1))
+    let clock = 1000
+    const now = () => clock
+
+    await queryAccountLimitsCoalesced("anthropic", "acc-1", { run, now })
+    clock += LIMITS_QUERY_FORCE_MIN_INTERVAL_MS - 1
+    await queryAccountLimitsCoalesced("anthropic", "acc-1", { run, now, force: true })
+
+    expect(run).toHaveBeenCalledTimes(1)
+  })
+
+  it("backs off after a 429 and preserves the last successful meters", async () => {
+    const successful = {
+      ...limits("acc-1", 100),
+      meters: [{ id: "session", kind: "window" as const, usedPct: 42, status: "ok" as const }],
+    }
+    const limited = { ...limits("acc-1", 200), error: "429 Too Many Requests", meters: [] }
+    const run = jest.fn().mockResolvedValueOnce(successful).mockResolvedValueOnce(limited)
+    let clock = 1000
+    const now = () => clock
+
+    await queryAccountLimitsCoalesced("anthropic", "acc-1", { run, now })
+    clock += LIMITS_QUERY_FORCE_MIN_INTERVAL_MS
+    const result = await queryAccountLimitsCoalesced("anthropic", "acc-1", {
+      run,
+      now,
+      force: true,
+    })
+
+    expect(result).toMatchObject({
+      fetchedAt: 200,
+      error: "429 Too Many Requests",
+      meters: successful.meters,
+    })
+    clock += LIMITS_QUERY_RATE_LIMIT_BACKOFF_MS - 1
+    await queryAccountLimitsCoalesced("anthropic", "acc-1", { run, now, force: true })
+    expect(run).toHaveBeenCalledTimes(2)
   })
 
   it("force still coalesces into a live request instead of starting a second", async () => {

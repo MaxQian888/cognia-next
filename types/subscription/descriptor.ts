@@ -167,6 +167,10 @@ export interface CustomLimitsSource {
   baseUrl: string
   /** Bearer token (stored in the renderer settings store — see security note). */
   token: string
+  /** Network access is opt-in. Missing is treated as disabled for legacy rows. */
+  enabled?: boolean
+  /** Preferred automatic refresh cadence imported from external managers. */
+  refreshIntervalMs?: number
   request: SourceDescriptor["request"]
   extract: DescriptorExtract
 }

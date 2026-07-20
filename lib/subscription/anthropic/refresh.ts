@@ -55,16 +55,52 @@ const DEFAULT_DEPS: RefreshAnthropicDeps = {
   reactivate: false,
 }
 
+interface RefreshInFlight {
+  promise: Promise<AnthropicCredentialData | null>
+  reactivateRequested: boolean
+}
+
+const refreshesInFlight = new Map<string, RefreshInFlight>()
+
 /**
  * Refresh the OAuth access token for one Anthropic account and persist the
  * result back to the vault (an upsert by the same account id). Returns the
  * merged credential on success, or `null` when the account no longer exists or
  * isn't an Anthropic credential. Throws only if the refresh exchange itself
- * fails (network / invalid_grant) — callers decide whether to swallow.
+ * fails (network / invalid_grant) — callers decide whether to swallow. Calls
+ * for the same account are single-flight so a rotating refresh token is never
+ * exchanged twice; if any joined caller requests reactivation, the shared
+ * result is activated once after persistence.
  */
-export async function refreshAndPersistAnthropicAccount(
+export function refreshAndPersistAnthropicAccount(
   accountId: string,
   deps: Partial<RefreshAnthropicDeps> = {}
+): Promise<AnthropicCredentialData | null> {
+  const existing = refreshesInFlight.get(accountId)
+  if (existing) {
+    if (deps.reactivate === true) existing.reactivateRequested = true
+    return existing.promise
+  }
+
+  const entry: RefreshInFlight = {
+    promise: Promise.resolve(null),
+    reactivateRequested: deps.reactivate === true,
+  }
+  entry.promise = runRefreshAndPersistAnthropicAccount(
+    accountId,
+    deps,
+    () => entry.reactivateRequested
+  ).finally(() => {
+    if (refreshesInFlight.get(accountId) === entry) refreshesInFlight.delete(accountId)
+  })
+  refreshesInFlight.set(accountId, entry)
+  return entry.promise
+}
+
+async function runRefreshAndPersistAnthropicAccount(
+  accountId: string,
+  deps: Partial<RefreshAnthropicDeps>,
+  shouldReactivate: () => boolean
 ): Promise<AnthropicCredentialData | null> {
   const {
     refreshAccessToken,
@@ -73,7 +109,6 @@ export async function refreshAndPersistAnthropicAccount(
     setActiveAccount,
     now,
     discoverLocalCredential,
-    reactivate,
   } = {
     ...DEFAULT_DEPS,
     ...deps,
@@ -115,7 +150,7 @@ export async function refreshAndPersistAnthropicAccount(
 
   // Only the Account-tab refresh wants the sidecar to adopt the new bearer
   // immediately; the quota path deliberately skips this to avoid a restart.
-  if (reactivate) await setActiveAccount("anthropic", accountId)
+  if (shouldReactivate()) await setActiveAccount("anthropic", accountId)
 
   return merged
 }

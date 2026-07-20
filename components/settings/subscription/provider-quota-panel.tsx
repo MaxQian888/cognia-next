@@ -9,9 +9,12 @@
 // overview's behavior.
 
 import { useEffect, useRef, useState } from "react"
+import { useTranslations } from "next-intl"
 
 import { BalanceCard } from "@/components/settings/subscription/balance-card"
 import { LimitsMetersCard } from "@/components/settings/subscription/limits-meters-card"
+import { SettingsAlert } from "@/components/settings/common/settings-section"
+import { Button } from "@/components/ui/button"
 
 import { useAccounts } from "@/lib/subscription/core/hooks"
 import { useProviderLimits } from "@/lib/subscription/limits/hooks"
@@ -35,6 +38,7 @@ export interface ProviderQuotaPanelProps {
  * account-scoped concept, and an empty shell would just add noise.
  */
 export function ProviderQuotaPanel({ provider, now: nowProp }: ProviderQuotaPanelProps) {
+  const t = useTranslations("subscription.limits.query")
   const [internalNow, setInternalNow] = useState(() => Date.now())
   useEffect(() => {
     if (nowProp != null) return
@@ -44,17 +48,20 @@ export function ProviderQuotaPanel({ provider, now: nowProp }: ProviderQuotaPane
   const now = nowProp ?? internalNow
 
   const { accounts, activeAccountId } = useAccounts(provider)
-  const { snapshot, refresh } = useProviderLimits(provider, activeAccountId ?? "")
+  const { snapshot, queryEnabled, setQueryEnabled, refresh } = useProviderLimits(
+    provider,
+    activeAccountId ?? ""
+  )
 
   // One auto-fetch per (mount, account) when there's nothing fresh to show.
   const autoFetchedForRef = useRef<string | null>(null)
   useEffect(() => {
-    if (!isTauri() || !activeAccountId) return
+    if (!isTauri() || !activeAccountId || !queryEnabled) return
     if (autoFetchedForRef.current === activeAccountId) return
     if (!usageWindowsStale({ fetchedAt: snapshot?.fetchedAt ?? null }, now)) return
     autoFetchedForRef.current = activeAccountId
     void refresh()
-  }, [activeAccountId, snapshot, now, refresh])
+  }, [activeAccountId, snapshot, now, queryEnabled, refresh])
 
   if (!activeAccountId) return null
   const active = accounts.find((a) => a.id === activeAccountId)
@@ -62,6 +69,20 @@ export function ProviderQuotaPanel({ provider, now: nowProp }: ProviderQuotaPane
 
   return (
     <>
+      <SettingsAlert
+        title={queryEnabled ? t("enabledTitle") : t("disabledTitle")}
+        action={
+          <Button
+            size="sm"
+            variant={queryEnabled ? "ghost" : "outline"}
+            onClick={() => void setQueryEnabled(!queryEnabled)}
+          >
+            {queryEnabled ? t("disable") : t("enable")}
+          </Button>
+        }
+      >
+        {queryEnabled ? t("enabledBody") : t("disabledBody")}
+      </SettingsAlert>
       <LimitsMetersCard
         provider={provider}
         accountId={activeAccountId}
@@ -69,7 +90,12 @@ export function ProviderQuotaPanel({ provider, now: nowProp }: ProviderQuotaPane
         now={now}
         windowsOnly
       />
-      <BalanceCard provider={provider} accountId={activeAccountId} label={label} />
+      <BalanceCard
+        provider={provider}
+        accountId={activeAccountId}
+        queryEnabled={queryEnabled}
+        label={label}
+      />
     </>
   )
 }

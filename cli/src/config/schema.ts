@@ -578,9 +578,12 @@ const customLimitsSourceSchema = z
     name: z.string(),
     baseUrl: z.string(),
     token: z.string(),
+    enabled: z.boolean().optional(),
+    refreshIntervalMs: z.number().int().nonnegative().optional(),
     request: z
       .object({
         path: z.string(),
+        useBaseUrlOrigin: z.boolean().optional(),
         method: z.literal("GET").optional(),
         headers: z.record(z.string(), z.string()).optional(),
       })

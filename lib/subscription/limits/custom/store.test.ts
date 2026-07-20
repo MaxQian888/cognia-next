@@ -49,6 +49,17 @@ describe("normalizeCustomSource", () => {
     expect(n.extract).not.toBe(original.extract)
     if (n.extract.kind === "window") expect(n.extract.windows[0]).not.toBe(original.extract)
   })
+
+  it("normalizes legacy enablement and clamps refresh cadence to the safe range", () => {
+    expect(normalizeCustomSource(src()).enabled).toBe(false)
+    expect(normalizeCustomSource(src({ enabled: true, refreshIntervalMs: 1_000 }))).toMatchObject({
+      enabled: true,
+      refreshIntervalMs: 5 * 60_000,
+    })
+    expect(normalizeCustomSource(src({ refreshIntervalMs: 48 * 60 * 60_000 }))).toMatchObject({
+      refreshIntervalMs: 24 * 60 * 60_000,
+    })
+  })
 })
 
 describe("isCustomSourceComplete", () => {

@@ -14,6 +14,7 @@ const meta = {
   args: {
     provider: "codex",
     accountId: "acc-codex-1",
+    queryEnabled: true,
     label: "ChatGPT Plus",
   },
   parameters: { layout: "padded" },

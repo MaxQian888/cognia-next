@@ -40,6 +40,35 @@ function refreshedCredential(over: Partial<AnthropicCredentialData> = {}): Anthr
 }
 
 describe("refreshAndPersistAnthropicAccount", () => {
+  it("coalesces concurrent refreshes for the same account", async () => {
+    let release!: (credential: AnthropicCredentialData) => void
+    const pending = new Promise<AnthropicCredentialData>((resolve) => {
+      release = resolve
+    })
+    const refreshAccessToken = jest.fn(() => pending)
+    const saveAccount = jest.fn(async () => {})
+    const setActiveAccount = jest.fn(async () => {})
+    const deps = {
+      getAccount: async () => anthropicAccount(),
+      saveAccount,
+      setActiveAccount,
+      refreshAccessToken,
+    }
+
+    const first = refreshAndPersistAnthropicAccount("acc-1", deps)
+    const second = refreshAndPersistAnthropicAccount("acc-1", { ...deps, reactivate: true })
+
+    expect(first).toBe(second)
+    await Promise.resolve()
+    expect(refreshAccessToken).toHaveBeenCalledTimes(1)
+    release(refreshedCredential())
+    const results = await Promise.all([first, second])
+    expect(results[0]).toMatchObject({ accessToken: "new-access", refreshToken: "rt-2" })
+    expect(results[1]).toEqual(results[0])
+    expect(saveAccount).toHaveBeenCalledTimes(1)
+    expect(setActiveAccount).toHaveBeenCalledWith("anthropic", "acc-1")
+  })
+
   it("refreshes with the vault's refresh token and upserts the merged credential", async () => {
     const saveAccount = jest.fn(async (_p: ProviderId, _a: Account) => {})
     const setActiveAccount = jest.fn(async (_p: ProviderId, _id: string | null) => {})

@@ -142,6 +142,127 @@ const githubCopilot: CustomSourcePreset = {
     ),
 }
 
+const kimiCoding: CustomSourcePreset = {
+  id: "kimi-coding",
+  labelKey: "subscription.customSources.presets.kimiCoding",
+  apply: (src) =>
+    withTemplate(
+      src,
+      { path: "/coding/v1/usages" },
+      {
+        kind: "window",
+        windows: [
+          {
+            id: "session",
+            labelKey: "subscription.limits.meter.session",
+            remainingPath: "usage.remaining",
+            totalPath: "usage.limit",
+            resetAtPath: "usage.resetTime",
+            resetUnit: "unix",
+          },
+        ],
+      }
+    ),
+}
+
+const glmCoding: CustomSourcePreset = {
+  id: "glm-coding",
+  labelKey: "subscription.customSources.presets.glmCoding",
+  apply: (src) =>
+    withTemplate(
+      src,
+      {
+        path: "/api/monitor/usage/quota/limit",
+        headers: { Authorization: "{{token}}" },
+      },
+      {
+        kind: "window",
+        windows: [
+          {
+            id: "session",
+            labelKey: "subscription.limits.meter.session",
+            usedPctPath: "percentage",
+            resetAtPath: "nextResetTime",
+            resetUnit: "unix",
+            select: { arrayPath: "data.limits", by: "unit", equals: 3 },
+          },
+          {
+            id: "weekly",
+            labelKey: "subscription.limits.meter.weekly",
+            usedPctPath: "percentage",
+            resetAtPath: "nextResetTime",
+            resetUnit: "unix",
+            select: { arrayPath: "data.limits", by: "unit", equals: 6 },
+          },
+        ],
+      }
+    ),
+}
+
+const minimaxTokenPlan: CustomSourcePreset = {
+  id: "minimax-token-plan",
+  labelKey: "subscription.customSources.presets.minimaxTokenPlan",
+  apply: (src) =>
+    withTemplate(
+      src,
+      { path: "/v1/token_plan/remains" },
+      {
+        kind: "window",
+        windows: [
+          {
+            id: "session",
+            labelKey: "subscription.limits.meter.session",
+            usedPctPath: "current_interval_remaining_percent",
+            invert: true,
+            resetAtPath: "end_time",
+            resetUnit: "unix",
+            select: { arrayPath: "model_remains", by: "model_name", equals: "general" },
+          },
+          {
+            id: "weekly",
+            labelKey: "subscription.limits.meter.weekly",
+            usedPctPath: "current_weekly_remaining_percent",
+            invert: true,
+            resetAtPath: "weekly_end_time",
+            resetUnit: "unix",
+            select: { arrayPath: "model_remains", by: "model_name", equals: "general" },
+          },
+        ],
+      }
+    ),
+}
+
+const zenmux: CustomSourcePreset = {
+  id: "zenmux",
+  labelKey: "subscription.customSources.presets.zenmux",
+  apply: (src) =>
+    withTemplate(
+      src,
+      { path: "/" },
+      {
+        kind: "window",
+        windows: [
+          {
+            id: "session",
+            labelKey: "subscription.limits.meter.session",
+            usedPctPath: "data.quota_5_hour.usage_percentage",
+            usedPctScale: 100,
+            resetAtPath: "data.quota_5_hour.resets_at",
+            resetUnit: "iso",
+          },
+          {
+            id: "weekly",
+            labelKey: "subscription.limits.meter.weekly",
+            usedPctPath: "data.quota_7_day.usage_percentage",
+            usedPctScale: 100,
+            resetAtPath: "data.quota_7_day.resets_at",
+            resetUnit: "iso",
+          },
+        ],
+      }
+    ),
+}
+
 /** All authoring presets, "Custom (blank)" first. */
 export const CUSTOM_SOURCE_PRESETS: readonly CustomSourcePreset[] = [
   custom,
@@ -149,6 +270,10 @@ export const CUSTOM_SOURCE_PRESETS: readonly CustomSourcePreset[] = [
   genericBalance,
   codingPlanCount,
   githubCopilot,
+  kimiCoding,
+  glmCoding,
+  minimaxTokenPlan,
+  zenmux,
 ]
 
 /** Look up a preset by id (defaults to the no-op `custom` preset). */

@@ -22,6 +22,7 @@ import { PlusIcon, TrashIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import {
   Select,
   SelectContent,
@@ -34,6 +35,8 @@ import { SettingsAlert, SettingsCard } from "@/components/settings/common/settin
 import { isTauri } from "@/lib/tauri"
 import { authedGet } from "@/lib/subscription/core/transport"
 import {
+  CUSTOM_LIMITS_MAX_REFRESH_MS,
+  CUSTOM_LIMITS_MIN_REFRESH_MS,
   emptyCustomSource,
   isCustomSourceComplete,
   newCustomSourceId,
@@ -125,6 +128,10 @@ export function CustomSourcesCard() {
     if (draft?.id === id) setDraft(null)
   }
 
+  const onToggle = async (src: CustomLimitsSource, enabled: boolean) => {
+    await persist(upsertCustomSource(sources, { ...src, enabled }))
+  }
+
   const onSave = async () => {
     if (!draft) return
     await persist(upsertCustomSource(sources, draft))
@@ -173,6 +180,15 @@ export function CustomSourcesCard() {
                   <p className="truncate text-xs text-muted-foreground">{src.baseUrl}</p>
                 </div>
                 <div className="flex shrink-0 gap-1">
+                  <Switch
+                    checked={src.enabled === true}
+                    aria-label={
+                      src.enabled
+                        ? t("disableSource", { name: src.name || src.id })
+                        : t("enableSource", { name: src.name || src.id })
+                    }
+                    onCheckedChange={(enabled) => void onToggle(src, enabled)}
+                  />
                   <Button variant="ghost" size="sm" onClick={() => onEdit(src)}>
                     {t("edit")}
                   </Button>
@@ -315,10 +331,40 @@ function SourceForm({
           <Input
             id="cs-path"
             value={draft.request.path}
+            // i18n-exempt: example API path the user types verbatim, not UI prose
             placeholder="/user/balance"
             onChange={(e) =>
               setDraft({ ...draft, request: { ...draft.request, path: e.target.value } })
             }
+          />
+        </Field>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <Field id="cs-refresh" label={t("fields.refreshMinutes")}>
+          <Input
+            id="cs-refresh"
+            type="number"
+            min={CUSTOM_LIMITS_MIN_REFRESH_MS / 60_000}
+            max={CUSTOM_LIMITS_MAX_REFRESH_MS / 60_000}
+            value={Math.round((draft.refreshIntervalMs ?? CUSTOM_LIMITS_MIN_REFRESH_MS) / 60_000)}
+            onChange={(e) => {
+              const minutes = Math.max(
+                CUSTOM_LIMITS_MIN_REFRESH_MS / 60_000,
+                Math.min(
+                  CUSTOM_LIMITS_MAX_REFRESH_MS / 60_000,
+                  Number(e.target.value) || CUSTOM_LIMITS_MIN_REFRESH_MS / 60_000
+                )
+              )
+              setDraft({ ...draft, refreshIntervalMs: minutes * 60_000 })
+            }}
+          />
+        </Field>
+        <Field id="cs-enabled" label={t("fields.enabled")}>
+          <Switch
+            id="cs-enabled"
+            checked={draft.enabled === true}
+            onCheckedChange={(enabled) => setDraft({ ...draft, enabled })}
           />
         </Field>
       </div>
@@ -392,6 +438,7 @@ function SourceForm({
             <Input
               id="cs-remaining"
               value={draft.extract.remainingPath ?? ""}
+              // i18n-exempt: example JSONPath selector into the API response, not UI prose
               placeholder="data.balance"
               onChange={(e) => setDraft(setExtract(draft, { remainingPath: e.target.value }))}
             />
@@ -407,6 +454,7 @@ function SourceForm({
             <Input
               id="cs-used"
               value={draft.extract.usedPath ?? ""}
+              // i18n-exempt: example JSONPath selector into the API response, not UI prose
               placeholder="data.used_quota"
               onChange={(e) => setDraft(setExtract(draft, { usedPath: e.target.value }))}
             />
@@ -415,6 +463,7 @@ function SourceForm({
             <Input
               id="cs-unit"
               value={draft.extract.unit ?? ""}
+              // i18n-exempt: example currency-unit token the user types verbatim, not UI prose
               placeholder="USD"
               onChange={(e) => setDraft(setExtract(draft, { unit: e.target.value }))}
             />
@@ -441,6 +490,7 @@ function SourceForm({
             <Input
               id="cs-wpct"
               value={windowSpec?.usedPctPath ?? ""}
+              // i18n-exempt: example JSONPath selector into the API response, not UI prose
               placeholder="rate_limit.primary.used_percent"
               onChange={(e) => setWindow({ usedPctPath: e.target.value })}
             />
@@ -449,6 +499,7 @@ function SourceForm({
             <Input
               id="cs-wused"
               value={windowSpec?.usedPath ?? ""}
+              // i18n-exempt: example JSONPath selector into the API response, not UI prose
               placeholder="data.used"
               onChange={(e) => setWindow({ usedPath: e.target.value })}
             />
@@ -457,6 +508,7 @@ function SourceForm({
             <Input
               id="cs-wtotal"
               value={windowSpec?.totalPath ?? ""}
+              // i18n-exempt: example JSONPath selector into the API response, not UI prose
               placeholder="data.total"
               onChange={(e) => setWindow({ totalPath: e.target.value })}
             />

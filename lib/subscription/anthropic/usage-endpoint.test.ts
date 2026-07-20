@@ -1,5 +1,3 @@
-import { CLAUDE_CLI_USER_AGENT } from "./constants"
-
 import {
   OAUTH_USAGE_BETA,
   OAUTH_USAGE_ENDPOINT,
@@ -112,8 +110,8 @@ describe("fetchOAuthUsage", () => {
     expect(seenHeaders).toMatchObject({
       Authorization: "Bearer sk-ant",
       "anthropic-beta": OAUTH_USAGE_BETA,
-      "User-Agent": CLAUDE_CLI_USER_AGENT,
     })
+    expect(seenHeaders).not.toHaveProperty("User-Agent")
     expect(result).toMatchObject({ ok: true })
     expect(result.ok && result.meters).toHaveLength(4)
   })

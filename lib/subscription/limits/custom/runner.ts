@@ -6,7 +6,7 @@
 // in the limits panel.
 
 import { runDescriptor } from "../descriptor/engine"
-import { isCustomSourceComplete } from "./store"
+import { CUSTOM_LIMITS_MIN_REFRESH_MS, isCustomSourceComplete } from "./store"
 
 import type {
   CustomLimitsSource,
@@ -19,6 +19,18 @@ export interface CustomRunnerDeps {
   authedGet: (url: string, headers?: Record<string, string>) => Promise<string>
   now: () => number
 }
+
+const CUSTOM_QUERY_RATE_LIMIT_BACKOFF_MS = 15 * 60_000
+
+interface CustomRunnerEntry {
+  inflight: Promise<ProviderLimits | null> | null
+  lastAttemptAt: number
+  blockedUntil: number
+  lastResult: ProviderLimits | null
+  lastSuccessfulResult: ProviderLimits | null
+}
+
+const customEntries = new Map<string, CustomRunnerEntry>()
 
 /** Provider id a custom source's snapshot is tagged with. */
 export function customProviderId(id: string): string {
@@ -53,13 +65,66 @@ export async function runCustomLimitsSource(
   return runDescriptor(descriptor, ctx)
 }
 
+async function runCustomLimitsSourceCoalesced(
+  src: CustomLimitsSource,
+  deps: CustomRunnerDeps
+): Promise<ProviderLimits | null> {
+  const entry = customEntries.get(src.id) ?? {
+    inflight: null,
+    lastAttemptAt: 0,
+    blockedUntil: 0,
+    lastResult: null,
+    lastSuccessfulResult: null,
+  }
+  customEntries.set(src.id, entry)
+  if (entry.inflight) return entry.inflight
+
+  const currentTime = deps.now()
+  const interval = Math.max(CUSTOM_LIMITS_MIN_REFRESH_MS, src.refreshIntervalMs ?? 0)
+  if (
+    entry.lastAttemptAt > 0 &&
+    (currentTime < entry.blockedUntil || currentTime - entry.lastAttemptAt < interval)
+  ) {
+    return entry.lastResult
+  }
+
+  const request = (async () => {
+    try {
+      const result = await runCustomLimitsSource(src, deps)
+      let displayResult = result
+      if (result && !result.error) {
+        entry.lastSuccessfulResult = result
+      } else if (result?.error && entry.lastSuccessfulResult) {
+        displayResult = { ...result, meters: entry.lastSuccessfulResult.meters }
+      }
+      if (result?.error && /(^|\s)429(\s|:)/.test(result.error)) {
+        entry.blockedUntil = deps.now() + CUSTOM_QUERY_RATE_LIMIT_BACKOFF_MS
+      }
+      entry.lastResult = displayResult
+      return displayResult
+    } finally {
+      entry.lastAttemptAt = deps.now()
+      entry.inflight = null
+    }
+  })()
+  entry.inflight = request
+  return request
+}
+
 /** Run every complete custom source concurrently, dropping the empty ones. */
 export async function runCustomLimitsSources(
   sources: readonly CustomLimitsSource[],
   deps: CustomRunnerDeps
 ): Promise<ProviderLimits[]> {
   const results = await Promise.all(
-    sources.map((s) => runCustomLimitsSource(s, deps).catch(() => null))
+    sources
+      .filter((source) => source.enabled === true)
+      .map((s) => runCustomLimitsSourceCoalesced(s, deps).catch(() => null))
   )
   return results.filter((r): r is ProviderLimits => r !== null)
+}
+
+/** Test-only: clear in-memory single-flight/throttle state. */
+export function __resetCustomLimitsRunnerForTesting(): void {
+  customEntries.clear()
 }

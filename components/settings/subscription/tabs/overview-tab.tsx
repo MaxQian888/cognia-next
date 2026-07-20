@@ -66,7 +66,10 @@ export function SubscriptionOverviewTab({
   const { credential, activeAccountId } = useActiveAnthropicCredential()
   const { latest } = useAnthropicUsage(20)
   const settings = useSettingsStore((s) => getSubscriptionSettings(s.settings))
-  const { snapshot, refreshing, refresh } = useProviderLimits("anthropic", activeAccountId ?? "")
+  const { snapshot, refreshing, queryEnabled, setQueryEnabled, refresh } = useProviderLimits(
+    "anthropic",
+    activeAccountId ?? ""
+  )
 
   const now = useNowTick(30_000)
 
@@ -80,12 +83,12 @@ export function SubscriptionOverviewTab({
   // chat traffic. Manual refresh stays available either way.
   const autoFetchedForRef = useRef<string | null>(null)
   useEffect(() => {
-    if (!tabReady || !credential || !activeAccountId) return
+    if (!tabReady || !credential || !activeAccountId || !queryEnabled) return
     if (autoFetchedForRef.current === activeAccountId) return
     if (!usageWindowsStale(resolved, now)) return
     autoFetchedForRef.current = activeAccountId
     void refresh()
-  }, [tabReady, credential, activeAccountId, resolved, now, refresh])
+  }, [tabReady, credential, activeAccountId, resolved, now, queryEnabled, refresh])
 
   if (!tabReady) {
     return <SettingsAlert title={t("webModeBanner")}>{t("webModeBanner")}</SettingsAlert>
@@ -108,23 +111,25 @@ export function SubscriptionOverviewTab({
   if (resolved.windows.length === 0) {
     return (
       <SettingsEmptyState
-        title={t("overview.noDataTitle")}
+        title={queryEnabled ? t("overview.noDataTitle") : t("overview.officialQuotaDisabledTitle")}
         // A failed query is not "no data yet": show why (expired bearer,
         // throttle, outage) rather than the generic empty copy, which is what
         // made a broken quota read indistinguishable from an idle account.
         description={
-          snapshot?.error
-            ? t("limits.error", { message: snapshot.error })
-            : t("overview.noDataBody")
+          !queryEnabled
+            ? t("overview.officialQuotaDisabledBody")
+            : snapshot?.error
+              ? t("limits.error", { message: snapshot.error })
+              : t("overview.noDataBody")
         }
         action={
           <Button
-            onClick={() => void refresh({ force: true })}
+            onClick={() => void (queryEnabled ? refresh({ force: true }) : setQueryEnabled(true))}
             disabled={refreshing}
             data-testid="overview-refresh"
           >
             <RefreshCwIcon className={cn("mr-2 size-4", refreshing && "animate-spin")} />
-            {t("overview.refresh")}
+            {queryEnabled ? t("overview.refresh") : t("limits.query.enable")}
           </Button>
         }
       />
@@ -157,7 +162,7 @@ export function SubscriptionOverviewTab({
           variant="outline"
           size="sm"
           onClick={() => void refresh({ force: true })}
-          disabled={refreshing}
+          disabled={refreshing || !queryEnabled}
           data-testid="overview-refresh"
           aria-label={t("overview.refresh")}
         >
