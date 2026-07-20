@@ -11,7 +11,7 @@ import {
   useState,
 } from "react"
 
-import { BrowserFindBar } from "@/components/browser/browser-find-bar"
+import { BrowserFindBarSection, isFindShortcut } from "@/components/browser/browser-find-bar"
 import { BrowserHistoryMenu } from "@/components/browser/browser-history-menu"
 import { BrowserZoomControl } from "@/components/browser/browser-zoom-control"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
@@ -365,11 +365,7 @@ export function RemoteBrowserPreview({
           </Button>
         </div>
 
-        {findOpen && (
-          <div className="flex justify-end border-b bg-background px-2 py-1">
-            <BrowserFindBar onSearch={runFind} onClose={closeFind} />
-          </div>
-        )}
+        {findOpen && <BrowserFindBarSection onSearch={runFind} onClose={closeFind} />}
 
         {pages.length > 0 && (
           <div className="flex gap-1 overflow-x-auto border-b bg-muted/30 px-2 py-1">
@@ -435,11 +431,7 @@ export function RemoteBrowserPreview({
               })
             }
             onKeyDown={(event) => {
-              if (
-                (event.metaKey || event.ctrlKey) &&
-                !event.altKey &&
-                (event.key === "f" || event.key === "F")
-              ) {
+              if (isFindShortcut(event)) {
                 event.preventDefault()
                 setFindOpen(true)
                 return

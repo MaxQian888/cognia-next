@@ -15,6 +15,7 @@ import { SlidersHorizontalIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { usePet } from "@/hooks/pet/use-pet"
 import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
+import { useActiveSpritePack } from "@/hooks/pet/use-active-sprite-pack"
 import { PetModelConfigDialog } from "@/components/settings/pet/pet-model-config-dialog"
 import type { PetSettings } from "@/types/pet"
 import { resolveEffectiveSkin } from "../skins/resolve-effective-skin"
@@ -28,6 +29,7 @@ export function PetLive2dLookControls({ pet }: PetLive2dLookControlsProps) {
   const t = useTranslations("pet.customize.live2dLook")
   const { profile, view } = usePet()
   const { modelId, row, coreReady } = useActiveLive2dModel(pet)
+  const { row: activeSpritePack } = useActiveSpritePack(pet)
   const [configOpen, setConfigOpen] = useState(false)
 
   if (!profile || !view) return null
@@ -35,6 +37,7 @@ export function PetLive2dLookControls({ pet }: PetLive2dLookControlsProps) {
   const effectiveSkin = resolveEffectiveSkin(pet.skinId, {
     coreReady,
     hasActiveModel: Boolean(modelId),
+    hasActiveSpritePack: Boolean(activeSpritePack),
   })
   // A model is picked but the Cubism runtime is definitively unavailable — the
   // preview is the SVG fallback, so say why it reads as intentional. (While the

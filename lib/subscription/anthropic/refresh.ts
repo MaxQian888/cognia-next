@@ -69,8 +69,12 @@ const refreshesInFlight = new Map<string, RefreshInFlight>()
  * isn't an Anthropic credential. Throws only if the refresh exchange itself
  * fails (network / invalid_grant) — callers decide whether to swallow. Calls
  * for the same account are single-flight so a rotating refresh token is never
- * exchanged twice; if any joined caller requests reactivation, the shared
- * result is activated once after persistence.
+ * exchanged twice. Reactivation is applied at most once, right after
+ * persistence: a caller requesting it that joins *before* the shared refresh
+ * reaches that step promotes the in-flight refresh to reactivate. A caller
+ * that joins in the narrow window *after* the reactivation decision (but before
+ * the entry is cleared) still shares the credential result, yet does not
+ * trigger a second (redundant) sidecar restart.
  */
 export function refreshAndPersistAnthropicAccount(
   accountId: string,

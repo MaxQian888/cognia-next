@@ -14,6 +14,7 @@ jest.mock("@/lib/db/pet-sprite-packs", () => ({
   deletePetSpritePack: (...args: unknown[]) => deletePetSpritePack(...args),
 }))
 jest.mock("@/lib/pet/sprite-v2/import", () => ({
+  ...jest.requireActual("@/lib/pet/sprite-v2/import"),
   validateSpriteV2Import: (...args: unknown[]) => validateSpriteV2Import(...args),
 }))
 jest.mock("@/lib/pet/chat/seed-main-chat", () => ({
@@ -30,6 +31,7 @@ jest.mock("next/navigation", () => ({ useRouter: () => ({ push }) }))
 jest.mock("@/lib/platform/detect", () => ({ isTauri: jest.fn(() => true) }))
 
 import { isTauri } from "@/lib/platform/detect"
+import { SpriteV2ImportError } from "@/lib/pet/sprite-v2/import"
 import { buildHatchPetPrompt, PetSpritePackManager } from "./pet-sprite-pack-manager"
 
 const mockIsTauri = jest.mocked(isTauri)
@@ -113,8 +115,36 @@ describe("PetSpritePackManager", () => {
     fireEvent.change(screen.getByLabelText("import"), {
       target: { files: [new File(["atlas"], "spritesheet.webp", { type: "image/webp" })] },
     })
-    expect(screen.getByRole("alert")).toHaveTextContent("invalid")
+    expect(screen.getByRole("alert")).toHaveTextContent("error.incomplete")
     expect(validateSpriteV2Import).not.toHaveBeenCalled()
+  })
+
+  it("surfaces a specific message for a typed validator error code", async () => {
+    validateSpriteV2Import.mockRejectedValue(
+      new SpriteV2ImportError("too-large", "Spritesheet exceeds the 25 MiB limit")
+    )
+    const manifest = {
+      name: "pet.json",
+      type: "application/json",
+      text: () => Promise.resolve("{}"),
+    } as File
+    const atlas = new File(["atlas"], "spritesheet.webp", { type: "image/webp" })
+    render(<PetSpritePackManager settings={{} as never} onPatch={jest.fn()} />)
+    fireEvent.change(screen.getByLabelText("import"), { target: { files: [manifest, atlas] } })
+    expect(await screen.findByRole("alert")).toHaveTextContent("error.tooLarge")
+  })
+
+  it("falls back to the generic message for an unexpected error", async () => {
+    validateSpriteV2Import.mockRejectedValue(new Error("boom"))
+    const manifest = {
+      name: "pet.json",
+      type: "application/json",
+      text: () => Promise.resolve("{}"),
+    } as File
+    const atlas = new File(["atlas"], "spritesheet.webp", { type: "image/webp" })
+    render(<PetSpritePackManager settings={{} as never} onPatch={jest.fn()} />)
+    fireEvent.change(screen.getByLabelText("import"), { target: { files: [manifest, atlas] } })
+    expect(await screen.findByRole("alert")).toHaveTextContent("error.invalid")
   })
 
   it("deletes the active pack and restores the built-in skin", async () => {

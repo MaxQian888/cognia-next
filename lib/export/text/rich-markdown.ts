@@ -5,6 +5,8 @@
 import type { UIMessage } from "ai"
 import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 
+import { isImageFile } from "../file-utils"
+
 export interface RichExportData {
   session: ChatSession
   messages: StoredMessage[]
@@ -209,14 +211,6 @@ function renderPart(part: UIMessage["parts"][number]): string {
   }
   // Fallback for unknown / data-* parts.
   return ""
-}
-
-function isImageFile(file: { url?: string; mediaType?: string; filename?: string }): boolean {
-  return Boolean(
-    file.mediaType?.startsWith("image/") ||
-    file.url?.startsWith("data:image/") ||
-    file.filename?.match(/\.(?:avif|gif|jpe?g|png|svg|webp)$/i)
-  )
 }
 
 function textOfPart(part: UIMessage["parts"][number]): string {

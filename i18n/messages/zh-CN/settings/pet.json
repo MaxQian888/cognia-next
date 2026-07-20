@@ -244,10 +244,18 @@
     "createTitle": "AI 外观孵化室",
     "delete": "删除 {name}",
     "empty": "还没有安装 v2 精灵图宠物。",
+    "error": {
+      "alreadyInstalled": "该 v2 精灵图宠物已安装。",
+      "badDimensions": "精灵图必须是 1536×2288 的图集，请按该尺寸重新导出。",
+      "badFormat": "精灵图必须是非空的 PNG 或 WebP，且与清单中的路径一致。",
+      "badManifest": "pet.json 清单无效。请检查其 id、名称、版本与精灵图路径。",
+      "incomplete": "请同时选择 pet.json 及其精灵图（.webp 或 .png）。",
+      "invalid": "这不是有效的 Codex 兼容 v2 宠物包。请检查清单、图片格式与图集尺寸。",
+      "tooLarge": "精灵图超过 25 MiB 限制，请压缩或重新导出。"
+    },
     "import": "导入 v2 精灵图宠物",
     "importHint": "同时选择 pet.json 与对应的 spritesheet.webp 或 spritesheet.png。安装前 Cognia 会校验 v2 清单和 1536×2288 图集。",
-    "installed": "精灵图宠物已安装并启用。",
-    "invalid": "这不是有效的 Codex 兼容 v2 宠物包。请检查清单、图片格式与图集尺寸。"
+    "installed": "精灵图宠物已安装并启用。"
   },
   "sound": {
     "description": "在你抚摸宠物或它作出反应时播放短促音效。默认关闭。",

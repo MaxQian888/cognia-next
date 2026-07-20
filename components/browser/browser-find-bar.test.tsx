@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import { TooltipProvider } from "@/components/ui/tooltip"
 
-import { BrowserFindBar } from "./browser-find-bar"
+import { BrowserFindBar, BrowserFindBarSection, isFindShortcut } from "./browser-find-bar"
 
 const renderBar = (ui: React.ReactElement) => render(<TooltipProvider>{ui}</TooltipProvider>)
 const input = () => screen.getByPlaceholderText("Find in page")
@@ -47,6 +47,18 @@ describe("BrowserFindBar", () => {
     expect(screen.getByRole("button", { name: "Previous match" })).toBeDisabled()
   })
 
+  it("degrades to no-matches when a later search rejects", async () => {
+    const onSearch = jest
+      .fn()
+      .mockResolvedValueOnce({ matches: 3, index: 0 })
+      .mockRejectedValueOnce(new Error("preview gone"))
+    renderBar(<BrowserFindBar onSearch={onSearch} onClose={jest.fn()} />)
+    fireEvent.change(input(), { target: { value: "ab" } })
+    expect(await screen.findByText("1/3")).toBeInTheDocument()
+    fireEvent.change(input(), { target: { value: "abc" } })
+    expect(await screen.findByText("No matches")).toBeInTheDocument()
+  })
+
   it("closes on Escape and on the close button", () => {
     const onClose = jest.fn()
     renderBar(
@@ -59,5 +71,30 @@ describe("BrowserFindBar", () => {
     expect(onClose).toHaveBeenCalledTimes(1)
     fireEvent.click(screen.getByRole("button", { name: "Close find" }))
     expect(onClose).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("isFindShortcut", () => {
+  const base = { metaKey: false, ctrlKey: false, altKey: false, key: "f" }
+  it("matches Cmd/Ctrl+F in either case", () => {
+    expect(isFindShortcut({ ...base, metaKey: true })).toBe(true)
+    expect(isFindShortcut({ ...base, ctrlKey: true, key: "F" })).toBe(true)
+  })
+  it("rejects plain F, Alt-modified, and other keys", () => {
+    expect(isFindShortcut(base)).toBe(false)
+    expect(isFindShortcut({ ...base, metaKey: true, altKey: true })).toBe(false)
+    expect(isFindShortcut({ ...base, ctrlKey: true, key: "g" })).toBe(false)
+  })
+})
+
+describe("BrowserFindBarSection", () => {
+  it("renders the find bar inside its standard row", () => {
+    renderBar(
+      <BrowserFindBarSection
+        onSearch={jest.fn().mockResolvedValue({ matches: 0, index: 0 })}
+        onClose={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("browser-find-bar")).toBeInTheDocument()
   })
 })

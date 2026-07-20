@@ -1,7 +1,6 @@
 import {
   registerProjectEditorOpener,
   openInProjectEditor,
-  requestProjectEditorOpen,
   deferProjectEditorOpen,
   __resetProjectEditorBridgeForTesting,
 } from "./project-editor-bridge"
@@ -16,7 +15,7 @@ describe("project-editor-bridge", () => {
   it("hands a deferred request to an editor that mounts afterwards", () => {
     const open = jest.fn()
 
-    expect(requestProjectEditorOpen("/repo/src/a.ts", 8, 3)).toBe(false)
+    deferProjectEditorOpen("/repo/src/a.ts", 8, 3)
     registerProjectEditorOpener({ root: "/repo", open })
 
     expect(open).toHaveBeenCalledWith("src/a.ts", 8, 3)

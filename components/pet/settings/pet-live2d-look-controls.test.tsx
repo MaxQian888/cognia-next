@@ -4,6 +4,9 @@ const usePet = jest.fn()
 jest.mock("@/hooks/pet/use-pet", () => ({ usePet: () => usePet() }))
 
 const useActiveLive2dModel = jest.fn()
+jest.mock("@/hooks/pet/use-active-sprite-pack", () => ({
+  useActiveSpritePack: () => ({ packId: undefined, row: undefined }),
+}))
 jest.mock("@/hooks/pet/use-active-live2d-model", () => ({
   useActiveLive2dModel: () => useActiveLive2dModel(),
 }))

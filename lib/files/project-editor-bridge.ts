@@ -59,23 +59,6 @@ export function openInProjectEditor(absolutePath: string, line?: number, column?
 }
 
 /**
- * Open immediately when an editor is mounted, otherwise retain the latest
- * request until a matching editor registers (for example after a tab switch).
- */
-export function requestProjectEditorOpen(
-  absolutePath: string,
-  line?: number,
-  column?: number
-): boolean {
-  if (openInProjectEditor(absolutePath, line, column)) {
-    pendingOpen = null
-    return true
-  }
-  pendingOpen = { absolutePath, line, column }
-  return false
-}
-
-/**
  * Retain a request for the next matching editor registration without offering
  * it to an already-mounted dormant opener. This is used when navigation also
  * changes tabs and the destination editor has not mounted yet.

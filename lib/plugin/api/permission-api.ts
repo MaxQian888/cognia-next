@@ -143,6 +143,25 @@ export function initializePluginPermissions(pluginId: string, manifestPermission
 }
 
 /**
+ * Mirror an API-permission change to the native/remote host, but only when that
+ * gateway exists — browser / Capacitor-local plugins use the in-memory set, and
+ * issuing a Tauri-only command there would warn and persist nothing. Failures
+ * are recorded silently: the in-memory grant already succeeded, so the host
+ * mirror is best-effort.
+ */
+function persistToHost(
+  pluginId: string,
+  fn: () => Promise<unknown>,
+  site: string,
+  message: string
+): void {
+  if (!isPluginGatewayAvailable()) return
+  void fn().catch((error) =>
+    recordSilentFailure(pluginId, { site, message, expected: false }, error)
+  )
+}
+
+/**
  * Create the Permission API for a plugin
  */
 export function createPermissionAPI(
@@ -155,22 +174,13 @@ export function createPermissionAPI(
     initializePluginPermissions(pluginId, manifestPermissions)
   }
 
-  // Prime native/remote host grants only when that gateway exists. Browser and
-  // Capacitor-local plugins use the in-memory permission set; issuing a Tauri-
-  // only command there creates a false warning and cannot persist anything.
-  if (isPluginGatewayAvailable()) {
-    void listHostPermissions(pluginId).catch((error) =>
-      recordSilentFailure(
-        pluginId,
-        {
-          site: "permission.listHost",
-          message: "Failed to prime host-side permission grants",
-          expected: false,
-        },
-        error
-      )
-    )
-  }
+  // Prime native/remote host grants (a no-op without the host gateway).
+  persistToHost(
+    pluginId,
+    () => listHostPermissions(pluginId),
+    "permission.listHost",
+    "Failed to prime host-side permission grants"
+  )
 
   const getPermissions = () => grantedPermissions.get(pluginId) || new Set()
 
@@ -205,19 +215,12 @@ export function createPermissionAPI(
       if (granted) {
         existing.add(permission)
         contextPanelRegistry.refresh()
-        if (isPluginGatewayAvailable()) {
-          void grantHostPermission(pluginId, permission).catch((error) =>
-            recordSilentFailure(
-              pluginId,
-              {
-                site: "permission.grantHost",
-                message: `Failed to persist grant for ${permission}`,
-                expected: false,
-              },
-              error
-            )
-          )
-        }
+        persistToHost(
+          pluginId,
+          () => grantHostPermission(pluginId, permission),
+          "permission.grantHost",
+          `Failed to persist grant for ${permission}`
+        )
         logger.info(`Granted permission: ${permission}`)
       } else {
         logger.info(`Denied permission: ${permission}`)
@@ -271,19 +274,12 @@ export function grantPermission(pluginId: string, permission: PluginAPIPermissio
   permissions.add(permission)
   grantedPermissions.set(pluginId, permissions)
   contextPanelRegistry.refresh()
-  if (isPluginGatewayAvailable()) {
-    void grantHostPermission(pluginId, permission).catch((error) =>
-      recordSilentFailure(
-        pluginId,
-        {
-          site: "permission.grantHost",
-          message: `Failed to persist grant for ${permission}`,
-          expected: false,
-        },
-        error
-      )
-    )
-  }
+  persistToHost(
+    pluginId,
+    () => grantHostPermission(pluginId, permission),
+    "permission.grantHost",
+    `Failed to persist grant for ${permission}`
+  )
 }
 
 /**
@@ -295,17 +291,10 @@ export function revokePermission(pluginId: string, permission: PluginAPIPermissi
     permissions.delete(permission)
   }
   contextPanelRegistry.refresh()
-  if (isPluginGatewayAvailable()) {
-    void revokeHostPermission(pluginId, permission).catch((error) =>
-      recordSilentFailure(
-        pluginId,
-        {
-          site: "permission.revokeHost",
-          message: `Failed to persist revocation for ${permission}`,
-          expected: false,
-        },
-        error
-      )
-    )
-  }
+  persistToHost(
+    pluginId,
+    () => revokeHostPermission(pluginId, permission),
+    "permission.revokeHost",
+    `Failed to persist revocation for ${permission}`
+  )
 }

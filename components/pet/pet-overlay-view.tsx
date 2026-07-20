@@ -30,6 +30,7 @@ import {
 import { usePet } from "@/hooks/pet/use-pet"
 import { usePetAnimationState } from "@/hooks/pet/use-pet-animation-state"
 import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
+import { useActiveSpritePack } from "@/hooks/pet/use-active-sprite-pack"
 import { useDocumentHidden } from "@/hooks/pet/use-document-visible"
 import { usePetLocomotion } from "@/hooks/pet/use-pet-locomotion"
 import { usePetDragGesture } from "@/hooks/pet/use-pet-drag-gesture"
@@ -69,9 +70,11 @@ export function PetOverlayView() {
   // only when picked, the Cubism runtime is ready, and an active model exists;
   // otherwise the SVG mascot.
   const { modelId, coreReady } = useActiveLive2dModel(pet)
+  const { row: activeSpritePack } = useActiveSpritePack(pet)
   const skinId = resolveEffectiveSkin(pet.skinId, {
     coreReady,
     hasActiveModel: Boolean(modelId),
+    hasActiveSpritePack: Boolean(activeSpritePack),
   })
 
   const osReduced = useReducedMotion()

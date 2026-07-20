@@ -14,6 +14,9 @@ const useActiveLive2dModel = jest.fn(() => ({
   row: undefined,
   coreReady: undefined as boolean | undefined,
 }))
+jest.mock("@/hooks/pet/use-active-sprite-pack", () => ({
+  useActiveSpritePack: () => ({ packId: undefined, row: undefined }),
+}))
 jest.mock("@/hooks/pet/use-active-live2d-model", () => ({
   useActiveLive2dModel: () => useActiveLive2dModel(),
 }))

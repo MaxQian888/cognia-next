@@ -159,4 +159,49 @@ describe("validateSpriteV2Import", () => {
       })
     ).rejects.toThrow("Unable to read spritesheet dimensions: decoder failed")
   })
+
+  it("tags each failure with a typed code the UI can translate", async () => {
+    await expect(
+      validateSpriteV2Import({
+        manifest: undefined,
+        spritesheet: webp(),
+        readImageDimensions: readValidDimensions,
+      })
+    ).rejects.toMatchObject({ code: "bad-manifest" })
+
+    await expect(
+      validateSpriteV2Import({
+        manifest: validManifest,
+        spritesheet: new Blob(["x"], { type: "image/gif" }),
+        readImageDimensions: readValidDimensions,
+      })
+    ).rejects.toMatchObject({ code: "bad-format" })
+
+    await expect(
+      validateSpriteV2Import({
+        manifest: validManifest,
+        spritesheet: webp(),
+        existingIds: new Set(["momo-v2"]),
+        readImageDimensions: readValidDimensions,
+      })
+    ).rejects.toMatchObject({ code: "already-installed" })
+
+    await expect(
+      validateSpriteV2Import({
+        manifest: validManifest,
+        spritesheet: webp(),
+        readImageDimensions: async () => ({ width: 10, height: 10 }),
+      })
+    ).rejects.toMatchObject({ code: "bad-dimensions" })
+
+    const bigSheet = webp()
+    Object.defineProperty(bigSheet, "size", { value: MAX_SPRITE_V2_ATLAS_BYTES + 1 })
+    await expect(
+      validateSpriteV2Import({
+        manifest: validManifest,
+        spritesheet: bigSheet,
+        readImageDimensions: readValidDimensions,
+      })
+    ).rejects.toMatchObject({ code: "too-large" })
+  })
 })

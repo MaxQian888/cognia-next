@@ -9,6 +9,9 @@ jest.mock("@/hooks/pet/use-pet")
 jest.mock("@/hooks/pet/use-pet-bubbles", () => ({ usePetBubbles: jest.fn() }))
 jest.mock("@/hooks/pet/use-pet-insight", () => ({ usePetInsight: jest.fn() }))
 // Default: no active Live2D model, so the widget renders the SVG skin.
+jest.mock("@/hooks/pet/use-active-sprite-pack", () => ({
+  useActiveSpritePack: () => ({ packId: undefined, row: undefined }),
+}))
 jest.mock("@/hooks/pet/use-active-live2d-model", () => ({
   useActiveLive2dModel: jest.fn(() => ({ modelId: undefined, row: undefined, coreReady: false })),
 }))

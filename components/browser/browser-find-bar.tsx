@@ -11,6 +11,22 @@ import { cn } from "@/lib/utils"
 export type FindResult = { matches: number; index: number }
 
 /**
+ * True for the Cmd/Ctrl+F find shortcut (never with Alt). Shared by both preview
+ * panes so the match rule cannot drift between them; the surrounding behaviour
+ * (URL guard, native key forwarding) stays each pane's own.
+ */
+export function isFindShortcut(event: {
+  metaKey: boolean
+  ctrlKey: boolean
+  altKey: boolean
+  key: string
+}): boolean {
+  return (
+    (event.metaKey || event.ctrlKey) && !event.altKey && (event.key === "f" || event.key === "F")
+  )
+}
+
+/**
  * Find-in-page bar: query input + `n/m` counter + prev/next + close. Owns its
  * own query state and delegates the actual search to `onSearch` (which drives
  * the injected `__cogniaFind` helper on whichever preview path is live). Enter =
@@ -36,7 +52,14 @@ export function BrowserFindBar({
 
   const run = useCallback(
     async (q: string, forward: boolean) => {
-      setResult(await onSearch(q, { forward }))
+      try {
+        setResult(await onSearch(q, { forward }))
+      } catch {
+        // A webview / RPC eval can reject (preview torn down, injected helper
+        // missing). Degrade to "no matches" instead of leaving an unhandled
+        // rejection and a stale counter.
+        setResult({ matches: 0, index: 0 })
+      }
     },
     [onSearch]
   )
@@ -110,6 +133,21 @@ export function BrowserFindBar({
       >
         <XIcon />
       </TooltipIconButton>
+    </div>
+  )
+}
+
+/** The find bar in its standard right-aligned, bordered row — shared by both preview panes. */
+export function BrowserFindBarSection({
+  onSearch,
+  onClose,
+}: {
+  onSearch: (query: string, options: { forward: boolean }) => Promise<FindResult> | FindResult
+  onClose: () => void
+}) {
+  return (
+    <div className="flex justify-end border-b bg-background px-2 py-1">
+      <BrowserFindBar onSearch={onSearch} onClose={onClose} />
     </div>
   )
 }

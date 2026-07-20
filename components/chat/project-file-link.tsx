@@ -17,7 +17,7 @@ export function ProjectFileLink({ target, children, onOpenFile }: ProjectFileLin
   return (
     <button
       type="button"
-      className="inline cursor-pointer font-inherit text-primary underline underline-offset-2 hover:text-primary/80"
+      className="inline cursor-pointer [font:inherit] text-primary underline underline-offset-2 hover:text-primary/80"
       onClick={() => {
         if (onOpenFile) {
           onOpenFile(target)

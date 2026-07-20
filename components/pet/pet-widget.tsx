@@ -20,6 +20,7 @@ import { usePetProactive } from "@/hooks/pet/use-pet-proactive"
 import { usePetInsight } from "@/hooks/pet/use-pet-insight"
 import { usePetScheduledReminder } from "@/hooks/pet/use-pet-scheduled-reminder"
 import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
+import { useActiveSpritePack } from "@/hooks/pet/use-active-sprite-pack"
 import { useDocumentHidden } from "@/hooks/pet/use-document-visible"
 import { usePetDragGesture } from "@/hooks/pet/use-pet-drag-gesture"
 import { usePetWidgetThrow } from "@/hooks/pet/use-pet-widget-throw"
@@ -71,9 +72,11 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
   // Resolved BEFORE the animation state so the one-shot queue can hold shots
   // long enough for Cubism motions to finish.
   const { modelId, coreReady } = useActiveLive2dModel(settings)
+  const { row: activeSpritePack } = useActiveSpritePack(settings)
   const effectiveSkin = resolveEffectiveSkin(settings.skinId, {
     coreReady,
     hasActiveModel: Boolean(modelId),
+    hasActiveSpritePack: Boolean(activeSpritePack),
   })
   const { state, oneShot } = usePetAnimationState(
     reduced,

@@ -10,6 +10,25 @@ const SPRITESHEET_MIME_BY_PATH = {
   "spritesheet.webp": "image/webp",
 } as const
 
+/** Distinct, user-actionable reasons an import can fail. */
+export type SpriteV2ImportErrorCode =
+  "bad-manifest" | "bad-format" | "too-large" | "already-installed" | "bad-dimensions"
+
+/**
+ * Typed import failure carrying a stable `code`, so the import UI can surface a
+ * specific translated reason instead of collapsing every failure into one
+ * generic message. The `message` stays developer-facing (English, for logs).
+ */
+export class SpriteV2ImportError extends Error {
+  constructor(
+    readonly code: SpriteV2ImportErrorCode,
+    message: string
+  ) {
+    super(message)
+    this.name = "SpriteV2ImportError"
+  }
+}
+
 export interface SpriteV2Manifest {
   id: string
   displayName: string
@@ -42,7 +61,7 @@ export function isValidSpritePackId(id: string): boolean {
 
 function record(value: unknown): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("Pet sprite manifest must be an object")
+    throw new SpriteV2ImportError("bad-manifest", "Pet sprite manifest must be an object")
   }
   return value as Record<string, unknown>
 }
@@ -53,7 +72,7 @@ function boundedText(
   maxLength: number
 ): string {
   if (typeof value !== "string" || value.trim().length === 0 || value.length > maxLength) {
-    throw new Error(`Invalid manifest.${field}`)
+    throw new SpriteV2ImportError("bad-manifest", `Invalid manifest.${field}`)
   }
   return value.trim()
 }
@@ -61,15 +80,22 @@ function boundedText(
 function parseManifest(value: unknown): SpriteV2Manifest {
   const raw = record(value)
   if (typeof raw.id !== "string" || !isValidSpritePackId(raw.id)) {
-    throw new Error("Invalid manifest.id: use a lowercase slug up to 64 characters")
+    throw new SpriteV2ImportError(
+      "bad-manifest",
+      "Invalid manifest.id: use a lowercase slug up to 64 characters"
+    )
   }
   const displayName = boundedText(raw.displayName, "displayName", MAX_DISPLAY_NAME_LENGTH)
   const description = boundedText(raw.description, "description", MAX_DESCRIPTION_LENGTH)
   if (raw.spriteVersionNumber !== 2) {
-    throw new Error("Invalid manifest.spriteVersionNumber: expected 2")
+    throw new SpriteV2ImportError(
+      "bad-manifest",
+      "Invalid manifest.spriteVersionNumber: expected 2"
+    )
   }
   if (raw.spritesheetPath !== "spritesheet.png" && raw.spritesheetPath !== "spritesheet.webp") {
-    throw new Error(
+    throw new SpriteV2ImportError(
+      "bad-manifest",
       "Invalid manifest.spritesheetPath: expected spritesheet.png or spritesheet.webp"
     )
   }
@@ -93,19 +119,28 @@ export async function validateSpriteV2Import(
   const manifest = parseManifest(options.manifest)
   const expectedMime = SPRITESHEET_MIME_BY_PATH[manifest.spritesheetPath]
   if (options.spritesheet.type !== "image/png" && options.spritesheet.type !== "image/webp") {
-    throw new Error("Unsupported spritesheet MIME type: expected image/png or image/webp")
+    throw new SpriteV2ImportError(
+      "bad-format",
+      "Unsupported spritesheet MIME type: expected image/png or image/webp"
+    )
   }
   if (options.spritesheet.type !== expectedMime) {
-    throw new Error("Spritesheet MIME type does not match manifest.spritesheetPath")
+    throw new SpriteV2ImportError(
+      "bad-format",
+      "Spritesheet MIME type does not match manifest.spritesheetPath"
+    )
   }
   if (options.spritesheet.size === 0) {
-    throw new Error("Spritesheet must not be empty")
+    throw new SpriteV2ImportError("bad-format", "Spritesheet must not be empty")
   }
   if (options.spritesheet.size > MAX_SPRITE_V2_ATLAS_BYTES) {
-    throw new Error("Spritesheet exceeds the 25 MiB limit")
+    throw new SpriteV2ImportError("too-large", "Spritesheet exceeds the 25 MiB limit")
   }
   if (options.existingIds && new Set(options.existingIds).has(manifest.id)) {
-    throw new Error(`Pet sprite pack '${manifest.id}' is already installed`)
+    throw new SpriteV2ImportError(
+      "already-installed",
+      `Pet sprite pack '${manifest.id}' is already installed`
+    )
   }
 
   let dimensions: { width: number; height: number }
@@ -113,13 +148,20 @@ export async function validateSpriteV2Import(
     dimensions = await options.readImageDimensions(options.spritesheet)
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
-    throw new Error(`Unable to read spritesheet dimensions: ${detail}`)
+    throw new SpriteV2ImportError(
+      "bad-dimensions",
+      `Unable to read spritesheet dimensions: ${detail}`
+    )
   }
   if (!Number.isFinite(dimensions.width) || !Number.isFinite(dimensions.height)) {
-    throw new Error("Spritesheet decoder returned invalid dimensions")
+    throw new SpriteV2ImportError(
+      "bad-dimensions",
+      "Spritesheet decoder returned invalid dimensions"
+    )
   }
   if (dimensions.width !== SPRITE_V2_ATLAS_WIDTH || dimensions.height !== SPRITE_V2_ATLAS_HEIGHT) {
-    throw new Error(
+    throw new SpriteV2ImportError(
+      "bad-dimensions",
       `Invalid spritesheet dimensions ${dimensions.width}x${dimensions.height}; expected ${SPRITE_V2_ATLAS_WIDTH}x${SPRITE_V2_ATLAS_HEIGHT}`
     )
   }

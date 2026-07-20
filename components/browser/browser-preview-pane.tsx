@@ -25,7 +25,7 @@ import {
   useBrowserAgentActivity,
 } from "@/components/browser/browser-agent-indicator"
 import { BrowserCookieImportAction } from "@/components/browser/browser-cookie-import-action"
-import { BrowserFindBar } from "@/components/browser/browser-find-bar"
+import { BrowserFindBarSection, isFindShortcut } from "@/components/browser/browser-find-bar"
 import { BrowserHistoryMenu } from "@/components/browser/browser-history-menu"
 import { BrowserRecorderPanel } from "@/components/browser/browser-recorder-panel"
 import { BrowserZoomControl, MAX_ZOOM, MIN_ZOOM } from "@/components/browser/browser-zoom-control"
@@ -474,7 +474,7 @@ export function BrowserPreviewPane({
       onKeyDown={(e) => {
         // Best-effort Cmd/Ctrl+F while the React chrome has focus; when the
         // native webview holds focus the toolbar Find button is the trigger.
-        if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === "f" || e.key === "F")) {
+        if (isFindShortcut(e)) {
           if (!committedUrl) return
           e.preventDefault()
           setFindOpen(true)
@@ -619,11 +619,7 @@ export function BrowserPreviewPane({
         </div>
       </div>
 
-      {findOpen && (
-        <div className="flex justify-end border-b bg-background px-2 py-1">
-          <BrowserFindBar onSearch={runFind} onClose={closeFind} />
-        </div>
-      )}
+      {findOpen && <BrowserFindBarSection onSearch={runFind} onClose={closeFind} />}
 
       <div className="flex min-h-0 flex-1">
         <div

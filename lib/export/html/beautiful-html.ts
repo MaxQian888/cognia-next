@@ -7,6 +7,7 @@ import { THEMES, type ThemeId, type ThemeTokens } from "./syntax-themes"
 import { getStylePreset } from "./style-presets"
 import { buildWallpaperBackdropCss } from "./theme-wallpaper"
 import { renderSafeInlineMarkdown } from "./safe-inline-markdown"
+import { isImageFile } from "../file-utils"
 
 export interface BeautifulHtmlOptions {
   session: ChatSession
@@ -214,12 +215,4 @@ details .error { color: #dc2626; margin: 6px 0 0; }
 .exported { margin-top: 32px; text-align: center; color: ${t.muted}; font-size: 12px; }
 @media (max-width: 600px) { .container { padding: 16px; } header h1 { font-size: 22px; } }
 `
-}
-
-function isImageFile(file: { url?: string; mediaType?: string; filename?: string }): boolean {
-  return Boolean(
-    file.mediaType?.startsWith("image/") ||
-    file.url?.startsWith("data:image/") ||
-    file.filename?.match(/\.(?:avif|gif|jpe?g|png|svg|webp)$/i)
-  )
 }

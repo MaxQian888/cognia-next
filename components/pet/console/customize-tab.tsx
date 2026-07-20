@@ -19,6 +19,7 @@ import Link from "next/link"
 import { useSettingsStore } from "@/stores/settings"
 import { isTauri } from "@/lib/platform/detect"
 import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
+import { useActiveSpritePack } from "@/hooks/pet/use-active-sprite-pack"
 import { DEFAULT_PET_SETTINGS, type PetSettings } from "@/types/pet"
 import { SettingsCard } from "@/components/settings/common/settings-section"
 import { resolveEffectiveSkin } from "../skins/resolve-effective-skin"
@@ -42,9 +43,11 @@ export function CustomizeTab() {
   // swap the SVG cosmetic controls for the Live2D look panel when the user has
   // chosen Live2D — the cosmetic palette/hat/eyes don't touch a Live2D model.
   const { modelId, coreReady } = useActiveLive2dModel(pet)
+  const { row: activeSpritePack } = useActiveSpritePack(pet)
   const effectiveSkin = resolveEffectiveSkin(pet.skinId, {
     coreReady,
     hasActiveModel: Boolean(modelId),
+    hasActiveSpritePack: Boolean(activeSpritePack),
   })
   const live2dChosen = pet.skinId === "live2d"
   const spriteChosen = pet.skinId === "sprite-v2"

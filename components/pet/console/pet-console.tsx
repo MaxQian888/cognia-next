@@ -18,6 +18,7 @@ import { renamePet } from "@/lib/pet/runtime/rename-pet"
 import { emitPetEvent } from "@/lib/pet/events/pet-event-bus"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
+import { useActiveSpritePack } from "@/hooks/pet/use-active-sprite-pack"
 import {
   PluginExtensionSlot,
   usePluginSlotHasExtensions,
@@ -66,9 +67,11 @@ export function PetConsole({ initialTab }: PetConsoleProps = {}) {
   // the popup's stat-card avatar.
   const pet = appSettings?.petSettings ?? DEFAULT_PET_SETTINGS
   const { modelId, coreReady } = useActiveLive2dModel(pet)
+  const { row: activeSpritePack } = useActiveSpritePack(pet)
   const effectiveSkin = resolveEffectiveSkin(pet.skinId, {
     coreReady,
     hasActiveModel: Boolean(modelId),
+    hasActiveSpritePack: Boolean(activeSpritePack),
   })
 
   // The "Plugins" tab is host-owned and appears only while ≥1 plugin has

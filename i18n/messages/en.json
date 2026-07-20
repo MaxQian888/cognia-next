@@ -22358,10 +22358,18 @@
         "createTitle": "AI Hatch Studio",
         "delete": "Delete {name}",
         "empty": "No v2 sprite pets installed yet.",
+        "error": {
+          "alreadyInstalled": "This v2 sprite pet is already installed.",
+          "badDimensions": "The spritesheet must be a 1536×2288 atlas. Re-export it at that exact size.",
+          "badFormat": "The spritesheet must be a non-empty PNG or WebP that matches the manifest path.",
+          "badManifest": "The pet.json manifest is invalid. Check its id, name, version, and spritesheet path.",
+          "incomplete": "Select both pet.json and its spritesheet (.webp or .png) together.",
+          "invalid": "This is not a valid Codex-compatible v2 pet package. Check the manifest, image format, and atlas dimensions.",
+          "tooLarge": "The spritesheet exceeds the 25 MiB limit. Compress or re-export it."
+        },
         "import": "Import v2 sprite pet",
         "importHint": "Select pet.json and its spritesheet.webp or spritesheet.png together. Cognia validates the v2 manifest and 1536×2288 atlas before installing.",
-        "installed": "Sprite pet installed and activated.",
-        "invalid": "This is not a valid Codex-compatible v2 pet package. Check the manifest, image format, and atlas dimensions."
+        "installed": "Sprite pet installed and activated."
       },
       "title": "Pet",
       "twinAwareness": {

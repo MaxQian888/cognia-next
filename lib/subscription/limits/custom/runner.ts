@@ -5,6 +5,7 @@
 // uses. Results carry a `custom:<id>` provider so they render as their own block
 // in the limits panel.
 
+import { applyCoalescedResult } from "../coalesce-record"
 import { runDescriptor } from "../descriptor/engine"
 import { CUSTOM_LIMITS_MIN_REFRESH_MS, isCustomSourceComplete } from "./store"
 
@@ -91,17 +92,7 @@ async function runCustomLimitsSourceCoalesced(
   const request = (async () => {
     try {
       const result = await runCustomLimitsSource(src, deps)
-      let displayResult = result
-      if (result && !result.error) {
-        entry.lastSuccessfulResult = result
-      } else if (result?.error && entry.lastSuccessfulResult) {
-        displayResult = { ...result, meters: entry.lastSuccessfulResult.meters }
-      }
-      if (result?.error && /(^|\s)429(\s|:)/.test(result.error)) {
-        entry.blockedUntil = deps.now() + CUSTOM_QUERY_RATE_LIMIT_BACKOFF_MS
-      }
-      entry.lastResult = displayResult
-      return displayResult
+      return applyCoalescedResult(entry, result, deps.now, CUSTOM_QUERY_RATE_LIMIT_BACKOFF_MS)
     } finally {
       entry.lastAttemptAt = deps.now()
       entry.inflight = null

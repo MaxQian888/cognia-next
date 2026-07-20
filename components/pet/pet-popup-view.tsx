@@ -22,6 +22,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_PET_DESKTOP_OVERLAY, DEFAULT_PET_SETTINGS } from "@/types/pet"
 import { usePet } from "@/hooks/pet/use-pet"
 import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
+import { useActiveSpritePack } from "@/hooks/pet/use-active-sprite-pack"
 import { startOverlayPetBridge, type OverlayPetBridge } from "@/lib/pet/events/cross-window-bridge"
 import type { PetBridgeInteractionKind } from "@/lib/pet/events/cross-window-protocol"
 import { schedulePetWindowReveal } from "@/lib/pet/reveal"
@@ -51,9 +52,11 @@ export function PetPopupView() {
   // floating sprite (Live2D when picked + ready, otherwise SVG) instead of
   // always drawing the SVG mascot.
   const { modelId, coreReady } = useActiveLive2dModel(pet)
+  const { row: activeSpritePack } = useActiveSpritePack(pet)
   const effectiveSkin = resolveEffectiveSkin(pet.skinId, {
     coreReady,
     hasActiveModel: Boolean(modelId),
+    hasActiveSpritePack: Boolean(activeSpritePack),
   })
 
   // Paint through to the desktop while mounted (transparent page background).

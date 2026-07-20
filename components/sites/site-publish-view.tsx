@@ -53,13 +53,7 @@ import type {
 } from "@/types/sites"
 import { SitePublishStep } from "./site-publish-step"
 import { SiteAdvancedPanel } from "./site-advanced-panel"
-
-function splitValues(value: string): string[] {
-  return value
-    .split(/[\n,]/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-}
+import { splitValues } from "./split-values"
 
 export interface SitePublishViewProps {
   site: SiteProjectRow

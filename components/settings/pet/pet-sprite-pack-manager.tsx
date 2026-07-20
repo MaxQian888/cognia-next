@@ -14,7 +14,11 @@ import {
   deletePetSpritePack,
   listPetSpritePacks,
 } from "@/lib/db/pet-sprite-packs"
-import { validateSpriteV2Import } from "@/lib/pet/sprite-v2/import"
+import {
+  validateSpriteV2Import,
+  SpriteV2ImportError,
+  type SpriteV2ImportErrorCode,
+} from "@/lib/pet/sprite-v2/import"
 import { seedMainChat } from "@/lib/pet/chat/seed-main-chat"
 import { isTauri } from "@/lib/platform/detect"
 import type { PetSettings } from "@/types/pet"
@@ -47,20 +51,33 @@ async function readImageDimensions(image: Blob): Promise<{ width: number; height
   }
 }
 
+type SpriteImportStatus = "idle" | "installed" | "incomplete" | "invalid" | SpriteV2ImportErrorCode
+
+/** Terminal error status → its translated alert message key under `spriteV2`. */
+const IMPORT_ERROR_KEY: Partial<Record<SpriteImportStatus, string>> = {
+  incomplete: "error.incomplete",
+  invalid: "error.invalid",
+  "bad-manifest": "error.badManifest",
+  "bad-format": "error.badFormat",
+  "too-large": "error.tooLarge",
+  "already-installed": "error.alreadyInstalled",
+  "bad-dimensions": "error.badDimensions",
+}
+
 export function PetSpritePackManager({ settings, onPatch }: PetSpritePackManagerProps) {
   const t = useTranslations("settings.pet.spriteV2")
   const router = useRouter()
   const packs = useLiveQuery(() => listPetSpritePacks(), [], [])
   const [concept, setConcept] = useState("")
   const [busy, setBusy] = useState(false)
-  const [status, setStatus] = useState<"idle" | "installed" | "invalid">("idle")
+  const [status, setStatus] = useState<SpriteImportStatus>("idle")
 
   async function importFiles(files: FileList | File[]) {
     const selected = Array.from(files)
     const manifestFile = selected.find((file) => file.name.toLowerCase() === "pet.json")
     const spritesheet = selected.find((file) => /^spritesheet\.(?:png|webp)$/i.test(file.name))
     if (!manifestFile || !spritesheet) {
-      setStatus("invalid")
+      setStatus("incomplete")
       return
     }
 
@@ -77,8 +94,8 @@ export function PetSpritePackManager({ settings, onPatch }: PetSpritePackManager
       const installed = await addPetSpritePack(payload)
       onPatch({ skinId: "sprite-v2", activeSpritePackId: installed.id })
       setStatus("installed")
-    } catch {
-      setStatus("invalid")
+    } catch (error) {
+      setStatus(error instanceof SpriteV2ImportError ? error.code : "invalid")
     } finally {
       setBusy(false)
     }
@@ -109,6 +126,8 @@ export function PetSpritePackManager({ settings, onPatch }: PetSpritePackManager
       setBusy(false)
     }
   }
+
+  const errorMessageKey = IMPORT_ERROR_KEY[status]
 
   return (
     <div className="space-y-4" data-testid="pet-sprite-pack-manager">
@@ -147,9 +166,9 @@ export function PetSpritePackManager({ settings, onPatch }: PetSpritePackManager
         />
         <p className="text-xs text-muted-foreground">{t("importHint")}</p>
         {status === "installed" && <p className="text-sm text-emerald-600">{t("installed")}</p>}
-        {status === "invalid" && (
+        {errorMessageKey && (
           <p className="text-sm text-destructive" role="alert">
-            {t("invalid")}
+            {t(errorMessageKey)}
           </p>
         )}
       </div>

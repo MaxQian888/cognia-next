@@ -13,6 +13,9 @@ jest.mock("@/hooks/pet/use-pet", () => ({ usePet: (id?: string | null) => mockUs
 
 // Active Live2D model resolution (drives the popup's effective preview skin).
 const mockUseActiveLive2dModel = jest.fn()
+jest.mock("@/hooks/pet/use-active-sprite-pack", () => ({
+  useActiveSpritePack: () => ({ packId: undefined, row: undefined }),
+}))
 jest.mock("@/hooks/pet/use-active-live2d-model", () => ({
   useActiveLive2dModel: () => mockUseActiveLive2dModel(),
 }))

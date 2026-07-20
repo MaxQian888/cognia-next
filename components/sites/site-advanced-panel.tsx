@@ -21,13 +21,7 @@ import type {
   SiteResourceRow,
   SiteVisitorPolicy,
 } from "@/types/sites"
-
-function splitValues(value: string): string[] {
-  return value
-    .split(/[\n,]/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-}
+import { splitValues } from "./split-values"
 
 const ACCESS_MODES: SiteVisitorPolicy["mode"][] = [
   "private",
