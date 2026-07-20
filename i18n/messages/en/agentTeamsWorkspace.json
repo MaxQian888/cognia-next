@@ -316,6 +316,7 @@
       "disabledTooltip": "Not available on this platform — use your local VS Code instead.",
       "downloading": "Downloading VS Code… {percent}%",
       "errorTitle": "Couldn't start VS Code",
+      "openFileFailed": "Couldn't open the file in VS Code: {error}",
       "retry": "Retry",
       "starting": "Starting VS Code…",
       "switchLabel": "Editor engine",

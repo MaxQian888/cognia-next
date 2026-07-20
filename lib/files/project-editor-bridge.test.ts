@@ -1,6 +1,8 @@
 import {
   registerProjectEditorOpener,
   openInProjectEditor,
+  requestProjectEditorOpen,
+  deferProjectEditorOpen,
   __resetProjectEditorBridgeForTesting,
 } from "./project-editor-bridge"
 
@@ -11,10 +13,40 @@ describe("project-editor-bridge", () => {
     expect(openInProjectEditor("/repo/a.ts")).toBe(false)
   })
 
+  it("hands a deferred request to an editor that mounts afterwards", () => {
+    const open = jest.fn()
+
+    expect(requestProjectEditorOpen("/repo/src/a.ts", 8, 3)).toBe(false)
+    registerProjectEditorOpener({ root: "/repo", open })
+
+    expect(open).toHaveBeenCalledWith("src/a.ts", 8, 3)
+  })
+
+  it("can wait for the next editor mount instead of using a dormant opener", () => {
+    const dormant = jest.fn()
+    const mounted = jest.fn()
+    registerProjectEditorOpener({ root: "/repo", open: dormant })
+
+    deferProjectEditorOpen("/repo/src/a.ts", 8, 3)
+    expect(dormant).not.toHaveBeenCalled()
+    registerProjectEditorOpener({ root: "/repo", open: mounted })
+
+    expect(mounted).toHaveBeenCalledWith("src/a.ts", 8, 3)
+    expect(dormant).not.toHaveBeenCalled()
+  })
+
   it("routes an in-root path to the opener with a relative path", () => {
     const open = jest.fn()
     registerProjectEditorOpener({ root: "/repo", open })
     expect(openInProjectEditor("/repo/src/a.ts", 5, 2)).toBe(true)
+    expect(open).toHaveBeenCalledWith("src/a.ts", 5, 2)
+  })
+
+  it("routes Windows paths using normalized separators", () => {
+    const open = jest.fn()
+    registerProjectEditorOpener({ root: "C:\\repo", open })
+
+    expect(openInProjectEditor("C:\\repo\\src\\a.ts", 5, 2)).toBe(true)
     expect(open).toHaveBeenCalledWith("src/a.ts", 5, 2)
   })
 

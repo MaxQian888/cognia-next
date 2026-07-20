@@ -78,6 +78,11 @@ jest.mock("./code-server-pane", () => ({
 
 import { AgentTeamEditor } from "./agent-team-editor"
 import type { AgentTeam } from "@/types/agent/agent-team"
+import {
+  __resetProjectEditorBridgeForTesting,
+  openInProjectEditor,
+} from "@/lib/files/project-editor-bridge"
+import { useProjectEditorSessionStore } from "@/stores/editor/project-editor-session-store"
 
 const isTauriMock = (jest.requireMock("@/lib/tauri") as { isTauri: jest.Mock }).isTauri
 const loadCompanionConfigMock = (
@@ -93,6 +98,7 @@ function team(workingDir?: string): AgentTeam {
 }
 
 beforeEach(() => {
+  __resetProjectEditorBridgeForTesting()
   isTauriMock.mockReturnValue(true)
   loadCompanionConfigMock.mockReturnValue(null)
   // Default to a pending probe so generic render tests don't fire an async
@@ -101,6 +107,7 @@ beforeEach(() => {
   editorState.activeFile = null
   editorState.dirtyCount = 0
   mockUseProjectEditor.mockClear()
+  useProjectEditorSessionStore.setState({ sessions: {} })
 })
 
 describe("AgentTeamEditor", () => {
@@ -145,6 +152,36 @@ describe("AgentTeamEditor", () => {
     })
     expect(screen.getByTestId("mock-code-server")).toHaveAttribute("data-root", "/repo")
     expect(screen.queryByTestId("mock-tree")).not.toBeInTheDocument()
+  })
+
+  it("restores the selected CodeServer mode after the editor tab remounts", async () => {
+    supportedMock.mockResolvedValue(true)
+    const first = render(<AgentTeamEditor team={team("/repo")} />)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    fireEvent.click(screen.getByTestId("editor-mode-codeserver"))
+    first.unmount()
+
+    render(<AgentTeamEditor team={team("/repo")} />)
+    expect(screen.getByTestId("mock-code-server")).toBeInTheDocument()
+  })
+
+  it("releases Monaco file routing while CodeServer owns the editor root", async () => {
+    supportedMock.mockResolvedValue(true)
+    render(<AgentTeamEditor team={team("/repo")} />)
+    act(() => {
+      expect(openInProjectEditor("/repo/a.ts", 3, 2)).toBe(true)
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("editor-mode-codeserver"))
+    })
+
+    expect(openInProjectEditor("/repo/a.ts", 3, 2)).toBe(false)
   })
 
   it("disables Pro IDE when the platform has no code-server binary", async () => {

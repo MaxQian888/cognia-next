@@ -20,6 +20,7 @@ import {
   ProjectEditorFileWorkbench,
   useProjectEditorWorkbench,
 } from "@/components/editor/project/project-editor-workbench"
+import { useProjectEditorSessionStore } from "@/stores/editor/project-editor-session-store"
 
 interface Props {
   team: AgentTeam
@@ -48,8 +49,17 @@ export function AgentTeamEditor({ team }: Props) {
 
 function ProjectEditorBody({ team, workingDir }: { team: AgentTeam; workingDir: string }) {
   const tTeam = useTranslations("agentTeamsWorkspace.editor")
-  // Optional "Pro IDE" mode — the embedded code-server webview (desktop only).
-  const [mode, setMode] = useState<"monaco" | "codeserver">("monaco")
+  const scopeKey = `team:${team.id}`
+  const persistedMode = useProjectEditorSessionStore(
+    (state) => state.sessions[scopeKey]?.editorMode
+  )
+  const setEditorSession = useProjectEditorSessionStore((state) => state.setSession)
+  // Persist the engine selection so a Chat → Editor file jump remounts the
+  // editor that the user actually selected, including CodeServer.
+  const mode = isTauri() && persistedMode === "codeserver" ? "codeserver" : "monaco"
+  const setMode = (next: "monaco" | "codeserver") => {
+    setEditorSession(scopeKey, { editorMode: next })
+  }
   const [proIdeSupported, setProIdeSupported] = useState(false)
   useEffect(() => {
     if (!isTauri()) return
@@ -65,7 +75,11 @@ function ProjectEditorBody({ team, workingDir }: { team: AgentTeam; workingDir: 
     }
   }, [])
 
-  const workbench = useProjectEditorWorkbench({ scopeKey: `team:${team.id}`, workingDir })
+  const workbench = useProjectEditorWorkbench({
+    scopeKey,
+    workingDir,
+    registerProjectOpener: mode === "monaco",
+  })
   const { roots, rootKey, rootPath, selectRoot } = workbench.editor
 
   return (

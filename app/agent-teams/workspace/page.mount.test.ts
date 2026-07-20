@@ -41,4 +41,17 @@ describe("agent-teams workspace page wiring", () => {
     expect(src).toMatch(/claude:\s*{\s*model:\s*buildTeamClaudeRuntimeModel\(settings\)\s*}/)
     expect(src).not.toMatch(/getProviderModel\(\{\s*provider:\s*"anthropic"/s)
   })
+
+  it("wires live file activity into the active project editor", () => {
+    expect(src).toMatch(/onFileActivity:\s*handleAgentFileActivity/)
+    expect(src).toMatch(/openInProjectEditor\(absolutePath, activity\.line, activity\.column\)/)
+  })
+
+  it("defers conversation file navigation until the editor tab mounts", () => {
+    expect(src).toMatch(
+      /deferProjectEditorOpen\(target\.absolutePath, target\.line, target\.column\)/
+    )
+    expect(src).toMatch(/setWorkspaceTab\("editor"\)/)
+    expect(src).toMatch(/onOpenProjectFile={handleConversationFileOpen}/)
+  })
 })

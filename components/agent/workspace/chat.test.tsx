@@ -62,8 +62,23 @@ jest.mock("./team-mention-chips", () => ({
 
 // Mock the heavy markdown stack so chat.test.tsx doesn't pull in react-markdown ESM.
 jest.mock("@/components/chat/markdown-renderer", () => ({
-  MarkdownRenderer: ({ content }: { content: string }) => (
-    <div data-testid="mock-markdown">{content}</div>
+  MarkdownRenderer: ({
+    content,
+    projectRoot,
+    onOpenProjectFile,
+  }: {
+    content: string
+    projectRoot?: string
+    onOpenProjectFile?: (target: { absolutePath: string; line?: number }) => void
+  }) => (
+    <button
+      type="button"
+      data-testid="mock-markdown"
+      data-root={projectRoot}
+      onClick={() => onOpenProjectFile?.({ absolutePath: "/repo/src/a.ts", line: 4 })}
+    >
+      {content}
+    </button>
   ),
 }))
 
@@ -210,6 +225,26 @@ describe("AgentTeamChat", () => {
     render(<AgentTeamChat teamId="t1" messages={[msg]} />)
     const list = screen.getByTestId("mock-tool-call-list")
     expect(list).toHaveAttribute("data-count", "2")
+  })
+
+  it("forwards project file-link navigation to completed agent messages", () => {
+    const onOpenProjectFile = jest.fn()
+    render(
+      <AgentTeamChat
+        teamId="t1"
+        messages={[makeMessage("file-link")]}
+        projectRoot="/repo"
+        onOpenProjectFile={onOpenProjectFile}
+      />
+    )
+
+    const markdown = screen.getByTestId("mock-markdown")
+    expect(markdown).toHaveAttribute("data-root", "/repo")
+    fireEvent.click(markdown)
+    expect(onOpenProjectFile).toHaveBeenCalledWith({
+      absolutePath: "/repo/src/a.ts",
+      line: 4,
+    })
   })
 
   it("renders TokenUsageLine when metadata carries tokenUsage", () => {

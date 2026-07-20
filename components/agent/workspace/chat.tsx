@@ -30,6 +30,7 @@ import type { ComposerHandle } from "@/components/chat/composer"
 import { TEAM_USER_SENDER_ID } from "@/types/agent/agent-team"
 import type { TeammateRuntime } from "@/types/agent/agent-team"
 import type { SubAgentTokenUsage } from "@/types/agent/sub-agent"
+import type { ProjectFileReference } from "@/lib/files/project-file-reference"
 
 /* ------------------------------------------------------------------ */
 /*  Border color per message type                                       */
@@ -102,7 +103,12 @@ function isErrored(msg: AgentTeamMessage): boolean {
  * agent messages get the full MarkdownRenderer treatment so code blocks,
  * lists, tables, etc. display properly.
  */
-function renderMessageBody(msg: AgentTeamMessage, streaming: boolean) {
+function renderMessageBody(
+  msg: AgentTeamMessage,
+  streaming: boolean,
+  projectRoot?: string,
+  onOpenProjectFile?: (target: ProjectFileReference) => void
+) {
   const isFromUser = msg.senderId === TEAM_USER_SENDER_ID
   // Hide teammate-to-teammate operational instructions wrapped in <info_for_agent>;
   // the full text stays in the store for the recipient's context.
@@ -112,7 +118,15 @@ function renderMessageBody(msg: AgentTeamMessage, streaming: boolean) {
   }
   return (
     <div className="text-xs leading-relaxed">
-      <MarkdownRenderer content={visible} messageId={msg.id} enableMermaid enableMath enableDiff />
+      <MarkdownRenderer
+        content={visible}
+        messageId={msg.id}
+        projectRoot={projectRoot}
+        onOpenProjectFile={onOpenProjectFile}
+        enableMermaid
+        enableMath
+        enableDiff
+      />
     </div>
   )
 }
@@ -127,6 +141,8 @@ interface ChatMessageItemProps {
   animationSlot: number
   onRetry?: AgentTeamChatProps["onRetry"]
   onDelete?: AgentTeamChatProps["onDelete"]
+  projectRoot?: string
+  onOpenProjectFile?: (target: ProjectFileReference) => void
 }
 
 /**
@@ -140,6 +156,8 @@ const ChatMessageItem = memo(function ChatMessageItem({
   animationSlot,
   onRetry,
   onDelete,
+  projectRoot,
+  onOpenProjectFile,
 }: ChatMessageItemProps) {
   const t = useTranslations("agentTeamsWorkspace.chat")
   const tMsg = useTranslations("agentTeamsWorkspace.chat.messageTypes")
@@ -202,7 +220,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
           </div>
         </div>
         {toolCalls && toolCalls.length > 0 && <ToolCallList calls={toolCalls} />}
-        {renderMessageBody(msg, streaming)}
+        {renderMessageBody(msg, streaming, projectRoot, onOpenProjectFile)}
         {streaming && (
           <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
             <Loader2Icon className="size-3 animate-spin" />
@@ -252,6 +270,10 @@ export interface AgentTeamChatProps {
   }) => void | Promise<void>
   /** Remove a message from the chat. */
   onDelete?: (messageId: string) => void | Promise<void>
+  /** Root used to resolve relative file links in completed agent messages. */
+  projectRoot?: string
+  /** Owner override for switching to and mounting the project editor. */
+  onOpenProjectFile?: (target: ProjectFileReference) => void
   /**
    * Extra classes for the root container. The workspace passes
    * `flex-1 min-h-0` so the chat fills the tab height (message list scrolls
@@ -272,6 +294,8 @@ export const AgentTeamChat = forwardRef<ComposerHandle, AgentTeamChatProps>(func
     availability,
     onRetry,
     onDelete,
+    projectRoot,
+    onOpenProjectFile,
     className,
   },
   composerRef
@@ -335,6 +359,8 @@ export const AgentTeamChat = forwardRef<ComposerHandle, AgentTeamChatProps>(func
                   animationSlot={index - Math.max(messages.length - 5, 0)}
                   onRetry={onRetry}
                   onDelete={onDelete}
+                  projectRoot={projectRoot}
+                  onOpenProjectFile={onOpenProjectFile}
                 />
               )
             })}

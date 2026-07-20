@@ -24,6 +24,7 @@ import type { EditorLike, MonacoLike } from "@/hooks/use-monaco-markers"
 
 interface UseProjectEditorWorkbenchArgs extends UseProjectEditorArgs {
   beforeOpen?: () => void
+  registerProjectOpener?: boolean
 }
 
 export function useProjectEditorWorkbench({
@@ -31,6 +32,7 @@ export function useProjectEditorWorkbench({
   workingDir,
   deps,
   beforeOpen,
+  registerProjectOpener = true,
 }: UseProjectEditorWorkbenchArgs) {
   const t = useTranslations("projectEditor")
   const bindings = useKeybindingStore((state) => state.bindings)
@@ -57,14 +59,13 @@ export function useProjectEditorWorkbench({
     [beforeOpen, openFile]
   )
 
-  useEffect(
-    () =>
-      registerProjectEditorOpener({
-        root: rootPath,
-        open: gotoLine,
-      }),
-    [gotoLine, rootPath]
-  )
+  useEffect(() => {
+    if (!registerProjectOpener) return
+    return registerProjectEditorOpener({
+      root: rootPath,
+      open: gotoLine,
+    })
+  }, [gotoLine, registerProjectOpener, rootPath])
 
   const saveActive = useCallback(() => {
     if (!activePath) return

@@ -189,6 +189,40 @@ describe("dispatchTeamMention", () => {
     expect(agent?.content).not.toContain("> ran ls")
   })
 
+  it("reports readable files immediately and written files after a successful result", async () => {
+    const { writer } = makeWriter()
+    const onFileActivity = jest.fn()
+    const streamer = makeStreamer([
+      { kind: "tool_start", id: "read", name: "Read", input: '{"file_path":"src/a.ts"}' },
+      { kind: "tool_result", id: "read", output: "source" },
+      { kind: "tool_start", id: "write", name: "Write", input: '{"file_path":"src/b.ts"}' },
+      { kind: "tool_result", id: "write", output: "created" },
+      { kind: "tool_start", id: "edit", name: "Edit", input: '{"file_path":"src/c.ts"}' },
+      { kind: "tool_result", id: "edit", output: "failed", isError: true },
+      { kind: "done" },
+    ])
+
+    await dispatchTeamMention(
+      {
+        teamId: "t",
+        target: makeVirtualTarget(),
+        prompt: "work",
+        rawText: "@codex work",
+      },
+      { writer, streamer, onFileActivity }
+    )
+
+    expect(onFileActivity).toHaveBeenNthCalledWith(1, {
+      path: "src/a.ts",
+      timing: "start",
+    })
+    expect(onFileActivity).toHaveBeenNthCalledWith(2, {
+      path: "src/b.ts",
+      timing: "success",
+    })
+    expect(onFileActivity).toHaveBeenCalledTimes(2)
+  })
+
   it("marks tool result with isError as 'error' status", async () => {
     const { writer, messages } = makeWriter()
     const streamer = makeStreamer([
