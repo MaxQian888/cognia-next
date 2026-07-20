@@ -93,8 +93,20 @@
     "emptyTitle": "No providers in CCSwitch",
     "errorTitle": "Could not list providers",
     "headerHint": "CCSwitch is the editor for these records — go back to CCSwitch to add, rename or delete.",
+    "importQuota": "Import quota",
     "model": "Model",
     "officialEndpoint": "Official Anthropic endpoint",
+    "quotaImportErrorTitle": "Quota metadata wasn't imported",
+    "quotaImportFailed": "Couldn't save the imported quota source: {error}",
+    "quotaImportReason": {
+      "invalid-endpoint": "The quota endpoint is missing or invalid.",
+      "missing-credentials": "The CCSwitch record does not contain the credential required by this quota endpoint.",
+      "missing-script": "This provider does not include CCSwitch quota metadata.",
+      "unsupported-provider": "This provider requires native signing or another unsupported authentication flow.",
+      "unsupported-template": "Only recognized declarative CCSwitch quota templates can be imported; arbitrary JavaScript is never executed."
+    },
+    "quotaImportSuccess": "Imported {name} as a disabled custom quota source. Review it under Subscription settings, then enable it explicitly.",
+    "quotaImportSuccessTitle": "Quota metadata imported",
     "refresh": "Refresh",
     "useHere": "Use here",
     "useHereAndIn": "Use here & in…"

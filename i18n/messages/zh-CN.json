@@ -3898,19 +3898,23 @@
   },
   "chat": {
     "agentFlow": {
-      "action": {
-        "edit": "{count, plural, =1 {编辑了文件} other {编辑了多个文件}}",
-        "other": "{count, plural, =1 {调用了工具} other {调用了多个工具}}",
-        "read": "{count, plural, =1 {查看了文件} other {查看了多个文件}}",
-        "run": "{count, plural, =1 {运行了命令} other {运行了多个命令}}",
-        "search": "{count, plural, =1 {搜索了内容} other {多次搜索}}",
-        "web": "{count, plural, =1 {检索了网页} other {检索了多个网页}}"
+      "count": {
+        "glob": "{count} 次匹配",
+        "list": "{count} 次列目录",
+        "other": "{count} 个工具",
+        "read": "{count} 次读取",
+        "search": "{count} 次搜索",
+        "web": "{count} 次抓取"
       },
       "group": {
         "collapseAll": "全部折叠",
         "expandAll": "全部展开",
+        "failed": "{count} 个失败",
         "summary": "{count, plural, =1 {1 次工具调用} other {# 次工具调用}}",
         "tally": "{name} ×{count}"
+      },
+      "progress": {
+        "streaming": "{count} 行…"
       },
       "result": {
         "diff": "+{added} −{removed}",
