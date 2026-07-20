@@ -32,6 +32,8 @@ import { classifyCommand } from "@/lib/claude/permissions/command-safety"
 import type { TerminalCompletionSuggestion } from "@/lib/terminal/completion/types"
 import { cn } from "@/lib/utils"
 
+import { completionListMaxHeight, TERMINAL_LAYOUT } from "./terminal-layout-tokens"
+
 const SOURCE_ICONS: Record<
   TerminalCompletionSuggestion["source"],
   React.ComponentType<{ className?: string }>
@@ -84,19 +86,26 @@ export function TerminalCompletionPopup({
 
   if (candidates.length === 0) return null
 
+  // The popup renders above the cursor (`-translate-y-full`), so its full
+  // height must fit in the space *above* the cursor or it clips against the
+  // dock's `overflow-hidden` top edge in a short dock. Cap the scrollable list
+  // to that space (see completionListMaxHeight).
+  const listMaxHeight = completionListMaxHeight(top)
+
   return (
     <div
       data-testid="terminal-completion-popup"
       role="listbox"
       aria-label={t("popup.label")}
       className={cn(
-        "absolute z-20 w-80 max-w-[90%] -translate-y-full overflow-hidden rounded-md border",
+        "absolute z-20 max-w-[90%] -translate-y-full overflow-hidden rounded-md border",
+        TERMINAL_LAYOUT.completionPopupWidth,
         "border-border bg-popover text-popover-foreground shadow-md",
         className
       )}
       style={{ left, top: Math.max(0, top - 4) }}
     >
-      <div className="max-h-60 overflow-y-auto py-1">
+      <div className="overflow-y-auto py-1" style={{ maxHeight: listMaxHeight }}>
         {candidates.map((c, i) => {
           const Icon = SOURCE_ICONS[c.source]
           const selected = i === selectedIndex

@@ -12,7 +12,9 @@
  */
 
 import type { MouseEvent, ReactNode } from "react"
+import { AnimatePresence, motion } from "motion/react"
 
+import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
 import type { TerminalSessionRow } from "@/stores/terminal/terminal-store"
 
 import { TerminalTab } from "./terminal-tab"
@@ -42,6 +44,9 @@ export function TerminalTabStrip({
   className,
   testId = "terminal-tab-strip",
 }: TerminalTabStripProps) {
+  // Tabs fade+slide in on open and out on close instead of popping. The strip
+  // is chrome-only (no xterm), so animating it never touches terminal layout.
+  const { reduce, speed } = useFlowMotion()
   return (
     <div
       className={
@@ -49,16 +54,26 @@ export function TerminalTabStrip({
       }
       data-testid={testId}
     >
-      {tabs.map((row) => (
-        <TerminalTab
-          key={row.id}
-          row={row}
-          active={row.id === activeId}
-          onSelect={onSelect}
-          onClose={onClose}
-          onContextMenu={onContextMenu ? (e) => onContextMenu(row, e) : undefined}
-        />
-      ))}
+      <AnimatePresence initial={false}>
+        {tabs.map((row) => (
+          <motion.div
+            key={row.id}
+            className="shrink-0"
+            initial={reduce ? false : { opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={reduce ? { opacity: 0 } : { opacity: 0, y: -4 }}
+            transition={{ duration: reduce ? 0 : 0.16 * speed, ease: "easeOut" }}
+          >
+            <TerminalTab
+              row={row}
+              active={row.id === activeId}
+              onSelect={onSelect}
+              onClose={onClose}
+              onContextMenu={onContextMenu ? (e) => onContextMenu(row, e) : undefined}
+            />
+          </motion.div>
+        ))}
+      </AnimatePresence>
       {trailing ? (
         <div className="ml-auto flex shrink-0 items-center gap-0.5 pb-1 pr-1">{trailing}</div>
       ) : null}

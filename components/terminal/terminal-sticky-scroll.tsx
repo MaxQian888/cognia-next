@@ -14,6 +14,8 @@ import { useTranslations } from "next-intl"
 
 import { cn } from "@/lib/utils"
 
+import { TERMINAL_LAYOUT } from "./terminal-layout-tokens"
+
 export interface TerminalStickyScrollProps {
   /** The pinned command's prompt-row text. */
   text: string
@@ -46,7 +48,8 @@ export function TerminalStickyScroll({
       aria-label={t("stickyScroll.label")}
       title={text}
       className={cn(
-        "absolute inset-x-0 top-0 z-10 flex h-[1.4em] items-center overflow-hidden whitespace-pre px-2 text-left",
+        "absolute inset-x-0 top-0 z-10 flex items-center overflow-hidden whitespace-pre px-2 text-left",
+        TERMINAL_LAYOUT.stickyScrollHeight,
         "border-b border-border/40 shadow-sm",
         className
       )}

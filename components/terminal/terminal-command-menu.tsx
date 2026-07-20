@@ -19,7 +19,10 @@ import { useEffect, useRef } from "react"
 import { ClipboardCopy, FileOutput, FileText, RotateCcw } from "lucide-react"
 import { useTranslations } from "next-intl"
 
+import { MotionPopover } from "@/components/chat/motion/motion-reveal"
 import { cn } from "@/lib/utils"
+
+import { TERMINAL_LAYOUT } from "./terminal-layout-tokens"
 
 export interface TerminalCommandMenuProps {
   /** The captured command line. Empty string when capture missed it. */
@@ -139,57 +142,64 @@ export function TerminalCommandMenu({
           onClose()
         }}
       />
-      <div
-        ref={menuRef}
-        data-testid="terminal-command-menu"
-        role="menu"
-        aria-label={t("commandMenu.trigger")}
-        className={cn(
-          "absolute z-30 w-60 overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-md",
-          className
-        )}
+      <MotionPopover
+        open
+        className="absolute z-30"
         style={{ left, top: Math.max(0, top) }}
+        from={{ opacity: 0, scale: 0.96, y: -4 }}
       >
-        <div className="border-b border-border/60 px-2 py-1 text-[10px] text-muted-foreground">
-          <span data-testid="terminal-command-menu-status">{statusLabel}</span>
-          {durationMs != null ? (
-            <span data-testid="terminal-command-menu-duration">
-              {" "}
-              · {formatDuration(durationMs, t)}
-            </span>
-          ) : null}
+        <div
+          ref={menuRef}
+          data-testid="terminal-command-menu"
+          role="menu"
+          aria-label={t("commandMenu.trigger")}
+          className={cn(
+            "overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-md",
+            TERMINAL_LAYOUT.commandMenuWidth,
+            className
+          )}
+        >
+          <div className="border-b border-border/60 px-2 py-1 text-[10px] text-muted-foreground">
+            <span data-testid="terminal-command-menu-status">{statusLabel}</span>
+            {durationMs != null ? (
+              <span data-testid="terminal-command-menu-duration">
+                {" "}
+                · {formatDuration(durationMs, t)}
+              </span>
+            ) : null}
+          </div>
+          <div className="py-1">
+            {rows.map((row) => {
+              const Icon = row.icon
+              return (
+                <button
+                  key={row.id}
+                  type="button"
+                  role="menuitem"
+                  disabled={row.disabled}
+                  data-testid={`terminal-command-menu-${row.id}`}
+                  className={cn(
+                    "flex w-full items-center gap-2 px-2 py-1 text-left text-xs",
+                    row.disabled
+                      ? "cursor-not-allowed text-muted-foreground/50"
+                      : "cursor-pointer hover:bg-accent hover:text-accent-foreground"
+                  )}
+                  onMouseDown={(e) => {
+                    // mousedown + preventDefault so the terminal keeps focus.
+                    e.preventDefault()
+                    if (row.disabled) return
+                    row.onClick()
+                    onClose()
+                  }}
+                >
+                  <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 truncate">{row.label}</span>
+                </button>
+              )
+            })}
+          </div>
         </div>
-        <div className="py-1">
-          {rows.map((row) => {
-            const Icon = row.icon
-            return (
-              <button
-                key={row.id}
-                type="button"
-                role="menuitem"
-                disabled={row.disabled}
-                data-testid={`terminal-command-menu-${row.id}`}
-                className={cn(
-                  "flex w-full items-center gap-2 px-2 py-1 text-left text-xs",
-                  row.disabled
-                    ? "cursor-not-allowed text-muted-foreground/50"
-                    : "cursor-pointer hover:bg-accent hover:text-accent-foreground"
-                )}
-                onMouseDown={(e) => {
-                  // mousedown + preventDefault so the terminal keeps focus.
-                  e.preventDefault()
-                  if (row.disabled) return
-                  row.onClick()
-                  onClose()
-                }}
-              >
-                <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1 truncate">{row.label}</span>
-              </button>
-            )
-          })}
-        </div>
-      </div>
+      </MotionPopover>
     </>
   )
 }

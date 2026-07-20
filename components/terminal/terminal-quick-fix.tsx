@@ -13,8 +13,11 @@ import { useEffect } from "react"
 import { Lightbulb } from "lucide-react"
 import { useTranslations } from "next-intl"
 
+import { MotionPopover } from "@/components/chat/motion/motion-reveal"
 import type { QuickFixAction } from "@/lib/terminal/quick-fix/matchers"
 import { cn } from "@/lib/utils"
+
+import { TERMINAL_LAYOUT } from "./terminal-layout-tokens"
 
 export interface TerminalQuickFixProps {
   actions: QuickFixAction[]
@@ -75,50 +78,59 @@ export function TerminalQuickFix({
         <Lightbulb className="size-3.5" />
       </button>
       {open ? (
-        <>
-          <div
-            data-testid="terminal-quick-fix-backdrop"
-            className="fixed inset-0 z-20"
-            onMouseDown={(e) => {
-              e.preventDefault()
-              onOpenChange(false)
-            }}
-          />
-          <div
-            data-testid="terminal-quick-fix-menu"
-            role="menu"
-            aria-label={t("quickFix.title")}
-            className="absolute left-0 top-6 z-30 w-72 overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-md"
-          >
-            <div className="border-b border-border/60 px-2 py-1 text-[10px] font-medium text-muted-foreground">
-              {t("quickFix.title")}
-            </div>
-            <div className="py-1">
-              {actions.map((action) => (
-                <button
-                  key={action.id}
-                  type="button"
-                  role="menuitem"
-                  data-testid={`terminal-quick-fix-action-${action.id}`}
-                  className="flex w-full cursor-pointer items-center gap-2 px-2 py-1 text-left text-xs hover:bg-accent hover:text-accent-foreground"
-                  onMouseDown={(e) => {
-                    e.preventDefault()
-                    onRun(action)
-                    onOpenChange(false)
-                  }}
-                >
-                  <Lightbulb className="size-3 shrink-0 text-amber-500" />
-                  <span className="min-w-0 flex-1 truncate" title={labelFor(action)}>
-                    {labelFor(action)}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </>
+        <div
+          data-testid="terminal-quick-fix-backdrop"
+          className="fixed inset-0 z-20"
+          onMouseDown={(e) => {
+            e.preventDefault()
+            onOpenChange(false)
+          }}
+        />
       ) : null}
+      <MotionPopover
+        open={open}
+        className="absolute left-0 top-6 z-30"
+        from={{ opacity: 0, scale: 0.96, y: -4 }}
+      >
+        <div
+          data-testid="terminal-quick-fix-menu"
+          role="menu"
+          aria-label={t("quickFix.title")}
+          className={cn(
+            "overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-md",
+            TERMINAL_LAYOUT.quickFixMenuWidth
+          )}
+        >
+          <div className="border-b border-border/60 px-2 py-1 text-[10px] font-medium text-muted-foreground">
+            {t("quickFix.title")}
+          </div>
+          <div className="py-1">
+            {actions.map((action) => (
+              <button
+                key={action.id}
+                type="button"
+                role="menuitem"
+                data-testid={`terminal-quick-fix-action-${action.id}`}
+                className="flex w-full cursor-pointer items-center gap-2 px-2 py-1 text-left text-xs hover:bg-accent hover:text-accent-foreground"
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  onRun(action)
+                  onOpenChange(false)
+                }}
+              >
+                <Lightbulb className="size-3 shrink-0 text-amber-500" />
+                <span className="min-w-0 flex-1 truncate" title={labelFor(action)}>
+                  {labelFor(action)}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </MotionPopover>
     </div>
   )
 }
+
+export default TerminalQuickFix
 
 export default TerminalQuickFix

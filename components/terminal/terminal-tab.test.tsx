@@ -153,6 +153,29 @@ describe("TerminalTab", () => {
     expect(screen.getByTestId("terminal-tab").getAttribute("data-agent-trusted")).toBe("true")
   })
 
+  it("keeps the status dot accessibly labelled after the animated swap wrapper", () => {
+    render(
+      <TerminalTab
+        row={row({ status: "running" })}
+        active={false}
+        onSelect={jest.fn()}
+        onClose={jest.fn()}
+      />
+    )
+    // The dot is wrapped by MotionStatusSwap for a crossfade on status change;
+    // its aria-label must survive so screen-reader users still hear the status.
+    expect(screen.getByLabelText("status.running")).toBeInTheDocument()
+  })
+
+  it("reveals the close button on keyboard focus, not only on hover (a11y)", () => {
+    render(<TerminalTab row={row()} active={false} onSelect={jest.fn()} onClose={jest.fn()} />)
+    const closeBtn = screen.getByLabelText("close")
+    // Hover-only reveal left the × keyboard-unreachable; focus-visible +
+    // group-focus-within bring it back for keyboard/touch users.
+    expect(closeBtn.className).toContain("focus-visible:opacity-100")
+    expect(closeBtn.className).toContain("group-focus-within:opacity-100")
+  })
+
   it("calls onContextMenu when right-clicked", () => {
     const onContextMenu = jest.fn()
     render(

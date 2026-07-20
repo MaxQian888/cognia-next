@@ -110,6 +110,15 @@ describe("TerminalPaneGroup", () => {
     const panes = screen.getAllByTestId("terminal-pane")
     expect(panes.map((p) => p.getAttribute("data-session-id"))).toEqual(["a", "b"])
     expect(screen.getAllByTestId("terminal-pane-close")).toHaveLength(2)
+    // Split panes get a one-shot CSS entrance (fade + slide) so a new pane
+    // eases into its slot; the single-pane body never carries it.
+    for (const p of panes) expect(p.className).toContain("animate-in")
+  })
+
+  it("does not animate the single (unsplit) pane body", () => {
+    useTerminalStore.getState().registerSession(info("a"))
+    render(<TerminalPaneGroup anchorId="a" onFocusedChange={jest.fn()} onClosePane={jest.fn()} />)
+    expect(screen.getByTestId("terminal-pane").className).not.toContain("animate-in")
   })
 
   // react-resizable-panels v4 interprets bare numbers as PIXELS; sizes must

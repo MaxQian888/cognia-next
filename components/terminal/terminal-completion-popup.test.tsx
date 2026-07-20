@@ -55,6 +55,24 @@ describe("TerminalCompletionPopup", () => {
     expect(screen.getAllByRole("option")).toHaveLength(2)
   })
 
+  it("clamps the list height to the space above the cursor in a short dock", () => {
+    const { container } = render(
+      <TerminalCompletionPopup {...baseProps} top={60} candidates={[sug("git status")]} />
+    )
+    const list = container.querySelector(".overflow-y-auto") as HTMLElement
+    // top 60 → (60 - 28) = 32, floored to the 72px readable minimum so the
+    // popup never exceeds the space above the cursor and clips.
+    expect(list.style.maxHeight).toBe("72px")
+  })
+
+  it("caps the list height at 240px when there is ample room above", () => {
+    const { container } = render(
+      <TerminalCompletionPopup {...baseProps} top={400} candidates={[sug("git status")]} />
+    )
+    const list = container.querySelector(".overflow-y-auto") as HTMLElement
+    expect(list.style.maxHeight).toBe("240px")
+  })
+
   it("marks the highlighted candidate as selected", () => {
     render(
       <TerminalCompletionPopup

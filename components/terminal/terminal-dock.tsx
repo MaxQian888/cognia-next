@@ -405,7 +405,9 @@ export function TerminalDock() {
         tabIndex={0}
         aria-label={t("resize")}
         data-testid="terminal-dock-resize-handle"
-        className="absolute -top-0.5 left-0 right-0 z-10 h-1 cursor-row-resize bg-transparent hover:bg-primary/50 focus-visible:bg-primary focus-visible:outline-none"
+        // 10px transparent hit zone (was a 4px sliver — too small to grab,
+        // especially by touch) with a 2px visible line centred on the border.
+        className="group absolute -top-1 left-0 right-0 z-10 flex h-2.5 cursor-row-resize items-center focus-visible:outline-none"
         onPointerDown={(e) => beginResize(e, setPanelHeight)}
         onKeyDown={(e) => {
           if (e.key === "ArrowUp") {
@@ -416,7 +418,12 @@ export function TerminalDock() {
             adjustPanelHeight(useTerminalStore.getState().panelHeightPct, 2, setPanelHeight)
           }
         }}
-      />
+      >
+        <span
+          aria-hidden
+          className="h-0.5 w-full bg-transparent transition-colors group-hover:bg-primary/50 group-focus-visible:bg-primary"
+        />
+      </div>
       <TerminalTabStrip
         tabs={tabs}
         activeId={activeId}

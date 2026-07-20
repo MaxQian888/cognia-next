@@ -20,7 +20,9 @@
 
 import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
+import { AnimatePresence, motion } from "motion/react"
 
+import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
 import { CommandPalette } from "@/components/desktop/command-palette"
 import { GuildRail } from "@/components/shell/guild-rail"
 import { StatusBar } from "@/components/desktop/status-bar"
@@ -75,6 +77,11 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
   // dock's slice of the shell's vertical column. Hidden when closed.
   const terminalPanelOpen = useTerminalStore((s) => s.panelOpen)
   const terminalPanelHeightPct = useTerminalStore((s) => s.panelHeightPct)
+  // Slide the dock up from the bottom edge on open (and back down on close)
+  // instead of popping. Only the wrapper's transform animates — the height is
+  // reserved instantly so the editor above settles once and xterm fits once,
+  // never per-frame. Collapses to an instant show/hide under reduced motion.
+  const { reduce: motionReduce, speed: motionSpeed } = useFlowMotion()
 
   // Bridge native-menu `menu://<id>` events into renderer actions. Must run
   // even when the in-app Menubar would render in its hamburger form so the
@@ -138,15 +145,25 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
           <div data-find-scope className="flex min-h-0 flex-1 overflow-hidden">
             {children}
           </div>
-          {terminalPanelOpen ? (
-            <div
-              data-testid="terminal-dock-region"
-              className="min-h-0 shrink-0"
-              style={{ height: `${terminalPanelHeightPct}%` }}
-            >
-              <TerminalDock />
-            </div>
-          ) : null}
+          <AnimatePresence initial={false}>
+            {terminalPanelOpen ? (
+              <motion.div
+                key="terminal-dock-region"
+                data-testid="terminal-dock-region"
+                className="min-h-0 shrink-0"
+                style={{ height: `${terminalPanelHeightPct}%` }}
+                initial={motionReduce ? false : { y: "100%" }}
+                animate={{ y: 0 }}
+                exit={{ y: motionReduce ? 0 : "100%", opacity: motionReduce ? 0 : 1 }}
+                transition={{
+                  duration: motionReduce ? 0 : 0.2 * motionSpeed,
+                  ease: [0.32, 0.72, 0, 1],
+                }}
+              >
+                <TerminalDock />
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
         </div>
         {/*
          * VS Code extension host bar — hosts webviews + terminals from

@@ -20,11 +20,13 @@ import { useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { ChevronDownIcon, ChevronUpIcon, XIcon } from "lucide-react"
 
+import { MotionPopover } from "@/components/chat/motion/motion-reveal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Toggle } from "@/components/ui/toggle"
 import { cn } from "@/lib/utils"
 
+import { TERMINAL_LAYOUT } from "./terminal-layout-tokens"
 import type { TerminalInstanceHandle } from "./terminal-instance"
 
 export interface TerminalSearchOverlayProps {
@@ -77,84 +79,86 @@ export function TerminalSearchOverlay({
     setMatchFailed(!ok && pattern.length > 0)
   }
 
-  if (!open) return null
-
   return (
-    <div
-      role="search"
-      data-testid="terminal-search-overlay"
-      className={cn(
-        "pointer-events-auto absolute right-2 top-2 z-20 flex items-center gap-1 rounded-md border bg-popover px-1.5 py-1 shadow",
-        className
-      )}
+    <MotionPopover
+      open={open}
+      className={cn("pointer-events-auto absolute right-2 top-2 z-20", className)}
+      from={{ opacity: 0, y: -6 }}
     >
-      <Input
-        ref={inputRef}
-        value={pattern}
-        onChange={(e) => {
-          setPattern(e.target.value)
-          setMatchFailed(false)
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") {
-            e.preventDefault()
-            onClose()
-          } else if (e.key === "Enter") {
-            e.preventDefault()
-            if (e.shiftKey) findPrev()
-            else findNext()
-          }
-        }}
-        placeholder={t("placeholder")}
-        aria-label={t("placeholder")}
-        data-testid="terminal-search-input"
-        className={cn(
-          "h-7 w-44 text-xs",
-          matchFailed && "border-red-500 focus-visible:ring-red-500"
-        )}
-      />
-      <Toggle
-        size="sm"
-        pressed={caseSensitive}
-        onPressedChange={setCaseSensitive}
-        aria-label={t("caseSensitive")}
-        title={t("caseSensitive")}
-        data-testid="terminal-search-case"
-        className="h-7 w-7 px-0 text-[10px]"
+      <div
+        role="search"
+        data-testid="terminal-search-overlay"
+        className="flex items-center gap-1 rounded-md border bg-popover px-1.5 py-1 shadow"
       >
-        Aa
-      </Toggle>
-      <Button
-        size="icon"
-        variant="ghost"
-        onClick={findPrev}
-        aria-label={t("previous")}
-        data-testid="terminal-search-prev"
-        className="h-7 w-7"
-      >
-        <ChevronUpIcon className="h-3.5 w-3.5" />
-      </Button>
-      <Button
-        size="icon"
-        variant="ghost"
-        onClick={findNext}
-        aria-label={t("next")}
-        data-testid="terminal-search-next"
-        className="h-7 w-7"
-      >
-        <ChevronDownIcon className="h-3.5 w-3.5" />
-      </Button>
-      <Button
-        size="icon"
-        variant="ghost"
-        onClick={onClose}
-        aria-label={t("close")}
-        data-testid="terminal-search-close"
-        className="h-7 w-7"
-      >
-        <XIcon className="h-3.5 w-3.5" />
-      </Button>
-    </div>
+        <Input
+          ref={inputRef}
+          value={pattern}
+          onChange={(e) => {
+            setPattern(e.target.value)
+            setMatchFailed(false)
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault()
+              onClose()
+            } else if (e.key === "Enter") {
+              e.preventDefault()
+              if (e.shiftKey) findPrev()
+              else findNext()
+            }
+          }}
+          placeholder={t("placeholder")}
+          aria-label={t("placeholder")}
+          data-testid="terminal-search-input"
+          className={cn(
+            "h-7 text-xs",
+            TERMINAL_LAYOUT.searchInputWidth,
+            matchFailed && "border-red-500 focus-visible:ring-red-500"
+          )}
+        />
+        <Toggle
+          size="sm"
+          pressed={caseSensitive}
+          onPressedChange={setCaseSensitive}
+          aria-label={t("caseSensitive")}
+          title={t("caseSensitive")}
+          data-testid="terminal-search-case"
+          className="h-7 w-7 px-0 text-[10px]"
+        >
+          Aa
+        </Toggle>
+        <Button
+          size="icon"
+          variant="ghost"
+          onClick={findPrev}
+          aria-label={t("previous")}
+          data-testid="terminal-search-prev"
+          className="h-7 w-7"
+        >
+          <ChevronUpIcon className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          size="icon"
+          variant="ghost"
+          onClick={findNext}
+          aria-label={t("next")}
+          data-testid="terminal-search-next"
+          className="h-7 w-7"
+        >
+          <ChevronDownIcon className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          size="icon"
+          variant="ghost"
+          onClick={onClose}
+          aria-label={t("close")}
+          data-testid="terminal-search-close"
+          className="h-7 w-7"
+        >
+          <XIcon className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    </MotionPopover>
   )
 }
 

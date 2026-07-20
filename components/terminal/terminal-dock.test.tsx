@@ -148,6 +148,20 @@ describe("TerminalDock", () => {
     expect(screen.getByTestId("terminal-dock-tabs")).toBeInTheDocument()
   })
 
+  it("gives the resize separator a large hit target and keeps it keyboard-operable", () => {
+    seedProjectAndSession({ sessionId: "s-1" })
+    render(<TerminalDock />)
+    const handle = screen.getByTestId("terminal-dock-resize-handle")
+    expect(handle.getAttribute("role")).toBe("separator")
+    expect(handle.getAttribute("tabindex")).toBe("0")
+    // 10px transparent hit zone (h-2.5) replaced the old 4px sliver (h-1) so
+    // it can actually be grabbed, including by touch.
+    expect(handle.className).toContain("h-2.5")
+    // Arrow keys still nudge the height.
+    fireEvent.keyDown(handle, { key: "ArrowUp" })
+    fireEvent.keyDown(handle, { key: "ArrowDown" })
+  })
+
   it("shows the empty-state desktop variant when there are no sessions", () => {
     seedProjectAndSession()
     render(<TerminalDock />)
