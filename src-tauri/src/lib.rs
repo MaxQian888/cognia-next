@@ -1164,6 +1164,7 @@ pub fn run() {
             codeserver::commands::codeserver_stop,
             codeserver::commands::codeserver_stop_all,
             codeserver::commands::codeserver_download,
+            codeserver::commands::codeserver_open_file,
             codeserver::webview::codeserver_embed_create,
             codeserver::webview::codeserver_embed_set_bounds,
             codeserver::webview::codeserver_embed_set_visible,

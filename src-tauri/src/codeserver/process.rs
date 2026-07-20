@@ -23,6 +23,9 @@ use super::download;
 struct RunningInstance {
     port: u16,
     child: Child,
+    binary_path: String,
+    user_data_dir: PathBuf,
+    extensions_dir: PathBuf,
 }
 
 impl RunningInstance {
@@ -89,7 +92,16 @@ impl CodeServerState {
         // becomes healthy.
         {
             let mut map = self.instances.lock().await;
-            map.insert(canonical.clone(), RunningInstance { port, child });
+            map.insert(
+                canonical.clone(),
+                RunningInstance {
+                    port,
+                    child,
+                    binary_path: info.binary_path,
+                    user_data_dir,
+                    extensions_dir,
+                },
+            );
         }
 
         match wait_healthy(port, Duration::from_secs(30)).await {
@@ -119,6 +131,57 @@ impl CodeServerState {
         for (_, mut inst) in map.drain() {
             let _ = inst.child.start_kill();
         }
+    }
+
+    /// Open and reveal a project-relative file in this root's existing browser
+    /// VS Code window through code-server's own session-socket CLI bridge.
+    pub async fn open_file(
+        &self,
+        root: &str,
+        relative_path: &str,
+        line: Option<u32>,
+        column: Option<u32>,
+    ) -> Result<(), String> {
+        let root = root.to_string();
+        let relative_path = relative_path.to_string();
+        let (canonical, target) = tokio::task::spawn_blocking(move || {
+            let canonical = canonicalize_root(&root)?;
+            let target = resolve_open_target(Path::new(&canonical), &relative_path, line, column)?;
+            Ok::<_, String>((canonical, target))
+        })
+        .await
+        .map_err(|e| format!("resolve code-server file task: {e}"))??;
+        let (binary_path, user_data_dir, extensions_dir) = {
+            let mut map = self.instances.lock().await;
+            let Some(instance) = map.get_mut(&canonical) else {
+                return Err("code-server is not running for this project root".to_string());
+            };
+            if !instance.is_alive() {
+                map.remove(&canonical);
+                return Err("code-server exited before the file could be opened".to_string());
+            }
+            (
+                instance.binary_path.clone(),
+                instance.user_data_dir.clone(),
+                instance.extensions_dir.clone(),
+            )
+        };
+
+        let args = open_file_args(&user_data_dir, &extensions_dir, &target);
+        let mut command = Command::new(&binary_path);
+        command.args(args).kill_on_drop(true);
+        let output = tokio::time::timeout(Duration::from_secs(10), command.output())
+            .await
+            .map_err(|_| "code-server file navigation timed out".to_string())?
+            .map_err(|e| format!("launch code-server file navigation: {e}"))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!(
+            "code-server file navigation failed: {}",
+            stderr.trim()
+        ))
     }
 
     async fn live_port(&self, canonical: &str) -> Option<u16> {
@@ -188,6 +251,53 @@ fn code_server_args(
         extensions_dir.to_string_lossy().into_owned(),
         root.to_string(),
     ]
+}
+
+/// Build a second code-server CLI invocation that talks to the already-running
+/// instance through the session socket derived from the shared user-data dir.
+fn open_file_args(user_data_dir: &Path, extensions_dir: &Path, target: &str) -> Vec<String> {
+    vec![
+        "--user-data-dir".to_string(),
+        user_data_dir.to_string_lossy().into_owned(),
+        "--extensions-dir".to_string(),
+        extensions_dir.to_string_lossy().into_owned(),
+        "--reuse-window".to_string(),
+        target.to_string(),
+    ]
+}
+
+fn resolve_open_target(
+    root: &Path,
+    relative_path: &str,
+    line: Option<u32>,
+    column: Option<u32>,
+) -> Result<String, String> {
+    let relative = Path::new(relative_path);
+    if relative.as_os_str().is_empty() || relative.is_absolute() {
+        return Err("code-server file path must be project-relative".to_string());
+    }
+    let canonical_root = root
+        .canonicalize()
+        .map_err(|e| format!("resolve project root {}: {e}", root.display()))?;
+    let target = canonical_root
+        .join(relative)
+        .canonicalize()
+        .map_err(|e| format!("resolve code-server file {relative_path}: {e}"))?;
+    if !target.starts_with(&canonical_root) || !target.is_file() {
+        return Err(format!(
+            "code-server file is outside the project root: {}",
+            target.display()
+        ));
+    }
+
+    let path = target.to_string_lossy();
+    Ok(match line {
+        Some(line) => match column {
+            Some(column) => format!("{path}:{}:{}", line.max(1), column.max(1)),
+            None => format!("{path}:{}", line.max(1)),
+        },
+        None => path.into_owned(),
+    })
 }
 
 /// Pick an ephemeral loopback port by binding :0 and releasing it. A tiny
@@ -292,6 +402,56 @@ mod tests {
         assert!(args.iter().any(|a| a == "/data/ext"));
         // The project root is the trailing positional arg.
         assert_eq!(args.last().unwrap(), "/work/proj");
+    }
+
+    #[test]
+    fn open_file_args_reuse_the_running_window_and_session() {
+        let args = open_file_args(
+            Path::new("/data/ud"),
+            Path::new("/data/ext"),
+            "/work/proj/src/main.ts:42:7",
+        );
+        assert_eq!(
+            args,
+            vec![
+                "--user-data-dir",
+                "/data/ud",
+                "--extensions-dir",
+                "/data/ext",
+                "--reuse-window",
+                "/work/proj/src/main.ts:42:7",
+            ]
+        );
+    }
+
+    #[test]
+    fn open_target_is_canonical_scoped_and_line_addressed() {
+        let root = tempfile::tempdir().unwrap();
+        let source_dir = root.path().join("src");
+        std::fs::create_dir(&source_dir).unwrap();
+        std::fs::write(source_dir.join("main.ts"), "export {}\n").unwrap();
+
+        let target = resolve_open_target(root.path(), "src/main.ts", Some(42), Some(7)).unwrap();
+
+        assert_eq!(
+            target,
+            format!(
+                "{}:42:7",
+                source_dir.join("main.ts").canonicalize().unwrap().display()
+            )
+        );
+    }
+
+    #[test]
+    fn open_target_rejects_absolute_traversal_and_missing_files() {
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("project");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(parent.path().join("outside.ts"), "outside\n").unwrap();
+
+        assert!(resolve_open_target(&root, "../outside.ts", None, None).is_err());
+        assert!(resolve_open_target(&root, "/tmp/outside.ts", None, None).is_err());
+        assert!(resolve_open_target(&root, "missing.ts", None, None).is_err());
     }
 
     #[test]

@@ -57,6 +57,7 @@ export function useCodeServerPane(
   const visible = useRegionVisibility(ref)
 
   const createdRef = useRef(false)
+  const mountedUrlRef = useRef<string | null>(null)
   const rectRef = useRef<ElementRect | null>(null)
   const visibleRef = useRef(visible)
   const url = port != null ? `http://127.0.0.1:${port}/` : null
@@ -67,16 +68,30 @@ export function useCodeServerPane(
   const syncWebview = useCallback(() => {
     const rect = rectRef.current
     const target = urlRef.current
-    if (!isTauri() || !target || !rect || createdRef.current) return
+    if (!isTauri() || !target || !rect) return
+    if (createdRef.current) {
+      if (mountedUrlRef.current === target) return
+      mountedUrlRef.current = target
+      void codeServerClient.embedNavigate(target).catch((cause) => {
+        if (mountedUrlRef.current === target) mountedUrlRef.current = null
+        setError(String(cause))
+        setPhase("error")
+      })
+      return
+    }
     createdRef.current = true
+    mountedUrlRef.current = target
     void codeServerClient.embedCreate(target, rect).then(
       () => {
         if (!visibleRef.current) {
           void codeServerClient.embedSetVisible(false, rectRef.current ?? rect).catch(() => {})
         }
       },
-      () => {
+      (cause) => {
         createdRef.current = false
+        if (mountedUrlRef.current === target) mountedUrlRef.current = null
+        setError(String(cause))
+        setPhase("error")
       }
     )
   }, [])
@@ -131,9 +146,12 @@ export function useCodeServerPane(
       try {
         const status = await codeServerClient.ensure(root)
         if (cancelled) return
-        setPort(status.port ?? null)
+        const nextPort = status.port ?? null
+        urlRef.current = nextPort != null ? `http://127.0.0.1:${nextPort}/` : null
+        setPort(nextPort)
         setProgress(null)
         setPhase("ready")
+        syncWebview()
       } catch (e) {
         if (cancelled) return
         setError(String(e))
@@ -144,7 +162,7 @@ export function useCodeServerPane(
       cancelled = true
       safeUnlisten(unlistenProgress)
     }
-  }, [root, active, attempt])
+  }, [root, active, attempt, syncWebview])
 
   // Mount the webview once the port (→ url) is known.
   useEffect(() => {
@@ -167,6 +185,7 @@ export function useCodeServerPane(
     if (createdRef.current) {
       void codeServerClient.embedDestroy().catch(() => {})
       createdRef.current = false
+      mountedUrlRef.current = null
     }
   }, [active])
 
@@ -174,6 +193,8 @@ export function useCodeServerPane(
   useEffect(() => {
     return () => {
       if (createdRef.current) void codeServerClient.embedDestroy().catch(() => {})
+      createdRef.current = false
+      mountedUrlRef.current = null
     }
   }, [])
 

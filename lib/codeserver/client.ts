@@ -50,6 +50,9 @@ export const codeServerClient = {
   stopAll: () => transport.call<void>("codeserver_stop_all", {}),
   /** Download + install code-server without spawning (pre-fetch). */
   download: () => transport.call<CodeServerInstallInfo>("codeserver_download", {}),
+  /** Open a project-relative file in the running CodeServer window. */
+  openFile: (root: string, path: string, line?: number, column?: number) =>
+    transport.call<void>("codeserver_open_file", { root, path, line, column }),
 
   /** Create or re-navigate the code-server pane webview at the reserved rect. */
   embedCreate: (url: string, rect: ElementRect) =>

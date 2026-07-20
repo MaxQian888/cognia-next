@@ -113,6 +113,7 @@ commands.allow = [
   "codeserver_embed_set_bounds",
   "codeserver_embed_set_visible",
   "codeserver_ensure",
+  "codeserver_open_file",
   "codeserver_status",
   "codeserver_stop",
   "codeserver_stop_all",

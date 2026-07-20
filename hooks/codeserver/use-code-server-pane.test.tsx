@@ -101,6 +101,66 @@ it("ensures code-server and mounts the webview at the loopback port", async () =
   expect(client.embedCreate).toHaveBeenCalledWith("http://127.0.0.1:43117/", RECT)
 })
 
+it("navigates the existing webview when the selected project root changes", async () => {
+  client.ensure
+    .mockResolvedValueOnce({ running: true, port: 43117, version: "4.128.0" })
+    .mockResolvedValueOnce({ running: true, port: 43118, version: "4.128.0" })
+  let root = ROOT
+  const { rerender } = renderHook(() => useCodeServerPane(ref, { root, active: true }))
+  await flush()
+  deliverRect()
+  await flush()
+
+  root = "/work/other"
+  rerender()
+  await flush()
+
+  expect(client.ensure).toHaveBeenLastCalledWith("/work/other")
+  expect(client.embedNavigate).toHaveBeenCalledWith("http://127.0.0.1:43118/")
+  expect(client.embedCreate).toHaveBeenCalledTimes(1)
+})
+
+it("surfaces native webview creation failures as retryable errors", async () => {
+  client.embedCreate.mockRejectedValueOnce(new Error("main window not found"))
+  const { result } = renderHook(() => useCodeServerPane(ref, { root: ROOT, active: true }))
+  await flush()
+  deliverRect()
+  await flush()
+
+  expect(result.current.phase).toBe("error")
+  expect(result.current.error).toContain("main window not found")
+
+  client.embedCreate.mockResolvedValueOnce("codeserver-embed")
+  act(() => result.current.retry())
+  await flush()
+  expect(client.embedCreate).toHaveBeenCalledTimes(2)
+  expect(result.current.phase).toBe("ready")
+})
+
+it("surfaces navigation failures and retries the existing webview", async () => {
+  client.ensure
+    .mockResolvedValueOnce({ running: true, port: 43117, version: "4.128.0" })
+    .mockResolvedValueOnce({ running: true, port: 43118, version: "4.128.0" })
+    .mockResolvedValueOnce({ running: true, port: 43118, version: "4.128.0" })
+  let root = ROOT
+  const { result, rerender } = renderHook(() => useCodeServerPane(ref, { root, active: true }))
+  await flush()
+  deliverRect()
+  await flush()
+  client.embedNavigate.mockRejectedValueOnce(new Error("navigation failed"))
+
+  root = "/work/other"
+  rerender()
+  await flush()
+  expect(result.current.phase).toBe("error")
+  expect(result.current.error).toContain("navigation failed")
+
+  act(() => result.current.retry())
+  await flush()
+  expect(client.embedNavigate).toHaveBeenCalledTimes(2)
+  expect(result.current.phase).toBe("ready")
+})
+
 it("surfaces download progress before it becomes ready", async () => {
   const pending = deferred<{ running: boolean; port: number; version: string }>()
   client.ensure.mockReturnValue(pending.promise)

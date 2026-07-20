@@ -4,12 +4,15 @@
 // code-server (browser VS Code) webview pinned over this pane, downloaded on
 // first use. Desktop-only; augments — never replaces — the Monaco editor.
 
-import { useRef } from "react"
+import { useEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
 import { Loader2Icon, MonitorXIcon, RotateCwIcon } from "lucide-react"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { useCodeServerPane } from "@/hooks/codeserver/use-code-server-pane"
+import { codeServerClient } from "@/lib/codeserver/client"
+import { registerProjectEditorOpener } from "@/lib/files/project-editor-bridge"
 
 interface Props {
   /** Project root code-server should open (the selected worktree root). */
@@ -21,6 +24,19 @@ export function CodeServerPane({ root }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const { phase, progress, error, retry } = useCodeServerPane(ref, { root, active: true })
   const percent = progress != null ? Math.round(progress * 100) : null
+
+  useEffect(
+    () =>
+      registerProjectEditorOpener({
+        root,
+        open: (path, line, column) => {
+          void codeServerClient
+            .openFile(root, path, line, column)
+            .catch((cause) => toast.error(t("proIde.openFileFailed", { error: String(cause) })))
+        },
+      }),
+    [root, t]
+  )
 
   return (
     <div className="relative h-full w-full overflow-hidden" data-testid="code-server-pane">
