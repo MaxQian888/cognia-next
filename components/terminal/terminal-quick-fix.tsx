@@ -132,5 +132,3 @@ export function TerminalQuickFix({
 }
 
 export default TerminalQuickFix
-
-export default TerminalQuickFix
