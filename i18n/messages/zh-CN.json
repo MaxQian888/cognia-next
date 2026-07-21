@@ -2709,9 +2709,12 @@
     "designerUnsupportedTitle": "设计器不可用",
     "dock": {
       "artifactMode": "产物",
+      "closeTab": "关闭 {title}",
       "collapse": "折叠面板",
       "hideHistory": "隐藏产物历史",
+      "openArtifacts": "已打开的产物",
       "openInNewTab": "在新标签页打开",
+      "saveToProject": "保存到项目…",
       "showHistory": "显示产物历史",
       "splitView": "分屏",
       "title": "产物",
@@ -5207,6 +5210,7 @@
       "pinHint": "固定后面板不再被自动切换，自动打开改为角标提示",
       "resize": "调整工作台宽度",
       "retry": "重试面板",
+      "switchPanel": "切换面板",
       "unpin": "取消固定面板",
       "wide": "宽栏模式"
     },

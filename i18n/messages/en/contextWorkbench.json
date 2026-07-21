@@ -38,6 +38,7 @@
     "pinHint": "Pinned panels stay put — automatic reveals become badges instead",
     "resize": "Resize workbench",
     "retry": "Retry panel",
+    "switchPanel": "Switch panel",
     "unpin": "Unpin panel",
     "wide": "Wide mode"
   },

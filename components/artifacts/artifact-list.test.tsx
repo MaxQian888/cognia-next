@@ -239,8 +239,11 @@ describe("ArtifactList", () => {
     expect(useArtifactStore.getState().artifacts[a.id]).toBeDefined()
 
     fireEvent.click(screen.getByRole("button", { name: "delete" }))
-    fireEvent.click(screen.getByRole("button", { name: "delete", selector: "button" }))
-    expect(screen.queryByText("deleteConfirmTitle")).not.toBeInTheDocument()
+    // Two buttons answer to "delete" once the dialog is up — the row's menu
+    // item and the dialog's confirm. The confirm is the later one.
+    const deleteButtons = screen.getAllByRole("button", { name: "delete" })
+    fireEvent.click(deleteButtons[deleteButtons.length - 1])
+    expect(useArtifactStore.getState().artifacts[a.id]).toBeUndefined()
   })
 
   it("marks the runtime filter as active too", () => {

@@ -44,9 +44,28 @@ jest.mock("@tauri-apps/api/path", () => ({
   downloadDir: jest.fn().mockResolvedValue("/Users/me/Downloads/"),
 }))
 
+jest.mock("@/lib/files/workspace-backend", () => ({
+  hasWorkspaceFsBackend: () => true,
+}))
+
+jest.mock("@/lib/db/sessions", () => ({
+  getSession: jest.fn(async (id: string) => ({ id, projectId: "p1" })),
+}))
+
 import { useArtifactPanelState } from "./use-artifact-panel"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
+import { useChatStore } from "@/stores/chat"
+import { useProjectStore } from "@/stores/project/project-store"
 import { loggers } from "@cognia/logging"
+
+/** A chat bound to a project rooted at /repo, the shape saveToProject needs. */
+function bindSessionToProject() {
+  useProjectStore.setState({
+    projects: [{ id: "p1", name: "Repo", roots: [{ id: "r1", path: "/repo", isPrimary: true }] }],
+  } as never)
+  useChatStore.setState({ activeSessionId: "s" } as never)
+}
 
 beforeEach(() => {
   localStorage.clear()
@@ -86,6 +105,141 @@ function makeArtifact() {
     language: "html",
   })
 }
+
+describe("saveToProject", () => {
+  beforeEach(() => {
+    bindSessionToProject()
+    act(() => useArtifactDockLayoutStore.getState().resetLayout())
+  })
+
+  it("offers the action only where there is a filesystem to write to", () => {
+    makeArtifact()
+    const { result, rerender } = renderHook(() => useArtifactPanelState())
+    expect(result.current.overflowActions).toContain("saveToProject")
+
+    setIsTauriValue(false)
+    rerender()
+    expect(result.current.overflowActions).not.toContain("saveToProject")
+  })
+
+  it("opens the save dialog in the session's project root", async () => {
+    const a = makeArtifact()
+    saveExport.mockResolvedValue({ kind: "saved", location: "/repo/src/Page.html" })
+    const { result } = renderHook(() => useArtifactPanelState())
+
+    await act(async () => {
+      await result.current.handleSaveToProject()
+    })
+
+    // Without this the dialog lands wherever the user saved last, which is
+    // rarely the project they are working in.
+    expect(saveExport).toHaveBeenCalledWith(
+      expect.objectContaining({ defaultDirectory: "/repo", filename: `${a.title}.html` })
+    )
+  })
+
+  it("reveals a file saved inside the project in the workspace panel", async () => {
+    makeArtifact()
+    saveExport.mockResolvedValue({ kind: "saved", location: "/repo/src/Page.html" })
+    const { result } = renderHook(() => useArtifactPanelState())
+
+    await act(async () => {
+      await result.current.handleSaveToProject()
+    })
+
+    // The point of the action: land in the workspace with the diff one tab away.
+    expect(useArtifactDockLayoutStore.getState().workspaceContext).toMatchObject({
+      kind: "file",
+      rootPath: "/repo",
+      relPath: "src/Page.html",
+    })
+    expect(revealInExplorer).not.toHaveBeenCalled()
+  })
+
+  it("falls back to the OS file manager when the user saves outside the project", async () => {
+    makeArtifact()
+    saveExport.mockResolvedValue({ kind: "saved", location: "/elsewhere/Page.html" })
+    const { result } = renderHook(() => useArtifactPanelState())
+
+    await act(async () => {
+      await result.current.handleSaveToProject()
+    })
+
+    expect(useArtifactDockLayoutStore.getState().workspaceContext).toBeNull()
+    expect(revealInExplorer).toHaveBeenCalledWith("/elsewhere/Page.html")
+  })
+
+  it("does nothing when the save dialog is cancelled", async () => {
+    makeArtifact()
+    saveExport.mockResolvedValue({ kind: "cancelled" })
+    const { result } = renderHook(() => useArtifactPanelState())
+
+    await act(async () => {
+      await result.current.handleSaveToProject()
+    })
+
+    expect(useArtifactDockLayoutStore.getState().workspaceContext).toBeNull()
+    expect(revealInExplorer).not.toHaveBeenCalled()
+  })
+
+  it("does nothing without an active artifact", async () => {
+    const { result } = renderHook(() => useArtifactPanelState())
+
+    await act(async () => {
+      await result.current.handleSaveToProject()
+    })
+
+    expect(saveExport).not.toHaveBeenCalled()
+  })
+
+  it("falls back to the artifact's own project when the chat is unbound", async () => {
+    useChatStore.setState({ activeSessionId: null } as never)
+    const a = makeArtifact()
+    act(() =>
+      useArtifactStore.setState((state) => ({
+        artifacts: { ...state.artifacts, [a.id]: { ...state.artifacts[a.id], projectId: "p1" } },
+      }))
+    )
+    saveExport.mockResolvedValue({ kind: "saved", location: "/repo/Page.html" })
+    const { result } = renderHook(() => useArtifactPanelState())
+
+    await act(async () => {
+      await result.current.handleSaveToProject()
+    })
+
+    expect(saveExport).toHaveBeenCalledWith(expect.objectContaining({ defaultDirectory: "/repo" }))
+    // No session id means nothing to scope a workspace reveal to.
+    expect(useArtifactDockLayoutStore.getState().workspaceContext).toBeNull()
+    expect(revealInExplorer).toHaveBeenCalledWith("/repo/Page.html")
+  })
+
+  it("still saves when neither the chat nor the artifact names a project", async () => {
+    useProjectStore.setState({ projects: [] } as never)
+    makeArtifact()
+    saveExport.mockResolvedValue({ kind: "saved", location: "/anywhere/Page.html" })
+    const { result } = renderHook(() => useArtifactPanelState())
+
+    await act(async () => {
+      await result.current.handleSaveToProject()
+    })
+
+    // A rootless workspace still gets a save dialog — it just opens wherever
+    // the OS last left it, and the result is revealed in the file manager.
+    expect(saveExport).toHaveBeenCalledWith(
+      expect.objectContaining({ defaultDirectory: undefined })
+    )
+    expect(revealInExplorer).toHaveBeenCalledWith("/anywhere/Page.html")
+  })
+
+  it("surfaces a write failure instead of reporting success", async () => {
+    makeArtifact()
+    saveExport.mockResolvedValue({ kind: "error", message: "disk full" })
+    const { result } = renderHook(() => useArtifactPanelState())
+
+    await expect(result.current.handleSaveToProject()).rejects.toThrow("disk full")
+    expect(useArtifactDockLayoutStore.getState().workspaceContext).toBeNull()
+  })
+})
 
 describe("useArtifactPanelState — extra coverage", () => {
   it("Esc keyboard shortcut closes the panel", () => {

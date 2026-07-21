@@ -20,12 +20,19 @@ import {
   FocusIcon,
   PanelRightCloseIcon,
   PanelRightIcon,
+  MoreHorizontalIcon,
   PinIcon,
   RotateCcwIcon,
   Rows3Icon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Sheet,
@@ -120,6 +127,14 @@ export interface ContextWorkbenchProps {
    * own shell. Without it the narrow/wide buttons render but do nothing.
    */
   onModeWidthHint?: (mode: ContextPanelMode) => void
+  /**
+   * Host content for the left of the panel header (the dock puts its open
+   * artifact tabs here). When present the group tabs collapse into an overflow
+   * menu rather than competing for the same row — in a ~34% wide dock there is
+   * only room for one of them, and a second header band would cost the panels
+   * content height they need more.
+   */
+  headerLeading?: ReactNode
 }
 
 export interface ContextWorkbenchMobileSheetProps extends Omit<
@@ -195,6 +210,7 @@ export function ContextWorkbench({
   onExitFocus,
   onCollapse,
   onModeWidthHint,
+  headerLeading,
 }: ContextWorkbenchProps) {
   const sectionRef = useRef<HTMLElement | null>(null)
   const previousFocusRef = useRef<HTMLElement | null>(null)
@@ -620,7 +636,34 @@ export function ContextWorkbench({
               context={{ resource, activePanelId: activePanel?.id ?? null }}
             />
             <header className="flex h-10 shrink-0 items-center gap-1 border-b px-2">
-              {activeGroup.length > 1 ? (
+              {headerLeading}
+              {activeGroup.length > 1 && headerLeading ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label={t("contextWorkbench.actions.switchPanel")}
+                      data-testid="context-workbench-group-overflow"
+                    >
+                      <MoreHorizontalIcon className="size-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    {activeGroup.map((panel) => (
+                      <DropdownMenuItem
+                        key={panel.id}
+                        data-workbench-group-tab
+                        onClick={() => handleActivate(panel)}
+                      >
+                        {getPanelLabel(panel)}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : null}
+              {activeGroup.length > 1 && !headerLeading ? (
                 <div
                   role="tablist"
                   className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
@@ -646,9 +689,8 @@ export function ContextWorkbench({
                     </Button>
                   ))}
                 </div>
-              ) : (
-                <div className="flex-1" />
-              )}
+              ) : null}
+              {headerLeading ? null : activeGroup.length > 1 ? null : <div className="flex-1" />}
               <PluginExtensionSlot
                 point="panel.header"
                 className="flex shrink-0 items-center gap-1"

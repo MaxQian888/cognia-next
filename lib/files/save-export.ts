@@ -37,6 +37,12 @@ export interface SaveExportOptions {
   mimeType: string
   /** Tauri save-dialog filter spec; derived from the filename extension when omitted. */
   filters?: { name: string; extensions: string[] }[]
+  /**
+   * Directory the Tauri save dialog opens in. Without it the dialog lands
+   * wherever the user saved last, which is rarely the project they are working
+   * in. Ignored on Capacitor and web, whose save paths are not user-chosen.
+   */
+  defaultDirectory?: string
   /** Capacitor sub-path under the chosen directory. Default "cognia/exports". */
   mobileSubdir?: string
   /** Capacitor base directory. Default "documents" (visible in the Files app). */
@@ -70,7 +76,12 @@ async function saveViaTauri(opts: SaveExportOptions): Promise<SaveExportOutcome>
   const fs = await import("@tauri-apps/plugin-fs")
   const ext = extOf(opts.filename)
   const filters = opts.filters ?? [{ name: ext.toUpperCase(), extensions: [ext] }]
-  const path = await save({ defaultPath: opts.filename, filters })
+  const path = await save({
+    defaultPath: opts.defaultDirectory
+      ? `${opts.defaultDirectory.replace(/\/+$/, "")}/${opts.filename}`
+      : opts.filename,
+    filters,
+  })
   if (!path) return { kind: "cancelled" }
   // Bless the dialog-chosen directory so the Rust FS allowed-roots gate treats
   // this user-picked path as in-bounds (shadow-mode containment).

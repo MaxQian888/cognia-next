@@ -2709,9 +2709,12 @@
     "designerUnsupportedTitle": "Designer is unavailable",
     "dock": {
       "artifactMode": "Artifact",
+      "closeTab": "Close {title}",
       "collapse": "Collapse panel",
       "hideHistory": "Hide artifact history",
+      "openArtifacts": "Open artifacts",
       "openInNewTab": "Open in new tab",
+      "saveToProject": "Save to project…",
       "showHistory": "Show artifact history",
       "splitView": "Split",
       "title": "Artifacts",
@@ -5207,6 +5210,7 @@
       "pinHint": "Pinned panels stay put — automatic reveals become badges instead",
       "resize": "Resize workbench",
       "retry": "Retry panel",
+      "switchPanel": "Switch panel",
       "unpin": "Unpin panel",
       "wide": "Wide mode"
     },

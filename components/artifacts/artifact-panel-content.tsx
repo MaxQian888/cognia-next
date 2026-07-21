@@ -86,6 +86,7 @@ type ArtifactPanelAction =
   | "download"
   | "openInNewTab"
   | "revealInExplorer"
+  | "saveToProject"
   | "versionHistory"
 
 export type ArtifactPanelMode = "desktop" | "tablet" | "mobile" | "fullscreen"
@@ -127,6 +128,7 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
     handleDownloadAs,
     handleOpenInNewTab,
     handleRevealInExplorer,
+    handleSaveToProject,
   } = useArtifactPanelState()
 
   // Workbench wiring for the VS Code reuse layer: when the artifact's Monaco
@@ -245,6 +247,8 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
         return handleOpenInNewTab()
       case "revealInExplorer":
         return handleRevealInExplorer()
+      case "saveToProject":
+        return handleSaveToProject()
       case "versionHistory":
         return setShowVersionHistory(!showVersionHistory)
       default:
@@ -262,6 +266,8 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
         return t("dock.openInNewTab")
       case "revealInExplorer":
         return t("revealInExplorer")
+      case "saveToProject":
+        return t("dock.saveToProject")
       case "versionHistory":
         return t("versionHistory")
       default:

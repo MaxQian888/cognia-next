@@ -33,6 +33,7 @@ import {
 } from "@/stores/artifact/artifact-dock-layout-store"
 import { ArtifactPanelContent, type ArtifactPanelMode } from "./artifact-panel-content"
 import { ArtifactList } from "./artifact-list"
+import { ArtifactTabStrip, useOpenArtifactTabs } from "./artifact-tab-strip"
 import { DockWorkspace } from "./workspace-mode/dock-workspace"
 import {
   ContextWorkbench,
@@ -166,6 +167,9 @@ export function ArtifactContextWorkbench({
   // not the viewport — decides the density. Hardcoding "desktop" here mounted
   // Monaco and the split tab inside the phone Sheet.
   const hostLayout = mobile?.panelMode ?? "desktop"
+  // Only claim the header's leading slot when there are tabs to put in it; an
+  // element that renders null would still displace the panel's group tabs.
+  const hasArtifactTabs = useOpenArtifactTabs().length > 0
   // DockWorkspace only distinguishes touch from pointer density.
   const workspaceLayout = hostLayout === "mobile" ? "mobile" : "desktop"
 
@@ -419,6 +423,7 @@ export function ArtifactContextWorkbench({
       panels={panels}
       onCollapse={() => setDockCollapsed(true)}
       onModeWidthHint={dockWidthHint}
+      headerLeading={hasArtifactTabs ? <ArtifactTabStrip className="flex-1" /> : undefined}
       placement="chat-dock"
       manageOwnWidth={false}
       className="w-full"

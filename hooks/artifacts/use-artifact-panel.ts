@@ -19,6 +19,12 @@ import { useSettingsStore } from "@/stores/settings"
 import { isTauri } from "@/lib/tauri"
 import { revealInExplorer, openPath } from "@/lib/tauri/opener"
 import { saveExport } from "@/lib/files/save-export"
+import { hasWorkspaceFsBackend } from "@/lib/files/workspace-backend"
+import { resolveSessionProjectRoot, allRootPaths } from "@/lib/workspace/roots"
+import { useProjectStore } from "@/stores/project/project-store"
+import { useChatStore } from "@/stores/chat"
+import { getSession } from "@/lib/db/sessions"
+import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { saveGeneratedDocument, type DocFormat } from "@/lib/files/document-writer"
 import { writeText as clipboardWriteText } from "@/lib/capacitor/clipboard"
 import { getArtifactExtension, canPreview } from "@/lib/artifacts"
@@ -43,6 +49,7 @@ type ArtifactPanelAction =
   | "download"
   | "openInNewTab"
   | "revealInExplorer"
+  | "saveToProject"
   | "versionHistory"
 
 /** Artifact view modes. `split` (code + live preview side-by-side) is the wide
@@ -358,6 +365,63 @@ export function useArtifactPanelState() {
     }
   }, [activeArtifact])
 
+  /**
+   * Write the artifact into the user's project and open it right there in the
+   * dock's workspace panel, so the next step (reading the diff) is one click
+   * away instead of a trip through the OS file manager.
+   *
+   * Deliberately one-directional: the artifact records nothing about the file
+   * afterwards. A stored link would owe us stale-detection and conflict
+   * resolution the moment either side changed.
+   */
+  const handleSaveToProject = async () => {
+    if (!activeArtifact) return
+    const sessionId = useChatStore.getState().activeSessionId
+    // Same source the workspace panel resolves its root from (see
+    // `dock-workspace.tsx`), falling back to the project the artifact was
+    // authored under when the chat itself is unbound.
+    const session = sessionId ? await getSession(sessionId) : undefined
+    const { project, root } = resolveSessionProjectRoot(
+      { projectId: session?.projectId ?? activeArtifact.projectId },
+      useProjectStore.getState().projects
+    )
+    const filename = `${activeArtifact.title}.${getExtension(activeArtifact)}`
+    try {
+      const outcome = await saveExport({
+        filename,
+        data: activeArtifact.content,
+        mimeType: "text/plain",
+        defaultDirectory: root?.path,
+      })
+      if (outcome.kind === "error") throw new Error(outcome.message)
+      if (outcome.kind !== "saved") return
+      if (isDesktop) setLastDownloadPath(outcome.location)
+
+      // The dialog lets the user leave the project entirely; only a path that
+      // landed under a mounted root can be revealed in the workspace panel.
+      const roots = project ? allRootPaths(project) : []
+      const containing = roots.find((candidate) => outcome.location.startsWith(`${candidate}/`))
+      if (sessionId && containing) {
+        useArtifactDockLayoutStore.getState().revealWorkspaceFile({
+          sessionId,
+          rootPath: containing,
+          relPath: outcome.location.slice(containing.length + 1),
+        })
+      } else if (isDesktop) {
+        await revealInExplorer(outcome.location)
+      }
+      loggers.ui.info("artifacts.action.save-to-project", {
+        artifactId: activeArtifact.id,
+        revealed: Boolean(containing),
+      })
+    } catch (error) {
+      loggers.ui.error("artifacts.action.save-to-project-failed", error, {
+        artifactId: activeArtifact.id,
+      })
+      throw error
+    }
+  }
+
   const handleRevealInExplorer = async () => {
     if (!isDesktop || !lastDownloadPath) return
     try {
@@ -413,9 +477,13 @@ export function useArtifactPanelState() {
     "close",
   ]
 
+  // Writing into the project needs a filesystem; the web shell has none.
+  const canSaveToProject = isDesktop && hasWorkspaceFsBackend()
+
   const overflowActions: ArtifactPanelAction[] = [
     "copy",
     "download",
+    ...(canSaveToProject ? ["saveToProject" as const] : []),
     ...(isOpenableInNewTab ? ["openInNewTab" as const] : []),
     ...(isDesktop && lastDownloadPath ? ["revealInExplorer" as const] : []),
     "versionHistory",
@@ -465,5 +533,6 @@ export function useArtifactPanelState() {
     handleDownloadAs,
     handleOpenInNewTab,
     handleRevealInExplorer,
+    handleSaveToProject,
   }
 }

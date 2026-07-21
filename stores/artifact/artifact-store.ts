@@ -379,6 +379,18 @@ function applyArtifactWorkspaceFilters(
   })
 }
 
+/** Tabs the dock will show at once before the oldest is dropped. */
+export const MAX_OPEN_ARTIFACTS = 12
+
+/**
+ * Append to the open-tab list, preserving open order (unlike the MRU recents
+ * list, tabs must not reshuffle under the pointer when you switch between them).
+ */
+function withOpenArtifact(openArtifactIds: string[], artifactId: string): string[] {
+  if (openArtifactIds.includes(artifactId)) return openArtifactIds
+  return [...openArtifactIds, artifactId].slice(-MAX_OPEN_ARTIFACTS)
+}
+
 function updateRecentArtifactIds(
   recentArtifactIds: string[],
   artifactId: string,
@@ -433,6 +445,14 @@ interface ArtifactState {
   // Analysis
   analysisResults: Record<string, AnalysisResult>
 
+  /**
+   * Artifacts the user currently has open, in the order they were opened —
+   * the dock's tab strip. Deliberately NOT `artifactWorkspace.recentArtifactIds`:
+   * that is an MRU history the workspace page's "recent" scope browses, so
+   * closing a tab would silently erase browsing history.
+   */
+  openArtifactIds: string[]
+
   // Panel state
   panelOpen: boolean
   panelView: "artifact" | "canvas" | "analysis"
@@ -451,6 +471,11 @@ interface ArtifactActions {
   }) => Artifact
   updateArtifact: (id: string, updates: Partial<Artifact>) => void
   deleteArtifact: (id: string) => void
+  /**
+   * Drop an artifact's tab. When it was the active one, activate its neighbour
+   * so the dock never lands on an empty surface with tabs still showing.
+   */
+  closeArtifact: (id: string) => void
   /**
    * Drop every artifact + canvas document owned by a workspace. Called by
    * `deleteProjectCascade` when a project is deleted (Workspace isolation).
@@ -607,6 +632,7 @@ const initialState: ArtifactState = {
   activeArtifactId: null,
   artifactVersions: {},
   artifactWorkspace: INITIAL_ARTIFACT_WORKSPACE,
+  openArtifactIds: [],
   pendingReviews: {},
   canvasDocuments: {},
   activeCanvasId: null,
@@ -641,6 +667,7 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
         set((state) => ({
           artifacts: { ...state.artifacts, [artifact.id]: artifact },
           activeArtifactId: artifact.id,
+          openArtifactIds: withOpenArtifact(state.openArtifactIds, artifact.id),
           artifactWorkspace: {
             ...state.artifactWorkspace,
             sessionId,
@@ -760,7 +787,22 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
             pendingReviews,
             artifactWorkspace: nextWorkspace,
             activeArtifactId: nextActiveArtifactId,
+            openArtifactIds: state.openArtifactIds.filter((openId) => openId !== id),
           }
+        })
+      },
+
+      closeArtifact: (id) => {
+        set((state) => {
+          const openArtifactIds = state.openArtifactIds.filter((openId) => openId !== id)
+          if (openArtifactIds.length === state.openArtifactIds.length) return state
+          if (state.activeArtifactId !== id) return { openArtifactIds }
+
+          // Prefer the tab that took this one's slot, else the one before it —
+          // the same neighbour a closed editor tab hands focus to.
+          const closedIndex = state.openArtifactIds.indexOf(id)
+          const neighbour = openArtifactIds[closedIndex] ?? openArtifactIds[closedIndex - 1] ?? null
+          return { openArtifactIds, activeArtifactId: neighbour }
         })
       },
 
@@ -789,6 +831,7 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
 
           return {
             activeArtifactId: id,
+            openArtifactIds: withOpenArtifact(state.openArtifactIds, id),
             artifacts: {
               ...state.artifacts,
               [id]: {
@@ -1804,6 +1847,7 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
             },
             canvasDocuments,
             analysisResults,
+            openArtifactIds: state.openArtifactIds.filter((id) => artifacts[id]),
             activeArtifactId:
               state.activeArtifactId && artifacts[state.activeArtifactId]
                 ? state.activeArtifactId
@@ -1879,6 +1923,8 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           artifacts,
           artifactVersions,
           artifactWorkspace: state.artifactWorkspace,
+          // Only tabs whose artifact survived the LRU eviction above.
+          openArtifactIds: state.openArtifactIds.filter((id) => artifacts[id]),
           canvasDocuments: state.canvasDocuments,
           analysisResults: state.analysisResults,
         }

@@ -241,6 +241,43 @@ describe("ArtifactDock — converged workbench shell", () => {
     expect(screen.getByTestId("resource-workbench-chat")).not.toHaveTextContent("Rewrite this")
   })
 
+  it("shows no tab strip for a single artifact, and keeps the group tabs inline", () => {
+    activateArtifact()
+    render(<ArtifactDock />)
+
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.proposalReview" }))
+
+    expect(screen.queryByTestId("artifact-tab-strip")).not.toBeInTheDocument()
+    // The header slot must stay free, or the panel's own tabs get displaced
+    // into an overflow menu for no reason.
+    expect(screen.getByRole("tab", { name: "artifacts.dock.showHistory" })).toBeInTheDocument()
+    expect(screen.queryByTestId("context-workbench-group-overflow")).not.toBeInTheDocument()
+  })
+
+  it("hands the header to the artifact tabs once a second artifact is open", () => {
+    activateArtifact()
+    act(() => {
+      useArtifactStore.setState((state) => ({
+        artifacts: {
+          ...state.artifacts,
+          "artifact-2": { ...state.artifacts["artifact-1"], id: "artifact-2", title: "Second" },
+        },
+        openArtifactIds: ["artifact-1", "artifact-2"],
+      }))
+    })
+    render(<ArtifactDock />)
+
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.proposalReview" }))
+
+    // Both cannot share a ~34% wide header, so the panel's group tabs step
+    // aside into an overflow menu rather than a third header band appearing.
+    expect(screen.getByTestId("artifact-tab-strip")).toBeInTheDocument()
+    expect(screen.getByTestId("context-workbench-group-overflow")).toBeInTheDocument()
+    expect(
+      screen.queryByRole("tab", { name: "artifacts.dock.showHistory" })
+    ).not.toBeInTheDocument()
+  })
+
   it("collapses the dock from the artifact surface rail too", () => {
     activateArtifact()
     act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
