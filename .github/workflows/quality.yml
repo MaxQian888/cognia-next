@@ -103,6 +103,12 @@ jobs:
       - name: Plugin contract generation freshness
         run: node scripts/plugin/generate-contract.mjs --check
 
+      # `cognia plugin import` embeds a bundled build of lib/plugin/convert/**
+      # with include_str!, so the CLI stays one binary and its Node-free
+      # cargo job keeps working. That artifact is checked in, so it can rot.
+      - name: Plugin import converter bundle freshness
+        run: pnpm plugin-convert:check
+
       - name: Plugin author import boundary
         run: node scripts/plugin/check-author-imports.mjs
 

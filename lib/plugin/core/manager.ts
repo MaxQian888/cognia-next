@@ -3725,7 +3725,7 @@ export class PluginManager {
       if (!entries?.length) continue
       for (const entry of entries) {
         try {
-          descriptor.registerEntry(entry, { pluginId })
+          descriptor.registerEntry(entry, { pluginId, installRoot: plugin.path ?? "" })
         } catch (err) {
           loggers.manager.warn(`[plugin:${pluginId}] failed to register ${cap} ${entry.id}:`, err)
         }

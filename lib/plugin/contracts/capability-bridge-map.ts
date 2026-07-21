@@ -56,6 +56,7 @@ import {
   unregisterNativeAnthropicToolsByPlugin,
 } from "@/lib/plugin/registries/native-anthropic-tool-registry"
 import { registerSkill, unregisterSkillsByPlugin } from "@/lib/plugin/registries/skill-registry"
+import { rebaseSkillSource } from "@/lib/plugin/utils/rebase-skill-source"
 import {
   refreshAllPackWarnings,
   registerCharacterPack,
@@ -133,6 +134,18 @@ export interface OverlayContributionEntry {
 }
 
 /**
+ * What the dispatch loop knows about the plugin whose contributions it is
+ * registering. `installRoot` is the plugin's on-disk directory (empty for
+ * built-ins, whose contributions never carry filesystem paths); descriptors
+ * that store paths use it to anchor plugin-dir-relative values, mirroring
+ * the `installRoot` the module-bridge dispatch already passes.
+ */
+export interface OverlayRegistrationContext {
+  pluginId: string
+  installRoot?: string
+}
+
+/**
  * The descriptor as the dispatch loop (`PluginManager.registerPluginContributions`)
  * sees it: `registerEntry` takes the structural lower bound every overlay
  * entry shares (`{ id: string }`), because the loop reads the manifest field
@@ -146,7 +159,7 @@ export interface OverlayCapabilityDescriptor {
    * the entry through verbatim — the uniform contract is just "this
    * adds one entry to its registry under `pluginId`".
    */
-  registerEntry: (entry: OverlayContributionEntry, ctx: { pluginId: string }) => void
+  registerEntry: (entry: OverlayContributionEntry, ctx: OverlayRegistrationContext) => void
   /**
    * Bulk cleanup. Implementations must idempotently drop every entry
    * the named plugin contributed. Returns the count for diagnostics.
@@ -167,7 +180,7 @@ export interface OverlayCapabilityDescriptor {
  */
 interface TypedOverlayCapabilityDescriptor<E extends { id: string }> {
   manifestField: keyof PluginManifest
-  registerEntry: (entry: E, ctx: { pluginId: string }) => void
+  registerEntry: (entry: E, ctx: OverlayRegistrationContext) => void
   unregisterAllByPlugin: (pluginId: string) => number
   virtual?: true
 }
@@ -200,12 +213,20 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
   skills: defineOverlayCapability<PluginSkillDef>({
     manifestField: "skills",
     registerEntry: (def, ctx) => {
-      // Skill defs pass through verbatim — the registry stores the
-      // entire entry under its `id`. After registration we refresh any
-      // character-pack `requires` warnings (ADR-0030): a pack that was
-      // previously missing this skill id now has the dep available.
-      // Also refresh agent-team-template warnings for the same reason.
-      registerSkill(def.id, def, ctx)
+      // `local-folder` / `local-bundle` / `archive` sources carry a
+      // filesystem path that downstream consumers (`resolveSkillMarkdown`)
+      // read with no knowledge of the owning plugin. Anchor it here, once,
+      // so a plugin can ship `"skills/foo"` the way it already ships
+      // `main` / `wasmMain` / `cliTools[].binary.relPath`. Throws on a
+      // path that escapes the plugin dir — the dispatch loop isolates
+      // per-entry failures, so only the offending skill is dropped.
+      const anchored = rebaseSkillSource(def, ctx.installRoot ?? "")
+      // The registry stores the entire entry under its `id`. After
+      // registration we refresh any character-pack `requires` warnings
+      // (ADR-0030): a pack that was previously missing this skill id now
+      // has the dep available. Also refresh agent-team-template warnings
+      // for the same reason.
+      registerSkill(anchored.id, anchored, ctx)
       refreshAllPackWarnings()
       refreshAllTemplateWarnings()
       refreshAllWorkflowTemplateWarnings()

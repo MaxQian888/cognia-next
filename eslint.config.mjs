@@ -75,6 +75,12 @@ const eslintConfig = defineConfig([
     "mobile/ios/App/App/public/**",
     "mobile/ios/App/Pods/**",
     "mobile/ios/DerivedData/**",
+    // esbuild bundle of lib/plugin/convert/**, emitted by
+    // scripts/plugin/build-convert-bundle.mjs and embedded in the CLI with
+    // include_str! so `cognia plugin import` needs no Node toolchain. Its
+    // generator owns the format; `eslint --fix` would desync it from the
+    // `plugin-convert:check` freshness gate.
+    "crates/cognia-cli/assets/plugin-convert.cjs",
   ]),
   // Allow underscore-prefixed unused variables (standard convention for intentional-unused).
   {

@@ -18,6 +18,7 @@ import {
   OVERLAY_REGISTRY_CAPABILITY_KEYS,
   type OverlayCapabilityDescriptor,
 } from "./capability-bridge-map"
+import { __resetSkillsForTesting, getSkill } from "@/lib/plugin/registries/skill-registry"
 import type { PluginCapability, PluginManifest } from "@/types/plugin"
 
 describe("OVERLAY_REGISTRY_CAPABILITIES (PR-D)", () => {
@@ -94,5 +95,58 @@ describe("OVERLAY_REGISTRY_CAPABILITIES (PR-D)", () => {
       const removed = descriptor.unregisterAllByPlugin(ctx.pluginId)
       expect(removed).toBeGreaterThanOrEqual(1)
     })
+  })
+})
+
+describe("skills descriptor anchors plugin-dir-relative source paths", () => {
+  const descriptor = OVERLAY_REGISTRY_CAPABILITIES.skills
+  const installRoot = "/opt/cognia/plugins/paths-demo"
+
+  afterEach(() => {
+    __resetSkillsForTesting()
+  })
+
+  it("resolves a relative local-bundle path against the install root", () => {
+    descriptor.registerEntry(
+      {
+        id: "anchored-skill",
+        name: "Anchored",
+        description: "d",
+        source: { kind: "local-bundle", path: "skills/researcher" },
+      },
+      { pluginId: "paths-demo", installRoot }
+    )
+    expect(getSkill("anchored-skill")?.source).toEqual({
+      kind: "local-bundle",
+      path: `${installRoot}/skills/researcher`,
+    })
+  })
+
+  it("leaves inline sources alone", () => {
+    descriptor.registerEntry(
+      {
+        id: "inline-skill",
+        name: "Inline",
+        description: "d",
+        source: { kind: "inline", markdown: "# body" },
+      },
+      { pluginId: "paths-demo", installRoot }
+    )
+    expect(getSkill("inline-skill")?.source).toEqual({ kind: "inline", markdown: "# body" })
+  })
+
+  it("refuses a path that escapes the plugin directory", () => {
+    expect(() =>
+      descriptor.registerEntry(
+        {
+          id: "escaping-skill",
+          name: "Escaping",
+          description: "d",
+          source: { kind: "local-folder", path: "../../../etc" },
+        },
+        { pluginId: "paths-demo", installRoot }
+      )
+    ).toThrow(/escapes the plugin directory/)
+    expect(getSkill("escaping-skill")).toBeUndefined()
   })
 })
