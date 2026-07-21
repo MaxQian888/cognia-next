@@ -25,6 +25,38 @@ afterEach(() => {
   __resetContextProvidersForTesting()
 })
 
+describe("context-providers-bridge python backend", () => {
+  it("registers a python-backed provider without importing any JS", async () => {
+    const importer = jest.fn()
+    const manifest = {
+      ...(MANIFEST as unknown as Record<string, unknown>),
+      type: "python",
+      pythonMain: "main.py",
+      contextProviders: [{ id: "py-clock", label: "Py clock" }],
+    } as unknown as PluginManifest
+
+    const result = await registerContextProvidersForPlugin(manifest, "/plugins/ctx", { importer })
+
+    expect(result).toEqual({ registered: 1, errors: [] })
+    expect(importer).not.toHaveBeenCalled()
+    expect(getContextProvider("ctx-plugin:py-clock")).toBeDefined()
+  })
+
+  it("reports a JS-backed provider that omits entry/export", async () => {
+    const manifest = {
+      ...(MANIFEST as unknown as Record<string, unknown>),
+      contextProviders: [{ id: "broken", label: "Broken" }],
+    } as unknown as PluginManifest
+
+    const result = await registerContextProvidersForPlugin(manifest, "/plugins/ctx", {
+      importer: jest.fn(),
+    })
+
+    expect(result.registered).toBe(0)
+    expect(result.errors[0]!.message).toMatch(/must declare both "entry" and "export"/)
+  })
+})
+
 describe("context-providers-bridge", () => {
   it("imports the factory and registers the provider under the namespaced id", async () => {
     const factory = jest.fn(async (ctx: { providerId: string }) => ({

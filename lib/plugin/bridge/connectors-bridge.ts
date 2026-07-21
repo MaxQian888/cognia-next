@@ -20,8 +20,23 @@
  */
 
 import type { PluginManifest, PluginConnectorDef } from "@/types/plugin/plugin"
-import type { PlatformAdapter } from "@/types/connectors"
+import type {
+  A2UICapabilityMatrix,
+  AdapterContext,
+  AdapterHealth,
+  AdapterMeta,
+  NormalizedInboundEvent,
+  OutboundRequest,
+  OutboundResult,
+  PlatformAdapter,
+} from "@/types/connectors"
 import { getBus } from "@/lib/connectors/bus"
+import {
+  createPythonBackedProxy,
+  isPythonBackedContribution,
+  subscribePythonContributionPush,
+} from "@/lib/plugin/bridge/_shared/python-backed-proxy"
+import { canRunPythonBackedContribution } from "@/lib/plugin/python/experimental-flag"
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -49,6 +64,90 @@ export type AdapterFactory = (
 /** pluginId → list of adapter ids registered by that plugin */
 const pluginAdapterIds = new Map<string, string[]>()
 
+/**
+ * Build a `PlatformAdapter` whose behaviour lives in the plugin's Python
+ * subprocess. Two parts of the contract cannot cross the process boundary
+ * verbatim, and the wrapper owns both:
+ *
+ * - **`start(ctx)`** — `AdapterContext` carries live functions (`emit`,
+ *   `logger`, `secrets`, `signal`). Only the serializable identity travels to
+ *   Python; the inbound `emit` path comes *back* over the `plugin:python` push
+ *   channel and is forwarded here.
+ * - **`health()`** — synchronous in the contract, so an IPC round-trip cannot
+ *   answer it. The wrapper tracks state around `start`/`stop`/`send`.
+ *
+ * This is why the `connectors` capability is `pythonExecution: "experimental"`.
+ */
+async function createPythonPlatformAdapter(
+  pluginId: string,
+  def: PluginConnectorDef
+): Promise<PlatformAdapter> {
+  const contributionId = def.type
+  const proxy = createPythonBackedProxy<{
+    describe(): Promise<{ meta: AdapterMeta; a2uiCapability: A2UICapabilityMatrix }>
+    start(ctx: { adapterId: string }): Promise<void>
+    stop(): Promise<void>
+    send(req: OutboundRequest): Promise<OutboundResult>
+  }>({
+    pluginId,
+    contributionId,
+    methods: ["describe", "start", "stop", "send"],
+    label: "connector adapter",
+  })
+
+  // `a2uiCapability()` is synchronous like `health()`, so the matrix is fetched
+  // once at build time and answered from cache thereafter.
+  const described = await proxy.describe()
+  const adapterId = `${pluginId}:${contributionId}`
+  let health: AdapterHealth = { state: "down" }
+  let detachInbound: (() => void) | null = null
+
+  return {
+    id: adapterId,
+    meta: described.meta,
+    async start(ctx: AdapterContext): Promise<void> {
+      // Wire inbound BEFORE the plugin starts so no early event is dropped.
+      detachInbound = subscribePythonContributionPush({
+        pluginId,
+        contributionId,
+        onPush: ({ channel, payload }) => {
+          if (channel !== "inbound") return
+          void ctx.emit(payload as NormalizedInboundEvent)
+        },
+      })
+      health = { state: "starting" }
+      try {
+        await proxy.start({ adapterId: ctx.adapterId })
+        health = { state: "running", lastActivityAt: Date.now() }
+      } catch (error) {
+        detachInbound?.()
+        detachInbound = null
+        health = {
+          state: "down",
+          reason: error instanceof Error ? error.message : String(error),
+        }
+        throw error
+      }
+    },
+    async stop(): Promise<void> {
+      try {
+        await proxy.stop()
+      } finally {
+        detachInbound?.()
+        detachInbound = null
+        health = { state: "down" }
+      }
+    },
+    health: () => health,
+    a2uiCapability: () => described.a2uiCapability,
+    async send(req: OutboundRequest): Promise<OutboundResult> {
+      const result = await proxy.send(req)
+      health = { ...health, lastActivityAt: Date.now() }
+      return result
+    },
+  }
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
@@ -70,8 +169,16 @@ export async function registerPluginAdapters(
   const ids: string[] = []
 
   for (const def of defs) {
-    const factoryFn = exports[def.factory]
-    if (typeof factoryFn !== "function") {
+    const pythonBacked = isPythonBackedContribution(def, manifest.type)
+    if (pythonBacked && !canRunPythonBackedContribution("connectors")) {
+      console.warn(
+        `[connectors-bridge] plugin ${pluginId}: python-backed connector "${def.type}" is ` +
+          `experimental and the flag is off — skipping (enable via setExperimentalPythonBackedEnabled)`
+      )
+      continue
+    }
+    const factoryFn = pythonBacked ? undefined : exports[def.factory]
+    if (!pythonBacked && typeof factoryFn !== "function") {
       console.warn(
         `[connectors-bridge] plugin ${pluginId}: factory "${def.factory}" not found in exports — skipping`
       )
@@ -80,7 +187,9 @@ export async function registerPluginAdapters(
 
     let adapter: PlatformAdapter
     try {
-      adapter = await (factoryFn as AdapterFactory)({ pluginId, connectorDef: def })
+      adapter = pythonBacked
+        ? await createPythonPlatformAdapter(pluginId, def)
+        : await (factoryFn as AdapterFactory)({ pluginId, connectorDef: def })
     } catch (err) {
       console.error(`[connectors-bridge] plugin ${pluginId}: factory "${def.factory}" threw —`, err)
       continue

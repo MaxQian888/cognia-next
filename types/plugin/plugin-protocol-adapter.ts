@@ -15,6 +15,8 @@
  * (`lib/ai/providers/protocol-adapter-spec.parity.test.ts`) guards drift.
  */
 
+import type { PluginContributionBackend } from "@/types/plugin/plugin"
+
 /** Response-extraction JSON paths (dot segments + numeric brackets only). */
 export interface OpenAiCompatibleVariantResponsePaths {
   /** Path to the text delta in each SSE chunk, e.g. `choices[0].delta.content`. */
@@ -191,8 +193,7 @@ export interface CodeAdapterUiToolApprovalRequestChunk {
 }
 
 export type CodeAdapterToolApprovalRequestChunk =
-  | CodeAdapterFullStreamToolApprovalRequestChunk
-  | CodeAdapterUiToolApprovalRequestChunk
+  CodeAdapterFullStreamToolApprovalRequestChunk | CodeAdapterUiToolApprovalRequestChunk
 
 export interface CodeAdapterToolResultChunk {
   type: "tool-result"
@@ -431,7 +432,16 @@ export interface PluginProtocolAdapterDef {
   description?: string
   /** Declarative execution spec (variant) or `{kind:"code"}` marker. */
   spec: ProtocolAdapterSpec
-  /** Relative module path (lazy-imported on enable) — REQUIRED for code. */
+  /**
+   * Which runtime owns a `{kind:"code"}` adapter's factory. Omit to inherit the
+   * plugin type (`python` plugins default to `"python"`); declaring `entry`
+   * pins it to `"js"`. See {@link PluginContributionBackend}.
+   */
+  backend?: PluginContributionBackend
+  /**
+   * Relative module path (lazy-imported on enable) — REQUIRED for a JS-backed
+   * code adapter, omitted for a python-backed one.
+   */
   entry?: string
   /** Export name of the {@link CodeProtocolAdapterFactory} in `entry`. */
   export?: string

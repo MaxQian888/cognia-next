@@ -29,6 +29,49 @@ afterEach(() => {
   __resetProtocolAdaptersForTesting()
 })
 
+describe("protocol-adapters-bridge python backend", () => {
+  const pythonManifest = (defs: unknown[]): PluginManifest =>
+    ({
+      ...(MANIFEST as unknown as Record<string, unknown>),
+      type: "python",
+      pythonMain: "main.py",
+      protocolAdapters: defs,
+    }) as unknown as PluginManifest
+
+  it("registers a python-backed code adapter without importing any JS", async () => {
+    const importer = jest.fn()
+    const result = await registerProtocolAdaptersForPlugin(
+      pythonManifest([{ id: "py-wire", label: "Py wire", spec: { kind: "code" } }]),
+      "/plugins/wire",
+      { importer }
+    )
+
+    expect(result).toEqual({ registered: 1, errors: [] })
+    expect(importer).not.toHaveBeenCalled()
+    // The seam's streaming method satisfies `CodeProtocolAdapterFactory`.
+    const executor = getCodeAdapterExecutor("wire-plugin:py-wire")
+    expect(typeof executor).toBe("function")
+    const built = await executor!({} as never)
+    expect(typeof built.stream).toBe("function")
+    expect(getProtocolAdapter("wire-plugin:py-wire")).toBeDefined()
+    unregisterProtocolAdaptersForPlugin("wire-plugin")
+  })
+
+  it("still requires entry/export for a JS-backed code adapter", async () => {
+    const result = await registerProtocolAdaptersForPlugin(
+      {
+        ...(MANIFEST as unknown as Record<string, unknown>),
+        protocolAdapters: [{ id: "js-wire", label: "Js wire", spec: { kind: "code" } }],
+      } as unknown as PluginManifest,
+      "/plugins/wire",
+      { importer: jest.fn() }
+    )
+
+    expect(result.registered).toBe(0)
+    expect(result.errors[0]!.message).toBe("code adapter requires entry + export")
+  })
+})
+
 describe("protocol-adapters-bridge", () => {
   it("registers the declarative def under the namespaced id (no import)", async () => {
     const result = await registerProtocolAdaptersForPlugin(MANIFEST, "/plugins/wire-plugin")

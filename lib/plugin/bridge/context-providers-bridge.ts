@@ -23,6 +23,10 @@ import type {
 import { loggers } from "@/lib/plugin/core/logger"
 import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 import {
+  createPythonBackedProxy,
+  isPythonBackedContribution,
+} from "@/lib/plugin/bridge/_shared/python-backed-proxy"
+import {
   registerContextProvider,
   unregisterContextProvidersByPlugin,
 } from "@/lib/plugin/registries/context-provider-registry"
@@ -65,7 +69,7 @@ export async function registerContextProvidersForPlugin(
 
   for (const def of defs) {
     try {
-      await registerOne(def, pluginId, installRoot, importer)
+      await registerOne(def, pluginId, manifest.type, installRoot, importer)
       registered++
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -83,21 +87,19 @@ export async function registerContextProvidersForPlugin(
 async function registerOne(
   def: PluginContextProviderDef,
   pluginId: string,
+  pluginType: string | undefined,
   installRoot: string,
   importer: NonNullable<ContextProvidersBridgeOptions["importer"]>
 ): Promise<void> {
-  const resolved = resolvePluginPath(installRoot, def.entry)
-  const mod = await importer(resolved)
-  const exported = mod[def.export]
-  if (typeof exported !== "function") {
-    throw new Error(`entry "${def.entry}" does not export a factory named "${def.export}"`)
-  }
-  const factory = exported as PluginContextProviderFactory
   const providerId = `${pluginId}:${def.id}`
-  const provider = await factory({ providerId, pluginId })
-  if (!provider || typeof provider.provide !== "function") {
-    throw new Error(`factory "${def.export}" did not return a { provide } context provider`)
-  }
+  const provider = isPythonBackedContribution(def, pluginType)
+    ? createPythonBackedProxy<Awaited<ReturnType<PluginContextProviderFactory>>>({
+        pluginId,
+        contributionId: def.id,
+        methods: ["provide"],
+        label: "context provider",
+      })
+    : await resolveJsProvider(def, pluginId, providerId, installRoot, importer)
 
   registerContextProvider(
     providerId,
@@ -108,6 +110,33 @@ async function registerOne(
     },
     { pluginId }
   )
+}
+
+async function resolveJsProvider(
+  def: PluginContextProviderDef,
+  pluginId: string,
+  providerId: string,
+  installRoot: string,
+  importer: NonNullable<ContextProvidersBridgeOptions["importer"]>
+): Promise<Awaited<ReturnType<PluginContextProviderFactory>>> {
+  if (!def.entry || !def.export) {
+    throw new Error(
+      `JS-backed context provider "${def.id}" must declare both "entry" and "export"` +
+        ` (set backend: "python" to run it in the plugin's Python subprocess)`
+    )
+  }
+  const resolved = resolvePluginPath(installRoot, def.entry)
+  const mod = await importer(resolved)
+  const exported = mod[def.export]
+  if (typeof exported !== "function") {
+    throw new Error(`entry "${def.entry}" does not export a factory named "${def.export}"`)
+  }
+  const factory = exported as PluginContextProviderFactory
+  const provider = await factory({ providerId, pluginId })
+  if (!provider || typeof provider.provide !== "function") {
+    throw new Error(`factory "${def.export}" did not return a { provide } context provider`)
+  }
+  return provider
 }
 
 export function unregisterContextProvidersForPlugin(pluginId: string): void {

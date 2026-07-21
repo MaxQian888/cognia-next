@@ -352,7 +352,11 @@ describe("Plugin Validation", () => {
       )
     })
 
-    it("treats connectors as JavaScript-backed contributions", () => {
+    it("treats connectors on a Python plugin as an experimental python-backed contribution", () => {
+      // `connectors` declares no JS module path (its `factory` is just a symbol
+      // name a python handler can own too), so on a python plugin the backend
+      // defaults to python and routes through the plugin_python_call seam.
+      // The capability is pythonExecution "experimental", hence the warning.
       const manifest = createValidManifest() as unknown as Record<string, unknown>
       manifest.type = "python"
       delete manifest.main
@@ -365,9 +369,40 @@ describe("Plugin Validation", () => {
           transportModes: ["polling"],
         },
       ]
+      const diagnostics = validatePluginManifest(manifest as unknown as PluginManifest).diagnostics
+      expect(diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "connectors",
+            code: "manifest.contributions.python.experimental",
+            severity: "warning",
+          }),
+        ])
+      )
+      expect((diagnostics ?? []).filter((d) => d.severity === "error")).toEqual([])
+    })
+
+    it("rejects an explicitly JS-backed connector on a Python-only plugin", () => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.type = "python"
+      delete manifest.main
+      manifest.pythonMain = "main.py"
+      manifest.connectors = [
+        {
+          type: "custom",
+          backend: "js",
+          factory: "createConnector",
+          configSchema: {},
+          transportModes: ["polling"],
+        },
+      ]
       expect(validatePluginManifest(manifest as unknown as PluginManifest).diagnostics).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ field: "connectors", severity: "error" }),
+          expect.objectContaining({
+            field: "connectors",
+            code: "manifest.contributions.javascript.unsupported_for_python",
+            severity: "error",
+          }),
         ])
       )
     })

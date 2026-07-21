@@ -35,6 +35,10 @@ import type {
 } from "@/types/plugin/plugin"
 import { loggers } from "@/lib/plugin/core/logger"
 import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
+import {
+  createPythonBackedProxy,
+  isPythonBackedContribution,
+} from "@/lib/plugin/bridge/_shared/python-backed-proxy"
 import { createAIProviderAPI } from "@/lib/plugin/api/ai-provider-api"
 
 const unregistrarsByPlugin = new Map<string, Array<() => void>>()
@@ -81,7 +85,14 @@ export async function registerAiProvidersForPlugin(
 
   for (const def of defs) {
     try {
-      const adapted = await adaptProvider(def, pluginId, installRoot, importer, options)
+      const adapted = await adaptProvider(
+        def,
+        pluginId,
+        manifest.type,
+        installRoot,
+        importer,
+        options
+      )
       const unregister = api.registerProvider(adapted)
       unregistrars.push(unregister)
       registered++
@@ -101,25 +112,21 @@ export async function registerAiProvidersForPlugin(
 async function adaptProvider(
   def: PluginAiProviderDef,
   pluginId: string,
+  pluginType: string | undefined,
   installRoot: string,
   importer: NonNullable<AiProvidersBridgeOptions["importer"]>,
   options: AiProvidersBridgeOptions
 ): Promise<AIProviderDefinition> {
-  const resolved = resolvePluginPath(installRoot, def.entry)
-  const mod = await importer(resolved)
-  const exported = mod[def.export]
-  if (typeof exported !== "function") {
-    throw new Error(`entry "${def.entry}" does not export a factory named "${def.export}"`)
-  }
-  const factory = exported as PluginAiProviderFactory
-  const ctx = {
-    providerId: `${pluginId}:${def.id}`,
-    pluginId,
-    kind: def.kind,
-    getConfig: <T = unknown>(key: string) => options.getConfig?.(pluginId, key) as T | undefined,
-    getSecret: (key: string) => Promise.resolve(options.getSecret?.(pluginId, key) ?? undefined),
-  }
-  const provider = await factory(ctx)
+  // Every host-facing field (label, models, description) comes from the
+  // manifest def, so a python-backed provider only has to supply behaviour.
+  const provider = isPythonBackedContribution(def, pluginType)
+    ? createPythonBackedProxy<PluginLlmProvider & PluginEmbeddingProvider>({
+        pluginId,
+        contributionId: def.id,
+        methods: [def.kind === "llm" ? "complete" : "embed"],
+        label: "AI provider",
+      })
+    : await resolveJsProvider(def, pluginId, installRoot, importer, options)
 
   if (def.kind === "llm") {
     const llm = provider as PluginLlmProvider
@@ -134,6 +141,36 @@ async function adaptProvider(
     throw new Error(`factory "${def.export}" did not return a PluginEmbeddingProvider`)
   }
   return adaptEmbeddingToHost(def, embed)
+}
+
+async function resolveJsProvider(
+  def: PluginAiProviderDef,
+  pluginId: string,
+  installRoot: string,
+  importer: NonNullable<AiProvidersBridgeOptions["importer"]>,
+  options: AiProvidersBridgeOptions
+): Promise<PluginLlmProvider | PluginEmbeddingProvider> {
+  if (!def.entry || !def.export) {
+    throw new Error(
+      `JS-backed AI provider "${def.id}" must declare both "entry" and "export"` +
+        ` (set backend: "python" to run it in the plugin's Python subprocess)`
+    )
+  }
+  const resolved = resolvePluginPath(installRoot, def.entry)
+  const mod = await importer(resolved)
+  const exported = mod[def.export]
+  if (typeof exported !== "function") {
+    throw new Error(`entry "${def.entry}" does not export a factory named "${def.export}"`)
+  }
+  const factory = exported as PluginAiProviderFactory
+  const ctx = {
+    providerId: `${pluginId}:${def.id}`,
+    pluginId,
+    kind: def.kind,
+    getConfig: <T = unknown>(key: string) => options.getConfig?.(pluginId, key) as T | undefined,
+    getSecret: (key: string) => Promise.resolve(options.getSecret?.(pluginId, key) ?? undefined),
+  }
+  return factory(ctx)
 }
 
 function adaptLlmToHost(def: PluginAiProviderDef, llm: PluginLlmProvider): AIProviderDefinition {

@@ -11,6 +11,10 @@ import {
 } from "@/lib/terminal/completion/registry"
 import type { PluginManifest } from "@/types/plugin/plugin"
 import type { TerminalCompletionContext } from "@/lib/terminal/completion/types"
+import {
+  __resetExperimentalPythonFlagForTesting,
+  setExperimentalPythonBackedEnabled,
+} from "@/lib/plugin/python/experimental-flag"
 
 function ctx(): TerminalCompletionContext {
   return {
@@ -29,6 +33,7 @@ const signal = new AbortController().signal
 
 beforeEach(() => {
   __resetCompletionRegistryForTesting()
+  __resetExperimentalPythonFlagForTesting()
 })
 
 describe("adaptPluginCompletionProvider", () => {
@@ -88,6 +93,57 @@ describe("registerTerminalCompletionProvidersForPlugin", () => {
       terminalCompletionProviders: defs,
     } as unknown as PluginManifest
   }
+
+  it("rejects a python-backed provider while the experimental flag is off", async () => {
+    const res = await registerTerminalCompletionProvidersForPlugin(
+      {
+        id: "demo",
+        name: "Demo",
+        version: "1.0.0",
+        type: "python",
+        pythonMain: "main.py",
+        terminalCompletionProviders: [{ id: "py", label: "Py" }],
+      } as unknown as PluginManifest,
+      "/root",
+      { importer: jest.fn() }
+    )
+
+    expect(res.registered).toBe(0)
+    expect(res.errors[0]!.message).toMatch(/experimental and the flag is off/)
+  })
+
+  it("registers a python-backed provider without importing any JS", async () => {
+    setExperimentalPythonBackedEnabled(true)
+    const importer = jest.fn()
+    const res = await registerTerminalCompletionProvidersForPlugin(
+      {
+        id: "demo",
+        name: "Demo",
+        version: "1.0.0",
+        type: "python",
+        pythonMain: "main.py",
+        terminalCompletionProviders: [{ id: "py", label: "Py" }],
+      } as unknown as PluginManifest,
+      "/root",
+      { importer }
+    )
+
+    expect(res).toEqual({ registered: 1, errors: [] })
+    expect(importer).not.toHaveBeenCalled()
+    expect(listProviders().some((p) => p.id === "demo:py")).toBe(true)
+    unregisterTerminalCompletionProvidersForPlugin("demo")
+  })
+
+  it("reports a JS-backed provider that omits entry/export", async () => {
+    const res = await registerTerminalCompletionProvidersForPlugin(
+      manifest([{ id: "broken", label: "Broken" }]),
+      "/root",
+      { importer: jest.fn() }
+    )
+
+    expect(res.registered).toBe(0)
+    expect(res.errors[0]!.message).toMatch(/must declare both "entry" and "export"/)
+  })
 
   it("lazy-loads declared providers and registers them", async () => {
     const importer = async () => ({

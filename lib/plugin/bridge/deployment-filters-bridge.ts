@@ -23,6 +23,10 @@ import type {
 import { loggers } from "@/lib/plugin/core/logger"
 import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 import {
+  createPythonBackedProxy,
+  isPythonBackedContribution,
+} from "@/lib/plugin/bridge/_shared/python-backed-proxy"
+import {
   registerDeploymentFilter,
   unregisterDeploymentFiltersByPlugin,
 } from "@cognia/provider-routing/filter-registry"
@@ -65,7 +69,7 @@ export async function registerDeploymentFiltersForPlugin(
 
   for (const def of defs) {
     try {
-      await registerOne(def, pluginId, installRoot, importer)
+      await registerOne(def, pluginId, manifest.type, installRoot, importer)
       registered++
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -83,21 +87,19 @@ export async function registerDeploymentFiltersForPlugin(
 async function registerOne(
   def: PluginDeploymentFilterDef,
   pluginId: string,
+  pluginType: string | undefined,
   installRoot: string,
   importer: NonNullable<DeploymentFiltersBridgeOptions["importer"]>
 ): Promise<void> {
-  const resolved = resolvePluginPath(installRoot, def.entry)
-  const mod = await importer(resolved)
-  const exported = mod[def.export]
-  if (typeof exported !== "function") {
-    throw new Error(`entry "${def.entry}" does not export a factory named "${def.export}"`)
-  }
-  const factory = exported as PluginDeploymentFilterFactory
   const filterId = `${pluginId}:${def.id}`
-  const filterLike = await factory({ filterId, pluginId })
-  if (!filterLike || typeof filterLike.filter !== "function") {
-    throw new Error(`factory "${def.export}" did not return a { filter } deployment filter`)
-  }
+  const filterLike = isPythonBackedContribution(def, pluginType)
+    ? createPythonBackedProxy<Awaited<ReturnType<PluginDeploymentFilterFactory>>>({
+        pluginId,
+        contributionId: def.id,
+        methods: ["filter"],
+        label: "deployment filter",
+      })
+    : await resolveJsFilter(def, pluginId, filterId, installRoot, importer)
 
   const ok = registerDeploymentFilter(
     {
@@ -111,6 +113,33 @@ async function registerOne(
     // Unreachable through the namespaced id, but keep the signal honest.
     throw new Error(`filter id "${filterId}" collides with a built-in filter`)
   }
+}
+
+async function resolveJsFilter(
+  def: PluginDeploymentFilterDef,
+  pluginId: string,
+  filterId: string,
+  installRoot: string,
+  importer: NonNullable<DeploymentFiltersBridgeOptions["importer"]>
+): Promise<Awaited<ReturnType<PluginDeploymentFilterFactory>>> {
+  if (!def.entry || !def.export) {
+    throw new Error(
+      `JS-backed deployment filter "${def.id}" must declare both "entry" and "export"` +
+        ` (set backend: "python" to run it in the plugin's Python subprocess)`
+    )
+  }
+  const resolved = resolvePluginPath(installRoot, def.entry)
+  const mod = await importer(resolved)
+  const exported = mod[def.export]
+  if (typeof exported !== "function") {
+    throw new Error(`entry "${def.entry}" does not export a factory named "${def.export}"`)
+  }
+  const factory = exported as PluginDeploymentFilterFactory
+  const filterLike = await factory({ filterId, pluginId })
+  if (!filterLike || typeof filterLike.filter !== "function") {
+    throw new Error(`factory "${def.export}" did not return a { filter } deployment filter`)
+  }
+  return filterLike
 }
 
 export function unregisterDeploymentFiltersForPlugin(pluginId: string): void {

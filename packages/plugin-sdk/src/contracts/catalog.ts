@@ -18,10 +18,20 @@ export interface AuthorCapabilityContract {
   minimumHostVersion: string
 }
 
+/**
+ * Whether a pure-Python (or hybrid python-backed) plugin can supply this
+ * contribution's runtime executor through the `plugin_python_call` seam.
+ * Only meaningful for `javascript` / `conditional` execution fields — `host`
+ * contributions are plain data and language-agnostic. Absent means
+ * `"unsupported"` (JS/React only, e.g. message renderers and tree views).
+ */
+export type PluginContributionPythonExecution = "supported" | "experimental" | "unsupported"
+
 export interface PluginManifestContributionContract {
   field: string
   capabilities: readonly string[]
   execution: PluginContributionExecution
+  pythonExecution?: PluginContributionPythonExecution
   entryPath?: string
   javascriptWhen?: PluginContributionJavascriptCondition
 }

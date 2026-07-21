@@ -14,6 +14,41 @@ const manifest = (overrides: Partial<PluginManifest>): PluginManifest =>
     ...overrides,
   }) as PluginManifest
 
+describe("ai-providers-bridge python backend", () => {
+  beforeEach(() => {
+    clearCustomAIProviders()
+  })
+
+  it("registers a python-backed LLM provider without importing any JS", async () => {
+    const importer = jest.fn()
+    const result = await registerAiProvidersForPlugin(
+      manifest({
+        type: "python",
+        pythonMain: "main.py",
+        aiProviders: [{ id: "pyllm", label: "Py LLM", kind: "llm", models: ["m"] }],
+      }),
+      "/plugins/p",
+      { importer }
+    )
+
+    expect(result).toEqual({ registered: 1, errors: [] })
+    expect(importer).not.toHaveBeenCalled()
+    expect(getCustomAIProviders().some((p) => p.id === "p:pyllm")).toBe(true)
+    unregisterAiProvidersForPlugin("p")
+  })
+
+  it("reports a JS-backed provider that omits entry/export", async () => {
+    const result = await registerAiProvidersForPlugin(
+      manifest({ aiProviders: [{ id: "broken", label: "Broken", kind: "llm" }] }),
+      "/plugins/p",
+      { importer: jest.fn() }
+    )
+
+    expect(result.registered).toBe(0)
+    expect(result.errors[0]!.message).toMatch(/must declare both "entry" and "export"/)
+  })
+})
+
 describe("ai-providers-bridge", () => {
   beforeEach(() => {
     clearCustomAIProviders()

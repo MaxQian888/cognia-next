@@ -20,6 +20,8 @@
  * Permission gates: `network:fetch` + `secrets:read`.
  */
 
+import type { PluginContributionBackend } from "@/types/plugin/plugin"
+
 /**
  * Discriminated union of provider definitions in `manifest.aiProviders[]`.
  * Both shapes share `id / label / entry / export` and differ only in the
@@ -30,8 +32,14 @@ export type PluginAiProviderDef = PluginLlmProviderDef | PluginEmbeddingProvider
 interface BasePluginAiProviderDef {
   id: string
   label: string
-  entry: string
-  export: string
+  /**
+   * Which runtime owns this factory. Omit to inherit the plugin type
+   * (`python` plugins default to `"python"`); declaring `entry` pins it to
+   * `"js"`. See {@link PluginContributionBackend}.
+   */
+  backend?: PluginContributionBackend
+  entry?: string
+  export?: string
   description?: string
 }
 

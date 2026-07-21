@@ -102,6 +102,10 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
   "cognia-python-demo": ["field_missing:tools"],
   "cognia-scheduler-tools": ["field_missing:tools", "field_missing:scheduler"],
   "cognia-sandboxed-tools": ["field_missing:tools"],
+  // The connector is python-backed and `connectors` is
+  // `pythonExecution: "experimental"`, so the validator warns by design —
+  // execution stays gated behind `lib/plugin/python/experimental-flag.ts`.
+  "cognia-python-runtime-demo": ["experimental:connectors"],
   "cognia-scheduling-demo": [],
   "cognia-share-watch": [],
   "computer-use": [

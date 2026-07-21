@@ -60,6 +60,50 @@ const MANIFEST = {
   ],
 } as unknown as PluginManifest
 
+describe("external-agent-adapters-bridge python backend", () => {
+  afterEach(() => {
+    unregisterExternalAgentAdaptersForPlugin("wire-plugin")
+    __resetPluginProtocolAdaptersForTesting()
+  })
+
+  it("registers a python-backed adapter whose isConnected() stays synchronous", async () => {
+    const importer = jest.fn()
+    const manifest = {
+      ...MANIFEST,
+      type: "python",
+      pythonMain: "main.py",
+      externalAgentAdapters: [{ id: "py-agent", label: "Py agent" }],
+    } as unknown as PluginManifest
+
+    const result = await registerExternalAgentAdaptersForPlugin(manifest, "/p", { importer })
+
+    expect(result).toEqual({ registered: 1, errors: [] })
+    expect(importer).not.toHaveBeenCalled()
+
+    expect(protocolAdapterRegistry.has("wire-plugin:py-agent")).toBe(true)
+    const adapter = protocolAdapterRegistry.create("wire-plugin:py-agent")!
+    // `isConnected()` must answer synchronously — the wrapper tracks it locally
+    // because an IPC round-trip cannot satisfy a sync contract.
+    expect(adapter.isConnected()).toBe(false)
+    expect(typeof adapter.prompt).toBe("function")
+    expect(typeof adapter.execute).toBe("function")
+  })
+
+  it("still requires entry/export for a JS-backed adapter", async () => {
+    const manifest = {
+      ...MANIFEST,
+      externalAgentAdapters: [{ id: "broken", label: "Broken" }],
+    } as unknown as PluginManifest
+
+    const result = await registerExternalAgentAdaptersForPlugin(manifest, "/p", {
+      importer: jest.fn(),
+    })
+
+    expect(result.registered).toBe(0)
+    expect(result.errors[0]!.message).toBe("entry is required")
+  })
+})
+
 afterEach(() => {
   __resetPluginProtocolAdaptersForTesting()
 })

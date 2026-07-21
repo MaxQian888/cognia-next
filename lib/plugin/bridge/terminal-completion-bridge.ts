@@ -18,6 +18,11 @@
 
 import type { PluginManifest } from "@/types/plugin/plugin"
 import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
+import {
+  createPythonBackedProxy,
+  isPythonBackedContribution,
+} from "@/lib/plugin/bridge/_shared/python-backed-proxy"
+import { canRunPythonBackedContribution } from "@/lib/plugin/python/experimental-flag"
 import type {
   PluginTerminalCompletionFactory,
   PluginTerminalCompletionProvider,
@@ -147,19 +152,43 @@ export async function registerTerminalCompletionProvidersForPlugin(
 
   for (const def of defs) {
     try {
-      const resolved = resolvePluginPath(installRoot, def.entry)
-      const mod = await importer(resolved)
-      const exported = mod[def.export]
-      if (typeof exported !== "function") {
-        throw new Error(`entry "${def.entry}" does not export a factory named "${def.export}"`)
+      let provider: Awaited<ReturnType<PluginTerminalCompletionFactory>>
+      if (isPythonBackedContribution(def, manifest.type)) {
+        if (!canRunPythonBackedContribution("terminalCompletionProviders")) {
+          throw new Error(
+            `python-backed completion provider "${def.id}" is experimental and the flag is off`
+          )
+        }
+        // NOTE: inline terminal completion is latency-budgeted; a python-backed
+        // provider pays an extra IPC round-trip per keystroke-batch, which is
+        // why `pythonExecution` for this capability is "experimental".
+        provider = createPythonBackedProxy<Awaited<ReturnType<PluginTerminalCompletionFactory>>>({
+          pluginId,
+          contributionId: def.id,
+          methods: ["getCompletions"],
+          label: "terminal completion provider",
+        })
+      } else {
+        if (!def.entry || !def.export) {
+          throw new Error(
+            `JS-backed completion provider "${def.id}" must declare both "entry" and "export"` +
+              ` (set backend: "python" to run it in the plugin's Python subprocess)`
+          )
+        }
+        const resolved = resolvePluginPath(installRoot, def.entry)
+        const mod = await importer(resolved)
+        const exported = mod[def.export]
+        if (typeof exported !== "function") {
+          throw new Error(`entry "${def.entry}" does not export a factory named "${def.export}"`)
+        }
+        const factory = exported as PluginTerminalCompletionFactory
+        provider = await factory({
+          pluginId,
+          providerId: `${pluginId}:${def.id}`,
+          getConfig: <T = unknown>(key: string) =>
+            options.getConfig?.(pluginId, key) as T | undefined,
+        })
       }
-      const factory = exported as PluginTerminalCompletionFactory
-      const provider = await factory({
-        pluginId,
-        providerId: `${pluginId}:${def.id}`,
-        getConfig: <T = unknown>(key: string) =>
-          options.getConfig?.(pluginId, key) as T | undefined,
-      })
       if (!provider || typeof provider.getCompletions !== "function") {
         throw new Error(`factory "${def.export}" did not return a completion provider`)
       }

@@ -24,7 +24,7 @@ def test_register_and_get_tools_infers_definition():
         }
     ]
     assert rt.has_tool("greet")
-    assert rt.get_info() == {"tool_count": 1, "hook_count": 0}
+    assert rt.get_info() == {"tool_count": 1, "hook_count": 0, "contribution_count": 0}
 
 
 def test_register_tool_explicit_overrides_win():
@@ -161,7 +161,7 @@ def test_dispatch_protocol_methods():
     rt.register_tool(lambda: "ok", name="t")
     assert rt.dispatch("ping") == "pong"
     assert rt.dispatch("get_tools")[0]["name"] == "t"
-    assert rt.dispatch("get_info") == {"tool_count": 1, "hook_count": 0}
+    assert rt.dispatch("get_info") == {"tool_count": 1, "hook_count": 0, "contribution_count": 0}
     assert rt.dispatch("push_config", {"config": {"a": 1}}) is None
     assert rt.get_config() == {"a": 1}
     with pytest.raises(RuntimeError, match="unknown method"):

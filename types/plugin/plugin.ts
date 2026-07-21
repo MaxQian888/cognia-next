@@ -120,6 +120,25 @@ export type PluginType =
   | "vscode-extension" // VS Code extension running in Node sidecar (Tauri-only — see ~/.claude/plans/vscode-snug-squid.md)
 
 /**
+ * Runtime that executes a module-bridge contribution's factory.
+ *
+ * Resolution order (see `effectiveContributionBackend` in
+ * `lib/plugin/core/validation.ts` and `isPythonBackedContribution` in
+ * `lib/plugin/bridge/_shared/python-backed-proxy.ts` — all three are kept
+ * rule-for-rule in lockstep with the Rust lint):
+ *   1. this explicit field;
+ *   2. a declared JS module path (`entry`) — writing one *is* the declaration
+ *      of JS intent, so it is never silently ignored;
+ *   3. the plugin type (`python` → `"python"`, everything else → `"js"`).
+ *
+ * `hybrid` plugins should set this explicitly: an omitted backend resolves to
+ * `"js"`, which is rarely what a hybrid author means for a Python handler.
+ * Only capabilities whose contract marks `pythonExecution` as
+ * `supported`/`experimental` may resolve to `"python"`.
+ */
+export type PluginContributionBackend = "js" | "python"
+
+/**
  * Plugin capabilities - what the plugin can provide
  */
 export type PluginCapability =

@@ -865,18 +865,21 @@
       "field": "ocrProviders",
       "capabilities": ["media"],
       "execution": "javascript",
+      "pythonExecution": "supported",
       "entryPath": "ocrProviders[].entry"
     },
     {
       "field": "aiProviders",
       "capabilities": ["ai-provider"],
       "execution": "javascript",
+      "pythonExecution": "supported",
       "entryPath": "aiProviders[].entry"
     },
     {
       "field": "workspaceBackends",
       "capabilities": ["workspace-backend"],
       "execution": "javascript",
+      "pythonExecution": "supported",
       "entryPath": "workspaceBackends[].entry"
     },
     {
@@ -894,6 +897,7 @@
       "field": "chatMiddlewares",
       "capabilities": ["chat-middleware"],
       "execution": "javascript",
+      "pythonExecution": "experimental",
       "entryPath": "chatMiddlewares[].entry"
     },
     {
@@ -906,24 +910,28 @@
       "field": "terminalCompletionProviders",
       "capabilities": ["terminal-completion"],
       "execution": "javascript",
+      "pythonExecution": "experimental",
       "entryPath": "terminalCompletionProviders[].entry"
     },
     {
       "field": "routingStrategies",
       "capabilities": ["routing-strategy"],
       "execution": "javascript",
+      "pythonExecution": "supported",
       "entryPath": "routingStrategies[].entry"
     },
     {
       "field": "deploymentFilters",
       "capabilities": ["deployment-filter"],
       "execution": "javascript",
+      "pythonExecution": "supported",
       "entryPath": "deploymentFilters[].entry"
     },
     {
       "field": "protocolAdapters",
       "capabilities": ["protocol-adapter"],
       "execution": "conditional",
+      "pythonExecution": "supported",
       "javascriptWhen": { "path": "spec.kind", "equals": "code" },
       "entryPath": "protocolAdapters[].entry"
     },
@@ -936,6 +944,7 @@
       "field": "contextProviders",
       "capabilities": ["context-provider"],
       "execution": "javascript",
+      "pythonExecution": "supported",
       "entryPath": "contextProviders[].entry"
     },
     {
@@ -947,12 +956,14 @@
       "field": "externalAgentAdapters",
       "capabilities": ["external-agent-adapter"],
       "execution": "javascript",
+      "pythonExecution": "supported",
       "entryPath": "externalAgentAdapters[].entry"
     },
     {
       "field": "sessionImporters",
       "capabilities": ["session-importer"],
       "execution": "javascript",
+      "pythonExecution": "supported",
       "entryPath": "sessionImporters[].entry"
     },
     {
@@ -1018,7 +1029,8 @@
     {
       "field": "connectors",
       "capabilities": ["connectors"],
-      "execution": "javascript"
+      "execution": "javascript",
+      "pythonExecution": "experimental"
     },
     {
       "field": "workflows",

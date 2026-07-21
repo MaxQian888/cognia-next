@@ -109,6 +109,8 @@ from .modes import Mode, define_mode
 from .plugin import Plugin
 from .runtime import (
     Runtime,
+    contribution,
+    emit,
     get_active_runtime,
     get_config,
     log,
@@ -155,6 +157,8 @@ __all__ = [
     "tool",
     "hook",
     "progress",
+    "contribution",
+    "emit",
     "get_config",
     "log",
     "on_config_changed",

@@ -11,6 +11,8 @@
  * Dependency-free leaf. Runtime in `lib/plugin/agent-sdk/context-providers.ts`.
  */
 
+import type { PluginContributionBackend } from "@/types/plugin/plugin"
+
 /** Input handed to a {@link PluginContextProvider} on each run. */
 export interface PluginContextProviderInput {
   /** The user prompt for the turn. */
@@ -46,9 +48,15 @@ export interface PluginContextProviderDef {
   /** Human-readable label. */
   label?: string
   /** Relative module path inside the plugin (lazy-imported on enable). */
-  entry: string
+  /**
+   * Which runtime owns this factory. Omit to inherit the plugin type
+   * (`python` plugins default to `"python"`); declaring `entry` pins it to
+   * `"js"`. See {@link PluginContributionBackend}.
+   */
+  backend?: PluginContributionBackend
+  entry?: string
   /** Export name of the factory function in `entry`. */
-  export: string
+  export?: string
 }
 
 /** Factory context handed to a {@link PluginContextProviderFactory}. */

@@ -4,6 +4,8 @@
 // `lib/plugin/contracts/diagnostics-store.ts` (module-level store +
 // listener set) so UI code can use the same useSyncExternalStore pattern.
 
+import { dispatchPythonPluginEvent } from "./event-bus"
+
 /** Wire payload of one `plugin:python` event (see events.rs PythonEvent). */
 export interface PythonPluginEvent {
   pluginId: string
@@ -53,6 +55,11 @@ export function appendPythonEvent(event: PythonPluginEvent, ts: number = Date.no
     buffer.splice(0, buffer.length - PYTHON_LOG_BUFFER_CAP)
   }
   notify(event.pluginId)
+  // This is the single ingestion point for `plugin:python` frames, so it also
+  // fans out to runtime consumers (streamed chunks / plugin→host pushes for
+  // python-backed contributions). Dispatch last: buffering must not depend on
+  // a subscriber behaving.
+  dispatchPythonPluginEvent(event)
 }
 
 /** Stable snapshot of a plugin's buffered entries (oldest first). */

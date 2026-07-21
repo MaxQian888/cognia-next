@@ -23,6 +23,8 @@
  * renderer-side protocol/session logic — never raw process spawning.
  */
 
+import type { PluginContributionBackend } from "@/types/plugin/plugin"
+
 /**
  * One protocol-adapter contribution inside
  * `PluginManifest.externalAgentAdapters`.
@@ -42,10 +44,16 @@ export interface PluginExternalAgentAdapterDef {
    * Relative module path (lazy-imported on enable, renderer-side). REQUIRED —
    * an adapter is always code.
    */
-  entry: string
+  /**
+   * Which runtime owns this factory. Omit to inherit the plugin type
+   * (`python` plugins default to `"python"`); declaring `entry` pins it to
+   * `"js"`. See {@link PluginContributionBackend}.
+   */
+  backend?: PluginContributionBackend
+  entry?: string
   /**
    * Export name of the adapter factory in `entry`. The export must be a
    * `() => ProtocolAdapter` function. REQUIRED.
    */
-  export: string
+  export?: string
 }

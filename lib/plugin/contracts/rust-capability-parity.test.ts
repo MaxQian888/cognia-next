@@ -37,7 +37,7 @@ function readGuarded(...segments: string[]): string {
   return readFileSync(path, "utf8")
 }
 
-const RUST_LINT = readGuarded("crates", "cognia-cli", "src", "generated_plugin_contract.rs")
+const RUST_LINT = readGuarded("crates", "cognia-cli", "src", "engine", "contract.rs")
 const API_BRIDGE = readGuarded("crates", "cognia-plugin-runtime", "src", "api_bridge.rs")
 
 /** Permission strings advertised inside the gateway's `capability_table()`. */

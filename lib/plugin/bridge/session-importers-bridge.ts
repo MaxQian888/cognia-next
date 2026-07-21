@@ -18,6 +18,10 @@ import type { PluginSessionImporterDef } from "@/types/plugin/plugin-session-imp
 import { loggers } from "@/lib/plugin/core/logger"
 import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 import {
+  createDescribedPythonContribution,
+  isPythonBackedContribution,
+} from "@/lib/plugin/bridge/_shared/python-backed-proxy"
+import {
   registerSessionSource,
   unregisterSessionSourcesByPlugin,
   type AgentSessionSourceAdapter,
@@ -42,9 +46,12 @@ const DEFAULT_IMPORTER: NonNullable<SessionImportersBridgeOptions["importer"]> =
   import(/* @vite-ignore */ /* webpackIgnore: true */ entry)
 
 /** Structural validation. Returns an error message or null. */
-function validateDef(def: PluginSessionImporterDef): string | null {
+function validateDef(def: PluginSessionImporterDef, pluginType: string | undefined): string | null {
   if (!def.id || typeof def.id !== "string") return "id is required"
   if (!def.label || typeof def.label !== "string") return "label is required"
+  // Python-backed importers resolve through the plugin_python_call seam and
+  // therefore carry no JS module reference.
+  if (isPythonBackedContribution(def, pluginType)) return null
   if (!def.entry || typeof def.entry !== "string") return "entry is required"
   if (!def.export || typeof def.export !== "string") return "export is required"
   return null
@@ -70,7 +77,7 @@ export async function registerSessionImportersForPlugin(
   let registered = 0
 
   for (const def of defs) {
-    const invalid = validateDef(def)
+    const invalid = validateDef(def, manifest.type)
     if (invalid) {
       errors.push({ pluginId, importerId: def.id ?? "(missing id)", message: invalid })
       loggers.manager.error(
@@ -80,13 +87,23 @@ export async function registerSessionImportersForPlugin(
     }
 
     try {
-      const resolved = resolvePluginPath(installRoot, def.entry)
-      const mod = await importer(resolved)
-      const exported = mod[def.export]
-      if (typeof exported !== "function") {
-        throw new Error(`entry "${def.entry}" does not export a factory named "${def.export}"`)
+      let built: AgentSessionSourceAdapter
+      if (isPythonBackedContribution(def, manifest.type)) {
+        built = await createDescribedPythonContribution<AgentSessionSourceAdapter>({
+          pluginId,
+          contributionId: def.id,
+          methods: ["listSessions", "parseSession"],
+          label: "session importer",
+        })
+      } else {
+        const resolved = resolvePluginPath(installRoot, def.entry!)
+        const mod = await importer(resolved)
+        const exported = mod[def.export!]
+        if (typeof exported !== "function") {
+          throw new Error(`entry "${def.entry}" does not export a factory named "${def.export}"`)
+        }
+        built = (exported as () => AgentSessionSourceAdapter)()
       }
-      const built = (exported as () => AgentSessionSourceAdapter)()
       if (
         !built ||
         typeof built.listSessions !== "function" ||

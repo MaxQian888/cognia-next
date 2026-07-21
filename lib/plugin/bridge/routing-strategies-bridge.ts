@@ -22,6 +22,10 @@ import type {
 import { loggers } from "@/lib/plugin/core/logger"
 import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 import {
+  createPythonBackedProxy,
+  isPythonBackedContribution,
+} from "@/lib/plugin/bridge/_shared/python-backed-proxy"
+import {
   registerRoutingStrategy,
   unregisterRoutingStrategiesByPlugin,
 } from "@cognia/provider-routing/strategy-registry"
@@ -64,7 +68,7 @@ export async function registerRoutingStrategiesForPlugin(
 
   for (const def of defs) {
     try {
-      await registerOne(def, pluginId, installRoot, importer)
+      await registerOne(def, pluginId, manifest.type, installRoot, importer)
       registered++
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -82,21 +86,19 @@ export async function registerRoutingStrategiesForPlugin(
 async function registerOne(
   def: PluginRoutingStrategyDef,
   pluginId: string,
+  pluginType: string | undefined,
   installRoot: string,
   importer: NonNullable<RoutingStrategiesBridgeOptions["importer"]>
 ): Promise<void> {
-  const resolved = resolvePluginPath(installRoot, def.entry)
-  const mod = await importer(resolved)
-  const exported = mod[def.export]
-  if (typeof exported !== "function") {
-    throw new Error(`entry "${def.entry}" does not export a factory named "${def.export}"`)
-  }
-  const factory = exported as PluginRoutingStrategyFactory
   const strategyId = `${pluginId}:${def.id}`
-  const selectorLike = await factory({ strategyId, pluginId })
-  if (!selectorLike || typeof selectorLike.select !== "function") {
-    throw new Error(`factory "${def.export}" did not return a { select } selector`)
-  }
+  const selectorLike = isPythonBackedContribution(def, pluginType)
+    ? createPythonBackedProxy<Awaited<ReturnType<PluginRoutingStrategyFactory>>>({
+        pluginId,
+        contributionId: def.id,
+        methods: ["select"],
+        label: "routing strategy",
+      })
+    : await resolveJsSelector(def, pluginId, strategyId, installRoot, importer)
 
   const ok = registerRoutingStrategy(
     {
@@ -110,6 +112,33 @@ async function registerOne(
     // Unreachable through the namespaced id, but keep the signal honest.
     throw new Error(`strategy id "${strategyId}" collides with a built-in strategy`)
   }
+}
+
+async function resolveJsSelector(
+  def: PluginRoutingStrategyDef,
+  pluginId: string,
+  strategyId: string,
+  installRoot: string,
+  importer: NonNullable<RoutingStrategiesBridgeOptions["importer"]>
+): Promise<Awaited<ReturnType<PluginRoutingStrategyFactory>>> {
+  if (!def.entry || !def.export) {
+    throw new Error(
+      `JS-backed routing strategy "${def.id}" must declare both "entry" and "export"` +
+        ` (set backend: "python" to run it in the plugin's Python subprocess)`
+    )
+  }
+  const resolved = resolvePluginPath(installRoot, def.entry)
+  const mod = await importer(resolved)
+  const exported = mod[def.export]
+  if (typeof exported !== "function") {
+    throw new Error(`entry "${def.entry}" does not export a factory named "${def.export}"`)
+  }
+  const factory = exported as PluginRoutingStrategyFactory
+  const selectorLike = await factory({ strategyId, pluginId })
+  if (!selectorLike || typeof selectorLike.select !== "function") {
+    throw new Error(`factory "${def.export}" did not return a { select } selector`)
+  }
+  return selectorLike
 }
 
 export function unregisterRoutingStrategiesForPlugin(pluginId: string): void {

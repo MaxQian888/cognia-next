@@ -28,6 +28,11 @@ use crate::{PluginError, PluginRuntimeState, Result};
 /// Embedded host script, written to `<python_dir>/host.py` at initialize.
 const HOST_SCRIPT: &str = include_str!("host.py");
 
+/// Host-owned dispatcher that routes python-backed module-bridge contributions
+/// (`lib/plugin/bridge/_shared/python-backed-proxy.ts`). Must stay in lockstep
+/// with `CONTRIBUTION_DISPATCH` in `host.py`; a parity test pins the pair.
+pub(crate) const CONTRIBUTION_DISPATCH: &str = "__cognia_dispatch_contribution__";
+
 const PYTHON_EXECUTE_PERMISSION: &str = "python:execute";
 
 /// Host-level per-plugin settings (user state persisted renderer-side in
@@ -762,8 +767,10 @@ async fn call_inner(
     args: Vec<Value>,
 ) -> Result<Value> {
     check_execute_grant(plugins, &plugin_id)?;
-    if function_name.starts_with('_') {
-        // host.py rejects these too — fail fast without a round-trip.
+    if function_name.starts_with('_') && function_name != CONTRIBUTION_DISPATCH {
+        // host.py rejects these too — fail fast without a round-trip. The
+        // contribution dispatcher is the one exception: it is host-owned (see
+        // `CONTRIBUTION_DISPATCH` in host.py), not a plugin symbol.
         return Err(PluginError::InvalidArgument(format!(
             "private function names are not callable: {function_name}"
         )));
@@ -1498,6 +1505,152 @@ def helper(a, b):
         assert!(get_info_inner(&state, "demo").is_none());
     }
 
+    /// Python-backed module-bridge contributions end-to-end: `@cognia
+    /// .contribution` registration, `describe()` + behaviour dispatch through
+    /// the host-owned `__cognia_dispatch_contribution__`, streamId-tagged
+    /// chunk frames, and `cognia.emit` inbound pushes.
+    #[tokio::test]
+    async fn python_backed_contributions_dispatch_with_real_python() {
+        let Some(interp) = super::super::discover::discover_interpreter(None) else {
+            eprintln!("skipping contribution test: no python interpreter found");
+            return;
+        };
+
+        let tmp = TempDir::new().unwrap();
+        let state = py_state(&tmp);
+        let plugins = plugins_state(&tmp);
+        grant_execute(&plugins, "contrib");
+        apply_initialize(&state, Some(interp)).unwrap();
+
+        let plugin_dir = tmp.path().join("contrib-plugin");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(
+            plugin_dir.join("main.py"),
+            r#"
+import cognia
+
+@cognia.contribution("tesseract")
+class Tesseract:
+    def describe(self):
+        return {"label": "Tesseract", "category": "local"}
+
+    def extract(self, image, ctx=None):
+        return {"text": "read:" + image}
+
+    def stream(self, n):
+        for i in range(n):
+            yield "c%d" % i
+
+    def push(self):
+        cognia.emit("tesseract", "inbound", {"id": "evt-1"})
+        return "pushed"
+"#,
+        )
+        .unwrap();
+
+        let load_info = load_inner(
+            &state,
+            &plugins,
+            "contrib".into(),
+            plugin_dir.to_string_lossy().into_owned(),
+            "main.py".into(),
+            None,
+            None,
+            PythonHostSettings::default(),
+        )
+        .await
+        .unwrap();
+        // import_main advertises the contribution surface for diagnostics.
+        assert_eq!(load_info["contribution_count"], 1);
+        assert_eq!(load_info["contributions"][0]["id"], "tesseract");
+        assert_eq!(
+            load_info["contributions"][0]["methods"],
+            json!(["describe", "extract", "push", "stream"])
+        );
+
+        // `describe()` supplies the plain-data descriptor a JS factory would
+        // have returned inline.
+        let described = call_inner(
+            &state,
+            &plugins,
+            "contrib".into(),
+            CONTRIBUTION_DISPATCH.into(),
+            vec![json!("tesseract"), json!("describe"), json!([]), Value::Null],
+        )
+        .await
+        .unwrap();
+        assert_eq!(described["label"], "Tesseract");
+
+        // Behaviour dispatch with positional args.
+        let extracted = call_inner(
+            &state,
+            &plugins,
+            "contrib".into(),
+            CONTRIBUTION_DISPATCH.into(),
+            vec![
+                json!("tesseract"),
+                json!("extract"),
+                json!(["a.png", null]),
+                Value::Null,
+            ],
+        )
+        .await
+        .unwrap();
+        assert_eq!(extracted["text"], "read:a.png");
+
+        // A streamId turns an iterator return into chunk frames.
+        let streamed = call_inner(
+            &state,
+            &plugins,
+            "contrib".into(),
+            CONTRIBUTION_DISPATCH.into(),
+            vec![
+                json!("tesseract"),
+                json!("stream"),
+                json!([2]),
+                json!("s-1"),
+            ],
+        )
+        .await
+        .unwrap();
+        assert_eq!(streamed, json!("c0c1"));
+
+        // Unknown contribution / method are honest errors, not silent nulls.
+        let unknown = call_inner(
+            &state,
+            &plugins,
+            "contrib".into(),
+            CONTRIBUTION_DISPATCH.into(),
+            vec![json!("nope"), json!("describe"), json!([]), Value::Null],
+        )
+        .await;
+        assert!(unknown.is_err());
+
+        let bad_method = call_inner(
+            &state,
+            &plugins,
+            "contrib".into(),
+            CONTRIBUTION_DISPATCH.into(),
+            vec![json!("tesseract"), json!("missing"), json!([]), Value::Null],
+        )
+        .await;
+        assert!(bad_method.is_err());
+
+        // A plugin symbol that merely *looks* private is still rejected — only
+        // the host-owned dispatcher is exempt from the guard.
+        let private = call_inner(
+            &state,
+            &plugins,
+            "contrib".into(),
+            "_secret".into(),
+            vec![],
+        )
+        .await;
+        assert!(private.is_err());
+
+        unload_inner(&state, "contrib").await.unwrap();
+    }
+
     /// P1.2 surface: streaming generator tools, hook dispatch round-trip,
     /// lifecycle conventions (on_startup / on_config_updated / on_shutdown)
     /// and config delivery — all against a real interpreter.
@@ -1740,6 +1893,99 @@ def rewrite(payload):
         assert!(state.host("demo").is_some());
 
         unload_inner(&state, "demo").await.unwrap();
+    }
+
+    /// The first-party python-backed *contributions* reference plugin really
+    /// loads and dispatches — the "it runs" evidence behind the OCR / AI
+    /// provider / workspace backend / connector wiring.
+    #[tokio::test]
+    async fn first_party_python_runtime_demo_contributions_dispatch() {
+        let Some(interp) = super::super::discover::discover_interpreter(None) else {
+            eprintln!("skipping runtime-demo plugin test: no python interpreter found");
+            return;
+        };
+
+        let demo_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("plugins")
+            .join("cognia-python-runtime-demo");
+        assert!(
+            demo_dir.join("main.py").is_file(),
+            "runtime-demo plugin main.py missing"
+        );
+
+        let tmp = TempDir::new().unwrap();
+        let state = py_state(&tmp);
+        let plugins = plugins_state(&tmp);
+        grant_execute(&plugins, "cognia-python-runtime-demo");
+        apply_initialize(&state, Some(interp)).unwrap();
+
+        let info = load_inner(
+            &state,
+            &plugins,
+            "cognia-python-runtime-demo".into(),
+            demo_dir.to_string_lossy().into_owned(),
+            "main.py".into(),
+            None,
+            None,
+            PythonHostSettings::default(),
+        )
+        .await
+        .unwrap();
+        // All four contributions registered from the manifest's declarations.
+        assert_eq!(info["contribution_count"], 4);
+
+        let dispatch = |contribution: &'static str, method: &'static str, args: Value| {
+            let state = &state;
+            let plugins = &plugins;
+            async move {
+                call_inner(
+                    state,
+                    plugins,
+                    "cognia-python-runtime-demo".into(),
+                    CONTRIBUTION_DISPATCH.into(),
+                    vec![json!(contribution), json!(method), args, Value::Null],
+                )
+                .await
+            }
+        };
+
+        // OCR: descriptor + behaviour.
+        let described = dispatch("echo-ocr", "describe", json!([])).await.unwrap();
+        assert_eq!(described["label"], "Echo OCR (Python)");
+        let extracted = dispatch("echo-ocr", "extract", json!(["a.png", null]))
+            .await
+            .unwrap();
+        assert_eq!(extracted["combinedText"], "recognized: a.png");
+
+        // Workspace backend: clone → commitAndPush → remove round-trip.
+        let handle = dispatch("memory-workspace", "clone", json!(["o/r", "main"]))
+            .await
+            .unwrap();
+        assert_eq!(handle["repoFullName"], "o/r");
+        let sha = dispatch(
+            "memory-workspace",
+            "commitAndPush",
+            json!([handle.clone(), "msg"]),
+        )
+        .await
+        .unwrap();
+        assert!(sha.as_str().unwrap().starts_with("sha-"));
+        let removed = dispatch("memory-workspace", "remove", json!([handle]))
+            .await
+            .unwrap();
+        assert_eq!(removed, json!(true));
+
+        // Connector: describe carries the meta the renderer wrapper caches for
+        // its synchronous `health()` / `a2uiCapability()` answers.
+        let conn = dispatch("echo-chat", "describe", json!([])).await.unwrap();
+        assert_eq!(conn["meta"]["displayName"], "Echo Chat (Python)");
+        assert_eq!(conn["a2uiCapability"]["mode"], "plainTextMirror");
+
+        unload_inner(&state, "cognia-python-runtime-demo")
+            .await
+            .unwrap();
     }
 
     /// The shipped first-party demo plugin (plugins/cognia-python-demo)

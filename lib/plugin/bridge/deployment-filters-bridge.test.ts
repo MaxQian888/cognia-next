@@ -21,6 +21,41 @@ const MANIFEST = {
   ],
 } as unknown as PluginManifest
 
+describe("deployment-filters-bridge python backend", () => {
+  it("registers a python-backed filter without importing any JS", async () => {
+    const importer = jest.fn()
+    const manifest = {
+      ...(MANIFEST as unknown as Record<string, unknown>),
+      type: "python",
+      pythonMain: "main.py",
+      deploymentFilters: [{ id: "py-filter", label: "Py filter" }],
+    } as unknown as PluginManifest
+
+    const result = await registerDeploymentFiltersForPlugin(manifest, "/plugins/filter", {
+      importer,
+    })
+
+    expect(result).toEqual({ registered: 1, errors: [] })
+    expect(importer).not.toHaveBeenCalled()
+    expect(getDeploymentFilter("filter-plugin:py-filter")).toBeDefined()
+    unregisterDeploymentFiltersForPlugin("filter-plugin")
+  })
+
+  it("reports a JS-backed filter that omits entry/export", async () => {
+    const manifest = {
+      ...(MANIFEST as unknown as Record<string, unknown>),
+      deploymentFilters: [{ id: "broken", label: "Broken" }],
+    } as unknown as PluginManifest
+
+    const result = await registerDeploymentFiltersForPlugin(manifest, "/plugins/filter", {
+      importer: jest.fn(),
+    })
+
+    expect(result.registered).toBe(0)
+    expect(result.errors[0]!.message).toMatch(/must declare both "entry" and "export"/)
+  })
+})
+
 const ENTRIES = [
   { providerId: "a", modelId: "m-a" },
   { providerId: "b", modelId: "m-b" },

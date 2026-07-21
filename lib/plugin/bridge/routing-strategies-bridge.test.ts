@@ -35,6 +35,41 @@ afterEach(() => {
   __resetRoutingStrategiesForTesting()
 })
 
+describe("routing-strategies-bridge python backend", () => {
+  it("registers a python-backed strategy without importing any JS", async () => {
+    const importer = jest.fn()
+    const manifest = {
+      ...(MANIFEST as unknown as Record<string, unknown>),
+      type: "python",
+      pythonMain: "main.py",
+      routingStrategies: [{ id: "py-router", label: "Py router" }],
+    } as unknown as PluginManifest
+
+    const result = await registerRoutingStrategiesForPlugin(manifest, "/plugins/router", {
+      importer,
+    })
+
+    expect(result).toEqual({ registered: 1, errors: [] })
+    expect(importer).not.toHaveBeenCalled()
+    expect(getRoutingStrategy("router-plugin:py-router")).toBeDefined()
+    unregisterRoutingStrategiesForPlugin("router-plugin")
+  })
+
+  it("reports a JS-backed strategy that omits entry/export", async () => {
+    const manifest = {
+      ...(MANIFEST as unknown as Record<string, unknown>),
+      routingStrategies: [{ id: "broken", label: "Broken" }],
+    } as unknown as PluginManifest
+
+    const result = await registerRoutingStrategiesForPlugin(manifest, "/plugins/router", {
+      importer: jest.fn(),
+    })
+
+    expect(result.registered).toBe(0)
+    expect(result.errors[0]!.message).toMatch(/must declare both "entry" and "export"/)
+  })
+})
+
 describe("routing-strategies-bridge", () => {
   it("imports the factory and registers the selector under the namespaced id", async () => {
     const factory = jest.fn(async (ctx: { strategyId: string }) => ({

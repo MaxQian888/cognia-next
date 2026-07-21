@@ -47,6 +47,10 @@
           "execution": {
             "enum": ["host", "javascript", "conditional", "python", "wasm", "vscode"]
           },
+          "pythonExecution": {
+            "enum": ["supported", "experimental", "unsupported"],
+            "description": "Whether a pure-Python (or hybrid python-backed) plugin can supply this contribution's runtime executor via the plugin_python_call seam. Only meaningful for javascript/conditional execution fields; host/data fields are language-agnostic and omit it. Defaults to \"unsupported\" (JS/React only)."
+          },
           "entryPath": { "type": "string" },
           "javascriptWhen": {
             "type": "object",

@@ -18,6 +18,7 @@ package is the standalone/reference implementation of the identical contract.
 from __future__ import annotations
 
 import collections.abc
+import inspect
 import sys
 from typing import Any, Callable, Dict, List, Optional
 
@@ -53,8 +54,51 @@ class Runtime:
         # helper (the targeted-behaviour twin of presets). Recorded here so the
         # typed helper is introspectable in tests / dev tooling.
         self._external_agent_adapters: List[Dict[str, Any]] = []
+        # contribution_id -> {method_name: callable}. Mirrors `_CONTRIBUTIONS`
+        # in the embedded host (`crates/cognia-plugin-runtime/src/python/
+        # host.py`) so a python-owned module-bridge contribution can be
+        # registered, introspected and unit-tested offline.
+        self._contributions: Dict[str, Dict[str, Callable[..., Any]]] = {}
 
     # -- registration -------------------------------------------------------
+
+    def register_contribution(self, contribution_id: str, target: Any) -> Any:
+        """Register a python-owned module-bridge contribution.
+
+        `target` is a class (instantiated here) or a ready object; every public
+        callable attribute becomes a method the host can dispatch through
+        ``__cognia_dispatch_contribution__``.
+        """
+        if not isinstance(contribution_id, str) or not contribution_id:
+            raise ValueError("contribution id must be a non-empty string")
+        instance = target() if inspect.isclass(target) else target
+        methods: Dict[str, Callable[..., Any]] = {}
+        for name in dir(instance):
+            if name.startswith("_"):
+                continue
+            attr = getattr(instance, name, None)
+            if callable(attr):
+                methods[name] = attr
+        if not methods:
+            raise ValueError(f"contribution '{contribution_id}' exposes no public methods")
+        self._contributions[contribution_id] = methods
+        return target
+
+    def dispatch_contribution(
+        self,
+        contribution_id: str,
+        method: str,
+        args: Optional[List[Any]] = None,
+    ) -> Any:
+        """Invoke one contribution method — the offline twin of the host's
+        dispatcher, so plugin tests can drive a contribution directly."""
+        entry = self._contributions.get(contribution_id)
+        if entry is None:
+            raise RuntimeError(f"unknown contribution: {contribution_id}")
+        fn = entry.get(method)
+        if fn is None:
+            raise RuntimeError(f"contribution '{contribution_id}' has no method '{method}'")
+        return fn(*(args or []))
 
     def register_tool(
         self,
@@ -107,8 +151,18 @@ class Runtime:
     def get_external_agent_adapters(self) -> List[Dict[str, Any]]:
         return list(self._external_agent_adapters)
 
+    def get_contributions(self) -> List[Dict[str, Any]]:
+        return [
+            {"id": cid, "methods": sorted(methods.keys())}
+            for cid, methods in self._contributions.items()
+        ]
+
     def get_info(self) -> Dict[str, int]:
-        return {"tool_count": len(self._tools), "hook_count": len(self._hooks)}
+        return {
+            "tool_count": len(self._tools),
+            "hook_count": len(self._hooks),
+            "contribution_count": len(self._contributions),
+        }
 
     def has_tool(self, name: str) -> bool:
         return name in self._tools
@@ -144,6 +198,18 @@ class Runtime:
     def emit_event(self, event: str, data: Any = None, call_id: Optional[int] = None) -> None:
         if self._event_sink is not None:
             self._event_sink(event, data, call_id)
+
+    def emit(self, contribution_id: str, channel: str, payload: Any = None) -> None:
+        """``cognia.emit(...)`` — push an unsolicited frame to the host.
+
+        The inbound half of a bidirectional contribution (connector messages,
+        watcher events); the renderer picks it up via
+        ``subscribePythonContributionPush``.
+        """
+        self.emit_event(
+            "emit",
+            {"contributionId": contribution_id, "channel": channel, "payload": payload},
+        )
 
     def progress(self, pct: Optional[float] = None, message: Optional[str] = None) -> None:
         """``cognia.progress(...)`` — report progress for the in-flight call."""
@@ -259,6 +325,36 @@ def reset_active_runtime() -> Runtime:
 
 
 # -- module-level convenience (host-shim parity) ----------------------------
+
+
+def contribution(contribution_id: str) -> Callable[[Any], Any]:
+    """``@cognia.contribution("<id>")`` — own a module-bridge contribution.
+
+    Decorates a class (instantiated on registration) or a ready object. Every
+    public callable attribute becomes a method the renderer can dispatch::
+
+        @cognia.contribution("tesseract")
+        class Tesseract:
+            def describe(self):
+                return {"label": "Tesseract", "category": "local"}
+
+            def extract(self, image, ctx=None):
+                return {"text": ...}
+
+    ``describe()`` supplies the plain-data descriptor a JS factory would have
+    returned inline; every other method is behaviour. Returning an iterator
+    from a method the host called with a stream id turns it into chunk frames.
+    """
+
+    def decorate(target: Any) -> Any:
+        return get_active_runtime().register_contribution(contribution_id, target)
+
+    return decorate
+
+
+def emit(contribution_id: str, channel: str, payload: Any = None) -> None:
+    """``cognia.emit(...)`` — push an unsolicited frame to the host."""
+    get_active_runtime().emit(contribution_id, channel, payload)
 
 
 def progress(pct: Optional[float] = None, message: Optional[str] = None) -> None:

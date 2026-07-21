@@ -42,6 +42,16 @@ sys.stdout = sys.stderr  # plugin print() must never corrupt the protocol
 
 _TOOLS = {}  # name -> {"fn": callable, "definition": {name, description, parameters}}
 _HOOKS = []  # (event, callable)
+# contribution_id -> {method_name: callable}. Backs python-owned module-bridge
+# contributions (ocr providers, ai providers, connectors, …) that the renderer
+# reaches through `__cognia_dispatch_contribution__`. See
+# `lib/plugin/bridge/_shared/python-backed-proxy.ts` for the host-side seam.
+_CONTRIBUTIONS = {}
+
+#: Reserved dispatcher name. The renderer calls it via the `call` RPC; it is
+#: exempt from the private-name guard below because it is host-owned, not a
+#: plugin symbol.
+CONTRIBUTION_DISPATCH = "__cognia_dispatch_contribution__"
 _MAIN_MODULE = None
 _CONFIG = {}  # persisted plugin config, pushed by the host app
 _CONFIG_LISTENERS = []  # cognia.on_config_changed(fn) subscribers, fired on push_config
@@ -176,6 +186,56 @@ def _on_config_changed(fn):
     return fn
 
 
+def _contribution(contribution_id):
+    """`@cognia.contribution("<id>")` — own a module-bridge contribution.
+
+    Decorates a class (instantiated here) or an already-built object. Every
+    public callable attribute becomes a method the renderer can invoke, so a
+    python OCR provider is just::
+
+        @cognia.contribution("tesseract")
+        class Tesseract:
+            def describe(self):
+                return {"label": "Tesseract", "category": "local"}
+
+            def extract(self, image, ctx):
+                return {...}
+
+    `describe()` supplies the plain-data fields a JS factory would have
+    returned inline; the rest are behaviour.
+    """
+    if not isinstance(contribution_id, str) or not contribution_id:
+        raise ValueError("cognia.contribution(id) requires a non-empty string id")
+
+    def decorate(target):
+        instance = target() if inspect.isclass(target) else target
+        methods = {}
+        for name in dir(instance):
+            if name.startswith("_"):
+                continue
+            attr = getattr(instance, name, None)
+            if callable(attr):
+                methods[name] = attr
+        if not methods:
+            raise ValueError(f"contribution '{contribution_id}' exposes no public methods")
+        _CONTRIBUTIONS[contribution_id] = methods
+        return target
+
+    return decorate
+
+
+def _emit(contribution_id, channel, payload=None):
+    """`cognia.emit(...)` — push an unsolicited frame to the host.
+
+    The inbound half of a bidirectional contribution (connector messages,
+    watcher events). Picked up by `subscribePythonContributionPush`.
+    """
+    _emit_event(
+        "emit",
+        {"contributionId": contribution_id, "channel": channel, "payload": payload},
+    )
+
+
 def _install_cognia_shim():
     shim = types.ModuleType("cognia")
     shim.tool = _tool
@@ -184,6 +244,8 @@ def _install_cognia_shim():
     shim.get_config = _get_config
     shim.log = _log
     shim.on_config_changed = _on_config_changed
+    shim.contribution = _contribution
+    shim.emit = _emit
     sys.modules["cognia"] = shim
 
 
@@ -243,11 +305,18 @@ def _handle_import_main(params):
         startup()
     info = _info()
     info["hooks"] = [{"event": event, "name": fn.__name__} for event, fn in _HOOKS]
+    info["contributions"] = [
+        {"id": cid, "methods": sorted(methods.keys())} for cid, methods in _CONTRIBUTIONS.items()
+    ]
     return info
 
 
 def _info():
-    return {"tool_count": len(_TOOLS), "hook_count": len(_HOOKS)}
+    return {
+        "tool_count": len(_TOOLS),
+        "hook_count": len(_HOOKS),
+        "contribution_count": len(_CONTRIBUTIONS),
+    }
 
 
 def _require_loaded():
@@ -289,9 +358,46 @@ def _handle_call_tool(params):
     return _ensure_serializable(result, f"tool '{name}'")
 
 
+def _dispatch_contribution(args):
+    """Route `__cognia_dispatch_contribution__(id, method, args, streamId)`.
+
+    Mirrors `createPythonBackedProxy` on the renderer side. When `stream_id` is
+    present and the handler returns an iterator, each item goes out as a
+    `chunk` frame tagged with that id (the protocol's own `call_id` never
+    reaches the renderer, so the seam correlates on `streamId` instead) and the
+    stream is closed with `chunk_end`.
+    """
+    _require_loaded()
+    padded = list(args or []) + [None, None, None, None]
+    contribution_id, method, call_args, stream_id = padded[:4]
+    entry = _CONTRIBUTIONS.get(contribution_id)
+    if entry is None:
+        raise RuntimeError(f"unknown contribution: {contribution_id}")
+    fn = entry.get(method)
+    if fn is None or not callable(fn):
+        raise RuntimeError(f"contribution '{contribution_id}' has no method '{method}'")
+
+    label = f"contribution '{contribution_id}.{method}'"
+    result = fn(*(call_args or []))
+    if stream_id is None or not isinstance(result, collections.abc.Iterator):
+        return _ensure_serializable(result, label)
+
+    chunks = []
+    for chunk in result:
+        _ensure_serializable(chunk, f"{label} stream chunk")
+        _emit_event("chunk", {"streamId": stream_id, "value": chunk}, _CURRENT_CALL_ID)
+        chunks.append(chunk)
+    _emit_event("chunk_end", {"streamId": stream_id}, _CURRENT_CALL_ID)
+    if chunks and all(isinstance(c, str) for c in chunks):
+        return "".join(chunks)
+    return chunks
+
+
 def _handle_call(params):
     _require_loaded()
     function_name = params["function_name"]
+    if function_name == CONTRIBUTION_DISPATCH:
+        return _dispatch_contribution(params.get("args"))
     if function_name.startswith("_"):
         raise RuntimeError(f"private function names are not callable: {function_name}")
     fn = getattr(_MAIN_MODULE, function_name, None)

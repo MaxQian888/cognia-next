@@ -10,6 +10,8 @@
  * full id.
  */
 
+import type { PluginContributionBackend } from "@/types/plugin/plugin"
+
 import type {
   DeploymentCandidate,
   FilterContext,
@@ -25,9 +27,15 @@ export interface PluginDeploymentFilterDef {
   label: string
   description?: string
   /** Relative module path inside the plugin (lazy-imported on enable). */
-  entry: string
+  /**
+   * Which runtime owns this factory. Omit to inherit the plugin type
+   * (`python` plugins default to `"python"`); declaring `entry` pins it to
+   * `"js"`. See {@link PluginContributionBackend}.
+   */
+  backend?: PluginContributionBackend
+  entry?: string
   /** Export name of the factory function in `entry`. */
-  export: string
+  export?: string
 }
 
 /** What the factory must return: the pure filter core (must not throw). */

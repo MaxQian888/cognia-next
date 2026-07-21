@@ -16,6 +16,8 @@
  * shape regardless of how it registered.
  */
 
+import type { PluginContributionBackend } from "@/types/plugin/plugin"
+
 /** Read-only context handed to a plugin completion provider. */
 export interface PluginTerminalCompletionContext {
   /** Shell family — `bash` | `zsh` | `pwsh` | `powershell` | `cmd` | `fish` | `nu` | `sh` | `unknown`. */
@@ -63,9 +65,15 @@ export interface PluginTerminalCompletionProviderDef {
   /** Human label. */
   label: string
   /** Module path (relative to the plugin install root). */
-  entry: string
+  /**
+   * Which runtime owns this factory. Omit to inherit the plugin type
+   * (`python` plugins default to `"python"`); declaring `entry` pins it to
+   * `"js"`. See {@link PluginContributionBackend}.
+   */
+  backend?: PluginContributionBackend
+  entry?: string
   /** Named export = factory returning a `PluginTerminalCompletionProvider`. */
-  export: string
+  export?: string
   /** Lower runs first; default 100. */
   priority?: number
 }

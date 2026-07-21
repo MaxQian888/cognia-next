@@ -24,6 +24,10 @@ import type {
 import { loggers } from "@/lib/plugin/core/logger"
 import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 import {
+  createPythonBackedProxy,
+  isPythonBackedContribution,
+} from "@/lib/plugin/bridge/_shared/python-backed-proxy"
+import {
   registerCodeAdapterExecutor,
   registerProtocolAdapter,
   unregisterCodeAdapterExecutorsByPlugin,
@@ -49,7 +53,7 @@ const DEFAULT_IMPORTER: NonNullable<ProtocolAdaptersBridgeOptions["importer"]> =
   import(/* @vite-ignore */ /* webpackIgnore: true */ entry)
 
 /** Structural validation. Returns an error message or null. */
-function validateDef(def: PluginProtocolAdapterDef): string | null {
+function validateDef(def: PluginProtocolAdapterDef, pluginType: string | undefined): string | null {
   if (!def.id || typeof def.id !== "string") return "id is required"
   if (!def.label || typeof def.label !== "string") return "label is required"
   const spec = def.spec
@@ -64,6 +68,9 @@ function validateDef(def: PluginProtocolAdapterDef): string | null {
     return null
   }
   if (spec.kind === "code") {
+    // Python-backed code adapters stream through the plugin_python_call seam
+    // and therefore reference no JS module.
+    if (isPythonBackedContribution(def, pluginType)) return null
     if (!def.entry || !def.export) return "code adapter requires entry + export"
     return null
   }
@@ -89,7 +96,7 @@ export async function registerProtocolAdaptersForPlugin(
   let registered = 0
 
   for (const def of defs) {
-    const invalid = validateDef(def)
+    const invalid = validateDef(def, manifest.type)
     if (invalid) {
       errors.push({ pluginId, adapterId: def.id ?? "(missing id)", message: invalid })
       loggers.manager.error(
@@ -102,13 +109,27 @@ export async function registerProtocolAdaptersForPlugin(
     // Code adapters: import + register the executor (renderer-side).
     if (def.spec.kind === "code") {
       try {
-        const resolved = resolvePluginPath(installRoot, def.entry!)
-        const mod = await importer(resolved)
-        const exported = mod[def.export!]
-        if (typeof exported !== "function") {
-          throw new Error(`entry "${def.entry}" does not export a factory named "${def.export}"`)
+        if (isPythonBackedContribution(def, manifest.type)) {
+          // `CodeProtocolAdapterFactory` is `() => { stream: AsyncGenerator }`,
+          // which the seam's streaming methods produce natively.
+          const pythonFactory: CodeProtocolAdapterFactory = () =>
+            createPythonBackedProxy<ReturnType<CodeProtocolAdapterFactory>>({
+              pluginId,
+              contributionId: def.id,
+              methods: ["stream"],
+              streamingMethods: ["stream"],
+              label: "protocol adapter",
+            })
+          registerCodeAdapterExecutor(adapterId, pythonFactory, pluginId)
+        } else {
+          const resolved = resolvePluginPath(installRoot, def.entry!)
+          const mod = await importer(resolved)
+          const exported = mod[def.export!]
+          if (typeof exported !== "function") {
+            throw new Error(`entry "${def.entry}" does not export a factory named "${def.export}"`)
+          }
+          registerCodeAdapterExecutor(adapterId, exported as CodeProtocolAdapterFactory, pluginId)
         }
-        registerCodeAdapterExecutor(adapterId, exported as CodeProtocolAdapterFactory, pluginId)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         errors.push({ pluginId, adapterId: def.id, message })

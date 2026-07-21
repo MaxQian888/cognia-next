@@ -1,6 +1,9 @@
 import type { PluginCapability } from "@/types/plugin"
 import type { PluginPointGovernanceMode } from "./plugin-points"
-import { CANONICAL_PLUGIN_CAPABILITIES as AUTHOR_CAPABILITY_IDS } from "@/packages/plugin-sdk/src/contracts/catalog"
+import {
+  CANONICAL_PLUGIN_CAPABILITIES as AUTHOR_CAPABILITY_IDS,
+  PLUGIN_MANIFEST_CONTRIBUTIONS,
+} from "@/packages/plugin-sdk/src/contracts/catalog"
 
 export type PluginCapabilitySupport = "supported" | "partial" | "experimental" | "blocked"
 
@@ -13,6 +16,16 @@ export interface PluginCapabilityContract {
   runtimeBinding: string
   hostBindings: readonly string[]
   typescriptSdk: readonly string[]
+  /**
+   * Python SDK modules that expose *authoring* helpers for this capability.
+   *
+   * A populated `pythonSdk` proves a `define_*` helper exists — it does NOT
+   * prove a pure-Python plugin can execute the capability at runtime. That
+   * truth lives on the contribution contract's `pythonExecution` axis
+   * (`packages/plugin-sdk/contract/catalog.json`), which the manifest
+   * validators enforce. Use {@link capabilityPythonExecution} to ask whether
+   * Python can actually own a capability.
+   */
   pythonSdk: readonly string[]
   builtinContributionPaths?: readonly string[]
   docs: string
@@ -1580,6 +1593,33 @@ export function getPluginCapabilityContract(
   return capabilityContractMap.get(capability as PluginCapability)
 }
 
+export type CapabilityPythonExecution = "host" | "supported" | "experimental" | "unsupported"
+
+/**
+ * Whether a pure-Python plugin can own this capability at runtime, derived from
+ * the contribution contracts rather than from the presence of SDK helper files.
+ *
+ * - `"host"` — the capability contributes plain data the host consumes (or has
+ *   no manifest contribution at all), so the authoring language is irrelevant.
+ * - `"supported"` / `"experimental"` — at least one contribution can route
+ *   through the `plugin_python_call` seam.
+ * - `"unsupported"` — every contribution needs a live JS/React factory.
+ */
+export function capabilityPythonExecution(
+  capability: PluginCapability | string
+): CapabilityPythonExecution {
+  const contributions = PLUGIN_MANIFEST_CONTRIBUTIONS.filter((contract) =>
+    contract.capabilities.includes(capability as string)
+  )
+  if (contributions.length === 0) return "host"
+  if (contributions.some((contract) => contract.execution === "host")) return "host"
+  if (contributions.some((contract) => contract.pythonExecution === "supported")) return "supported"
+  if (contributions.some((contract) => contract.pythonExecution === "experimental")) {
+    return "experimental"
+  }
+  return "unsupported"
+}
+
 export function validatePluginCapabilities(
   capabilities: readonly string[],
   options: { governanceMode?: PluginPointGovernanceMode } = {}
@@ -1667,8 +1707,13 @@ export function auditPluginCapabilityContracts(): PluginCapabilityProofAudit[] {
       missingFields.push("typescriptSdk")
     }
 
+    // Only demand Python authoring helpers where Python can actually own the
+    // capability. JS/React-only capabilities (tree views, message renderers,
+    // modal mounts, context panels) previously had to list `pythonSdk` files to
+    // pass the audit, which encoded a support claim the runtime never honoured.
     if (
       requiresProof &&
+      capabilityPythonExecution(contract.id) !== "unsupported" &&
       (!contract.pythonSdk.length || contract.pythonSdk.some((entry) => !entry.trim()))
     ) {
       missingFields.push("pythonSdk")

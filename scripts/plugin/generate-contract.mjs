@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const catalogPath = resolve(repoRoot, "packages/plugin-sdk/contract/catalog.json")
 const catalogSchemaPath = resolve(repoRoot, "packages/plugin-sdk/contract/catalog.schema.json")
-const rustPath = resolve(repoRoot, "crates/cognia-cli/src/generated_plugin_contract.rs")
+const rustPath = resolve(repoRoot, "crates/cognia-cli/src/engine/contract.rs")
 const pythonPath = resolve(repoRoot, "plugin-sdk/python/src/cognia/_generated_contract.py")
 
 export function readCatalog() {
@@ -124,6 +124,7 @@ export function renderRustContract(catalog) {
             ? `Some(${JSON.stringify(entry.javascriptWhen.equals)})`
             : "None"
         },
+        ${JSON.stringify(entry.pythonExecution ?? "unsupported")},
     ),`
     )
     .join("\n")
@@ -148,7 +149,7 @@ pub(crate) const VALID_PLUGIN_TYPES: &[&str] =\n    &[${catalog.pluginTypes
     .map((pluginType) => JSON.stringify(pluginType))
     .join(", ")}];\n\n\
 pub(crate) const CAPABILITY_FIELDS: &[(&str, &[&str])] = &[\n${capabilityFields}\n];\n\n\
-pub(crate) const MANIFEST_CONTRIBUTIONS: &[\n    (&str, &[&str], &str, Option<&str>, Option<&str>, Option<&str>)\n] = &[\n${manifestContributions}\n];\n\n\
+pub(crate) const MANIFEST_CONTRIBUTIONS: &[\n    (&str, &[&str], &str, Option<&str>, Option<&str>, Option<&str>, &str)\n] = &[\n${manifestContributions}\n];\n\n\
 pub(crate) const RUNTIME_ENTRY_CONTRACTS: &[(&str, &[&str], Option<&str>, bool, &[&str])] = &[\n${runtimeEntries}\n];\n\n\
 pub(crate) const PLUGIN_PATH_FIELDS: &[&str] = &[\n${rustStrings(
     catalog.pathFields.map((entry) => entry.path)

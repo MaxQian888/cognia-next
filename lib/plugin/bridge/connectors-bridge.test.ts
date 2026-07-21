@@ -20,6 +20,13 @@ jest.mock("@/lib/connectors/bus", () => ({
   __resetBusForTesting: jest.fn(),
 }))
 
+// Only the transport-facing proxy is faked; `isPythonBackedContribution` and
+// the push channel stay real so the inbound wiring is genuinely exercised.
+jest.mock("@/lib/plugin/bridge/_shared/python-backed-proxy", () => ({
+  ...jest.requireActual("@/lib/plugin/bridge/_shared/python-backed-proxy"),
+  createPythonBackedProxy: jest.fn(),
+}))
+
 import {
   registerPluginAdapters,
   unregisterPluginAdapters,
@@ -28,6 +35,19 @@ import {
 } from "./connectors-bridge"
 import type { PluginManifest } from "@/types/plugin/plugin"
 import type { PlatformAdapter } from "@/types/connectors"
+import { createPythonBackedProxy } from "@/lib/plugin/bridge/_shared/python-backed-proxy"
+import {
+  __resetExperimentalPythonFlagForTesting,
+  setExperimentalPythonBackedEnabled,
+} from "@/lib/plugin/python/experimental-flag"
+import {
+  __resetPythonEventBusForTesting,
+  dispatchPythonPluginEvent,
+} from "@/lib/plugin/python/event-bus"
+
+const mockCreateProxy = createPythonBackedProxy as jest.MockedFunction<
+  typeof createPythonBackedProxy
+>
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -67,6 +87,138 @@ function makeAdapter(id: string): PlatformAdapter {
     send: jest.fn().mockResolvedValue({ ok: true }),
   } as unknown as PlatformAdapter
 }
+
+// ── python-backed adapter ────────────────────────────────────────────────────
+
+describe("connectors-bridge python backend", () => {
+  const pythonManifest = (): PluginManifest =>
+    ({
+      id: "py.connector",
+      name: "Py Connector",
+      version: "1.0.0",
+      description: "",
+      type: "python",
+      pythonMain: "main.py",
+      capabilities: ["connectors", "python"],
+      connectors: [
+        {
+          id: "mail",
+          type: "mastodon",
+          factory: "createAdapter",
+          configSchema: { type: "object" },
+          transportModes: ["longpoll"],
+        },
+      ],
+    }) as unknown as PluginManifest
+
+  beforeEach(() => {
+    mockRegisterAdapter.mockClear()
+    __resetBridgeForTesting()
+    __resetPythonEventBusForTesting()
+    mockCreateProxy.mockReset()
+    // connectors is `pythonExecution: "experimental"` — open the gate explicitly.
+    setExperimentalPythonBackedEnabled(true)
+  })
+
+  afterEach(() => {
+    __resetExperimentalPythonFlagForTesting()
+  })
+
+  it("skips a python-backed connector while the experimental flag is off", async () => {
+    __resetExperimentalPythonFlagForTesting()
+    stubProxy()
+    await registerPluginAdapters("py.connector", pythonManifest(), {})
+    expect(mockRegisterAdapter).not.toHaveBeenCalled()
+  })
+
+  function stubProxy(overrides: Record<string, unknown> = {}) {
+    mockCreateProxy.mockReturnValue({
+      describe: jest.fn().mockResolvedValue({
+        a2uiCapability: { mode: "none" },
+        meta: {
+          type: "telegram",
+          displayName: "Py Mail",
+          version: "1.0.0",
+          capabilities: [],
+          transportModes: ["longpoll"],
+          configSchema: {},
+        },
+      }),
+      start: jest.fn().mockResolvedValue(undefined),
+      stop: jest.fn().mockResolvedValue(undefined),
+      send: jest.fn().mockResolvedValue({ ok: true }),
+      ...overrides,
+    } as never)
+  }
+
+  it("builds a python-backed adapter without looking at plugin JS exports", async () => {
+    stubProxy()
+    // Empty exports: a pure-Python plugin ships no JS module at all.
+    await registerPluginAdapters("py.connector", pythonManifest(), {})
+
+    expect(mockRegisterAdapter).toHaveBeenCalledTimes(1)
+    const adapter = mockRegisterAdapter.mock.calls[0]![0] as PlatformAdapter
+    expect(adapter.id).toBe("py.connector:mastodon")
+    expect(adapter.meta.displayName).toBe("Py Mail")
+    // `health()` answers synchronously from wrapper-tracked state.
+    expect(adapter.health()).toEqual({ state: "down" })
+  })
+
+  it("forwards inbound python pushes into ctx.emit and tracks health", async () => {
+    stubProxy()
+    await registerPluginAdapters("py.connector", pythonManifest(), {})
+    const adapter = mockRegisterAdapter.mock.calls[0]![0] as PlatformAdapter
+
+    const emit = jest.fn().mockResolvedValue(undefined)
+    await adapter.start({ adapterId: "py.connector:mastodon", emit } as never)
+    expect(adapter.health().state).toBe("running")
+
+    // A push from the Python subprocess must reach the bus via ctx.emit.
+    dispatchPythonPluginEvent({
+      pluginId: "py.connector",
+      kind: "emit",
+      data: { contributionId: "mastodon", channel: "inbound", payload: { id: "msg-1" } },
+    })
+    expect(emit).toHaveBeenCalledWith({ id: "msg-1" })
+
+    // Non-inbound channels and other contributions are ignored.
+    dispatchPythonPluginEvent({
+      pluginId: "py.connector",
+      kind: "emit",
+      data: { contributionId: "mastodon", channel: "telemetry", payload: { id: "nope" } },
+    })
+    expect(emit).toHaveBeenCalledTimes(1)
+
+    // stop() detaches the inbound subscription.
+    await adapter.stop()
+    expect(adapter.health()).toEqual({ state: "down" })
+    dispatchPythonPluginEvent({
+      pluginId: "py.connector",
+      kind: "emit",
+      data: { contributionId: "mastodon", channel: "inbound", payload: { id: "msg-2" } },
+    })
+    expect(emit).toHaveBeenCalledTimes(1)
+  })
+
+  it("reports start failure as down and detaches the inbound subscription", async () => {
+    stubProxy({ start: jest.fn().mockRejectedValue(new Error("python boom")) })
+    await registerPluginAdapters("py.connector", pythonManifest(), {})
+    const adapter = mockRegisterAdapter.mock.calls[0]![0] as PlatformAdapter
+
+    const emit = jest.fn()
+    await expect(
+      adapter.start({ adapterId: "py.connector:mastodon", emit } as never)
+    ).rejects.toThrow("python boom")
+    expect(adapter.health()).toEqual({ state: "down", reason: "python boom" })
+
+    dispatchPythonPluginEvent({
+      pluginId: "py.connector",
+      kind: "emit",
+      data: { contributionId: "mastodon", channel: "inbound", payload: { id: "x" } },
+    })
+    expect(emit).not.toHaveBeenCalled()
+  })
+})
 
 // ── tests ─────────────────────────────────────────────────────────────────────
 

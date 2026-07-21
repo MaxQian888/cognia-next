@@ -20,9 +20,14 @@ import type { PluginExternalAgentAdapterDef } from "@/types/plugin/plugin-extern
 import { loggers } from "@/lib/plugin/core/logger"
 import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 import {
+  createPythonBackedProxy,
+  isPythonBackedContribution,
+} from "@/lib/plugin/bridge/_shared/python-backed-proxy"
+import {
   getPluginProtocolAdapterProtocols,
   registerPluginProtocolAdapter,
   unregisterPluginProtocolAdaptersByPlugin,
+  type ProtocolAdapter,
   type ProtocolAdapterFactory,
 } from "@/lib/ai/agent/external/protocol-adapter"
 
@@ -45,12 +50,61 @@ const DEFAULT_IMPORTER: NonNullable<ExternalAgentAdaptersBridgeOptions["importer
   import(/* @vite-ignore */ /* webpackIgnore: true */ entry)
 
 /** Structural validation. Returns an error message or null. */
-function validateDef(def: PluginExternalAgentAdapterDef): string | null {
+function validateDef(
+  def: PluginExternalAgentAdapterDef,
+  pluginType: string | undefined
+): string | null {
   if (!def.id || typeof def.id !== "string") return "id is required"
   if (!def.label || typeof def.label !== "string") return "label is required"
+  // Python-backed adapters resolve through the plugin_python_call seam and
+  // therefore reference no JS module.
+  if (isPythonBackedContribution(def, pluginType)) return null
   if (!def.entry || typeof def.entry !== "string") return "entry is required"
   if (!def.export || typeof def.export !== "string") return "export is required"
   return null
+}
+
+/**
+ * A `ProtocolAdapter` whose behaviour lives in the plugin's Python subprocess.
+ *
+ * Everything except `isConnected()` maps cleanly onto the seam: `prompt`
+ * streams (the seam's generator satisfies `AsyncIterable`), the rest are plain
+ * request/response calls. `isConnected()` is **synchronous** in the contract,
+ * which an IPC round-trip cannot satisfy, so the wrapper tracks the flag
+ * locally around `connect`/`disconnect` — the one piece of state the host is
+ * entitled to answer without crossing the process boundary.
+ */
+function createPythonProtocolAdapter(pluginId: string, contributionId: string): ProtocolAdapter {
+  const proxy = createPythonBackedProxy<
+    Omit<ProtocolAdapter, "isConnected" | "setSessionMode" | "setSessionModel" | "getSessionModels">
+  >({
+    pluginId,
+    contributionId,
+    methods: [
+      "connect",
+      "disconnect",
+      "createSession",
+      "closeSession",
+      "prompt",
+      "execute",
+      "respondToPermission",
+    ],
+    streamingMethods: ["prompt"],
+    label: "external-agent adapter",
+  })
+  let connected = false
+  return {
+    ...proxy,
+    connect: async (config) => {
+      await proxy.connect(config)
+      connected = true
+    },
+    disconnect: async () => {
+      await proxy.disconnect()
+      connected = false
+    },
+    isConnected: () => connected,
+  }
 }
 
 export async function registerExternalAgentAdaptersForPlugin(
@@ -75,7 +129,7 @@ export async function registerExternalAgentAdaptersForPlugin(
   let registered = 0
 
   for (const def of defs) {
-    const invalid = validateDef(def)
+    const invalid = validateDef(def, manifest.type)
     if (invalid) {
       errors.push({ pluginId, adapterId: def.id ?? "(missing id)", message: invalid })
       loggers.manager.error(
@@ -86,13 +140,19 @@ export async function registerExternalAgentAdaptersForPlugin(
 
     const protocol = `${pluginId}:${def.id}`
     try {
-      const resolved = resolvePluginPath(installRoot, def.entry)
-      const mod = await importer(resolved)
-      const exported = mod[def.export]
-      if (typeof exported !== "function") {
-        throw new Error(`entry "${def.entry}" does not export a factory named "${def.export}"`)
+      let factory: ProtocolAdapterFactory
+      if (isPythonBackedContribution(def, manifest.type)) {
+        factory = () => createPythonProtocolAdapter(pluginId, def.id)
+      } else {
+        const resolved = resolvePluginPath(installRoot, def.entry!)
+        const mod = await importer(resolved)
+        const exported = mod[def.export!]
+        if (typeof exported !== "function") {
+          throw new Error(`entry "${def.entry}" does not export a factory named "${def.export}"`)
+        }
+        factory = exported as ProtocolAdapterFactory
       }
-      const ok = registerPluginProtocolAdapter(protocol, exported as ProtocolAdapterFactory, {
+      const ok = registerPluginProtocolAdapter(protocol, factory, {
         pluginId,
       })
       if (!ok) {

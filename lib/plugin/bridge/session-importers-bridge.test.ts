@@ -8,9 +8,19 @@ import {
   type AgentSessionSourceAdapter,
 } from "@/lib/session-import"
 import type { PluginManifest } from "@/types/plugin/plugin"
+import { createDescribedPythonContribution } from "@/lib/plugin/bridge/_shared/python-backed-proxy"
+
+const mockCreateDescribed = createDescribedPythonContribution as jest.MockedFunction<
+  typeof createDescribedPythonContribution
+>
 
 jest.mock("@/lib/plugin/core/logger", () => ({
   loggers: { manager: { error: jest.fn(), info: jest.fn(), warn: jest.fn() } },
+}))
+
+jest.mock("@/lib/plugin/bridge/_shared/python-backed-proxy", () => ({
+  ...jest.requireActual("@/lib/plugin/bridge/_shared/python-backed-proxy"),
+  createDescribedPythonContribution: jest.fn(),
 }))
 
 function fakeAdapter(id: string): AgentSessionSourceAdapter {
@@ -38,6 +48,49 @@ const okImporter = async () => ({ createImporter: () => fakeAdapter("cursor") })
 afterEach(() => {
   __resetDynamicSessionSourcesForTesting()
   jest.clearAllMocks()
+})
+
+describe("registerSessionImportersForPlugin python backend", () => {
+  const pythonManifest = (defs: unknown[]): PluginManifest =>
+    ({
+      id: "plug",
+      type: "python",
+      pythonMain: "main.py",
+      sessionImporters: defs,
+    }) as unknown as PluginManifest
+
+  it("accepts a python-backed importer with no entry/export and skips the JS import", async () => {
+    mockCreateDescribed.mockResolvedValue(fakeAdapter("py-src") as unknown as never)
+    const importer = jest.fn()
+
+    const result = await registerSessionImportersForPlugin(
+      pythonManifest([{ id: "py-src", label: "Py source" }]),
+      "/plugins/plug",
+      { importer }
+    )
+
+    expect(result).toEqual({ registered: 1, errors: [] })
+    expect(importer).not.toHaveBeenCalled()
+    expect(mockCreateDescribed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pluginId: "plug",
+        contributionId: "py-src",
+        methods: ["listSessions", "parseSession"],
+      })
+    )
+    expect(getSessionSources().some((s) => s.id === "plug:py-src")).toBe(true)
+  })
+
+  it("still requires entry/export for a JS-backed importer", async () => {
+    const result = await registerSessionImportersForPlugin(
+      manifest([{ id: "js-src", label: "Js source" }]),
+      "/plugins/plug",
+      { importer: jest.fn() }
+    )
+
+    expect(result.registered).toBe(0)
+    expect(result.errors[0]!.message).toBe("entry is required")
+  })
 })
 
 describe("registerSessionImportersForPlugin", () => {

@@ -123,25 +123,77 @@ function nestedContributionValue(value: unknown, path: string): unknown {
   }, value)
 }
 
-function contributionRequiresJavascript(
+interface ContributionExecutionSplit {
+  /** At least one populated entry genuinely needs a JavaScript factory. */
+  requiresJavascript: boolean
+  /** At least one populated entry routes to Python on an experimental capability. */
+  pythonBackedExperimental: boolean
+}
+
+/**
+ * The backend a contribution entry executes on, most specific first:
+ *   1. an explicit per-entry `backend`;
+ *   2. a declared JS module path (`entry`) — writing one *is* the declaration
+ *      of JS intent, so we never silently ignore it on a python plugin;
+ *   3. the plugin-type default — python plugins default their contributions to
+ *      python-backed, every other type to JS.
+ */
+function effectiveContributionBackend(
+  entry: unknown,
+  contract: (typeof PLUGIN_MANIFEST_CONTRIBUTIONS)[number],
+  pluginType: unknown
+): string {
+  if (isPlainObject(entry) && typeof entry.backend === "string") return entry.backend
+  const entryField = contract.entryPath?.split(".").pop()
+  if (entryField && isPlainObject(entry) && typeof entry[entryField] === "string") {
+    if (entry[entryField] !== "") return "js"
+  }
+  return pluginType === "python" ? "python" : "js"
+}
+
+/**
+ * Split a contribution's populated entries into "needs a JS factory" versus
+ * "routes through the plugin_python_call seam". Keep rule-for-rule in lockstep
+ * with `crates/cognia-cli/src/commands/lint/rules.rs`.
+ */
+function contributionExecutionSplit(
   manifest: Record<string, unknown>,
   contract: (typeof PLUGIN_MANIFEST_CONTRIBUTIONS)[number]
-): boolean {
+): ContributionExecutionSplit {
   const contribution = manifest[contract.field]
   const entries = Array.isArray(contribution)
     ? contribution
     : isPlainObject(contribution)
       ? [contribution]
       : []
-  if (entries.length === 0) return false
-  if (contract.execution === "javascript") return true
-  if (contract.execution !== "conditional" || !contract.javascriptWhen) return false
-  return entries.some((entry) => {
-    const value = nestedContributionValue(entry, contract.javascriptWhen!.path)
-    return contract.javascriptWhen!.equals === undefined
+  if (entries.length === 0) return { requiresJavascript: false, pythonBackedExperimental: false }
+
+  const baseRequiresJavascript = (entry: unknown): boolean => {
+    if (contract.execution === "javascript") return true
+    if (contract.execution !== "conditional" || !contract.javascriptWhen) return false
+    const value = nestedContributionValue(entry, contract.javascriptWhen.path)
+    return contract.javascriptWhen.equals === undefined
       ? value !== undefined && value !== null && value !== ""
-      : value === contract.javascriptWhen!.equals
-  })
+      : value === contract.javascriptWhen.equals
+  }
+
+  // An absent `pythonExecution` means "unsupported": the capability stays
+  // JS-only (React UI, config component) whichever backend is requested.
+  const pythonBackable = (contract.pythonExecution ?? "unsupported") !== "unsupported"
+  let requiresJavascript = false
+  let pythonBackedExperimental = false
+  for (const entry of entries) {
+    if (!baseRequiresJavascript(entry)) continue
+    if (
+      pythonBackable &&
+      effectiveContributionBackend(entry, contract, manifest.type) === "python"
+    ) {
+      if (contract.pythonExecution === "experimental") pythonBackedExperimental = true
+      continue
+    }
+    requiresJavascript = true
+  }
+  return { requiresJavascript, pythonBackedExperimental }
 }
 
 function pluginPathMessage(violation: PluginPathViolation): string {
@@ -229,7 +281,9 @@ function validateLazyFactoryArray(
   raw: unknown,
   options: LazyFactoryFieldOptions,
   pushError: (field: string, code: string, message: string, hint?: string) => void,
-  pushWarning: (field: string, code: string, message: string, hint?: string) => void
+  pushWarning: (field: string, code: string, message: string, hint?: string) => void,
+  /** Owning plugin's `type` — decides the default contribution backend. */
+  pluginType?: unknown
 ): void {
   const { field, requireLabel = true, extra } = options
   if (raw === undefined) return
@@ -279,7 +333,23 @@ function validateLazyFactoryArray(
       )
     }
 
-    if (typeof entry.entry !== "string" || entry.entry.length === 0) {
+    // `entry`/`export` name a JS module + symbol, so they are required only
+    // when this contribution actually executes in JS. A python-backed entry
+    // resolves through the plugin_python_call seam and declares neither —
+    // same rule as `effectiveContributionBackend` above.
+    const entryBackend =
+      typeof entry.backend === "string"
+        ? entry.backend
+        : typeof entry.entry === "string" && entry.entry.length > 0
+          ? "js"
+          : pluginType === "python"
+            ? "python"
+            : "js"
+
+    if (
+      entryBackend !== "python" &&
+      (typeof entry.entry !== "string" || entry.entry.length === 0)
+    ) {
       pushError(
         `${path}.entry`,
         `manifest.${field}.entry.missing`,
@@ -287,7 +357,9 @@ function validateLazyFactoryArray(
       )
     }
 
-    if (typeof entry.export !== "string" || entry.export.length === 0) {
+    if (entryBackend === "python") {
+      // Nothing further to check: behaviour lives in the subprocess.
+    } else if (typeof entry.export !== "string" || entry.export.length === 0) {
       pushError(
         `${path}.export`,
         `manifest.${field}.export.missing`,
@@ -632,9 +704,24 @@ export function validatePluginManifest(
     }
   }
 
-  const populatedJsContributionFields = PLUGIN_MANIFEST_CONTRIBUTIONS.filter((contract) =>
-    contributionRequiresJavascript(m, contract)
-  ).map((contract) => contract.field)
+  const contributionSplits = PLUGIN_MANIFEST_CONTRIBUTIONS.map((contract) => ({
+    field: contract.field,
+    ...contributionExecutionSplit(m, contract),
+  }))
+  const populatedJsContributionFields = contributionSplits
+    .filter((split) => split.requiresJavascript)
+    .map((split) => split.field)
+  const experimentalPythonField = contributionSplits.find(
+    (split) => split.pythonBackedExperimental
+  )?.field
+  if (experimentalPythonField) {
+    pushWarning(
+      experimentalPythonField,
+      "manifest.contributions.python.experimental",
+      `Python-backed "${experimentalPythonField}" is experimental; its subprocess execution path may change`,
+      "Gate it behind a feature flag and verify end-to-end before relying on it."
+    )
+  }
   if (
     populatedJsContributionFields.length > 0 &&
     runtimeEntryContract &&
@@ -1212,12 +1299,19 @@ export function validatePluginManifest(
   // the `extra` callback runs field-specific checks (e.g. `kind` for
   // aiProviders, `partType` for messageRenderers).
 
-  validateLazyFactoryArray(m.ocrProviders, { field: "ocrProviders" }, pushError, pushWarning)
+  validateLazyFactoryArray(
+    m.ocrProviders,
+    { field: "ocrProviders" },
+    pushError,
+    pushWarning,
+    m.type
+  )
   validateLazyFactoryArray(
     m.workspaceBackends,
     { field: "workspaceBackends" },
     pushError,
-    pushWarning
+    pushWarning,
+    m.type
   )
   validateLazyFactoryArray(
     m.messageRenderers,
@@ -1231,7 +1325,8 @@ export function validatePluginManifest(
       },
     },
     pushError,
-    pushWarning
+    pushWarning,
+    m.type
   )
   validateLazyFactoryArray(
     m.aiProviders,
@@ -1266,14 +1361,16 @@ export function validatePluginManifest(
       },
     },
     pushError,
-    pushWarning
+    pushWarning,
+    m.type
   )
-  validateLazyFactoryArray(m.modalMounts, { field: "modalMounts" }, pushError, pushWarning)
+  validateLazyFactoryArray(m.modalMounts, { field: "modalMounts" }, pushError, pushWarning, m.type)
   validateLazyFactoryArray(
     m.routingStrategies,
     { field: "routingStrategies" },
     pushError,
-    pushWarning
+    pushWarning,
+    m.type
   )
   validateLazyFactoryArray(
     m.chatMiddlewares,
@@ -1297,7 +1394,8 @@ export function validatePluginManifest(
       },
     },
     pushError,
-    pushWarning
+    pushWarning,
+    m.type
   )
   validateLazyFactoryArray(
     m.contextPanels,
@@ -1397,7 +1495,8 @@ export function validatePluginManifest(
       },
     },
     pushError,
-    pushWarning
+    pushWarning,
+    m.type
   )
 
   // ── i18n block ──────────────────────────────────────────────────────────────

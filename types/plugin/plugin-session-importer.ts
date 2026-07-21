@@ -17,6 +17,8 @@
  * ADR-0051 `externalAgentAdapters` shape 1:1.
  */
 
+import type { PluginContributionBackend } from "@/types/plugin/plugin"
+
 /** One session-importer contribution inside `PluginManifest.sessionImporters`. */
 export interface PluginSessionImporterDef {
   /**
@@ -32,10 +34,16 @@ export interface PluginSessionImporterDef {
    * Relative module path (lazy-imported on enable, renderer-side). REQUIRED —
    * an importer is always code.
    */
-  entry: string
+  /**
+   * Which runtime owns this factory. Omit to inherit the plugin type
+   * (`python` plugins default to `"python"`); declaring `entry` pins it to
+   * `"js"`. See {@link PluginContributionBackend}.
+   */
+  backend?: PluginContributionBackend
+  entry?: string
   /**
    * Export name of the factory in `entry`. The export must be a
    * `() => AgentSessionSourceAdapter` function. REQUIRED.
    */
-  export: string
+  export?: string
 }
