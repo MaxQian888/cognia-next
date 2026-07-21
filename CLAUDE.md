@@ -54,6 +54,13 @@ pnpm audit:slots        # plugin slot manifest audit
 pnpm lint:i18n          # diff against the i18n key baseline
 pnpm lint:i18n:baseline # rewrite the i18n baseline after intentional changes
 pnpm sidecar:test       # node --test on sidecar/builtin-tools/
+pnpm build:packages     # standalone tsup build of the zero-`@/` packages
+                        # (provider-types, memory, ocr). Run this after ANY
+                        # types-shim extraction: a child tsconfig's `paths`
+                        # REPLACE the root's, so a package can lose a path the
+                        # root gates still resolve. `@cognia/plugin-sdk` is NOT
+                        # in this gate — it imports ~390 `@/` app paths and
+                        # cannot build standalone yet.
 
 # shadcn/ui
 pnpm dlx shadcn@latest add <component>

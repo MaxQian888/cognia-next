@@ -19,6 +19,7 @@
     "plugin-node:check": "node scripts/build/prepare-plugin-node.mjs --check",
     "dev": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next dev --port 3000",
     "build": "cross-env NODE_OPTIONS=--max-old-space-size=8192 next build",
+    "build:packages": "pnpm --filter @cognia/provider-types --filter @cognia/memory --filter @cognia/ocr run build",
     "start": "next start",
     "monaco:copy": "node scripts/build/copy-monaco-assets.mjs",
     "ocr:copy": "node scripts/build/copy-ocr-assets.mjs",
