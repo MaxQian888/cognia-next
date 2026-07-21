@@ -18,6 +18,8 @@ import { detectPlatform } from "@/lib/platform/detect"
 import type { NativePlatform } from "@/lib/capacitor/_shared"
 import { getSharedOcrRegistry } from "./registry"
 import { createOcrCredentialsResolver } from "./credentials"
+import { dexieOcrPageCache, dexieOcrResultCache } from "./cache"
+import type { OcrPageCache, OcrResultCache } from "./cache-contract"
 import type {
   AttachmentResolver,
   CredentialsResolver,
@@ -59,6 +61,10 @@ export interface BuildOcrDepsOptions {
   osTag?: OcrOsTag
   /** Override the credentials resolver (tests). */
   credentialsResolver?: CredentialsResolver
+  /** Override the result cache (tests, or callers that must not persist). */
+  cache?: OcrResultCache
+  /** Override the per-page cache used by the streaming PDF path. */
+  pageCache?: OcrPageCache
   /** Resolver for `attachment-id` sources (connectors, agent tool). */
   attachmentResolver?: AttachmentResolver
   /** Resolver for `file-path` sources. */
@@ -77,6 +83,8 @@ export function buildOcrDeps(opts: BuildOcrDepsOptions = {}): ExtractDeps {
     platform,
     osTag: opts.osTag ?? detectOcrOsTag(platform),
     credentialsResolver: opts.credentialsResolver ?? createOcrCredentialsResolver(),
+    cache: opts.cache ?? dexieOcrResultCache,
+    pageCache: opts.pageCache ?? dexieOcrPageCache,
     attachmentResolver: opts.attachmentResolver,
     filePathResolver: opts.filePathResolver,
     onResult: opts.onResult,

@@ -1,3 +1,4 @@
+import { createNullOcrCache, createNullOcrPageCache } from "./cache-contract"
 import { probeOcrProvider, PROBE_PNG_DATA_URL, type ProbeOutcome } from "./probe"
 import { OcrError } from "@/lib/ocr/errors"
 import { type OcrInput } from "@/types/ocr"
@@ -10,6 +11,8 @@ function fakeDeps(): ExtractDeps {
     settings: {} as ExtractDeps["settings"],
     platform: "web",
     credentialsResolver: async () => ({ secrets: {} }),
+    cache: createNullOcrCache(),
+    pageCache: createNullOcrPageCache(),
   }
 }
 

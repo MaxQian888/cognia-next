@@ -1,3 +1,4 @@
+import { createNullOcrCache, createNullOcrPageCache } from "./cache-contract"
 import { MIN_TEXT_LAYER_CHARS, extractPdf, type PdfDocument } from "./pdf-router"
 import { createOcrRegistry } from "./registry"
 import { DEFAULT_OCR_SETTINGS, type OcrResult, type UserOcrSettings } from "@/types/ocr"
@@ -46,18 +47,18 @@ function makeDeps(): {
     settings,
     platform: "web",
     credentialsResolver: async () => ({ secrets: {} }),
+    cache: createNullOcrCache(),
+    pageCache: createNullOcrPageCache(),
   }
-  const ocrPage = jest.fn(
-    async (): Promise<OcrResult> => ({
-      providerId: "mock",
-      pages: [{ pageNumber: 1, markdown: "# OCR'd", text: "OCR'd" }],
-      combinedMarkdown: "# OCR'd",
-      combinedText: "OCR'd",
-      languages: ["en"],
-      durationMs: 5,
-      cached: false,
-    })
-  )
+  const ocrPage = jest.fn(async (): Promise<OcrResult> => ({
+    providerId: "mock",
+    pages: [{ pageNumber: 1, markdown: "# OCR'd", text: "OCR'd" }],
+    combinedMarkdown: "# OCR'd",
+    combinedText: "OCR'd",
+    languages: ["en"],
+    durationMs: 5,
+    cached: false,
+  }))
   return { deps, settings, ocrPage }
 }
 

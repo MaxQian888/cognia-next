@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import { createNullOcrCache, createNullOcrPageCache } from "@/lib/ocr/cache-contract"
 import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { ocrPluginDefinition, runOcrTool, type OcrToolInput } from "./index"
@@ -34,6 +35,8 @@ function makeDeps() {
     settings: { ...DEFAULT_OCR_SETTINGS, defaultProviderId: "mock" },
     platform: "web" as const,
     credentialsResolver: async () => ({ secrets: {} }),
+    cache: createNullOcrCache(),
+    pageCache: createNullOcrPageCache(),
   }
 }
 
@@ -109,6 +112,8 @@ describe("runOcrTool", () => {
           settings: { ...DEFAULT_OCR_SETTINGS },
           platform: "web",
           credentialsResolver: async () => ({ secrets: {} }),
+          cache: createNullOcrCache(),
+          pageCache: createNullOcrPageCache(),
         }),
       }
     )
@@ -144,6 +149,8 @@ describe("runOcrTool", () => {
           settings: { ...DEFAULT_OCR_SETTINGS, defaultProviderId: "boom" },
           platform: "web",
           credentialsResolver: async () => ({ secrets: {} }),
+          cache: createNullOcrCache(),
+          pageCache: createNullOcrPageCache(),
         }),
       }
     )

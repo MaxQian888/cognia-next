@@ -18,7 +18,7 @@
 
 import type { NativePlatform } from "@/lib/capacitor/_shared"
 import { sha256Blob, sha256Bytes } from "./hash"
-import { readCachedResult, writeCachedResult } from "./cache"
+import type { OcrPageCache, OcrResultCache } from "./cache-contract"
 import { combinePageMarkdown, combinePageText, normalizeLanguages } from "./image-prep"
 import { buildOcrDocument } from "./document"
 import { maybeEscalateResult } from "./confidence"
@@ -62,6 +62,14 @@ export interface ExtractDeps {
   osTag?: "windows" | "macos" | "linux" | "ios" | "android" | "browser"
   /** Pulls credentials from the keyring (Tauri) or encrypted Dexie (web). */
   credentialsResolver: CredentialsResolver
+  /**
+   * Read-through result cache. REQUIRED on purpose: an optional cache would let
+   * a missed construction site silently stop persisting OCR output. Callers that
+   * genuinely want no persistence pass `createNullOcrCache()`.
+   */
+  cache: OcrResultCache
+  /** Per-page cache for the streaming PDF path. Same required-on-purpose rule. */
+  pageCache: OcrPageCache
   /** Required only when callers pass `kind: "attachment-id"` sources. */
   attachmentResolver?: AttachmentResolver
   /** Required only when callers pass `kind: "file-path"` sources. */
@@ -234,7 +242,7 @@ export async function extract(input: OcrInput, deps: ExtractDeps): Promise<OcrRe
   // Cache lookup.
   const useCache = input.useCache !== false
   if (useCache) {
-    const hit = await readCachedResult({ fileSha, providerId: provider.id, languages })
+    const hit = await deps.cache.read({ fileSha, providerId: provider.id, languages })
     if (hit) {
       deps.onResult?.(hit)
       return hit
@@ -266,7 +274,7 @@ export async function extract(input: OcrInput, deps: ExtractDeps): Promise<OcrRe
   })
 
   if (useCache) {
-    await writeCachedResult({
+    await deps.cache.write({
       fileSha,
       providerId: finalResult.providerId,
       languages,

@@ -2,6 +2,7 @@
 import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { extract, type ExtractDeps } from "./index"
+import { dexieOcrPageCache, dexieOcrResultCache } from "./cache"
 import { createOcrRegistry } from "./registry"
 import {
   DEFAULT_OCR_SETTINGS,
@@ -46,6 +47,10 @@ function makeDeps(overrides: Partial<ExtractDeps> = {}): ExtractDeps {
     platform: overrides.platform ?? "web",
     osTag: overrides.osTag,
     credentialsResolver: overrides.credentialsResolver ?? (async () => ({ secrets: {} })),
+    // Real Dexie-backed caches — this suite runs on fake-indexeddb, so the
+    // `cached:true` / `useCache:false` behaviours stay exercised end to end.
+    cache: overrides.cache ?? dexieOcrResultCache,
+    pageCache: overrides.pageCache ?? dexieOcrPageCache,
     attachmentResolver: overrides.attachmentResolver,
     filePathResolver: overrides.filePathResolver,
     onResult: overrides.onResult,

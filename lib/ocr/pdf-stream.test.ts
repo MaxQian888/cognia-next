@@ -1,11 +1,10 @@
+// The per-page cache is injected through `ExtractDeps.pageCache` now, so these
+// stand-ins are wired into the deps below instead of module-mocking "./cache".
 const readCachedPage = jest.fn()
 const writeCachedPage = jest.fn()
-jest.mock("./cache", () => ({
-  readCachedPage: (...a: unknown[]) => readCachedPage(...a),
-  writeCachedPage: (...a: unknown[]) => writeCachedPage(...a),
-}))
 
 import { extractPdfStreaming } from "./pdf-stream"
+import { createNullOcrCache } from "./cache-contract"
 import { createOcrRegistry } from "./registry"
 import { DEFAULT_OCR_SETTINGS } from "@/types/ocr"
 import type { PdfDocument } from "./pdf-router"
@@ -35,6 +34,13 @@ function deps(): ExtractDeps {
     settings: DEFAULT_OCR_SETTINGS,
     platform: "web",
     credentialsResolver: async () => ({ secrets: {} }),
+    cache: createNullOcrCache(),
+    pageCache: {
+      // Rest-forward so the stand-ins observe the exact arity the pipeline
+      // used — naming `bytesIn` would append an extra `undefined` argument.
+      read: (...args) => readCachedPage(...args),
+      write: (...args) => writeCachedPage(...args),
+    },
   }
 }
 

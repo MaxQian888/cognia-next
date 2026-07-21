@@ -1,3 +1,4 @@
+import { createNullOcrCache, createNullOcrPageCache } from "@/lib/ocr/cache-contract"
 import { buildOcrResultPart, handleOcrSlashCommand, parseOcrArgs } from "./ocr"
 import { createOcrRegistry } from "@/lib/ocr/registry"
 import { DEFAULT_OCR_SETTINGS, type OcrResult } from "@/types/ocr"
@@ -10,6 +11,8 @@ function makeDeps(): ExtractDeps {
     settings: { ...DEFAULT_OCR_SETTINGS },
     platform: "web",
     credentialsResolver: async () => ({ secrets: {} }),
+    cache: createNullOcrCache(),
+    pageCache: createNullOcrPageCache(),
   }
 }
 

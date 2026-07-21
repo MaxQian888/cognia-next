@@ -15,12 +15,17 @@ import {
   type OcrResultRow,
 } from "@/lib/db/ocr-results"
 import type { OcrPage, OcrResult } from "@/types/ocr"
+import type {
+  CacheLookupKey,
+  CacheWriteInput,
+  OcrPageCache,
+  OcrResultCache,
+  PageCacheKey,
+} from "./cache-contract"
 
-export interface CacheLookupKey {
-  fileSha: string
-  providerId: string
-  languages: readonly string[]
-}
+// The key/input shapes are part of the injection contract (they travel with the
+// pipeline into `@cognia/ocr`); this module keeps the Dexie-backed behaviour.
+export type { CacheLookupKey, CacheWriteInput, PageCacheKey } from "./cache-contract"
 
 /** Read a cached OcrResult, or null when the row is missing / unreadable. */
 export async function readCachedResult(key: CacheLookupKey): Promise<OcrResult | null> {
@@ -28,11 +33,6 @@ export async function readCachedResult(key: CacheLookupKey): Promise<OcrResult |
   const row = await getOcrCacheRow(id)
   if (!row) return null
   return decodeOcrResult(row.result)
-}
-
-export interface CacheWriteInput extends CacheLookupKey {
-  result: OcrResult
-  bytesIn: number
 }
 
 /** Store a fresh OcrResult under the canonical cache id. */
@@ -56,10 +56,6 @@ export async function writeCachedResult(input: CacheWriteInput): Promise<void> {
 // ─── Per-page cache (ADR-0024 Phase 2 / 2e — streaming large PDFs) ───────────
 // Reuses the same `ocrResults` table (no schema bump) with a page-suffixed id,
 // so a large-PDF run resumes from whatever pages already landed.
-
-export interface PageCacheKey extends CacheLookupKey {
-  pageNumber: number
-}
 
 function pageCacheId(key: PageCacheKey): string {
   return `${buildOcrCacheId(key.fileSha, key.providerId, key.languages)}|p${key.pageNumber}`
@@ -105,4 +101,21 @@ export async function writeCachedPage(
     bytesIn,
   }
   await putOcrCacheRow(row)
+}
+
+// ─── Injection-contract adapters ─────────────────────────────────────────────
+// The extract pipeline takes these through `ExtractDeps` instead of importing
+// this module, so the pipeline carries no Dexie dependency. `buildOcrDeps()`
+// wires them by default — production behaviour is unchanged.
+
+/** Dexie-backed whole-result cache. */
+export const dexieOcrResultCache: OcrResultCache = {
+  read: readCachedResult,
+  write: writeCachedResult,
+}
+
+/** Dexie-backed per-page cache (streaming large-PDF resume). */
+export const dexieOcrPageCache: OcrPageCache = {
+  read: readCachedPage,
+  write: writeCachedPage,
 }

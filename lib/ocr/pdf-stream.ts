@@ -1,8 +1,8 @@
 /**
  * Streaming / resumable large-PDF OCR (ADR-0024 Phase 2 / 2e).
  *
- * Thin wrapper over `extractPdf` that wires the per-page cache
- * (`readCachedPage`/`writeCachedPage`) and surfaces an `onPage` progress
+ * Thin wrapper over `extractPdf` that wires the injected per-page cache
+ * (`ExtractDeps.pageCache`) and surfaces an `onPage` progress
  * callback. Because each page is cached as it completes, a re-run with the same
  * `fileSha` + provider + languages resumes past whatever already landed — a
  * crash, cancel, or reload mid-document costs only the unfinished pages. No new
@@ -10,7 +10,6 @@
  */
 
 import { extractPdf, type PdfRouterDeps, type PdfRouterInput } from "./pdf-router"
-import { readCachedPage, writeCachedPage } from "./cache"
 import type { OcrPage, OcrResult } from "@/types/ocr"
 
 export interface PdfStreamInput extends PdfRouterInput {
@@ -47,7 +46,9 @@ export async function extractPdfStreaming(
     ...deps,
     onPage: opts.onPage,
     signal: opts.signal,
-    readPage: useCache ? (n) => readCachedPage(keyFor(n)) : undefined,
-    writePage: useCache ? (n, page) => writeCachedPage(keyFor(n), page) : undefined,
+    readPage: useCache ? (n) => deps.extractDeps.pageCache.read(keyFor(n)) : undefined,
+    writePage: useCache
+      ? (n, page) => deps.extractDeps.pageCache.write(keyFor(n), page)
+      : undefined,
   })
 }

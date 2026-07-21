@@ -1,3 +1,4 @@
+import { createNullOcrCache, createNullOcrPageCache } from "@/lib/ocr/cache-contract"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { useOcr } from "./use-ocr"
 import { createOcrRegistry } from "@/lib/ocr/registry"
@@ -39,6 +40,8 @@ function makeDeps(provider: OcrProvider): ExtractDeps {
     settings: { ...DEFAULT_OCR_SETTINGS, defaultProviderId: provider.id },
     platform: "web",
     credentialsResolver: async () => ({ secrets: {} }),
+    cache: createNullOcrCache(),
+    pageCache: createNullOcrPageCache(),
   }
 }
 
