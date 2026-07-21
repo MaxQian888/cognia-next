@@ -138,10 +138,15 @@ export function ContextWorkbenchMobileSheet({
   const t = useTranslations("contextWorkbench")
   return (
     <Sheet open={open} onOpenChange={onOpenChange} modal={open}>
+      {/* A bottom drawer, not a right-edge takeover: it keeps the grab-handle
+          affordance and the swipe-to-dismiss gesture users already had on the
+          Workspace sheet this replaced. Decelerate-in / quicker-out, scaled by
+          the user's motion-speed preference. */}
       <SheetContent
         forceMount
-        side="right"
-        className="w-full gap-0 p-0 sm:max-w-none"
+        side="bottom"
+        showCloseButton={false}
+        className="h-[92dvh] max-h-[92dvh] gap-0 overflow-hidden rounded-t-2xl p-0 pb-[env(safe-area-inset-bottom)] data-[state=open]:[animation-duration:calc(300ms*var(--motion-duration-scale,1))] data-[state=closed]:[animation-duration:calc(200ms*var(--motion-duration-scale,1))]"
         inert={!open}
         aria-hidden={!open}
         data-testid="context-workbench-mobile-sheet"
@@ -150,6 +155,10 @@ export function ContextWorkbenchMobileSheet({
           <SheetTitle>{t("mobileTitle")}</SheetTitle>
           <SheetDescription>{t("mobileDescription")}</SheetDescription>
         </SheetHeader>
+        <div
+          aria-hidden
+          className="mx-auto mt-2 mb-1 h-1 w-10 shrink-0 rounded-full bg-muted-foreground/30"
+        />
         <Activity mode={open ? "visible" : "hidden"}>
           <ContextWorkbench
             {...workbenchProps}
@@ -413,8 +422,14 @@ export function ContextWorkbench({
     window.addEventListener("pointerup", handleUp)
   }
 
+  // The mobile Sheet lays the rail out horizontally, so the arrow keys that
+  // walk it have to follow the visual axis rather than the vertical default.
+  const railIsHorizontal = placement === "mobile-sheet"
   const handleActivityKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
-    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return
+    const [nextKey, previousKey] = railIsHorizontal
+      ? ["ArrowRight", "ArrowLeft"]
+      : ["ArrowDown", "ArrowUp"]
+    if (![nextKey, previousKey, "Home", "End"].includes(event.key)) return
     const buttons = Array.from(
       event.currentTarget.querySelectorAll<HTMLButtonElement>("[data-workbench-activity-button]")
     )
@@ -425,7 +440,7 @@ export function ContextWorkbench({
         ? 0
         : event.key === "End"
           ? buttons.length - 1
-          : event.key === "ArrowDown"
+          : event.key === nextKey
             ? (currentIndex + 1) % buttons.length
             : (currentIndex - 1 + buttons.length) % buttons.length
     event.preventDefault()
@@ -467,7 +482,9 @@ export function ContextWorkbench({
         aria-modal={layout.mode === "focus" ? true : undefined}
         className={cn(
           "relative flex h-full min-h-0 overflow-hidden border-l bg-card/40",
-          placement === "mobile-sheet" && "w-full border-l-0",
+          // A phone can't spare 48px of its width for a vertical rail, so the
+          // sheet stacks: rail across the top, panel body beneath it.
+          placement === "mobile-sheet" && "w-full flex-col border-l-0",
           layout.mode === "collapsed" && "w-12",
           className,
           // Focus used to snap straight to a full-screen takeover. Zooming it in
@@ -504,7 +521,12 @@ export function ContextWorkbench({
         ) : null}
         <TooltipProvider delayDuration={300}>
           <nav
-            className="flex w-12 shrink-0 flex-col items-center gap-1 border-r bg-muted/30 py-2"
+            className={cn(
+              "flex shrink-0 items-center gap-1 bg-muted/30",
+              railIsHorizontal
+                ? "h-12 w-full overflow-x-auto border-b px-2"
+                : "w-12 flex-col border-r py-2"
+            )}
             aria-label={t("contextWorkbench.activityRailLabel")}
             data-testid="context-workbench-activity-rail"
             onKeyDown={handleActivityKeyDown}
@@ -545,29 +567,47 @@ export function ContextWorkbench({
                 </Tooltip>
               )
             })}
-            <div className="mt-auto flex flex-col gap-1">
-              <Button
-                type="button"
-                size="icon-sm"
-                variant="ghost"
-                aria-label={
-                  layout.userPinned
-                    ? t("contextWorkbench.actions.unpin")
-                    : t("contextWorkbench.actions.pin")
-                }
-                onClick={() => setUserPinned(scopeKey, !layout.userPinned)}
-              >
-                <PinIcon className={cn("size-4", layout.userPinned && "fill-current")} />
-              </Button>
-              <Button
-                type="button"
-                size="icon-sm"
-                variant="ghost"
-                aria-label={t("contextWorkbench.actions.collapse")}
-                onClick={() => (onCollapse ? onCollapse() : setMode(scopeKey, "collapsed"))}
-              >
-                <PanelRightCloseIcon className="size-4" />
-              </Button>
+            {/* Pinning suppresses automatic reveals, which is impossible to
+                guess from a bare pin glyph — these two were the only rail
+                buttons without a tooltip to explain them. */}
+            <div className={cn("flex gap-1", railIsHorizontal ? "ml-auto" : "mt-auto flex-col")}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant={layout.userPinned ? "secondary" : "ghost"}
+                    aria-label={
+                      layout.userPinned
+                        ? t("contextWorkbench.actions.unpin")
+                        : t("contextWorkbench.actions.pin")
+                    }
+                    aria-pressed={layout.userPinned}
+                    onClick={() => setUserPinned(scopeKey, !layout.userPinned)}
+                  >
+                    <PinIcon className={cn("size-4", layout.userPinned && "fill-current")} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side={railIsHorizontal ? "bottom" : "left"}>
+                  {t("contextWorkbench.actions.pinHint")}
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={t("contextWorkbench.actions.collapse")}
+                    onClick={() => (onCollapse ? onCollapse() : setMode(scopeKey, "collapsed"))}
+                  >
+                    <PanelRightCloseIcon className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side={railIsHorizontal ? "bottom" : "left"}>
+                  {t("contextWorkbench.actions.collapse")}
+                </TooltipContent>
+              </Tooltip>
             </div>
           </nav>
         </TooltipProvider>

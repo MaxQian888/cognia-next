@@ -251,6 +251,63 @@ describe("ContextWorkbench", () => {
     expect(screen.queryByRole("button", { name: "Focus" })).not.toBeInTheDocument()
   })
 
+  it("lays the mobile activity rail out horizontally and walks it with left/right", () => {
+    const makePanel = (id: string, activity: string): ContextPanelDefinition => ({
+      id,
+      activity,
+      labelKey: `contextWorkbench.panels.${id}`,
+      appliesTo: () => true,
+      retention: "stateful",
+      renderer: () => <div>{id}</div>,
+    })
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ContextWorkbenchMobileSheet
+          open
+          onOpenChange={jest.fn()}
+          workbenchInstanceId="mobile-rail"
+          resource={resource}
+          panels={[makePanel("comments", "comments"), makePanel("history", "review")]}
+        />
+      </NextIntlClientProvider>
+    )
+
+    // A phone cannot spare 48px of width for a vertical rail, so the sheet
+    // stacks — which also means the arrow keys must follow the visual axis.
+    const rail = screen.getByTestId("context-workbench-activity-rail")
+    expect(rail.className).toContain("w-full")
+    expect(rail.className).toContain("border-b")
+    expect(rail.className).not.toContain("flex-col")
+    expect(rail.className).not.toContain("w-12")
+
+    const first = screen.getByRole("button", { name: "contextWorkbench.panels.comments" })
+    const second = screen.getByRole("button", { name: "contextWorkbench.panels.history" })
+    first.focus()
+    fireEvent.keyDown(first, { key: "ArrowRight" })
+    expect(document.activeElement).toBe(second)
+
+    // The vertical binding must go quiet here, or a rail laid out horizontally
+    // would still answer to Up/Down and skip two entries per press.
+    fireEvent.keyDown(second, { key: "ArrowDown" })
+    expect(document.activeElement).toBe(second)
+  })
+
+  it("explains what pinning does instead of leaving a bare pin glyph", async () => {
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ContextWorkbench workbenchInstanceId="pin-hint" resource={resource} panels={[]} />
+      </NextIntlClientProvider>
+    )
+
+    const pin = screen.getByRole("button", { name: "Pin panel" })
+    expect(pin).toHaveAttribute("aria-pressed", "false")
+    fireEvent.click(pin)
+    expect(screen.getByRole("button", { name: "Unpin panel" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+  })
+
   it("pauses mobile panel effects while the force-mounted Sheet is closed", () => {
     const mounted = jest.fn()
     const cleanedUp = jest.fn()

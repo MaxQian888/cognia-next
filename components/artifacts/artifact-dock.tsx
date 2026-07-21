@@ -119,21 +119,23 @@ function useDockPanelSync(scopeKey: string, panelIds: string[], activePanelId?: 
 /** Stable identity so the sync effects don't re-run on every render. */
 const EMPTY_PANEL_IDS: string[] = []
 
+/**
+ * Set by the Sheet host (`<ArtifactPanel />`). `panelMode` is the host's own
+ * density decision — tablet still wants Monaco, only a phone drops to the light
+ * editor — so the panels must not re-derive it from the viewport.
+ */
+export interface SheetHost {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  panelMode: ArtifactPanelMode
+}
+
 export function ArtifactContextWorkbench({
   artifactId,
   mobile,
 }: {
   artifactId: string
-  /**
-   * Set by the Sheet host (`<ArtifactPanel />`). `panelMode` is the host's own
-   * density decision — tablet still wants Monaco, only a phone drops to the
-   * light editor — so the panels must not re-derive it from the viewport.
-   */
-  mobile?: {
-    open: boolean
-    onOpenChange: (open: boolean) => void
-    panelMode: ArtifactPanelMode
-  }
+  mobile?: SheetHost
 }) {
   const tWorkbench = useTranslations("contextWorkbench")
   const workbenchInstanceId = useContextWorkbenchInstanceId("artifact")
@@ -343,7 +345,7 @@ export function ArtifactContextWorkbench({
       },
       {
         id: "workspace",
-        activity: "inspect",
+        activity: "workspace",
         labelKey: "artifacts.dock.workspaceMode",
         icon: SearchCodeIcon,
         order: 30,
@@ -386,7 +388,7 @@ export function ArtifactContextWorkbench({
   // The id outlived its artifact (evicted by the persist cap, or cleared in
   // another tab). Fall through to the session workbench so the dock keeps a
   // single shell.
-  if (!artifact) return mobile ? null : <SessionContextWorkbench />
+  if (!artifact) return <SessionContextWorkbench mobile={mobile} />
   const resource: ContextResource = {
     kind: "artifact",
     artifactId,
@@ -469,11 +471,12 @@ function ArtifactSelectionCommentPanel({
  * workbench chrome the artifact surface uses, so the chat right rail never
  * changes shape.
  */
-export function SessionContextWorkbench() {
+export function SessionContextWorkbench({ mobile }: { mobile?: SheetHost }) {
   const workbenchInstanceId = useContextWorkbenchInstanceId("artifact")
   const activeSessionId = useChatStore((state) => state.activeSessionId)
   const setDockCollapsed = useArtifactDockLayoutStore((state) => state.setDockCollapsed)
   const workspaceAvailable = hasWorkspaceFsBackend()
+  const workspaceLayout = mobile?.panelMode === "mobile" ? "mobile" : "desktop"
   const dockWidthHint = useDockWidthHint()
   const scopeKey = `${workbenchInstanceId}::session:${activeSessionId ?? "none"}`
   const activePanelId = useContextWorkbenchStore(
@@ -511,7 +514,7 @@ export function SessionContextWorkbench() {
       },
       {
         id: "workspace",
-        activity: "inspect",
+        activity: "workspace",
         labelKey: "artifacts.dock.workspaceMode",
         icon: SearchCodeIcon,
         order: 30,
@@ -520,13 +523,13 @@ export function SessionContextWorkbench() {
         preferredMode: "wide",
         renderer: () =>
           workspaceAvailable ? (
-            <DockWorkspace activeSessionId={activeSessionId} />
+            <DockWorkspace activeSessionId={activeSessionId} layout={workspaceLayout} />
           ) : (
             <ContextCapabilityUnavailable capability="workspace" />
           ),
       },
     ],
-    [activeSessionId, workspaceAvailable]
+    [activeSessionId, workspaceAvailable, workspaceLayout]
   )
   useDockPanelSync(
     scopeKey,
@@ -541,7 +544,16 @@ export function SessionContextWorkbench() {
     capabilities: resolveContextCapabilities({ kind: "session", workspaceAvailable }),
   }
 
-  return (
+  return mobile ? (
+    <ContextWorkbenchMobileSheet
+      open={mobile.open}
+      onOpenChange={mobile.onOpenChange}
+      workbenchInstanceId={workbenchInstanceId}
+      resource={resource}
+      panels={panels}
+      onCollapse={() => mobile.onOpenChange(false)}
+    />
+  ) : (
     <ContextWorkbench
       workbenchInstanceId={workbenchInstanceId}
       resource={resource}

@@ -5204,6 +5204,7 @@
       "focus": "Focus mode",
       "narrow": "Narrow mode",
       "pin": "Pin panel",
+      "pinHint": "Pinned panels stay put — automatic reveals become badges instead",
       "resize": "Resize workbench",
       "retry": "Retry panel",
       "unpin": "Unpin panel",

@@ -14,8 +14,14 @@ export type ContextCapability =
   | "templates"
   | "workspace"
   | "history"
+/**
+ * `workspace` is its own activity rather than a member of `inspect`: sharing
+ * a rail button with `metadata` (which sorts first) buried the project
+ * workspace behind an ℹ️ icon plus a group tab, turning what used to be a
+ * one-click surface into a two-level navigation.
+ */
 export type CanonicalContextActivity =
-  "ai" | "comments" | "inspect" | "review" | "preview-run" | "templates"
+  "ai" | "comments" | "inspect" | "review" | "preview-run" | "templates" | "workspace"
 export type ContextActivity = CanonicalContextActivity | (string & {})
 
 export interface TextSelectionCoordinates {

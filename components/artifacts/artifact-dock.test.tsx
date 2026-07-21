@@ -17,8 +17,21 @@ jest.mock("./artifact-panel-content", () => ({
 }))
 
 jest.mock("@/components/context-workbench/resource-workbench-chat-panel", () => ({
-  ResourceWorkbenchChatPanel: ({ pendingPrompt }: { pendingPrompt?: string | null }) => (
-    <div data-testid="resource-workbench-chat">{pendingPrompt}</div>
+  ResourceWorkbenchChatPanel: ({
+    pendingPrompt,
+    getResourceContext,
+    onPendingPromptConsumed,
+  }: {
+    pendingPrompt?: string | null
+    getResourceContext: () => string
+    onPendingPromptConsumed: () => void
+  }) => (
+    <div data-testid="resource-workbench-chat" data-context={getResourceContext()}>
+      {pendingPrompt}
+      <button type="button" data-testid="consume-prompt" onClick={onPendingPromptConsumed}>
+        consume
+      </button>
+    </div>
   ),
 }))
 jest.mock("@/hooks/chat/use-resource-workbench-session", () => ({
@@ -45,8 +58,18 @@ jest.mock("./artifact-review-view", () => ({
 }))
 
 jest.mock("@/components/context-workbench/context-comments-panel", () => ({
-  ContextCommentsPanel: ({ revision }: { revision: string }) => (
-    <div data-testid="comments-panel" data-revision={revision} />
+  ContextCommentsPanel: ({
+    revision,
+    anchor,
+  }: {
+    revision: string
+    anchor?: { kind: string; start: number; end: number; revision: string }
+  }) => (
+    <div
+      data-testid="comments-panel"
+      data-revision={revision}
+      data-anchor={anchor ? `${anchor.kind}:${anchor.start}-${anchor.end}@${anchor.revision}` : ""}
+    />
   ),
 }))
 
@@ -69,7 +92,7 @@ jest.mock("@/stores/chat", () => ({
     selector({ activeSessionId: "sess-1" }),
 }))
 
-import { ArtifactContextWorkbench, ArtifactDock } from "./artifact-dock"
+import { ArtifactContextWorkbench, ArtifactDock, SessionContextWorkbench } from "./artifact-dock"
 import {
   DOCK_MODE_WIDTH_PERCENT,
   useArtifactDockLayoutStore,
@@ -160,11 +183,7 @@ describe("ArtifactDock — converged workbench shell", () => {
     render(<ArtifactDock />)
     expect(screen.getByTestId("browser-preview")).toBeInTheDocument()
 
-    // On the artifact surface `workspace` still shares the inspect activity
-    // with `metadata`, so reaching it costs a rail click plus a group tab.
-    // P2 gives it its own activity; this walks the path as it stands today.
-    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.metadata.artifactTitle" }))
-    fireEvent.click(screen.getByRole("tab", { name: "artifacts.dock.workspaceMode" }))
+    fireEvent.click(screen.getByRole("button", { name: "artifacts.dock.workspaceMode" }))
 
     expect(activePanelId("artifact:artifact-1")).toBe("workspace")
     expect(screen.getByTestId("workspace")).toHaveAttribute("data-session", "sess-1")
@@ -190,6 +209,74 @@ describe("ArtifactDock — converged workbench shell", () => {
 
     expect(screen.queryByTestId("workspace")).not.toBeInTheDocument()
     expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
+  })
+
+  it("feeds the artifact body to its embedded AI panel and clears a consumed prompt", () => {
+    activateArtifact()
+    render(<ArtifactDock />)
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("artifact-context-selection", {
+          detail: { artifactId: "artifact-1", start: 0, end: 8 },
+        })
+      )
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.resourceChat" }))
+    expect(screen.getByTestId("resource-workbench-chat")).toHaveAttribute(
+      "data-context",
+      "selected text"
+    )
+
+    fireEvent.click(screen.getByRole("tab", { name: "contextWorkbench.aiActions" }))
+    fireEvent.change(screen.getByRole("textbox", { name: "label" }), {
+      target: { value: "Rewrite this" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "sendToAi" }))
+    expect(screen.getByTestId("resource-workbench-chat")).toHaveTextContent("Rewrite this")
+
+    // Consuming it must clear the hand-off, or the prompt replays on every
+    // later visit to the panel.
+    fireEvent.click(screen.getByTestId("consume-prompt"))
+    expect(screen.getByTestId("resource-workbench-chat")).not.toHaveTextContent("Rewrite this")
+  })
+
+  it("collapses the dock from the artifact surface rail too", () => {
+    activateArtifact()
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+    render(<ArtifactDock />)
+
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.actions.collapse" }))
+
+    expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
+  })
+
+  it("dismisses the Sheet instead of collapsing when hosted on mobile", () => {
+    activateArtifact()
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+    const onOpenChange = jest.fn()
+    render(
+      <ArtifactContextWorkbench
+        artifactId="artifact-1"
+        mobile={{ open: true, onOpenChange, panelMode: "mobile" }}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.actions.collapse" }))
+
+    // A Sheet has no collapsed rail to shrink to — collapsing must close it,
+    // and must leave the separate desktop dock state alone.
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+    expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
+  })
+
+  it("dismisses the Sheet from the session surface too", () => {
+    const onOpenChange = jest.fn()
+    render(<SessionContextWorkbench mobile={{ open: true, onOpenChange, panelMode: "mobile" }} />)
+
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.actions.collapse" }))
+
+    expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
   it("collapses the dock from the workbench rail", () => {
@@ -284,13 +371,19 @@ describe("ArtifactDock — converged workbench shell", () => {
     )
   })
 
-  it("moves Artifact, History, and Workspace into the Context Workbench registry host", () => {
+  it("gives the workspace its own rail entry rather than burying it under metadata", () => {
     activateArtifact(3)
-
     render(<ArtifactDock />)
-    expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
+
+    // `workspace` used to share the inspect activity with `metadata`, which
+    // sorts first — so the project workspace sat behind an info icon plus a
+    // group tab. It is a one-click rail entry now, and metadata keeps its own.
+    fireEvent.click(screen.getByRole("button", { name: "artifacts.dock.workspaceMode" }))
+    expect(screen.getByTestId("workspace")).toBeInTheDocument()
+    expect(activePanelId("artifact:artifact-1")).toBe("workspace")
+
     fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.metadata.artifactTitle" }))
-    expect(screen.getByRole("tab", { name: "artifacts.dock.workspaceMode" })).toBeInTheDocument()
+    expect(activePanelId("artifact:artifact-1")).toBe("metadata")
   })
 
   it("reveals the proposal review as soon as one arrives", () => {
@@ -337,7 +430,27 @@ describe("ArtifactDock — converged workbench shell", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.comments" }))
 
+    // No selection: a whole-resource comment, carrying no range.
     expect(screen.getByTestId("comments-panel")).toHaveAttribute("data-revision", "4")
+    expect(screen.getByTestId("comments-panel")).toHaveAttribute("data-anchor", "")
+  })
+
+  it("pins a comment made on a selection to that text range and revision", () => {
+    activateArtifact(4)
+    render(<ArtifactDock />)
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("artifact-context-selection", {
+          detail: { artifactId: "artifact-1", start: 2, end: 9 },
+        })
+      )
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.comments" }))
+
+    // The revision travels with the range: without it a later edit would leave
+    // the comment silently pointing at different text.
+    expect(screen.getByTestId("comments-panel")).toHaveAttribute("data-anchor", "text-range:2-9@4")
   })
 
   it("routes an Artifact selection comment into its resource AI panel", () => {

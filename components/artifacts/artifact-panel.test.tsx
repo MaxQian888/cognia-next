@@ -106,10 +106,17 @@ function makeArtifact(type: "code" | "html" = "code") {
 }
 
 describe("ArtifactPanel", () => {
-  it("renders the recent-artifacts list when no artifact is active", () => {
+  it("hosts the session workbench when no artifact is active", () => {
     useArtifactStore.setState({ panelOpen: true })
     render(<ArtifactPanel />)
-    expect(screen.getByText("recentArtifacts")).toBeInTheDocument()
+
+    // The empty state used to be a plain Sheet that could only show the
+    // artifact list, leaving the browser/comments/metadata panels unreachable
+    // on a phone. It is the same workbench shell as everything else now.
+    expect(screen.getByTestId("context-workbench-mobile-sheet")).toBeInTheDocument()
+    expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
+    expect(screen.getByTestId("list")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "browser.title" })).toBeInTheDocument()
   })
 
   it("renders the active artifact's identity row", () => {
@@ -150,6 +157,20 @@ describe("ArtifactPanel", () => {
     expect(screen.getByTestId("artifact-tab-preview")).toBeInTheDocument()
   })
 
+  it("dismissing the Sheet closes the artifact panel", async () => {
+    makeArtifact()
+    render(<ArtifactPanel />)
+    expect(useArtifactStore.getState().panelOpen).toBe(true)
+
+    // The rail's collapse button is the Sheet's dismiss affordance here — a
+    // Sheet has no collapsed strip to shrink into.
+    fireEvent.click(
+      await screen.findByRole("button", { name: "contextWorkbench.actions.collapse" })
+    )
+
+    expect(useArtifactStore.getState().panelOpen).toBe(false)
+  })
+
   it("clicking the close action closes the panel", async () => {
     makeArtifact()
     render(<ArtifactPanel />)
@@ -161,11 +182,9 @@ describe("ArtifactPanel", () => {
   })
 
   it("overrides the Sheet slide to a snappier pace that honors motion-speed (not the 500/300ms default)", async () => {
-    // No active artifact: this is the plain Sheet host, the one surface that
-    // still owns its own slide (an artifact routes to the workbench Sheet).
-    useArtifactStore.setState({ panelOpen: true })
+    makeArtifact()
     render(<ArtifactPanel />)
-    const content = await screen.findByTestId("artifact-panel")
+    const content = await screen.findByTestId("context-workbench-mobile-sheet")
     // Overrides via animation-duration (the property that drives the slide),
     // scaled by --motion-duration-scale so motion-speed applies.
     expect(content.className).toContain(

@@ -99,9 +99,6 @@ jest.mock("./artifact-dock", () => ({
 jest.mock("./artifact-panel", () => ({
   ArtifactPanel: () => <div data-testid="sheet-panel" />,
 }))
-jest.mock("./workspace-mode/mobile-workspace-sheet", () => ({
-  MobileWorkspaceSheet: () => <div data-testid="workspace-sheet" />,
-}))
 jest.mock("./workspace-mode/workspace-reveal-opener", () => ({
   WorkspaceRevealOpener: () => <div data-testid="workspace-reveal-opener" />,
 }))
@@ -142,8 +139,9 @@ describe("ArtifactWorkspaceDock", () => {
       </ArtifactWorkspaceDock>
     )
     expect(screen.getByTestId("chat")).toBeInTheDocument()
-    expect(screen.getByTestId("sheet-panel")).toBeInTheDocument()
-    expect(screen.getByTestId("workspace-sheet")).toBeInTheDocument()
+    // ONE Sheet now, not two: the standalone Workspace Sheet is gone and the
+    // workspace is a panel inside the workbench Sheet like everything else.
+    expect(screen.getAllByTestId("sheet-panel")).toHaveLength(1)
     expect(screen.getByTestId("workspace-reveal-opener")).toBeInTheDocument()
     expect(screen.queryByTestId("artifact-workspace-dock")).not.toBeInTheDocument()
   })
@@ -156,12 +154,10 @@ describe("ArtifactWorkspaceDock", () => {
       </ArtifactWorkspaceDock>
     )
     expect(screen.getByTestId("sheet-panel")).toBeInTheDocument()
-    expect(screen.getByTestId("workspace-sheet")).toBeInTheDocument()
   })
 
-  it("closes the Artifact Sheet when a Workspace reveal opens on mobile", async () => {
+  it("raises the single Sheet when a Workspace reveal arrives on mobile", async () => {
     useBreakpointMock.mockReturnValue("mobile")
-    act(() => useArtifactStore.getState().openPanel("artifact"))
     render(
       <ArtifactWorkspaceDock>
         <div data-testid="chat" />
@@ -175,11 +171,13 @@ describe("ArtifactWorkspaceDock", () => {
       })
     })
 
-    await waitFor(() => expect(useArtifactStore.getState().panelOpen).toBe(false))
+    // The reveal used to have to close the Artifact Sheet to make room for the
+    // Workspace one; now it just opens the one Sheet on the workspace panel.
+    await waitFor(() => expect(useArtifactStore.getState().panelOpen).toBe(true))
     expect(useArtifactDockLayoutStore.getState().dockProfile).toBe("workspace")
   })
 
-  it("closes the Workspace Sheet when a new artifact arrives on mobile", async () => {
+  it("keeps the sheet-open request in step when the panel closes on mobile", async () => {
     useBreakpointMock.mockReturnValue("mobile")
     act(() => {
       useArtifactDockLayoutStore.getState().revealWorkspaceReview({
@@ -193,11 +191,13 @@ describe("ArtifactWorkspaceDock", () => {
       </ArtifactWorkspaceDock>
     )
 
-    act(() => useArtifactStore.setState({ activeArtifactId: "artifact-mobile" }))
+    // The reveal raised the Sheet; closing the panel must retract the request
+    // too, or a stale `mobileSheetOpen` re-opens it on the next render.
+    await waitFor(() => expect(useArtifactStore.getState().panelOpen).toBe(true))
+    act(() => useArtifactStore.getState().closePanel())
 
-    // The arriving artifact only dismisses the Workspace Sheet; it must not
-    // write a surface — panel selection belongs to the workbench alone.
     await waitFor(() => expect(useArtifactDockLayoutStore.getState().mobileSheetOpen).toBe(false))
+    expect(useArtifactStore.getState().panelOpen).toBe(false)
   })
 
   it("auto-expands the dock when a new artifact becomes active", () => {

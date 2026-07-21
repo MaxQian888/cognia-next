@@ -3,8 +3,8 @@
 /**
  * ArtifactWorkspaceDock — wraps the chat workspace so a docked, resizable
  * artifacts panel can sit in the right rail on desktop. On tablet/mobile it
- * renders the children plus Artifact and Workspace Sheet fallbacks. Both
- * sheets reuse the same content components as their desktop dock surfaces.
+ * renders the children plus a single workbench Sheet fallback, which hosts the
+ * same panels — and the same resources — as the desktop dock.
  *
  * Desktop layout (Codex / Claude-artifacts style):
  *   ┌───────────────────────────┬──────────────┐
@@ -32,7 +32,6 @@ import {
 import { useArtifactDockShortcuts } from "@/hooks/artifacts/use-artifact-dock-shortcuts"
 import { ArtifactPanel } from "./artifact-panel"
 import { ArtifactDock } from "./artifact-dock"
-import { MobileWorkspaceSheet } from "./workspace-mode/mobile-workspace-sheet"
 import { WorkspaceRevealOpener } from "./workspace-mode/workspace-reveal-opener"
 
 /**
@@ -79,35 +78,28 @@ export function ArtifactWorkspaceDock({ children }: { children: ReactNode }) {
 }
 
 function ArtifactWorkspaceDockNarrow({ children }: { children: ReactNode }) {
-  const dockProfile = useArtifactDockLayoutStore((state) => state.dockProfile)
   const mobileSheetOpen = useArtifactDockLayoutStore((state) => state.mobileSheetOpen)
   const setMobileSheetOpen = useArtifactDockLayoutStore((state) => state.setMobileSheetOpen)
   const panelOpen = useArtifactStore((state) => state.panelOpen)
-  const panelView = useArtifactStore((state) => state.panelView)
-  const closePanel = useArtifactStore((state) => state.closePanel)
-  const activeArtifactId = useArtifactStore((state) => state.activeArtifactId)
-  const previousArtifactId = useRef(activeArtifactId)
+  const openPanel = useArtifactStore((state) => state.openPanel)
 
-  // Two Sheets can't both own the screen. P2 collapses them into one workbench
-  // Sheet and this mutual exclusion goes away with it.
+  // A reveal from outside (terminal link, Edit/Write review, the browser
+  // button) asks for the Sheet by raising `mobileSheetOpen`. There is now a
+  // single Sheet to raise, so that request simply opens the artifact panel —
+  // the two-Sheet mutual-exclusion dance this replaced is gone.
   useEffect(() => {
-    if (dockProfile === "workspace" && mobileSheetOpen && panelOpen && panelView === "artifact") {
-      closePanel()
-    }
-  }, [closePanel, dockProfile, mobileSheetOpen, panelOpen, panelView])
+    if (mobileSheetOpen && !panelOpen) openPanel("artifact")
+  }, [mobileSheetOpen, openPanel, panelOpen])
 
   useEffect(() => {
-    const previous = previousArtifactId.current
-    previousArtifactId.current = activeArtifactId
-    if (activeArtifactId && activeArtifactId !== previous) setMobileSheetOpen(false)
-  }, [activeArtifactId, setMobileSheetOpen])
+    if (!panelOpen && mobileSheetOpen) setMobileSheetOpen(false)
+  }, [mobileSheetOpen, panelOpen, setMobileSheetOpen])
 
   return (
     <div data-testid="artifact-workspace-dock-mobile" className="flex min-h-0 flex-1 flex-col">
       <WorkspaceRevealOpener />
       {children}
       <ArtifactPanel />
-      <MobileWorkspaceSheet />
     </div>
   )
 }
