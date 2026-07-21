@@ -1,0 +1,56 @@
+{
+  "name": "@cognia/ocr",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cognia OCR core: the dependency-injected extract() pipeline, provider registry and auto-router, 18 cloud/local provider adapters, PDF routing and streaming, confidence escalation, and the hOCR/citation output layer — framework-agnostic, zero app imports.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "cognia-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
+    },
+    "./*": {
+      "cognia-source": "./src/*.ts",
+      "types": "./dist/*.d.ts",
+      "import": "./dist/*.js",
+      "require": "./dist/*.cjs",
+      "default": "./dist/*.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cognia/provider-types": "workspace:*"
+  },
+  "peerDependencies": {
+    "@tauri-apps/api": "*",
+    "pdfjs-dist": "*",
+    "tesseract.js": "*"
+  },
+  "peerDependenciesMeta": {
+    "@tauri-apps/api": {
+      "optional": true
+    },
+    "pdfjs-dist": {
+      "optional": true
+    },
+    "tesseract.js": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

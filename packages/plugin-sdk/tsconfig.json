@@ -41,7 +41,9 @@
       "@cognia/agent-config-types": ["../../packages/agent-config-types/src/index.ts"],
       "@cognia/agent-config-types/*": ["../../packages/agent-config-types/src/*"],
       "@cognia/tts": ["../../packages/tts/src/index.ts"],
-      "@cognia/tts/*": ["../../packages/tts/src/*"]
+      "@cognia/tts/*": ["../../packages/tts/src/*"],
+      "@cognia/ocr": ["../../packages/ocr/src/index.ts"],
+      "@cognia/ocr/*": ["../../packages/ocr/src/*"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "../../types/optional-modules.d.ts"],

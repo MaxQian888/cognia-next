@@ -47,6 +47,12 @@
     "lines": 75,
     "statements": 75
   },
+  "./packages/ocr/src/**/*.{ts,tsx}": {
+    "branches": 50,
+    "functions": 60,
+    "lines": 75,
+    "statements": 75
+  },
   "./packages/vector/src/**/*.{ts,tsx}": {
     "branches": 50,
     "functions": 60,

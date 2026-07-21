@@ -11,7 +11,9 @@
       // a shim re-exporting `@cognia/memory/types/memory`. A child `paths` REPLACES
       // the root's, so the target must be re-listed here (relative to baseUrl "..").
       "@cognia/memory": ["packages/memory/src/index.ts"],
-      "@cognia/memory/*": ["packages/memory/src/*"]
+      "@cognia/memory/*": ["packages/memory/src/*"],
+      "@cognia/ocr": ["packages/ocr/src/index.ts"],
+      "@cognia/ocr/*": ["packages/ocr/src/*"]
     }
   }
 }

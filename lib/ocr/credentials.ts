@@ -68,8 +68,7 @@ export async function resolveMainProviderKey(mainProviderId: string): Promise<st
   const snapshot = createProviderSettingsSnapshot({
     defaultProvider: settings.defaultProvider,
     providerSettings: settings.providerSettings as
-      | Record<string, ProviderSettingsEntry>
-      | undefined,
+      Record<string, ProviderSettingsEntry> | undefined,
     customProviders: settings.customProviders as RichCustomProviderEntry[] | undefined,
   })
   const resolution = resolveFeatureProvider(

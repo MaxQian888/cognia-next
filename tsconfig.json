@@ -71,7 +71,9 @@
       "@cognia/agent-config-types": ["./packages/agent-config-types/src/index.ts"],
       "@cognia/agent-config-types/*": ["./packages/agent-config-types/src/*"],
       "@cognia/memory": ["./packages/memory/src/index.ts"],
-      "@cognia/memory/*": ["./packages/memory/src/*"]
+      "@cognia/memory/*": ["./packages/memory/src/*"],
+      "@cognia/ocr": ["./packages/ocr/src/index.ts"],
+      "@cognia/ocr/*": ["./packages/ocr/src/*"]
     }
   },
   "include": [

@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "jest"],
+    // tsup's .d.ts emit runs a standalone tsc that can't share the root's
+    // incremental build-info file, and rollup-plugin-dts injects a baseUrl that
+    // TS 6.x flags as deprecated. Scope both overrides to this package's build.
+    "incremental": false,
+    "ignoreDeprecations": "6.0",
+    // A child tsconfig's `paths` REPLACES the parent's, so every `@cognia/*`
+    // this package imports must be re-listed here against the sibling src.
+    // `@/*` stays mapped only so a stray app import is caught by typecheck
+    // rather than silently resolving to `any`.
+    "paths": {
+      "@/*": ["../../*"],
+      "@cognia/provider-types": ["../provider-types/src/index.ts"],
+      "@cognia/provider-types/*": ["../provider-types/src/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["node_modules", "dist"]
+}

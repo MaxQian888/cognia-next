@@ -13,7 +13,9 @@
       // Subpath targets are per-file, so only the type module is pulled in — never
       // the memory logic.
       "@cognia/memory": ["../memory/src/index.ts"],
-      "@cognia/memory/*": ["../memory/src/*"]
+      "@cognia/memory/*": ["../memory/src/*"],
+      "@cognia/ocr": ["../ocr/src/index.ts"],
+      "@cognia/ocr/*": ["../ocr/src/*"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
