@@ -1,5 +1,5 @@
 import { toMemoryWireRow } from "./wire"
-import type { Memory } from "@/types/memory/memory"
+import type { Memory } from "../types/memory"
 
 const ROW: Memory = {
   id: "m1",

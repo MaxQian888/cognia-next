@@ -1,6 +1,6 @@
-import type { Memory } from "@/types/memory/memory"
+import type { Memory } from "../types/memory"
 import { applyMemoryContext, type ApplyMemoryContextDeps } from "./apply-memory-context"
-import { __resetMemoryBm25Cache } from "@/lib/memory/retrieve/retriever"
+import { __resetMemoryBm25Cache } from "../retrieve/retriever"
 
 // The retriever's BM25 index is module-level cached by a `{count}:{updatedAt}`
 // signature. These tests use a fixed `updatedAt`, so single-candidate corpora

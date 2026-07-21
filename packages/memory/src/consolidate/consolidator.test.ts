@@ -1,5 +1,5 @@
-import type { Memory } from "@/types/memory/memory"
-import type { MemoryCandidate } from "@/lib/memory/extract/extractor"
+import type { Memory } from "../types/memory"
+import type { MemoryCandidate } from "../extract/extractor"
 import { consolidate, sameMemoryNamespace, type ConsolidateDeps } from "./consolidator"
 
 let seq = 0

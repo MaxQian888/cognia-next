@@ -1,4 +1,4 @@
-import type { Memory } from "@/types/memory/memory"
+import type { Memory } from "./types/memory"
 import { assembleProceduralBlock } from "./procedural"
 
 let seq = 0

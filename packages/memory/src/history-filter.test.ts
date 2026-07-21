@@ -1,4 +1,4 @@
-import type { Memory } from "@/types/memory/memory"
+import type { Memory } from "./types/memory"
 import { computeMemoryStats, filterAndSortMemories } from "./history-filter"
 
 let seq = 0

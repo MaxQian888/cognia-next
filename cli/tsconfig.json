@@ -6,7 +6,12 @@
       "@/lib/native/external-agent": ["cli/src/runtime/external/native-shim.ts"],
       "@/lib/ai/agent/external/agent-transport": ["cli/src/runtime/external/host-branch.ts"],
       "@/lib/ai/agent/external/agent-hooks": ["cli/src/runtime/external/agent-hooks-shim.ts"],
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      // The CLI reaches memory types through `@/types/memory/memory`, which is now
+      // a shim re-exporting `@cognia/memory/types/memory`. A child `paths` REPLACES
+      // the root's, so the target must be re-listed here (relative to baseUrl "..").
+      "@cognia/memory": ["packages/memory/src/index.ts"],
+      "@cognia/memory/*": ["packages/memory/src/*"]
     }
   }
 }

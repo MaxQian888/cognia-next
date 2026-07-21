@@ -1,0 +1,45 @@
+{
+  "name": "@cognia/memory",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cognia long-term memory core: dependency-injected extraction, LLM-judged consolidation, hybrid retrieval, decay/forget, procedural assembly, and the read-runtime context builder — framework-agnostic, zero app imports.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "cognia-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
+    },
+    "./*": {
+      "cognia-source": "./src/*.ts",
+      "types": "./dist/*.d.ts",
+      "import": "./dist/*.js",
+      "require": "./dist/*.cjs",
+      "default": "./dist/*.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cognia/provider-embedding": "workspace:*",
+    "@cognia/rag": "workspace:*",
+    "@cognia/redact": "workspace:*"
+  },
+  "peerDependencies": {
+    "ai": "*"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

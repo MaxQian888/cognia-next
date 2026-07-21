@@ -1,5 +1,5 @@
 import { resolveMemoryTurnPolicy } from "./policy"
-import { DEFAULT_MEMORY_CONFIG } from "@/types/memory/memory"
+import { DEFAULT_MEMORY_CONFIG } from "../types/memory"
 
 describe("resolveMemoryTurnPolicy", () => {
   it("separates recall and learning controls", () => {

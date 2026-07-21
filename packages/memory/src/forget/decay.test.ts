@@ -1,4 +1,4 @@
-import type { Memory, MemoryScope } from "@/types/memory/memory"
+import type { Memory, MemoryScope } from "../types/memory"
 import { evictOverflow, expireStale, type DecayDeps } from "./decay"
 
 let seq = 0

@@ -171,6 +171,7 @@ const projectCommon: Config = {
     "^@cognia/tts(.*)$": "<rootDir>/packages/tts/src$1",
     "^@cognia/logging(.*)$": "<rootDir>/packages/logging/src$1",
     "^@cognia/agent-config-types(.*)$": "<rootDir>/packages/agent-config-types/src$1",
+    "^@cognia/memory(.*)$": "<rootDir>/packages/memory/src$1",
 
     // cheerio's package exports prefer the ESM browser build under jsdom.
     // The HTML parser uses dynamic import("cheerio"), so map Jest to the CJS
@@ -307,6 +308,8 @@ const globalConfig: Config = {
     "packages/rag/src/**/*.{ts,tsx}",
     // error-parsers was lifted out of lib/error-parsers (coverage-collected).
     "packages/error-parsers/src/**/*.{ts,tsx}",
+    // memory core was lifted out of lib/memory (coverage-collected), so keep it collected.
+    "packages/memory/src/**/*.{ts,tsx}",
     // vector / document / agent-trace were lifted out of lib/* (coverage-collected).
     "packages/vector/src/**/*.{ts,tsx}",
     "packages/document/src/**/*.{ts,tsx}",

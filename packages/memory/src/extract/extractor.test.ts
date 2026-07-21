@@ -1,4 +1,4 @@
-import type { LlmClient } from "@/lib/twin/distill/llm"
+import type { LlmClient } from "../llm"
 import { extractMemories } from "./extractor"
 
 function client(reply: string | (() => Promise<string>)): LlmClient {

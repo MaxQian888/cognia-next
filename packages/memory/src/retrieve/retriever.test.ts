@@ -1,4 +1,4 @@
-import type { Memory } from "@/types/memory/memory"
+import type { Memory } from "../types/memory"
 import { retrieveMemories, __resetMemoryBm25Cache, type MemoryRetrieverDeps } from "./retriever"
 
 // The BM25 index is cached by corpus signature at module scope; reset between
