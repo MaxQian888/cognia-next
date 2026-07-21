@@ -4,7 +4,7 @@ use anyhow::Result;
 use comfy_table::{presets::UTF8_FULL, ContentArrangement, Table};
 use serde::{Deserialize, Serialize};
 
-use crate::http_client::{get_json, load_endpoint, EndpointFile};
+use crate::engine::bridge_client::{get_json, load_endpoint, EndpointFile};
 use crate::ui::{style, RuntimeUi};
 
 const LIST_PATH: &str = "/api/v1/dev/plugins/installed";
@@ -91,7 +91,7 @@ fn emit_json_failure(stage: &'static str, err: anyhow::Error) -> Result<()> {
         error: err.to_string(),
     };
     println!("{}", serde_json::to_string_pretty(&payload)?);
-    Err(crate::JsonFailureExit.into())
+    Err(crate::shared::JsonFailureExit.into())
 }
 
 fn print_human(plugins: &[InstalledPluginEntry]) {
@@ -154,7 +154,7 @@ mod tests {
             }
         });
 
-        let endpoint = crate::http_client::EndpointFile {
+        let endpoint = crate::engine::bridge_client::EndpointFile {
             base_url: format!("http://127.0.0.1:{port}"),
             dev_token: "tok".into(),
         };

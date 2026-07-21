@@ -16,7 +16,7 @@ use serde_json::json;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use crate::http_client::{get_json, load_endpoint, post_json, EndpointFile};
+use crate::engine::bridge_client::{get_json, load_endpoint, post_json, EndpointFile};
 use crate::ui::{style, RuntimeUi};
 
 const INSTALL_BUNDLE_PATH: &str = "/api/v1/dev/plugins/install";
@@ -229,7 +229,7 @@ fn run_prepared_with_endpoint(
                 warnings,
             };
             println!("{}", serde_json::to_string_pretty(&payload)?);
-            return Err(crate::JsonFailureExit.into());
+            return Err(crate::shared::JsonFailureExit.into());
         }
         bail!("install rejected by cognia: {}", error);
     }
@@ -344,7 +344,7 @@ fn emit_json_failure(
         warnings,
     };
     println!("{}", serde_json::to_string_pretty(&payload)?);
-    Err(crate::JsonFailureExit.into())
+    Err(crate::shared::JsonFailureExit.into())
 }
 
 fn install_input_kind(path: &Path) -> Result<InstallInputKind> {

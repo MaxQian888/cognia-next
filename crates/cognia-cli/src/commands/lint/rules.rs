@@ -1,291 +1,16 @@
-//! `cognia plugin lint` — validate `plugin.json` against the host's schema.
-//!
-//! Rust port of `lib/plugin/core/validation.ts::validatePluginManifest`.
-//! Catches malformed manifests before they hit the host so authors get a
-//! fast, local feedback loop. Returns exit 0 if no errors, 1 otherwise.
-//!
-//! `cognia plugin build` calls this implicitly before invoking the
-//! per-type build path, so a single command suffices for the common
-//! "validate + build" flow.
+//! Manifest validation rules — the Rust port of
+//! `lib/plugin/core/validation.ts::validatePluginManifest`. `validate_manifest`
+//! is the single public entry; every `validate_*` / `check_*` sub-validator and
+//! helper below is private to this module and reached only through it.
 
-use anyhow::{Context, Result};
-use serde::Serialize;
 use serde_json::Value;
-use std::fmt;
-use std::path::{Path, PathBuf};
 
-use crate::read_plugin_manifest;
-use crate::ui::RuntimeUi;
-
-#[path = "generated_plugin_contract.rs"]
-mod generated_plugin_contract;
-use generated_plugin_contract::{
+use super::report::{Diagnostic, Severity};
+use crate::engine::contract::{
     CAPABILITY_FIELDS, CAPABILITY_MINIMUM_HOST_VERSIONS, MANIFEST_CONTRIBUTIONS,
     PLUGIN_PATH_FIELDS, RUNTIME_ENTRY_CONTRACTS, VALID_CAPABILITIES, VALID_PERMISSIONS,
     VALID_PLUGIN_TYPES,
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Diagnostic types
-// ─────────────────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Severity {
-    Error,
-    Warning,
-    /// Informational tier: surfaced, but never gates — not even under
-    /// `--warnings-as-errors`. Reserved for advisory rules (e.g. the
-    /// version-compatibility notices in W3.4). No production rule emits one
-    /// yet; tests construct it to pin the non-gating behavior.
-    #[allow(dead_code)]
-    Notice,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct Diagnostic {
-    pub severity: Severity,
-    pub field: String,
-    pub code: String,
-    pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hint: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct LintReport {
-    /// Bumped for breaking changes to the JSON shape so consumers can
-    /// version-pin without parsing the whole payload speculatively.
-    #[serde(rename = "schemaVersion")]
-    pub schema_version: u32,
-    pub ok: bool,
-    pub action: &'static str,
-    /// Which stage produced this payload. `"validate"` for a real lint result;
-    /// the input-failure payload carries `"input"`. Always present so a `--json`
-    /// consumer can bucket on `.stage` uniformly across success and failure.
-    pub stage: &'static str,
-    #[serde(rename = "manifestPath")]
-    pub manifest_path: PathBuf,
-    pub valid: bool,
-    pub diagnostics: Vec<Diagnostic>,
-}
-
-impl LintReport {
-    pub fn error_count(&self) -> usize {
-        self.diagnostics
-            .iter()
-            .filter(|d| d.severity == Severity::Error)
-            .count()
-    }
-
-    pub fn warning_count(&self) -> usize {
-        self.diagnostics
-            .iter()
-            .filter(|d| d.severity == Severity::Warning)
-            .count()
-    }
-
-    pub fn notice_count(&self) -> usize {
-        self.diagnostics
-            .iter()
-            .filter(|d| d.severity == Severity::Notice)
-            .count()
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct LintError {
-    pub report: LintReport,
-}
-
-impl LintError {
-    pub fn error_count(&self) -> usize {
-        self.report.error_count()
-    }
-
-    pub fn warning_count(&self) -> usize {
-        self.report.warning_count()
-    }
-}
-
-impl fmt::Display for LintError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "manifest lint failed: {} error(s), {} warning(s)",
-            self.error_count(),
-            self.warning_count()
-        )
-    }
-}
-
-impl std::error::Error for LintError {}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Public entry points
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// CLI entry: `cognia plugin lint`. Prints human-readable diagnostics by
-/// default or JSON when `as_json` is true, and returns `LintError` when
-/// diagnostics contain errors so callers can choose their own exit policy.
-///
-/// `_ui` is accepted but unused in Phase 1; Phase 2 paints diagnostics
-/// with severity color and uses `ui.json()` instead of the bool argument.
-pub fn run(
-    path: PathBuf,
-    as_json: bool,
-    warnings_as_errors: bool,
-    ui: &mut RuntimeUi,
-) -> Result<()> {
-    let crate_root = match path.canonicalize() {
-        Ok(root) => root,
-        Err(err) if as_json => {
-            return emit_json_input_failure(
-                &path,
-                format!("resolve {}: {err}", path.display()),
-                "lint.input.unreadable",
-            );
-        }
-        Err(err) => return Err(err).with_context(|| format!("resolve {}", path.display())),
-    };
-    let (manifest, manifest_path) = match read_plugin_manifest(&crate_root) {
-        Ok(manifest) => manifest,
-        Err(err) if as_json => {
-            return emit_json_input_failure(&crate_root, err.to_string(), "lint.input.manifest");
-        }
-        Err(err) => return Err(err),
-    };
-    let diagnostics = validate_manifest(&manifest);
-    // `valid` describes the manifest (no errors); `ok` describes this run's
-    // gate. Under `--warnings-as-errors`, warnings escalate the exit but do
-    // not change `valid`. Notices never gate on either axis.
-    let valid = !diagnostics.iter().any(|d| d.severity == Severity::Error);
-    let ok = run_passes(&diagnostics, warnings_as_errors);
-    let report = LintReport {
-        schema_version: 2,
-        ok,
-        action: "lint",
-        stage: "validate",
-        manifest_path,
-        valid,
-        diagnostics,
-    };
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
-    } else if !ui.flags.quiet || !ok {
-        print_human(&report);
-    }
-    if ok {
-        Ok(())
-    } else {
-        Err(LintError { report }.into())
-    }
-}
-
-/// Whether a lint run passes its gate. Errors always gate; warnings gate only
-/// under `--warnings-as-errors`; notices never gate on either axis.
-fn run_passes(diagnostics: &[Diagnostic], warnings_as_errors: bool) -> bool {
-    let has_error = diagnostics.iter().any(|d| d.severity == Severity::Error);
-    let has_warning = diagnostics.iter().any(|d| d.severity == Severity::Warning);
-    !has_error && !(warnings_as_errors && has_warning)
-}
-
-#[derive(Debug, Serialize)]
-struct LintFailureReport {
-    #[serde(rename = "schemaVersion")]
-    schema_version: u32,
-    ok: bool,
-    action: &'static str,
-    stage: &'static str,
-    /// Same key as the success payload's `manifestPath`, so a `--json` consumer
-    /// reads one field for "the manifest this run was about" on both shapes.
-    #[serde(rename = "manifestPath")]
-    path: PathBuf,
-    valid: bool,
-    diagnostics: Vec<Diagnostic>,
-}
-
-fn emit_json_input_failure(path: &Path, error: String, code: &'static str) -> Result<()> {
-    let report = LintFailureReport {
-        schema_version: 2,
-        ok: false,
-        action: "lint",
-        stage: "input",
-        path: path.to_path_buf(),
-        valid: false,
-        diagnostics: vec![Diagnostic {
-            severity: Severity::Error,
-            field: "path".into(),
-            code: code.into(),
-            message: error,
-            hint: Some("Pass --path pointing at a plugin directory containing plugin.json.".into()),
-        }],
-    };
-    println!("{}", serde_json::to_string_pretty(&report)?);
-    Err(crate::JsonFailureExit.into())
-}
-
-/// Library entry used by `cmd_build::run` to pre-validate before building.
-/// Does not exit the process; returns the report so the caller can print
-/// it in context and abort the build itself.
-pub fn validate_at(path: &Path) -> Result<LintReport> {
-    let (manifest, manifest_path) = read_plugin_manifest(path)?;
-    let diagnostics = validate_manifest(&manifest);
-    let valid = !diagnostics.iter().any(|d| d.severity == Severity::Error);
-    Ok(LintReport {
-        schema_version: 2,
-        ok: valid,
-        action: "lint",
-        stage: "validate",
-        manifest_path,
-        valid,
-        diagnostics,
-    })
-}
-
-fn print_human(report: &LintReport) {
-    use crate::ui::style;
-    println!(
-        "Validating {}",
-        style::bold(report.manifest_path.display().to_string())
-    );
-    if report.diagnostics.is_empty() {
-        println!("{}no problems found", style::success_prefix());
-        return;
-    }
-    for d in &report.diagnostics {
-        let tag = match d.severity {
-            Severity::Error => style::error("ERROR"),
-            Severity::Warning => style::warn("WARN "),
-            Severity::Notice => style::dim("NOTE "),
-        };
-        println!("  [{tag}] {}: {}", style::bold(&d.field), d.message);
-        if let Some(hint) = &d.hint {
-            println!("         {}{hint}", style::hint_prefix());
-        }
-        println!("         code: {}", style::dim(&d.code));
-    }
-    println!();
-    let mut summary = format!(
-        "{} error(s), {} warning(s)",
-        report.error_count(),
-        report.warning_count()
-    );
-    if report.notice_count() > 0 {
-        summary.push_str(&format!(", {} notice(s)", report.notice_count()));
-    }
-    if !report.valid {
-        println!("{}", style::error(&summary));
-    } else if !report.ok {
-        // No errors, but `--warnings-as-errors` escalated the warnings.
-        println!("{} (--warnings-as-errors)", style::error(&summary));
-    } else if report.warning_count() > 0 {
-        println!("{}", style::warn(&summary));
-    } else {
-        // Notices only — passes cleanly.
-        println!("{}{summary}", style::success_prefix());
-    }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Validation core
@@ -692,21 +417,38 @@ pub fn validate_manifest(manifest: &Value) -> Vec<Diagnostic> {
     // ── lazy-factory contribution fields: `entry` path safety ────────────
     lint_manifest_paths(obj, &mut out);
 
+    // The backend a contribution entry executes on: an explicit per-entry
+    // `backend` wins, otherwise it defaults from the plugin type — python
+    // plugins default their contributions to python-backed, every other type
+    // to JS. `hybrid` intentionally has no python default here so an omitted
+    // backend resolves to JS (the explicit-backend rule for hybrid is enforced
+    // separately in the TS validator).
+    let default_backend = match plugin_type {
+        Some("python") => "python",
+        _ => "js",
+    };
+    // First field with at least one entry that genuinely needs a JS factory,
+    // after per-entry python-backend opt-out. `pythonExecution == "supported" |
+    // "experimental"` capabilities route python-backed entries through the
+    // `plugin_python_call` seam instead of a JS module, so those entries never
+    // demand a JS entry point. `unsupported` capabilities (React UI, config
+    // component) stay JS-only regardless of the requested backend.
+    let mut python_backed_experimental: Option<&str> = None;
     let populated_js_contribution = MANIFEST_CONTRIBUTIONS.iter().find_map(
-        |(field, _, execution, _, condition_path, condition_equals)| {
+        |(field, _, execution, entry_path, condition_path, condition_equals, python_execution)| {
             let entries: Vec<&Value> = match obj.get(*field) {
                 Some(Value::Array(entries)) if !entries.is_empty() => entries.iter().collect(),
                 Some(value @ Value::Object(_)) => vec![value],
                 _ => return None,
             };
-            let requires_javascript = if *execution == "javascript" {
-                true
-            } else if *execution == "conditional" {
-                condition_path.is_some_and(|path| {
-                    entries.iter().any(|entry| {
+            let base_requires_javascript = |entry: &Value| -> bool {
+                if *execution == "javascript" {
+                    true
+                } else if *execution == "conditional" {
+                    condition_path.is_some_and(|path| {
                         let value = path
                             .split('.')
-                            .try_fold(*entry, |current, segment| current.get(segment));
+                            .try_fold(entry, |current, segment| current.get(segment));
                         match condition_equals {
                             Some(expected) => value.and_then(Value::as_str) == Some(*expected),
                             None => value.is_some_and(|value| match value {
@@ -716,13 +458,55 @@ pub fn validate_manifest(manifest: &Value) -> Vec<Diagnostic> {
                             }),
                         }
                     })
-                })
-            } else {
-                false
+                } else {
+                    false
+                }
             };
-            requires_javascript.then_some(*field)
+            let python_backable = *python_execution != "unsupported";
+            let mut field_requires_javascript = false;
+            for &entry in &entries {
+                if !base_requires_javascript(entry) {
+                    continue;
+                }
+                let backend = entry
+                    .get("backend")
+                    .and_then(Value::as_str)
+                    .or_else(|| {
+                        // A declared JS module path is itself a declaration of
+                        // JS intent — never silently ignore it on a python
+                        // plugin by defaulting the backend to python.
+                        entry_path
+                            .and_then(|path| path.rsplit('.').next())
+                            .and_then(|field| entry.get(field))
+                            .and_then(Value::as_str)
+                            .filter(|value| !value.is_empty())
+                            .map(|_| "js")
+                    })
+                    .unwrap_or(default_backend);
+                if python_backable && backend == "python" {
+                    if *python_execution == "experimental" {
+                        python_backed_experimental.get_or_insert(*field);
+                    }
+                    continue;
+                }
+                field_requires_javascript = true;
+            }
+            field_requires_javascript.then_some(*field)
         },
     );
+    if let Some(field) = python_backed_experimental {
+        out.push(Diagnostic {
+            severity: Severity::Warning,
+            field: field.into(),
+            code: "manifest.contributions.python.experimental".into(),
+            message: format!(
+                "Python-backed \"{field}\" is experimental; its subprocess execution path may change"
+            ),
+            hint: Some(
+                "Gate it behind a feature flag and verify end-to-end before relying on it.".into(),
+            ),
+        });
+    }
     let runtime_entry_contract = plugin_type.and_then(|plugin_type| {
         RUNTIME_ENTRY_CONTRACTS
             .iter()
@@ -1638,649 +1422,9 @@ fn is_valid_dexie_table_name(s: &str) -> bool {
     chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Tests
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
-
-    fn assert_clean(manifest: Value) {
-        let diags = validate_manifest(&manifest);
-        assert!(
-            diags.iter().all(|d| d.severity != Severity::Error),
-            "expected no errors, got: {diags:?}"
-        );
-    }
-
-    fn assert_has_error_code(manifest: Value, code: &str) {
-        let diags = validate_manifest(&manifest);
-        assert!(
-            diags
-                .iter()
-                .any(|d| d.severity == Severity::Error && d.code == code),
-            "expected error code {code}, got: {diags:?}"
-        );
-    }
-
-    fn assert_has_warning_code(manifest: Value, code: &str) {
-        let diags = validate_manifest(&manifest);
-        assert!(
-            diags
-                .iter()
-                .any(|d| d.severity == Severity::Warning && d.code == code),
-            "expected warning code {code}, got: {diags:?}"
-        );
-    }
-
-    fn minimal_frontend() -> Value {
-        json!({
-            "id": "hello-plugin",
-            "name": "Hello",
-            "version": "0.1.0",
-            "description": "A plugin",
-            "type": "frontend",
-            "capabilities": ["tools"],
-            "main": "dist/index.js"
-        })
-    }
-
-    fn cli_manifest() -> Value {
-        json!({
-            "id": "cli-demo",
-            "name": "CLI Demo",
-            "version": "0.1.0",
-            "description": "demo",
-            "type": "frontend",
-            "capabilities": ["cli-tools"],
-            "main": "dist/index.js",
-            "permissions": ["cli:execute"],
-            "requires": { "binaries": [{ "name": "rg" }] },
-            "cliTools": [{
-                "name": "ripgrep_search",
-                "description": "Search files",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "pattern": { "type": "string" },
-                        "globs": { "type": "array" }
-                    }
-                },
-                "binary": { "kind": "requires", "name": "rg" },
-                "argv": [
-                    { "literal": "--json" },
-                    { "param": "globs", "eachPrefixedBy": "--glob", "omitWhenEmpty": true },
-                    { "param": "pattern" }
-                ],
-                "outputParse": "lines",
-                "successExitCodes": [0, 1]
-            }]
-        })
-    }
-
-    #[test]
-    fn runtime_combinations_enforce_javascript_entry_ownership() {
-        let contribution = json!([{
-            "id": "sessions",
-            "entry": "dist/importer.js",
-            "export": "createImporter"
-        }]);
-        let python_only = json!({
-            "id": "python-only",
-            "name": "Python only",
-            "version": "0.1.0",
-            "description": "Python plugin",
-            "type": "python",
-            "capabilities": ["python", "session-importer"],
-            "pythonMain": "main.py",
-            "sessionImporters": contribution
-        });
-        assert_has_error_code(
-            python_only,
-            "manifest.contributions.javascript.unsupported_for_python",
-        );
-
-        let python_with_main = json!({
-            "id": "python-only-with-main",
-            "name": "Python only",
-            "version": "0.1.0",
-            "description": "Python plugin",
-            "type": "python",
-            "capabilities": ["python", "session-importer"],
-            "main": "dist/index.js",
-            "pythonMain": "main.py",
-            "sessionImporters": contribution
-        });
-        assert_has_error_code(
-            python_with_main,
-            "manifest.contributions.javascript.unsupported_for_python",
-        );
-
-        let hybrid = json!({
-            "id": "hybrid-plugin",
-            "name": "Hybrid",
-            "version": "0.1.0",
-            "description": "Hybrid plugin",
-            "type": "hybrid",
-            "capabilities": ["python", "session-importer"],
-            "main": "dist/index.js",
-            "pythonMain": "main.py",
-            "sessionImporters": contribution
-        });
-        assert_clean(hybrid);
-
-        let hybrid_without_python = json!({
-            "id": "hybrid-without-python",
-            "name": "Hybrid",
-            "version": "0.1.0",
-            "description": "Hybrid plugin",
-            "type": "hybrid",
-            "capabilities": ["session-importer"],
-            "main": "dist/index.js",
-            "sessionImporters": contribution
-        });
-        assert_has_error_code(hybrid_without_python, "manifest.pythonMain.required");
-
-        let javascript = json!({
-            "id": "javascript-plugin",
-            "name": "JavaScript",
-            "version": "0.1.0",
-            "description": "JavaScript plugin",
-            "type": "frontend",
-            "capabilities": ["session-importer"],
-            "main": "dist/index.js",
-            "sessionImporters": contribution
-        });
-        assert_clean(javascript);
-
-        for contribution in [
-            json!({ "protocolAdapters": [{ "spec": { "kind": "declarative" } }] }),
-            json!({ "webviews": [{ "html": "<p>safe inline view</p>" }] }),
-        ] {
-            let mut manifest = json!({
-                "id": "python-declarative",
-                "name": "Python declarative",
-                "version": "0.1.0",
-                "description": "Host-rendered contribution",
-                "type": "python",
-                "capabilities": [],
-                "pythonMain": "main.py"
-            });
-            manifest
-                .as_object_mut()
-                .unwrap()
-                .extend(contribution.as_object().unwrap().clone());
-            assert_clean(manifest);
-        }
-
-        for contribution in [
-            json!({ "protocolAdapters": [{ "spec": { "kind": "code" }, "entry": "dist/adapter.js" }] }),
-            json!({ "webviews": [{ "entry": "dist/view.js" }] }),
-            json!({ "connectors": [{ "id": "mail" }] }),
-        ] {
-            let mut manifest = json!({
-                "id": "python-executable",
-                "name": "Python executable",
-                "version": "0.1.0",
-                "description": "Executable contribution",
-                "type": "python",
-                "capabilities": [],
-                "pythonMain": "main.py"
-            });
-            manifest
-                .as_object_mut()
-                .unwrap()
-                .extend(contribution.as_object().unwrap().clone());
-            assert_has_error_code(
-                manifest,
-                "manifest.contributions.javascript.unsupported_for_python",
-            );
-        }
-    }
-
-    #[test]
-    fn engines_cognia_must_cover_declared_capability_minimums() {
-        let mut manifest = minimal_frontend();
-        manifest["engines"] = json!({ "cognia": ">=0.0.9" });
-        assert_has_error_code(
-            manifest.clone(),
-            "manifest.engines.cognia.capability_minimum",
-        );
-
-        manifest["engines"] = json!({ "cognia": ">=0.1.0" });
-        assert_clean(manifest);
-    }
-
-    #[test]
-    fn cli_tools_valid_manifest_is_clean() {
-        assert_clean(cli_manifest());
-    }
-
-    #[test]
-    fn cli_tools_require_cli_execute_permission() {
-        let mut m = cli_manifest();
-        m["permissions"] = json!([]);
-        assert_has_error_code(m, "manifest.cliTools.permission.missing");
-    }
-
-    #[test]
-    fn cli_tools_reject_undeclared_requires_binary() {
-        let mut m = cli_manifest();
-        m["cliTools"][0]["binary"]["name"] = json!("ffmpeg");
-        assert_has_error_code(m, "manifest.cliTools.binary.name.undeclared");
-    }
-
-    #[test]
-    fn cli_tools_reject_plugin_dir_traversal() {
-        for bad in ["../evil.exe", "/usr/bin/evil", "C:\\evil.exe", "a/../../b"] {
-            let mut m = cli_manifest();
-            m["cliTools"][0]["binary"] = json!({ "kind": "plugin-dir", "relPath": bad });
-            assert_has_error_code(m, "manifest.cliTools.binary.relPath.invalid");
-        }
-        let mut m = cli_manifest();
-        m["cliTools"][0]["binary"] = json!({ "kind": "plugin-dir", "relPath": "bin/tool.exe" });
-        assert_clean(m);
-    }
-
-    #[test]
-    fn cli_tools_reject_undeclared_argv_param_and_bad_tokens() {
-        let mut m = cli_manifest();
-        m["cliTools"][0]["argv"] = json!([
-            { "param": "ghost" },
-            { "literal": "-x", "param": "pattern" },
-            {}
-        ]);
-        assert_has_error_code(m.clone(), "manifest.cliTools.argv.param.undeclared");
-        assert_has_error_code(m, "manifest.cliTools.argv.token.invalid");
-    }
-
-    #[test]
-    fn cli_tools_reject_bad_stdin_cwd_env_and_knobs() {
-        let mut m = cli_manifest();
-        m["cliTools"][0]["stdin"] = json!({ "param": "ghost" });
-        m["cliTools"][0]["cwd"] = json!({ "kind": "anywhere" });
-        m["cliTools"][0]["env"] = json!({ "GOOD": "1", "BAD": 2 });
-        m["cliTools"][0]["timeoutMs"] = json!(-5);
-        m["cliTools"][0]["maxOutputBytes"] = json!(1.5);
-        m["cliTools"][0]["outputParse"] = json!("yaml");
-        m["cliTools"][0]["successExitCodes"] = json!([0, "ok"]);
-        for code in [
-            "manifest.cliTools.stdin.invalid",
-            "manifest.cliTools.cwd.invalid",
-            "manifest.cliTools.env.invalid",
-            "manifest.cliTools.timeoutMs.invalid",
-            "manifest.cliTools.maxOutputBytes.invalid",
-            "manifest.cliTools.outputParse.invalid",
-            "manifest.cliTools.successExitCodes.invalid",
-        ] {
-            assert_has_error_code(m.clone(), code);
-        }
-    }
-
-    #[test]
-    fn cli_tools_reject_duplicates_bad_name_and_parameters_shape() {
-        let mut m = cli_manifest();
-        let dup = m["cliTools"][0].clone();
-        m["cliTools"].as_array_mut().unwrap().push(dup);
-        assert_has_error_code(m, "manifest.cliTools.name.duplicate");
-
-        let mut m = cli_manifest();
-        m["cliTools"][0]["name"] = json!("Bad-Name");
-        assert_has_error_code(m, "manifest.cliTools.name.invalid");
-
-        let mut m = cli_manifest();
-        m["cliTools"][0]["parameters"] = json!({ "type": "string" });
-        assert_has_error_code(m, "manifest.cliTools.parameters.invalid");
-    }
-
-    fn minimal_wasm() -> Value {
-        json!({
-            "id": "hello-wasm",
-            "name": "Hello",
-            "version": "0.1.0",
-            "description": "A plugin",
-            "type": "wasm",
-            "capabilities": ["tools"],
-            "wasmMain": "hello.wasm",
-            "wasm": { "apiVersion": "0.1.0" }
-        })
-    }
-
-    #[test]
-    fn minimal_frontend_is_valid() {
-        assert_clean(minimal_frontend());
-    }
-
-    #[test]
-    fn minimal_wasm_is_valid() {
-        assert_clean(minimal_wasm());
-    }
-
-    #[test]
-    fn newly_contracted_capabilities_are_valid() {
-        for cap in [
-            "theme-pack",
-            "fonts",
-            "wallpapers",
-            "subagent",
-            "agent-team-template",
-            "shared-memory-adapter",
-            "workflow-template",
-            "lsp-server",
-            "character-pack",
-            "workspace-backend",
-            "message-renderer",
-            "density-preset",
-            "chat-middleware",
-            "modal-mount",
-            "terminal-completion",
-            "routing-strategy",
-            "deployment-filter",
-            "protocol-adapter",
-            "tool-route",
-            "context-provider",
-        ] {
-            let mut m = minimal_frontend();
-            m["capabilities"] = json!([cap]);
-            let diags = validate_manifest(&m);
-            assert!(
-                !diags
-                    .iter()
-                    .any(|d| d.code == "manifest.capabilities.invalid"),
-                "capability {cap} should be valid, got: {diags:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn declared_capability_without_field_warns() {
-        let mut m = minimal_frontend();
-        m["capabilities"] = json!(["scheduler"]);
-        assert_has_warning_code(m, "manifest.capability.field_missing");
-    }
-
-    #[test]
-    fn populated_field_without_capability_warns() {
-        let mut m = minimal_frontend();
-        m["capabilities"] = json!(["tools"]);
-        m["tools"] = json!([{ "name": "t", "description": "d", "parametersSchema": {} }]);
-        m["fonts"] = json!([{ "family": "X", "files": [{ "weight": 400, "src": "a.woff2" }] }]);
-        assert_has_warning_code(m, "manifest.capability.field_undeclared");
-    }
-
-    #[test]
-    fn workflows_object_block_counts_as_populated() {
-        let mut m = minimal_frontend();
-        m["capabilities"] = json!(["workflow"]);
-        m["workflows"] =
-            json!({ "nodes": [{ "kind": "demo.node", "entry": "src/index.ts", "export": "n" }] });
-        let diags = validate_manifest(&m);
-        assert!(
-            !diags
-                .iter()
-                .any(|d| d.code == "manifest.capability.field_missing"
-                    && d.message.contains("workflows")),
-            "populated workflows block should satisfy the workflow capability, got: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn empty_workflows_object_block_counts_as_missing() {
-        let mut m = minimal_frontend();
-        m["capabilities"] = json!(["workflow"]);
-        m["workflows"] = json!({ "nodes": [], "triggers": [] });
-        assert_has_warning_code(m, "manifest.capability.field_missing");
-    }
-
-    #[test]
-    fn missing_id_is_error() {
-        let mut m = minimal_frontend();
-        m.as_object_mut().unwrap().remove("id");
-        assert_has_error_code(m, "manifest.id.missing");
-    }
-
-    #[test]
-    fn bad_id_format_is_error() {
-        let mut m = minimal_frontend();
-        m["id"] = json!("Has Space");
-        assert_has_error_code(m, "manifest.id.invalid_format");
-    }
-
-    #[test]
-    fn id_must_start_with_alphanumeric() {
-        let mut m = minimal_frontend();
-        m["id"] = json!("-leading-dash");
-        assert_has_error_code(m, "manifest.id.invalid_format");
-    }
-
-    #[test]
-    fn id_must_end_with_alphanumeric() {
-        let mut m = minimal_frontend();
-        m["id"] = json!("trailing-dash-");
-        assert_has_error_code(m, "manifest.id.invalid_format");
-    }
-
-    #[test]
-    fn id_accepts_single_char() {
-        let mut m = minimal_frontend();
-        m["id"] = json!("a");
-        assert_clean(m);
-    }
-
-    #[test]
-    fn id_rejects_host_reserved_and_overlong_names() {
-        for id in [
-            ".host-state".to_string(),
-            "_marketplace_cache".to_string(),
-            "_backups".to_string(),
-            "a".repeat(129),
-        ] {
-            let mut manifest = minimal_frontend();
-            manifest["id"] = json!(id);
-            assert_has_error_code(manifest, "manifest.id.invalid_format");
-        }
-    }
-
-    #[test]
-    fn bad_version_is_error() {
-        let mut m = minimal_frontend();
-        m["version"] = json!("v1.0");
-        assert_has_error_code(m, "manifest.version.invalid_format");
-    }
-
-    #[test]
-    fn version_with_prerelease_is_valid() {
-        let mut m = minimal_frontend();
-        m["version"] = json!("1.2.3-beta");
-        assert_clean(m);
-    }
-
-    #[test]
-    fn unknown_type_is_error() {
-        let mut m = minimal_frontend();
-        m["type"] = json!("widget");
-        assert_has_error_code(m, "manifest.type.invalid");
-    }
-
-    #[test]
-    fn unknown_capability_is_error() {
-        let mut m = minimal_frontend();
-        m["capabilities"] = json!(["telepathy"]);
-        assert_has_error_code(m, "manifest.capabilities.invalid");
-    }
-
-    #[test]
-    fn frontend_without_main_is_error() {
-        let mut m = minimal_frontend();
-        m.as_object_mut().unwrap().remove("main");
-        assert_has_error_code(m, "manifest.main.required");
-    }
-
-    #[test]
-    fn wasm_without_wasm_main_is_error() {
-        let mut m = minimal_wasm();
-        m.as_object_mut().unwrap().remove("wasmMain");
-        assert_has_error_code(m, "manifest.wasmMain.required");
-    }
-
-    #[test]
-    fn wasm_main_non_wasm_extension_is_error() {
-        let mut m = minimal_wasm();
-        m["wasmMain"] = json!("dist/index.js");
-        assert_has_error_code(m, "manifest.wasmMain.invalid_extension");
-    }
-
-    #[test]
-    fn wasm_without_api_version_is_error() {
-        let mut m = minimal_wasm();
-        m.as_object_mut().unwrap().remove("wasm");
-        assert_has_error_code(m, "manifest.wasm.required");
-    }
-
-    #[test]
-    fn wasm_api_version_with_prerelease_is_error() {
-        let mut m = minimal_wasm();
-        m["wasm"]["apiVersion"] = json!("0.1.0-beta");
-        assert_has_error_code(m, "manifest.wasm.apiVersion.invalid");
-    }
-
-    #[test]
-    fn wasm_memory_limit_above_4096_is_error() {
-        let mut m = minimal_wasm();
-        m["wasm"]["memoryLimitMb"] = json!(5000);
-        assert_has_error_code(m, "manifest.wasm.memoryLimitMb.invalid");
-    }
-
-    #[test]
-    fn wasm_call_timeout_above_10min_is_error() {
-        let mut m = minimal_wasm();
-        m["wasm"]["callTimeoutMs"] = json!(700_000);
-        assert_has_error_code(m, "manifest.wasm.callTimeoutMs.invalid");
-    }
-
-    #[test]
-    fn unknown_permission_is_warning_not_error() {
-        let mut m = minimal_frontend();
-        m["permissions"] = json!(["mind:read"]);
-        let diags = validate_manifest(&m);
-        assert!(diags
-            .iter()
-            .any(|d| d.severity == Severity::Warning && d.code == "manifest.permissions.unknown"));
-        assert!(diags.iter().all(|d| d.severity != Severity::Error));
-    }
-
-    #[test]
-    fn activation_events_must_be_array() {
-        let mut m = minimal_frontend();
-        m["activationEvents"] = json!("onStartup");
-        assert_has_error_code(m, "manifest.activationEvents.invalid_type");
-    }
-
-    #[test]
-    fn activation_events_items_must_be_strings() {
-        let mut m = minimal_frontend();
-        m["activationEvents"] = json!(["onStartup", 42]);
-        assert_has_error_code(m, "manifest.activationEvents.invalid_item");
-    }
-
-    #[test]
-    fn tools_missing_name_is_error() {
-        let mut m = minimal_frontend();
-        m["tools"] = json!([{ "description": "noname" }]);
-        assert_has_error_code(m, "manifest.tools.name.missing");
-    }
-
-    #[test]
-    fn commands_missing_id_is_error() {
-        let mut m = minimal_frontend();
-        m["commands"] = json!([{ "name": "Foo" }]);
-        assert_has_error_code(m, "manifest.commands.id.missing");
-    }
-
-    #[test]
-    fn dexie_tables_must_not_be_empty() {
-        let mut m = minimal_frontend();
-        m["dexie"] = json!({ "tables": [] });
-        assert_has_error_code(m, "manifest.dexie.tables.empty");
-    }
-
-    #[test]
-    fn dexie_table_name_must_be_valid() {
-        let mut m = minimal_frontend();
-        m["dexie"] = json!({ "tables": [{ "name": "Bad-Name", "schema": "++id" }] });
-        assert_has_error_code(m, "manifest.dexie.tables.nameInvalid");
-    }
-
-    #[test]
-    fn dexie_duplicate_table_is_error() {
-        let mut m = minimal_frontend();
-        m["dexie"] = json!({
-            "tables": [
-                { "name": "items", "schema": "++id" },
-                { "name": "items", "schema": "++id, name" }
-            ]
-        });
-        assert_has_error_code(m, "manifest.dexie.tables.duplicate");
-    }
-
-    #[test]
-    fn dexie_too_many_tables_is_error() {
-        let mut tables = Vec::new();
-        for i in 0..21 {
-            tables.push(json!({ "name": format!("t{i}"), "schema": "++id" }));
-        }
-        let mut m = minimal_frontend();
-        m["dexie"] = json!({ "tables": tables });
-        assert_has_error_code(m, "manifest.dexie.tables.tooMany");
-    }
-
-    #[test]
-    fn name_over_50_chars_warns() {
-        let mut m = minimal_frontend();
-        m["name"] = json!("a".repeat(51));
-        let diags = validate_manifest(&m);
-        assert!(diags
-            .iter()
-            .any(|d| d.severity == Severity::Warning && d.code == "manifest.name.long"));
-    }
-
-    #[test]
-    fn lint_rejects_lazy_factory_entry_traversal() {
-        let mut m = minimal_frontend();
-        m["capabilities"] = json!(["message-renderer"]);
-        m["messageRenderers"] = json!([
-            { "id": "evil", "partType": "x", "entry": "../../../../etc/passwd", "export": "default" }
-        ]);
-        assert_has_error_code(m, "manifest.messageRenderers.entry.traversal");
-    }
-
-    #[test]
-    fn lint_rejects_lazy_factory_entry_absolute() {
-        let mut m = minimal_frontend();
-        m["capabilities"] = json!(["workspace-backend"]);
-        m["workspaceBackends"] = json!([
-            { "id": "evil2", "label": "L", "entry": "/etc/shadow", "export": "default" }
-        ]);
-        assert_has_error_code(m, "manifest.workspaceBackends.entry.absolute");
-    }
-
-    #[test]
-    fn lint_accepts_relative_lazy_factory_entry() {
-        let mut m = minimal_frontend();
-        m["capabilities"] = json!(["modal-mount"]);
-        m["modalMounts"] = json!([
-            { "id": "ok", "label": "L", "entry": "dist/mount.js", "export": "default" }
-        ]);
-        let diags = validate_manifest(&m);
-        assert!(
-            !diags
-                .iter()
-                .any(|d| d.code.starts_with("manifest.modalMounts.entry.")),
-            "a clean relative entry must not trip a path-safety code, got: {diags:?}"
-        );
-    }
 
     #[test]
     fn lazy_factory_entry_violations_match_ts_regexes() {
@@ -2319,153 +1463,5 @@ mod tests {
         );
         // `..foo` is not a `..` path segment.
         assert_eq!(lazy_factory_entry_violations("..foo/bar"), none);
-    }
-
-    #[test]
-    fn notices_never_gate_even_with_warnings_as_errors() {
-        let notice = Diagnostic {
-            severity: Severity::Notice,
-            field: "x".into(),
-            code: "manifest.demo.notice".into(),
-            message: "informational".into(),
-            hint: None,
-        };
-        // A notice passes the gate on both axes.
-        assert!(run_passes(std::slice::from_ref(&notice), false));
-        assert!(
-            run_passes(std::slice::from_ref(&notice), true),
-            "a notice must not gate even under --warnings-as-errors"
-        );
-
-        let warning = Diagnostic {
-            severity: Severity::Warning,
-            ..notice.clone()
-        };
-        assert!(run_passes(std::slice::from_ref(&warning), false));
-        assert!(
-            !run_passes(std::slice::from_ref(&warning), true),
-            "--warnings-as-errors must escalate a warning"
-        );
-
-        let error = Diagnostic {
-            severity: Severity::Error,
-            ..notice
-        };
-        assert!(!run_passes(std::slice::from_ref(&error), false));
-        assert!(!run_passes(std::slice::from_ref(&error), true));
-    }
-
-    #[test]
-    fn warnings_as_errors_flips_the_exit_on_a_warning() {
-        // A manifest with exactly one warning (long name) and no errors.
-        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags {
-            json: true,
-            ..crate::ui::runtime::UiFlags::default()
-        });
-        let tmp = tempfile::tempdir().unwrap();
-        let mut m = minimal_frontend();
-        m["name"] = json!("a".repeat(60));
-        std::fs::write(
-            tmp.path().join("plugin.json"),
-            serde_json::to_vec_pretty(&m).unwrap(),
-        )
-        .unwrap();
-
-        // Without -W: the warning does not gate → Ok.
-        run(tmp.path().to_path_buf(), true, false, &mut ui)
-            .expect("a warning alone must not fail lint");
-        // With -W: the same warning gates → Err.
-        let err = run(tmp.path().to_path_buf(), true, true, &mut ui).unwrap_err();
-        assert!(
-            err.is::<LintError>(),
-            "--warnings-as-errors must fail on a warning"
-        );
-    }
-
-    #[test]
-    fn validate_at_returns_report() {
-        let tmp = tempfile::tempdir().unwrap();
-        let p = tmp.path().join("plugin.json");
-        std::fs::write(&p, serde_json::to_vec_pretty(&minimal_frontend()).unwrap()).unwrap();
-        let report = validate_at(tmp.path()).unwrap();
-        assert!(report.valid);
-        assert_eq!(report.error_count(), 0);
-    }
-
-    #[test]
-    fn run_returns_error_instead_of_exiting_on_invalid_manifest() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("plugin.json"), r#"{"id":"x"}"#).unwrap();
-        let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags {
-            json: true,
-            ..crate::ui::runtime::UiFlags::default()
-        });
-
-        let err = run(tmp.path().to_path_buf(), true, false, &mut ui).unwrap_err();
-        let err = err
-            .downcast_ref::<LintError>()
-            .expect("invalid lint reports should return a downcastable LintError");
-
-        assert_eq!(err.error_count(), err.report.error_count());
-        assert!(err.error_count() >= 5);
-        assert_eq!(err.warning_count(), 0);
-    }
-
-    #[test]
-    fn vscode_extension_requires_runtime_or_declarative_contribution() {
-        let mut m = minimal_frontend();
-        m["type"] = json!("vscode-extension");
-        m.as_object_mut().unwrap().remove("main");
-        assert_has_error_code(m, "manifest.runtime_entry.required_any_of");
-    }
-
-    #[test]
-    fn vscode_extension_accepts_declarative_theme_without_vscode_main() {
-        let mut m = minimal_frontend();
-        m["type"] = json!("vscode-extension");
-        m.as_object_mut().unwrap().remove("main");
-        m["themes"] = json!([{
-            "id": "dark",
-            "name": "Dark",
-            "vscodeJsonPath": "themes/dark.json"
-        }]);
-        let diagnostics = validate_manifest(&m);
-        assert!(
-            diagnostics
-                .iter()
-                .all(|diagnostic| diagnostic.code != "manifest.runtime_entry.required_any_of"),
-            "declarative extension should not require vscodeMain: {diagnostics:?}"
-        );
-    }
-
-    #[test]
-    fn report_serializes_to_json() {
-        let report = LintReport {
-            schema_version: 2,
-            ok: false,
-            action: "lint",
-            stage: "validate",
-            manifest_path: PathBuf::from("/tmp/plugin.json"),
-            valid: false,
-            diagnostics: vec![Diagnostic {
-                severity: Severity::Error,
-                field: "id".into(),
-                code: "manifest.id.missing".into(),
-                message: "Missing id".into(),
-                hint: None,
-            }],
-        };
-        let json_str = serde_json::to_string(&report).unwrap();
-        assert!(json_str.contains("\"ok\":false"));
-        assert!(json_str.contains("\"action\":\"lint\""));
-        assert!(json_str.contains("\"valid\":false"));
-        assert!(json_str.contains("\"severity\":\"error\""));
-        assert!(json_str.contains("\"schemaVersion\":2"), "got: {json_str}");
-        // Unified shape: camelCase manifestPath + always-present stage.
-        assert!(json_str.contains("\"manifestPath\":"), "got: {json_str}");
-        assert!(
-            json_str.contains("\"stage\":\"validate\""),
-            "got: {json_str}"
-        );
     }
 }

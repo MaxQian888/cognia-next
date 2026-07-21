@@ -31,8 +31,8 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
-use crate::http_client::{load_endpoint, post_json, EndpointFile};
-use crate::read_plugin_manifest;
+use crate::engine::bridge_client::{load_endpoint, post_json, EndpointFile};
+use crate::shared::read_plugin_manifest;
 use crate::ui::{style, RuntimeUi};
 
 const DEBOUNCE: Duration = Duration::from_millis(250);
@@ -162,7 +162,7 @@ pub fn run(
                     pending = false;
                     panel.set_status("Building");
                     let started = Instant::now();
-                    // Suppress cmd_build's own spinners while the panel
+                    // Suppress build's own spinners while the panel
                     // owns the bottom of the screen — cargo's native
                     // output still streams.
                     let prior_quiet = ui.flags.quiet;
@@ -206,7 +206,7 @@ fn run_once(
                 error,
             };
             println!("{}", serde_json::to_string_pretty(&payload)?);
-            return Err(crate::JsonFailureExit.into());
+            return Err(crate::shared::JsonFailureExit.into());
         }
         Err(err) => return Err(err),
     };
@@ -232,7 +232,7 @@ fn run_once(
                 error: err.to_string(),
             };
             println!("{}", serde_json::to_string_pretty(&payload)?);
-            return Err(crate::JsonFailureExit.into());
+            return Err(crate::shared::JsonFailureExit.into());
         }
         Err(err) => return Err(err),
     };
@@ -279,18 +279,21 @@ fn run_once(
     Ok(())
 }
 
-fn build_once(crate_root: &Path, ui: &mut RuntimeUi) -> Result<crate::cmd_build::BuildOutcome> {
+fn build_once(
+    crate_root: &Path,
+    ui: &mut RuntimeUi,
+) -> Result<crate::commands::build::BuildOutcome> {
     let prior_quiet = ui.flags.quiet;
     let prior_json = ui.flags.json;
     ui.flags.quiet = true;
-    let result = crate::cmd_build::build_quiet(crate_root.to_path_buf(), None, false, ui);
+    let result = crate::commands::build::build_quiet(crate_root.to_path_buf(), None, false, ui);
     ui.flags.quiet = prior_quiet;
     ui.flags.json = prior_json;
     result
 }
 
 fn dev_build_error_message(err: &anyhow::Error) -> String {
-    if let Some(lint) = err.downcast_ref::<crate::cmd_lint::LintError>() {
+    if let Some(lint) = err.downcast_ref::<crate::commands::lint::LintError>() {
         // LintError's Display already reads "manifest lint failed: …" — surface
         // it verbatim (don't double the prefix); other build errors surface as-is.
         return lint.to_string();
@@ -360,7 +363,7 @@ fn rebuild_and_reload(
     reload_endpoint: Option<&EndpointFile>,
     ui: &mut RuntimeUi,
 ) -> Result<()> {
-    let outcome = crate::cmd_build::build(crate_root.to_path_buf(), None, false, ui)?;
+    let outcome = crate::commands::build::build(crate_root.to_path_buf(), None, false, ui)?;
 
     reload_bundle(crate_root, reload_endpoint, &outcome.bundle_path)?;
     Ok(())
@@ -487,7 +490,7 @@ fn emit_json_input_failure(path: &Path, once: bool, error: String) -> Result<()>
         error,
     };
     println!("{}", serde_json::to_string_pretty(&payload)?);
-    Err(crate::JsonFailureExit.into())
+    Err(crate::shared::JsonFailureExit.into())
 }
 
 impl DevReloadJsonPayload {
@@ -755,7 +758,7 @@ mod tests {
 
     #[test]
     fn resolve_reload_endpoint_combines_override_with_token() {
-        let _guard = crate::test_env::lock();
+        let _guard = crate::shared::test_env::lock();
         let prior_endpoint = std::env::var_os("COGNIA_CLI_ENDPOINT_FILE");
         let mut tmp = tempfile::NamedTempFile::new().unwrap();
         use std::io::Write;
@@ -766,7 +769,7 @@ mod tests {
         .unwrap();
         std::env::set_var("COGNIA_CLI_ENDPOINT_FILE", tmp.path());
         let ep = resolve_reload_endpoint(Some("http://localhost:1234"));
-        crate::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
+        crate::shared::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
         let ep = ep.expect("endpoint should resolve");
         assert_eq!(ep.base_url, "http://localhost:1234");
         assert_eq!(ep.dev_token, "realtoken");
@@ -774,21 +777,21 @@ mod tests {
 
     #[test]
     fn resolve_reload_endpoint_returns_none_when_neither_source() {
-        let _guard = crate::test_env::lock();
+        let _guard = crate::shared::test_env::lock();
         let prior_endpoint = std::env::var_os("COGNIA_CLI_ENDPOINT_FILE");
         std::env::set_var("COGNIA_CLI_ENDPOINT_FILE", "/definitely/no/such/file.json");
         let ep = resolve_reload_endpoint(None);
-        crate::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
+        crate::shared::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
         assert!(ep.is_none());
     }
 
     #[test]
     fn resolve_reload_endpoint_uses_override_with_empty_token() {
-        let _guard = crate::test_env::lock();
+        let _guard = crate::shared::test_env::lock();
         let prior_endpoint = std::env::var_os("COGNIA_CLI_ENDPOINT_FILE");
         std::env::set_var("COGNIA_CLI_ENDPOINT_FILE", "/definitely/no/such/file.json");
         let ep = resolve_reload_endpoint(Some("http://localhost:4321"));
-        crate::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
+        crate::shared::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
         let ep = ep.expect("override alone should resolve");
         assert_eq!(ep.base_url, "http://localhost:4321");
         assert_eq!(ep.dev_token, "");
@@ -910,7 +913,7 @@ mod tests {
 
     #[test]
     fn dev_build_error_message_labels_lint_errors() {
-        let report = crate::cmd_lint::LintReport {
+        let report = crate::commands::lint::LintReport {
             schema_version: 2,
             ok: false,
             action: "lint",
@@ -919,7 +922,7 @@ mod tests {
             manifest_path: PathBuf::from("plugin.json"),
             diagnostics: Vec::new(),
         };
-        let err: anyhow::Error = crate::cmd_lint::LintError { report }.into();
+        let err: anyhow::Error = crate::commands::lint::LintError { report }.into();
 
         assert!(dev_build_error_message(&err).contains("manifest lint failed"));
     }

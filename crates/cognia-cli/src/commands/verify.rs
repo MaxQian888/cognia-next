@@ -6,7 +6,7 @@ use serde::Serialize;
 use std::io::Read;
 use std::path::PathBuf;
 
-use crate::signing::{fingerprint, verify_bundle};
+use crate::engine::signing::{fingerprint, verify_bundle};
 use crate::ui::{style, RuntimeUi};
 
 /// `cognia plugin verify` — verify a bundle's `.sig` against the embedded
@@ -127,7 +127,7 @@ pub fn run(
                 println!("{}", serde_json::to_string_pretty(&payload)?);
                 // Still error out so the exit code distinguishes pass/fail
                 // for scripts that don't parse the JSON.
-                return Err(crate::JsonFailureExit.into());
+                return Err(crate::shared::JsonFailureExit.into());
             }
             // Wrap with an actionable hint so plain-text consumers get a
             // helpful suggestion line under the cause chain.
@@ -175,11 +175,11 @@ fn emit_json_failure(
         error: Some(error),
     };
     println!("{}", serde_json::to_string_pretty(&payload)?);
-    Err(crate::JsonFailureExit.into())
+    Err(crate::shared::JsonFailureExit.into())
 }
 
 fn public_key_fingerprint(public_key: &str) -> Result<String> {
-    let bytes = crate::b64_decode(public_key)?;
+    let bytes = crate::shared::b64_decode(public_key)?;
     if bytes.len() != 32 {
         return Err(anyhow!("public key must be 32 bytes (got {})", bytes.len()));
     }
@@ -190,7 +190,7 @@ fn json_failure_fingerprint(public_key: Option<&str>) -> String {
     let Some(public_key) = public_key else {
         return "<unavailable>".into();
     };
-    match crate::b64_decode(public_key) {
+    match crate::shared::b64_decode(public_key) {
         Ok(bytes) if bytes.len() == 32 => fingerprint(&bytes),
         Ok(_) => "<invalid public key>".into(),
         Err(_) => "<invalid base64>".into(),
@@ -229,7 +229,7 @@ fn extract_public_key_from_bundle(bundle: &[u8]) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signing::{sign_bundle, Keypair};
+    use crate::engine::signing::{sign_bundle, Keypair};
     use std::io::Write;
     use tempfile::tempdir;
 

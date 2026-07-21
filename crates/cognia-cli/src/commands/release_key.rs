@@ -3,7 +3,7 @@
 use anyhow::Result;
 use serde::Serialize;
 
-use crate::release_key;
+use crate::engine::release_key;
 use crate::ui::{style, RuntimeUi};
 
 const PLACEHOLDER_POLICY: &str = "sha256-only-until-release-key-is-provisioned";

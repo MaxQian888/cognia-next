@@ -5,8 +5,8 @@
 //! out without an `assert_cmd` dependency.
 //!
 //! These tests prove the dispatch chain through `main()` → `clap` →
-//! `dispatch_plugin` → `cmd_*::run` works end-to-end. The per-command
-//! tests in `crates/cognia-cli/src/cmd_*.rs` cover the deeper behavior.
+//! `cli::dispatch_plugin` → `commands::*::run` works end-to-end. The per-command
+//! tests in `crates/cognia-cli/src/commands/*.rs` cover the deeper behavior.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -151,6 +151,7 @@ fn plugin_group_help_mentions_every_public_subcommand() {
     assert_eq!(code, Some(0), "stderr: {stderr}");
     for command in [
         "new",
+        "import",
         "lint",
         "build",
         "info",
@@ -4136,4 +4137,465 @@ fn plugin_embed_version_json_missing_wasm_emits_payload_without_human_noise() {
         stderr.trim().is_empty(),
         "embed-version --json read failure payload is already actionable; stderr should stay empty: {stderr}"
     );
+}
+
+// ── `cognia plugin import` ────────────────────────────────────────────────
+//
+// These drive the real chain: clap → the embedded Node converter → the
+// files on disk. They are skipped when `node` is absent so the Node-free
+// `cargo-test-cli` CI job stays green; `#[test]` bodies that silently do
+// nothing are a known trap, so the skip is loud in the test output.
+
+fn node_available() -> bool {
+    Command::new("node")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// A config holding three servers: one plain, one with a live-looking
+/// credential, one with a machine-specific absolute path.
+const MCP_FIXTURE: &str = r#"{
+  "mcpServers": {
+    "playwright": { "command": "npx", "args": ["-y", "@playwright/mcp@latest"] },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": { "GITHUB_TOKEN": "ghp_INTEGRATION_SECRET" }
+    },
+    "files": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/integration/Docs"]
+    }
+  }
+}"#;
+
+#[test]
+fn plugin_import_help_is_available() {
+    let (code, stdout, stderr) = run_cognia(&["plugin", "import", "--help"]);
+    assert_eq!(code, Some(0), "stderr: {stderr}");
+    for flag in [
+        "--from",
+        "--input",
+        "--pick",
+        "--list",
+        "--into",
+        "--no-build",
+    ] {
+        assert!(
+            stdout.contains(flag),
+            "import help missing {flag}: {stdout}"
+        );
+    }
+}
+
+#[test]
+fn plugin_import_lists_every_server_in_a_config() {
+    if !node_available() {
+        eprintln!("SKIP plugin_import_lists_every_server_in_a_config: node not on PATH");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let config = tmp.path().join("mcp.json");
+    std::fs::write(&config, MCP_FIXTURE).unwrap();
+
+    let (code, stdout, stderr) = run_cognia(&[
+        "plugin",
+        "import",
+        "--from",
+        "mcp",
+        "--input",
+        config.to_str().unwrap(),
+        "--list",
+    ]);
+    assert_eq!(code, Some(0), "stderr: {stderr}");
+    for name in ["playwright", "github", "files"] {
+        assert!(stdout.contains(name), "listing missing {name}: {stdout}");
+    }
+}
+
+#[test]
+fn plugin_import_writes_an_installable_project_without_leaking_secrets() {
+    if !node_available() {
+        eprintln!("SKIP plugin_import_writes_an_installable_project: node not on PATH");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let config = tmp.path().join("mcp.json");
+    std::fs::write(&config, MCP_FIXTURE).unwrap();
+    let out = tmp.path().join("generated");
+
+    let (code, _stdout, stderr) = run_cognia(&[
+        "plugin",
+        "import",
+        "--from",
+        "mcp",
+        "--input",
+        config.to_str().unwrap(),
+        "--pick",
+        "github",
+        "--dir",
+        out.to_str().unwrap(),
+        "--no-build",
+    ]);
+    assert_eq!(code, Some(0), "stderr: {stderr}");
+
+    // `main` points at dist/index.js, so it must exist for the plugin to
+    // be installable straight out of the converter.
+    for file in [
+        "plugin.json",
+        "src/index.ts",
+        "dist/index.js",
+        "package.json",
+        "tsconfig.json",
+        "README.md",
+        ".gitignore",
+    ] {
+        assert!(out.join(file).exists(), "missing generated file {file}");
+    }
+
+    // No value from the source config may survive anywhere in the output.
+    for file in ["plugin.json", "dist/index.js", "package.json", "README.md"] {
+        let body = std::fs::read_to_string(out.join(file)).unwrap();
+        assert!(
+            !body.contains("ghp_INTEGRATION_SECRET"),
+            "{file} leaked the source credential"
+        );
+    }
+
+    let manifest = std::fs::read_to_string(out.join("plugin.json")).unwrap();
+    assert!(manifest.contains("\"mcp-server-preset\""));
+    assert!(manifest.contains("\"GITHUB_TOKEN\""));
+    assert!(manifest.contains("\"secret\": true"));
+    // A stdio server cannot run in the browser or on mobile.
+    assert!(manifest.contains("\"blocked\""));
+}
+
+#[test]
+fn plugin_import_output_passes_plugin_lint() {
+    if !node_available() {
+        eprintln!("SKIP plugin_import_output_passes_plugin_lint: node not on PATH");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let config = tmp.path().join("mcp.json");
+    std::fs::write(&config, MCP_FIXTURE).unwrap();
+    let out = tmp.path().join("generated");
+
+    let (code, _stdout, stderr) = run_cognia(&[
+        "plugin",
+        "import",
+        "--from",
+        "mcp",
+        "--input",
+        config.to_str().unwrap(),
+        "--pick",
+        "playwright",
+        "--dir",
+        out.to_str().unwrap(),
+        "--no-build",
+    ]);
+    assert_eq!(code, Some(0), "stderr: {stderr}");
+
+    let (lint_code, lint_out, lint_err) =
+        run_cognia(&["plugin", "lint", "--path", out.to_str().unwrap(), "-W"]);
+    assert_eq!(
+        lint_code,
+        Some(0),
+        "generated plugin failed its own lint: {lint_out} {lint_err}"
+    );
+}
+
+#[test]
+fn plugin_import_tokenizes_machine_specific_paths() {
+    if !node_available() {
+        eprintln!("SKIP plugin_import_tokenizes_machine_specific_paths: node not on PATH");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let config = tmp.path().join("mcp.json");
+    std::fs::write(&config, MCP_FIXTURE).unwrap();
+    let out = tmp.path().join("generated");
+
+    let (code, _stdout, stderr) = run_cognia(&[
+        "plugin",
+        "import",
+        "--from",
+        "mcp",
+        "--input",
+        config.to_str().unwrap(),
+        "--pick",
+        "files",
+        "--dir",
+        out.to_str().unwrap(),
+        "--no-build",
+    ]);
+    assert_eq!(code, Some(0), "stderr: {stderr}");
+
+    let manifest = std::fs::read_to_string(out.join("plugin.json")).unwrap();
+    assert!(
+        !manifest.contains("/Users/integration"),
+        "the author's absolute path survived into the manifest: {manifest}"
+    );
+    assert!(
+        manifest.contains("<DOCS>"),
+        "expected an arg-replace token: {manifest}"
+    );
+    assert!(manifest.contains("\"arg-replace\""));
+}
+
+#[test]
+fn plugin_import_refuses_a_non_empty_target_directory() {
+    if !node_available() {
+        eprintln!("SKIP plugin_import_refuses_a_non_empty_target_directory: node not on PATH");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let config = tmp.path().join("mcp.json");
+    std::fs::write(&config, MCP_FIXTURE).unwrap();
+    let out = tmp.path().join("occupied");
+    std::fs::create_dir_all(&out).unwrap();
+    std::fs::write(out.join("mine.txt"), "do not clobber").unwrap();
+
+    let (code, _stdout, stderr) = run_cognia(&[
+        "plugin",
+        "import",
+        "--from",
+        "mcp",
+        "--input",
+        config.to_str().unwrap(),
+        "--pick",
+        "playwright",
+        "--dir",
+        out.to_str().unwrap(),
+        "--no-build",
+    ]);
+    assert_eq!(code, Some(1), "expected a refusal");
+    assert!(stderr.contains("not empty"), "stderr: {stderr}");
+    assert_eq!(
+        std::fs::read_to_string(out.join("mine.txt")).unwrap(),
+        "do not clobber"
+    );
+}
+
+#[test]
+fn plugin_import_into_appends_and_refuses_collisions() {
+    if !node_available() {
+        eprintln!("SKIP plugin_import_into_appends_and_refuses_collisions: node not on PATH");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let config = tmp.path().join("mcp.json");
+    std::fs::write(&config, MCP_FIXTURE).unwrap();
+    let out = tmp.path().join("generated");
+
+    let (code, _o, e) = run_cognia(&[
+        "plugin",
+        "import",
+        "--from",
+        "mcp",
+        "--input",
+        config.to_str().unwrap(),
+        "--pick",
+        "playwright",
+        "--dir",
+        out.to_str().unwrap(),
+        "--no-build",
+    ]);
+    assert_eq!(code, Some(0), "stderr: {e}");
+    let before = std::fs::read_to_string(out.join("src/index.ts")).unwrap();
+
+    let merge = |pick: &str, extra: &[&str]| {
+        let mut args = vec![
+            "plugin",
+            "import",
+            "--from",
+            "mcp",
+            "--input",
+            config.to_str().unwrap(),
+            "--pick",
+            pick,
+            "--into",
+            out.to_str().unwrap(),
+        ];
+        args.extend_from_slice(extra);
+        run_cognia(&args)
+    };
+
+    let (code, _o, e) = merge("github", &[]);
+    assert_eq!(code, Some(0), "stderr: {e}");
+    let manifest = std::fs::read_to_string(out.join("plugin.json")).unwrap();
+    assert!(manifest.contains("\"playwright\""));
+    assert!(manifest.contains("\"github\""));
+    // The merge touches plugin.json only.
+    assert_eq!(
+        std::fs::read_to_string(out.join("src/index.ts")).unwrap(),
+        before
+    );
+
+    let (code, _o, stderr) = merge("github", &[]);
+    assert_eq!(code, Some(1), "a duplicate id must be refused");
+    assert!(
+        stderr.contains("already contains an entry"),
+        "stderr: {stderr}"
+    );
+
+    // `--id` renames the imported contribution so the collision is fixable.
+    let (code, _o, e) = merge("github", &["--id", "github-2"]);
+    assert_eq!(code, Some(0), "stderr: {e}");
+    let manifest = std::fs::read_to_string(out.join("plugin.json")).unwrap();
+    assert!(manifest.contains("\"github-2\""));
+}
+
+#[test]
+fn plugin_import_skill_folder_inlines_and_bundles() {
+    if !node_available() {
+        eprintln!("SKIP plugin_import_skill_folder_inlines_and_bundles: node not on PATH");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let skill = tmp.path().join("code-review");
+    std::fs::create_dir_all(skill.join("references")).unwrap();
+    std::fs::write(
+        skill.join("SKILL.md"),
+        "---\nname: Code Review\ndescription: Review a diff.\n---\n\nRead the diff.\n",
+    )
+    .unwrap();
+
+    // Without resources → inline, portable everywhere.
+    let inline_out = tmp.path().join("inline");
+    let (code, _o, e) = run_cognia(&[
+        "plugin",
+        "import",
+        "--from",
+        "skill",
+        "--input",
+        skill.join("SKILL.md").to_str().unwrap(),
+        "--dir",
+        inline_out.to_str().unwrap(),
+        "--no-build",
+    ]);
+    assert_eq!(code, Some(0), "stderr: {e}");
+    let manifest = std::fs::read_to_string(inline_out.join("plugin.json")).unwrap();
+    assert!(manifest.contains("\"inline\""), "{manifest}");
+
+    // With resources → local-bundle, files copied in, desktop-only.
+    std::fs::write(skill.join("references").join("checklist.md"), "- check\n").unwrap();
+    let bundle_out = tmp.path().join("bundle");
+    let (code, _o, e) = run_cognia(&[
+        "plugin",
+        "import",
+        "--from",
+        "skill",
+        "--input",
+        skill.to_str().unwrap(),
+        "--dir",
+        bundle_out.to_str().unwrap(),
+        "--no-build",
+    ]);
+    assert_eq!(code, Some(0), "stderr: {e}");
+    let manifest = std::fs::read_to_string(bundle_out.join("plugin.json")).unwrap();
+    assert!(manifest.contains("\"local-bundle\""), "{manifest}");
+    assert!(manifest.contains("\"skills/code-review\""), "{manifest}");
+    assert!(bundle_out.join("skills/code-review/SKILL.md").exists());
+    assert!(bundle_out
+        .join("skills/code-review/references/checklist.md")
+        .exists());
+}
+
+#[test]
+fn plugin_import_cli_emits_an_unfinished_skeleton_lint_can_see() {
+    if !node_available() {
+        eprintln!("SKIP plugin_import_cli_emits_an_unfinished_skeleton: node not on PATH");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let out = tmp.path().join("rg-tools");
+
+    let (code, stdout, stderr) = run_cognia(&[
+        "plugin",
+        "import",
+        "--from",
+        "cli",
+        "--input",
+        "rg",
+        "--dir",
+        out.to_str().unwrap(),
+        "--no-build",
+    ]);
+    assert_eq!(code, Some(0), "stderr: {stderr}");
+    assert!(stdout.contains("field_missing"), "stdout: {stdout}");
+
+    let manifest = std::fs::read_to_string(out.join("plugin.json")).unwrap();
+    assert!(manifest.contains("\"cli-tools\""));
+    assert!(manifest.contains("\"cli:execute\""));
+    assert!(manifest.contains("\"cliTools\": []"), "{manifest}");
+
+    // An empty contribution table is a warning, not an error: the project
+    // is structurally valid, just unfinished.
+    let (code, _o, _e) = run_cognia(&["plugin", "lint", "--path", out.to_str().unwrap()]);
+    assert_eq!(code, Some(0));
+    let (code, _o, _e) = run_cognia(&["plugin", "lint", "--path", out.to_str().unwrap(), "-W"]);
+    assert_eq!(code, Some(1), "-W must gate on the unfinished tool table");
+}
+
+#[test]
+fn plugin_import_rejects_a_binary_name_that_is_a_command_line() {
+    if !node_available() {
+        eprintln!("SKIP plugin_import_rejects_a_binary_name_that_is_a_command_line: node absent");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let (code, _stdout, stderr) = run_cognia(&[
+        "plugin",
+        "import",
+        "--from",
+        "cli",
+        "--input",
+        "rg; rm -rf /",
+        "--dir",
+        tmp.path().join("bad").to_str().unwrap(),
+    ]);
+    assert_eq!(code, Some(1));
+    assert!(stderr.contains("bare binary name"), "stderr: {stderr}");
+}
+
+#[test]
+fn plugin_import_json_reports_the_machine_readable_contract() {
+    if !node_available() {
+        eprintln!("SKIP plugin_import_json_reports_the_machine_readable_contract: node absent");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let config = tmp.path().join("mcp.json");
+    std::fs::write(&config, MCP_FIXTURE).unwrap();
+    let out = tmp.path().join("generated");
+
+    let (code, stdout, stderr) = run_cognia(&[
+        "plugin",
+        "import",
+        "--from",
+        "mcp",
+        "--input",
+        config.to_str().unwrap(),
+        "--pick",
+        "github",
+        "--dir",
+        out.to_str().unwrap(),
+        "--no-build",
+        "--json",
+    ]);
+    assert_eq!(code, Some(0), "stderr: {stderr}");
+    let report: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON report");
+    assert_eq!(report["ok"], serde_json::json!(true));
+    assert_eq!(report["action"], serde_json::json!("import"));
+    assert_eq!(report["mode"], serde_json::json!("create"));
+    assert_eq!(report["pluginId"], serde_json::json!("github-mcp"));
+    assert_eq!(report["build"], serde_json::json!("skipped"));
+    assert!(report["files"].as_array().unwrap().len() >= 7);
+    assert!(!report["todos"].as_array().unwrap().is_empty());
+    assert!(!stdout.contains("ghp_INTEGRATION_SECRET"));
 }

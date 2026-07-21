@@ -11,7 +11,7 @@
 //!     runtimes as build-free local installs, so the CLI does not invent a
 //!     compiler step.
 //!
-//! In both cases `cmd_lint::validate_at` runs first so authors don't
+//! In both cases `lint::validate_at` runs first so authors don't
 //! waste a build cycle on a malformed manifest.
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -20,9 +20,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::{
-    build_ts, cmd_lint,
-    cmd_lint::Severity,
-    packaging, read_plugin_manifest, run_streaming,
+    commands::lint::{self, Severity},
+    engine::{frontend_build, packaging},
+    shared::{read_plugin_manifest, run_streaming},
     ui::{progress, style, RuntimeUi},
 };
 
@@ -110,8 +110,8 @@ fn build_inner(
 
     // ── lint first ─────────────────────────────────────────────────────
     let lint_spinner = progress::make_spinner(ui, "Validating plugin.json");
-    let lint = cmd_lint::validate_at(&crate_root)?;
-    let errors: Vec<&cmd_lint::Diagnostic> = lint
+    let lint = lint::validate_at(&crate_root)?;
+    let errors: Vec<&lint::Diagnostic> = lint
         .diagnostics
         .iter()
         .filter(|d| d.severity == Severity::Error)
@@ -154,7 +154,7 @@ fn build_inner(
         // such as `dev --once` can tell a manifest lint failure apart from a
         // compile/pack failure — a plain `bail!` string can't be downcast, which
         // made `dev_build_error_message`'s `is::<LintError>()` branch dead.
-        return Err(cmd_lint::LintError { report: lint }.into());
+        return Err(lint::LintError { report: lint }.into());
     }
     let warn_count = lint
         .diagnostics
@@ -303,7 +303,7 @@ struct BuildFailureJsonPayload<'a> {
     ok: bool,
     action: &'static str,
     stage: &'static str,
-    manifest: &'a cmd_lint::LintReport,
+    manifest: &'a lint::LintReport,
 }
 
 #[derive(Debug, Serialize)]
@@ -343,7 +343,7 @@ fn emit_build_input_json_failure<T>(path: &Path, err: anyhow::Error) -> Result<T
         error: err.to_string(),
     };
     println!("{}", serde_json::to_string_pretty(&payload)?);
-    Err(crate::JsonFailureExit.into())
+    Err(crate::shared::JsonFailureExit.into())
 }
 
 fn build_existing_entry_bundle(
@@ -389,7 +389,7 @@ fn build_existing_entry_bundle(
                 &err,
             )?;
             println!("{}", serde_json::to_string_pretty(&payload)?);
-            return Err(crate::JsonFailureExit.into());
+            return Err(crate::shared::JsonFailureExit.into());
         }
         Err(err) => return Err(err),
     };
@@ -443,7 +443,7 @@ fn emit_build_stage_json_failure<T>(
         err,
     )?;
     println!("{}", serde_json::to_string_pretty(&payload)?);
-    Err(crate::JsonFailureExit.into())
+    Err(crate::shared::JsonFailureExit.into())
 }
 
 fn expected_bundle_path(
@@ -481,7 +481,7 @@ fn build_frontend(
         });
     if skip_build {
         let pack_spinner = progress::make_spinner(ui, "Packing bundle (skipping esbuild)");
-        let result = build_ts::build_and_pack(crate_root, manifest, out, true);
+        let result = frontend_build::build_and_pack(crate_root, manifest, out, true);
         match &result {
             Ok(path) => {
                 if !report_mode.emits_human() {
@@ -514,7 +514,7 @@ fn build_frontend(
     let build_spinner = progress::make_spinner(ui, "Building frontend (esbuild)");
     // `build_and_pack` runs both esbuild AND packing under one helper.
     // We split the spinner messaging at the boundaries we can observe.
-    let result = build_ts::build_and_pack(crate_root, manifest, out, false);
+    let result = frontend_build::build_and_pack(crate_root, manifest, out, false);
     match &result {
         Ok(bundle_path) => {
             if !report_mode.emits_human() {
@@ -811,7 +811,7 @@ mod tests {
         // A manifest lint failure returns a DOWNCASTABLE LintError so callers can
         // tell it apart from a compile/pack failure.
         assert!(
-            err.downcast_ref::<crate::cmd_lint::LintError>().is_some(),
+            err.downcast_ref::<lint::LintError>().is_some(),
             "expected a downcastable LintError, got: {err}"
         );
         assert!(
@@ -831,7 +831,7 @@ mod tests {
         let mut ui = RuntimeUi::new(crate::ui::runtime::UiFlags::default());
         let err = build_quiet(tmp.path().to_path_buf(), None, true, &mut ui).unwrap_err();
         assert!(
-            err.downcast_ref::<crate::cmd_lint::LintError>().is_some(),
+            err.downcast_ref::<lint::LintError>().is_some(),
             "expected a downcastable LintError, got: {err}"
         );
     }
@@ -1023,15 +1023,15 @@ mod tests {
 
     #[test]
     fn build_failure_json_payload_wraps_lint_report() {
-        let lint = cmd_lint::LintReport {
+        let lint = lint::LintReport {
             schema_version: 2,
             ok: false,
             action: "lint",
             stage: "validate",
             manifest_path: PathBuf::from("plugin.json"),
             valid: false,
-            diagnostics: vec![cmd_lint::Diagnostic {
-                severity: cmd_lint::Severity::Error,
+            diagnostics: vec![lint::Diagnostic {
+                severity: lint::Severity::Error,
                 field: "name".into(),
                 code: "manifest.name.missing".into(),
                 message: "Missing name".into(),

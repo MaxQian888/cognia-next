@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 
-use crate::http_client::{load_endpoint, post_json, EndpointFile};
+use crate::engine::bridge_client::{load_endpoint, post_json, EndpointFile};
 use crate::ui::{style, RuntimeUi};
 
 const RELOAD_PATH: &str = "/api/v1/dev/plugins/reload";
@@ -249,7 +249,7 @@ fn emit_json_failure(
         warnings,
     };
     println!("{}", serde_json::to_string_pretty(&payload)?);
-    Err(crate::JsonFailureExit.into())
+    Err(crate::shared::JsonFailureExit.into())
 }
 
 fn emit_json_input_failure(
@@ -271,7 +271,7 @@ fn emit_json_input_failure(
         warnings: Vec::new(),
     };
     println!("{}", serde_json::to_string_pretty(&payload)?);
-    Err(crate::JsonFailureExit.into())
+    Err(crate::shared::JsonFailureExit.into())
 }
 
 #[cfg(test)]
@@ -302,7 +302,7 @@ mod tests {
             }
         });
 
-        let endpoint = crate::http_client::EndpointFile {
+        let endpoint = crate::engine::bridge_client::EndpointFile {
             base_url: format!("http://127.0.0.1:{port}"),
             dev_token: "tok".into(),
         };
@@ -317,7 +317,7 @@ mod tests {
 
     #[test]
     fn reload_rejects_missing_id_and_bundle() {
-        let endpoint = crate::http_client::EndpointFile {
+        let endpoint = crate::engine::bridge_client::EndpointFile {
             base_url: "http://127.0.0.1:1".into(),
             dev_token: "tok".into(),
         };
@@ -359,7 +359,7 @@ mod tests {
             }
         });
 
-        let endpoint = crate::http_client::EndpointFile {
+        let endpoint = crate::engine::bridge_client::EndpointFile {
             base_url: format!("http://127.0.0.1:{port}"),
             dev_token: "tok".into(),
         };

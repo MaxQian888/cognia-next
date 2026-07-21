@@ -3,7 +3,7 @@
 use anyhow::{bail, Result};
 use serde::Serialize;
 
-use crate::http_client::{endpoint_file_path, load_endpoint, probe_health, EndpointFile};
+use crate::engine::bridge_client::{endpoint_file_path, load_endpoint, probe_health, EndpointFile};
 use crate::ui::{style, RuntimeUi};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -35,7 +35,7 @@ fn run_with_report(json: bool, report: BridgeStatusReport, ui: &mut RuntimeUi) -
     if report.running {
         Ok(())
     } else if json {
-        Err(crate::JsonFailureExit.into())
+        Err(crate::shared::JsonFailureExit.into())
     } else {
         bail!(
             "cognia CLI bridge is not running: {}",

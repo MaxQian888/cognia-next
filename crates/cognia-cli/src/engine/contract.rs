@@ -276,8 +276,9 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
     Option<&str>,
     Option<&str>,
     Option<&str>,
+    &str,
 )] = &[
-    ("tools", &["tools"], "host", None, None, None),
+    ("tools", &["tools"], "host", None, None, None, "unsupported"),
     (
         "a2uiComponents",
         &["components", "a2ui"],
@@ -285,12 +286,45 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         None,
         None,
         None,
+        "unsupported",
     ),
-    ("modes", &["modes"], "host", None, None, None),
-    ("skills", &["skills"], "host", None, None, None),
-    ("commands", &["commands"], "host", None, None, None),
-    ("a2uiTemplates", &["a2ui"], "host", None, None, None),
-    ("scheduledTasks", &["scheduler"], "host", None, None, None),
+    ("modes", &["modes"], "host", None, None, None, "unsupported"),
+    (
+        "skills",
+        &["skills"],
+        "host",
+        None,
+        None,
+        None,
+        "unsupported",
+    ),
+    (
+        "commands",
+        &["commands"],
+        "host",
+        None,
+        None,
+        None,
+        "unsupported",
+    ),
+    (
+        "a2uiTemplates",
+        &["a2ui"],
+        "host",
+        None,
+        None,
+        None,
+        "unsupported",
+    ),
+    (
+        "scheduledTasks",
+        &["scheduler"],
+        "host",
+        None,
+        None,
+        None,
+        "unsupported",
+    ),
     (
         "ocrProviders",
         &["media"],
@@ -298,6 +332,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         Some("ocrProviders[].entry"),
         None,
         None,
+        "supported",
     ),
     (
         "aiProviders",
@@ -306,6 +341,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         Some("aiProviders[].entry"),
         None,
         None,
+        "supported",
     ),
     (
         "workspaceBackends",
@@ -314,6 +350,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         Some("workspaceBackends[].entry"),
         None,
         None,
+        "supported",
     ),
     (
         "messageRenderers",
@@ -322,6 +359,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         Some("messageRenderers[].entry"),
         None,
         None,
+        "unsupported",
     ),
     (
         "densityPresets",
@@ -330,6 +368,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         None,
         None,
         None,
+        "unsupported",
     ),
     (
         "chatMiddlewares",
@@ -338,6 +377,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         Some("chatMiddlewares[].entry"),
         None,
         None,
+        "experimental",
     ),
     (
         "modalMounts",
@@ -346,6 +386,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         Some("modalMounts[].entry"),
         None,
         None,
+        "unsupported",
     ),
     (
         "terminalCompletionProviders",
@@ -354,6 +395,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         Some("terminalCompletionProviders[].entry"),
         None,
         None,
+        "experimental",
     ),
     (
         "routingStrategies",
@@ -362,6 +404,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         Some("routingStrategies[].entry"),
         None,
         None,
+        "supported",
     ),
     (
         "deploymentFilters",
@@ -370,6 +413,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         Some("deploymentFilters[].entry"),
         None,
         None,
+        "supported",
     ),
     (
         "protocolAdapters",
@@ -378,8 +422,17 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         Some("protocolAdapters[].entry"),
         Some("spec.kind"),
         Some("code"),
+        "supported",
     ),
-    ("toolRoutes", &["tool-route"], "host", None, None, None),
+    (
+        "toolRoutes",
+        &["tool-route"],
+        "host",
+        None,
+        None,
+        None,
+        "unsupported",
+    ),
     (
         "contextProviders",
         &["context-provider"],
@@ -387,6 +440,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         Some("contextProviders[].entry"),
         None,
         None,
+        "supported",
     ),
     (
         "externalAgentPresets",
@@ -395,6 +449,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         None,
         None,
         None,
+        "unsupported",
     ),
     (
         "externalAgentAdapters",
@@ -403,6 +458,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         Some("externalAgentAdapters[].entry"),
         None,
         None,
+        "supported",
     ),
     (
         "sessionImporters",
@@ -411,6 +467,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         Some("sessionImporters[].entry"),
         None,
         None,
+        "supported",
     ),
     (
         "mcpServerPresets",
@@ -419,6 +476,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         None,
         None,
         None,
+        "unsupported",
     ),
     (
         "nativeAnthropicTools",
@@ -427,8 +485,17 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         None,
         None,
         None,
+        "unsupported",
     ),
-    ("lspServers", &["lsp-server"], "host", None, None, None),
+    (
+        "lspServers",
+        &["lsp-server"],
+        "host",
+        None,
+        None,
+        None,
+        "unsupported",
+    ),
     (
         "characterPacks",
         &["character-pack"],
@@ -436,8 +503,17 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         None,
         None,
         None,
+        "unsupported",
     ),
-    ("subagents", &["subagent"], "host", None, None, None),
+    (
+        "subagents",
+        &["subagent"],
+        "host",
+        None,
+        None,
+        None,
+        "unsupported",
+    ),
     (
         "agentTeamTemplates",
         &["agent-team-template"],
@@ -445,6 +521,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         None,
         None,
         None,
+        "unsupported",
     ),
     (
         "sharedMemoryAdapters",
@@ -453,6 +530,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         None,
         None,
         None,
+        "unsupported",
     ),
     (
         "balanceAdapters",
@@ -461,6 +539,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         None,
         None,
         None,
+        "unsupported",
     ),
     (
         "limitsSources",
@@ -469,6 +548,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         None,
         None,
         None,
+        "unsupported",
     ),
     (
         "imRateSources",
@@ -477,6 +557,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         None,
         None,
         None,
+        "unsupported",
     ),
     (
         "compactionStrategies",
@@ -485,6 +566,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         None,
         None,
         None,
+        "unsupported",
     ),
     (
         "workflowTemplates",
@@ -493,6 +575,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         None,
         None,
         None,
+        "unsupported",
     ),
     (
         "connectors",
@@ -501,6 +584,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         None,
         None,
         None,
+        "experimental",
     ),
     (
         "workflows",
@@ -509,12 +593,45 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         None,
         None,
         None,
+        "unsupported",
     ),
-    ("themePacks", &["theme-pack"], "host", None, None, None),
-    ("fonts", &["fonts"], "host", None, None, None),
-    ("wallpapers", &["wallpapers"], "host", None, None, None),
-    ("quickActions", &["quick-action"], "host", None, None, None),
-    ("cliTools", &["cli-tools"], "host", None, None, None),
+    (
+        "themePacks",
+        &["theme-pack"],
+        "host",
+        None,
+        None,
+        None,
+        "unsupported",
+    ),
+    ("fonts", &["fonts"], "host", None, None, None, "unsupported"),
+    (
+        "wallpapers",
+        &["wallpapers"],
+        "host",
+        None,
+        None,
+        None,
+        "unsupported",
+    ),
+    (
+        "quickActions",
+        &["quick-action"],
+        "host",
+        None,
+        None,
+        None,
+        "unsupported",
+    ),
+    (
+        "cliTools",
+        &["cli-tools"],
+        "host",
+        None,
+        None,
+        None,
+        "unsupported",
+    ),
     (
         "contextPanels",
         &["context-panel"],
@@ -522,6 +639,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         Some("contextPanels[].entry"),
         None,
         None,
+        "unsupported",
     ),
     (
         "viewsContainers",
@@ -530,6 +648,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         None,
         None,
         None,
+        "unsupported",
     ),
     (
         "views",
@@ -538,6 +657,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         Some("views[].entry"),
         None,
         None,
+        "unsupported",
     ),
     (
         "webviews",
@@ -546,6 +666,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         Some("webviews[].entry"),
         Some("entry"),
         None,
+        "unsupported",
     ),
     (
         "authProviders",
@@ -554,6 +675,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         None,
         None,
         None,
+        "unsupported",
     ),
     (
         "petAchievements",
@@ -562,8 +684,17 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         None,
         None,
         None,
+        "unsupported",
     ),
-    ("petItems", &["pet-item"], "host", None, None, None),
+    (
+        "petItems",
+        &["pet-item"],
+        "host",
+        None,
+        None,
+        None,
+        "unsupported",
+    ),
     (
         "configComponent",
         &["configuration"],
@@ -571,6 +702,7 @@ pub(crate) const MANIFEST_CONTRIBUTIONS: &[(
         Some("configComponent.entry"),
         None,
         None,
+        "unsupported",
     ),
 ];
 

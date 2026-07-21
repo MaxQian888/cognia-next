@@ -13,8 +13,8 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::Serialize;
 use std::path::PathBuf;
 
-use crate::signing::{fingerprint, Keypair};
-use crate::template::{files_for, next_steps, TemplateFile, TemplateKind};
+use crate::engine::signing::{fingerprint, Keypair};
+use crate::engine::template::{files_for, next_steps, TemplateFile, TemplateKind};
 use crate::ui::{style, RuntimeUi};
 
 const ID_PATTERN_HINT: &str = "lowercase alphanumeric plus -_.";
@@ -553,7 +553,7 @@ fn emit_json_failure(
         error: err.to_string(),
     };
     println!("{}", serde_json::to_string_pretty(&payload)?);
-    Err(crate::JsonFailureExit.into())
+    Err(crate::shared::JsonFailureExit.into())
 }
 
 pub(crate) fn validate_name(name: &str) -> Result<()> {

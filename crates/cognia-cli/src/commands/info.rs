@@ -12,8 +12,8 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::{
-    b64_decode,
-    signing::{fingerprint, verify_bundle},
+    engine::signing::{fingerprint, verify_bundle},
+    shared::b64_decode,
     ui::{style, RuntimeUi},
 };
 
@@ -68,7 +68,7 @@ fn emit_json_failure(path: &Path, stage: &'static str, err: anyhow::Error) -> Re
         error: err.to_string(),
     };
     println!("{}", serde_json::to_string_pretty(&payload)?);
-    Err(crate::JsonFailureExit.into())
+    Err(crate::shared::JsonFailureExit.into())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -636,7 +636,7 @@ fn print_signature_block(sig: &SignatureStatus) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signing::{sign_bundle, Keypair};
+    use crate::engine::signing::{sign_bundle, Keypair};
     use std::io::Write;
     use tempfile::tempdir;
 
@@ -756,7 +756,7 @@ mod tests {
         let manifest = r#"{"id":"hw","name":"HW","version":"0.1.0","type":"wasm","capabilities":["tools"],"wasmMain":"hw.wasm","wasm":{"apiVersion":"0.1.0"}}"#;
         // Minimal wasm + embed via the packaging helper.
         let min_wasm = vec![0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
-        let patched = crate::packaging::embed_api_version(&min_wasm, "0.1.0").unwrap();
+        let patched = crate::engine::packaging::embed_api_version(&min_wasm, "0.1.0").unwrap();
         let bundle = make_bundle(manifest, &[("hw.wasm", &patched)]);
         let tmp = tempdir().unwrap();
         let path = tmp.path().join("p.zip");
@@ -771,7 +771,7 @@ mod tests {
         let plugin_dir = parent.path().join("plugin");
         std::fs::create_dir_all(&plugin_dir).unwrap();
         let min_wasm = vec![0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
-        let outside = crate::packaging::embed_api_version(&min_wasm, "9.9.9").unwrap();
+        let outside = crate::engine::packaging::embed_api_version(&min_wasm, "9.9.9").unwrap();
         std::fs::write(parent.path().join("outside.wasm"), outside).unwrap();
         std::fs::write(
             plugin_dir.join("plugin.json"),

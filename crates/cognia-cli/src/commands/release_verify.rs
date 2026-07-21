@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-use crate::release_key;
+use crate::engine::release_key;
 use crate::ui::{style, RuntimeUi};
 
 const ACTION: &str = "release-verify";
@@ -60,7 +60,7 @@ pub fn run(
         print_human(&payload);
     }
     if payload.error.is_some() && json {
-        return Err(crate::JsonFailureExit.into());
+        return Err(crate::shared::JsonFailureExit.into());
     }
     if let Some(error) = &payload.error {
         bail!("{error}");

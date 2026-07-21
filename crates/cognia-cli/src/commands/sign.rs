@@ -4,7 +4,7 @@ use anyhow::{anyhow, Context, Result};
 use serde::Serialize;
 use std::path::PathBuf;
 
-use crate::signing::{sign_bundle, Keypair};
+use crate::engine::signing::{sign_bundle, Keypair};
 use crate::ui::{style, RuntimeUi};
 
 /// `cognia plugin sign` — Ed25519-sign the bundle and write `<bundle>.sig`.
@@ -154,13 +154,13 @@ fn emit_json_failure(
         error: err.to_string(),
     };
     println!("{}", serde_json::to_string_pretty(&payload)?);
-    Err(crate::JsonFailureExit.into())
+    Err(crate::shared::JsonFailureExit.into())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signing::Keypair;
+    use crate::engine::signing::Keypair;
     use tempfile::tempdir;
 
     #[test]
@@ -177,7 +177,8 @@ mod tests {
         let sig_bytes = std::fs::read(tmp.path().join("p.zip.sig")).unwrap();
         // Verify the signature we wrote matches the bundle.
         let sig_str = String::from_utf8(sig_bytes).unwrap();
-        crate::signing::verify_bundle(&kp.public_base64(), b"-- bundle --", &sig_str).unwrap();
+        crate::engine::signing::verify_bundle(&kp.public_base64(), b"-- bundle --", &sig_str)
+            .unwrap();
     }
 
     #[test]
@@ -218,7 +219,8 @@ mod tests {
         run(bundle, key_path, None, &mut ui).unwrap();
         let actual = std::fs::read_to_string(tmp.path().join("p.zip.sig")).unwrap();
         assert_ne!(actual, "stale");
-        crate::signing::verify_bundle(&kp.public_base64(), b"bundle", actual.trim()).unwrap();
+        crate::engine::signing::verify_bundle(&kp.public_base64(), b"bundle", actual.trim())
+            .unwrap();
     }
 
     #[test]

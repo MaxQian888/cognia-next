@@ -48,61 +48,65 @@ impl TemplateKind {
 
 // ── WASM template files (existing) ──────────────────────────────────────────
 pub mod wasm {
-    pub const CARGO_TOML: &str = include_str!("../../cognia-plugin-template/Cargo.toml");
-    pub const SRC_LIB_RS: &str = include_str!("../../cognia-plugin-template/src/lib.rs");
-    pub const PLUGIN_JSON: &str = include_str!("../../cognia-plugin-template/plugin.json");
-    pub const WIT_WORLD: &str = include_str!("../../cognia-plugin-template/wit/world.wit");
-    pub const README: &str = include_str!("../../cognia-plugin-template/README.md");
-    pub const GITIGNORE: &str = include_str!("../../cognia-plugin-template/.gitignore");
+    pub const CARGO_TOML: &str = include_str!("../../../cognia-plugin-template/Cargo.toml");
+    pub const SRC_LIB_RS: &str = include_str!("../../../cognia-plugin-template/src/lib.rs");
+    pub const PLUGIN_JSON: &str = include_str!("../../../cognia-plugin-template/plugin.json");
+    pub const WIT_WORLD: &str = include_str!("../../../cognia-plugin-template/wit/world.wit");
+    pub const README: &str = include_str!("../../../cognia-plugin-template/README.md");
+    pub const GITIGNORE: &str = include_str!("../../../cognia-plugin-template/.gitignore");
 }
 
 // ── TS template files (new) ─────────────────────────────────────────────────
 pub mod ts {
-    pub const PACKAGE_JSON: &str = include_str!("../../cognia-plugin-template-ts/package.json");
-    pub const TSCONFIG_JSON: &str = include_str!("../../cognia-plugin-template-ts/tsconfig.json");
-    pub const JEST_CONFIG: &str = include_str!("../../cognia-plugin-template-ts/jest.config.cjs");
-    pub const PLUGIN_JSON: &str = include_str!("../../cognia-plugin-template-ts/plugin.json");
-    pub const SRC_INDEX_TS: &str = include_str!("../../cognia-plugin-template-ts/src/index.ts");
+    pub const PACKAGE_JSON: &str = include_str!("../../../cognia-plugin-template-ts/package.json");
+    pub const TSCONFIG_JSON: &str =
+        include_str!("../../../cognia-plugin-template-ts/tsconfig.json");
+    pub const JEST_CONFIG: &str =
+        include_str!("../../../cognia-plugin-template-ts/jest.config.cjs");
+    pub const PLUGIN_JSON: &str = include_str!("../../../cognia-plugin-template-ts/plugin.json");
+    pub const SRC_INDEX_TS: &str = include_str!("../../../cognia-plugin-template-ts/src/index.ts");
     pub const SRC_INDEX_TEST_TS: &str =
-        include_str!("../../cognia-plugin-template-ts/src/index.test.ts");
-    pub const GITIGNORE: &str = include_str!("../../cognia-plugin-template-ts/.gitignore");
-    pub const README: &str = include_str!("../../cognia-plugin-template-ts/README.md");
+        include_str!("../../../cognia-plugin-template-ts/src/index.test.ts");
+    pub const GITIGNORE: &str = include_str!("../../../cognia-plugin-template-ts/.gitignore");
+    pub const README: &str = include_str!("../../../cognia-plugin-template-ts/README.md");
 }
 
 // ── Python template files ──────────────────────────────────────────────────
 pub mod python {
-    pub const PLUGIN_JSON: &str = include_str!("../../cognia-plugin-template-python/plugin.json");
-    pub const MAIN_PY: &str = include_str!("../../cognia-plugin-template-python/main.py");
-    pub const README: &str = include_str!("../../cognia-plugin-template-python/README.md");
-    pub const GITIGNORE: &str = include_str!("../../cognia-plugin-template-python/.gitignore");
+    pub const PLUGIN_JSON: &str =
+        include_str!("../../../cognia-plugin-template-python/plugin.json");
+    pub const MAIN_PY: &str = include_str!("../../../cognia-plugin-template-python/main.py");
+    pub const README: &str = include_str!("../../../cognia-plugin-template-python/README.md");
+    pub const GITIGNORE: &str = include_str!("../../../cognia-plugin-template-python/.gitignore");
 }
 
 // ── Hybrid template files ──────────────────────────────────────────────────
 pub mod hybrid {
-    pub const PLUGIN_JSON: &str = include_str!("../../cognia-plugin-template-hybrid/plugin.json");
+    pub const PLUGIN_JSON: &str =
+        include_str!("../../../cognia-plugin-template-hybrid/plugin.json");
     pub const FRONTEND_INDEX_JS: &str =
-        include_str!("../../cognia-plugin-template-hybrid/frontend/index.js");
+        include_str!("../../../cognia-plugin-template-hybrid/frontend/index.js");
     pub const BACKEND_MAIN_PY: &str =
-        include_str!("../../cognia-plugin-template-hybrid/backend/main.py");
-    pub const STYLES: &str = include_str!("../../cognia-plugin-template-hybrid/styles.css");
-    pub const README: &str = include_str!("../../cognia-plugin-template-hybrid/README.md");
-    pub const GITIGNORE: &str = include_str!("../../cognia-plugin-template-hybrid/.gitignore");
+        include_str!("../../../cognia-plugin-template-hybrid/backend/main.py");
+    pub const STYLES: &str = include_str!("../../../cognia-plugin-template-hybrid/styles.css");
+    pub const README: &str = include_str!("../../../cognia-plugin-template-hybrid/README.md");
+    pub const GITIGNORE: &str = include_str!("../../../cognia-plugin-template-hybrid/.gitignore");
 }
 
 // ── VS Code extension template files ───────────────────────────────────────
 pub mod vscode_extension {
     pub const PLUGIN_JSON: &str =
-        include_str!("../../cognia-plugin-template-vscode-extension/plugin.json");
+        include_str!("../../../cognia-plugin-template-vscode-extension/plugin.json");
     pub const PACKAGE_JSON: &str =
-        include_str!("../../cognia-plugin-template-vscode-extension/package.json");
+        include_str!("../../../cognia-plugin-template-vscode-extension/package.json");
     pub const EXTENSION_JS: &str =
-        include_str!("../../cognia-plugin-template-vscode-extension/extension/out/extension.js");
+        include_str!("../../../cognia-plugin-template-vscode-extension/extension/out/extension.js");
     pub const STYLES: &str =
-        include_str!("../../cognia-plugin-template-vscode-extension/styles.css");
+        include_str!("../../../cognia-plugin-template-vscode-extension/styles.css");
     pub const README: &str =
-        include_str!("../../cognia-plugin-template-vscode-extension/README.md");
+        include_str!("../../../cognia-plugin-template-vscode-extension/README.md");
     pub const GITIGNORE: &str =
-        include_str!("../../cognia-plugin-template-vscode-extension/.gitignore");
+        include_str!("../../../cognia-plugin-template-vscode-extension/.gitignore");
 }
 
 /// A file to write during template stamping, with its destination

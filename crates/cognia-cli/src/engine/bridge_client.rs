@@ -199,18 +199,18 @@ mod tests {
 
     #[test]
     fn endpoint_file_path_honors_env_override() {
-        let _guard = crate::test_env::lock();
+        let _guard = crate::shared::test_env::lock();
         let prior_endpoint = std::env::var_os("COGNIA_CLI_ENDPOINT_FILE");
         let tmp = NamedTempFile::new().unwrap();
         std::env::set_var("COGNIA_CLI_ENDPOINT_FILE", tmp.path());
         let path = endpoint_file_path().unwrap();
-        crate::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
+        crate::shared::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
         assert_eq!(path, tmp.path());
     }
 
     #[test]
     fn load_endpoint_reads_valid_file() {
-        let _guard = crate::test_env::lock();
+        let _guard = crate::shared::test_env::lock();
         let prior_endpoint = std::env::var_os("COGNIA_CLI_ENDPOINT_FILE");
         let mut tmp = NamedTempFile::new().unwrap();
         let payload =
@@ -218,34 +218,34 @@ mod tests {
         write!(tmp, "{payload}").unwrap();
         std::env::set_var("COGNIA_CLI_ENDPOINT_FILE", tmp.path());
         let ep = load_endpoint().unwrap();
-        crate::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
+        crate::shared::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
         assert_eq!(ep.base_url, "http://127.0.0.1:1234");
         assert_eq!(ep.dev_token, "deadbeef");
     }
 
     #[test]
     fn load_endpoint_errors_on_missing_file() {
-        let _guard = crate::test_env::lock();
+        let _guard = crate::shared::test_env::lock();
         let prior_endpoint = std::env::var_os("COGNIA_CLI_ENDPOINT_FILE");
         std::env::set_var(
             "COGNIA_CLI_ENDPOINT_FILE",
             "/definitely/does/not/exist.json",
         );
         let err = load_endpoint().unwrap_err();
-        crate::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
+        crate::shared::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
         let msg = err.to_string();
         assert!(msg.contains("no running cognia detected"), "got: {msg}");
     }
 
     #[test]
     fn load_endpoint_rejects_empty_fields() {
-        let _guard = crate::test_env::lock();
+        let _guard = crate::shared::test_env::lock();
         let prior_endpoint = std::env::var_os("COGNIA_CLI_ENDPOINT_FILE");
         let mut tmp = NamedTempFile::new().unwrap();
         write!(tmp, r#"{{"baseUrl": "", "devToken": ""}}"#).unwrap();
         std::env::set_var("COGNIA_CLI_ENDPOINT_FILE", tmp.path());
         let err = load_endpoint().unwrap_err();
-        crate::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
+        crate::shared::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
         assert!(err.to_string().contains("missing baseUrl / devToken"));
     }
 

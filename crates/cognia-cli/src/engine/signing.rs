@@ -1,6 +1,6 @@
 //! Ed25519 signing + verification primitives.
 //!
-//! Pure helper layer used by `cmd_sign` and `cmd_verify`. We sign the
+//! Pure helper layer used by `sign` and `verify`. We sign the
 //! raw bundle bytes (matching the host's `plugin_verify_detached_signature`
 //! command) so the same `.sig` file works regardless of whether the
 //! receiving host knows the plugin id yet.
@@ -12,7 +12,7 @@ use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey, SIGNA
 use rand::RngCore;
 use sha2::{Digest, Sha256};
 
-use crate::{b64_decode, b64_encode};
+use crate::shared::{b64_decode, b64_encode};
 
 pub struct Keypair {
     pub signing_key: SigningKey,

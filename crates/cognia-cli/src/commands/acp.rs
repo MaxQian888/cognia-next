@@ -34,7 +34,7 @@ use std::time::Duration;
 use tungstenite::client::IntoClientRequest;
 use tungstenite::{Connector, Message, WebSocket};
 
-use crate::http_client;
+use crate::engine::bridge_client;
 use crate::ui::RuntimeUi;
 
 /// How long the poll loop sleeps in the underlying socket read before
@@ -79,9 +79,9 @@ pub(crate) fn resolve_target() -> Result<ConnectionTarget> {
         _ => {}
     }
 
-    let endpoint = http_client::load_endpoint()?;
+    let endpoint = bridge_client::load_endpoint()?;
     let response: AcpTokenResponse =
-        http_client::post_json(&endpoint, "/api/v1/dev/acp/token", &serde_json::json!({}))?;
+        bridge_client::post_json(&endpoint, "/api/v1/dev/acp/token", &serde_json::json!({}))?;
     if !response.ok {
         bail!(
             "ACP token broker refused: {}",
@@ -349,7 +349,7 @@ mod tests {
 
     #[test]
     fn explicit_acp_url_override_requires_non_empty_url() {
-        let _guard = crate::test_env::lock();
+        let _guard = crate::shared::test_env::lock();
         let prior_url = std::env::var_os("COGNIA_ACP_URL");
 
         std::env::remove_var("COGNIA_ACP_URL");
@@ -364,7 +364,7 @@ mod tests {
         std::env::set_var("COGNIA_ACP_URL", "wss://example.com/ws/v1/acp");
         assert!(has_explicit_acp_url_override());
 
-        crate::test_env::restore("COGNIA_ACP_URL", prior_url);
+        crate::shared::test_env::restore("COGNIA_ACP_URL", prior_url);
     }
 
     // ── Target resolution ───────────────────────────────────────────────
@@ -375,14 +375,14 @@ mod tests {
 
     #[test]
     fn resolve_target_prefers_env_override() {
-        let _guard = crate::test_env::lock();
+        let _guard = crate::shared::test_env::lock();
         let prior_url = std::env::var_os("COGNIA_ACP_URL");
         let prior_token = std::env::var_os("COGNIA_ACP_TOKEN");
         std::env::set_var("COGNIA_ACP_URL", "wss://127.0.0.1:1/ws/v1/acp");
         std::env::set_var("COGNIA_ACP_TOKEN", "tok");
         let target = resolve_target().unwrap();
-        crate::test_env::restore("COGNIA_ACP_URL", prior_url);
-        crate::test_env::restore("COGNIA_ACP_TOKEN", prior_token);
+        crate::shared::test_env::restore("COGNIA_ACP_URL", prior_url);
+        crate::shared::test_env::restore("COGNIA_ACP_TOKEN", prior_token);
         assert_eq!(
             target,
             ConnectionTarget {
@@ -394,33 +394,33 @@ mod tests {
 
     #[test]
     fn resolve_target_rejects_url_without_token() {
-        let _guard = crate::test_env::lock();
+        let _guard = crate::shared::test_env::lock();
         let prior_url = std::env::var_os("COGNIA_ACP_URL");
         let prior_token = std::env::var_os("COGNIA_ACP_TOKEN");
         std::env::set_var("COGNIA_ACP_URL", "wss://127.0.0.1:1/ws/v1/acp");
         std::env::remove_var("COGNIA_ACP_TOKEN");
         let err = resolve_target().unwrap_err();
-        crate::test_env::restore("COGNIA_ACP_URL", prior_url);
-        crate::test_env::restore("COGNIA_ACP_TOKEN", prior_token);
+        crate::shared::test_env::restore("COGNIA_ACP_URL", prior_url);
+        crate::shared::test_env::restore("COGNIA_ACP_TOKEN", prior_token);
         assert!(err.to_string().contains("COGNIA_ACP_TOKEN"));
     }
 
     #[test]
     fn resolve_target_rejects_token_without_url() {
-        let _guard = crate::test_env::lock();
+        let _guard = crate::shared::test_env::lock();
         let prior_url = std::env::var_os("COGNIA_ACP_URL");
         let prior_token = std::env::var_os("COGNIA_ACP_TOKEN");
         std::env::remove_var("COGNIA_ACP_URL");
         std::env::set_var("COGNIA_ACP_TOKEN", "tok");
         let err = resolve_target().unwrap_err();
-        crate::test_env::restore("COGNIA_ACP_URL", prior_url);
-        crate::test_env::restore("COGNIA_ACP_TOKEN", prior_token);
+        crate::shared::test_env::restore("COGNIA_ACP_URL", prior_url);
+        crate::shared::test_env::restore("COGNIA_ACP_TOKEN", prior_token);
         assert!(err.to_string().contains("COGNIA_ACP_URL"));
     }
 
     #[test]
     fn resolve_target_uses_broker_via_cli_bridge() {
-        let _guard = crate::test_env::lock();
+        let _guard = crate::shared::test_env::lock();
         let prior_url = std::env::var_os("COGNIA_ACP_URL");
         let prior_token = std::env::var_os("COGNIA_ACP_TOKEN");
         let prior_endpoint = std::env::var_os("COGNIA_CLI_ENDPOINT_FILE");
@@ -460,9 +460,9 @@ mod tests {
         std::env::remove_var("COGNIA_ACP_TOKEN");
 
         let target = resolve_target().unwrap();
-        crate::test_env::restore("COGNIA_ACP_URL", prior_url);
-        crate::test_env::restore("COGNIA_ACP_TOKEN", prior_token);
-        crate::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
+        crate::shared::test_env::restore("COGNIA_ACP_URL", prior_url);
+        crate::shared::test_env::restore("COGNIA_ACP_TOKEN", prior_token);
+        crate::shared::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
         let _ = server_thread.join();
 
         assert_eq!(target.ws_url, "wss://127.0.0.1:7890/ws/v1/acp");
@@ -471,7 +471,7 @@ mod tests {
 
     #[test]
     fn resolve_target_surfaces_broker_refusal() {
-        let _guard = crate::test_env::lock();
+        let _guard = crate::shared::test_env::lock();
         let prior_url = std::env::var_os("COGNIA_ACP_URL");
         let prior_token = std::env::var_os("COGNIA_ACP_TOKEN");
         let prior_endpoint = std::env::var_os("COGNIA_CLI_ENDPOINT_FILE");
@@ -503,9 +503,9 @@ mod tests {
         std::env::set_var("COGNIA_CLI_ENDPOINT_FILE", tmp.path());
 
         let err = resolve_target().unwrap_err();
-        crate::test_env::restore("COGNIA_ACP_URL", prior_url);
-        crate::test_env::restore("COGNIA_ACP_TOKEN", prior_token);
-        crate::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
+        crate::shared::test_env::restore("COGNIA_ACP_URL", prior_url);
+        crate::shared::test_env::restore("COGNIA_ACP_TOKEN", prior_token);
+        crate::shared::test_env::restore("COGNIA_CLI_ENDPOINT_FILE", prior_endpoint);
         let _ = server_thread.join();
         assert!(err.to_string().contains("not running"), "got: {err}");
     }

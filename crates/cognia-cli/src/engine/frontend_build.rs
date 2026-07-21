@@ -15,9 +15,9 @@ use anyhow::{anyhow, bail, Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::run_streaming;
+use crate::shared::run_streaming;
 
-/// Build a frontend TS plugin and pack its bundle. The caller (cmd_build)
+/// Build a frontend TS plugin and pack its bundle. The caller (commands::build)
 /// has already validated the manifest.
 pub fn build_and_pack(
     crate_root: &Path,
@@ -88,6 +88,15 @@ fn resolve_ts_entry(crate_root: &Path, manifest: &serde_json::Value) -> Result<P
         "no TypeScript entry point found. Looked for: {}. Set `tsEntry` in plugin.json to override.",
         candidates.join(", ")
     )
+}
+
+/// Bundle a frontend plugin's entry without packing a `.zip`.
+///
+/// `cognia plugin import` uses this for its trailing build: the author
+/// wants an installable directory, not a distributable archive, and the
+/// zip step would only produce a file they have to ignore.
+pub(crate) fn build_only(crate_root: &Path, manifest: &serde_json::Value) -> Result<()> {
+    run_esbuild(crate_root, manifest)
 }
 
 fn run_esbuild(crate_root: &Path, manifest: &serde_json::Value) -> Result<()> {

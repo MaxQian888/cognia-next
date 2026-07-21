@@ -4,7 +4,7 @@ use anyhow::{anyhow, Context, Result};
 use serde::Serialize;
 use std::path::PathBuf;
 
-use crate::signing::Keypair;
+use crate::engine::signing::Keypair;
 use crate::ui::{style, RuntimeUi};
 
 /// `cognia plugin keygen` — generate an Ed25519 keypair.
@@ -162,7 +162,7 @@ fn emit_json_failure(
         error: err.to_string(),
     };
     println!("{}", serde_json::to_string_pretty(&payload)?);
-    Err(crate::JsonFailureExit.into())
+    Err(crate::shared::JsonFailureExit.into())
 }
 
 #[cfg(test)]

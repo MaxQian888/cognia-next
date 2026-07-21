@@ -1,14 +1,14 @@
 //! `cognia plugin uninstall <plugin-id> [--purge-data]` — remove an
 //! installed plugin from a running cognia desktop instance.
 //!
-//! Talks to the same CLI bridge as `cmd_install` — see `cli_bridge` on
+//! Talks to the same CLI bridge as `install` — see `cli_bridge` on
 //! the Tauri side.
 
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::http_client::{get_json, load_endpoint, post_json, EndpointFile};
+use crate::engine::bridge_client::{get_json, load_endpoint, post_json, EndpointFile};
 use crate::ui::{style, RuntimeUi};
 
 const PATH: &str = "/api/v1/dev/plugins/uninstall";
@@ -70,7 +70,7 @@ pub fn run(plugin_id: String, purge_data: bool, ui: &mut RuntimeUi) -> Result<()
     run_with_endpoint(plugin_id, purge_data, &endpoint, ui)
 }
 
-/// Endpoint-injected variant; mirrors [`crate::cmd_install::run_with_endpoint`].
+/// Endpoint-injected variant; mirrors [`crate::commands::install::run_with_endpoint`].
 pub fn run_with_endpoint(
     plugin_id: String,
     purge_data: bool,
@@ -167,7 +167,7 @@ pub fn run_with_endpoint(
                 error,
             };
             println!("{}", serde_json::to_string_pretty(&payload)?);
-            return Err(crate::JsonFailureExit.into());
+            return Err(crate::shared::JsonFailureExit.into());
         }
         bail!("uninstall rejected by cognia: {}", error);
     }
@@ -238,7 +238,7 @@ fn emit_json_failure(
         error,
     };
     println!("{}", serde_json::to_string_pretty(&payload)?);
-    Err(crate::JsonFailureExit.into())
+    Err(crate::shared::JsonFailureExit.into())
 }
 
 #[cfg(test)]

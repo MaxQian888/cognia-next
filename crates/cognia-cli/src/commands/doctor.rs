@@ -16,7 +16,7 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::cmd_status::probe_bridge_status;
+use crate::commands::status::probe_bridge_status;
 use crate::ui::{style, RuntimeUi};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -104,7 +104,7 @@ pub fn run(fix: bool, as_json: bool, ui: &mut RuntimeUi) -> Result<()> {
     if ok {
         Ok(())
     } else if as_json {
-        Err(crate::JsonFailureExit.into())
+        Err(crate::shared::JsonFailureExit.into())
     } else {
         let fails = report
             .checks
@@ -287,7 +287,7 @@ fn signing_key_check(key_exists: bool, gitignore: Option<&str>) -> Check {
 }
 
 fn manifest_check(dir: &Path) -> Check {
-    match crate::cmd_lint::validate_at(dir) {
+    match crate::commands::lint::validate_at(dir) {
         Ok(report) => {
             let errors = report.error_count();
             let warnings = report.warning_count();
