@@ -43,7 +43,11 @@
       "@cognia/tts": ["../../packages/tts/src/index.ts"],
       "@cognia/tts/*": ["../../packages/tts/src/*"],
       "@cognia/ocr": ["../../packages/ocr/src/index.ts"],
-      "@cognia/ocr/*": ["../../packages/ocr/src/*"]
+      "@cognia/ocr/*": ["../../packages/ocr/src/*"],
+      // Reached INDIRECTLY: this package compiles `lib/plugin/api/memory-api.ts`,
+      // which imports `@/types/memory/memory` — now a shim over @cognia/memory.
+      "@cognia/memory": ["../../packages/memory/src/index.ts"],
+      "@cognia/memory/*": ["../../packages/memory/src/*"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "../../types/optional-modules.d.ts"],
