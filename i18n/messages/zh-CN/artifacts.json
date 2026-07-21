@@ -46,6 +46,7 @@
   "filterByRuntime": "按运行时筛选",
   "filterByType": "按类型筛选",
   "fullscreen": "全屏",
+  "generating": "正在生成…",
   "manualSave": "手动保存 v{version}",
   "mermaidTypes": {
     "classDiagram": "类图",

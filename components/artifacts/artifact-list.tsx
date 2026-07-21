@@ -9,7 +9,7 @@
 import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { formatDistanceToNow } from "date-fns"
-import { Trash2, Code, Search, Filter, CheckSquare, Eye } from "lucide-react"
+import { Trash2, Code, Search, Filter, CheckSquare, Eye, Loader2 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import {
   Select,
@@ -45,7 +45,34 @@ import { getPluginEventHooks } from "@/lib/plugin"
 import type { Artifact } from "@/types"
 import { ARTIFACT_TYPES, ARTIFACT_TYPE_KEYS, PREVIEWABLE_TYPES } from "@/lib/artifacts"
 import { useArtifactList } from "@/hooks/artifacts/use-artifact-list"
+import { useStreamingArtifact } from "@/hooks/artifacts/use-streaming-artifact"
+import type { StreamingArtifact } from "@/lib/ai/generation/artifact-detector"
 import { getArtifactTypeIcon } from "./artifact-icons"
+
+/**
+ * The artifact the assistant is still writing, rendered in the slot the real
+ * one will occupy. Without it a finished artifact simply appears from nowhere,
+ * because nothing exists in the store until the turn seals.
+ */
+function GeneratingArtifactRow({ pending }: { pending: StreamingArtifact }) {
+  const t = useTranslations("artifacts")
+  return (
+    <div
+      data-testid="artifact-list-generating"
+      aria-live="polite"
+      className="flex w-full items-center gap-2 rounded-md border border-dashed px-3 py-2"
+    >
+      <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+      <div className="min-w-0 flex-1 text-left">
+        <p className="truncate text-sm font-medium">{pending.title}</p>
+        <p className="text-xs text-muted-foreground">{t("generating")}</p>
+      </div>
+      <Badge variant="outline" className="shrink-0 text-xs">
+        {t(`types.${TYPE_LABEL_KEYS[pending.type]}`)}
+      </Badge>
+    </div>
+  )
+}
 
 interface ArtifactListProps {
   sessionId?: string
@@ -109,8 +136,17 @@ export function ArtifactList({
     handleBatchDelete,
     confirmDelete,
   } = useArtifactList({ sessionId, onArtifactClick })
+  const pending = useStreamingArtifact(sessionId)
 
   if (sessionArtifacts.length === 0 && !searchQuery && typeFilter === "all") {
+    // "No artifacts yet" would be a lie while one is being written.
+    if (pending) {
+      return (
+        <div data-testid="artifact-list" className={cn("p-2", className)} style={{ maxHeight }}>
+          <GeneratingArtifactRow pending={pending} />
+        </div>
+      )
+    }
     return (
       <ListEmptyState
         title={t("noArtifacts")}
@@ -203,6 +239,7 @@ export function ArtifactList({
 
       <ScrollArea style={{ maxHeight: `calc(${maxHeight} - 48px)` }}>
         <div className="space-y-1 p-2">
+          {pending ? <GeneratingArtifactRow pending={pending} /> : null}
           {sessionArtifacts.map((artifact) => {
             const createdAt =
               artifact.createdAt instanceof Date ? artifact.createdAt : new Date(artifact.createdAt)

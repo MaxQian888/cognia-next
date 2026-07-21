@@ -46,6 +46,7 @@
   "filterByRuntime": "Filter by runtime",
   "filterByType": "Filter by type",
   "fullscreen": "Fullscreen",
+  "generating": "Generating…",
   "manualSave": "Manual save v{version}",
   "mermaidTypes": {
     "classDiagram": "Class Diagram",

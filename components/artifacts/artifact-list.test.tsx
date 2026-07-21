@@ -11,6 +11,7 @@ jest.mock("next-intl", () => ({
 import { ArtifactList, ArtifactListCompact } from "./artifact-list"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useChatStore } from "@/stores/chat"
+import { useSettingsStore } from "@/stores/settings"
 
 beforeEach(() => {
   localStorage.clear()
@@ -34,8 +35,30 @@ beforeEach(() => {
     panelOpen: false,
     panelView: "artifact",
   })
-  useChatStore.setState({ activeSessionId: "s1" })
+  useChatStore.setState({ activeSessionId: "s1", status: "idle", messages: [] })
+  useSettingsStore.setState({ settings: { artifacts: {} } } as never)
 })
+
+/** Put the chat into a streaming turn with an open, artifact-sized fence. */
+function streamAnArtifact() {
+  useChatStore.setState({
+    status: "streaming",
+    messages: [
+      {
+        id: "m1",
+        role: "assistant",
+        parts: [
+          {
+            type: "text",
+            text:
+              "Sure:\n\n```python\n" +
+              Array.from({ length: 12 }, (_, index) => `print(${index})`).join("\n"),
+          },
+        ],
+      },
+    ] as never,
+  })
+}
 
 describe("ArtifactList", () => {
   it("renders the empty state when no artifacts exist", () => {
@@ -80,6 +103,35 @@ describe("ArtifactList", () => {
     const input = screen.getByPlaceholderText("search")
     fireEvent.change(input, { target: { value: "alpha" } })
     expect(useArtifactStore.getState().artifactWorkspace.searchQuery).toBe("alpha")
+  })
+
+  it("shows the generating row instead of claiming there are no artifacts", () => {
+    streamAnArtifact()
+    render(<ArtifactList sessionId="s1" />)
+
+    expect(screen.getByTestId("artifact-list-generating")).toBeInTheDocument()
+    // "No artifacts yet" would be a lie while one is being written.
+    expect(screen.queryByText("noArtifacts")).not.toBeInTheDocument()
+  })
+
+  it("shows the generating row above the artifacts already in the list", () => {
+    useArtifactStore.getState().createArtifact({
+      sessionId: "s1",
+      messageId: "m",
+      type: "code",
+      title: "Foo",
+      content: "x",
+    })
+    streamAnArtifact()
+    render(<ArtifactList sessionId="s1" />)
+
+    expect(screen.getByTestId("artifact-list-generating")).toBeInTheDocument()
+    expect(screen.getByText("Foo")).toBeInTheDocument()
+  })
+
+  it("shows no generating row once the turn is idle", () => {
+    render(<ArtifactList sessionId="s1" />)
+    expect(screen.queryByTestId("artifact-list-generating")).not.toBeInTheDocument()
   })
 
   it("compact list renders nothing when empty", () => {
