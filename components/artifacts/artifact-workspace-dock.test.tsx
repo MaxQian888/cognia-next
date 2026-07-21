@@ -88,7 +88,9 @@ jest.mock("@/components/ui/resizable", () => {
         </div>
       )
     },
-    ResizableHandle: () => <div />,
+    ResizableHandle: ({ className }: { className?: string }) => (
+      <div data-testid="resizable-handle" className={className} />
+    ),
   }
 })
 
@@ -253,6 +255,56 @@ describe("ArtifactWorkspaceDock", () => {
     act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
     expect(dockPanel).toHaveAttribute("data-size", "0%")
     expect(dockPanel.style.transitionProperty).toBe("flex-grow")
+  })
+
+  it("pins the dock body's width so collapsing wipes it instead of squashing it", async () => {
+    // jsdom reports every offsetWidth as 0, so the pin is unreachable without
+    // stubbing the two measurements it derives from.
+    const offsetWidth = jest.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(400)
+    try {
+      render(
+        <ArtifactWorkspaceDock>
+          <div data-testid="chat" />
+        </ArtifactWorkspaceDock>
+      )
+      const body = screen.getByTestId("artifact-dock-wrapper")
+
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+
+      // Expanding: the body is laid out at the width it is heading for (34% of
+      // the 400px group) from the first frame, so the widening panel reveals
+      // finished content rather than stretching a squeezed column.
+      expect(body.style.width).toBe("136px")
+      await waitFor(() => expect(body.style.width).toBe(""))
+
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
+
+      // Collapsing: hold what is on screen. The activity rail is shrink-0 while
+      // the panel body is not, so an unpinned body gets crushed alone.
+      expect(body.style.width).toBe("400px")
+      await waitFor(() => expect(body.style.width).toBe(""))
+    } finally {
+      offsetWidth.mockRestore()
+    }
+  })
+
+  it("fades the resize handle in step with the panel instead of hiding it outright", () => {
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+    const handle = screen.getByTestId("resizable-handle")
+
+    // Collapsed: a hard `hidden` removed the divider before the dock had
+    // finished retracting, and popped it back over a zero-width dock on expand.
+    expect(handle.className).toContain("opacity-0")
+    expect(handle.className).toContain("transition-[width,opacity]")
+    expect(handle.className).not.toContain("hidden")
+
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+
+    expect(handle.className).not.toContain("opacity-0")
   })
 
   it("widens the dock bounds and reclaims chat width in workspace mode", () => {

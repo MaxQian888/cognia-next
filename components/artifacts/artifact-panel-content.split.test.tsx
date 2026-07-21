@@ -6,7 +6,7 @@
  * `split` viewMode through a click).
  */
 
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -42,6 +42,23 @@ jest.mock("@/components/ui/resizable", () => ({
   ResizablePanel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   ResizableHandle: () => <div data-testid="resize-handle" />,
 }))
+
+// Radix menus open on pointer events jsdom does not deliver, so overflow items
+// are unreachable through `fireEvent`. Flatten them to render inline.
+jest.mock("@/components/ui/dropdown-menu", () => {
+  const React = jest.requireActual("react")
+  type Props = { children?: React.ReactNode; onClick?: () => void }
+  return {
+    DropdownMenu: ({ children }: Props) => <div>{children}</div>,
+    DropdownMenuTrigger: ({ children }: Props) => <>{children}</>,
+    DropdownMenuContent: ({ children }: Props) => <div>{children}</div>,
+    DropdownMenuItem: ({ children, onClick }: Props) => (
+      <button type="button" onClick={onClick}>
+        {children}
+      </button>
+    ),
+  }
+})
 
 const mockState: Record<string, unknown> = {}
 jest.mock("@/hooks/artifacts/use-artifact-panel", () => ({
@@ -90,9 +107,26 @@ function setState(overrides: Record<string, unknown>) {
     handleDownload: jest.fn(),
     handleOpenInNewTab: jest.fn(),
     handleRevealInExplorer: jest.fn(),
+    handleSaveToProject: jest.fn(),
+    handleDownloadAs: jest.fn(),
     ...overrides,
   })
 }
+
+describe("ArtifactPanelContent overflow actions", () => {
+  it("labels and dispatches Save to project", () => {
+    const handleSaveToProject = jest.fn()
+    setState({ overflowActions: ["saveToProject"], handleSaveToProject })
+    render(<ArtifactPanelContent panelMode="desktop" />)
+
+    // Both the label and the dispatch arm are switch cases with no default
+    // fallthrough, so a missing arm renders the raw action name and does
+    // nothing on click.
+    fireEvent.click(screen.getByRole("button", { name: "dock.saveToProject" }))
+
+    expect(handleSaveToProject).toHaveBeenCalledTimes(1)
+  })
+})
 
 describe("ArtifactPanelContent split view", () => {
   it("renders code + preview side-by-side when viewMode is split", () => {

@@ -110,36 +110,30 @@ describe("useArtifactDockShortcuts", () => {
     }
   })
 
-  it("on mobile: Cmd+J toggles the current Workspace Sheet", () => {
+  it("on mobile: Cmd+J still closes the Sheet while the workspace panel is showing", () => {
     useBreakpointMock.mockReturnValue("mobile")
+    // Regression: the workspace surface used to take a branch of its own, built
+    // for a standalone Workspace Sheet that no longer exists. It closed the
+    // panel while raising `mobileSheetOpen`, which the narrow dock reconciles
+    // straight back into re-opening — so the Sheet could never be dismissed.
     act(() => useArtifactDockLayoutStore.getState().setDockProfile("workspace"))
+    act(() => useArtifactStore.getState().openPanel("artifact"))
     mount()
+
     act(() => pressMod(document.body, "j"))
-    expect(useArtifactDockLayoutStore.getState().mobileSheetOpen).toBe(true)
-    expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
-    act(() => {
-      useArtifactDockLayoutStore.setState({
-        workspaceContext: {
-          kind: "file",
-          sessionId: "session-1",
-          rootPath: "/repo",
-          relPath: "src/a.ts",
-        },
-      })
-    })
-    act(() => pressMod(document.body, "j"))
+
+    expect(useArtifactStore.getState().panelOpen).toBe(false)
     expect(useArtifactDockLayoutStore.getState().mobileSheetOpen).toBe(false)
-    expect(useArtifactDockLayoutStore.getState().workspaceContext).toBeNull()
   })
 
-  it("on tablet: Cmd+J toggles the Workspace Sheet instead of the desktop dock", () => {
+  it("on tablet: Cmd+J opens the one Sheet rather than the desktop dock", () => {
     useBreakpointMock.mockReturnValue("tablet")
     act(() => useArtifactDockLayoutStore.getState().setDockProfile("workspace"))
     mount()
 
     act(() => pressMod(document.body, "j"))
 
-    expect(useArtifactDockLayoutStore.getState().mobileSheetOpen).toBe(true)
+    expect(useArtifactStore.getState().panelOpen).toBe(true)
     expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
   })
 

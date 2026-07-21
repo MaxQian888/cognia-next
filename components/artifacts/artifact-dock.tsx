@@ -414,6 +414,9 @@ export function ArtifactContextWorkbench({
       workbenchInstanceId={workbenchInstanceId}
       resource={resource}
       panels={panels}
+      // The Sheet needs the tabs as much as the dock does — without them a
+      // phone has no way to move between open artifacts at all.
+      headerLeading={hasArtifactTabs ? <ArtifactTabStrip className="flex-1" /> : undefined}
       onCollapse={() => mobile.onOpenChange(false)}
     />
   ) : (

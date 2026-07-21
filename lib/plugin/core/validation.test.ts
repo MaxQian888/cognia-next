@@ -5,6 +5,7 @@
 import { validatePluginManifest, validatePluginConfig } from "./validation"
 import type { PluginConfigSchema } from "@/types/plugin"
 import type { PluginManifest } from "@/types/plugin"
+import { CANONICAL_CONTEXT_ACTIVITIES } from "@/types/context-workbench"
 
 describe("Plugin Validation", () => {
   describe("validatePluginManifest", () => {
@@ -215,6 +216,35 @@ describe("Plugin Validation", () => {
         ])
       )
     })
+
+    it.each([...CANONICAL_CONTEXT_ACTIVITIES])(
+      "accepts a context panel on the canonical %s activity",
+      (activity) => {
+        // The validator used to hold a hand-copied list, so `workspace` passed
+        // tsc via `CanonicalContextActivity` and then failed at install time.
+        // Driving this from the same source keeps the two from drifting again.
+        const manifest = createValidManifest()
+        manifest.capabilities = ["context-panel"] as PluginManifest["capabilities"]
+        manifest.permissions = ["extension:ui", "canvas:read"]
+        ;(manifest as unknown as Record<string, unknown>).contextPanels = [
+          {
+            id: "outline",
+            label: "Outline",
+            labelKey: "panels.outline",
+            entry: "panel.js",
+            export: "OutlinePanel",
+            resourceKinds: ["canvas-document"],
+            activity,
+          },
+        ]
+
+        const result = validatePluginManifest(manifest, { governanceMode: "warn" })
+
+        expect(result.diagnostics ?? []).not.toEqual(
+          expect.arrayContaining([expect.objectContaining({ code: "activity.invalid" })])
+        )
+      }
+    )
 
     it("accepts declarative-only VS Code extensions without vscodeMain", () => {
       const manifest = createValidManifest() as unknown as Record<string, unknown>

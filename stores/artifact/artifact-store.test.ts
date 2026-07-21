@@ -42,12 +42,14 @@ import {
   activateArtifactAccountStorage,
   clearArtifactAccountStorage,
   purgeArtifactAccountStorage,
+  MAX_OPEN_ARTIFACTS,
   useArtifactStore,
 } from "./artifact-store"
 
 const initial = {
   artifacts: {},
   activeArtifactId: null,
+  openArtifactIds: [],
   artifactVersions: {},
   artifactWorkspace: {
     scope: "session" as const,
@@ -72,6 +74,100 @@ beforeEach(() => {
   jest.clearAllMocks()
   resetPluginRateLimiter()
   mockActiveProjectId = null
+})
+
+describe("openArtifactIds (the dock's tab strip)", () => {
+  function make(title: string) {
+    return useArtifactStore.getState().createArtifact({
+      sessionId: "s1",
+      messageId: "m1",
+      type: "code",
+      title,
+      content: "x",
+    })
+  }
+
+  it("opens a tab on create and on activate, without reordering", () => {
+    const a = make("A")
+    const b = make("B")
+    expect(useArtifactStore.getState().openArtifactIds).toEqual([a.id, b.id])
+
+    useArtifactStore.getState().setActiveArtifact(a.id)
+
+    // Tabs keep open order; only `recentArtifactIds` is an MRU list.
+    expect(useArtifactStore.getState().openArtifactIds).toEqual([a.id, b.id])
+    expect(useArtifactStore.getState().artifactWorkspace.recentArtifactIds[0]).toBe(a.id)
+  })
+
+  it("drops the oldest tab past the cap", () => {
+    const created = Array.from({ length: MAX_OPEN_ARTIFACTS + 2 }, (_, i) => make(`A${i}`))
+    const open = useArtifactStore.getState().openArtifactIds
+
+    expect(open).toHaveLength(MAX_OPEN_ARTIFACTS)
+    expect(open).not.toContain(created[0].id)
+    expect(open.at(-1)).toBe(created.at(-1)!.id)
+  })
+
+  it("ignores closing an id that is not open", () => {
+    const a = make("A")
+    make("B")
+    const before = useArtifactStore.getState().openArtifactIds
+
+    useArtifactStore.getState().closeArtifact("nope")
+
+    expect(useArtifactStore.getState().openArtifactIds).toBe(before)
+    expect(useArtifactStore.getState().activeArtifactId).toBe(
+      useArtifactStore.getState().activeArtifactId
+    )
+    expect(useArtifactStore.getState().artifacts[a.id]).toBeDefined()
+  })
+
+  it("closing a tab keeps the artifact itself", () => {
+    const a = make("A")
+    make("B")
+
+    useArtifactStore.getState().closeArtifact(a.id)
+
+    // Closing is not deleting — the artifact stays reachable from history.
+    expect(useArtifactStore.getState().artifacts[a.id]).toBeDefined()
+    expect(useArtifactStore.getState().openArtifactIds).not.toContain(a.id)
+  })
+
+  it.each([
+    ["deleteArtifact", (id: string) => useArtifactStore.getState().deleteArtifact(id)],
+    ["deleteArtifacts", (id: string) => useArtifactStore.getState().deleteArtifacts([id])],
+  ])("%s drops the tab along with the artifact", (_name, remove) => {
+    const a = make("A")
+    make("B")
+
+    remove(a.id)
+
+    expect(useArtifactStore.getState().openArtifactIds).not.toContain(a.id)
+  })
+
+  it("duplicating an artifact opens the copy as a tab", () => {
+    const a = make("A")
+    make("B")
+
+    const copy = useArtifactStore.getState().duplicateArtifact(a.id)
+
+    // The copy becomes active, so a tab strip missing it would show every tab
+    // unselected while the panel displayed something else entirely.
+    expect(useArtifactStore.getState().activeArtifactId).toBe(copy!.id)
+    expect(useArtifactStore.getState().openArtifactIds).toContain(copy!.id)
+  })
+
+  it("clearSessionData and purgeProject drop tabs for artifacts they remove", () => {
+    const a = make("A")
+    useArtifactStore.getState().clearSessionData("s1")
+    expect(useArtifactStore.getState().openArtifactIds).not.toContain(a.id)
+
+    mockActiveProjectId = "proj_x"
+    const b = make("B")
+    expect(useArtifactStore.getState().openArtifactIds).toContain(b.id)
+    useArtifactStore.getState().purgeProject("proj_x")
+    expect(useArtifactStore.getState().openArtifactIds).not.toContain(b.id)
+  })
 })
 
 describe("createArtifact", () => {

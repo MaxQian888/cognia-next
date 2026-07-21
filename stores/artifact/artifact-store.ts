@@ -715,6 +715,7 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
             artifacts,
             canvasDocuments,
             pendingReviews,
+            openArtifactIds: state.openArtifactIds.filter((id) => artifacts[id]),
             activeArtifactId: removedActiveArtifact ? null : state.activeArtifactId,
             activeCanvasId: removedActiveCanvas ? null : state.activeCanvasId,
           }
@@ -976,6 +977,7 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
         if (createdArtifacts.length > 0) {
           set({
             activeArtifactId: createdArtifacts[0].id,
+            openArtifactIds: withOpenArtifact(get().openArtifactIds, createdArtifacts[0].id),
             artifactWorkspace: {
               ...get().artifactWorkspace,
               sessionId,
@@ -1736,6 +1738,7 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
             artifactVersions,
             pendingReviews,
             artifactWorkspace: nextWorkspace,
+            openArtifactIds: state.openArtifactIds.filter((openId) => artifacts[openId]),
             activeArtifactId: nextActiveArtifactId,
           }
         })
@@ -1764,6 +1767,7 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
         set((s) => ({
           artifacts: { ...s.artifacts, [duplicated.id]: duplicated },
           activeArtifactId: duplicated.id,
+          openArtifactIds: withOpenArtifact(s.openArtifactIds, duplicated.id),
           artifactWorkspace: {
             ...s.artifactWorkspace,
             sessionId: duplicated.sessionId,

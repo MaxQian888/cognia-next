@@ -27,21 +27,18 @@ export function useArtifactDockShortcuts(): void {
         return
       }
 
-      const dock = useArtifactDockLayoutStore.getState()
-      if (dock.dockProfile === "workspace") {
-        const nextOpen = !dock.mobileSheetOpen
-        const artifact = useArtifactStore.getState()
-        if (nextOpen && artifact.panelOpen && artifact.panelView === "artifact") {
-          artifact.closePanel()
-        }
-        setMobileSheetOpen(nextOpen)
-        return
-      }
-
-      setMobileSheetOpen(false)
+      // One Sheet on narrow screens, so one toggle. There used to be a second
+      // branch here for a standalone Workspace Sheet keyed on the dock surface;
+      // that Sheet is gone, and the branch had become an infinite no-op —
+      // closing the panel while raising `mobileSheetOpen`, which the narrow dock
+      // immediately reconciles back into re-opening it.
       const artifact = useArtifactStore.getState()
-      if (artifact.panelOpen && artifact.panelView === "artifact") closeArtifactPanel()
-      else openArtifactPanel("artifact")
+      if (artifact.panelOpen && artifact.panelView === "artifact") {
+        setMobileSheetOpen(false)
+        closeArtifactPanel()
+      } else {
+        openArtifactPanel("artifact")
+      }
     },
     { preventDefault: true, editorSelectors: [".monaco-editor"] }
   )

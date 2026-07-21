@@ -57,6 +57,33 @@ beforeEach(() => {
 describe("saveExport — Tauri", () => {
   beforeEach(() => isTauriMock.mockReturnValue(true))
 
+  it.each([
+    ["/repo", "/repo/out.md"],
+    ["/repo/", "/repo/out.md"],
+    ["/repo///", "/repo/out.md"],
+  ])("opens the dialog inside %s", async (defaultDirectory, expected) => {
+    saveDialogMock.mockResolvedValueOnce(expected)
+
+    await saveExport({
+      filename: "out.md",
+      data: "# hi",
+      mimeType: "text/markdown",
+      defaultDirectory,
+    })
+
+    // Without a directory the dialog lands wherever the OS left it, which is
+    // rarely the project the caller means. A trailing slash must not double up.
+    expect(saveDialogMock.mock.calls[0][0].defaultPath).toBe(expected)
+  })
+
+  it("falls back to a bare filename with no directory hint", async () => {
+    saveDialogMock.mockResolvedValueOnce("/picked/out.md")
+
+    await saveExport({ filename: "out.md", data: "# hi", mimeType: "text/markdown" })
+
+    expect(saveDialogMock.mock.calls[0][0].defaultPath).toBe("out.md")
+  })
+
   it("writes a string via writeTextFile and registers the chosen path", async () => {
     saveDialogMock.mockResolvedValueOnce("/picked/out.md")
     const res = await saveExport({ filename: "out.md", data: "# hi", mimeType: "text/markdown" })

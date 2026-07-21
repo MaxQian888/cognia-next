@@ -23,6 +23,7 @@ import {
   type PluginPointGovernanceMode,
 } from "@/lib/plugin/contracts/plugin-points"
 import { isValidPluginTableName, MAX_TABLES_PER_PLUGIN } from "@/lib/plugin/dexie/namespace"
+import { CANONICAL_CONTEXT_ACTIVITIES } from "@/types/context-workbench"
 import { getPluginPathViolations, type PluginPathViolation } from "@/lib/plugin/core/plugin-path"
 import {
   AUTHOR_CAPABILITY_CONTRACTS,
@@ -1420,14 +1421,10 @@ export function validatePluginManifest(
             `contextPanels "resourceKinds" must be a non-empty array of supported resource kinds`
           )
         }
-        const activities = new Set([
-          "ai",
-          "comments",
-          "inspect",
-          "review",
-          "preview-run",
-          "templates",
-        ])
+        // Shares its source with `CanonicalContextActivity`, which is what the
+        // SDK's `defineContextPanel` types against — a hand-copied list here
+        // let `workspace` pass tsc and then fail manifest validation.
+        const activities = new Set<string>(CANONICAL_CONTEXT_ACTIVITIES)
         if (typeof entry.activity !== "string" || !activities.has(entry.activity)) {
           push("error", "activity.invalid", `contextPanels "activity" must be canonical`)
         }

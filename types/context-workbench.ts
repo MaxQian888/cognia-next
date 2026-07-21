@@ -15,13 +15,29 @@ export type ContextCapability =
   | "workspace"
   | "history"
 /**
- * `workspace` is its own activity rather than a member of `inspect`: sharing
- * a rail button with `metadata` (which sorts first) buried the project
- * workspace behind an ℹ️ icon plus a group tab, turning what used to be a
- * one-click surface into a two-level navigation.
+ * The canonical activity groups an activity rail can show.
+ *
+ * A runtime array rather than a bare union so the plugin manifest validator can
+ * check against the same source the SDK types against — the two drifted apart
+ * once already, and a value present in the type but missing from the validator
+ * passes tsc and then fails at install time.
+ *
+ * `workspace` is its own activity rather than a member of `inspect`: sharing a
+ * rail button with `metadata` (which sorts first) buried the project workspace
+ * behind an ℹ️ icon plus a group tab, turning a one-click surface into
+ * two-level navigation.
  */
-export type CanonicalContextActivity =
-  "ai" | "comments" | "inspect" | "review" | "preview-run" | "templates" | "workspace"
+export const CANONICAL_CONTEXT_ACTIVITIES = [
+  "ai",
+  "comments",
+  "inspect",
+  "review",
+  "preview-run",
+  "templates",
+  "workspace",
+] as const
+
+export type CanonicalContextActivity = (typeof CANONICAL_CONTEXT_ACTIVITIES)[number]
 export type ContextActivity = CanonicalContextActivity | (string & {})
 
 export interface TextSelectionCoordinates {
