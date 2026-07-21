@@ -112,14 +112,15 @@ const VSCODE_HOST_RUNTIME_DEPS = [
 const TUI_EXTERNALS = ["react", "react/jsx-runtime", "react/jsx-dev-runtime", "ink", "ink-spinner"]
 const TUI_DEPS = ["react@19.2.7", "ink@7.0.5", "ink-spinner@5.0.0"]
 
-// Node 24 (satisfies the repo's >=20 engine). MUST be 24, not 22: pkg-fetch's
-// node22 base binary segfaults (access violation) rendering Ink's yoga-layout
-// WASM, so the interactive TUI crashes on launch; node24 renders it correctly.
-// (node20's win-x64 prebuilt is also absent — it would compile Node from source.)
+// Node 26 (matches the repo's >=26 engine). pkg-fetch ships node26 base binaries
+// from v3.6 onwards. History worth keeping: node22's base binary segfaults
+// (access violation) rendering Ink's yoga-layout WASM, so the interactive TUI
+// crashes on launch — 24 and 26 both render it correctly. Re-verify the TUI on
+// every base-binary bump; that failure only shows up at runtime.
 const TARGETS = [
-  { pkg: "node24-win-x64", dist: "cognia-agent-win-x64", bin: "cognia-agent.exe", archive: "zip" },
-  { pkg: "node24-linux-x64", dist: "cognia-agent-linux-x64", bin: "cognia-agent", archive: "tar.gz" },
-  { pkg: "node24-macos-arm64", dist: "cognia-agent-macos-arm64", bin: "cognia-agent", archive: "tar.gz" },
+  { pkg: "node26-win-x64", dist: "cognia-agent-win-x64", bin: "cognia-agent.exe", archive: "zip" },
+  { pkg: "node26-linux-x64", dist: "cognia-agent-linux-x64", bin: "cognia-agent", archive: "tar.gz" },
+  { pkg: "node26-macos-arm64", dist: "cognia-agent-macos-arm64", bin: "cognia-agent", archive: "tar.gz" },
 ]
 
 // `--layout-only` (ADR-0059 W6): stop after assembling the plain-Node layout
@@ -251,7 +252,7 @@ await esbuild.build({
   bundle: true,
   platform: "node",
   format: "esm",
-  target: "node20",
+  target: "node26",
   tsconfig: path.join(root, "tsconfig.json"),
   banner: { js: CREATE_REQUIRE_BANNER },
   // Inline every npm dep EXCEPT the TUI stack (which breaks when bundled — see
@@ -288,7 +289,7 @@ await esbuild.build({
   bundle: true,
   platform: "node",
   format: "esm",
-  target: "node20",
+  target: "node26",
   external: SIDECAR_EXTERNALS,
   banner: { js: CREATE_REQUIRE_BANNER },
   loader: ASSET_LOADERS,
@@ -307,7 +308,7 @@ await esbuild.build({
   bundle: true,
   platform: "node",
   format: "esm",
-  target: "node20",
+  target: "node26",
   tsconfig: path.join(root, "tsconfig.json"),
   plugins: [mcpHostBridgePlugin],
   banner: { js: CREATE_REQUIRE_BANNER },

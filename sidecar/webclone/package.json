@@ -6,7 +6,7 @@
   "description": "Vendored web-clone snapshot engine (full web page snapshot + component extraction + framework codegen), adapted for the cognia sidecar. Runs as an isolated child process via dist/runner.js.",
   "main": "dist/index.js",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=26.0.0"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

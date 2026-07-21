@@ -27,6 +27,6 @@
     "@tauri-apps/api": "*"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=26.0.0"
   }
 }

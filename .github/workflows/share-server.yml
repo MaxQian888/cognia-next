@@ -110,7 +110,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 26
           cache: pnpm
           cache-dependency-path: services/share-server/worker/pnpm-lock.yaml
 

@@ -115,7 +115,7 @@ RUN cargo check --release --locked --bin cognia-server --features container-exec
 # ── Node: brain (cognia-agent) + sidecar bundle ─────────────────────────────
 # Full (non-slim) image: node-gyp needs python3/make/g++ for the sidecar's
 # native optional deps (node-pty, better-sqlite3).
-FROM node:22-bookworm AS brain-builder
+FROM node:26-bookworm AS brain-builder
 ENV HUSKY=0 \
     CI=1
 RUN corepack enable && corepack prepare pnpm@10.30.3 --activate
@@ -148,7 +148,7 @@ FROM node:26.3.1-bookworm-slim AS plugin-node-runtime
 RUN node --version
 
 # ── Runtime: slim (sidecar-only execution plane) ────────────────────────────
-FROM node:22-bookworm-slim AS runtime-slim
+FROM node:26-bookworm-slim AS runtime-slim
 # The binary dynamically links the Tauri desktop stack (see the chef-stage
 # note) — ship the runtime .so set alongside the headless essentials.
 RUN apt-get update \

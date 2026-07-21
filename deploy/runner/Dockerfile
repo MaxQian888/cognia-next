@@ -13,7 +13,7 @@
 # Build:  docker build -t cognia-runner deploy/runner
 # CI:     built/published by the `cognia-runner` matrix entry in images.yml.
 
-FROM node:22-slim
+FROM node:26-slim
 
 ARG CLAUDE_CODE_VERSION=latest
 ARG CLAUDE_CODE_ACP_VERSION=latest

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=26.0.0"
   },
   "main": "claude-host.mjs",
   "scripts": {
@@ -34,7 +34,7 @@
   },
   "optionalDependencies": {
     "@ast-grep/cli": "^0.42.1",
-    "better-sqlite3": "^11.8.1",
+    "better-sqlite3": "^13.0.1",
     "node-pty": "^1.0.0",
     "tree-sitter-wasms": "^0.1.12",
     "web-tree-sitter": "^0.25.10"

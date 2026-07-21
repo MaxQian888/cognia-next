@@ -67,7 +67,7 @@ jobs:
       - name: Setup Node.js 20.x
         uses: actions/setup-node@v6
         with:
-          node-version: 20.x
+          node-version: 26.x
           cache: "pnpm"
 
       - name: Install dependencies
@@ -120,7 +120,7 @@ jobs:
       - name: Setup Node.js 20.x
         uses: actions/setup-node@v6
         with:
-          node-version: 20.x
+          node-version: 26.x
           cache: "pnpm"
 
       - name: Install dependencies
@@ -201,7 +201,7 @@ jobs:
       - name: Setup Node.js 20.x
         uses: actions/setup-node@v6
         with:
-          node-version: 20.x
+          node-version: 26.x
           cache: "pnpm"
 
       - name: Install dependencies
@@ -234,7 +234,7 @@ jobs:
       - name: Setup Node.js 20.x
         uses: actions/setup-node@v6
         with:
-          node-version: 20.x
+          node-version: 26.x
           cache: "pnpm"
 
       - name: Cache Next.js build
@@ -293,7 +293,7 @@ jobs:
       - name: Setup Node.js 20.x
         uses: actions/setup-node@v6
         with:
-          node-version: 20.x
+          node-version: 26.x
           cache: "pnpm"
 
       # Separate cache key from the plain verification build — the E2E flag
@@ -354,7 +354,7 @@ jobs:
       - name: Setup Node.js 20.x
         uses: actions/setup-node@v6
         with:
-          node-version: 20.x
+          node-version: 26.x
           cache: "pnpm"
 
       - name: Install dependencies
@@ -431,7 +431,7 @@ jobs:
       - name: Setup Node.js 20.x
         uses: actions/setup-node@v6
         with:
-          node-version: 20.x
+          node-version: 26.x
           cache: "pnpm"
 
       - name: Install dependencies
@@ -477,7 +477,7 @@ jobs:
       - name: Setup Node.js 20.x
         uses: actions/setup-node@v6
         with:
-          node-version: 20.x
+          node-version: 26.x
           cache: "pnpm"
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -525,7 +525,7 @@ jobs:
       - name: Setup Node.js 20.x
         uses: actions/setup-node@v6
         with:
-          node-version: 20.x
+          node-version: 26.x
           cache: "pnpm"
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -575,7 +575,7 @@ jobs:
       - name: Setup Node.js 20.x
         uses: actions/setup-node@v6
         with:
-          node-version: 20.x
+          node-version: 26.x
           cache: "pnpm"
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable

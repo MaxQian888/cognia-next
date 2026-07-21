@@ -30,11 +30,13 @@ pub const A2UI_EVENT: &str = "a2ui://dispatch";
 /// same false-positive class that ruled out a blanket reader-inactivity timeout.
 const SIDECAR_READY_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Minimum Node.js major version the chat sidecar requires. The
-/// `@anthropic-ai/claude-agent-sdk` + undici proxy stack assume Node >= 20;
-/// older runtimes fail late and opaquely deep inside the SDK, so we probe up
-/// front and surface an actionable error instead.
-const MIN_NODE_MAJOR: u32 = 20;
+/// Minimum Node.js major version the chat sidecar requires. Matches the repo's
+/// `engines.node` (>= 26): the sidecar's native addons (`better-sqlite3` 13.x,
+/// `node-pty`) declare Node >= 22, and the `@anthropic-ai/claude-agent-sdk` +
+/// undici proxy stack assumes a current runtime. Older runtimes fail late and
+/// opaquely deep inside the SDK, so we probe up front and surface an actionable
+/// error instead.
+const MIN_NODE_MAJOR: u32 = 26;
 
 /// Parse the major version out of `node --version` output (e.g. `"v20.11.0\n"`
 /// → `Some(20)`). Tolerates a missing leading `v`. Pure — unit-tested.

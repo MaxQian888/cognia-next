@@ -209,7 +209,7 @@ cognia-next/
 | AI           | Vercel AI SDK v6, `@ai-sdk/*` providers, `@modelcontextprotocol/sdk`, `@anthropic-ai/claude-agent-sdk` (sidecar), `@opencode-ai/sdk` |
 | Desktop core | Tauri 2.11, Rust 1.84.1+, `axum`, `tokio`, `rusqlite` + `sqlite-vec`, `webrtc-rs`, `wasmtime` 26, `keyring`, `git2`                  |
 | Mobile       | Capacitor 8 (iOS / Android), barcode scanner, biometric / secure-storage / voice-recorder plugins                                    |
-| Sidecar      | Node 20+ ESM, Claude Agent SDK, AI SDK providers                                                                                     |
+| Sidecar      | Node 26+ ESM, Claude Agent SDK, AI SDK providers                                                                                     |
 | Quality      | Jest 30 + RTL, Playwright, ESLint 9, Prettier 3, Husky + lint-staged + commitlint                                                    |
 
 ### Critical notes

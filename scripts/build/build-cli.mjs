@@ -83,7 +83,7 @@ await esbuild.build({
   bundle: true,
   platform: "node",
   format: "esm",
-  target: "node20",
+  target: "node26",
   tsconfig: path.join(root, "tsconfig.json"),
   banner: { js: "#!/usr/bin/env node" },
   // Code-splitting: dynamic `import()` chains (the desktop option-builder pulls
