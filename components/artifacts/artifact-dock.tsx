@@ -2,16 +2,20 @@
 
 /**
  * ArtifactDock — the docked (non-modal) artifacts surface that lives in the
- * right rail of the chat workspace on desktop. Wraps the shared
- * `<ArtifactPanelContent />` with a slim header (collapse + history-rail
- * toggle) and an optional conversation-scoped artifact history rail.
+ * right rail of the chat workspace on desktop.
+ *
+ * There is exactly ONE shell: the shared Context Workbench (ADR-0083). Which
+ * resource backs it is the only branch — an artifact when one is active, the
+ * chat session otherwise — and every surface the dock ever showed (preview,
+ * history, embedded browser, workspace, comments, review, metadata) is a panel
+ * inside it. Panel selection lives solely in `contextWorkbenchStore`; the
+ * layout store contributes sizing and one-shot reveal intents, never routing.
  */
 
 import {
   BotIcon,
   History,
   MessageSquareIcon,
-  PanelRightClose,
   PanelsTopLeftIcon,
   SearchCodeIcon,
   InfoIcon,
@@ -21,16 +25,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { cn } from "@/lib/utils"
 import { hasWorkspaceFsBackend } from "@/lib/files/workspace-backend"
 import { useChatStore } from "@/stores/chat"
 import {
   DOCK_MODE_WIDTH_PERCENT,
   useArtifactDockLayoutStore,
-  type DockMode,
 } from "@/stores/artifact/artifact-dock-layout-store"
-import { ArtifactPanelContent } from "./artifact-panel-content"
+import { ArtifactPanelContent, type ArtifactPanelMode } from "./artifact-panel-content"
 import { ArtifactList } from "./artifact-list"
 import { DockWorkspace } from "./workspace-mode/dock-workspace"
 import {
@@ -44,7 +45,6 @@ import type {
   ContextPanelMode,
   ContextResource,
 } from "@/types/context-workbench"
-import { useContextWorkbenchSurfaceFlag } from "@/hooks/context-workbench/use-context-workbench-surface-flag"
 import { ResourceWorkbenchChatPanel } from "@/components/context-workbench/resource-workbench-chat-panel"
 import { ArtifactReviewView } from "./artifact-review-view"
 import { ContextMetadataPanel } from "@/components/context-workbench/context-metadata-panel"
@@ -56,20 +56,11 @@ import { useContextCommentBadge } from "@/hooks/context-workbench/use-context-co
 import { BrowserPreviewPane } from "@/components/browser/browser-preview-pane"
 
 export function ArtifactDock() {
-  const enabled = useContextWorkbenchSurfaceFlag("artifact")
-  // Rollback path only — ADR-0083 keeps the legacy dock reachable for one minor
-  // release. With the flag on the workbench now covers *every* dock state
-  // (artifact, browser and the no-artifact empty state), so the chat right rail
-  // no longer swaps between an activity rail and the legacy top-tab chrome.
-  if (!enabled) return <LegacyArtifactDock />
-  return <DockContextWorkbench />
-}
-
-function DockContextWorkbench() {
   const activeArtifactId = useArtifactStore((state) => state.activeArtifactId)
-  const dockMode = useArtifactDockLayoutStore((state) => state.dockMode)
-  // The browser is session-scoped, so asking for it drops the artifact resource.
-  return activeArtifactId && dockMode !== "browser" ? (
+  // The only branch in the dock: which resource backs the one workbench shell.
+  // The browser used to force a surface swap because it is session-scoped; it
+  // is now a panel on both surfaces, so opening it keeps your artifact context.
+  return activeArtifactId ? (
     <ArtifactContextWorkbench artifactId={activeArtifactId} />
   ) : (
     <SessionContextWorkbench />
@@ -77,39 +68,72 @@ function DockContextWorkbench() {
 }
 
 /**
- * Which panel the persisted dock mode maps onto. `reconcilePanels` falls back to
- * the *first* panel when a scope has no active panel yet, so the panel matching
- * the current mode is sorted first (see `modeFirstOrder`) — otherwise a fresh
- * scope activates an unrelated panel whose lifecycle hook writes `dockMode`
- * back and bounces the dock straight out of the mode the user asked for.
- */
-function modeFirstOrder(panelId: string, modePanelId: string, order: number): number {
-  return panelId === modePanelId ? 0 : order
-}
-
-/**
  * The dock is mounted with `manageOwnWidth={false}` — its width belongs to the
  * outer ResizablePanel — so the workbench header's narrow/wide buttons have to
- * resize the dock instead of the workbench, or they do nothing at all.
+ * resize the dock instead of the workbench, or they do nothing at all. The
+ * preset table is keyed by profile so "wide" reaches the workspace cap (65%)
+ * rather than the artifact one (50%).
  */
 function useDockWidthHint() {
   const requestDockSize = useArtifactDockLayoutStore((state) => state.requestDockSize)
+  const dockProfile = useArtifactDockLayoutStore((state) => state.dockProfile)
   return useCallback(
     (mode: ContextPanelMode) => {
       // Focus is a full-screen takeover; it owns no dock width.
       if (mode === "focus") return
-      requestDockSize(DOCK_MODE_WIDTH_PERCENT[mode])
+      requestDockSize(DOCK_MODE_WIDTH_PERCENT[dockProfile][mode])
     },
-    [requestDockSize]
+    [dockProfile, requestDockSize]
   )
 }
+
+/**
+ * Keep the dock's sizing profile in step with whichever panel is showing, and
+ * consume any one-shot reveal intent this surface can satisfy.
+ *
+ * This is the ONLY writer of `dockProfile`, and it is strictly one-directional:
+ * panel → profile. The predecessor (`dockMode`) was written by panel lifecycle
+ * hooks *and* read back to order the panel list, so a fresh scope could
+ * activate an unrelated panel, have it write the mode, and bounce the dock out
+ * of the surface the user asked for.
+ */
+function useDockPanelSync(scopeKey: string, panelIds: string[], activePanelId?: string | null) {
+  const setDockProfile = useArtifactDockLayoutStore((state) => state.setDockProfile)
+  const revealIntent = useArtifactDockLayoutStore((state) => state.revealIntent)
+  const consumeRevealIntent = useArtifactDockLayoutStore((state) => state.consumeRevealIntent)
+  const navigatePanel = useContextWorkbenchStore((state) => state.navigatePanel)
+
+  useEffect(() => {
+    if (!activePanelId) return
+    setDockProfile(activePanelId === "workspace" ? "workspace" : "compact")
+  }, [activePanelId, setDockProfile])
+
+  const owns = revealIntent ? panelIds.includes(revealIntent.panelId) : false
+  useEffect(() => {
+    if (!revealIntent || !owns) return
+    navigatePanel(scopeKey, revealIntent.panelId, revealIntent.mode)
+    consumeRevealIntent(revealIntent.panelId)
+  }, [consumeRevealIntent, navigatePanel, owns, revealIntent, scopeKey])
+}
+
+/** Stable identity so the sync effects don't re-run on every render. */
+const EMPTY_PANEL_IDS: string[] = []
 
 export function ArtifactContextWorkbench({
   artifactId,
   mobile,
 }: {
   artifactId: string
-  mobile?: { open: boolean; onOpenChange: (open: boolean) => void }
+  /**
+   * Set by the Sheet host (`<ArtifactPanel />`). `panelMode` is the host's own
+   * density decision — tablet still wants Monaco, only a phone drops to the
+   * light editor — so the panels must not re-derive it from the viewport.
+   */
+  mobile?: {
+    open: boolean
+    onOpenChange: (open: boolean) => void
+    panelMode: ArtifactPanelMode
+  }
 }) {
   const tWorkbench = useTranslations("contextWorkbench")
   const workbenchInstanceId = useContextWorkbenchInstanceId("artifact")
@@ -118,14 +142,11 @@ export function ArtifactContextWorkbench({
   const pendingReview = useArtifactStore((state) => state.pendingReviews[artifactId] ?? null)
   const hadPendingReview = useRef(false)
   const activeSessionId = useChatStore((state) => state.activeSessionId)
-  const dockMode = useArtifactDockLayoutStore((state) => state.dockMode)
-  const setDockMode = useArtifactDockLayoutStore((state) => state.setDockMode)
   const setDockCollapsed = useArtifactDockLayoutStore((state) => state.setDockCollapsed)
   const navigatePanel = useContextWorkbenchStore((state) => state.navigatePanel)
   const smartReveal = useContextWorkbenchStore((state) => state.smartReveal)
-  const layout = useContextWorkbenchStore(
-    (state) => state.layouts[`${workbenchInstanceId}::artifact:${artifactId}`]
-  )
+  const scopeKey = `${workbenchInstanceId}::artifact:${artifactId}`
+  const layout = useContextWorkbenchStore((state) => state.layouts[scopeKey])
   const [selectionState, setSelectionState] = useState<
     { artifactId: string; start: number; end: number } | undefined
   >()
@@ -138,8 +159,13 @@ export function ArtifactContextWorkbench({
     [artifactId, selectionState]
   )
   const workspaceAvailable = hasWorkspaceFsBackend()
-  const modePanelId = dockMode === "workspace" ? "workspace" : "preview"
   const dockWidthHint = useDockWidthHint()
+  // The same panels back the desktop dock and the Sheet hosts, so the host —
+  // not the viewport — decides the density. Hardcoding "desktop" here mounted
+  // Monaco and the split tab inside the phone Sheet.
+  const hostLayout = mobile?.panelMode ?? "desktop"
+  // DockWorkspace only distinguishes touch from pointer density.
+  const workspaceLayout = hostLayout === "mobile" ? "mobile" : "desktop"
 
   useEffect(() => {
     const handleSelection = (event: Event) => {
@@ -151,22 +177,20 @@ export function ArtifactContextWorkbench({
     return () => window.removeEventListener("artifact-context-selection", handleSelection)
   }, [artifactId])
 
+  // A scope with no history opens on the preview. Everything else is restored
+  // by `reconcilePanels` from the persisted layout, so this must not run again.
+  // Skipped without an artifact, or a dead id would seed a layout entry against
+  // the workbench's 200-scope persistence budget for a surface never rendered.
   useEffect(() => {
-    if (layout?.activePanelId) return
-    navigatePanel(
-      `${workbenchInstanceId}::artifact:${artifactId}`,
-      dockMode === "workspace" ? "workspace" : "preview",
-      dockMode === "workspace" ? "wide" : "narrow"
-    )
-  }, [artifactId, dockMode, layout?.activePanelId, navigatePanel, workbenchInstanceId])
+    if (!artifact || layout?.activePanelId) return
+    navigatePanel(scopeKey, "preview", "narrow")
+  }, [artifact, layout?.activePanelId, navigatePanel, scopeKey])
 
   useEffect(() => {
     const appeared = !hadPendingReview.current && pendingReview !== null
     hadPendingReview.current = pendingReview !== null
-    if (appeared) {
-      smartReveal(`${workbenchInstanceId}::artifact:${artifactId}`, "proposal-review", "wide")
-    }
-  }, [artifactId, pendingReview, smartReveal, workbenchInstanceId])
+    if (appeared) smartReveal(scopeKey, "proposal-review", "wide")
+  }, [pendingReview, scopeKey, smartReveal])
 
   const panels = useMemo<ContextPanelDefinition[]>(
     () => [
@@ -227,11 +251,7 @@ export function ArtifactContextWorkbench({
             hasSelection={Boolean(textSelection)}
             onSubmit={(comment) => {
               setPendingSelectionComment(comment)
-              navigatePanel(
-                `${workbenchInstanceId}::artifact:${artifactId}`,
-                "resource-chat",
-                "narrow"
-              )
+              navigatePanel(scopeKey, "resource-chat", "narrow")
             }}
           />
         ),
@@ -247,19 +267,31 @@ export function ArtifactContextWorkbench({
         preferredMode: "wide",
         getBadge: () => (pendingReview ? 1 : 0),
         renderer: () =>
-          artifact ? <ArtifactReviewView artifact={artifact} panelMode="desktop" /> : null,
+          artifact ? <ArtifactReviewView artifact={artifact} panelMode={hostLayout} /> : null,
       },
       {
         id: "preview",
         activity: "preview-run",
         labelKey: "artifacts.dock.artifactMode",
         icon: PanelsTopLeftIcon,
-        order: modeFirstOrder("preview", modePanelId, 10),
+        order: 10,
         appliesTo: (resource) => resource.kind === "artifact",
         retention: "stateful",
-        onFirstActivate: () => setDockMode("artifact"),
-        onRestore: () => setDockMode("artifact"),
-        renderer: () => <ArtifactPanelContent panelMode="desktop" />,
+        renderer: () => <ArtifactPanelContent panelMode={hostLayout} />,
+      },
+      {
+        // Session-scoped content on an artifact-scoped surface, deliberately:
+        // grouped with the preview so reaching the browser costs one click and
+        // never drops the artifact you were looking at.
+        id: "browser",
+        activity: "preview-run",
+        labelKey: "browser.title",
+        icon: GlobeIcon,
+        order: 11,
+        appliesTo: (resource) => resource.kind === "artifact",
+        retention: "stateful",
+        preferredMode: "wide",
+        renderer: () => <BrowserPreviewPane sessionId={activeSessionId ?? undefined} />,
       },
       {
         id: "history",
@@ -314,15 +346,13 @@ export function ArtifactContextWorkbench({
         activity: "inspect",
         labelKey: "artifacts.dock.workspaceMode",
         icon: SearchCodeIcon,
-        order: modeFirstOrder("workspace", modePanelId, 30),
+        order: 30,
         appliesTo: (resource) => resource.kind === "artifact",
         retention: "stateful",
         preferredMode: "wide",
-        onFirstActivate: () => setDockMode("workspace"),
-        onRestore: () => setDockMode("workspace"),
         renderer: () =>
           workspaceAvailable ? (
-            <DockWorkspace activeSessionId={activeSessionId} />
+            <DockWorkspace activeSessionId={activeSessionId} layout={workspaceLayout} />
           ) : (
             <ContextCapabilityUnavailable capability="workspace" />
           ),
@@ -333,21 +363,29 @@ export function ArtifactContextWorkbench({
       activeSessionId,
       artifact,
       artifactId,
-      modePanelId,
+      hostLayout,
+      workspaceLayout,
       pendingReview,
       pendingSelectionComment,
-      setDockMode,
+      scopeKey,
       tWorkbench,
       textSelection,
       unresolvedCommentCount,
-      workbenchInstanceId,
       workspaceAvailable,
     ]
   )
+  // Claim no panels when the artifact is gone: the fallback below mounts the
+  // session workbench as a child, and both would otherwise race to consume the
+  // same one-shot reveal intent — with this dead scope usually winning.
+  useDockPanelSync(
+    scopeKey,
+    artifact ? panels.map((panel) => panel.id) : EMPTY_PANEL_IDS,
+    artifact ? layout?.activePanelId : null
+  )
 
   // The id outlived its artifact (evicted by the persist cap, or cleared in
-  // another tab). Fall through to the session workbench rather than the legacy
-  // chrome so the dock keeps a single shell.
+  // another tab). Fall through to the session workbench so the dock keeps a
+  // single shell.
   if (!artifact) return mobile ? null : <SessionContextWorkbench />
   const resource: ContextResource = {
     kind: "artifact",
@@ -426,30 +464,20 @@ function ArtifactSelectionCommentPanel({
 }
 
 /**
- * The dock's fallback surface: no artifact is active, or the user asked for the
- * browser. Hosts the session-scoped panels (artifact history, embedded browser,
- * workspace) inside the *same* workbench chrome the artifact surface uses, so
- * the chat right rail never changes shape.
+ * The dock's surface when no artifact is active. Hosts the session-scoped
+ * panels (artifact history, embedded browser, workspace) inside the *same*
+ * workbench chrome the artifact surface uses, so the chat right rail never
+ * changes shape.
  */
-function SessionContextWorkbench() {
+export function SessionContextWorkbench() {
   const workbenchInstanceId = useContextWorkbenchInstanceId("artifact")
   const activeSessionId = useChatStore((state) => state.activeSessionId)
-  const dockMode = useArtifactDockLayoutStore((state) => state.dockMode)
-  const setDockMode = useArtifactDockLayoutStore((state) => state.setDockMode)
   const setDockCollapsed = useArtifactDockLayoutStore((state) => state.setDockCollapsed)
   const workspaceAvailable = hasWorkspaceFsBackend()
-  const modePanelId =
-    dockMode === "browser" ? "browser" : dockMode === "workspace" ? "workspace" : "history"
   const dockWidthHint = useDockWidthHint()
-
-  // `setDockMode` also clears any pending workspace reveal, so only write when
-  // the mode actually changes — a panel restoring into the mode it already owns
-  // must not wipe the reveal request that routed the user here.
-  const selectDockMode = useCallback(
-    (mode: DockMode) => {
-      if (useArtifactDockLayoutStore.getState().dockMode !== mode) setDockMode(mode)
-    },
-    [setDockMode]
+  const scopeKey = `${workbenchInstanceId}::session:${activeSessionId ?? "none"}`
+  const activePanelId = useContextWorkbenchStore(
+    (state) => state.layouts[scopeKey]?.activePanelId ?? null
   )
 
   const panels = useMemo<ContextPanelDefinition[]>(
@@ -459,11 +487,9 @@ function SessionContextWorkbench() {
         activity: "review",
         labelKey: "artifacts.dock.showHistory",
         icon: History,
-        order: modeFirstOrder("history", modePanelId, 10),
+        order: 10,
         appliesTo: (resource) => resource.kind === "session",
         retention: "stateful",
-        onFirstActivate: () => selectDockMode("artifact"),
-        onRestore: () => selectDockMode("artifact"),
         renderer: () => (
           <ArtifactList
             sessionId={activeSessionId ?? undefined}
@@ -477,12 +503,10 @@ function SessionContextWorkbench() {
         activity: "preview-run",
         labelKey: "browser.title",
         icon: GlobeIcon,
-        order: modeFirstOrder("browser", modePanelId, 20),
+        order: 20,
         appliesTo: (resource) => resource.kind === "session",
         retention: "stateful",
         preferredMode: "wide",
-        onFirstActivate: () => selectDockMode("browser"),
-        onRestore: () => selectDockMode("browser"),
         renderer: () => <BrowserPreviewPane sessionId={activeSessionId ?? undefined} />,
       },
       {
@@ -490,12 +514,10 @@ function SessionContextWorkbench() {
         activity: "inspect",
         labelKey: "artifacts.dock.workspaceMode",
         icon: SearchCodeIcon,
-        order: modeFirstOrder("workspace", modePanelId, 30),
+        order: 30,
         appliesTo: (resource) => resource.kind === "session",
         retention: "stateful",
         preferredMode: "wide",
-        onFirstActivate: () => selectDockMode("workspace"),
-        onRestore: () => selectDockMode("workspace"),
         renderer: () =>
           workspaceAvailable ? (
             <DockWorkspace activeSessionId={activeSessionId} />
@@ -504,7 +526,12 @@ function SessionContextWorkbench() {
           ),
       },
     ],
-    [activeSessionId, modePanelId, selectDockMode, workspaceAvailable]
+    [activeSessionId, workspaceAvailable]
+  )
+  useDockPanelSync(
+    scopeKey,
+    panels.map((panel) => panel.id),
+    activePanelId
   )
 
   const resource: ContextResource = {
@@ -525,150 +552,6 @@ function SessionContextWorkbench() {
       manageOwnWidth={false}
       className="w-full"
     />
-  )
-}
-
-function LegacyArtifactDock() {
-  const t = useTranslations("artifacts")
-  const tBrowser = useTranslations("browser")
-  const listRailOpen = useArtifactDockLayoutStore((s) => s.listRailOpen)
-  const toggleListRail = useArtifactDockLayoutStore((s) => s.toggleListRail)
-  const setDockCollapsed = useArtifactDockLayoutStore((s) => s.setDockCollapsed)
-  const dockMode = useArtifactDockLayoutStore((s) => s.dockMode)
-  const setDockMode = useArtifactDockLayoutStore((s) => s.setDockMode)
-  const activeSessionId = useChatStore((s) => s.activeSessionId)
-  const workspaceAvailable = hasWorkspaceFsBackend()
-  const activeArtifactId = useArtifactStore((state) => state.activeArtifactId)
-  const workbenchInstanceId = useContextWorkbenchInstanceId("artifact")
-  const navigatePanel = useContextWorkbenchStore((state) => state.navigatePanel)
-
-  const selectDockMode = (mode: "artifact" | "workspace") => {
-    if (activeArtifactId) {
-      navigatePanel(
-        `${workbenchInstanceId}::artifact:${activeArtifactId}`,
-        mode === "workspace" ? "workspace" : "preview",
-        mode === "workspace" ? "wide" : "narrow"
-      )
-    }
-    setDockMode(mode)
-  }
-
-  return (
-    <div
-      data-testid="artifact-dock"
-      className="flex h-full min-h-0 flex-col border-l bg-background"
-    >
-      <div className="flex items-center justify-between gap-1 border-b px-2 py-1">
-        <div className="flex items-center rounded-md bg-muted p-0.5" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={dockMode === "artifact"}
-            data-testid="artifact-dock-mode-artifact"
-            className={cn(
-              "rounded px-2 py-1 text-xs",
-              dockMode === "artifact" ? "bg-background shadow-sm" : "text-muted-foreground"
-            )}
-            onClick={() => selectDockMode("artifact")}
-          >
-            {t("dock.artifactMode")}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={dockMode === "browser"}
-            data-testid="artifact-dock-mode-browser"
-            className={cn(
-              "flex items-center gap-1 rounded px-2 py-1 text-xs",
-              dockMode === "browser" ? "bg-background shadow-sm" : "text-muted-foreground"
-            )}
-            onClick={() => setDockMode("browser")}
-          >
-            <GlobeIcon className="size-3" aria-hidden />
-            {tBrowser("title")}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={dockMode === "workspace"}
-            data-testid="artifact-dock-mode-workspace"
-            disabled={!workspaceAvailable}
-            title={!workspaceAvailable ? t("dock.workspaceUnavailable") : undefined}
-            className={cn(
-              "rounded px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50",
-              dockMode === "workspace" ? "bg-background shadow-sm" : "text-muted-foreground"
-            )}
-            onClick={() => selectDockMode("workspace")}
-          >
-            {t("dock.workspaceMode")}
-          </button>
-        </div>
-        <div className="flex items-center gap-0.5">
-          <TooltipProvider>
-            {dockMode === "artifact" && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    data-testid="artifact-dock-history-toggle"
-                    variant={listRailOpen ? "secondary" : "ghost"}
-                    size="icon"
-                    className="h-7 w-7"
-                    aria-pressed={listRailOpen}
-                    aria-label={listRailOpen ? t("dock.hideHistory") : t("dock.showHistory")}
-                    onClick={toggleListRail}
-                  >
-                    <History className="h-3.5 w-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  {listRailOpen ? t("dock.hideHistory") : t("dock.showHistory")}
-                </TooltipContent>
-              </Tooltip>
-            )}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  data-testid="artifact-dock-collapse"
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  aria-label={t("dock.collapse")}
-                  title={t("dock.toggleHint")}
-                  onClick={() => setDockCollapsed(true)}
-                >
-                  <PanelRightClose className="h-3.5 w-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">{t("dock.toggleHint")}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        </div>
-      </div>
-
-      <div className="flex min-h-0 flex-1">
-        {dockMode === "artifact" && listRailOpen && (
-          <div
-            data-testid="artifact-dock-history-rail"
-            className={cn("w-56 shrink-0 border-r overflow-hidden")}
-          >
-            <ArtifactList
-              sessionId={activeSessionId ?? undefined}
-              className="h-full"
-              maxHeight="100%"
-            />
-          </div>
-        )}
-        <div className="min-h-0 min-w-0 flex-1">
-          {dockMode === "artifact" ? (
-            <ArtifactPanelContent panelMode="desktop" />
-          ) : dockMode === "browser" ? (
-            <BrowserPreviewPane sessionId={activeSessionId ?? undefined} />
-          ) : (
-            <DockWorkspace activeSessionId={activeSessionId} />
-          )}
-        </div>
-      </div>
-    </div>
   )
 }
 

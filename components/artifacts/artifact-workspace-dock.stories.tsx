@@ -63,6 +63,9 @@ export const SessionSurface: Story = {
 export const BrowserSurface: Story = {
   args: { children: <ChatPlaceholder /> },
   beforeEach: () => {
-    seedStore(useArtifactDockLayoutStore, { dockMode: "browser", dockCollapsed: false })
+    seedStore(useArtifactDockLayoutStore, {
+      revealIntent: { panelId: "browser", mode: "wide" },
+      dockCollapsed: false,
+    })
   },
 }

@@ -176,10 +176,10 @@ describe("ArtifactWorkspaceDock", () => {
     })
 
     await waitFor(() => expect(useArtifactStore.getState().panelOpen).toBe(false))
-    expect(useArtifactDockLayoutStore.getState().dockMode).toBe("workspace")
+    expect(useArtifactDockLayoutStore.getState().dockProfile).toBe("workspace")
   })
 
-  it("switches back to Artifact mode when a new artifact arrives on mobile", async () => {
+  it("closes the Workspace Sheet when a new artifact arrives on mobile", async () => {
     useBreakpointMock.mockReturnValue("mobile")
     act(() => {
       useArtifactDockLayoutStore.getState().revealWorkspaceReview({
@@ -195,13 +195,14 @@ describe("ArtifactWorkspaceDock", () => {
 
     act(() => useArtifactStore.setState({ activeArtifactId: "artifact-mobile" }))
 
-    await waitFor(() => expect(useArtifactDockLayoutStore.getState().dockMode).toBe("artifact"))
-    expect(useArtifactDockLayoutStore.getState().mobileSheetOpen).toBe(false)
+    // The arriving artifact only dismisses the Workspace Sheet; it must not
+    // write a surface — panel selection belongs to the workbench alone.
+    await waitFor(() => expect(useArtifactDockLayoutStore.getState().mobileSheetOpen).toBe(false))
   })
 
   it("auto-expands the dock when a new artifact becomes active", () => {
     expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
-    act(() => useArtifactDockLayoutStore.getState().setDockMode("workspace"))
+    act(() => useArtifactDockLayoutStore.getState().setDockProfile("workspace"))
     const { rerender } = render(
       <ArtifactWorkspaceDock>
         <div data-testid="chat" />
@@ -214,7 +215,6 @@ describe("ArtifactWorkspaceDock", () => {
       </ArtifactWorkspaceDock>
     )
     expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
-    expect(useArtifactDockLayoutStore.getState().dockMode).toBe("artifact")
   })
 
   it("persists desktop dock resizing through the shared layout store", () => {
@@ -268,7 +268,7 @@ describe("ArtifactWorkspaceDock", () => {
     expect(screen.getByTestId("resizable-panel-artifact-chat")).toHaveAttribute("data-min", "50%")
 
     // Workspace mode: absolute pixel floor, wider cap, chat floor drops to 35%.
-    act(() => useArtifactDockLayoutStore.getState().setDockMode("workspace"))
+    act(() => useArtifactDockLayoutStore.getState().setDockProfile("workspace"))
     expect(screen.getByTestId("resizable-panel-artifact-dock")).toHaveAttribute("data-min", "480px")
     expect(screen.getByTestId("resizable-panel-artifact-dock")).toHaveAttribute("data-max", "65%")
     expect(screen.getByTestId("resizable-panel-artifact-chat")).toHaveAttribute("data-min", "35%")

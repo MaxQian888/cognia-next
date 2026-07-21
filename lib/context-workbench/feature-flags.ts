@@ -1,4 +1,10 @@
-export type ContextWorkbenchSurface = "canvas" | "project" | "artifact" | "workflow"
+/**
+ * `artifact` is intentionally absent: the chat dock has no legacy shell left to
+ * roll back to (ADR-0083's one-minor window never shipped — the legacy dock and
+ * the workbench were in the same unreleased batch), so a flag there could only
+ * ever select a surface that no longer exists.
+ */
+export type ContextWorkbenchSurface = "canvas" | "project" | "workflow"
 
 const SURFACE_FLAGS_KEY = "cognia-context-workbench-surfaces-v1"
 const LEGACY_CANVAS_FLAGS_KEY = "cognia-canvas-feature-flags-v1"
@@ -10,7 +16,6 @@ const LEGACY_CANVAS_FLAGS_KEY = "cognia-canvas-feature-flags-v1"
 const DEFAULT_FLAGS: Record<ContextWorkbenchSurface, boolean> = {
   canvas: true,
   project: true,
-  artifact: true,
   workflow: true,
 }
 

@@ -79,9 +79,8 @@ export function ArtifactWorkspaceDock({ children }: { children: ReactNode }) {
 }
 
 function ArtifactWorkspaceDockNarrow({ children }: { children: ReactNode }) {
-  const dockMode = useArtifactDockLayoutStore((state) => state.dockMode)
+  const dockProfile = useArtifactDockLayoutStore((state) => state.dockProfile)
   const mobileSheetOpen = useArtifactDockLayoutStore((state) => state.mobileSheetOpen)
-  const setDockMode = useArtifactDockLayoutStore((state) => state.setDockMode)
   const setMobileSheetOpen = useArtifactDockLayoutStore((state) => state.setMobileSheetOpen)
   const panelOpen = useArtifactStore((state) => state.panelOpen)
   const panelView = useArtifactStore((state) => state.panelView)
@@ -89,20 +88,19 @@ function ArtifactWorkspaceDockNarrow({ children }: { children: ReactNode }) {
   const activeArtifactId = useArtifactStore((state) => state.activeArtifactId)
   const previousArtifactId = useRef(activeArtifactId)
 
+  // Two Sheets can't both own the screen. P2 collapses them into one workbench
+  // Sheet and this mutual exclusion goes away with it.
   useEffect(() => {
-    if (dockMode === "workspace" && mobileSheetOpen && panelOpen && panelView === "artifact") {
+    if (dockProfile === "workspace" && mobileSheetOpen && panelOpen && panelView === "artifact") {
       closePanel()
     }
-  }, [closePanel, dockMode, mobileSheetOpen, panelOpen, panelView])
+  }, [closePanel, dockProfile, mobileSheetOpen, panelOpen, panelView])
 
   useEffect(() => {
     const previous = previousArtifactId.current
     previousArtifactId.current = activeArtifactId
-    if (activeArtifactId && activeArtifactId !== previous) {
-      setDockMode("artifact")
-      setMobileSheetOpen(false)
-    }
-  }, [activeArtifactId, setDockMode, setMobileSheetOpen])
+    if (activeArtifactId && activeArtifactId !== previous) setMobileSheetOpen(false)
+  }, [activeArtifactId, setMobileSheetOpen])
 
   return (
     <div data-testid="artifact-workspace-dock-mobile" className="flex min-h-0 flex-1 flex-col">
@@ -117,7 +115,7 @@ function ArtifactWorkspaceDockNarrow({ children }: { children: ReactNode }) {
 function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
   const dockSize = useArtifactDockLayoutStore((s) => s.dockSize)
   const dockCollapsed = useArtifactDockLayoutStore((s) => s.dockCollapsed)
-  const dockMode = useArtifactDockLayoutStore((s) => s.dockMode)
+  const dockProfile = useArtifactDockLayoutStore((s) => s.dockProfile)
   const layoutVersion = useArtifactDockLayoutStore((s) => s.layoutVersion)
   const dockSizeRequest = useArtifactDockLayoutStore((s) => s.dockSizeRequest)
   const setDockSize = useArtifactDockLayoutStore((s) => s.setDockSize)
@@ -172,12 +170,16 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
     }
   }, [activeArtifactId, notifyNewArtifact])
 
-  const chatMinSize =
-    dockMode === "workspace" ? `${CHAT_MIN_PERCENT.workspace}%` : `${CHAT_MIN_PERCENT.default}%`
-  const dockMinSize =
-    dockMode === "workspace" ? WORKSPACE_DOCK_BOUNDS.minPx : `${ARTIFACT_DOCK_BOUNDS.min}%`
-  const dockMaxSize =
-    dockMode === "workspace" ? `${WORKSPACE_DOCK_BOUNDS.max}%` : `${ARTIFACT_DOCK_BOUNDS.max}%`
+  const workspaceProfile = dockProfile === "workspace"
+  const chatMinSize = workspaceProfile
+    ? `${CHAT_MIN_PERCENT.workspace}%`
+    : `${CHAT_MIN_PERCENT.default}%`
+  const dockMinSize = workspaceProfile
+    ? WORKSPACE_DOCK_BOUNDS.minPx
+    : `${ARTIFACT_DOCK_BOUNDS.min}%`
+  const dockMaxSize = workspaceProfile
+    ? `${WORKSPACE_DOCK_BOUNDS.max}%`
+    : `${ARTIFACT_DOCK_BOUNDS.max}%`
 
   return (
     <div

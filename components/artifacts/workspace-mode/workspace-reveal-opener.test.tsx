@@ -69,7 +69,7 @@ it("queues a workspace file reveal while the workspace dock is not mounted", () 
     line: 3,
     column: 4,
   })
-  expect(useArtifactDockLayoutStore.getState().dockMode).toBe("workspace")
+  expect(useArtifactDockLayoutStore.getState().dockProfile).toBe("workspace")
   expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
 })
 

@@ -38,7 +38,7 @@ describe("revealArtifactInWorkspace", () => {
     expect(useArtifactStore.getState().panelView).toBe("artifact")
   })
 
-  it("expands the docked panel and opens the mobile Sheet fallback", () => {
+  it("expands the docked panel and asks the workbench for the preview panel", () => {
     const artifact = useArtifactStore.getState().createArtifact({
       sessionId: "s",
       messageId: "m",
@@ -47,15 +47,16 @@ describe("revealArtifactInWorkspace", () => {
       content: "console.log(1)",
     })
     useArtifactDockLayoutStore.getState().setDockCollapsed(true)
-    useArtifactDockLayoutStore.getState().setMobileSheetOpen(false)
 
     revealArtifactInWorkspace(artifact.id)
     expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
-    expect(useArtifactDockLayoutStore.getState().dockMode).toBe("artifact")
-    expect(useArtifactDockLayoutStore.getState().mobileSheetOpen).toBe(true)
+    expect(useArtifactDockLayoutStore.getState().revealIntent).toEqual({
+      panelId: "preview",
+      mode: "narrow",
+    })
   })
 
-  it("switches a workspace dock back to artifact mode", () => {
+  it("pulls a dock parked on the workspace back to the revealed artifact", () => {
     const artifact = useArtifactStore.getState().createArtifact({
       sessionId: "s",
       messageId: "m",
@@ -63,10 +64,10 @@ describe("revealArtifactInWorkspace", () => {
       title: "t",
       content: "console.log(1)",
     })
-    useArtifactDockLayoutStore.getState().setDockMode("workspace")
+    useArtifactDockLayoutStore.getState().setDockProfile("workspace")
 
     revealArtifactInWorkspace(artifact.id)
 
-    expect(useArtifactDockLayoutStore.getState().dockMode).toBe("artifact")
+    expect(useArtifactDockLayoutStore.getState().revealIntent?.panelId).toBe("preview")
   })
 })

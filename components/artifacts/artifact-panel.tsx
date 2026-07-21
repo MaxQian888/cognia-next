@@ -14,19 +14,17 @@ import { useArtifactPanelState } from "@/hooks/artifacts/use-artifact-panel"
 import { ArtifactPanelContent } from "./artifact-panel-content"
 import { ArtifactContextWorkbench } from "./artifact-dock"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
-import { useContextWorkbenchSurfaceFlag } from "@/hooks/context-workbench/use-context-workbench-surface-flag"
 
 export function ArtifactPanel() {
   const { t, panelOpen, panelView, panelMode, panelWidth, closePanel } = useArtifactPanelState()
   const activeArtifactId = useArtifactStore((state) => state.activeArtifactId)
-  const workbenchEnabled = useContextWorkbenchSurfaceFlag("artifact")
   const open = panelOpen && panelView === "artifact"
 
-  if (workbenchEnabled && activeArtifactId) {
+  if (activeArtifactId) {
     return (
       <ArtifactContextWorkbench
         artifactId={activeArtifactId}
-        mobile={{ open, onOpenChange: (next) => !next && closePanel() }}
+        mobile={{ open, onOpenChange: (next) => !next && closePanel(), panelMode }}
       />
     )
   }

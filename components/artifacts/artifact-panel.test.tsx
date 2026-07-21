@@ -71,7 +71,6 @@ import { useArtifactStore } from "@/stores/artifact/artifact-store"
 
 beforeEach(() => {
   localStorage.clear()
-  localStorage.setItem("cognia-context-workbench-surfaces-v1", JSON.stringify({ artifact: false }))
   mobileViewportRef.current = false
   useArtifactStore.setState({
     artifacts: {},
@@ -162,7 +161,9 @@ describe("ArtifactPanel", () => {
   })
 
   it("overrides the Sheet slide to a snappier pace that honors motion-speed (not the 500/300ms default)", async () => {
-    makeArtifact()
+    // No active artifact: this is the plain Sheet host, the one surface that
+    // still owns its own slide (an artifact routes to the workbench Sheet).
+    useArtifactStore.setState({ panelOpen: true })
     render(<ArtifactPanel />)
     const content = await screen.findByTestId("artifact-panel")
     // Overrides via animation-duration (the property that drives the slide),

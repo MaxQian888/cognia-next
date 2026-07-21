@@ -16,8 +16,9 @@ export function revealArtifactInWorkspace(id: string): Artifact | null {
   // the desktop dock and open the mobile Sheet fallback. Harmless no-ops when
   // the dock isn't on screen.
   const dock = useArtifactDockLayoutStore.getState()
-  dock.setDockMode("artifact")
   dock.setDockCollapsed(false)
-  dock.setMobileSheetOpen(true)
+  // The artifact surface opens on its preview; ask for it explicitly so a dock
+  // parked on (say) the workspace panel follows the artifact you just revealed.
+  dock.requestReveal({ panelId: "preview", mode: "narrow" })
   return artifact
 }

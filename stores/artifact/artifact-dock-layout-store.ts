@@ -2,10 +2,12 @@
  * Artifact Dock Layout Store — persisted shell sizing for the docked artifacts
  * panel that lives alongside the chat workspace (Codex / Claude-artifacts style).
  *
- * Owns: the dock width (percent), collapsed flag, the history-rail open flag,
- * and a runtime-only mobile-sheet open flag. `<ArtifactWorkspaceDock />` calls
- * `setDockSize` on every drag tick; persistence is debounced internally so
- * localStorage isn't thrashed.
+ * Owns the dock *shell*: width (percent), collapsed flag, the sizing profile,
+ * a runtime-only mobile-sheet open flag, and the one-shot reveal intents that
+ * outside surfaces use to ask for a panel. It deliberately owns no panel
+ * selection — that is `contextWorkbenchStore.activePanelId` alone.
+ * `<ArtifactWorkspaceDock />` calls `setDockSize` on every drag tick;
+ * persistence is debounced internally so localStorage isn't thrashed.
  *
  * Mirrors `stores/canvas/canvas-layout-store.ts` — the artifact data lives in
  * `artifact-store.ts` (persisted v3, widely imported); this keeps the UI layout
@@ -14,8 +16,27 @@
 
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
+import type { ContextPanelMode } from "@/types/context-workbench"
 
-export type DockMode = "artifact" | "workspace" | "browser"
+/**
+ * The dock's *sizing* profile. Derived from whichever workbench panel is
+ * active (the workspace panel needs far more room than a preview) — it is NOT
+ * a router. Panel selection belongs to `contextWorkbenchStore.activePanelId`
+ * alone; this used to be a second, writable `dockMode` that fought it.
+ */
+export type DockProfile = "compact" | "workspace"
+
+/**
+ * A one-shot request to bring a specific workbench panel forward, published by
+ * surfaces that live outside the workbench (the chat header's browser button,
+ * terminal file links, the Edit/Write review bridge). The mounted workbench
+ * host consumes it if it owns a panel with that id, then clears it — so an
+ * intent never lingers to re-route a later navigation.
+ */
+export interface DockRevealIntent {
+  panelId: string
+  mode: ContextPanelMode
+}
 
 type WorkspaceRevealFileRequest = {
   id: string
@@ -66,11 +87,18 @@ export const CHAT_MIN_PERCENT = {
  * lives inside the outer ResizablePanel and is mounted with
  * `manageOwnWidth={false}`, so the workbench cannot size itself — without this
  * mapping those two buttons render but do nothing.
+ *
+ * Keyed by profile: a single table made "wide" cap out at the artifact bound
+ * (50%) even in workspace mode, which allows 65% — so the button silently
+ * under-delivered exactly where the extra room mattered most.
  */
-export const DOCK_MODE_WIDTH_PERCENT = {
-  narrow: ARTIFACT_DOCK_BOUNDS.default,
-  wide: ARTIFACT_DOCK_BOUNDS.max,
-} as const
+export const DOCK_MODE_WIDTH_PERCENT: Record<
+  DockProfile,
+  Record<Exclude<ContextPanelMode, "focus">, number>
+> = {
+  compact: { narrow: ARTIFACT_DOCK_BOUNDS.default, wide: ARTIFACT_DOCK_BOUNDS.max },
+  workspace: { narrow: 45, wide: WORKSPACE_DOCK_BOUNDS.max },
+}
 
 export const ARTIFACT_DOCK_PERSIST_DEBOUNCE_MS = 150
 
@@ -79,10 +107,10 @@ export interface ArtifactDockLayoutState {
   dockSize: number
   /** When true the dock is hidden (collapsedSize 0). Default: hidden until an artifact opens. */
   dockCollapsed: boolean
-  /** When true the in-dock artifact history rail is shown beside the panel. */
-  listRailOpen: boolean
-  /** Persisted desktop dock surface. */
-  dockMode: DockMode
+  /** Persisted sizing profile, derived by the mounted workbench from its active panel. */
+  dockProfile: DockProfile
+  /** Runtime-only one-shot panel request published from outside the workbench. */
+  revealIntent: DockRevealIntent | null
   /** Runtime-only reveal queue consumed after the workspace dock mounts. */
   workspaceRevealRequest: WorkspaceRevealRequest | null
   /** Runtime-only workspace target retained after a reveal request is consumed. */
@@ -119,10 +147,17 @@ export interface ArtifactDockLayoutState {
    * (then only flags it unread), so we never yank open a panel the user closed.
    */
   notifyNewArtifact: () => void
-  toggleListRail: () => void
-  setListRailOpen: (open: boolean) => void
-  setDockMode: (mode: DockMode) => void
-  /** Reveal the browser surface in the expanded chat right rail. */
+  /**
+   * Record which sizing profile the active panel wants. Leaving `workspace`
+   * also drops any pending workspace reveal — the user navigated away from the
+   * surface that reveal was routing to.
+   */
+  setDockProfile: (profile: DockProfile) => void
+  /** Ask the mounted workbench to bring `panelId` forward. Consumed once. */
+  requestReveal: (intent: DockRevealIntent) => void
+  /** Clear a consumed intent, but only if it is still the one that was published. */
+  consumeRevealIntent: (panelId: string) => void
+  /** Reveal the browser panel in the expanded chat right rail. */
   openBrowser: () => void
   revealWorkspaceFile: (request: {
     sessionId: string
@@ -145,16 +180,23 @@ export interface ArtifactDockLayoutState {
 interface PersistedArtifactDockLayoutState {
   dockSize: number
   dockCollapsed: boolean
-  listRailOpen: boolean
-  dockMode: DockMode
+  dockProfile: DockProfile
   layoutVersion: number
+}
+
+/** v2 shape, still on disk for anyone who ran a build before the convergence. */
+interface LegacyPersistedArtifactDockLayoutState {
+  dockSize?: number
+  dockCollapsed?: boolean
+  listRailOpen?: boolean
+  dockMode?: "artifact" | "workspace" | "browser"
+  layoutVersion?: number
 }
 
 const DEFAULTS = {
   dockSize: ARTIFACT_DOCK_BOUNDS.default,
   dockCollapsed: true,
-  listRailOpen: false,
-  dockMode: "artifact" as DockMode,
+  dockProfile: "compact" as DockProfile,
   layoutVersion: 0,
 }
 
@@ -189,6 +231,7 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
       unreadArtifact: false,
       workspaceRevealRequest: null,
       workspaceContext: null,
+      revealIntent: null,
       dockSizeRequest: 0,
 
       requestDockSize: (pct) =>
@@ -225,34 +268,42 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
           state.userDismissed
             ? { unreadArtifact: true }
             : {
-                dockMode: "artifact",
                 dockCollapsed: false,
                 userDismissed: false,
                 unreadArtifact: false,
               }
         ),
-      toggleListRail: () => set((state) => ({ listRailOpen: !state.listRailOpen })),
-      setListRailOpen: (open) => set({ listRailOpen: open }),
-      setDockMode: (dockMode) =>
-        set({
-          dockMode,
-          unreadArtifact: false,
-          workspaceRevealRequest: null,
-          workspaceContext: null,
-        }),
+      setDockProfile: (dockProfile) =>
+        set((state) =>
+          state.dockProfile === dockProfile
+            ? state
+            : dockProfile === "workspace"
+              ? { dockProfile }
+              : // Left the workspace surface — the reveal that routed us there
+                // no longer has a target, so drop it instead of letting it
+                // re-fire the next time workspace mounts.
+                { dockProfile, workspaceRevealRequest: null, workspaceContext: null }
+        ),
+      requestReveal: (revealIntent) => set({ revealIntent, unreadArtifact: false }),
+      consumeRevealIntent: (panelId) =>
+        set((state) => (state.revealIntent?.panelId === panelId ? { revealIntent: null } : state)),
       openBrowser: () =>
         set({
-          dockMode: "browser",
+          revealIntent: { panelId: "browser", mode: "wide" },
           dockCollapsed: false,
           userDismissed: false,
           unreadArtifact: false,
-          mobileSheetOpen: false,
+          mobileSheetOpen: true,
           workspaceRevealRequest: null,
           workspaceContext: null,
         }),
       revealWorkspaceFile: (request) =>
         set({
-          dockMode: "workspace",
+          revealIntent: { panelId: "workspace", mode: "wide" },
+          // Seed the profile so the dock is already sized for the workspace on
+          // the very first frame; the mounted workbench re-derives the same
+          // value from its active panel once it settles.
+          dockProfile: "workspace",
           dockCollapsed: false,
           userDismissed: false,
           unreadArtifact: false,
@@ -266,7 +317,11 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
         }),
       revealWorkspaceReview: (request) =>
         set({
-          dockMode: "workspace",
+          revealIntent: { panelId: "workspace", mode: "wide" },
+          // Seed the profile so the dock is already sized for the workspace on
+          // the very first frame; the mounted workbench re-derives the same
+          // value from its active panel once it settles.
+          dockProfile: "workspace",
           dockCollapsed: false,
           userDismissed: false,
           unreadArtifact: false,
@@ -303,23 +358,31 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
           unreadArtifact: false,
           workspaceRevealRequest: null,
           workspaceContext: null,
+          revealIntent: null,
         })),
     }),
     {
       name: "cognia-artifact-dock-layout",
-      version: 2,
+      version: 3,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- subset persistence
       partialize: (state): any => ({
         dockSize: state.dockSize,
         dockCollapsed: state.dockCollapsed,
-        listRailOpen: state.listRailOpen,
-        dockMode: state.dockMode,
+        dockProfile: state.dockProfile,
         layoutVersion: state.layoutVersion,
       }),
       migrate: (persisted: unknown, version) => {
-        const state = (persisted ?? {}) as Partial<PersistedArtifactDockLayoutState>
-        if (version < 2) return { ...state, dockMode: "artifact" as DockMode }
-        return state
+        const state = (persisted ?? {}) as LegacyPersistedArtifactDockLayoutState &
+          Partial<PersistedArtifactDockLayoutState>
+        if (version >= 3) return state as Partial<PersistedArtifactDockLayoutState>
+        // v1/v2 stored a writable three-value `dockMode` that also acted as a
+        // router. Only its sizing meaning survives: `workspace` was the one
+        // value that changed the dock's min/max bounds.
+        const { dockMode, listRailOpen: _listRailOpen, ...rest } = state
+        return {
+          ...rest,
+          dockProfile: dockMode === "workspace" ? "workspace" : "compact",
+        } as Partial<PersistedArtifactDockLayoutState>
       },
       merge: (persisted: unknown, current: ArtifactDockLayoutState) => {
         const p = (persisted ?? {}) as Partial<PersistedArtifactDockLayoutState>
@@ -327,16 +390,16 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
           ...current,
           ...p,
           dockSize: clampDockSize(p.dockSize ?? current.dockSize),
-          dockMode:
-            p.dockMode === "workspace" || p.dockMode === "browser" ? p.dockMode : "artifact",
-          // mobileSheetOpen / userDismissed / unreadArtifact / dockSizeRequest
-          // are runtime-only — never restore them from disk.
+          dockProfile: p.dockProfile === "workspace" ? "workspace" : "compact",
+          // mobileSheetOpen / userDismissed / unreadArtifact / dockSizeRequest /
+          // revealIntent are runtime-only — never restore them from disk.
           dockSizeRequest: 0,
           mobileSheetOpen: false,
           userDismissed: false,
           unreadArtifact: false,
           workspaceRevealRequest: null,
           workspaceContext: null,
+          revealIntent: null,
         } as ArtifactDockLayoutState
       },
     }

@@ -235,7 +235,10 @@ describe("ChatHeader", () => {
 
     fireEvent.click(screen.getByTestId("chat-browser-dock-open"))
 
-    expect(useArtifactDockLayoutStore.getState().dockMode).toBe("browser")
+    expect(useArtifactDockLayoutStore.getState().revealIntent).toEqual({
+      panelId: "browser",
+      mode: "wide",
+    })
     expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
   })
 

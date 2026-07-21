@@ -11,7 +11,7 @@ import { DockWorkspace } from "./dock-workspace"
 /** Mobile/tablet host for the same Workspace surface used by the desktop Dock. */
 export function MobileWorkspaceSheet() {
   const t = useTranslations("artifacts.workspace")
-  const dockMode = useArtifactDockLayoutStore((state) => state.dockMode)
+  const dockProfile = useArtifactDockLayoutStore((state) => state.dockProfile)
   const mobileSheetOpen = useArtifactDockLayoutStore((state) => state.mobileSheetOpen)
   const setMobileSheetOpen = useArtifactDockLayoutStore((state) => state.setMobileSheetOpen)
   const activeSessionId = useChatStore((state) => state.activeSessionId)
@@ -21,7 +21,7 @@ export function MobileWorkspaceSheet() {
   }
 
   return (
-    <Sheet open={dockMode === "workspace" && mobileSheetOpen} onOpenChange={handleOpenChange}>
+    <Sheet open={dockProfile === "workspace" && mobileSheetOpen} onOpenChange={handleOpenChange}>
       <SheetContent
         side="bottom"
         showCloseButton={false}

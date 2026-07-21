@@ -15,13 +15,12 @@ describe("context workbench surface flags", () => {
   it("allows each surface to be enabled independently", async () => {
     window.localStorage.setItem(
       "cognia-context-workbench-surfaces-v1",
-      JSON.stringify({ canvas: false, project: true, artifact: false, workflow: true })
+      JSON.stringify({ canvas: false, project: true, workflow: true })
     )
     const { getContextWorkbenchSurfaceFlags } = await import("./feature-flags")
     expect(getContextWorkbenchSurfaceFlags()).toEqual({
       canvas: false,
       project: true,
-      artifact: false,
       workflow: true,
     })
   })
@@ -36,7 +35,6 @@ describe("context workbench surface flags", () => {
     expect(getContextWorkbenchSurfaceFlags()).toEqual({
       canvas: true,
       project: false,
-      artifact: false,
       workflow: false,
     })
   })
@@ -44,7 +42,7 @@ describe("context workbench surface flags", () => {
   it("ignores malformed persisted values", async () => {
     window.localStorage.setItem("cognia-context-workbench-surfaces-v1", "not-json")
     const { isContextWorkbenchSurfaceEnabled } = await import("./feature-flags")
-    expect(isContextWorkbenchSurfaceEnabled("artifact")).toBe(true)
+    expect(isContextWorkbenchSurfaceEnabled("project")).toBe(true)
   })
 
   it.each(["1", "true"])("accepts the enabled environment value %s", async (value) => {
@@ -53,7 +51,6 @@ describe("context workbench surface flags", () => {
     expect(getContextWorkbenchSurfaceFlags()).toEqual({
       canvas: true,
       project: true,
-      artifact: true,
       workflow: true,
     })
   })

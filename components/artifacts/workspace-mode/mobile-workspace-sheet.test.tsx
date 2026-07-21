@@ -62,7 +62,7 @@ beforeEach(() => {
 
 it("opens only for Workspace mode and reuses the responsive DockWorkspace", () => {
   act(() => {
-    useArtifactDockLayoutStore.getState().setDockMode("workspace")
+    useArtifactDockLayoutStore.getState().setDockProfile("workspace")
     useArtifactDockLayoutStore.getState().setMobileSheetOpen(true)
   })
 
@@ -92,7 +92,7 @@ it("closes through the shared runtime sheet state", () => {
 
 it("uses a snappier decelerate-in/quick-out slide that honors motion-speed", () => {
   act(() => {
-    useArtifactDockLayoutStore.getState().setDockMode("workspace")
+    useArtifactDockLayoutStore.getState().setDockProfile("workspace")
     useArtifactDockLayoutStore.getState().setMobileSheetOpen(true)
   })
   render(<MobileWorkspaceSheet />)

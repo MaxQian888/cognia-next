@@ -28,7 +28,7 @@ export function useArtifactDockShortcuts(): void {
       }
 
       const dock = useArtifactDockLayoutStore.getState()
-      if (dock.dockMode === "workspace") {
+      if (dock.dockProfile === "workspace") {
         const nextOpen = !dock.mobileSheetOpen
         const artifact = useArtifactStore.getState()
         if (nextOpen && artifact.panelOpen && artifact.panelView === "artifact") {

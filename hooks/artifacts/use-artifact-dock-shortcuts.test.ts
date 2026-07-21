@@ -112,7 +112,7 @@ describe("useArtifactDockShortcuts", () => {
 
   it("on mobile: Cmd+J toggles the current Workspace Sheet", () => {
     useBreakpointMock.mockReturnValue("mobile")
-    act(() => useArtifactDockLayoutStore.getState().setDockMode("workspace"))
+    act(() => useArtifactDockLayoutStore.getState().setDockProfile("workspace"))
     mount()
     act(() => pressMod(document.body, "j"))
     expect(useArtifactDockLayoutStore.getState().mobileSheetOpen).toBe(true)
@@ -134,7 +134,7 @@ describe("useArtifactDockShortcuts", () => {
 
   it("on tablet: Cmd+J toggles the Workspace Sheet instead of the desktop dock", () => {
     useBreakpointMock.mockReturnValue("tablet")
-    act(() => useArtifactDockLayoutStore.getState().setDockMode("workspace"))
+    act(() => useArtifactDockLayoutStore.getState().setDockProfile("workspace"))
     mount()
 
     act(() => pressMod(document.body, "j"))

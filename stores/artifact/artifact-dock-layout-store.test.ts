@@ -29,10 +29,24 @@ describe("useArtifactDockLayoutStore", () => {
   })
 
   describe("width presets", () => {
-    it("maps the workbench modes onto real dock widths", () => {
-      expect(DOCK_MODE_WIDTH_PERCENT.narrow).toBe(ARTIFACT_DOCK_BOUNDS.default)
-      expect(DOCK_MODE_WIDTH_PERCENT.wide).toBe(ARTIFACT_DOCK_BOUNDS.max)
-      expect(DOCK_MODE_WIDTH_PERCENT.wide).toBeGreaterThan(DOCK_MODE_WIDTH_PERCENT.narrow)
+    it("maps the workbench modes onto real dock widths, per profile", () => {
+      expect(DOCK_MODE_WIDTH_PERCENT.compact.narrow).toBe(ARTIFACT_DOCK_BOUNDS.default)
+      expect(DOCK_MODE_WIDTH_PERCENT.compact.wide).toBe(ARTIFACT_DOCK_BOUNDS.max)
+      expect(DOCK_MODE_WIDTH_PERCENT.compact.wide).toBeGreaterThan(
+        DOCK_MODE_WIDTH_PERCENT.compact.narrow
+      )
+    })
+
+    it("lets the workspace profile reach its own cap, not the artifact one", () => {
+      // A single shared table capped "wide" at 50% even in workspace mode,
+      // where the panel allows 65% — the button silently under-delivered.
+      expect(DOCK_MODE_WIDTH_PERCENT.workspace.wide).toBe(WORKSPACE_DOCK_BOUNDS.max)
+      expect(DOCK_MODE_WIDTH_PERCENT.workspace.wide).toBeGreaterThan(
+        DOCK_MODE_WIDTH_PERCENT.compact.wide
+      )
+      expect(DOCK_MODE_WIDTH_PERCENT.workspace.narrow).toBeGreaterThan(
+        DOCK_MODE_WIDTH_PERCENT.compact.narrow
+      )
     })
 
     it("bumps the request token only on an explicit width request", () => {
@@ -44,8 +58,8 @@ describe("useArtifactDockLayoutStore", () => {
       expect(result.current.dockSize).toBe(45)
       expect(result.current.dockSizeRequest).toBe(initialToken)
 
-      act(() => result.current.requestDockSize(DOCK_MODE_WIDTH_PERCENT.wide))
-      expect(result.current.dockSize).toBe(DOCK_MODE_WIDTH_PERCENT.wide)
+      act(() => result.current.requestDockSize(DOCK_MODE_WIDTH_PERCENT.compact.wide))
+      expect(result.current.dockSize).toBe(DOCK_MODE_WIDTH_PERCENT.compact.wide)
       expect(result.current.dockSizeRequest).toBe(initialToken + 1)
     })
 
@@ -60,7 +74,7 @@ describe("useArtifactDockLayoutStore", () => {
 
     it("never restores the runtime request token from disk", () => {
       const { result } = renderHook(() => useArtifactDockLayoutStore())
-      act(() => result.current.requestDockSize(DOCK_MODE_WIDTH_PERCENT.wide))
+      act(() => result.current.requestDockSize(DOCK_MODE_WIDTH_PERCENT.compact.wide))
       expect(readPersisted()?.state.dockSizeRequest).toBeUndefined()
     })
   })
@@ -70,9 +84,9 @@ describe("useArtifactDockLayoutStore", () => {
       const { result } = renderHook(() => useArtifactDockLayoutStore())
       expect(result.current.dockSize).toBe(ARTIFACT_DOCK_BOUNDS.default)
       expect(result.current.dockCollapsed).toBe(true)
-      expect(result.current.listRailOpen).toBe(false)
       expect(result.current.mobileSheetOpen).toBe(false)
-      expect(result.current.dockMode).toBe("artifact")
+      expect(result.current.dockProfile).toBe("compact")
+      expect(result.current.revealIntent).toBeNull()
       expect(result.current.workspaceRevealRequest).toBeNull()
       expect(result.current.workspaceContext).toBeNull()
     })
@@ -126,30 +140,22 @@ describe("useArtifactDockLayoutStore", () => {
     })
   })
 
-  describe("collapse + rail toggles", () => {
-    it("toggleDock flips the collapsed flag", () => {
+  describe("collapse", () => {
+    it("toggleDock flips the collapsed flag without touching the profile", () => {
       const { result } = renderHook(() => useArtifactDockLayoutStore())
-      act(() => result.current.setDockMode("workspace"))
+      act(() => result.current.setDockProfile("workspace"))
       act(() => result.current.toggleDock())
       expect(result.current.dockCollapsed).toBe(false)
-      expect(result.current.dockMode).toBe("workspace")
+      expect(result.current.dockProfile).toBe("workspace")
       act(() => result.current.toggleDock())
       expect(result.current.dockCollapsed).toBe(true)
-      expect(result.current.dockMode).toBe("workspace")
+      expect(result.current.dockProfile).toBe("workspace")
     })
 
     it("setDockCollapsed accepts explicit values", () => {
       const { result } = renderHook(() => useArtifactDockLayoutStore())
       act(() => result.current.setDockCollapsed(false))
       expect(result.current.dockCollapsed).toBe(false)
-    })
-
-    it("toggleListRail / setListRailOpen mutate the rail flag", () => {
-      const { result } = renderHook(() => useArtifactDockLayoutStore())
-      act(() => result.current.toggleListRail())
-      expect(result.current.listRailOpen).toBe(true)
-      act(() => result.current.setListRailOpen(false))
-      expect(result.current.listRailOpen).toBe(false)
     })
   })
 
@@ -158,7 +164,6 @@ describe("useArtifactDockLayoutStore", () => {
       const { result } = renderHook(() => useArtifactDockLayoutStore())
       act(() => result.current.notifyNewArtifact())
       expect(result.current.dockCollapsed).toBe(false)
-      expect(result.current.dockMode).toBe("artifact")
       expect(result.current.unreadArtifact).toBe(false)
       expect(result.current.userDismissed).toBe(false)
     })
@@ -186,12 +191,12 @@ describe("useArtifactDockLayoutStore", () => {
       expect(result.current.unreadArtifact).toBe(false)
     })
 
-    it("switching dock mode clears the unread flag", () => {
+    it("an explicit reveal request clears the unread flag", () => {
       const { result } = renderHook(() => useArtifactDockLayoutStore())
       act(() => result.current.setDockCollapsed(true))
       act(() => result.current.notifyNewArtifact())
       expect(result.current.unreadArtifact).toBe(true)
-      act(() => result.current.setDockMode("workspace"))
+      act(() => result.current.requestReveal({ panelId: "workspace", mode: "wide" }))
       expect(result.current.unreadArtifact).toBe(false)
     })
 
@@ -205,17 +210,45 @@ describe("useArtifactDockLayoutStore", () => {
     })
   })
 
-  describe("dock mode + workspace reveal", () => {
-    it("opens the browser in the expanded right dock", () => {
+  describe("reveal intents + workspace reveal", () => {
+    it("opens the browser as a one-shot panel intent, not a persisted mode", () => {
       const { result } = renderHook(() => useArtifactDockLayoutStore())
 
       act(() => result.current.openBrowser())
 
-      expect(result.current.dockMode).toBe("browser")
+      expect(result.current.revealIntent).toEqual({ panelId: "browser", mode: "wide" })
       expect(result.current.dockCollapsed).toBe(false)
+      // Routing is never persisted — only the workbench's own layout store
+      // remembers which panel a scope was last on.
+      expect(readPersisted()?.state).not.toHaveProperty("revealIntent")
     })
 
-    it("migrates a v1 snapshot to artifact mode", async () => {
+    it("consumes an intent only for the panel that actually handled it", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+      act(() => result.current.openBrowser())
+
+      act(() => result.current.consumeRevealIntent("workspace"))
+      expect(result.current.revealIntent).toEqual({ panelId: "browser", mode: "wide" })
+
+      act(() => result.current.consumeRevealIntent("browser"))
+      expect(result.current.revealIntent).toBeNull()
+    })
+
+    it("leaving the workspace profile drops a stale workspace reveal", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+      act(() => result.current.revealWorkspaceReview({ sessionId: "session-1", rootPath: "/repo" }))
+      expect(result.current.workspaceContext).not.toBeNull()
+
+      // Re-entering the profile it already owns must NOT wipe the target.
+      act(() => result.current.setDockProfile("workspace"))
+      expect(result.current.workspaceContext).not.toBeNull()
+
+      act(() => result.current.setDockProfile("compact"))
+      expect(result.current.workspaceRevealRequest).toBeNull()
+      expect(result.current.workspaceContext).toBeNull()
+    })
+
+    it("migrates a v1 snapshot onto the compact profile", async () => {
       window.localStorage.setItem(
         PERSIST_NAME,
         JSON.stringify({
@@ -228,14 +261,13 @@ describe("useArtifactDockLayoutStore", () => {
         await useArtifactDockLayoutStore.persist.rehydrate()
       })
 
-      expect(useArtifactDockLayoutStore.getState().dockMode).toBe("artifact")
+      expect(useArtifactDockLayoutStore.getState().dockProfile).toBe("compact")
       expect(useArtifactDockLayoutStore.getState().dockSize).toBe(41)
     })
 
-    it("persists the selected mode but never the runtime reveal request", () => {
+    it("persists the sizing profile but never the runtime reveal request", () => {
       const { result } = renderHook(() => useArtifactDockLayoutStore())
       act(() => {
-        result.current.setDockMode("workspace")
         result.current.revealWorkspaceFile({
           sessionId: "session-1",
           rootPath: "/repo",
@@ -245,7 +277,7 @@ describe("useArtifactDockLayoutStore", () => {
         })
       })
 
-      expect(result.current.dockMode).toBe("workspace")
+      expect(result.current.dockProfile).toBe("workspace")
       expect(result.current.dockCollapsed).toBe(false)
       expect(result.current.mobileSheetOpen).toBe(true)
       expect(result.current.workspaceRevealRequest).toMatchObject({
@@ -256,16 +288,22 @@ describe("useArtifactDockLayoutStore", () => {
         line: 12,
         column: 4,
       })
-      expect(readPersisted()?.state.dockMode).toBe("workspace")
+      expect(readPersisted()?.state.dockProfile).toBe("workspace")
       expect(readPersisted()?.state).not.toHaveProperty("workspaceRevealRequest")
       expect(readPersisted()?.state).not.toHaveProperty("workspaceContext")
     })
 
-    it("restores a persisted browser mode", async () => {
+    it.each([
+      ["workspace", "workspace"],
+      ["browser", "compact"],
+      ["artifact", "compact"],
+    ])("migrates a v2 dockMode %s onto the %s profile", async (dockMode, dockProfile) => {
+      // Only the *sizing* meaning of the old three-value mode survives:
+      // `workspace` was the one value that changed the dock's min/max bounds.
       window.localStorage.setItem(
         PERSIST_NAME,
         JSON.stringify({
-          state: { dockSize: 38, dockCollapsed: false, dockMode: "browser", layoutVersion: 2 },
+          state: { dockSize: 38, dockCollapsed: false, dockMode, layoutVersion: 2 },
           version: 2,
         })
       )
@@ -274,8 +312,9 @@ describe("useArtifactDockLayoutStore", () => {
         await useArtifactDockLayoutStore.persist.rehydrate()
       })
 
-      expect(useArtifactDockLayoutStore.getState().dockMode).toBe("browser")
+      expect(useArtifactDockLayoutStore.getState().dockProfile).toBe(dockProfile)
       expect(useArtifactDockLayoutStore.getState().dockSize).toBe(38)
+      expect(useArtifactDockLayoutStore.getState()).not.toHaveProperty("dockMode")
     })
 
     it("queues review reveals and lets the consumer clear only the matching request", () => {
@@ -342,15 +381,15 @@ describe("useArtifactDockLayoutStore", () => {
       act(() => {
         result.current.setDockSize(48)
         result.current.setDockCollapsed(false)
-        result.current.setListRailOpen(true)
+        result.current.setDockProfile("workspace")
         result.current.setMobileSheetOpen(true)
       })
       act(() => result.current.resetLayout())
       expect(result.current.dockSize).toBe(ARTIFACT_DOCK_BOUNDS.default)
       expect(result.current.dockCollapsed).toBe(true)
-      expect(result.current.listRailOpen).toBe(false)
       expect(result.current.mobileSheetOpen).toBe(false)
-      expect(result.current.dockMode).toBe("artifact")
+      expect(result.current.dockProfile).toBe("compact")
+      expect(result.current.revealIntent).toBeNull()
       expect(result.current.workspaceRevealRequest).toBeNull()
       expect(result.current.workspaceContext).toBeNull()
       expect(result.current.layoutVersion).toBe(before + 1)

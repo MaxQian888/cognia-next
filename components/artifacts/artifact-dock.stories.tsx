@@ -9,13 +9,13 @@ import { makeArtifact, makeArtifactList } from "@/lib/storybook/fixtures/artifac
 const SESSION = "ses_1"
 const artifact = makeArtifact({ sessionId: SESSION })
 
-function seedDock(listRailOpen: boolean) {
+function seedDock(withArtifact: boolean) {
   resetStore(useArtifactStore)
   resetStore(useArtifactDockLayoutStore)
   const list = makeArtifactList(SESSION)
   seedStore(useArtifactStore, {
     artifacts: Object.fromEntries([...list, artifact].map((a) => [a.id, a])),
-    activeArtifactId: artifact.id,
+    activeArtifactId: withArtifact ? artifact.id : null,
     artifactWorkspace: {
       scope: "session",
       sessionId: SESSION,
@@ -26,11 +26,11 @@ function seedDock(listRailOpen: boolean) {
       returnContext: null,
     },
   })
-  seedStore(useArtifactDockLayoutStore, { listRailOpen })
 }
 
-// The docked (non-modal) artifacts surface for the desktop right rail: a slim
-// header (collapse + history-rail toggle) wrapping the shared panel content.
+// The docked (non-modal) artifacts surface for the desktop right rail. One
+// Context Workbench shell throughout; the only difference between these two
+// stories is which resource backs it — an artifact, or the chat session.
 const meta = {
   title: "Artifacts/ArtifactDock",
   component: ArtifactDock,
@@ -47,10 +47,10 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Default: Story = {
-  beforeEach: () => seedDock(false),
+export const ArtifactResource: Story = {
+  beforeEach: () => seedDock(true),
 }
 
-export const WithHistoryRail: Story = {
-  beforeEach: () => seedDock(true),
+export const SessionResource: Story = {
+  beforeEach: () => seedDock(false),
 }
