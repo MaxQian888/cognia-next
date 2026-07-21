@@ -79,7 +79,7 @@ describe("clipboard-history (built-in)", () => {
       "clipboard_history_clear",
       "clipboard_history_list",
     ])
-    expect(registerMock).toHaveBeenCalledWith(expect.objectContaining({ id: "clipboard-history" }))
+    expect(registerMock).not.toHaveBeenCalled()
   })
 
   it("clipboard_history_add stores entries in the secure buffer", async () => {
@@ -126,25 +126,23 @@ describe("clipboard-history (built-in)", () => {
     expect(secureStore.get("buffer")).toEqual([])
   })
 
-  it("deactivate calls unregisterCommandsByPlugin", async () => {
+  it("leaves command teardown to the manager", async () => {
     const { ctx } = makeCtx()
     await clipboardHistory.activate?.(ctx)
     await clipboardHistory.deactivate?.(ctx)
-    expect(unregisterMock).toHaveBeenCalledWith("cognia-clipboard-history")
+    expect(unregisterMock).not.toHaveBeenCalled()
   })
 
-  it("the /clipboard slash command reports empty and formatted buffers", async () => {
-    const { ctx, tools } = makeCtx()
-    await clipboardHistory.activate?.(ctx)
-    const handler = registerMock.mock.calls[0][0].handler as () => Promise<{ message: string }>
-
-    const empty = await handler()
-    expect(empty.message).toMatch(/empty/i)
-
-    await tools.clipboard_history_add({ text: "alpha snippet" })
-    const filled = await handler()
-    expect(filled.message).toContain("alpha snippet")
-    await clipboardHistory.deactivate?.(ctx)
+  it("the declared command reports empty and formatted buffers", async () => {
+    const { ctx } = makeCtx()
+    const showToast = jest.fn()
+    ;(ctx as { ui?: unknown }).ui = { showToast }
+    const hooks = (await clipboardHistory.activate?.(ctx)) as unknown as {
+      onCommand?: (c: string, a: string[]) => Promise<boolean>
+    }
+    expect(await hooks?.onCommand?.("not-mine", [])).toBe(false)
+    expect(await hooks?.onCommand?.("clipboard-history", [])).toBe(true)
+    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/empty/i), "info")
   })
 
   it("a successful Tauri poll persists the captured clipboard text", async () => {

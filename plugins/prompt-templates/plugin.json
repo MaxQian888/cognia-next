@@ -13,7 +13,13 @@
     "cognia": ">=0.1.0"
   },
   "permissions": ["settings:read", "settings:write"],
-  "activationEvents": ["startup"],
+  "activationEvents": [
+    "startup",
+    "onCommand:template",
+    "onCommand:template-add",
+    "onCommand:template-remove",
+    "onCommand:template-list"
+  ],
   "runtimeCompatibility": {
     "browser": {
       "availability": "supported",
@@ -23,6 +29,35 @@
       "availability": "supported",
       "entrypoint": "src/index.ts"
     },
-    "mobile": { "availability": "supported", "entrypoint": "src/index.ts" }
-  }
+    "mobile": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    }
+  },
+  "commands": [
+    {
+      "id": "template",
+      "name": "/template",
+      "description": "Insert a stored prompt template by name.",
+      "icon": "FileText"
+    },
+    {
+      "id": "template-add",
+      "name": "/template-add",
+      "description": "Store a new prompt template.",
+      "icon": "FilePlus"
+    },
+    {
+      "id": "template-remove",
+      "name": "/template-remove",
+      "description": "Delete a stored prompt template.",
+      "icon": "FileMinus"
+    },
+    {
+      "id": "template-list",
+      "name": "/template-list",
+      "description": "List stored prompt templates.",
+      "icon": "List"
+    }
+  ]
 }

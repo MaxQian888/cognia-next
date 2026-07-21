@@ -3471,8 +3471,18 @@ export class PluginManager {
     if (definition?.deactivate) {
       // Swallow-and-record (W6.2): a throwing deactivate() must not abort the
       // teardown below, or the plugin leaks permissions/IPC/WASM grants.
+      //
+      // The context MUST be passed: `PluginDefinition.deactivate` takes an
+      // optional `PluginContext`, and every first-party plugin that owns a
+      // resource the host cannot reclaim — a `setInterval` clipboard poller,
+      // an imperatively-registered slash command — guards its teardown with
+      // `if (ctx?.pluginId)`. Calling this with no argument made all of those
+      // guards fail closed, so the resources survived disable/suspend
+      // (a clipboard read loop outliving a revoked `clipboard:read` grant).
+      // `this.contexts.delete(pluginId)` runs AFTER this in every caller, so
+      // the entry is still live here.
       try {
-        await Promise.resolve(definition.deactivate())
+        await Promise.resolve(definition.deactivate(this.contexts.get(pluginId)))
       } catch (error) {
         recordSilentFailure(
           pluginId,
@@ -3600,7 +3610,14 @@ export class PluginManager {
         }
         registerSlashCommand({
           id: aliasId,
-          name: `${manifestCommand.name} (alias: ${alias})`,
+          // The `name` is the token the user types (see
+          // `lib/slash-commands/plugin-commands.ts:slashCommandToken`), so it
+          // must be the bare alias. It previously read
+          // `"<Name> (alias: <alias>)"`, which contains spaces and therefore
+          // fell back to the `…#alias:<alias>` id — an untypeable string. The
+          // alias feature was dead as shipped. The id keeps the `#alias:`
+          // suffix purely for registry bookkeeping (dedup + unregister).
+          name: alias,
           description: manifestCommand.description || manifestCommand.name,
           source: "plugin",
           pluginId,

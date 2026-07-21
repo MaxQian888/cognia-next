@@ -63,7 +63,16 @@ export function QuestsTab() {
                 type="button"
                 data-action={`claim-${quest.id}`}
                 disabled={!quest.done || quest.claimed}
-                onClick={() => void claimQuestReward(quest.id)}
+                // Swallow-and-log rather than `void`: `claimQuestReward`
+                // rejects when the pet rate limiter trips or `pet:interact`
+                // is denied, and an unhandled rejection left the user with no
+                // signal at all. The quest stays claimable (the store only
+                // marks it claimed after a successful grant).
+                onClick={() => {
+                  claimQuestReward(quest.id).catch((error: unknown) => {
+                    console.warn("[pet-daily-quests] claim failed", error)
+                  })
+                }}
                 className="shrink-0 rounded-md border px-2 py-1 text-xs font-medium disabled:opacity-50"
               >
                 {quest.claimed ? t("claimed") : t("claim")}

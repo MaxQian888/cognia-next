@@ -2118,6 +2118,11 @@ describe("PluginManager", () => {
       ).loader.loadedModules.set("to-disable", {
         definition: { deactivate },
       })
+      // Seed the live context the way `activate` would, so the teardown
+      // assertion below exercises the real forwarding path.
+      ;(manager as unknown as { contexts: Map<string, unknown> }).contexts.set("to-disable", {
+        pluginId: "to-disable",
+      })
 
       await manager.disablePlugin("to-disable")
 
@@ -2130,6 +2135,13 @@ describe("PluginManager", () => {
         "to-disable.command-a"
       )
       expect(deactivate).toHaveBeenCalled()
+      // The plugin's own context MUST be forwarded: `deactivate(ctx?)` is how a
+      // plugin releases resources the host cannot reclaim (a `setInterval`
+      // clipboard poller, imperatively-registered slash commands), and every
+      // first-party implementation guards on `if (ctx?.pluginId)`. Calling it
+      // bare made all of those guards fail closed and the resources outlived
+      // disable — a clipboard read loop surviving a revoked `clipboard:read`.
+      expect(deactivate).toHaveBeenCalledWith(expect.objectContaining({ pluginId: "to-disable" }))
       expect(mockGuard.revokeAll).toHaveBeenCalledWith("to-disable")
       // Disabling a plugin must drop its "always allow this session" consent
       // grants so a dangerous-permission grant can't silently outlive disable.

@@ -11,32 +11,33 @@
  *   - `deep_research` agent tool — model-invoked, streams step progress.
  *   - `/research <question>` slash — user-invoked, returns a final cited card.
  */
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
-import { unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
-import { PLUGIN_ID } from "./config"
+import type { PluginContext, PluginDefinition, PluginManifest } from "@/types/plugin"
 import { registerResearchSkill } from "./skill"
-import { registerResearchSlash } from "./slash"
+import { handleResearchSlash } from "./slash"
 import { registerDeepResearchTool } from "./tool"
+import manifestJson from "../plugin.json"
 
 const definition: PluginDefinition = {
-  manifest: {
-    id: PLUGIN_ID,
-    name: "Deep Research",
-    version: "0.1.0",
-    type: "frontend",
-    capabilities: ["tools", "commands", "skills"],
-    main: "src/index.ts",
-  } as never,
+  // Spread plugin.json: `builtinManifest()` merges module-over-JSON, so a
+  // hand-written subset here WINS and would silently drop `commands[]`.
+  manifest: manifestJson as unknown as PluginManifest,
   activate: (ctx: PluginContext) => {
     ctx.logger?.info?.("deep-research activated")
     registerDeepResearchTool(ctx)
-    registerResearchSlash(ctx)
     registerResearchSkill(ctx)
-  },
-  deactivate: () => {
-    // Tools + skills are auto-unregistered by the runtime; slash commands are
-    // keyed by plugin id and removed explicitly.
-    unregisterCommandsByPlugin(PLUGIN_ID)
+    // `/research` is DECLARED in plugin.json (`commands[]`). It used to ALSO be
+    // registered imperatively, so the registry held two entries: the manifest
+    // one (which, lacking an `onCommand` hook, always answered "Plugin command
+    // not handled") and the working imperative one. Returning the hook makes
+    // the declared entry the real one, and the duplicate disappears.
+    return {
+      onCommand: async (command: string, args: string[]) => {
+        if (command !== "research") return false
+        const result = await handleResearchSlash(ctx, args.join(" "))
+        if (result?.message) ctx.ui?.showToast?.(result.message, "info")
+        return true
+      },
+    }
   },
 }
 

@@ -51,18 +51,13 @@ beforeEach(() => {
 })
 
 describe("e2b-sandbox (built-in)", () => {
-  it("activate registers the e2b MCP preset and the /sandbox slash command", async () => {
+  it("activate registers the e2b MCP preset and declares its slash command", async () => {
     const { ctx, presets } = makeCtx({ workspace: true })
     await e2bSandbox.activate?.(ctx)
     expect(presets).toEqual([expect.objectContaining({ id: "e2b-sandbox" })])
-    expect(registerMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "e2b.attach",
-        name: "/sandbox",
-        source: "plugin",
-        pluginId: "cognia-e2b-sandbox",
-      })
-    )
+    // The slash command is manifest-declared now; the plugin must not touch
+    // the registry itself.
+    expect(registerMock).not.toHaveBeenCalled()
     await e2bSandbox.deactivate?.(ctx)
   })
 
@@ -94,10 +89,31 @@ describe("e2b-sandbox (built-in)", () => {
     expect(setMicrovmExecMock).toHaveBeenLastCalledWith(null)
   })
 
-  it("deactivate unregisters the plugin's commands", async () => {
-    const { ctx } = makeCtx({ workspace: true })
-    await e2bSandbox.activate?.(ctx)
-    await e2bSandbox.deactivate?.(ctx)
-    expect(unregisterMock).toHaveBeenCalledWith("cognia-e2b-sandbox")
+  it("declares its slash command instead of registering it imperatively", async () => {
+    const { ctx } = makeCtx()
+    const hooks = await e2bSandbox.activate?.(ctx)
+    // The manager owns registration for manifest-declared commands; a plugin
+    // touching the registry itself skips namespacing, conflict detection,
+    // aliases, the command-palette entry and teardown.
+    expect(registerMock).not.toHaveBeenCalled()
+    expect(typeof hooks?.onCommand).toBe("function")
+    const commands = (e2bSandbox.manifest as { commands?: Array<{ id: string }> }).commands
+    expect(commands?.map((c) => c.id)).toEqual(["sandbox"])
+  })
+
+  it("handles its own command and declines others", async () => {
+    const { ctx } = makeCtx()
+    const showToast = jest.fn()
+    ;(ctx as { ui?: unknown }).ui = { showToast }
+    const hooks = await e2bSandbox.activate?.(ctx)
+    expect(await hooks?.onCommand?.("not-mine", [])).toBe(false)
+    expect(showToast).not.toHaveBeenCalled()
+    expect(await hooks?.onCommand?.("sandbox", [])).toBe(true)
+    expect(showToast).toHaveBeenCalled()
+  })
+
+  it("declares lazy activation for its command", () => {
+    const events = (e2bSandbox.manifest as { activationEvents?: string[] }).activationEvents
+    expect(events).toContain("onCommand:sandbox")
   })
 })

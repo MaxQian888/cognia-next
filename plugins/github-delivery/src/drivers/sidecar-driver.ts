@@ -11,16 +11,48 @@
  *
  * The driver intentionally does NOT pre-register any custom tools — the
  * sidecar's built-ins already cover the operations Issue → PR work needs.
- * Operations the driver explicitly forbids (`git push`, the GitHub API,
- * dependency installs) are spelled out in the system prompt rather than
- * gated at the tool layer; future revisions can tighten this with the
- * SDK's `disallowedTools` if real bots get too creative.
+ *
+ * The operations the system prompt forbids (`git push`, the `gh` CLI) are ALSO
+ * gated at the tool layer via {@link ISSUE_LOOP_PERMISSION_RULESET}. A prompt
+ * is not a boundary: the issue title/body this driver is handed is
+ * attacker-controlled (anyone can open an issue), so instructions in it can
+ * try to talk the agent out of the prompt's rules. `permissionRuleset` is
+ * enforced by the sidecar's `canUseTool` gate, where an explicit `deny`
+ * hard-rejects and cannot be escalated into an approval prompt.
  */
 
 import { interruptSession, onClaudeMessage, sendPrompt } from "@/lib/claude/ipc"
 import type { ClaudeEvent } from "@cognia/agent-config-types"
 import type { IssueLoopDriver } from "../workflow/issue-loop"
 import { buildIssueSystemPrompt, buildIssueUserPrompt, extractSummary } from "./system-prompt"
+
+/**
+ * Tool-layer enforcement of the two operations the Issue → PR system prompt
+ * forbids ("Never `git push`, never `gh` — leave the remote untouched").
+ *
+ * Denying the whole `Bash` tool is not an option — the agent has to run the
+ * project's build and tests — so the rules are command-scoped.
+ * `resolveBashPermission` splits compound commands (`a && b`, pipes) into
+ * segments and takes the WORST verdict, so `cd x && git push` is denied too.
+ *
+ * The host pushes and opens the PR itself after the driver returns
+ * (`issue-loop.ts`), so nothing legitimate needs these commands.
+ */
+export const ISSUE_LOOP_PERMISSION_RULESET = {
+  Bash: {
+    // `**` (not `*`): a single star is `[^/\\]*` and therefore stops at a path
+    // separator, so `git remote*` would MISS
+    // `git remote set-url origin https://…/a/b.git` — exactly the command that
+    // matters most here. Each command needs both the bare and the
+    // argument-bearing form.
+    "git push": "deny",
+    "git push **": "deny",
+    "git remote": "deny",
+    "git remote **": "deny",
+    gh: "deny",
+    "gh **": "deny",
+  },
+} as const
 
 /**
  * Dependencies the driver leans on. Defaulted to the real `lib/claude/ipc`
@@ -115,6 +147,7 @@ export class SidecarIssueLoopDriver implements IssueLoopDriver {
           process: true,
           environment: true,
         },
+        permissionRuleset: ISSUE_LOOP_PERMISSION_RULESET,
         maxTurns: this.opts.maxTurns ?? 60,
         model: this.opts.model,
       })

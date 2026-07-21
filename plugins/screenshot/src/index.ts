@@ -11,9 +11,10 @@
  * tool diagnostics rather than fatal exceptions.
  */
 
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
+import type { PluginContext, PluginDefinition, PluginManifest } from "@/types/plugin"
+
+import manifestJson from "../plugin.json"
 import { captureScreenshot } from "@/lib/ui/screenshot"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 import { extract } from "@/lib/ocr"
 import { buildOcrDeps } from "@/lib/ocr/deps"
 
@@ -125,14 +126,9 @@ async function performCaptureOcr(languages?: string[]): Promise<
 }
 
 const definition: PluginDefinition = {
-  manifest: {
-    id: "cognia-screenshot",
-    name: "Screenshot",
-    version: "0.1.0",
-    type: "frontend",
-    capabilities: ["tools", "commands"],
-    main: "src/index.ts",
-  } as never,
+  // Spread plugin.json: `builtinManifest()` merges module-over-JSON, so a
+  // hand-written subset here would WIN and silently drop `commands[]`.
+  manifest: manifestJson as unknown as PluginManifest,
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("screenshot plugin activated")
 
@@ -175,27 +171,25 @@ const definition: PluginDefinition = {
       execute: (args?: { languages?: string[] }) => performCaptureOcr(args?.languages),
     })
 
-    registerSlashCommand({
-      id: "screenshot.capture",
-      name: "/screenshot",
-      description: "Capture a screen image and copy it to the clipboard.",
-      handler: async () => {
+    // The slash command is DECLARED in plugin.json (`commands[]`) and handled
+    // here — the supported shape per the author-SDK migration table. The
+    // manager owns registration (namespaced id, conflict detection, aliases,
+    // command-palette entry, idle-clock refresh) and teardown, so there is no
+    // imperative registry call and nothing to unregister in `deactivate`.
+    return {
+      onCommand: async (command: string) => {
+        if (command !== "screenshot") return false
         const result = await performCapture()
-        return result.ok
-          ? {
-              message: `Captured ${result.filename ?? "screenshot.png"} (${result.size ?? 0} bytes).${
+        ctx.ui?.showToast?.(
+          result.ok
+            ? `Captured ${result.filename ?? "screenshot.png"} (${result.size ?? 0} bytes).${
                 result.copiedToClipboard ? " Copied to clipboard." : ""
-              }`,
-            }
-          : { message: `Screenshot failed: ${result.error ?? "unknown"}` }
+              }`
+            : `Screenshot failed: ${result.error ?? "unknown"}`,
+          result.ok ? "success" : "error"
+        )
+        return true
       },
-      source: "plugin",
-      pluginId: ctx.pluginId,
-    })
-  },
-  deactivate: async (ctx?: PluginContext) => {
-    if (ctx?.pluginId) {
-      unregisterCommandsByPlugin(ctx.pluginId)
     }
   },
 }

@@ -4,8 +4,8 @@ import type { EngineDeps, SearchHit } from "./types"
 
 jest.mock("./runtime", () => ({ buildEngineDeps: jest.fn() }))
 import { buildEngineDeps } from "./runtime"
-import { __resetSlashCommandsForTesting, listCommandsByPlugin } from "@/lib/slash-commands/registry"
-import { handleResearchSlash, registerResearchSlash } from "./slash"
+import { __resetSlashCommandsForTesting } from "@/lib/slash-commands/registry"
+import { handleResearchSlash } from "./slash"
 
 const mockBuild = buildEngineDeps as jest.MockedFunction<typeof buildEngineDeps>
 
@@ -112,13 +112,5 @@ describe("handleResearchSlash", () => {
     })
     const res = await handleResearchSlash(ctx({ maxSteps: 2 }), "q")
     expect(res.message).toMatch(/failed: model exploded/)
-  })
-})
-
-describe("registerResearchSlash", () => {
-  it("registers /research under the plugin and is removable", () => {
-    registerResearchSlash(ctx())
-    const mine = listCommandsByPlugin("cognia-deep-research")
-    expect(mine.map((c) => c.id)).toContain("research")
   })
 })

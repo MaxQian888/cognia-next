@@ -70,6 +70,29 @@ describe("resolveOutput", () => {
       /no open workspace/
     )
   })
+  it("rejects a relative output that walks out of the workspace", () => {
+    // Leading separators were stripped, but `..` was not — so this used to
+    // resolve to /repo/../../.ssh/authorized_keys while still looking like a
+    // workspace-relative path to the caller.
+    expect(() =>
+      resolveOutput(parseWebCloneArgs("https://x/ -o ../../.ssh/authorized_keys"), "/repo", "1")
+    ).toThrow(/must stay inside the workspace/)
+    expect(() =>
+      resolveOutput(parseWebCloneArgs("https://x/ -o out/../../../etc/passwd"), "/repo", "1")
+    ).toThrow(/must stay inside the workspace/)
+  })
+  it("still honours an absolute -o as the documented escape hatch", () => {
+    // Absolute paths deliberately bypass the workspace (the no-workspace error
+    // tells the user to pass one), so `..` inside them grants nothing new.
+    expect(resolveOutput(parseWebCloneArgs("https://x/ -o /abs/out"), "/repo", "1")).toBe(
+      "/abs/out"
+    )
+  })
+  it("still allows a legitimate nested relative output", () => {
+    expect(resolveOutput(parseWebCloneArgs("https://x/ -o out/site.a"), "/repo", "1")).toBe(
+      "/repo/out/site.a"
+    )
+  })
 })
 
 describe("buildJob", () => {
@@ -133,20 +156,22 @@ describe("runWebCloneCommand", () => {
 })
 
 describe("plugin definition", () => {
-  it("registers /web-clone on activate and cleans up on deactivate", async () => {
+  it("declares /web-clone and handles it via the returned hook", async () => {
     const ctx = {
       pluginId: "cognia-web-clone",
       logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+      ui: { showToast: jest.fn() },
     } as unknown as PluginContext
-    await webClonePlugin.activate(ctx)
-    expect(registerMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: "/web-clone",
-        pluginId: "cognia-web-clone",
-        source: "plugin",
-      })
-    )
-    await webClonePlugin.deactivate?.(ctx)
-    expect(unregisterMock).toHaveBeenCalledWith("cognia-web-clone")
+    const hooks = (await webClonePlugin.activate(ctx)) as unknown as {
+      onCommand?: (c: string, a: string[]) => Promise<boolean>
+    }
+    // Declared, not imperatively registered — the manager owns registration
+    // (namespacing, conflict detection, palette entry) and teardown.
+    expect(registerMock).not.toHaveBeenCalled()
+    const commands = (webClonePlugin.manifest as { commands?: Array<{ id: string }> }).commands
+    expect(commands?.map((c) => c.id)).toEqual(["web-clone"])
+    expect(await hooks?.onCommand?.("not-mine", [])).toBe(false)
+    expect(webClonePlugin.deactivate).toBeUndefined()
+    expect(unregisterMock).not.toHaveBeenCalled()
   })
 })

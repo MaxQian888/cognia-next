@@ -52,11 +52,30 @@ beforeEach(() => {
 })
 
 describe("screenshot (built-in)", () => {
-  it("registers take_screenshot tool and a slash command", async () => {
+  it("registers take_screenshot and declares its command instead of registering it", async () => {
     const { ctx, tools } = makeCtx()
-    await screenshotPlugin.activate?.(ctx)
+    const hooks = await screenshotPlugin.activate?.(ctx)
     expect(Object.keys(tools)).toContain("take_screenshot")
-    expect(registerMock).toHaveBeenCalledWith(expect.objectContaining({ id: "screenshot.capture" }))
+    // The slash command is DECLARED (manifest.commands[]) and handled via the
+    // returned hook — the supported shape. The plugin must NOT touch the
+    // slash registry itself: doing so skipped the manager's namespacing,
+    // conflict detection, aliases, command-palette entry and teardown.
+    expect(registerMock).not.toHaveBeenCalled()
+    expect(typeof hooks?.onCommand).toBe("function")
+    const commands = (screenshotPlugin.manifest as { commands?: Array<{ id: string }> }).commands
+    expect(commands?.map((c) => c.id)).toEqual(["screenshot"])
+  })
+
+  it("handles its declared command and ignores everyone else's", async () => {
+    const { ctx } = makeCtx()
+    captureMock.mockResolvedValue(null)
+    const showToast = jest.fn()
+    ;(ctx as { ui?: unknown }).ui = { showToast }
+    const hooks = await screenshotPlugin.activate?.(ctx)
+    expect(await hooks?.onCommand?.("someone-elses-command", [])).toBe(false)
+    expect(showToast).not.toHaveBeenCalled()
+    expect(await hooks?.onCommand?.("screenshot", [])).toBe(true)
+    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/failed/i), "error")
   })
 
   it("registers extract_screenshot_ocr and OCRs the captured image", async () => {
@@ -139,9 +158,15 @@ describe("screenshot (built-in)", () => {
     expect(result.base64.length).toBeGreaterThan(0)
   })
 
-  it("deactivate calls unregisterCommandsByPlugin", async () => {
+  it("declares lazy activation for its command", async () => {
+    const events = (screenshotPlugin.manifest as { activationEvents?: string[] }).activationEvents
+    expect(events).toContain("onCommand:screenshot")
+  })
+
+  it("has no imperative teardown left to do", async () => {
     const { ctx } = makeCtx()
     await screenshotPlugin.deactivate?.(ctx)
-    expect(unregisterMock).toHaveBeenCalledWith("cognia-screenshot")
+    // The manager unregisters manifest-declared commands itself.
+    expect(unregisterMock).not.toHaveBeenCalled()
   })
 })

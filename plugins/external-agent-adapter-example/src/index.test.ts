@@ -5,7 +5,14 @@
  * overlay, and the contributed adapter is createable + behaves (echo).
  */
 
-import definition, { manifest } from "./index"
+import type { PluginManifest } from "@/types/plugin"
+import definition, { TYPED_CONTRIBUTIONS } from "./index"
+// Read the JSON manifest, NOT the TS module overlay: this plugin is in
+// `INTENTIONALLY_UNBUNDLED`, so an installed copy only ever sees plugin.json.
+// Asserting the TS manifest is what hid the fact that the contributions
+// existed nowhere an installed copy could reach.
+import manifestJson from "../plugin.json"
+const manifest = manifestJson as unknown as PluginManifest
 import { createDemoEchoAdapter, DEMO_ADAPTER_ID } from "./demo-adapter"
 import {
   registerExternalAgentAdaptersForPlugin,
@@ -118,5 +125,17 @@ describe("external-agent-adapter-example plugin", () => {
     )
     expect(delta?.delta.text).toBe("echo: ping")
     expect(events.some((e) => e.type === "done")).toBe(true)
+  })
+})
+
+describe("plugin.json is the shipped source of truth", () => {
+  // plugin.json is what an installed copy reads. These assertions keep it
+  // honest against the SDK types via the typed mirrors in index.ts.
+  it("matches the typed adapter definition", () => {
+    expect(manifest.externalAgentAdapters?.[0]).toEqual(TYPED_CONTRIBUTIONS.adapter)
+  })
+
+  it("matches the typed preset definition", () => {
+    expect(manifest.externalAgentPresets?.[0]).toEqual(TYPED_CONTRIBUTIONS.preset)
   })
 })

@@ -21,7 +21,7 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "activationEvents": ["startup"],
+  "activationEvents": ["startup", "onCommand:zhihu"],
   "runtimeCompatibility": {
     "browser": {
       "availability": "supported",
@@ -37,5 +37,13 @@
       "entrypoint": "src/index.ts",
       "reason": "Characters and skills load on mobile; spawning the MCP servers (zget / browser) needs the desktop sidecar."
     }
-  }
+  },
+  "commands": [
+    {
+      "id": "zhihu",
+      "name": "/zhihu",
+      "description": "Open the Zhihu content pipeline panel.",
+      "icon": "PenLine"
+    }
+  ]
 }

@@ -37,7 +37,21 @@ describe("stagehand-mcp (built-in)", () => {
     expect(presets).toEqual([expect.objectContaining({ id: "stagehand", transport: "stdio" })])
   })
 
-  it("marks the Browserbase / OpenAI key fields as env-placed secrets", () => {
+  it("points at the package that actually exists on npm", () => {
+    // `@browserbasehq/mcp-stagehand` is a hard 404 and
+    // `@browserbasehq/mcp-server-browserbase` is deprecated — either one makes
+    // `npx` fail at spawn on every launch.
+    const manifest = stagehandMcp.manifest as unknown as {
+      mcpServerPresets: Array<{ config: { command: string; args: string[] } }>
+    }
+    const { command, args } = manifest.mcpServerPresets[0].config
+    expect(command).toBe("npx")
+    expect(args.join(" ")).toContain("@browserbasehq/mcp@")
+    expect(args.join(" ")).not.toContain("mcp-stagehand")
+    expect(args.join(" ")).not.toContain("mcp-server-browserbase")
+  })
+
+  it("marks the Browserbase / model key fields as env-placed secrets", () => {
     const manifest = stagehandMcp.manifest as unknown as {
       mcpServerPresets: Array<{
         id: string
@@ -48,32 +62,45 @@ describe("stagehand-mcp (built-in)", () => {
     expect(preset.id).toBe("stagehand")
     const byKey = Object.fromEntries(preset.fields.map((f) => [f.key, f]))
     expect(byKey.BROWSERBASE_API_KEY).toMatchObject({ placement: "env", secret: true })
-    expect(byKey.OPENAI_API_KEY).toMatchObject({ placement: "env", secret: true })
+    // v3 defaults to google/gemini-2.5-flash-lite, not GPT-4o.
+    expect(byKey.GEMINI_API_KEY).toMatchObject({ placement: "env", secret: true })
+    expect(byKey.OPENAI_API_KEY).toBeUndefined()
     expect(byKey.BROWSERBASE_PROJECT_ID).toMatchObject({ placement: "env" })
   })
 
-  it("activate registers the /stagehand slash command", async () => {
-    const { ctx } = makeCtx()
-    await stagehandMcp.activate?.(ctx)
-    expect(registerMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "stagehand.attach",
-        name: "/stagehand",
-        source: "plugin",
-        pluginId: "cognia-stagehand-mcp",
-      })
-    )
-  })
-
-  it("deactivate unregisters the plugin's commands", async () => {
-    const { ctx } = makeCtx()
-    await stagehandMcp.activate?.(ctx)
-    await stagehandMcp.deactivate?.(ctx)
-    expect(unregisterMock).toHaveBeenCalledWith("cognia-stagehand-mcp")
-  })
-
-  it("deactivate without a context is a safe no-op", async () => {
-    await expect(stagehandMcp.deactivate?.(undefined as never)).resolves.toBeUndefined()
+  it("has no deactivate — the manager owns command teardown", () => {
+    // The plugin registers nothing imperatively any more, so there is nothing
+    // for it to undo. Manifest-declared commands are unregistered by
+    // `PluginManager.unregisterPluginSlashCommands`.
+    expect(stagehandMcp.deactivate).toBeUndefined()
     expect(unregisterMock).not.toHaveBeenCalled()
+  })
+
+  it("declares its slash command instead of registering it imperatively", async () => {
+    const { ctx } = makeCtx()
+    const hooks = await stagehandMcp.activate?.(ctx)
+    // The manager owns registration for manifest-declared commands; a plugin
+    // touching the registry itself skips namespacing, conflict detection,
+    // aliases, the command-palette entry and teardown.
+    expect(registerMock).not.toHaveBeenCalled()
+    expect(typeof hooks?.onCommand).toBe("function")
+    const commands = (stagehandMcp.manifest as { commands?: Array<{ id: string }> }).commands
+    expect(commands?.map((c) => c.id)).toEqual(["stagehand"])
+  })
+
+  it("handles its own command and declines others", async () => {
+    const { ctx } = makeCtx()
+    const showToast = jest.fn()
+    ;(ctx as { ui?: unknown }).ui = { showToast }
+    const hooks = await stagehandMcp.activate?.(ctx)
+    expect(await hooks?.onCommand?.("not-mine", [])).toBe(false)
+    expect(showToast).not.toHaveBeenCalled()
+    expect(await hooks?.onCommand?.("stagehand", [])).toBe(true)
+    expect(showToast).toHaveBeenCalled()
+  })
+
+  it("declares lazy activation for its command", () => {
+    const events = (stagehandMcp.manifest as { activationEvents?: string[] }).activationEvents
+    expect(events).toContain("onCommand:stagehand")
   })
 })

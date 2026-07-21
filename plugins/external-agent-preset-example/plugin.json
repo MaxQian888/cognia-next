@@ -9,11 +9,47 @@
   "author": "cognia-next",
   "license": "MIT",
   "minAppVersion": "0.1.0",
-  "engines": { "cognia": ">=0.1.0" },
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
   "activationEvents": ["startup"],
   "runtimeCompatibility": {
-    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
-    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
-    "mobile": { "availability": "supported", "entrypoint": "src/index.ts" }
-  }
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    }
+  },
+  "externalAgentPresets": [
+    {
+      "id": "example-acp-cli",
+      "name": "Example ACP CLI",
+      "description": "A reference external agent preset wired over ACP stdio.",
+      "protocol": "acp",
+      "transport": "stdio",
+      "process": {
+        "command": "npx",
+        "args": ["-y", "example-acp-agent", "--stdio"]
+      },
+      "envVarHint": "EXAMPLE_ACP_API_KEY",
+      "defaultPermissionMode": "default",
+      "supportTier": "documented-only",
+      "tags": ["example", "reference"]
+    }
+  ],
+  "contextProviders": [
+    {
+      "id": "env-banner",
+      "label": "Environment Banner",
+      "entry": "src/context-provider.ts",
+      "export": "createEnvBannerProvider"
+    }
+  ]
 }

@@ -21623,6 +21623,7 @@
           "start": "启动 cloudflared 隧道",
           "starting": "正在启动…",
           "stop": "停止隧道",
+          "unavailable": "入站 webhook 尚不可用：本地端口上没有任何服务在监听，GitHub 的投递会失败。当前仓库通过轮询跟踪。",
           "webOnly": "公网隧道需要桌面模式（PATH 中需有 cloudflared 可执行文件）。"
         },
         "webhook": "webhook",

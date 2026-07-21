@@ -31,13 +31,40 @@ function makePluginHandler(def: SlashCommandDefinition): (ctx: SlashContext) => 
  * composer via `BUILTIN_SLASH_COMMANDS`, so including them would duplicate
  * every builtin.
  */
+/**
+ * The token a user actually types for a plugin command.
+ *
+ * This used to be `def.id` verbatim, which made every declared `name` inert:
+ * a plugin registering `{ id: "screenshot.capture", name: "/screenshot" }` was
+ * only reachable as `/screenshot.capture`, and a manifest-declared command
+ * (which the manager namespaces to `<pluginId>.<commandId>`) would have been
+ * reachable only as `/cognia-screenshot.screenshot`. `makePluginHandler`
+ * dispatches by `def.id` internally, so the projected name is free to be the
+ * friendly one — the id still does the resolving.
+ */
+export function slashCommandToken(def: SlashCommandDefinition): string {
+  const declared = def.name?.trim().replace(/^\/+/, "") ?? ""
+  // A name with whitespace isn't typeable as a single `/token`, so fall back.
+  return declared.length > 0 && !/\s/.test(declared) ? declared : def.id
+}
+
 export function pluginSlashCommandsToSlashCommands(
   defs: readonly SlashCommandDefinition[]
 ): SlashCommand[] {
+  // First-wins on a colliding token, mirroring the registry's own conflict
+  // policy. The loser keeps its (unique) id as the token so it stays reachable
+  // rather than silently vanishing from the picker's name-keyed map.
+  const taken = new Set<string>()
   return defs
     .filter((def) => def.source === "plugin")
-    .map((def) => ({
-      name: def.id,
+    .map((def) => {
+      const preferred = slashCommandToken(def)
+      const name = taken.has(preferred) ? def.id : preferred
+      taken.add(name)
+      return { def, name }
+    })
+    .map(({ def, name }) => ({
+      name,
       description: def.description ?? "",
       scope: "plugin" as const,
       category: def.category ?? "plugins",

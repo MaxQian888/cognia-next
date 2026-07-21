@@ -122,6 +122,13 @@ export async function executeAgentTurn(ctx: StepExecutionContext): Promise<StepE
     character,
     appSettings: appSettings ?? null,
   })
+  // Headless runs have no UI to answer a permission prompt, so the turn would
+  // hang forever waiting on one. Scope the bypass to THIS call site rather than
+  // to the character definitions: a character's `permissionMode` is consulted
+  // for every interactive chat with that character too (see the pack header),
+  // which silently handed un-prompted Edit/Write/Bash to anyone who picked a
+  // refactor role from the character list.
+  sendOptions.permissionMode = "bypassPermissions"
 
   const timeoutSec =
     typeof params.timeoutSec === "number" && params.timeoutSec > 0

@@ -11,6 +11,7 @@ import type { PluginTool, PluginToolContext } from "@/types/plugin"
 import { buildReadTools } from "./read-tools"
 import { buildMutateTools } from "./mutate-tools"
 import { buildLayoutTools } from "./layout-tools"
+import * as autoLayoutModule from "@/lib/workflow/editor/auto-layout"
 
 function workflow(id: string): VisualWorkflow {
   return {
@@ -287,6 +288,36 @@ describe("mutate tools", () => {
 })
 
 describe("layout tools", () => {
+  it("wf_auto_layout accepts every direction its schema advertises", async () => {
+    // `direction` is in the tool schema, i.e. a promise to the model. It used
+    // to be `void`ed, so a request for TB silently produced LR and still
+    // answered `{ ok: true }`. The mapping itself is pinned in
+    // lib/workflow/editor/auto-layout.test.ts.
+    const store = createEditorStore(workflow("wf_a"))
+    store.getState().addNode("ai.prompt", { x: 0, y: 0 })
+    registerEditorStore("wf_a", store)
+    const tool = findTool(buildLayoutTools(), "wf_auto_layout")
+    const schema = tool.definition.parametersSchema as {
+      properties: { direction: { enum: string[] } }
+    }
+    for (const direction of schema.properties.direction.enum) {
+      expect(direction in autoLayoutModule.ELK_DIRECTIONS).toBe(true)
+      const result = (await tool.execute({ direction }, EMPTY_CTX)) as { ok: boolean }
+      expect(result.ok).toBe(true)
+    }
+  })
+
+  it("maps every schema direction onto a real elk direction", () => {
+    // The tool's enum and the elk mapping must not drift apart.
+    expect(Object.keys(autoLayoutModule.ELK_DIRECTIONS).sort()).toEqual(["BT", "LR", "RL", "TB"])
+    expect(Object.values(autoLayoutModule.ELK_DIRECTIONS).sort()).toEqual([
+      "DOWN",
+      "LEFT",
+      "RIGHT",
+      "UP",
+    ])
+  })
+
   it("wf_select_nodes pushes ids into the store selection", async () => {
     const store = createEditorStore(workflow("wf_a"))
     const id = store.getState().addNode("ai.prompt", { x: 0, y: 0 })

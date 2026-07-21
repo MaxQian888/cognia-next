@@ -13,40 +13,19 @@
  */
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 import { isTauri } from "@/lib/tauri"
 import { recordStatus } from "@/lib/skills/recording/recorder-client"
 import { RecordSkillModal } from "./ui/record-skill-modal"
+import manifestJson from "../plugin.json"
 
 const definition: PluginDefinition = {
+  // Spread plugin.json: `builtinManifest()` merges module-over-JSON, so a
+  // hand-written subset here would WIN and silently drop `commands[]`.
   manifest: {
-    id: "cognia-skill-recorder",
-    name: "Skill Recorder",
-    version: "0.1.0",
-    type: "frontend",
-    capabilities: ["commands", "tools"],
-    main: "src/index.ts",
+    ...(manifestJson as object),
   } as never,
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("skill-recorder plugin activated")
-
-    registerSlashCommand({
-      id: "skill-recorder.record",
-      name: "/record-skill",
-      description: "Record a desktop workflow and turn it into a generated Skill.",
-      source: "plugin",
-      pluginId: ctx.pluginId,
-      handler: () => {
-        if (!isTauri()) {
-          return { message: "Skill recording is desktop-only." }
-        }
-        if (!ctx.modal) {
-          return { message: "The recorder UI is unavailable in this surface." }
-        }
-        ctx.modal.openModal(RecordSkillModal)
-        return { message: "Recorder opened." }
-      },
-    })
 
     ctx.agent?.registerTool?.({
       name: "record_skill_status",
@@ -72,10 +51,25 @@ const definition: PluginDefinition = {
         }
       },
     })
-  },
-  deactivate: async (ctx?: PluginContext) => {
-    if (ctx?.pluginId) {
-      unregisterCommandsByPlugin(ctx.pluginId)
+
+    // The slash command is DECLARED in plugin.json (`commands[]`) and handled
+    // here — the supported shape per the author-SDK migration table. The
+    // manager owns registration and teardown, so `deactivate` has nothing to
+    // undo for it.
+    return {
+      onCommand: async (command: string) => {
+        if (command !== "record-skill") return false
+        if (!isTauri()) {
+          ctx.ui?.showToast?.("Skill recording is desktop-only.", "error")
+          return true
+        }
+        if (!ctx.modal) {
+          ctx.ui?.showToast?.("The recorder UI is unavailable in this surface.", "error")
+          return true
+        }
+        ctx.modal.openModal(RecordSkillModal)
+        return true
+      },
     }
   },
 }

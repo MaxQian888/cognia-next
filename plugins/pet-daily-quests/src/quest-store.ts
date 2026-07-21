@@ -80,6 +80,13 @@ export async function claimQuestReward(
   if (!state || !effects) return null
   const { state: next, reward } = claimQuest(state, questId)
   if (!reward) return null
+  // Grant FIRST, mark claimed only on success. `effects.reward` routes to
+  // `ctx.pet.emitEvent`, which throws on the plugin rate limiter and on a
+  // denied `pet:interact` grant. Marking the quest claimed before awaiting it
+  // burnt the quest permanently for zero reward whenever that happened — and
+  // the UI calls this as `void claimQuestReward(...)`, so the rejection was
+  // unhandled and the user saw nothing at all.
+  const granted = await effects.reward(reward)
   setState(next)
-  return effects.reward(reward)
+  return granted
 }

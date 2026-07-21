@@ -36,7 +36,7 @@ const PLUGINS_ROOT = join(__dirname)
  */
 const INTENTIONALLY_UNBUNDLED: Readonly<Record<string, string>> = Object.freeze({
   "cognia-test-lsp-contribution":
-    "Phase-B LSP test fixture — loaded only by the verification suite.",
+    "Phase-B LSP fixture — exercised by its own co-located suite (which drives the bundled echo-lsp server over real stdio framing), not shipped to end users.",
   "cognia-external-agent-preset-example":
     "Author reference plugin — copy-paste template, not a default.",
   "cognia-external-agent-adapter-example":

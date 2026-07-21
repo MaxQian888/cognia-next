@@ -11,7 +11,7 @@ import { usePluginT } from "./use-plugin-t"
 import { clearAllRuns, deleteRun, getPref, listFindings, listRuns, setPref } from "./db"
 import { sortBySeverity } from "./lib/parse-reports"
 import { runPreflight } from "./lib/preflight"
-import { runScan } from "./lib/strix-runner"
+import { purgeAllArtifacts, purgeRunArtifacts, runScan } from "./lib/strix-runner"
 import { PreflightBanner } from "./components/preflight-banner"
 import { ScanForm } from "./components/scan-form"
 import { ScanConsole } from "./components/scan-console"
@@ -114,15 +114,30 @@ export function StrixPanel(_props: PluginViewProps) {
     setSelectedRunId(runId)
     setTab("scan")
   }, [])
+  // Deleting must remove the on-disk artifacts too: the scan directory holds
+  // `vulnerabilities.json` with full PoC exploits, and clearing only the Dexie
+  // rows left them on disk forever with no GC path.
   const onDelete = useCallback(
     (runId: string) => {
-      if (dexie) void deleteRun(dexie, runId)
+      if (!dexie) return
+      void (async () => {
+        if (terminal) {
+          await purgeRunArtifacts(runId, { terminal, randomId: uuid, sleep, pollMs: 400 })
+        }
+        await deleteRun(dexie, runId)
+      })()
     },
-    [dexie]
+    [dexie, terminal]
   )
   const onClearAll = useCallback(() => {
-    if (dexie) void clearAllRuns(dexie)
-  }, [dexie])
+    if (!dexie) return
+    void (async () => {
+      if (terminal) {
+        await purgeAllArtifacts({ terminal, randomId: uuid, sleep, pollMs: 400 })
+      }
+      await clearAllRuns(dexie)
+    })()
+  }, [dexie, terminal])
 
   if (!rt || !dexie || !terminal) {
     return (

@@ -33,7 +33,24 @@ import type { GhRepoEntry } from "@/lib/github/types"
 import type Dexie from "dexie"
 
 const NAMESPACED_TABLE = "github-delivery:repos"
-const DEFAULT_WEBHOOK_PORT = 17243 // matches the Rust webhook receiver default
+const DEFAULT_WEBHOOK_PORT = 17243
+
+/**
+ * Inbound GitHub webhooks are DORMANT — labelled here per Working Rule 7; the
+ * other two axes are `connectors[].transportModes: []` in the plugin manifest
+ * and the dormancy guard in `plugins/github-delivery/src/connector/inbox-bridge.test.ts`.
+ *
+ * There is no GitHub webhook receiver: nothing in `src-tauri/` or `crates/`
+ * binds {@link DEFAULT_WEBHOOK_PORT}, and `lib/github/event-normalizer.ts`,
+ * `lib/github/webhook-verify.ts` and the plugin's `ghEventToInbound` have zero
+ * production callers. Offering a "Start cloudflared tunnel" button plus a
+ * public URL invited users to point GitHub at an endpoint whose deliveries can
+ * only fail, with nothing surfacing the failure. Repos are tracked by polling.
+ *
+ * The renderer half is complete and tested — flip this to `true` and the
+ * control below works again once the receiver lands.
+ */
+const INBOUND_WEBHOOKS_AVAILABLE = false
 
 function getReposTable(): Dexie.Table<GhRepoEntry, string> | null {
   try {
@@ -93,10 +110,19 @@ function TunnelControl({ port }: { port: number }) {
     )
   }
 
+  if (!INBOUND_WEBHOOKS_AVAILABLE) {
+    return (
+      <p className="text-xs text-muted-foreground" data-testid="tunnel-unavailable">
+        {t("unavailable")}
+      </p>
+    )
+  }
+
   return (
     <div className="space-y-1.5" data-testid="tunnel-control">
       <div className="flex items-center gap-2 text-xs">
         <span className="text-muted-foreground">{t("localLabel")}</span>
+        {/* i18n-exempt: literal webhook URL template, not UI prose */}
         <code className="font-mono">http://127.0.0.1:{port}/webhook/&lt;path&gt;</code>
       </div>
       {tunnel.state === "running" && (

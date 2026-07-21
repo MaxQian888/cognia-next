@@ -17,7 +17,7 @@
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
 import { defineSkill } from "@cognia/plugin-sdk"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
+import manifestJson from "../plugin.json"
 
 const CODE_REVIEW = defineSkill({
   id: "anthropic.code-review",
@@ -97,13 +97,10 @@ const definition: PluginDefinition = {
   // registry. `skills` is declared in `capabilities` so the plugin manager
   // walks the `skills` array on enable and registers each entry with the
   // M1·T3 overlay.
+  // Spread plugin.json: `builtinManifest()` merges module-over-JSON, so a
+  // hand-written subset here would WIN and silently drop `commands[]`.
   manifest: {
-    id: "cognia-anthropic-skills",
-    name: "Anthropic Skills",
-    version: "0.1.0",
-    type: "frontend",
-    capabilities: ["skills", "commands"],
-    main: "src/index.ts",
+    ...(manifestJson as object),
     skills: [CODE_REVIEW, DATA_ANALYSIS, WEB_RESEARCH],
   } as never,
   activate: async (ctx: PluginContext) => {
@@ -115,20 +112,20 @@ const definition: PluginDefinition = {
     ctx.agent?.registerSkill?.(DATA_ANALYSIS)
     ctx.agent?.registerSkill?.(WEB_RESEARCH)
 
-    registerSlashCommand({
-      id: "skill.list",
-      name: "/skill",
-      description: "List available skills.",
-      handler: () => ({
-        message:
+    // The slash command is DECLARED in plugin.json (`commands[]`) and handled
+    // here — the supported shape per the author-SDK migration table. The
+    // manager owns registration (namespaced id, conflict detection, aliases,
+    // command-palette entry, idle-clock refresh) and teardown.
+    return {
+      onCommand: async (command: string) => {
+        if (command !== "skill") return false
+        ctx.ui?.showToast?.(
           "Available skills from anthropic-skills plugin: code-review, data-analysis, web-research. Attach via the character settings.",
-      }),
-      source: "plugin",
-      pluginId: ctx.pluginId,
-    })
-  },
-  deactivate: async (ctx?: PluginContext) => {
-    if (ctx?.pluginId) unregisterCommandsByPlugin(ctx.pluginId)
+          "info"
+        )
+        return true
+      },
+    }
   },
 }
 

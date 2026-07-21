@@ -93,6 +93,28 @@ export function parseCandidates(input: unknown): CandidateInput[] {
   }
 }
 
+/**
+ * Like {@link parseCandidates}, but distinguishes "upstream gave us nothing"
+ * from "upstream gave us something we could not parse".
+ *
+ * Collapsing the two into `[]` meant a model that answered with prose (or the
+ * `ai.prompt` stub echo) produced `{ saved: 0 }` and a SUCCESSFUL step — the
+ * daily pipeline ran green and wrote nothing, indefinitely.
+ */
+export function parseCandidatesStrict(input: unknown): {
+  candidates: CandidateInput[]
+  unparseable: boolean
+} {
+  const candidates = parseCandidates(input)
+  // Only a NON-EMPTY STRING that yields nothing is a parse failure — that is
+  // the prose / stub-echo case. An array or object input is already structured
+  // data, so an empty result there is a legitimate "no candidates" answer and
+  // must not fail the step.
+  const unparseable =
+    typeof input === "string" && input.trim().length > 0 && candidates.length === 0
+  return { candidates, unparseable }
+}
+
 function normalizeCandidates(parsed: unknown): CandidateInput[] {
   const arr = Array.isArray(parsed)
     ? parsed

@@ -44,15 +44,17 @@ describe("strix-security plugin lifecycle", () => {
         containerId: "strix-security:security",
       })
     )
-    expect(registerSlashCommand).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "/security", pluginId: "strix-security", source: "plugin" })
-    )
+    // The slash command is DECLARED (manifest.commands[]) and handled by the
+    // hook returned from activate — the plugin must not touch the registry.
+    expect(registerSlashCommand).not.toHaveBeenCalled()
   })
 
-  it("opens the panel when the slash command handler runs", async () => {
-    await definition.activate(fakeCtx())
-    const def = (registerSlashCommand as jest.Mock).mock.calls[0][0]
-    def.handler("")
+  it("opens the panel when the declared command is dispatched", async () => {
+    const hooks = (await definition.activate(fakeCtx())) as unknown as {
+      onCommand?: (c: string, a: string[]) => Promise<boolean>
+    }
+    expect(await hooks?.onCommand?.("not-mine", [])).toBe(false)
+    expect(await hooks?.onCommand?.("security", [])).toBe(true)
     expect(mockSetSelectedGuild).toHaveBeenCalledWith({
       kind: "plugin-view",
       containerId: "strix-security:security",
@@ -70,7 +72,8 @@ describe("strix-security plugin lifecycle", () => {
   it("tears everything down on deactivate", async () => {
     await definition.deactivate?.(fakeCtx())
     expect(unregisterViewsByPlugin).toHaveBeenCalledWith("strix-security")
-    expect(unregisterCommandsByPlugin).toHaveBeenCalledWith("strix-security")
+    // Command teardown is the manager's job for declared commands.
+    expect(unregisterCommandsByPlugin).not.toHaveBeenCalled()
     expect(clearStrixRuntime).toHaveBeenCalledTimes(1)
   })
 })

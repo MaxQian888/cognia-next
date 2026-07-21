@@ -53,7 +53,7 @@
       "type": "github",
       "factory": "createGithubAdapterForBridge",
       "configSchema": { "type": "object", "properties": {}, "additionalProperties": false },
-      "transportModes": ["webhook"]
+      "transportModes": []
     }
   ]
 }

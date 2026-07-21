@@ -24,7 +24,6 @@ import {
   defineAgentTeamTemplate,
   defineContextProvider,
 } from "@cognia/plugin-sdk"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 // ADR-0026 §5 §D — i18n strings are now declared in `manifest.i18n` below
 // and auto-wired by the plugin manager on enable. The old imperative
 // `registerPluginI18n` / `unregisterPluginI18n` calls are removed; the
@@ -42,6 +41,7 @@ import { getActiveComputerUseSettings } from "@/lib/claude/computer-use-active-s
 import { getActiveComputerUseTarget } from "@/lib/claude/computer-use-target-state"
 import { getActiveSandboxConfine } from "@/lib/claude/sandbox-confine-state"
 import type { CallContext } from "@/lib/automation/client"
+import manifestJson from "../plugin.json"
 
 // ADR-0020 W1 audit-fix — build the CallContext for a chat-path
 // dispatch. Reads the active character's `requireConsent` setting
@@ -547,17 +547,13 @@ const DESKTOP_AUTOMATION_TEMPLATE = defineAgentTeamTemplate({
 })
 
 const definition: PluginDefinition = {
+  // Spread plugin.json: `builtinManifest()` merges module-over-JSON, so a
+  // hand-written subset here WINS and would silently drop `commands[]`.
   manifest: {
-    id: PLUGIN_ID,
-    name: "Computer Use",
-    version: "0.1.0",
-    type: "frontend",
-    capabilities: ["native-anthropic-tool", "commands", "tools", "subagent", "agent-team-template"],
-    main: "src/index.ts",
+    ...(manifestJson as object),
     nativeAnthropicTools: [COMPUTER_TOOL, BASH_TOOL, TEXT_EDITOR_TOOL],
     subagents: [SCREEN_WATCHER, GUI_DRIVER],
     agentTeamTemplates: [DESKTOP_AUTOMATION_TEMPLATE],
-    permissions: ["native:input", "native:screen"],
     // ADR-0026 §5 §D — declarative i18n. The plugin manager merges these
     // into the host next-intl bundle under `plugin.cognia-computer-use.*`
     // on enable and removes them on disable.
@@ -590,15 +586,6 @@ const definition: PluginDefinition = {
     const locale = pluginLocale()
     const copy = SLASH_MESSAGES[locale] ?? SLASH_MESSAGES.en
 
-    registerSlashCommand({
-      id: "cu.status",
-      name: "/cu",
-      description: copy.description,
-      handler: () => ({ message: copy.body }),
-      source: "plugin",
-      pluginId: ctx.pluginId,
-    })
-
     // Register the three plugin MCP tools so the chat-side Claude Code SDK
     // sees `mcp__cognia-plugin-tools__{computer_use,bash,text_editor}`.
     // The sidecar's plugin-tools bridge (sidecar/builtin-tools/plugin-tools.mjs)
@@ -623,10 +610,19 @@ const definition: PluginDefinition = {
         provide: () => SURFACE_GUIDANCE,
       })
     )
+    // The slash command is DECLARED in plugin.json (`commands[]`) and handled
+    // here — the supported shape per the author-SDK migration table. The
+    // manager owns registration and teardown.
+    return {
+      onCommand: async (command: string) => {
+        if (command !== "cu") return false
+        ctx.ui?.showToast?.(copy.body, "info")
+        return true
+      },
+    }
   },
   deactivate: async (ctx?: PluginContext) => {
     if (ctx?.pluginId) {
-      unregisterCommandsByPlugin(ctx.pluginId)
       // i18n teardown handled by the manager when manifest.i18n is in use
       // (ADR-0026 §5 §D). No imperative unregisterPluginI18n call needed.
       if (ctx.agent?.unregisterTool) {

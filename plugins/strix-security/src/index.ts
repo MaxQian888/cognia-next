@@ -16,15 +16,13 @@
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
 import type { FullPluginContext } from "@/lib/plugin/core/context"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 import { registerView, unregisterViewsByPlugin } from "@/lib/plugin/registries/tree-view-registry"
 import { useUIStore } from "@/stores/ui"
 import manifest from "../plugin.json"
 import { I18N_MESSAGES } from "./i18n"
-import { CONTAINER_ID, OPEN_COMMAND_ID, PLUGIN_ID, VIEW_ID } from "./ids"
 import { StrixPanel } from "./StrixPanel"
+import { CONTAINER_ID, PLUGIN_ID, VIEW_ID } from "./ids"
 import { clearStrixRuntime, setStrixRuntime } from "./runtime"
-import { translate } from "./use-plugin-t"
 
 const CONTAINER_FULL_ID = `${PLUGIN_ID}:${CONTAINER_ID}`
 
@@ -55,26 +53,23 @@ const definition: PluginDefinition = {
       component: StrixPanel,
     })
 
-    registerSlashCommand({
-      id: OPEN_COMMAND_ID,
-      name: "/security",
-      description: translate("en", "command.openDescription"),
-      handler: () => {
-        openPanel()
-        return {}
-      },
-      source: "plugin",
-      pluginId: ctx.pluginId,
-      category: "plugins",
-    })
-
     ctx.logger?.info?.("strix-security activated")
+
+    // The slash command is DECLARED in plugin.json (`commands[]`) and handled
+    // here — the supported shape per the author-SDK migration table. The
+    // manager owns registration and teardown.
+    return {
+      onCommand: async (command: string) => {
+        if (command !== "security") return false
+        openPanel()
+        return true
+      },
+    }
   },
 
   deactivate: async (ctx?: PluginContext) => {
     const id = ctx?.pluginId ?? PLUGIN_ID
     unregisterViewsByPlugin(id)
-    unregisterCommandsByPlugin(id)
     clearStrixRuntime()
     ctx?.logger?.info?.("strix-security deactivated")
   },

@@ -119,7 +119,7 @@ const NODES: PluginWorkflowTemplateNode[] = [
     0,
     "architect",
     "Plan refactor",
-    "Using the analysis below, produce an ordered, build-green refactor plan with per-module acceptance criteria.\n\nANALYSIS:\n{{ $node['analyze'].out.text }}"
+    "Using the analysis below, produce an ordered, build-green refactor plan with per-module acceptance criteria.\n\nANALYSIS:\n{{ $node['analyze'].text }}"
   ),
   turn(
     "refactor",
@@ -127,7 +127,7 @@ const NODES: PluginWorkflowTemplateNode[] = [
     0,
     "refactorer",
     "Refactor",
-    "Carry out the plan below, module by module, keeping the build green (run go build/test as you go).\n\nPLAN:\n{{ $node['plan'].out.text }}"
+    "Carry out the plan below, module by module, keeping the build green (run go build/test as you go).\n\nPLAN:\n{{ $node['plan'].text }}"
   ),
   terminal("gate1", 880, 0, "Go gate", GO_GATE, "branch"),
   setVar("ok1", 1100, -80, "Verified", "buildVerified"),
@@ -137,7 +137,7 @@ const NODES: PluginWorkflowTemplateNode[] = [
     180,
     "refactorer",
     "Fix failures",
-    "The verification gate failed. Diagnose and fix until `go build ./...` and `go test ./...` pass.\n\nGATE OUTPUT:\n{{ $node['gate1'].out.output }}"
+    "The verification gate failed. Diagnose and fix until `go build ./...` and `go test ./...` pass.\n\nGATE OUTPUT:\n{{ $node['gate1'].output }}"
   ),
   terminal("gate2", 1100, 180, "Re-verify", GO_GATE, "branch"),
   setVar("ok2", 1320, 100, "Verified (after fix)", "buildVerified"),

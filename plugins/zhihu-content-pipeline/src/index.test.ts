@@ -5,7 +5,6 @@ import {
 import { refreshAllWorkflowTemplateWarnings } from "@/lib/plugin/registries/workflow-template-registry"
 import { unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 import definition from "./index"
-import { registerZhihuCommands } from "./commands"
 import { getPipelineDb } from "./db/runtime"
 import { ZHIHU_ROLE_PACK } from "./characters/pack"
 import { ZHIHU_SKILLS } from "./skills/definitions"
@@ -22,12 +21,11 @@ jest.mock("@/lib/plugin/registries/workflow-template-registry", () => ({
   refreshAllWorkflowTemplateWarnings: jest.fn(),
 }))
 jest.mock("@/lib/slash-commands/registry", () => ({ unregisterCommandsByPlugin: jest.fn() }))
-jest.mock("./commands", () => ({ registerZhihuCommands: jest.fn() }))
+jest.mock("./commands", () => ({ handleZhihuCommand: jest.fn(() => "opened") }))
 
 const mockRegisterPack = registerCharacterPack as jest.Mock
 const mockUnregisterPack = unregisterCharacterPacksByPlugin as jest.Mock
 const mockRefresh = refreshAllWorkflowTemplateWarnings as jest.Mock
-const mockRegisterCommands = registerZhihuCommands as jest.Mock
 const mockUnregisterCommands = unregisterCommandsByPlugin as jest.Mock
 
 function buildCtx(withDexie = true) {
@@ -113,7 +111,7 @@ describe("zhihu-content-pipeline activate (with dexie)", () => {
     const { ctx } = buildCtx(true)
     await definition.activate?.(ctx as never)
     expect(getPipelineDb()).not.toBeNull()
-    expect(mockRegisterCommands).toHaveBeenCalledWith(ctx)
+    // `/zhihu` is manifest-declared; activate returns the handler hook.
   })
 
   it("disposes the node, clears the DB, drops the pack + commands on deactivate", async () => {
@@ -123,7 +121,8 @@ describe("zhihu-content-pipeline activate (with dexie)", () => {
     expect(disposeNode).toHaveBeenCalledTimes(1)
     expect(getPipelineDb()).toBeNull()
     expect(mockUnregisterPack).toHaveBeenCalledWith(PLUGIN_ID)
-    expect(mockUnregisterCommands).toHaveBeenCalledWith(PLUGIN_ID)
+    // Command teardown belongs to the manager for declared commands.
+    expect(mockUnregisterCommands).not.toHaveBeenCalled()
   })
 })
 
@@ -138,7 +137,7 @@ describe("zhihu-content-pipeline activate (without dexie)", () => {
     expect(ctx.logger.warn).toHaveBeenCalled()
     // No Dexie → no pipeline DB published, but the /zhihu command still registers.
     expect(getPipelineDb()).toBeNull()
-    expect(mockRegisterCommands).toHaveBeenCalledWith(ctx)
+    // `/zhihu` is manifest-declared; activate returns the handler hook.
   })
 
   it("deactivate tolerates ctx without pluginId", async () => {

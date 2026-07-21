@@ -13,6 +13,7 @@
     "cognia": ">=0.1.0"
   },
   "permissions": ["cli:execute"],
+  "activationEvents": ["startup"],
   "requires": {
     "binaries": [
       {
@@ -59,7 +60,8 @@
         { "param": "ignoreCase", "eachPrefixedBy": "-i", "omitWhenEmpty": true },
         { "param": "maxCount", "eachPrefixedBy": "--max-count", "omitWhenEmpty": true },
         { "param": "globs", "eachPrefixedBy": "--glob", "omitWhenEmpty": true },
-        { "param": "pattern" },
+        { "param": "pattern", "eachPrefixedBy": "-e" },
+        { "literal": "--" },
         { "param": "path", "omitWhenEmpty": true }
       ],
       "cwd": { "kind": "workspace" },

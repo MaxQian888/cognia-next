@@ -14,9 +14,9 @@
  */
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 import { isTauri } from "@/lib/tauri"
 import { useGitStore } from "@/stores/git/git-store"
+import manifestJson from "../plugin.json"
 
 const CODEGEN_FRAMEWORKS = ["vue", "react", "angular", "svelte", "jquery"] as const
 type CodegenFramework = (typeof CODEGEN_FRAMEWORKS)[number]
@@ -101,7 +101,20 @@ export function resolveOutput(
   }
   const sep = rootDir.includes("\\") ? "\\" : "/"
   const base = rootDir.replace(/[\\/]+$/, "")
-  if (explicit) return base + sep + explicit.replace(/^[\\/]+/, "")
+  if (explicit) {
+    // A relative `-o` is documented to resolve UNDER the workspace. Stripping
+    // only the leading separators left `..` free to walk back out, so
+    // `-o ../../../.ssh/authorized_keys` silently wrote outside the workspace
+    // while still reading as a workspace-relative path. (An ABSOLUTE `-o` is a
+    // separate, deliberate escape hatch handled above.)
+    const relative = explicit.replace(/^[\\/]+/, "")
+    if (relative.split(/[\\/]+/).some((segment) => segment === "..")) {
+      throw new Error(
+        `-o "${explicit}" must stay inside the workspace — remove the ".." segments, or pass a full absolute path`
+      )
+    }
+    return base + sep + relative
+  }
   const dir = `snapshots${sep}${safeHostSlug(parsed.url ?? "")}-${stamp}`
   const suffix = parsed.mode === "single" ? ".html" : ""
   return base + sep + dir + suffix
@@ -172,40 +185,34 @@ export async function runWebCloneCommand(
 }
 
 const definition: PluginDefinition = {
+  // Spread plugin.json: `builtinManifest()` merges module-over-JSON, so a
+  // hand-written subset here WINS and would silently drop `commands[]`.
   manifest: {
-    id: "cognia-web-clone",
-    name: "Web Clone",
-    version: "0.1.0",
-    type: "frontend",
-    capabilities: ["commands"],
-    main: "src/index.ts",
+    ...(manifestJson as object),
   } as never,
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("web-clone plugin activated")
-    registerSlashCommand({
-      id: "web-clone.snapshot",
-      name: "/web-clone",
-      description: "Snapshot a web page (HTML + assets) to a self-contained file or bundle.",
-      category: "plugins",
-      handler: async (args: string) => {
+
+    // The slash command is DECLARED in plugin.json (`commands[]`) and handled
+    // here. `hooks.onCommand` receives whitespace-split argv, so the raw tail
+    // is rejoined for handlers that parse their own argument string.
+    return {
+      onCommand: async (command: string, args: string[]) => {
+        if (command !== "web-clone") return false
         if (!isTauri()) {
-          return { message: "web-clone runs only on the desktop app." }
+          ctx.ui?.showToast?.("web-clone runs only on the desktop app.", "error")
+          return true
         }
         const { invoke } = await import("@tauri-apps/api/core")
-        return runWebCloneCommand(args, {
+        const result = await runWebCloneCommand(args.join(" "), {
           invoke: (cmd, a) =>
             invoke<{ envelope: WebCloneEnvelope }>(cmd, a as Record<string, unknown>),
           rootDir: () => useGitStore.getState().rootDir,
           now: () => Date.now(),
         })
+        if (result?.message) ctx.ui?.showToast?.(result.message, "info")
+        return true
       },
-      source: "plugin",
-      pluginId: ctx.pluginId,
-    })
-  },
-  deactivate: async (ctx?: PluginContext) => {
-    if (ctx?.pluginId) {
-      unregisterCommandsByPlugin(ctx.pluginId)
     }
   },
 }

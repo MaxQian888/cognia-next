@@ -26,6 +26,8 @@ import type {
   PluginManifest,
 } from "@/types/plugin"
 
+import manifestJson from "../plugin.json"
+
 const PLUGIN_ID = "cognia-external-agent-adapter-example"
 const ADAPTER_ID = "demo-echo"
 
@@ -60,16 +62,28 @@ const demoPreset: PluginExternalAgentPresetDef = {
   tags: ["example", "reference"],
 }
 
-export const manifest: PluginManifest = {
-  id: PLUGIN_ID,
-  name: "External Agent Adapter Example",
-  version: "0.1.0",
-  type: "frontend",
-  capabilities: ["external-agent-adapter", "external-agent-preset"],
-  main: "src/index.ts",
-  externalAgentAdapters: [demoAdapter],
-  externalAgentPresets: [demoPreset],
-} as PluginManifest
+/**
+ * The manifest is plugin.json verbatim — the contributions live THERE, not
+ * here. An installed copy only ever reads plugin.json (the TS module-manifest
+ * overlay is a `builtinManifest()` merge that applies to bundled builtins, and
+ * this plugin is deliberately unbundled), so declaring the arrays only in TS
+ * meant this reference plugin registered nothing in any runtime.
+ *
+ * `demoAdapter` / `demoPreset` below are kept as TYPED mirrors of the JSON so
+ * a change to either shape still fails the build.
+ */
+export const manifest = manifestJson as unknown as PluginManifest
+
+/**
+ * Typed mirrors of the two plugin.json entries. Exported so the co-located
+ * test can assert they deep-equal the JSON: that keeps the JSON (which is what
+ * actually ships) honest against the SDK types without reintroducing a second
+ * runtime source of truth.
+ */
+export const TYPED_CONTRIBUTIONS = {
+  adapter: demoAdapter,
+  preset: demoPreset,
+} as const
 
 const definition: PluginDefinition = {
   manifest,

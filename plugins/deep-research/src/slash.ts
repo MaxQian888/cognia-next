@@ -9,7 +9,7 @@
  * surface every plugin uses, e.g. zhihu-content-pipeline) — not feature
  * coupling. The engine itself imports nothing from the host.
  */
-import { registerSlashCommand, type SlashCommandResult } from "@/lib/slash-commands/registry"
+import type { SlashCommandResult } from "@/lib/slash-commands/registry"
 import type { PluginContext } from "@/types/plugin"
 import { readEngineConfig } from "./config"
 import { runDeepResearch } from "./engine/deepresearch"
@@ -22,18 +22,6 @@ const USAGE =
   "- `/research <question>` — a cited answer.\n" +
   "- `/research report <topic>` — a multi-section cited report.\n\n" +
   "（用法：`/research <问题>` 给出带引用的答案；`/research report <主题>` 生成多章节研究报告。）"
-
-export function registerResearchSlash(ctx: PluginContext): void {
-  registerSlashCommand({
-    id: "research",
-    name: "/research",
-    description: "Autonomous web deep-research → a cited answer.",
-    source: "plugin",
-    pluginId: ctx.pluginId,
-    category: "chat",
-    handler: (args) => handleResearchSlash(ctx, args),
-  })
-}
 
 export async function handleResearchSlash(
   ctx: PluginContext,

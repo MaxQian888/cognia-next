@@ -9,11 +9,43 @@
   "author": "cognia-next",
   "license": "MIT",
   "minAppVersion": "0.1.0",
-  "engines": { "cognia": ">=0.1.0" },
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
   "activationEvents": ["startup"],
   "runtimeCompatibility": {
-    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
-    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
-    "mobile": { "availability": "supported", "entrypoint": "src/index.ts" }
-  }
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    }
+  },
+  "externalAgentAdapters": [
+    {
+      "id": "demo-echo",
+      "label": "Demo Echo Protocol",
+      "description": "A reference external-agent protocol adapter (echo, no subprocess).",
+      "entry": "src/demo-adapter.ts",
+      "export": "createDemoEchoAdapter"
+    }
+  ],
+  "externalAgentPresets": [
+    {
+      "id": "demo-echo-agent",
+      "name": "Demo Echo Agent",
+      "description": "A complete external agent contributed end-to-end by one plugin.",
+      "protocol": "cognia-external-agent-adapter-example:demo-echo",
+      "transport": "sse",
+      "defaultPermissionMode": "default",
+      "supportTier": "executable",
+      "tags": ["example", "reference"]
+    }
+  ]
 }

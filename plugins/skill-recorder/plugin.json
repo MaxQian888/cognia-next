@@ -9,13 +9,15 @@
   "author": "cognia-next",
   "license": "MIT",
   "minAppVersion": "0.1.0",
-  "engines": { "cognia": ">=0.1.0" },
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
   "permissions": ["native:input", "native:screen", "media:image:write"],
-  "activationEvents": ["startup"],
+  "activationEvents": ["startup", "onCommand:record-skill"],
   "runtimeCompatibility": {
     "browser": {
       "availability": "blocked",
-      "reason": "Recording needs a native global input hook + screen capture (record_* Tauri commands) — desktop only."
+      "reason": "Recording needs a native global input hook + screen capture (record_* Tauri commands) \u2014 desktop only."
     },
     "tauri": {
       "availability": "supported",
@@ -24,7 +26,15 @@
     },
     "mobile": {
       "availability": "blocked",
-      "reason": "Needs a native global input hook + screen capture — unavailable on mobile."
+      "reason": "Needs a native global input hook + screen capture \u2014 unavailable on mobile."
     }
-  }
+  },
+  "commands": [
+    {
+      "id": "record-skill",
+      "name": "/record-skill",
+      "description": "Record a desktop workflow and turn it into a generated Skill.",
+      "icon": "Video"
+    }
+  ]
 }

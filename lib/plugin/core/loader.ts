@@ -4,7 +4,13 @@
 
 import { detectPlatform, isTauri } from "@/lib/platform/detect"
 import { loggers } from "@cognia/logging"
-import type { Plugin, PluginDefinition, PluginManifest, PluginPermission } from "@/types/plugin"
+import type {
+  Plugin,
+  PluginContext,
+  PluginDefinition,
+  PluginManifest,
+  PluginPermission,
+} from "@/types/plugin"
 import { TimeoutError, withTimeout } from "@cognia/primitives"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
 import { getBrowserBuiltinRegistryEntry } from "./browser-builtin-registry"
@@ -602,13 +608,16 @@ export class PluginLoader {
 
         return allHooks
       },
-      deactivate: async () => {
-        // Deactivate both parts, Python first to clean up native resources
+      deactivate: async (ctx?: PluginContext) => {
+        // Deactivate both parts, Python first to clean up native resources.
+        // Forward the context: plugin teardown routinely guards on
+        // `ctx?.pluginId` (slash-command unregistration, interval cleanup),
+        // so dropping it here would silently no-op both halves.
         if (pythonDefinition?.deactivate) {
-          await pythonDefinition.deactivate()
+          await pythonDefinition.deactivate(ctx)
         }
         if (frontendDefinition?.deactivate) {
-          await frontendDefinition.deactivate()
+          await frontendDefinition.deactivate(ctx)
         }
       },
     }

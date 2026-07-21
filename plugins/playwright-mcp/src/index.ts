@@ -14,7 +14,7 @@
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
 import { defineMcpServerPreset } from "@cognia/plugin-sdk"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
+import manifestJson from "../plugin.json"
 
 const PLAYWRIGHT_PRESET = defineMcpServerPreset({
   id: "playwright",
@@ -34,13 +34,10 @@ const PLAYWRIGHT_PRESET = defineMcpServerPreset({
 })
 
 const definition: PluginDefinition = {
+  // Spread plugin.json: `builtinManifest()` merges module-over-JSON, so a
+  // hand-written subset here would WIN and silently drop `commands[]`.
   manifest: {
-    id: "cognia-playwright-mcp",
-    name: "Playwright Browser",
-    version: "0.1.0",
-    type: "frontend",
-    capabilities: ["mcp-server-preset", "commands"],
-    main: "src/index.ts",
+    ...(manifestJson as object),
     mcpServerPresets: [PLAYWRIGHT_PRESET],
   } as never,
   activate: async (ctx: PluginContext) => {
@@ -53,21 +50,19 @@ const definition: PluginDefinition = {
     // the manifest reader.
     ctx.agent?.registerMcpServerPreset?.(PLAYWRIGHT_PRESET)
 
-    registerSlashCommand({
-      id: "playwright.attach",
-      name: "/browser",
-      description: "Attach the Playwright MCP browser to the current character.",
-      handler: () => ({
-        message:
+    // The slash command is DECLARED in plugin.json (`commands[]`) and handled
+    // here — the supported shape per the author-SDK migration table. The
+    // manager owns registration (namespaced id, conflict detection, aliases,
+    // command-palette entry, idle-clock refresh) and teardown.
+    return {
+      onCommand: async (command: string) => {
+        if (command !== "browser") return false
+        ctx.ui?.showToast?.(
           "Open Settings → MCP Servers, click Playwright in the gallery, then attach it to the current character via the chip list.",
-      }),
-      source: "plugin",
-      pluginId: ctx.pluginId,
-    })
-  },
-  deactivate: async (ctx?: PluginContext) => {
-    if (ctx?.pluginId) {
-      unregisterCommandsByPlugin(ctx.pluginId)
+          "info"
+        )
+        return true
+      },
     }
   },
 }

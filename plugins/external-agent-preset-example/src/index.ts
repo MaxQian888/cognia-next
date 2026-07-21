@@ -16,7 +16,10 @@
 
 import type { PluginDefinition, PluginManifest, PluginExternalAgentPresetDef } from "@/types/plugin"
 
-const PLUGIN_ID = "cognia-external-agent-preset-example"
+import manifestJson from "../plugin.json"
+
+/** Re-exported from the JSON so callers/tests share one source of truth. */
+export const PLUGIN_ID = manifestJson.id
 
 /**
  * A generic ACP-over-stdio preset. Uses a unique id so it can never shadow a
@@ -38,23 +41,22 @@ const examplePreset: PluginExternalAgentPresetDef = {
   tags: ["example", "reference"],
 }
 
-export const manifest: PluginManifest = {
-  id: PLUGIN_ID,
-  name: "External Agent Preset Example",
-  version: "0.1.0",
-  type: "frontend",
-  capabilities: ["external-agent-preset", "context-provider"],
-  main: "src/index.ts",
-  externalAgentPresets: [examplePreset],
-  contextProviders: [
-    {
-      id: "env-banner",
-      label: "Environment Banner",
-      entry: "src/context-provider.ts",
-      export: "createEnvBannerProvider",
-    },
-  ],
-} as PluginManifest
+/**
+ * The manifest is plugin.json verbatim — the contributions live THERE, not
+ * here. An installed copy only ever reads plugin.json (the TS module-manifest
+ * overlay is a `builtinManifest()` merge that applies to bundled builtins, and
+ * this plugin is deliberately unbundled), so declaring the arrays only in TS
+ * meant this reference plugin registered nothing in any runtime.
+ */
+export const manifest = manifestJson as unknown as PluginManifest
+
+/**
+ * Typed mirror of the plugin.json preset entry. Exported so the co-located
+ * test can assert it deep-equals the JSON — that keeps the JSON (which is what
+ * actually ships) honest against the SDK types without reintroducing a second
+ * runtime source of truth.
+ */
+export const TYPED_CONTRIBUTIONS = { preset: examplePreset } as const
 
 const definition: PluginDefinition = {
   manifest,

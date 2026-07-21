@@ -79,4 +79,13 @@ describe("renderErrorCard / errorText", () => {
     )
     expect(errorText({ ok: false, error: "MISSING_KEY", provider: "tavily" })).toContain("tavily")
   })
+  it("explains a declined AI permission distinctly from a missing provider", () => {
+    const card = renderErrorCard({ ok: false, error: "NO_AI_PERMISSION" })
+    expect(card).toContain("permission")
+    expect(card).toContain("授权")
+    // Must NOT be confused with "configure a provider" — the provider is fine,
+    // the grant is missing, and the two need different user actions.
+    expect(card).not.toContain("Configure a provider in settings")
+    expect(errorText({ ok: false, error: "NO_AI_PERMISSION" })).toMatch(/ai:chat/)
+  })
 })

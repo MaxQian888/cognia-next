@@ -1,4 +1,5 @@
-import { SidecarIssueLoopDriver } from "./sidecar-driver"
+import { ISSUE_LOOP_PERMISSION_RULESET, SidecarIssueLoopDriver } from "./sidecar-driver"
+import { resolveBashPermission, type Ruleset } from "@/lib/claude/permissions/ruleset"
 import type { ClaudeEvent, SendContent, SendOptions } from "@cognia/agent-config-types"
 
 describe("SidecarIssueLoopDriver", () => {
@@ -197,5 +198,41 @@ describe("SidecarIssueLoopDriver", () => {
     })
     const result = await runPromise
     expect(result.summary).toBe("done")
+  })
+})
+
+describe("ISSUE_LOOP_PERMISSION_RULESET", () => {
+  // Resolve through the REAL matcher the sidecar's canUseTool gate uses, so
+  // this pins actual enforcement rather than "an options object was passed".
+  const verdict = (command: string) =>
+    resolveBashPermission(command, [ISSUE_LOOP_PERMISSION_RULESET as unknown as Ruleset]).verdict
+
+  it.each([
+    "git push",
+    "git push origin feature",
+    "git push --force origin main",
+    "gh pr create --fill",
+    "git remote set-url origin https://x@github.com/a/b.git",
+  ])("denies %s", (command) => {
+    expect(verdict(command)).toBe("deny")
+  })
+
+  it("denies a forbidden command hidden inside a compound command", () => {
+    // The worst verdict across segments wins, so chaining can't launder it.
+    expect(verdict("npm test && git push origin main")).toBe("deny")
+    expect(verdict("cd /tmp; gh pr merge 1")).toBe("deny")
+  })
+
+  it("leaves the commands the driver actually needs alone", () => {
+    for (const command of [
+      "npm test",
+      "go build ./...",
+      "git status",
+      "git add -A",
+      "git commit -m 'fix'",
+      "git diff",
+    ]) {
+      expect(verdict(command)).not.toBe("deny")
+    }
   })
 })

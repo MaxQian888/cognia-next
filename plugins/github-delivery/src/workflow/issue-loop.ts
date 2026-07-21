@@ -182,8 +182,7 @@ export async function runIssueLoop(
     const stepId = params.workflowStepId ?? "ai-driver"
     const workspaceForDriver = workspace
     type DriverState =
-      | { phase: "running" }
-      | { phase: "completed"; summary: string; durationMs: number }
+      { phase: "running" } | { phase: "completed"; summary: string; durationMs: number }
     const driverHandle = runLongStep<{ summary: string; durationMs: number }, DriverState>({
       runId,
       stepId,
@@ -216,6 +215,10 @@ export async function runIssueLoop(
     await pusher({
       workspace,
       message: `cognia: address #${params.issueNumber}\n\n${driverResult.summary}`.slice(0, 4000),
+      // The clone deliberately keeps no credential in `.git/config` — the agent
+      // we just ran had shell access to that very directory — so the push has
+      // to carry the token itself.
+      token: auth.token,
     })
 
     // 7. Open PR.

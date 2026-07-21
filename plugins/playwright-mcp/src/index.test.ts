@@ -50,28 +50,39 @@ describe("playwright-mcp (built-in)", () => {
     expect(manifest.mcpServerPresets.map((p) => p.id)).toEqual(["playwright"])
   })
 
-  it("activate registers the /browser slash command", async () => {
-    const { ctx } = makeCtx()
-    await playwrightMcp.activate?.(ctx)
-    expect(registerMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "playwright.attach",
-        name: "/browser",
-        source: "plugin",
-        pluginId: "cognia-playwright-mcp",
-      })
-    )
-  })
-
-  it("deactivate unregisters the plugin's commands", async () => {
-    const { ctx } = makeCtx()
-    await playwrightMcp.activate?.(ctx)
-    await playwrightMcp.deactivate?.(ctx)
-    expect(unregisterMock).toHaveBeenCalledWith("cognia-playwright-mcp")
-  })
-
-  it("deactivate without a context is a safe no-op", async () => {
-    await expect(playwrightMcp.deactivate?.(undefined as never)).resolves.toBeUndefined()
+  it("has no deactivate — the manager owns command teardown", () => {
+    // The plugin registers nothing imperatively any more, so there is nothing
+    // for it to undo. Manifest-declared commands are unregistered by
+    // `PluginManager.unregisterPluginSlashCommands`.
+    expect(playwrightMcp.deactivate).toBeUndefined()
     expect(unregisterMock).not.toHaveBeenCalled()
+  })
+
+  it("declares its slash command instead of registering it imperatively", async () => {
+    const { ctx } = makeCtx()
+    const hooks = await playwrightMcp.activate?.(ctx)
+    // The manager owns registration for manifest-declared commands; a plugin
+    // touching the registry itself skips namespacing, conflict detection,
+    // aliases, the command-palette entry and teardown.
+    expect(registerMock).not.toHaveBeenCalled()
+    expect(typeof hooks?.onCommand).toBe("function")
+    const commands = (playwrightMcp.manifest as { commands?: Array<{ id: string }> }).commands
+    expect(commands?.map((c) => c.id)).toEqual(["browser"])
+  })
+
+  it("handles its own command and declines others", async () => {
+    const { ctx } = makeCtx()
+    const showToast = jest.fn()
+    ;(ctx as { ui?: unknown }).ui = { showToast }
+    const hooks = await playwrightMcp.activate?.(ctx)
+    expect(await hooks?.onCommand?.("not-mine", [])).toBe(false)
+    expect(showToast).not.toHaveBeenCalled()
+    expect(await hooks?.onCommand?.("browser", [])).toBe(true)
+    expect(showToast).toHaveBeenCalled()
+  })
+
+  it("declares lazy activation for its command", () => {
+    const events = (playwrightMcp.manifest as { activationEvents?: string[] }).activationEvents
+    expect(events).toContain("onCommand:browser")
   })
 })

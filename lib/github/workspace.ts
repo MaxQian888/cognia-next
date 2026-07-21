@@ -148,6 +148,15 @@ export interface CommitAndPushOptions {
   message: string
   /** Branch to push to. Defaults to workspace.branch. */
   remoteBranch?: string
+  /**
+   * PAT / installation token used for this push.
+   *
+   * Required for a workspace produced by `cloneToWorkspace`: the clone stores a
+   * credential-FREE remote URL so a token can't be read out of
+   * `<workspace>/.git/config` by whatever runs inside the clone. The credential
+   * is supplied per-invocation instead.
+   */
+  token?: string
 }
 
 /**
@@ -175,6 +184,7 @@ export async function commitAndPush(opts: CommitAndPushOptions): Promise<string>
       branch: opts.workspace.branch,
       message: opts.message,
       remoteBranch: opts.remoteBranch,
+      token: opts.token,
     },
   })
 }

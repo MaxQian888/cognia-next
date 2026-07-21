@@ -4,7 +4,14 @@
  * contextProviders entry flows through the context-providers bridge.
  */
 
-import definition, { manifest } from "./index"
+import type { PluginManifest } from "@/types/plugin"
+import definition, { TYPED_CONTRIBUTIONS } from "./index"
+// Read the JSON manifest, NOT the TS module overlay: this plugin is in
+// `INTENTIONALLY_UNBUNDLED`, so an installed copy only ever sees plugin.json.
+// Asserting the TS manifest is what hid the fact that the contributions
+// existed nowhere an installed copy could reach.
+import manifestJson from "../plugin.json"
+const manifest = manifestJson as unknown as PluginManifest
 import { createEnvBannerProvider } from "./context-provider"
 import {
   registerPreset,
@@ -67,5 +74,11 @@ describe("external-agent-preset-example plugin", () => {
     })
     expect(provider.provide({ prompt: "do work" })).toMatch(/external CLI/)
     expect(provider.provide({ prompt: "   " })).toBeNull()
+  })
+})
+
+describe("plugin.json is the shipped source of truth", () => {
+  it("matches the typed preset definition", () => {
+    expect(manifest.externalAgentPresets?.[0]).toEqual(TYPED_CONTRIBUTIONS.preset)
   })
 })

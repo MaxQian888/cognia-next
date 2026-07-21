@@ -2,7 +2,7 @@
   "id": "cognia-e2b-sandbox",
   "name": "E2B Sandbox",
   "version": "0.1.0",
-  "description": "Run code in ephemeral Firecracker microVM sandboxes via E2B — useful for safe Computer Use isolation, code interpretation, and untrusted execution.",
+  "description": "Run code in ephemeral Firecracker microVM sandboxes via E2B \u2014 useful for safe Computer Use isolation, code interpretation, and untrusted execution.",
   "type": "frontend",
   "capabilities": ["mcp-server-preset", "commands"],
   "main": "src/index.ts",
@@ -13,11 +13,11 @@
     "cognia": ">=0.1.0"
   },
   "permissions": [],
-  "activationEvents": ["startup"],
+  "activationEvents": ["startup", "onCommand:sandbox"],
   "runtimeCompatibility": {
     "browser": {
       "availability": "blocked",
-      "reason": "Requires npx to spawn @e2b/mcp-server — desktop only."
+      "reason": "Requires npx to spawn @e2b/mcp-server \u2014 desktop only."
     },
     "tauri": {
       "availability": "supported",
@@ -25,7 +25,15 @@
     },
     "mobile": {
       "availability": "blocked",
-      "reason": "Spawns @e2b/mcp-server via npx — unavailable on mobile."
+      "reason": "Spawns @e2b/mcp-server via npx \u2014 unavailable on mobile."
     }
-  }
+  },
+  "commands": [
+    {
+      "id": "sandbox",
+      "name": "/sandbox",
+      "description": "Attach the E2B sandbox MCP to the current character.",
+      "icon": "Box"
+    }
+  ]
 }

@@ -14,11 +14,11 @@
  */
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
+import manifestJson from "../plugin.json"
 // `isTauri` retained as a fallback for hosts that don't expose
 // `ctx.capabilities` (older bootstrap, sidecar harnesses). Prefer
 // `ctx.capabilities.tauri` per ADR-0026 §5 §C.
 import { isTauri } from "@/lib/tauri"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 
 const BUFFER_KEY = "buffer"
 
@@ -85,13 +85,10 @@ async function pushIfNew(ctx: PluginContext, text: string): Promise<boolean> {
 }
 
 const definition: PluginDefinition = {
+  // Spread plugin.json: `builtinManifest()` merges module-over-JSON, so a
+  // hand-written subset here WINS and would silently drop `commands[]`.
   manifest: {
-    id: "cognia-clipboard-history",
-    name: "Clipboard History",
-    version: "0.1.0",
-    type: "frontend",
-    capabilities: ["tools", "commands"],
-    main: "src/index.ts",
+    ...(manifestJson as object),
   } as never,
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("clipboard-history activated")
@@ -173,38 +170,35 @@ const definition: PluginDefinition = {
       },
     })
 
-    registerSlashCommand({
-      id: "clipboard-history",
-      name: "/clipboard-history",
-      description: "Show recent clipboard entries.",
-      source: "plugin",
-      pluginId: ctx.pluginId,
-      handler: async () => {
-        const buffer = await readBuffer(ctx)
-        if (buffer.length === 0) return { message: "Clipboard history is empty." }
-        return {
-          message: buffer
-            .slice(-10)
-            .map(
-              (entry, idx) =>
-                `${idx + 1}. ${new Date(entry.capturedAt).toISOString()}: ${
-                  entry.text.length > 80 ? entry.text.slice(0, 80) + "…" : entry.text
-                }`
-            )
-            .join("\n"),
-        }
-      },
-    })
-
     // Save the poll handle on the context so deactivate can clear it.
     ;(
       ctx as { __clipboardHistoryPoll?: ReturnType<typeof setInterval> | null }
     ).__clipboardHistoryPoll = pollHandle
+    // The slash command is DECLARED in plugin.json (`commands[]`) and handled
+    // here — the supported shape per the author-SDK migration table. The
+    // manager owns registration and teardown.
+    return {
+      onCommand: async (command: string) => {
+        if (command !== "clipboard-history") return false
+        const buffer = await readBuffer(ctx)
+        const message =
+          buffer.length === 0
+            ? "Clipboard history is empty."
+            : buffer
+                .slice(-10)
+                .map(
+                  (entry, idx) =>
+                    `${idx + 1}. ${new Date(entry.capturedAt).toISOString()}: ${
+                      entry.text.length > 80 ? entry.text.slice(0, 80) + "…" : entry.text
+                    }`
+                )
+                .join("\n")
+        ctx.ui?.showToast?.(message, "info")
+        return true
+      },
+    }
   },
   deactivate: async (ctx?: PluginContext) => {
-    if (ctx?.pluginId) {
-      unregisterCommandsByPlugin(ctx.pluginId)
-    }
     const handle = (
       ctx as { __clipboardHistoryPoll?: ReturnType<typeof setInterval> | null } | undefined
     )?.__clipboardHistoryPoll

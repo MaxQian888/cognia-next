@@ -40,13 +40,36 @@ describe("save-topics node", () => {
     expect(topics.bulkPut).toHaveBeenCalledTimes(1)
   })
 
-  it("no-ops (saved 0) and warns when nothing parses", async () => {
+  it("FAILS the step when upstream output cannot be parsed", async () => {
+    // Reporting `saved: 0` as a success here is what let the daily cron run
+    // green while writing nothing — usually because `ai.prompt` had fallen
+    // back to its stub echo. Unparseable ≠ empty.
     const { dexie, topics } = fakeDexie()
     const ctx = ctxWith({ candidates: "not json" })
+    await expect(makeSaveTopicsNode(dexie).execute(ctx)).rejects.toThrow(/not candidate JSON/)
+    expect(topics.bulkPut).not.toHaveBeenCalled()
+  })
+
+  it("also fails on the ai.prompt stub echo specifically", async () => {
+    const { dexie } = fakeDexie()
+    const ctx = ctxWith({ candidates: "[ai.prompt stub] 知乎热榜原始数据如下…" })
+    await expect(makeSaveTopicsNode(dexie).execute(ctx)).rejects.toThrow(/routed/)
+  })
+
+  it("no-ops (saved 0) and warns when upstream genuinely returned nothing", async () => {
+    const { dexie, topics } = fakeDexie()
+    const ctx = ctxWith({ candidates: "" })
     const result = await makeSaveTopicsNode(dexie).execute(ctx)
     expect((result.output as { saved: number }).saved).toBe(0)
     expect(topics.bulkPut).not.toHaveBeenCalled()
     expect(ctx.log).toHaveBeenCalledWith("warn", expect.stringContaining("no candidates"))
+  })
+
+  it("no-ops on an empty candidate array without failing", async () => {
+    const { dexie, topics } = fakeDexie()
+    const result = await makeSaveTopicsNode(dexie).execute(ctxWith({ candidates: [] }))
+    expect((result.output as { saved: number }).saved).toBe(0)
+    expect(topics.bulkPut).not.toHaveBeenCalled()
   })
 
   it("defaults the source label when omitted or blank", async () => {

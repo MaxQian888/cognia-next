@@ -9,17 +9,19 @@
  * detection, injection-proof argv templating, audit).
  */
 
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
+import type { PluginContext, PluginDefinition, PluginManifest } from "@/types/plugin"
+
+import manifest from "../plugin.json"
 
 const definition: PluginDefinition = {
-  manifest: {
-    id: "ripgrep-tools",
-    name: "Ripgrep Tools",
-    version: "0.1.0",
-    type: "frontend",
-    capabilities: ["cli-tools"],
-    main: "src/index.ts",
-  } as never,
+  // Spread plugin.json rather than re-declaring a subset. `builtinManifest()`
+  // merges module-over-JSON (`{ ...base, ...rich }`), so a hand-written subset
+  // silently WINS over the JSON for every key it names — and any key it omits
+  // (here: `permissions`, `requires`, `cliTools`) only survives by luck. A
+  // future edit adding `permissions` to the overlay would have dropped
+  // `cli:execute` and broken the tool at the manifest.cliTools permission
+  // check. There is nothing this plugin needs to add on the TS side.
+  manifest: manifest as unknown as PluginManifest,
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("ripgrep-tools activated (cliTools are manifest-driven)")
   },

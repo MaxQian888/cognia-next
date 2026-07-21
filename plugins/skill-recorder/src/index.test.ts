@@ -26,17 +26,14 @@ import plugin from "./index"
 const registerMock = registerSlashCommand as jest.Mock
 const unregisterMock = unregisterCommandsByPlugin as jest.Mock
 
-interface SlashCommand {
-  id: string
-  handler: () => { message: string }
-}
-
 function makeCtx(modal?: { openModal: jest.Mock }) {
   const tools: Record<string, (args: unknown) => Promise<unknown>> = {}
+  const showToast = jest.fn()
   const ctx: Partial<PluginContext> = {
     pluginId: "cognia-skill-recorder",
     logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() } as never,
     modal: modal as never,
+    ui: { showToast } as never,
     agent: {
       registerTool: ({
         name,
@@ -49,7 +46,7 @@ function makeCtx(modal?: { openModal: jest.Mock }) {
       },
     } as never,
   }
-  return { ctx: ctx as PluginContext, tools }
+  return { ctx: ctx as PluginContext, tools, showToast }
 }
 
 beforeEach(() => {
@@ -60,41 +57,47 @@ beforeEach(() => {
 })
 
 describe("skill-recorder (built-in)", () => {
-  it("registers the /record-skill command and the status tool", async () => {
+  it("declares its command instead of registering it, and registers the status tool", async () => {
     const { ctx, tools } = makeCtx()
-    await plugin.activate?.(ctx)
-    expect(registerMock).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "skill-recorder.record", name: "/record-skill" })
-    )
+    const hooks = await plugin.activate?.(ctx)
+    expect(registerMock).not.toHaveBeenCalled()
+    expect(typeof hooks?.onCommand).toBe("function")
+    const commands = (plugin.manifest as { commands?: Array<{ id: string }> }).commands
+    expect(commands?.map((c) => c.id)).toEqual(["record-skill"])
     expect(Object.keys(tools)).toContain("record_skill_status")
   })
 
-  it("the slash command opens the modal on desktop", async () => {
+  it("declines commands that aren't its own", async () => {
     const openModal = jest.fn()
     const { ctx } = makeCtx({ openModal })
-    await plugin.activate?.(ctx)
-    const cmd = registerMock.mock.calls[0][0] as SlashCommand
-    const result = cmd.handler()
-    expect(openModal).toHaveBeenCalledTimes(1)
-    expect(result.message).toMatch(/opened/i)
+    const hooks = await plugin.activate?.(ctx)
+    expect(await hooks?.onCommand?.("someone-else", [])).toBe(false)
+    expect(openModal).not.toHaveBeenCalled()
   })
 
-  it("the slash command refuses outside Tauri", async () => {
+  it("opens the modal on desktop", async () => {
+    const openModal = jest.fn()
+    const { ctx } = makeCtx({ openModal })
+    const hooks = await plugin.activate?.(ctx)
+    expect(await hooks?.onCommand?.("record-skill", [])).toBe(true)
+    expect(openModal).toHaveBeenCalledTimes(1)
+  })
+
+  it("refuses outside Tauri", async () => {
     isTauriMock.mockReturnValue(false)
     const openModal = jest.fn()
-    const { ctx } = makeCtx({ openModal })
-    await plugin.activate?.(ctx)
-    const cmd = registerMock.mock.calls[0][0] as SlashCommand
-    const result = cmd.handler()
+    const { ctx, showToast } = makeCtx({ openModal })
+    const hooks = await plugin.activate?.(ctx)
+    expect(await hooks?.onCommand?.("record-skill", [])).toBe(true)
     expect(openModal).not.toHaveBeenCalled()
-    expect(result.message).toMatch(/desktop-only/i)
+    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/desktop-only/i), "error")
   })
 
-  it("the slash command reports the UI is unavailable when no modal surface exists", async () => {
-    const { ctx } = makeCtx() // no modal
-    await plugin.activate?.(ctx)
-    const cmd = registerMock.mock.calls[0][0] as SlashCommand
-    expect(cmd.handler().message).toMatch(/unavailable/i)
+  it("reports the UI is unavailable when no modal surface exists", async () => {
+    const { ctx, showToast } = makeCtx() // no modal
+    const hooks = await plugin.activate?.(ctx)
+    expect(await hooks?.onCommand?.("record-skill", [])).toBe(true)
+    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/unavailable/i), "error")
   })
 
   it("record_skill_status returns an error when the native call throws", async () => {
@@ -121,11 +124,5 @@ describe("skill-recorder (built-in)", () => {
       recording: true,
       stepCount: 3,
     })
-  })
-
-  it("deactivate unregisters the plugin commands", async () => {
-    const { ctx } = makeCtx()
-    await plugin.deactivate?.(ctx)
-    expect(unregisterMock).toHaveBeenCalledWith("cognia-skill-recorder")
   })
 })

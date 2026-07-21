@@ -17,7 +17,7 @@
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
 import { defineMcpServerPreset } from "@cognia/plugin-sdk"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
+import manifestJson from "../plugin.json"
 // `setE2BBackend` kept as a fallback for hosts that don't expose
 // `ctx.workspace` yet (older bootstrap paths / unit-test contexts). When
 // the new API is present, we register through it for ADR-0026 §2 §D
@@ -62,13 +62,10 @@ const E2B_PRESET = defineMcpServerPreset({
 let workspaceRegistrationDispose: (() => void) | undefined
 
 const definition: PluginDefinition = {
+  // Spread plugin.json: `builtinManifest()` merges module-over-JSON, so a
+  // hand-written subset here would WIN and silently drop `commands[]`.
   manifest: {
-    id: "cognia-e2b-sandbox",
-    name: "E2B Sandbox",
-    version: "0.1.0",
-    type: "frontend",
-    capabilities: ["mcp-server-preset", "commands"],
-    main: "src/index.ts",
+    ...(manifestJson as object),
     mcpServerPresets: [E2B_PRESET],
   } as never,
   activate: async (ctx: PluginContext) => {
@@ -104,34 +101,33 @@ const definition: PluginDefinition = {
       workspaceRegistrationDispose = () => setE2BBackend(null)
     }
 
-    registerSlashCommand({
-      id: "e2b.attach",
-      name: "/sandbox",
-      description: "Attach the E2B sandbox MCP to the current character.",
-      handler: () => ({
-        message:
-          "Open Settings → MCP Servers, click E2B Sandbox in the gallery, paste your E2B API key, then attach it to the current character.",
-      }),
-      source: "plugin",
-      pluginId: ctx.pluginId,
-    })
-
     // ADR-0028 / T4 — register the microvm exec adapter so any session
     // with `sandboxTier: "microvm"` routes `sandbox_*` tool calls through
     // an ephemeral Firecracker microVM instead of the OS sandbox. When
     // `@e2b/sdk` isn't installed the factory throws a clean install hint
     // at first call — strict-mode compliant (no silent fallback).
     setMicrovmExec(buildMicrovmExec())
+    // The slash command is DECLARED in plugin.json (`commands[]`) and handled
+    // here — the supported shape per the author-SDK migration table. The
+    // manager owns registration (namespaced id, conflict detection, aliases,
+    // command-palette entry, idle-clock refresh) and teardown.
+    return {
+      onCommand: async (command: string) => {
+        if (command !== "sandbox") return false
+        ctx.ui?.showToast?.(
+          "Open Settings → MCP Servers, click E2B Sandbox in the gallery, paste your E2B API key, then attach it to the current character.",
+          "info"
+        )
+        return true
+      },
+    }
   },
-  deactivate: async (ctx?: PluginContext) => {
+  deactivate: async () => {
     if (workspaceRegistrationDispose) {
       workspaceRegistrationDispose()
       workspaceRegistrationDispose = undefined
     }
     setMicrovmExec(null)
-    if (ctx?.pluginId) {
-      unregisterCommandsByPlugin(ctx.pluginId)
-    }
   },
 }
 

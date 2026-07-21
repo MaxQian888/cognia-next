@@ -13,7 +13,7 @@
     "cognia": ">=0.1.0"
   },
   "permissions": ["clipboard:read", "settings:read", "settings:write"],
-  "activationEvents": ["startup"],
+  "activationEvents": ["startup", "onCommand:clipboard-history"],
   "runtimeCompatibility": {
     "browser": {
       "availability": "supported",
@@ -40,7 +40,7 @@
       "privacyMode": {
         "type": "boolean",
         "default": false,
-        "description": "When true, do not persist entries — only surface the most recent in-memory."
+        "description": "When true, do not persist entries \u2014 only surface the most recent in-memory."
       },
       "pollIntervalMs": {
         "type": "number",
@@ -117,6 +117,14 @@
         "sidebarAccentForeground": "#1f1f23",
         "sidebarRing": "#7c3aed"
       }
+    }
+  ],
+  "commands": [
+    {
+      "id": "clipboard-history",
+      "name": "/clipboard-history",
+      "description": "Show recent clipboard entries.",
+      "icon": "Clipboard"
     }
   ]
 }

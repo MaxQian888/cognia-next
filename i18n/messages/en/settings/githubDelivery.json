@@ -76,6 +76,7 @@
       "start": "Start cloudflared tunnel",
       "starting": "Starting…",
       "stop": "Stop tunnel",
+      "unavailable": "Inbound webhooks are not available yet: nothing listens on the local port, so GitHub deliveries would fail. Repos are tracked by polling in the meantime.",
       "webOnly": "Public tunnels require desktop mode (cloudflared binary on PATH)."
     },
     "webhook": "webhook",

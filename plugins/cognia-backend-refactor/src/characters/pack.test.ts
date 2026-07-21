@@ -13,8 +13,12 @@ describe("REFACTOR_ROLE_PACK", () => {
       expect(ch.name.length).toBeGreaterThan(0)
       expect(ch.avatarColor).toMatch(/^oklch\(/)
       expect(ch.systemPrompt.length).toBeGreaterThan(40)
-      // Headless runs can't answer prompts — every role bypasses permissions.
-      expect(ch.permissionMode).toBe("bypassPermissions")
+      // No role may carry `permissionMode`. `resolveSendOptions` falls back
+      // session → mode → character → appSettings, so a character-level
+      // `bypassPermissions` also applies to ordinary interactive chat with
+      // that character — where there is no permission ceiling. The headless
+      // bypass belongs to the agent.turn node, not to the persona.
+      expect(ch.permissionMode).toBeUndefined()
       expect(ch.allowedTools?.length ?? 0).toBeGreaterThan(0)
       // Plugin skills are referenced via pluginSkillIds (not skillIds).
       expect(ch.pluginSkillIds?.length ?? 0).toBeGreaterThan(0)

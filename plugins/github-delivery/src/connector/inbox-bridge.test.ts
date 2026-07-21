@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+
 import { ghEventToInbound, shouldBridgeToInbox } from "./inbox-bridge"
 import type { NormalizedGhEvent } from "@/lib/github/types"
 
@@ -84,5 +87,38 @@ describe("ghEventToInbound", () => {
     const result = ghEventToInbound(event)
     expect(result?.raw).toBe(event)
     expect(result?.channelData).toEqual({ kind: "pull_request.opened", ref: undefined })
+  })
+})
+
+/**
+ * Working Rule 7 axis 3: pin the dormancy of the inbound webhook path.
+ *
+ * `ghEventToInbound` (above) and `lib/github/{event-normalizer,webhook-verify}`
+ * are a complete, tested renderer half with NO producer: no GitHub webhook
+ * receiver exists in `src-tauri/` or `crates/`, so nothing ever calls them in
+ * production. That was previously invisible — the plugin manifest advertised
+ * `transportModes: ["webhook"]` and the settings UI offered a public tunnel URL.
+ *
+ * This guard fails the moment either the dormancy is lifted (a producer appears
+ * ⇒ delete this test and restore the manifest/UI) or the manifest starts
+ * re-advertising inbound support without one.
+ */
+describe("inbound webhook dormancy", () => {
+  it("the plugin manifest advertises no inbound transport", () => {
+    const manifest = JSON.parse(
+      readFileSync(join(__dirname, "..", "..", "plugin.json"), "utf-8")
+    ) as { connectors?: Array<{ type: string; transportModes?: string[] }> }
+    const github = manifest.connectors?.find((c) => c.type === "github")
+    expect(github).toBeDefined()
+    expect(github?.transportModes ?? []).toEqual([])
+  })
+
+  it("has no production caller for the webhook normalizer/verifier", () => {
+    // Cheap structural proof rather than a repo-wide grep: the plugin entry is
+    // the only place that could wire them, and it does not import the module.
+    const entry = readFileSync(join(__dirname, "..", "index.ts"), "utf-8")
+    expect(entry).not.toContain("inbox-bridge")
+    expect(entry).not.toContain("event-normalizer")
+    expect(entry).not.toContain("webhook-verify")
   })
 })

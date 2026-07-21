@@ -2,20 +2,22 @@
   "id": "cognia-computer-use",
   "name": "Computer Use",
   "version": "0.1.0",
-  "description": "Native Anthropic Computer Use tool (computer_20251124) — screen capture, mouse/keyboard control via the Operator action protocol. Tauri Rust backend ships in a follow-up.",
+  "description": "Native Anthropic Computer Use tool (computer_20251124) \u2014 screen capture, mouse/keyboard control via the Operator action protocol. Tauri Rust backend ships in a follow-up.",
   "type": "frontend",
   "capabilities": ["native-anthropic-tool", "commands", "tools", "subagent", "agent-team-template"],
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",
   "minAppVersion": "0.1.0",
-  "engines": { "cognia": ">=0.1.0" },
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
   "permissions": ["native:input", "native:screen"],
-  "activationEvents": ["startup"],
+  "activationEvents": ["startup", "onCommand:cu"],
   "runtimeCompatibility": {
     "browser": {
       "availability": "blocked",
-      "reason": "Requires Tauri Rust commands for screen capture and input synthesis — desktop only."
+      "reason": "Requires Tauri Rust commands for screen capture and input synthesis \u2014 desktop only."
     },
     "tauri": {
       "availability": "degraded",
@@ -24,7 +26,15 @@
     },
     "mobile": {
       "availability": "blocked",
-      "reason": "Screen capture and input synthesis require native desktop APIs — unavailable in the mobile WebView."
+      "reason": "Screen capture and input synthesis require native desktop APIs \u2014 unavailable in the mobile WebView."
     }
-  }
+  },
+  "commands": [
+    {
+      "id": "cu",
+      "name": "/cu",
+      "description": "Show computer-use status and available actions.",
+      "icon": "MousePointer"
+    }
+  ]
 }

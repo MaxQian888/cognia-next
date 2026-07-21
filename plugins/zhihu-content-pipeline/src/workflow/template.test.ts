@@ -47,3 +47,21 @@ describe("TOPIC_DISCOVERY_TEMPLATE", () => {
     expect(String(byId.save.data.params?.candidates)).not.toContain(".out.")
   })
 })
+
+describe("unattended / routed execution params", () => {
+  const byId = Object.fromEntries(TOPIC_DISCOVERY_TEMPLATE.nodes.map((n) => [n.id, n]))
+
+  it("runs the terminal step unattended (cron has nobody to answer consent)", () => {
+    // Without `unattended: true` the node takes the DOCK path, which calls
+    // `requestAgentTrust` and opens a tab — so the 09:00 cron run just waited
+    // on a dialog nobody was there to accept.
+    expect(byId.scan.data.params?.unattended).toBe(true)
+  })
+
+  it("ranks with routed mode so no per-node credentials are required", () => {
+    // The explicit branch of `ai.prompt` needs provider+model+apiKey ON the
+    // node; the template has nowhere to put them, so it fell through to the
+    // stub echo on every run.
+    expect(byId.rank.data.params?.mode).toBe("routed")
+  })
+})

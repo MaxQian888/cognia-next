@@ -118,7 +118,9 @@ describe("executeAgentTurn happy path", () => {
     expect(mRun).toHaveBeenCalledWith(
       "sess-new",
       "Refactor the auth module",
-      { cwd: "/repo" },
+      // The node stamps the headless bypass onto the resolved options; the
+      // character definitions deliberately carry no permissionMode.
+      { cwd: "/repo", permissionMode: "bypassPermissions" },
       expect.objectContaining({ timeoutMs: 600000 })
     )
     expect(res.output).toMatchObject({
@@ -143,7 +145,12 @@ describe("executeAgentTurn happy path", () => {
     await executeAgentTurn(makeCtx({ prompt: "go", cwd: "/repo", role: "refactorer" }))
     expect(mUpdateSession).toHaveBeenCalledWith("old", { workingDir: "/repo" })
     expect(mCreateSession).not.toHaveBeenCalled()
-    expect(mRun).toHaveBeenCalledWith("old", "go", { cwd: "/repo" }, expect.any(Object))
+    expect(mRun).toHaveBeenCalledWith(
+      "old",
+      "go",
+      { cwd: "/repo", permissionMode: "bypassPermissions" },
+      expect.any(Object)
+    )
   })
 
   it("passes a custom timeoutSec through to the runner", async () => {
@@ -196,6 +203,23 @@ describe("executeAgentTurn session handling", () => {
     await executeAgentTurn(makeCtx({ prompt: "go", cwd: "/repo", role: "refactorer" }))
     expect(mUpdateSession).not.toHaveBeenCalled()
     expect(mCreateSession).not.toHaveBeenCalled()
+  })
+
+  it("applies bypassPermissions to the resolved send options, not to the character", async () => {
+    // The headless runner has no UI to answer a permission prompt, so the
+    // bypass must be applied — but ONLY here. Pinning it at the call site is
+    // what keeps it off the character definitions, where it would also cover
+    // ordinary interactive chat (see characters/pack.test.ts).
+    const resolved: Record<string, unknown> = {}
+    mResolveSend.mockResolvedValue(resolved)
+    await executeAgentTurn(makeCtx({ prompt: "go", cwd: "/repo", role: "refactorer" }))
+    expect(resolved.permissionMode).toBe("bypassPermissions")
+    expect(mRun).toHaveBeenCalledWith(
+      expect.any(String),
+      "go",
+      expect.objectContaining({ permissionMode: "bypassPermissions" }),
+      expect.any(Object)
+    )
   })
 })
 

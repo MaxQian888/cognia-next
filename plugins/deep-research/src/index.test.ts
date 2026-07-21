@@ -32,7 +32,22 @@ describe("activate / deactivate", () => {
     expect(agent.registerSkill).toHaveBeenCalledWith(
       expect.objectContaining({ id: "deep-research" })
     )
-    expect(listCommandsByPlugin("cognia-deep-research").map((x) => x.id)).toContain("research")
+    // `/research` is DECLARED (manifest.commands[]) and handled by the returned
+    // hook — the plugin no longer registers it imperatively, which used to
+    // leave a DUPLICATE entry in the registry whose only behaviour was to
+    // answer "Plugin command not handled".
+    expect(listCommandsByPlugin("cognia-deep-research")).toHaveLength(0)
+  })
+
+  it("declares /research and handles it via the returned hook", async () => {
+    const c = ctx()
+    const hooks = definition.activate(c) as unknown as {
+      onCommand?: (cmd: string, args: string[]) => Promise<boolean>
+    }
+    const commands = (definition.manifest as { commands?: Array<{ id: string }> }).commands
+    expect(commands?.map((x) => x.id)).toEqual(["research"])
+    expect(await hooks?.onCommand?.("not-mine", [])).toBe(false)
+    expect(await hooks?.onCommand?.("research", [])).toBe(true)
   })
 
   it("removes its slash command on deactivate", () => {

@@ -1,7 +1,7 @@
 import type { PluginDexieAPI } from "@/lib/plugin/api/dexie-api"
 import type { StrixFinding, StrixRun } from "../types"
 import { counterId, createMockTerminal, immediateSleep, type CommandResolver } from "./mock-shell"
-import { runScan } from "./strix-runner"
+import { purgeAllArtifacts, purgeRunArtifacts, runScan } from "./strix-runner"
 
 function fakeDexie() {
   const runs: StrixRun[] = []
@@ -86,6 +86,27 @@ describe("runScan", () => {
     expect(dexie.findings).toHaveLength(0)
   })
 
+  it("marks the run INCONCLUSIVE when the report exists but cannot be parsed", async () => {
+    // The dangerous case, distinct from the clean-scan case above: the file WAS
+    // produced and read back, but is not valid JSON. Reporting that as
+    // "done / 0 findings" tells the user a scan that may have found criticals
+    // came back clean — the worst failure mode for a security scanner.
+    const { terminal } = createMockTerminal((inner) => {
+      if (inner.startsWith("strix -n")) return { exitCode: 0 }
+      if (inner.includes("vulnerabilities.json")) {
+        return { output: Buffer.from("{ truncated…", "utf8").toString("base64"), exitCode: 0 }
+      }
+      if (inner.includes("run.json")) return { output: b64({ status: "completed" }), exitCode: 0 }
+      return { exitCode: 0 }
+    })
+    const dexie = fakeDexie()
+    const run = await runScan({ target: "x" }, deps(terminal, dexie.api))
+    expect(run.status).toBe("error")
+    expect(run.findingsCount).toBe(0)
+    expect(dexie.runs.at(-1)?.error).toMatch(/INCONCLUSIVE/)
+    expect(dexie.runs.at(-1)?.status).toBe("error")
+  })
+
   it("marks the run errored when strix exits 1", async () => {
     const { terminal } = createMockTerminal((inner) => {
       if (inner.startsWith("strix -n")) return { exitCode: 1 }
@@ -135,5 +156,59 @@ describe("runScan", () => {
     expect(strixWrite).toBeDefined()
     expect(strixWrite).not.toContain("secret")
     expect(strixWrite).not.toContain("openai/gpt-5")
+  })
+})
+
+describe("artifact purging", () => {
+  const purgeDeps = (terminal: ReturnType<typeof createMockTerminal>["terminal"]) => ({
+    terminal,
+    randomId: counterId(),
+    sleep: immediateSleep,
+    pollMs: 0,
+  })
+
+  it("removes a single run's scan directory", async () => {
+    const seen: string[] = []
+    const { terminal } = createMockTerminal((inner) => {
+      seen.push(inner)
+      return { exitCode: 0 }
+    })
+    const ok = await purgeRunArtifacts("run-abcd1234", purgeDeps(terminal))
+    expect(ok).toBe(true)
+    expect(seen.some((c) => c.includes('rm -rf "$HOME/.cognia/strix-scans/run-abcd1234"'))).toBe(
+      true
+    )
+  })
+
+  it("removes the whole scan root on clear-all", async () => {
+    const seen: string[] = []
+    const { terminal } = createMockTerminal((inner) => {
+      seen.push(inner)
+      return { exitCode: 0 }
+    })
+    const ok = await purgeAllArtifacts(purgeDeps(terminal))
+    expect(ok).toBe(true)
+    expect(seen.some((c) => c.includes('rm -rf "$HOME/.cognia/strix-scans"'))).toBe(true)
+  })
+
+  it("refuses to interpolate a runId that is not an id, and runs no command", async () => {
+    // A corrupted / hand-edited Dexie row must not be able to widen an rm -rf.
+    for (const bad of ["", "..", "a/../../etc", 'x" ; rm -rf /', "a".repeat(65)]) {
+      const seen: string[] = []
+      const { terminal } = createMockTerminal((inner) => {
+        seen.push(inner)
+        return { exitCode: 0 }
+      })
+      const ok = await purgeRunArtifacts(bad, purgeDeps(terminal))
+      expect(ok).toBe(false)
+      expect(seen.some((c) => c.includes("rm -rf"))).toBe(false)
+    }
+  })
+
+  it("reports failure without throwing when rm exits non-zero", async () => {
+    const { terminal } = createMockTerminal((inner) =>
+      inner.includes("rm -rf") ? { exitCode: 1 } : { exitCode: 0 }
+    )
+    await expect(purgeRunArtifacts("run-abcd1234", purgeDeps(terminal))).resolves.toBe(false)
   })
 })

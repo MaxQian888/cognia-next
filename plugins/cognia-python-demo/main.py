@@ -76,7 +76,15 @@ def countdown(start: int = 3):
 
 @hook("onMessageSend")
 def stamp_outgoing(payload):
-    """Transform hook: tag outgoing chat payloads (dict in, dict out)."""
+    """Transform hook: tag outgoing chat payloads (dict in, dict out).
+
+    ``onMessageSend`` is a CHAT-INTERCEPTION hook: it sees, and can rewrite,
+    every outgoing message. The host therefore refuses to register any hook in
+    that family unless the manifest declares ``hooks:chat-intercept`` — and the
+    refusal aborts the whole Python load, not just this hook, leaving the plugin
+    in ``error``. If you copy this template and do not need to see the
+    conversation, drop both the permission and this hook.
+    """
     if isinstance(payload, dict):
         payload.setdefault("metadata", {})["pythonDemo"] = True
     return payload

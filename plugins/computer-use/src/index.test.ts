@@ -104,9 +104,9 @@ describe("computer-use plugin activate()", () => {
     // them on enable. So this test verifies the slash command is still
     // registered AND the imperative i18n registry is no longer touched.
     expect(registerPluginI18n).not.toHaveBeenCalled()
-    expect(registerSlashCommand).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "/cu", source: "plugin" })
-    )
+    // The slash command is DECLARED (manifest.commands[]) and handled by the
+    // hook returned from activate — the plugin must not touch the registry.
+    expect(registerSlashCommand).not.toHaveBeenCalled()
   })
 
   it("declares the i18n bundle on the manifest", () => {
@@ -153,9 +153,9 @@ describe("computer-use plugin activate()", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await definition.activate(ctx as any)
     expect(ctx.logger!.warn).toHaveBeenCalled()
-    // Slash command + i18n still register — the chat-side tool surface is
+    // The command is manifest-declared now; the chat-side tool surface is
     // optional, not load-bearing for the rest of the plugin.
-    expect(registerSlashCommand).toHaveBeenCalled()
+    expect(registerSlashCommand).not.toHaveBeenCalled()
   })
 
   describe("registered tool executors route correctly", () => {
@@ -298,7 +298,8 @@ describe("computer-use plugin deactivate()", () => {
     const ctx = buildCtx()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await definition.deactivate!(ctx as any)
-    expect(unregisterCommandsByPlugin).toHaveBeenCalledWith("cognia-computer-use")
+    // Command teardown is the manager's job for declared commands.
+    expect(unregisterCommandsByPlugin).not.toHaveBeenCalled()
     // ADR-0026 §5 §D — the plugin no longer calls `unregisterPluginI18n`
     // directly. The manager tears down the manifest.i18n bundle when the
     // plugin disables.
@@ -321,6 +322,7 @@ describe("computer-use plugin deactivate()", () => {
     const ctx = buildCtx({ withAgent: false })
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await definition.deactivate!(ctx as any)
-    expect(unregisterCommandsByPlugin).toHaveBeenCalledWith("cognia-computer-use")
+    // Command teardown is the manager's job for declared commands.
+    expect(unregisterCommandsByPlugin).not.toHaveBeenCalled()
   })
 })

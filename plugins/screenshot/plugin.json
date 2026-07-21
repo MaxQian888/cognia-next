@@ -13,7 +13,7 @@
     "cognia": ">=0.1.0"
   },
   "permissions": ["clipboard:write", "media:image:write"],
-  "activationEvents": ["startup"],
+  "activationEvents": ["startup", "onCommand:screenshot"],
   "runtimeCompatibility": {
     "browser": {
       "availability": "degraded",
@@ -28,5 +28,13 @@
       "availability": "blocked",
       "reason": "No getDisplayMedia / screen capture in the mobile WebView."
     }
-  }
+  },
+  "commands": [
+    {
+      "id": "screenshot",
+      "name": "/screenshot",
+      "description": "Capture a screen image and copy it to the clipboard.",
+      "icon": "Camera"
+    }
+  ]
 }
