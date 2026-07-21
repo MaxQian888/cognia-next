@@ -50,6 +50,62 @@ pub struct ConcurrencyLimiter {
     gates: Mutex<HashMap<String, KeyGate>>,
 }
 
+/// Per-provider in-flight tally, counted whether or not a cap is configured.
+///
+/// [`ConcurrencyLimiter`] can't double as this: it short-circuits at `cap == 0`
+/// (the default) without ever building a gate, so it knows nothing about the
+/// requests it isn't limiting. Its gate keys also embed the upstream secret
+/// (`up:{provider}:{apiKey}`) and so can never be serialized. This tracker keys
+/// on the provider id alone, so [`snapshot`](InFlightTracker::snapshot) is safe
+/// to hand to the renderer — it feeds the routing engine's `least-busy` signal
+/// for gateway-originated traffic, which otherwise reads a constant zero.
+#[derive(Default)]
+pub struct InFlightTracker {
+    counts: Arc<Mutex<HashMap<String, u32>>>,
+}
+
+/// Decrements its provider's tally on drop. Must live exactly as long as the
+/// matching [`Slot`] — for a streaming response that means being moved into the
+/// SSE pump task, not dropped at the handler's return.
+pub struct InFlightGuard {
+    counts: Arc<Mutex<HashMap<String, u32>>>,
+    provider_id: String,
+}
+
+impl InFlightTracker {
+    /// Count one in-flight upstream attempt against `provider_id`.
+    pub fn enter(&self, provider_id: &str) -> InFlightGuard {
+        *self
+            .counts
+            .lock()
+            .entry(provider_id.to_string())
+            .or_insert(0) += 1;
+        InFlightGuard {
+            counts: Arc::clone(&self.counts),
+            provider_id: provider_id.to_string(),
+        }
+    }
+
+    /// Current in-flight count per provider; idle providers are absent.
+    pub fn snapshot(&self) -> HashMap<String, u32> {
+        self.counts.lock().clone()
+    }
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        let mut counts = self.counts.lock();
+        match counts.get_mut(&self.provider_id) {
+            Some(n) if *n > 1 => *n -= 1,
+            // Last holder — drop the entry so an idle provider stays absent
+            // rather than lingering as a zero.
+            _ => {
+                counts.remove(&self.provider_id);
+            }
+        }
+    }
+}
+
 impl ConcurrencyLimiter {
     /// Acquire a slot for `key` against `cap` concurrent holders. `cap == 0`
     /// disables the cap (always `Ok(Slot::Unlimited)`). When the cap is reached
@@ -149,6 +205,52 @@ mod tests {
         let _a = limiter.acquire("key-a", 1, wait).await.expect("a");
         // A different key has its own gate.
         assert!(limiter.acquire("key-b", 1, wait).await.is_ok());
+    }
+
+    #[test]
+    fn tracker_counts_per_provider_and_releases_on_drop() {
+        let tracker = InFlightTracker::default();
+        let a1 = tracker.enter("openai");
+        let _a2 = tracker.enter("openai");
+        let _b = tracker.enter("anthropic");
+        let snap = tracker.snapshot();
+        assert_eq!(snap.get("openai"), Some(&2));
+        assert_eq!(snap.get("anthropic"), Some(&1));
+
+        drop(a1);
+        assert_eq!(tracker.snapshot().get("openai"), Some(&1));
+    }
+
+    #[test]
+    fn tracker_drops_the_entry_when_a_provider_goes_idle() {
+        let tracker = InFlightTracker::default();
+        let guard = tracker.enter("openai");
+        drop(guard);
+        // Idle providers are absent rather than present-as-zero, so the
+        // serialized snapshot stays small and `?? 0` on the renderer is honest.
+        assert!(tracker.snapshot().is_empty());
+    }
+
+    #[tokio::test]
+    async fn limiter_learns_nothing_at_cap_zero_so_the_tally_must_be_separate() {
+        // This is the reason InFlightTracker exists at all. Assert the LIMITER's
+        // blindness directly — asserting only `tracker.enter` would pass even if
+        // the limiter did track, making the test decoration rather than a pin.
+        let limiter = ConcurrencyLimiter::default();
+        let _slot = limiter
+            .acquire("up:openai:sk-x", 0, Duration::from_millis(10))
+            .await
+            .expect("cap 0 always grants");
+        // No gate was ever built, so the limiter cannot report in-flight work.
+        assert!(
+            limiter.gates.lock().is_empty(),
+            "cap 0 must not build a gate — if it ever does, the tracker is redundant"
+        );
+
+        // …whereas the tracker counts regardless of cap.
+        let tracker = InFlightTracker::default();
+        let _guard = tracker.enter("openai");
+        assert_eq!(tracker.snapshot().get("openai"), Some(&1));
     }
 
     #[tokio::test]

@@ -131,6 +131,72 @@ describe("buildRoutingEngine", () => {
     const engine = buildRoutingEngine({ modelMappings: [] })
     expect(engine.selectProvider({ model: "nope" })).toBeNull()
   })
+
+  it("lets a deps override steer least-busy away from a loaded provider", () => {
+    // The inbound gateway needs this: its own in-flight load lives in the Rust
+    // process, not in the renderer store the default deps read, so it folds the
+    // per-request counts in here. Without the override least-busy sees 0
+    // everywhere and always picks the first entry.
+    const settings = {
+      modelMappings: [
+        mapping("fast", [
+          { providerId: "groq", modelId: "llama-3.3-70b-versatile" },
+          { providerId: "openai", modelId: "gpt-4o-mini" },
+        ]),
+      ],
+      routingConfig: {
+        strategy: "least-busy" as const,
+        allowPerRequestOverride: true,
+        providerConstraints: [],
+        requestTimeoutMs: 30000,
+        maxFallbackAttempts: 3,
+      },
+      providerSettings: { groq: ps("groq"), openai: ps("openai") },
+      customProviders: [],
+    }
+
+    // Baseline: nothing in flight → first entry wins.
+    expect(buildRoutingEngine(settings).selectProvider({ model: "fast" })?.providerId).toBe("groq")
+
+    // groq reported busy → least-busy must move to openai.
+    const steered = buildRoutingEngine(settings, {
+      getInFlight: (id) => (id === "groq" ? 7 : 0),
+    })
+    expect(steered.selectProvider({ model: "fast" })?.providerId).toBe("openai")
+  })
+
+  it("merges overrides over the store deps instead of replacing them", () => {
+    // If `{ ...deps, ...overrides }` ever regressed to just `overrides`, every
+    // other dep would go undefined and the engine would silently fall back to
+    // its permissive defaults — disabling the enabled-flag, breaker, cost and
+    // health filters for GATEWAY decisions only (the sole caller passing
+    // overrides). Steering alone can't see that, so pin a dep the override
+    // does NOT supply: `openai` is disabled and must stay unselectable even
+    // while the override pushes least-busy away from groq.
+    const engine = buildRoutingEngine(
+      {
+        modelMappings: [
+          mapping("fast", [
+            { providerId: "groq", modelId: "llama-3.3-70b-versatile" },
+            { providerId: "openai", modelId: "gpt-4o-mini" },
+          ]),
+        ],
+        routingConfig: {
+          strategy: "least-busy" as const,
+          allowPerRequestOverride: true,
+          providerConstraints: [],
+          requestTimeoutMs: 30000,
+          maxFallbackAttempts: 3,
+        },
+        providerSettings: { groq: ps("groq"), openai: ps("openai", false) },
+        customProviders: [],
+      },
+      { getInFlight: (id) => (id === "groq" ? 7 : 0) }
+    )
+    // `isProviderAvailable` came from the store deps, so the disabled provider
+    // is filtered out and busy-but-enabled groq still wins.
+    expect(engine.selectProvider({ model: "fast" })?.providerId).toBe("groq")
+  })
 })
 
 describe("buildRoutingEngineDeps", () => {

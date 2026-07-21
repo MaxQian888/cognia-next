@@ -109,11 +109,26 @@ export function buildRoutingEngineDeps(appSettings: RoutingEngineSettings): Rout
   }
 }
 
-/** Assemble a routing engine over the given settings + live telemetry stores. */
-export function buildRoutingEngine(appSettings: RoutingEngineSettings): ProviderRoutingEngine {
+/**
+ * Assemble a routing engine over the given settings + live telemetry stores.
+ *
+ * `overrides` shallow-merges over the store-backed deps. The inbound gateway
+ * uses it to fold its own in-flight counts into `getInFlight` — the renderer
+ * stores only track chat-plane turns, so a gateway decision would otherwise
+ * score every provider as idle.
+ */
+export function buildRoutingEngine(
+  appSettings: RoutingEngineSettings,
+  overrides?: Partial<RoutingEngineDeps>
+): ProviderRoutingEngine {
   const registry = createMappingRegistry(appSettings.modelMappings ?? [])
   const routingConfig = appSettings.routingConfig ?? DEFAULT_ROUTING_CONFIG
-  return new ProviderRoutingEngine(registry, routingConfig, buildRoutingEngineDeps(appSettings))
+  const deps = buildRoutingEngineDeps(appSettings)
+  return new ProviderRoutingEngine(
+    registry,
+    routingConfig,
+    overrides ? { ...deps, ...overrides } : deps
+  )
 }
 
 /**

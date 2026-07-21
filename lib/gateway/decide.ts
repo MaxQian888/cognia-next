@@ -20,6 +20,11 @@ export interface GatewayDecideRequest {
   /** Gateway-derived affinity key (W1.3) — lets the routing engine's
    * session-affinity filter stick this conversation to one deployment. */
   sessionId?: string | null
+  /** Per-provider in-flight upstream attempts the GATEWAY is currently running
+   * (W1.2b). The renderer's own counter only tracks chat-plane turns, so
+   * without this the `least-busy` strategy scores every provider at 0 for
+   * gateway traffic and piles a concurrent burst onto a single deployment. */
+  inFlight?: Record<string, number> | null
 }
 
 /**

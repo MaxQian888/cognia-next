@@ -146,9 +146,17 @@ export function GatewayProvider() {
         try {
           const live = useSettingsStore.getState().settings
           if (live) {
-            const { buildRoutingEngine } =
+            const { buildRoutingEngine, buildRoutingEngineDeps } =
               await import("@cognia/provider-routing/build-preview-engine")
-            entries = resolveGatewayDecision(req, buildRoutingEngine(live))
+            // The renderer's in-flight counter is written only by the chat
+            // plane, so fold in the gateway's own per-provider tally (W1.2b) —
+            // otherwise `least-busy` reads 0 for every provider and a
+            // concurrent burst all lands on the same deployment.
+            const base = buildRoutingEngineDeps(live)
+            const engine = buildRoutingEngine(live, {
+              getInFlight: (id) => (base.getInFlight?.(id) ?? 0) + (req.inFlight?.[id] ?? 0),
+            })
+            entries = resolveGatewayDecision(req, engine)
           }
         } catch {
           entries = [] // any failure → empty = gateway uses its snapshot

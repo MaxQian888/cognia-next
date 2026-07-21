@@ -41,16 +41,16 @@ use cognia_remote_control::allowlist::ParsedAllowlist;
 use cognia_remote_control::rate_limit::FixedWindowRateLimiter;
 
 use super::api_keys::{self, GatewayApiKey};
-use super::concurrency::{ConcurrencyLimiter, Slot};
+use super::concurrency::{ConcurrencyLimiter, InFlightGuard, InFlightTracker, Slot};
 use super::cooldown::{self, KeyCooldownMap};
 use super::execute::{
-    candidates_from_entries, embeddings_url, expand_key_pools, record_key_success,
-    resolve_candidates, rewrite_model, strip_request_fields, upstream_headers, upstream_url,
-    Candidate, KeyRotationMap, SseDeframer,
+    candidates_from_entries, embeddings_url, expand_key_pools, is_executable_protocol,
+    record_key_success, resolve_candidates, rewrite_model, strip_request_fields, upstream_headers,
+    upstream_url, Candidate, KeyRotationMap, SseDeframer,
 };
 use super::keyed_rate_limit::KeyedRateLimiter;
 use super::session_key::derive_session_id;
-use super::snapshot::RoutingSnapshot;
+use super::snapshot::{AliasSnapshot, RoutingSnapshot};
 use super::translate::errors::{error_body, InboundFormat};
 use super::translate::responses as responses_translate;
 use super::translate::stream::{Direction, SseOut, StreamTranscoder};
@@ -69,6 +69,23 @@ const DECIDE_TIMEOUT_MS: u64 = 800;
 /// Chat bodies can be large (long histories); 16 MiB is generous without
 /// being a memory hazard.
 const BODY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
+
+/// How long an SSE pump tolerates total silence from the upstream before giving
+/// up on the stream.
+///
+/// Streaming requests deliberately skip `apply_timeout` (a long generation is
+/// not a hung one) and `reqwest` here sets only a connect timeout, so an
+/// upstream that accepts the connection and then never writes or closes would
+/// park the pump task forever — holding its concurrency slots AND its in-flight
+/// tally. The tally drives least-busy routing, so a single hung stream would
+/// steer traffic away from that provider permanently, with nothing in the UI to
+/// explain it.
+///
+/// Five minutes of *zero bytes* is well past any real generation: both upstream
+/// protocols emit keepalives (Anthropic `event: ping`, OpenAI incremental
+/// chunks) far more often than that, so this fires only on a genuinely dead
+/// connection.
+const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Clone)]
 pub struct ServerHandle {
@@ -117,6 +134,10 @@ struct AppState {
     key_cooldown: Arc<KeyCooldownMap>,
     /// In-flight concurrency caps (W1.2).
     concurrency: Arc<ConcurrencyLimiter>,
+    /// Per-provider in-flight tally, counted regardless of whether a cap is set.
+    /// Serialized into each decide request so the renderer's `least-busy`
+    /// strategy can see the load the gateway itself is generating.
+    in_flight: Arc<InFlightTracker>,
     http: reqwest::Client,
 }
 
@@ -188,6 +209,9 @@ pub async fn spawn_server(
         key_rotation,
         key_cooldown,
         concurrency,
+        // Transient by nature — nothing is in flight when a listener starts, so
+        // this is built per-spawn rather than threaded through from the state.
+        in_flight: Arc::new(InFlightTracker::default()),
         http,
     };
 
@@ -316,6 +340,10 @@ async fn healthz_upstream(
     let mut results = Vec::new();
     for candidate in candidates.iter().take(cfg.attempt_budget(candidates.len())) {
         let started = Instant::now();
+        // A probe is a real (billed) upstream call, so it counts toward the
+        // in-flight tally that now drives least-busy routing — otherwise a
+        // self-check would be invisible to the very decisions it runs beside.
+        let _in_flight = state.in_flight.enter(&candidate.provider.id);
         let (ok, status, error) = probe_candidate(&state, &cfg, candidate).await;
         results.push(UpstreamProbeResult {
             provider_id: candidate.provider.id.clone(),
@@ -564,12 +592,40 @@ async fn list_models(State(state): State<AppState>, Extension(ctx): Extension<Re
     let cfg = state.config.read().clone();
 
     // A model is listed only if the gateway exposes it AND the calling key may
-    // use it.
+    // use it AND the gateway can actually execute it. That last clause is why
+    // `resolve_candidates` is consulted for aliases below: without it a provider
+    // on a non-executable protocol (anything but openai / anthropic — see
+    // `is_executable_protocol`) was advertised here and then 404'd on the very
+    // next /v1/chat/completions call.
     let visible = |model: &str| -> bool { cfg.model_is_exposed(model) && ctx_allows(&ctx, model) };
+
+    let data = listable_models(&snapshot, cfg.hide_raw_provider_models, &visible);
+    Json(json!({ "object": "list", "data": data })).into_response()
+}
+
+/// The `/v1/models` payload for a caller, given a per-model visibility
+/// predicate. Pure (no `AppHandle`) so the executability rule is unit-testable —
+/// this crate does not use `tauri::test::mock_app`.
+fn listable_models(
+    snapshot: &RoutingSnapshot,
+    hide_raw_provider_models: bool,
+    visible: &dyn Fn(&str) -> bool,
+) -> Vec<Value> {
+    // An alias is executable if ANY of its entries points at an enabled provider
+    // on a protocol the gateway can drive. Deliberately not `resolve_candidates`:
+    // that clones every matching `ProviderSnapshot` — credentials included —
+    // onto the heap just to answer a yes/no, once per alias per request.
+    let alias_is_executable = |alias: &AliasSnapshot| -> bool {
+        alias.entries.iter().any(|entry| {
+            snapshot
+                .provider(&entry.provider_id)
+                .is_some_and(|p| is_executable_protocol(&p.protocol))
+        })
+    };
 
     let mut data: Vec<Value> = Vec::new();
     for alias in &snapshot.aliases {
-        if visible(&alias.alias) {
+        if visible(&alias.alias) && alias_is_executable(alias) {
             data.push(json!({
                 "id": alias.alias,
                 "object": "model",
@@ -577,9 +633,9 @@ async fn list_models(State(state): State<AppState>, Extension(ctx): Extension<Re
             }));
         }
     }
-    if !cfg.hide_raw_provider_models {
+    if !hide_raw_provider_models {
         for provider in &snapshot.providers {
-            if !provider.enabled {
+            if !provider.enabled || !is_executable_protocol(&provider.protocol) {
                 continue;
             }
             for model in &provider.models {
@@ -593,7 +649,7 @@ async fn list_models(State(state): State<AppState>, Extension(ctx): Extension<Re
             }
         }
     }
-    Json(json!({ "object": "list", "data": data })).into_response()
+    data
 }
 
 fn ctx_allows(ctx: &ReqCtx, model: &str) -> bool {
@@ -667,6 +723,20 @@ async fn openai_embeddings(
         return resp;
     }
 
+    // W1.2: gateway-key in-flight cap. Embeddings responses are always buffered,
+    // so the slot lives in this handler's scope — no SSE-pump hand-off needed.
+    // The key is byte-identical to the chat path's so a single configured cap is
+    // one shared budget across endpoints, not one budget per endpoint.
+    let wait = Duration::from_millis(cfg.concurrency_wait_ms as u64);
+    let _gw_slot = match state
+        .concurrency
+        .acquire(&gw_gate_key(&ctx), cfg.max_concurrent_per_key, wait)
+        .await
+    {
+        Ok(slot) => slot,
+        Err(()) => return concurrency_rejected(&state, &ctx, format, Some(&model)),
+    };
+
     // Only OpenAI-compatible providers expose `/embeddings`. Expand each
     // provider's upstream key pool so a rate-limited account fails over, and
     // skip pooled keys the upstream just parked (W1.1) / permanently disabled
@@ -696,6 +766,30 @@ async fn openai_embeddings(
     let mut failures: Vec<String> = Vec::new();
     for candidate in candidates.iter().take(cfg.attempt_budget(candidates.len())) {
         let started = Instant::now();
+
+        // W1.2: per-upstream-key cap for THIS attempt; released when the loop
+        // iteration ends (failover) or the handler returns (success).
+        let _up_slot = match state
+            .concurrency
+            .acquire(
+                &up_gate_key(candidate),
+                cfg.max_concurrent_per_upstream_key,
+                wait,
+            )
+            .await
+        {
+            Ok(slot) => slot,
+            Err(()) => {
+                failures.push(format!(
+                    "{}: upstream concurrency limit reached",
+                    candidate.provider.id
+                ));
+                continue;
+            }
+        };
+        // Counted whether or not a cap is set — this is the least-busy signal.
+        let _in_flight = state.in_flight.enter(&candidate.provider.id);
+
         let mut upstream_body = rewrite_model(&body, &candidate.model_id);
         strip_request_fields(
             &mut upstream_body,
@@ -713,7 +807,21 @@ async fn openai_embeddings(
         let resp = match req.send().await {
             Ok(resp) => resp,
             Err(err) => {
-                failures.push(format!("{}: connect error: {err}", candidate.provider.id));
+                let message = format!("connect error: {err}");
+                // Embeddings traffic trains the same health / breaker / cost
+                // stores as chat. `session_id` is None: embeddings must never
+                // pin a chat session's affinity (same rule as /v1/responses).
+                emit_outcome(
+                    &state.app_handle,
+                    candidate,
+                    false,
+                    started,
+                    None,
+                    Some(&message),
+                    None,
+                    None,
+                );
+                failures.push(format!("{}: {message}", candidate.provider.id));
                 continue;
             }
         };
@@ -728,7 +836,7 @@ async fn openai_embeddings(
             let text = resp.text().await.unwrap_or_default();
             // W1.1 + W3.1: park / disable the pooled key so later requests (any
             // endpoint) stop re-selecting it.
-            record_upstream_cooldown(
+            let retry_after_ms = record_upstream_cooldown(
                 &state,
                 &cfg,
                 candidate,
@@ -741,6 +849,18 @@ async fn openai_embeddings(
             let message = format!(
                 "HTTP {status}: {}",
                 text.chars().take(500).collect::<String>()
+            );
+            // Forward the cooldown window so the renderer breaker gets the same
+            // dynamic backoff the chat path already feeds it.
+            emit_outcome(
+                &state.app_handle,
+                candidate,
+                false,
+                started,
+                None,
+                Some(&message),
+                retry_after_ms,
+                None,
             );
             if cfg.should_retry(status) {
                 failures.push(format!("{}: {message}", candidate.provider.id));
@@ -760,13 +880,28 @@ async fn openai_embeddings(
         let upstream: Value = match resp.json().await {
             Ok(value) => value,
             Err(err) => {
+                // A 200 the provider can't serialize is still the provider's
+                // fault — the chat path already reports this (see
+                // `buffered_response`), so embeddings must too or the breaker
+                // never sees a provider that reliably returns garbage.
+                let message = format!("invalid upstream JSON: {err}");
+                emit_outcome(
+                    &state.app_handle,
+                    candidate,
+                    false,
+                    started,
+                    None,
+                    Some(&message),
+                    None,
+                    None,
+                );
                 return logged_error(
                     &state,
                     &ctx,
                     format,
                     StatusCode::BAD_GATEWAY,
                     "api_error",
-                    &format!("invalid upstream JSON: {err}"),
+                    &message,
                     Some(&model),
                 );
             }
@@ -775,6 +910,16 @@ async fn openai_embeddings(
         let input_tokens = upstream["usage"]["prompt_tokens"]
             .as_u64()
             .or_else(|| upstream["usage"]["total_tokens"].as_u64());
+        emit_outcome(
+            &state.app_handle,
+            candidate,
+            true,
+            started,
+            Some((input_tokens, None)),
+            None,
+            None,
+            None,
+        );
         log_success(
             &state,
             &ctx,
@@ -846,6 +991,19 @@ async fn openai_responses(
         return resp;
     }
 
+    // W1.2: gateway-key in-flight cap. `/v1/responses` rejects `stream` up front
+    // (see `responses_translate::unsupported_feature`), so the slot is always
+    // scope-held. Key matches the chat path's — one shared budget.
+    let wait = Duration::from_millis(cfg.concurrency_wait_ms as u64);
+    let _gw_slot = match state
+        .concurrency
+        .acquire(&gw_gate_key(&ctx), cfg.max_concurrent_per_key, wait)
+        .await
+    {
+        Ok(slot) => slot,
+        Err(()) => return concurrency_rejected(&state, &ctx, format, Some(&model)),
+    };
+
     let now_ms = chrono::Utc::now().timestamp_millis();
     let candidates = expand_key_pools(
         resolve_candidates(&snapshot, &model),
@@ -870,6 +1028,28 @@ async fn openai_responses(
     let mut failures: Vec<String> = Vec::new();
     for candidate in candidates.iter().take(cfg.attempt_budget(candidates.len())) {
         let started = Instant::now();
+
+        // W1.2: per-upstream-key cap for THIS attempt.
+        let _up_slot = match state
+            .concurrency
+            .acquire(
+                &up_gate_key(candidate),
+                cfg.max_concurrent_per_upstream_key,
+                wait,
+            )
+            .await
+        {
+            Ok(slot) => slot,
+            Err(()) => {
+                failures.push(format!(
+                    "{}: upstream concurrency limit reached",
+                    candidate.provider.id
+                ));
+                continue;
+            }
+        };
+        let _in_flight = state.in_flight.enter(&candidate.provider.id);
+
         let mut candidate_ir = ir.clone();
         candidate_ir.model = candidate.model_id.clone();
         let mut upstream_body = match request_from_ir(&candidate.provider.protocol, &candidate_ir) {
@@ -899,7 +1079,21 @@ async fn openai_responses(
         let resp = match req.send().await {
             Ok(resp) => resp,
             Err(err) => {
-                failures.push(format!("{}: connect error: {err}", candidate.provider.id));
+                let message = format!("connect error: {err}");
+                // The success path already emitted; the failure paths did not,
+                // so a provider failing every Responses call never opened its
+                // breaker. `session_id` stays None (no chat-affinity key here).
+                emit_outcome(
+                    &state.app_handle,
+                    candidate,
+                    false,
+                    started,
+                    None,
+                    Some(&message),
+                    None,
+                    None,
+                );
+                failures.push(format!("{}: {message}", candidate.provider.id));
                 continue;
             }
         };
@@ -912,7 +1106,7 @@ async fn openai_responses(
                 .get("anthropic-ratelimit-unified-reset")
                 .and_then(|v| v.to_str().ok());
             let text = resp.text().await.unwrap_or_default();
-            record_upstream_cooldown(
+            let retry_after_ms = record_upstream_cooldown(
                 &state,
                 &cfg,
                 candidate,
@@ -925,6 +1119,16 @@ async fn openai_responses(
             let message = format!(
                 "HTTP {status}: {}",
                 text.chars().take(500).collect::<String>()
+            );
+            emit_outcome(
+                &state.app_handle,
+                candidate,
+                false,
+                started,
+                None,
+                Some(&message),
+                retry_after_ms,
+                None,
             );
             if cfg.should_retry(status) {
                 failures.push(format!("{}: {message}", candidate.provider.id));
@@ -944,13 +1148,26 @@ async fn openai_responses(
         let upstream: Value = match resp.json().await {
             Ok(value) => value,
             Err(err) => {
+                // Same rule as the chat path: an unserializable 200 is a
+                // provider-health signal, not a client error.
+                let message = format!("invalid upstream JSON: {err}");
+                emit_outcome(
+                    &state.app_handle,
+                    candidate,
+                    false,
+                    started,
+                    None,
+                    Some(&message),
+                    None,
+                    None,
+                );
                 return logged_error(
                     &state,
                     &ctx,
                     format,
                     StatusCode::BAD_GATEWAY,
                     "api_error",
-                    &format!("invalid upstream JSON: {err}"),
+                    &message,
                     Some(&model),
                 );
             }
@@ -988,6 +1205,23 @@ async fn openai_responses(
                 .into_response();
             }
             Err(err) => {
+                // The provider answered 200 with a body we can't read as a
+                // response — a provider-health signal, so it is reported even
+                // though the walk continues to the next candidate. (A
+                // `request_from_ir` failure above is NOT reported: that is the
+                // gateway's own translation limit, not the provider's fault —
+                // the chat path draws the same line.)
+                let message = format!("unreadable upstream response: {}", err.reason);
+                emit_outcome(
+                    &state.app_handle,
+                    candidate,
+                    false,
+                    started,
+                    None,
+                    Some(&message),
+                    None,
+                    None,
+                );
                 failures.push(format!("{}: {}", candidate.provider.id, err.reason));
                 continue;
             }
@@ -1151,6 +1385,28 @@ fn record_upstream_cooldown(
     Some(ms)
 }
 
+/// Concurrency-gate key for the calling gateway API key (W1.2).
+///
+/// Chat, embeddings and responses MUST derive this identically — a single
+/// configured `maxConcurrentPerKey` is one budget shared across every endpoint,
+/// and three hand-copied `format!` literals would silently split it into three.
+fn gw_gate_key(ctx: &ReqCtx) -> String {
+    format!("gw:{}", ctx.key_id.as_deref().unwrap_or("_"))
+}
+
+/// Concurrency-gate key for one pooled upstream account (W1.2). Same
+/// shared-budget invariant as [`gw_gate_key`].
+///
+/// Note this embeds the upstream secret and therefore must never be serialized;
+/// the renderer-facing in-flight tally keys on `provider.id` alone.
+fn up_gate_key(candidate: &Candidate) -> String {
+    format!(
+        "up:{}:{}",
+        candidate.provider.id,
+        candidate.provider.api_key.as_deref().unwrap_or("")
+    )
+}
+
 /// The "in-flight concurrency cap reached" 429 terminal (W1.2).
 fn concurrency_rejected(
     state: &AppState,
@@ -1203,6 +1459,11 @@ async fn live_decision(
             "model": model,
             "promptText": prompt_text,
             "sessionId": session_id,
+            // W1.2b: gateway-generated load, per provider. This runs BEFORE the
+            // candidate walk, so the snapshot is exactly "what other requests
+            // are in flight" — the signal the renderer's least-busy strategy
+            // otherwise reads as a constant zero for gateway traffic.
+            "inFlight": state.in_flight.snapshot(),
         }),
     );
     if emitted.is_err() {
@@ -1275,11 +1536,7 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
     let wait = Duration::from_millis(cfg.concurrency_wait_ms as u64);
     let gw_slot = match state
         .concurrency
-        .acquire(
-            &format!("gw:{}", ctx.key_id.as_deref().unwrap_or("_")),
-            cfg.max_concurrent_per_key,
-            wait,
-        )
+        .acquire(&gw_gate_key(&ctx), cfg.max_concurrent_per_key, wait)
         .await
     {
         Ok(slot) => slot,
@@ -1341,11 +1598,7 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
         let up_slot = match state
             .concurrency
             .acquire(
-                &format!(
-                    "up:{}:{}",
-                    candidate.provider.id,
-                    candidate.provider.api_key.as_deref().unwrap_or("")
-                ),
+                &up_gate_key(candidate),
                 cfg.max_concurrent_per_upstream_key,
                 wait,
             )
@@ -1360,6 +1613,9 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
                 continue;
             }
         };
+        // Counted whether or not a cap is set. Tracks `up_slot`'s lifetime
+        // exactly — including the move into the streaming task below.
+        let in_flight = state.in_flight.enter(&candidate.provider.id);
 
         let passthrough = candidate.provider.protocol == format.protocol_name();
         let mut upstream_body = if passthrough {
@@ -1468,13 +1724,15 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
         if stream {
             return stream_response(
                 state, ctx, format, candidate, resp, started, &model, session_id, gw_slot, up_slot,
+                in_flight,
             )
             .await;
         }
-        // Buffered path: `gw_slot` / `up_slot` carry Drop glue, so they release
-        // only when this handler returns — i.e. after the awaited response
-        // below completes — holding the concurrency slots for the whole
-        // non-streaming request without being passed down.
+        // Buffered path: `gw_slot` / `up_slot` / `in_flight` carry Drop glue, so
+        // they release only when this handler returns — i.e. after the awaited
+        // response below completes — holding the concurrency slots and the
+        // in-flight tally for the whole non-streaming request without being
+        // passed down.
         return buffered_response(
             state,
             ctx,
@@ -1628,6 +1886,7 @@ async fn stream_response(
     session_id: String,
     gw_slot: Slot,
     up_slot: Slot,
+    in_flight: InFlightGuard,
 ) -> Response {
     let passthrough = candidate.provider.protocol == format.protocol_name();
     if passthrough {
@@ -1640,14 +1899,24 @@ async fn stream_response(
         let ctx = ctx.clone();
         let model = model.to_string();
         tokio::spawn(async move {
-            // Hold the W1.2 concurrency slots for the WHOLE stream — they
-            // release when this task ends, not at the handler's return.
-            let _slots = (gw_slot, up_slot);
+            // Hold the W1.2 concurrency slots + the in-flight tally for the
+            // WHOLE stream — they release when this task ends, not at the
+            // handler's return.
+            let _slots = (gw_slot, up_slot, in_flight);
             let mut deframer = SseDeframer::default();
             let mut input: Option<u64> = None;
             let mut output: Option<u64> = None;
             let mut upstream = resp.bytes_stream();
-            'pump: while let Some(chunk) = upstream.next().await {
+            let mut stalled = false;
+            'pump: loop {
+                let chunk = match tokio::time::timeout(STREAM_IDLE_TIMEOUT, upstream.next()).await {
+                    Ok(Some(chunk)) => chunk,
+                    Ok(None) => break 'pump, // clean end of stream
+                    Err(_) => {
+                        stalled = true;
+                        break 'pump;
+                    }
+                };
                 let Ok(bytes) = chunk else { break };
                 for data in deframer.push(&bytes) {
                     if data == "[DONE]" {
@@ -1666,13 +1935,22 @@ async fn stream_response(
                     sniff_passthrough_usage(format, &value, &mut input, &mut output);
                 }
             }
+            // A stall is a provider failure, not a completed turn — reporting it
+            // as success would both mis-train the breaker and leave a stuck
+            // upstream looking healthy.
+            let stall_error = stalled.then(|| {
+                format!(
+                    "upstream stream stalled: no data for {}s",
+                    STREAM_IDLE_TIMEOUT.as_secs()
+                )
+            });
             emit_outcome(
                 &task_state.app_handle,
                 &candidate,
-                true,
+                !stalled,
                 started,
                 Some((input, output)),
-                None,
+                stall_error.as_deref(),
                 None,
                 Some(&session_id),
             );
@@ -1709,11 +1987,21 @@ async fn stream_response(
     let ctx = ctx.clone();
     let model = model.to_string();
     tokio::spawn(async move {
-        // Hold the W1.2 concurrency slots for the WHOLE transcoded stream.
-        let _slots = (gw_slot, up_slot);
+        // Hold the W1.2 concurrency slots + in-flight tally for the WHOLE
+        // transcoded stream.
+        let _slots = (gw_slot, up_slot, in_flight);
         let mut deframer = SseDeframer::default();
         let mut upstream = resp.bytes_stream();
-        'pump: while let Some(chunk) = upstream.next().await {
+        let mut stalled = false;
+        'pump: loop {
+            let chunk = match tokio::time::timeout(STREAM_IDLE_TIMEOUT, upstream.next()).await {
+                Ok(Some(chunk)) => chunk,
+                Ok(None) => break 'pump, // clean end of stream
+                Err(_) => {
+                    stalled = true;
+                    break 'pump;
+                }
+            };
             let Ok(bytes) = chunk else { break };
             for frame in transcode_upstream_sse_bytes(&mut deframer, &mut transcoder, &bytes) {
                 if tx.send(Ok(Bytes::from(frame.to_frame()))).await.is_err() {
@@ -1727,13 +2015,19 @@ async fn stream_response(
             }
         }
         let usage = transcoder.usage();
+        let stall_error = stalled.then(|| {
+            format!(
+                "upstream stream stalled: no data for {}s",
+                STREAM_IDLE_TIMEOUT.as_secs()
+            )
+        });
         emit_outcome(
             &task_state.app_handle,
             &candidate,
-            true,
+            !stalled,
             started,
             Some((Some(usage.input_tokens), Some(usage.output_tokens))),
-            None,
+            stall_error.as_deref(),
             None,
             Some(&session_id),
         );
@@ -1816,19 +2110,44 @@ fn emit_outcome(
     retry_after_ms: Option<i64>,
     session_id: Option<&str>,
 ) {
+    let payload = outcome_payload(
+        candidate,
+        ok,
+        started.elapsed().as_millis() as u64,
+        usage,
+        error,
+        retry_after_ms,
+        session_id,
+    );
+    let _ = app_handle.emit(REQUEST_OUTCOME_EVENT, payload);
+}
+
+/// The `gateway://request-outcome` body. Split out from [`emit_outcome`] so the
+/// renderer contract — above all the rule that a non-chat endpoint sends a null
+/// `sessionId` and therefore cannot pin chat affinity — is unit-testable
+/// without an `AppHandle`.
+#[allow(clippy::too_many_arguments)]
+fn outcome_payload(
+    candidate: &Candidate,
+    ok: bool,
+    latency_ms: u64,
+    usage: Option<(Option<u64>, Option<u64>)>,
+    error: Option<&str>,
+    retry_after_ms: Option<i64>,
+    session_id: Option<&str>,
+) -> Value {
     let (input_tokens, output_tokens) = usage.unwrap_or((None, None));
-    let payload = json!({
+    json!({
         "providerId": candidate.provider.id,
         "modelId": candidate.model_id,
         "ok": ok,
-        "latencyMs": started.elapsed().as_millis() as u64,
+        "latencyMs": latency_ms,
         "inputTokens": input_tokens,
         "outputTokens": output_tokens,
         "errorMessage": error,
         "retryAfterMs": retry_after_ms,
         "sessionId": session_id,
-    });
-    let _ = app_handle.emit(REQUEST_OUTCOME_EVENT, payload);
+    })
 }
 
 /// One durable request-log row per request (success, error, or middleware
@@ -2044,6 +2363,196 @@ mod tests {
         assert_eq!(supplied_token(&both), Some("tok-1"));
 
         assert_eq!(supplied_token(&HeaderMap::new()), None);
+    }
+
+    /// A snapshot mixing executable (openai / anthropic) providers with a
+    /// non-executable one, plus an alias that points ONLY at the latter.
+    fn models_snapshot() -> RoutingSnapshot {
+        serde_json::from_value(serde_json::json!({
+            "aliases": [
+                { "alias": "fast", "entries": [
+                    { "providerId": "groq", "modelId": "llama-3.3-70b" }
+                ]},
+                { "alias": "vision", "entries": [
+                    { "providerId": "weird", "modelId": "gemini-pro" }
+                ]}
+            ],
+            "providers": [
+                { "id": "groq", "protocol": "openai", "baseUrl": "https://api.groq.com/openai/v1",
+                  "apiKey": "sk-g", "enabled": true, "models": ["llama-3.3-70b"] },
+                { "id": "weird", "protocol": "gemini", "baseUrl": "https://g",
+                  "apiKey": "sk-w", "enabled": true, "models": ["gemini-pro"] },
+                { "id": "off", "protocol": "openai", "baseUrl": "https://o",
+                  "apiKey": "sk-o", "enabled": false, "models": ["hidden-model"] }
+            ],
+            "generatedAtMs": 1
+        }))
+        .unwrap()
+    }
+
+    fn listed_ids(data: &[Value]) -> Vec<String> {
+        data.iter()
+            .filter_map(|m| m["id"].as_str().map(str::to_string))
+            .collect()
+    }
+
+    #[test]
+    fn list_models_hides_models_the_gateway_cannot_execute() {
+        let ids = listed_ids(&listable_models(&models_snapshot(), false, &|_| true));
+        // Executable + enabled only.
+        assert!(ids.contains(&"fast".to_string()));
+        assert!(ids.contains(&"llama-3.3-70b".to_string()));
+        // The gemini-protocol provider would 404 on the very next chat call, so
+        // neither it nor the alias that only points at it may be advertised.
+        assert!(!ids.contains(&"gemini-pro".to_string()));
+        assert!(!ids.contains(&"vision".to_string()));
+        // Disabled providers stay hidden as before.
+        assert!(!ids.contains(&"hidden-model".to_string()));
+    }
+
+    #[test]
+    fn list_models_still_honours_exposure_and_key_allowlist() {
+        let ids = listed_ids(&listable_models(&models_snapshot(), false, &|m| {
+            m == "fast"
+        }));
+        assert_eq!(ids, vec!["fast".to_string()]);
+
+        // hide_raw_provider_models keeps aliases and drops bare provider models.
+        let ids = listed_ids(&listable_models(&models_snapshot(), true, &|_| true));
+        assert_eq!(ids, vec!["fast".to_string()]);
+    }
+
+    #[test]
+    fn gate_keys_are_endpoint_independent() {
+        // The shared-budget invariant: chat, embeddings and responses all reach
+        // the limiter through these two helpers, so a single configured cap is
+        // ONE budget across endpoints. If someone re-inlines a `format!` in one
+        // handler this test won't catch it — but the helpers existing at all is
+        // what makes that a visible edit rather than an invisible one.
+        let mut c = ctx();
+        c.key_id = Some("key-abc".into());
+        assert_eq!(gw_gate_key(&c), "gw:key-abc");
+
+        // An unauthenticated caller still shares one bucket rather than each
+        // getting its own unlimited gate.
+        c.key_id = None;
+        assert_eq!(gw_gate_key(&c), "gw:_");
+
+        let candidate = resolve_candidates(&models_snapshot(), "llama-3.3-70b")
+            .into_iter()
+            .next()
+            .expect("groq candidate");
+        assert_eq!(up_gate_key(&candidate), "up:groq:sk-g");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_silent_upstream_stream_is_abandoned_rather_than_parked_forever() {
+        // Streaming skips `apply_timeout` and reqwest sets no read timeout, so
+        // without this the pump task would park forever holding its concurrency
+        // slots AND its in-flight tally — and the tally drives least-busy, so
+        // one hung stream would steer traffic off that provider permanently.
+        let mut silent = futures_util::stream::pending::<Result<Bytes, ()>>();
+        assert!(
+            tokio::time::timeout(STREAM_IDLE_TIMEOUT, silent.next())
+                .await
+                .is_err(),
+            "a stream that never yields must time out, not park the pump"
+        );
+
+        // …and a stall must be reported as a FAILURE. Both pumps used to emit
+        // `ok: true` unconditionally at stream end, which would have logged a
+        // hung upstream as a healthy turn.
+        let candidate = resolve_candidates(&models_snapshot(), "llama-3.3-70b")
+            .into_iter()
+            .next()
+            .expect("groq candidate");
+        let stalled = outcome_payload(
+            &candidate,
+            false,
+            1,
+            None,
+            Some("upstream stream stalled: no data for 300s"),
+            None,
+            Some("sess-1"),
+        );
+        assert_eq!(stalled["ok"], false);
+        assert!(stalled["errorMessage"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("stalled"));
+    }
+
+    #[test]
+    fn a_non_chat_outcome_can_never_pin_chat_affinity() {
+        // `sessionId` drives `pinSessionDeployment` on the renderer. Embeddings
+        // and /v1/responses have no chat session, so they MUST send null —
+        // otherwise their traffic would stick a real conversation to whatever
+        // deployment happened to serve an embedding.
+        let candidate = resolve_candidates(&models_snapshot(), "llama-3.3-70b")
+            .into_iter()
+            .next()
+            .expect("groq candidate");
+
+        let embeddings = outcome_payload(
+            &candidate,
+            true,
+            12,
+            Some((Some(7), None)),
+            None,
+            None,
+            None,
+        );
+        assert!(embeddings["sessionId"].is_null());
+        assert_eq!(embeddings["inputTokens"], 7);
+        assert!(embeddings["outputTokens"].is_null());
+        assert_eq!(embeddings["providerId"], "groq");
+
+        // A failure carries the cooldown window through to the breaker.
+        let failed = outcome_payload(
+            &candidate,
+            false,
+            3,
+            None,
+            Some("HTTP 429"),
+            Some(4_000),
+            None,
+        );
+        assert_eq!(failed["ok"], false);
+        assert_eq!(failed["retryAfterMs"], 4_000);
+        assert_eq!(failed["errorMessage"], "HTTP 429");
+        assert!(failed["sessionId"].is_null());
+
+        // The chat path, by contrast, does thread one through.
+        let chat = outcome_payload(&candidate, true, 5, None, None, None, Some("sess-1"));
+        assert_eq!(chat["sessionId"], "sess-1");
+    }
+
+    #[test]
+    fn in_flight_snapshot_never_carries_a_credential() {
+        // `up_gate_key` deliberately embeds the API key, and the decide payload
+        // is serialized to the renderer — so the tally MUST key on the provider
+        // id alone. Working rule 7: pin the intentional invariant.
+        let tracker = InFlightTracker::default();
+        let candidate = resolve_candidates(&models_snapshot(), "llama-3.3-70b")
+            .into_iter()
+            .next()
+            .expect("groq candidate");
+        assert!(
+            up_gate_key(&candidate).contains("sk-"),
+            "fixture has a secret"
+        );
+
+        let _guard = tracker.enter(&candidate.provider.id);
+        let snapshot = tracker.snapshot();
+        assert_eq!(snapshot.get("groq"), Some(&1));
+        for key in snapshot.keys() {
+            assert!(
+                !key.contains("sk-"),
+                "credential leaked into snapshot: {key}"
+            );
+        }
+        // And it is a plain provider id, not the gate key.
+        assert!(!snapshot.contains_key(&up_gate_key(&candidate)));
     }
 
     #[test]

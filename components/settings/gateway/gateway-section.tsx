@@ -10,9 +10,9 @@
  * (<GatewayLogViewer>). Inspired by newapi's channel/token/log surface.
  */
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { AlertTriangleIcon, CopyIcon, NetworkIcon } from "lucide-react"
+import { AlertTriangleIcon, CopyIcon, NetworkIcon, PlusIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -40,21 +40,34 @@ import { GatewayKeysCard } from "./gateway-keys-card"
 import { GatewayLogViewer } from "./gateway-log-viewer"
 
 /** Add/remove chip list backed by a string[] — used for allowlist / exposed
- * models / retry status codes. */
+ * models / retry status codes.
+ *
+ * The draft is controlled state, not a ref, and commits on Enter OR blur: the
+ * earlier ref-backed version silently discarded anything typed but not
+ * Enter-ed, which looked exactly like a save that didn't stick. */
 function ChipInput({
   values,
   onCommit,
   placeholder,
   ariaLabel,
+  addLabel,
   removeLabel,
 }: {
   values: string[]
   onCommit: (next: string[]) => void
   placeholder: string
   ariaLabel: string
+  addLabel: string
   removeLabel: string
 }) {
-  const draftRef = useRef("")
+  const [draft, setDraft] = useState("")
+
+  const commitDraft = () => {
+    const value = draft.trim()
+    if (value && !values.includes(value)) onCommit([...values, value])
+    setDraft("")
+  }
+
   return (
     <div className="space-y-2">
       {values.length > 0 && (
@@ -62,12 +75,12 @@ function ChipInput({
           {values.map((entry) => (
             <span
               key={entry}
-              className="flex items-center gap-1 rounded bg-muted px-2 py-1 font-mono text-xs"
+              className="flex items-center gap-1 rounded bg-muted py-1 pl-2 pr-1 font-mono text-xs"
             >
               {entry}
               <button
                 type="button"
-                className="text-muted-foreground hover:text-foreground"
+                className="rounded-sm px-1 text-muted-foreground hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 aria-label={`${removeLabel} ${entry}`}
                 onClick={() => onCommit(values.filter((e) => e !== entry))}
               >
@@ -77,19 +90,39 @@ function ChipInput({
           ))}
         </div>
       )}
-      <Input
-        placeholder={placeholder}
-        aria-label={ariaLabel}
-        className="font-mono text-xs"
-        onChange={(e) => (draftRef.current = e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key !== "Enter") return
-          const value = draftRef.current.trim()
-          if (value && !values.includes(value)) onCommit([...values, value])
-          draftRef.current = ""
-          ;(e.target as HTMLInputElement).value = ""
-        }}
-      />
+      <div className="flex items-center gap-2">
+        <Input
+          value={draft}
+          placeholder={placeholder}
+          aria-label={ariaLabel}
+          className="font-mono text-xs"
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commitDraft}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter") return
+            e.preventDefault()
+            commitDraft()
+          }}
+        />
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={!draft.trim()}
+          // Qualified by the field: six buttons all named "Add" are ambiguous
+          // to a screen reader (and indistinguishable to a test).
+          aria-label={`${addLabel} ${ariaLabel}`}
+          // Commit on mousedown, NOT click: mousedown blurs the input, whose
+          // onBlur commits and clears the draft, which renders this button
+          // disabled — so an onClick handler would never fire and the button
+          // would be decorative. Ordering mousedown first makes the button the
+          // thing that actually commits; the blur that follows sees an empty
+          // draft and no-ops.
+          onMouseDown={commitDraft}
+        >
+          <PlusIcon className="h-3.5 w-3.5" />
+        </Button>
+      </div>
     </div>
   )
 }
@@ -193,26 +226,15 @@ export function GatewaySection() {
           </div>
           {!status?.hasToken && <p className="text-xs text-muted-foreground">{t("requiresKey")}</p>}
 
-          <div className="flex items-center justify-between gap-4">
-            <Label htmlFor="gw-port" className="flex-1">
-              {t("port")}
-            </Label>
-            <Input
-              id="gw-port"
-              type="number"
-              min={1024}
-              max={65535}
-              className="w-28"
-              value={config.port}
-              onChange={(e) => {
-                const next = Math.min(
-                  65535,
-                  Math.max(1024, Number.parseInt(e.target.value || "0", 10) || 47823)
-                )
-                void persist({ port: next })
-              }}
-            />
-          </div>
+          <NumberRow
+            id="gw-port"
+            label={t("port")}
+            value={config.port}
+            min={1024}
+            max={65535}
+            fallback={DEFAULT_GATEWAY_CONFIG.port}
+            onCommit={(v) => void persist({ port: v })}
+          />
 
           {/* Bind interface */}
           <div className="space-y-2">
@@ -285,6 +307,7 @@ export function GatewaySection() {
               onCommit={(next) => void persist({ allowlist: next })}
               placeholder={t("allowlistPlaceholder")}
               ariaLabel={t("allowlist")}
+              addLabel={t("add")}
               removeLabel={t("remove")}
             />
             <p className="text-xs text-muted-foreground">{t("allowlistHelp")}</p>
@@ -343,6 +366,7 @@ export function GatewaySection() {
               }
               placeholder={t("retryStatusCodesPlaceholder")}
               ariaLabel={t("retryStatusCodes")}
+              addLabel={t("add")}
               removeLabel={t("remove")}
             />
             <p className="text-xs text-muted-foreground">{t("retryStatusCodesHelp")}</p>
@@ -366,6 +390,7 @@ export function GatewaySection() {
               onCommit={(next) => void persist({ exposedModels: next })}
               placeholder={t("exposedModelsPlaceholder")}
               ariaLabel={t("exposedModels")}
+              addLabel={t("add")}
               removeLabel={t("remove")}
             />
             <p className="text-xs text-muted-foreground">
@@ -451,6 +476,7 @@ export function GatewaySection() {
               onCommit={(next) => void persist({ disableKeywords: next })}
               placeholder={t("disableKeywordsPlaceholder")}
               ariaLabel={t("disableKeywords")}
+              addLabel={t("add")}
               removeLabel={t("remove")}
             />
             <p className="text-xs text-muted-foreground">{t("disableKeywordsHelp")}</p>
@@ -463,6 +489,7 @@ export function GatewaySection() {
               onCommit={(next) => void persist({ strippedRequestFields: next })}
               placeholder={t("strippedFieldsPlaceholder")}
               ariaLabel={t("strippedFields")}
+              addLabel={t("add")}
               removeLabel={t("remove")}
             />
             <p className="text-xs text-muted-foreground">{t("strippedFieldsHelp")}</p>
@@ -475,6 +502,7 @@ export function GatewaySection() {
               onCommit={(next) => void persist({ fieldStripAllow: next })}
               placeholder={t("fieldStripAllowPlaceholder")}
               ariaLabel={t("fieldStripAllow")}
+              addLabel={t("add")}
               removeLabel={t("remove")}
             />
             <p className="text-xs text-muted-foreground">{t("fieldStripAllowHelp")}</p>
@@ -526,6 +554,14 @@ export function GatewaySection() {
   )
 }
 
+/** Label + bounded number input, committed on blur / Enter rather than on every
+ * keystroke.
+ *
+ * Clamping per keystroke made these fields unusable: with `min` 1024 the port
+ * box turned the first digit of "8080" into 1024 and typing could never recover,
+ * and an empty field parsed as NaN and snapped back to the default so the value
+ * could not be cleared and retyped. Deferring the clamp to commit also collapses
+ * one Tauri IPC + disk write per keystroke into one per edit. */
 function NumberRow({
   id,
   label,
@@ -545,6 +581,16 @@ function NumberRow({
   fallback: number
   onCommit: (v: number) => void
 }) {
+  const [draft, setDraft] = useState<string | null>(null)
+
+  const commitDraft = () => {
+    if (draft === null) return
+    const raw = Number.parseInt(draft, 10)
+    const next = Number.isFinite(raw) ? Math.min(max, Math.max(min, raw)) : fallback
+    setDraft(null)
+    if (next !== value) onCommit(next)
+  }
+
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between gap-4">
@@ -557,11 +603,15 @@ function NumberRow({
           min={min}
           max={max}
           className="w-28"
-          value={value}
-          onChange={(e) => {
-            const raw = Number.parseInt(e.target.value, 10)
-            const next = Number.isFinite(raw) ? Math.min(max, Math.max(min, raw)) : fallback
-            onCommit(next)
+          // `draft` is null while not editing, so the field tracks external
+          // config reloads; once the user types it owns the value verbatim.
+          value={draft ?? String(value)}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commitDraft}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter") return
+            e.preventDefault()
+            commitDraft()
           }}
         />
       </div>

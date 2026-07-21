@@ -40,6 +40,38 @@ jest.mock("@/lib/subscription/opencode/chat-bridge", () => ({
   resolveOpencodeVaultCredential: jest.fn().mockResolvedValue(null),
 }))
 
+// Stubbed so the deps `overrides` the provider assembles can be inspected. The
+// stub engine's `selectProvider` returns undefined, which `resolveGatewayDecision`
+// maps to `[]` — the same answer the real engine gives for an unmatched alias.
+type EngineOverrides = { getInFlight: (id: string) => number }
+
+// Args are declared so `mock.calls[…][1]` is typed as the overrides object.
+const mockBuildEngine = jest.fn((_settings: unknown, _overrides?: EngineOverrides) => ({
+  selectProvider: () => undefined,
+}))
+/** Chat-plane in-flight, as the renderer's own store would report it. */
+const mockBuildDeps = jest.fn((_settings: unknown) => ({
+  getInFlight: (id: string) => (id === "openai" ? 2 : 0),
+}))
+jest.mock("@cognia/provider-routing/build-preview-engine", () => ({
+  // Referenced lazily inside the arrows — a direct reference in the factory
+  // body would hit the hoisted-mock TDZ.
+  buildRoutingEngine: (settings: unknown, overrides?: EngineOverrides) =>
+    mockBuildEngine(settings, overrides),
+  buildRoutingEngineDeps: (settings: unknown) => mockBuildDeps(settings),
+}))
+
+/** Drive the decide round-trip and hand back the deps overrides it built. */
+async function decideWith(payload: Record<string, unknown>) {
+  await act(async () => {
+    handlers["gateway://decide"](payload)
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+  return mockBuildEngine.mock.calls.at(-1)?.[1]
+}
+
 const settingsState = {
   settings: {
     defaultProvider: "openai",
@@ -64,6 +96,10 @@ describe("GatewayProvider", () => {
     mockUnsubscribe.mockReset()
     mockAppendLog.mockReset().mockResolvedValue(undefined)
     mockDecisionResponse.mockReset().mockResolvedValue(undefined)
+    // `decideWith` reads `mock.calls.at(-1)`, so a stale call from a previous
+    // test would be read as this one's.
+    mockBuildEngine.mockClear()
+    mockBuildDeps.mockClear()
     for (const k of Object.keys(handlers)) delete handlers[k]
   })
   afterEach(() => {
@@ -148,6 +184,26 @@ describe("GatewayProvider", () => {
     // but the round-trip is always answered so the Rust side doesn't wait out
     // the full timeout.
     expect(mockDecisionResponse).toHaveBeenCalledWith("r1", [])
+  })
+
+  it("folds the gateway's own in-flight counts into the least-busy signal", async () => {
+    // The renderer's in-flight store is written only by the chat plane, so
+    // without this merge a burst of concurrent gateway requests all score every
+    // provider as idle and pile onto one deployment.
+    render(<GatewayProvider />)
+    const overrides = await decideWith({
+      requestId: "r2",
+      model: "some-alias",
+      inFlight: { openai: 3 },
+    })
+    expect(overrides?.getInFlight("openai")).toBe(5) // 2 chat-plane + 3 gateway
+    expect(overrides?.getInFlight("anthropic")).toBe(0)
+  })
+
+  it("falls back to the chat-plane count when the gateway sends no in-flight map", async () => {
+    render(<GatewayProvider />)
+    const overrides = await decideWith({ requestId: "r3", model: "some-alias" })
+    expect(overrides?.getInFlight("openai")).toBe(2)
   })
 
   it("is inert outside Tauri", () => {

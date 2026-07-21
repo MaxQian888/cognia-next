@@ -40,3 +40,6 @@ rand = "0.8"
 [dev-dependencies]
 cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }
 tower = { version = "0.5", features = ["util", "limit", "timeout"] }
+# `test-util` gives tests a paused clock, so the SSE idle-timeout test can
+# assert the real STREAM_IDLE_TIMEOUT instead of a stand-in short duration.
+tokio = { version = "1", features = ["test-util"] }
