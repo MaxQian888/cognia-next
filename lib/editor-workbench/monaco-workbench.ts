@@ -43,6 +43,7 @@ import {
 } from "@/lib/plugin/vscode-shim/monaco-bridge"
 import { getFileExtension } from "@/lib/canvas/utils"
 import { pathToFileUri } from "@/lib/files/path-uri"
+import { registerAllSnippets, registerEmmetSupport } from "@/lib/monaco/snippets"
 
 // ────────────────────────────────────────────────────────────────────────
 // Minimal real-monaco interface shapes (decoupled from monaco-editor pkg).
@@ -238,10 +239,12 @@ function adaptEditorForBridge(editor: IMonacoEditor): BridgeMonacoEditor {
  *      at the URI yet, or reusing the cached one if it does.
  *   2. Binds the editor to the snippets/outline registry via
  *      `bindMonacoEditorContext` (preserves existing behavior).
- *   3. Notifies the vscode-shim bridge so LSP providers can address
+ *   3. Registers global snippet and Emmet completion providers for the
+ *      Monaco namespace (idempotent per Monaco instance).
+ *   4. Notifies the vscode-shim bridge so LSP providers can address
  *      this editor as `vscode.window.activeTextEditor` and bind
  *      providers to its URI.
- *   4. Wires focus / blur / content / selection listeners and forwards
+ *   5. Wires focus / blur / content / selection listeners and forwards
  *      them to the bridge.
  *
  * The returned `dispose()` tears down 2 + 3 + 4. It deliberately does
@@ -267,6 +270,12 @@ export function mountMonacoWorkbench(
   if (editor.getModel() !== model) {
     editor.setModel(model)
   }
+
+  // Completion registration belongs at the shared workbench seam so Skills,
+  // Artifacts, Canvas, and project files behave identically even when a less
+  // common surface is the first Monaco editor mounted in the app.
+  registerAllSnippets(monaco)
+  registerEmmetSupport(monaco)
 
   // Step 2 — light registry binding. Threads the surface discriminator + live
   // editor + selection/cursor so the plugin Canvas API (`canvas-api.ts`) can

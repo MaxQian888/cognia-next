@@ -58,15 +58,20 @@ import type {
  * snippets render correctly.
  */
 export interface AdaptedMonacoCompletionItem {
-  label: string
+  label: string | { label: string; detail?: string; description?: string }
   kind?: number
+  tags?: number[]
   detail?: string
   documentation?: string
   insertText: string
   insertTextRules?: number
-  range?: MonacoRange
+  range?: MonacoRange | { insert: MonacoRange; replace: MonacoRange }
   filterText?: string
   sortText?: string
+  preselect?: boolean
+  commitCharacters?: string[]
+  additionalTextEdits?: MonacoTextEdit[]
+  command?: { id: string; title: string; arguments?: unknown[] }
 }
 
 // =============================================================================
@@ -112,9 +117,7 @@ export type VscodeMarkedString = string | { language: string; value: string }
 /** VS Code & LSP `Hover`. */
 export interface VscodeHover {
   contents:
-    | VscodeMarkupContent
-    | VscodeMarkedString
-    | Array<VscodeMarkupContent | VscodeMarkedString>
+    VscodeMarkupContent | VscodeMarkedString | Array<VscodeMarkupContent | VscodeMarkedString>
   range?: VscodeRange
 }
 
@@ -154,6 +157,7 @@ export interface VscodeCompletionItem {
   range?: VscodeRange | { inserting: VscodeRange; replacing: VscodeRange }
   filterText?: string
   sortText?: string
+  tags?: number[]
   preselect?: boolean
   commitCharacters?: string[]
   additionalTextEdits?: VscodeTextEdit[]
@@ -162,8 +166,30 @@ export interface VscodeCompletionItem {
 
 /** Result of a completion request — flat array or `CompletionList`. */
 export type VscodeCompletionResult =
-  | VscodeCompletionItem[]
-  | { isIncomplete: boolean; items: VscodeCompletionItem[] }
+  VscodeCompletionItem[] | { isIncomplete: boolean; items: VscodeCompletionItem[] }
+
+export interface VscodeInlineCompletionItem {
+  insertText: string | { value: string } | { snippet: string }
+  range?: VscodeRange
+  additionalTextEdits?: VscodeTextEdit[]
+  command?: { command: string; title: string; arguments?: unknown[] }
+  completeBracketPairs?: boolean
+}
+
+export interface VscodeInlineCompletionList {
+  items: VscodeInlineCompletionItem[]
+  commands?: Array<
+    | { command: string; title: string; arguments?: unknown[] }
+    | {
+        command: { command: string; title: string; arguments?: unknown[] }
+        icon?: unknown
+      }
+  >
+  suppressSuggestions?: boolean
+  enableForwardStability?: boolean
+}
+
+export type VscodeInlineCompletionResult = VscodeInlineCompletionItem[] | VscodeInlineCompletionList
 
 /** LSP `SignatureHelp`. */
 export interface VscodeSignatureHelp {
@@ -311,7 +337,7 @@ const VSCODE_TO_MONACO_COMPLETION_KIND: Record<number, number> = {
   12: 13, // Value → Value
   13: 15, // Enum → Enum
   14: 17, // Keyword → Keyword
-  15: 27, // Snippet → Snippet
+  15: 28, // Snippet → Snippet
   16: 19, // Color → Color
   17: 20, // File → File
   18: 21, // Reference → Reference
@@ -340,12 +366,9 @@ export function vscodeCompletionKindToMonaco(kind: number | undefined): number {
  *     `insertTextRules = InsertAsSnippet (= 4)` to interpret `${1:foo}`
  *     placeholders. We emit that flag inline so the bridge consumer can
  *     forward it verbatim to Monaco's provider result.
- *   - Both flavours of `range` (single `Range` or `{ inserting, replacing }`)
- *     collapse to a single `range` on the Monaco shape — Monaco itself
- *     supports the inserting/replacing distinction via the
- *     `InsertReplaceEdit` shape, but cognia's `MonacoCompletionItem` is
- *     the bridge-side simplified type. We pick `replacing` when both are
- *     present (matches Monaco default behaviour).
+ *   - Both flavours of `range` are preserved. Monaco supports distinct
+ *     insert/replace ranges, so collapsing them would overwrite text that
+ *     VS Code providers intentionally left outside the insertion range.
  *   - `documentation` reduces to its `value` when it's MarkupContent.
  */
 export function vscodeCompletionItemToMonaco(
@@ -355,22 +378,34 @@ export function vscodeCompletionItemToMonaco(
     item.range == null
       ? undefined
       : "inserting" in item.range
-        ? vscodeRangeToMonaco(item.range.replacing)
+        ? {
+            insert: vscodeRangeToMonaco(item.range.inserting),
+            replace: vscodeRangeToMonaco(item.range.replacing),
+          }
         : vscodeRangeToMonaco(item.range)
 
+  const plainLabel = typeof item.label === "string" ? item.label : item.label.label
+
   return {
-    label: typeof item.label === "string" ? item.label : item.label.label,
+    label: item.label,
     kind: vscodeCompletionKindToMonaco(item.kind),
+    tags: item.tags,
     detail: item.detail,
     documentation:
       typeof item.documentation === "string"
         ? item.documentation
         : (item.documentation?.value ?? undefined),
-    insertText: item.insertText ?? (typeof item.label === "string" ? item.label : item.label.label),
+    insertText: item.insertText ?? plainLabel,
     insertTextRules: item.insertTextFormat === 2 ? 4 : undefined,
     range,
     filterText: item.filterText,
     sortText: item.sortText,
+    preselect: item.preselect,
+    commitCharacters: item.commitCharacters,
+    additionalTextEdits: item.additionalTextEdits?.map(vscodeTextEditToMonaco),
+    command: item.command
+      ? { id: item.command.command, title: item.command.title, arguments: item.command.arguments }
+      : undefined,
   }
 }
 
@@ -635,10 +670,83 @@ export function vscodeSemanticTokensToMonaco(st: VscodeSemanticTokens): MonacoSe
  */
 export function vscodeCompletionResultToMonaco(
   result: VscodeCompletionResult | null | undefined
-): { suggestions: AdaptedMonacoCompletionItem[] } | null {
+): { suggestions: AdaptedMonacoCompletionItem[]; incomplete?: boolean } | null {
   if (result == null) return null
   const items = Array.isArray(result) ? result : result.items
-  return { suggestions: items.map(vscodeCompletionItemToMonaco) }
+  return {
+    suggestions: items.map(vscodeCompletionItemToMonaco),
+    ...(Array.isArray(result) ? {} : { incomplete: result.isIncomplete }),
+  }
+}
+
+export interface AdaptedMonacoInlineCompletionItem {
+  insertText: string | { snippet: string }
+  range?: MonacoRange
+  additionalTextEdits?: MonacoTextEdit[]
+  command?: { id: string; title: string; arguments?: unknown[] }
+  completeBracketPairs?: boolean
+}
+
+export interface AdaptedMonacoInlineCompletions {
+  items: AdaptedMonacoInlineCompletionItem[]
+  commands?: Array<{
+    command: { id: string; title: string; arguments?: unknown[] }
+    icon?: unknown
+  }>
+  suppressSuggestions?: boolean
+  enableForwardStability?: boolean
+}
+
+function adaptCommand(command: { command: string; title: string; arguments?: unknown[] }): {
+  id: string
+  title: string
+  arguments?: unknown[]
+} {
+  return { id: command.command, title: command.title, arguments: command.arguments }
+}
+
+function vscodeInlineCompletionItemToMonaco(
+  item: VscodeInlineCompletionItem
+): AdaptedMonacoInlineCompletionItem {
+  const insertText =
+    typeof item.insertText === "string"
+      ? item.insertText
+      : "value" in item.insertText
+        ? { snippet: item.insertText.value }
+        : item.insertText
+  return {
+    insertText,
+    range: item.range ? vscodeRangeToMonaco(item.range) : undefined,
+    additionalTextEdits: item.additionalTextEdits?.map(vscodeTextEditToMonaco),
+    command: item.command ? adaptCommand(item.command) : undefined,
+    completeBracketPairs: item.completeBracketPairs,
+  }
+}
+
+/** Convert VS Code inline-completion arrays/lists into Monaco's result shape. */
+export function vscodeInlineCompletionResultToMonaco(
+  result: VscodeInlineCompletionResult | null | undefined
+): AdaptedMonacoInlineCompletions | null {
+  if (result == null) return null
+  const list: VscodeInlineCompletionList = Array.isArray(result) ? { items: result } : result
+  return {
+    items: list.items.map(vscodeInlineCompletionItemToMonaco),
+    ...(list.commands
+      ? {
+          commands: list.commands.map((entry) => {
+            const nested = typeof entry.command === "string" ? entry : entry.command
+            return {
+              command: adaptCommand(nested),
+              ...("icon" in entry ? { icon: entry.icon } : {}),
+            }
+          }),
+        }
+      : {}),
+    ...(list.suppressSuggestions == null ? {} : { suppressSuggestions: list.suppressSuggestions }),
+    ...(list.enableForwardStability == null
+      ? {}
+      : { enableForwardStability: list.enableForwardStability }),
+  }
 }
 
 /**

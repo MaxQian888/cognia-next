@@ -1,4 +1,4 @@
-import { registerAllSnippets, registerEmmetSupport } from "./snippets"
+import { collectEditorSnippets, registerAllSnippets, registerEmmetSupport } from "./snippets"
 import { snippetProvider } from "@/lib/canvas/snippets/snippet-registry"
 import { listSnippetsForLanguage } from "@/lib/plugin/bridge/snippets-bridge"
 import { isTauri } from "@/lib/tauri"
@@ -61,18 +61,85 @@ beforeEach(() => {
   mockedIsTauri.mockReturnValue(false)
 })
 
+describe("collectEditorSnippets", () => {
+  it("normalizes builtin and multi-prefix plugin snippets for every editor engine", () => {
+    jest.spyOn(snippetProvider, "getSnippets").mockReturnValue([
+      {
+        id: "ts-fn",
+        prefix: "fn",
+        description: "Function",
+        body: ["function ${1:name}() {", "  ${0}", "}"],
+        language: "typescript",
+        category: "functions",
+      },
+    ])
+    mockedListSnippets.mockReturnValue([
+      {
+        id: "p1:ts:loop",
+        pluginId: "p1",
+        language: "typescript",
+        name: "loop",
+        prefix: ["for", "forl"],
+        body: "for (const ${1:item} of ${2:items}) { ${0} }",
+      },
+    ])
+
+    expect(collectEditorSnippets("typescript")).toEqual([
+      {
+        label: "fn",
+        insertText: "function ${1:name}() {\n  ${0}\n}",
+        detail: "Function",
+        documentation: "functions snippet",
+      },
+      {
+        label: "for",
+        insertText: "for (const ${1:item} of ${2:items}) { ${0} }",
+        detail: "p1 snippet",
+        documentation: "p1 · loop",
+      },
+      {
+        label: "forl",
+        insertText: "for (const ${1:item} of ${2:items}) { ${0} }",
+        detail: "p1 snippet",
+        documentation: "p1 · loop",
+      },
+    ])
+  })
+
+  it("resolves collapsed editor language ids to compatible plugin snippet ids", () => {
+    jest.spyOn(snippetProvider, "getSnippets").mockReturnValue([])
+    mockedListSnippets.mockImplementation((language) =>
+      language === "shellscript"
+        ? [
+            {
+              id: "p1:shellscript:case",
+              pluginId: "p1",
+              language,
+              name: "case",
+              prefix: ["case"],
+              body: "case ${1:value} in\n  ${0}\nesac",
+            },
+          ]
+        : []
+    )
+
+    expect(collectEditorSnippets("shell").map((snippet) => snippet.label)).toContain("case")
+    expect(mockedListSnippets).toHaveBeenCalledWith("shellscript")
+  })
+})
+
 describe("registerAllSnippets", () => {
   it("returns [] when the monaco namespace is missing the register API", () => {
     expect(registerAllSnippets({})).toEqual([])
     expect(registerAllSnippets(null)).toEqual([])
   })
 
-  it("registers a completion provider for the known languages", () => {
+  it("registers one wildcard provider so late-contributed languages are covered", () => {
     const { monaco, providers } = makeFakeMonaco()
     const regs = registerAllSnippets(monaco)
     expect(regs).toHaveLength(1)
     expect(monaco.languages.registerCompletionItemProvider).toHaveBeenCalledTimes(1)
-    expect(providers[0]?.selector).toEqual(["javascript", "typescript"])
+    expect(providers[0]?.selector).toBe("*")
   })
 
   it("is idempotent per monaco instance", () => {
@@ -81,13 +148,6 @@ describe("registerAllSnippets", () => {
     const second = registerAllSnippets(monaco)
     expect(second).toEqual([])
     expect(monaco.languages.registerCompletionItemProvider).toHaveBeenCalledTimes(1)
-  })
-
-  it("falls back to plaintext when no languages are registered", () => {
-    const { monaco, providers } = makeFakeMonaco()
-    monaco.languages.getLanguages = () => []
-    registerAllSnippets(monaco)
-    expect(providers[0]?.selector).toEqual(["plaintext"])
   })
 
   it("surfaces canvas snippets as snippet completion items", () => {

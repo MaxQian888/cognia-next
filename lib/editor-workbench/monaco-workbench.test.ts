@@ -22,6 +22,10 @@ const lightBindingUpdate = jest.fn()
 const bindingMock = jest.requireMock("./monaco-context-binding") as {
   bindMonacoEditorContext: jest.Mock
 }
+const snippetMock = jest.requireMock("@/lib/monaco/snippets") as {
+  registerAllSnippets: jest.Mock
+  registerEmmetSupport: jest.Mock
+}
 
 jest.mock("@/lib/plugin/vscode-shim/monaco-bridge", () => ({
   notifyEditorMounted: jest.fn(),
@@ -36,6 +40,11 @@ jest.mock("./monaco-context-binding", () => ({
     dispose: lightBindingDispose,
     update: lightBindingUpdate,
   })),
+}))
+
+jest.mock("@/lib/monaco/snippets", () => ({
+  registerAllSnippets: jest.fn(() => []),
+  registerEmmetSupport: jest.fn(() => []),
 }))
 
 function makeFakeMonaco(): {
@@ -272,6 +281,20 @@ describe("mountMonacoWorkbench", () => {
     language: "typescript",
     initialContent: "const x = 1\n",
   }
+
+  beforeEach(() => {
+    snippetMock.registerAllSnippets.mockClear()
+    snippetMock.registerEmmetSupport.mockClear()
+  })
+
+  it("registers shared snippet and Emmet completions for every workbench surface", () => {
+    const { monaco } = makeFakeMonaco()
+    const { editor } = makeFakeEditor()
+    mountMonacoWorkbench(editor, monaco, { ...baseSpec, surface: "skill" })
+
+    expect(snippetMock.registerAllSnippets).toHaveBeenCalledWith(monaco)
+    expect(snippetMock.registerEmmetSupport).toHaveBeenCalledWith(monaco)
+  })
 
   it("creates a new model with the workbench URI when none exists", () => {
     const { monaco, createCalls, modelByUri } = makeFakeMonaco()

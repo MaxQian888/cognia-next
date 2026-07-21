@@ -3,7 +3,7 @@
  */
 
 import { createRef } from "react"
-import { render, act } from "@testing-library/react"
+import { render, act, fireEvent } from "@testing-library/react"
 
 // Mock the heavy xterm.js modules so the test doesn't need a real GPU /
 // canvas. Each constructor returns a stub with the methods the
@@ -1047,7 +1047,7 @@ describe("TerminalInstance", () => {
       expect(result).toBe(false)
     })
 
-    it("erases a replaced span with DEL bytes before writing the insert", async () => {
+    it("atomically erases a replaced span and writes the insert", async () => {
       mockAutocomplete.enabled = true
       mockAutocomplete.ghostSuggestion = { source: "path" }
       mockAutocomplete.accept.mockReturnValue({ backspaces: 3, write: "Documents/" })
@@ -1056,8 +1056,8 @@ describe("TerminalInstance", () => {
       await flushAsync()
       const result = captured.cb!(key({ key: "Tab" }))
       const del = String.fromCharCode(0x7f)
-      expect(sessionRegistry.current!.write).toHaveBeenNthCalledWith(1, del.repeat(3))
-      expect(sessionRegistry.current!.write).toHaveBeenNthCalledWith(2, "Documents/")
+      expect(sessionRegistry.current!.write).toHaveBeenCalledTimes(1)
+      expect(sessionRegistry.current!.write).toHaveBeenCalledWith(`${del.repeat(3)}Documents/`)
       expect(result).toBe(false)
     })
 
@@ -1118,9 +1118,25 @@ describe("TerminalInstance", () => {
       await flushAsync()
       const result = captured.cb!(key({ key: "Enter" }))
       const del = String.fromCharCode(0x7f)
-      expect(sessionRegistry.current!.write).toHaveBeenNthCalledWith(1, del.repeat(2))
-      expect(sessionRegistry.current!.write).toHaveBeenNthCalledWith(2, "src/")
+      expect(sessionRegistry.current!.write).toHaveBeenCalledTimes(1)
+      expect(sessionRegistry.current!.write).toHaveBeenCalledWith(`${del.repeat(2)}src/`)
       expect(result).toBe(false)
+    })
+
+    it("atomically applies a replacement selected with the pointer", async () => {
+      mockAutocomplete.enabled = true
+      mockAutocomplete.popupEnabled = true
+      mockAutocomplete.listOpen = true
+      mockAutocomplete.candidates = [
+        { text: "cd src/", source: "path", providerId: "builtin:path" },
+      ]
+      mockAutocomplete.acceptSelected.mockReturnValue({ backspaces: 2, write: "src/" })
+      const { getByTestId } = render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      fireEvent.mouseDown(getByTestId("terminal-completion-candidate-0"))
+      const del = String.fromCharCode(0x7f)
+      expect(sessionRegistry.current!.write).toHaveBeenCalledTimes(1)
+      expect(sessionRegistry.current!.write).toHaveBeenCalledWith(`${del.repeat(2)}src/`)
     })
 
     it("opens the popup on a second Tab when candidates exist but no ghost", async () => {

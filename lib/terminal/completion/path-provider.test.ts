@@ -1,6 +1,11 @@
 import { createPathCompletionProvider, requoteToken } from "./path-provider"
 import type { TerminalCompletionContext } from "./types"
 
+const completeTerminalPathsMock = jest.fn()
+jest.mock("@/lib/terminal/remote-api", () => ({
+  completeTerminalPaths: (options: unknown) => completeTerminalPathsMock(options),
+}))
+
 function ctx(
   input: string,
   over: Partial<TerminalCompletionContext> = {}
@@ -28,10 +33,20 @@ function setup(candidates: Array<{ name: string; isDir: boolean }> | (() => Prom
 }
 
 describe("path completion provider", () => {
-  it("returns nothing off-desktop or without a cwd", async () => {
+  beforeEach(() => {
+    completeTerminalPathsMock.mockReset()
+  })
+
+  it("uses the active terminal transport off-desktop and returns nothing without a cwd", async () => {
+    completeTerminalPathsMock.mockResolvedValue([{ name: "src", isDir: true }])
+    const web = createPathCompletionProvider({ isDesktop: () => false })
+    const out = await web.getCompletions(ctx("cd s"), signal)
+    expect(out[0]).toMatchObject({ source: "path", replace: { insert: "src\\" } })
+    expect(completeTerminalPathsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ cwd: "D:/repo", fragment: "s" })
+    )
+
     const invoke = jest.fn(async () => [])
-    const web = createPathCompletionProvider({ invoke, isDesktop: () => false })
-    expect(await web.getCompletions(ctx("cd s"), signal)).toEqual([])
     const desktop = createPathCompletionProvider({ invoke, isDesktop: () => true })
     expect(await desktop.getCompletions(ctx("cd s", { cwd: null }), signal)).toEqual([])
     expect(invoke).not.toHaveBeenCalled()

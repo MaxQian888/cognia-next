@@ -43,7 +43,10 @@ import {
 import { linter, type Diagnostic as CmLintDiagnostic } from "@codemirror/lint"
 import { useTranslations } from "next-intl"
 import { workflowExpressionLanguage } from "@/lib/workflow/editor/expression-language"
-import { buildExpressionSuggestions } from "@/lib/workflow/editor/expression-suggestions"
+import {
+  buildExpressionSuggestions,
+  deriveExpressionScopeHints,
+} from "@/lib/workflow/editor/expression-suggestions"
 import { computeExpressionDiagnostics } from "@/lib/workflow/editor/expression-diagnostics"
 import { computeUpstreamNodeIds } from "@/lib/workflow/editor/upstream-graph"
 import { flattenSchema } from "@/lib/workflow/editor/node-io-data"
@@ -51,6 +54,7 @@ import { buildNodeRef, EXPR_DRAG_MIME, parseExprDrag } from "@/lib/workflow/edit
 import { resolveExpression } from "@/lib/workflow/runtime/expression"
 import { useLatestRunOutputs } from "@/hooks/workflow/use-latest-run-outputs"
 import type { EditorStore, EditorState as WfEditorState } from "@/lib/workflow/editor/store"
+import type { WorkflowNode } from "@/types/workflow/visual"
 import { cn } from "@/lib/utils"
 import { useInspectorExpressionCtx } from "./inspector-context"
 import { VariablePicker } from "./variable-picker"
@@ -108,12 +112,28 @@ export function ExpressionField({
     workflowId: s.baseWorkflow.id,
     variables: s.baseWorkflow.variables,
     pinData: s.baseWorkflow.pinData,
+    staticData: s.baseWorkflow.staticData,
+    workflowInputSchema: s.baseWorkflow.interface?.inputSchema,
     isDraggingAny: s.isDraggingAny,
     performanceTier: s.performanceTier as PerformanceTier,
   }))
   const editorState = store?.(shallowSelector)
   const nodes = useMemo(() => editorState?.nodes ?? [], [editorState?.nodes])
   const edges = useMemo(() => editorState?.edges ?? [], [editorState?.edges])
+  const expressionNodes = useMemo<WorkflowNode[]>(
+    () =>
+      nodes.map((node) => ({
+        id: node.id,
+        type: node.data.kind,
+        typeVersion: node.data.typeVersion,
+        position: node.position,
+        data: node.data,
+        width: node.width,
+        height: node.height,
+        parentId: node.parentId,
+      })),
+    [nodes]
+  )
   // Projections for the variable picker (B3) — minimal {id,kind,label} / edges.
   const pickerNodes = useMemo(
     () =>
@@ -131,6 +151,7 @@ export function ExpressionField({
   const workflowId = editorState?.workflowId
   const varKeys = useMemo(() => Object.keys(editorState?.variables ?? {}), [editorState?.variables])
   const pinData = editorState?.pinData
+  const staticData = editorState?.staticData
   const isDraggingAny = editorState?.isDraggingAny ?? false
   // Gate the live-query on the resolved tier's `liveQueryWhileDragging` flag.
   // Tests / headless renders without a store fall back to "always enabled"
@@ -161,6 +182,44 @@ export function ExpressionField({
   const upstreamOutputs = useMemo(
     () => (pinData ? { ...runOutputs, ...pinData } : runOutputs),
     [runOutputs, pinData]
+  )
+
+  const upstreamNodeIds = useMemo(
+    () =>
+      currentNodeId
+        ? computeUpstreamNodeIds(
+            currentNodeId,
+            nodes.map((node) => ({ id: node.id, kind: node.data.kind as string })),
+            edges.map((edge) => ({ source: edge.source, target: edge.target }))
+          )
+        : undefined,
+    [currentNodeId, nodes, edges]
+  )
+  const outputSchemas = useMemo(() => {
+    const schemas: Record<string, string[]> = {}
+    for (const [stepId, output] of Object.entries(upstreamOutputs)) {
+      if (output && typeof output === "object") {
+        schemas[stepId] = flattenSchema(output, { maxDepth: 3, maxRows: 60 }).map((row) => row.path)
+      }
+    }
+    return schemas
+  }, [upstreamOutputs])
+  const scopeHints = useMemo(
+    () =>
+      deriveExpressionScopeHints({
+        nodes: expressionNodes,
+        upstreamNodeIds,
+        staticData,
+        outputs: upstreamOutputs,
+        workflowInputSchema: editorState?.workflowInputSchema,
+      }),
+    [
+      expressionNodes,
+      upstreamNodeIds,
+      staticData,
+      upstreamOutputs,
+      editorState?.workflowInputSchema,
+    ]
   )
 
   // Insert a reference at the current cursor — shared by the variable picker
@@ -219,31 +278,14 @@ export function ExpressionField({
       const from = word
         ? word.from + (word.text.startsWith("{{") ? word.text.indexOf("$") : 0)
         : ctx.pos
-      // Nested field paths (result.text, items[0].name) come from
-      // `flattenSchema` so the completion drills into the upstream output, not
-      // just its top-level keys.
-      const outputSchemas: Record<string, string[]> = {}
-      for (const [stepId, output] of Object.entries(upstreamOutputs)) {
-        if (output && typeof output === "object") {
-          outputSchemas[stepId] = flattenSchema(output, { maxDepth: 3, maxRows: 60 }).map(
-            (row) => row.path
-          )
-        }
-      }
-      // Only offer upstream nodes as references (downstream output is unavailable).
-      const upstreamNodeIds = currentNodeId
-        ? computeUpstreamNodeIds(
-            currentNodeId,
-            nodes.map((n) => ({ id: n.id, kind: n.data.kind as string })),
-            edges.map((e) => ({ source: e.source, target: e.target }))
-          )
-        : undefined
       const entries = buildExpressionSuggestions({
-        nodes: nodes as unknown as Parameters<typeof buildExpressionSuggestions>[0]["nodes"],
+        nodes: expressionNodes,
         currentNodeId,
         outputSchemas,
         varKeys,
         upstreamNodeIds,
+        staticKeys: scopeHints.staticKeys,
+        triggerHints: scopeHints.triggerHints,
       })
       return {
         from,
@@ -257,7 +299,7 @@ export function ExpressionField({
         validFor: /[\w$.[\]'"-]*$/,
       }
     }
-  }, [nodes, edges, currentNodeId, upstreamOutputs, varKeys])
+  }, [expressionNodes, currentNodeId, outputSchemas, varKeys, upstreamNodeIds, scopeHints])
 
   // Mount the EditorView once.
   useEffect(() => {
@@ -373,7 +415,7 @@ export function ExpressionField({
       const resolved = resolveExpression(value, {
         upstream: upstreamOutputs,
         trigger: { workflowId: workflowId ?? "", kind: "trigger.manual", payload: {}, originAt: 0 },
-        staticData: {},
+        staticData: staticData ?? {},
         params: {},
       })
       if (typeof resolved === "string") return resolved
@@ -383,7 +425,7 @@ export function ExpressionField({
     } catch (err) {
       return err instanceof Error ? `error: ${err.message}` : "error"
     }
-  }, [value, upstreamOutputs, workflowId])
+  }, [value, upstreamOutputs, workflowId, staticData])
 
   return (
     <div

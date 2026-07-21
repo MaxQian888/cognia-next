@@ -3,8 +3,10 @@
  *
  * Completes the token under the cursor against the session cwd (tracked
  * via OSC 633 P) by asking the Rust side to list + prefix-filter the
- * directory (`terminal_complete_paths`). Desktop-only: in web/Capacitor
- * mode (`!isTauri()`) or before the first cwd event it returns nothing.
+ * directory (`terminal_complete_paths`). The shared terminal transport routes
+ * the request to local Tauri or a paired companion host, so desktop and remote
+ * terminal surfaces use the same provider. Before the first cwd event it
+ * returns nothing.
  *
  * Suggestions are emitted in *replace* mode spanning the whole token, so
  * accepting can re-case (`doc` → `Documents\`) and re-quote
@@ -12,7 +14,7 @@
  * with DEL bytes and writes the rebuilt token.
  */
 
-import { isTauri } from "@/lib/tauri"
+import { completeTerminalPaths } from "@/lib/terminal/remote-api"
 import type { ShellKind } from "@/lib/terminal/shell-detect"
 import { shellUsesBackslashEscapes, tokenAtCursor } from "./tokenize"
 import type { TerminalCompletionProvider, TerminalCompletionSuggestion } from "./types"
@@ -27,8 +29,10 @@ interface PathCandidate {
 export interface PathProviderDeps {
   /** Tauri invoke — injected for tests. */
   invoke?: (cmd: string, args: Record<string, unknown>) => Promise<unknown>
-  /** Platform gate — injected for tests. */
+  /** Legacy test seam; path completion is no longer platform-gated. */
   isDesktop?: () => boolean
+  /** Cross-transport completion seam — injected for tests. */
+  completePaths?: typeof completeTerminalPaths
 }
 
 /** Does this token look like the user is typing a path? */
@@ -78,20 +82,18 @@ export function requoteToken(value: string, shell: ShellKind, isDir: boolean): s
 export function createPathCompletionProvider(
   deps: PathProviderDeps = {}
 ): TerminalCompletionProvider {
-  const isDesktop = deps.isDesktop ?? isTauri
-  const doInvoke =
-    deps.invoke ??
-    (async (cmd: string, args: Record<string, unknown>) => {
-      const { invoke } = await import("@tauri-apps/api/core")
-      return invoke(cmd, args)
-    })
+  const completePaths =
+    deps.completePaths ??
+    (deps.invoke
+      ? async (options: Parameters<typeof completeTerminalPaths>[0]) =>
+          (await deps.invoke!("terminal_complete_paths", options)) as PathCandidate[]
+      : completeTerminalPaths)
 
   return {
     id: "builtin:path",
     label: "File paths",
     priority: 20,
     getCompletions: async (context, signal) => {
-      if (!isDesktop()) return []
       if (!context.cwd) return []
 
       const escapes = shellUsesBackslashEscapes(context.shell)
@@ -110,12 +112,12 @@ export function createPathCompletionProvider(
 
       let candidates: PathCandidate[]
       try {
-        candidates = (await doInvoke("terminal_complete_paths", {
+        candidates = await completePaths({
           cwd: context.cwd,
           fragment,
           showHidden: false,
           limit: MAX_PATH_SUGGESTIONS * 2,
-        })) as PathCandidate[]
+        })
       } catch {
         return []
       }

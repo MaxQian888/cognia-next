@@ -79,12 +79,15 @@ export function adaptPluginCompletionProvider(
       try {
         const items = await provider.getCompletions(
           {
+            sessionId: context.sessionId,
             shell: context.shell,
             shellPath: context.shellPath,
             cwd: context.cwd,
             input: context.input,
+            cursor: context.cursor,
             recentCommands: context.recentCommands,
             platform: context.platform,
+            projectId: context.projectId,
           },
           signal
         )
@@ -96,7 +99,15 @@ export function adaptPluginCompletionProvider(
             source: "plugin" as const,
             providerId,
             detail: it.detail,
+            description: it.description,
             score: it.score,
+            replace:
+              it.replace &&
+              Number.isInteger(it.replace.from) &&
+              it.replace.from >= 0 &&
+              typeof it.replace.insert === "string"
+                ? { from: it.replace.from, insert: it.replace.insert }
+                : undefined,
           }))
       } catch {
         return []

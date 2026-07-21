@@ -54,7 +54,6 @@ interface CompletionProviderLike {
 }
 
 interface MonacoLanguagesLike {
-  getLanguages?(): Array<{ id: string }>
   registerCompletionItemProvider(
     languageSelector: string | string[],
     provider: CompletionProviderLike
@@ -77,6 +76,64 @@ function bodyToInsertText(body: string | string[]): string {
   return Array.isArray(body) ? body.join("\n") : body
 }
 
+export interface EditorSnippetCompletion {
+  label: string
+  insertText: string
+  detail?: string
+  documentation?: string
+}
+
+const SNIPPET_LANGUAGE_GROUPS = [
+  ["typescript", "javascript", "typescriptreact", "javascriptreact"],
+  ["shell", "shellscript", "bash", "sh"],
+  ["json", "jsonc"],
+] as const
+
+function compatibleSnippetLanguageIds(language: string): readonly string[] {
+  const normalized = language.toLowerCase()
+  return (
+    SNIPPET_LANGUAGE_GROUPS.find((group) => group.some((id) => id === normalized)) ?? [language]
+  )
+}
+
+/**
+ * Normalize builtin/user and plugin snippets into an editor-agnostic list.
+ * Read registries on every request so late plugin activation is immediately
+ * visible in both Monaco and the mobile CodeMirror editor.
+ */
+export function collectEditorSnippets(language: string): EditorSnippetCompletion[] {
+  const out: EditorSnippetCompletion[] = []
+  const seen = new Set<string>()
+  const add = (snippet: EditorSnippetCompletion): void => {
+    const key = `${snippet.label}\0${snippet.insertText}`
+    if (seen.has(key)) return
+    seen.add(key)
+    out.push(snippet)
+  }
+
+  for (const languageId of compatibleSnippetLanguageIds(language)) {
+    for (const snippet of snippetProvider.getSnippets(languageId)) {
+      add({
+        label: snippet.prefix,
+        insertText: bodyToInsertText(snippet.body),
+        detail: snippet.description,
+        documentation: snippet.category ? `${snippet.category} snippet` : undefined,
+      })
+    }
+    for (const snippet of listSnippetsForLanguage(languageId)) {
+      for (const prefix of snippet.prefix) {
+        add({
+          label: prefix,
+          insertText: snippet.body,
+          detail: snippet.description ?? `${snippet.pluginId} snippet`,
+          documentation: `${snippet.pluginId} · ${snippet.name}`,
+        })
+      }
+    }
+  }
+  return out
+}
+
 /**
  * Register a completion provider that surfaces canvas + plugin snippets for
  * the model's language. Idempotent per Monaco instance. Returns the
@@ -88,8 +145,6 @@ export function registerAllSnippets(monacoNs: unknown): MonacoLikeRegistration[]
   if (snippetsRegistered.has(monaco)) return []
   snippetsRegistered.add(monaco)
 
-  const languages = monaco.languages.getLanguages?.().map((l) => l.id) ?? []
-  const selector = languages.length > 0 ? languages : ["plaintext"]
   const SnippetKind = monaco.languages.CompletionItemKind.Snippet
   const InsertAsSnippet = monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
 
@@ -105,39 +160,25 @@ export function registerAllSnippets(monacoNs: unknown): MonacoLikeRegistration[]
       }
       const suggestions: unknown[] = []
 
-      // Canvas snippet registry (builtin + user-defined).
-      for (const s of snippetProvider.getSnippets(language)) {
+      for (const snippet of collectEditorSnippets(language)) {
         suggestions.push({
-          label: s.prefix,
+          label: snippet.label,
           kind: SnippetKind,
-          insertText: bodyToInsertText(s.body),
+          insertText: snippet.insertText,
           insertTextRules: InsertAsSnippet,
-          detail: s.description,
-          documentation: s.category ? `${s.category} snippet` : undefined,
+          detail: snippet.detail,
+          documentation: snippet.documentation,
           range,
         })
-      }
-
-      // Plugin-contributed snippets (each may declare multiple prefixes).
-      for (const s of listSnippetsForLanguage(language)) {
-        for (const prefix of s.prefix) {
-          suggestions.push({
-            label: prefix,
-            kind: SnippetKind,
-            insertText: s.body,
-            insertTextRules: InsertAsSnippet,
-            detail: s.description ?? `${s.pluginId} snippet`,
-            documentation: `${s.pluginId} · ${s.name}`,
-            range,
-          })
-        }
       }
 
       return { suggestions }
     },
   }
 
-  const disposable = monaco.languages.registerCompletionItemProvider(selector, provider)
+  // Monaco's wildcard selector includes languages registered after this call;
+  // the provider still resolves snippets against the live model language.
+  const disposable = monaco.languages.registerCompletionItemProvider("*", provider)
   return [disposable]
 }
 

@@ -38,7 +38,7 @@ export interface BuiltinCompletionDeps {
   getSettings: () => BuiltinCompletionSettings | null | undefined
   /** Build the LlmClient for the AI provider, or null when unavailable. */
   buildClient: () => LlmClient | null
-  /** Test seams for the desktop-backed providers. */
+  /** Test seams for the host-backed providers. */
   pathDeps?: PathProviderDeps
   exeDeps?: ExeProviderDeps
 }

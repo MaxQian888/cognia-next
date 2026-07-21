@@ -784,8 +784,7 @@ function TerminalInstanceImpl(
         if (ac.enabled) {
           const applyEdit = (edit: { backspaces: number; write: string } | null): boolean => {
             if (!edit) return false
-            if (edit.backspaces > 0) void session.write(DEL_BYTE.repeat(edit.backspaces))
-            void session.write(edit.write)
+            void session.write(`${DEL_BYTE.repeat(edit.backspaces)}${edit.write}`)
             return true
           }
           // While the popup is open it owns ↑/↓/Enter/Tab/Esc.
@@ -1558,8 +1557,7 @@ function TerminalInstanceImpl(
             if (edit) {
               const session = getLiveSession(sessionId)
               if (session) {
-                if (edit.backspaces > 0) void session.write(DEL_BYTE.repeat(edit.backspaces))
-                void session.write(edit.write)
+                void session.write(`${DEL_BYTE.repeat(edit.backspaces)}${edit.write}`)
               }
             }
           }}

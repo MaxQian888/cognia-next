@@ -42,7 +42,15 @@ import {
 } from "@codemirror/language"
 import { history, defaultKeymap, historyKeymap, indentWithTab } from "@codemirror/commands"
 import { search, searchKeymap } from "@codemirror/search"
-import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete"
+import {
+  autocompletion,
+  closeBrackets,
+  closeBracketsKeymap,
+  completionKeymap,
+  snippetCompletion,
+  type CompletionContext,
+  type CompletionResult,
+} from "@codemirror/autocomplete"
 import {
   lintKeymap,
   nextDiagnostic,
@@ -57,6 +65,7 @@ import type { EditorLanguage } from "./editor-language"
 import { editorDiagnostics, getDiagnosticSummary } from "./diagnostics/cm-linter"
 import { getDiagnosticsProducer } from "./diagnostics/registry"
 import type { DiagnosticSummary } from "./diagnostics/types"
+import { collectEditorSnippets } from "@/lib/monaco/snippets"
 
 export interface LightCodeEditorProps {
   value: string
@@ -165,6 +174,10 @@ export function LightCodeEditor({
   useEffect(() => {
     onChangeRef.current = onChange
   }, [onChange])
+  const languageRef = useRef(language)
+  useEffect(() => {
+    languageRef.current = language
+  }, [language])
   const onDiagnosticsChangeRef = useRef(onDiagnosticsChange)
   useEffect(() => {
     onDiagnosticsChangeRef.current = onDiagnosticsChange
@@ -189,6 +202,28 @@ export function LightCodeEditor({
   // broadening of this gate.)
   const diagnosticsActive = enableDiagnostics && getDiagnosticsProducer(language) !== null
 
+  const snippetCompletionSource = useCallback(
+    (context: CompletionContext): CompletionResult | null => {
+      const word = context.matchBefore(/[\w.-]*/)
+      if (!context.explicit && (!word || word.from === word.to)) return null
+      const snippets = collectEditorSnippets(languageRef.current)
+      if (snippets.length === 0) return null
+      return {
+        from: word?.from ?? context.pos,
+        options: snippets.map((snippet) =>
+          snippetCompletion(snippet.insertText, {
+            label: snippet.label,
+            type: "snippet",
+            detail: snippet.detail,
+            info: snippet.documentation,
+          })
+        ),
+        validFor: /[\w.-]*$/,
+      }
+    },
+    []
+  )
+
   // Mount the EditorView once. `search`/`closeBrackets` are mount-time; the
   // appearance/line-number/wrap/tab settings ride Compartments and reconfigure
   // live via the effects below.
@@ -204,6 +239,7 @@ export function LightCodeEditor({
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         keymap.of([
           ...closeBracketsKeymap,
+          ...completionKeymap,
           ...defaultKeymap,
           ...historyKeymap,
           indentWithTab,
@@ -211,6 +247,13 @@ export function LightCodeEditor({
           ...(enableDiagnostics ? lintKeymap : []),
         ]),
         ...(enableSearch ? [search({ top: true })] : []),
+        autocompletion({
+          override: [snippetCompletionSource],
+          activateOnTyping: true,
+          // Show local snippets quickly even if another async source is added
+          // later (CodeMirror's default is 100 ms).
+          updateSyncTime: 50,
+        }),
         lineNumberCompartment.of(lineNumberExtension(showLineNumbers)),
         wrapCompartment.of(wordWrap ? EditorView.lineWrapping : []),
         tabCompartment.of([EditorState.tabSize.of(tabSize), indentUnit.of(" ".repeat(tabSize))]),

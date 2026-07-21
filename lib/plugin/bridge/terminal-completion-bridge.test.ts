@@ -26,6 +26,7 @@ function ctx(): TerminalCompletionContext {
     cursor: 1,
     recentCommands: [],
     platform: "linux",
+    projectId: "project-1",
   }
 }
 
@@ -38,21 +39,40 @@ beforeEach(() => {
 
 describe("adaptPluginCompletionProvider", () => {
   it("namespaces the id and tags suggestions as plugin-sourced", async () => {
+    const getCompletions = jest.fn(() => [
+      {
+        text: "git status",
+        detail: "git",
+        description: "Show repository status",
+        score: 0.8,
+        replace: { from: 0, insert: "git status" },
+      },
+    ])
     const host = adaptPluginCompletionProvider(
       "my-plugin",
       { id: "fig", label: "Fig", priority: 30 },
-      { getCompletions: () => [{ text: "git status", detail: "git", score: 0.8 }] }
+      { getCompletions }
     )
     expect(host.id).toBe("my-plugin:fig")
     expect(host.priority).toBe(30)
     const out = await host.getCompletions(ctx(), signal)
+    expect(getCompletions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "s1",
+        cursor: 1,
+        projectId: "project-1",
+      }),
+      signal
+    )
     expect(out).toEqual([
       {
         text: "git status",
         source: "plugin",
         providerId: "my-plugin:fig",
         detail: "git",
+        description: "Show repository status",
         score: 0.8,
+        replace: { from: 0, insert: "git status" },
       },
     ])
   })

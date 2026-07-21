@@ -33,6 +33,17 @@ jest.mock("./load-language-support", () => ({
   loadLanguageSupport: (lang: string) => loadLanguageSupportMock(lang),
 }))
 
+const collectEditorSnippetsMock = jest.fn(
+  (): Array<{
+    label: string
+    insertText: string
+    detail?: string
+  }> => []
+)
+jest.mock("@/lib/monaco/snippets", () => ({
+  collectEditorSnippets: (language: string) => collectEditorSnippetsMock(language),
+}))
+
 // Control diagnostics deterministically: editorDiagnostics is a no-op extension
 // (the real linter is covered in diagnostics/cm-linter.test.ts), and the summary
 // is whatever the mock returns when the update listener reads it.
@@ -45,6 +56,8 @@ jest.mock("./diagnostics/cm-linter", () => ({
 
 beforeEach(() => {
   loadLanguageSupportMock.mockClear()
+  collectEditorSnippetsMock.mockReset()
+  collectEditorSnippetsMock.mockReturnValue([])
   mockSummaryReturn = EMPTY
 })
 
@@ -195,6 +208,29 @@ describe("LightCodeEditor", () => {
     await waitFor(() => expect(host.querySelector(".cm-content")).toBeInTheDocument())
     // The find/replace panel keymap + extension are omitted; the editor still mounts.
     expect(host.querySelector(".cm-search")).not.toBeInTheDocument()
+  })
+
+  it("offers shared builtin and plugin snippets through CodeMirror completion", async () => {
+    collectEditorSnippetsMock.mockReturnValue([
+      {
+        label: "fn",
+        insertText: "function ${1:name}() {\n  ${0}\n}",
+        detail: "Function snippet",
+      },
+    ])
+    render(<LightCodeEditor value="fn" onChange={() => {}} language="typescript" />)
+    const host = screen.getByTestId("light-code-editor")
+    await waitFor(() => expect(host.querySelector(".cm-content")).not.toBeNull())
+    const content = host.querySelector<HTMLElement>(".cm-content") as HTMLElement
+    content.focus()
+    fireEvent.keyDown(content, { key: " ", code: "Space", ctrlKey: true })
+
+    await waitFor(() => {
+      const popup = document.querySelector(".cm-tooltip-autocomplete")
+      expect(popup).toHaveTextContent("fn")
+      expect(popup).toHaveTextContent("Function snippet")
+    })
+    expect(collectEditorSnippetsMock).toHaveBeenCalledWith("typescript")
   })
 
   describe("diagnostics status bar", () => {

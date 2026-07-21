@@ -20,6 +20,8 @@ import type { PluginContributionBackend } from "@/types/plugin/plugin"
 
 /** Read-only context handed to a plugin completion provider. */
 export interface PluginTerminalCompletionContext {
+  /** Terminal session id for providers that keep per-session caches. */
+  sessionId: string
   /** Shell family — `bash` | `zsh` | `pwsh` | `powershell` | `cmd` | `fish` | `nu` | `sh` | `unknown`. */
   shell: string
   /** Raw shell binary path/name. */
@@ -28,10 +30,14 @@ export interface PluginTerminalCompletionContext {
   cwd: string | null
   /** The partial command typed so far. */
   input: string
+  /** Cursor offset within `input`. */
+  cursor: number
   /** Recent command lines, oldest → newest. */
   recentCommands: string[]
   /** Platform hint. */
   platform: "windows" | "macos" | "linux" | "other"
+  /** Owning project id, or null when the terminal is not project-scoped. */
+  projectId?: string | null
 }
 
 /** A single suggestion from a plugin provider. `text` is the FULL line. */
@@ -40,8 +46,12 @@ export interface PluginTerminalCompletionItem {
   text: string
   /** Short label shown beside the ghost text (e.g. "git", "npm"). */
   detail?: string
+  /** Longer explanation shown in the candidate popup. */
+  description?: string
   /** Optional confidence in [0,1]; defaults to 0.5 when omitted. */
   score?: number
+  /** Replace the input tail from `from` instead of only appending a suffix. */
+  replace?: { from: number; insert: string }
 }
 
 /** The provider object a plugin registers (runtime form). */
