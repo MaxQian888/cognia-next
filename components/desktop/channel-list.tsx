@@ -240,7 +240,10 @@ export function ChannelList(props: Props) {
         // layer is hidden rather than spilling; leave it un-clipped when idle
         // so the resize handle can protrude past the right edge.
         (sidebarCollapsed || animatingCollapse) && "overflow-hidden",
-        animatingCollapse && "transition-[width] duration-200 ease-in-out"
+        // Same 200ms and the same motion-speed multiplier the artifact dock
+        // uses, so both rails collapse at one pace.
+        animatingCollapse &&
+          "transition-[width] duration-[calc(200ms*var(--motion-duration-scale,1))] ease-in-out"
       )}
       style={{ width: sidebarCollapsed ? 0 : width }}
       aria-label={t("conversationsTitle")}

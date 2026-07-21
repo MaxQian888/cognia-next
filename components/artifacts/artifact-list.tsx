@@ -83,6 +83,24 @@ interface ArtifactListProps {
 
 const TYPE_LABEL_KEYS = ARTIFACT_TYPE_KEYS
 
+/**
+ * Filter triggers shrink to a square icon button in a narrow container. `w-8`
+ * plus `shrink-0` is what keeps the row inside the dock; the chevron is hidden
+ * because there is no room for it beside the icon.
+ */
+const COMPACT_FILTER_TRIGGER =
+  "relative h-8 w-8 shrink-0 justify-center px-0 text-xs [&>svg:last-child]:hidden @[380px]/artifact-list:w-auto @[380px]/artifact-list:justify-between @[380px]/artifact-list:px-3 @[380px]/artifact-list:[&>svg:last-child]:block"
+
+/** Marks a filter as narrowed while its label is hidden by the compact layout. */
+function FilterActiveDot() {
+  return (
+    <span
+      aria-hidden
+      className="absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-primary @[380px]/artifact-list:hidden"
+    />
+  )
+}
+
 function ListEmptyState({
   title,
   description,
@@ -157,14 +175,24 @@ export function ArtifactList({
   }
 
   return (
-    <div data-testid="artifact-list" className={className} style={{ maxHeight }}>
-      {/* Search and Filter Bar */}
+    <div
+      data-testid="artifact-list"
+      className={cn("@container/artifact-list flex flex-col", className)}
+      style={{ maxHeight }}
+    >
+      {/* Search and Filter Bar. The two filters carry fixed widths and, as flex
+          items, default to `min-width: auto` — so at the dock's narrowest
+          (~200px of content once the activity rail is subtracted) this row
+          overflowed and `overflow-hidden` silently clipped the batch button off
+          the end. They collapse to icon-only triggers below 380px instead.
+          Container query, not a viewport breakpoint: the dock's width is
+          user-dragged and has nothing to do with the window's. */}
       <div
-        className="flex items-center gap-2 p-2 border-b"
+        className="flex shrink-0 items-center gap-2 p-2 border-b"
         role="search"
         aria-label={tArtifacts("search")}
       >
-        <div className="relative flex-1">
+        <div className="relative min-w-0 flex-1">
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder={tArtifacts("search")}
@@ -174,10 +202,17 @@ export function ArtifactList({
             aria-label={tArtifacts("search")}
           />
         </div>
-        <Select data-testid="type-filter-select" value={typeFilter} onValueChange={setTypeFilter}>
-          <SelectTrigger className="h-8 w-[120px] text-xs">
-            <Filter className="h-3 w-3 mr-1" />
-            <SelectValue />
+        <Select value={typeFilter} onValueChange={setTypeFilter}>
+          <SelectTrigger
+            data-testid="type-filter-select"
+            aria-label={tArtifacts("allTypes")}
+            className={cn(COMPACT_FILTER_TRIGGER, "@[380px]/artifact-list:w-[120px]")}
+          >
+            <Filter className="h-3 w-3 @[380px]/artifact-list:mr-1" />
+            <span className="hidden @[380px]/artifact-list:contents">
+              <SelectValue />
+            </span>
+            {typeFilter !== "all" && <FilterActiveDot />}
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">{tArtifacts("allTypes")}</SelectItem>
@@ -188,14 +223,17 @@ export function ArtifactList({
             ))}
           </SelectContent>
         </Select>
-        <Select
-          data-testid="runtime-filter-select"
-          value={runtimeFilter}
-          onValueChange={setRuntimeFilter}
-        >
-          <SelectTrigger className="h-8 w-[140px] text-xs">
-            <Eye className="h-3 w-3 mr-1" />
-            <SelectValue />
+        <Select value={runtimeFilter} onValueChange={setRuntimeFilter}>
+          <SelectTrigger
+            data-testid="runtime-filter-select"
+            aria-label={tArtifacts("allRuntimeStates")}
+            className={cn(COMPACT_FILTER_TRIGGER, "@[380px]/artifact-list:w-[140px]")}
+          >
+            <Eye className="h-3 w-3 @[380px]/artifact-list:mr-1" />
+            <span className="hidden @[380px]/artifact-list:contents">
+              <SelectValue />
+            </span>
+            {runtimeFilter !== "all" && <FilterActiveDot />}
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">{tArtifacts("allRuntimeStates")}</SelectItem>
@@ -219,7 +257,7 @@ export function ArtifactList({
       {/* Batch Actions */}
       {batchMode && selectedIds.size > 0 && (
         <div
-          className="flex items-center justify-between px-3 py-1.5 bg-destructive/10 border-b"
+          className="flex shrink-0 items-center justify-between px-3 py-1.5 bg-destructive/10 border-b"
           role="alert"
         >
           <span className="text-xs text-destructive">
@@ -237,7 +275,11 @@ export function ArtifactList({
         </div>
       )}
 
-      <ScrollArea style={{ maxHeight: `calc(${maxHeight} - 48px)` }}>
+      {/* Was `calc(${maxHeight} - 48px)`: a hardcoded guess at the filter bar's
+          height that ignored its 1px border and knew nothing about the batch
+          bar, so the last row was clipped — worse once batch mode was on. The
+          flex column derives the remainder instead. */}
+      <ScrollArea className="min-h-0 flex-1">
         <div className="space-y-1 p-2">
           {pending ? <GeneratingArtifactRow pending={pending} /> : null}
           {sessionArtifacts.map((artifact) => {

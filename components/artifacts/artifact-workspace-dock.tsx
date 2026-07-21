@@ -38,31 +38,53 @@ import { WorkspaceRevealOpener } from "./workspace-mode/workspace-reveal-opener"
  * Apply a dock size change under a short flex-grow transition, then strip the
  * transition again so manual divider dragging stays immediate.
  *
+ * The panel's content is pinned to the width it will occupy when the animation
+ * settles, so the shrinking shell *wipes* it instead of reflowing it. Without
+ * that pin the dock squashed for 200ms — the activity rail is `shrink-0` while
+ * the panel body is not, so the body alone got crushed on the way out and
+ * stretched on the way in.
+ *
  * Uses inline styles (not Tailwind classes) so the duration can consume the
  * user's `--motion-duration-scale` preference — a runtime `classList.add` of an
  * arbitrary Tailwind class would never be JIT-compiled into the CSS. The
  * cleanup delay is scaled by the same multiplier so a slower (1.5×) preference
  * isn't cut short; reduce-motion collapses it via the global CSS guard.
  */
-function animateDockResize(element: HTMLDivElement, apply: () => void): () => void {
-  const clearTransition = () => {
-    element.style.transitionProperty = ""
-    element.style.transitionDuration = ""
-    element.style.transitionTimingFunction = ""
+function animateDockResize(
+  panel: HTMLDivElement,
+  content: HTMLDivElement | null,
+  /** Target width as a percent of the group, or null when collapsing to zero. */
+  targetPercent: number | null,
+  apply: () => void
+): () => void {
+  // Collapsing: hold what is on screen. Expanding: the panel is at ~0, so hold
+  // the width it is heading for — the content is then laid out correctly from
+  // the first frame and the widening panel reveals it.
+  const frozenWidth =
+    targetPercent === null
+      ? (content?.offsetWidth ?? 0)
+      : ((panel.parentElement?.offsetWidth ?? 0) * targetPercent) / 100
+
+  const reset = () => {
+    panel.style.transitionProperty = ""
+    panel.style.transitionDuration = ""
+    panel.style.transitionTimingFunction = ""
+    if (content) content.style.width = ""
   }
 
-  element.style.transitionProperty = "flex-grow"
-  element.style.transitionDuration = "calc(200ms * var(--motion-duration-scale, 1))"
-  element.style.transitionTimingFunction = "ease-in-out"
+  if (content && frozenWidth > 0) content.style.width = `${frozenWidth}px`
+  panel.style.transitionProperty = "flex-grow"
+  panel.style.transitionDuration = "calc(200ms * var(--motion-duration-scale, 1))"
+  panel.style.transitionTimingFunction = "ease-in-out"
   // Commit the transition style before react-resizable-panels updates flex-grow.
-  void element.offsetWidth
+  void panel.offsetWidth
   apply()
 
-  const scale = Number(getComputedStyle(element).getPropertyValue("--motion-duration-scale")) || 1
-  const timer = window.setTimeout(clearTransition, 200 * scale + 40)
+  const scale = Number(getComputedStyle(panel).getPropertyValue("--motion-duration-scale")) || 1
+  const timer = window.setTimeout(reset, 200 * scale + 40)
   return () => {
     window.clearTimeout(timer)
-    clearTransition()
+    reset()
   }
 }
 
@@ -114,6 +136,7 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
   const notifyNewArtifact = useArtifactDockLayoutStore((s) => s.notifyNewArtifact)
   const dockPanelRef = useRef<PanelImperativeHandle | null>(null)
   const dockPanelElementRef = useRef<HTMLDivElement | null>(null)
+  const dockContentElementRef = useRef<HTMLDivElement | null>(null)
   const previousDockCollapsedRef = useRef(dockCollapsed)
   const previousDockSizeRequestRef = useRef(dockSizeRequest)
 
@@ -127,10 +150,15 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
     const element = dockPanelElementRef.current
     if (!panel || !element) return
 
-    return animateDockResize(element, () => {
-      if (dockCollapsed) panel.collapse()
-      else panel.resize(`${dockSize}%`)
-    })
+    return animateDockResize(
+      element,
+      dockContentElementRef.current,
+      dockCollapsed ? null : dockSize,
+      () => {
+        if (dockCollapsed) panel.collapse()
+        else panel.resize(`${dockSize}%`)
+      }
+    )
   }, [dockCollapsed, dockSize])
 
   // A width preset (the workbench narrow/wide buttons) asked for a specific
@@ -145,7 +173,9 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
     const element = dockPanelElementRef.current
     if (!panel || !element || dockCollapsed) return
 
-    return animateDockResize(element, () => panel.resize(`${dockSize}%`))
+    return animateDockResize(element, dockContentElementRef.current, dockSize, () =>
+      panel.resize(`${dockSize}%`)
+    )
   }, [dockCollapsed, dockSize, dockSizeRequest])
 
   // Auto-expand the dock when a fresh artifact becomes active — unless the user
@@ -194,7 +224,18 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
           <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">{children}</div>
         </ResizablePanel>
 
-        <ResizableHandle withHandle className={cn(dockCollapsed && "hidden")} />
+        {/* Fades and narrows in lockstep with the panel. A hard `hidden` made
+            the divider pop in over a zero-width dock on expand, and vanish
+            before the dock had finished retracting on collapse. */}
+        <ResizableHandle
+          withHandle
+          aria-hidden={dockCollapsed || undefined}
+          className={cn(
+            "transition-[width,opacity] duration-[calc(200ms*var(--motion-duration-scale,1))] ease-in-out",
+            dockCollapsed && "w-0 opacity-0 [&>div]:opacity-0"
+          )}
+          disabled={dockCollapsed}
+        />
 
         <ResizablePanel
           id="artifact-dock"
@@ -206,7 +247,11 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
           collapsible
           collapsedSize="0%"
         >
-          <div data-testid="artifact-dock-wrapper" className="h-full min-w-0 overflow-hidden">
+          <div
+            ref={dockContentElementRef}
+            data-testid="artifact-dock-wrapper"
+            className="h-full min-w-0 overflow-hidden"
+          >
             <ArtifactDock />
           </div>
         </ResizablePanel>
