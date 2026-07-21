@@ -35,6 +35,38 @@ import { ArtifactDock } from "./artifact-dock"
 import { MobileWorkspaceSheet } from "./workspace-mode/mobile-workspace-sheet"
 import { WorkspaceRevealOpener } from "./workspace-mode/workspace-reveal-opener"
 
+/**
+ * Apply a dock size change under a short flex-grow transition, then strip the
+ * transition again so manual divider dragging stays immediate.
+ *
+ * Uses inline styles (not Tailwind classes) so the duration can consume the
+ * user's `--motion-duration-scale` preference — a runtime `classList.add` of an
+ * arbitrary Tailwind class would never be JIT-compiled into the CSS. The
+ * cleanup delay is scaled by the same multiplier so a slower (1.5×) preference
+ * isn't cut short; reduce-motion collapses it via the global CSS guard.
+ */
+function animateDockResize(element: HTMLDivElement, apply: () => void): () => void {
+  const clearTransition = () => {
+    element.style.transitionProperty = ""
+    element.style.transitionDuration = ""
+    element.style.transitionTimingFunction = ""
+  }
+
+  element.style.transitionProperty = "flex-grow"
+  element.style.transitionDuration = "calc(200ms * var(--motion-duration-scale, 1))"
+  element.style.transitionTimingFunction = "ease-in-out"
+  // Commit the transition style before react-resizable-panels updates flex-grow.
+  void element.offsetWidth
+  apply()
+
+  const scale = Number(getComputedStyle(element).getPropertyValue("--motion-duration-scale")) || 1
+  const timer = window.setTimeout(clearTransition, 200 * scale + 40)
+  return () => {
+    window.clearTimeout(timer)
+    clearTransition()
+  }
+}
+
 export function ArtifactWorkspaceDock({ children }: { children: ReactNode }) {
   useArtifactDockShortcuts()
   const breakpoint = useBreakpoint()
@@ -87,17 +119,16 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
   const dockCollapsed = useArtifactDockLayoutStore((s) => s.dockCollapsed)
   const dockMode = useArtifactDockLayoutStore((s) => s.dockMode)
   const layoutVersion = useArtifactDockLayoutStore((s) => s.layoutVersion)
+  const dockSizeRequest = useArtifactDockLayoutStore((s) => s.dockSizeRequest)
   const setDockSize = useArtifactDockLayoutStore((s) => s.setDockSize)
   const notifyNewArtifact = useArtifactDockLayoutStore((s) => s.notifyNewArtifact)
   const dockPanelRef = useRef<PanelImperativeHandle | null>(null)
   const dockPanelElementRef = useRef<HTMLDivElement | null>(null)
   const previousDockCollapsedRef = useRef(dockCollapsed)
+  const previousDockSizeRequestRef = useRef(dockSizeRequest)
 
   // Match the conversation sidebar: animate only collapse/expand for ~200ms,
   // then remove the transition so manual divider dragging remains immediate.
-  // Uses inline styles (not Tailwind classes) so the duration can consume the
-  // user's `--motion-duration-scale` preference — a runtime `classList.add` of
-  // an arbitrary Tailwind class would never be JIT-compiled into the CSS.
   useEffect(() => {
     if (previousDockCollapsedRef.current === dockCollapsed) return
     previousDockCollapsedRef.current = dockCollapsed
@@ -106,30 +137,26 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
     const element = dockPanelElementRef.current
     if (!panel || !element) return
 
-    const clearTransition = () => {
-      element.style.transitionProperty = ""
-      element.style.transitionDuration = ""
-      element.style.transitionTimingFunction = ""
-    }
-
-    element.style.transitionProperty = "flex-grow"
-    element.style.transitionDuration = "calc(200ms * var(--motion-duration-scale, 1))"
-    element.style.transitionTimingFunction = "ease-in-out"
-    // Commit the transition style before react-resizable-panels updates flex-grow.
-    void element.offsetWidth
-    if (dockCollapsed) panel.collapse()
-    else panel.resize(`${dockSize}%`)
-
-    // Scale the cleanup delay by the same motion multiplier so a slower (1.5×)
-    // preference isn't cut short — reduce-motion still collapses it via the
-    // global CSS guard, so a slight over-wait here is harmless.
-    const scale = Number(getComputedStyle(element).getPropertyValue("--motion-duration-scale")) || 1
-    const timer = window.setTimeout(clearTransition, 200 * scale + 40)
-    return () => {
-      window.clearTimeout(timer)
-      clearTransition()
-    }
+    return animateDockResize(element, () => {
+      if (dockCollapsed) panel.collapse()
+      else panel.resize(`${dockSize}%`)
+    })
   }, [dockCollapsed, dockSize])
+
+  // A width preset (the workbench narrow/wide buttons) asked for a specific
+  // size. Keyed on the request token rather than `dockSize`, because a drag
+  // rewrites `dockSize` on every tick and would otherwise re-enter here and
+  // fight the pointer.
+  useEffect(() => {
+    if (previousDockSizeRequestRef.current === dockSizeRequest) return
+    previousDockSizeRequestRef.current = dockSizeRequest
+
+    const panel = dockPanelRef.current
+    const element = dockPanelElementRef.current
+    if (!panel || !element || dockCollapsed) return
+
+    return animateDockResize(element, () => panel.resize(`${dockSize}%`))
+  }, [dockCollapsed, dockSize, dockSizeRequest])
 
   // Auto-expand the dock when a fresh artifact becomes active — unless the user
   // manually dismissed it, in which case `notifyNewArtifact` only flags it

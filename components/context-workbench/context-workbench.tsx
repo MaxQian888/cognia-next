@@ -50,6 +50,7 @@ import {
 import {
   getContextResourceKey,
   type ContextPanelDefinition,
+  type ContextPanelMode,
   type ContextResource,
   type ContextWorkbenchPlacement,
 } from "@/types/context-workbench"
@@ -112,6 +113,13 @@ export interface ContextWorkbenchProps {
   manageOwnWidth?: boolean
   onExitFocus?: () => void
   onCollapse?: () => void
+  /**
+   * Called when the user picks a mode from the header. Hosts that own the
+   * workbench width themselves (`manageOwnWidth={false}` — e.g. the chat dock,
+   * whose width belongs to the outer resizable panel) use this to resize their
+   * own shell. Without it the narrow/wide buttons render but do nothing.
+   */
+  onModeWidthHint?: (mode: ContextPanelMode) => void
 }
 
 export interface ContextWorkbenchMobileSheetProps extends Omit<
@@ -177,6 +185,7 @@ export function ContextWorkbench({
   manageOwnWidth = true,
   onExitFocus,
   onCollapse,
+  onModeWidthHint,
 }: ContextWorkbenchProps) {
   const sectionRef = useRef<HTMLElement | null>(null)
   const previousFocusRef = useRef<HTMLElement | null>(null)
@@ -384,6 +393,11 @@ export function ContextWorkbench({
     invokePanelLifecycle(panel, phase)
   }
 
+  const selectMode = (mode: ContextPanelMode) => {
+    setMode(scopeKey, mode)
+    onModeWidthHint?.(mode)
+  }
+
   const handleResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault()
     const startX = event.clientX
@@ -456,7 +470,11 @@ export function ContextWorkbench({
           placement === "mobile-sheet" && "w-full border-l-0",
           layout.mode === "collapsed" && "w-12",
           className,
-          layout.mode === "focus" && "fixed inset-0 z-50 w-screen border-l-0 bg-background"
+          // Focus used to snap straight to a full-screen takeover. Zooming it in
+          // (same easing contract as Dialog) keeps the jump legible; the global
+          // reduce-motion guard collapses the duration to 1ms.
+          layout.mode === "focus" &&
+            "fixed inset-0 z-50 w-screen border-l-0 bg-background animate-in fade-in-0 zoom-in-95 [animation-duration:calc(200ms*var(--motion-duration-scale,1))]"
         )}
         style={
           !manageOwnWidth ||
@@ -603,7 +621,7 @@ export function ContextWorkbench({
                     size="icon-sm"
                     variant={layout.mode === "narrow" ? "secondary" : "ghost"}
                     aria-label={t("contextWorkbench.actions.narrow")}
-                    onClick={() => setMode(scopeKey, "narrow")}
+                    onClick={() => selectMode("narrow")}
                   >
                     <PanelRightIcon className="size-4" />
                   </Button>
@@ -612,7 +630,7 @@ export function ContextWorkbench({
                     size="icon-sm"
                     variant={layout.mode === "wide" ? "secondary" : "ghost"}
                     aria-label={t("contextWorkbench.actions.wide")}
-                    onClick={() => setMode(scopeKey, "wide")}
+                    onClick={() => selectMode("wide")}
                   >
                     <Rows3Icon className="size-4" />
                   </Button>
@@ -621,7 +639,7 @@ export function ContextWorkbench({
                     size="icon-sm"
                     variant={layout.mode === "focus" ? "secondary" : "ghost"}
                     aria-label={t("contextWorkbench.actions.focus")}
-                    onClick={() => setMode(scopeKey, "focus")}
+                    onClick={() => selectMode("focus")}
                   >
                     <FocusIcon className="size-4" />
                   </Button>
@@ -638,7 +656,19 @@ export function ContextWorkbench({
                   <div
                     id={`context-workbench-panel-${panel.id}`}
                     role="tabpanel"
-                    className={cn("h-full", !active && "pointer-events-none")}
+                    className={cn(
+                      "h-full",
+                      !active && "pointer-events-none",
+                      // Panels stay mounted behind `<Activity>`, so switching one
+                      // in is a display flip with no transition to hook. A CSS
+                      // *animation* restarts on re-display, which gives the
+                      // incoming panel a soft entrance; the outgoing one is left
+                      // alone because a cross-fade would need both painted at
+                      // once, which Activity deliberately prevents. The global
+                      // reduce-motion guard in globals.css collapses this to 1ms.
+                      active &&
+                        "animate-in fade-in-0 slide-in-from-bottom-1 [animation-duration:calc(150ms*var(--motion-duration-scale,1))]"
+                    )}
                     inert={!active}
                     aria-hidden={!active}
                   >

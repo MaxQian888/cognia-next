@@ -10,8 +10,18 @@ export type ContextCapabilityInput =
       workspaceAvailable: boolean
     }
   | { kind: "workflow" }
+  | { kind: "session"; workspaceAvailable: boolean }
 
 export function resolveContextCapabilities(input: ContextCapabilityInput): ContextCapability[] {
+  // A session is not a document: there is nothing to comment on, review or ask
+  // the AI about at the session level, so it gets its own (much smaller) seed
+  // instead of the document base set below.
+  if (input.kind === "session") {
+    const sessionCapabilities = new Set<ContextCapability>(["inspect", "preview", "history"])
+    if (input.workspaceAvailable) sessionCapabilities.add("workspace")
+    return [...sessionCapabilities]
+  }
+
   const capabilities = new Set<ContextCapability>(["ai", "comments", "inspect", "review"])
   if (input.kind === "project-file") {
     capabilities.add("history")

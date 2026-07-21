@@ -16,8 +16,14 @@ export function useResourceWorkbenchSession(
   enabled: boolean,
   workbenchInstanceId: string
 ): ChatSession | null {
-  const bindingKey = JSON.stringify(surfaceBindingForContextResource(resource))
-  const binding = useMemo(() => JSON.parse(bindingKey) as SessionSurfaceBinding, [bindingKey])
+  // `session` resources have no binding — they are already a chat session and
+  // never own a nested resource-workbench session.
+  const surfaceBinding = surfaceBindingForContextResource(resource)
+  const bindingKey = surfaceBinding ? JSON.stringify(surfaceBinding) : null
+  const binding = useMemo(
+    () => (bindingKey ? (JSON.parse(bindingKey) as SessionSurfaceBinding) : null),
+    [bindingKey]
+  )
   const resourceKey = getContextResourceKey(resource)
   const sessionOverrideId = useContextWorkbenchStore(
     (state) => state.sessionOverrides?.[resourceKey]
@@ -26,7 +32,7 @@ export function useResourceWorkbenchSession(
   const [session, setSession] = useState<ChatSession | null>(null)
 
   useEffect(() => {
-    if (!enabled || resource.kind === "workflow") return
+    if (!enabled || !binding || resource.kind === "workflow") return
     let cancelled = false
     const db = getDb()
     const repository = {
@@ -72,5 +78,7 @@ export function useResourceWorkbenchSession(
     workbenchInstanceId,
   ])
 
-  return session && JSON.stringify(session.surfaceBinding) === bindingKey ? session : null
+  return session && bindingKey && JSON.stringify(session.surfaceBinding) === bindingKey
+    ? session
+    : null
 }

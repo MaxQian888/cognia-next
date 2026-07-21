@@ -61,6 +61,17 @@ export const CHAT_MIN_PERCENT = {
   workspace: 35,
 } as const
 
+/**
+ * Width presets the workbench header's narrow/wide buttons map onto. The dock
+ * lives inside the outer ResizablePanel and is mounted with
+ * `manageOwnWidth={false}`, so the workbench cannot size itself — without this
+ * mapping those two buttons render but do nothing.
+ */
+export const DOCK_MODE_WIDTH_PERCENT = {
+  narrow: ARTIFACT_DOCK_BOUNDS.default,
+  wide: ARTIFACT_DOCK_BOUNDS.max,
+} as const
+
 export const ARTIFACT_DOCK_PERSIST_DEBOUNCE_MS = 150
 
 export interface ArtifactDockLayoutState {
@@ -90,8 +101,17 @@ export interface ArtifactDockLayoutState {
   unreadArtifact: boolean
   /** Bumped on migrate / reset so ResizablePanelGroup remounts with new defaults. */
   layoutVersion: number
+  /**
+   * Runtime-only: bumped only when something asks for a specific width (the
+   * workbench narrow/wide buttons), never by a drag. The desktop dock watches
+   * this token instead of `dockSize` so applying a preset cannot fight the
+   * per-tick `setDockSize` writes a drag produces.
+   */
+  dockSizeRequest: number
 
   setDockSize: (pct: number) => void
+  /** Apply a width preset and ask the mounted dock to resize to it. */
+  requestDockSize: (pct: number) => void
   toggleDock: () => void
   setDockCollapsed: (collapsed: boolean) => void
   /**
@@ -169,6 +189,13 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
       unreadArtifact: false,
       workspaceRevealRequest: null,
       workspaceContext: null,
+      dockSizeRequest: 0,
+
+      requestDockSize: (pct) =>
+        set((state) => ({
+          dockSize: clampDockSize(pct),
+          dockSizeRequest: state.dockSizeRequest + 1,
+        })),
 
       setDockSize: (pct) => {
         set({ dockSize: clampDockSize(pct) })
@@ -270,6 +297,7 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
         set((state) => ({
           ...DEFAULTS,
           layoutVersion: state.layoutVersion + 1,
+          dockSizeRequest: 0,
           mobileSheetOpen: false,
           userDismissed: false,
           unreadArtifact: false,
@@ -301,8 +329,9 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
           dockSize: clampDockSize(p.dockSize ?? current.dockSize),
           dockMode:
             p.dockMode === "workspace" || p.dockMode === "browser" ? p.dockMode : "artifact",
-          // mobileSheetOpen / userDismissed / unreadArtifact are runtime-only —
-          // never restore them from disk.
+          // mobileSheetOpen / userDismissed / unreadArtifact / dockSizeRequest
+          // are runtime-only — never restore them from disk.
+          dockSizeRequest: 0,
           mobileSheetOpen: false,
           userDismissed: false,
           unreadArtifact: false,

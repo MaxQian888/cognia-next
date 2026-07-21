@@ -274,6 +274,38 @@ describe("ArtifactWorkspaceDock", () => {
     expect(screen.getByTestId("resizable-panel-artifact-chat")).toHaveAttribute("data-min", "35%")
   })
 
+  it("applies a width preset to the docked panel straight away", async () => {
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+    const dockPanel = screen.getByTestId("resizable-panel-artifact-dock")
+    expect(dockPanel).toHaveAttribute("data-size", "34%")
+
+    act(() => useArtifactDockLayoutStore.getState().requestDockSize(50))
+
+    await waitFor(() => expect(dockPanel).toHaveAttribute("data-size", "50%"))
+  })
+
+  it("ignores per-tick drag writes so a preset never fights the pointer", () => {
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+    const dockPanel = screen.getByTestId("resizable-panel-artifact-dock")
+
+    // `setDockSize` is what a drag calls on every tick — it must not re-drive
+    // the panel, or the dock would fight the pointer mid-drag.
+    act(() => useArtifactDockLayoutStore.getState().setDockSize(45))
+
+    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(45)
+    expect(dockPanel).toHaveAttribute("data-size", "34%")
+  })
+
   it("does not force-expand a dismissed dock — only flags it unread", () => {
     render(
       <ArtifactWorkspaceDock>

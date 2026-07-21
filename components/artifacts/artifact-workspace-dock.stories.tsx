@@ -47,3 +47,22 @@ type Story = StoryObj<typeof meta>
 export const WithDock: Story = {
   args: { children: <ChatPlaceholder /> },
 }
+
+// No active artifact. The dock keeps the same workbench chrome and falls back to
+// the session surface (artifact history / browser / workspace) instead of
+// swapping to the legacy top-tab dock.
+export const SessionSurface: Story = {
+  args: { children: <ChatPlaceholder /> },
+  beforeEach: () => {
+    seedStore(useArtifactStore, { artifacts: {}, activeArtifactId: null })
+  },
+}
+
+// The embedded browser is a session panel, so it renders inside the same
+// activity rail rather than replacing the dock chrome.
+export const BrowserSurface: Story = {
+  args: { children: <ChatPlaceholder /> },
+  beforeEach: () => {
+    seedStore(useArtifactDockLayoutStore, { dockMode: "browser", dockCollapsed: false })
+  },
+}

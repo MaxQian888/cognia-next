@@ -136,6 +136,25 @@ it("leaves workflow session ownership to the workflow editor", () => {
   expect(get).not.toHaveBeenCalled()
 })
 
+it("never nests a resource session under a session resource", () => {
+  const { result } = renderHook(() =>
+    useResourceWorkbenchSession(
+      {
+        kind: "session",
+        sessionId: "s",
+        capabilities: ["inspect"],
+      },
+      // Even with chat scope requested, a session resource has no binding.
+      true,
+      "window-a"
+    )
+  )
+
+  expect(result.current).toBeNull()
+  expect(get).not.toHaveBeenCalled()
+  expect(put).not.toHaveBeenCalled()
+})
+
 it("does not create a session before an AI panel is activated", () => {
   const { result } = renderHook(() =>
     useResourceWorkbenchSession(

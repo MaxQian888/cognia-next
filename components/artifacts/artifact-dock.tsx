@@ -17,7 +17,7 @@ import {
   InfoIcon,
   GlobeIcon,
 } from "lucide-react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -25,7 +25,11 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { cn } from "@/lib/utils"
 import { hasWorkspaceFsBackend } from "@/lib/files/workspace-backend"
 import { useChatStore } from "@/stores/chat"
-import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
+import {
+  DOCK_MODE_WIDTH_PERCENT,
+  useArtifactDockLayoutStore,
+  type DockMode,
+} from "@/stores/artifact/artifact-dock-layout-store"
 import { ArtifactPanelContent } from "./artifact-panel-content"
 import { ArtifactList } from "./artifact-list"
 import { DockWorkspace } from "./workspace-mode/dock-workspace"
@@ -35,7 +39,11 @@ import {
 } from "@/components/context-workbench/context-workbench"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
-import type { ContextPanelDefinition, ContextResource } from "@/types/context-workbench"
+import type {
+  ContextPanelDefinition,
+  ContextPanelMode,
+  ContextResource,
+} from "@/types/context-workbench"
 import { useContextWorkbenchSurfaceFlag } from "@/hooks/context-workbench/use-context-workbench-surface-flag"
 import { ResourceWorkbenchChatPanel } from "@/components/context-workbench/resource-workbench-chat-panel"
 import { ArtifactReviewView } from "./artifact-review-view"
@@ -49,12 +57,50 @@ import { BrowserPreviewPane } from "@/components/browser/browser-preview-pane"
 
 export function ArtifactDock() {
   const enabled = useContextWorkbenchSurfaceFlag("artifact")
+  // Rollback path only — ADR-0083 keeps the legacy dock reachable for one minor
+  // release. With the flag on the workbench now covers *every* dock state
+  // (artifact, browser and the no-artifact empty state), so the chat right rail
+  // no longer swaps between an activity rail and the legacy top-tab chrome.
+  if (!enabled) return <LegacyArtifactDock />
+  return <DockContextWorkbench />
+}
+
+function DockContextWorkbench() {
   const activeArtifactId = useArtifactStore((state) => state.activeArtifactId)
   const dockMode = useArtifactDockLayoutStore((state) => state.dockMode)
-  return enabled && activeArtifactId && dockMode !== "browser" ? (
+  // The browser is session-scoped, so asking for it drops the artifact resource.
+  return activeArtifactId && dockMode !== "browser" ? (
     <ArtifactContextWorkbench artifactId={activeArtifactId} />
   ) : (
-    <LegacyArtifactDock />
+    <SessionContextWorkbench />
+  )
+}
+
+/**
+ * Which panel the persisted dock mode maps onto. `reconcilePanels` falls back to
+ * the *first* panel when a scope has no active panel yet, so the panel matching
+ * the current mode is sorted first (see `modeFirstOrder`) — otherwise a fresh
+ * scope activates an unrelated panel whose lifecycle hook writes `dockMode`
+ * back and bounces the dock straight out of the mode the user asked for.
+ */
+function modeFirstOrder(panelId: string, modePanelId: string, order: number): number {
+  return panelId === modePanelId ? 0 : order
+}
+
+/**
+ * The dock is mounted with `manageOwnWidth={false}` — its width belongs to the
+ * outer ResizablePanel — so the workbench header's narrow/wide buttons have to
+ * resize the dock instead of the workbench, or they do nothing at all.
+ */
+function useDockWidthHint() {
+  const requestDockSize = useArtifactDockLayoutStore((state) => state.requestDockSize)
+  return useCallback(
+    (mode: ContextPanelMode) => {
+      // Focus is a full-screen takeover; it owns no dock width.
+      if (mode === "focus") return
+      requestDockSize(DOCK_MODE_WIDTH_PERCENT[mode])
+    },
+    [requestDockSize]
   )
 }
 
@@ -92,6 +138,8 @@ export function ArtifactContextWorkbench({
     [artifactId, selectionState]
   )
   const workspaceAvailable = hasWorkspaceFsBackend()
+  const modePanelId = dockMode === "workspace" ? "workspace" : "preview"
+  const dockWidthHint = useDockWidthHint()
 
   useEffect(() => {
     const handleSelection = (event: Event) => {
@@ -206,7 +254,7 @@ export function ArtifactContextWorkbench({
         activity: "preview-run",
         labelKey: "artifacts.dock.artifactMode",
         icon: PanelsTopLeftIcon,
-        order: 10,
+        order: modeFirstOrder("preview", modePanelId, 10),
         appliesTo: (resource) => resource.kind === "artifact",
         retention: "stateful",
         onFirstActivate: () => setDockMode("artifact"),
@@ -266,7 +314,7 @@ export function ArtifactContextWorkbench({
         activity: "inspect",
         labelKey: "artifacts.dock.workspaceMode",
         icon: SearchCodeIcon,
-        order: 30,
+        order: modeFirstOrder("workspace", modePanelId, 30),
         appliesTo: (resource) => resource.kind === "artifact",
         retention: "stateful",
         preferredMode: "wide",
@@ -285,6 +333,7 @@ export function ArtifactContextWorkbench({
       activeSessionId,
       artifact,
       artifactId,
+      modePanelId,
       pendingReview,
       pendingSelectionComment,
       setDockMode,
@@ -296,7 +345,10 @@ export function ArtifactContextWorkbench({
     ]
   )
 
-  if (!artifact) return mobile ? null : <LegacyArtifactDock />
+  // The id outlived its artifact (evicted by the persist cap, or cleared in
+  // another tab). Fall through to the session workbench rather than the legacy
+  // chrome so the dock keeps a single shell.
+  if (!artifact) return mobile ? null : <SessionContextWorkbench />
   const resource: ContextResource = {
     kind: "artifact",
     artifactId,
@@ -326,6 +378,7 @@ export function ArtifactContextWorkbench({
       resource={resource}
       panels={panels}
       onCollapse={() => setDockCollapsed(true)}
+      onModeWidthHint={dockWidthHint}
       placement="chat-dock"
       manageOwnWidth={false}
       className="w-full"
@@ -369,6 +422,109 @@ function ArtifactSelectionCommentPanel({
         {t("sendToAi")}
       </Button>
     </div>
+  )
+}
+
+/**
+ * The dock's fallback surface: no artifact is active, or the user asked for the
+ * browser. Hosts the session-scoped panels (artifact history, embedded browser,
+ * workspace) inside the *same* workbench chrome the artifact surface uses, so
+ * the chat right rail never changes shape.
+ */
+function SessionContextWorkbench() {
+  const workbenchInstanceId = useContextWorkbenchInstanceId("artifact")
+  const activeSessionId = useChatStore((state) => state.activeSessionId)
+  const dockMode = useArtifactDockLayoutStore((state) => state.dockMode)
+  const setDockMode = useArtifactDockLayoutStore((state) => state.setDockMode)
+  const setDockCollapsed = useArtifactDockLayoutStore((state) => state.setDockCollapsed)
+  const workspaceAvailable = hasWorkspaceFsBackend()
+  const modePanelId =
+    dockMode === "browser" ? "browser" : dockMode === "workspace" ? "workspace" : "history"
+  const dockWidthHint = useDockWidthHint()
+
+  // `setDockMode` also clears any pending workspace reveal, so only write when
+  // the mode actually changes — a panel restoring into the mode it already owns
+  // must not wipe the reveal request that routed the user here.
+  const selectDockMode = useCallback(
+    (mode: DockMode) => {
+      if (useArtifactDockLayoutStore.getState().dockMode !== mode) setDockMode(mode)
+    },
+    [setDockMode]
+  )
+
+  const panels = useMemo<ContextPanelDefinition[]>(
+    () => [
+      {
+        id: "history",
+        activity: "review",
+        labelKey: "artifacts.dock.showHistory",
+        icon: History,
+        order: modeFirstOrder("history", modePanelId, 10),
+        appliesTo: (resource) => resource.kind === "session",
+        retention: "stateful",
+        onFirstActivate: () => selectDockMode("artifact"),
+        onRestore: () => selectDockMode("artifact"),
+        renderer: () => (
+          <ArtifactList
+            sessionId={activeSessionId ?? undefined}
+            className="h-full"
+            maxHeight="100%"
+          />
+        ),
+      },
+      {
+        id: "browser",
+        activity: "preview-run",
+        labelKey: "browser.title",
+        icon: GlobeIcon,
+        order: modeFirstOrder("browser", modePanelId, 20),
+        appliesTo: (resource) => resource.kind === "session",
+        retention: "stateful",
+        preferredMode: "wide",
+        onFirstActivate: () => selectDockMode("browser"),
+        onRestore: () => selectDockMode("browser"),
+        renderer: () => <BrowserPreviewPane sessionId={activeSessionId ?? undefined} />,
+      },
+      {
+        id: "workspace",
+        activity: "inspect",
+        labelKey: "artifacts.dock.workspaceMode",
+        icon: SearchCodeIcon,
+        order: modeFirstOrder("workspace", modePanelId, 30),
+        appliesTo: (resource) => resource.kind === "session",
+        retention: "stateful",
+        preferredMode: "wide",
+        onFirstActivate: () => selectDockMode("workspace"),
+        onRestore: () => selectDockMode("workspace"),
+        renderer: () =>
+          workspaceAvailable ? (
+            <DockWorkspace activeSessionId={activeSessionId} />
+          ) : (
+            <ContextCapabilityUnavailable capability="workspace" />
+          ),
+      },
+    ],
+    [activeSessionId, modePanelId, selectDockMode, workspaceAvailable]
+  )
+
+  const resource: ContextResource = {
+    kind: "session",
+    // A dock with no conversation still needs a stable scope key.
+    sessionId: activeSessionId ?? "none",
+    capabilities: resolveContextCapabilities({ kind: "session", workspaceAvailable }),
+  }
+
+  return (
+    <ContextWorkbench
+      workbenchInstanceId={workbenchInstanceId}
+      resource={resource}
+      panels={panels}
+      onCollapse={() => setDockCollapsed(true)}
+      onModeWidthHint={dockWidthHint}
+      placement="chat-dock"
+      manageOwnWidth={false}
+      className="w-full"
+    />
   )
 }
 

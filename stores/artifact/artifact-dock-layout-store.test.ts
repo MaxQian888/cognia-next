@@ -7,6 +7,7 @@ import { act, renderHook } from "@testing-library/react"
 import {
   ARTIFACT_DOCK_BOUNDS,
   ARTIFACT_DOCK_PERSIST_DEBOUNCE_MS,
+  DOCK_MODE_WIDTH_PERCENT,
   WORKSPACE_DOCK_BOUNDS,
   useArtifactDockLayoutStore,
 } from "./artifact-dock-layout-store"
@@ -24,6 +25,43 @@ describe("useArtifactDockLayoutStore", () => {
     const { result } = renderHook(() => useArtifactDockLayoutStore())
     act(() => {
       result.current.resetLayout()
+    })
+  })
+
+  describe("width presets", () => {
+    it("maps the workbench modes onto real dock widths", () => {
+      expect(DOCK_MODE_WIDTH_PERCENT.narrow).toBe(ARTIFACT_DOCK_BOUNDS.default)
+      expect(DOCK_MODE_WIDTH_PERCENT.wide).toBe(ARTIFACT_DOCK_BOUNDS.max)
+      expect(DOCK_MODE_WIDTH_PERCENT.wide).toBeGreaterThan(DOCK_MODE_WIDTH_PERCENT.narrow)
+    })
+
+    it("bumps the request token only on an explicit width request", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+      const initialToken = result.current.dockSizeRequest
+
+      // A drag writes the size without asking the dock to resize itself.
+      act(() => result.current.setDockSize(45))
+      expect(result.current.dockSize).toBe(45)
+      expect(result.current.dockSizeRequest).toBe(initialToken)
+
+      act(() => result.current.requestDockSize(DOCK_MODE_WIDTH_PERCENT.wide))
+      expect(result.current.dockSize).toBe(DOCK_MODE_WIDTH_PERCENT.wide)
+      expect(result.current.dockSizeRequest).toBe(initialToken + 1)
+    })
+
+    it("clamps a requested width into the allowed span", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+      act(() => result.current.requestDockSize(5))
+      expect(result.current.dockSize).toBe(ARTIFACT_DOCK_BOUNDS.min)
+
+      act(() => result.current.requestDockSize(999))
+      expect(result.current.dockSize).toBe(WORKSPACE_DOCK_BOUNDS.max)
+    })
+
+    it("never restores the runtime request token from disk", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+      act(() => result.current.requestDockSize(DOCK_MODE_WIDTH_PERCENT.wide))
+      expect(readPersisted()?.state.dockSizeRequest).toBeUndefined()
     })
   })
 

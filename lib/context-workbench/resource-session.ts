@@ -9,7 +9,15 @@ interface ResourceSessionRepository {
   now?: () => number
 }
 
-export function surfaceBindingForContextResource(resource: ContextResource): SessionSurfaceBinding {
+/**
+ * Maps a workbench resource onto the persisted binding of its embedded chat
+ * session. Returns `null` for the `session` resource: it *is* a chat session
+ * already, so it never owns a nested resource-workbench session and must not
+ * be given a `SessionSurfaceBinding` (that type is a persisted Dexie column).
+ */
+export function surfaceBindingForContextResource(
+  resource: ContextResource
+): SessionSurfaceBinding | null {
   switch (resource.kind) {
     case "canvas-document":
       return { kind: "canvas-document", documentId: resource.documentId }
@@ -24,6 +32,8 @@ export function surfaceBindingForContextResource(resource: ContextResource): Ses
       return { kind: "artifact", artifactId: resource.artifactId }
     case "workflow":
       return { kind: "workflow", workflowId: resource.workflowId }
+    case "session":
+      return null
   }
 }
 

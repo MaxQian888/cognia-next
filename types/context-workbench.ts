@@ -69,6 +69,19 @@ export type ContextResource =
       selection?: WorkflowSelectionCoordinates
       capabilities: ContextCapability[]
     }
+  | {
+      /**
+       * The chat session itself — the dock's fallback resource when no artifact
+       * is active. Backs the empty state, the embedded browser and the
+       * session-scoped workspace/history panels so the chat right rail keeps a
+       * single workbench shell instead of dropping to the legacy dock chrome.
+       */
+      kind: "session"
+      sessionId: string
+      /** A session is not a document, so it never carries a selection. */
+      selection?: never
+      capabilities: ContextCapability[]
+    }
 
 export type ContextResourceKind = ContextResource["kind"]
 
@@ -109,6 +122,8 @@ export function getContextResourceKey(resource: ContextResource): string {
       return `artifact:${resource.artifactId}`
     case "workflow":
       return `workflow:${resource.workflowId}`
+    case "session":
+      return `session:${resource.sessionId}`
   }
 }
 

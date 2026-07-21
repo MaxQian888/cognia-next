@@ -552,4 +552,74 @@ describe("ContextWorkbench", () => {
       expect(context.resource).not.toHaveProperty("content")
     }
   })
+
+  describe("motion and host-owned width", () => {
+    const twoPanels: ContextPanelDefinition[] = [
+      {
+        id: "comments",
+        activity: "comments",
+        labelKey: "contextWorkbench.panels.comments",
+        appliesTo: () => true,
+        renderer: () => <div>comments-panel</div>,
+      },
+      {
+        id: "review",
+        activity: "review",
+        labelKey: "contextWorkbench.panels.review",
+        appliesTo: () => true,
+        renderer: () => <div>review-panel</div>,
+      },
+    ]
+
+    it("animates the incoming panel instead of hard-cutting to it", () => {
+      renderWorkbench(twoPanels)
+
+      const active = document.getElementById("context-workbench-panel-comments")
+      expect(active?.className).toContain("animate-in")
+      // The duration must consume the user's motion-speed preference.
+      expect(active?.className).toContain("--motion-duration-scale")
+
+      fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.panels.review" }))
+
+      const incoming = document.getElementById("context-workbench-panel-review")
+      expect(incoming?.className).toContain("animate-in")
+      // The outgoing panel is left alone — Activity keeps it mounted but hidden,
+      // so a cross-fade could never paint both at once.
+      expect(document.getElementById("context-workbench-panel-comments")?.className).not.toContain(
+        "animate-in"
+      )
+    })
+
+    it("zooms the focus takeover in rather than snapping to full screen", () => {
+      renderWorkbench(twoPanels)
+
+      fireEvent.click(screen.getByRole("button", { name: "Focus mode" }))
+
+      const section = screen.getByTestId("context-workbench")
+      expect(section).toHaveAttribute("data-mode", "focus")
+      expect(section.className).toContain("zoom-in-95")
+      expect(section.className).toContain("--motion-duration-scale")
+    })
+
+    it("reports mode changes so a host that owns the width can resize itself", () => {
+      const onModeWidthHint = jest.fn()
+      render(
+        <NextIntlClientProvider locale="en" messages={messages}>
+          <ContextWorkbench
+            workbenchInstanceId="window-a"
+            resource={resource}
+            panels={twoPanels}
+            manageOwnWidth={false}
+            onModeWidthHint={onModeWidthHint}
+          />
+        </NextIntlClientProvider>
+      )
+
+      fireEvent.click(screen.getByRole("button", { name: "Wide mode" }))
+      fireEvent.click(screen.getByRole("button", { name: "Narrow mode" }))
+      fireEvent.click(screen.getByRole("button", { name: "Focus mode" }))
+
+      expect(onModeWidthHint.mock.calls.map(([mode]) => mode)).toEqual(["wide", "narrow", "focus"])
+    })
+  })
 })

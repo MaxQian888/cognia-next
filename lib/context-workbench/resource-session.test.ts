@@ -99,6 +99,16 @@ describe("resource workbench sessions", () => {
     ).toEqual({ kind: "workflow", workflowId: "w" })
   })
 
+  it("returns no binding for a session resource — it is already a chat session", () => {
+    expect(
+      surfaceBindingForContextResource({
+        kind: "session",
+        sessionId: "s",
+        capabilities: [],
+      })
+    ).toBeNull()
+  })
+
   it("uses stable encoded ids and repairs an older row with the same id", async () => {
     expect(
       resourceWorkbenchSessionId({
