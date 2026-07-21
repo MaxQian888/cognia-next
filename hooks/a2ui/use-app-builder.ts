@@ -46,6 +46,11 @@ import {
   patchAppMetadata,
   type A2UIAppMetadataPatch,
 } from "@/lib/db/a2ui-apps"
+import { createShareLink, revokeShareLink, ShareNotConfiguredError } from "@/lib/share/client"
+import { a2uiPayload } from "@/lib/share/payload"
+import { upsertTemplate } from "@/lib/db/a2ui-templates"
+import type { A2UITemplateRow } from "@/lib/db/a2ui-types"
+import type { A2UIPublishOutcome } from "@/types/a2ui/app"
 import { loggers } from "@cognia/logging"
 
 const log = loggers.app
@@ -65,6 +70,7 @@ function toMetadataPatch(instance: A2UIAppInstance): A2UIAppMetadataPatch {
     publishedAt: instance.publishedAt,
     isPublished: instance.isPublished,
     storeId: instance.storeId,
+    isFavorite: instance.isFavorite,
     screenshots: instance.screenshots,
     locale: instance.locale,
   }
@@ -560,6 +566,99 @@ export function useA2UIAppBuilder(options: UseA2UIAppBuilderOptions = {}) {
     return { valid: missing.length === 0, missing }
   }, [])
 
+  // Publish = mint a durable, revocable public share link (share-server) and
+  // record the published state on the instance. `storeId` holds the share code
+  // so unpublish can revoke it. Reuses the exact hosting the Share button uses.
+  const publishApp = useCallback(
+    async (appId: string): Promise<A2UIPublishOutcome> => {
+      const validation = prepareForPublish(appId)
+      if (!validation.valid) return { ok: false, reason: "invalid", missing: validation.missing }
+
+      const instance = getAppInstancesCache().get(appId)
+      const json = importExport.exportApp(appId)
+      if (!instance || !json) return { ok: false, reason: "export-failed" }
+
+      try {
+        const created = await createShareLink({ payload: a2uiPayload(json, instance.name) })
+        await persistInstanceUpdate(appId, (current) => ({
+          ...current,
+          isPublished: true,
+          publishedAt: Date.now(),
+          storeId: created.code,
+        }))
+        return { ok: true, url: created.url }
+      } catch (error) {
+        if (error instanceof ShareNotConfiguredError) return { ok: false, reason: "not-configured" }
+        log.error("A2UI AppBuilder: publish failed", error as Error)
+        throw error
+      }
+    },
+    [importExport, persistInstanceUpdate, prepareForPublish]
+  )
+
+  const unpublishApp = useCallback(
+    async (appId: string): Promise<boolean> => {
+      const instance = getAppInstancesCache().get(appId)
+      if (instance?.storeId) {
+        // Best-effort revoke — clear local published state even if the remote
+        // link is already gone, so the app never gets stuck "published".
+        try {
+          await revokeShareLink(instance.storeId)
+        } catch (error) {
+          log.error("A2UI AppBuilder: unpublish revoke failed", error as Error)
+        }
+      }
+      return persistInstanceUpdate(appId, (current) => ({
+        ...current,
+        isPublished: false,
+        publishedAt: undefined,
+        storeId: undefined,
+      }))
+    },
+    [persistInstanceUpdate]
+  )
+
+  // Toggle favorite without touching lastModified (favoriting must not reorder
+  // the "recently edited" list).
+  const toggleFavorite = useCallback(
+    (appId: string): Promise<boolean> =>
+      persistInstanceUpdate(
+        appId,
+        (current) => ({ ...current, isFavorite: !current.isFavorite }),
+        false
+      ),
+    [persistInstanceUpdate]
+  )
+
+  // Save the current app's tree as a reusable user template (Dexie
+  // `a2uiTemplates`), the same store the Settings → Templates tab lists.
+  const saveAsTemplate = useCallback(
+    async (appId: string): Promise<boolean> => {
+      const surface = surfaces[appId]
+      const instance = getAppInstancesCache().get(appId)
+      if (!surface || !instance) return false
+
+      const now = Date.now()
+      const row: A2UITemplateRow = {
+        id: generateTemplateId("user"),
+        name: instance.name,
+        category: instance.category ?? "other",
+        description: instance.description,
+        components: Object.values(surface.components) as A2UIComponent[],
+        dataModel: deepClone(surface.dataModel),
+        rootId: surface.rootId,
+        isBuiltIn: false,
+        source: "user",
+        thumbnailUrl: instance.thumbnail,
+        createdAt: now,
+        updatedAt: now,
+      }
+      await upsertTemplate(row)
+      return true
+    },
+    [surfaces]
+  )
+
   // Memoized locale-owned template views. Canonical structures remain in
   // `appTemplates`; localization returns isolated overlays.
   const templates = useMemo(() => getLocalizedTemplates(locale), [locale])
@@ -636,6 +735,10 @@ export function useA2UIAppBuilder(options: UseA2UIAppBuilderOptions = {}) {
 
     // App store preparation
     prepareForPublish,
+    publishApp,
+    unpublishApp,
+    toggleFavorite,
+    saveAsTemplate,
 
     // Active app
     activeAppId: a2ui.activeSurfaceId,

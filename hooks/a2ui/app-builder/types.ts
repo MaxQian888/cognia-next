@@ -59,6 +59,9 @@ export interface A2UIAppInstance {
   isPublished?: boolean
   storeId?: string
 
+  /** User-pinned favorite (surfaced + filterable in the Hub). */
+  isFavorite?: boolean
+
   // Screenshots (for app store)
   screenshots?: string[]
 }

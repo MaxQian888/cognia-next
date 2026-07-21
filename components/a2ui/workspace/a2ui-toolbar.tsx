@@ -8,9 +8,11 @@
 import React, { useCallback, useState } from "react"
 import { useLocale, useTranslations } from "next-intl"
 import {
+  BookmarkPlus,
   Database,
   Download,
   Eye,
+  Loader2,
   PanelRight,
   Pencil,
   Redo2,
@@ -38,7 +40,11 @@ import {
 import { useA2UIStore } from "@/stores/a2ui"
 import { useA2UIAppBuilder } from "@/hooks/a2ui/use-app-builder"
 import { useA2UISave } from "@/hooks/a2ui/use-a2ui-save"
-import { generateAppFromDescription } from "@/lib/a2ui/app-generator"
+import {
+  generateA2UIApp,
+  streamDispatchToStore,
+  A2UIAiUnavailableError,
+} from "@/lib/a2ui/ai-generate"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { ShareLinkDialog } from "@/components/share/share-link-dialog"
@@ -70,11 +76,15 @@ export function A2UIToolbar() {
   const undo = useA2UIStore((state) => state.undo)
   const redo = useA2UIStore((state) => state.redo)
   const replaceSurfaceContent = useA2UIStore((state) => state.replaceSurfaceContent)
+  const updateComponents = useA2UIStore((state) => state.updateComponents)
+  const updateDataModel = useA2UIStore((state) => state.updateDataModel)
   const appBuilder = useA2UIAppBuilder({})
   const saveApp = useA2UISave(surfaceId)
   const [shareOpen, setShareOpen] = useState(false)
   const [regenerateOpen, setRegenerateOpen] = useState(false)
   const [regeneratePrompt, setRegeneratePrompt] = useState("")
+  const [aiMode, setAiMode] = useState<"edit" | "create">("edit")
+  const [isGenerating, setIsGenerating] = useState(false)
 
   const handleUndo = useCallback(() => undo(surfaceId), [undo, surfaceId])
   const handleRedo = useCallback(() => redo(surfaceId), [redo, surfaceId])
@@ -114,33 +124,84 @@ export function A2UIToolbar() {
     }
   }, [appBuilder, surfaceId, t])
 
-  const handleRegenerate = useCallback(() => {
-    const description = regeneratePrompt.trim()
-    if (!description) return
-
+  const handleSaveTemplate = useCallback(async () => {
     try {
-      const appLocale = appBuilder.getAppInstance(surfaceId)?.locale ?? locale
-      const generated = generateAppFromDescription({
-        description,
-        language: appLocale === "zh-CN" ? "zh" : "en",
-      })
-      const replaced = replaceSurfaceContent(
-        surfaceId,
-        generated.components,
-        generated.dataModel,
-        "root"
-      )
-      if (!replaced) {
-        toast.error(t("generationFailed"))
-        return
-      }
-      setRegenerateOpen(false)
-      setRegeneratePrompt("")
-      toast.success(t("appRegenerated"))
+      const ok = await appBuilder.saveAsTemplate(surfaceId)
+      if (ok) toast.success(t("savedAsTemplate"))
+      else toast.error(t("generationFailed"))
     } catch {
       toast.error(t("generationFailed"))
     }
-  }, [appBuilder, locale, regeneratePrompt, replaceSurfaceContent, surfaceId, t])
+  }, [appBuilder, surfaceId, t])
+
+  const handleAiRun = useCallback(async () => {
+    const instruction = regeneratePrompt.trim()
+    if (!instruction || isGenerating) return
+    setIsGenerating(true)
+
+    try {
+      const appLocale = appBuilder.getAppInstance(surfaceId)?.locale ?? locale
+      const language = appLocale === "zh-CN" ? "zh" : "en"
+
+      if (aiMode === "edit") {
+        // Incremental edit: stream patches onto the live canvas, then reconcile
+        // with the authoritative merged tree the model returned.
+        const surface = useA2UIStore.getState().surfaces[surfaceId]
+        const result = await generateA2UIApp({
+          instruction,
+          mode: "edit",
+          surfaceId,
+          language,
+          currentComponents: surface ? Object.values(surface.components) : [],
+          onDispatch: streamDispatchToStore,
+        })
+        updateComponents(surfaceId, result.components)
+        updateDataModel(surfaceId, result.dataModel, false)
+        toast.success(t("appEdited"))
+      } else {
+        // Whole-app regenerate: stream in, then a clean full replace so no
+        // orphan components from the previous tree survive.
+        const result = await generateA2UIApp({
+          instruction,
+          mode: "create",
+          surfaceId,
+          language,
+          onDispatch: streamDispatchToStore,
+        })
+        const replaced = replaceSurfaceContent(
+          surfaceId,
+          result.components,
+          result.dataModel,
+          result.rootId
+        )
+        if (!replaced) {
+          toast.error(t("generationFailed"))
+          return
+        }
+        if (result.usedFallback) toast.info(t("usedTemplateFallback"))
+        else toast.success(t("appRegenerated"))
+      }
+
+      setRegenerateOpen(false)
+      setRegeneratePrompt("")
+    } catch (err) {
+      if (err instanceof A2UIAiUnavailableError) toast.error(t("aiEditUnavailable"))
+      else toast.error(t("generationFailed"))
+    } finally {
+      setIsGenerating(false)
+    }
+  }, [
+    aiMode,
+    appBuilder,
+    isGenerating,
+    locale,
+    regeneratePrompt,
+    replaceSurfaceContent,
+    surfaceId,
+    t,
+    updateComponents,
+    updateDataModel,
+  ])
 
   return (
     <div className="flex items-center gap-1 border-b px-2 py-1 bg-background/95 backdrop-blur shrink-0">
@@ -249,6 +310,11 @@ export function A2UIToolbar() {
         label={t("shareApp")}
         onClick={() => setShareOpen(true)}
       />
+      <ToolbarButton
+        icon={<BookmarkPlus className="h-4 w-4" />}
+        label={t("saveAsTemplate")}
+        onClick={handleSaveTemplate}
+      />
 
       <ShareLinkDialog
         open={shareOpen}
@@ -256,25 +322,65 @@ export function A2UIToolbar() {
         buildPayload={buildSharePayload}
       />
 
-      <Dialog open={regenerateOpen} onOpenChange={setRegenerateOpen}>
+      <Dialog
+        open={regenerateOpen}
+        onOpenChange={(open) => !isGenerating && setRegenerateOpen(open)}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("aiGenerate")}</DialogTitle>
-            <DialogDescription>{t("regenerateAppDescription")}</DialogDescription>
+            <DialogDescription>
+              {aiMode === "edit" ? t("aiEditDescription") : t("regenerateAppDescription")}
+            </DialogDescription>
           </DialogHeader>
+          <div className="flex gap-1 rounded-md bg-muted p-1">
+            <Button
+              type="button"
+              variant={aiMode === "edit" ? "secondary" : "ghost"}
+              size="sm"
+              className="flex-1"
+              onClick={() => setAiMode("edit")}
+              disabled={isGenerating}
+            >
+              {t("aiEditMode")}
+            </Button>
+            <Button
+              type="button"
+              variant={aiMode === "create" ? "secondary" : "ghost"}
+              size="sm"
+              className="flex-1"
+              onClick={() => setAiMode("create")}
+              disabled={isGenerating}
+            >
+              {t("aiCreateMode")}
+            </Button>
+          </div>
           <Textarea
             value={regeneratePrompt}
             onChange={(event) => setRegeneratePrompt(event.target.value)}
-            placeholder={t("aiRegeneratePrompt")}
+            placeholder={aiMode === "edit" ? t("aiRegeneratePrompt") : t("aiCreatePrompt")}
             rows={4}
+            disabled={isGenerating}
           />
           <DialogFooter>
-            <Button variant="outline" onClick={() => setRegenerateOpen(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setRegenerateOpen(false)}
+              disabled={isGenerating}
+            >
               {t("cancel")}
             </Button>
-            <Button onClick={handleRegenerate} disabled={!regeneratePrompt.trim()}>
-              <Sparkles className="h-4 w-4" />
-              {t("regenerate")}
+            <Button onClick={handleAiRun} disabled={!regeneratePrompt.trim() || isGenerating}>
+              {isGenerating ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4" />
+              )}
+              {isGenerating
+                ? t("generating")
+                : aiMode === "edit"
+                  ? t("applyEdit")
+                  : t("regenerate")}
             </Button>
           </DialogFooter>
         </DialogContent>

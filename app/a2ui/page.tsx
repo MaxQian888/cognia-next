@@ -12,6 +12,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
 } from "react"
@@ -26,13 +27,16 @@ import {
   Download,
   Edit,
   Eye,
+  FilePlus2,
   Grid3X3,
+  Link2,
   List,
   Loader2,
   MoreVertical,
   Search,
   SortAsc,
   Sparkles,
+  Star,
   Trash2,
   Upload,
   X,
@@ -50,7 +54,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import {
   Select,
   SelectContent,
@@ -60,7 +71,7 @@ import {
 } from "@/components/ui/select"
 import { useA2UIAppBuilder } from "@/hooks/a2ui/use-app-builder"
 import { filterAndSortApps, type ViewMode } from "@/hooks/a2ui/use-app-gallery-filter"
-import { generateAppFromDescription } from "@/lib/a2ui/app-generator"
+import { generateA2UIApp } from "@/lib/a2ui/ai-generate"
 import { CATEGORY_KEYS, CATEGORY_I18N_MAP } from "@/lib/a2ui/constants"
 import { A2UIInlineSurface } from "@/components/a2ui/a2ui-surface"
 import { PageLoading } from "@/components/ui/loading-states"
@@ -72,6 +83,7 @@ import { cn } from "@/lib/utils"
 import { loggers } from "@cognia/logging"
 import { toast } from "sonner"
 import type { A2UIAppTemplate } from "@/lib/a2ui/templates"
+import type { A2UIComponent } from "@/types/a2ui/schema"
 
 type SortOption = "newest" | "oldest" | "name" | "mostUsed"
 
@@ -113,6 +125,12 @@ function A2UIPageContent() {
   const [selectedCategory, setSelectedCategory] = useState<A2UIAppTemplate["category"] | null>(null)
   const [heroPrompt, setHeroPrompt] = useState("")
   const [isGenerating, setIsGenerating] = useState(false)
+  const [shareCodeOpen, setShareCodeOpen] = useState(false)
+  const [shareCodeInput, setShareCodeInput] = useState("")
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
+  // Favoriting mutates the localStorage instance cache (not the A2UI store), so
+  // it does not trigger a store-driven re-render — bump this to refresh.
+  const [, forceRender] = useReducer((n: number) => n + 1, 0)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [appToDelete, setAppToDelete] = useState<string | null>(null)
   const [previewAppId, setPreviewAppId] = useState<string | null>(null)
@@ -142,14 +160,15 @@ function A2UIPageContent() {
   const allApps = useMemo(() => appBuilder.getAllApps(), [appBuilder])
 
   const filteredApps = useMemo(() => {
-    return filterAndSortApps(allApps, {
+    const sorted = filterAndSortApps(allApps, {
       searchQuery,
       categoryFilter: selectedCategory ?? "all",
       sortField: sortBy === "name" ? "name" : sortBy === "mostUsed" ? "uses" : "lastModified",
       sortOrder: sortBy === "oldest" ? "asc" : "desc",
       getTemplate: appBuilder.getTemplate,
     })
-  }, [allApps, appBuilder.getTemplate, searchQuery, selectedCategory, sortBy])
+    return showFavoritesOnly ? sorted.filter((app) => app.isFavorite) : sorted
+  }, [allApps, appBuilder.getTemplate, searchQuery, selectedCategory, sortBy, showFavoritesOnly])
 
   const filteredTemplates = useMemo(() => {
     if (searchQuery.trim()) {
@@ -194,12 +213,14 @@ function A2UIPageContent() {
     if (!heroPrompt.trim() || isGenerating) return
     setIsGenerating(true)
     try {
-      const result = generateAppFromDescription({
-        description: heroPrompt,
+      const result = await generateA2UIApp({
+        instruction: heroPrompt,
+        mode: "create",
         language: locale === "zh-CN" ? "zh" : "en",
       })
-      appBuilder.createCustomApp(result.name, result.components, result.dataModel)
+      appBuilder.createCustomApp(result.title, result.components, result.dataModel)
       setHeroPrompt("")
+      if (result.usedFallback) toast.info(t("usedTemplateFallback"))
     } catch (err) {
       loggers.a2ui?.error("Flash generation failed", err)
       toast.error(t("generationFailed"))
@@ -327,6 +348,71 @@ function A2UIPageContent() {
     [router]
   )
 
+  const handleCreateBlank = useCallback(() => {
+    try {
+      const components = [
+        {
+          id: "root",
+          component: "Column",
+          children: ["placeholder"],
+          className: "min-h-40 items-center justify-center gap-3 p-6",
+        },
+        {
+          id: "placeholder",
+          component: "Text",
+          text: t("blankAppPlaceholder"),
+          align: "center",
+          className: "text-sm text-muted-foreground",
+        },
+      ] as A2UIComponent[]
+      const id = appBuilder.createCustomApp(t("blankAppName"), components, {})
+      if (id) handleOpenWorkspace(id)
+      else toast.error(t("generationFailed"))
+    } catch (err) {
+      loggers.a2ui?.error("Blank app creation failed", err)
+      toast.error(t("generationFailed"))
+    }
+  }, [appBuilder, handleOpenWorkspace, t])
+
+  const handleImportShareCode = useCallback(() => {
+    const raw = shareCodeInput.trim()
+    if (!raw) return
+    // Accept a raw share code or a "…/share/app?code=…" URL.
+    let code = raw
+    if (raw.includes("code=")) {
+      try {
+        const url = new URL(
+          raw,
+          typeof window !== "undefined" ? window.location.origin : "http://localhost"
+        )
+        code = url.searchParams.get("code") ?? raw
+      } catch {
+        code = raw
+      }
+    }
+    const id = appBuilder.importFromShareCode(code)
+    if (id) {
+      setShareCodeOpen(false)
+      setShareCodeInput("")
+      toast.success(t("appImported"))
+      handleOpenWorkspace(id)
+    } else {
+      toast.error(t("importFailed"))
+    }
+  }, [appBuilder, handleOpenWorkspace, shareCodeInput, t])
+
+  const handleToggleFavorite = useCallback(
+    async (appId: string) => {
+      try {
+        await appBuilder.toggleFavorite(appId)
+        forceRender()
+      } catch (err) {
+        loggers.a2ui?.error("Toggle favorite failed", err)
+      }
+    },
+    [appBuilder]
+  )
+
   if (appIdFromUrl) {
     return <A2UIWorkspace surfaceId={appIdFromUrl} />
   }
@@ -370,12 +456,32 @@ function A2UIPageContent() {
               variant="outline"
               size="icon"
               className="shrink-0 sm:w-auto sm:gap-1.5 sm:px-3"
+              onClick={() => setShareCodeOpen(true)}
+              aria-label={t("importShareCode")}
+            >
+              <Link2 className="h-4 w-4" />
+              <span className="hidden sm:inline">{t("importShareCode")}</span>
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="shrink-0 sm:w-auto sm:gap-1.5 sm:px-3"
               onClick={handleExportAll}
               disabled={allApps.length === 0}
               aria-label={t("exportAllApps")}
             >
               <Download className="h-4 w-4" />
               <span className="hidden sm:inline">{t("exportAllApps")}</span>
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="shrink-0 sm:w-auto sm:gap-1.5 sm:px-3"
+              onClick={handleCreateBlank}
+              aria-label={t("newBlankApp")}
+            >
+              <FilePlus2 className="h-4 w-4" />
+              <span className="hidden sm:inline">{t("newBlankApp")}</span>
             </Button>
             <Button className="shrink-0 gap-1.5" onClick={focusCreatePrompt}>
               <Sparkles className="h-4 w-4" />
@@ -384,6 +490,31 @@ function A2UIPageContent() {
           </div>
         </div>
       </header>
+
+      <Dialog open={shareCodeOpen} onOpenChange={setShareCodeOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("importShareCodeTitle")}</DialogTitle>
+            <DialogDescription>{t("importShareCodeDescription")}</DialogDescription>
+          </DialogHeader>
+          <Textarea
+            value={shareCodeInput}
+            onChange={(event) => setShareCodeInput(event.target.value)}
+            placeholder={t("importShareCodePlaceholder")}
+            rows={4}
+            className="font-mono text-xs"
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShareCodeOpen(false)}>
+              {t("cancel")}
+            </Button>
+            <Button onClick={handleImportShareCode} disabled={!shareCodeInput.trim()}>
+              <Upload className="h-4 w-4" />
+              {t("importApp")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <main className="flex-1 overflow-hidden">
         <ScrollArea className="h-full">
@@ -581,6 +712,17 @@ function A2UIPageContent() {
                   >
                     {t("allCategories")}
                   </Button>
+                  <Button
+                    variant={showFavoritesOnly ? "secondary" : "ghost"}
+                    size="sm"
+                    onClick={() => setShowFavoritesOnly((value) => !value)}
+                    aria-pressed={showFavoritesOnly}
+                  >
+                    <Star
+                      className={cn("mr-1.5 h-3.5 w-3.5", showFavoritesOnly && "fill-current")}
+                    />
+                    {t("favoritesFilter")}
+                  </Button>
                   {CATEGORY_KEYS.map((category) => (
                     <Button
                       key={category}
@@ -624,12 +766,29 @@ function A2UIPageContent() {
                       <Card
                         key={app.id}
                         className={cn(
-                          "group relative overflow-hidden border-border/60 bg-background/80 transition-all hover:-translate-y-0.5 hover:shadow-md",
+                          "group relative overflow-hidden border-border/60 bg-background/80 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md motion-reduce:transition-none motion-reduce:hover:translate-y-0",
                           viewMode === "list" && "flex-row"
                         )}
                         onClick={() => handleOpenWorkspace(app.id)}
                       >
-                        <div className="absolute right-2 top-2 z-10">
+                        <div className="absolute right-2 top-2 z-10 flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            aria-label={app.isFavorite ? t("unfavorite") : t("favorite")}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              void handleToggleFavorite(app.id)
+                            }}
+                          >
+                            <Star
+                              className={cn(
+                                "h-4 w-4",
+                                app.isFavorite && "fill-yellow-400 text-yellow-400"
+                              )}
+                            />
+                          </Button>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button
@@ -676,7 +835,7 @@ function A2UIPageContent() {
                         </div>
 
                         {viewMode === "grid" && (
-                          <div className="overflow-hidden border-b bg-muted/30 p-3">
+                          <div className="max-h-[180px] overflow-hidden border-b bg-muted/30 p-3">
                             {/* w-[161%] compensates scale-[0.62] so the scaled preview fills its layout box */}
                             <A2UIInlineSurface
                               surfaceId={app.id}
@@ -904,6 +1063,9 @@ function A2UIPageContent() {
           template={detailTemplate}
           open={!!detailAppId}
           onOpenChange={(open) => !open && setDetailAppId(null)}
+          onPreparePublish={appBuilder.prepareForPublish}
+          onPublish={appBuilder.publishApp}
+          onUnpublish={appBuilder.unpublishApp}
         />
       )}
     </div>

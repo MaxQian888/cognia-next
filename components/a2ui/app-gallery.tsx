@@ -488,6 +488,8 @@ export function AppGallery({
         onSave={handleMetadataSave}
         onGenerateThumbnail={handleGenerateThumbnail}
         onPreparePublish={appBuilder.prepareForPublish}
+        onPublish={appBuilder.publishApp}
+        onUnpublish={appBuilder.unpublishApp}
       />
     </div>
   )

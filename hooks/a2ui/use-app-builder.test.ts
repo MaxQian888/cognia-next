@@ -5,6 +5,9 @@
 import { renderHook, act } from "@testing-library/react"
 import { useA2UIAppBuilder } from "./use-app-builder"
 import { getAppInstancesCache } from "./app-builder/persistence"
+import { createShareLink, revokeShareLink, ShareNotConfiguredError } from "@/lib/share/client"
+import { upsertTemplate } from "@/lib/db/a2ui-templates"
+import type { A2UIPublishOutcome } from "@/types/a2ui/app"
 import { globalEventEmitter, createUserAction } from "@/lib/a2ui/events"
 import type { A2UIAppMetadataPatch } from "@/lib/db/a2ui-apps"
 import type { A2UIAppRow } from "@/lib/db/a2ui-types"
@@ -53,6 +56,19 @@ jest.mock("@/lib/db/a2ui-apps", () => ({
   deleteApp: (id: string) => mockDeletePersistedApp(id),
   patchAppMetadata: (id: string, patch: A2UIAppMetadataPatch, when?: number) =>
     mockPatchAppMetadata(id, patch, when),
+}))
+
+jest.mock("@/lib/share/client", () => {
+  class ShareNotConfiguredError extends Error {}
+  return {
+    createShareLink: jest.fn(),
+    revokeShareLink: jest.fn(),
+    ShareNotConfiguredError,
+  }
+})
+
+jest.mock("@/lib/db/a2ui-templates", () => ({
+  upsertTemplate: jest.fn(),
 }))
 
 jest.mock("./use-a2ui", () => ({
@@ -192,6 +208,151 @@ describe("useA2UIAppBuilder", () => {
     mockDeletePersistedApp.mockResolvedValue(undefined)
     mockPatchAppMetadata.mockResolvedValue(false)
     mockRestoreSurface.mockReturnValue(true)
+    jest.mocked(createShareLink).mockReset()
+    jest.mocked(revokeShareLink).mockReset()
+    jest.mocked(upsertTemplate).mockReset()
+  })
+
+  describe("publish / unpublish", () => {
+    const fullInstance = (id: string) => ({
+      id,
+      templateId: "custom",
+      name: "Publishable App",
+      createdAt: Date.now(),
+      lastModified: Date.now(),
+      description: "A description long enough to pass validation",
+      version: "1.0.0",
+      category: "productivity",
+      thumbnail: "data:image/png;base64,x",
+    })
+
+    it("returns invalid with the missing fields when the app is not publish-ready", async () => {
+      getAppInstancesCache().set("app-x", {
+        id: "app-x",
+        templateId: "custom",
+        name: "X",
+        createdAt: 1,
+        lastModified: 1,
+      })
+      const { result } = renderHook(() => useA2UIAppBuilder())
+      let outcome: A2UIPublishOutcome | undefined
+      await act(async () => {
+        outcome = await result.current.publishApp("app-x")
+      })
+      expect(outcome).toEqual({
+        ok: false,
+        reason: "invalid",
+        missing: expect.arrayContaining([expect.stringContaining("description")]),
+      })
+      expect(createShareLink).not.toHaveBeenCalled()
+    })
+
+    it("mints a hosted link and records published state on success", async () => {
+      mockSurfaces["pub-app"] = { components: {}, dataModel: {} }
+      getAppInstancesCache().set("pub-app", fullInstance("pub-app"))
+      jest
+        .mocked(createShareLink)
+        .mockResolvedValue({ code: "CODE1", url: "https://share.test/v/CODE1#k=K" } as never)
+      const { result } = renderHook(() => useA2UIAppBuilder())
+      let outcome: A2UIPublishOutcome | undefined
+      await act(async () => {
+        outcome = await result.current.publishApp("pub-app")
+      })
+      expect(createShareLink).toHaveBeenCalledWith(
+        expect.objectContaining({ payload: expect.objectContaining({ kind: "a2ui" }) })
+      )
+      expect(outcome).toEqual({ ok: true, url: "https://share.test/v/CODE1#k=K" })
+      const stored = getAppInstancesCache().get("pub-app")
+      expect(stored?.isPublished).toBe(true)
+      expect(stored?.storeId).toBe("CODE1")
+    })
+
+    it("returns not-configured when sharing is unavailable", async () => {
+      mockSurfaces["pub-app"] = { components: {}, dataModel: {} }
+      getAppInstancesCache().set("pub-app", fullInstance("pub-app"))
+      jest.mocked(createShareLink).mockRejectedValue(new ShareNotConfiguredError("nope"))
+      const { result } = renderHook(() => useA2UIAppBuilder())
+      let outcome: A2UIPublishOutcome | undefined
+      await act(async () => {
+        outcome = await result.current.publishApp("pub-app")
+      })
+      expect(outcome).toEqual({ ok: false, reason: "not-configured" })
+    })
+
+    it("unpublishes: revokes the link and clears published state", async () => {
+      getAppInstancesCache().set("pub-app", {
+        ...fullInstance("pub-app"),
+        isPublished: true,
+        publishedAt: 123,
+        storeId: "CODE1",
+      })
+      jest.mocked(revokeShareLink).mockResolvedValue(undefined as never)
+      const { result } = renderHook(() => useA2UIAppBuilder())
+      await act(async () => {
+        await result.current.unpublishApp("pub-app")
+      })
+      expect(revokeShareLink).toHaveBeenCalledWith("CODE1")
+      const stored = getAppInstancesCache().get("pub-app")
+      expect(stored?.isPublished).toBe(false)
+      expect(stored?.storeId).toBeUndefined()
+    })
+
+    it("toggles favorite on and off without touching lastModified", async () => {
+      getAppInstancesCache().set("fav-app", { ...fullInstance("fav-app"), lastModified: 999 })
+      const { result } = renderHook(() => useA2UIAppBuilder())
+
+      await act(async () => {
+        await result.current.toggleFavorite("fav-app")
+      })
+      let stored = getAppInstancesCache().get("fav-app")
+      expect(stored?.isFavorite).toBe(true)
+      expect(stored?.lastModified).toBe(999)
+
+      await act(async () => {
+        await result.current.toggleFavorite("fav-app")
+      })
+      stored = getAppInstancesCache().get("fav-app")
+      expect(stored?.isFavorite).toBe(false)
+    })
+
+    it("saves the current app as a user template", async () => {
+      mockSurfaces["tpl-app"] = {
+        components: { root: { id: "root", component: "Column" } },
+        dataModel: { x: 1 },
+        rootId: "root",
+      }
+      getAppInstancesCache().set("tpl-app", {
+        ...fullInstance("tpl-app"),
+        category: "productivity",
+      })
+      const { result } = renderHook(() => useA2UIAppBuilder())
+      let ok: boolean | undefined
+      await act(async () => {
+        ok = await result.current.saveAsTemplate("tpl-app")
+      })
+      expect(ok).toBe(true)
+      expect(upsertTemplate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "Publishable App",
+          category: "productivity",
+          source: "user",
+          isBuiltIn: false,
+          components: [{ id: "root", component: "Column" }],
+          dataModel: { x: 1 },
+          rootId: "root",
+        })
+      )
+    })
+
+    it("returns false from saveAsTemplate when the surface is missing", async () => {
+      const { result } = renderHook(() => useA2UIAppBuilder())
+      let ok: boolean | undefined
+      await act(async () => {
+        ok = await result.current.saveAsTemplate("missing")
+      })
+      expect(ok).toBe(false)
+      expect(upsertTemplate).not.toHaveBeenCalled()
+    })
   })
 
   describe("initialization", () => {

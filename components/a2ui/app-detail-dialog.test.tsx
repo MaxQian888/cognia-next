@@ -9,11 +9,15 @@ import type { A2UIAppInstance } from "@/hooks/a2ui/use-app-builder"
 import type { A2UIAppTemplate } from "@/lib/a2ui/templates"
 
 const mockToastError = jest.fn()
+const mockToastSuccess = jest.fn()
+const mockToastInfo = jest.fn()
 const mockLoggerError = jest.fn()
 
 jest.mock("sonner", () => ({
   toast: {
     error: (...args: unknown[]) => mockToastError(...args),
+    success: (...args: unknown[]) => mockToastSuccess(...args),
+    info: (...args: unknown[]) => mockToastInfo(...args),
   },
 }))
 
@@ -361,6 +365,64 @@ describe("AppDetailDialog", () => {
         expect(screen.getByText("Published")).toBeInTheDocument()
         expect(screen.getByText("Store ID: store-123")).toBeInTheDocument()
       })
+    })
+  })
+
+  describe("publish action", () => {
+    it("publishes and shows the hosted link", async () => {
+      const onPublish = jest.fn(async () => ({
+        ok: true as const,
+        url: "https://share.test/v/C#k=K",
+      }))
+      renderDialog({ onPublish })
+
+      fireEvent.click(screen.getByText("Publish Prep"))
+      fireEvent.click(await screen.findByRole("button", { name: "Publish" }))
+
+      await waitFor(() => expect(onPublish).toHaveBeenCalledWith("test-app-1"))
+      expect(await screen.findByDisplayValue("https://share.test/v/C#k=K")).toBeInTheDocument()
+      expect(mockToastSuccess).toHaveBeenCalled()
+    })
+
+    it("shows the missing fields when publish validation fails", async () => {
+      const onPublish = jest.fn(async () => ({
+        ok: false as const,
+        reason: "invalid" as const,
+        missing: ["thumbnail"],
+      }))
+      renderDialog({ onPublish })
+
+      fireEvent.click(screen.getByText("Publish Prep"))
+      fireEvent.click(await screen.findByRole("button", { name: "Publish" }))
+
+      await waitFor(() => expect(screen.getByText("thumbnail")).toBeInTheDocument())
+    })
+
+    it("toasts an error when sharing is not configured", async () => {
+      const onPublish = jest.fn(async () => ({
+        ok: false as const,
+        reason: "not-configured" as const,
+      }))
+      renderDialog({ onPublish })
+
+      fireEvent.click(screen.getByText("Publish Prep"))
+      fireEvent.click(await screen.findByRole("button", { name: "Publish" }))
+
+      await waitFor(() => expect(mockToastError).toHaveBeenCalled())
+    })
+
+    it("shows Unpublish for a published app and calls onUnpublish", async () => {
+      const onUnpublish = jest.fn(async () => true)
+      renderDialog({
+        app: createMockApp({ isPublished: true, publishedAt: Date.now(), storeId: "s1" }),
+        onUnpublish,
+      })
+
+      fireEvent.click(screen.getByText("Publish Prep"))
+      fireEvent.click(await screen.findByRole("button", { name: "Unpublish" }))
+
+      await waitFor(() => expect(onUnpublish).toHaveBeenCalledWith("test-app-1"))
+      expect(mockToastSuccess).toHaveBeenCalled()
     })
   })
 

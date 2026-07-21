@@ -19,7 +19,6 @@ import {
   ToggleLeft,
   TextCursorInput,
   ChevronRight,
-  ChevronDown,
   MousePointerClick,
   Layout,
   CopyPlus,
@@ -58,6 +57,20 @@ const COMPONENT_ICONS: Record<string, React.ReactNode> = {
   Table: <Table2 className="h-3.5 w-3.5" />,
 }
 
+/** Locate a component's current collection placement (parent + slot + index). */
+function findComponentPlacement(
+  components: Record<string, A2UIComponent>,
+  childId: string
+): A2UIComponentPlacement | null {
+  for (const [parentId, component] of Object.entries(components)) {
+    for (const slot of getComponentCollectionSlots(component)) {
+      const index = slot.childIds.indexOf(childId)
+      if (index >= 0) return { parentId, slotId: slot.id, index }
+    }
+  }
+  return null
+}
+
 interface TreeNodeProps {
   componentId: string
   components: Record<string, A2UIComponent>
@@ -69,6 +82,16 @@ interface TreeNodeProps {
   ancestorIds: ReadonlySet<string>
   expandLabel: string
   collapseLabel: string
+  /** This node's placement in its parent. Undefined for the root / required
+   *  (non-collection) children — those are not drag-reorderable. */
+  placement?: A2UIComponentPlacement
+  draggingId: string | null
+  dragOverId: string | null
+  dropAfter: boolean
+  onDragStartNode: (id: string) => void
+  onDragOverNode: (id: string, after: boolean) => void
+  onDragEndNode: () => void
+  onDropNode: (target: A2UIComponentPlacement, after: boolean) => void
 }
 
 function TreeNode({
@@ -82,11 +105,27 @@ function TreeNode({
   ancestorIds,
   expandLabel,
   collapseLabel,
+  placement,
+  draggingId,
+  dragOverId,
+  dropAfter,
+  onDragStartNode,
+  onDragOverNode,
+  onDragEndNode,
+  onDropNode,
 }: TreeNodeProps) {
   const component = components[componentId]
   if (!component || ancestorIds.has(componentId)) return null
 
   const children = getComponentChildReferences(component).map((reference) => reference.id)
+  // Per-child collection placement (parent + slot + index). Only collection
+  // children are drag-reorderable; required children (trigger/template) are not.
+  const childPlacements = new Map<string, A2UIComponentPlacement>()
+  for (const slot of getComponentCollectionSlots(component)) {
+    slot.childIds.forEach((childId, index) => {
+      childPlacements.set(childId, { parentId: componentId, slotId: slot.id, index })
+    })
+  }
   const hasChildren = children.length > 0
   const isExpanded = expandedIds.has(componentId)
   const isSelected = selectedId === componentId
@@ -99,13 +138,36 @@ function TreeNode({
         tabIndex={0}
         aria-selected={isSelected}
         aria-expanded={hasChildren ? isExpanded : undefined}
+        draggable={Boolean(placement)}
         className={cn(
           "flex items-center gap-1 px-2 py-1 text-xs cursor-pointer rounded-sm transition-colors",
           "hover:bg-accent/50",
-          isSelected && "bg-accent text-accent-foreground"
+          isSelected && "bg-accent text-accent-foreground",
+          draggingId === componentId && "opacity-50",
+          dragOverId === componentId &&
+            (dropAfter ? "border-b-2 border-primary" : "border-t-2 border-primary")
         )}
         style={{ paddingLeft: `${8 + depth * 16}px` }}
         onClick={() => onSelect(componentId)}
+        onDragStart={(event) => {
+          if (!placement) return
+          event.stopPropagation()
+          onDragStartNode(componentId)
+        }}
+        onDragEnd={() => onDragEndNode()}
+        onDragOver={(event) => {
+          if (!placement || !draggingId || draggingId === componentId) return
+          event.preventDefault()
+          const rect = event.currentTarget.getBoundingClientRect()
+          onDragOverNode(componentId, event.clientY > rect.top + rect.height / 2)
+        }}
+        onDrop={(event) => {
+          if (!placement || !draggingId || draggingId === componentId) return
+          event.preventDefault()
+          event.stopPropagation()
+          const rect = event.currentTarget.getBoundingClientRect()
+          onDropNode(placement, event.clientY > rect.top + rect.height / 2)
+        }}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault()
@@ -123,11 +185,12 @@ function TreeNode({
               onToggleExpand(componentId)
             }}
           >
-            {isExpanded ? (
-              <ChevronDown className="h-3 w-3" />
-            ) : (
-              <ChevronRight className="h-3 w-3" />
-            )}
+            <ChevronRight
+              className={cn(
+                "h-3 w-3 transition-transform duration-200 motion-reduce:transition-none",
+                isExpanded && "rotate-90"
+              )}
+            />
           </button>
         ) : (
           <span className="w-4 shrink-0" />
@@ -153,6 +216,14 @@ function TreeNode({
               ancestorIds={new Set([...ancestorIds, componentId])}
               expandLabel={expandLabel}
               collapseLabel={collapseLabel}
+              placement={childPlacements.get(childId)}
+              draggingId={draggingId}
+              dragOverId={dragOverId}
+              dropAfter={dropAfter}
+              onDragStartNode={onDragStartNode}
+              onDragOverNode={onDragOverNode}
+              onDragEndNode={onDragEndNode}
+              onDropNode={onDropNode}
             />
           ))}
         </div>
@@ -183,10 +254,56 @@ export function ComponentTreePanel({
   const t = useTranslations("a2ui")
   const { surfaceId, selectedComponentId, setSelectedComponentId } = useWorkspaceContext()
   const surface = useA2UIStore((state) => state.surfaces[surfaceId])
+  const moveComponent = useA2UIStore((state) => state.moveComponent)
   const [expandedIds, setExpandedIds] = React.useState<Set<string>>(() =>
     surface?.rootId ? new Set([surface.rootId]) : new Set()
   )
   const [dialogMode, setDialogMode] = React.useState<"add" | "move" | null>(null)
+  const [draggingId, setDraggingId] = React.useState<string | null>(null)
+  const [dragOverId, setDragOverId] = React.useState<string | null>(null)
+  const [dropAfter, setDropAfter] = React.useState(false)
+
+  const handleDragStartNode = React.useCallback((id: string) => setDraggingId(id), [])
+  const handleDragOverNode = React.useCallback((id: string, after: boolean) => {
+    setDragOverId(id)
+    setDropAfter(after)
+  }, [])
+  const handleDragEndNode = React.useCallback(() => {
+    setDraggingId(null)
+    setDragOverId(null)
+  }, [])
+  const handleDropNode = React.useCallback(
+    (target: A2UIComponentPlacement, after: boolean) => {
+      const dragged = draggingId
+      setDraggingId(null)
+      setDragOverId(null)
+      if (!dragged || !surface) return
+      // Base index: before the target, or after it (top/bottom drop half).
+      let index = (target.index ?? 0) + (after ? 1 : 0)
+      // Reordering DOWN within the same slot detaches the dragged node first,
+      // shifting the target's index down by one.
+      const from = findComponentPlacement(surface.components, dragged)
+      if (
+        from &&
+        from.parentId === target.parentId &&
+        from.slotId === target.slotId &&
+        from.index !== undefined &&
+        from.index < index
+      ) {
+        index -= 1
+      }
+      const moved = moveComponent(surfaceId, dragged, {
+        parentId: target.parentId,
+        slotId: target.slotId,
+        index,
+      })
+      if (moved) {
+        setSelectedComponentId(dragged)
+        setExpandedIds((current) => new Set(current).add(target.parentId))
+      }
+    },
+    [draggingId, moveComponent, surface, surfaceId, setSelectedComponentId]
+  )
   // Reset expanded set when the surface root changes — adjust during render
   // per React docs (https://react.dev/reference/react/useState#storing-information-from-previous-renders).
   const [trackedRootId, setTrackedRootId] = React.useState<string | undefined>(surface?.rootId)
@@ -310,6 +427,13 @@ export function ComponentTreePanel({
               ancestorIds={new Set()}
               expandLabel={t("expandComponent")}
               collapseLabel={t("collapseComponent")}
+              draggingId={draggingId}
+              dragOverId={dragOverId}
+              dropAfter={dropAfter}
+              onDragStartNode={handleDragStartNode}
+              onDragOverNode={handleDragOverNode}
+              onDragEndNode={handleDragEndNode}
+              onDropNode={handleDropNode}
             />
           )}
         </div>

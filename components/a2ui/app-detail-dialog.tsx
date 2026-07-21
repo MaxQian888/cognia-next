@@ -50,6 +50,8 @@ import {
   AlertCircle,
   Sparkles,
   Loader2,
+  Copy,
+  ExternalLink,
 } from "lucide-react"
 import { toast } from "sonner"
 import { loggers } from "@cognia/logging"
@@ -66,6 +68,8 @@ export function AppDetailDialog({
   onSave,
   onGenerateThumbnail,
   onPreparePublish,
+  onPublish,
+  onUnpublish,
   className,
 }: AppDetailDialogProps) {
   const [isEditing, setIsEditing] = useState(false)
@@ -74,6 +78,8 @@ export function AppDetailDialog({
   const [publishCheck, setPublishCheck] = useState<{ valid: boolean; missing: string[] } | null>(
     null
   )
+  const [publishing, setPublishing] = useState(false)
+  const [publishedUrl, setPublishedUrl] = useState<string | null>(null)
   const t = useTranslations("a2ui")
 
   const categoryOptions = useMemo(
@@ -89,6 +95,7 @@ export function AppDetailDialog({
         setIsEditing(false)
         setEditedData({})
         setPublishCheck(null)
+        setPublishedUrl(null)
       }
       onOpenChange(newOpen)
     },
@@ -140,6 +147,57 @@ export function AppDetailDialog({
       setPublishCheck(result)
     }
   }, [app, onPreparePublish])
+
+  // Publish → mint a durable hosted share link.
+  const handlePublish = useCallback(async () => {
+    if (!app || !onPublish || publishing) return
+    setPublishing(true)
+    try {
+      const outcome = await onPublish(app.id)
+      if (outcome.ok) {
+        setPublishedUrl(outcome.url)
+        setPublishCheck({ valid: true, missing: [] })
+        toast.success(t("publishSuccess"))
+      } else if (outcome.reason === "invalid") {
+        setPublishCheck({ valid: false, missing: outcome.missing })
+      } else if (outcome.reason === "not-configured") {
+        toast.error(t("shareNotConfigured"))
+      } else {
+        toast.error(t("publishFailed"))
+      }
+    } catch (error) {
+      loggers.ui.error("[AppDetailDialog] Failed to publish app:", error)
+      toast.error(t("publishFailed"))
+    } finally {
+      setPublishing(false)
+    }
+  }, [app, onPublish, publishing, t])
+
+  // Unpublish → revoke the hosted link and clear published state.
+  const handleUnpublish = useCallback(async () => {
+    if (!app || !onUnpublish || publishing) return
+    setPublishing(true)
+    try {
+      await onUnpublish(app.id)
+      setPublishedUrl(null)
+      toast.success(t("unpublishSuccess"))
+    } catch (error) {
+      loggers.ui.error("[AppDetailDialog] Failed to unpublish app:", error)
+      toast.error(t("publishFailed"))
+    } finally {
+      setPublishing(false)
+    }
+  }, [app, onUnpublish, publishing, t])
+
+  const handleCopyPublishedUrl = useCallback(async () => {
+    if (!publishedUrl) return
+    try {
+      await navigator.clipboard.writeText(publishedUrl)
+      toast.success(t("copied"))
+    } catch (error) {
+      loggers.ui.error("[AppDetailDialog] clipboard write failed:", error)
+    }
+  }, [publishedUrl, t])
 
   const formatDate = formatAbsoluteTime
 
@@ -457,39 +515,84 @@ export function AppDetailDialog({
             <div className="text-center py-4">
               <h4 className="font-medium mb-2">{t("publishReadyTitle")}</h4>
               <p className="text-sm text-muted-foreground mb-4">{t("publishReadyDescription")}</p>
-              <Button onClick={handleCheckPublish}>
-                <CheckCircle className="h-4 w-4 mr-2" />
-                {t("checkPublish")}
-              </Button>
+              <div className="flex items-center justify-center gap-2">
+                <Button variant="outline" onClick={handleCheckPublish} disabled={publishing}>
+                  <CheckCircle className="h-4 w-4 mr-2" />
+                  {t("checkPublish")}
+                </Button>
+                {app.isPublished ? (
+                  <Button variant="destructive" onClick={handleUnpublish} disabled={publishing}>
+                    {publishing ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <X className="h-4 w-4 mr-2" />
+                    )}
+                    {t("unpublish")}
+                  </Button>
+                ) : (
+                  <Button onClick={handlePublish} disabled={publishing || !onPublish}>
+                    {publishing ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-4 w-4 mr-2" />
+                    )}
+                    {t("publish")}
+                  </Button>
+                )}
+              </div>
             </div>
 
-            {publishCheck && (
-              <div
-                className={cn(
-                  "p-4 rounded-lg",
-                  publishCheck.valid
-                    ? "bg-green-50 dark:bg-green-950"
-                    : "bg-yellow-50 dark:bg-yellow-950"
-                )}
-              >
-                {publishCheck.valid ? (
-                  <div className="flex items-center gap-2 text-green-700 dark:text-green-300">
-                    <CheckCircle className="h-5 w-5" />
-                    <span className="font-medium">{t("publishReady")}</span>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex items-center gap-2 text-yellow-700 dark:text-yellow-300 mb-2">
-                      <AlertCircle className="h-5 w-5" />
-                      <span className="font-medium">{t("publishMissing")}</span>
-                    </div>
-                    <ul className="list-disc list-inside text-sm text-yellow-600 dark:text-yellow-400 space-y-1">
-                      {publishCheck.missing.map((item, index) => (
-                        <li key={index}>{item}</li>
-                      ))}
-                    </ul>
-                  </>
-                )}
+            {publishedUrl && (
+              <div className="p-4 rounded-lg bg-green-50 dark:bg-green-950 space-y-2">
+                <div className="flex items-center gap-2 text-green-700 dark:text-green-300">
+                  <CheckCircle className="h-5 w-5" />
+                  <span className="font-medium">{t("publishSuccess")}</span>
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    readOnly
+                    value={publishedUrl}
+                    aria-label={t("publishedLink")}
+                    className="font-mono text-xs"
+                  />
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    aria-label={t("copyLink")}
+                    onClick={handleCopyPublishedUrl}
+                  >
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                  <Button asChild variant="outline" size="icon" aria-label={t("openLink")}>
+                    <a href={publishedUrl} target="_blank" rel="noreferrer">
+                      <ExternalLink className="h-4 w-4" />
+                    </a>
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">{t("publishLinkOnceHint")}</p>
+              </div>
+            )}
+
+            {publishCheck && !publishCheck.valid && (
+              <div className="p-4 rounded-lg bg-yellow-50 dark:bg-yellow-950">
+                <div className="flex items-center gap-2 text-yellow-700 dark:text-yellow-300 mb-2">
+                  <AlertCircle className="h-5 w-5" />
+                  <span className="font-medium">{t("publishMissing")}</span>
+                </div>
+                <ul className="list-disc list-inside text-sm text-yellow-600 dark:text-yellow-400 space-y-1">
+                  {publishCheck.missing.map((item, index) => (
+                    <li key={index}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {publishCheck?.valid && !publishedUrl && !app.isPublished && (
+              <div className="p-4 rounded-lg bg-green-50 dark:bg-green-950">
+                <div className="flex items-center gap-2 text-green-700 dark:text-green-300">
+                  <CheckCircle className="h-5 w-5" />
+                  <span className="font-medium">{t("publishReady")}</span>
+                </div>
               </div>
             )}
 

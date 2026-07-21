@@ -54,7 +54,7 @@ function WorkspacePreview({
     <div className={cn("h-full overflow-auto bg-muted/20", compact ? "p-3" : "p-4")}>
       <div
         data-testid="workspace-preview-scale"
-        className="origin-top-left transition-transform"
+        className="origin-top-left transition-transform duration-200 motion-reduce:transition-none"
         style={{
           transform: `scale(${scale})`,
           width: `${100 / scale}%`,

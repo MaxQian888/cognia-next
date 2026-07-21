@@ -33,6 +33,16 @@ export interface AppCardProps {
 }
 
 /**
+ * Outcome of a publish attempt. A durable hosted link is created via the
+ * public-share subsystem; the app instance records `isPublished`/`storeId`.
+ */
+export type A2UIPublishOutcome =
+  | { ok: true; url: string }
+  | { ok: false; reason: "invalid"; missing: string[] }
+  | { ok: false; reason: "export-failed" }
+  | { ok: false; reason: "not-configured" }
+
+/**
  * Props for the AppDetailDialog component
  */
 export interface AppDetailDialogProps {
@@ -46,6 +56,10 @@ export interface AppDetailDialogProps {
   ) => boolean | void | Promise<boolean | void>
   onGenerateThumbnail?: (appId: string) => void
   onPreparePublish?: (appId: string) => { valid: boolean; missing: string[] }
+  /** Publish the app as a durable hosted share link. */
+  onPublish?: (appId: string) => Promise<A2UIPublishOutcome>
+  /** Revoke a published app's hosted link and clear its published state. */
+  onUnpublish?: (appId: string) => Promise<boolean>
   className?: string
 }
 

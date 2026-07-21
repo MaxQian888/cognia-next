@@ -1,5 +1,5 @@
 /**
- * Tests for the workspace toolbar (undo / redo / save / export).
+ * Tests for the workspace toolbar (undo / redo / save / export / AI / share).
  */
 
 import React from "react"
@@ -14,21 +14,44 @@ const exportApp = jest.fn()
 const downloadApp = jest.fn()
 const getAppInstance = jest.fn(() => ({ locale: "zh-CN" as const }))
 const replaceSurfaceContent = jest.fn()
+const updateComponents = jest.fn()
+const updateDataModel = jest.fn()
 const saveApp = jest.fn(async () => true)
+const saveAsTemplate = jest.fn(async () => true)
 const storeState: Record<string, unknown> = {
   undo,
   redo,
   replaceSurfaceContent,
+  updateComponents,
+  updateDataModel,
+  surfaces: { sx: { components: { root: { id: "root" }, header: { id: "header" } } } },
   undoStacks: { sx: [{ id: "s1" }] },
   redoStacks: {},
 }
 
 jest.mock("@/stores/a2ui", () => ({
-  useA2UIStore: (selector: (state: Record<string, unknown>) => unknown) => selector(storeState),
+  useA2UIStore: Object.assign(
+    (selector: (state: Record<string, unknown>) => unknown) => selector(storeState),
+    { getState: () => storeState }
+  ),
+}))
+
+const generateA2UIApp = jest.fn()
+jest.mock("@/lib/a2ui/ai-generate", () => ({
+  generateA2UIApp: (...a: unknown[]) => generateA2UIApp(...a),
+  streamDispatchToStore: jest.fn(),
+  A2UIAiUnavailableError: class A2UIAiUnavailableError extends Error {
+    reason: string
+    constructor(reason: string) {
+      super(reason)
+      this.name = "A2UIAiUnavailableError"
+      this.reason = reason
+    }
+  },
 }))
 
 jest.mock("@/hooks/a2ui/use-app-builder", () => ({
-  useA2UIAppBuilder: () => ({ exportApp, downloadApp, getAppInstance }),
+  useA2UIAppBuilder: () => ({ exportApp, downloadApp, getAppInstance, saveAsTemplate }),
 }))
 
 jest.mock("@/hooks/a2ui/use-a2ui-save", () => ({
@@ -39,6 +62,7 @@ jest.mock("sonner", () => ({
   toast: {
     success: jest.fn(),
     error: jest.fn(),
+    info: jest.fn(),
   },
 }))
 
@@ -54,7 +78,17 @@ jest.mock("@/lib/share/client", () => {
 
 import { A2UIWorkspaceProvider } from "./a2ui-workspace-context"
 import { A2UIToolbar } from "./a2ui-toolbar"
+import { A2UIAiUnavailableError } from "@/lib/a2ui/ai-generate"
 import { toast } from "sonner"
+
+const AI_RESULT = {
+  surfaceId: "sx",
+  components: [{ id: "root" }, { id: "c1" }],
+  dataModel: { count: 1 },
+  rootId: "root",
+  title: "My App",
+  usedFallback: false,
+}
 
 function renderToolbar(surfaceId = "sx") {
   return render(
@@ -77,10 +111,17 @@ describe("A2UIToolbar", () => {
     downloadApp.mockReturnValue(true)
     replaceSurfaceContent.mockReset()
     replaceSurfaceContent.mockReturnValue(true)
+    updateComponents.mockReset()
+    updateDataModel.mockReset()
+    generateA2UIApp.mockReset()
+    generateA2UIApp.mockResolvedValue(AI_RESULT)
     saveApp.mockReset()
     saveApp.mockResolvedValue(true)
+    saveAsTemplate.mockReset()
+    saveAsTemplate.mockResolvedValue(true)
     ;(toast.success as jest.Mock).mockReset()
     ;(toast.error as jest.Mock).mockReset()
+    ;(toast.info as jest.Mock).mockReset()
     storeState.undoStacks = { sx: [{ id: "s1" }] }
     storeState.redoStacks = {}
   })
@@ -93,7 +134,6 @@ describe("A2UIToolbar", () => {
   it("disables redo when redoStacks is empty for the active surface", () => {
     renderToolbar()
     const buttons = screen.getAllByRole("button")
-    // First button is Undo, second is Redo (per render order in source)
     expect((buttons[1] as HTMLButtonElement).disabled).toBe(true)
     expect((buttons[0] as HTMLButtonElement).disabled).toBe(false)
   })
@@ -158,26 +198,86 @@ describe("A2UIToolbar", () => {
     expect(toast.error).toHaveBeenCalled()
   })
 
-  it("regenerates the current app from a prompt without changing its surface id", async () => {
+  it("regenerate mode replaces the surface with the generated app", async () => {
     renderToolbar()
 
     fireEvent.click(screen.getByRole("button", { name: "AI Generate" }))
-    fireEvent.change(screen.getByPlaceholderText("Describe what you want to change..."), {
-      target: { value: "Turn this into a BMI calculator" },
+    fireEvent.click(screen.getByRole("button", { name: "Regenerate all" }))
+    fireEvent.change(screen.getByPlaceholderText("Describe the app you want to build..."), {
+      target: { value: "a habit tracker" },
     })
     fireEvent.click(screen.getByRole("button", { name: "Regenerate" }))
 
     await waitFor(() => expect(replaceSurfaceContent).toHaveBeenCalled())
+    expect(generateA2UIApp).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "create", surfaceId: "sx", instruction: "a habit tracker" })
+    )
     expect(replaceSurfaceContent).toHaveBeenCalledWith(
       "sx",
-      expect.arrayContaining([
-        expect.objectContaining({ id: "root" }),
-        expect.objectContaining({ id: "header", text: "🏃 BMI 计算器" }),
-      ]),
-      expect.objectContaining({ bmi: 0 }),
+      AI_RESULT.components,
+      AI_RESULT.dataModel,
       "root"
     )
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(toast.success).toHaveBeenCalled()
+  })
+
+  it("regenerate mode surfaces a fallback toast when a template was used", async () => {
+    generateA2UIApp.mockResolvedValueOnce({ ...AI_RESULT, usedFallback: true })
+    renderToolbar()
+
+    fireEvent.click(screen.getByRole("button", { name: "AI Generate" }))
+    fireEvent.click(screen.getByRole("button", { name: "Regenerate all" }))
+    fireEvent.change(screen.getByPlaceholderText("Describe the app you want to build..."), {
+      target: { value: "a calculator" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Regenerate" }))
+
+    await waitFor(() => expect(toast.info).toHaveBeenCalled())
+  })
+
+  it("edit mode applies an incremental AI edit and reconciles the tree", async () => {
+    renderToolbar()
+
+    fireEvent.click(screen.getByRole("button", { name: "AI Generate" }))
+    // default mode is edit
+    fireEvent.change(screen.getByPlaceholderText("Describe what you want to change..."), {
+      target: { value: "make the header red" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Apply edit" }))
+
+    await waitFor(() => expect(updateComponents).toHaveBeenCalled())
+    expect(generateA2UIApp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "edit",
+        surfaceId: "sx",
+        currentComponents: [{ id: "root" }, { id: "header" }],
+      })
+    )
+    expect(updateComponents).toHaveBeenCalledWith("sx", AI_RESULT.components)
+    expect(updateDataModel).toHaveBeenCalledWith("sx", AI_RESULT.dataModel, false)
+    expect(toast.success).toHaveBeenCalled()
+  })
+
+  it("edit mode toasts an error and leaves the surface untouched when AI is unavailable", async () => {
+    generateA2UIApp.mockRejectedValueOnce(new A2UIAiUnavailableError("no-transport"))
+    renderToolbar()
+
+    fireEvent.click(screen.getByRole("button", { name: "AI Generate" }))
+    fireEvent.change(screen.getByPlaceholderText("Describe what you want to change..."), {
+      target: { value: "make it fancy" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Apply edit" }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+    expect(updateComponents).not.toHaveBeenCalled()
+    expect(replaceSurfaceContent).not.toHaveBeenCalled()
+  })
+
+  it("saves the current app as a template", async () => {
+    renderToolbar()
+    fireEvent.click(screen.getByRole("button", { name: "Save as template" }))
+    await waitFor(() => expect(saveAsTemplate).toHaveBeenCalledWith("sx"))
     expect(toast.success).toHaveBeenCalled()
   })
 

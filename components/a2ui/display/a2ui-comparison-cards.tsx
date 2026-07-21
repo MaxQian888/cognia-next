@@ -72,7 +72,7 @@ export function A2UIComparisonCards({
             <button
               key={item.id}
               type="button"
-              className="rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="cursor-pointer rounded-xl text-left transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none motion-reduce:hover:translate-y-0"
               onClick={() =>
                 onAction(component.itemClickAction!, {
                   itemId: item.id,

@@ -63,11 +63,26 @@ function parsePropertyObject(value: string): Record<string, unknown> | null {
   }
 }
 
+/** Flatten a data model into `/slash/paths` for binding autocompletion. */
+function collectDataPaths(dataModel: Record<string, unknown>, prefix = ""): string[] {
+  const paths: string[] = []
+  for (const [key, value] of Object.entries(dataModel)) {
+    const path = `${prefix}/${key}`
+    paths.push(path)
+    if (isRecord(value)) paths.push(...collectDataPaths(value, path))
+  }
+  return paths
+}
+
 export function PropertyInspectorPanel() {
   const t = useTranslations("a2ui")
   const { surfaceId, selectedComponentId } = useWorkspaceContext()
   const surface = useA2UIStore((state) => state.surfaces[surfaceId])
   const updateComponents = useA2UIStore((state) => state.updateComponents)
+  const dataPaths = useMemo(
+    () => collectDataPaths((surface?.dataModel as Record<string, unknown> | undefined) ?? {}),
+    [surface?.dataModel]
+  )
   const selectedComponent = useMemo(() => {
     if (!surface || !selectedComponentId) return null
     return surface.components[selectedComponentId] ?? null
@@ -196,6 +211,7 @@ export function PropertyInspectorPanel() {
                   }
                   onChange={(nextValue) => handlePropertyChange(key, nextValue)}
                   onRemove={() => handlePropertyRemove(key)}
+                  dataPaths={dataPaths}
                 />
               ))
             )}
@@ -363,6 +379,7 @@ interface PropertyFieldProps {
   onChange: (value: unknown) => void
   enumDefinition?: A2UIEnumPropertyDefinition
   onRemove?: () => void
+  dataPaths?: string[]
 }
 
 function PropertyField({
@@ -372,6 +389,7 @@ function PropertyField({
   onChange,
   enumDefinition,
   onRemove,
+  dataPaths,
 }: PropertyFieldProps) {
   const t = useTranslations("a2ui")
 
@@ -410,6 +428,8 @@ function PropertyField({
   }
 
   if (isPathBinding(value)) {
+    const hasPaths = Boolean(dataPaths && dataPaths.length > 0)
+    const listId = `${fieldId}-datapaths`
     return (
       <div className="space-y-1">
         <Label htmlFor={fieldId} className="font-mono text-xs">
@@ -417,11 +437,19 @@ function PropertyField({
         </Label>
         <Input
           id={fieldId}
+          list={hasPaths ? listId : undefined}
           aria-label={t("propertyDataPath", { property: propertyKey })}
           value={value.path}
           onChange={(event) => onChange({ path: event.target.value })}
           className="h-8 font-mono text-xs"
         />
+        {hasPaths && (
+          <datalist id={listId}>
+            {dataPaths!.map((path) => (
+              <option key={path} value={path} />
+            ))}
+          </datalist>
+        )}
       </div>
     )
   }

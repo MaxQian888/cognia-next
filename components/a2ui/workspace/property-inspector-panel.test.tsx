@@ -83,6 +83,23 @@ describe("PropertyInspectorPanel", () => {
     ])
   })
 
+  it("suggests data-model paths for a path-bound property", () => {
+    storeState.surfaces = {
+      sx: {
+        rootId: "root",
+        dataModel: { user: { name: "x" }, count: 5 },
+        components: {
+          btn: { id: "btn", component: "Button", text: "Submit", action: { path: "/user/name" } },
+        },
+      },
+    }
+    renderInspector("sx", "btn")
+    const values = Array.from(document.querySelectorAll("datalist option")).map((o) =>
+      o.getAttribute("value")
+    )
+    expect(values).toEqual(expect.arrayContaining(["/user", "/user/name", "/count"]))
+  })
+
   it("discovers, sets, and clears optional enum properties with constrained choices", () => {
     storeState.surfaces = {
       sx: {
