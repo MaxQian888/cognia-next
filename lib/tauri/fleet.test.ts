@@ -24,6 +24,9 @@ import {
   closeIslandWindow,
   fleetCodexInstall,
   fleetCodexStatus,
+  fleetCodexHooksInstall,
+  fleetCodexHooksUninstall,
+  fleetCodexHooksStatus,
   fleetCodexUninstall,
   fleetOpencodeInstall,
   fleetOpencodeStatus,
@@ -84,6 +87,9 @@ describe("off Tauri (web)", () => {
       configPath: null,
       scriptPath: null,
     })
+    expect(await fleetCodexHooksStatus()).toBe("unavailable")
+    expect(await fleetCodexHooksInstall()).toBe("unavailable")
+    expect(await fleetCodexHooksUninstall()).toBe("unavailable")
     expect(await fleetOpencodeStatus()).toEqual({ status: "unavailable", pluginPath: null })
     expect(await fleetOpencodeInstall()).toEqual({ status: "unavailable", pluginPath: null })
     expect(await fleetOpencodeUninstall()).toEqual({ status: "unavailable", pluginPath: null })
@@ -159,6 +165,31 @@ describe("on Tauri", () => {
     expect(invokeMock).toHaveBeenCalledWith("fleet_codex_uninstall")
     expect(await fleetCodexStatus()).toEqual(status)
     expect(invokeMock).toHaveBeenCalledWith("fleet_codex_status")
+  })
+
+  it("passes Codex hooks calls through", async () => {
+    invokeMock.mockResolvedValue("installed")
+    expect(await fleetCodexHooksInstall()).toBe("installed")
+    expect(invokeMock).toHaveBeenCalledWith("fleet_codex_hooks_install")
+    expect(await fleetCodexHooksUninstall()).toBe("installed")
+    expect(invokeMock).toHaveBeenCalledWith("fleet_codex_hooks_uninstall")
+    expect(await fleetCodexHooksStatus()).toBe("installed")
+    expect(invokeMock).toHaveBeenCalledWith("fleet_codex_hooks_status")
+  })
+
+  it("surfaces the stale hooks state verbatim", async () => {
+    // `stale` means our handler drifted — and because Codex keys hook trust by
+    // content, that also means it is no longer trusted and will not fire. It
+    // must never be flattened into "installed".
+    invokeMock.mockResolvedValue("stale")
+    expect(await fleetCodexHooksStatus()).toBe("stale")
+  })
+
+  it("swallows a Codex hooks status failure but lets install/uninstall throw", async () => {
+    invokeMock.mockRejectedValue(new Error("boom"))
+    expect(await fleetCodexHooksStatus()).toBe("unavailable")
+    await expect(fleetCodexHooksInstall()).rejects.toThrow("boom")
+    await expect(fleetCodexHooksUninstall()).rejects.toThrow("boom")
   })
 
   it("swallows a Codex status failure but lets install/uninstall throw", async () => {

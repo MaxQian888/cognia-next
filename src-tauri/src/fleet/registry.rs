@@ -14,6 +14,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use super::integrations::NormalizedEvent;
 use super::terminal::TerminalSource;
 
 /// How long an `Ended` row keeps lingering in the snapshot so the island can
@@ -226,6 +227,34 @@ impl FleetSession {
         self.pending_questions.clear();
         self.pending_question_request = None;
     }
+
+    /// Recompute this row's capabilities as the agent manifest's declared
+    /// ceiling AND-narrowed by the runtime facts the row has actually observed.
+    ///
+    /// The direction is the whole point: narrowing only ever turns a capability
+    /// **off**. A capability the manifest declares `false` stays `false` no
+    /// matter what a payload carries — an OpenCode event that happens to ship a
+    /// `transcript_path` used to switch `open_transcript` on and hand the island
+    /// a button with nothing behind it. Conversely a declared `true` still needs
+    /// its evidence: no transcript file means nothing to open, and a terminal
+    /// this OS cannot raise means no focus button.
+    fn refresh_capabilities(&mut self) {
+        let declared = super::integrations::manifest_for(self.agent).capabilities;
+        self.capabilities = FleetCapabilities {
+            // No runtime probe: whether the agent's ingress can carry an
+            // approval back is a property of its hook contract, not of any
+            // single payload.
+            approve_permission: declared.approve_permission,
+            // Same — the reverse command channel exists (or not) per agent.
+            send_message: declared.send_message,
+            focus_terminal: declared.focus_terminal
+                && self
+                    .terminal
+                    .as_ref()
+                    .is_some_and(|t| super::control::can_focus(t.app)),
+            open_transcript: declared.open_transcript && self.transcript_path.is_some(),
+        };
+    }
 }
 
 /// Full snapshot emitted to the frontend on every change.
@@ -293,6 +322,16 @@ impl FleetRegistry {
             return RegistryEffect::Ignored;
         };
 
+        // An event outside this agent's declared vocabulary is dropped at the
+        // door. It used to fall through the fold's `_ => {}` arm and still
+        // return `Updated`, which *created a session row* out of an
+        // unrecognized payload — a typo'd hook name or a foreign program
+        // POSTing to the ingress would materialize a phantom agent.
+        let manifest = super::integrations::manifest_for(ev.agent);
+        let Some(event) = manifest.normalize(&ev.event) else {
+            return RegistryEffect::Ignored;
+        };
+
         let key = (ev.agent, session_id.clone());
 
         // One Claude Code / Codex process runs one interactive session at a
@@ -302,9 +341,10 @@ impl FleetRegistry {
         // row survives forever: the reaper keeps any row whose agent pid is
         // alive, and the pid IS alive — it's now running the new session. So
         // when a new session id shows up for a pid we already track, drop that
-        // pid's other rows. OpenCode is exempt: one server process can
-        // legitimately host several concurrent sessions.
-        if !self.sessions.contains_key(&key) && ev.agent != FleetAgent::Opencode {
+        // pid's other rows. Agents whose manifest declares `multi_session_host`
+        // are exempt: one OpenCode server process can legitimately host several
+        // concurrent sessions.
+        if !self.sessions.contains_key(&key) && !manifest.multi_session_host {
             if let Some(ppid) = ev.ppid {
                 self.sessions.retain(|(agent, sid), s| {
                     *agent != ev.agent || sid == &session_id || s.agent_pid != Some(ppid)
@@ -328,7 +368,6 @@ impl FleetRegistry {
         }
         if let Some(t) = payload_str(&ev.payload, "transcript_path") {
             entry.transcript_path = Some(t);
-            entry.capabilities.open_transcript = true;
         }
         if let Some(mode) = payload_str(&ev.payload, "permission_mode") {
             entry.permission_mode = Some(mode);
@@ -338,16 +377,18 @@ impl FleetRegistry {
         }
         if entry.terminal.is_none() && !ev.env.is_empty() {
             entry.terminal = super::terminal::classify_terminal(&ev.env);
-            // Platform-aware: only advertise focus when the current OS knows
-            // how to raise this terminal (no silently-dead row buttons).
-            entry.capabilities.focus_terminal = entry
-                .terminal
-                .as_ref()
-                .is_some_and(|t| super::control::can_focus(t.app));
         }
+        // Capabilities are the manifest's ceiling narrowed by whatever the row
+        // now knows (transcript path, focusable terminal). Recomputed here, once,
+        // so every arm below — including the ones that return early — sees the
+        // same rule and no arm can widen a capability the manifest denies.
+        entry.refresh_capabilities();
 
-        match ev.event.as_str() {
-            "SessionStart" => {
+        // The fold matches only on the normalized vocabulary — no vendor
+        // event names reach it, and the exhaustive match makes a new
+        // `NormalizedEvent` variant a compile error rather than a silent drop.
+        match event {
+            NormalizedEvent::SessionStart => {
                 entry.status = FleetStatus::Idle;
                 entry.ended_at = None;
                 // `startup` | `resume` | `clear` | `compact` — distinguishes a
@@ -357,7 +398,7 @@ impl FleetRegistry {
                 }
                 entry.last_error = None;
             }
-            "UserPromptSubmit" => {
+            NormalizedEvent::UserPromptSubmit => {
                 entry.status = FleetStatus::Working;
                 if let Some(prompt) = payload_str(&ev.payload, "prompt") {
                     entry.last_prompt = Some(prompt);
@@ -374,7 +415,7 @@ impl FleetRegistry {
                 entry.last_error = None;
                 entry.git_checked = false;
             }
-            "PreToolUse" => {
+            NormalizedEvent::PreToolUse => {
                 // Count on Pre (not Post) so a tool that never returns still
                 // counts once; PostToolUse handles error/success bookkeeping.
                 entry.tool_use_count = entry.tool_use_count.saturating_add(1);
@@ -407,7 +448,7 @@ impl FleetRegistry {
                     });
                 }
             }
-            "PostToolUse" => {
+            NormalizedEvent::PostToolUse => {
                 // Keep Working; the activity line stays until the next tool
                 // or Stop so slow model turns still show the last action.
                 entry.status = FleetStatus::Working;
@@ -444,7 +485,7 @@ impl FleetRegistry {
                     finish_task_subagent(entry, &ev.payload);
                 }
             }
-            "Notification" => {
+            NormalizedEvent::Notification => {
                 // Notifications are display hints, and they only mean "the
                 // agent is blocked mid-turn". Claude Code also fires an
                 // `idle_prompt` notification ~60 s after a turn ends cleanly
@@ -483,7 +524,7 @@ impl FleetRegistry {
                     _ => {}
                 }
             }
-            "PermissionRequest" => {
+            NormalizedEvent::PermissionRequest => {
                 let request_id = permission_request_id(&ev.agent, &session_id, now_ms);
                 let tool_name = payload_str(&ev.payload, "tool_name");
                 // AskUserQuestion fires BOTH PreToolUse and PermissionRequest.
@@ -491,9 +532,10 @@ impl FleetRegistry {
                 // user must answer. Park it as an *answerable* question (not a
                 // generic Approve/Deny) so the island shows the options and the
                 // selection rides back as the hook's `allow` + `updatedInput`
-                // answer decision. OpenCode has no AskUserQuestion tool, so this
-                // is scoped to Claude/Codex.
-                if ev.agent != FleetAgent::Opencode
+                // answer decision. Scoped by the manifest's `answers_questions`
+                // — OpenCode has no AskUserQuestion tool and no wait-mode gate
+                // that could carry an answer back.
+                if manifest.answers_questions
                     && tool_name.as_deref().is_some_and(is_ask_user_question_tool)
                 {
                     entry.status = FleetStatus::WaitingInput;
@@ -523,7 +565,6 @@ impl FleetRegistry {
                         detail: None,
                         requested_at: now_ms,
                     });
-                    entry.capabilities.approve_permission = true;
                     return RegistryEffect::PermissionRequested { request_id };
                 }
                 entry.status = FleetStatus::WaitingPermission;
@@ -535,13 +576,12 @@ impl FleetRegistry {
                     tool_name,
                     requested_at: now_ms,
                 });
-                entry.capabilities.approve_permission = true;
                 return RegistryEffect::PermissionRequested { request_id };
             }
             // A clean turn end returns the row to idle, clears in-flight
             // activity / parked permission, and clears any error. Background
             // subagents survive the turn; foreground ones can't.
-            "Stop" => {
+            NormalizedEvent::Stop => {
                 entry.status = FleetStatus::Idle;
                 entry.activity = None;
                 entry.pending_permission = None;
@@ -553,7 +593,7 @@ impl FleetRegistry {
             // Same idle transition as `Stop`, but the turn ended in an API
             // error — stamp a `Turn` error so the row can flag it (previously
             // this signal was collapsed into `Stop` and silently discarded).
-            "StopFailure" => {
+            NormalizedEvent::StopFailure => {
                 entry.status = FleetStatus::Idle;
                 entry.activity = None;
                 entry.pending_permission = None;
@@ -570,7 +610,7 @@ impl FleetRegistry {
             // A subagent finished. The payload carries no correlation id, so
             // retire the oldest foreground entry (its PostToolUse follows and
             // no-ops); a background-only list retires FIFO.
-            "SubagentStop" => {
+            NormalizedEvent::SubagentStop => {
                 if let Some(pos) = entry.subagents.iter().position(|s| !s.background) {
                     entry.subagents.remove(pos);
                 } else if !entry.subagents.is_empty() {
@@ -579,7 +619,7 @@ impl FleetRegistry {
             }
             // Context compaction: show a brief "compacting" beat (kept Working so
             // the row doesn't flash idle mid-turn). `trigger` is `manual`/`auto`.
-            "PreCompact" => {
+            NormalizedEvent::PreCompact => {
                 entry.status = FleetStatus::Working;
                 entry.activity = Some(FleetActivity {
                     tool_name: "Compacting".to_string(),
@@ -588,7 +628,7 @@ impl FleetRegistry {
             }
             // Compaction done — drop the transient activity; the next tool call
             // or Stop drives the row from here.
-            "PostCompact" => {
+            NormalizedEvent::PostCompact => {
                 entry.status = FleetStatus::Working;
                 entry.activity = None;
             }
@@ -598,7 +638,7 @@ impl FleetRegistry {
             // `pending_permission`), so release it symmetrically — drop the stale
             // plan text and return to Working instead of leaving the row stuck on
             // a plan whose answer won't come back through Cognia.
-            "PermissionDenied" => {
+            NormalizedEvent::PermissionDenied => {
                 entry.pending_permission = None;
                 if matches!(
                     entry.status,
@@ -608,7 +648,7 @@ impl FleetRegistry {
                     entry.pending_plan = None;
                 }
             }
-            "agent-turn-complete" => {
+            NormalizedEvent::TurnComplete => {
                 // Codex's `notify` program fires once per completed turn with
                 // the turn's inputs + reply (kebab-case argv JSON). It is the
                 // only lifecycle signal on the notify path, so lean on it to
@@ -638,7 +678,7 @@ impl FleetRegistry {
                         detail: Some(reply),
                     });
             }
-            "SessionEnd" => {
+            NormalizedEvent::SessionEnd => {
                 entry.status = FleetStatus::Ended;
                 entry.ended_at = Some(now_ms);
                 entry.activity = None;
@@ -649,11 +689,12 @@ impl FleetRegistry {
             }
             // OpenCode plugin events (normalized in `cognia-fleet.js` so we
             // never depend on OpenCode's internal bus schema).
-            "session-active" => {
+            NormalizedEvent::SessionActive => {
                 entry.status = FleetStatus::Working;
-                // OpenCode sessions are controllable: the plugin can inject a
-                // prompt via its bound client (see fleet/opencode.rs poll loop).
-                entry.capabilities.send_message = true;
+                // `send_message` is not set here: OpenCode's reverse command
+                // channel (fleet/opencode.rs poll loop) is a property of the
+                // integration, declared once in its manifest, not something a
+                // `session-active` payload grants.
                 entry.activity =
                     payload_str(&ev.payload, "tool_name").map(|tool_name| FleetActivity {
                         detail: tool_detail(&ev.payload, &tool_name),
@@ -663,7 +704,7 @@ impl FleetRegistry {
                     entry.last_prompt = Some(prompt);
                 }
             }
-            "session-idle" => {
+            NormalizedEvent::SessionIdle => {
                 entry.status = FleetStatus::Idle;
                 entry.activity = None;
                 // Idle means nothing is blocked on the user anymore — release
@@ -674,8 +715,6 @@ impl FleetRegistry {
                 entry.pending_plan = None;
                 entry.clear_questions();
             }
-            // Subagent events only bump last_event_at (already done above).
-            _ => {}
         }
 
         RegistryEffect::Updated
@@ -703,8 +742,11 @@ impl FleetRegistry {
         if session.terminal.is_some() {
             return false;
         }
-        session.capabilities.focus_terminal = super::control::can_focus(terminal.app);
         session.terminal = Some(terminal);
+        // A newly classified terminal is a runtime fact that can only ever
+        // narrow the manifest's `focus_terminal` ceiling (this OS may not know
+        // how to raise that app).
+        session.refresh_capabilities();
         true
     }
 
@@ -835,7 +877,9 @@ fn new_session(
         pending_questions: Vec::new(),
         pending_question_request: None,
         subagents: Vec::new(),
-        capabilities: FleetCapabilities::default(),
+        // The manifest's declared ceiling. `FleetRegistry::apply` narrows it
+        // against this row's runtime facts immediately after inserting.
+        capabilities: super::integrations::manifest_for(agent).capabilities,
         started_at: now_ms,
         last_event_at: now_ms,
         ended_at: None,
@@ -848,10 +892,12 @@ fn new_session(
     }
 }
 
-/// Session id lives at `payload.session_id` for Claude/Codex hooks and
-/// `payload["session-id"]` for the Codex notify program.
+/// Session id extraction is per-agent: the key order lives in that agent's
+/// [`AgentManifest`], not here. Codex is the cautionary tale — its `notify`
+/// payload carries `thread-id`, never `session_id`, so a single hardcoded key
+/// list silently dropped every Codex event ever sent.
 fn extract_session_id(ev: &FleetEvent) -> Option<String> {
-    payload_str(&ev.payload, "session_id").or_else(|| payload_str(&ev.payload, "session-id"))
+    super::integrations::manifest_for(ev.agent).session_id(&ev.payload)
 }
 
 fn payload_str(payload: &serde_json::Value, key: &str) -> Option<String> {
@@ -2059,6 +2105,92 @@ mod tests {
         assert_eq!(reg.snapshot(2).sessions.len(), 2);
     }
 
+    /// The shipped `@openai/codex` `notify` payload identifies its session with
+    /// **`thread-id`** — there is no `session_id` and no `session-id`. This
+    /// test pins the real wire format; before the manifest layer the extractor
+    /// only accepted `session_id`/`session-id`, so every Codex event ever sent
+    /// was dropped before the fold and no Codex row ever reached the island —
+    /// while the settings card kept reporting a healthy install.
+    ///
+    /// Verified 2026-07-21 against `@openai/codex 0.144.4`.
+    #[test]
+    fn codex_notify_payload_with_thread_id_produces_a_row() {
+        let mut reg = FleetRegistry::new();
+        let payload = serde_json::json!({
+            "type": "agent-turn-complete",
+            "thread-id": "019f65d9-4119-7cb3-a504-9f746f0b252a",
+            "turn-id": "019f65d9-4029-71e2-a4ed-bb08a0be08f1",
+            "client": "cli",
+            "cwd": "/Users/x/proj/api",
+            "input-messages": ["rename foo to bar"],
+            "last-assistant-message": "Renamed and verified"
+        });
+        let effect = reg.apply(&ev(FleetAgent::Codex, "agent-turn-complete", payload), 0);
+        assert_eq!(effect, RegistryEffect::Updated);
+        let s = only_session(&reg);
+        assert_eq!(s.agent, FleetAgent::Codex);
+        assert_eq!(s.session_id, "019f65d9-4119-7cb3-a504-9f746f0b252a");
+        assert_eq!(s.project_name.as_deref(), Some("api"));
+    }
+
+    /// Codex's hooks system (`~/.codex/hooks.json`) — the integration that
+    /// replaces `notify` — speaks the Claude-congruent vocabulary with a real
+    /// `session_id`. Verified 2026-07-21 against a live third-party
+    /// `hooks.json` on `@openai/codex 0.144.4`.
+    #[test]
+    fn codex_hook_events_fold_like_claude() {
+        let mut reg = FleetRegistry::new();
+        let start = serde_json::json!({
+            "hook_event_name": "SessionStart",
+            "session_id": "codex-hooked",
+            "cwd": "/Users/x/proj/web",
+            "source": "startup"
+        });
+        reg.apply(&ev(FleetAgent::Codex, "SessionStart", start), 0);
+        let pre = serde_json::json!({
+            "hook_event_name": "PreToolUse",
+            "session_id": "codex-hooked",
+            "tool_name": "Bash",
+            "tool_input": { "command": "pnpm test" }
+        });
+        reg.apply(&ev(FleetAgent::Codex, "PreToolUse", pre), 1);
+
+        let s = only_session(&reg);
+        assert_eq!(s.session_id, "codex-hooked");
+        assert_eq!(s.status, FleetStatus::Working);
+        assert_eq!(s.tool_use_count, 1);
+        assert_eq!(s.activity.as_ref().unwrap().tool_name, "Bash");
+    }
+
+    /// An event outside the agent's declared vocabulary must not materialize a
+    /// session. It previously fell through the fold's catch-all arm and still
+    /// reported `Updated`, so a typo'd hook name or a foreign POST created a
+    /// phantom agent row that only the reaper could clear.
+    #[test]
+    fn unknown_event_names_do_not_create_rows() {
+        let mut reg = FleetRegistry::new();
+        let payload = serde_json::json!({ "session_id": "ghost", "cwd": "/p" });
+        let effect = reg.apply(&ev(FleetAgent::ClaudeCode, "TotallyMadeUp", payload), 0);
+        assert_eq!(effect, RegistryEffect::Ignored);
+        assert!(reg.is_empty());
+    }
+
+    /// Vocabularies do not leak across agents: OpenCode's `session-active` is
+    /// meaningless to Claude Code and must be dropped rather than folded.
+    #[test]
+    fn foreign_vocabulary_is_rejected_per_agent() {
+        let mut reg = FleetRegistry::new();
+        let payload = serde_json::json!({ "session_id": "x", "cwd": "/p" });
+        assert_eq!(
+            reg.apply(&ev(FleetAgent::ClaudeCode, "session-active", payload), 0),
+            RegistryEffect::Ignored
+        );
+        assert!(reg.is_empty());
+    }
+
+    /// Hypothetical `session-id` spelling, kept because the extractor still
+    /// accepts it. NOT the shape Codex actually emits — see
+    /// `codex_notify_payload_with_thread_id_produces_a_row` for that.
     #[test]
     fn codex_turn_complete_maps_kebab_session_id_and_surfaces_turn() {
         let mut reg = FleetRegistry::new();
@@ -2196,6 +2328,74 @@ mod tests {
         assert!(s.get("lastEventAt").is_some());
         assert!(s.get("projectName").is_some());
         assert!(s["capabilities"].get("openTranscript").is_some());
+    }
+
+    /// The manifest is a ceiling, and a payload cannot raise it. OpenCode
+    /// declares `open_transcript: false` / `focus_terminal: false`, yet its
+    /// events routinely carry a `transcript_path` and a terminal env — which is
+    /// exactly how the old "turn it on when the field shows up" code handed the
+    /// island two buttons OpenCode cannot serve.
+    #[test]
+    fn manifest_false_capability_cannot_be_switched_on_by_a_payload() {
+        use super::super::terminal::{TerminalApp, TerminalSource};
+
+        let mut payload = base_payload();
+        payload["session_id"] = serde_json::json!("oc-cap");
+        let mut event = ev(FleetAgent::Opencode, "session-active", payload);
+        event.env.insert("TERM_PROGRAM".into(), "iTerm.app".into());
+
+        let mut reg = FleetRegistry::new();
+        reg.apply(&event, 0);
+        let s = only_session(&reg);
+        // The payload carried a transcript path and the env classified a
+        // terminal — both denied by the manifest.
+        assert!(s.transcript_path.is_some(), "payload did carry the field");
+        assert!(s.terminal.is_some(), "env did classify a terminal");
+        assert!(!s.capabilities.open_transcript);
+        assert!(!s.capabilities.focus_terminal);
+        // Declared capabilities stand on their own, without payload evidence.
+        assert!(s.capabilities.send_message);
+        assert!(s.capabilities.approve_permission);
+
+        // The out-of-band terminal attach path (parent-chain fallback) narrows
+        // the same way — a row that never saw a terminal env still must not
+        // gain focus from a manifest that denies it.
+        let mut bare = base_payload();
+        bare["session_id"] = serde_json::json!("oc-bare");
+        let mut reg = FleetRegistry::new();
+        reg.apply(&ev(FleetAgent::Opencode, "session-active", bare), 0);
+        assert!(reg.set_terminal(
+            FleetAgent::Opencode,
+            "oc-bare",
+            TerminalSource {
+                app: TerminalApp::Ghostty,
+                label: "Ghostty".into(),
+                session_ref: None,
+            },
+        ));
+        let s = only_session(&reg);
+        assert!(s.terminal.is_some());
+        assert!(!s.capabilities.focus_terminal);
+    }
+
+    /// The other direction: a declared `true` still needs its runtime evidence,
+    /// so the island never renders a transcript button before a transcript
+    /// path exists.
+    #[test]
+    fn declared_capability_still_waits_for_its_runtime_evidence() {
+        let mut reg = FleetRegistry::new();
+        let payload = serde_json::json!({ "session_id": SID, "cwd": "/Users/x/proj" });
+        reg.apply(&claude_ev("SessionStart", payload), 0);
+        let s = only_session(&reg);
+        assert!(!s.capabilities.open_transcript, "no transcript path yet");
+        assert!(!s.capabilities.focus_terminal, "no terminal classified yet");
+        // Not narrowed by anything → straight from the manifest.
+        assert!(s.capabilities.approve_permission);
+        assert!(!s.capabilities.send_message);
+
+        // The transcript path arrives on a later event and the button appears.
+        reg.apply(&claude_ev("UserPromptSubmit", base_payload()), 1);
+        assert!(only_session(&reg).capabilities.open_transcript);
     }
 
     #[test]

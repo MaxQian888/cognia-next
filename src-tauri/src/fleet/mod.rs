@@ -13,9 +13,11 @@
 //! share it without threading an `AppHandle` through the router.
 
 pub mod codex;
+pub mod codex_hooks;
 pub mod control;
 pub mod gitinfo;
 pub mod install;
+pub mod integrations;
 pub mod island_window;
 pub mod opencode;
 pub mod registry;
@@ -226,21 +228,17 @@ impl FleetRuntime {
         // If the env classifier came up empty but we have the agent pid,
         // walk its parent chain to name the terminal. Done here (not in the
         // pure registry) because it does live sysinfo I/O.
-        if let Some(session_id) = event
-            .payload
-            .get("session_id")
-            .or_else(|| event.payload.get("session-id"))
-            .and_then(|v| v.as_str())
+        if let Some(session_id) = integrations::manifest_for(event.agent).session_id(&event.payload)
         {
             let pid = self
                 .registry
                 .lock()
-                .needs_terminal_fallback(event.agent, session_id);
+                .needs_terminal_fallback(event.agent, &session_id);
             if let Some(pid) = pid {
                 if let Some(terminal) = terminal::classify_from_pid(pid) {
                     self.registry
                         .lock()
-                        .set_terminal(event.agent, session_id, terminal);
+                        .set_terminal(event.agent, &session_id, terminal);
                 }
             }
         }
@@ -264,11 +262,7 @@ impl FleetRuntime {
         if !git_capture_enabled() {
             return;
         }
-        let Some(session_id) = event
-            .payload
-            .get("session_id")
-            .or_else(|| event.payload.get("session-id"))
-            .and_then(|v| v.as_str())
+        let Some(session_id) = integrations::manifest_for(event.agent).session_id(&event.payload)
         else {
             return;
         };
@@ -276,7 +270,7 @@ impl FleetRuntime {
         let cwd = self
             .registry
             .lock()
-            .needs_git_capture(event.agent, session_id);
+            .needs_git_capture(event.agent, &session_id);
         let Some(cwd) = cwd else {
             return;
         };
@@ -287,7 +281,7 @@ impl FleetRuntime {
         if self
             .registry
             .lock()
-            .set_git_branch(event.agent, session_id, branch)
+            .set_git_branch(event.agent, &session_id, branch)
         {
             self.emit_update();
         }
@@ -738,21 +732,21 @@ mod tests {
         let rt = runtime();
         // Unique session id + pid so the process-global registry can't collide
         // with another (unlocked) test's ingest.
-        let sid = "mod-git-capture-001";
+        let sid = "mod-git-capture-codex-001";
         let event = registry::FleetEvent {
-            agent: registry::FleetAgent::ClaudeCode,
+            agent: registry::FleetAgent::Codex,
             event: "SessionStart".into(),
             pid: None,
             ppid: Some(31_337),
             env: Default::default(),
             // The crate dir lives inside this repo, so rev-parse resolves.
-            payload: serde_json::json!({ "session_id": sid, "cwd": env!("CARGO_MANIFEST_DIR") }),
+            payload: serde_json::json!({ "thread-id": sid, "cwd": env!("CARGO_MANIFEST_DIR") }),
         };
         rt.ingest(&event);
         assert!(rt
             .registry
             .lock()
-            .needs_git_capture(registry::FleetAgent::ClaudeCode, sid)
+            .needs_git_capture(registry::FleetAgent::Codex, sid)
             .is_some());
 
         rt.capture_git_branch(&event).await;
@@ -762,7 +756,7 @@ mod tests {
         assert!(rt
             .registry
             .lock()
-            .needs_git_capture(registry::FleetAgent::ClaudeCode, sid)
+            .needs_git_capture(registry::FleetAgent::Codex, sid)
             .is_none());
         set_git_capture_enabled(false);
     }

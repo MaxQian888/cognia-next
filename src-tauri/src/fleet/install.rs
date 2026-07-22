@@ -37,7 +37,13 @@ fn monitor_config_path_at(base: &Path) -> PathBuf {
 }
 
 fn claude_hook_script_path_at(base: &Path) -> PathBuf {
-    base.join("agent-monitor").join("claude-hook.sh")
+    hook_script_path_at(base, "claude")
+}
+
+/// `<cognia home>/agent-monitor/<slug>-hook.sh` — one forwarder per agent that
+/// speaks the Claude-shaped hooks contract.
+pub fn hook_script_path_at(base: &Path, slug: &str) -> PathBuf {
+    base.join("agent-monitor").join(format!("{slug}-hook.sh"))
 }
 
 pub fn claude_hook_script_path() -> Option<PathBuf> {
@@ -120,6 +126,16 @@ fn restrict_permissions(path: &Path) -> Result<(), String> {
 /// - stdout — echoed decision JSON in `wait` mode; nothing otherwise.
 /// - Always exits 0 (fail-open: a dead/stopped Cognia never blocks the agent).
 pub fn claude_hook_script(env_vars: &[&str]) -> String {
+    hook_forwarder_script("claude-code", env_vars)
+}
+
+/// The shared hook forwarder, parameterized by the agent id that rides in the
+/// envelope. Claude Code and Codex both drive a Claude-shaped hooks system
+/// (JSON on stdin, decision JSON on stdout, per-event argv), so they run the
+/// *same* generated script rather than two near-copies — the tricky part here
+/// is the triple layer of quoting in `ENVJSON`/`BODY`, and it is pinned by the
+/// `sh -n` syntax check plus the stub-curl envelope test below.
+pub fn hook_forwarder_script(agent: &str, env_vars: &[&str]) -> String {
     // Build the `\"K\":\"$(esc "$K")\"` env-capture pairs. The whole ENVJSON
     // assignment is a double-quoted sh string, so JSON quotes must be
     // backslash-escaped to survive as literals while `$(esc …)` still
@@ -134,7 +150,7 @@ pub fn claude_hook_script(env_vars: &[&str]) -> String {
     format!(
         r#"#!/bin/sh
 # {marker}
-# Forwards Claude Code hook events to the Cognia fleet monitor.
+# Forwards {agent} hook events to the Cognia fleet monitor.
 # Fail-open by design: every early-exit path exits 0 so a stopped Cognia
 # never blocks or slows the agent beyond the curl timeout.
 CFG="${{COGNIA_HOME:-$HOME/.cognia}}/agent-monitor.json"
@@ -154,7 +170,7 @@ esc() {{
 }}
 
 ENVJSON="{{{env_pairs_open}}}"
-BODY="{{\"agent\":\"claude-code\",\"event\":\"$EVENT\",\"pid\":$$,\"ppid\":$PPID,\"env\":$ENVJSON,\"payload\":$PAYLOAD}}"
+BODY="{{\"agent\":\"{agent}\",\"event\":\"$EVENT\",\"pid\":$$,\"ppid\":$PPID,\"env\":$ENVJSON,\"payload\":$PAYLOAD}}"
 
 TMOUT=0.4
 [ "$MODE" = "wait" ] && TMOUT=25
@@ -171,6 +187,7 @@ fi
 exit 0
 "#,
         marker = MANAGED_MARKER,
+        agent = agent,
         env_pairs_open = env_pairs,
     )
 }

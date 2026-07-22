@@ -17,8 +17,12 @@
  * 1. Monitor — starts/stops the local ingress (companion API + token file).
  * 2. Claude Code hooks — install/uninstall the forwarder entries in
  *    `~/.claude/settings.json` (+ the generated `claude-hook.sh`).
- * 3. Codex notify — point `~/.codex/config.toml`'s `notify` at a forwarder
- *    (observe-only: one turn-complete event per turn, no trust step).
+ * 3. Codex hooks — register the forwarder in `~/.codex/hooks.json` (merged, so
+ *    a foreign tool's hooks survive). This replaced the `notify` integration,
+ *    which never produced a single fleet row: Codex's notify payload names its
+ *    session `thread-id`, not `session_id`, so every event was dropped at the
+ *    door while this card kept reporting a healthy install. Toggling the row
+ *    also clears any leftover `notify` entry, so the two can't double-report.
  * 4. OpenCode plugin — install the observe/approve plugin.
  * 5. Island overlay — the Dynamic-Island-style status window (+ display picker).
  */
@@ -45,7 +49,9 @@ import {
 } from "@/components/ui/select"
 import {
   closeIslandWindow,
-  fleetCodexInstall,
+  fleetCodexHooksInstall,
+  fleetCodexHooksStatus,
+  fleetCodexHooksUninstall,
   fleetCodexStatus,
   fleetCodexUninstall,
   fleetMonitorStart,
@@ -58,7 +64,7 @@ import {
   islandListMonitors,
   islandSetMonitor,
   openIslandWindow,
-  type CodexStatus,
+  type CodexHooksStatus,
   type IslandMonitorInfo,
   type OpencodeStatus,
 } from "@/lib/tauri/fleet"
@@ -79,7 +85,7 @@ export function FleetSection() {
   const [monitorPort, setMonitorPort] = useState<number | null>(null)
   const [installState, setInstallState] = useState<FleetHooksInstallState>("not-installed")
   const [scriptStale, setScriptStale] = useState(false)
-  const [codexStatus, setCodexStatus] = useState<CodexStatus>("not-installed")
+  const [codexStatus, setCodexStatus] = useState<CodexHooksStatus>("not-installed")
   const [opencodeStatus, setOpencodeStatus] = useState<OpencodeStatus>("not-installed")
   const [islandOpen, setIslandOpen] = useState(false)
   const [islandMonitors, setIslandMonitors] = useState<IslandMonitorInfo[]>([])
@@ -93,7 +99,7 @@ export function FleetSection() {
       const [monitor, hooks, codex, opencode, island, monitors] = await Promise.all([
         fleetMonitorStatus(),
         readFleetHooksStatus(),
-        fleetCodexStatus(),
+        fleetCodexHooksStatus(),
         fleetOpencodeStatus(),
         isIslandWindowOpen(),
         islandListMonitors(),
@@ -103,7 +109,7 @@ export function FleetSection() {
         monitorPort: monitor.port,
         installState: hooks.install,
         scriptStale: hooks.scripts.claudeScript === "stale",
-        codexStatus: codex.status,
+        codexStatus: codex,
         opencodeStatus: opencode.status,
         islandOpen: island,
         islandMonitors: monitors,
@@ -205,10 +211,18 @@ export function FleetSection() {
       if (busy) return
       setBusy(true)
       try {
-        // Install/uninstall throw on conflict (foreign `notify`) — surface it.
         if (next) {
-          await fleetCodexInstall()
+          await fleetCodexHooksInstall()
         } else {
+          await fleetCodexHooksUninstall()
+        }
+        // Either way, drop any leftover `notify` entry from the retired
+        // integration. Left in place it would keep firing `agent-turn-complete`
+        // alongside the hooks, double-counting every turn — and turning this
+        // row off has to actually disconnect Codex, not half of it. Gated on
+        // the status read so we never rewrite config.toml on the overwhelming
+        // majority of machines that have nothing of ours in it.
+        if ((await fleetCodexStatus()).status === "installed") {
           await fleetCodexUninstall()
         }
         await refresh()
@@ -281,8 +295,11 @@ export function FleetSection() {
     switch (codexStatus) {
       case "installed":
         return { key: "installed", variant: "default" as const }
-      case "conflict":
-        return { key: "codexConflict", variant: "destructive" as const }
+      // Our handler is registered but under a different command. Codex keys
+      // hook trust to the command text, so a drifted entry is an untrusted one
+      // — it will not fire until reinstalled and re-approved.
+      case "stale":
+        return { key: "codexStale", variant: "destructive" as const }
       case "unavailable":
         return { key: "codexUnavailable", variant: "outline" as const }
       default:
@@ -410,13 +427,18 @@ export function FleetSection() {
               ) : null}
             </div>
             <p className="text-[11px] text-muted-foreground">{t("codex.desc")}</p>
+            {codexStatus === "installed" || codexStatus === "stale" ? (
+              <p className="text-[11px] text-amber-600 dark:text-amber-500" role="note">
+                {t("codex.trustHint")}
+              </p>
+            ) : null}
           </div>
           <Switch
             id="fleet-codex"
+            // `stale` reads as off so the switch stays actionable: flipping it
+            // on rewrites the entry, which is what re-earns Codex's trust.
             checked={codexStatus === "installed"}
-            disabled={
-              busy || !loaded || codexStatus === "unavailable" || codexStatus === "conflict"
-            }
+            disabled={busy || !loaded || codexStatus === "unavailable"}
             onCheckedChange={(v) => void toggleCodex(v)}
             aria-label={t("codex.label")}
             data-testid="fleet-codex-switch"

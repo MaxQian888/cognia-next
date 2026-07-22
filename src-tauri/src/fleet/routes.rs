@@ -123,46 +123,39 @@ async fn hook_handler(
                 .wait_for_question(&request_id, raw_questions, super::permission_wait_ms())
                 .await
             {
-                Some(updated_input) => Json(question_decision(updated_input)).into_response(),
+                Some(updated_input) => match question_decision(agent, updated_input) {
+                    Some(decision) => Json(decision).into_response(),
+                    None => StatusCode::NO_CONTENT.into_response(),
+                },
                 None => StatusCode::NO_CONTENT.into_response(),
             }
         }
     }
 }
 
-/// The AskUserQuestion answer decision. Same `hookSpecificOutput` envelope as a
-/// permission `allow`, but carries the built `updatedInput` (`{questions,
-/// answers}`) so the tool resolves with the island's answer instead of
-/// prompting in the terminal. Claude/Codex only (OpenCode never routes here).
-fn question_decision(updated_input: serde_json::Value) -> serde_json::Value {
-    serde_json::json!({
-        "hookSpecificOutput": {
-            "hookEventName": "PermissionRequest",
-            "decision": {
-                "behavior": "allow",
-                "updatedInput": updated_input
-            }
-        }
-    })
+/// The AskUserQuestion answer decision, encoded by the agent's manifest.
+/// `None` when the agent declares no answer channel — the ingress then fails
+/// open with an empty `204` instead of shipping an envelope the forwarder
+/// cannot parse. Unreachable for OpenCode today (the registry only emits
+/// `QuestionRequested` when the manifest sets `answers_questions`), which is
+/// exactly why the guard lives in the manifest rather than in a comment.
+fn question_decision(
+    agent: FleetAgent,
+    updated_input: serde_json::Value,
+) -> Option<serde_json::Value> {
+    super::integrations::manifest_for(agent).question_decision(updated_input)
 }
 
-/// The decision JSON each agent's forwarder expects back:
-/// - Claude Code hook echoes the `hookSpecificOutput` block on stdout.
-/// - The OpenCode plugin reads `{status}` and sets `output.status`.
+/// The decision JSON the agent's forwarder expects back — the envelope is the
+/// manifest's `decision_shape`, not a branch here (Claude Code / Codex hooks
+/// echo the `hookSpecificOutput` block on stdout; the OpenCode plugin reads
+/// `{status}` and sets `output.status`).
 fn permission_decision(agent: FleetAgent, behavior: PermissionBehavior) -> serde_json::Value {
     let behavior_str = match behavior {
         PermissionBehavior::Allow => "allow",
         PermissionBehavior::Deny => "deny",
     };
-    match agent {
-        FleetAgent::Opencode => serde_json::json!({ "status": behavior_str }),
-        FleetAgent::ClaudeCode | FleetAgent::Codex => serde_json::json!({
-            "hookSpecificOutput": {
-                "hookEventName": "PermissionRequest",
-                "decision": { "behavior": behavior_str }
-            }
-        }),
-    }
+    super::integrations::manifest_for(agent).permission_decision(behavior_str)
 }
 
 #[cfg(test)]
@@ -523,5 +516,37 @@ mod tests {
         let oc = permission_decision(FleetAgent::Opencode, PermissionBehavior::Allow);
         assert_eq!(oc["status"], "allow");
         assert!(oc.get("hookSpecificOutput").is_none());
+    }
+
+    /// The ingress must not hold its own copy of the reply format: every
+    /// agent's decision is byte-for-byte what its manifest encodes. A
+    /// re-introduced `match agent { … }` here fails this even if it happens to
+    /// agree with the manifest today, because a new manifest entry would not.
+    #[test]
+    fn permission_decision_is_delegated_to_the_manifest() {
+        for manifest in crate::fleet::integrations::MANIFESTS {
+            for (behavior, s) in [
+                (PermissionBehavior::Allow, "allow"),
+                (PermissionBehavior::Deny, "deny"),
+            ] {
+                assert_eq!(
+                    permission_decision(manifest.agent, behavior),
+                    manifest.permission_decision(s),
+                    "{:?}",
+                    manifest.agent
+                );
+            }
+        }
+    }
+
+    /// An agent that declares no answer channel gets no answer envelope — the
+    /// route falls through to the fail-open `204` rather than emitting a
+    /// `hookSpecificOutput` block its forwarder would choke on.
+    #[test]
+    fn question_decision_follows_the_manifests_answer_channel() {
+        let updated = serde_json::json!({ "questions": [], "answers": {} });
+        assert!(question_decision(FleetAgent::ClaudeCode, updated.clone()).is_some());
+        assert!(question_decision(FleetAgent::Codex, updated.clone()).is_some());
+        assert!(question_decision(FleetAgent::Opencode, updated).is_none());
     }
 }

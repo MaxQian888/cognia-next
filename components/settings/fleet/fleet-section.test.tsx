@@ -45,6 +45,9 @@ const mockFleet = {
   fleetCodexInstall: jest.fn(),
   fleetCodexUninstall: jest.fn(),
   fleetCodexStatus: jest.fn(),
+  fleetCodexHooksInstall: jest.fn(),
+  fleetCodexHooksUninstall: jest.fn(),
+  fleetCodexHooksStatus: jest.fn(),
   fleetOpencodeInstall: jest.fn(),
   fleetOpencodeUninstall: jest.fn(),
   fleetOpencodeStatus: jest.fn(),
@@ -61,6 +64,9 @@ jest.mock("@/lib/tauri/fleet", () => ({
   fleetCodexInstall: () => mockFleet.fleetCodexInstall(),
   fleetCodexUninstall: () => mockFleet.fleetCodexUninstall(),
   fleetCodexStatus: () => mockFleet.fleetCodexStatus(),
+  fleetCodexHooksInstall: () => mockFleet.fleetCodexHooksInstall(),
+  fleetCodexHooksUninstall: () => mockFleet.fleetCodexHooksUninstall(),
+  fleetCodexHooksStatus: () => mockFleet.fleetCodexHooksStatus(),
   fleetOpencodeInstall: () => mockFleet.fleetOpencodeInstall(),
   fleetOpencodeUninstall: () => mockFleet.fleetOpencodeUninstall(),
   fleetOpencodeStatus: () => mockFleet.fleetOpencodeStatus(),
@@ -130,6 +136,14 @@ beforeEach(() => {
     configPath: null,
     scriptPath: null,
   })
+  mockFleet.fleetCodexUninstall.mockResolvedValue({
+    status: "not-installed",
+    configPath: null,
+    scriptPath: null,
+  })
+  mockFleet.fleetCodexHooksStatus.mockResolvedValue("not-installed")
+  mockFleet.fleetCodexHooksInstall.mockResolvedValue("installed")
+  mockFleet.fleetCodexHooksUninstall.mockResolvedValue("not-installed")
   mockFleet.fleetOpencodeStatus.mockResolvedValue({ status: "not-installed", pluginPath: null })
   mockFleet.isIslandWindowOpen.mockResolvedValue(false)
   mockFleet.islandListMonitors.mockResolvedValue([
@@ -149,10 +163,11 @@ beforeEach(() => {
 // The controls are always visible on the dedicated section (no collapse), so
 // loading is the only barrier to interaction.
 async function renderLoaded() {
-  render(<FleetSection />)
+  const view = render(<FleetSection />)
   await waitFor(() => {
     expect(screen.getByTestId("fleet-section").getAttribute("data-loaded")).toBe("true")
   })
+  return view
 }
 
 describe("FleetSection", () => {
@@ -275,36 +290,85 @@ describe("FleetSection", () => {
     await waitFor(() => expect(toastError).toHaveBeenCalled())
   })
 
-  it("installs and uninstalls the Codex notify integration", async () => {
-    mockFleet.fleetCodexInstall.mockResolvedValue({ status: "installed" })
-    mockFleet.fleetCodexStatus
-      .mockResolvedValueOnce({ status: "not-installed", configPath: null, scriptPath: null })
-      .mockResolvedValue({ status: "installed", configPath: "/c", scriptPath: "/s" })
+  it("installs and uninstalls the Codex hooks integration", async () => {
+    mockFleet.fleetCodexHooksStatus
+      .mockResolvedValueOnce("not-installed")
+      .mockResolvedValue("installed")
     await renderLoaded()
     fireEvent.click(screen.getByTestId("fleet-codex-switch"))
-    await waitFor(() => expect(mockFleet.fleetCodexInstall).toHaveBeenCalled())
+    await waitFor(() => expect(mockFleet.fleetCodexHooksInstall).toHaveBeenCalled())
     await waitFor(() =>
       expect(screen.getByTestId("fleet-codex-switch").getAttribute("aria-checked")).toBe("true")
     )
     expect(screen.getByTestId("fleet-codex-badge-installed")).toBeInTheDocument()
 
     fireEvent.click(screen.getByTestId("fleet-codex-switch"))
-    await waitFor(() => expect(mockFleet.fleetCodexUninstall).toHaveBeenCalled())
+    await waitFor(() => expect(mockFleet.fleetCodexHooksUninstall).toHaveBeenCalled())
+    // The retired `notify` installer is dormant by design (see the doc comment
+    // on fleetCodexInstall) — no path through this card may reach it.
+    expect(mockFleet.fleetCodexInstall).not.toHaveBeenCalled()
   })
 
-  it("disables the Codex switch and shows a conflict badge when notify is taken", async () => {
+  it("clears a leftover notify entry when hooks are installed", async () => {
     mockFleet.fleetCodexStatus.mockResolvedValue({
-      status: "conflict",
+      status: "installed",
       configPath: "/c",
       scriptPath: "/s",
     })
     await renderLoaded()
-    expect(screen.getByTestId("fleet-codex-switch")).toBeDisabled()
-    expect(screen.getByTestId("fleet-codex-badge-codexConflict")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("fleet-codex-switch"))
+    await waitFor(() => expect(mockFleet.fleetCodexHooksInstall).toHaveBeenCalled())
+    await waitFor(() => expect(mockFleet.fleetCodexUninstall).toHaveBeenCalled())
   })
 
-  it("surfaces a Codex install failure as an error toast", async () => {
-    mockFleet.fleetCodexInstall.mockRejectedValue(new Error("notify taken"))
+  it("leaves config.toml alone when no notify entry of ours is present", async () => {
+    // The default beforeEach status is "not-installed" — the overwhelmingly
+    // common case. Rewriting config.toml there would touch a file we have no
+    // business in.
+    await renderLoaded()
+    fireEvent.click(screen.getByTestId("fleet-codex-switch"))
+    await waitFor(() => expect(mockFleet.fleetCodexHooksInstall).toHaveBeenCalled())
+    expect(mockFleet.fleetCodexUninstall).not.toHaveBeenCalled()
+  })
+
+  it("keeps the Codex switch actionable when the hook entry drifted", async () => {
+    // Codex keys hook trust to the exact command, so a drifted entry never
+    // fires. It must read as off and stay clickable — flipping it on rewrites
+    // the entry, which is the only way to re-earn that trust.
+    mockFleet.fleetCodexHooksStatus.mockResolvedValue("stale")
+    await renderLoaded()
+    const sw = screen.getByTestId("fleet-codex-switch")
+    expect(sw).not.toBeDisabled()
+    expect(sw.getAttribute("aria-checked")).toBe("false")
+    expect(screen.getByTestId("fleet-codex-badge-codexStale")).toBeInTheDocument()
+  })
+
+  it("shows the trust hint only once a hook entry exists to be trusted", async () => {
+    // Writing hooks.json is not enough — Codex will not fire a hook the user
+    // has not approved in its TUI, and that approval is not readable from
+    // disk. The card has to say so, or "Installed" reads as "working".
+    mockFleet.fleetCodexHooksStatus.mockResolvedValue("not-installed")
+    const { unmount } = await renderLoaded()
+    expect(screen.queryByRole("note")).not.toBeInTheDocument()
+    unmount()
+
+    for (const status of ["installed", "stale"] as const) {
+      mockFleet.fleetCodexHooksStatus.mockResolvedValue(status)
+      const view = await renderLoaded()
+      expect(screen.getByRole("note")).toBeInTheDocument()
+      view.unmount()
+    }
+  })
+
+  it("disables the Codex switch when Codex is not installed on the machine", async () => {
+    mockFleet.fleetCodexHooksStatus.mockResolvedValue("unavailable")
+    await renderLoaded()
+    expect(screen.getByTestId("fleet-codex-switch")).toBeDisabled()
+    expect(screen.getByTestId("fleet-codex-badge-codexUnavailable")).toBeInTheDocument()
+  })
+
+  it("surfaces a Codex hooks install failure as an error toast", async () => {
+    mockFleet.fleetCodexHooksInstall.mockRejectedValue(new Error("hooks.json unwritable"))
     await renderLoaded()
     fireEvent.click(screen.getByTestId("fleet-codex-switch"))
     await waitFor(() => expect(toastError).toHaveBeenCalled())

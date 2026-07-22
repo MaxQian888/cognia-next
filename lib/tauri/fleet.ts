@@ -125,7 +125,17 @@ const CODEX_UNAVAILABLE: CodexIntegrationStatus = {
   scriptPath: null,
 }
 
-/** Point `~/.codex/config.toml`'s `notify` at the generated forwarder. */
+/**
+ * Point `~/.codex/config.toml`'s `notify` at the generated forwarder.
+ *
+ * DORMANT BY DESIGN — no UI calls this, and none should. `notify` identifies a
+ * session with `thread-id`, never `session_id`, so this integration produced
+ * zero fleet rows for its entire life; {@link fleetCodexHooksInstall} replaced
+ * it. The command is retained only so the path can be revived if Codex's hook
+ * trust model changes; the settings card is pinned by a test that asserts it
+ * never reaches this function. Its counterpart {@link fleetCodexUninstall} is
+ * still live — it clears the leftovers on machines that ran the old build.
+ */
 export async function fleetCodexInstall(): Promise<CodexIntegrationStatus> {
   if (!isTauri()) return CODEX_UNAVAILABLE
   return invoke<CodexIntegrationStatus>("fleet_codex_install")
@@ -144,6 +154,51 @@ export async function fleetCodexStatus(): Promise<CodexIntegrationStatus> {
   } catch (err) {
     console.warn("fleetCodexStatus failed", err)
     return CODEX_UNAVAILABLE
+  }
+}
+
+/**
+ * Install state of the Codex **hooks** integration (mirrors
+ * `fleet/codex_hooks.rs`) — the replacement for the `notify` path above, which
+ * never produced a single fleet row (Codex's notify payload identifies its
+ * session with `thread-id`, not `session_id`).
+ *
+ * `installed` means *written to `~/.codex/hooks.json`*, not *firing*: Codex
+ * gates hooks behind a trust the user grants in its TUI, and that trust is not
+ * readable from disk. Callers must render liveness from observed events, never
+ * from this value alone.
+ *
+ * `stale` means our handler is present but with a different command (or covers
+ * only some events). Codex keys hook trust by content, so a drifted command is
+ * also an untrusted one — it will not fire until reinstalled and re-approved.
+ */
+export type CodexHooksStatus = "installed" | "stale" | "not-installed" | "unavailable"
+
+/**
+ * Register the fleet forwarder in `~/.codex/hooks.json`.
+ *
+ * Merges into the file rather than replacing it — on real machines `hooks.json`
+ * is frequently already owned by another tool, and Codex runs every matching
+ * hook, so clobbering it would silently break that product.
+ */
+export async function fleetCodexHooksInstall(): Promise<CodexHooksStatus> {
+  if (!isTauri()) return "unavailable"
+  return invoke<CodexHooksStatus>("fleet_codex_hooks_install")
+}
+
+/** Remove only our handlers (leaving every foreign one) and delete the script. */
+export async function fleetCodexHooksUninstall(): Promise<CodexHooksStatus> {
+  if (!isTauri()) return "unavailable"
+  return invoke<CodexHooksStatus>("fleet_codex_hooks_uninstall")
+}
+
+export async function fleetCodexHooksStatus(): Promise<CodexHooksStatus> {
+  if (!isTauri()) return "unavailable"
+  try {
+    return await invoke<CodexHooksStatus>("fleet_codex_hooks_status")
+  } catch (err) {
+    console.warn("fleetCodexHooksStatus failed", err)
+    return "unavailable"
   }
 }
 
