@@ -10,6 +10,11 @@ export interface EnrichDeps {
   ocrImage?: (dataUrl: string) => Promise<{ text: string } | null>
 }
 
+export interface BuildEnrichDepsOptions {
+  /** Allow the third-party Jina Reader fallback for thin pages. Defaults to Tauri only. */
+  jinaFallback?: boolean
+}
+
 export async function enrichCandidate(
   candidate: CaptureCandidate,
   deps: EnrichDeps
@@ -32,7 +37,7 @@ export async function enrichCandidate(
  * and the OCR pipeline for images. Lazy-imported so the pure module above stays
  * dependency-light.
  */
-export function buildEnrichDeps(): EnrichDeps {
+export function buildEnrichDeps(options: BuildEnrichDepsOptions = {}): EnrichDeps {
   return {
     readUrl: async (url) => {
       const { fetchUrlAsRawSource } = await import("@/lib/twin/ingest/url-fetcher")
@@ -42,7 +47,7 @@ export function buildEnrichDeps(): EnrichDeps {
       const fetchImpl = tauri ? (createProxyFetch() as typeof fetch) : undefined
       const r = await fetchUrlAsRawSource(url, {
         ...(fetchImpl ? { fetchImpl } : {}),
-        jinaFallback: tauri,
+        jinaFallback: options.jinaFallback ?? tauri,
       })
       return { markdown: r.text, ...(r.title ? { title: r.title } : {}) }
     },

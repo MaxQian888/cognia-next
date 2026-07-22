@@ -10,8 +10,8 @@ import {
 
 // AttachmentPreview returns null with zero files, so we seed the PromptInput
 // attachments context through its public `add(File[])` API. A 1x1 PNG (decoded
-// from base64) and a couple of plain-text files give us one image thumb and two
-// file chips — the component's two render branches.
+// from base64), another image, and a plain-text file exercise the thumbnail
+// gallery plus the non-image chip branch.
 const PNG_1x1 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
 
@@ -58,9 +58,15 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-// One image thumb + one file chip, each with a hover-only remove button.
+// Two image thumbnails + one file chip, each with a hover-only remove button.
 export const ImageAndFile: Story = {
-  decorators: [withFiles([pngFile("screenshot.png"), textFile("notes.md", "# Notes\nhello")])],
+  decorators: [
+    withFiles([
+      pngFile("screenshot.png"),
+      pngFile("diagram.png"),
+      textFile("notes.md", "# Notes\nhello"),
+    ]),
+  ],
 }
 
 // With an `onOcrSelect` handler, OCR-eligible attachments (the image) grow a

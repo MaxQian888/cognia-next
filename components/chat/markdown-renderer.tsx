@@ -3,7 +3,7 @@
 /**
  * MarkdownRenderer — full-featured markdown rendering for completed messages.
  *
- * Backed by react-markdown + remark-gfm + remark-math + rehype-raw + rehype-sanitize,
+ * Backed by react-markdown + CJK-aware GFM + remark-math + rehype-raw + rehype-sanitize,
  * with custom block renderers from `components/chat/renderers/*` for code, math,
  * mermaid, diff, images, video/audio, alerts, details, and kbd.
  *
@@ -17,6 +17,7 @@ import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
 import rehypeRaw from "rehype-raw"
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize"
+import { cjk } from "@streamdown/cjk"
 import { cn } from "@/lib/utils"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
 import { ImageBlock } from "@/components/chat/renderers/image-block"
@@ -175,13 +176,33 @@ const sanitizeSchema = {
   },
 }
 
+type RemarkPlugins = NonNullable<Parameters<typeof ReactMarkdown>[0]["remarkPlugins"]>
+type RehypePlugins = NonNullable<Parameters<typeof ReactMarkdown>[0]["rehypePlugins"]>
+
+// These plugin lists are immutable application configuration. Keeping them at
+// module scope avoids rebuilding equivalent arrays for every rendered message.
+// CJK's before/after ordering is load-bearing: emphasis parsing runs before GFM,
+// while autolink punctuation and CJK strikethrough fixes run after it.
+const baseRemarkPlugins: RemarkPlugins = [
+  ...cjk.remarkPluginsBefore,
+  remarkGfm,
+  ...cjk.remarkPluginsAfter,
+]
+const mathRemarkPlugins: RemarkPlugins = [...baseRemarkPlugins, remarkMath]
+const rehypePlugins: RehypePlugins = [rehypeRaw, [rehypeSanitize, sanitizeSchema]]
+
 /**
  * Convert `\[...\]` → `$$...$$` and `\(...\)` → `$...$` so remark-math accepts
  * the wider variety of LaTeX delimiters Claude tends to emit.
  */
 function preprocessLatex(content: string): string {
-  let processed = content.replace(/\\\[([\s\S]*?)\\\]/g, (_match, eq) => `$$${eq}$$`)
-  processed = processed.replace(/\\\(([\s\S]*?)\\\)/g, (_match, eq) => `$${eq}$`)
+  let processed = content
+  if (processed.includes("\\[")) {
+    processed = processed.replace(/\\\[([\s\S]*?)\\\]/g, (_match, eq) => `$$${eq}$$`)
+  }
+  if (processed.includes("\\(")) {
+    processed = processed.replace(/\\\(([\s\S]*?)\\\)/g, (_match, eq) => `$${eq}$`)
+  }
   return processed
 }
 
@@ -237,19 +258,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   projectRoot,
   onOpenProjectFile,
 }: MarkdownRendererProps) {
-  const remarkPlugins = useMemo(() => {
-    const plugins: NonNullable<Parameters<typeof ReactMarkdown>[0]["remarkPlugins"]> = [remarkGfm]
-    if (enableMath) {
-      plugins.push(remarkMath)
-    }
-    return plugins
-  }, [enableMath])
-
-  const rehypePlugins = useMemo(() => {
-    const plugins: NonNullable<Parameters<typeof ReactMarkdown>[0]["rehypePlugins"]> = [rehypeRaw]
-    plugins.push([rehypeSanitize, sanitizeSchema])
-    return plugins
-  }, [])
+  const remarkPlugins = enableMath ? mathRemarkPlugins : baseRemarkPlugins
 
   const processedContent = useMemo(() => {
     return enableMath ? preprocessLatex(content) : content
@@ -349,10 +358,13 @@ function buildComponents(
 
   return {
     code({ className: codeClassName, children, ...props }) {
-      const match = /language-(\w+)/.exec(codeClassName || "")
+      const match = /(?:^|\s)language-([^\s]+)/.exec(codeClassName || "")
       const language = match ? match[1] : undefined
-      const codeContent = String(children).replace(/\n$/, "")
-      const isInline = !match && !codeContent.includes("\n")
+      const rawCodeContent = String(children)
+      // react-markdown preserves a terminal newline for block code, including
+      // one-line fences without a language. Inline code has no terminal newline.
+      const isInline = !match && !rawCodeContent.endsWith("\n")
+      const codeContent = rawCodeContent.replace(/\n$/, "")
 
       // remark-math emits code elements with `language-math` and an
       // additional `math-display` / `math-inline` class.
@@ -406,7 +418,7 @@ function buildComponents(
         return <SafeA2UIBlock content={codeContent} messageId={messageId} />
       }
 
-      const showArtifactButton = codeContent.split("\n").length > 1
+      const showArtifactButton = codeContent.includes("\n")
       return (
         <div className="relative group/code">
           <CodeBlock
@@ -596,12 +608,20 @@ function extractTextContent(children: React.ReactNode): string {
 }
 
 function isVideoUrl(url: string): boolean {
-  const videoExtensions = /\.(mp4|webm|ogg|mov|avi|mkv)$/i
-  const videoPlatforms = /(youtube\.com|youtu\.be|vimeo\.com|bilibili\.com)/i
-  return videoExtensions.test(url) || videoPlatforms.test(url)
+  const videoExtensions = /\.(mp4|webm|ogv|mov|avi|mkv)(?:[?#]|$)/i
+  if (videoExtensions.test(url)) return true
+
+  try {
+    const hostname = new URL(url).hostname.toLowerCase()
+    return ["youtube.com", "youtu.be", "vimeo.com", "bilibili.com"].some(
+      (domain) => hostname === domain || hostname.endsWith(`.${domain}`)
+    )
+  } catch {
+    return false
+  }
 }
 
 function isAudioUrl(url: string): boolean {
-  const audioExtensions = /\.(mp3|wav|ogg|aac|flac|m4a|wma)$/i
+  const audioExtensions = /\.(mp3|wav|ogg|oga|opus|aac|flac|m4a|wma)(?:[?#]|$)/i
   return audioExtensions.test(url)
 }

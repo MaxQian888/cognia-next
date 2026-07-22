@@ -6,7 +6,6 @@ import {
   MessageActions,
   MessageContent,
 } from "@/components/ai-elements/message"
-import { Image } from "@/components/ai-elements/image"
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning"
 import { Tool, ToolHeader, ToolContent, ToolInput } from "@/components/ai-elements/tool"
 import { ErrorTraceDetails } from "@/components/ai-elements/error-trace"
@@ -29,6 +28,10 @@ import {
 } from "@/components/chat/message-parts/mcp-tool-card"
 import { CanvasInlinePart } from "@/components/chat/message-parts/canvas-inline-part"
 import { FilePartPreview } from "@/components/chat/message-parts/file-part-preview"
+import {
+  MessageImageGallery,
+  type MessageImageGalleryProps,
+} from "@/components/chat/renderers/message-image-gallery"
 import { UnknownPartCard } from "@/components/chat/message-parts/unknown-part-card"
 import {
   HookNoticeRow,
@@ -229,6 +232,30 @@ function MessageRendererInner({
     () => groupAgentParts(message.parts, agentFlowMode),
     [message.parts, agentFlowMode]
   )
+
+  // Image file parts belong to one visual attachment group even when a text or
+  // document part sits between them. Render the group at the first image's
+  // transcript position and suppress the remaining individual image parts.
+  const messageImageGallery = useMemo(() => {
+    const items: MessageImageGalleryProps["items"] = []
+    const partIndexes = new Set<number>()
+    message.parts.forEach((part, index) => {
+      const file = part as { type?: string; url?: string; mediaType?: string; filename?: string }
+      if (file.type !== "file" || !file.url || !file.mediaType?.startsWith("image/")) return
+      partIndexes.add(index)
+      items.push({
+        id: `${message.id}-${index}`,
+        src: file.url,
+        alt: file.filename ?? t("attachmentAlt"),
+        filename: file.filename,
+      })
+    })
+    return {
+      items,
+      partIndexes,
+      firstPartIndex: partIndexes.values().next().value as number | undefined,
+    }
+  }, [message.id, message.parts, t])
 
   // Plain text of the message, for the "share as card" action + gate.
   const messageText = useMemo(() => extractText(message), [message])
@@ -440,6 +467,15 @@ function MessageRendererInner({
               const { part, index } = segment.entry
               const partKey = `${message.id}-${index}`
               const partType = (part as { type?: string }).type
+              if (messageImageGallery.partIndexes.has(index)) {
+                if (index !== messageImageGallery.firstPartIndex) return null
+                return (
+                  <MessageImageGallery
+                    key={`${message.id}-image-gallery`}
+                    items={messageImageGallery.items}
+                  />
+                )
+              }
               // Tool cards and reasoning read the display mode only through their
               // Collapsible's uncontrolled `defaultOpen`, snapshotted at mount —
               // a live standard⇄detailed switch changes the prop but never
@@ -1002,12 +1038,16 @@ function renderPart(
 
     if (url && mediaType?.startsWith("image/")) {
       return (
-        <Image
+        <MessageImageGallery
           key={key}
-          src={url}
-          mediaType={mediaType}
-          alt={filename ?? t("attachmentAlt")}
-          className="max-h-64 max-w-xs rounded-md border"
+          items={[
+            {
+              id: key,
+              src: url,
+              alt: filename ?? t("attachmentAlt"),
+              filename,
+            },
+          ]}
         />
       )
     }

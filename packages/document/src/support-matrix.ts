@@ -1,6 +1,6 @@
 import type { DocumentType, KnowledgeFileType } from "./types"
 
-export type DocumentSupportSurface = "vector" | "knowledge-base" | "ppt-material"
+export type DocumentSupportSurface = "vector" | "knowledge-base" | "ppt-material" | "chat"
 
 const DOCUMENT_TYPE_EXTENSIONS: Record<Exclude<DocumentType, "unknown">, string[]> = {
   markdown: ["md", "markdown", "mdx"],
@@ -37,8 +37,30 @@ const DOCUMENT_TYPE_EXTENSIONS: Record<Exclude<DocumentType, "unknown">, string[
     "scss",
     "less",
     "xml",
+    "mjs",
+    "cjs",
+    "mts",
+    "cts",
+    "lua",
+    "dart",
+    "ex",
+    "exs",
+    "fs",
+    "fsx",
+    "hs",
+    "clj",
+    "cljs",
+    "groovy",
+    "sol",
+    "proto",
+    "graphql",
+    "gql",
+    "toml",
+    "ini",
+    "conf",
+    "properties",
   ],
-  text: ["txt"],
+  text: ["txt", "log"],
   json: ["json"],
   pdf: ["pdf"],
   word: ["docx", "doc", "docm", "odt"],
@@ -133,6 +155,7 @@ const SURFACE_EXTENSIONS: Record<DocumentSupportSurface, string[]> = {
     "epub",
   ],
   "ppt-material": ["txt", "md", "pdf", "docx", "docm", "odt", "rtf", "epub", "pptx", "pptm", "odp"],
+  chat: Object.values(DOCUMENT_TYPE_EXTENSIONS).flat(),
 }
 
 const DOCUMENT_TYPE_TO_KNOWLEDGE_TYPE: Record<DocumentType, KnowledgeFileType | "text"> = {

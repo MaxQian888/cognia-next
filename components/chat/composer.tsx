@@ -54,6 +54,8 @@ import {
   INLINE_TOKEN_CEILING,
   type SubmittedFile,
 } from "@/lib/chat/attachments/dispatch"
+import { prepareComposerAttachments } from "@/lib/chat/attachments/prepare"
+import { buildLinkContextBlocks, mergeContextBlocks, removeHttpUrl } from "@/lib/chat/link-context"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -64,10 +66,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import {
-  detectDocumentTypeFromFilename,
-  getDocumentAcceptExtensions,
-} from "@cognia/document/support-matrix"
+import { getDocumentAcceptExtensions } from "@cognia/document/support-matrix"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { collapsePaste, expandPastes, findPastePlaceholders } from "@/lib/paste-collapse"
@@ -94,6 +93,7 @@ import { useApplyPreset } from "@/hooks/chat/use-apply-preset"
 import { useEffectiveCwd } from "@/hooks/chat/use-effective-cwd"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
 import { ContextChipBar } from "./composer/context-chip-bar"
+import { ComposerLinkButton } from "./composer/link-context"
 import { FolderPickerButton } from "./composer/folder-picker-button"
 import { nextPermissionMode } from "./permission-mode-indicator"
 import { useResolvedConnectorMode } from "./use-resolved-connector-mode"
@@ -255,12 +255,7 @@ const COMPOSER_MAX_HEIGHT_PX = COMPOSER_MAX_HEIGHT_REM * 16
 // Accept images plus every text/binary document type lib/document can extract
 // (pdf, docx, xlsx, pptx, csv, md, code, …). Folders are handled separately via
 // the @-mention / folder-picker reference path, not this attachment input.
-const ATTACHMENT_ACCEPT = ["image/*", ...getDocumentAcceptExtensions("knowledge-base")].join(",")
-
-/** True when a picked file is an image or a document type we can extract. */
-function isAcceptableAttachment(file: File): boolean {
-  return file.type.startsWith("image/") || detectDocumentTypeFromFilename(file.name) !== "unknown"
-}
+const ATTACHMENT_ACCEPT = ["image/*", ...getDocumentAcceptExtensions("chat")].join(",")
 
 const blobUrlToDataUrl = async (url: string): Promise<string | null> => {
   try {
@@ -368,6 +363,13 @@ function ComposerInner(props: InnerProps) {
   )
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const attachmentPrepareCountRef = useRef(0)
+  const [attachmentPrepareCount, setAttachmentPrepareCount] = useState(0)
+  const isPreparingAttachments = attachmentPrepareCount > 0
+  const attachmentFileCountRef = useRef(attachments.files.length)
+  useEffect(() => {
+    attachmentFileCountRef.current = attachments.files.length
+  }, [attachments.files])
   // Send protection: the chat store only flips to "streaming" once the dispatch
   // pipeline reaches `setSessionStatus`, leaving a window after the click where
   // the button would still read as "send". `isSending` is set synchronously the
@@ -761,6 +763,7 @@ function ComposerInner(props: InnerProps) {
   const submit = useCallback(async () => {
     const text = controller.textInput.value
     if (props.disabled) return
+    if (attachmentPrepareCountRef.current > 0) return
     // Re-entrancy guard (send protection): reject a second dispatch while one is
     // already in flight — covers the window between the click and the store
     // flipping to "streaming", where a fast Enter could otherwise double-send.
@@ -1150,24 +1153,43 @@ function ComposerInner(props: InnerProps) {
 
   // --- Paste / drag for attachments -------------------------------------
   const acceptFiles = useCallback(
-    (files: FileList | File[]) => {
-      const incoming = [...files].filter(isAcceptableAttachment)
-      const sized = incoming.filter((f) => f.size <= MAX_FILE_SIZE)
-      const rejected = incoming.length - sized.length
-      if (rejected > 0) {
-        toast.warning(
-          tAttach("fileSizeExceeded", {
-            count: rejected,
-            max: MAX_FILE_SIZE / (1024 * 1024),
-          })
-        )
+    async (files: FileList | File[]) => {
+      attachmentPrepareCountRef.current += 1
+      setAttachmentPrepareCount((count) => count + 1)
+      try {
+        const prepared = await prepareComposerAttachments([...files], {
+          maxFileSize: MAX_FILE_SIZE,
+        })
+        if (prepared.unsupportedCount > 0) {
+          toast.warning(tAttach("unsupported", { count: prepared.unsupportedCount }))
+        }
+        if (prepared.tooLargeCount > 0) {
+          toast.warning(
+            tAttach("fileSizeExceeded", {
+              count: prepared.tooLargeCount,
+              max: MAX_FILE_SIZE / (1024 * 1024),
+            })
+          )
+        }
+        if (prepared.optimizedCount > 0) {
+          toast.success(tAttach("optimized", { count: prepared.optimizedCount }))
+        }
+        // Preparation is async for oversized images. Track the latest staged
+        // list in a ref so two concurrent pick/drop operations cannot both see
+        // stale headroom and exceed MAX_FILES.
+        const headroom = Math.max(0, MAX_FILES - attachmentFileCountRef.current)
+        const take = prepared.files.slice(0, headroom)
+        if (prepared.files.length > headroom) {
+          toast.warning(tAttach("countLimit", { max: MAX_FILES }))
+        }
+        if (take.length > 0) {
+          attachmentFileCountRef.current += take.length
+          attachments.add(take)
+        }
+      } finally {
+        attachmentPrepareCountRef.current = Math.max(0, attachmentPrepareCountRef.current - 1)
+        setAttachmentPrepareCount((count) => Math.max(0, count - 1))
       }
-      const headroom = Math.max(0, MAX_FILES - attachments.files.length)
-      const take = sized.slice(0, headroom)
-      if (sized.length > headroom) {
-        toast.warning(tAttach("countLimit", { max: MAX_FILES }))
-      }
-      if (take.length > 0) attachments.add(take)
     },
     [attachments, tAttach]
   )
@@ -1179,7 +1201,7 @@ function ComposerInner(props: InnerProps) {
     (attachment: ComposerAttachment) => {
       void attachmentToFiles(attachment)
         .then((files) => {
-          if (files.length > 0) acceptFiles(files)
+          if (files.length > 0) void acceptFiles(files)
         })
         .catch((err: unknown) => {
           loggers.chat.warn("plus-menu attach failed", {
@@ -1274,14 +1296,14 @@ function ComposerInner(props: InnerProps) {
       const files = e.dataTransfer?.files
       if (!files || files.length === 0) return
       e.preventDefault()
-      acceptFiles(files)
+      void acceptFiles(files)
     },
     [acceptFiles]
   )
 
   const onFilePick = useCallback(
     (e: ChangeEvent<HTMLInputElement>) => {
-      if (e.target.files) acceptFiles(e.target.files)
+      if (e.target.files) void acceptFiles(e.target.files)
       e.target.value = ""
     },
     [acceptFiles]
@@ -1290,6 +1312,24 @@ function ComposerInner(props: InnerProps) {
   const openFileDialog = useCallback(() => {
     fileInputRef.current?.click()
   }, [])
+
+  const addLink = useCallback(
+    (url: string) => {
+      const current = controller.textInput.value.trimEnd()
+      if (current.includes(url)) return
+      controller.textInput.setInput(current ? `${current}\n${url}` : url)
+      requestAnimationFrame(() => textareaRef.current?.focus())
+    },
+    [controller.textInput]
+  )
+
+  const removeLink = useCallback(
+    (url: string) => {
+      controller.textInput.setInput(removeHttpUrl(controller.textInput.value, url))
+      requestAnimationFrame(() => textareaRef.current?.focus())
+    },
+    [controller.textInput]
+  )
 
   // ── Mobile inline mention popover ──────────────────────────────────────
   // When `mobileMentionMembers` is supplied, the chat shell wants the inline
@@ -1461,7 +1501,12 @@ function ComposerInner(props: InnerProps) {
 
   return (
     <div ref={setContainerEl}>
-      <ContextChipBar onOcrSelect={handleOcrSelect} ocrBusy={ocr.status === "running"} />
+      <ContextChipBar
+        onOcrSelect={handleOcrSelect}
+        ocrBusy={ocr.status === "running"}
+        text={controller.textInput.value}
+        onRemoveLink={removeLink}
+      />
       <DraftRestoredAttachments
         items={restoredAttachments}
         onDismiss={() => setRestoredAttachments([])}
@@ -1629,6 +1674,12 @@ function ComposerInner(props: InnerProps) {
 
           <FolderPickerButton disabled={props.disabled} />
 
+          <ComposerLinkButton
+            disabled={props.disabled || isPreparingAttachments}
+            onAdd={addLink}
+            className={isMobile ? "touch-target" : undefined}
+          />
+
           {isDesktop ? <ScreenshotButton disabled={props.disabled} /> : null}
 
           <VoiceTranscriptionBridge disabled={props.disabled} />
@@ -1723,7 +1774,13 @@ function ComposerInner(props: InnerProps) {
               ) : (
                 <Button
                   aria-label={
-                    isStreaming ? t("ariaStop") : isSending ? t("ariaSending") : t("ariaSend")
+                    isStreaming
+                      ? t("ariaStop")
+                      : isSending
+                        ? t("ariaSending")
+                        : isPreparingAttachments
+                          ? tAttach("preparing")
+                          : t("ariaSend")
                   }
                   className={cn(
                     "size-9 rounded-full transition-transform duration-200 ease-out active:scale-90 disabled:scale-100",
@@ -1737,6 +1794,7 @@ function ComposerInner(props: InnerProps) {
                     // spinner until the store flips to "streaming" (then it becomes
                     // the live Stop button).
                     isSending ||
+                    isPreparingAttachments ||
                     (!isStreaming &&
                       (props.disabled ||
                         (controller.textInput.value.trim().length === 0 &&
@@ -1755,7 +1813,7 @@ function ComposerInner(props: InnerProps) {
                       key={
                         isStreaming
                           ? "stop"
-                          : isSending || props.status === "submitted"
+                          : isSending || isPreparingAttachments || props.status === "submitted"
                             ? "sending"
                             : "send"
                       }
@@ -1767,7 +1825,7 @@ function ComposerInner(props: InnerProps) {
                     >
                       {isStreaming ? (
                         <SquareIcon className="size-4" />
-                      ) : isSending || props.status === "submitted" ? (
+                      ) : isSending || isPreparingAttachments || props.status === "submitted" ? (
                         <Loader2Icon className="size-4 animate-spin" />
                       ) : (
                         <ArrowUpIcon className="size-4" />
@@ -2204,13 +2262,20 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         }
       }
 
-      const { content, rejected, tokens } = await buildSendContent(augmented, files)
+      const linkContext = await buildLinkContextBlocks(text)
+      const attachmentResult = await buildSendContent(augmented, files)
+      const content = mergeContextBlocks(attachmentResult.content, linkContext.blocks)
+      const rejected = attachmentResult.rejected
+      const tokens = attachmentResult.tokens + linkContext.tokens
       const isEmpty =
         (typeof content === "string" && !content.trim()) ||
         (Array.isArray(content) && content.length === 0)
       if (isEmpty) return true
       if (rejected.length > 0) {
         toast.warning(tAttach("skipped", { count: rejected.length }))
+      }
+      if (linkContext.rejected.length > 0) {
+        toast.warning(tAttach("linkSkipped", { count: linkContext.rejected.length }))
       }
       // Oversize guard: above the inline-token ceiling we ask the user to
       // confirm before sending — never silently truncate. The promise resolves

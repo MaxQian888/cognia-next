@@ -79,6 +79,20 @@ describe("buildAttachmentBlocks — documents", () => {
     expect(text).toContain("```typescript")
   })
 
+  it("redacts PII from extracted document text before creating an outbound block", async () => {
+    processMock.mockResolvedValue({
+      embeddableContent: "Contact alice@example.com",
+      content: "Contact alice@example.com",
+    })
+    const { blocks } = await buildAttachmentBlocks([
+      { url: dataUrl("text/plain", "contact"), filename: "contacts.txt" },
+    ])
+
+    const text = (blocks[0] as { text: string }).text
+    expect(text).toContain("Contact <EMAIL_001>")
+    expect(text).not.toContain("alice@example.com")
+  })
+
   it("passes a real ArrayBuffer to the processor for binary documents", async () => {
     await buildAttachmentBlocks([
       {

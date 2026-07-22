@@ -1,16 +1,32 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { downloadFromUrl } from "@/lib/files/download"
+import { openExternal } from "@/lib/tauri/opener"
 
 import { ImageBlock } from "./image-block"
+
+const mockCopy = jest.fn(async () => undefined)
+let mockCopied = false
+
+jest.mock("@/hooks/ui/use-copy", () => ({
+  useCopy: () => ({ copied: mockCopied, copy: mockCopy }),
+}))
 
 jest.mock("@/lib/files/download", () => ({
   downloadFromUrl: jest.fn(async () => undefined),
 }))
+
+jest.mock("@/lib/tauri/opener", () => ({
+  openExternal: jest.fn(async () => undefined),
+}))
+
+const mockDownloadFromUrl = jest.mocked(downloadFromUrl)
+const mockOpenExternal = jest.mocked(openExternal)
 
 const messages = {
   chat: {
@@ -21,12 +37,14 @@ const messages = {
         viewFullscreen: "View fullscreen",
         download: "Download",
         copyUrl: "Copy URL",
+        counter: "{current} of {total}",
         defaultTitle: "Image",
         defaultFilename: "image",
         previewDescription: "Image preview",
         zoomIn: "Zoom in",
         zoomOut: "Zoom out",
         rotate: "Rotate",
+        selectImage: "View {name}",
         openInNewTab: "Open in new tab",
         close: "Close",
       },
@@ -34,11 +52,19 @@ const messages = {
   },
 }
 
-function renderBlock() {
+function renderBlock({
+  src = "https://example.com/pic.png",
+  alt = "a picture",
+  title,
+}: {
+  src?: string
+  alt?: string
+  title?: string
+} = {}) {
   return render(
     <NextIntlClientProvider locale="en" messages={messages}>
       <TooltipProvider>
-        <ImageBlock src="https://example.com/pic.png" alt="a picture" />
+        <ImageBlock src={src} alt={alt} title={title} />
       </TooltipProvider>
     </NextIntlClientProvider>
   )
@@ -46,7 +72,7 @@ function renderBlock() {
 
 function openFullscreen() {
   fireEvent.click(screen.getByAltText("a picture"))
-  return screen.getByTestId("image-fullscreen-stage")
+  return screen.getByTestId("image-lightbox-stage")
 }
 
 // jsdom has no PointerEvent constructor — fireEvent.pointerDown falls back to
@@ -68,15 +94,30 @@ function firePointer(
 }
 
 describe("ImageBlock", () => {
+  beforeEach(() => {
+    mockDownloadFromUrl.mockClear()
+    mockDownloadFromUrl.mockResolvedValue(undefined)
+    mockOpenExternal.mockClear()
+    mockCopy.mockClear()
+    mockCopied = false
+  })
+
   it("renders the inline image", () => {
-    renderBlock()
-    expect(screen.getByAltText("a picture")).toBeInTheDocument()
+    const { container } = renderBlock()
+    const image = screen.getByAltText("a picture")
+    expect(image).toBeInTheDocument()
+    expect(container.querySelector(".animate-pulse")).toBeInTheDocument()
+
+    fireEvent.load(image)
+
+    expect(container.querySelector(".animate-pulse")).not.toBeInTheDocument()
   })
 
   it("opens the fullscreen viewer on image click", () => {
     renderBlock()
     openFullscreen()
-    expect(screen.getByTestId("image-fullscreen-stage")).toBeInTheDocument()
+    expect(screen.getByTestId("image-lightbox-stage")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "View a picture" })).toBeInTheDocument()
     expect(screen.getByText("100%")).toBeInTheDocument()
   })
 
@@ -85,6 +126,112 @@ describe("ImageBlock", () => {
     openFullscreen()
     fireEvent.click(screen.getByLabelText("Zoom in"))
     expect(screen.getByText("125%")).toBeInTheDocument()
+  })
+
+  it("opens from the keyboard and restores focus after closing", async () => {
+    renderBlock()
+    const image = screen.getByAltText("a picture")
+    image.focus()
+
+    fireEvent.keyDown(image, { key: "x" })
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    fireEvent.keyDown(image, { key: " " })
+    fireEvent.click(screen.getByRole("button", { name: "Close" }))
+
+    await waitFor(() => expect(image).toHaveFocus())
+  })
+
+  it("opens from the fullscreen toolbar button and restores focus", async () => {
+    renderBlock()
+    const trigger = screen
+      .getAllByRole("button", { name: "View fullscreen" })
+      .find((element) => element.tagName === "BUTTON")!
+
+    fireEvent.click(trigger)
+    fireEvent.click(screen.getByRole("button", { name: "Close" }))
+
+    await waitFor(() => expect(trigger).toHaveFocus())
+  })
+
+  it("downloads and copies the inline image", async () => {
+    renderBlock()
+
+    fireEvent.click(screen.getByRole("button", { name: "Download" }))
+    fireEvent.click(screen.getByRole("button", { name: "Copy URL" }))
+
+    await waitFor(() =>
+      expect(mockDownloadFromUrl).toHaveBeenCalledWith("https://example.com/pic.png", "pic.png", {
+        fetchAsBlob: true,
+      })
+    )
+    expect(mockCopy).toHaveBeenCalledWith("https://example.com/pic.png")
+  })
+
+  it("shows copied feedback and title-based captions", () => {
+    mockCopied = true
+    renderBlock({ alt: "", title: "Generated chart" })
+
+    expect(screen.getByText("Generated chart")).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Copy URL" }).querySelector(".lucide-check")
+    ).toBeInTheDocument()
+  })
+
+  it("uses the default download name and omits an empty caption", async () => {
+    const { container } = renderBlock({ src: "https://example.com/", alt: "" })
+
+    expect(container.querySelector("figcaption")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Download" }))
+
+    await waitFor(() =>
+      expect(mockDownloadFromUrl).toHaveBeenCalledWith("https://example.com/", "image", {
+        fetchAsBlob: true,
+      })
+    )
+  })
+
+  it("falls back to the external viewer when download fails", async () => {
+    mockDownloadFromUrl.mockRejectedValueOnce("save failed")
+    renderBlock()
+
+    fireEvent.click(screen.getByRole("button", { name: "Download" }))
+
+    await waitFor(() =>
+      expect(mockOpenExternal).toHaveBeenCalledWith("https://example.com/pic.png")
+    )
+  })
+
+  it("handles Error download failures before opening externally", async () => {
+    mockDownloadFromUrl.mockRejectedValueOnce(new Error("save failed"))
+    renderBlock()
+
+    fireEvent.click(screen.getByRole("button", { name: "Download" }))
+
+    await waitFor(() =>
+      expect(mockOpenExternal).toHaveBeenCalledWith("https://example.com/pic.png")
+    )
+  })
+
+  it("shows the inline error state and lets the user open the source", () => {
+    renderBlock()
+
+    fireEvent.error(screen.getByAltText("a picture"))
+    expect(screen.getByText("Failed to load image")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Open URL" }))
+
+    expect(mockOpenExternal).toHaveBeenCalledWith("https://example.com/pic.png")
+  })
+
+  it("omits absent alt text from the inline error state", () => {
+    renderBlock({ alt: "" })
+
+    const image = screen
+      .getAllByRole("button", { name: "View fullscreen" })
+      .find((element) => element.tagName === "IMG")!
+    fireEvent.error(image)
+
+    expect(screen.getByText("Failed to load image")).toBeInTheDocument()
+    expect(screen.queryByText("a picture")).not.toBeInTheDocument()
   })
 
   describe("touch gestures", () => {

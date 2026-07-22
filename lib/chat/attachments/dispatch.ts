@@ -34,15 +34,17 @@ import {
 } from "@cognia/document/document-processor"
 import { isBinaryDocumentType } from "@cognia/document/support-matrix"
 import { detectLanguage } from "@cognia/document/parsers/code-parser"
+import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import type { DocumentType } from "@/types/document"
 import type { SendContent, SendContentBlock } from "@cognia/agent-config-types"
+import { COMPOSER_IMAGE_MAX_LONG_EDGE } from "./prepare"
 
 /**
  * The longest edge (px) we downscale large images to before base64-encoding.
  * Anthropic resamples anything beyond ~1568px on the long edge anyway, so this
  * trims upload + token cost with no quality loss the model would notice.
  */
-export const IMAGE_MAX_LONG_EDGE = 1568
+export const IMAGE_MAX_LONG_EDGE = COMPOSER_IMAGE_MAX_LONG_EDGE
 
 /**
  * Soft ceiling (in estimated tokens) for inlined document text. Above this the
@@ -169,7 +171,9 @@ async function documentTextBlock(
   }
 
   if (!text) return null
-  return { type: "text", text: formatDocumentText(type, filename, text) }
+  const formatted = formatDocumentText(type, filename, text)
+  const safeText = hasNoLeakingPii(formatted) ? formatted : redactText(formatted).redacted
+  return hasNoLeakingPii(safeText) ? { type: "text", text: safeText } : null
 }
 
 function nonWhitespaceLength(text: string): number {

@@ -1,34 +1,26 @@
 "use client"
 
-import { useState, memo, useCallback, useRef } from "react"
+import { memo, useCallback, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
-  ZoomIn,
-  ZoomOut,
-  Download,
-  Copy,
-  Check,
-  Maximize2,
-  X,
+  CheckIcon,
+  CopyIcon,
+  DownloadIcon,
+  ExternalLinkIcon,
   ImageIcon,
-  ExternalLink,
-  RotateCw,
+  Maximize2Icon,
 } from "lucide-react"
-import { cn } from "@/lib/utils"
+
 import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { downloadFromUrl } from "@/lib/files/download"
 import { openExternal } from "@/lib/tauri/opener"
+import { cn } from "@/lib/utils"
 import { loggers } from "@cognia/logging"
+
+import { ImageLightbox, type ImageLightboxItem } from "./image-lightbox"
 
 interface ImageBlockProps {
   src: string
@@ -51,116 +43,40 @@ export const ImageBlock = memo(function ImageBlock({
   const [isOpen, setIsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [hasError, setHasError] = useState(false)
-  const [zoom, setZoom] = useState(1)
-  const [rotation, setRotation] = useState(0)
+  const [activeIndex, setActiveIndex] = useState(0)
+  const returnFocusRef = useRef<HTMLElement | null>(null)
   const { copied, copy } = useCopy({ logger: loggers.chat, scope: "chat" })
-
-  const handleLoad = useCallback(() => {
-    setIsLoading(false)
-    setHasError(false)
-  }, [])
-
-  const handleError = useCallback(() => {
-    setIsLoading(false)
-    setHasError(true)
-  }, [])
-
-  const handleZoomIn = useCallback(() => {
-    setZoom((prev) => Math.min(prev + 0.25, 3))
-  }, [])
-
-  const handleZoomOut = useCallback(() => {
-    setZoom((prev) => Math.max(prev - 0.25, 0.5))
-  }, [])
-
-  const handleRotate = useCallback(() => {
-    setRotation((prev) => (prev + 90) % 360)
-  }, [])
-
-  const handleResetView = useCallback(() => {
-    setZoom(1)
-    setRotation(0)
-  }, [])
-
-  // ── Touch gestures (fullscreen viewer) ────────────────────────────────
-  // Pinch-to-zoom via pointer events: while two pointers are down, zoom
-  // scales with the distance ratio from gesture start. The container's
-  // `touch-action: pan-x pan-y` keeps one-finger scroll-panning native
-  // while claiming two-finger moves for us. Double-tap (and double-click)
-  // toggles 100% ↔ 200%.
-  const pointersRef = useRef(new Map<number, { x: number; y: number }>())
-  const pinchRef = useRef<{ startDist: number; startZoom: number } | null>(null)
-
-  const pinchDistance = () => {
-    const pts = [...pointersRef.current.values()]
-    if (pts.length < 2) return 0
-    return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y)
-  }
-
-  const handlePointerDown = useCallback(
-    (e: React.PointerEvent) => {
-      pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
-      if (pointersRef.current.size === 2) {
-        pinchRef.current = { startDist: pinchDistance(), startZoom: zoom }
-      }
-    },
-    [zoom]
+  const items = useMemo<ImageLightboxItem[]>(
+    () => [{ id: src, src, alt, title }],
+    [alt, src, title]
   )
-
-  const handlePointerMove = useCallback((e: React.PointerEvent) => {
-    if (!pointersRef.current.has(e.pointerId)) return
-    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
-    const pinch = pinchRef.current
-    if (pinch && pointersRef.current.size === 2 && pinch.startDist > 0) {
-      const ratio = pinchDistance() / pinch.startDist
-      setZoom(Math.min(3, Math.max(0.5, pinch.startZoom * ratio)))
-    }
-  }, [])
-
-  const handlePointerEnd = useCallback((e: React.PointerEvent) => {
-    pointersRef.current.delete(e.pointerId)
-    if (pointersRef.current.size < 2) pinchRef.current = null
-  }, [])
-
-  const handleDoubleTap = useCallback(() => {
-    setZoom((prev) => (prev === 1 ? 2 : 1))
-  }, [])
 
   const handleDownload = useCallback(async () => {
     const filename = src.split("/").pop() || t("defaultFilename")
     try {
       await downloadFromUrl(src, filename, { fetchAsBlob: true })
-    } catch (err) {
-      loggers.chat.warn("image download failed, opening in new tab", {
-        err: err instanceof Error ? err.message : String(err),
+    } catch (error) {
+      loggers.chat.warn("image download failed, opening externally", {
+        err: error instanceof Error ? error.message : String(error),
         src,
       })
       void openExternal(src)
     }
   }, [src, t])
 
-  const handleCopyUrl = useCallback(async () => {
-    await copy(src)
-  }, [copy, src])
-
-  const handleOpenExternal = useCallback(() => {
-    // Capacitor WebView can't rely on window.open — route via openExternal.
-    void openExternal(src)
-  }, [src])
-
   if (hasError) {
     return (
       <div
         className={cn(
-          "flex flex-col items-center justify-center rounded-lg border border-dashed bg-muted/30 p-8 my-4",
+          "my-4 flex flex-col items-center justify-center rounded-lg border border-dashed bg-muted/30 p-8",
           className
         )}
       >
-        <ImageIcon className="h-12 w-12 text-muted-foreground/50 mb-2" />
+        <ImageIcon className="mb-2 size-12 text-muted-foreground/50" />
         <p className="text-sm text-muted-foreground">{t("failedToLoad")}</p>
-        {alt && <p className="text-xs text-muted-foreground/70 mt-1">{alt}</p>}
-        <Button variant="ghost" size="sm" className="mt-2" onClick={handleOpenExternal}>
-          <ExternalLink className="h-3 w-3 mr-1" />
+        {alt ? <p className="mt-1 text-xs text-muted-foreground/70">{alt}</p> : null}
+        <Button variant="ghost" size="sm" className="mt-2" onClick={() => void openExternal(src)}>
+          <ExternalLinkIcon className="mr-1 size-3" />
           {t("openUrl")}
         </Button>
       </div>
@@ -171,11 +87,11 @@ export const ImageBlock = memo(function ImageBlock({
     <>
       <figure
         className={cn(
-          "group relative rounded-lg overflow-hidden my-4 inline-block max-w-full",
+          "group relative my-4 inline-block max-w-full overflow-hidden rounded-lg",
           className
         )}
       >
-        {isLoading && <Skeleton className="absolute inset-0 h-full w-full" />}
+        {isLoading ? <Skeleton className="absolute inset-0 size-full" /> : null}
 
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
@@ -184,180 +100,85 @@ export const ImageBlock = memo(function ImageBlock({
           title={title}
           width={width}
           height={height}
+          role="button"
+          tabIndex={0}
+          aria-label={t("viewFullscreen")}
           loading="lazy"
-          onLoad={handleLoad}
-          onError={handleError}
+          onLoad={() => {
+            setIsLoading(false)
+            setHasError(false)
+          }}
+          onError={() => {
+            setIsLoading(false)
+            setHasError(true)
+          }}
           className={cn(
-            "max-w-full h-auto rounded-lg cursor-zoom-in transition-opacity",
+            "h-auto max-w-full cursor-zoom-in rounded-lg transition-[opacity,transform] duration-300 group-hover:scale-[1.01]",
             isLoading && "opacity-0"
           )}
-          onClick={() => setIsOpen(true)}
+          onClick={(event) => {
+            returnFocusRef.current = event.currentTarget
+            setIsOpen(true)
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" && event.key !== " ") return
+            event.preventDefault()
+            returnFocusRef.current = event.currentTarget
+            setIsOpen(true)
+          }}
         />
 
-        <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="absolute right-2 top-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100">
           <TooltipIconButton
             variant="secondary"
             size="icon"
-            className="h-7 w-7 bg-background/80"
-            onClick={() => setIsOpen(true)}
+            className="size-7 bg-background/80 backdrop-blur-sm"
+            onClick={(event) => {
+              returnFocusRef.current = event.currentTarget
+              setIsOpen(true)
+            }}
             aria-label={t("viewFullscreen")}
             tooltip={t("viewFullscreen")}
           >
-            <Maximize2 className="h-3 w-3" />
+            <Maximize2Icon className="size-3" />
           </TooltipIconButton>
-
           <TooltipIconButton
             variant="secondary"
             size="icon"
-            className="h-7 w-7 bg-background/80"
-            onClick={handleDownload}
+            className="size-7 bg-background/80 backdrop-blur-sm"
+            onClick={() => void handleDownload()}
             aria-label={t("download")}
             tooltip={t("download")}
           >
-            <Download className="h-3 w-3" />
+            <DownloadIcon className="size-3" />
           </TooltipIconButton>
-
           <TooltipIconButton
             variant="secondary"
             size="icon"
-            className="h-7 w-7 bg-background/80"
-            onClick={handleCopyUrl}
+            className="size-7 bg-background/80 backdrop-blur-sm"
+            onClick={() => void copy(src)}
             aria-label={t("copyUrl")}
             tooltip={t("copyUrl")}
           >
-            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+            {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
           </TooltipIconButton>
         </div>
 
-        {(alt || title) && (
-          <figcaption className="text-center text-sm text-muted-foreground mt-2 px-2">
+        {alt || title ? (
+          <figcaption className="mt-2 px-2 text-center text-sm text-muted-foreground">
             {title || alt}
           </figcaption>
-        )}
+        ) : null}
       </figure>
 
-      <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogContent
-          className="max-w-[95vw] max-h-[95vh] p-0 overflow-hidden"
-          showCloseButton={false}
-        >
-          <DialogHeader className="absolute top-0 left-0 right-0 z-10 flex flex-row items-center justify-between p-3 bg-gradient-to-b from-black/60 to-transparent">
-            <DialogTitle className="text-white text-sm truncate max-w-[60%]">
-              {title || alt || t("defaultTitle")}
-            </DialogTitle>
-            <DialogDescription className="sr-only">{t("previewDescription")}</DialogDescription>
-            <div className="flex items-center gap-1">
-              <TooltipIconButton
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-white hover:bg-white/20"
-                onClick={handleZoomOut}
-                disabled={zoom <= 0.5}
-                aria-label={t("zoomOut")}
-                tooltip={t("zoomOut")}
-              >
-                <ZoomOut className="h-4 w-4" />
-              </TooltipIconButton>
-
-              <span className="text-white text-xs px-2 min-w-[3rem] text-center">
-                {Math.round(zoom * 100)}%
-              </span>
-
-              <TooltipIconButton
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-white hover:bg-white/20"
-                onClick={handleZoomIn}
-                disabled={zoom >= 3}
-                aria-label={t("zoomIn")}
-                tooltip={t("zoomIn")}
-              >
-                <ZoomIn className="h-4 w-4" />
-              </TooltipIconButton>
-
-              <TooltipIconButton
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-white hover:bg-white/20"
-                onClick={handleRotate}
-                aria-label={t("rotate")}
-                tooltip={t("rotate")}
-              >
-                <RotateCw className="h-4 w-4" />
-              </TooltipIconButton>
-
-              <TooltipIconButton
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-white hover:bg-white/20"
-                onClick={handleDownload}
-                aria-label={t("download")}
-                tooltip={t("download")}
-              >
-                <Download className="h-4 w-4" />
-              </TooltipIconButton>
-
-              <TooltipIconButton
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-white hover:bg-white/20"
-                onClick={handleOpenExternal}
-                aria-label={t("openInNewTab")}
-                tooltip={t("openInNewTab")}
-              >
-                <ExternalLink className="h-4 w-4" />
-              </TooltipIconButton>
-
-              <TooltipIconButton
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-white hover:bg-white/20"
-                onClick={() => setIsOpen(false)}
-                aria-label={t("close")}
-                tooltip={t("close")}
-              >
-                <X className="h-4 w-4" />
-              </TooltipIconButton>
-            </div>
-          </DialogHeader>
-
-          <div
-            className="flex items-center justify-center bg-black/90 overflow-auto"
-            data-testid="image-fullscreen-stage"
-            style={
-              {
-                height: "calc(95vh - 60px)",
-                // pan-x/pan-y keeps one-finger scroll native while routing
-                // two-finger moves to the pinch handlers above.
-                touchAction: "pan-x pan-y",
-              } as React.CSSProperties
-            }
-            onClick={(e) => {
-              if (e.target === e.currentTarget) {
-                handleResetView()
-              }
-            }}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerEnd}
-            onPointerCancel={handlePointerEnd}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={src}
-              alt={alt}
-              className="max-w-none transition-transform duration-200"
-              style={
-                {
-                  transform: `scale(${zoom}) rotate(${rotation}deg)`,
-                } as React.CSSProperties
-              }
-              draggable={false}
-              onDoubleClick={handleDoubleTap}
-            />
-          </div>
-        </DialogContent>
-      </Dialog>
+      <ImageLightbox
+        items={items}
+        open={isOpen}
+        activeIndex={activeIndex}
+        returnFocusRef={returnFocusRef}
+        onActiveIndexChange={setActiveIndex}
+        onOpenChange={setIsOpen}
+      />
     </>
   )
 })

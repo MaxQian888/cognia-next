@@ -1,5 +1,5 @@
 import type { ReactElement } from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { AttachmentPreview } from "./attachment-preview"
 
@@ -33,6 +33,35 @@ describe("AttachmentPreview", () => {
     renderPreview(<AttachmentPreview />)
     expect(screen.getByAltText("pic.png")).toBeInTheDocument()
     expect(screen.getByText("doc.pdf")).toBeInTheDocument()
+  })
+
+  it("opens staged image thumbnails in a gallery preview", () => {
+    mockState.files = [
+      { id: "a", mediaType: "image/png", filename: "one.png", url: "blob:one" },
+      { id: "b", mediaType: "image/png", filename: "two.png", url: "blob:two" },
+    ]
+    renderPreview(<AttachmentPreview />)
+
+    fireEvent.click(screen.getByRole("button", { name: /preview.*one\.png/i }))
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+    expect(screen.getByTestId("image-lightbox-thumbnails").querySelectorAll("button")).toHaveLength(
+      2
+    )
+  })
+
+  it("opens the selected staged image and restores focus after closing", async () => {
+    mockState.files = [
+      { id: "a", mediaType: "image/png", filename: "one.png", url: "blob:one" },
+      { id: "b", mediaType: "image/png", filename: "two.png", url: "blob:two" },
+    ]
+    renderPreview(<AttachmentPreview />)
+    const trigger = screen.getByRole("button", { name: /preview.*two\.png/i })
+
+    fireEvent.click(trigger)
+    expect(screen.getByTestId("image-lightbox-active-image")).toHaveAttribute("src", "blob:two")
+    fireEvent.click(screen.getByRole("button", { name: /close/i }))
+
+    await waitFor(() => expect(trigger).toHaveFocus())
   })
 
   it("removes an attachment when its X is clicked", () => {

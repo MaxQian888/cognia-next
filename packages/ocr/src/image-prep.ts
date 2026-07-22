@@ -217,9 +217,9 @@ export function combinePageText(pages: Array<{ pageNumber: number; text: string 
 /**
  * Downscale `bytes` so the long edge is at most `maxLongEdge` pixels. Returns
  * the original payload unchanged when the input is already small enough or
- * when the runtime can't decode images (jsdom + node). Always preserves the
- * original mime type — callers asking for a different output mime have to
- * re-encode separately.
+ * when the runtime can't decode images (jsdom + node). A canvas codec may
+ * choose a fallback output type; the returned mime type always describes the
+ * returned bytes.
  */
 export async function downscaleImage(
   bytes: Uint8Array,
@@ -242,11 +242,20 @@ export async function downscaleImage(
   const scale = maxLongEdge / longEdge
   const targetW = Math.max(1, Math.round(bitmap.width * scale))
   const targetH = Math.max(1, Math.round(bitmap.height * scale))
-  const blob = await rasterToBlob(bitmap, targetW, targetH, mimeType)
-  closeBitmap(bitmap)
-  if (!blob) return { bytes, mimeType }
-  const buf = await blob.arrayBuffer()
-  return { bytes: new Uint8Array(buf), mimeType: blob.type || mimeType }
+  try {
+    const blob = await rasterToBlob(bitmap, targetW, targetH, mimeType)
+    if (!blob) return { bytes, mimeType }
+    const buf = await blob.arrayBuffer()
+    // Some canvas codecs can make an already-efficient source larger. The
+    // purpose of this path is transport/token reduction, so retain the source
+    // whenever re-encoding would regress its byte size.
+    if (buf.byteLength >= bytes.byteLength) return { bytes, mimeType }
+    return { bytes: new Uint8Array(buf), mimeType: blob.type || mimeType }
+  } catch {
+    return { bytes, mimeType }
+  } finally {
+    closeBitmap(bitmap)
+  }
 }
 
 interface ImageBitmapLike {
@@ -256,13 +265,33 @@ interface ImageBitmapLike {
 }
 
 async function decodeBitmap(bytes: Uint8Array, mimeType: string): Promise<ImageBitmapLike | null> {
-  if (typeof createImageBitmap !== "function") return null
-  try {
-    const blob = new Blob([bytes as BlobPart], { type: mimeType })
-    return await createImageBitmap(blob)
-  } catch {
+  const blob = new Blob([bytes as BlobPart], { type: mimeType })
+  if (typeof createImageBitmap === "function") {
+    try {
+      return await createImageBitmap(blob)
+    } catch {
+      // Older WebViews expose createImageBitmap but fail for formats their
+      // <img> decoder supports. Fall through to the DOM decoder.
+    }
+  }
+  if (
+    typeof Image === "undefined" ||
+    typeof URL === "undefined" ||
+    typeof URL.createObjectURL !== "function"
+  ) {
     return null
   }
+  return await new Promise<ImageBitmapLike | null>((resolve) => {
+    const objectUrl = URL.createObjectURL(blob)
+    const image = new Image()
+    const settle = (value: ImageBitmapLike | null) => {
+      URL.revokeObjectURL(objectUrl)
+      resolve(value)
+    }
+    image.onload = () => settle(image)
+    image.onerror = () => settle(null)
+    image.src = objectUrl
+  })
 }
 
 function closeBitmap(bitmap: ImageBitmapLike): void {

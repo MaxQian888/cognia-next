@@ -1,8 +1,12 @@
 import {
   detectDocumentTypeFromFilename,
+  getDocumentAcceptExtensions,
   getDocumentAcceptString,
   getDocumentFormatSummary,
+  getFilenameExtension,
+  inferKnowledgeFileTypeFromFilename,
   isBinaryFilename,
+  mapDocumentTypeToKnowledgeFileType,
 } from "./support-matrix"
 
 describe("support-matrix", () => {
@@ -25,6 +29,18 @@ describe("support-matrix", () => {
     expect(getDocumentAcceptString("knowledge-base")).toContain(".odt")
     expect(getDocumentAcceptString("knowledge-base")).toContain(".xlsm")
     expect(getDocumentAcceptString("knowledge-base")).toContain(".pptm")
+  })
+
+  it("exposes every parser-backed format to the chat attachment picker", () => {
+    const formats = getDocumentAcceptExtensions("chat")
+    expect(formats).toEqual(expect.arrayContaining([".mdx", ".mjs", ".toml", ".log", ".odp"]))
+  })
+
+  it("handles dotfiles, unknown extensions, and knowledge type fallbacks", () => {
+    expect(getFilenameExtension(".gitignore")).toBe("")
+    expect(detectDocumentTypeFromFilename("README")).toBe("unknown")
+    expect(mapDocumentTypeToKnowledgeFileType("unknown")).toBe("text")
+    expect(inferKnowledgeFileTypeFromFilename("notes.txt")).toBe("text")
   })
 
   it("exposes curated ppt material support from the shared registry", () => {

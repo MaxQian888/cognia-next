@@ -160,8 +160,12 @@ export function MotionStatusSwap({ swapKey, children, className }: MotionStatusS
   )
 }
 
-/** Entry/exit offset for {@link MotionPopover}. */
-export interface MotionPopoverOffset {
+/**
+ * Entry/exit offset for {@link MotionPopover}. Declared as a type alias rather
+ * than an interface so it keeps an implicit index signature and stays
+ * assignable to motion's `TargetAndTransition`.
+ */
+export type MotionPopoverOffset = {
   opacity?: number
   scale?: number
   x?: number | string

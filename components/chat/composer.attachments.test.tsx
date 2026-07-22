@@ -25,6 +25,10 @@ jest.mock("@/lib/chat/attachments/dispatch", () => ({
   INLINE_TOKEN_CEILING: 12_000,
   buildSendContent: jest.fn(),
 }))
+jest.mock("@/lib/chat/link-context", () => ({
+  ...jest.requireActual("@/lib/chat/link-context"),
+  buildLinkContextBlocks: jest.fn(async () => ({ blocks: [], rejected: [], tokens: 0 })),
+}))
 // The draft helpers hit Dexie; stub them so clearAfterSend()'s floating
 // clearDraft() can't reject into an unhandled-rejection that fails the test.
 jest.mock("@/lib/db/chat-drafts", () => ({
@@ -42,9 +46,11 @@ import type { DataAdapter } from "@/lib/data-hooks/types"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { buildSendContent } from "@/lib/chat/attachments/dispatch"
+import { buildLinkContextBlocks } from "@/lib/chat/link-context"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 const buildSendContentMock = buildSendContent as jest.Mock
+const buildLinkContextBlocksMock = buildLinkContextBlocks as jest.Mock
 
 function makeAdapter(): DataAdapter {
   return {
@@ -128,12 +134,37 @@ beforeEach(() => {
   // don't leak between cases.
   useSettingsStore.setState({ settings: undefined })
   buildSendContentMock.mockReset()
+  buildLinkContextBlocksMock.mockReset()
+  buildLinkContextBlocksMock.mockResolvedValue({ blocks: [], rejected: [], tokens: 0 })
   // jsdom lacks object-URL support; the composer creates one per staged file.
   global.URL.createObjectURL = jest.fn(() => "blob:mock")
   global.URL.revokeObjectURL = jest.fn()
 })
 
 describe("Composer — attachment send contract", () => {
+  it("appends readable context for recognized links while keeping the URL in the prompt", async () => {
+    buildSendContentMock.mockResolvedValue({
+      content: "Read https://example.com/docs",
+      rejected: [],
+      tokens: 0,
+    })
+    buildLinkContextBlocksMock.mockResolvedValue({
+      blocks: [{ type: "text", text: "Linked page context" }],
+      rejected: [],
+      tokens: 4,
+    })
+    const onSend = jest.fn(async () => undefined)
+    const ta = renderComposer(onSend)
+
+    await typeAndEnter(ta, "Read https://example.com/docs")
+
+    expect(buildLinkContextBlocksMock).toHaveBeenCalledWith("Read https://example.com/docs")
+    expect(onSend).toHaveBeenCalledWith([
+      { type: "text", text: "Read https://example.com/docs" },
+      { type: "text", text: "Linked page context" },
+    ])
+  })
+
   it("sends a normal turn and clears the input", async () => {
     buildSendContentMock.mockResolvedValue({ content: "hi", rejected: [], tokens: 0 })
     const onSend = jest.fn(async () => undefined)

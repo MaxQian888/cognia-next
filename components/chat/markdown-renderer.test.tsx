@@ -78,7 +78,10 @@ jest.mock("@/components/chat/renderers/alert-block", () => ({
   AlertBlock: ({ children }: { children: React.ReactNode }) => (
     <div data-test="alert-block">{children}</div>
   ),
-  parseAlertFromBlockquote: () => null,
+  parseAlertFromBlockquote: (content: string) =>
+    content.startsWith("[!WARNING]")
+      ? { type: "warning", content: content.replace("[!WARNING]", "").trim() }
+      : null,
 }))
 
 jest.mock("@/components/chat/renderers/details-block", () => ({
@@ -89,6 +92,14 @@ jest.mock("@/components/chat/renderers/details-block", () => ({
 
 jest.mock("@/components/chat/renderers/kbd-inline", () => ({
   KbdInline: ({ children }: { children: React.ReactNode }) => <kbd data-test="kbd">{children}</kbd>,
+}))
+
+jest.mock("@/components/chat/renderers/task-list", () => ({
+  TaskListItem: ({ checked, children }: { checked: boolean; children: React.ReactNode }) => (
+    <li data-test="task-list-item" data-checked={String(checked)}>
+      {children}
+    </li>
+  ),
 }))
 
 jest.mock("@/components/artifacts/artifact-create-button", () => ({
@@ -117,6 +128,28 @@ describe("MarkdownRenderer", () => {
   it("wraps output in prose container", () => {
     const { container } = render(<MarkdownRenderer content="test" />)
     expect(container.querySelector(".markdown-renderer")).toBeTruthy()
+  })
+
+  it("orders CJK parsing around GFM and adds math only when enabled", () => {
+    const { rerender } = render(<MarkdownRenderer content="中文**强调**。" />)
+    const withMath = screen.getByTestId("react-markdown-config").dataset.remarkOrder?.split(",")
+    expect(withMath).toHaveLength(4)
+    expect(withMath?.[0]).toBe("cjkBefore")
+    expect(withMath?.[2]).toBe("cjkAfter")
+
+    rerender(<MarkdownRenderer content="中文**强调**。" enableMath={false} />)
+    const withoutMath = screen.getByTestId("react-markdown-config").dataset.remarkOrder?.split(",")
+    expect(withoutMath).toHaveLength(3)
+    expect(withoutMath?.[0]).toBe("cjkBefore")
+    expect(withoutMath?.[2]).toBe("cjkAfter")
+  })
+
+  it("normalizes both LaTeX delimiter styles only when math is enabled", () => {
+    const { rerender } = render(<MarkdownRenderer content={"\\(x^2\\) and \\[y^2\\]"} />)
+    expect(screen.getByText("$x^2$ and $$y^2$$")).toBeInTheDocument()
+
+    rerender(<MarkdownRenderer content={"\\(x^2\\) and \\[y^2\\]"} enableMath={false} />)
+    expect(screen.getByText("\\(x^2\\) and \\[y^2\\]")).toBeInTheDocument()
   })
 
   // ── external links ──────────────────────────────────────────────────────────
@@ -187,6 +220,17 @@ describe("MarkdownRenderer", () => {
     expect(block?.getAttribute("data-lang")).toBe("js")
   })
 
+  it("renders a one-line unlabelled fence as a block instead of inline code", () => {
+    render(<MarkdownRenderer content={"```\nplain text\n```"} />)
+    expect(document.querySelector("[data-test='code-block']")).toHaveTextContent("plain text")
+    expect(document.querySelector("p > code")).toBeNull()
+  })
+
+  it("preserves punctuation in fenced-code language identifiers", () => {
+    render(<MarkdownRenderer content={"```c++\nint main() {}\n```"} />)
+    expect(document.querySelector("[data-test='code-block']")).toHaveAttribute("data-lang", "c++")
+  })
+
   it("renders inline code as <code> element (not CodeBlock)", () => {
     render(<MarkdownRenderer content="use `const` here" />)
     expect(document.querySelector("code")).toBeTruthy()
@@ -211,6 +255,22 @@ describe("MarkdownRenderer", () => {
     })
   })
 
+  // ── math ──────────────────────────────────────────────────────────────────
+
+  it("routes inline and display math through their dedicated renderers", () => {
+    const { rerender } = render(<MarkdownRenderer content="$x^2$" />)
+    expect(document.querySelector("[data-test='math-inline']")).toHaveTextContent("x^2")
+
+    rerender(<MarkdownRenderer content="$$y^2$$" />)
+    expect(document.querySelector("[data-test='math-block']")).toHaveTextContent("y^2")
+  })
+
+  it("falls back to a code block when math rendering is disabled", () => {
+    render(<MarkdownRenderer content={"```math\nx^2\n```"} enableMath={false} />)
+    expect(document.querySelector("[data-test='math-inline']")).toBeNull()
+    expect(document.querySelector("[data-test='code-block']")).toHaveTextContent("x^2")
+  })
+
   // ── mermaid ─────────────────────────────────────────────────────────────────
 
   it("renders mermaid block when enableMermaid=true (default)", () => {
@@ -229,6 +289,99 @@ describe("MarkdownRenderer", () => {
   it("renders diff block when enableDiff=true (default)", () => {
     render(<MarkdownRenderer content={"```diff\n+ added\n- removed\n```"} />)
     expect(document.querySelector("[data-test='diff-block']")).toBeTruthy()
+  })
+
+  it("renders A2UI fences through the dedicated renderer", () => {
+    render(<MarkdownRenderer content={'```a2ui\n{"type":"Text"}\n```'} />)
+    expect(document.querySelector("[data-test='a2ui-block']")).toBeTruthy()
+  })
+
+  // ── media ─────────────────────────────────────────────────────────────────
+
+  it("renders images through the enhanced image renderer", () => {
+    render(<MarkdownRenderer content="![diagram](https://cdn.example.com/diagram.png)" />)
+    expect(document.querySelector("[data-test='image-block']")).toHaveAttribute(
+      "src",
+      "https://cdn.example.com/diagram.png"
+    )
+  })
+
+  it("falls back to a lazy native image when enhanced images are disabled", () => {
+    render(
+      <MarkdownRenderer
+        content="![diagram](https://cdn.example.com/diagram.png)"
+        enableEnhancedImages={false}
+      />
+    )
+    expect(document.querySelector("[data-test='image-block']")).toBeNull()
+    expect(document.querySelector("img")).toHaveAttribute("loading", "lazy")
+  })
+
+  it("falls back to enhanced images when media embeds are disabled", () => {
+    const { rerender } = render(
+      <MarkdownRenderer
+        content="![video](https://cdn.example.com/demo.mp4)"
+        enableVideoEmbed={false}
+      />
+    )
+    expect(document.querySelector("[data-test='video-block']")).toBeNull()
+    expect(document.querySelector("[data-test='image-block']")).toBeTruthy()
+
+    rerender(
+      <MarkdownRenderer
+        content="![audio](https://cdn.example.com/demo.mp3)"
+        enableAudioEmbed={false}
+      />
+    )
+    expect(document.querySelector("[data-test='audio-block']")).toBeNull()
+    expect(document.querySelector("[data-test='image-block']")).toBeTruthy()
+  })
+
+  it("recognizes video URLs with query strings", () => {
+    render(<MarkdownRenderer content="![demo](https://cdn.example.com/demo.mp4?token=abc)" />)
+    expect(document.querySelector("[data-test='video-block']")).toHaveAttribute(
+      "data-src",
+      "https://cdn.example.com/demo.mp4?token=abc"
+    )
+  })
+
+  it("recognizes audio URLs with fragments", () => {
+    render(<MarkdownRenderer content="![sample](https://cdn.example.com/sample.flac#t=10)" />)
+    expect(document.querySelector("[data-test='audio-block']")).toHaveAttribute(
+      "data-src",
+      "https://cdn.example.com/sample.flac#t=10"
+    )
+  })
+
+  it("routes Ogg audio and Ogg video to their unambiguous renderers", () => {
+    const { rerender } = render(
+      <MarkdownRenderer content="![audio](https://cdn.example.com/sample.ogg)" />
+    )
+    expect(document.querySelector("[data-test='audio-block']")).toBeTruthy()
+    expect(document.querySelector("[data-test='video-block']")).toBeNull()
+
+    rerender(<MarkdownRenderer content="![video](https://cdn.example.com/sample.ogv)" />)
+    expect(document.querySelector("[data-test='video-block']")).toBeTruthy()
+  })
+
+  it("recognizes supported video hosts without accepting lookalike domains", () => {
+    const { rerender } = render(
+      <MarkdownRenderer content="![video](https://www.youtube.com/watch?v=abc)" />
+    )
+    expect(document.querySelector("[data-test='video-block']")).toBeTruthy()
+
+    rerender(<MarkdownRenderer content="![image](https://youtube.com.evil.example/cover)" />)
+    expect(document.querySelector("[data-test='video-block']")).toBeNull()
+    expect(document.querySelector("[data-test='image-block']")).toBeTruthy()
+  })
+
+  it("treats a non-absolute video-host string as an ordinary image URL", () => {
+    render(<MarkdownRenderer content="![image](youtube.com/watch?v=abc)" />)
+    expect(document.querySelector("[data-test='video-block']")).toBeNull()
+    expect(document.querySelector("[data-test='image-block']")).toHaveAttribute(
+      "src",
+      "youtube.com/watch?v=abc"
+    )
   })
 
   // ── tables ──────────────────────────────────────────────────────────────────
@@ -273,6 +426,22 @@ describe("MarkdownRenderer", () => {
     expect(h2?.className).toContain("text-xl")
   })
 
+  it("renders h3 and h4 with their semantic heading styles", () => {
+    render(<MarkdownRenderer content={"### Heading 3\n#### Heading 4"} />)
+    expect(screen.getByRole("heading", { level: 3 })).toHaveClass("text-lg")
+    expect(screen.getByRole("heading", { level: 4 })).toHaveClass("text-base")
+  })
+
+  // ── safe raw HTML ─────────────────────────────────────────────────────────
+
+  it("routes safe details and keyboard elements through dedicated renderers", () => {
+    render(
+      <MarkdownRenderer content={"<details><summary>More</summary>Body</details>\n<kbd>⌘K</kbd>"} />
+    )
+    expect(document.querySelector("[data-test='details-block']")).toHaveTextContent("Body")
+    expect(document.querySelector("[data-test='kbd']")).toHaveTextContent("⌘K")
+  })
+
   // ── lists ───────────────────────────────────────────────────────────────────
 
   it("renders unordered list", () => {
@@ -295,6 +464,23 @@ describe("MarkdownRenderer", () => {
     render(<MarkdownRenderer content="> A simple quote" />)
     expect(document.querySelector("blockquote")).toBeTruthy()
     expect(document.querySelector("[data-test='alert-block']")).toBeNull()
+  })
+
+  it("renders GitHub alerts unless alert rendering is disabled", () => {
+    const { rerender } = render(<MarkdownRenderer content="> [!WARNING] Careful" />)
+    expect(document.querySelector("[data-test='alert-block']")).toHaveTextContent("Careful")
+
+    rerender(<MarkdownRenderer content="> [!WARNING] Careful" enableAlerts={false} />)
+    expect(document.querySelector("[data-test='alert-block']")).toBeNull()
+    expect(document.querySelector("blockquote")).toBeTruthy()
+  })
+
+  it("routes GFM task-list items through the task renderer", () => {
+    render(<MarkdownRenderer content="- [x] complete" />)
+    expect(document.querySelector("[data-test='task-list-item']")).toHaveAttribute(
+      "data-checked",
+      "true"
+    )
   })
 
   // ── horizontal rule ─────────────────────────────────────────────────────────

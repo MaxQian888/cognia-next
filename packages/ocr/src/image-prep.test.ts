@@ -233,6 +233,364 @@ describe("downscaleImage", () => {
     expect(out.bytes).toBe(bytes)
     expect(out.mimeType).toBe("image/png")
   })
+
+  it("downscales with canvas, closes the bitmap, and keeps only a smaller result", async () => {
+    const originalBitmap = globalThis.createImageBitmap
+    const originalCanvas = globalThis.OffscreenCanvas
+    const close = jest.fn()
+    const drawImage = jest.fn()
+    let dimensions: [number, number] | null = null
+    Object.defineProperty(globalThis, "createImageBitmap", {
+      configurable: true,
+      value: jest.fn(async () => ({ width: 4000, height: 2000, close })),
+    })
+    Object.defineProperty(globalThis, "OffscreenCanvas", {
+      configurable: true,
+      value: class {
+        constructor(width: number, height: number) {
+          dimensions = [width, height]
+        }
+        getContext() {
+          return { drawImage }
+        }
+        async convertToBlob() {
+          return new Blob([new Uint8Array([9, 8])], { type: "image/jpeg" })
+        }
+      },
+    })
+    try {
+      const out = await downscaleImage(new Uint8Array([1, 2, 3, 4]), "image/jpeg", 1000)
+      expect(dimensions).toEqual([1000, 500])
+      expect(Array.from(out.bytes)).toEqual([9, 8])
+      expect(drawImage).toHaveBeenCalled()
+      expect(close).toHaveBeenCalled()
+    } finally {
+      Object.defineProperty(globalThis, "createImageBitmap", {
+        configurable: true,
+        value: originalBitmap,
+      })
+      Object.defineProperty(globalThis, "OffscreenCanvas", {
+        configurable: true,
+        value: originalCanvas,
+      })
+    }
+  })
+
+  it("keeps the original bytes when canvas re-encoding is larger", async () => {
+    const originalBitmap = globalThis.createImageBitmap
+    const originalCanvas = globalThis.OffscreenCanvas
+    Object.defineProperty(globalThis, "createImageBitmap", {
+      configurable: true,
+      value: jest.fn(async () => ({ width: 200, height: 200, close: jest.fn() })),
+    })
+    Object.defineProperty(globalThis, "OffscreenCanvas", {
+      configurable: true,
+      value: class {
+        getContext() {
+          return { drawImage: jest.fn() }
+        }
+        async convertToBlob() {
+          return new Blob([new Uint8Array([1, 2, 3, 4, 5])], { type: "image/png" })
+        }
+      },
+    })
+    const source = new Uint8Array([1, 2, 3, 4])
+    try {
+      const out = await downscaleImage(source, "image/png", 100)
+      expect(out.bytes).toBe(source)
+    } finally {
+      Object.defineProperty(globalThis, "createImageBitmap", {
+        configurable: true,
+        value: originalBitmap,
+      })
+      Object.defineProperty(globalThis, "OffscreenCanvas", {
+        configurable: true,
+        value: originalCanvas,
+      })
+    }
+  })
+
+  it("keeps an already-small decoded image and closes its bitmap", async () => {
+    const originalBitmap = globalThis.createImageBitmap
+    const originalCanvas = globalThis.OffscreenCanvas
+    const source = new Uint8Array([1, 2, 3])
+    const close = jest.fn()
+    Object.defineProperty(globalThis, "createImageBitmap", {
+      configurable: true,
+      value: jest.fn(async () => ({ width: 80, height: 40, close })),
+    })
+    Object.defineProperty(globalThis, "OffscreenCanvas", {
+      configurable: true,
+      value: class {},
+    })
+    try {
+      const out = await downscaleImage(source, "image/png", 100)
+      expect(out.bytes).toBe(source)
+      expect(close).toHaveBeenCalledTimes(1)
+    } finally {
+      Object.defineProperty(globalThis, "createImageBitmap", {
+        configurable: true,
+        value: originalBitmap,
+      })
+      Object.defineProperty(globalThis, "OffscreenCanvas", {
+        configurable: true,
+        value: originalCanvas,
+      })
+    }
+  })
+
+  it("keeps the original when no 2D canvas context is available", async () => {
+    const originalBitmap = globalThis.createImageBitmap
+    const originalCanvas = globalThis.OffscreenCanvas
+    const source = new Uint8Array([1, 2, 3])
+    Object.defineProperty(globalThis, "createImageBitmap", {
+      configurable: true,
+      value: jest.fn(async () => ({ width: 800, height: 400 })),
+    })
+    Object.defineProperty(globalThis, "OffscreenCanvas", {
+      configurable: true,
+      value: class {
+        getContext() {
+          return null
+        }
+      },
+    })
+    try {
+      const out = await downscaleImage(source, "image/png", 100)
+      expect(out.bytes).toBe(source)
+    } finally {
+      Object.defineProperty(globalThis, "createImageBitmap", {
+        configurable: true,
+        value: originalBitmap,
+      })
+      Object.defineProperty(globalThis, "OffscreenCanvas", {
+        configurable: true,
+        value: originalCanvas,
+      })
+    }
+  })
+
+  it("keeps the original when canvas encoding rejects", async () => {
+    const originalBitmap = globalThis.createImageBitmap
+    const originalCanvas = globalThis.OffscreenCanvas
+    const source = new Uint8Array([1, 2, 3])
+    Object.defineProperty(globalThis, "createImageBitmap", {
+      configurable: true,
+      value: jest.fn(async () => ({ width: 800, height: 400, close: jest.fn() })),
+    })
+    Object.defineProperty(globalThis, "OffscreenCanvas", {
+      configurable: true,
+      value: class {
+        getContext() {
+          return { drawImage: jest.fn() }
+        }
+        async convertToBlob() {
+          throw new Error("encoder failed")
+        }
+      },
+    })
+    try {
+      const out = await downscaleImage(source, "image/png", 100)
+      expect(out.bytes).toBe(source)
+    } finally {
+      Object.defineProperty(globalThis, "createImageBitmap", {
+        configurable: true,
+        value: originalBitmap,
+      })
+      Object.defineProperty(globalThis, "OffscreenCanvas", {
+        configurable: true,
+        value: originalCanvas,
+      })
+    }
+  })
+
+  it("falls back to the DOM image decoder when createImageBitmap is unavailable", async () => {
+    const originalBitmap = globalThis.createImageBitmap
+    const originalCanvas = globalThis.OffscreenCanvas
+    const originalImage = globalThis.Image
+    const createObjectUrl = URL.createObjectURL
+    const revokeObjectUrl = URL.revokeObjectURL
+    const revoke = jest.fn()
+    Object.defineProperty(globalThis, "createImageBitmap", {
+      configurable: true,
+      value: undefined,
+    })
+    Object.defineProperty(globalThis, "Image", {
+      configurable: true,
+      value: class {
+        width = 300
+        height = 150
+        onload: (() => void) | null = null
+        onerror: (() => void) | null = null
+        set src(_value: string) {
+          queueMicrotask(() => this.onload?.())
+        }
+      },
+    })
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: jest.fn(() => "blob:fallback"),
+    })
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revoke })
+    Object.defineProperty(globalThis, "OffscreenCanvas", {
+      configurable: true,
+      value: class {
+        getContext() {
+          return { drawImage: jest.fn() }
+        }
+        async convertToBlob() {
+          return new Blob([new Uint8Array([7])], { type: "image/png" })
+        }
+      },
+    })
+    try {
+      const out = await downscaleImage(new Uint8Array([1, 2, 3]), "image/png", 100)
+      expect(Array.from(out.bytes)).toEqual([7])
+      expect(revoke).toHaveBeenCalledWith("blob:fallback")
+    } finally {
+      Object.defineProperty(globalThis, "createImageBitmap", {
+        configurable: true,
+        value: originalBitmap,
+      })
+      Object.defineProperty(globalThis, "OffscreenCanvas", {
+        configurable: true,
+        value: originalCanvas,
+      })
+      Object.defineProperty(globalThis, "Image", { configurable: true, value: originalImage })
+      Object.defineProperty(URL, "createObjectURL", {
+        configurable: true,
+        value: createObjectUrl,
+      })
+      Object.defineProperty(URL, "revokeObjectURL", {
+        configurable: true,
+        value: revokeObjectUrl,
+      })
+    }
+  })
+
+  it("falls back to the DOM image decoder when createImageBitmap rejects the format", async () => {
+    const originalBitmap = globalThis.createImageBitmap
+    const originalCanvas = globalThis.OffscreenCanvas
+    const originalImage = globalThis.Image
+    const createObjectUrl = URL.createObjectURL
+    const revokeObjectUrl = URL.revokeObjectURL
+    Object.defineProperty(globalThis, "createImageBitmap", {
+      configurable: true,
+      value: jest.fn(async () => {
+        throw new Error("unsupported image format")
+      }),
+    })
+    Object.defineProperty(globalThis, "Image", {
+      configurable: true,
+      value: class {
+        width = 240
+        height = 120
+        onload: (() => void) | null = null
+        onerror: (() => void) | null = null
+        set src(_value: string) {
+          queueMicrotask(() => this.onload?.())
+        }
+      },
+    })
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: jest.fn(() => "blob:bitmap-error-fallback"),
+    })
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: jest.fn(),
+    })
+    Object.defineProperty(globalThis, "OffscreenCanvas", {
+      configurable: true,
+      value: class {
+        getContext() {
+          return { drawImage: jest.fn() }
+        }
+        async convertToBlob() {
+          return new Blob([new Uint8Array([6])], { type: "image/png" })
+        }
+      },
+    })
+    try {
+      const out = await downscaleImage(new Uint8Array([1, 2, 3]), "image/png", 100)
+      expect(Array.from(out.bytes)).toEqual([6])
+    } finally {
+      Object.defineProperty(globalThis, "createImageBitmap", {
+        configurable: true,
+        value: originalBitmap,
+      })
+      Object.defineProperty(globalThis, "OffscreenCanvas", {
+        configurable: true,
+        value: originalCanvas,
+      })
+      Object.defineProperty(globalThis, "Image", { configurable: true, value: originalImage })
+      Object.defineProperty(URL, "createObjectURL", {
+        configurable: true,
+        value: createObjectUrl,
+      })
+      Object.defineProperty(URL, "revokeObjectURL", {
+        configurable: true,
+        value: revokeObjectUrl,
+      })
+    }
+  })
+
+  it("keeps the original when the DOM image decoder reports an error", async () => {
+    const originalBitmap = globalThis.createImageBitmap
+    const originalCanvas = globalThis.OffscreenCanvas
+    const originalImage = globalThis.Image
+    const createObjectUrl = URL.createObjectURL
+    const revokeObjectUrl = URL.revokeObjectURL
+    const source = new Uint8Array([1, 2, 3])
+    Object.defineProperty(globalThis, "createImageBitmap", {
+      configurable: true,
+      value: undefined,
+    })
+    Object.defineProperty(globalThis, "Image", {
+      configurable: true,
+      value: class {
+        onload: (() => void) | null = null
+        onerror: (() => void) | null = null
+        set src(_value: string) {
+          queueMicrotask(() => this.onerror?.())
+        }
+      },
+    })
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: jest.fn(() => "blob:decode-error"),
+    })
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: jest.fn(),
+    })
+    Object.defineProperty(globalThis, "OffscreenCanvas", {
+      configurable: true,
+      value: class {},
+    })
+    try {
+      const out = await downscaleImage(source, "image/png", 100)
+      expect(out.bytes).toBe(source)
+    } finally {
+      Object.defineProperty(globalThis, "createImageBitmap", {
+        configurable: true,
+        value: originalBitmap,
+      })
+      Object.defineProperty(globalThis, "OffscreenCanvas", {
+        configurable: true,
+        value: originalCanvas,
+      })
+      Object.defineProperty(globalThis, "Image", { configurable: true, value: originalImage })
+      Object.defineProperty(URL, "createObjectURL", {
+        configurable: true,
+        value: createObjectUrl,
+      })
+      Object.defineProperty(URL, "revokeObjectURL", {
+        configurable: true,
+        value: revokeObjectUrl,
+      })
+    }
+  })
 })
 
 describe("combinePageMarkdown / combinePageText", () => {

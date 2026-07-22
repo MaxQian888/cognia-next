@@ -310,6 +310,20 @@ html[data-reduce-motion="true"] *::after {
   }
 }
 
+/* Pro IDE shell-transition guard. The embedded code-server pane is a NATIVE
+   child webview pinned over a reserved rect: it floats above the DOM, cannot be
+   clipped or tweened by CSS, and its bounds are re-pushed over IPC roughly once
+   per frame. So an animated ancestor does not glide it — it makes VS Code
+   relayout on every frame for the whole transition, which is both janky and
+   expensive. While a surface holds the pane we collapse the shell transitions it
+   sits inside so the layout change lands in one frame instead. Same 1ms (not 0)
+   convention as the reduce-motion guards above, so `transitionend` still fires.
+   The marker is written by `lib/codeserver/pane-manager.ts`. */
+html[data-pro-ide-active] [data-slot="sidebar-gap"],
+html[data-pro-ide-active] [data-slot="sidebar-container"] {
+  transition-duration: 1ms !important;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

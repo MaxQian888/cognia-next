@@ -441,7 +441,7 @@ describe("Composer — mobile (Claude-style) layout", () => {
     // camera/album branches both degrade to the same file picker off-mobile, so
     // three entries would be redundant there.
     expect(screen.queryByTestId("composer-plus-toggle")).toBeNull()
-    expect(screen.getByLabelText("Attach image")).toBeInTheDocument()
+    expect(screen.getByLabelText("Attach files")).toBeInTheDocument()
     expect(surface).toContainElement(screen.getByTestId("composer-toolbar-embedded"))
   })
 

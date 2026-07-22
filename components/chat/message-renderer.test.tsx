@@ -86,6 +86,14 @@ jest.mock("./markdown-renderer", () => ({
     ),
 }))
 
+jest.mock("@/components/chat/renderers/message-image-gallery", () => ({
+  MessageImageGallery: ({ items }: { items: Array<{ src: string }> }) =>
+    ReactForMocks.createElement("div", {
+      "data-testid": "message-image-gallery",
+      "data-count": items.length,
+    }),
+}))
+
 jest.mock("@/components/chat/message-parts/a2ui-part", () => ({
   A2UIPart: () => ReactForMocks.createElement("div", { "data-test": "a2ui-part" }),
 }))
@@ -290,14 +298,46 @@ describe("reasoning parts", () => {
 // ── file parts ────────────────────────────────────────────────────────────────
 
 describe("file parts", () => {
-  it("renders image file as <img>", () => {
+  it("renders image files through the thumbnail gallery", () => {
     const msg: UIMessage = {
       id: "f1",
       role: "user",
       parts: [{ type: "file", url: "data:image/png;base64,abc", mediaType: "image/png" }],
     }
     render(<MessageRenderer message={msg} />)
-    expect(document.querySelector("img")).toBeTruthy()
+    expect(screen.getByTestId("message-image-gallery")).toHaveAttribute("data-count", "1")
+  })
+
+  it("groups every image file into one gallery while preserving non-image files", () => {
+    const msg: UIMessage = {
+      id: "f-gallery",
+      role: "user",
+      parts: [
+        {
+          type: "file",
+          url: "data:image/png;base64,one",
+          mediaType: "image/png",
+          filename: "one.png",
+        },
+        {
+          type: "file",
+          url: "/uploads/archive.bin",
+          mediaType: "application/octet-stream",
+          filename: "archive.bin",
+        },
+        {
+          type: "file",
+          url: "data:image/png;base64,two",
+          mediaType: "image/png",
+          filename: "two.png",
+        },
+      ],
+    }
+    render(<MessageRenderer message={msg} />)
+
+    expect(screen.getAllByTestId("message-image-gallery")).toHaveLength(1)
+    expect(screen.getByTestId("message-image-gallery")).toHaveAttribute("data-count", "2")
+    expect(screen.getByText("archive.bin")).toBeInTheDocument()
   })
 
   it("renders non-image file as a download link", () => {
