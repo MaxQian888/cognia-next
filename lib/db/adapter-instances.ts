@@ -71,6 +71,9 @@ export async function updateAdapterInstance(
       | "implMetadata"
       // v45 (im-refactored-crayon) — Lark guardrails + whoami cache.
       | "atResponseStrategy"
+      | "inboundActivationPolicy"
+      | "activeRunDispatchMode"
+      | "deliveryReadiness"
       | "chatAllowlist"
       | "chatBlocklist"
       | "lastWhoamiAt"

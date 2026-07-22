@@ -54,7 +54,11 @@ import { assistantReplyToSegments } from "@/lib/connectors/a2ui-bridge/a2ui-to-s
 import { hasNoLeakingPii } from "@cognia/redact"
 import { appendAudit } from "./audit"
 import { getBus } from "./bus"
-import { createPlatformSession, findActiveSessionForConversation } from "./session-bindings"
+import {
+  createPlatformSession,
+  findActiveSessionForConversation,
+  refreshPlatformSessionBinding,
+} from "./session-bindings"
 import { startTeamRunFromIM } from "./team-dispatch"
 import { startWorkflowFromIM } from "@/lib/workflow/runtime/start-from-im"
 import { evaluateImRate } from "@/lib/connectors/im-rate/registry"
@@ -677,6 +681,8 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
     )
     if (!session) {
       session = await createPlatformSession(event, resolved.characterId)
+    } else {
+      session = await refreshPlatformSessionBinding(session, event)
     }
 
     // ── Step 2: insert inbound StoredMessage ─────────────────────────────────

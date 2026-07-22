@@ -945,6 +945,49 @@ describe("createLarkAdapter", () => {
     expect(url.searchParams.get("end_time")).toBe("1714900100")
   })
 
+  it("fetchHistory() never yields messages from the parent chat or another topic", async () => {
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "connectors_keyring_get") return null
+      if (cmd !== "connectors_http_request") return undefined
+      const url = (args as { req: { url: string } }).req.url
+      if (url.includes("tenant_access_token")) return makeTatOkResp("t-topic-history")
+      const item = (message_id: string, thread_id?: string) => ({
+        message_id,
+        chat_id: "oc_chat_001",
+        chat_type: "group",
+        msg_type: "text",
+        body: { content: JSON.stringify({ text: message_id }) },
+        create_time: "1714900000000",
+        thread_id,
+        deleted: false,
+        sender: { id: "ou_hist_001", id_type: "open_id", sender_type: "user" },
+      })
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          code: 0,
+          data: {
+            items: [
+              item("om-wanted", "omt-wanted"),
+              item("om-other", "omt-other"),
+              item("om-root"),
+            ],
+            has_more: false,
+          },
+        }),
+      }
+    })
+
+    const events = []
+    for await (const evt of makeAdapter().fetchHistory!("lark:lark-1:oc_chat_001:omt-wanted", {
+      max: 50,
+    })) {
+      events.push(evt)
+    }
+    expect(events.map((event) => event.messageId)).toEqual(["om-wanted"])
+  })
+
   // ── outbound error classification (retryability contract) ──
   const send400 = (body: Record<string, unknown>, status = 400) => {
     mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {

@@ -26,9 +26,13 @@
 
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
-import { getAdapterInstance } from "@/lib/db/adapter-instances"
+import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { appendAudit } from "@/lib/connectors/audit"
 import { findSiblingBotSender } from "@/lib/connectors/sibling-bots"
+import {
+  admitConversationEvent,
+  type ConversationAdmissionReason,
+} from "@/lib/connectors/conversation-admission"
 
 export type AtResponseStrategy = "always" | "mention_only" | "direct_only"
 
@@ -36,7 +40,11 @@ export type AtResponseStrategy = "always" | "mention_only" | "direct_only"
 export const DEFAULT_AT_RESPONSE_STRATEGY: AtResponseStrategy = "mention_only"
 
 export type AtGateReason =
-  "chat_blocklist" | "chat_allowlist" | "at_mention_required" | "at_direct_only"
+  | "chat_blocklist"
+  | "chat_allowlist"
+  | "at_mention_required"
+  | "at_direct_only"
+  | ConversationAdmissionReason
 
 export interface AtGateDecision {
   allowed: boolean
@@ -197,7 +205,33 @@ export async function gateInboundEvent(
     }
   }
 
-  const decision = shouldRespondToMessage(event, row)
+  // Chat allow/block lists are transport guardrails and remain ahead of the
+  // conversation-aware policy. Do not run the legacy mention branch here:
+  // `admitConversationEvent` explicitly maps legacy values and also resolves
+  // topic activation state + per-conversation overrides.
+  const chatId = pickChatId(event)
+  let decision: AtGateDecision
+  if (row.chatBlocklist?.includes(chatId)) {
+    decision = { allowed: false, reason: "chat_blocklist" }
+  } else if (row.chatAllowlist?.length && !row.chatAllowlist.includes(chatId)) {
+    decision = { allowed: false, reason: "chat_allowlist" }
+  } else {
+    // Receiving one unmentioned Lark group event is the only authoritative
+    // runtime proof that `im:message.group_msg` delivery is active. Persist the
+    // proof for future events, but keep evaluating this probe against the
+    // previously effective policy so it cannot unexpectedly start a turn.
+    if (
+      event.platform === "lark" &&
+      event.channel.kind !== "private" &&
+      !event.mentions.selfMentioned &&
+      row.deliveryReadiness !== "all_messages_verified"
+    ) {
+      await updateAdapterInstance(adapterId, {
+        deliveryReadiness: "all_messages_verified",
+      }).catch(() => undefined)
+    }
+    decision = await admitConversationEvent(event, row)
+  }
   if (decision.allowed) return true
   await appendAudit({
     adapterId,

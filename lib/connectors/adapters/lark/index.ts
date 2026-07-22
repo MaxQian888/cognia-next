@@ -688,7 +688,10 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
           },
         }
         const event = parseLarkEventEnvelope(opts.id, opts.selfBotOpenId, envelope)
-        if (event) {
+        // Feishu only exposes chat-level history. A response may therefore
+        // contain the parent chat and every topic in it; retain exactly the
+        // requested opaque conversation scope after normalisation.
+        if (event?.conversationKey === conversationKey) {
           yielded++
           yield event
         }
@@ -858,6 +861,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     },
     id: opts.id,
     runPresentation: createLarkRunPresentationDriver(doRequest),
+    historyCursorKind: "timestamp",
     start,
     stop,
     health,

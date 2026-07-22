@@ -186,6 +186,8 @@ export interface PlatformAdapter {
 
   /** Native projection for durable execution runs. Absence selects the generic A2UI/edit fallback. */
   readonly runPresentation?: RunPresentationDriver
+  /** Native cursor domain expected by the legacy history stream. */
+  readonly historyCursorKind?: "message_id" | "timestamp"
 
   send(req: OutboundRequest): Promise<OutboundResult>
   /**

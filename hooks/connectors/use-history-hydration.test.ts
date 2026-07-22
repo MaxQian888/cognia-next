@@ -88,7 +88,7 @@ describe("useHistoryHydration", () => {
     expect(result.current.lastCount).toBe(2)
   })
 
-  it("uses the oldest stored platformMessageId as the before cursor and dedups", async () => {
+  it("uses the oldest timestamp for timestamp-cursor adapters and dedups", async () => {
     mockToArray.mockResolvedValue([
       { platformMessageId: "m-old", createdAt: 100 },
       { platformMessageId: "m-new", createdAt: 500 },
@@ -97,6 +97,7 @@ describe("useHistoryHydration", () => {
     mockListAdapters.mockReturnValue([
       {
         id: "adp",
+        historyCursorKind: "timestamp",
         fetchHistory: (_key: string, opts: { before?: string }) => {
           captured = opts
           // m-old is already stored → skipped; m-older is new → inserted.
@@ -111,7 +112,7 @@ describe("useHistoryHydration", () => {
       count = await result.current.hydrate()
     })
 
-    expect(captured?.before).toBe("m-old")
+    expect(captured?.before).toBe("100")
     expect(count).toBe(1)
     expect(mockInsert).toHaveBeenCalledTimes(1)
     expect(mockInsert).toHaveBeenCalledWith(
@@ -119,6 +120,20 @@ describe("useHistoryHydration", () => {
       "sess-1",
       50
     )
+  })
+
+  it("drops an adapter history event that belongs to another conversation scope", async () => {
+    mockListAdapters.mockReturnValue([
+      {
+        id: "adp",
+        fetchHistory: () => gen([{ ...makeEvent("wrong", 1), conversationKey: "another-topic" }]),
+      },
+    ])
+    const { result } = renderHook(() => useHistoryHydration("k", "adp"))
+    await act(async () => {
+      await result.current.hydrate()
+    })
+    expect(mockInsert).not.toHaveBeenCalled()
   })
 
   it("skips edit/delete/system events", async () => {

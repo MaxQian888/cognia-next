@@ -90,12 +90,16 @@ export function useHistoryHydration(
 
       let inserted = 0
       for await (const event of adapter.fetchHistory(conversationKey, {
-        before: oldestPlatformId,
+        before:
+          adapter.historyCursorKind === "timestamp" && Number.isFinite(oldestAt)
+            ? String(oldestAt)
+            : oldestPlatformId,
         max: HISTORY_PAGE_MAX,
       })) {
         // Only back-fill plain messages; edit/delete/system events have no
         // standalone history row to create.
         if (event.kind && event.kind !== "create") continue
+        if (event.conversationKey !== conversationKey) continue
         if (event.messageId && seen.has(event.messageId)) continue
         await insertInboundMessage(event, session.id, event.timestamp)
         if (event.messageId) seen.add(event.messageId)

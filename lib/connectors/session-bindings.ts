@@ -18,7 +18,7 @@
  */
 
 import type { ChatSession } from "@cognia/agent-config-types"
-import type { NormalizedInboundEvent } from "@/types/connectors/event"
+import { deliveryTargetFromEvent, type NormalizedInboundEvent } from "@/types/connectors/event"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
 import { parseConversationKey } from "@/types/connectors/event"
 import { getDb } from "@/lib/db/schema"
@@ -150,6 +150,7 @@ export async function createPlatformSession(
   characterId: string | undefined
 ): Promise<ChatSession> {
   const now = Date.now()
+  const deliveryTarget = deliveryTargetFromEvent(event)
   const session: ChatSession = {
     id: crypto.randomUUID(),
     title: event.channel.name ?? event.sender.displayName ?? event.conversationKey,
@@ -160,6 +161,7 @@ export async function createPlatformSession(
       adapterId: event.adapterId,
       conversationKey: event.conversationKey,
       conversationRef: event.conversationRef,
+      ...(deliveryTarget ? { deliveryTarget } : {}),
     },
     platformConversationKey: event.conversationKey,
     createdAt: now,
@@ -167,4 +169,24 @@ export async function createPlatformSession(
   }
   await getDb().sessions.add(session)
   return session
+}
+
+/** Refresh mutable delivery anchors without changing the stable conversation binding. */
+export async function refreshPlatformSessionBinding(
+  session: ChatSession,
+  event: NormalizedInboundEvent
+): Promise<ChatSession> {
+  if (!session.platformBinding) return session
+  const deliveryTarget = deliveryTargetFromEvent(event)
+  const updated: ChatSession = {
+    ...session,
+    platformBinding: {
+      ...session.platformBinding,
+      conversationRef: event.conversationRef,
+      ...(deliveryTarget ? { deliveryTarget } : {}),
+    },
+    updatedAt: Date.now(),
+  }
+  await getDb().sessions.put(updated)
+  return updated
 }

@@ -666,6 +666,14 @@ export function parseLarkEventEnvelope(
       ...(threadId ? { threadRootMessageId: message.message_id } : {}),
     },
     conversationKey,
+    conversationAddress: {
+      conversationKey,
+      platform: "lark",
+      adapterId,
+      scopeKind: channelKind,
+      containerId: chatId,
+      ...(threadId ? { topicId: threadId } : {}),
+    },
     sender: senderIdentity,
     channel: {
       id: conversationKey,

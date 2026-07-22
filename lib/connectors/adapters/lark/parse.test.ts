@@ -95,6 +95,17 @@ describe("parseLarkEventEnvelope", () => {
       expect(result!.conversationKey).toBe(`lark:${ADAPTER_ID}:oc_group_chat_002:thr_root_001`)
     })
 
+    it("carries an explicit topic address so core code never parses the key", () => {
+      expect(result!.conversationAddress).toEqual({
+        conversationKey: `lark:${ADAPTER_ID}:oc_group_chat_002:thr_root_001`,
+        platform: "lark",
+        adapterId: ADAPTER_ID,
+        scopeKind: "thread",
+        containerId: "oc_group_chat_002",
+        topicId: "thr_root_001",
+      })
+    })
+
     it("conversationRef.threadTs matches thread_id", () => {
       const ref = result!.conversationRef as { threadTs?: string }
       expect(ref.threadTs).toBe("thr_root_001")

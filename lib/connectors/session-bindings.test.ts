@@ -10,6 +10,7 @@ import {
   listSessionsByConversationKey,
   findActiveSessionForConversation,
   createPlatformSession,
+  refreshPlatformSessionBinding,
   listSiblingConversations,
 } from "./session-bindings"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
@@ -48,6 +49,13 @@ function makeEvent(): NormalizedInboundEvent {
     adapterId: "tg-1",
     conversationKey: KEY,
     conversationRef: { platform: "telegram", adapterId: "tg-1" },
+    conversationAddress: {
+      conversationKey: KEY,
+      platform: "telegram",
+      adapterId: "tg-1",
+      scopeKind: "private",
+      containerId: "42",
+    },
     kind: "message",
     messageId: "m1",
     sender: { remoteUserId: "u1", displayName: "Alice" },
@@ -64,8 +72,26 @@ describe("session-bindings", () => {
     expect(session.platformConversationKey).toBe(KEY)
     expect(session.platformBinding?.conversationKey).toBe(KEY)
     expect(session.characterId).toBe("char_1")
+    expect(session.platformBinding?.deliveryTarget?.sourceMessageId).toBe("m1")
     const stored = await getDb().sessions.get(session.id)
     expect(stored?.platformConversationKey).toBe(KEY)
+  })
+
+  it("refreshes the delivery anchor on every later inbound message", async () => {
+    const session = await createPlatformSession(makeEvent(), "char_1")
+    const next = makeEvent()
+    next.messageId = "m2"
+    next.timestamp = 2_000
+    next.conversationRef = {
+      ...next.conversationRef,
+      threadRootMessageId: "m2",
+    }
+
+    const refreshed = await refreshPlatformSessionBinding(session, next)
+    expect(refreshed.platformBinding?.deliveryTarget?.sourceMessageId).toBe("m2")
+    expect((await getDb().sessions.get(session.id))?.platformBinding?.conversationRef).toEqual(
+      next.conversationRef
+    )
   })
 
   it("findSessionByConversationKey returns the most-recently-updated match", async () => {

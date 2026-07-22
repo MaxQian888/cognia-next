@@ -40,6 +40,7 @@ describe("serializeSend", () => {
     expect(call.url).toContain("receive_id_type=chat_id")
     expect(call.payload["receive_id"]).toBe("oc_chat_001")
     expect(call.payload["msg_type"]).toBe("text")
+    expect(call.payload["uuid"]).toBe("k1")
   })
 
   it("sends to open_id for ou_ prefixed id", () => {
@@ -63,6 +64,7 @@ describe("serializeSend", () => {
     expect(call.method).toBe("POST")
     expect(call.url).toContain("/im/v1/messages/om_thread_anchor_1/reply")
     expect(call.payload["reply_in_thread"]).toBe(true)
+    expect(call.payload["uuid"]).toBe("k1")
     expect(call.payload["receive_id"]).toBeUndefined()
     expect(call.payload["parent_id"]).toBeUndefined()
   })

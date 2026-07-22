@@ -139,6 +139,7 @@ export function serializeSend(req: OutboundRequest): SerializedLarkCall {
     const payload: Record<string, unknown> = {
       msg_type: body.msg_type,
       content: body.content,
+      uuid: req.metadata.idempotencyKey,
     }
     if (threadId) payload["reply_in_thread"] = true
     return {
@@ -163,6 +164,7 @@ export function serializeSend(req: OutboundRequest): SerializedLarkCall {
           msg_type: body.msg_type,
           content: body.content,
           reply_in_thread: true,
+          uuid: req.metadata.idempotencyKey,
         },
       }
     }
@@ -176,6 +178,7 @@ export function serializeSend(req: OutboundRequest): SerializedLarkCall {
     receive_id: receiveId,
     msg_type: body.msg_type,
     content: body.content,
+    uuid: req.metadata.idempotencyKey,
   }
 
   return {
@@ -390,6 +393,7 @@ export async function serializeOutboundAsync(
     const payload: Record<string, unknown> = {
       msg_type: body.msg_type,
       content: body.content,
+      uuid: req.metadata.idempotencyKey,
     }
     if (threadId) payload["reply_in_thread"] = true
     return {
@@ -412,6 +416,7 @@ export async function serializeOutboundAsync(
           msg_type: body.msg_type,
           content: body.content,
           reply_in_thread: true,
+          uuid: req.metadata.idempotencyKey,
         },
       }
     }
@@ -421,6 +426,7 @@ export async function serializeOutboundAsync(
     receive_id: receiveId,
     msg_type: body.msg_type,
     content: body.content,
+    uuid: req.metadata.idempotencyKey,
   }
 
   return {
