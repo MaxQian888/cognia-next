@@ -33,13 +33,14 @@ jest.mock("./load-language-support", () => ({
   loadLanguageSupport: (lang: string) => loadLanguageSupportMock(lang),
 }))
 
-const collectEditorSnippetsMock = jest.fn(
-  (): Array<{
+const collectEditorSnippetsMock = jest.fn<
+  Array<{
     label: string
     insertText: string
     detail?: string
-  }> => []
-)
+  }>,
+  [string]
+>(() => [])
 jest.mock("@/lib/monaco/snippets", () => ({
   collectEditorSnippets: (language: string) => collectEditorSnippetsMock(language),
 }))

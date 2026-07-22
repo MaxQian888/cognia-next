@@ -241,7 +241,8 @@ describe("handleCost", () => {
     expect(block.durationMs).toBe(1500)
     // Window occupancy is the LATEST turn (inputTokens 500), not the sum.
     expect(block.window?.used).toBe(500)
-    expect(block.window?.max).toBe(200_000)
+    // No session model and no default in settings → DEFAULT_CONTEXT_WINDOW (128k).
+    expect(block.window?.max).toBe(128_000)
   })
 
   it("omits cache/cost/duration when zero", async () => {
@@ -441,10 +442,11 @@ describe("handleContext", () => {
     expect(block.assistantTurns).toBe(2)
     // Raw tallies; the card sums input + cache for the "incl. cache" display.
     expect(block.tokens).toEqual({ input: 1200, output: 800, cacheRead: 100, cacheCreate: 200 })
-    // Window line uses the latest turn (200 in + 300 out = 500) vs the 200k default.
+    // Window line uses the latest turn (200 in + 300 out = 500) vs the 128k
+    // DEFAULT_CONTEXT_WINDOW (unknown model → conservative floor).
     expect(block.window?.used).toBe(500)
-    expect(block.window?.max).toBe(200_000)
-    expect(block.window?.remaining).toBe(199_500)
+    expect(block.window?.max).toBe(128_000)
+    expect(block.window?.remaining).toBe(127_500)
     expect(block.window?.autoCompactFraction).toBeCloseTo(0.835)
   })
 

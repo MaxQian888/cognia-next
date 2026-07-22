@@ -1,6 +1,6 @@
 import { diffScopes, parseScopeString, recordGrantedScopes } from "./oauth-scope-audit"
 
-const appendMock = jest.fn(async () => ({}) as never)
+const appendMock = jest.fn<Promise<never>, unknown[]>(async () => ({}) as never)
 jest.mock("@/lib/db/connector-audit", () => ({
   append: (...args: unknown[]) => appendMock(...args),
 }))

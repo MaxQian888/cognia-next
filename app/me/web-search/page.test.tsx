@@ -6,6 +6,23 @@ import { fireEvent, render, screen } from "@testing-library/react"
 const saveMock = jest.fn(async (_patch: Record<string, unknown>): Promise<void> => undefined)
 const enqueueMock = jest.fn(async (_arg: unknown): Promise<void> => undefined)
 
+// `SubPageShell` pops history instead of pushing `/me`, falling back to
+// `replace(backHref)` when there is nothing to pop — assert against the real
+// router rather than the global jest.setup stub (which hands out a fresh
+// `jest.fn()` on every call).
+const routerBackMock = jest.fn()
+const routerReplaceMock = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({
+    back: routerBackMock,
+    replace: routerReplaceMock,
+    push: jest.fn(),
+    prefetch: jest.fn(),
+  }),
+  usePathname: () => "/me/web-search",
+  useSearchParams: () => new URLSearchParams(),
+}))
+
 const settingsRef: { current: Record<string, unknown> | undefined } = {
   current: { searchEnabled: false, searchMaxResults: 10 },
 }
@@ -90,6 +107,8 @@ import Page from "./page"
 beforeEach(() => {
   saveMock.mockReset()
   enqueueMock.mockReset()
+  routerBackMock.mockReset()
+  routerReplaceMock.mockReset()
   settingsRef.current = { searchEnabled: false, searchMaxResults: 10 }
   standaloneRef.current = false
 })
@@ -102,9 +121,19 @@ describe("MobileWebSearchPage", () => {
     expect(screen.getByTestId("web-search-max-results")).toBeInTheDocument()
   })
 
-  it("links the back button to /me", () => {
-    render(<Page />)
-    expect(screen.getByTestId("mobile-sub-page-back").closest("a")).toHaveAttribute("href", "/me")
+  it("routes the back button to /me", () => {
+    // Cold start straight on the sub-page: nothing to pop, so the shell
+    // replaces with the configured backHref — the page relies on the `/me`
+    // default.
+    const lengthSpy = jest.spyOn(window.history, "length", "get").mockReturnValue(1)
+    try {
+      render(<Page />)
+      fireEvent.click(screen.getByTestId("mobile-sub-page-back"))
+      expect(routerReplaceMock).toHaveBeenCalledWith("/me")
+      expect(routerBackMock).not.toHaveBeenCalled()
+    } finally {
+      lengthSpy.mockRestore()
+    }
   })
 
   it("disables the result-count picker until search is enabled", () => {

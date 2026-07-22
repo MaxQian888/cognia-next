@@ -190,7 +190,7 @@ describe("pushAllToNative", () => {
         subtle: {
           digest: async () => new Uint8Array([0xab, 0xcd, 0x01, 0x02]).buffer,
         },
-      } as Crypto,
+      } as unknown as Crypto,
     })
     try {
       mockedIsTauri.mockReturnValue(true)

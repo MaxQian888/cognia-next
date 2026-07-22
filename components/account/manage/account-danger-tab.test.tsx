@@ -15,7 +15,7 @@ jest.mock("@/stores/account/account-store", () => ({
     selector({ deleteAccount: deleteAccountMock }),
 }))
 
-const toastMock = jest.fn(() => "toast-id")
+const toastMock = jest.fn<string, [message?: unknown, options?: unknown]>(() => "toast-id")
 const toastErrorMock = jest.fn()
 const toastDismissMock = jest.fn()
 jest.mock("sonner", () => ({

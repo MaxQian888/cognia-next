@@ -255,7 +255,10 @@ fn apply_git_auth_env(command: &mut Command, token: &str) {
     command
         .env("GIT_CONFIG_COUNT", "1")
         .env("GIT_CONFIG_KEY_0", "http.extraheader")
-        .env("GIT_CONFIG_VALUE_0", format!("Authorization: Basic {basic}"))
+        .env(
+            "GIT_CONFIG_VALUE_0",
+            format!("Authorization: Basic {basic}"),
+        )
         // Never let git fall back to an interactive credential prompt: in a
         // headless workflow that would hang the run instead of failing it.
         .env("GIT_TERMINAL_PROMPT", "0");

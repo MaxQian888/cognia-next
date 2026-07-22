@@ -1537,10 +1537,13 @@ describe("action.scheduler.task.*", () => {
       "action.scheduler.status" as WorkflowNodeKind,
       makeCtx("action.scheduler.status" as WorkflowNodeKind, {})
     )
+    // Creating an active task lazily boots the scheduler and arms it through the
+    // timing driver (see `scheduleTask` in lib/scheduler/task-scheduler.ts), so the
+    // status node reports one armed task and nothing running.
     expect(status.output).toEqual({
-      initialized: false,
+      initialized: true,
       runningCount: 0,
-      scheduledCount: 0,
+      scheduledCount: 1,
     })
 
     const statistics = await exec(

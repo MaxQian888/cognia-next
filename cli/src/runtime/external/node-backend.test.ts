@@ -6,7 +6,29 @@ import { fileURLToPath } from "node:url"
 
 import { buildExternalAgentChildEnv, NodeExternalAgentBackend } from "./node-backend"
 
-const flush = () => new Promise((resolve) => setTimeout(resolve, 25))
+/**
+ * Wait for a real backend event instead of sleeping. Everything the backend
+ * emits is driven by child-process I/O (spawn / readline lines / exit), so a
+ * fixed delay races the OS: on a loaded machine the stub needs well past 25ms
+ * to boot, echo a line, or reap. Resolving on the emission itself makes the
+ * assertions deterministic.
+ */
+function nextEvent<T>(
+  backend: NodeExternalAgentBackend,
+  channel: string,
+  match: (payload: T) => boolean = () => true
+): Promise<T> {
+  return new Promise<T>((resolve) => {
+    let off = () => {}
+    let settled = false
+    off = backend.listen<T>(channel, (payload) => {
+      if (settled || !match(payload)) return
+      settled = true
+      off()
+      resolve(payload)
+    })
+  })
+}
 
 describe("NodeExternalAgentBackend", () => {
   it("inherits plain credential env, accepts configured agent credentials, and strips loaders", () => {
@@ -65,16 +87,36 @@ describe("NodeExternalAgentBackend", () => {
     ])
       backend.listen(channel, (payload) => seen.push([channel, payload]))
 
+    // Arm every wait BEFORE the action that triggers it — `spawn` fires
+    // synchronously inside `invoke`, so a listener attached afterwards misses it.
+    const running = nextEvent<{ state: string }>(
+      backend,
+      "external-agent://state-change",
+      (payload) => payload.state === "Running"
+    )
+    const ready = nextEvent<{ data: string }>(
+      backend,
+      "external-agent://stderr",
+      (payload) => payload.data === "stub-ready"
+    )
     await expect(
       backend.invoke<string>("spawn_external_agent", {
         config: { id: "stub", command: "node", args: [stub], cwd: workspace },
       })
     ).resolves.toBe("stub")
-    await flush()
+    await Promise.all([running, ready])
+
+    const echoed = nextEvent<{ data: string }>(
+      backend,
+      "external-agent://stdout",
+      (payload) => payload.data === "hello"
+    )
     await backend.invoke("send_to_external_agent", { agentId: "stub", message: "hello" })
-    await flush()
+    await echoed
+
+    const exited = nextEvent(backend, "external-agent://exit")
     await backend.invoke("send_to_external_agent", { agentId: "stub", message: "exit" })
-    await flush()
+    await exited
 
     expect(seen).toContainEqual(["external-agent://spawn", { agentId: "stub", status: "starting" }])
     expect(seen).toContainEqual([
@@ -150,8 +192,13 @@ describe("NodeExternalAgentBackend", () => {
       resolveLaunch: async (config) => ({ command: config.command, args: config.args ?? [] }),
     })
     const config = { id: "reused", command: "node", args: [stub], cwd: workspace }
+    const running = nextEvent<{ state: string }>(
+      backend,
+      "external-agent://state-change",
+      (payload) => payload.state === "Running"
+    )
     await backend.invoke("spawn_external_agent", { config })
-    await flush()
+    await running
     await backend.invoke("kill_external_agent", { agentId: "reused" })
     await expect(backend.invoke("spawn_external_agent", { config })).resolves.toBe("reused")
     await backend.invoke("kill_external_agent", { agentId: "reused" })

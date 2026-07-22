@@ -66,11 +66,14 @@ test("the index service is built lazily (no .cognia until a query runs)", async 
 })
 
 test("resolveCodeGraphRoot walks up to the nearest manifest/VCS marker", async () => {
-  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "cg-root-"))
+  // realpath the temp root up front: on macOS os.tmpdir() is `/var/...`, a
+  // symlink to `/private/var/...`, and the resolver walks up the path it is
+  // given without resolving links.
+  const root = fs.realpathSync(await fsp.mkdtemp(path.join(os.tmpdir(), "cg-root-")))
   const sub = path.join(root, "packages", "app")
   await fsp.mkdir(sub, { recursive: true })
   await fsp.writeFile(path.join(root, "package.json"), "{}\n")
-  assert.equal(resolveCodeGraphRoot(sub), fs.realpathSync(root))
+  assert.equal(resolveCodeGraphRoot(sub), root)
 })
 
 test("resolveCodeGraphRoot falls back to cwd when no marker is found", async () => {

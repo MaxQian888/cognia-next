@@ -93,6 +93,12 @@ beforeEach(async () => {
 async function advanceToStep2(name = "Alex twin") {
   await userEvent.type(screen.getByTestId("twin-wizard-name"), name)
   await userEvent.click(screen.getByTestId("twin-wizard-next"))
+  // `commitIdentity` only flips to step 2 after the Dexie `createTwin` write
+  // resolves, and the step-1 Next button is disabled while it is in flight.
+  // Without gating on the step-2 body, a follow-up `click(twin-wizard-next)`
+  // lands on that disabled step-1 button and is silently swallowed, leaving
+  // the wizard parked on step 2.
+  await screen.findByTestId("mock-add-source")
 }
 
 describe("TwinCreationWizard", () => {

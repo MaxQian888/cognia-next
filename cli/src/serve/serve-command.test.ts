@@ -6,6 +6,8 @@
  * @jest-environment node
  */
 import fs from "node:fs"
+import http from "node:http"
+import type { AddressInfo } from "node:net"
 import os from "node:os"
 import path from "node:path"
 
@@ -72,6 +74,31 @@ class FakeServerSocket implements WebSocketLike {
   }
 }
 
+/**
+ * The control-plane half of the scripted server: a real HTTP listener that
+ * answers every `CompanionTransport.call` with a non-retryable 404.
+ *
+ * Booting the brain activates the whole built-in plugin roster, and each
+ * activation awaits host RPCs (`mirrorDeclaredPermissionsToLedger`,
+ * `syncShellAllowlistToHost`, …). Pointed at a dead port those are *network*
+ * errors, which the transport retries three times with 250/500/1000 ms backoff
+ * — ~1.75 s burned per plugin permission, minutes across the roster. A 4xx is
+ * terminal on the first attempt, so the boot keeps the same end state (the
+ * mirrors are best-effort and still fail) without the backoff.
+ */
+async function startControlPlane(): Promise<{ url: string; close: () => Promise<void> }> {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(404, { "content-type": "application/json" })
+    res.end(JSON.stringify({ code: "unknown_command", message: "not served by the test brain" }))
+  })
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+  const { port } = server.address() as AddressInfo
+  return {
+    url: `http://127.0.0.1:${port}`,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  }
+}
+
 function sink(): OutputSink & { logs: string[] } {
   const logs: string[] = []
   return {
@@ -108,6 +135,7 @@ describe("serveCommand", () => {
   it("boots, answers a sync-pull from Dexie, and flushes on shutdown", async () => {
     __resetCliDbForTesting()
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-serve-e2e-"))
+    const controlPlane = await startControlPlane()
     const out = sink()
     let releaseShutdown: () => void = () => undefined
     const shutdown = new Promise<void>((resolve) => {
@@ -152,16 +180,21 @@ describe("serveCommand", () => {
       throw new Error(`no respond frame arrived; sent=${JSON.stringify(server.sent)}`)
     }
 
-    const code = await serveCommand(parseArgv(["serve", "--home", home]), {
-      out,
-      env: env({
-        COGNIA_SERVER_URL: "https://127.0.0.1:7999",
-        COGNIA_SERVICE_TOKEN: "svc-token-e2e",
-      }),
-      wsFactory: (url) => new FakeServerSocket(url),
-      shutdown,
-      onStarted,
-    })
+    let code: number
+    try {
+      code = await serveCommand(parseArgv(["serve", "--home", home]), {
+        out,
+        env: env({
+          COGNIA_SERVER_URL: controlPlane.url,
+          COGNIA_SERVICE_TOKEN: "svc-token-e2e",
+        }),
+        wsFactory: (url) => new FakeServerSocket(url),
+        shutdown,
+        onStarted,
+      })
+    } finally {
+      await controlPlane.close()
+    }
 
     expect(code).toBe(0)
     const joined = out.logs.join("")

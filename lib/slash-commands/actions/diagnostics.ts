@@ -27,7 +27,7 @@ import { isTauri } from "@/lib/tauri"
  * per-session override first, then the app default. Used by `/context` and
  * `/cost` to size the context window (the provider disambiguates custom /
  * discovered model metadata) and to price tokens. Never throws — missing values
- * fall back to `undefined` (→ 200k window, no pricing).
+ * fall back to `undefined` (→ DEFAULT_CONTEXT_WINDOW, no pricing).
  */
 async function resolveActiveModelInfo(
   activeSessionId: string | null
@@ -53,8 +53,8 @@ async function resolveActiveModelInfo(
 /**
  * Per-model context window for `/cost` + `/context`: a model's declared length
  * from the custom, discovered, or built-in catalog overrides the curated
- * pattern table, which otherwise forces unrecognised models to the 200k
- * default. Mirrors the composer's `ContextUsageIndicator` and the model picker.
+ * pattern table, which otherwise forces unrecognised models to
+ * `DEFAULT_CONTEXT_WINDOW`. Mirrors the composer's `ContextUsageIndicator` and the model picker.
  */
 function resolveWindowOverride(
   model: string | undefined,

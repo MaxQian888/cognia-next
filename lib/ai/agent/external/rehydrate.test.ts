@@ -8,6 +8,7 @@
  */
 
 import type { ExternalAgentConfig } from "@/types/agent/external-agent"
+import type { ExternalAgentManager } from "@/lib/ai/agent/external/manager"
 import type { ProtocolAdapterRegistryChange } from "@/lib/ai/agent/external/protocol-adapter"
 
 // --------------------------------------------------------------------------
@@ -35,7 +36,13 @@ const connectMock = jest.fn(async (id: string) => {
   if (inst) inst.connectionStatus = "connected"
 })
 const getAgentMock = jest.fn((id: string) => agentsInManager.get(id))
-const fakeManager = { addAgent: addAgentMock, connect: connectMock, getAgent: getAgentMock }
+// Only the three methods `rehydrate` actually calls are stubbed; the rest of the
+// manager surface is irrelevant here.
+const fakeManager = {
+  addAgent: addAgentMock,
+  connect: connectMock,
+  getAgent: getAgentMock,
+} as unknown as ExternalAgentManager
 // Spied getter so a test can assert the manager (and its health-check interval)
 // is NOT instantiated when there is nothing to rehydrate.
 const getManagerMock = jest.fn(() => fakeManager)

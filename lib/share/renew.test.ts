@@ -7,7 +7,7 @@ jest.mock("./config", () => ({
 }))
 
 const getSharedLinkByCodeMock = jest.fn()
-const updateSharedLinkExpiryMock = jest.fn(async () => undefined)
+const updateSharedLinkExpiryMock = jest.fn<Promise<void>, unknown[]>(async () => undefined)
 jest.mock("@/lib/db/shared-links", () => ({
   getSharedLinkByCode: (...a: unknown[]) => getSharedLinkByCodeMock(...a),
   updateSharedLinkExpiry: (...a: unknown[]) => updateSharedLinkExpiryMock(...a),

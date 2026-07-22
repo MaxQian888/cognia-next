@@ -95,6 +95,11 @@ mod tests {
             let mut cfg = repo.config().unwrap();
             cfg.set_str("user.name", "T").unwrap();
             cfg.set_str("user.email", "t@e.com").unwrap();
+            // `exec::run` shells out to the user's git, which reads their global
+            // config. A developer with `tag.gpgSign = true` would otherwise have
+            // every tag here forced through GPG — failing with "no tag message?"
+            // for lightweight tags and a pinentry error for annotated ones.
+            cfg.set_bool("tag.gpgSign", false).unwrap();
         }
         fs::write(tmp.path().join("a.txt"), "hi\n").unwrap();
         {

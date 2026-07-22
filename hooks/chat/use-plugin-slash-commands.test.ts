@@ -27,8 +27,11 @@ describe("usePluginSlashCommands", () => {
       })
     })
     const { result } = renderHook(() => usePluginSlashCommands())
+    // The projected `name` is the token the user types, which prefers the
+    // declared (single-word) name over the id — see
+    // `lib/slash-commands/plugin-commands.ts:slashCommandToken`.
     expect(result.current).toEqual([
-      expect.objectContaining({ name: "demo.run", scope: "plugin", description: "Run it" }),
+      expect.objectContaining({ name: "Run", scope: "plugin", description: "Run it" }),
     ])
   })
 
@@ -39,7 +42,7 @@ describe("usePluginSlashCommands", () => {
     act(() => {
       registerSlashCommand({ id: "a.cmd", name: "A", source: "plugin", handler: () => ({}) })
     })
-    expect(result.current.map((c) => c.name)).toEqual(["a.cmd"])
+    expect(result.current.map((c) => c.name)).toEqual(["A"])
 
     act(() => {
       unregisterSlashCommand("a.cmd")

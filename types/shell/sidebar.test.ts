@@ -39,8 +39,10 @@ describe("sidebar nav meta", () => {
     }
   })
 
-  it("marks only the two known desktop-only auxiliary items", () => {
+  it("marks only the known desktop-only items", () => {
     const desktopOnly = SIDEBAR_NAV_META.filter((m) => m.desktopOnly).map((m) => m.id)
-    expect(desktopOnly.sort()).toEqual(["performance", "source-control"])
+    // `browser` is a feature-group entry rather than an auxiliary one, but the
+    // embedded webview only exists in the Tauri shell, so it is desktop-only too.
+    expect(desktopOnly.sort()).toEqual(["browser", "performance", "source-control"])
   })
 })
