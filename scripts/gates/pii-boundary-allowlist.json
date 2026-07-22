@@ -45,6 +45,7 @@
     "file": "lib/ai/provider-consumption.ts",
     "boundaries": [
       "@ai-sdk/anthropic",
+      "@ai-sdk/amazon-bedrock",
       "@ai-sdk/azure",
       "@ai-sdk/cohere",
       "@ai-sdk/google",
@@ -73,12 +74,6 @@
     "protection": "Routing queries are user-authored; local candidate metadata is application-owned."
   },
   {
-    "file": "lib/memory/runtime/build-deps.ts",
-    "boundaries": ["@cognia/provider-embedding/embedding"],
-    "reason": "Builds the low-level memory embedding dependency.",
-    "protection": "Memory extraction and persistence gates derived content before invoking this dependency."
-  },
-  {
     "file": "lib/plugin/api/ai-provider-api.ts",
     "boundaries": ["ai"],
     "reason": "Plugin AI API is wrapped by the plugin PII gate contract.",
@@ -105,12 +100,6 @@
     "protection": "Twin ingest applies @cognia/redact before distillation."
   },
   {
-    "file": "lib/twin/ingest/embed.ts",
-    "boundaries": ["@cognia/provider-embedding/embedding"],
-    "reason": "Embedding leaf consumes redacted chunks.",
-    "protection": "The ingest pipeline creates redacted chunks with @cognia/redact before this leaf."
-  },
-  {
     "file": "lib/workflow/nodes/built-ins.ts",
     "boundaries": ["@cognia/provider-embedding/embedding"],
     "reason": "Workflow node delegates to the shared embedding boundary.",
@@ -120,6 +109,7 @@
     "file": "packages/provider-core/src/core/client.ts",
     "boundaries": [
       "@ai-sdk/anthropic",
+      "@ai-sdk/amazon-bedrock",
       "@ai-sdk/openai",
       "@ai-sdk/azure",
       "@ai-sdk/google",
@@ -143,7 +133,14 @@
   },
   {
     "file": "packages/provider-embedding/src/embedding.ts",
-    "boundaries": ["ai", "@ai-sdk/openai", "@ai-sdk/google", "@ai-sdk/cohere", "@ai-sdk/mistral"],
+    "boundaries": [
+      "ai",
+      "@ai-sdk/amazon-bedrock",
+      "@ai-sdk/openai",
+      "@ai-sdk/google",
+      "@ai-sdk/cohere",
+      "@ai-sdk/mistral"
+    ],
     "reason": "Low-level provider-agnostic embedding transport.",
     "protection": "Callers must redact derived local data before invoking this package boundary."
   },

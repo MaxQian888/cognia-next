@@ -70,6 +70,7 @@ const REGISTRY = [
   { script: "format:check", group: "lint" },
 
   { script: "typecheck", group: "types" },
+  { script: "knip", group: "types" },
 
   { script: "lint:i18n", group: "i18n" },
   { script: "i18n:build:check", group: "i18n" },

@@ -35,6 +35,7 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 test("registry covers the read-only gates and excludes the unsorted i18n:sort:check", () => {
   for (const script of [
     "typecheck",
+    "knip",
     "lint",
     "lint:i18n",
     "release:sync-keys:check",

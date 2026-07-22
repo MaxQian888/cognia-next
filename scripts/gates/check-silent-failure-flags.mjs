@@ -58,6 +58,7 @@ function listTsFiles() {
     .filter((p) => p.endsWith(".ts") || p.endsWith(".tsx"))
     .filter((p) => !p.endsWith(".test.ts") && !p.endsWith(".test.tsx"))
     .map((p) => resolve(REPO_ROOT, p))
+    .filter((p) => existsSync(p))
 }
 
 function walkRust(root) {

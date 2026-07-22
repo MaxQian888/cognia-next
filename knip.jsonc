@@ -4,7 +4,6 @@
     ".": {
       "entry": [
         "app/sw.ts",
-        "cli/src/cli/entry.ts",
         "components/{ai-elements,ui}/**/*.{ts,tsx}",
         "hooks/builtin/*.mjs",
         "lib/browser-stubs/*.{js,ts}",
@@ -12,7 +11,6 @@
         "plugins/*/src/index.{ts,tsx}",
         "plugins/*/*.harness.mjs",
         "plugins/**/tests/fixtures/**/*.{js,mjs,ts}",
-        "postcss.config.mjs",
         "scripts/**/*.{js,cjs,mjs,ts,mts}",
         "src-tauri/scripts/**/*.{js,mjs,ts}",
       ],
@@ -22,15 +20,23 @@
       "ignore": [".agents/**", ".claude/**"],
       // Loaded from CSS, dynamic imports, or as providers for workspace peer dependencies.
       "ignoreDependencies": [
+        "@ai-sdk/react",
+        "@hookform/resolvers",
+        "@huggingface/transformers",
+        "@radix-ui/react-slot",
+        "@tauri-apps/api",
         "@tauri-apps/plugin-shell",
         "@types/katex",
         "katex",
+        "langfuse",
         "mammoth",
         "mermaid",
         "pdfjs-dist",
+        "shadcn",
         "tailwindcss",
         "tesseract.js",
         "tw-animate-css",
+        "ts-jest",
         "xlsx",
       ],
       "ignoreBinaries": ["chcp.com", "pwsh", "rustfmt", "taskkill"],
@@ -51,8 +57,8 @@
     "crates/cognia-plugin-template-ts": {},
     "crates/cognia-plugin-template-vscode-extension": {},
     "mobile": {
-      "entry": ["capacitor.config.ts", "scripts/*.{js,mjs,ts}"],
-      "project": ["capacitor.config.ts", "scripts/*.{js,mjs,ts}"],
+      "entry": ["scripts/*.{js,mjs,ts}"],
+      "project": ["scripts/*.{js,mjs,ts}"],
       "ignoreDependencies": ["^@capacitor(?:-|/)", "^@capgo/", "^capacitor-"],
     },
     "packages/*": {},
@@ -63,10 +69,14 @@
     "sidecar": {
       // Packaged by Tauri and launched from the Rust bridge.
       "entry": ["a2ui-mcp.mjs"],
+      "ignoreDependencies": ["@vscode/ripgrep"],
+      "ignoreIssues": {
+        "dispatch/protocol-adapters/provider-protocol.d.mts": ["files"],
+      },
     },
     "sidecar/vscode-ext-host": {
       "entry": ["tests/fixtures/**/*.{js,mjs,ts}"],
-      "ignoreDependencies": ["^vscode$"],
+      "ignoreDependencies": ["^vscode$", "vscode-languageclient"],
     },
     "sidecar/webclone": {},
   },

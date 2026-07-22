@@ -18,6 +18,7 @@
 import { readFileSync, writeFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
+import { createHash } from "node:crypto"
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 
@@ -32,6 +33,8 @@ const TS_MIRROR = join(root, "lib/cli-bridge/embedded-pubkey.ts")
 
 const KEY_RE = /RELEASE_PUBLIC_KEY_BASE64[^"]*"([A-Za-z0-9+/=]+)"/
 const TS_KEY_RE = /EMBEDDED_COGNIA_RELEASE_PUBKEY\s*=\s*\n?\s*"([A-Za-z0-9+/=]+)"/
+const TS_FINGERPRINT_RE =
+  /(EMBEDDED_COGNIA_RELEASE_KEY_FINGERPRINT_SHA256\s*=\s*\n?\s*")[a-f0-9]{64}(")/
 
 function readCanonicalKey() {
   const src = readFileSync(SOURCE, "utf8")
@@ -59,11 +62,13 @@ function syncRustMirror(key, check) {
 
 function syncTsMirror(key, check) {
   const content = readFileSync(TS_MIRROR, "utf8")
+  const fingerprint = createHash("sha256").update(Buffer.from(key, "base64")).digest("hex")
   const next = content.replace(
     /(EMBEDDED_COGNIA_RELEASE_PUBKEY\s*=\s*\n?\s*")[A-Za-z0-9+/=]+(")/,
     `$1${key}$2`
   )
-  return maybeWrite(TS_MIRROR, content, next, check)
+  const nextWithFingerprint = next.replace(TS_FINGERPRINT_RE, `$1${fingerprint}$2`)
+  return maybeWrite(TS_MIRROR, content, nextWithFingerprint, check)
 }
 
 const PLACEHOLDER = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
@@ -86,6 +91,10 @@ function main() {
   const tsContent = readFileSync(TS_MIRROR, "utf8")
   if (!TS_KEY_RE.test(tsContent)) {
     console.error(`[release-sync-keys] could not find key literal in ${TS_MIRROR}`)
+    process.exit(1)
+  }
+  if (!TS_FINGERPRINT_RE.test(tsContent)) {
+    console.error(`[release-sync-keys] could not find fingerprint literal in ${TS_MIRROR}`)
     process.exit(1)
   }
   const ok = [syncRustMirror(key, check), syncTsMirror(key, check)].every(Boolean)

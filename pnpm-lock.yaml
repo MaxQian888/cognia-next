@@ -34,6 +34,9 @@ importers:
       '@ai-sdk/openai':
         specifier: 3.0.73
         version: 3.0.73(zod@4.4.3)
+      '@ai-sdk/provider':
+        specifier: 3.0.12
+        version: 3.0.12
       '@ai-sdk/react':
         specifier: 3.0.210
         version: 3.0.210(react@19.2.7)(zod@4.4.3)
@@ -454,9 +457,6 @@ importers:
       xlsx:
         specifier: https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz
         version: https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz
-      xstate:
-        specifier: ^5.32.4
-        version: 5.32.4
       yaml:
         specifier: ^2.9.0
         version: 2.9.0
@@ -578,6 +578,9 @@ importers:
       husky:
         specifier: ^9.1.7
         version: 9.1.7
+      identity-obj-proxy:
+        specifier: ^3.0.0
+        version: 3.0.0
       intl-messageformat:
         specifier: 11.2.10
         version: 11.2.10
@@ -869,6 +872,15 @@ importers:
 
   packages/plugin-sdk:
     dependencies:
+      '@cognia/provider-core':
+        specifier: workspace:*
+        version: link:../provider-core
+      '@cognia/provider-routing':
+        specifier: workspace:*
+        version: link:../provider-routing
+      '@cognia/provider-types':
+        specifier: workspace:*
+        version: link:../provider-types
       '@types/json-schema':
         specifier: ^7.0.0
         version: 7.0.15
@@ -895,6 +907,9 @@ importers:
 
   packages/provider-core:
     dependencies:
+      '@ai-sdk/amazon-bedrock':
+        specifier: '*'
+        version: 4.0.123(zod@4.4.3)
       '@ai-sdk/anthropic':
         specifier: '*'
         version: 3.0.85(zod@4.4.3)
@@ -922,6 +937,12 @@ importers:
 
   packages/provider-embedding:
     dependencies:
+      '@ai-sdk/amazon-bedrock':
+        specifier: '*'
+        version: 4.0.123(zod@4.4.3)
+      '@ai-sdk/provider':
+        specifier: '*'
+        version: 3.0.12
       '@cognia/provider-core':
         specifier: workspace:*
         version: link:../provider-core
@@ -9282,6 +9303,9 @@ packages:
     engines: {node: '>=0.4.7'}
     hasBin: true
 
+  harmony-reflect@1.6.2:
+    resolution: {integrity: sha512-HIp/n38R9kQjDEziXyDTuW3vvoxxyxjxFzXLrBr18uB47GnSt+G9D29fqrpM5ZkspMcPICud3XsBJQ4Y2URg8g==}
+
   has-bigints@1.1.0:
     resolution: {integrity: sha512-R3pbpkcIqv2Pm3dUwgjclDRVmWpTJW2DcMzcIhEXEx1oh/CEMObMm3KLmRJOdvhM7o4uQBnwr8pzRK2sJWIqfg==}
     engines: {node: '>= 0.4'}
@@ -9489,6 +9513,10 @@ packages:
 
   idb@8.0.3:
     resolution: {integrity: sha512-LtwtVyVYO5BqRvcsKuB2iUMnHwPVByPCXFXOpuU96IZPPoPN6xjOGxZQ74pgSVVLQWtUOYgyeL4GE98BY5D3wg==}
+
+  identity-obj-proxy@3.0.0:
+    resolution: {integrity: sha512-00n6YnVHKrinT9t0d9+5yZC6UBNJANpYEQvL2LlX6Ab9lnmxzIRcEmTPuyGScvl1+jKuCICX1Z0Ab1pPKKdikA==}
+    engines: {node: '>=4'}
 
   ieee754@1.2.1:
     resolution: {integrity: sha512-dcyqhDvX1C46lXZcVqCpK+FtMRQVdIMN6/Df5js2zouUsqG7I6sFxitIC+7KYK29KdXOLHdu9zL4sFnoVQnqaA==}
@@ -13632,9 +13660,6 @@ packages:
 
   xmlchars@2.2.0:
     resolution: {integrity: sha512-JZnDKK8B0RCDw84FNdDAIpZK+JuJw+s7Lz8nksI7SIuU3UXJJslUthsi+uWBUYOwPFwW7W7PRLRfUKpxjtjFCw==}
-
-  xstate@5.32.4:
-    resolution: {integrity: sha512-E5WtDB8DBs2ZWliz2Ry9XfbSZTbBRcK/cwefBot04qQ/L5SLP16xpnTDU4/ZFXuXFhNxi7JP2RhuoGwBnM+S4A==}
 
   xtend@4.0.2:
     resolution: {integrity: sha512-LKYU1iAXJXUgAXn9URjiu+MWhyUXHsvfp7mcuYm9dSUKK0/CjtrUwFAxD82/mCWbtLsGjFIad0wIsod4zrTAEQ==}
@@ -22713,6 +22738,8 @@ snapshots:
     optionalDependencies:
       uglify-js: 3.19.3
 
+  harmony-reflect@1.6.2: {}
+
   has-bigints@1.1.0: {}
 
   has-flag@4.0.0: {}
@@ -23027,6 +23054,10 @@ snapshots:
   idb-keyval@6.3.0: {}
 
   idb@8.0.3: {}
+
+  identity-obj-proxy@3.0.0:
+    dependencies:
+      harmony-reflect: 1.6.2
 
   ieee754@1.2.1: {}
 
@@ -28277,8 +28308,6 @@ snapshots:
   xmlbuilder@15.1.1: {}
 
   xmlchars@2.2.0: {}
-
-  xstate@5.32.4: {}
 
   xtend@4.0.2: {}
 
