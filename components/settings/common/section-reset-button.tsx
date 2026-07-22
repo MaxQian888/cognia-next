@@ -28,6 +28,12 @@ import {
 } from "@/components/ui/alert-dialog"
 import { useSettingsStore } from "@/stores/settings"
 import { resetKeysForSection } from "@/lib/settings/section-keys"
+import {
+  DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS,
+  isBehaviorTelemetryEnabled,
+  saveBehaviorTelemetrySettings,
+} from "@/lib/telemetry/events/settings"
+import { trackEvent } from "@/lib/telemetry/events/track-event"
 import type { SettingsSectionId } from "@/components/settings/settings-nav-config"
 
 export function SectionResetButton({ sectionId }: { sectionId: SettingsSectionId }) {
@@ -42,6 +48,16 @@ export function SectionResetButton({ sectionId }: { sectionId: SettingsSectionId
   const onConfirm = async () => {
     setBusy(true)
     try {
+      if (sectionId === "data") {
+        if (isBehaviorTelemetryEnabled()) {
+          await trackEvent("telemetry.preference.changed", { enabled: false })
+        }
+        saveBehaviorTelemetrySettings({
+          ...DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS,
+          destinations: { ...DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS.destinations },
+          categories: { ...DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS.categories },
+        })
+      }
       await resetSettings(keys)
       toast.success(t("toast"))
       setOpen(false)

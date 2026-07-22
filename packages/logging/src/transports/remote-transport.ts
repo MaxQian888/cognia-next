@@ -82,7 +82,10 @@ export class RemoteTransport implements Transport {
 
   private buffer: StructuredLogEntry[] = []
   private flushTimer: ReturnType<typeof setInterval> | null = null
-  private isOnline = typeof navigator === "undefined" ? true : navigator.onLine
+  // Node 26 ships a global `navigator` WITHOUT `onLine`; the old
+  // `typeof navigator === "undefined"` check therefore yielded `undefined` and
+  // the transport started up permanently "offline" in CLI/sidecar/headless runs.
+  private isOnline = typeof navigator?.onLine === "boolean" ? navigator.onLine : true
   private handleOnline: (() => void) | null = null
   private handleOffline: (() => void) | null = null
   private health: TransportHealthSnapshot = {

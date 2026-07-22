@@ -72,10 +72,14 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
     "cliBridge",
   ],
   ccswitch: ["ccswitchSync"],
+  // The limits panel's two settings-backed knobs: the per-account opt-in for
+  // quota queries (network access) and the user-defined custom sources. Their
+  // bearer tokens are stripped on profile export by `deepStripSecrets`.
+  subscription: ["limitsQueryEnabledAccounts", "customLimitsSources"],
   about: ["updates"],
   desktop: ["browserCookieImportEnabled"],
   companion: ["remoteBrowserEnabled"],
-  data: ["telemetryEnabled", "storageRetention"],
+  data: ["telemetryEnabled", "behaviorTelemetry", "storageRetention"],
   appearance: [
     "theme",
     "colorTheme",

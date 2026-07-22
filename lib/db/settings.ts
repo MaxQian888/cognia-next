@@ -68,6 +68,20 @@ export const DEFAULTS: AppSettings = {
   workflowEditorPerformanceTier: undefined,
   evalSettings: { ...DEFAULT_EVAL_SETTINGS },
   telemetryEnabled: false,
+  behaviorTelemetry: {
+    enabled: false,
+    destinations: { local: true, remote: false },
+    categories: {
+      chat: true,
+      workflow: true,
+      connector: true,
+      agentTeam: true,
+      system: true,
+    },
+    sampleRate: 1,
+    retentionDays: 30,
+    maxStoredEvents: 10_000,
+  },
   storageRetention: { traceRetentionDays: 30 },
   sttLanguage: "en-US",
   selectedMicId: undefined,
@@ -208,6 +222,22 @@ export async function getSettings(): Promise<AppSettings> {
     biometricRequiredFor: {
       ...DEFAULT_BIOMETRIC_GUARD,
       ...(row.biometricRequiredFor ?? {}),
+    },
+    behaviorTelemetry: {
+      ...DEFAULTS.behaviorTelemetry!,
+      ...(row.behaviorTelemetry ?? {}),
+      enabled:
+        row.behaviorTelemetry?.enabled ??
+        row.telemetryEnabled ??
+        DEFAULTS.behaviorTelemetry!.enabled,
+      destinations: {
+        ...DEFAULTS.behaviorTelemetry!.destinations,
+        ...(row.behaviorTelemetry?.destinations ?? {}),
+      },
+      categories: {
+        ...DEFAULTS.behaviorTelemetry!.categories,
+        ...(row.behaviorTelemetry?.categories ?? {}),
+      },
     },
     ocrSettings: mergeOcrSettings(row.ocrSettings),
     storageRetention: {

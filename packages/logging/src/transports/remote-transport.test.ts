@@ -306,6 +306,29 @@ describe("RemoteTransport failure modes", () => {
 })
 
 describe("RemoteTransport offline behavior", () => {
+  it("starts healthy when navigator exists but has no onLine (Node >= 26)", async () => {
+    // Node 26 ships a global `navigator` without `onLine`; reading it as falsy
+    // would boot the transport permanently "offline" in CLI/sidecar runs.
+    const original = Object.getOwnPropertyDescriptor(window.navigator, "onLine")
+    Object.defineProperty(window.navigator, "onLine", {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    })
+    try {
+      const store = new FakeQueueStore()
+      const fetchMock = withFetch(() => okResponse())
+      const t = makeTransport({}, store)
+      expect(t.getHealth().status).not.toBe("offline")
+      t.log(makeEntry())
+      await t.flush()
+      expect(fetchMock).toHaveBeenCalled()
+      await t.close()
+    } finally {
+      if (original) Object.defineProperty(window.navigator, "onLine", original)
+    }
+  })
+
   it("queues entries when offline (no fetch attempted)", async () => {
     Object.defineProperty(window.navigator, "onLine", {
       value: false,

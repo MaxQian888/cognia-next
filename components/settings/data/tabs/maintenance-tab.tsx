@@ -39,6 +39,11 @@ const log = createLogger("settings.data.maintenance")
 import { RotateCcwIcon, ShieldAlertIcon, ShieldIcon, Trash2Icon } from "lucide-react"
 import { StorageCleanupDialog } from "@/components/data/storage/storage-cleanup-dialog"
 import { useStorageBreakdown } from "@/hooks/storage"
+import {
+  getBehaviorTelemetrySettings,
+  setBehaviorTelemetryEnabled,
+} from "@/lib/telemetry/events/settings"
+import { trackEvent } from "@/lib/telemetry/events/track-event"
 
 const CLEAR_TARGETS: { value: ClearableTable | "all"; label: string }[] = [
   { value: "sessions", label: "Conversations + messages" },
@@ -233,9 +238,11 @@ function ClearBlock() {
 
 function PrivacyBlock() {
   const t = useTranslations("settings.data")
-  const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
-  const telemetryEnabled = Boolean(settings?.telemetryEnabled)
+  const canonicalTelemetryEnabled = useSettingsStore(
+    (s) => s.settings?.behaviorTelemetry?.enabled ?? s.settings?.telemetryEnabled
+  )
+  const telemetryEnabled = canonicalTelemetryEnabled ?? getBehaviorTelemetrySettings().enabled
 
   return (
     <Card className="space-y-3 p-4">
@@ -252,7 +259,10 @@ function PrivacyBlock() {
           checked={telemetryEnabled}
           onCheckedChange={(v) => {
             log.info("telemetry_toggled", { enabled: v })
-            void save({ telemetryEnabled: v })
+            if (!v) void trackEvent("telemetry.preference.changed", { enabled: false })
+            const behaviorTelemetry = setBehaviorTelemetryEnabled(v)
+            if (v) void trackEvent("telemetry.preference.changed", { enabled: true })
+            void save({ telemetryEnabled: v, behaviorTelemetry })
           }}
         />
       </div>

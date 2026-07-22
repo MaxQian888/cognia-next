@@ -58,9 +58,13 @@ jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginEventHooks: () => ({ dispatchConnectorDecision: mockConnectorDecision }),
 }))
 const mockPiiDeep = jest.fn(() => true)
+const mockTrackEvent = jest.fn().mockResolvedValue(true)
 jest.mock("@cognia/redact", () => ({
   hasNoLeakingPiiDeep: (...args: unknown[]) => mockPiiDeep(...(args as [])),
   hasNoLeakingPii: () => true,
+}))
+jest.mock("@/lib/telemetry/events/track-event", () => ({
+  trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
 }))
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -155,6 +159,7 @@ beforeEach(async () => {
   mockConnectorDecision.mockResolvedValue({ action: "allow" })
   mockPiiDeep.mockReset()
   mockPiiDeep.mockReturnValue(true)
+  mockTrackEvent.mockClear()
 })
 
 describe("outbound-runner — plugin onConnectorOutbound", () => {
@@ -235,6 +240,11 @@ describe("outbound-runner — successful delivery", () => {
 
     const audits = await listRecent(adapterId)
     expect(audits.some((a) => a.kind === "delivery.success")).toBe(true)
+    expect(mockTrackEvent).toHaveBeenCalledWith("connector.message.sent", {
+      adapterId,
+      platform: "telegram",
+      outcome: "succeeded",
+    })
   })
 
   it("yields the job without sending when it loses the atomic claim to another runner", async () => {
@@ -497,6 +507,12 @@ describe("outbound-runner — retryable error", () => {
 
     const audits = await listRecent(adapterId)
     expect(audits.some((a) => a.kind === "delivery.error")).toBe(true)
+    expect(mockTrackEvent).toHaveBeenCalledWith("connector.message.sent", {
+      adapterId,
+      platform: "telegram",
+      outcome: "failed",
+      errorCode: "platform_5xx",
+    })
   })
 })
 
@@ -519,6 +535,62 @@ describe("outbound-runner — non-retryable error", () => {
 
     const audits = await listRecent(adapterId)
     expect(audits.some((a) => a.kind === "delivery.deadlettered")).toBe(true)
+    expect(mockTrackEvent).toHaveBeenCalledWith("connector.message.sent", {
+      adapterId,
+      platform: "telegram",
+      outcome: "failed",
+      errorCode: "validation",
+    })
+  })
+})
+
+describe("outbound-runner — adapter availability", () => {
+  it("tracks a missing adapter at the queued delivery choke point", async () => {
+    const adapterId = "a_missing"
+    await enqueue(adapterId, `telegram:${adapterId}:chat`)
+
+    await runOnce(new Map())
+
+    expect(mockTrackEvent).toHaveBeenCalledWith("connector.message.sent", {
+      adapterId,
+      platform: "unknown",
+      outcome: "failed",
+      errorCode: "adapter_not_found",
+    })
+  })
+
+  it("tracks adapter exceptions by class without exporting their message", async () => {
+    const adapterId = "a_throwing"
+    const adapter = makeAdapter(adapterId, async () => {
+      throw new TypeError("private connector failure")
+    })
+    await enqueue(adapterId, `telegram:${adapterId}:chat`)
+
+    await runOnce(new Map([[adapterId, adapter]]))
+
+    expect(mockTrackEvent).toHaveBeenCalledWith("connector.message.sent", {
+      adapterId,
+      platform: "telegram",
+      outcome: "failed",
+      errorCode: "TypeError",
+    })
+    expect(JSON.stringify(mockTrackEvent.mock.calls)).not.toContain("private connector failure")
+  })
+
+  it("uses a stable fallback code for non-Error adapter exceptions", async () => {
+    const adapterId = "a_throwing_value"
+    const adapter = makeAdapter(adapterId, async () => Promise.reject("private rejection"))
+    await enqueue(adapterId, `telegram:${adapterId}:chat`)
+
+    await runOnce(new Map([[adapterId, adapter]]))
+
+    expect(mockTrackEvent).toHaveBeenCalledWith("connector.message.sent", {
+      adapterId,
+      platform: "telegram",
+      outcome: "failed",
+      errorCode: "Error",
+    })
+    expect(JSON.stringify(mockTrackEvent.mock.calls)).not.toContain("private rejection")
   })
 })
 
@@ -1352,15 +1424,11 @@ describe("outbound-runner — muted defer audit hygiene", () => {
       // Simulate the defer window elapsing: make the job due again while
       // still muted. The SAME runner re-defers it but must NOT re-audit.
       await getDb().outboundQueue.update(job.id, { nextAttemptAt: Date.now() - 1 })
-      row = (
-        await waitForJobs((rows) => rows[0]?.nextAttemptAt > Date.now() + 60_000)
-      )[0]
+      row = (await waitForJobs((rows) => rows[0]?.nextAttemptAt > Date.now() + 60_000))[0]
       expect(row.lastErrorCode).toBe("muted")
 
       const audits = await listRecent(adapterId)
-      const muteAudits = audits.filter(
-        (a) => a.kind === "delivery.error" && a.reason === "muted"
-      )
+      const muteAudits = audits.filter((a) => a.kind === "delivery.error" && a.reason === "muted")
       expect(muteAudits).toHaveLength(1)
       expect(adapter.send).not.toHaveBeenCalled()
     } finally {
@@ -1703,9 +1771,7 @@ describe("outbound-runner — drain error visibility", () => {
     try {
       // pollIntervalMs 1 → dozens of failing drain passes in 120 ms.
       await runOnce(new Map())
-      expect(
-        errorSpy.mock.calls.some((c) => String(c[0]).includes("drain pass failed"))
-      ).toBe(true)
+      expect(errorSpy.mock.calls.some((c) => String(c[0]).includes("drain pass failed"))).toBe(true)
       const audits = await listRecent(RUNNER_AUDIT_ID)
       const drainAudits = audits.filter(
         (a) => a.kind === "adapter.error" && a.reason === "drain_failed"

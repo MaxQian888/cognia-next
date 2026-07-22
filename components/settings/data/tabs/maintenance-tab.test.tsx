@@ -22,12 +22,54 @@ jest.mock("@/lib/data/clear", () => ({
   clearAll: jest.fn(),
   clearTables: jest.fn(),
 }))
+const mockTrackEvent = jest.fn().mockResolvedValue(true)
+jest.mock("@/lib/telemetry/events/track-event", () => ({
+  trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
+}))
 
 import { MaintenanceTab } from "./maintenance-tab"
 
 beforeEach(() => {
   saveMock.mockClear()
+  mockTrackEvent.mockClear()
+  localStorage.clear()
   storeState = { settings: { storageRetention: { traceRetentionDays: 30 } }, save: saveMock }
+})
+
+describe("<MaintenanceTab /> privacy block", () => {
+  it("updates the real behavior-telemetry consent while preserving the legacy setting alias", async () => {
+    const user = userEvent.setup()
+    render(<MaintenanceTab />)
+
+    await user.click(screen.getByRole("switch"))
+
+    expect(saveMock).toHaveBeenCalledWith({
+      telemetryEnabled: true,
+      behaviorTelemetry: expect.objectContaining({ enabled: true }),
+    })
+    expect(
+      JSON.parse(localStorage.getItem("cognia-behavior-telemetry-enabled") ?? "{}")
+    ).toMatchObject({ enabled: true })
+    expect(mockTrackEvent).toHaveBeenCalledWith("telemetry.preference.changed", { enabled: true })
+  })
+
+  it("records opt-out before disabling consent", async () => {
+    localStorage.setItem("cognia-behavior-telemetry-enabled", "true")
+    storeState.settings = {
+      storageRetention: { traceRetentionDays: 30 },
+      telemetryEnabled: true,
+      behaviorTelemetry: { enabled: true },
+    }
+    const user = userEvent.setup()
+    render(<MaintenanceTab />)
+
+    await user.click(screen.getByRole("switch"))
+
+    expect(mockTrackEvent).toHaveBeenCalledWith("telemetry.preference.changed", { enabled: false })
+    expect(
+      JSON.parse(localStorage.getItem("cognia-behavior-telemetry-enabled") ?? "{}")
+    ).toMatchObject({ enabled: false })
+  })
 })
 
 describe("<MaintenanceTab /> retention block", () => {

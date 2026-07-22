@@ -50,6 +50,7 @@
 import "./desktop-sync-source"
 import "./desktop-message-source"
 import "./a2ui-dispatch"
+import "./behavior-telemetry"
 import "./initializers"
 import "./connector-runtime"
 import "./backup-scheduler"

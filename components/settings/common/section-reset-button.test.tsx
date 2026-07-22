@@ -17,12 +17,19 @@ jest.mock("@/stores/settings", () => ({
 
 const toastSuccess = jest.fn()
 jest.mock("sonner", () => ({ toast: { success: (...a: unknown[]) => toastSuccess(...a) } }))
+const mockTrackEvent = jest.fn().mockResolvedValue(true)
+jest.mock("@/lib/telemetry/events/track-event", () => ({
+  trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
+}))
 
+import { resetKeysForSection } from "@/lib/settings/section-keys"
 import { SectionResetButton } from "./section-reset-button"
 
 beforeEach(() => {
   resetMock.mockClear()
   toastSuccess.mockClear()
+  mockTrackEvent.mockClear()
+  localStorage.clear()
 })
 
 describe("SectionResetButton", () => {
@@ -42,7 +49,39 @@ describe("SectionResetButton", () => {
     fireEvent.click(screen.getByTestId("section-reset-button"))
     await user.click(await screen.findByTestId("section-reset-confirm"))
     await waitFor(() => expect(resetMock).toHaveBeenCalledTimes(1))
-    expect(resetMock).toHaveBeenCalledWith(["biometricRequiredFor", "pluginSecurityPosture"])
+    // The button's contract is "hand the section's owned keys to the store" —
+    // which keys the section owns is pinned by section-keys.test.ts, so reading
+    // them here keeps this from re-breaking every time a key joins a section.
+    const securityKeys = resetKeysForSection("security")
+    expect(securityKeys).toContain("biometricRequiredFor")
+    expect(resetMock).toHaveBeenCalledWith(securityKeys)
     expect(toastSuccess).toHaveBeenCalled()
+  })
+
+  it("resets the data section's real telemetry consent", async () => {
+    localStorage.setItem("cognia-behavior-telemetry-enabled", "true")
+    const user = userEvent.setup()
+    render(<SectionResetButton sectionId="data" />)
+    fireEvent.click(screen.getByTestId("section-reset-button"))
+    await user.click(await screen.findByTestId("section-reset-confirm"))
+    await waitFor(() => expect(resetMock).toHaveBeenCalledTimes(1))
+
+    expect(mockTrackEvent).toHaveBeenCalledWith("telemetry.preference.changed", { enabled: false })
+    expect(
+      JSON.parse(localStorage.getItem("cognia-behavior-telemetry-enabled") ?? "{}")
+    ).toMatchObject({ enabled: false })
+  })
+
+  it("restores data defaults without emitting an opt-out event when already disabled", async () => {
+    const user = userEvent.setup()
+    render(<SectionResetButton sectionId="data" />)
+    fireEvent.click(screen.getByTestId("section-reset-button"))
+    await user.click(await screen.findByTestId("section-reset-confirm"))
+    await waitFor(() => expect(resetMock).toHaveBeenCalledTimes(1))
+
+    expect(mockTrackEvent).not.toHaveBeenCalled()
+    expect(
+      JSON.parse(localStorage.getItem("cognia-behavior-telemetry-enabled") ?? "{}")
+    ).toMatchObject({ enabled: false })
   })
 })

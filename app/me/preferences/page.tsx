@@ -15,7 +15,7 @@
  */
 
 import { useTranslations } from "next-intl"
-
+import { useEffect } from "react"
 import { BiometricRow } from "@/components/mobile/me/biometric-row"
 import { MeSection } from "@/components/mobile/me/me-section"
 import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
@@ -31,6 +31,11 @@ import {
 import type { BiometricGuardPolicy } from "@cognia/agent-config-types"
 import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
 import { useSettingsPatch } from "@/hooks/use-settings-patch"
+import {
+  getBehaviorTelemetrySettings,
+  setBehaviorTelemetryEnabled,
+} from "@/lib/telemetry/events/settings"
+import { trackEvent } from "@/lib/telemetry/events/track-event"
 import { useSettingsStore } from "@/stores/settings"
 
 export default function MobilePreferencesPage() {
@@ -45,7 +50,16 @@ export default function MobilePreferencesPage() {
   const defaultModel = settings?.defaultModel ?? ""
   const policy: BiometricGuardPolicy = settings?.biometricRequiredFor ?? DEFAULT_BIOMETRIC_GUARD
   const reduceMotion = settings?.reduceMotion ?? false
-  const telemetryEnabled = settings?.telemetryEnabled ?? false
+  const telemetryEnabled =
+    settings?.behaviorTelemetry?.enabled ??
+    settings?.telemetryEnabled ??
+    getBehaviorTelemetrySettings().enabled
+
+  useEffect(() => {
+    if (!settings?.behaviorTelemetry && settings?.telemetryEnabled) {
+      setBehaviorTelemetryEnabled(true)
+    }
+  }, [settings?.behaviorTelemetry, settings?.telemetryEnabled])
 
   const updateBiometric = (patch: Partial<BiometricGuardPolicy>) =>
     update({ biometricRequiredFor: { ...policy, ...patch } })
@@ -137,7 +151,12 @@ export default function MobilePreferencesPage() {
             label={tPanel("telemetry")}
             help={tPanel("telemetryHelp")}
             checked={telemetryEnabled}
-            onChange={(v) => void update({ telemetryEnabled: v })}
+            onChange={(v) => {
+              if (!v) void trackEvent("telemetry.preference.changed", { enabled: false })
+              const behaviorTelemetry = setBehaviorTelemetryEnabled(v)
+              if (v) void trackEvent("telemetry.preference.changed", { enabled: true })
+              void update({ telemetryEnabled: v, behaviorTelemetry })
+            }}
             testid="pref-telemetry"
           />
         </MeSection>

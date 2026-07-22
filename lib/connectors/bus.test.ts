@@ -9,6 +9,12 @@ import type {
   OutboundRequest,
   ConnectorCallbackEvent,
 } from "@/types/connectors"
+
+const mockTrackEvent = jest.fn().mockResolvedValue(true)
+jest.mock("@/lib/telemetry/events/track-event", () => ({
+  trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
+}))
+
 import { getBus, __resetBusForTesting } from "./bus"
 import { appendAudit } from "./audit"
 import { evaluatePolicy } from "./policy-eval"
@@ -86,6 +92,7 @@ function makeRequest(): OutboundRequest {
 
 beforeEach(() => {
   __resetBusForTesting()
+  mockTrackEvent.mockClear()
 })
 
 describe("ConnectorBus — adapter registry", () => {
@@ -119,6 +126,94 @@ describe("ConnectorBus — adapter registry", () => {
   it("unregisterAdapter on unknown id is a no-op", () => {
     const bus = getBus()
     expect(() => bus.unregisterAdapter("nonexistent")).not.toThrow()
+  })
+})
+
+describe("ConnectorBus — outbound behavior telemetry", () => {
+  it("records both successful and rejected sends at the central bus boundary", async () => {
+    const bus = getBus()
+    const adapter = makeAdapter("a1")
+    bus.registerAdapter(adapter)
+
+    await expect(bus.sendOutbound("a1", makeRequest())).resolves.toMatchObject({ ok: true })
+    await expect(bus.sendOutbound("missing", makeRequest())).resolves.toMatchObject({ ok: false })
+
+    expect(mockTrackEvent.mock.calls).toEqual([
+      ["connector.message.sent", { adapterId: "a1", platform: "telegram", outcome: "succeeded" }],
+      [
+        "connector.message.sent",
+        {
+          adapterId: "missing",
+          platform: "unknown",
+          outcome: "failed",
+          errorCode: "adapter_not_found",
+        },
+      ],
+    ])
+  })
+
+  it("records adapter-declared failures with and without an error code", async () => {
+    const bus = getBus()
+    const coded = makeAdapter("coded")
+    const uncoded = makeAdapter("uncoded")
+    jest.mocked(coded.send).mockResolvedValue({
+      ok: false,
+      error: { code: "rate_limited", message: "private", retryable: true },
+    })
+    jest.mocked(uncoded.send).mockResolvedValue({ ok: false })
+    bus.registerAdapter(coded)
+    bus.registerAdapter(uncoded)
+
+    await expect(bus.sendOutbound("coded", makeRequest())).resolves.toMatchObject({ ok: false })
+    await expect(bus.sendOutbound("uncoded", makeRequest())).resolves.toMatchObject({ ok: false })
+
+    expect(mockTrackEvent.mock.calls).toEqual([
+      [
+        "connector.message.sent",
+        {
+          adapterId: "coded",
+          platform: "telegram",
+          outcome: "failed",
+          errorCode: "rate_limited",
+        },
+      ],
+      ["connector.message.sent", { adapterId: "uncoded", platform: "telegram", outcome: "failed" }],
+    ])
+    expect(JSON.stringify(mockTrackEvent.mock.calls)).not.toContain("private")
+  })
+
+  it("records an adapter exception by class and preserves the rejection", async () => {
+    const bus = getBus()
+    const adapter = makeAdapter("throws")
+    jest.mocked(adapter.send).mockRejectedValue(new TypeError("private connector failure"))
+    bus.registerAdapter(adapter)
+
+    await expect(bus.sendOutbound("throws", makeRequest())).rejects.toThrow(
+      "private connector failure"
+    )
+    expect(mockTrackEvent).toHaveBeenCalledWith("connector.message.sent", {
+      adapterId: "throws",
+      platform: "telegram",
+      outcome: "failed",
+      errorCode: "TypeError",
+    })
+    expect(JSON.stringify(mockTrackEvent.mock.calls)).not.toContain("private connector failure")
+  })
+
+  it("uses a stable fallback code for non-Error adapter rejections", async () => {
+    const bus = getBus()
+    const adapter = makeAdapter("rejects-value")
+    jest.mocked(adapter.send).mockRejectedValue("private rejection")
+    bus.registerAdapter(adapter)
+
+    await expect(bus.sendOutbound("rejects-value", makeRequest())).rejects.toBe("private rejection")
+    expect(mockTrackEvent).toHaveBeenCalledWith("connector.message.sent", {
+      adapterId: "rejects-value",
+      platform: "telegram",
+      outcome: "failed",
+      errorCode: "Error",
+    })
+    expect(JSON.stringify(mockTrackEvent.mock.calls)).not.toContain("private rejection")
   })
 })
 

@@ -8,6 +8,7 @@
 import { nanoid } from "nanoid"
 import { getDb } from "@/lib/db/schema"
 import { recordWorkflowStepUsage, swallowUsageWrite } from "@/lib/db/session-usage"
+import { trackEvent } from "@/lib/telemetry/events/track-event"
 import type {
   RunEventLogLevel,
   RunEventType,
@@ -185,18 +186,40 @@ export interface StepIterationMeta {
  * the same microtask land in a single `bulkPut` instead of N transactions.
  */
 export function createRunLogger(runId: string) {
+  let behaviorStartedAt = Date.now()
+  const durationMs = () => Math.max(0, Date.now() - behaviorStartedAt)
+
   return {
-    runStarted: (payload?: unknown) => enqueueRunEvent({ runId, type: "run_started", payload }),
-    runCompleted: (output?: unknown) =>
-      enqueueRunEvent({ runId, type: "run_completed", payload: output }),
-    runFailed: (error: { message: string; stack?: string; nodeId?: string; code?: string }) =>
-      enqueueRunEvent({
+    runStarted: (payload?: unknown) => {
+      behaviorStartedAt = Date.now()
+      const trigger =
+        payload && typeof payload === "object" && "trigger" in payload
+          ? (payload as { trigger?: unknown }).trigger
+          : undefined
+      const triggerKind =
+        trigger && typeof trigger === "object" && "kind" in trigger
+          ? String((trigger as { kind?: unknown }).kind ?? "unknown")
+          : "unknown"
+      void trackEvent("workflow.run.started", { runId, trigger: triggerKind })
+      return enqueueRunEvent({ runId, type: "run_started", payload })
+    },
+    runCompleted: (output?: unknown) => {
+      void trackEvent("workflow.run.completed", { runId, durationMs: durationMs() })
+      return enqueueRunEvent({ runId, type: "run_completed", payload: output })
+    },
+    runFailed: (error: { message: string; stack?: string; nodeId?: string; code?: string }) => {
+      void trackEvent("workflow.run.failed", {
+        runId,
+        durationMs: durationMs(),
+        ...(error.code ? { errorCode: error.code } : {}),
+      })
+      return enqueueRunEvent({
         runId,
         type: "run_failed",
         level: "error",
         payload: error,
-      }),
-    runCancelled: () => enqueueRunEvent({ runId, type: "run_cancelled" }),
+      })
+    },
     stepStarted: (stepId: string, params?: unknown, meta?: StepIterationMeta) =>
       enqueueRunEvent({ runId, type: "step_started", stepId, payload: { params, ...meta } }),
     stepCompleted: (stepId: string, output: unknown, meta?: StepIterationMeta) =>

@@ -973,12 +973,36 @@ export class ConnectorBus {
   async sendOutbound(adapterId: string, req: OutboundRequest): Promise<OutboundResult> {
     const a = this.adapters.get(adapterId)
     if (!a) {
-      return {
+      const result: OutboundResult = {
         ok: false,
         error: { code: "adapter_not_found", message: adapterId, retryable: false },
       }
+      void trackEvent("connector.message.sent", {
+        adapterId,
+        platform: "unknown",
+        outcome: "failed",
+        errorCode: result.error?.code ?? "adapter_not_found",
+      })
+      return result
     }
-    return a.send(req)
+    try {
+      const result = await a.send(req)
+      void trackEvent("connector.message.sent", {
+        adapterId,
+        platform: a.meta.type,
+        outcome: result.ok ? "succeeded" : "failed",
+        ...(!result.ok && result.error?.code ? { errorCode: result.error.code } : {}),
+      })
+      return result
+    } catch (error) {
+      void trackEvent("connector.message.sent", {
+        adapterId,
+        platform: a.meta.type,
+        outcome: "failed",
+        errorCode: error instanceof Error ? error.name : "Error",
+      })
+      throw error
+    }
   }
 
   /**

@@ -13,6 +13,10 @@ import { resolveActiveThemeColors } from "@/lib/themes"
 import { resolveRadiusVar } from "@/lib/appearance/radius-applier"
 import { resolveTypographyVars } from "@/lib/appearance/typography-applier"
 import { DEFAULT_DENSITY } from "@/types/appearance"
+import {
+  configureBehaviorTelemetrySettings,
+  saveBehaviorTelemetrySettings,
+} from "@/lib/telemetry/events/settings"
 
 /**
  * Mounts at the root layout and triggers `useSettingsStore.load()` exactly
@@ -43,10 +47,27 @@ export function SettingsHydrator(): null {
   const radius = useSettingsStore((s) => s.settings?.radius)
   const typography = useSettingsStore((s) => s.settings?.typographyExt)
   const density = useSettingsStore((s) => s.settings?.density)
+  const behaviorTelemetry = useSettingsStore((s) => s.settings?.behaviorTelemetry)
 
   useEffect(() => {
     void useSettingsStore.getState().load()
   }, [])
+
+  // AppSettings is the canonical account-scoped policy. Mirror it into the
+  // renderer's synchronous runtime reader so settings sync, companion writes,
+  // and section resets take effect without requiring a page reload.
+  useEffect(() => {
+    if (!behaviorTelemetry) return
+    configureBehaviorTelemetrySettings(behaviorTelemetry)
+    saveBehaviorTelemetrySettings(behaviorTelemetry)
+  }, [behaviorTelemetry])
+
+  useEffect(
+    () => () => {
+      configureBehaviorTelemetrySettings(null)
+    },
+    []
+  )
 
   // Persist the mirror snapshot whenever the visible appearance fields change.
   // Driven by React's render cycle rather than a Zustand `subscribe` so the

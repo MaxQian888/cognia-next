@@ -6,6 +6,7 @@ import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
 
 const saveMock = jest.fn(async (_patch: Record<string, unknown>): Promise<void> => undefined)
 const enqueueMock = jest.fn(async (_arg: unknown): Promise<void> => undefined)
+const mockTrackEvent = jest.fn().mockResolvedValue(true)
 
 const settingsRef: { current: Record<string, unknown> | undefined } = {
   current: {
@@ -35,6 +36,9 @@ jest.mock("@/stores/settings", () => ({
 
 jest.mock("@/lib/db/mobile-outbound-queue", () => ({
   enqueue: (arg: unknown) => enqueueMock(arg),
+}))
+jest.mock("@/lib/telemetry/events/track-event", () => ({
+  trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
 }))
 
 // Render the Radix Select as a native <select> so `onValueChange` is testable.
@@ -85,11 +89,13 @@ import Page from "./page"
 beforeEach(() => {
   saveMock.mockReset()
   enqueueMock.mockReset()
+  mockTrackEvent.mockClear()
   settingsRef.current = {
     fontScale: "md",
     defaultModel: "",
     biometricRequiredFor: { ...DEFAULT_BIOMETRIC_GUARD },
   }
+  localStorage.clear()
 })
 
 describe("MobilePreferencesPage", () => {
@@ -123,7 +129,49 @@ describe("MobilePreferencesPage", () => {
     fireEvent.click(screen.getByTestId("pref-telemetry"))
     await Promise.resolve()
     await Promise.resolve()
-    expect(saveMock).toHaveBeenCalledWith({ telemetryEnabled: true })
+    expect(saveMock).toHaveBeenCalledWith({
+      telemetryEnabled: true,
+      behaviorTelemetry: expect.objectContaining({ enabled: true }),
+    })
+    expect(
+      JSON.parse(localStorage.getItem("cognia-behavior-telemetry-enabled") ?? "{}")
+    ).toMatchObject({ enabled: true })
+    expect(mockTrackEvent).toHaveBeenCalledWith("telemetry.preference.changed", { enabled: true })
+  })
+
+  it("records opt-out before disabling the real consent", async () => {
+    localStorage.setItem("cognia-behavior-telemetry-enabled", "true")
+    settingsRef.current = {
+      ...settingsRef.current,
+      telemetryEnabled: true,
+      behaviorTelemetry: { enabled: true },
+    }
+    render(<Page />)
+
+    fireEvent.click(screen.getByTestId("pref-telemetry"))
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(mockTrackEvent).toHaveBeenCalledWith("telemetry.preference.changed", { enabled: false })
+    expect(
+      JSON.parse(localStorage.getItem("cognia-behavior-telemetry-enabled") ?? "{}")
+    ).toMatchObject({ enabled: false })
+  })
+
+  it("migrates an enabled legacy telemetry preference into the real consent", () => {
+    settingsRef.current = {
+      fontScale: "md",
+      defaultModel: "",
+      telemetryEnabled: true,
+      biometricRequiredFor: { ...DEFAULT_BIOMETRIC_GUARD },
+    }
+
+    render(<Page />)
+
+    expect(screen.getByTestId("pref-telemetry")).toHaveAttribute("aria-checked", "true")
+    expect(
+      JSON.parse(localStorage.getItem("cognia-behavior-telemetry-enabled") ?? "{}")
+    ).toMatchObject({ enabled: true })
   })
 
   it("writes the default model patch and enqueues a server-bound update", async () => {

@@ -16,6 +16,7 @@
  */
 
 import { getDb } from "@/lib/db/schema"
+import { trackEvent } from "@/lib/telemetry/events/track-event"
 import { requestCancelRun } from "./run-cancel-registry"
 import { getExecutorId } from "./run-lease"
 import { notifyCompanionsOfRunState } from "./companion-run-events"
@@ -34,6 +35,7 @@ export interface CancelRunResult {
 export async function cancelWorkflowRun(runId: string, reason: string): Promise<CancelRunResult> {
   // 1. Local abort.
   if (requestCancelRun(runId, reason)) {
+    void trackEvent("workflow.run.cancelled", { runId })
     return { cancelled: true, live: true, mode: "aborted" }
   }
 
@@ -47,11 +49,13 @@ export async function cancelWorkflowRun(runId: string, reason: string): Promise<
   const now = Date.now()
   if (row.lease && row.lease.expiresAt > now && row.lease.ownerId !== getExecutorId()) {
     await db.workflowRuns.update(runId, { cancelRequestedAt: now })
+    void trackEvent("workflow.run.cancelled", { runId })
     return { cancelled: true, live: false, mode: "lease-signalled" }
   }
 
   // 3. Soft cancel.
   await db.workflowRuns.update(runId, { status: "cancelled", completedAt: now })
+  void trackEvent("workflow.run.cancelled", { runId })
   // Fan the terminal state out (sync invalidate + status frame + push
   // policy) — a direct Dexie write bypasses the persistRunState funnel.
   void notifyCompanionsOfRunState({ runId, workflowId: row.workflowId, status: "cancelled" })

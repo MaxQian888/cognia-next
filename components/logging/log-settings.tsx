@@ -57,11 +57,14 @@ import { clearTelemetrySecret, persistTelemetrySecret } from "@/lib/logging/tele
 import { configureTauriSidecarTelemetry } from "@/lib/logging/transports/tauri-fetch-shim"
 import { isTauri } from "@/lib/platform/detect"
 import {
-  isBehaviorTelemetryEnabled,
-  setBehaviorTelemetryEnabled,
+  BEHAVIOR_TELEMETRY_CATEGORIES,
+  DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS,
+  getBehaviorTelemetrySettings,
+  saveBehaviorTelemetrySettings,
 } from "@/lib/telemetry/events/settings"
 import { trackEvent } from "@/lib/telemetry/events/track-event"
 import { clearBehaviorEvents, exportBehaviorEvents } from "@/lib/db/behavior-events"
+import { useSettingsStore } from "@/stores/settings"
 
 export interface LogSettingsProps {
   className?: string
@@ -161,6 +164,7 @@ function persistSamplingRules(rules: SamplingRule[]): void {
 
 export function LogSettings({ className }: LogSettingsProps) {
   const t = useTranslations("logging")
+  const saveAppSettings = useSettingsStore((state) => state.save)
   const bootstrapState = getLoggingBootstrapState()
   // Cognia mirrors langfuse / OTel keys into a global observability settings
   // store; cognia-next has no such store yet, so the panel relies entirely on
@@ -195,9 +199,7 @@ export function LogSettings({ className }: LogSettingsProps) {
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle")
   const [langfuseSecretDraft, setLangfuseSecretDraft] = useState("")
   const [grafanaTokenDraft, setGrafanaTokenDraft] = useState("")
-  const [behaviorTelemetryEnabled, setBehaviorTelemetryEnabledState] = useState(() =>
-    isBehaviorTelemetryEnabled()
-  )
+  const [behaviorTelemetry, setBehaviorTelemetry] = useState(() => getBehaviorTelemetrySettings())
 
   // Transport settings (stored separately)
   const [transports, setTransports] = useState<LoggingTransportSettings>(() => ({
@@ -337,13 +339,19 @@ export function LogSettings({ className }: LogSettingsProps) {
     setSaveStatus("saving")
 
     try {
-      const behaviorPreferenceChanged = behaviorTelemetryEnabled !== isBehaviorTelemetryEnabled()
-      if (behaviorPreferenceChanged && !behaviorTelemetryEnabled) {
-        await trackEvent("telemetry.preference.changed", { enabled: behaviorTelemetryEnabled })
+      const previousBehaviorTelemetry = getBehaviorTelemetrySettings()
+      const behaviorPreferenceChanged =
+        behaviorTelemetry.enabled !== previousBehaviorTelemetry.enabled
+      if (behaviorPreferenceChanged && !behaviorTelemetry.enabled) {
+        await trackEvent("telemetry.preference.changed", { enabled: behaviorTelemetry.enabled })
       }
-      setBehaviorTelemetryEnabled(behaviorTelemetryEnabled)
-      if (behaviorPreferenceChanged && behaviorTelemetryEnabled) {
-        await trackEvent("telemetry.preference.changed", { enabled: behaviorTelemetryEnabled })
+      saveBehaviorTelemetrySettings(behaviorTelemetry)
+      void saveAppSettings({
+        telemetryEnabled: behaviorTelemetry.enabled,
+        behaviorTelemetry,
+      })
+      if (behaviorPreferenceChanged && behaviorTelemetry.enabled) {
+        await trackEvent("telemetry.preference.changed", { enabled: behaviorTelemetry.enabled })
       }
       if (langfuseSecretDraft) {
         await persistTelemetrySecret("langfuseSecretKey", langfuseSecretDraft)
@@ -425,12 +433,14 @@ export function LogSettings({ className }: LogSettingsProps) {
     }
   }
 
-  const handleExportBehaviorEvents = async () => {
-    const contents = await exportBehaviorEvents()
-    const url = URL.createObjectURL(new Blob([contents], { type: "application/json" }))
+  const handleExportBehaviorEvents = async (format: "json" | "csv") => {
+    const contents = await exportBehaviorEvents(format)
+    const url = URL.createObjectURL(
+      new Blob([contents], { type: format === "json" ? "application/json" : "text/csv" })
+    )
     const anchor = document.createElement("a")
     anchor.href = url
-    anchor.download = `cognia-behavior-events-${new Date().toISOString()}.json`
+    anchor.download = `cognia-behavior-events-${new Date().toISOString()}.${format}`
     anchor.click()
     URL.revokeObjectURL(url)
   }
@@ -507,6 +517,11 @@ export function LogSettings({ className }: LogSettingsProps) {
     setRetention({
       maxEntries: 10000,
       maxAgeDays: 7,
+    })
+    setBehaviorTelemetry({
+      ...DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS,
+      destinations: { ...DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS.destinations },
+      categories: { ...DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS.categories },
     })
     setHasChanges(true)
   }
@@ -1554,16 +1569,158 @@ export function LogSettings({ className }: LogSettingsProps) {
                 </div>
                 <Switch
                   data-testid="behavior-telemetry-switch"
-                  checked={behaviorTelemetryEnabled}
+                  checked={behaviorTelemetry.enabled}
                   onCheckedChange={(checked) => {
-                    setBehaviorTelemetryEnabledState(checked)
+                    setBehaviorTelemetry((prev) => ({ ...prev, enabled: checked }))
                     setHasChanges(true)
                   }}
                 />
               </div>
+              <Separator />
+              <div className="space-y-3">
+                <div>
+                  <Label>{t("settings.behaviorTelemetry.destinations.title")}</Label>
+                  <p className="text-xs text-muted-foreground">
+                    {t("settings.behaviorTelemetry.destinations.description")}
+                  </p>
+                </div>
+                {(["local", "remote"] as const).map((destination) => (
+                  <div key={destination} className="flex items-start justify-between gap-3">
+                    <div>
+                      <Label>
+                        {t(`settings.behaviorTelemetry.destinations.${destination}.label`)}
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        {t(`settings.behaviorTelemetry.destinations.${destination}.description`)}
+                      </p>
+                    </div>
+                    <Switch
+                      data-testid={`behavior-telemetry-${destination}-switch`}
+                      checked={behaviorTelemetry.destinations[destination]}
+                      disabled={!behaviorTelemetry.enabled}
+                      onCheckedChange={(checked) => {
+                        setBehaviorTelemetry((prev) => ({
+                          ...prev,
+                          destinations: { ...prev.destinations, [destination]: checked },
+                        }))
+                        setHasChanges(true)
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+              <Separator />
+              <div className="space-y-3">
+                <div>
+                  <Label>{t("settings.behaviorTelemetry.categories.title")}</Label>
+                  <p className="text-xs text-muted-foreground">
+                    {t("settings.behaviorTelemetry.categories.description")}
+                  </p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {BEHAVIOR_TELEMETRY_CATEGORIES.map((category) => (
+                    <div
+                      key={category}
+                      className="flex items-center justify-between gap-3 rounded-md border p-3"
+                    >
+                      <Label>{t(`settings.behaviorTelemetry.categories.${category}`)}</Label>
+                      <Switch
+                        data-testid={`behavior-telemetry-category-${category}`}
+                        checked={behaviorTelemetry.categories[category]}
+                        disabled={!behaviorTelemetry.enabled}
+                        onCheckedChange={(checked) => {
+                          setBehaviorTelemetry((prev) => ({
+                            ...prev,
+                            categories: { ...prev.categories, [category]: checked },
+                          }))
+                          setHasChanges(true)
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <Separator />
+              <div className="grid gap-5 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <Label>{t("settings.behaviorTelemetry.sampleRate")}</Label>
+                    <span className="text-xs tabular-nums text-muted-foreground">
+                      {Math.round(behaviorTelemetry.sampleRate * 100)}%
+                    </span>
+                  </div>
+                  <Slider
+                    data-testid="behavior-telemetry-sample-rate"
+                    value={[Math.round(behaviorTelemetry.sampleRate * 100)]}
+                    min={0}
+                    max={100}
+                    step={5}
+                    disabled={!behaviorTelemetry.enabled}
+                    onValueChange={([value]) => {
+                      setBehaviorTelemetry((prev) => ({ ...prev, sampleRate: value / 100 }))
+                      setHasChanges(true)
+                    }}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <Label>{t("settings.behaviorTelemetry.retentionDays")}</Label>
+                    <span className="text-xs tabular-nums text-muted-foreground">
+                      {behaviorTelemetry.retentionDays}
+                    </span>
+                  </div>
+                  <Slider
+                    data-testid="behavior-telemetry-retention-days"
+                    value={[behaviorTelemetry.retentionDays]}
+                    min={1}
+                    max={365}
+                    step={1}
+                    disabled={!behaviorTelemetry.enabled || !behaviorTelemetry.destinations.local}
+                    onValueChange={([value]) => {
+                      setBehaviorTelemetry((prev) => ({ ...prev, retentionDays: value }))
+                      setHasChanges(true)
+                    }}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="behavior-telemetry-max-events">
+                    {t("settings.behaviorTelemetry.maxStoredEvents")}
+                  </Label>
+                  <Input
+                    id="behavior-telemetry-max-events"
+                    type="number"
+                    min={100}
+                    max={100000}
+                    step={100}
+                    value={behaviorTelemetry.maxStoredEvents}
+                    disabled={!behaviorTelemetry.enabled || !behaviorTelemetry.destinations.local}
+                    onChange={(event) => {
+                      setBehaviorTelemetry((prev) => ({
+                        ...prev,
+                        maxStoredEvents: Math.min(
+                          100000,
+                          Math.max(100, Number(event.target.value) || 100)
+                        ),
+                      }))
+                      setHasChanges(true)
+                    }}
+                  />
+                </div>
+              </div>
               <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="outline" onClick={handleExportBehaviorEvents}>
-                  {t("settings.behaviorTelemetry.export")}
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void handleExportBehaviorEvents("json")}
+                >
+                  {t("settings.behaviorTelemetry.exportJson")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void handleExportBehaviorEvents("csv")}
+                >
+                  {t("settings.behaviorTelemetry.exportCsv")}
                 </Button>
                 <Button
                   type="button"

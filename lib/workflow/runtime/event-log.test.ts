@@ -2,6 +2,12 @@
  * @jest-environment jsdom
  */
 import "fake-indexeddb/auto"
+
+const mockTrackEvent = jest.fn().mockResolvedValue(true)
+jest.mock("@/lib/telemetry/events/track-event", () => ({
+  trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
+}))
+
 import {
   appendEvent,
   appendEvents,
@@ -19,6 +25,7 @@ beforeEach(async () => {
   getDb()
   await whenSeeded()
   await getDb().workflowRunEvents.clear()
+  mockTrackEvent.mockClear()
 })
 
 describe("event-log ts monotonicity", () => {
@@ -104,6 +111,39 @@ describe("event-log ts monotonicity", () => {
     await logger.stepCompleted("n1", { ok: true })
     const events = await listRunEvents("run_d")
     expect(events.map((e) => e.type)).toEqual(["step_started", "step_completed"])
+  })
+
+  it("mirrors every workflow lifecycle outcome into typed behavior telemetry", async () => {
+    const logger = createRunLogger("run_lifecycle")
+    await logger.runStarted({ trigger: { kind: "trigger.manual" } })
+    await logger.runCompleted({ ok: true })
+    await logger.runFailed({ message: "private failure", code: "timeout" })
+
+    expect(mockTrackEvent.mock.calls).toEqual([
+      ["workflow.run.started", { runId: "run_lifecycle", trigger: "trigger.manual" }],
+      ["workflow.run.completed", expect.objectContaining({ runId: "run_lifecycle" })],
+      [
+        "workflow.run.failed",
+        expect.objectContaining({ runId: "run_lifecycle", errorCode: "timeout" }),
+      ],
+    ])
+    expect(JSON.stringify(mockTrackEvent.mock.calls)).not.toContain("private failure")
+  })
+
+  it("normalizes missing or malformed workflow telemetry metadata", async () => {
+    const logger = createRunLogger("run_unknown")
+    await logger.runStarted()
+    await logger.runStarted({ trigger: "manual" })
+    await logger.runStarted({ trigger: { kind: null } })
+    await logger.runFailed({ message: "private failure" })
+
+    expect(mockTrackEvent.mock.calls).toEqual([
+      ["workflow.run.started", { runId: "run_unknown", trigger: "unknown" }],
+      ["workflow.run.started", { runId: "run_unknown", trigger: "unknown" }],
+      ["workflow.run.started", { runId: "run_unknown", trigger: "unknown" }],
+      ["workflow.run.failed", expect.not.objectContaining({ errorCode: expect.anything() })],
+    ])
+    expect(JSON.stringify(mockTrackEvent.mock.calls)).not.toContain("private failure")
   })
 
   it("listRunEvents only returns the requested run's events", async () => {

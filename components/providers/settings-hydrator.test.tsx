@@ -3,6 +3,10 @@ import { useSettingsStore } from "@/stores/settings"
 import { SettingsHydrator } from "./settings-hydrator"
 import { getSettings } from "@/lib/db/settings"
 import { BOOT_MIRROR_STORAGE_KEY } from "@/lib/appearance/boot-script"
+import {
+  DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS,
+  getBehaviorTelemetrySettings,
+} from "@/lib/telemetry/events/settings"
 
 jest.mock("@/lib/db/settings", () => ({
   getSettings: jest.fn().mockResolvedValue({
@@ -143,5 +147,26 @@ describe("SettingsHydrator", () => {
     mockResolvedTheme = undefined
     render(<SettingsHydrator />)
     expect(window.localStorage.getItem(BOOT_MIRROR_STORAGE_KEY)).toBeNull()
+  })
+
+  it("installs canonical behavior telemetry updates in the renderer runtime", async () => {
+    const behaviorTelemetry = {
+      ...DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS,
+      enabled: true,
+      sampleRate: 0.25,
+    }
+    useSettingsStore.setState({
+      settings: { id: "singleton", behaviorTelemetry } as never,
+      loaded: true,
+    })
+
+    render(<SettingsHydrator />)
+
+    await waitFor(() => {
+      expect(getBehaviorTelemetrySettings()).toMatchObject({ enabled: true, sampleRate: 0.25 })
+    })
+    expect(
+      JSON.parse(window.localStorage.getItem("cognia-behavior-telemetry-enabled") ?? "{}")
+    ).toMatchObject({ enabled: true, sampleRate: 0.25 })
   })
 })

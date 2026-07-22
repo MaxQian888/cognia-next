@@ -13,6 +13,11 @@ const mockGetRegisteredModules = jest.fn<string[], []>()
 const mockPersistTelemetrySecret = jest.fn().mockResolvedValue(undefined)
 const mockClearTelemetrySecret = jest.fn().mockResolvedValue(undefined)
 const mockTrackEvent = jest.fn().mockResolvedValue(true)
+const mockClearBehaviorEvents = jest.fn().mockResolvedValue(undefined)
+const mockExportBehaviorEvents = jest.fn().mockResolvedValue("[]")
+const mockCreateObjectUrl = jest.fn().mockReturnValue("blob:behavior-events")
+const mockRevokeObjectUrl = jest.fn()
+const mockSaveAppSettings = jest.fn().mockResolvedValue(undefined)
 
 jest.mock("@/lib/logging", () => ({
   applyLoggingSettings: (...args: unknown[]) => mockApplyLoggingSettings(...args),
@@ -34,8 +39,12 @@ jest.mock("@/lib/telemetry/events/track-event", () => ({
   trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
 }))
 jest.mock("@/lib/db/behavior-events", () => ({
-  clearBehaviorEvents: jest.fn().mockResolvedValue(undefined),
-  exportBehaviorEvents: jest.fn().mockResolvedValue("[]"),
+  clearBehaviorEvents: (...args: unknown[]) => mockClearBehaviorEvents(...args),
+  exportBehaviorEvents: (...args: unknown[]) => mockExportBehaviorEvents(...args),
+}))
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: (selector: (state: { save: typeof mockSaveAppSettings }) => unknown) =>
+    selector({ save: mockSaveAppSettings }),
 }))
 
 import { LogSettings } from "./log-settings"
@@ -113,6 +122,19 @@ beforeEach(() => {
   mockPersistTelemetrySecret.mockClear()
   mockClearTelemetrySecret.mockClear()
   mockTrackEvent.mockClear()
+  mockClearBehaviorEvents.mockClear()
+  mockExportBehaviorEvents.mockClear()
+  mockCreateObjectUrl.mockClear()
+  mockRevokeObjectUrl.mockClear()
+  mockSaveAppSettings.mockClear()
+  Object.defineProperty(URL, "createObjectURL", {
+    configurable: true,
+    value: mockCreateObjectUrl,
+  })
+  Object.defineProperty(URL, "revokeObjectURL", {
+    configurable: true,
+    value: mockRevokeObjectUrl,
+  })
   mockGetBootstrap.mockReturnValue(defaultBootstrap())
   mockUseTransportHealth.mockReturnValue({ nativeLogging: defaultNativeLogging() })
   mockGetRegisteredModules.mockReturnValue(["ai", "network", "network:lark"])
@@ -148,6 +170,131 @@ describe("LogSettings — render", () => {
     // First flip a switch to surface the badge — use Reset as a deterministic trigger
     fireEvent.click(screen.getByText("Reset"))
     expect(screen.getAllByText("Unsaved changes").length).toBeGreaterThan(0)
+  })
+})
+
+describe("LogSettings — behavior telemetry", () => {
+  it("persists independent destinations and category consent", async () => {
+    render(<LogSettings />)
+    fireEvent.click(screen.getByRole("tab", { name: /Advanced/ }))
+    fireEvent.click(screen.getByTestId("behavior-telemetry-switch"))
+    fireEvent.click(screen.getByTestId("behavior-telemetry-local-switch"))
+    fireEvent.click(screen.getByTestId("behavior-telemetry-remote-switch"))
+    fireEvent.click(screen.getByTestId("behavior-telemetry-category-workflow"))
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    })
+
+    expect(
+      JSON.parse(localStorage.getItem("cognia-behavior-telemetry-enabled") ?? "{}")
+    ).toMatchObject({
+      enabled: true,
+      destinations: { local: false, remote: true },
+      categories: { workflow: false },
+    })
+    expect(mockSaveAppSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        telemetryEnabled: true,
+        behaviorTelemetry: expect.objectContaining({
+          destinations: { local: false, remote: true },
+          categories: expect.objectContaining({ workflow: false }),
+        }),
+      })
+    )
+  })
+
+  it("configures sampling, local retention, and bounded storage limits", async () => {
+    render(<LogSettings />)
+    fireEvent.click(screen.getByRole("tab", { name: /Advanced/ }))
+
+    const localSwitch = screen.getByTestId("behavior-telemetry-local-switch")
+    const remoteSwitch = screen.getByTestId("behavior-telemetry-remote-switch")
+    const maxEvents = screen.getByLabelText("Maximum local events") as HTMLInputElement
+    expect(localSwitch).toBeDisabled()
+    expect(remoteSwitch).toBeDisabled()
+    expect(maxEvents).toBeDisabled()
+
+    fireEvent.click(screen.getByTestId("behavior-telemetry-switch"))
+    const sampleSlider = screen
+      .getByTestId("behavior-telemetry-sample-rate")
+      .querySelector('[role="slider"]') as HTMLElement
+    const retentionSlider = screen
+      .getByTestId("behavior-telemetry-retention-days")
+      .querySelector('[role="slider"]') as HTMLElement
+    sampleSlider.focus()
+    fireEvent.keyDown(sampleSlider, { key: "ArrowLeft" })
+    retentionSlider.focus()
+    fireEvent.keyDown(retentionSlider, { key: "ArrowRight" })
+    fireEvent.change(maxEvents, { target: { value: "50" } })
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    })
+
+    expect(
+      JSON.parse(localStorage.getItem("cognia-behavior-telemetry-enabled") ?? "{}")
+    ).toMatchObject({
+      enabled: true,
+      sampleRate: 0.95,
+      retentionDays: 31,
+      maxStoredEvents: 100,
+    })
+  })
+
+  it("clamps the local event limit at both boundaries and handles empty input", () => {
+    render(<LogSettings />)
+    fireEvent.click(screen.getByRole("tab", { name: /Advanced/ }))
+    fireEvent.click(screen.getByTestId("behavior-telemetry-switch"))
+    const maxEvents = screen.getByLabelText("Maximum local events") as HTMLInputElement
+
+    fireEvent.change(maxEvents, { target: { value: "200000" } })
+    expect(maxEvents.value).toBe("100000")
+    fireEvent.change(maxEvents, { target: { value: "" } })
+    expect(maxEvents.value).toBe("100")
+  })
+
+  it("exports both supported formats and clears local events", async () => {
+    const click = jest.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+    render(<LogSettings />)
+    fireEvent.click(screen.getByRole("tab", { name: /Advanced/ }))
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Export JSON" }))
+      fireEvent.click(screen.getByRole("button", { name: "Export CSV" }))
+      fireEvent.click(screen.getByRole("button", { name: /Clear local events/i }))
+    })
+
+    expect(mockExportBehaviorEvents.mock.calls).toEqual([["json"], ["csv"]])
+    expect(mockCreateObjectUrl).toHaveBeenCalledTimes(2)
+    expect(mockRevokeObjectUrl).toHaveBeenCalledTimes(2)
+    expect(mockClearBehaviorEvents).toHaveBeenCalledTimes(1)
+    click.mockRestore()
+  })
+
+  it("reset restores private defaults and disables dependent controls", () => {
+    localStorage.setItem(
+      "cognia-behavior-telemetry-enabled",
+      JSON.stringify({
+        enabled: true,
+        destinations: { local: true, remote: true },
+        sampleRate: 0.25,
+        retentionDays: 90,
+        maxStoredEvents: 500,
+      })
+    )
+    render(<LogSettings />)
+    fireEvent.click(screen.getByRole("tab", { name: /Advanced/ }))
+    expect(screen.getByTestId("behavior-telemetry-remote-switch")).toHaveAttribute(
+      "aria-checked",
+      "true"
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }))
+
+    expect(screen.getByTestId("behavior-telemetry-switch")).toHaveAttribute("aria-checked", "false")
+    expect(screen.getByTestId("behavior-telemetry-remote-switch")).toBeDisabled()
+    expect(screen.getByLabelText("Maximum local events")).toBeDisabled()
   })
 })
 
@@ -390,7 +537,9 @@ describe("LogSettings — Advanced tab redaction & queue", () => {
     expect(toggle).toHaveAttribute("aria-checked", "false")
     fireEvent.click(toggle)
     await act(async () => fireEvent.click(screen.getByText("Save")))
-    expect(localStorage.getItem("cognia-behavior-telemetry-enabled")).toBe("true")
+    expect(
+      JSON.parse(localStorage.getItem("cognia-behavior-telemetry-enabled") ?? "{}")
+    ).toMatchObject({ enabled: true })
     expect(mockTrackEvent).toHaveBeenCalledWith("telemetry.preference.changed", { enabled: true })
   })
 
@@ -401,7 +550,9 @@ describe("LogSettings — Advanced tab redaction & queue", () => {
     fireEvent.click(screen.getByTestId("behavior-telemetry-switch"))
     await act(async () => fireEvent.click(screen.getByText("Save")))
     expect(mockTrackEvent).toHaveBeenCalledWith("telemetry.preference.changed", { enabled: false })
-    expect(localStorage.getItem("cognia-behavior-telemetry-enabled")).toBe("false")
+    expect(
+      JSON.parse(localStorage.getItem("cognia-behavior-telemetry-enabled") ?? "{}")
+    ).toMatchObject({ enabled: false })
   })
 
   it("toggles the redaction switch", () => {

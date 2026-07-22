@@ -4,8 +4,12 @@
 import "fake-indexeddb/auto"
 
 const mockNotify = jest.fn(async (..._a: unknown[]) => undefined)
+const mockTrackEvent = jest.fn().mockResolvedValue(true)
 jest.mock("./companion-run-events", () => ({
   notifyCompanionsOfRunState: (...a: unknown[]) => mockNotify(...a),
+}))
+jest.mock("@/lib/telemetry/events/track-event", () => ({
+  trackEvent: (...a: unknown[]) => mockTrackEvent(...a),
 }))
 
 import { cancelWorkflowRun } from "./cancel-run"
@@ -50,6 +54,7 @@ describe("cancelWorkflowRun", () => {
     const result = await cancelWorkflowRun("run_c", "test")
     expect(result).toEqual({ cancelled: true, live: true, mode: "aborted" })
     expect(ac.signal.aborted).toBe(true)
+    expect(mockTrackEvent).toHaveBeenCalledWith("workflow.run.cancelled", { runId: "run_c" })
     unregisterRun("run_c")
   })
 
@@ -65,6 +70,7 @@ describe("cancelWorkflowRun", () => {
     expect(row?.cancelRequestedAt).toEqual(expect.any(Number))
     expect(row?.status).toBe("running")
     expect(mockNotify).not.toHaveBeenCalled()
+    expect(mockTrackEvent).toHaveBeenCalledWith("workflow.run.cancelled", { runId: "run_c" })
   })
 
   it("soft-cancels when nobody drives the run (stale lease) and fans out", async () => {
@@ -81,6 +87,7 @@ describe("cancelWorkflowRun", () => {
       workflowId: "wf_c",
       status: "cancelled",
     })
+    expect(mockTrackEvent).toHaveBeenCalledWith("workflow.run.cancelled", { runId: "run_c" })
   })
 
   it("soft-cancels a run leased by this very process id but not live (crashed loop)", async () => {
@@ -101,5 +108,6 @@ describe("cancelWorkflowRun", () => {
       mode: "noop",
     })
     expect(await cancelWorkflowRun("run_ghost", "test")).toMatchObject({ mode: "noop" })
+    expect(mockTrackEvent).not.toHaveBeenCalled()
   })
 })

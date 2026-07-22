@@ -30,6 +30,14 @@ describe("getSettings", () => {
     expect(s.remoteBrowserEnabled).toBe(false)
     expect(s.customLimitsSources).toEqual([])
     expect(s.limitsQueryEnabledAccounts).toEqual([])
+    expect(s.behaviorTelemetry).toMatchObject({
+      enabled: false,
+      destinations: { local: true, remote: false },
+      categories: { chat: true, workflow: true, connector: true, agentTeam: true, system: true },
+      sampleRate: 1,
+      retentionDays: 30,
+      maxStoredEvents: 10_000,
+    })
   })
 
   it("keeps a user's update preference over the default", async () => {
@@ -140,6 +148,39 @@ describe("getSettings", () => {
     expect(s.builtinTools).toBeDefined()
     expect(s.builtinTools.fileExtras).toBe(true)
     expect(s.builtinTools.shellAdvanced).toBe(false)
+  })
+
+  it("merges behavior telemetry defaults under partial persisted policy", async () => {
+    await getDb().settings.put({
+      id: "singleton",
+      permissionMode: "default",
+      alwaysAllowTools: [],
+      behaviorTelemetry: {
+        enabled: true,
+        categories: { chat: false },
+        destinations: { remote: true },
+      },
+    } as unknown as Awaited<ReturnType<typeof getSettings>>)
+
+    expect((await getSettings()).behaviorTelemetry).toMatchObject({
+      enabled: true,
+      destinations: { local: true, remote: true },
+      categories: { chat: false, workflow: true, connector: true, agentTeam: true, system: true },
+      sampleRate: 1,
+      retentionDays: 30,
+      maxStoredEvents: 10_000,
+    })
+  })
+
+  it("migrates the legacy telemetry opt-in when no structured policy was persisted", async () => {
+    await getDb().settings.put({
+      id: "singleton",
+      permissionMode: "default",
+      alwaysAllowTools: [],
+      telemetryEnabled: true,
+    } as unknown as Awaited<ReturnType<typeof getSettings>>)
+
+    expect((await getSettings()).behaviorTelemetry?.enabled).toBe(true)
   })
 })
 

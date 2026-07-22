@@ -61,6 +61,12 @@ describe("section-keys", () => {
       expect(resetKeysForSection("sandbox")).toEqual(
         expect.arrayContaining(["sandboxDefaultEnabled", "sandboxTier", "automationPolicy"])
       )
+      expect(resetKeysForSection("subscription")).toEqual(
+        expect.arrayContaining(["limitsQueryEnabledAccounts", "customLimitsSources"])
+      )
+      expect(resetKeysForSection("data")).toEqual(
+        expect.arrayContaining(["telemetryEnabled", "behaviorTelemetry", "storageRetention"])
+      )
     })
 
     it("returns undefined for a Dexie-backed section with no owned keys", () => {
@@ -99,6 +105,8 @@ describe("section-keys", () => {
       expect(keyToSection("ttsProvider")).toBe("speech")
       expect(keyToSection("networkProxy")).toBe("network")
       expect(keyToSection("biometricRequiredFor")).toBe("security")
+      expect(keyToSection("customLimitsSources")).toBe("subscription")
+      expect(keyToSection("behaviorTelemetry")).toBe("data")
     })
 
     it("returns undefined for an unowned / denylisted key", () => {

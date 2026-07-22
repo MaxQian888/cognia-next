@@ -65,6 +65,7 @@ import {
 } from "@/lib/db/conversation-overrides"
 import { appendAudit } from "./audit"
 import { trackInboxEvent } from "@/lib/telemetry/inbox-events"
+import { trackEvent } from "@/lib/telemetry/events/track-event"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { parseConversationKey, buildConversationKey } from "@/types/connectors/event"
@@ -966,6 +967,12 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
         idempotencyKey,
         reason: "adapter_not_found",
       })
+      void trackEvent("connector.message.sent", {
+        adapterId,
+        platform: "unknown",
+        outcome: "failed",
+        errorCode: "adapter_not_found",
+      })
       return
     }
 
@@ -1012,6 +1019,12 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
         reason: "network",
         message: msg,
       })
+      void trackEvent("connector.message.sent", {
+        adapterId,
+        platform: adapter.meta.type,
+        outcome: "failed",
+        errorCode: err instanceof Error ? err.name : "Error",
+      })
       return
     }
 
@@ -1042,8 +1055,19 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
         fields: { jobId: job.id, attempts: job.attempts + 1 },
         at: now,
       })
+      void trackEvent("connector.message.sent", {
+        adapterId,
+        platform: adapter.meta.type,
+        outcome: "succeeded",
+      })
     } else {
       const err = result.error!
+      void trackEvent("connector.message.sent", {
+        adapterId,
+        platform: adapter.meta.type,
+        outcome: "failed",
+        errorCode: err.code,
+      })
       if (err.retryable) {
         const retryAfter = err.retryAfterMs ?? 0
         const backoff =
