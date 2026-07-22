@@ -10,12 +10,82 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import {
+  routeSteer,
   makeWrappedEmit,
   restartReason,
   routeClose,
   routeRestore,
   runControlWithTimeout,
 } from "./claude-host.mjs"
+
+test("routeSteer acknowledges an Anthropic live-input push without changing the turn id", () => {
+  const pushed = []
+  const session = {
+    sendOptions: {},
+    turnRef: { id: "turn-original" },
+    pushUserMessage: (content, priority) => {
+      pushed.push([content, priority])
+      return true
+    },
+    scheduleSteerInputClose: () => pushed.push("scheduled-close"),
+  }
+  const sessions = new Map([["s1", session]])
+
+  const result = routeSteer(sessions, {
+    sessionId: "s1",
+    prompt: [{ type: "text", text: "redirect" }],
+    priority: "now",
+    sourceMessageId: "om-steer",
+  })
+
+  assert.deepEqual(result, {
+    ok: true,
+    result: { accepted: true, sourceMessageId: "om-steer" },
+  })
+  assert.deepEqual(pushed, [[[{ type: "text", text: "redirect" }], "now"], "scheduled-close"])
+  assert.equal(session.turnRef.id, "turn-original")
+})
+
+test("routeSteer refuses closed, missing, and non-Anthropic sessions", () => {
+  assert.deepEqual(routeSteer(new Map(), { sessionId: "missing", prompt: "x" }), {
+    ok: false,
+    error: "no_active_session",
+  })
+  assert.deepEqual(
+    routeSteer(
+      new Map([["s1", { sendOptions: { provider: "openai" }, pushUserMessage: () => true }]]),
+      { sessionId: "s1", prompt: "x" }
+    ),
+    { ok: false, error: "unsupported_provider" }
+  )
+  assert.deepEqual(
+    routeSteer(new Map([["s1", { sendOptions: {}, pushUserMessage: () => false }]]), {
+      sessionId: "s1",
+      prompt: "x",
+    }),
+    { ok: false, error: "input_closed" }
+  )
+})
+
+test("routeSteer validates priority and source-message correlation fields", () => {
+  const sessions = new Map([
+    [
+      "s1",
+      {
+        sendOptions: {},
+        pushUserMessage: () => true,
+      },
+    ],
+  ])
+  assert.deepEqual(routeSteer(sessions, { sessionId: "s1", prompt: "x", priority: "immediate" }), {
+    ok: false,
+    error: "invalid_priority",
+  })
+  assert.deepEqual(routeSteer(sessions, { sessionId: "s1", prompt: "x", sourceMessageId: 42 }), {
+    ok: false,
+    error: "invalid_source_message_id",
+  })
+})
 
 test("runControlWithTimeout resolves a fast control method", async () => {
   const out = await runControlWithTimeout(async (x) => x + 1, null, [41], 1000)

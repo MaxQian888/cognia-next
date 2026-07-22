@@ -577,20 +577,27 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       emit(buildMcpLogEvent({ sessionId, ts: Date.now(), level, message, server, source })),
   })
 
+  let steerCloseTimer
+  const closeInput = () => {
+    if (steerCloseTimer) clearTimeout(steerCloseTimer)
+    steerCloseTimer = undefined
+    inputStream.close()
+  }
   const session = {
     q,
-    pushUserMessage: (content) => {
+    pushUserMessage: (content, priority) => {
       // Per-turn doom-guard reset (parity with the ai-sdk path, which builds a
       // fresh guard each turn). Without this, a legitimate identical call made
       // once per turn — e.g. reading the same config at each turn's start —
       // crosses the threshold on the 3rd TURN of a multi-turn session and
       // forces approval prompts forever after.
       doomGuard.reset()
-      inputStream.push({
+      return inputStream.push({
         type: "user",
         message: { role: "user", content },
         parent_tool_use_id: null,
         session_id: sessionId,
+        ...(priority ? { priority } : {}),
       })
     },
     // Manual compaction: the Agent SDK owns compaction and intercepts a
@@ -600,7 +607,15 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       const trimmed = typeof focus === "string" ? focus.trim() : ""
       session.pushUserMessage(trimmed ? `/compact ${trimmed}` : "/compact")
     },
-    closeInput: inputStream.close,
+    closeInput,
+    // A streaming query that receives a second user message remains open for
+    // more input after emitting that response. Keep a short burst window for
+    // adjacent steers, then close THIS query's input so its result can settle;
+    // later messages fall back to the durable next-turn lane.
+    scheduleSteerInputClose: () => {
+      if (steerCloseTimer) clearTimeout(steerCloseTimer)
+      steerCloseTimer = setTimeout(closeInput, 250)
+    },
     // Immediate teardown drain for the host's interrupt/close handlers. The SDK
     // `q.interrupt()` doesn't settle `pendingPluginToolCalls`, so without this a
     // closed/crashed renderer would keep the turn alive until the per-call

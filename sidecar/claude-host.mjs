@@ -43,6 +43,7 @@ import { createRequire } from "node:module"
 import { pathToFileURL } from "node:url"
 import { dispatch } from "./dispatch/index.mjs"
 import { isControlMethod, controlArgs, buildControlResponse } from "./dispatch/control.mjs"
+import { createFeatureCallHandler } from "./dispatch/feature-call.mjs"
 
 // Resolve sidecar + SDK versions for the `ready` payload. createRequire is
 // used so we can read package.json without taking JSON-import dependency on
@@ -91,6 +92,8 @@ function emit(payload) {
 function log(level, message) {
   emit({ type: "log", level, message })
 }
+
+const featureCalls = createFeatureCallHandler({ emit })
 
 // ---- Per-session state ----------------------------------------------------
 
@@ -424,6 +427,52 @@ export async function runControlWithTimeout(fn, thisArg, args, timeoutMs = CONTR
   }
 }
 
+/**
+ * Push an additional user message into an active Anthropic streaming-input
+ * query. This deliberately bypasses `handleSend`: ordinary sends retain their
+ * stale-session restart protection, while an explicit steer may only target
+ * the currently-owned live input stream.
+ *
+ * The acknowledgement means "accepted by the sidecar input queue". It does
+ * not claim that an already-issued provider HTTP request was mutated; the SDK
+ * consumes the message at its next supported boundary.
+ *
+ * @param {Map<string, any>} sessionsMap
+ * @param {{ sessionId?: string, prompt?: any, priority?: string, sourceMessageId?: string }} msg
+ * @returns {{ ok: true, result: { accepted: true } } | { ok: false, error: string }}
+ */
+export function routeSteer(sessionsMap, msg) {
+  const { sessionId, prompt, priority, sourceMessageId } = msg
+  const session = sessionsMap.get(sessionId)
+  if (!session) return { ok: false, error: "no_active_session" }
+  if ((session.sendOptions?.provider ?? "anthropic") !== "anthropic") {
+    return { ok: false, error: "unsupported_provider" }
+  }
+  if (typeof prompt !== "string" && !Array.isArray(prompt)) {
+    return { ok: false, error: "invalid_prompt" }
+  }
+  if (priority !== undefined && !["now", "next", "later"].includes(priority)) {
+    return { ok: false, error: "invalid_priority" }
+  }
+  if (sourceMessageId !== undefined && typeof sourceMessageId !== "string") {
+    return { ok: false, error: "invalid_source_message_id" }
+  }
+  if (typeof session.pushUserMessage !== "function") {
+    return { ok: false, error: "unsupported_provider" }
+  }
+  try {
+    const accepted = session.pushUserMessage(prompt, priority)
+    if (accepted === false) return { ok: false, error: "input_closed" }
+    session.scheduleSteerInputClose?.()
+    return {
+      ok: true,
+      result: { accepted: true, ...(sourceMessageId ? { sourceMessageId } : {}) },
+    }
+  } catch (err) {
+    return { ok: false, error: err?.message ?? String(err) }
+  }
+}
+
 // Drive a live session's SDK `Query` control method (getContextUsage,
 // mcpServerStatus, reconnectMcpServer, toggleMcpServer, supportedModels,
 // supportedCommands, setModel) and reply with a `control_response` correlated by
@@ -435,6 +484,10 @@ async function handleControl(msg) {
   const respond = (extra) => emit(buildControlResponse({ sessionId, requestId, method, ...extra }))
   if (!isControlMethod(method)) {
     respond({ ok: false, error: "unknown_method" })
+    return
+  }
+  if (method === "steer") {
+    respond(routeSteer(sessions, { sessionId, ...params }))
     return
   }
   const s = sessions.get(sessionId)
@@ -635,6 +688,12 @@ function startReadLoop() {
         break
       case "control":
         void handleControl(msg)
+        break
+      case "feature_call":
+        void featureCalls.call(msg)
+        break
+      case "feature_call_abort":
+        featureCalls.abort(msg.requestId)
         break
       case "permission_response":
         handlePermissionResponse(msg)

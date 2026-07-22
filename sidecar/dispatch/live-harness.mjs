@@ -74,12 +74,12 @@ function writeMessagesSse(res, chunks, model) {
  * claude-code CLI can issue auxiliary /v1/messages calls (title generation,
  * probes) whose count varies by CLI version, so call indices are not stable.
  */
-export function startMockAnthropic({ chunks = ["PONG"], replyFor } = {}) {
+export function startMockAnthropic({ chunks = ["PONG"], replyFor, delayMs = 0 } = {}) {
   const messagesCalls = []
   const server = http.createServer((req, res) => {
     let body = ""
     req.on("data", (c) => (body += c))
-    req.on("end", () => {
+    req.on("end", async () => {
       if (req.method === "POST" && req.url.startsWith("/v1/messages")) {
         let parsed = {}
         try {
@@ -89,6 +89,7 @@ export function startMockAnthropic({ chunks = ["PONG"], replyFor } = {}) {
         }
         messagesCalls.push(parsed)
         const reply = replyFor ? replyFor(parsed, messagesCalls.length - 1) : chunks
+        if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs))
         writeMessagesSse(res, reply, parsed.model)
         return
       }

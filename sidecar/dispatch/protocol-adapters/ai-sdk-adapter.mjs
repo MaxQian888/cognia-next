@@ -15,6 +15,7 @@ import {
   decideOpenAiEndpointFlavor,
   RESPONSES_ONLY_PROVIDERS,
 } from "./provider-protocol.mjs"
+import { buildBedrockProviderOptions } from "../bedrock.mjs"
 import { aiSdkTelemetry, withTraceparent } from "../../telemetry.mjs"
 
 export { isGenuineOpenAiEndpoint, isResponsesOnlyEndpoint }
@@ -194,6 +195,14 @@ export async function buildModel({
   headers,
   apiFlavor,
   providerId,
+  bedrockAuthMode,
+  region,
+  accessKeyId,
+  secretAccessKey,
+  sessionToken,
+  profile,
+  roleArn,
+  roleSessionName,
 }) {
   const base = await buildRawModel({
     protocol,
@@ -203,12 +212,36 @@ export async function buildModel({
     headers,
     apiFlavor,
     providerId,
+    bedrockAuthMode,
+    region,
+    accessKeyId,
+    secretAccessKey,
+    sessionToken,
+    profile,
+    roleArn,
+    roleSessionName,
   })
   return withReasoningExtraction(base)
 }
 
 /** Construct the un-wrapped provider model. Split out so the wrap is uniform. */
-async function buildRawModel({ protocol, model, apiKey, baseURL, headers, apiFlavor, providerId }) {
+async function buildRawModel({
+  protocol,
+  model,
+  apiKey,
+  baseURL,
+  headers,
+  apiFlavor,
+  providerId,
+  bedrockAuthMode,
+  region,
+  accessKeyId,
+  secretAccessKey,
+  sessionToken,
+  profile,
+  roleArn,
+  roleSessionName,
+}) {
   switch (protocol) {
     case "openai": {
       const { createOpenAI } = await import("@ai-sdk/openai")
@@ -263,15 +296,19 @@ async function buildRawModel({ protocol, model, apiKey, baseURL, headers, apiFla
     }
     case "bedrock": {
       const { createAmazonBedrock } = await import("@ai-sdk/amazon-bedrock")
-      // Modern Bedrock authenticates with a direct API key (bearer,
-      // `AWS_BEARER_TOKEN_BEDROCK`), carried in `apiKey`. The region falls back
-      // to the `AWS_REGION` env the sidecar inherits; `baseURL` is an optional
-      // custom endpoint. Bedrock has its own wire protocol — no responses/chat
-      // split, so `apiFlavor` does not apply here.
-      const client = createAmazonBedrock({
-        ...(apiKey ? { apiKey } : {}),
-        ...(baseURL ? { baseURL } : {}),
+      const options = await buildBedrockProviderOptions({
+        authMode: bedrockAuthMode ?? (apiKey ? "api-key" : "default-chain"),
+        region,
+        apiKey,
+        baseURL,
+        accessKeyId,
+        secretAccessKey,
+        sessionToken,
+        profile,
+        roleArn,
+        roleSessionName,
       })
+      const client = createAmazonBedrock(options)
       return client(model)
     }
     default:
@@ -297,6 +334,14 @@ export function makeAiSdkAdapter(protocol) {
         headers: creds.headers,
         apiFlavor: creds.apiFlavor,
         providerId,
+        bedrockAuthMode: creds.bedrockAuthMode,
+        region: creds.region,
+        accessKeyId: creds.accessKeyId,
+        secretAccessKey: creds.secretAccessKey,
+        sessionToken: creds.sessionToken,
+        profile: creds.profile,
+        roleArn: creds.roleArn,
+        roleSessionName: creds.roleSessionName,
       })
       const streamTextFn = req.streamTextFn ?? (await import("ai")).streamText
       const streamArgs = {

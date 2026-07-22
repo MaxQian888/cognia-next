@@ -76,3 +76,47 @@ test("anthropic dispatch reports a session id for the turn", async () => {
     await mock.close()
   }
 })
+
+test("anthropic dispatch accepts a correlated live steer into the same query", async () => {
+  const mock = startMockAnthropic({
+    delayMs: 150,
+    replyFor: (body) =>
+      JSON.stringify(body.messages ?? []).includes("change direction") ? ["STEERED"] : ["FIRST"],
+  })
+  await mock.listen()
+  const sidecar = spawnSidecar({ baseUrl: mock.baseUrl })
+
+  try {
+    await sidecar.waitFor((m) => m.type === "ready", { timeoutMs: 15_000, label: "ready" })
+    sidecar.send({ type: "send", sessionId: "live-steer", prompt: "start the task" })
+    await sidecar.waitFor((m) => m.type === "sdk_session_id", { label: "sdk_session_id" })
+
+    sidecar.send({
+      type: "control",
+      sessionId: "live-steer",
+      requestId: "steer-request-1",
+      method: "steer",
+      params: { prompt: "change direction", priority: "now" },
+    })
+    const acknowledged = await sidecar.waitFor(
+      (m) => m.type === "control_response" && m.requestId === "steer-request-1",
+      { label: "steer_response" }
+    )
+    assert.equal(acknowledged.ok, true)
+    assert.equal(acknowledged.result?.accepted, true)
+
+    await sidecar.waitFor((m) => m.type === "session_ended", {
+      timeoutMs: 30_000,
+      label: "session_ended",
+    })
+    assert.ok(
+      mock.messagesCalls.some((body) =>
+        JSON.stringify(body.messages ?? []).includes("change direction")
+      ),
+      "the accepted steer must reach the live SDK query"
+    )
+  } finally {
+    await sidecar.close()
+    await mock.close()
+  }
+})

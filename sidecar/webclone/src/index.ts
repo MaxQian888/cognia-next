@@ -37,6 +37,18 @@ export type {
 // Optional tool function export
 export { parseHtml } from "./parser/html-parser.js"
 
+// Canonical configuration surface consumed by the outer sidecar runner.
+export {
+  DEFAULTS,
+  parseBool,
+  parseCodegenFramework,
+  parseFileSize,
+  parseFrameworkHint,
+  safeInt,
+  validateOptions,
+} from "./config/index.js"
+export type { CodegenFramework, FrameworkHint } from "./config/index.js"
+
 // SSRF guard (exported so the runner / tests can pre-validate the entry URL)
 export {
   assertFetchTargetAllowed,

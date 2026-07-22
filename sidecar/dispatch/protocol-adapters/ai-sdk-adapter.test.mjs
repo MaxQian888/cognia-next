@@ -108,6 +108,21 @@ test("buildModel(bedrock) builds an amazon-bedrock model from a direct API key",
     protocol: "bedrock",
     model: "anthropic.claude-3-haiku-20240307-v1:0",
     apiKey: "bedrock-bearer",
+    bedrockAuthMode: "api-key",
+    region: "us-east-1",
+  })
+  assert.equal(m.provider, "amazon-bedrock")
+})
+
+test("buildModel(bedrock) accepts explicit IAM credentials", async () => {
+  const m = await buildModel({
+    protocol: "bedrock",
+    model: "us.amazon.nova-lite-v1:0",
+    bedrockAuthMode: "iam",
+    region: "eu-west-1",
+    accessKeyId: "AKIAEXAMPLE",
+    secretAccessKey: "secret",
+    sessionToken: "session",
   })
   assert.equal(m.provider, "amazon-bedrock")
 })

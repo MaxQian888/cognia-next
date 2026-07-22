@@ -5,7 +5,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { EventEmitter } from "node:events"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, realpathSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -115,7 +115,7 @@ test("buildJob builds a snapshot job with clamped tuning + confined output", () 
     assert.equal(job.options.concurrency, 1)
     assert.equal(job.options.timeout, 1000)
     assert.equal(job.options.pretty, true)
-    assert.ok(job.options.output.startsWith(cwd))
+    assert.ok(job.options.output.startsWith(realpathSync(cwd)))
     assert.equal(job.options.extractComponents, false)
     assert.equal(job.options.frameworkCodegen, undefined)
   } finally {
@@ -147,13 +147,30 @@ test("buildJob: a framework implies component extraction + codegen options", () 
   }
 })
 
+test("buildJob consumes the built engine's canonical parsers", () => {
+  const cwd = realCwd()
+  try {
+    const job = buildJob({
+      cwd,
+      url: "https://example.com/",
+      output: "site",
+      framework: "REACT",
+      frameworkHint: "VUE",
+    })
+    assert.equal(job.options.frameworkCodegen.framework, "react")
+    assert.equal(job.options.frameworkHint, "vue")
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
 test("buildJob builds a convert job from convertLocal", () => {
   const cwd = realCwd()
   try {
     const job = buildJob({ cwd, convertLocal: "snap", output: "gen", framework: "vue" })
     assert.equal(job.mode, "convert")
-    assert.ok(job.options.convertLocal.startsWith(cwd))
-    assert.ok(job.options.output.startsWith(cwd))
+    assert.ok(job.options.convertLocal.startsWith(realpathSync(cwd)))
+    assert.ok(job.options.output.startsWith(realpathSync(cwd)))
     assert.equal(job.options.frameworkCodegen.framework, "vue")
   } finally {
     rmSync(cwd, { recursive: true, force: true })

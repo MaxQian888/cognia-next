@@ -16,7 +16,13 @@ import { fileURLToPath } from "node:url"
 import { randomUUID } from "node:crypto"
 
 import { assertPathInside } from "../safety.mjs"
-import { evaluateFetchTarget } from "../../webclone/dist/ssrf-guard.js"
+import {
+  DEFAULTS as ENGINE_DEFAULTS,
+  evaluateFetchTarget,
+  parseCodegenFramework,
+  parseFrameworkHint,
+  validateOptions,
+} from "../../webclone/dist/index.js"
 
 /** Absolute path to the vendored engine's runner (built by `tsc`). */
 export const RUNNER_PATH = fileURLToPath(new URL("../../webclone/dist/runner.js", import.meta.url))
@@ -27,21 +33,8 @@ const MAX_STDERR_BYTES = 64 * 1024
 export const DEFAULT_JOB_TIMEOUT_MS = 180 * 1000
 
 export const SNAPSHOT_MODES = Object.freeze(["single", "bundle"])
-export const CODEGEN_FRAMEWORKS = Object.freeze(["vue", "react", "angular", "svelte", "jquery"])
-export const FRAMEWORK_HINTS = Object.freeze(["vue", "react", "svelte"])
-
-/** Engine defaults mirrored from webclone/src/config/defaults.ts (kept in sync). */
-const ENGINE_DEFAULTS = Object.freeze({
-  mode: "bundle",
-  maxAssets: 100,
-  concurrency: 6,
-  timeout: 15000,
-  retryCount: 1,
-  retryInitialDelay: 200,
-  retryMaxDelay: 2000,
-  inline: true,
-  pretty: false,
-})
+export const CODEGEN_FRAMEWORKS = Object.freeze([...ENGINE_DEFAULTS.codegenFrameworks])
+export const FRAMEWORK_HINTS = Object.freeze([...ENGINE_DEFAULTS.frameworkHints])
 
 function clampInt(value, fallback, min, max) {
   const n = typeof value === "number" ? value : Number(value)
@@ -92,12 +85,14 @@ export function buildJob(args) {
   if (!SNAPSHOT_MODES.includes(mode)) {
     throw new Error(`mode must be one of ${SNAPSHOT_MODES.join(", ")} (got "${mode}")`)
   }
-  if (args.framework != null && !CODEGEN_FRAMEWORKS.includes(args.framework)) {
+  const framework = parseCodegenFramework(args.framework)
+  if (args.framework != null && !framework) {
     throw new Error(
       `framework must be one of ${CODEGEN_FRAMEWORKS.join(", ")} (got "${args.framework}")`
     )
   }
-  if (args.frameworkHint != null && !FRAMEWORK_HINTS.includes(args.frameworkHint)) {
+  const frameworkHint = parseFrameworkHint(args.frameworkHint)
+  if (args.frameworkHint != null && !frameworkHint) {
     throw new Error(
       `frameworkHint must be one of ${FRAMEWORK_HINTS.join(", ")} (got "${args.frameworkHint}")`
     )
@@ -106,7 +101,7 @@ export function buildJob(args) {
   // Confine the output under the caller's workspace root (path-traversal guard).
   const output = assertPathInside(args.cwd, args.output)
   // A framework request implies component extraction.
-  const wantsCodegen = args.framework != null
+  const wantsCodegen = framework != null
   const extractComponents = Boolean(args.extractComponents) || wantsCodegen
 
   /** @type {Record<string, unknown>} */
@@ -125,12 +120,12 @@ export function buildJob(args) {
     extractComponents,
     allowPrivateHosts: Boolean(args.allowPrivateHosts),
   }
-  if (args.frameworkHint != null) options.frameworkHint = args.frameworkHint
+  if (frameworkHint != null) options.frameworkHint = frameworkHint
   if (typeof args.maxFileSize === "number")
     options.maxFileSize = clampInt(args.maxFileSize, 0, 0, 1024 * 1024 * 1024)
   if (wantsCodegen) {
     options.frameworkCodegen = {
-      framework: args.framework,
+      framework,
       typescript: args.codegenTypescript !== false,
       cssModules: false,
       generateDrafts: Boolean(args.codegenGenerateDrafts),
@@ -140,8 +135,10 @@ export function buildJob(args) {
   if (isConvert) {
     const convertLocal = assertPathInside(args.cwd, args.convertLocal)
     options.convertLocal = convertLocal
+    validateOptions(options)
     return { mode: "convert", options }
   }
+  validateOptions(options)
   return { mode: "snapshot", url: args.url, options }
 }
 

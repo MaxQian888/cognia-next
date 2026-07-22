@@ -622,6 +622,14 @@ export interface SendOptions {
      * bearer.
      */
     headers?: Record<string, string>
+    bedrockAuthMode?: import("@cognia/provider-types").BedrockAuthMode
+    region?: string
+    accessKeyId?: string
+    secretAccessKey?: string
+    sessionToken?: string
+    profile?: string
+    roleArn?: string
+    roleSessionName?: string
   }
 
   /**
@@ -1003,6 +1011,7 @@ export type SessionControlMethod =
   | "supportedModels"
   | "supportedCommands"
   | "setModel"
+  | "steer"
 
 /**
  * Sidecar → renderer reply to a `sessionControl` request. `ok` distinguishes a
@@ -1022,6 +1031,45 @@ export interface ControlResponseEvent {
 
 export function isControlResponseEvent(evt: ClaudeEvent): evt is ControlResponseEvent {
   return evt.type === "control_response"
+}
+
+export type FeatureCallOperation =
+  "language-generate" | "language-stream" | "embedding" | "bedrock-discover"
+
+export interface FeatureCallCredentials {
+  protocol?: string
+  apiKey?: string
+  baseURL?: string
+  headers?: Record<string, string>
+  apiFlavor?: "auto" | "responses" | "chat"
+  bedrockAuthMode?: "api-key" | "iam" | "default-chain"
+  region?: string
+  accessKeyId?: string
+  secretAccessKey?: string
+  sessionToken?: string
+  profile?: string
+  roleArn?: string
+  roleSessionName?: string
+}
+
+export interface FeatureCallRequest {
+  requestId: string
+  operation: FeatureCallOperation
+  providerId?: string
+  model?: string
+  credentials: FeatureCallCredentials
+  options?: Record<string, unknown>
+}
+
+export type FeatureCallEvent =
+  | { type: "feature_call_result"; requestId: string; result: unknown }
+  | { type: "feature_call_stream"; requestId: string; part: unknown }
+  | { type: "feature_call_stream_end"; requestId: string }
+  | { type: "feature_call_error"; requestId: string; error: string }
+  | { type: "feature_call_aborted"; requestId: string }
+
+export function isFeatureCallEvent(evt: ClaudeEvent): evt is FeatureCallEvent {
+  return typeof evt?.type === "string" && evt.type.startsWith("feature_call_")
 }
 
 /**
@@ -1111,6 +1159,7 @@ export type ClaudeEvent =
   | ProtocolAdapterCancelEvent
   | ToolResultReviewEvent
   | ControlResponseEvent
+  | FeatureCallEvent
   | McpLogEvent
 
 // ---- Narrow subset of SDKMessage we care about ---------------------------

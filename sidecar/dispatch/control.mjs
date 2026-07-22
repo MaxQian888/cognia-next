@@ -20,6 +20,7 @@ export const CONTROL_METHODS = new Set([
   "supportedModels",
   "supportedCommands",
   "setModel",
+  "steer",
 ])
 
 /** True when `method` is an allowlisted control method. */
@@ -41,6 +42,8 @@ export function controlArgs(method, params) {
       return [p.name]
     case "toggleMcpServer":
       return [p.name, p.enabled]
+    case "steer":
+      return [p.prompt, p.priority]
     default:
       return []
   }

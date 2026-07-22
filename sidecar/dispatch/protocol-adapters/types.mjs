@@ -14,6 +14,14 @@
  * @property {string} [protocol]  Resolved protocol id (builtin or `${pluginId}:${id}`).
  * @property {Record<string,string>} [headers]  Extra default headers (Codex ChatGPT-login extras).
  * @property {"auto"|"responses"|"chat"} [apiFlavor]  Explicit OpenAI endpoint family.
+ * @property {"api-key"|"iam"|"default-chain"} [bedrockAuthMode]
+ * @property {string} [region]
+ * @property {string} [accessKeyId]
+ * @property {string} [secretAccessKey]
+ * @property {string} [sessionToken]
+ * @property {string} [profile]
+ * @property {string} [roleArn]
+ * @property {string} [roleSessionName]
  */
 
 /**

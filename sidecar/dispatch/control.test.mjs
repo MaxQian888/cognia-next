@@ -25,6 +25,10 @@ test("controlArgs maps params to positional args", () => {
   assert.deepEqual(controlArgs("getContextUsage", { junk: 1 }), [])
   assert.deepEqual(controlArgs("mcpServerStatus", undefined), [])
   assert.deepEqual(controlArgs("supportedModels"), [])
+  assert.deepEqual(controlArgs("steer", { prompt: "redirect", priority: "now" }), [
+    "redirect",
+    "now",
+  ])
 })
 
 test("controlArgs tolerates missing params", () => {
