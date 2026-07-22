@@ -7899,18 +7899,11 @@
       "dialogTitle": "会话覆盖设置",
       "fields": {
         "activationPolicy": {
-          "label": "激活策略",
-          "options": {
-            "always": "始终响应",
-            "direct_only": "仅私聊",
-            "inherit": "继承适配器默认值",
-            "mention_activates": "首次 @ 激活话题",
-            "mention_each": "每次都需要 @"
-          }
+          "label": "激活策略"
         },
         "activationTtl": {
           "label": "激活有效期（小时）",
-          "placeholder": "继承适配器默认值"
+          "placeholder": "例如 24"
         },
         "advancedJson": "高级 (勿扰时段 + 冷却 + 静音)",
         "advancedJsonHelp": "这些字段会写入该会话的 `trigger` 部分覆盖，覆盖适配器级触发策略。",
@@ -7939,12 +7932,7 @@
         "characterPlaceholder": "（无）",
         "cooldownMs": "机器人回复后冷却时间 (ms)",
         "dispatchMode": {
-          "label": "运行中消息派发",
-          "options": {
-            "inherit": "继承适配器默认值",
-            "queue": "进入队列",
-            "steer": "Steering"
-          }
+          "label": "调度模式"
         },
         "liveActivity": "实时活动卡片",
         "liveActivityHint": "助手工作时在对话中显示实时进度卡片（工具数、用时、当前操作、文件编辑）。默认开启；频道消息过多时可关闭。",
@@ -8039,12 +8027,12 @@
     },
     "inboundRecovery": {
       "continueSafely": "安全继续",
-      "description": "消息已持久化接收，但执行中断，模型或工具副作用可能已经发生。请选择明确的恢复操作。",
+      "description": "有一条或多条入站消息未能处理，需要恢复。",
       "dismiss": "忽略",
-      "message": "消息 {id} · {reason}",
+      "message": "消息 {id}：{reason}",
       "retryFromStart": "从头重试",
-      "retryWarning": "从头重试可能重复模型输出或工具副作用。请先核对外部状态，再决定是否继续。",
-      "title": "入站消息需要恢复",
+      "retryWarning": "从头重试会重新处理该消息，是否继续？",
+      "title": "入站恢复",
       "unknown": "未知原因"
     },
     "labels": {
@@ -8087,7 +8075,6 @@
       "retry": "重试",
       "status": {
         "deadlettered": "已死信",
-        "delivery_unknown": "投递状态未知",
         "failed": "失败",
         "pending": "排队中",
         "sending": "发送中",
@@ -8178,21 +8165,21 @@
       }
     },
     "topicRuntime": {
-      "activation": "话题激活：{value}",
+      "activation": "激活状态：{value}",
       "active": "已激活",
-      "activeRun": "当前运行：{value}",
-      "aria": "话题运行时：{policy}，{dispatch}",
+      "activeRun": "活跃运行：{value}",
+      "aria": "Topic 运行时：{policy} · {dispatch}",
       "badge": "{policy} · {dispatch}",
-      "capabilities": "话题隔离：{topic}；{count} 项丰富展示能力",
+      "capabilities": "能力：topic={topic}, count={count}",
       "effective": "生效策略：{value}",
       "fallback": {
-        "delivery_unverified": "降级原因：尚未验证免 @ 投递，因此仍要求 @。"
+        "delivery_unverified": "因投递未验证，回退到逐条 @ 模式"
       },
       "inactive": "未激活",
       "none": "无",
       "queue": "队列深度：{count}",
       "readiness": "投递就绪：{value}",
-      "recovery": "待恢复：{count}",
+      "recovery": "需要恢复：{count}",
       "requested": "请求策略：{value}"
     },
     "unreadPill": {
@@ -13208,6 +13195,7 @@
       "downloadSuccess": "cognia CLI 已安装。",
       "downloadSuccessSigned": "cognia CLI 已安装并通过签名验证。",
       "openReleases": "打开发布页",
+      "releaseKeyFingerprint": "发布密钥指纹（SHA-256）",
       "sourceHint": "使用 Cargo 构建并安装：",
       "sourcePrereq": "需要 PATH 上有 Rust 1.82+。",
       "tabDownload": "下载",
@@ -13215,6 +13203,9 @@
       "tabTarball": "发布页",
       "tarballHint": "从 GitHub 手动下载发布归档。",
       "title": "安装 cognia CLI",
+      "verificationMode": "验证模式",
+      "verificationMode_checksum-and-signature": "SHA-256 校验和 + Ed25519 签名",
+      "verificationMode_checksum-only": "仅 SHA-256 校验和（发布密钥尚未上线）",
       "verifyNote": "下载会做校验和验证；发布签名密钥上线后将启用签名验证。"
     },
     "cliLauncher": {
@@ -14893,10 +14884,30 @@
       "baseURLLabel": "Base URL",
       "baseURLOptional": "可选",
       "baseURLPlaceholder": "https://api.example.com/v1",
+      "bedrockAccessKeyId": "Access Key ID",
+      "bedrockApiKey": "Bedrock API 密钥",
+      "bedrockApiKeyRequired": "请输入 Bedrock API 密钥。",
+      "bedrockAuthApiKey": "Bedrock API 密钥",
+      "bedrockAuthDefaultChain": "AWS 默认凭据链",
+      "bedrockAuthHint": "凭据仅保存在本地，诊断信息绝不会包含密钥内容。",
+      "bedrockAuthIam": "显式 IAM 凭据",
+      "bedrockAuthMode": "认证方式",
+      "bedrockBaseURL": "自定义 Bedrock 端点（可选）",
+      "bedrockBaseURLPlaceholder": "使用 AWS 区域端点",
+      "bedrockDefaultChainHint": "由本地 Sidecar 使用 AWS Profile、SSO、环境凭据或实例角色。",
+      "bedrockProfile": "AWS Profile（可选）",
+      "bedrockRegion": "AWS 区域",
+      "bedrockRegionPlaceholder": "us-east-1",
+      "bedrockRegionRequired": "请输入 AWS 区域。",
+      "bedrockRoleArn": "Role ARN（可选）",
+      "bedrockRoleSessionName": "Role Session Name（可选）",
+      "bedrockSecretAccessKey": "Secret Access Key",
+      "bedrockSessionToken": "Session Token（可选）",
       "connectionFailed": "连接失败",
       "connectionStatus": "连接状态",
       "connectionSuccess": "已连接",
       "defaultModelLabel": "默认模型",
+      "docs": "文档",
       "getApiKey": "获取 API Key →",
       "hideKey": "隐藏密钥",
       "keyRotation": "密钥轮换",
@@ -14904,6 +14915,9 @@
       "lastTested": "上次测试",
       "latency": "延迟",
       "leastUsed": "最少使用",
+      "moveDown": "下移",
+      "moveUp": "上移",
+      "newKeyPlaceholder": "sk-...",
       "random": "随机",
       "removeKey": "移除",
       "rotationStrategy": "轮换策略",
@@ -14916,6 +14930,7 @@
     },
     "configuration": "配置",
     "configureApiKey": "配置 API 密钥",
+    "configureProviderForParameters": "在“配置”标签页中配置此服务商以启用参数。",
     "configured": "已配置",
     "confirmDeleteProvider": "删除此服务商？",
     "confirmSelection": "确认",
@@ -14953,6 +14968,7 @@
     "custom": "自定义",
     "customBaseURL": "自定义基础 URL",
     "customProviderDescription": "配置使用您首选协议的自定义 API 服务商。",
+    "customProviderModelsManaged": "自定义服务商的模型在服务商编辑器中管理。",
     "customProviders": "自定义服务商",
     "customProvidersDescription": "添加支持 OpenAI、Anthropic 或 Gemini 协议的自定义 API 服务商。",
     "dashboard": "控制台",
@@ -14966,17 +14982,24 @@
     "deleteModelConfirm": "确定要删除 {model} 吗？此操作无法撤销。",
     "deleteUnsupported": "该 provider 不支持删除模型。",
     "detailPanel": {
+      "advancedPlaceholder": "高级占位",
+      "configPlaceholder": "配置占位",
       "connected": "已连接",
       "connectionFailed": "错误",
       "connectionOk": "已连接 · {latency}ms · 上次测试: {time}",
+      "costPlaceholder": "费用占位",
       "defaultBadge": "默认",
       "emptyDescription": "选择一个提供商开始配置，或添加新的提供商",
       "emptyTitle": "未选择提供商",
       "modelsAvailable": "{count} 个模型可用",
+      "modelsPlaceholder": "模型占位",
       "notConfigured": "未配置",
+      "notConfiguredHint": "添加凭据以开始使用该提供商",
       "setDefault": "设为默认",
       "setDefaultAria": "将此提供商设为新会话的默认提供商",
-      "testButton": "测试"
+      "testButton": "测试",
+      "warning": "警告",
+      "warningHint": "已配置但未验证 — 请运行连接测试"
     },
     "detect": "检测",
     "differentSettings": "配置不同",
@@ -15226,6 +15249,7 @@
     "neverChecked": "从未检查",
     "next": "下一步",
     "noCustomProviders": "暂无自定义服务商。",
+    "noModelsAvailable": "无可用模型。",
     "noModelsConfigured": "该提供商暂无已配置的模型。",
     "noModelsFound": "未找到模型",
     "noModelsInstalled": "暂无已安装模型",
@@ -15676,6 +15700,7 @@
     "togetherai": "Together AI",
     "togetheraiDescription": "快速开源模型推理",
     "total": "共",
+    "unknownProviderType": "未知服务商类型。",
     "unlimited": "无限制",
     "usage": "用量",
     "valid": "有效",
@@ -19610,44 +19635,44 @@
         "appSecretRequired": "App Secret 不能为空。",
         "atStrategy": {
           "activationTtl": {
-            "help": "每次接收人类消息后滑动续期，默认 24 小时。",
-            "label": "话题激活有效期（小时）"
+            "help": "最后一条入站消息后，会话保持激活的时长。",
+            "label": "激活有效期（小时）"
           },
-          "defaultNotice": "默认：首次 @ 激活当前话题 24 小时，仅影响该话题。",
+          "defaultNotice": "默认值 — 按机器人角色调整。",
           "diagnostics": {
-            "capabilities": "能力 — 话题隔离：{topic}；文本流式：{stream}；组件更新：{mutate}",
+            "capabilities": "能力：topic={topic}, streaming={stream}, mutation={mutate}",
             "effective": "生效策略：{value}",
             "no": "否",
             "requested": "请求策略：{value}",
-            "title": "运行时生效诊断",
-            "unverifiedFallback": "降级：尚未验证免 @ 投递，因此群聊每条消息仍需 @。",
+            "title": "运行时诊断",
+            "unverifiedFallback": "因投递未验证，已回退。",
             "yes": "是"
           },
           "dispatch": {
-            "help": "选择话题已有运行任务时新消息的处理方式。运行时不支持安全实时注入时，steer 会在最早安全边界作为独立消息重放。",
+            "help": "该适配器如何派发活跃运行。",
             "options": {
-              "queue": "进入队列 — 每条消息作为独立 FIFO 对话轮次保留",
-              "steer": "Steering — 安全时实时注入，否则保留 steering 意图后重放"
+              "inherit": "继承默认",
+              "queue": "队列",
+              "steer": "引导"
             },
-            "title": "运行中消息派发"
+            "title": "调度模式"
           },
-          "help": "控制话题激活方式。私聊始终处理；群聊免 @ 还必须先完成消息投递就绪验证。",
+          "help": "控制机器人在群聊中何时回应。私聊不受策略影响，始终通过。",
           "options": {
             "always": "始终响应每一条消息",
             "directOnly": "仅私聊 — 群聊永不回应",
-            "mentionActivates": "首次 @ 激活当前话题，后续无需 @",
-            "mentionEach": "群聊每条消息都必须 @机器人",
             "mentionOnly": "仅 @ 机器人 — 群聊中需要被 @（默认）"
           },
           "readiness": {
-            "help": "先在开发者后台开通 im:message.group_msg 并发布应用。启动 10 分钟探测后，在群里发送一条不 @机器人的消息；只有实际观察到该事件才会通过验证。",
-            "startProbe": "已发布权限，开始探测",
+            "help": "适配器是否能验证每条消息的投递。",
+            "startProbe": "开始就绪探测",
             "states": {
-              "all_messages_verified": "已验证：正在接收群聊免 @ 消息。",
-              "mentions_only": "仅 @：尚未验证免 @ 消息投递。",
-              "unknown": "未知：尚无成功的免 @ 投递探测。"
+              "all_messages_verified": "所有消息已验证",
+              "mentions_only_verified": "仅 @ 消息已验证",
+              "none_verified": "未验证",
+              "unknown": "未知"
             },
-            "title": "免 @ 消息投递就绪状态"
+            "title": "投递就绪状态"
           },
           "sibling": {
             "budgetAria": "同群机器人每群每小时回复额度",
@@ -19660,7 +19685,7 @@
             },
             "title": "同群机器人"
           },
-          "title": "话题激活"
+          "title": "响应策略"
         },
         "authorizeButton": "连接账号",
         "authorizeNeedsAppId": "请先保存 App ID —— 授权需要它。",

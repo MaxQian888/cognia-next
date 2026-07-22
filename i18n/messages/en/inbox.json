@@ -294,7 +294,17 @@
       "teamBindingPlaceholder": "(none — replies use the character)",
       "workflowBinding": "Visual Workflow (name or id)",
       "workflowBindingHelp": "When set (and no team is bound — a team wins), inbound messages run this Visual Workflow instead of a single character; the message text is the trigger payload and progress streams back to the conversation.",
-      "workflowBindingPlaceholder": "(none — replies use the character)"
+      "workflowBindingPlaceholder": "(none — replies use the character)",
+      "activationPolicy": {
+        "label": "Activation policy"
+      },
+      "dispatchMode": {
+        "label": "Dispatch mode"
+      },
+      "activationTtl": {
+        "label": "Activation TTL (hours)",
+        "placeholder": "e.g. 24"
+      }
     },
     "gearAria": "Open per-conversation override settings",
     "noOverrideYet": "No override yet — defaults are inherited from the adapter.",
@@ -474,5 +484,33 @@
   },
   "unreadPill": {
     "aria": "{count} unread"
+  },
+  "inboundRecovery": {
+    "retryWarning": "Retrying from the start will re-process the message. Continue?",
+    "title": "Inbound recovery",
+    "description": "One or more inbound messages could not be processed and need recovery.",
+    "message": "Message {id}: {reason}",
+    "unknown": "Unknown reason",
+    "continueSafely": "Continue safely",
+    "retryFromStart": "Retry from start",
+    "dismiss": "Dismiss"
+  },
+  "topicRuntime": {
+    "aria": "Topic runtime: {policy} · {dispatch}",
+    "badge": "{policy} · {dispatch}",
+    "requested": "Requested: {value}",
+    "effective": "Effective: {value}",
+    "readiness": "Readiness: {value}",
+    "activation": "Activation: {value}",
+    "active": "Active",
+    "inactive": "Inactive",
+    "queue": "Queue depth: {count}",
+    "activeRun": "Active run: {value}",
+    "none": "None",
+    "recovery": "Recovery required: {count}",
+    "capabilities": "Capabilities: topic={topic}, count={count}",
+    "fallback": {
+      "delivery_unverified": "Fallback to mention-each because delivery is unverified"
+    }
   }
 }

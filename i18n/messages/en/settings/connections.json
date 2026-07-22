@@ -620,7 +620,40 @@
         },
         "title": "Sibling bots"
       },
-      "title": "Mention strategy"
+      "title": "Mention strategy",
+      "dispatch": {
+        "title": "Dispatch mode",
+        "help": "How active runs are dispatched for this adapter.",
+        "options": {
+          "inherit": "Inherit",
+          "queue": "Queue",
+          "steer": "Steer"
+        }
+      },
+      "activationTtl": {
+        "label": "Activation TTL (hours)",
+        "help": "How long the conversation stays activated after the last inbound message."
+      },
+      "readiness": {
+        "title": "Delivery readiness",
+        "help": "Whether the adapter can verify every message delivery.",
+        "states": {
+          "unknown": "Unknown",
+          "all_messages_verified": "All messages verified",
+          "mentions_only_verified": "Mentions only verified",
+          "none_verified": "None verified"
+        },
+        "startProbe": "Start readiness probe"
+      },
+      "diagnostics": {
+        "title": "Runtime diagnostics",
+        "requested": "Requested policy: {value}",
+        "effective": "Effective policy: {value}",
+        "unverifiedFallback": "Falling back because delivery is unverified.",
+        "capabilities": "Capabilities: topic={topic}, streaming={stream}, mutation={mutate}",
+        "yes": "Yes",
+        "no": "No"
+      }
     },
     "authorizeButton": "Connect account",
     "authorizeNeedsAppId": "Save the App ID first — authorization needs it.",

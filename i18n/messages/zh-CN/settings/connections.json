@@ -620,7 +620,40 @@
         },
         "title": "同群机器人"
       },
-      "title": "响应策略"
+      "title": "响应策略",
+      "dispatch": {
+        "title": "调度模式",
+        "help": "该适配器如何派发活跃运行。",
+        "options": {
+          "inherit": "继承默认",
+          "queue": "队列",
+          "steer": "引导"
+        }
+      },
+      "activationTtl": {
+        "label": "激活有效期（小时）",
+        "help": "最后一条入站消息后，会话保持激活的时长。"
+      },
+      "readiness": {
+        "title": "投递就绪状态",
+        "help": "适配器是否能验证每条消息的投递。",
+        "states": {
+          "unknown": "未知",
+          "all_messages_verified": "所有消息已验证",
+          "mentions_only_verified": "仅 @ 消息已验证",
+          "none_verified": "未验证"
+        },
+        "startProbe": "开始就绪探测"
+      },
+      "diagnostics": {
+        "title": "运行时诊断",
+        "requested": "请求策略：{value}",
+        "effective": "生效策略：{value}",
+        "unverifiedFallback": "因投递未验证，已回退。",
+        "capabilities": "能力：topic={topic}, streaming={stream}, mutation={mutate}",
+        "yes": "是",
+        "no": "否"
+      }
     },
     "authorizeButton": "连接账号",
     "authorizeNeedsAppId": "请先保存 App ID —— 授权需要它。",
