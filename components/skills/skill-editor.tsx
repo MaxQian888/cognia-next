@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { AlertCircleIcon, SparklesIcon } from "lucide-react"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
-import { Streamdown } from "streamdown"
+import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -262,7 +262,9 @@ export function SkillEditor({ mode, initial, onCancel, onSave, hideContent, onAi
             <TabsContent value="preview" className="mt-1.5">
               <div className="prose prose-sm dark:prose-invert min-h-[300px] max-w-none rounded-md border bg-muted/30 px-3 py-2 text-sm">
                 {form.content.trim() ? (
-                  <Streamdown>{`## ${form.name || t("unnamedPreview")}\n\n${form.content}`}</Streamdown>
+                  <MarkdownRenderer
+                    content={`## ${form.name || t("unnamedPreview")}\n\n${form.content}`}
+                  />
                 ) : (
                   <p className="m-0 text-xs italic text-muted-foreground">
                     {t("contentPlaceholder")}

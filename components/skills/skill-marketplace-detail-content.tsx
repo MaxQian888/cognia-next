@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { Streamdown } from "streamdown"
+import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { CheckIcon, DownloadIcon, ExternalLinkIcon } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
@@ -196,7 +196,7 @@ export function SkillMarketplaceDetailContent({
           ) : error ? (
             <p className="text-xs text-destructive">{error}</p>
           ) : readme ? (
-            <Streamdown>{readme}</Streamdown>
+            <MarkdownRenderer content={readme} />
           ) : null}
         </div>
       </ScrollArea>

@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { Streamdown } from "streamdown"
+import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import {
   Dialog,
   DialogContent,
@@ -110,7 +110,7 @@ export function SkillEditorAiPopup({
               {t("diff")}
             </p>
             <div className="prose prose-sm dark:prose-invert max-w-none">
-              <Streamdown>{suggested}</Streamdown>
+              <MarkdownRenderer content={suggested} />
             </div>
           </Card>
         )}

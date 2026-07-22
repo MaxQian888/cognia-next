@@ -7,16 +7,11 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
-jest.mock(
-  "streamdown",
-  () => ({
-    __esModule: true,
-    Streamdown: ({ children }: { children: React.ReactNode }) => (
-      <div data-testid="streamdown">{children}</div>
-    ),
-  }),
-  { virtual: true }
-)
+jest.mock("@/components/chat/markdown-renderer", () => ({
+  MarkdownRenderer: ({ content }: { content: string }) => (
+    <div data-testid="markdown-renderer">{content}</div>
+  ),
+}))
 
 const fetchMarketplaceContent = jest.fn(async () => ({ content: "# Readme" }))
 jest.mock("@/lib/skills/marketplace-install", () => ({
@@ -49,21 +44,24 @@ describe("SkillMarketplaceDetailContent", () => {
     )
     expect(screen.getByText("X")).toBeInTheDocument()
     expect(screen.getByText("install")).toBeInTheDocument()
-    await screen.findByTestId("streamdown")
+    await screen.findByTestId("markdown-renderer")
   })
 
   it("renders the uninstall button when installed", async () => {
+    const onUninstall = jest.fn()
     render(
       <SkillMarketplaceDetailContent
         item={item}
         installed
         installing={false}
         onInstall={jest.fn()}
-        onUninstall={jest.fn()}
+        onUninstall={onUninstall}
       />
     )
     expect(screen.getByText("uninstall")).toBeInTheDocument()
-    await screen.findByTestId("streamdown")
+    fireEvent.click(screen.getByText("uninstall"))
+    expect(onUninstall).toHaveBeenCalledWith(item)
+    await screen.findByTestId("markdown-renderer")
   })
 
   it("invokes onInstall when the install button is clicked", async () => {
@@ -79,7 +77,7 @@ describe("SkillMarketplaceDetailContent", () => {
     )
     fireEvent.click(screen.getByText("install"))
     expect(onInstall).toHaveBeenCalledWith(item)
-    await screen.findByTestId("streamdown")
+    await screen.findByTestId("markdown-renderer")
   })
 
   it("renders the fetched readme", async () => {
@@ -92,7 +90,7 @@ describe("SkillMarketplaceDetailContent", () => {
         onUninstall={jest.fn()}
       />
     )
-    expect(await screen.findByTestId("streamdown")).toHaveTextContent("# Readme")
+    expect(await screen.findByTestId("markdown-renderer")).toHaveTextContent("# Readme")
   })
 
   it("renders author and repository metadata in the header", async () => {
@@ -117,7 +115,7 @@ describe("SkillMarketplaceDetailContent", () => {
     expect(repoLink?.closest("p")).toHaveTextContent('byAuthor:{"author":"alice"}')
     expect(screen.getByText('license:{"name":"MIT"}')).toBeInTheDocument()
     expect(screen.getByText("Great skill")).toBeInTheDocument()
-    await screen.findByTestId("streamdown")
+    await screen.findByTestId("markdown-renderer")
   })
 
   it("uses an http(s) repository value as the link href verbatim", async () => {
@@ -134,7 +132,7 @@ describe("SkillMarketplaceDetailContent", () => {
       "href",
       "https://gitlab.com/x/y"
     )
-    await screen.findByTestId("streamdown")
+    await screen.findByTestId("markdown-renderer")
   })
 
   it("shows the fetch error when the readme fails to load", async () => {
@@ -176,7 +174,7 @@ describe("SkillMarketplaceDetailContent", () => {
       />
     )
     expect(screen.getByText("installing").closest("button")).toBeDisabled()
-    await screen.findByTestId("streamdown")
+    await screen.findByTestId("markdown-renderer")
   })
 
   it("disables the uninstall action while installing for an installed item", async () => {
@@ -190,6 +188,6 @@ describe("SkillMarketplaceDetailContent", () => {
       />
     )
     expect(screen.getByText("uninstall").closest("button")).toBeDisabled()
-    await screen.findByTestId("streamdown")
+    await screen.findByTestId("markdown-renderer")
   })
 })
