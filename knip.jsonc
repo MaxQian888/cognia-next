@@ -1,0 +1,73 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": [
+        "app/sw.ts",
+        "cli/src/cli/entry.ts",
+        "components/{ai-elements,ui}/**/*.{ts,tsx}",
+        "hooks/builtin/*.mjs",
+        "lib/browser-stubs/*.{js,ts}",
+        "lib/browser/overlay.injected.js",
+        "plugins/*/src/index.{ts,tsx}",
+        "plugins/*/*.harness.mjs",
+        "plugins/**/tests/fixtures/**/*.{js,mjs,ts}",
+        "postcss.config.mjs",
+        "scripts/**/*.{js,cjs,mjs,ts,mts}",
+        "src-tauri/scripts/**/*.{js,mjs,ts}",
+      ],
+      "project": [
+        "{__mocks__,app,cli,components,hooks,i18n,lib,plugins,scripts,src-tauri/scripts,stores,tests,types}/**/*.{js,jsx,cjs,mjs,ts,tsx,cts,mts}",
+      ],
+      "ignore": [".agents/**", ".claude/**"],
+      // Loaded from CSS, dynamic imports, or as providers for workspace peer dependencies.
+      "ignoreDependencies": [
+        "@tauri-apps/plugin-shell",
+        "@types/katex",
+        "katex",
+        "mammoth",
+        "mermaid",
+        "pdfjs-dist",
+        "tailwindcss",
+        "tesseract.js",
+        "tw-animate-css",
+        "xlsx",
+      ],
+      "ignoreBinaries": ["chcp.com", "pwsh", "rustfmt", "taskkill"],
+      "ignoreIssues": {
+        "**/*.generated.{js,ts,tsx}": [
+          "files",
+          "exports",
+          "nsExports",
+          "types",
+          "nsTypes",
+          "enumMembers",
+          "namespaceMembers",
+          "duplicates",
+        ],
+      },
+    },
+    "docs": {},
+    "crates/cognia-plugin-template-ts": {},
+    "crates/cognia-plugin-template-vscode-extension": {},
+    "mobile": {
+      "entry": ["capacitor.config.ts", "scripts/*.{js,mjs,ts}"],
+      "project": ["capacitor.config.ts", "scripts/*.{js,mjs,ts}"],
+      "ignoreDependencies": ["^@capacitor(?:-|/)", "^@capgo/", "^capacitor-"],
+    },
+    "packages/*": {},
+    "services/share-server/worker": {
+      "ignoreDependencies": ["^cloudflare$"],
+    },
+    "services/workspace-runtime": {},
+    "sidecar": {
+      // Packaged by Tauri and launched from the Rust bridge.
+      "entry": ["a2ui-mcp.mjs"],
+    },
+    "sidecar/vscode-ext-host": {
+      "entry": ["tests/fixtures/**/*.{js,mjs,ts}"],
+      "ignoreDependencies": ["^vscode$"],
+    },
+    "sidecar/webclone": {},
+  },
+}
