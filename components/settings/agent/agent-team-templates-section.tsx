@@ -57,6 +57,7 @@ import {
   type PluginAgentTeamTemplateWarning,
 } from "@/lib/plugin/registries/agent-team-template-registry"
 import { projectPluginTemplate } from "@/lib/agent-team/project-plugin-template"
+import { instantiateAgentTeamTemplate } from "@/lib/agent-team/instantiate-template"
 
 const log = createLogger("settings.agent-teams")
 
@@ -79,6 +80,7 @@ export function AgentTeamTemplatesSection() {
   const templates = useAgentTeamStore((s) => s.templates)
   const createTeam = useAgentTeamStore((s) => s.createTeam)
   const addTeammate = useAgentTeamStore((s) => s.addTeammate)
+  const createTask = useAgentTeamStore((s) => s.createTask)
   const addTemplate = useAgentTeamStore((s) => s.addTemplate)
   const updateTemplate = useAgentTeamStore((s) => s.updateTemplate)
   const deleteTemplate = useAgentTeamStore((s) => s.deleteTemplate)
@@ -129,30 +131,15 @@ export function AgentTeamTemplatesSection() {
 
   const handleUse = useCallback(
     (template: AgentTeamTemplate) => {
-      const team = createTeam({
-        name: template.name,
-        description: template.description,
-        task: template.description,
-        config: template.config,
+      const team = instantiateAgentTeamTemplate(template, {
+        createTeam,
+        addTeammate,
+        createTask,
       })
-      for (const tm of template.teammates) {
-        addTeammate({
-          teamId: team.id,
-          name: tm.name,
-          description: tm.description,
-          role: "teammate",
-          config: {
-            ...tm.config,
-            systemPrompt: tm.systemPrompt ?? tm.config?.systemPrompt,
-            capabilities: tm.capabilities ?? tm.config?.capabilities,
-            specialization: tm.specialization ?? tm.config?.specialization,
-          },
-        })
-      }
       log.info("template_used", { templateId: template.id, teamId: team.id })
       router.push(`/agent-teams/workspace?teamId=${team.id}`)
     },
-    [addTeammate, createTeam, router]
+    [addTeammate, createTask, createTeam, router]
   )
 
   const handleDuplicate = useCallback(

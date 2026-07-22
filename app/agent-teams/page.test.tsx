@@ -64,7 +64,15 @@ const template = (overrides: Partial<AgentTeamTemplate>): AgentTeamTemplate =>
     description: "Built-in template",
     category: "general",
     isBuiltIn: true,
-    teammates: [],
+    teammates: [{ name: "Planner", description: "Plans the work" }],
+    taskTemplates: [
+      {
+        title: "Approve brief",
+        description: "Approve the work brief",
+        priority: "high",
+        assignedToIndex: 0,
+      },
+    ],
     config: {},
     ...overrides,
   }) as AgentTeamTemplate
@@ -98,7 +106,8 @@ beforeEach(() => {
     teammates: {},
     templates: { tpl_1: template({}) },
     createTeam: jest.fn(() => ({ id: "copy_1", name: "Research Squad (copy)" })),
-    addTeammate: jest.fn(),
+    addTeammate: jest.fn(() => ({ id: "mate_1" })),
+    createTask: jest.fn(),
     deleteTeam: jest.fn(),
     updateTeam: jest.fn(),
   }
@@ -146,6 +155,32 @@ describe("AgentTeamsListPage", () => {
     await user.click(screen.getByRole("tab", { name: "Templates" }))
     const card = await screen.findByTestId("template-card-tpl_1")
     expect(within(card).getByText("Built-in")).toBeInTheDocument()
+  })
+
+  it("creates seeded template tasks from the template card", async () => {
+    const user = userEvent.setup()
+    render(<AgentTeamsListPage />)
+    await user.click(screen.getByRole("tab", { name: "Templates" }))
+    const card = await screen.findByTestId("template-card-tpl_1")
+    await user.click(within(card).getByRole("button", { name: "Create team" }))
+
+    expect(storeState.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Approve brief", assignedTo: "mate_1", order: 0 })
+    )
+    expect(pushMock).toHaveBeenCalledWith("/agent-teams/workspace?teamId=copy_1")
+  })
+
+  it("creates seeded template tasks from the create dialog", async () => {
+    const user = userEvent.setup()
+    render(<AgentTeamsListPage />)
+    await user.click(screen.getByRole("button", { name: "Create team" }))
+    const dialog = screen.getByRole("dialog", { name: "Create new team" })
+    await user.click(within(dialog).getByRole("button", { name: /Manager Worker/ }))
+
+    expect(storeState.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Approve brief", assignedTo: "mate_1", order: 0 })
+    )
+    expect(pushMock).toHaveBeenCalledWith("/agent-teams/workspace?teamId=copy_1")
   })
 
   it("duplicates a team with the i18n-formatted copy suffix from the actions menu", async () => {

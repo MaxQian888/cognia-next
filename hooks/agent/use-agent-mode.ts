@@ -66,8 +66,9 @@ export function useAgentMode(options: UseAgentModeOptions = {}): UseAgentModeRes
   const duplicateMode = useCustomModeStore((state) => state.duplicateMode)
   const recordModeUsage = useCustomModeStore((state) => state.recordModeUsage)
 
-  // Plugin modes from store
-  const getAllPluginModes = usePluginStore((state) => state.getAllModes)
+  // Subscribe to plugin records (rather than the stable getAllModes action)
+  // so modes that arrive during startup activation update mounted selectors.
+  const plugins = usePluginStore((state) => state.plugins)
 
   // Convert custom modes map to array
   const customModes = useMemo(() => Object.values(customModesMap), [customModesMap])
@@ -75,8 +76,11 @@ export function useAgentMode(options: UseAgentModeOptions = {}): UseAgentModeRes
   // Get plugin modes
   const pluginModes = useMemo(() => {
     if (!includePlugin) return []
-    return getAllPluginModes()
-  }, [includePlugin, getAllPluginModes])
+    return Object.values(plugins)
+      .filter((plugin) => plugin.status === "enabled")
+      .flatMap((plugin) => plugin.modes ?? [])
+      .map((mode) => ({ ...mode, type: "plugin" as const }))
+  }, [includePlugin, plugins])
 
   // Built-in modes
   const builtInModes = useMemo(() => (includeBuiltIn ? BUILT_IN_AGENT_MODES : []), [includeBuiltIn])

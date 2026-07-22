@@ -1,0 +1,33 @@
+{
+  "id": "cognia-work-mode",
+  "name": "Work Mode",
+  "version": "0.1.0",
+  "description": "Outcome-to-deliverable knowledge work with source-grounded research, parallel specialists, review gates, and artifacts.",
+  "type": "frontend",
+  "capabilities": ["tools", "modes", "skills", "subagent", "agent-team-template"],
+  "main": "src/index.ts",
+  "author": { "name": "cognia-next" },
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "permissions": ["artifact:read", "artifact:write", "agent:dispatch"],
+  "activationEvents": ["startup"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts",
+      "reason": "Mode, skills, artifacts, and text-channel specialist dispatch are available in the browser."
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "degraded",
+      "entrypoint": "src/index.ts",
+      "reason": "Review and artifact workflows are available; local-folder and desktop-app actions require a connected desktop host."
+    }
+  }
+}

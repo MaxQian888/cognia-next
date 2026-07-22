@@ -15,6 +15,7 @@ export type AgentModeType =
   | "academic" // Academic paper research mode
   | "plan" // Read-only planning mode (no edits)
   | "build" // Full-access build mode
+  | "plugin" // Plugin-contributed mode
   | "custom" // Custom user-defined mode
 
 export interface AgentModeConfig {

@@ -82,6 +82,7 @@ import {
   type PluginAgentTeamTemplateWarning,
 } from "@/lib/plugin/registries/agent-team-template-registry"
 import { projectPluginTemplate } from "@/lib/agent-team/project-plugin-template"
+import { instantiateAgentTeamTemplate } from "@/lib/agent-team/instantiate-template"
 
 const log = createLogger("agentTeams.list")
 
@@ -147,6 +148,7 @@ export default function AgentTeamsListPage() {
   const templates = useAgentTeamStore((s) => s.templates)
   const createTeam = useAgentTeamStore((s) => s.createTeam)
   const addTeammate = useAgentTeamStore((s) => s.addTeammate)
+  const createTask = useAgentTeamStore((s) => s.createTask)
   const deleteTeam = useAgentTeamStore((s) => s.deleteTeam)
   const updateTeam = useAgentTeamStore((s) => s.updateTeam)
 
@@ -208,26 +210,7 @@ export default function AgentTeamsListPage() {
 
   /* ---- actions ---- */
   const handlePickTemplate = (tpl: AgentTeamTemplate) => {
-    const team = createTeam({
-      name: tpl.name,
-      description: tpl.description,
-      task: tpl.description,
-      config: tpl.config,
-    })
-    for (const tm of tpl.teammates) {
-      addTeammate({
-        teamId: team.id,
-        name: tm.name,
-        description: tm.description,
-        role: "teammate",
-        config: {
-          ...tm.config,
-          systemPrompt: tm.systemPrompt ?? tm.config?.systemPrompt,
-          capabilities: tm.capabilities ?? tm.config?.capabilities,
-          specialization: tm.specialization ?? tm.config?.specialization,
-        },
-      })
-    }
+    const team = instantiateAgentTeamTemplate(tpl, { createTeam, addTeammate, createTask })
     log.info("template_used", { templateId: tpl.id, teamId: team.id })
     router.push(`/agent-teams/workspace?teamId=${team.id}`)
   }
@@ -709,6 +692,7 @@ function CreateTeamDialog({ open, onOpenChange, templates, onCreated }: CreateTe
   const t = useTranslations("agentTeamsWorkspace")
   const createTeam = useAgentTeamStore((s) => s.createTeam)
   const addTeammate = useAgentTeamStore((s) => s.addTeammate)
+  const createTask = useAgentTeamStore((s) => s.createTask)
 
   const [mode, setMode] = useState<"template" | "scratch">("template")
   const [name, setName] = useState("")
@@ -740,26 +724,7 @@ function CreateTeamDialog({ open, onOpenChange, templates, onCreated }: CreateTe
   const handlePickTemplate = (tpl: AgentTeamTemplate) => {
     setSaving(true)
     try {
-      const team = createTeam({
-        name: tpl.name,
-        description: tpl.description,
-        task: tpl.description,
-        config: tpl.config,
-      })
-      for (const tm of tpl.teammates) {
-        addTeammate({
-          teamId: team.id,
-          name: tm.name,
-          description: tm.description,
-          role: "teammate",
-          config: {
-            ...tm.config,
-            systemPrompt: tm.systemPrompt ?? tm.config?.systemPrompt,
-            capabilities: tm.capabilities ?? tm.config?.capabilities,
-            specialization: tm.specialization ?? tm.config?.specialization,
-          },
-        })
-      }
+      const team = instantiateAgentTeamTemplate(tpl, { createTeam, addTeammate, createTask })
       toast.success(t("teamCreated", { name: team.name }))
       onCreated(team.id)
       reset()

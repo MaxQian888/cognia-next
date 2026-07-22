@@ -50,10 +50,11 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { BUILT_IN_AGENT_MODES, type AgentModeConfig } from "@/types/agent/agent-mode"
+import type { AgentModeConfig } from "@/types/agent/agent-mode"
 import { useCustomModeStore, type CustomModeConfig } from "@/stores/agent/custom-mode-store"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { useProjectStore } from "@/stores/project/project-store"
+import { useAgentMode } from "@/hooks/agent/use-agent-mode"
 import { TEAM_STATUS_CONFIG } from "@/types/agent/agent-team"
 import { CustomModeEditor } from "./custom-mode-editor"
 
@@ -110,6 +111,7 @@ export function AgentModeSelector({
 
   // Custom mode store
   const { customModes, deleteMode, duplicateMode, recordModeUsage } = useCustomModeStore()
+  const { builtInModes, pluginModes, getModeById, isBuiltInMode } = useAgentMode()
 
   // Agent team store
   const teamsList = useAgentTeamStore(useShallow((s) => Object.values(s.teams)))
@@ -134,18 +136,16 @@ export function AgentModeSelector({
   // Get all custom modes as array
   const customModesList = useMemo(() => Object.values(customModes), [customModes])
 
-  // Find selected mode from both built-in and custom
+  // Find selected mode from built-in, custom, and live plugin contributions.
   const selectedMode = useMemo(() => {
-    const builtIn = BUILT_IN_AGENT_MODES.find((m) => m.id === selectedModeId)
-    if (builtIn) return builtIn
-    return customModes[selectedModeId] || BUILT_IN_AGENT_MODES[0]
-  }, [selectedModeId, customModes])
+    return getModeById(selectedModeId) ?? builtInModes[0]
+  }, [selectedModeId, getModeById, builtInModes])
 
   // Handle mode selection
   const handleModeSelect = (mode: AgentModeConfig | CustomModeConfig) => {
     onModeChange(mode)
     // Track usage for custom modes
-    if ("isBuiltIn" in mode && mode.isBuiltIn === false) {
+    if (mode.type === "custom") {
       recordModeUsage(mode.id)
     }
   }
@@ -206,11 +206,11 @@ export function AgentModeSelector({
               className
             )}
           >
-            <ModeIcon name={selectedMode.icon} className="size-3.5 shrink-0" />
+            <ModeIcon name={selectedMode?.icon ?? "Bot"} className="size-3.5 shrink-0" />
             <span className="hidden max-w-[8rem] truncate sm:inline-block">
-              {selectedMode.type === "custom"
-                ? selectedMode.name
-                : t(`modes.${selectedMode.id}.name`)}
+              {selectedMode && isBuiltInMode(selectedMode.id)
+                ? t(`modes.${selectedMode.id}.name`)
+                : selectedMode?.name}
             </span>
             <ChevronDown className="size-3 shrink-0 opacity-50" />
           </Button>
@@ -224,7 +224,7 @@ export function AgentModeSelector({
                 <DropdownMenuLabel className="text-xs text-muted-foreground">
                   {t("builtInModes")}
                 </DropdownMenuLabel>
-                {BUILT_IN_AGENT_MODES.map((mode) => {
+                {builtInModes.map((mode) => {
                   const isSelected = mode.id === selectedModeId
                   return (
                     <DropdownMenuItem
@@ -258,6 +258,51 @@ export function AgentModeSelector({
                   )
                 })}
               </DropdownMenuGroup>
+
+              {/* Plugin Modes Section */}
+              {pluginModes.length > 0 && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel className="text-xs text-muted-foreground">
+                      {t("pluginModes")}
+                    </DropdownMenuLabel>
+                    {pluginModes.map((mode) => {
+                      const isSelected = mode.id === selectedModeId
+                      return (
+                        <DropdownMenuItem
+                          key={mode.id}
+                          onClick={() => handleModeSelect(mode)}
+                          className="flex items-start gap-3 p-3"
+                        >
+                          <div
+                            className={cn(
+                              "flex h-8 w-8 shrink-0 items-center justify-center rounded-md",
+                              isSelected ? "bg-primary text-primary-foreground" : "bg-muted"
+                            )}
+                          >
+                            <ModeIcon name={mode.icon} className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium">{mode.name}</span>
+                              {isSelected && <Check className="h-3 w-3 text-primary" />}
+                            </div>
+                            <p className="line-clamp-2 text-xs text-muted-foreground">
+                              {mode.description}
+                            </p>
+                            {mode.previewEnabled && (
+                              <Badge variant="secondary" className="mt-1 text-[10px]">
+                                {t("livePreview")}
+                              </Badge>
+                            )}
+                          </div>
+                        </DropdownMenuItem>
+                      )
+                    })}
+                  </DropdownMenuGroup>
+                </>
+              )}
 
               {/* Custom Modes Section */}
               {customModesList.length > 0 && (
