@@ -109,6 +109,7 @@ import {
 } from "@cognia/provider-routing/build-preview-engine"
 import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
 import { estimateCJKTokenCount } from "@cognia/rag/cjk-tokenizer"
+import { estimateFallbackTokens } from "@/lib/ai/tokens/fallback-estimator"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { PLAN_MODE_PROMPT, PLAN_MODE_STRUCTURED_STEPS_SNIPPET } from "./plan-mode-prompt"
 
@@ -1216,6 +1217,18 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           // opt a gateway / Azure / custom URL into the Responses API; the
           // sidecar's decideOpenAiEndpointFlavor honors it.
           ...(resolution.apiFlavor ? { apiFlavor: resolution.apiFlavor } : {}),
+          ...(resolution.bedrock
+            ? {
+                bedrockAuthMode: resolution.bedrock.authMode,
+                region: resolution.bedrock.region,
+                accessKeyId: resolution.bedrock.accessKeyId,
+                secretAccessKey: resolution.bedrock.secretAccessKey,
+                sessionToken: resolution.bedrock.sessionToken,
+                profile: resolution.bedrock.profile,
+                roleArn: resolution.bedrock.roleArn,
+                roleSessionName: resolution.bedrock.roleSessionName,
+              }
+            : {}),
         }
         // Plugin-contributed protocol: ride the execution spec along. A
         // declarative variant spec is forwarded verbatim (the sidecar serves
@@ -1436,7 +1449,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         chunkCount: result.retrievedChunks?.length ?? 0,
         styleSampleCount: result.selectedStyleSamples?.length ?? 0,
         tokensApprox: result.applied
-          ? Math.ceil((result.applied.systemPrompt ?? baseSystem).length / 4)
+          ? estimateFallbackTokens(result.applied.systemPrompt ?? baseSystem)
           : 0,
       })
     } catch {

@@ -401,7 +401,6 @@ describe("resolveSendOptions — semantic tool routing exempts flow-control tool
       listRoutes: async () => [],
       embed: async (texts: string[]) => texts.map(() => [1, 0]),
       cacheRouteEmbeddings: async () => {},
-      cosine: () => 0,
     })
 
     const opts = await resolveSendOptions({
@@ -672,6 +671,42 @@ describe("resolveSendOptions — opt-in Auto routing", () => {
 })
 
 describe("resolveSendOptions — non-Anthropic provider credentials (ADR-0043)", () => {
+  it("forwards Bedrock default-chain selection without resolved AWS credentials", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({
+        id: "bedrock-character",
+        providerId: "bedrock",
+        model: "us.amazon.nova-lite-v1:0",
+      }),
+      appSettings: {
+        defaultProvider: "bedrock",
+        providerSettings: {
+          bedrock: {
+            enabled: true,
+            defaultModel: "us.amazon.nova-lite-v1:0",
+            bedrock: {
+              authMode: "default-chain",
+              region: "us-east-1",
+              profile: "engineering",
+              roleArn: "arn:aws:iam::123456789012:role/Cognia",
+            },
+          },
+        },
+      } as unknown as AppSettings,
+    })
+
+    expect(opts.providerCredentials).toEqual({
+      apiKey: undefined,
+      baseURL: undefined,
+      protocol: "bedrock",
+      bedrockAuthMode: "default-chain",
+      region: "us-east-1",
+      profile: "engineering",
+      roleArn: "arn:aws:iam::123456789012:role/Cognia",
+    })
+    expect(JSON.stringify(opts.providerCredentials)).not.toContain("secretAccessKey")
+  })
+
   it("forwards the resolved protocol + modelParams for a configured built-in provider", async () => {
     const opts = await resolveSendOptions({
       character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),

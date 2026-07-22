@@ -27,6 +27,7 @@ import {
 import type { PluginToolExecResponse } from "./plugin-tool-ipc"
 import type { ProtocolAdapterExecEvent } from "./protocol-adapter-ipc"
 import type { ProtocolAdapterCancelEvent } from "@cognia/agent-config-types"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 
 const SIDECAR_EVENT = "claude://message"
 
@@ -140,7 +141,7 @@ const CONTROL_TIMEOUT_MS = 8000
  * call can't run. Anthropic-path + open-session only — callers degrade
  * gracefully on rejection.
  */
-export async function sessionControl<T = unknown>(
+async function sessionControlRequest<T>(
   sessionId: string,
   method: SessionControlMethod,
   params?: Record<string, unknown>
@@ -168,6 +169,17 @@ export async function sessionControl<T = unknown>(
         reject(err instanceof Error ? err : new Error(String(err)))
       })
   })
+}
+
+export async function sessionControl<T = unknown>(
+  sessionId: string,
+  method: Exclude<SessionControlMethod, "steer">,
+  params?: Record<string, unknown>
+): Promise<T> {
+  if ((method as SessionControlMethod) === "steer") {
+    throw new Error("steer must use the PII-gated steerSession wrapper")
+  }
+  return sessionControlRequest<T>(sessionId, method, params)
 }
 
 /** Live context-window usage from the SDK (authoritative window + breakdown). */
@@ -207,6 +219,27 @@ export function getSessionSupportedCommands(sessionId: string): Promise<SdkSlash
 /** Switch the model on the running query in place (no session restart). */
 export function setSessionModel(sessionId: string, model: string): Promise<void> {
   return sessionControl<void>(sessionId, "setModel", { model })
+}
+
+/**
+ * Queue a user message into the active Anthropic streaming-input query.
+ * Success acknowledges sidecar queue acceptance only; the SDK applies the
+ * message at its next supported boundary and may not mutate an HTTP request
+ * that is already in flight.
+ */
+export async function steerSession(
+  sessionId: string,
+  prompt: SendContent,
+  sourceMessageId?: string
+): Promise<{ accepted: true }> {
+  if (!hasNoLeakingPiiDeep(prompt)) {
+    throw new Error("live-steer prompt rejected by the renderer PII gate")
+  }
+  return sessionControlRequest<{ accepted: true }>(sessionId, "steer", {
+    prompt,
+    priority: "now",
+    ...(sourceMessageId ? { sourceMessageId } : {}),
+  })
 }
 
 // ---- Mobile-only message + session RPCs (mobile completeness Phase 2) ----

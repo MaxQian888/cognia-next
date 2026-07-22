@@ -24,7 +24,6 @@ import {
   releaseSessionDeployment,
 } from "@cognia/provider-routing/session-affinity-store"
 import { generateEmbeddings, type EmbeddingConfig } from "@cognia/provider-embedding/embedding"
-import { cosineSimilarity } from "@cognia/provider-embedding/embedding-utils"
 import type { CircuitBreakerConfig } from "@cognia/provider-types/circuit-breaker"
 
 import { useSettingsStore } from "@/stores/settings"
@@ -98,7 +97,6 @@ export function buildRoutingRuntimeAdapters(): ProviderRoutingRuntimeAdapters {
       },
       cacheRouteEmbeddings: (id, embeddings, model) =>
         cacheToolRouteEmbeddings(id, embeddings, model),
-      cosine: cosineSimilarity,
     },
   }
 }

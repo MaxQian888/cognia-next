@@ -1,6 +1,11 @@
 /** @jest-environment jsdom */
 import { transport } from "@/lib/tauri"
 
+const mockHasNoLeakingPiiDeep = jest.fn(() => true)
+jest.mock("@cognia/redact", () => ({
+  hasNoLeakingPiiDeep: (...args: unknown[]) => mockHasNoLeakingPiiDeep(...args),
+}))
+
 jest.mock("@tauri-apps/api/event", () => ({
   listen: jest.fn(),
 }))
@@ -26,6 +31,8 @@ import {
   scanClaudeSkills,
   sendPluginToolResponse,
   sendPrompt,
+  sessionControl,
+  steerSession,
   subscribePluginToolExec,
   setApiKey,
   skillsFetchRemoteJson,
@@ -58,6 +65,7 @@ let callSpy: jest.SpiedFunction<typeof transport.call>
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockHasNoLeakingPiiDeep.mockReturnValue(true)
   setTauri(true)
   callSpy = jest.spyOn(transport, "call")
 })
@@ -103,6 +111,51 @@ describe("sendPluginToolResponse", () => {
       result: "ok",
       error: undefined,
     })
+  })
+})
+
+describe("steerSession", () => {
+  it("uses the correlated session-control channel and requests immediate queued input", async () => {
+    let emit: ((event: unknown) => void) | undefined
+    jest.spyOn(transport, "subscribe").mockImplementation((_channel, handler) => {
+      emit = handler
+      return () => undefined
+    })
+    callSpy.mockImplementation(async (_command, payload) => {
+      const request = payload as { requestId: string }
+      queueMicrotask(() => {
+        emit?.({
+          type: "control_response",
+          sessionId: "session-1",
+          requestId: request.requestId,
+          method: "steer",
+          ok: true,
+          result: { accepted: true },
+        })
+      })
+      return undefined
+    })
+
+    await expect(steerSession("session-1", "change direction", "om-steer")).resolves.toEqual({
+      accepted: true,
+    })
+    expect(callSpy).toHaveBeenCalledWith(
+      "claude_session_control",
+      expect.objectContaining({
+        sessionId: "session-1",
+        method: "steer",
+        params: { prompt: "change direction", priority: "now", sourceMessageId: "om-steer" },
+      })
+    )
+  })
+
+  it("fails closed before transport and cannot be bypassed through generic controls", async () => {
+    mockHasNoLeakingPiiDeep.mockReturnValue(false)
+    await expect(steerSession("session-1", "user@example.com")).rejects.toThrow(/renderer PII gate/)
+    await expect(
+      sessionControl("session-1", "steer" as never, { prompt: "user@example.com" })
+    ).rejects.toThrow(/PII-gated steerSession/)
+    expect(callSpy).not.toHaveBeenCalled()
   })
 })
 

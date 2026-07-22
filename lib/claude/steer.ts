@@ -2,13 +2,11 @@
  * Steer-queue helpers.
  *
  * A "steer" is a follow-up the user typed *while a turn was still running*.
- * True mid-turn injection is NOT available through the sidecar — both dispatch
- * paths (anthropic / ai-sdk) serialize input at the turn boundary and the host
- * (`restartReason`) close-and-restarts a session rather than feeding a second
- * prompt into a live turn. So a steer is held client-side and replayed as a
- * fresh turn once the running turn settles, framed so the model reads it as a
- * mid-run aside. This mirrors the CLI's `frameSteer`
- * (`cli/src/tui/runtime/driven-turns.ts`).
+ * The pinned Anthropic sidecar supports acknowledged streaming-input steer.
+ * This module handles the REQUIRED fallback: providers/phases that cannot
+ * acknowledge live acceptance preserve the message and replay it as a fresh
+ * turn once the running turn settles, framed as a course correction. This
+ * mirrors the CLI's `frameSteer` (`cli/src/tui/runtime/driven-turns.ts`).
  */
 
 import type { SendContent, SendContentBlock } from "@cognia/agent-config-types"

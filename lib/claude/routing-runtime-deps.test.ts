@@ -133,7 +133,7 @@ describe("buildRoutingRuntimeAdapters — difficulty settings", () => {
 })
 
 describe("buildRoutingRuntimeAdapters — semantic tool router deps", () => {
-  it("wires listRoutes, embed, cacheRouteEmbeddings and cosine", async () => {
+  it("wires listRoutes, embed and cacheRouteEmbeddings", async () => {
     const deps = buildRoutingRuntimeAdapters().semanticToolRouterDeps!
     expect(await deps.listRoutes()).toHaveLength(1)
     expect(listEnabledToolRoutes).toHaveBeenCalled()
@@ -149,7 +149,5 @@ describe("buildRoutingRuntimeAdapters — semantic tool router deps", () => {
 
     await deps.cacheRouteEmbeddings("r1", [[1, 0]], "Xenova/all-MiniLM-L6-v2")
     expect(cacheToolRouteEmbeddings).toHaveBeenCalledWith("r1", [[1, 0]], "Xenova/all-MiniLM-L6-v2")
-
-    expect(deps.cosine([1, 0], [1, 0])).toBeCloseTo(1)
   })
 })
