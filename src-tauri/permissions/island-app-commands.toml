@@ -9,4 +9,5 @@ commands.allow = [
   "fleet_question_respond",
   "island_resize",
   "island_set_tucked",
+  "reveal_island_window",
 ]

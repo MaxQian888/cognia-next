@@ -32,6 +32,7 @@ import {
   closePetPopup,
   resizePetPopup,
   revealPetWindow,
+  revealIslandWindow,
   onPetNativeStateChanged,
   onPetSuspend,
   onPetResume,
@@ -156,6 +157,18 @@ describe("lib/tauri/pet-window — happy path command mapping", () => {
     await expect(revealPetWindow()).resolves.toBe(true)
     expect(mockInvoke).toHaveBeenCalledWith("reveal_pet_window", { focus: false })
   })
+
+  it("revealIslandWindow delegates first-paint reveal to the island window owner", async () => {
+    mockInvoke.mockResolvedValue(undefined)
+    await expect(revealIslandWindow(true)).resolves.toBe(true)
+    expect(mockInvoke).toHaveBeenCalledWith("reveal_island_window", { focus: true })
+  })
+
+  it("revealIslandWindow defaults to a non-activating reveal", async () => {
+    mockInvoke.mockResolvedValue(undefined)
+    await expect(revealIslandWindow()).resolves.toBe(true)
+    expect(mockInvoke).toHaveBeenCalledWith("reveal_island_window", { focus: false })
+  })
 })
 
 describe("lib/tauri/pet-window — off Tauri", () => {
@@ -178,6 +191,7 @@ describe("lib/tauri/pet-window — off Tauri", () => {
     await expect(closePetPopup()).resolves.toBe(false)
     await expect(resizePetPopup(1, 1)).resolves.toBe(false)
     await expect(revealPetWindow(false)).resolves.toBe(false)
+    await expect(revealIslandWindow(false)).resolves.toBe(false)
     expect(mockInvoke).not.toHaveBeenCalled()
   })
 })

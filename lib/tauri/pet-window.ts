@@ -218,6 +218,22 @@ export async function revealPetWindow(focus = false): Promise<boolean> {
   }
 }
 
+/**
+ * Reveal the fleet island overlay after its first paint. Mirrors
+ * `revealPetWindow` but for the `"island"` window; on macOS it orders the
+ * island NSPanel front without activating Cognia.
+ */
+export async function revealIslandWindow(focus = false): Promise<boolean> {
+  if (!isTauri()) return false
+  try {
+    await invoke("reveal_island_window", { focus })
+    return true
+  } catch (err) {
+    console.warn("revealIslandWindow failed", err)
+    return false
+  }
+}
+
 /** Bring the main app window back to the foreground (overlay "show main"). */
 export async function showMainWindow(): Promise<boolean> {
   if (!isTauri()) return false

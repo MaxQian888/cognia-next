@@ -5,6 +5,7 @@ import { DEFAULT_UPDATE_SETTINGS, type UpdateSettings } from "@cognia/agent-conf
 import { isTauri } from "@/lib/tauri"
 import { getActiveProxyUrl } from "@/stores/network-proxy"
 import { useSettingsStore } from "@/stores/settings/settings-store"
+import { loggers } from "@/lib/logging"
 
 /** Available update surfaced to the UI. */
 export interface AvailableUpdate {
@@ -333,6 +334,16 @@ export interface InstallUpdateOptions {
 export async function relaunchAfterUpdate(): Promise<void> {
   if (!isTauri()) return
   try {
+    try {
+      const { saveWindowState, StateFlags } = await import("@tauri-apps/plugin-window-state")
+      await saveWindowState(
+        StateFlags.SIZE | StateFlags.POSITION | StateFlags.MAXIMIZED | StateFlags.DECORATIONS
+      )
+    } catch (error) {
+      loggers.app.warn("window state save failed before updater relaunch", {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
     const { relaunch } = await import("@tauri-apps/plugin-process")
     await relaunch()
   } catch (error) {

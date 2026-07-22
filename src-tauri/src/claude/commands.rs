@@ -132,6 +132,22 @@ pub struct ProviderCredentials {
     /// them silently.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub headers: Option<std::collections::HashMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bedrock_auth_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub access_key_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secret_access_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role_arn: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role_session_name: Option<String>,
 }
 
 impl SendOptions {
@@ -183,6 +199,22 @@ impl SendOptions {
             if let Some(flavor) = creds.api_flavor.as_ref() {
                 if !matches!(flavor.as_str(), "auto" | "responses" | "chat") {
                     return Err(format!("invalid providerCredentials.apiFlavor: {flavor}"));
+                }
+            }
+            if let Some(mode) = creds.bedrock_auth_mode.as_ref() {
+                if !matches!(mode.as_str(), "api-key" | "iam" | "default-chain") {
+                    return Err(format!(
+                        "invalid providerCredentials.bedrockAuthMode: {mode}"
+                    ));
+                }
+                if creds
+                    .region
+                    .as_deref()
+                    .unwrap_or_default()
+                    .trim()
+                    .is_empty()
+                {
+                    return Err("providerCredentials.region is required for Bedrock".into());
                 }
             }
         }
@@ -497,6 +529,7 @@ pub fn is_allowed_control_method(method: &str) -> bool {
             | "supportedModels"
             | "supportedCommands"
             | "setModel"
+            | "steer"
     )
 }
 
@@ -535,6 +568,56 @@ pub async fn claude_session_control(
     }
     let payload = build_session_control_payload(session_id, request_id, method, params);
     state.write_command(&payload).await
+}
+
+fn build_feature_call_payload(mut request: Value) -> Result<Value, String> {
+    let object = request
+        .as_object_mut()
+        .ok_or_else(|| "feature call request must be an object".to_string())?;
+    let request_id = object
+        .get("requestId")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if request_id.is_empty() {
+        return Err("feature call requestId must not be empty".into());
+    }
+    let operation = object
+        .get("operation")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if !matches!(
+        operation,
+        "language-generate" | "language-stream" | "embedding" | "bedrock-discover"
+    ) {
+        return Err(format!("unsupported feature call operation: {operation}"));
+    }
+    object.insert("type".into(), Value::String("feature_call".into()));
+    Ok(request)
+}
+
+#[tauri::command]
+pub async fn claude_feature_call(
+    app: AppHandle,
+    state: State<'_, SidecarState>,
+    request: Value,
+) -> Result<(), String> {
+    spawn_sidecar(Arc::new(TauriSidecarHost(app)), state.inner().clone()).await?;
+    state
+        .write_command(&build_feature_call_payload(request)?)
+        .await
+}
+
+#[tauri::command]
+pub async fn claude_feature_abort(
+    state: State<'_, SidecarState>,
+    request_id: String,
+) -> Result<(), String> {
+    if request_id.is_empty() {
+        return Err("feature call requestId must not be empty".into());
+    }
+    state
+        .write_command(&json!({ "type": "feature_call_abort", "requestId": request_id }))
+        .await
 }
 
 /// Build the `plugin_tool_response` JSON line written to the sidecar stdin.
@@ -742,6 +825,7 @@ mod tests {
             "supportedModels",
             "supportedCommands",
             "setModel",
+            "steer",
         ] {
             assert!(is_allowed_control_method(m), "{m} should be allowed");
         }
@@ -1057,5 +1141,22 @@ mod tests {
 
         let bad_source = parse(r#"{ "settingSources": ["user", "globe"] }"#);
         assert!(bad_source.validate().is_err());
+    }
+
+    #[test]
+    fn feature_call_payload_is_correlated_and_allowlisted() {
+        let payload = build_feature_call_payload(json!({
+            "requestId": "request-1",
+            "operation": "language-stream",
+            "model": "us.amazon.nova-lite-v1:0"
+        }))
+        .expect("valid payload");
+        assert_eq!(payload["type"], "feature_call");
+        assert_eq!(payload["requestId"], "request-1");
+        assert!(build_feature_call_payload(json!({
+            "requestId": "request-2",
+            "operation": "shell"
+        }))
+        .is_err());
     }
 }

@@ -34,7 +34,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Runtime};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Runtime, WebviewWindow};
 
 pub const ISLAND_LABEL: &str = "island";
 
@@ -554,6 +554,23 @@ pub async fn close_island_window(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn is_island_window_open(app: AppHandle) -> bool {
     is_island_window_open_inner(&app)
+}
+
+/// Reveal the island overlay after its first painted frame. Mirrors
+/// `pet_window::reveal_pet_window`: non-activating NSPanel on macOS, plain
+/// show elsewhere. The renderer calls this from `IslandView` mount.
+#[tauri::command]
+pub async fn reveal_island_window(window: WebviewWindow, focus: bool) -> Result<(), String> {
+    if window.label() != ISLAND_LABEL {
+        return Err(format!(
+            "reveal_island_window called from window '{}', expected '{}'",
+            window.label(),
+            ISLAND_LABEL
+        ));
+    }
+    let role = crate::pet_window::OverlayPanelRole::Island;
+    let generation = crate::pet_window::current_overlay_panel_generation(role);
+    crate::pet_window::reveal_overlay_panel(&window, role, focus, generation)
 }
 
 /// Resize on expand/collapse, keeping the strip centered under the notch.

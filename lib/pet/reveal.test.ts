@@ -16,8 +16,18 @@ let mockIsMac = false
 jest.mock("@/lib/tauri/os", () => ({ isMacPlatform: () => mockIsMac }))
 
 const revealPetWindowMock = jest.fn().mockResolvedValue(true)
+const revealIslandWindowMock = jest.fn().mockResolvedValue(true)
 jest.mock("@/lib/tauri/pet-window", () => ({
   revealPetWindow: (focus: boolean) => revealPetWindowMock(focus),
+  revealIslandWindow: (focus: boolean) => revealIslandWindowMock(focus),
+}))
+
+let mockWindowRole: ReturnType<typeof import("@/lib/pet/window-role").getPetWindowRole> = "overlay"
+jest.mock("@/lib/pet/window-role", () => ({
+  getPetWindowRole: () => mockWindowRole,
+  PET_WINDOW_LABEL: "pet",
+  PET_POPUP_WINDOW_LABEL: "pet-popup",
+  ISLAND_WINDOW_LABEL: "island",
 }))
 
 // Tauri window API reached via dynamic import inside the reveal.
@@ -64,6 +74,7 @@ async function flushAsync() {
 beforeEach(() => {
   mockIsTauri = false
   mockIsMac = false
+  mockWindowRole = "overlay"
   showMock.mockClear()
   setFocusMock.mockClear()
   innerSizeMock.mockClear()
@@ -71,6 +82,7 @@ beforeEach(() => {
   setSizeMock.mockClear()
   setResizableMock.mockClear()
   revealPetWindowMock.mockClear()
+  revealIslandWindowMock.mockClear()
   rafCallbacks.length = 0
   rafSpy = jest.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
     rafCallbacks.push(cb)
@@ -133,12 +145,29 @@ describe("schedulePetWindowReveal", () => {
   it("asks the native macOS panel to become key only for the popup", async () => {
     mockIsTauri = true
     mockIsMac = true
+    mockWindowRole = "popup"
     schedulePetWindowReveal({ focus: true })
     flushRaf()
     flushRaf()
     await flushAsync()
 
     expect(revealPetWindowMock).toHaveBeenCalledWith(true)
+    expect(revealIslandWindowMock).not.toHaveBeenCalled()
+    expect(showMock).not.toHaveBeenCalled()
+    expect(setFocusMock).not.toHaveBeenCalled()
+  })
+
+  it("routes the macOS island reveal to the island-specific NSPanel command", async () => {
+    mockIsTauri = true
+    mockIsMac = true
+    mockWindowRole = "island"
+    schedulePetWindowReveal({ focus: true })
+    flushRaf()
+    flushRaf()
+    await flushAsync()
+
+    expect(revealIslandWindowMock).toHaveBeenCalledWith(true)
+    expect(revealPetWindowMock).not.toHaveBeenCalled()
     expect(showMock).not.toHaveBeenCalled()
     expect(setFocusMock).not.toHaveBeenCalled()
   })

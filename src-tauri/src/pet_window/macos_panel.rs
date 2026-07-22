@@ -343,7 +343,6 @@ pub(crate) fn apply_pet_panel_behavior<R: Runtime>(
             panel
         }
     };
-    panel.set_level(role.window_level());
     panel.set_collection_behavior(behavior.into());
     panel.set_style_mask(style.into());
     panel.set_floating_panel(true);
@@ -353,6 +352,10 @@ pub(crate) fn apply_pet_panel_behavior<R: Runtime>(
     panel.set_has_shadow(false);
     panel.set_transparent(true);
     panel.set_opaque(false);
+    // Set the level last: `setFloatingPanel:` can reset an NSPanel's level to
+    // `NSFloatingWindowLevel`, which would leave the island (level 25,
+    // NSStatusWindowLevel) drawing behind the menu bar instead of above it.
+    panel.set_level(role.window_level());
     Ok(())
 }
 

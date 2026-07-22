@@ -36,6 +36,21 @@ jest.mock("@tauri-apps/plugin-process", () => ({ relaunch: () => relaunchMock() 
   virtual: true,
 })
 
+const saveWindowStateMock = jest.fn(async () => {})
+jest.mock(
+  "@tauri-apps/plugin-window-state",
+  () => ({
+    StateFlags: { SIZE: 1, POSITION: 2, MAXIMIZED: 4, VISIBLE: 8, DECORATIONS: 16, FULLSCREEN: 32 },
+    saveWindowState: (flags: number) => saveWindowStateMock(flags),
+  }),
+  { virtual: true }
+)
+
+const warnMock = jest.fn()
+jest.mock("@/lib/logging", () => ({
+  loggers: { app: { warn: (...args: unknown[]) => warnMock(...args) } },
+}))
+
 type UpdateHandleFixture = {
   version: string
   body?: string
@@ -394,6 +409,18 @@ describe("downloadAndInstallUpdate", () => {
     expect(await downloadAndInstallUpdate()).toBe("relaunching")
     expect(download).toHaveBeenCalled()
     expect(install).toHaveBeenCalled()
+    expect(saveWindowStateMock).toHaveBeenCalledWith(1 | 2 | 4 | 16)
+    expect(relaunchMock).toHaveBeenCalled()
+  })
+
+  it("does not block relaunch when saving window state fails", async () => {
+    saveWindowStateMock.mockRejectedValueOnce(new Error("state file unavailable"))
+
+    await expect(relaunchAfterUpdate()).resolves.toBeUndefined()
+
+    expect(warnMock).toHaveBeenCalledWith("window state save failed before updater relaunch", {
+      error: "state file unavailable",
+    })
     expect(relaunchMock).toHaveBeenCalled()
   })
 

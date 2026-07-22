@@ -1,5 +1,5 @@
-// Shared first-paint reveal for the two transparent desktop-pet windows (the
-// sprite overlay and the click popup). Rust creates both windows
+// Shared first-paint reveal for the transparent desktop overlay windows (pet
+// sprite, pet click popup, and fleet island). Rust creates these windows
 // `visible(false)` and never shows them on the create path, because on Windows
 // a `transparent(true)` window shown before its WebView commits a first paint
 // renders an opaque (black) rectangle until a recomposite — the "invisible /
@@ -10,7 +10,8 @@
 
 import { isTauri } from "@/lib/platform/detect"
 import { isMacPlatform } from "@/lib/tauri/os"
-import { revealPetWindow } from "@/lib/tauri/pet-window"
+import { revealIslandWindow, revealPetWindow } from "@/lib/tauri/pet-window"
+import { getPetWindowRole } from "@/lib/pet/window-role"
 
 export interface PetWindowRevealOptions {
   /**
@@ -45,7 +46,12 @@ export function schedulePetWindowReveal(options: PetWindowRevealOptions = {}): (
     void (async () => {
       try {
         if (isMacPlatform()) {
-          await revealPetWindow(Boolean(options.focus))
+          const role = getPetWindowRole()
+          if (role === "island") {
+            await revealIslandWindow(Boolean(options.focus))
+          } else {
+            await revealPetWindow(Boolean(options.focus))
+          }
           return
         }
         const [{ getCurrentWindow }, { PhysicalSize }] = await Promise.all([

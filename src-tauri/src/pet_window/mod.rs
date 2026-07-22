@@ -30,7 +30,10 @@ pub use surfaces::*;
 // reclassing the pet windows pioneered (non-activating, all-Spaces,
 // floating level). Alias rather than move — pet call sites stay untouched.
 pub(crate) use macos_panel::{
-    apply_pet_panel_behavior as apply_overlay_panel_behavior, PetPanelRole as OverlayPanelRole,
+    apply_pet_panel_behavior as apply_overlay_panel_behavior,
+    current_panel_generation as current_overlay_panel_generation,
+    reveal_pet_panel as reveal_overlay_panel,
+    PetPanelRole as OverlayPanelRole,
 };
 
 /// Default overlay size used when the tray opens the pet with no renderer
