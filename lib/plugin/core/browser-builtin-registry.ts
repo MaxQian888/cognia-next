@@ -17,6 +17,7 @@ import workflowAiManifest from "@/plugins/workflow-ai/plugin.json"
 import workspaceToolsManifest from "@/plugins/workspace-tools/plugin.json"
 import agentTeamExamplesManifest from "@/plugins/agent-team-examples/plugin.json"
 import backendRefactorManifest from "@/plugins/cognia-backend-refactor/plugin.json"
+import workModeManifest from "@/plugins/cognia-work-mode/plugin.json"
 import zhihuContentPipelineManifest from "@/plugins/zhihu-content-pipeline/plugin.json"
 import appearanceDemoManifest from "@/plugins/cognia-appearance-demo/plugin.json"
 import schedulingDemoManifest from "@/plugins/cognia-scheduling-demo/plugin.json"
@@ -55,6 +56,7 @@ import * as githubDeliveryExports from "@/plugins/github-delivery/src/index"
 import workflowAiModule from "@/plugins/workflow-ai/src/index"
 import agentTeamExamplesModule from "@/plugins/agent-team-examples/src/index"
 import backendRefactorModule from "@/plugins/cognia-backend-refactor/src/index"
+import workModeModule from "@/plugins/cognia-work-mode/src/index"
 import zhihuContentPipelineModule from "@/plugins/zhihu-content-pipeline/src/index"
 import appearanceDemoModule from "@/plugins/cognia-appearance-demo/src/index"
 import schedulingDemoModule from "@/plugins/cognia-scheduling-demo/src/index"
@@ -204,6 +206,15 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     path: "builtin://cognia-backend-refactor",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(backendRefactorModule),
+  },
+  {
+    // Outcome-to-deliverable Work experience. Its rich module manifest carries
+    // the mode, skills, specialist subagents, and team template; activate()
+    // registers the artifact/review/parallel-dispatch tools.
+    manifest: builtinManifest(workModeManifest, workModeModule),
+    path: "builtin://cognia-work-mode",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(workModeModule),
   },
   {
     manifest: builtinManifest(zhihuContentPipelineManifest, zhihuContentPipelineModule),

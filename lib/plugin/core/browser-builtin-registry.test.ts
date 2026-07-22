@@ -39,6 +39,7 @@ describe("browser-builtin-registry", () => {
       "cognia-stagehand-mcp",
       "cognia-web-clone",
       "cognia-web-tools",
+      "cognia-work-mode",
       "cognia-workflow-ai",
       "cognia-workspace-tools",
       "github-delivery",
