@@ -15,11 +15,22 @@
 
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import type { OutboundRequest } from "@/types/connectors/outbound"
-import type { TriggerPolicy, ConnectorMode } from "@/types/connectors/policy"
+import type {
+  ActiveRunDispatchMode,
+  DeliveryReadiness,
+  InboundActivationPolicy,
+  TriggerPolicy,
+  ConnectorMode,
+} from "@/types/connectors/policy"
 import type { TransportMode } from "@/types/connectors/adapter"
 import type { A2UICapabilityMatrix } from "@/types/connectors/capability"
 import type { PlatformSkillCapability } from "@/types/connectors/skill-capability"
-import type { ConversationReference, PlatformIdentity } from "@/types/connectors/event"
+import type {
+  ConversationDeliveryTarget,
+  ConversationReference,
+  NormalizedInboundEvent,
+  PlatformIdentity,
+} from "@/types/connectors/event"
 import type { AuditEntry } from "@/types/connectors/audit"
 import type { UsagePresenceConfig, UsagePresenceState } from "@/types/connectors/presence"
 import type { MessageSegment } from "@/types/connectors/segment"
@@ -230,6 +241,12 @@ export interface AdapterInstanceRow {
    * added Lark bot that may have been invited into chatty group channels.
    */
   atResponseStrategy?: "always" | "mention_only" | "direct_only"
+  /** Platform-neutral successor to `atResponseStrategy`; legacy rows map explicitly at read time. */
+  inboundActivationPolicy?: InboundActivationPolicy
+  /** Default handling of new messages while this adapter already has an active run. */
+  activeRunDispatchMode?: ActiveRunDispatchMode
+  /** Runtime-observed delivery readiness; configuration alone never sets this to verified. */
+  deliveryReadiness?: DeliveryReadiness
   /**
    * Per-adapter chat allow/blocklist (v45). `chatAllowlist` non-empty means
    * "only these `chat_id`s may trigger a response"; `chatBlocklist` hit
@@ -607,6 +624,10 @@ export interface ConversationOverrideRow {
   /** The cognia-next ChatSession this conversation maps to. */
   sessionId: string
   mode?: ConnectorMode
+  /** Optional topic/channel-specific override of the adapter admission policy. */
+  inboundActivationPolicy?: InboundActivationPolicy
+  /** Optional topic/channel-specific override of the adapter active-run policy. */
+  activeRunDispatchMode?: ActiveRunDispatchMode
   characterId?: string
   trigger?: Partial<TriggerPolicy>
   pinned?: boolean
@@ -823,6 +844,60 @@ export interface ConversationOverrideRow {
    * runner clears it (markResponded) on reply. Non-indexed; absent = no SLA.
    */
   slaResponseMinutes?: number
+  createdAt: number
+  updatedAt: number
+}
+
+export type ConnectorConversationActivationStatus = "inactive" | "active"
+
+/** Durable runtime state for one platform conversation scope (Dexie v120). */
+export interface ConnectorConversationStateRow {
+  /** Same value as the stable opaque conversation key. */
+  conversationKey: string
+  adapterId: string
+  activationStatus: ConnectorConversationActivationStatus
+  activatedBy?: string
+  activatedAt?: number
+  lastHumanActivityAt?: number
+  expiresAt?: number
+  dispatchMode?: ActiveRunDispatchMode
+  deliveryReadiness: DeliveryReadiness
+  deliveryTarget: ConversationDeliveryTarget
+  historyCursor?: {
+    beforeTimestamp?: number
+    afterTimestamp?: number
+    pageToken?: string
+  }
+  createdAt: number
+  updatedAt: number
+}
+
+export type ConnectorInboundJobStatus =
+  | "queued"
+  | "steering"
+  | "running"
+  | "completed"
+  | "failed"
+  | "recovery_required"
+  | "dismissed"
+  | "history_only"
+
+/** Durable inbound execution unit, unique per adapter/platform message (Dexie v120). */
+export interface ConnectorInboundJobRow {
+  id: string
+  adapterId: string
+  platformMessageId: string
+  conversationKey: string
+  event: NormalizedInboundEvent
+  dispatchMode: ActiveRunDispatchMode
+  status: ConnectorInboundJobStatus
+  attempts: number
+  leaseOwner?: string
+  leaseExpiresAt?: number
+  executionRunId?: string
+  recoveryReason?: string
+  lastError?: string
+  receivedAt: number
   createdAt: number
   updatedAt: number
 }

@@ -63,6 +63,8 @@ import type {
   ConnectorAttachmentRow,
   ConnectorCallbackBindingRow,
   ConnectorHeartbeatRow,
+  ConnectorConversationStateRow,
+  ConnectorInboundJobRow,
   WorkflowFanoutSubscriptionRow,
 } from "./connector-types"
 import type {
@@ -315,6 +317,9 @@ export class CogniaDB extends Dexie {
   // the heartbeat sweep (`lib/connectors/health/heartbeat.ts`), not by the
   // audit writer, so heartbeat churn no longer evicts real audit events.
   connectorHeartbeats!: Table<ConnectorHeartbeatRow, string>
+  // v120 — topic-scoped activation/delivery state and durable inbound execution jobs.
+  connectorConversationStates!: Table<ConnectorConversationStateRow, string>
+  connectorInboundJobs!: Table<ConnectorInboundJobRow, string>
   // v20 — Claude subscription usage table. One row per `anthropic-ratelimit-
   // unified-*` header snapshot; capped at 1 000 rows newest-first by
   // `lib/anthropic-subscription/usage-collector.ts`.
@@ -2628,6 +2633,15 @@ export class CogniaDB extends Dexie {
     // displayName and createdAt support picker search/sort surfaces.
     this.version(119).stores({
       petSpritePacks: "&id, displayName, createdAt",
+    })
+
+    // v120 — Platform-neutral conversation state and crash-safe inbound work.
+    // Pure additions; legacy connector rows remain valid and are resolved lazily.
+    this.version(120).stores({
+      connectorConversationStates:
+        "&conversationKey, adapterId, activationStatus, expiresAt, updatedAt",
+      connectorInboundJobs:
+        "&id, &[adapterId+platformMessageId], [conversationKey+status+receivedAt], adapterId, conversationKey, status, leaseExpiresAt, executionRunId, receivedAt",
     })
 
     // First full-chain construction under Jest: cache the merged spec so every

@@ -22,6 +22,16 @@ export interface TriggerPolicy {
 
 export type ConnectorMode = "auto" | "manual" | "draft"
 
+/** Group-message admission policy resolved at adapter then conversation scope. */
+export type InboundActivationPolicy =
+  "mention_each" | "mention_activates" | "always" | "direct_only"
+
+/** How a message received while a run is active should be interpreted. */
+export type ActiveRunDispatchMode = "queue" | "steer"
+
+/** Observed ability of a platform adapter to receive unmentioned messages. */
+export type DeliveryReadiness = "unknown" | "mentions_only" | "all_messages_verified"
+
 export const ALL_MODES = ["auto", "manual", "draft"] as const
 
 /**

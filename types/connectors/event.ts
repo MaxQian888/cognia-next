@@ -12,6 +12,31 @@ export interface ConversationReference {
   [k: string]: unknown
 }
 
+/**
+ * Stable, platform-neutral identity for an IM conversation scope.
+ *
+ * `conversationKey` remains the durable lookup key, but core connector code
+ * treats it as opaque. Adapters provide the structured container/topic fields
+ * so delivery, history, and presentation never need to reverse-engineer the
+ * key string.
+ */
+export interface ConversationAddress {
+  conversationKey: string
+  platform: PlatformKind
+  adapterId: string
+  scopeKind: ChannelKind
+  containerId: string
+  topicId?: string
+}
+
+/** A refreshed, sendable target for one stable conversation address. */
+export interface ConversationDeliveryTarget {
+  address: ConversationAddress
+  conversationRef: ConversationReference
+  sourceMessageId?: string
+  refreshedAt: number
+}
+
 export interface PlatformIdentity {
   /** Stable local id; same person across platforms after merge. */
   id: string
@@ -66,6 +91,8 @@ export interface NormalizedInboundEvent {
   messageId: string
   conversationRef: ConversationReference
   conversationKey: string
+  /** Structured address supplied by adapters that support scoped delivery. */
+  conversationAddress?: ConversationAddress
   sender: PlatformIdentity
   channel: ChannelDescriptor
   segments: MessageSegment[]
@@ -107,6 +134,19 @@ export interface NormalizedInboundEvent {
     // Transport lifecycle marker (OneBot meta_event enable/disable/connect).
     // Bookkeeping only, same caveat as `request`.
     | "lifecycle"
+}
+
+/** Build the complete target that must be persisted for later outbound use. */
+export function deliveryTargetFromEvent(
+  event: NormalizedInboundEvent
+): ConversationDeliveryTarget | undefined {
+  if (!event.conversationAddress) return undefined
+  return {
+    address: event.conversationAddress,
+    conversationRef: event.conversationRef,
+    sourceMessageId: event.messageId,
+    refreshedAt: event.timestamp,
+  }
 }
 
 const KEY_SEP = ":"

@@ -209,6 +209,24 @@ describe("getDb", () => {
     expect(db.memoryJobs).toBeDefined()
     expect(db.memoryAuditEvents).toBeDefined()
     expect(db.petSpritePacks).toBeDefined()
+    expect(db.connectorConversationStates).toBeDefined()
+    expect(db.connectorInboundJobs).toBeDefined()
+  })
+
+  it("v120 opens durable connector conversation and inbound job tables", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(120)
+    expect(db.connectorConversationStates.schema.primKey.name).toBe("conversationKey")
+    expect(db.connectorConversationStates.schema.indexes.map((index) => index.name)).toContain(
+      "activationStatus"
+    )
+    expect(db.connectorInboundJobs.schema.indexes.map((index) => index.name)).toContain(
+      "[adapterId+platformMessageId]"
+    )
+    expect(db.connectorInboundJobs.schema.indexes.map((index) => index.name)).toContain(
+      "[conversationKey+status+receivedAt]"
+    )
   })
 
   it("v119 opens petSpritePacks with displayName and createdAt indexes", async () => {
