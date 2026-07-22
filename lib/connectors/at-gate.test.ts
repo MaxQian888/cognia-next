@@ -17,6 +17,7 @@ import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 
 jest.mock("@/lib/db/adapter-instances", () => ({
   getAdapterInstance: jest.fn(),
+  updateAdapterInstance: jest.fn(async () => undefined),
 }))
 jest.mock("@/lib/connectors/audit", () => ({
   appendAudit: jest.fn(async () => undefined),
@@ -25,11 +26,14 @@ jest.mock("@/lib/connectors/sibling-bots", () => ({
   findSiblingBotSender: jest.fn(async () => null),
 }))
 
-import { getAdapterInstance } from "@/lib/db/adapter-instances"
+import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { appendAudit } from "@/lib/connectors/audit"
 import { findSiblingBotSender } from "@/lib/connectors/sibling-bots"
 
 const mockGetAdapterInstance = getAdapterInstance as jest.MockedFunction<typeof getAdapterInstance>
+const mockUpdateAdapterInstance = updateAdapterInstance as jest.MockedFunction<
+  typeof updateAdapterInstance
+>
 const mockAppendAudit = appendAudit as jest.MockedFunction<typeof appendAudit>
 const mockFindSibling = findSiblingBotSender as jest.MockedFunction<typeof findSiblingBotSender>
 
@@ -349,7 +353,7 @@ describe("gateInboundEvent", () => {
     expect(mockAppendAudit).not.toHaveBeenCalled()
   })
 
-  it("returns false and calls appendAudit when the event is blocked", async () => {
+  it("defers mention admission to the durable bus", async () => {
     mockGetAdapterInstance.mockResolvedValue(makeAdapter({ atResponseStrategy: "mention_only" }))
     const event = makeEvent({
       kind: "create",
@@ -357,25 +361,64 @@ describe("gateInboundEvent", () => {
       channel: { id: "chat-100", kind: "group" },
     })
     const result = await gateInboundEvent("tg-1", event)
-    expect(result).toBe(false)
-    expect(mockAppendAudit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        adapterId: "tg-1",
-        kind: "inbound.policy_blocked",
-        reason: "at_mention_required",
-        conversationKey: event.conversationKey,
+    expect(result).toBe(true)
+    expect(mockAppendAudit).not.toHaveBeenCalled()
+  })
+
+  it("does not infer Lark unmentioned readiness until an operator starts a probe", async () => {
+    mockGetAdapterInstance.mockResolvedValue(
+      makeAdapter({
+        type: "lark",
+        inboundActivationPolicy: "mention_activates",
+        deliveryReadiness: "mentions_only",
       })
+    )
+    const event = makeEvent({
+      platform: "lark",
+      channel: { id: "chat-100", kind: "group" },
+      mentions: { selfMentioned: false, users: [] },
+    })
+
+    await expect(gateInboundEvent("tg-1", event)).resolves.toBe(true)
+    expect(mockUpdateAdapterInstance).not.toHaveBeenCalled()
+  })
+
+  it("marks Lark all-message delivery verified only after observing an active probe", async () => {
+    mockGetAdapterInstance.mockResolvedValue(
+      makeAdapter({
+        type: "lark",
+        inboundActivationPolicy: "mention_activates",
+        deliveryReadiness: "mentions_only",
+        settings: {
+          unmentionedDeliveryProbe: {
+            consoleConfirmed: true,
+            startedAt: Date.now() - 1_000,
+            expiresAt: Date.now() + 60_000,
+          },
+        },
+      })
+    )
+    const event = makeEvent({
+      platform: "lark",
+      channel: { id: "chat-100", kind: "group" },
+      mentions: { selfMentioned: false, users: [] },
+    })
+
+    await expect(gateInboundEvent("tg-1", event)).resolves.toBe(false)
+    expect(mockUpdateAdapterInstance).toHaveBeenCalledWith(
+      "tg-1",
+      expect.objectContaining({ deliveryReadiness: "all_messages_verified" })
     )
   })
 
-  it("does not throw when appendAudit rejects (audit failure is fire-and-forget)", async () => {
+  it("does not use the transport gate for direct-only admission", async () => {
     mockGetAdapterInstance.mockResolvedValue(makeAdapter({ atResponseStrategy: "direct_only" }))
     mockAppendAudit.mockRejectedValue(new Error("audit write failed"))
     const event = makeEvent({
       kind: "create",
       channel: { id: "chat-100", kind: "group" },
     })
-    await expect(gateInboundEvent("tg-1", event)).resolves.toBe(false)
+    await expect(gateInboundEvent("tg-1", event)).resolves.toBe(true)
   })
 
   it("returns true for a non-create kind even when the strategy would block", async () => {
@@ -429,15 +472,13 @@ describe("gateInboundEvent — sibling-bot guard", () => {
     expect(mockAppendAudit).not.toHaveBeenCalled()
   })
 
-  it('"respond" still enforces the mention gate after the sibling check', async () => {
+  it('"respond" defers mention admission to the bus after the sibling check', async () => {
     mockGetAdapterInstance.mockResolvedValue(
       makeAdapter({ atResponseStrategy: "mention_only", siblingBotPolicy: "respond" })
     )
     const event = makeEvent({ kind: "create", mentions: { selfMentioned: false, users: [] } })
-    expect(await gateInboundEvent("tg-1", event)).toBe(false)
-    expect(mockAppendAudit).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "inbound.policy_blocked", reason: "at_mention_required" })
-    )
+    expect(await gateInboundEvent("tg-1", event)).toBe(true)
+    expect(mockAppendAudit).not.toHaveBeenCalled()
   })
 
   it("exhausts the per-chat budget and audits the drop", async () => {

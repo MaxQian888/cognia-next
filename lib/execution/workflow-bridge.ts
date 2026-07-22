@@ -12,6 +12,7 @@ import { topoSort } from "@/lib/workflow/runtime/topo-sort"
 import { mapWorkflowRunEvent } from "@/lib/execution/sources/workflow"
 import type { WorkflowFanoutSubscriptionRow } from "@/lib/db/connector-types"
 import type { WorkflowRunEventRow, WorkflowRunRow } from "@/types/workflow/visual"
+import { getConnectorConversationState } from "@/lib/db/connector-conversation-state"
 
 export function workflowExecutionRunId(sourceRunId: string): string {
   return `execution:workflow:${sourceRunId}`
@@ -80,6 +81,7 @@ export async function syncWorkflowExecutionRun(
             adapterId: origin.adapterId,
             conversationKey: origin.conversationKey,
             sourceMessageId: origin.sourceMessageId,
+            deliveryTarget: origin.deliveryTarget,
           },
         ]
       : []),
@@ -97,6 +99,9 @@ export async function syncWorkflowExecutionRun(
     const id = bindingId(runId, target.adapterId, target.conversationKey)
     const existing = await getDb().executionRunBindings.get(id)
     if (existing) continue
+    const deliveryTarget =
+      target.deliveryTarget ??
+      (await getConnectorConversationState(target.conversationKey))?.deliveryTarget
     await putExecutionRunBinding({
       id,
       runId,
@@ -108,6 +113,7 @@ export async function syncWorkflowExecutionRun(
       ...("sourceMessageId" in target && target.sourceMessageId
         ? { sourceMessageId: target.sourceMessageId }
         : {}),
+      ...(deliveryTarget ? { deliveryTarget } : {}),
       lastProjectedRevision: 0,
       createdAt: Date.now(),
       updatedAt: Date.now(),

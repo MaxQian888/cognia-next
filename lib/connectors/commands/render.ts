@@ -32,6 +32,11 @@ const COMMAND_HELP: Array<{ name: ControlCommandName; usage: string; desc: strin
     usage: "/goal <目标|status|pause|resume|stop>",
     desc: "启动/管理持续目标 / start or manage a goal",
   },
+  {
+    name: "agent",
+    usage: "/agent status|off|verify",
+    desc: "查看/关闭话题激活或启动免 @ 探测 / topic activation and delivery probe",
+  },
   { name: "dir", usage: "/dir", desc: "查看工作目录上下文 / working-dir context" },
 ]
 
@@ -83,6 +88,39 @@ export interface StatusView {
   workflow: string
   sessionTitle: string
   sessionIdPrefix: string
+}
+
+export interface AgentTopicStatusView {
+  policy: string
+  active: boolean
+  expiresAt?: number
+  queueDepth: number
+  activeRunId?: string
+  dispatchMode: string
+  readiness: string
+  recoveryCount: number
+}
+
+export function renderAgentTopicStatus(v: AgentTopicStatusView): string {
+  return [
+    "话题 Agent 状态 / Topic Agent status:",
+    `• 激活 / active: ${v.active ? "是 / yes" : "否 / no"}`,
+    `• 策略 / policy: ${v.policy}`,
+    `• 过期 / expires: ${v.expiresAt ? new Date(v.expiresAt).toISOString() : "—"}`,
+    `• 运行中派发 / active-run dispatch: ${v.dispatchMode}`,
+    `• 队列 / queue depth: ${v.queueDepth}`,
+    `• 当前运行 / active run: ${v.activeRunId ?? "—"}`,
+    `• 投递就绪 / delivery readiness: ${v.readiness}`,
+    `• 待恢复 / recovery required: ${v.recoveryCount}`,
+  ].join("\n")
+}
+
+export function confirmAgentOff(): string {
+  return "已关闭当前话题的免 @ 激活；再次 @机器人可重新激活 / Topic activation closed; @bot to reactivate"
+}
+
+export function confirmAgentProbeStarted(): string {
+  return "探测已启动（10 分钟）：请在群里发送一条不 @机器人的消息 / Probe started for 10 minutes; send one group message without @"
 }
 
 export function renderStatus(v: StatusView): string {

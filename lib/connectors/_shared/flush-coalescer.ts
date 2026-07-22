@@ -1,7 +1,7 @@
 /**
  * In-flight flush coalescer — the shared "one flush at a time, collapse a burst
  * into a single follow-up" guard used by both the live-activity dispatcher
- * (`lib/connectors/activity/turn-activity-dispatcher.ts`) and the workflow
+ * (the durable execution presentation runner) and the workflow
  * progress runner (`lib/connectors/a2ui-bridge/workflow-progress-runner.ts`).
  *
  * Both previously reimplemented the identical control flow:

@@ -133,4 +133,30 @@ describe("conversationKey", () => {
       refreshedAt: 123,
     })
   })
+
+  it("builds a platform-neutral fallback address for a legacy adapter event", () => {
+    const ev: NormalizedInboundEvent = {
+      platform: "telegram",
+      adapterId: "tg-1",
+      selfId: "bot",
+      messageId: "42",
+      conversationRef: { platform: "telegram", adapterId: "tg-1", chatId: "chat-1" },
+      conversationKey: "opaque-legacy-key",
+      sender: { id: "u-1", platform: "telegram", adapterId: "tg-1", remoteUserId: "1" },
+      channel: { id: "chat-1", kind: "private" },
+      segments: [{ type: "text", text: "hello" }],
+      plainText: "hello",
+      mentions: { selfMentioned: false, users: [] },
+      timestamp: 123,
+      raw: {},
+    }
+
+    expect(deliveryTargetFromEvent(ev).address).toEqual({
+      conversationKey: "opaque-legacy-key",
+      platform: "telegram",
+      adapterId: "tg-1",
+      scopeKind: "private",
+      containerId: "chat-1",
+    })
+  })
 })

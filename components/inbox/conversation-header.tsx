@@ -28,6 +28,7 @@ import { AdapterHealthBadge } from "./adapter-health-badge"
 import { ComputerUseChip } from "./computer-use-chip"
 import { QuietHoursChip } from "./quiet-hours-chip"
 import { AtStrategyChip } from "./at-strategy-chip"
+import { TopicRuntimeChip } from "./topic-runtime-chip"
 import { useConversationOverride } from "@/hooks/connectors/use-conversation-overrides"
 import { effectiveStatus } from "@/lib/db/conversation-overrides"
 import { useLastInboundForConversation } from "@/hooks/connectors/use-last-inbound"
@@ -257,6 +258,9 @@ export function ConversationHeader({
         <QuietHoursChip adapterId={parsedAdapterId} conversationKey={conversationKey} />
       )}
       {parsedAdapterId && <AtStrategyChip adapterId={parsedAdapterId} />}
+      {parsedAdapterId && (
+        <TopicRuntimeChip adapterId={parsedAdapterId} conversationKey={conversationKey} />
+      )}
       {parsedAdapterId && desktop && (
         <ComputerUseToggle
           conversationKey={conversationKey}

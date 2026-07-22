@@ -508,6 +508,15 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
       )
     })
 
+    await bus.recoverActiveConversationHistory().catch((error) => {
+      log(
+        "error",
+        `[connector-bus] active conversation history recovery failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      )
+    })
+
     // Start the Rust axum inbound server iff a webhook / reverse-WS adapter
     // is enabled. Bind loopback-only — public reachability for webhook
     // adapters comes from the cloudflared tunnel, never a bound public

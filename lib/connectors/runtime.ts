@@ -52,6 +52,7 @@ import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
 import { resolveMemoryConfig } from "@/types/memory/memory"
 import { assistantReplyToSegments } from "@/lib/connectors/a2ui-bridge/a2ui-to-segments"
 import { buildSteerPayload, steerBlocksOf } from "@/lib/claude/steer"
+import { deliveryTargetFromEvent } from "@/types/connectors/event"
 import { hasNoLeakingPii } from "@cognia/redact"
 import { appendAudit } from "./audit"
 import { getBus } from "./bus"
@@ -840,6 +841,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
               adapterId: event.adapterId,
               conversationKey: event.conversationKey,
               sourceMessageId: event.messageId,
+              deliveryTarget: deliveryTargetFromEvent(event),
               ...(session.id ? { sessionId: session.id } : {}),
               initiator: {
                 platformIdentityId: event.sender.id,
@@ -1000,6 +1002,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             deliveryMode: "native",
             locale: appSettings?.language,
             sourceMessageId: event.messageId,
+            deliveryTarget: deliveryTargetFromEvent(event),
             recipientUserId: event.sender.remoteUserId,
             recipientTeamId: teamId,
             lastProjectedRevision: 0,

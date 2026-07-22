@@ -17,6 +17,7 @@ import { getDb } from "@/lib/db/schema"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { InboxShell } from "@/components/inbox/inbox-shell"
 import { ConversationHeader } from "@/components/inbox/conversation-header"
+import { InboundRecoveryPanel } from "@/components/inbox/inbound-recovery-panel"
 import { PageLoading } from "@/components/ui/loading-states"
 import { DraftBanner } from "@/components/inbox/draft-banner"
 import { ConversationActivityLog } from "@/components/inbox/conversation-activity-log"
@@ -118,6 +119,7 @@ function ConversationDetail({ conversationKey }: { conversationKey: string }) {
           policy={defaultPrivateChatPolicy()}
           characterId={session.characterId}
         />
+        <InboundRecoveryPanel conversationKey={conversationKey} />
         <DraftBanner conversationKey={conversationKey} />
         <ConversationActivityLog conversationKey={conversationKey} />
         <ArtifactWorkspaceDock>

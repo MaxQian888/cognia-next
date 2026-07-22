@@ -15,6 +15,7 @@ import type {
   ReactionRef,
 } from "@/types/connectors/adapter"
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
+import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
 import { connectorsHttpRequest, connectorsMediaUpload } from "@/lib/connectors/tauri/commands"
 import { getBus } from "@/lib/connectors/bus"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
@@ -651,6 +652,7 @@ export function createMatrixAdapter(opts: MatrixAdapterOptions): PlatformAdapter
     addReaction,
     removeReaction,
     refreshCredentials,
+    runtimeCapabilities: builtInConnectorRuntimeCapabilities("matrix"),
     a2uiCapability: () => MATRIX_A2UI_CAPABILITY,
   }
 }

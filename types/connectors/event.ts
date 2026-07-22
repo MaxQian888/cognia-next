@@ -137,12 +137,19 @@ export interface NormalizedInboundEvent {
 }
 
 /** Build the complete target that must be persisted for later outbound use. */
-export function deliveryTargetFromEvent(
-  event: NormalizedInboundEvent
-): ConversationDeliveryTarget | undefined {
-  if (!event.conversationAddress) return undefined
+export function deliveryTargetFromEvent(event: NormalizedInboundEvent): ConversationDeliveryTarget {
+  const address =
+    event.conversationAddress ??
+    ({
+      conversationKey: event.conversationKey,
+      platform: event.platform,
+      adapterId: event.adapterId,
+      scopeKind: event.channel.kind,
+      containerId: event.channel.platformChannelId ?? event.channel.id,
+      ...(event.channel.kind === "thread" ? { topicId: event.channel.id } : {}),
+    } satisfies ConversationAddress)
   return {
-    address: event.conversationAddress,
+    address,
     conversationRef: event.conversationRef,
     sourceMessageId: event.messageId,
     refreshedAt: event.timestamp,

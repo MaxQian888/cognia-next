@@ -20,9 +20,12 @@ import type {
   ReadReceipt,
   ForwardMessageInput,
   UrgentChannel,
+  HistoryPage,
+  PlatformHistoryCursor,
 } from "@/types/connectors/adapter"
 import { createLarkRunPresentationDriver } from "@/lib/connectors/run-presentation/lark-driver"
 import type { OutboundError, OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
+import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
 import { extractLarkCode, LARK_PERMISSION_CODES } from "./http"
 import { LARK_A2UI_CAPABILITY, LARK_CAPS } from "./capability"
@@ -57,7 +60,7 @@ import { createLarkPresence } from "./presence"
 import { startLarkLongConn } from "./transport-long-conn"
 import { startLarkWebhookTransport } from "./transport-webhook"
 import { parseConversationKey } from "@/types/connectors/event"
-import type { NormalizedInboundEvent } from "@/types/connectors/event"
+import type { ConversationDeliveryTarget, NormalizedInboundEvent } from "@/types/connectors/event"
 import { loggers } from "@cognia/logging"
 
 export interface LarkAdapterOptions {
@@ -612,95 +615,150 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     return n > 1e12 ? String(Math.floor(n / 1000)) : value
   }
 
+  async function fetchHistoryPage(
+    target: ConversationDeliveryTarget,
+    cursor: PlatformHistoryCursor | undefined,
+    pageOpts: { max: number }
+  ): Promise<HistoryPage> {
+    if (cursor && cursor.kind !== "timestamp") {
+      throw new Error("Lark history requires a timestamp cursor; message ids are not timestamps")
+    }
+    const chatId = target.address.containerId
+    const conversationKey = target.address.conversationKey
+    const pageSize = Math.max(1, Math.min(50, pageOpts.max))
+    const params: Record<string, string> = {
+      container_id_type: "chat",
+      container_id: chatId,
+      page_size: String(pageSize),
+    }
+    if (cursor?.pageToken) params["page_token"] = cursor.pageToken
+    if (cursor?.afterTimestamp !== undefined) {
+      params["start_time"] = toEpochSeconds(String(cursor.afterTimestamp))
+    }
+    if (cursor?.beforeTimestamp !== undefined) {
+      params["end_time"] = toEpochSeconds(String(cursor.beforeTimestamp))
+    }
+
+    const search = new URLSearchParams(params).toString()
+    const response = (await doRequest("GET", `/im/v1/messages?${search}`)) as {
+      data?: {
+        items?: Array<Record<string, unknown>>
+        page_token?: string
+        has_more?: boolean
+      }
+    } | null
+
+    const events: NormalizedInboundEvent[] = []
+    const items = response?.data?.items ?? []
+    for (const item of items) {
+      if (events.length >= pageOpts.max) break
+      // History items differ from live push events in TWO shapes (proven
+      // against the real API): the type field is `msg_type` (live:
+      // `message_type`) and the content JSON lives under `body.content`
+      // (live: `content`). Normalise into the live shape so
+      // `parseLarkEventEnvelope` → `buildSegments` sees real content
+      // instead of silently yielding empty events. Recalled messages
+      // ("This message was recalled") and system notices carry no
+      // recoverable content — skip them.
+      const raw = item as {
+        message_id?: string
+        chat_id?: string
+        chat_type?: string
+        msg_type?: string
+        body?: { content?: string }
+        mentions?: unknown
+        create_time?: string
+        thread_id?: string | null
+        deleted?: boolean
+      }
+      if (raw.deleted === true || raw.msg_type === "system") continue
+      const normalizedMessage = {
+        message_id: raw.message_id ?? "",
+        chat_id: raw.chat_id ?? chatId,
+        chat_type: raw.chat_type ?? (chatId.startsWith("oc_") ? "group" : "p2p"),
+        message_type: raw.msg_type ?? "",
+        content: raw.body?.content ?? "",
+        mentions: raw.mentions,
+        create_time: raw.create_time,
+        thread_id: raw.thread_id ?? null,
+      }
+      const envelope: LarkEventEnvelope = {
+        schema: "2.0",
+        header: {
+          event_id: `hist:${raw.message_id ?? "?"}`,
+          event_type: "im.message.receive_v1",
+        },
+        event: {
+          sender: (item as { sender?: LarkEventEnvelope["event"]["sender"] }).sender,
+          message: normalizedMessage as unknown as LarkEventEnvelope["event"]["message"],
+        },
+      }
+      const event = parseLarkEventEnvelope(opts.id, opts.selfBotOpenId, envelope)
+      // Feishu only exposes chat-level history. A response may therefore
+      // contain the parent chat and every topic in it; retain exactly the
+      // requested opaque conversation scope after normalisation.
+      if (event?.conversationKey === conversationKey) {
+        events.push(event)
+      }
+    }
+
+    const nextToken = response?.data?.page_token
+    const hasMore = response?.data?.has_more
+    const nextCursor =
+      hasMore && nextToken
+        ? {
+            kind: "timestamp" as const,
+            beforeTimestamp: cursor?.beforeTimestamp,
+            afterTimestamp: cursor?.afterTimestamp,
+            pageToken: nextToken,
+          }
+        : undefined
+    return { events, nextCursor }
+  }
+
   async function* fetchHistory(
     conversationKey: string,
     historyOpts: { before?: string; after?: string; max?: number }
   ): AsyncIterable<NormalizedInboundEvent> {
+    // Compatibility surface for plugin/API callers. Runtime recovery uses
+    // fetchHistoryPage with the persisted target and never enters this parser.
     const parsed = parseConversationKey(conversationKey)
-    const chatId = parsed.remoteChatId
+    const target: ConversationDeliveryTarget = {
+      address: {
+        conversationKey,
+        platform: "lark",
+        adapterId: opts.id,
+        scopeKind: parsed.threadId ? "thread" : "group",
+        containerId: parsed.remoteChatId,
+        ...(parsed.threadId ? { topicId: parsed.threadId } : {}),
+      },
+      conversationRef: {
+        platform: "lark",
+        adapterId: opts.id,
+        channelId: parsed.remoteChatId,
+        ...(parsed.threadId ? { threadTs: parsed.threadId } : {}),
+      },
+      refreshedAt: Date.now(),
+    }
     const maxPages = opts.historyMaxPages ?? 20
     const overallCap = historyOpts.max ?? Number.POSITIVE_INFINITY
-
-    let pageToken: string | undefined = undefined
+    let cursor: PlatformHistoryCursor | undefined = {
+      kind: "timestamp",
+      beforeTimestamp: historyOpts.before ? Number(historyOpts.before) : undefined,
+      afterTimestamp: historyOpts.after ? Number(historyOpts.after) : undefined,
+    }
     let yielded = 0
-
-    for (let page = 0; page < maxPages; page++) {
-      const params: Record<string, string> = {
-        container_id_type: "chat",
-        container_id: chatId,
-        page_size: "50",
-      }
-      if (pageToken) params["page_token"] = pageToken
-      if (historyOpts.after) params["start_time"] = toEpochSeconds(historyOpts.after)
-      if (historyOpts.before) params["end_time"] = toEpochSeconds(historyOpts.before)
-
-      const search = new URLSearchParams(params).toString()
-      const response = (await doRequest("GET", `/im/v1/messages?${search}`)) as {
-        data?: {
-          items?: Array<Record<string, unknown>>
-          page_token?: string
-          has_more?: boolean
-        }
-      } | null
-
-      const items = response?.data?.items ?? []
-      for (const item of items) {
+    for (let pageIndex = 0; pageIndex < maxPages && yielded < overallCap; pageIndex++) {
+      const page = await fetchHistoryPage(target, cursor, {
+        max: 50,
+      })
+      for (const event of page.events) {
         if (yielded >= overallCap) return
-        // History items differ from live push events in TWO shapes (proven
-        // against the real API): the type field is `msg_type` (live:
-        // `message_type`) and the content JSON lives under `body.content`
-        // (live: `content`). Normalise into the live shape so
-        // `parseLarkEventEnvelope` → `buildSegments` sees real content
-        // instead of silently yielding empty events. Recalled messages
-        // ("This message was recalled") and system notices carry no
-        // recoverable content — skip them.
-        const raw = item as {
-          message_id?: string
-          chat_id?: string
-          chat_type?: string
-          msg_type?: string
-          body?: { content?: string }
-          mentions?: unknown
-          create_time?: string
-          thread_id?: string | null
-          deleted?: boolean
-        }
-        if (raw.deleted === true || raw.msg_type === "system") continue
-        const normalizedMessage = {
-          message_id: raw.message_id ?? "",
-          chat_id: raw.chat_id ?? chatId,
-          chat_type: raw.chat_type ?? (chatId.startsWith("oc_") ? "group" : "p2p"),
-          message_type: raw.msg_type ?? "",
-          content: raw.body?.content ?? "",
-          mentions: raw.mentions,
-          create_time: raw.create_time,
-          thread_id: raw.thread_id ?? null,
-        }
-        const envelope: LarkEventEnvelope = {
-          schema: "2.0",
-          header: {
-            event_id: `hist:${raw.message_id ?? "?"}`,
-            event_type: "im.message.receive_v1",
-          },
-          event: {
-            sender: (item as { sender?: LarkEventEnvelope["event"]["sender"] }).sender,
-            message: normalizedMessage as unknown as LarkEventEnvelope["event"]["message"],
-          },
-        }
-        const event = parseLarkEventEnvelope(opts.id, opts.selfBotOpenId, envelope)
-        // Feishu only exposes chat-level history. A response may therefore
-        // contain the parent chat and every topic in it; retain exactly the
-        // requested opaque conversation scope after normalisation.
-        if (event?.conversationKey === conversationKey) {
-          yielded++
-          yield event
-        }
+        yielded++
+        yield event
       }
-
-      const nextToken = response?.data?.page_token
-      const hasMore = response?.data?.has_more
-      if (!hasMore || !nextToken || nextToken.length === 0) return
-      pageToken = nextToken
+      if (!page.nextCursor) return
+      cursor = page.nextCursor
     }
   }
 
@@ -861,6 +919,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     },
     id: opts.id,
     runPresentation: createLarkRunPresentationDriver(doRequest),
+    runtimeCapabilities: builtInConnectorRuntimeCapabilities("lark"),
     historyCursorKind: "timestamp",
     start,
     stop,
@@ -869,6 +928,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     edit,
     delete: deleteMessage,
     fetchHistory,
+    fetchHistoryPage,
     refreshCredentials,
     setPresenceStatus: presence.setPresenceStatus,
     pinMessage: presence.pinMessage,

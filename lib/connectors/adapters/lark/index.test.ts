@@ -988,6 +988,60 @@ describe("createLarkAdapter", () => {
     expect(events.map((event) => event.messageId)).toEqual(["om-wanted"])
   })
 
+  it("fetchHistoryPage() uses the persisted target and preserves its timestamp page token", async () => {
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "connectors_keyring_get") return null
+      if (cmd !== "connectors_http_request") return undefined
+      const url = (args as { req: { url: string } }).req.url
+      if (url.includes("tenant_access_token")) return makeTatOkResp("t-page")
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({ code: 0, data: { items: [], has_more: true, page_token: "p2" } }),
+      }
+    })
+    const target = {
+      address: {
+        conversationKey: "opaque-topic-key",
+        platform: "lark" as const,
+        adapterId: "lark-1",
+        scopeKind: "thread" as const,
+        containerId: "oc_target",
+        topicId: "omt_target",
+      },
+      conversationRef: { platform: "lark" as const, adapterId: "lark-1" },
+      refreshedAt: 1,
+    }
+    const page = await makeAdapter().fetchHistoryPage!(
+      target,
+      { kind: "timestamp", afterTimestamp: 1714900000000, pageToken: "p1" },
+      { max: 50 }
+    )
+    const historyCall = mockInvoke.mock.calls.find(
+      ([cmd, args]: [string, { req?: { url?: string } }]) =>
+        cmd === "connectors_http_request" && args.req?.url?.includes("/im/v1/messages")
+    )
+    const url = new URL((historyCall![1] as { req: { url: string } }).req.url)
+    expect(url.searchParams.get("container_id")).toBe("oc_target")
+    expect(url.searchParams.get("start_time")).toBe("1714900000")
+    expect(url.searchParams.get("page_token")).toBe("p1")
+    expect(page.nextCursor).toEqual({
+      kind: "timestamp",
+      afterTimestamp: 1714900000000,
+      beforeTimestamp: undefined,
+      pageToken: "p2",
+    })
+    await expect(
+      makeAdapter().fetchHistoryPage!(
+        target,
+        { kind: "message_id", beforeMessageId: "om_1" },
+        {
+          max: 50,
+        }
+      )
+    ).rejects.toThrow(/message ids are not timestamps/)
+  })
+
   // ── outbound error classification (retryability contract) ──
   const send400 = (body: Record<string, unknown>, status = 400) => {
     mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {

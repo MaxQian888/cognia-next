@@ -24,6 +24,7 @@ import type {
 } from "@/types/connectors/adapter"
 import { createSlackRunPresentationDriver } from "@/lib/connectors/run-presentation/slack-driver"
 import type { OutboundError, OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
+import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { connectorsHttpRequest, connectorsMediaUpload } from "@/lib/connectors/tauri/commands"
 import { statFile } from "@/lib/file/file-operations"
@@ -972,6 +973,7 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
     runPresentation: opts.assistantAppEnabled
       ? createSlackRunPresentationDriver(doRequest)
       : undefined,
+    runtimeCapabilities: builtInConnectorRuntimeCapabilities("slack"),
     start,
     stop,
     health,

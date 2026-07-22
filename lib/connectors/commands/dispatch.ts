@@ -34,6 +34,14 @@ import { resolveTeamByNameOrId } from "@/lib/connectors/team-dispatch"
 import { resolveWorkflowByNameOrId } from "@/lib/workflow/library/lookup"
 import { isBuiltInProviderId } from "@cognia/provider-types/built-in-provider-catalog"
 import { clearSessionBypass } from "@/lib/connectors/hitl/approval-registry"
+import {
+  closeConnectorConversation,
+  getConnectorConversationState,
+} from "@/lib/db/connector-conversation-state"
+import { countPendingConnectorInboundJobs } from "@/lib/db/connector-inbound-jobs"
+import { updateAdapterInstance } from "@/lib/db/adapter-instances"
+import { getDb } from "@/lib/db/schema"
+import { resolveInboundActivationPolicy } from "@/lib/connectors/conversation-admission"
 import { parseControlCommand, isReadonlyCommand } from "./parse"
 import { handleGoalCommand } from "./goal"
 import * as R from "./render"
@@ -61,6 +69,50 @@ export interface ControlCommandDeps {
   isKnownProvider?: (provider: string) => Promise<boolean>
   /** Injectable `/goal` handler (defaults to the real connector goal router). */
   handleGoal?: typeof handleGoalCommand
+  getAgentTopicStatus?: (conversationKey: string) => Promise<
+    R.AgentTopicStatusView & {
+      activatedBy?: string
+    }
+  >
+  closeAgentTopic?: typeof closeConnectorConversation
+  updateAdapter?: typeof updateAdapterInstance
+}
+
+async function loadAgentTopicStatus(
+  conversationKey: string,
+  adapterRow: AdapterInstanceRow,
+  override: ConversationOverrideRow | undefined,
+  at: number
+): Promise<R.AgentTopicStatusView & { activatedBy?: string }> {
+  const db = getDb()
+  const state = await getConnectorConversationState(conversationKey)
+  const [queueDepth, bindings, recoveryCount] = await Promise.all([
+    countPendingConnectorInboundJobs(conversationKey),
+    db.executionRunBindings.where("conversationKey").equals(conversationKey).toArray(),
+    db.connectorInboundJobs
+      .where("conversationKey")
+      .equals(conversationKey)
+      .filter((job) => job.status === "recovery_required")
+      .count(),
+  ])
+  const activeBinding = bindings.find((binding) => binding.status === "active")
+  return {
+    policy: resolveInboundActivationPolicy(adapterRow, override),
+    active:
+      state?.activationStatus === "active" &&
+      (state.expiresAt === undefined || state.expiresAt > at),
+    activatedBy: state?.activatedBy,
+    expiresAt: state?.expiresAt,
+    queueDepth,
+    activeRunId: activeBinding?.runId,
+    dispatchMode:
+      state?.dispatchMode ??
+      override?.activeRunDispatchMode ??
+      adapterRow.activeRunDispatchMode ??
+      "queue",
+    readiness: state?.deliveryReadiness ?? adapterRow.deliveryReadiness ?? "unknown",
+    recoveryCount,
+  }
 }
 
 function idPrefix(id: string): string {
@@ -150,7 +202,7 @@ export async function maybeHandleControlCommand(
   const { name, arg } = parsed
 
   // ── Permission gate for state-changing commands ──
-  if (!isReadonlyCommand(name) && !isCommandAllowed(event, policy)) {
+  if (name !== "agent" && !isReadonlyCommand(name) && !isCommandAllowed(event, policy)) {
     await reply(R.renderDenied(), "denied")
     return true
   }
@@ -410,6 +462,62 @@ export async function maybeHandleControlCommand(
       // audit) and `ensureSession` (the IM-bound session the guard checks).
       const handleGoal = deps.handleGoal ?? handleGoalCommand
       await handleGoal({ event, arg, ensureSession, reply })
+      return true
+    }
+
+    case "agent": {
+      const action = arg.trim().toLowerCase()
+      const getStatus =
+        deps.getAgentTopicStatus ??
+        ((conversationKey: string) =>
+          loadAgentTopicStatus(conversationKey, adapterRow, override, at))
+      const status = await getStatus(event.conversationKey)
+
+      if (action === "status") {
+        await reply(R.renderAgentTopicStatus(status), "applied")
+        return true
+      }
+
+      if (action === "off") {
+        const isActivator =
+          status.activatedBy === event.sender.id || status.activatedBy === event.sender.remoteUserId
+        if (!isActivator && !isCommandAllowed(event, policy)) {
+          await reply(R.renderDenied(), "denied", { reason: "agent_off_not_authorized" })
+          return true
+        }
+        await (deps.closeAgentTopic ?? closeConnectorConversation)(event.conversationKey, {
+          now: at,
+        })
+        await reply(R.confirmAgentOff(), "applied")
+        return true
+      }
+
+      if (action === "verify") {
+        if (!isCommandAllowed(event, policy)) {
+          await reply(R.renderDenied(), "denied", { reason: "agent_verify_not_authorized" })
+          return true
+        }
+        if (event.platform !== "lark" || event.channel.kind !== "group") {
+          await reply(R.renderUsage("agent"), "denied", { reason: "probe_requires_lark_group" })
+          return true
+        }
+        const expiresAt = at + 10 * 60 * 1000
+        await (deps.updateAdapter ?? updateAdapterInstance)(adapterRow.id, {
+          deliveryReadiness: "mentions_only",
+          settings: {
+            ...adapterRow.settings,
+            unmentionedDeliveryProbe: {
+              consoleConfirmed: true,
+              startedAt: at,
+              expiresAt,
+            },
+          },
+        })
+        await reply(R.confirmAgentProbeStarted(), "applied", { expiresAt })
+        return true
+      }
+
+      await reply(R.renderUsage("agent"), "applied")
       return true
     }
   }

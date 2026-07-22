@@ -175,7 +175,7 @@ export async function enqueueOutbound(input: EnqueueInput): Promise<OutboundJobR
 
 /** Terminal outbound statuses — the job will never transition again. */
 export function isOutboundTerminal(status: OutboundJobRow["status"]): boolean {
-  return status === "sent" || status === "deadlettered"
+  return status === "sent" || status === "deadlettered" || status === "delivery_unknown"
 }
 
 /**
@@ -287,10 +287,7 @@ async function waitForTerminalRaw(
  */
 async function enforceQueueSoftCap(now: number): Promise<void> {
   const db = getDb()
-  const total = await db.outboundQueue
-    .where("status")
-    .anyOf("pending", "failed", "sending")
-    .count()
+  const total = await db.outboundQueue.where("status").anyOf("pending", "failed", "sending").count()
   if (total <= OUTBOUND_QUEUE_SOFT_CAP) return
   const overflow = total - OUTBOUND_QUEUE_SOFT_CAP
   const oldestPending = await db.outboundQueue.where("status").equals("pending").toArray()
@@ -435,8 +432,7 @@ export async function findOlderActiveOutboundSibling(
     .toArray()
   return older.find(
     (r) =>
-      r.id !== job.id &&
-      (r.status === "pending" || r.status === "failed" || r.status === "sending")
+      r.id !== job.id && (r.status === "pending" || r.status === "failed" || r.status === "sending")
   )
 }
 
@@ -599,6 +595,19 @@ export async function markFailed(
     lastErrorCode: errorCode,
     lastError: message,
     nextAttemptAt,
+  })
+}
+
+/** Ambiguous remote outcome: never retry without operator reconciliation. */
+export async function markDeliveryUnknown(
+  jobId: string,
+  errorCode: string,
+  message: string
+): Promise<void> {
+  await getDb().outboundQueue.update(jobId, {
+    status: "delivery_unknown",
+    lastErrorCode: errorCode,
+    lastError: message,
   })
 }
 

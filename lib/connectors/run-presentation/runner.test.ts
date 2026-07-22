@@ -105,7 +105,7 @@ describe("execution run presentation projection", () => {
     })
   })
 
-  it("freezes the native anchor and emits a separate terminal milestone", async () => {
+  it("freezes an agent card without duplicating the authoritative final reply", async () => {
     const driver: RunPresentationDriver = {
       capabilities: {
         nativeStreaming: true,
@@ -137,12 +137,32 @@ describe("execution run presentation projection", () => {
     })
 
     expect(driver.finish).toHaveBeenCalledTimes(1)
-    expect(deliverMilestone).toHaveBeenCalledWith(
-      terminalBinding,
-      expect.objectContaining({
-        status: "completed",
-      })
+    expect(deliverMilestone).not.toHaveBeenCalled()
+  })
+
+  it("emits one normal terminal summary for a workflow after freezing its card", async () => {
+    const driver: RunPresentationDriver = {
+      capabilities: { interactiveControls: true },
+      open: jest.fn(),
+      update: jest.fn(),
+      finish: jest.fn(async (ref) => ref),
+    }
+    const deliverMilestone = jest.fn(async () => undefined)
+
+    await projectExecutionRunBinding(
+      { ...binding, platformMessageId: "message-1" },
+      { ...snapshot, kind: "workflow", status: "completed", revision: 3 },
+      {
+        resolveDriver: () => driver,
+        deliverFallback: jest.fn(),
+        deliverMilestone,
+        saveBinding: jest.fn(async () => undefined),
+        recordDegraded: jest.fn(),
+        nativeEnabled: () => true,
+      }
     )
+
+    expect(deliverMilestone).toHaveBeenCalledTimes(1)
   })
 
   it("does not project an already committed or disabled binding", async () => {

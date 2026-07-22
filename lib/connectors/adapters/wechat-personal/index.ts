@@ -16,6 +16,7 @@ import type {
   AdapterHealthState,
 } from "@/types/connectors/adapter"
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
+import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { buildConversationKey } from "@/types/connectors/event"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
@@ -253,9 +254,7 @@ export function createWechatPersonalAdapter(opts: WechatPersonalAdapterOptions):
         attempts += 1
         healthState = "degraded"
         healthReason = "network_error"
-        ctx?.logger.warn(
-          `ilink poll failed: ${err instanceof Error ? err.message : String(err)}`
-        )
+        ctx?.logger.warn(`ilink poll failed: ${err instanceof Error ? err.message : String(err)}`)
         await delay(reconnectBackoffMs(backoffBaseMs, attempts))
       }
     }
@@ -387,6 +386,7 @@ export function createWechatPersonalAdapter(opts: WechatPersonalAdapterOptions):
       return { state: healthState, reason: healthReason, lastActivityAt }
     },
     send,
+    runtimeCapabilities: builtInConnectorRuntimeCapabilities("wechat-personal"),
     a2uiCapability: () => WECHAT_PERSONAL_A2UI_CAPABILITY,
   }
 }

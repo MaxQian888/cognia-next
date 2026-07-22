@@ -56,14 +56,28 @@ export function resolveInboundActivationPolicy(
 export async function admitConversationEvent(
   event: NormalizedInboundEvent,
   adapter: AdapterInstanceRow,
-  options: { now?: number; activationTtlMs?: number } = {}
+  options: {
+    now?: number
+    activationTtlMs?: number
+    override?: ConversationOverrideRow | null
+  } = {}
 ): Promise<ConversationAdmissionDecision> {
   if (event.kind && event.kind !== "create") return { allowed: true, activated: false }
   if (event.channel.kind === "private") return { allowed: true, activated: false }
 
-  const override = await readForResolution(event.conversationKey).catch(() => undefined)
+  const override =
+    options.override === undefined
+      ? await readForResolution(event.conversationKey).catch(() => undefined)
+      : (options.override ?? undefined)
   const policy = resolveInboundActivationPolicy(adapter, override)
-  if (policy === "always") return { allowed: true, activated: false }
+  if (policy === "always") {
+    if (adapter.type !== "lark" || adapter.deliveryReadiness === "all_messages_verified") {
+      return { allowed: true, activated: false }
+    }
+    return event.mentions.selfMentioned
+      ? { allowed: true, activated: false }
+      : { allowed: false, reason: "delivery_unverified", activated: false }
+  }
   if (policy === "direct_only") {
     return { allowed: false, reason: "at_direct_only", activated: false }
   }
@@ -90,6 +104,7 @@ export async function admitConversationEvent(
       await activateConnectorConversation(deliveryTarget, {
         activatedBy: event.sender.remoteUserId,
         expiresAt: now + ttl,
+        sourceTimestamp: event.timestamp,
         now,
       })
       return { allowed: true, activated: true }
@@ -108,6 +123,7 @@ export async function admitConversationEvent(
   await touchConnectorConversation(event.conversationKey, {
     deliveryTarget,
     expiresAt: now + ttl,
+    sourceTimestamp: event.timestamp,
     now,
   })
   return { allowed: true, activated: false }

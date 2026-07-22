@@ -15,6 +15,7 @@ import type {
   PlatformAdapter,
 } from "@/types/connectors/adapter"
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
+import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
 import { DINGTALK_A2UI_CAPABILITY, DINGTALK_CAPS } from "./capability"
@@ -354,6 +355,7 @@ export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAda
     health,
     send,
     refreshCredentials,
+    runtimeCapabilities: builtInConnectorRuntimeCapabilities("dingtalk"),
     a2uiCapability: () => DINGTALK_A2UI_CAPABILITY,
     platformSkillCapabilities: () => [],
   }

@@ -48,6 +48,7 @@ import {
   startOutboundRunner,
 } from "./outbound-runner"
 import type { PlatformAdapter, OutboundResult } from "@/types/connectors"
+import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
 import type { AdapterInstanceRow, OutboundJobRow } from "@/lib/db/connector-types"
 
 // Plugin connector hook + PII gate mocked so the outbound block/transform path
@@ -872,6 +873,37 @@ describe("getAdapterRuntimeStateSnapshot", () => {
 
 // ── Event-driven loop (v51 performance hardening) ──────────────────────────────
 describe("outbound-runner — event-driven loop", () => {
+  it("requires reconciliation after an ambiguous throw on a non-idempotent platform", async () => {
+    const adapter = makeAdapter("tg-ambiguous", async () => {
+      throw new Error("connection reset after request body was sent")
+    })
+    Object.assign(adapter, {
+      runtimeCapabilities: {
+        topicIsolation: "native",
+        unmentionedDelivery: true,
+        historyPagination: false,
+        liveSteer: false,
+        textStreaming: false,
+        componentMutation: false,
+        fullReplacement: false,
+        messageEditing: true,
+        appendFallback: true,
+        interactiveControls: true,
+        followUpBubbles: false,
+        staticMenus: false,
+        suggestedPrompts: false,
+        ambiguousDelivery: "reconciliation_required",
+      },
+    })
+    const job = await enqueue("tg-ambiguous", "telegram:tg-ambiguous:c1")
+    await runOnce(new Map([[adapter.id, adapter]]))
+    expect(await getDb().outboundQueue.get(job.id)).toMatchObject({
+      status: "delivery_unknown",
+      lastErrorCode: "delivery_unknown",
+    })
+    expect(adapter.send).toHaveBeenCalledTimes(1)
+  })
+
   it("fires a deferred retry near its deadline, not at the idle cap", async () => {
     // First attempt fails retryably → backoff = BASE(1000ms) * 2^0 + jitter(0)
     // = 1000 ms. With a 60 s idle cap, a poll-based loop woken only every 60 s
@@ -1470,6 +1502,12 @@ describe("outbound-runner — stale sending recovery", () => {
   it("recovers a stale sending row on startup and retries it to delivery", async () => {
     const adapterId = "a_stale"
     const adapter = makeAdapter(adapterId, async () => ({ ok: true, platformMessageId: "pm_r" }))
+    Object.assign(adapter, {
+      runtimeCapabilities: {
+        ...builtInConnectorRuntimeCapabilities("telegram"),
+        ambiguousDelivery: "remote_idempotent",
+      },
+    })
     await getDb().outboundQueue.add(
       sendingRow(
         "stale_job",

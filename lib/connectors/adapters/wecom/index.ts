@@ -25,6 +25,7 @@ import type {
   StreamReplyRequest,
 } from "@/types/connectors/adapter"
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
+import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { buildConversationKey } from "@/types/connectors/event"
 import {
@@ -795,6 +796,7 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
     health,
     send,
     streamReply,
+    runtimeCapabilities: builtInConnectorRuntimeCapabilities("wecom"),
     a2uiCapability: () => WECOM_A2UI_CAPABILITY,
   }
 }

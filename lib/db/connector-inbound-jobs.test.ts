@@ -6,6 +6,8 @@ import {
   claimConnectorInboundJob,
   claimNextConnectorInboundJob,
   completeConnectorInboundJob,
+  continueConnectorInboundJobSafely,
+  dismissConnectorInboundJobRecovery,
   enqueueConnectorInboundJob,
   ensureConnectorInboundJob,
   listRecoverableConnectorInboundJobs,
@@ -13,6 +15,7 @@ import {
   markConnectorInboundJobHistoryOnly,
   markConnectorInboundJobRecoveryRequired,
   recoverStaleConnectorInboundJobs,
+  retryConnectorInboundJobFromStart,
   updateConnectorInboundJobPayload,
 } from "./connector-inbound-jobs"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
@@ -127,6 +130,45 @@ describe("connector inbound jobs", () => {
         recoveryReason: "route_handler_failed",
         lastError: "tool may have run",
       })
+    )
+  })
+
+  it("requires an explicit recovery action and distinguishes safe continuation from full retry", async () => {
+    const continuing = await enqueueConnectorInboundJob(event("om-continue", 10), "queue")
+    await markConnectorInboundJobRecoveryRequired(continuing.id, "ambiguous")
+    await expect(continueConnectorInboundJobSafely(continuing.id, { now: 400 })).resolves.toBe(true)
+    expect(await getDb().connectorInboundJobs.get(continuing.id)).toEqual(
+      expect.objectContaining({
+        status: "steering",
+        dispatchMode: "steer",
+        recoveryReason: "operator_continue_at_safe_boundary",
+        event: expect.objectContaining({
+          channelData: expect.objectContaining({
+            dispatchIntent: "steer-replay",
+            recoveryIntent: "continue_safely",
+          }),
+        }),
+      })
+    )
+
+    const retrying = await enqueueConnectorInboundJob(event("om-retry", 20), "steer")
+    await markConnectorInboundJobRecoveryRequired(retrying.id, "ambiguous")
+    await expect(
+      retryConnectorInboundJobFromStart(retrying.id, { confirmed: true, now: 500 })
+    ).resolves.toBe(true)
+    expect(await getDb().connectorInboundJobs.get(retrying.id)).toEqual(
+      expect.objectContaining({
+        status: "queued",
+        dispatchMode: "queue",
+        recoveryReason: "operator_retry_from_start",
+      })
+    )
+
+    const dismissed = await enqueueConnectorInboundJob(event("om-dismiss", 30), "queue")
+    await markConnectorInboundJobRecoveryRequired(dismissed.id, "ambiguous")
+    await expect(dismissConnectorInboundJobRecovery(dismissed.id, { now: 600 })).resolves.toBe(true)
+    expect(await getDb().connectorInboundJobs.get(dismissed.id)).toEqual(
+      expect.objectContaining({ status: "dismissed", recoveryReason: "operator_dismissed" })
     )
   })
 

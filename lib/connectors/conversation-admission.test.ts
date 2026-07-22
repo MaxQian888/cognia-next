@@ -105,4 +105,19 @@ describe("conversation admission", () => {
       admitConversationEvent(event({ mentioned: false }), adapter, { now: 2_000 })
     ).resolves.toEqual({ allowed: false, reason: "delivery_unverified", activated: false })
   })
+
+  it("keeps a legacy Lark always policy mention-gated until no-@ delivery is verified", async () => {
+    const adapter = {
+      id: "lk-1",
+      type: "lark",
+      atResponseStrategy: "always",
+      deliveryReadiness: "mentions_only",
+    } as never
+    await expect(
+      admitConversationEvent(event({ mentioned: false }), adapter, { now: 1_000 })
+    ).resolves.toEqual({ allowed: false, reason: "delivery_unverified", activated: false })
+    await expect(
+      admitConversationEvent(event({ mentioned: true }), adapter, { now: 1_000 })
+    ).resolves.toEqual({ allowed: true, activated: false })
+  })
 })

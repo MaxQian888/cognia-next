@@ -13,6 +13,7 @@ import type {
   TransportMode,
 } from "@/types/connectors/adapter"
 import type { OutboundError, OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
+import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { connectorsHttpRequest, connectorsDiscordUpload } from "@/lib/connectors/tauri/commands"
 import { DISCORD_A2UI_CAPABILITY, DISCORD_CAPS } from "./capability"
@@ -499,8 +500,7 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
       (s): s is Extract<MessageSegment, { type: "voice" }> => s.type === "voice"
     )
     const mediaSegments = req.segments.filter(
-      (s): s is DiscordMediaSegment =>
-        s.type === "image" || s.type === "file" || s.type === "video"
+      (s): s is DiscordMediaSegment => s.type === "image" || s.type === "file" || s.type === "video"
     )
     const otherSegments = req.segments.filter(
       (s) => s.type !== "voice" && s.type !== "image" && s.type !== "file" && s.type !== "video"
@@ -654,8 +654,7 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
         after: forward ? cursor : undefined,
       })
       const resp = (await doRequest("GET", call.url.replace(DISCORD_API_BASE, ""))) as
-        | DiscordMessage[]
-        | null
+        DiscordMessage[] | null
       const messages = resp ?? []
       if (messages.length === 0) return
 
@@ -749,6 +748,7 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
     removeReaction,
     fetchHistory,
     refreshCredentials,
+    runtimeCapabilities: builtInConnectorRuntimeCapabilities("discord"),
     a2uiCapability: () => DISCORD_A2UI_CAPABILITY,
   } as PlatformAdapter & {
     addReaction: typeof addReaction

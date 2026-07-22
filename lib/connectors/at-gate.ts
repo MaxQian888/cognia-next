@@ -29,10 +29,7 @@ import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { appendAudit } from "@/lib/connectors/audit"
 import { findSiblingBotSender } from "@/lib/connectors/sibling-bots"
-import {
-  admitConversationEvent,
-  type ConversationAdmissionReason,
-} from "@/lib/connectors/conversation-admission"
+import type { ConversationAdmissionReason } from "@/lib/connectors/conversation-admission"
 
 export type AtResponseStrategy = "always" | "mention_only" | "direct_only"
 
@@ -220,17 +217,45 @@ export async function gateInboundEvent(
     // runtime proof that `im:message.group_msg` delivery is active. Persist the
     // proof for future events, but keep evaluating this probe against the
     // previously effective policy so it cannot unexpectedly start a turn.
+    const probe = row.settings.unmentionedDeliveryProbe as
+      { startedAt?: number; expiresAt?: number; consoleConfirmed?: boolean } | undefined
+    const probeActive =
+      probe?.consoleConfirmed === true &&
+      typeof probe.startedAt === "number" &&
+      typeof probe.expiresAt === "number" &&
+      probe.expiresAt >= Date.now()
     if (
       event.platform === "lark" &&
       event.channel.kind !== "private" &&
       !event.mentions.selfMentioned &&
-      row.deliveryReadiness !== "all_messages_verified"
+      row.deliveryReadiness !== "all_messages_verified" &&
+      probeActive
     ) {
       await updateAdapterInstance(adapterId, {
         deliveryReadiness: "all_messages_verified",
+        settings: {
+          ...row.settings,
+          unmentionedDeliveryProbe: {
+            ...probe,
+            observedAt: Date.now(),
+            sourceMessageId: event.messageId,
+          },
+        },
       }).catch(() => undefined)
+      await appendAudit({
+        adapterId,
+        kind: "inbound.policy_blocked",
+        at: Date.now(),
+        conversationKey: event.conversationKey,
+        reason: "delivery_probe_observed",
+      }).catch(() => undefined)
+      // The probe proves transport readiness; it must not also become the
+      // first ordinary turn under an `always` policy.
+      return false
     }
-    decision = await admitConversationEvent(event, row)
+    // Admission belongs to the bus, after durable job creation and override
+    // resolution. Transport adapters only enforce chat/sibling guardrails.
+    decision = { allowed: true }
   }
   if (decision.allowed) return true
   await appendAudit({

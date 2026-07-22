@@ -53,15 +53,25 @@ interface Harness {
   patches: Array<{ patch: Record<string, unknown>; sessionId?: string }>
   created: ChatSession[]
   goalCalls: Array<{ arg: string }>
+  closedTopics: string[]
+  adapterPatches: Array<Record<string, unknown>>
   deps: ControlCommandDeps
 }
 
-function harness(opts: { sessions?: ChatSession[]; active?: ChatSession } = {}): Harness {
+function harness(
+  opts: {
+    sessions?: ChatSession[]
+    active?: ChatSession
+    agentStatus?: Awaited<ReturnType<NonNullable<ControlCommandDeps["getAgentTopicStatus"]>>>
+  } = {}
+): Harness {
   const enqueued: Harness["enqueued"] = []
   const audits: Harness["audits"] = []
   const patches: Harness["patches"] = []
   const created: ChatSession[] = []
   const goalCalls: Harness["goalCalls"] = []
+  const closedTopics: string[] = []
+  const adapterPatches: Array<Record<string, unknown>> = []
   const sessions = opts.sessions ?? []
   const deps: ControlCommandDeps = {
     handleGoal: (async (inp: {
@@ -115,8 +125,27 @@ function harness(opts: { sessions?: ChatSession[]; active?: ChatSession } = {}):
         }
       return { ok: false, reason: "not-found" }
     }) as unknown as ControlCommandDeps["resolveWorkflow"],
+    getAgentTopicStatus: async () =>
+      opts.agentStatus ?? {
+        policy: "mention_activates",
+        active: true,
+        activatedBy: "activator",
+        expiresAt: 86_401_000,
+        queueDepth: 2,
+        activeRunId: "run-1",
+        dispatchMode: "queue",
+        readiness: "mentions_only",
+        recoveryCount: 1,
+      },
+    closeAgentTopic: (async (conversationKey: string) => {
+      closedTopics.push(conversationKey)
+      return undefined
+    }) as ControlCommandDeps["closeAgentTopic"],
+    updateAdapter: (async (_adapterId: string, patch: Record<string, unknown>) => {
+      adapterPatches.push(patch)
+    }) as ControlCommandDeps["updateAdapter"],
   }
-  return { enqueued, audits, patches, created, goalCalls, deps }
+  return { enqueued, audits, patches, created, goalCalls, closedTopics, adapterPatches, deps }
 }
 
 describe("isCommandAllowed", () => {
@@ -144,6 +173,75 @@ describe("isCommandAllowed", () => {
 })
 
 describe("maybeHandleControlCommand", () => {
+  it("/agent status is readable by an ordinary topic participant", async () => {
+    const h = harness()
+    await maybeHandleControlCommand(
+      makeEvent({
+        platform: "lark",
+        plainText: "/agent status",
+        channel: { id: "oc-1", kind: "group" },
+      }),
+      makeAdapter({ controlCommands: { mode: "private-only" } }),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+    expect(h.enqueued[0].text).toMatch(/mention_activates/)
+    expect(h.enqueued[0].text).toMatch(/queue depth: 2/)
+    expect(h.enqueued[0].text).toMatch(/run-1/)
+  })
+
+  it("/agent off allows the activator but denies an unrelated participant", async () => {
+    const allowed = harness({
+      agentStatus: {
+        policy: "mention_activates",
+        active: true,
+        activatedBy: "u1",
+        queueDepth: 0,
+        dispatchMode: "queue",
+        readiness: "mentions_only",
+        recoveryCount: 0,
+      },
+    })
+    const event = makeEvent({
+      platform: "lark",
+      plainText: "/agent off",
+      channel: { id: "oc-1", kind: "group" },
+    })
+    await maybeHandleControlCommand(event, makeAdapter(), undefined, RESOLVED, allowed.deps)
+    expect(allowed.closedTopics).toEqual([event.conversationKey])
+
+    const denied = harness()
+    await maybeHandleControlCommand(event, makeAdapter(), undefined, RESOLVED, denied.deps)
+    expect(denied.closedTopics).toHaveLength(0)
+    expect(denied.enqueued[0].text).toMatch(/not allowed/)
+  })
+
+  it("/agent verify starts a bounded Lark probe without pre-verifying readiness", async () => {
+    const h = harness()
+    await maybeHandleControlCommand(
+      makeEvent({
+        platform: "lark",
+        plainText: "/agent verify",
+        channel: { id: "oc-1", kind: "group" },
+      }),
+      makeAdapter({ controlCommands: { mode: "allowlist", allowedUserIds: ["u1"] } }),
+      undefined,
+      RESOLVED,
+      h.deps
+    )
+    expect(h.adapterPatches[0]).toMatchObject({
+      deliveryReadiness: "mentions_only",
+      settings: {
+        unmentionedDeliveryProbe: {
+          consoleConfirmed: true,
+          startedAt: 1000,
+          expiresAt: 601000,
+        },
+      },
+    })
+  })
+
   it("returns false for a non-command message", async () => {
     const h = harness()
     const handled = await maybeHandleControlCommand(

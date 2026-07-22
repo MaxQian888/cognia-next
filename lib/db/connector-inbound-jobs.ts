@@ -216,3 +216,70 @@ export async function recoverStaleConnectorInboundJobs(
   }
   return stale.length
 }
+
+export async function continueConnectorInboundJobSafely(
+  id: string,
+  options: { now?: number } = {}
+): Promise<boolean> {
+  const db = getDb()
+  return db.transaction("rw", db.connectorInboundJobs, async () => {
+    const current = await db.connectorInboundJobs.get(id)
+    if (!current || current.status !== "recovery_required") return false
+    await db.connectorInboundJobs.update(id, {
+      status: "steering",
+      dispatchMode: "steer",
+      event: {
+        ...current.event,
+        channelData: {
+          ...current.event.channelData,
+          dispatchIntent: "steer-replay",
+          recoveryIntent: "continue_safely",
+        },
+      },
+      recoveryReason: "operator_continue_at_safe_boundary",
+      lastError: undefined,
+      updatedAt: options.now ?? Date.now(),
+    })
+    return true
+  })
+}
+
+export async function retryConnectorInboundJobFromStart(
+  id: string,
+  options: { confirmed: true; now?: number }
+): Promise<boolean> {
+  const db = getDb()
+  return db.transaction("rw", db.connectorInboundJobs, async () => {
+    const current = await db.connectorInboundJobs.get(id)
+    if (!current || current.status !== "recovery_required") return false
+    const channelData = { ...current.event.channelData }
+    delete channelData.dispatchIntent
+    delete channelData.recoveryIntent
+    await db.connectorInboundJobs.update(id, {
+      status: "queued",
+      dispatchMode: "queue",
+      event: { ...current.event, channelData },
+      recoveryReason: "operator_retry_from_start",
+      lastError: undefined,
+      updatedAt: options.now ?? Date.now(),
+    })
+    return true
+  })
+}
+
+export async function dismissConnectorInboundJobRecovery(
+  id: string,
+  options: { now?: number } = {}
+): Promise<boolean> {
+  const db = getDb()
+  return db.transaction("rw", db.connectorInboundJobs, async () => {
+    const current = await db.connectorInboundJobs.get(id)
+    if (!current || current.status !== "recovery_required") return false
+    await db.connectorInboundJobs.update(id, {
+      status: "dismissed",
+      recoveryReason: "operator_dismissed",
+      updatedAt: options.now ?? Date.now(),
+    })
+    return true
+  })
+}

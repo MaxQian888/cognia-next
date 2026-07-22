@@ -56,6 +56,7 @@ import { trackInboxEvent } from "@/lib/telemetry/inbox-events"
 import { trackEvent } from "@/lib/telemetry/events/track-event"
 import { maybeHandleHelpCommand, maybeSendWelcome } from "./help/help-dispatch"
 import { maybeHandleControlCommand } from "./commands/dispatch"
+import { parseControlCommand } from "./commands/parse"
 import { parseConversationKey } from "@/types/connectors/event"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
@@ -70,6 +71,7 @@ import {
   recoverStaleConnectorInboundJobs,
   updateConnectorInboundJobPayload,
 } from "@/lib/db/connector-inbound-jobs"
+import { admitConversationEvent } from "./conversation-admission"
 
 export interface BusInboundHandler {
   (event: NormalizedInboundEvent): Promise<void>
@@ -331,6 +333,31 @@ export class ConnectorBus {
     }
   }
 
+  /** Execute a reconnect catch-up event while evaluating sliding expiry at its wire timestamp. */
+  async dispatchBackfilledInbound(event: NormalizedInboundEvent): Promise<void> {
+    try {
+      await this.runInboundPipeline(event, undefined, { admissionNow: event.timestamp })
+    } catch (err) {
+      await appendAudit({
+        adapterId: event.adapterId,
+        kind: "adapter.error",
+        at: Date.now(),
+        conversationKey: event.conversationKey,
+        reason: "history_catchup_failed",
+        message: err instanceof Error ? err.message : String(err),
+      }).catch(() => undefined)
+    }
+  }
+
+  async recoverActiveConversationHistory(): Promise<{
+    conversations: number
+    executed: number
+    historyOnly: number
+  }> {
+    const { recoverActiveConversationHistory } = await import("./history-recovery")
+    return recoverActiveConversationHistory(this)
+  }
+
   /**
    * Reclaim durable work that was inserted but never started before a restart.
    * Expired running leases are deliberately converted to `recovery_required`
@@ -359,7 +386,8 @@ export class ConnectorBus {
 
   private async runInboundPipeline(
     event: NormalizedInboundEvent,
-    recoveredJob?: ConnectorInboundJobRow
+    recoveredJob?: ConnectorInboundJobRow,
+    context: { admissionNow?: number } = {}
   ): Promise<void> {
     const now = Date.now()
 
@@ -458,6 +486,31 @@ export class ConnectorBus {
     const override = (await readForResolution(event.conversationKey)) ?? null
     const dispatchMode =
       override?.activeRunDispatchMode ?? adapterRow.activeRunDispatchMode ?? "queue"
+
+    // ── Step 3.1: conversation-aware admission ──────────────────────────────
+    // This runs after the durable insert so ignored messages remain auditable,
+    // and after override resolution so a topic can override adapter defaults.
+    const parsedControl = parseControlCommand(event.plainText)
+    const admission =
+      parsedControl.kind === "known"
+        ? { allowed: true, activated: false }
+        : await admitConversationEvent(event, adapterRow, {
+            now: context.admissionNow ?? now,
+            override,
+          })
+    if (!admission.allowed) {
+      await markConnectorInboundJobHistoryOnly(inboundJob.id, admission.reason ?? "not_admitted", {
+        now,
+      })
+      await appendAudit({
+        adapterId: event.adapterId,
+        kind: "inbound.policy_blocked",
+        at: now,
+        conversationKey: event.conversationKey,
+        reason: admission.reason,
+      })
+      return
+    }
 
     // ── Step 3.5: lifecycle auto-reopen (CRM, schema v83) ─────────────────────
     // A fresh inbound on a resolved or snoozed conversation reopens it

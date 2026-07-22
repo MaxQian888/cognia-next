@@ -7737,6 +7737,34 @@
       "mention_only": "@mention only",
       "tooltip": "This adapter replies to: {strategy}"
     },
+    "topicRuntime": {
+      "active": "active",
+      "activeRun": "Active run: {value}",
+      "activation": "Topic activation: {value}",
+      "aria": "Topic runtime: {policy}, {dispatch}",
+      "badge": "{policy} · {dispatch}",
+      "capabilities": "Topic isolation: {topic}; {count} rich presentation capabilities",
+      "effective": "Effective policy: {value}",
+      "fallback": {
+        "delivery_unverified": "Fallback: unmentioned delivery is not verified, so mentions remain required."
+      },
+      "inactive": "inactive",
+      "none": "none",
+      "queue": "Queue depth: {count}",
+      "readiness": "Delivery readiness: {value}",
+      "recovery": "Recovery required: {count}",
+      "requested": "Requested policy: {value}"
+    },
+    "inboundRecovery": {
+      "continueSafely": "Continue safely",
+      "description": "Execution stopped after durable acceptance, but model or tool side effects may already exist. Choose an explicit recovery action.",
+      "dismiss": "Dismiss",
+      "message": "Message {id} · {reason}",
+      "retryFromStart": "Retry from start",
+      "retryWarning": "Retrying from the start may repeat model output or tool side effects. Continue only after reconciling external state.",
+      "title": "Inbound recovery required",
+      "unknown": "unknown reason"
+    },
     "banner": {
       "outboundSaturated": {
         "count": "{count, plural, =1 {1 message capped} other {# messages capped}}",
@@ -19558,12 +19586,41 @@
         "appSecretPlaceholder": "App secret…",
         "appSecretRequired": "App Secret is required.",
         "atStrategy": {
-          "defaultNotice": "Default — change to suit this bot's role.",
-          "help": "Controls when the bot responds in group chats. DMs always pass regardless of the strategy.",
+          "defaultNotice": "Default: the first @mention activates only that topic for 24 hours.",
+          "help": "Controls topic activation. Direct messages always pass; unmentioned group delivery also requires readiness verification.",
           "options": {
             "always": "Always respond to every message",
             "directOnly": "Direct messages only — never respond in groups",
+            "mentionActivates": "First @mention activates this topic; follow-ups need no @",
+            "mentionEach": "Require @bot for every group message",
             "mentionOnly": "Mention only — require @bot in groups (default)"
+          },
+          "dispatch": {
+            "help": "Choose what a new message does while this topic already has an active run. Steering is replayed as its own turn at the earliest safe boundary when live injection is unavailable.",
+            "options": {
+              "queue": "Queue — preserve each message as a separate FIFO turn",
+              "steer": "Steer — inject live when safe, otherwise replay with steering intent"
+            },
+            "title": "Active-run dispatch"
+          },
+          "diagnostics": {
+            "capabilities": "Capabilities — topic: {topic}; text stream: {stream}; component mutation: {mutate}",
+            "effective": "Effective policy: {value}",
+            "no": "no",
+            "requested": "Requested policy: {value}",
+            "title": "Effective runtime diagnostic",
+            "unverifiedFallback": "Fallback: unmentioned delivery is not verified, so every group message still requires @.",
+            "yes": "yes"
+          },
+          "readiness": {
+            "help": "First enable im:message.group_msg in the developer console and publish the app. Start a 10-minute probe, then send one group message without @. Verification is granted only when that event is observed.",
+            "startProbe": "I published the permission — start probe",
+            "states": {
+              "all_messages_verified": "Verified: unmentioned group messages are arriving.",
+              "mentions_only": "Mentions only: unmentioned delivery is not verified yet.",
+              "unknown": "Unknown: no unmentioned-delivery probe has succeeded."
+            },
+            "title": "Unmentioned delivery readiness"
           },
           "sibling": {
             "budgetAria": "Sibling bot reply budget per chat per hour",
@@ -19576,7 +19633,7 @@
             },
             "title": "Sibling bots"
           },
-          "title": "Mention strategy"
+          "title": "Topic activation"
         },
         "authorizeButton": "Connect account",
         "authorizeNeedsAppId": "Save the App ID first — authorization needs it.",

@@ -7737,6 +7737,34 @@
       "mention_only": "仅 @提及",
       "tooltip": "该适配器的回复范围：{strategy}"
     },
+    "topicRuntime": {
+      "active": "已激活",
+      "activeRun": "当前运行：{value}",
+      "activation": "话题激活：{value}",
+      "aria": "话题运行时：{policy}，{dispatch}",
+      "badge": "{policy} · {dispatch}",
+      "capabilities": "话题隔离：{topic}；{count} 项丰富展示能力",
+      "effective": "生效策略：{value}",
+      "fallback": {
+        "delivery_unverified": "降级原因：尚未验证免 @ 投递，因此仍要求 @。"
+      },
+      "inactive": "未激活",
+      "none": "无",
+      "queue": "队列深度：{count}",
+      "readiness": "投递就绪：{value}",
+      "recovery": "待恢复：{count}",
+      "requested": "请求策略：{value}"
+    },
+    "inboundRecovery": {
+      "continueSafely": "安全继续",
+      "description": "消息已持久化接收，但执行中断，模型或工具副作用可能已经发生。请选择明确的恢复操作。",
+      "dismiss": "忽略",
+      "message": "消息 {id} · {reason}",
+      "retryFromStart": "从头重试",
+      "retryWarning": "从头重试可能重复模型输出或工具副作用。请先核对外部状态，再决定是否继续。",
+      "title": "入站消息需要恢复",
+      "unknown": "未知原因"
+    },
     "banner": {
       "outboundSaturated": {
         "count": "{count, plural, =1 {1 条消息被限流} other {# 条消息被限流}}",
@@ -19558,12 +19586,41 @@
         "appSecretPlaceholder": "App secret…",
         "appSecretRequired": "App Secret 不能为空。",
         "atStrategy": {
-          "defaultNotice": "默认值 — 按机器人角色调整。",
-          "help": "控制机器人在群聊中何时回应。私聊不受策略影响，始终通过。",
+          "defaultNotice": "默认：首次 @ 激活当前话题 24 小时，仅影响该话题。",
+          "help": "控制话题激活方式。私聊始终处理；群聊免 @ 还必须先完成消息投递就绪验证。",
           "options": {
             "always": "始终响应每一条消息",
             "directOnly": "仅私聊 — 群聊永不回应",
+            "mentionActivates": "首次 @ 激活当前话题，后续无需 @",
+            "mentionEach": "群聊每条消息都必须 @机器人",
             "mentionOnly": "仅 @ 机器人 — 群聊中需要被 @（默认）"
+          },
+          "dispatch": {
+            "help": "选择话题已有运行任务时新消息的处理方式。运行时不支持安全实时注入时，steer 会在最早安全边界作为独立消息重放。",
+            "options": {
+              "queue": "进入队列 — 每条消息作为独立 FIFO 对话轮次保留",
+              "steer": "Steering — 安全时实时注入，否则保留 steering 意图后重放"
+            },
+            "title": "运行中消息派发"
+          },
+          "diagnostics": {
+            "capabilities": "能力 — 话题隔离：{topic}；文本流式：{stream}；组件更新：{mutate}",
+            "effective": "生效策略：{value}",
+            "no": "否",
+            "requested": "请求策略：{value}",
+            "title": "运行时生效诊断",
+            "unverifiedFallback": "降级：尚未验证免 @ 投递，因此群聊每条消息仍需 @。",
+            "yes": "是"
+          },
+          "readiness": {
+            "help": "先在开发者后台开通 im:message.group_msg 并发布应用。启动 10 分钟探测后，在群里发送一条不 @机器人的消息；只有实际观察到该事件才会通过验证。",
+            "startProbe": "已发布权限，开始探测",
+            "states": {
+              "all_messages_verified": "已验证：正在接收群聊免 @ 消息。",
+              "mentions_only": "仅 @：尚未验证免 @ 消息投递。",
+              "unknown": "未知：尚无成功的免 @ 投递探测。"
+            },
+            "title": "免 @ 消息投递就绪状态"
           },
           "sibling": {
             "budgetAria": "同群机器人每群每小时回复额度",
@@ -19576,7 +19633,7 @@
             },
             "title": "同群机器人"
           },
-          "title": "响应策略"
+          "title": "话题激活"
         },
         "authorizeButton": "连接账号",
         "authorizeNeedsAppId": "请先保存 App ID —— 授权需要它。",

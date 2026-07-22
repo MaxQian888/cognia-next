@@ -12,6 +12,7 @@ import type {
   ReactionRef,
 } from "@/types/connectors/adapter"
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
+import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
 import { TELEGRAM_A2UI_CAPABILITY, TELEGRAM_CAPS } from "./capability"
 import {
@@ -571,6 +572,7 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
     addReaction,
     removeReaction,
     refreshCredentials,
+    runtimeCapabilities: builtInConnectorRuntimeCapabilities("telegram"),
     a2uiCapability: () => TELEGRAM_A2UI_CAPABILITY,
   } as PlatformAdapter & {
     addReaction: typeof addReaction

@@ -1,6 +1,31 @@
 import { createLarkRunPresentationDriver } from "./lark-driver"
 import type { RunProjectionSnapshot } from "@/types/execution/run"
 
+const topicTarget = {
+  adapterId: "lark-1",
+  conversationKey: "opaque-topic-key",
+  sourceMessageId: "om-anchor",
+  deliveryTarget: {
+    address: {
+      conversationKey: "opaque-topic-key",
+      platform: "lark" as const,
+      adapterId: "lark-1",
+      scopeKind: "thread" as const,
+      containerId: "chat-1",
+      topicId: "thread-1",
+    },
+    conversationRef: {
+      platform: "lark" as const,
+      adapterId: "lark-1",
+      channelId: "chat-1",
+      threadId: "thread-1",
+      threadRootMessageId: "om-anchor",
+    },
+    sourceMessageId: "om-anchor",
+    refreshedAt: 1,
+  },
+}
+
 const snapshot = (
   revision: number,
   status: RunProjectionSnapshot["status"] = "running"
@@ -32,21 +57,29 @@ describe("Lark run presentation driver", () => {
       return { data: {} }
     })
 
-    const target = { adapterId: "lark-1", conversationKey: "lark:lark-1:chat-1" }
-    const ref = await driver.open(target, snapshot(1))
+    const ref = await driver.open(topicTarget, snapshot(1))
     const updated = await driver.update(ref, snapshot(2))
     await driver.finish(updated, snapshot(3, "completed"))
 
     expect(calls.map((call) => [call.method, call.path])).toEqual([
       ["POST", "/cardkit/v1/cards"],
-      ["POST", "/im/v1/messages?receive_id_type=chat_id"],
-      ["PUT", "/cardkit/v1/cards/card-1"],
+      ["POST", "/im/v1/messages/om-anchor/reply"],
+      ["PUT", "/cardkit/v1/cards/card-1/elements/run_summary/content"],
+      ["PUT", "/cardkit/v1/cards/card-1/elements/run_actions"],
       ["PUT", "/cardkit/v1/cards/card-1"],
     ])
+    expect(calls[1].body).toEqual(
+      expect.objectContaining({ reply_in_thread: true, uuid: expect.any(String) })
+    )
     expect((calls[2].body as { sequence: number }).sequence).toBe(1)
     expect((calls[3].body as { sequence: number }).sequence).toBe(2)
+    expect((calls[4].body as { sequence: number }).sequence).toBe(3)
     expect(ref.platformMessageId).toBe("msg-1")
-    expect(updated.opaqueState?.sequence).toBe(1)
+    expect(updated.opaqueState?.lastAcknowledgedSequence).toBe(2)
+    expect(updated.opaqueState?.elementIds).toEqual({
+      summary: "run_summary",
+      actions: "run_actions",
+    })
   })
 
   it("trims oversized card bodies below the CardKit 30KB limit", async () => {
@@ -61,7 +94,7 @@ describe("Lark run presentation driver", () => {
     const large = snapshot(1)
     large.summary = "x".repeat(50_000)
 
-    await driver.open({ adapterId: "lark-1", conversationKey: "lark:lark-1:chat-1" }, large)
+    await driver.open(topicTarget, large)
 
     expect(new TextEncoder().encode(createdData).byteLength).toBeLessThanOrEqual(30_000)
     expect(createdData).toContain("truncated")
@@ -75,16 +108,64 @@ describe("Lark run presentation driver", () => {
       if (path === "/cardkit/v1/cards") return { data: { card_id: "card-checkpoint" } }
       return { data: { message_id: "message-checkpoint" } }
     })
-    const target = { adapterId: "lark-1", conversationKey: "lark:lark-1:chat-1" }
-    const first = await driver.open(target, snapshot(1), {
+    const first = await driver.open(topicTarget, snapshot(1), {
       checkpoint: async (ref) => {
         checkpoints.push(ref)
       },
     })
 
-    await driver.open(target, snapshot(1), { previousRef: first })
+    await driver.open(topicTarget, snapshot(1), { previousRef: first })
 
     expect(calls.filter((path) => path === "/cardkit/v1/cards")).toHaveLength(1)
     expect(checkpoints[0]?.opaqueState?.cardId).toBe("card-checkpoint")
+  })
+
+  it("checkpoints and reuses the same sequence and UUID across an ambiguous retry", async () => {
+    const updates: Array<{ sequence: number; uuid: string }> = []
+    const checkpoints: Array<Record<string, unknown>> = []
+    let updateAttempt = 0
+    const driver = createLarkRunPresentationDriver(
+      async (_method, path, body) => {
+        if (path === "/cardkit/v1/cards") return { data: { card_id: "card-retry" } }
+        if (path.includes("/elements/")) {
+          updates.push(body as { sequence: number; uuid: string })
+          updateAttempt += 1
+          if (updateAttempt === 1) throw new Error("connection reset after send")
+        }
+        return { data: { message_id: "msg-retry" } }
+      },
+      { sleep: async () => undefined }
+    )
+    const opened = await driver.open(topicTarget, snapshot(1))
+
+    const updated = await driver.update(opened, snapshot(2), {
+      checkpoint: async (ref) => {
+        checkpoints.push(ref.opaqueState ?? {})
+      },
+    })
+
+    expect(updates).toHaveLength(3)
+    expect(updates[1]).toEqual(updates[0])
+    expect(checkpoints[0]?.pendingMutation).toEqual(
+      expect.objectContaining({ sequence: 1, uuid: updates[0].uuid, operation: "stream_summary" })
+    )
+    expect(updated.opaqueState?.pendingMutation).toBeUndefined()
+  })
+
+  it("retries interaction conflict 200810 before degrading", async () => {
+    let conflicts = 0
+    const sleep = jest.fn(async () => undefined)
+    const driver = createLarkRunPresentationDriver(
+      async (_method, path) => {
+        if (path === "/cardkit/v1/cards") return { data: { card_id: "card-conflict" } }
+        if (path.includes("/elements/") && conflicts++ === 0) throw { code: 200810 }
+        return { data: { message_id: "msg-conflict" } }
+      },
+      { sleep }
+    )
+    const opened = await driver.open(topicTarget, snapshot(1))
+
+    await expect(driver.update(opened, snapshot(2))).resolves.toBeDefined()
+    expect(sleep).toHaveBeenCalledWith(150)
   })
 })

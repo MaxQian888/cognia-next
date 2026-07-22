@@ -43,6 +43,7 @@ import {
   markSending,
   markSent,
   markFailed,
+  markDeliveryUnknown,
   markDeadlettered,
   enqueueOutbound,
   unclaimSending,
@@ -1003,6 +1004,26 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
+      if (adapter.runtimeCapabilities?.ambiguousDelivery !== "remote_idempotent") {
+        await markDeliveryUnknown(job.id, "delivery_unknown", msg)
+        breaker.recordFailure()
+        await appendAudit({
+          adapterId,
+          kind: "delivery.error",
+          at: now,
+          conversationKey,
+          idempotencyKey,
+          reason: "delivery_unknown",
+          message: msg,
+        })
+        void trackEvent("connector.message.sent", {
+          adapterId,
+          platform: adapter.meta.type,
+          outcome: "failed",
+          errorCode: err instanceof Error ? err.name : "Error",
+        })
+        return
+      }
       const backoff = computeBackoffDelay(job.attempts, {
         baseDelayMs: BASE_BACKOFF_MS,
         maxDelayMs: MAX_BACKOFF_MS,
@@ -1182,6 +1203,24 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
       try {
         const recoveredRows = await recoverStaleSendingJobs(clock())
         for (const row of recoveredRows) {
+          const recoveredAdapter = opts.adapters.get(row.adapterId)
+          if (recoveredAdapter?.runtimeCapabilities?.ambiguousDelivery !== "remote_idempotent") {
+            await markDeliveryUnknown(
+              row.id,
+              "stale_sending_delivery_unknown",
+              "The runner stopped while delivery was in flight; reconcile before retrying"
+            )
+            await appendAudit({
+              adapterId: row.adapterId,
+              kind: "delivery.error",
+              at: clock(),
+              conversationKey: row.conversationKey,
+              idempotencyKey: row.idempotencyKey,
+              reason: "delivery_unknown",
+              message: "Stale send has an ambiguous remote outcome and requires reconciliation",
+            }).catch(() => undefined)
+            continue
+          }
           await appendAudit({
             adapterId: row.adapterId,
             kind: "delivery.error",

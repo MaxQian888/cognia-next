@@ -10,7 +10,7 @@ export async function getConnectorConversationState(
 
 export async function activateConnectorConversation(
   deliveryTarget: ConversationDeliveryTarget,
-  options: { activatedBy: string; expiresAt: number; now?: number }
+  options: { activatedBy: string; expiresAt: number; sourceTimestamp?: number; now?: number }
 ): Promise<ConnectorConversationStateRow> {
   const now = options.now ?? Date.now()
   const existing = await getConnectorConversationState(deliveryTarget.address.conversationKey)
@@ -25,7 +25,10 @@ export async function activateConnectorConversation(
     dispatchMode: existing?.dispatchMode,
     deliveryReadiness: existing?.deliveryReadiness ?? "unknown",
     deliveryTarget,
-    historyCursor: existing?.historyCursor,
+    historyCursor:
+      options.sourceTimestamp !== undefined
+        ? { afterTimestamp: options.sourceTimestamp }
+        : existing?.historyCursor,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   }
@@ -38,6 +41,7 @@ export async function touchConnectorConversation(
   options: {
     deliveryTarget?: ConversationDeliveryTarget
     expiresAt?: number
+    sourceTimestamp?: number
     now?: number
   }
 ): Promise<ConnectorConversationStateRow | undefined> {
@@ -48,6 +52,9 @@ export async function touchConnectorConversation(
     ...existing,
     ...(options.deliveryTarget ? { deliveryTarget: options.deliveryTarget } : {}),
     ...(options.expiresAt !== undefined ? { expiresAt: options.expiresAt } : {}),
+    ...(options.sourceTimestamp !== undefined
+      ? { historyCursor: { afterTimestamp: options.sourceTimestamp } }
+      : {}),
     lastHumanActivityAt: now,
     updatedAt: now,
   }

@@ -794,6 +794,7 @@ export interface WorkflowTriggeredFrom {
   adapterId?: string
   conversationKey?: string
   sourceMessageId?: string
+  deliveryTarget?: import("@/types/connectors/event").ConversationDeliveryTarget
   sessionId?: string
   initiator?: {
     platformIdentityId?: string

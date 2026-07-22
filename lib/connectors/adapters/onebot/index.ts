@@ -28,6 +28,7 @@ import type {
   ReactionRef,
 } from "@/types/connectors/adapter"
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
+import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import { ONEBOT_A2UI_CAPABILITY, ONEBOT_CAPS } from "./capability"
 import { parseOneBotEvent, clearVariantCache } from "./parse"
@@ -646,6 +647,7 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
     setTyping,
     refreshCredentials,
     forwardMessage,
+    runtimeCapabilities: builtInConnectorRuntimeCapabilities("onebot"),
     a2uiCapability: () => ONEBOT_A2UI_CAPABILITY,
     fetchHistory,
     addReaction,

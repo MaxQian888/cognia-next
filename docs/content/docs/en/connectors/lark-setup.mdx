@@ -77,6 +77,7 @@ Your app needs the following permissions. Go to **Permission management** and ad
 | Scope                    | Purpose                                |
 | ------------------------ | -------------------------------------- |
 | `im:message`             | Read messages sent to the bot          |
+| `im:message.group_msg`   | Receive group messages that do not @ the bot (required for topic activation) |
 | `im:message:send_as_bot` | Send messages as the bot               |
 | `im:chat`                | Access chat information                |
 | `im:resource`            | Access media resources (images, files) |
@@ -149,6 +150,43 @@ you choose, then runs an assistant turn when the menu is clicked.
 5. Clicking the menu in Lark now drives an assistant reply in that 1:1 chat. An
    `event_key` with no mapping falls back to its label / raw key as the prompt, so
    the click is never silently dropped.
+
+Bot menus are static developer-console configuration and are mainly useful in
+direct bot chats. Keep them to commands such as `status`, `new`, and `help`;
+they are not a per-topic progress surface. CardKit progress cards are used for
+live Agent status inside topics.
+
+Feishu lists follow-up bubbles as an AI-bot presentation feature configured in
+the developer console, not as a documented server API that can carry dynamic
+per-run controls. Treat them as an optional temporary enhancement only: they
+may disappear after a click or after the next message. Durable `Stop`, status,
+and approval controls remain on the CardKit card. Do not advertise a follow-up
+bubble until the released app has been verified in the target tenant/client.
+
+### Verify topic no-@ delivery
+
+Enabling `im:message.group_msg` in the console is not enough: permission and
+event-subscription changes only take effect after a new app version is released.
+
+1. Grant `im:message.group_msg`, keep `im.message.receive_v1` subscribed, and release the app.
+2. Add the released bot to a test group and create two separate topics.
+3. In cognia-next open **Settings → Connections → Lark → Admission** and click
+   **Start delivery probe** (or run `/agent verify` as an operator).
+4. Within ten minutes, send one ordinary group/topic message without @-mentioning the bot.
+5. Confirm readiness becomes **All messages verified**. The probe message is audited and is not
+   executed as an Agent turn.
+6. @-mention the Agent once inside topic A, then continue without @. Topic B and the parent group
+   must remain mention-gated until independently activated.
+
+Topic controls:
+
+- `/agent status` — policy, expiry, dispatch mode, queue depth, active run, readiness, and recovery count.
+- `/agent off` — close activation (activator or configured operator).
+- `/agent verify` — start the ten-minute no-@ probe (configured operator only).
+
+Choose **Queue** to preserve every new message as an independent FIFO turn. Choose **Steer** to
+request live injection into an active run; if the runtime cannot safely steer at that phase, the
+message and attachments remain durable and run at the earliest safe boundary.
 
 ---
 

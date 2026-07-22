@@ -21,6 +21,7 @@ import type {
   TransportMode,
 } from "@/types/connectors/adapter"
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
+import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
 import { QQ_OFFICIAL_A2UI_CAPABILITY, QQ_OFFICIAL_CAPS } from "./capability"
@@ -286,6 +287,7 @@ export function createQQOfficialAdapter(opts: QQOfficialAdapterOptions): Platfor
     health,
     send,
     refreshCredentials,
+    runtimeCapabilities: builtInConnectorRuntimeCapabilities("qq-official"),
     a2uiCapability: () => QQ_OFFICIAL_A2UI_CAPABILITY,
   }
 }

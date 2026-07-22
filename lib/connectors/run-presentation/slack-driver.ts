@@ -49,10 +49,14 @@ function refState(ref: RunPresentationRef): { channel: string; ts: string } {
 export function createSlackRunPresentationDriver(request: SlackRunRequest): RunPresentationDriver {
   return {
     capabilities: {
-      nativeStreaming: true,
-      partialUpdate: true,
-      messageEdit: true,
+      topicIsolation: true,
+      textStreaming: true,
+      componentMutation: true,
+      fullReplacement: false,
+      messageEditing: true,
+      appendFallback: true,
       interactiveControls: false,
+      followUpBubbles: false,
     },
     async open(target, snapshot, options) {
       if (options?.previousRef?.platformMessageId) return options.previousRef

@@ -29,11 +29,14 @@ const baseRow = (overrides: Partial<AdapterInstanceRow> = {}): AdapterInstanceRo
 })
 
 describe("LarkAtStrategy", () => {
-  it("selects mention_only by default when the row has no strategy", async () => {
+  it("selects mention activation by default when the row has no strategy", async () => {
     await getDb().adapterInstances.put(baseRow())
     render(<LarkAtStrategy adapterId="lark-as" />)
     await waitFor(() => {
-      expect(screen.getByTestId("lark-at-mention_only")).toHaveAttribute("data-state", "checked")
+      expect(screen.getByTestId("lark-activation-mention_activates")).toHaveAttribute(
+        "data-state",
+        "checked"
+      )
     })
   })
 
@@ -41,19 +44,60 @@ describe("LarkAtStrategy", () => {
     await getDb().adapterInstances.put(baseRow({ atResponseStrategy: "always" }))
     render(<LarkAtStrategy adapterId="lark-as" />)
     await waitFor(() => {
-      expect(screen.getByTestId("lark-at-always")).toHaveAttribute("data-state", "checked")
+      expect(screen.getByTestId("lark-activation-always")).toHaveAttribute("data-state", "checked")
     })
   })
 
   it("persists the new strategy when the operator picks one", async () => {
     await getDb().adapterInstances.put(baseRow())
     render(<LarkAtStrategy adapterId="lark-as" />)
-    await waitFor(() => screen.getByTestId("lark-at-direct_only"))
-    fireEvent.click(screen.getByTestId("lark-at-direct_only"))
+    await waitFor(() => screen.getByTestId("lark-activation-direct_only"))
+    fireEvent.click(screen.getByTestId("lark-activation-direct_only"))
     await waitFor(async () => {
       const row = await getDb().adapterInstances.get("lark-as")
-      expect(row?.atResponseStrategy).toBe("direct_only")
+      expect(row?.inboundActivationPolicy).toBe("direct_only")
+      expect(row?.deliveryReadiness).toBe("mentions_only")
     })
+  })
+
+  it("persists queue versus steer as an independent active-run policy", async () => {
+    await getDb().adapterInstances.put(baseRow())
+    render(<LarkAtStrategy adapterId="lark-as" />)
+    await waitFor(() => screen.getByTestId("lark-dispatch-steer"))
+    fireEvent.click(screen.getByTestId("lark-dispatch-steer"))
+
+    await waitFor(async () => {
+      expect((await getDb().adapterInstances.get("lark-as"))?.activeRunDispatchMode).toBe("steer")
+    })
+  })
+
+  it("starts an explicit no-mention delivery probe without claiming verification", async () => {
+    await getDb().adapterInstances.put(baseRow())
+    render(<LarkAtStrategy adapterId="lark-as" />)
+    await waitFor(() => screen.getByTestId("lark-readiness-probe"))
+    fireEvent.click(screen.getByTestId("lark-readiness-probe"))
+
+    await waitFor(async () => {
+      const row = await getDb().adapterInstances.get("lark-as")
+      expect(row?.deliveryReadiness).toBe("mentions_only")
+      expect(row?.settings.unmentionedDeliveryProbe).toEqual(
+        expect.objectContaining({ consoleConfirmed: true, startedAt: expect.any(Number) })
+      )
+    })
+  })
+
+  it("shows requested/effective policy and the unverified fallback", async () => {
+    await getDb().adapterInstances.put(
+      baseRow({
+        inboundActivationPolicy: "mention_activates",
+        deliveryReadiness: "mentions_only",
+      })
+    )
+    render(<LarkAtStrategy adapterId="lark-as" />)
+    const diagnostic = await screen.findByTestId("lark-runtime-diagnostics")
+    expect(diagnostic).toHaveTextContent("Requested policy: mention_activates")
+    expect(diagnostic).toHaveTextContent("Effective policy: mention_each")
+    expect(diagnostic).toHaveTextContent(/unmentioned delivery is not verified/i)
   })
 
   // ── Sibling-bot policy (W5 multi-bot same-group) ──

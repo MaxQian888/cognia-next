@@ -9,10 +9,15 @@ import type {
   ResolveContactsInput,
   UpdateChatInput,
 } from "./chat-management"
-import type { ConversationReference, NormalizedInboundEvent } from "./event"
+import type {
+  ConversationDeliveryTarget,
+  ConversationReference,
+  NormalizedInboundEvent,
+} from "./event"
 import type { OutboundRequest, OutboundResult } from "./outbound"
 import type { PresenceStatusInput } from "./presence"
 import type { RunPresentationDriver } from "@/types/execution/run"
+import type { ConnectorRuntimeCapabilityMatrix } from "./runtime-capability"
 
 export type TransportMode =
   "longpoll" | "webhook" | "reverse-ws" | "forward-ws" | "gateway" | "imap-smtp" | "stub" // tests only
@@ -69,6 +74,20 @@ export interface HistoryFetchOpts {
   before?: string
   after?: string
   max?: number
+}
+
+export type PlatformHistoryCursor =
+  | {
+      kind: "timestamp"
+      beforeTimestamp?: number
+      afterTimestamp?: number
+      pageToken?: string
+    }
+  | { kind: "message_id"; beforeMessageId?: string; afterMessageId?: string; pageToken?: string }
+
+export interface HistoryPage {
+  events: NormalizedInboundEvent[]
+  nextCursor?: PlatformHistoryCursor
 }
 
 /**
@@ -186,6 +205,8 @@ export interface PlatformAdapter {
 
   /** Native projection for durable execution runs. Absence selects the generic A2UI/edit fallback. */
   readonly runPresentation?: RunPresentationDriver
+  /** Explicit runtime/presentation degradation contract for this adapter. */
+  readonly runtimeCapabilities?: ConnectorRuntimeCapabilityMatrix
   /** Native cursor domain expected by the legacy history stream. */
   readonly historyCursorKind?: "message_id" | "timestamp"
 
@@ -254,6 +275,15 @@ export interface PlatformAdapter {
     conversationKey: string,
     opts: HistoryFetchOpts
   ): AsyncIterable<NormalizedInboundEvent>
+  /**
+   * Durable history contract. The complete delivery target is mandatory so
+   * adapters never reverse-engineer a destination from an opaque key.
+   */
+  fetchHistoryPage?(
+    target: ConversationDeliveryTarget,
+    cursor: PlatformHistoryCursor | undefined,
+    opts: { max: number }
+  ): Promise<HistoryPage>
   refreshCredentials?(): Promise<void>
   /**
    * Surface a short, periodically refreshed status text on the platform

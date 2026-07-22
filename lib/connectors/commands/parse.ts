@@ -29,6 +29,7 @@ export type ControlCommandName =
   | "character"
   | "team"
   | "workflow"
+  | "agent"
   | "goal"
 
 /**
@@ -59,6 +60,7 @@ const KNOWN_COMMANDS: ReadonlySet<string> = new Set<ControlCommandName>([
   "character",
   "team",
   "workflow",
+  "agent",
   "goal",
 ])
 

@@ -1,16 +1,43 @@
-import { parseConversationKey } from "@/types/connectors/event"
 import type {
   RunControlAction,
   RunPresentationDriver,
   RunPresentationRef,
+  RunPresentationTarget,
   RunProjectionSnapshot,
 } from "@/types/execution/run"
+import type { ConversationDeliveryTarget } from "@/types/connectors/event"
 
 type LarkMethod = "POST" | "PUT" | "PATCH"
 export type LarkRunRequest = (method: LarkMethod, path: string, body: unknown) => Promise<unknown>
 
 const CARD_LIMIT_BYTES = 30_000
 const CARD_CREATED_AT_KEY = "cardCreatedAt"
+const SUMMARY_ELEMENT_ID = "run_summary"
+const ACTIONS_ELEMENT_ID = "run_actions"
+const MAX_MUTATION_ATTEMPTS = 3
+
+interface PendingCardMutation {
+  sequence: number
+  uuid: string
+  operation: "stream_summary" | "update_actions" | "replace_card"
+  method: "PUT"
+  path: string
+  body: Record<string, unknown>
+}
+
+interface LarkCardState {
+  cardId: string
+  lastAcknowledgedSequence: number
+  cardCreatedAt: number
+  elementIds: { summary: string; actions: string }
+  target: RunPresentationTarget
+  pendingMutation?: PendingCardMutation
+}
+
+export interface LarkRunPresentationDriverOptions {
+  sleep?: (ms: number) => Promise<void>
+  now?: () => number
+}
 
 const STATUS_LABEL_EN: Record<RunProjectionSnapshot["status"], string> = {
   queued: "Queued",
@@ -138,9 +165,9 @@ function cardJson(snapshot: RunProjectionSnapshot, streaming: boolean): Record<s
     },
     body: {
       elements: [
-        { tag: "markdown", content: details.join("\n\n"), element_id: "run_summary" },
+        { tag: "markdown", content: details.join("\n\n"), element_id: SUMMARY_ELEMENT_ID },
         ...(actions.length > 0
-          ? [{ tag: "action", layout: "bisected", actions, element_id: "run_actions" }]
+          ? [{ tag: "action", layout: "bisected", actions, element_id: ACTIONS_ELEMENT_ID }]
           : []),
       ],
     },
@@ -168,88 +195,268 @@ function serializeCard(snapshot: RunProjectionSnapshot, streaming: boolean): str
   return json
 }
 
-function state(ref: RunPresentationRef): {
-  cardId: string
-  sequence: number
-  cardCreatedAt: number
-} {
+function summaryContent(snapshot: RunProjectionSnapshot): string {
+  const card = cardJson(snapshot, true) as {
+    body: { elements: Array<{ content?: string }> }
+  }
+  return card.body.elements[0]?.content ?? ""
+}
+
+function actionsElement(snapshot: RunProjectionSnapshot): Record<string, unknown> {
+  const card = cardJson(snapshot, true) as {
+    body: { elements: Array<Record<string, unknown> & { element_id?: string }> }
+  }
+  return (
+    card.body.elements.find((element) => element.element_id === ACTIONS_ELEMENT_ID) ?? {
+      tag: "action",
+      layout: "bisected",
+      actions: [],
+      element_id: ACTIONS_ELEMENT_ID,
+    }
+  )
+}
+
+function state(ref: RunPresentationRef): LarkCardState {
   const cardId = ref.opaqueState?.cardId
-  const sequence = ref.opaqueState?.sequence
+  const lastAcknowledgedSequence =
+    ref.opaqueState?.lastAcknowledgedSequence ?? ref.opaqueState?.sequence
   const cardCreatedAt = ref.opaqueState?.[CARD_CREATED_AT_KEY]
+  const target = ref.opaqueState?.target
+  const elementIds = ref.opaqueState?.elementIds
+  const pendingMutation = ref.opaqueState?.pendingMutation
   if (
     typeof cardId !== "string" ||
-    typeof sequence !== "number" ||
-    typeof cardCreatedAt !== "number"
+    typeof lastAcknowledgedSequence !== "number" ||
+    typeof cardCreatedAt !== "number" ||
+    !target ||
+    typeof target !== "object"
   ) {
     throw new Error("Invalid Lark CardKit presentation reference")
   }
-  return { cardId, sequence, cardCreatedAt }
+  return {
+    cardId,
+    lastAcknowledgedSequence,
+    cardCreatedAt,
+    target: target as RunPresentationTarget,
+    elementIds:
+      elementIds && typeof elementIds === "object"
+        ? (elementIds as LarkCardState["elementIds"])
+        : { summary: SUMMARY_ELEMENT_ID, actions: ACTIONS_ELEMENT_ID },
+    ...(pendingMutation && typeof pendingMutation === "object"
+      ? { pendingMutation: pendingMutation as PendingCardMutation }
+      : {}),
+  }
 }
 
-export function createLarkRunPresentationDriver(request: LarkRunRequest): RunPresentationDriver {
-  async function replace(
+function errorCode(error: unknown): number | undefined {
+  if (!error || typeof error !== "object") return undefined
+  const code = (error as { code?: unknown }).code
+  return typeof code === "number" ? code : undefined
+}
+
+function sendTarget(target: RunPresentationTarget): ConversationDeliveryTarget {
+  if (!target.deliveryTarget) {
+    throw new Error("Lark run presentation requires a persisted delivery target")
+  }
+  return target.deliveryTarget
+}
+
+export function createLarkRunPresentationDriver(
+  request: LarkRunRequest,
+  options: LarkRunPresentationDriverOptions = {}
+): RunPresentationDriver {
+  const sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)))
+  const now = options.now ?? Date.now
+
+  async function requestMutation(mutation: PendingCardMutation): Promise<void> {
+    let lastError: unknown
+    for (let attempt = 0; attempt < MAX_MUTATION_ATTEMPTS; attempt += 1) {
+      try {
+        await request(mutation.method, mutation.path, mutation.body)
+        return
+      } catch (error) {
+        lastError = error
+        const code = errorCode(error)
+        if ([200740, 200750, 300317].includes(code ?? -1)) throw error
+        if (code !== undefined && code !== 200810 && code !== 230002 && code !== 99991400) {
+          throw error
+        }
+        if (attempt + 1 >= MAX_MUTATION_ATTEMPTS) break
+        await sleep(code === 200810 ? 150 * (attempt + 1) : 100 * 2 ** attempt)
+      }
+    }
+    throw lastError
+  }
+
+  async function sendCard(
+    target: RunPresentationTarget,
+    cardId: string,
+    snapshot: RunProjectionSnapshot
+  ): Promise<string | undefined> {
+    const delivery = sendTarget(target)
+    const content = JSON.stringify({ type: "card", data: { card_id: cardId } })
+    const uuid = `run-card:${snapshot.runId}:${delivery.address.conversationKey}`.slice(0, 64)
+    if (delivery.address.topicId) {
+      const anchor = delivery.sourceMessageId ?? target.sourceMessageId
+      if (!anchor) throw new Error("Lark topic presentation has no valid reply anchor")
+      const sent = (await request("POST", `/im/v1/messages/${encodeURIComponent(anchor)}/reply`, {
+        msg_type: "interactive",
+        content,
+        reply_in_thread: true,
+        uuid,
+      })) as { data?: { message_id?: string } }
+      return sent.data?.message_id
+    }
+    const sent = (await request("POST", "/im/v1/messages?receive_id_type=chat_id", {
+      receive_id: delivery.address.containerId,
+      msg_type: "interactive",
+      content,
+      uuid,
+    })) as { data?: { message_id?: string } }
+    return sent.data?.message_id
+  }
+
+  async function openCard(
+    target: RunPresentationTarget,
+    snapshot: RunProjectionSnapshot,
+    checkpoint?: (ref: RunPresentationRef) => Promise<void>
+  ): Promise<RunPresentationRef> {
+    const created = (await request("POST", "/cardkit/v1/cards", {
+      type: "card_json",
+      data: serializeCard(snapshot, true),
+    })) as { data?: { card_id?: string } }
+    const cardId = created.data?.card_id
+    if (!cardId) throw new Error("Lark CardKit create response omitted card_id")
+    const provisional: RunPresentationRef = {
+      opaqueState: {
+        cardId,
+        lastAcknowledgedSequence: 0,
+        [CARD_CREATED_AT_KEY]: now(),
+        elementIds: { summary: SUMMARY_ELEMENT_ID, actions: ACTIONS_ELEMENT_ID },
+        target,
+      },
+    }
+    await checkpoint?.(provisional)
+    const platformMessageId = await sendCard(target, cardId, snapshot)
+    const result = { ...provisional, platformMessageId }
+    await checkpoint?.(result)
+    return result
+  }
+
+  async function mutate(
     ref: RunPresentationRef,
     snapshot: RunProjectionSnapshot,
-    streaming: boolean
+    operation: PendingCardMutation["operation"],
+    checkpoint?: (ref: RunPresentationRef) => Promise<void>
   ): Promise<RunPresentationRef> {
     const current = state(ref)
-    if (Date.now() - current.cardCreatedAt >= 14 * 24 * 60 * 60 * 1_000) {
-      throw new Error("Lark CardKit entity expired after 14 days")
+    if (now() - current.cardCreatedAt >= 14 * 24 * 60 * 60 * 1_000) {
+      return openCard(current.target, snapshot, checkpoint)
     }
-    const sequence = current.sequence + 1
-    await request("PUT", `/cardkit/v1/cards/${current.cardId}`, {
-      card: { type: "card_json", data: serializeCard(snapshot, streaming) },
-      sequence,
-      uuid: `${snapshot.runId}:${snapshot.revision}`.slice(0, 64),
-    })
-    return {
+    const sequence = current.lastAcknowledgedSequence + 1
+    const desired: PendingCardMutation =
+      operation === "stream_summary"
+        ? {
+            sequence,
+            uuid: `${snapshot.runId}:${sequence}:summary`.slice(0, 64),
+            operation,
+            method: "PUT",
+            path: `/cardkit/v1/cards/${current.cardId}/elements/${current.elementIds.summary}/content`,
+            body: {
+              content: summaryContent(snapshot),
+              sequence,
+              uuid: `${snapshot.runId}:${sequence}:summary`.slice(0, 64),
+            },
+          }
+        : operation === "update_actions"
+          ? {
+              sequence,
+              uuid: `${snapshot.runId}:${sequence}:actions`.slice(0, 64),
+              operation,
+              method: "PUT",
+              path: `/cardkit/v1/cards/${current.cardId}/elements/${current.elementIds.actions}`,
+              body: {
+                element: actionsElement(snapshot),
+                sequence,
+                uuid: `${snapshot.runId}:${sequence}:actions`.slice(0, 64),
+              },
+            }
+          : {
+              sequence,
+              uuid: `${snapshot.runId}:${sequence}:replace`.slice(0, 64),
+              operation,
+              method: "PUT",
+              path: `/cardkit/v1/cards/${current.cardId}`,
+              body: {
+                card: { type: "card_json", data: serializeCard(snapshot, false) },
+                sequence,
+                uuid: `${snapshot.runId}:${sequence}:replace`.slice(0, 64),
+              },
+            }
+    const pending = current.pendingMutation ?? desired
+    const pendingRef: RunPresentationRef = {
       ...ref,
-      opaqueState: { ...ref.opaqueState, sequence },
+      opaqueState: { ...ref.opaqueState, pendingMutation: pending },
     }
+    await checkpoint?.(pendingRef)
+    try {
+      await requestMutation(pending)
+    } catch (error) {
+      if ([200740, 200750, 300317].includes(errorCode(error) ?? -1)) {
+        return openCard(current.target, snapshot, checkpoint)
+      }
+      throw error
+    }
+    const acknowledged: RunPresentationRef = {
+      ...ref,
+      opaqueState: {
+        ...ref.opaqueState,
+        lastAcknowledgedSequence: pending.sequence,
+        pendingMutation: undefined,
+      },
+    }
+    await checkpoint?.(acknowledged)
+    if (
+      pending.operation !== desired.operation ||
+      JSON.stringify(pending.body) !== JSON.stringify(desired.body)
+    ) {
+      return mutate(acknowledged, snapshot, operation, checkpoint)
+    }
+    return acknowledged
   }
 
   return {
     capabilities: {
-      nativeStreaming: true,
-      partialUpdate: false,
-      messageEdit: true,
+      topicIsolation: true,
+      textStreaming: true,
+      componentMutation: true,
+      fullReplacement: true,
+      messageEditing: true,
+      appendFallback: true,
       interactiveControls: true,
+      followUpBubbles: true,
     },
     async open(target, snapshot, options) {
-      const { remoteChatId } = parseConversationKey(target.conversationKey)
-      let provisional = options?.previousRef
+      const provisional = options?.previousRef
       if (!provisional?.opaqueState?.cardId) {
-        const created = (await request("POST", "/cardkit/v1/cards", {
-          type: "card_json",
-          data: serializeCard(snapshot, true),
-        })) as { data?: { card_id?: string } }
-        const cardId = created.data?.card_id
-        if (!cardId) throw new Error("Lark CardKit create response omitted card_id")
-        provisional = {
-          opaqueState: { cardId, sequence: 0, [CARD_CREATED_AT_KEY]: Date.now() },
-        }
-        await options?.checkpoint?.(provisional)
+        return openCard(target, snapshot, options?.checkpoint)
       }
-      const current = state(provisional)
       if (provisional.platformMessageId) return provisional
-      const sent = (await request("POST", "/im/v1/messages?receive_id_type=chat_id", {
-        receive_id: remoteChatId,
-        msg_type: "interactive",
-        content: JSON.stringify({ type: "card", data: { card_id: current.cardId } }),
-        uuid: snapshot.runId.slice(0, 50),
-      })) as { data?: { message_id?: string } }
+      const current = state(provisional)
+      const platformMessageId = await sendCard(current.target, current.cardId, snapshot)
       const result = {
-        platformMessageId: sent.data?.message_id,
+        platformMessageId,
         opaqueState: provisional.opaqueState,
       }
       await options?.checkpoint?.(result)
       return result
     },
-    update(ref, snapshot) {
-      return replace(ref, snapshot, true)
+    async update(ref, snapshot, mutationOptions) {
+      const streamed = await mutate(ref, snapshot, "stream_summary", mutationOptions?.checkpoint)
+      return mutate(streamed, snapshot, "update_actions", mutationOptions?.checkpoint)
     },
-    finish(ref, snapshot) {
-      return replace(ref, snapshot, false)
+    finish(ref, snapshot, mutationOptions) {
+      return mutate(ref, snapshot, "replace_card", mutationOptions?.checkpoint)
     },
   }
 }

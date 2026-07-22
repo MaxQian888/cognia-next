@@ -20,13 +20,15 @@ jest.mock("@/lib/connectors/runtime", () => ({
 }))
 
 const mockToArray = jest.fn()
+const mockGetConversationState = jest.fn()
 jest.mock("@/lib/db/schema", () => ({
   getDb: () => ({
     messages: { where: () => ({ equals: () => ({ toArray: () => mockToArray() }) }) },
+    connectorConversationStates: { get: (...args: unknown[]) => mockGetConversationState(...args) },
   }),
 }))
 
-import { useHistoryHydration } from "./use-history-hydration"
+import { HISTORY_PAGE_MAX, useHistoryHydration } from "./use-history-hydration"
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function* gen(events: any[]) {
@@ -49,10 +51,54 @@ beforeEach(() => {
   mockIsTauri.mockReturnValue(true)
   mockFindSession.mockResolvedValue({ id: "sess-1" })
   mockToArray.mockResolvedValue([])
+  mockGetConversationState.mockResolvedValue(undefined)
   mockInsert.mockResolvedValue(undefined)
 })
 
 describe("useHistoryHydration", () => {
+  it("uses the persisted target and typed timestamp cursor for page-based adapters", async () => {
+    mockToArray.mockResolvedValue([{ platformMessageId: "m-old", createdAt: 100 }])
+    const deliveryTarget = {
+      address: {
+        conversationKey: "k",
+        platform: "lark",
+        adapterId: "adp",
+        scopeKind: "thread",
+        containerId: "oc-1",
+        topicId: "omt-1",
+      },
+      conversationRef: { platform: "lark", adapterId: "adp", channelId: "oc-1" },
+      refreshedAt: 100,
+    }
+    mockGetConversationState.mockResolvedValue({ deliveryTarget })
+    const fetchHistoryPage = jest
+      .fn()
+      .mockResolvedValueOnce({
+        events: [makeEvent("m-older", 50)],
+        nextCursor: { kind: "timestamp", beforeTimestamp: 100, pageToken: "next" },
+      })
+      .mockResolvedValueOnce({ events: [] })
+    mockListAdapters.mockReturnValue([{ id: "adp", fetchHistoryPage }])
+
+    const { result } = renderHook(() => useHistoryHydration("k", "adp"))
+    await act(async () => {
+      await result.current.hydrate()
+    })
+
+    expect(fetchHistoryPage).toHaveBeenNthCalledWith(
+      1,
+      deliveryTarget,
+      { kind: "timestamp", beforeTimestamp: 100 },
+      { max: HISTORY_PAGE_MAX }
+    )
+    expect(fetchHistoryPage).toHaveBeenNthCalledWith(
+      2,
+      deliveryTarget,
+      { kind: "timestamp", beforeTimestamp: 100, pageToken: "next" },
+      { max: HISTORY_PAGE_MAX - 1 }
+    )
+  })
+
   it("inserts new history events with their original timestamp", async () => {
     let captured: { before?: string; max?: number } | undefined
     mockListAdapters.mockReturnValue([

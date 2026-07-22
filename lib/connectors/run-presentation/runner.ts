@@ -3,7 +3,6 @@ import { getDb } from "@/lib/db/schema"
 import { enqueueOutbound, waitForOutboundTerminal } from "@/lib/db/outbound-jobs"
 import { sweepExecutionRunEventRetention, updateExecutionRunBinding } from "@/lib/db/execution-runs"
 import { getRunningAdapter } from "@/lib/connectors/lifecycle"
-import { parseConversationKey } from "@/types/connectors/event"
 import type {
   ExecutionRunBinding,
   RunPresentationDriver,
@@ -52,10 +51,35 @@ function errorMessage(error: unknown): string {
 }
 
 function presentationRef(binding: ExecutionRunBinding): RunPresentationRef {
+  const opaqueState = binding.presentationState
+    ? {
+        ...binding.presentationState,
+        ...(binding.deliveryTarget
+          ? {
+              target: {
+                adapterId: binding.adapterId,
+                conversationKey: binding.conversationKey,
+                sourceMessageId: binding.sourceMessageId,
+                deliveryTarget: binding.deliveryTarget,
+                recipientUserId: binding.recipientUserId,
+                recipientTeamId: binding.recipientTeamId,
+              },
+            }
+          : {}),
+      }
+    : undefined
   return {
     ...(binding.platformMessageId ? { platformMessageId: binding.platformMessageId } : {}),
-    ...(binding.presentationState ? { opaqueState: binding.presentationState } : {}),
+    ...(opaqueState ? { opaqueState } : {}),
   }
+}
+
+function deliveryConversationRef(binding: ExecutionRunBinding) {
+  const ref = binding.deliveryTarget?.conversationRef
+  if (!ref) {
+    throw new Error("Execution presentation binding has no persisted delivery target")
+  }
+  return ref
 }
 
 function piiSafeSnapshot(snapshot: RunProjectionSnapshot): RunProjectionSnapshot {
@@ -109,36 +133,36 @@ export async function projectExecutionRunBinding(
   const driver = deps.nativeEnabled(binding) ? deps.resolveDriver(binding) : undefined
   if (driver && binding.deliveryMode === "native") {
     try {
+      const checkpoint = async (checkpointRef: RunPresentationRef) => {
+        await deps.saveBinding({
+          ...binding,
+          ...(checkpointRef.platformMessageId
+            ? { platformMessageId: checkpointRef.platformMessageId }
+            : {}),
+          ...(checkpointRef.opaqueState ? { presentationState: checkpointRef.opaqueState } : {}),
+          updatedAt: Date.now(),
+        })
+      }
       const ref = binding.platformMessageId
         ? TERMINAL.has(snapshot.status)
-          ? await driver.finish(presentationRef(binding), projectedSnapshot)
-          : await driver.update(presentationRef(binding), projectedSnapshot)
+          ? await driver.finish(presentationRef(binding), projectedSnapshot, { checkpoint })
+          : await driver.update(presentationRef(binding), projectedSnapshot, { checkpoint })
         : await driver.open(
             {
               adapterId: binding.adapterId,
               conversationKey: binding.conversationKey,
               sourceMessageId: binding.sourceMessageId,
+              deliveryTarget: binding.deliveryTarget,
               recipientUserId: binding.recipientUserId,
               recipientTeamId: binding.recipientTeamId,
             },
             projectedSnapshot,
             {
               previousRef: presentationRef(binding),
-              checkpoint: async (checkpointRef) => {
-                await deps.saveBinding({
-                  ...binding,
-                  ...(checkpointRef.platformMessageId
-                    ? { platformMessageId: checkpointRef.platformMessageId }
-                    : {}),
-                  ...(checkpointRef.opaqueState
-                    ? { presentationState: checkpointRef.opaqueState }
-                    : {}),
-                  updatedAt: Date.now(),
-                })
-              },
+              checkpoint,
             }
           )
-      if (TERMINAL.has(snapshot.status)) {
+      if (TERMINAL.has(snapshot.status) && snapshot.kind !== "agent-turn") {
         await deps.deliverMilestone?.(binding, projectedSnapshot)
       }
       const next: ExecutionRunBinding = {
@@ -205,12 +229,11 @@ async function deliverMilestone(
   binding: ExecutionRunBinding,
   snapshot: RunProjectionSnapshot
 ): Promise<void> {
-  const { platform } = parseConversationKey(binding.conversationKey)
   const job = await enqueueOutbound({
     adapterId: binding.adapterId,
     conversationKey: binding.conversationKey,
     request: {
-      conversationRef: { platform, adapterId: binding.adapterId },
+      conversationRef: deliveryConversationRef(binding),
       segments: [{ type: "markdown", md: markdown(snapshot) }],
       metadata: {
         idempotencyKey: `execution-run:${binding.id}:${snapshot.revision}:final`,
@@ -229,14 +252,13 @@ async function deliverFallback(
   binding: ExecutionRunBinding,
   snapshot: RunProjectionSnapshot
 ): Promise<RunPresentationRef> {
-  const { platform } = parseConversationKey(binding.conversationKey)
   const adapter = getRunningAdapter(binding.adapterId)?.adapter
   const editTargetMessageId = adapter?.edit ? binding.platformMessageId : undefined
   const job = await enqueueOutbound({
     adapterId: binding.adapterId,
     conversationKey: binding.conversationKey,
     request: {
-      conversationRef: { platform, adapterId: binding.adapterId },
+      conversationRef: deliveryConversationRef(binding),
       segments: [
         buildA2UISegment(`execution-run:${snapshot.runId}`, {
           components: {

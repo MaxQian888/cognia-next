@@ -1,7 +1,7 @@
 /**
  * Per-turn throttled cumulative state for the live-activity card (Feature A).
  * PURE logic — no Dexie, no bus, no React, no side effects. The dispatcher
- * (`turn-activity-dispatcher.ts`) owns an instance per turn, folds each
+ * The durable execution presentation runner owns an instance per turn and folds each
  * `CaptureStreamEvent` into it, and consults `shouldEmit` to decide when to
  * flush a card update. Keeping the state machine here (out of the dispatcher)
  * makes the throttle/fold semantics unit-testable in isolation.

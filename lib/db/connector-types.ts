@@ -477,7 +477,8 @@ export interface InboundLedgerRow {
   receivedAt: number
 }
 
-export type OutboundJobStatus = "pending" | "sending" | "sent" | "failed" | "deadlettered"
+export type OutboundJobStatus =
+  "pending" | "sending" | "sent" | "failed" | "deadlettered" | "delivery_unknown"
 
 /**
  * Provenance of an outbound job. Added at schema v41 so the inbox UI can

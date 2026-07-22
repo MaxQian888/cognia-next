@@ -39,11 +39,15 @@ const mockListAdapters = jest.fn().mockReturnValue([])
 const mockResumeDurableInboundJobs = jest
   .fn()
   .mockResolvedValue({ resumed: 0, recoveryRequired: 0 })
+const mockRecoverActiveConversationHistory = jest
+  .fn()
+  .mockResolvedValue({ conversations: 0, executed: 0, historyOnly: 0 })
 const mockBus = {
   registerAdapter: mockRegisterAdapter,
   unregisterAdapter: mockUnregisterAdapterBus,
   listAdapters: mockListAdapters,
   resumeDurableInboundJobs: mockResumeDurableInboundJobs,
+  recoverActiveConversationHistory: mockRecoverActiveConversationHistory,
 }
 jest.mock("@/lib/connectors/bus", () => ({
   getBus: () => mockBus,

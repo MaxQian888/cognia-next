@@ -1,5 +1,7 @@
 /** Stable execution semantics shared by agent turns, workflows, and IM presenters. */
 
+import type { ConversationDeliveryTarget } from "@/types/connectors/event"
+
 export type ExecutionRunKind = "agent-turn" | "workflow" | "plan" | "goal" | "team" | "scheduled"
 
 export type ExecutionRunStatus =
@@ -148,10 +150,20 @@ export interface RunControlCommand {
 }
 
 export interface RunPresentationCapabilities {
-  nativeStreaming: boolean
-  partialUpdate: boolean
-  messageEdit: boolean
+  topicIsolation?: boolean
+  textStreaming?: boolean
+  componentMutation?: boolean
+  fullReplacement?: boolean
+  messageEditing?: boolean
+  appendFallback?: boolean
   interactiveControls: boolean
+  followUpBubbles?: boolean
+  /** @deprecated Use textStreaming. */
+  nativeStreaming?: boolean
+  /** @deprecated Use componentMutation. */
+  partialUpdate?: boolean
+  /** @deprecated Use messageEditing. */
+  messageEdit?: boolean
 }
 
 export interface RunPresentationRef {
@@ -164,8 +176,13 @@ export interface RunPresentationTarget {
   conversationKey: string
   /** Platform message that initiated the run; required by thread-native streams such as Slack. */
   sourceMessageId?: string
+  deliveryTarget?: ConversationDeliveryTarget
   recipientUserId?: string
   recipientTeamId?: string
+}
+
+export interface RunPresentationMutationOptions {
+  checkpoint?: (ref: RunPresentationRef) => Promise<void>
 }
 
 export interface RunPresentationDriver {
@@ -178,8 +195,16 @@ export interface RunPresentationDriver {
       checkpoint?: (ref: RunPresentationRef) => Promise<void>
     }
   ): Promise<RunPresentationRef>
-  update(ref: RunPresentationRef, snapshot: RunProjectionSnapshot): Promise<RunPresentationRef>
-  finish(ref: RunPresentationRef, snapshot: RunProjectionSnapshot): Promise<RunPresentationRef>
+  update(
+    ref: RunPresentationRef,
+    snapshot: RunProjectionSnapshot,
+    options?: RunPresentationMutationOptions
+  ): Promise<RunPresentationRef>
+  finish(
+    ref: RunPresentationRef,
+    snapshot: RunProjectionSnapshot,
+    options?: RunPresentationMutationOptions
+  ): Promise<RunPresentationRef>
 }
 
 export type ExecutionRunBindingStatus = "active" | "degraded" | "finished" | "disabled"
@@ -193,6 +218,7 @@ export interface ExecutionRunBinding {
   status: ExecutionRunBindingStatus
   locale?: string
   sourceMessageId?: string
+  deliveryTarget?: ConversationDeliveryTarget
   recipientUserId?: string
   recipientTeamId?: string
   deliveryMode: "native" | "card-edit" | "append" | "final-only"

@@ -186,7 +186,7 @@ export type AuditKind =
   // transitions to its terminal Done/Failed state at turn end; `edit_fallback`
   // when an edit-frame fell back to a fresh send because the entry card's
   // platformMessageId hadn't landed yet. Emitted from
-  // `lib/connectors/activity/turn-activity-dispatcher.ts`.
+  // the durable execution presentation runner.
   | "activity.card_dispatched"
   | "activity.card_finalized"
   | "activity.edit_fallback"

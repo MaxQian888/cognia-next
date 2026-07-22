@@ -79,6 +79,15 @@ describe("parseControlCommand", () => {
     expect(isReadonlyCommand("goal")).toBe(false)
   })
 
+  it("parses topic-agent controls as a gated command family", () => {
+    expect(parseControlCommand("/agent status")).toEqual({
+      kind: "known",
+      name: "agent",
+      arg: "status",
+    })
+    expect(isReadonlyCommand("agent")).toBe(false)
+  })
+
   it("classifies read-only vs state-changing commands", () => {
     expect(isReadonlyCommand("help")).toBe(true)
     expect(isReadonlyCommand("status")).toBe(true)
