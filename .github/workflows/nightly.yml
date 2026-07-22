@@ -1,0 +1,47 @@
+name: Nightly
+
+# ============================================================================
+# The expensive tier
+# ============================================================================
+# Everything too slow to sit on the PR path: the 4-platform Tauri bundle
+# matrix, the Windows Tauri E2E project (needs a full cargo build), and the
+# WebKit/iOS mobile project.
+#
+# IMPORTANT — why this file exists at all: GitHub only fires `schedule` from
+# the repository's DEFAULT branch. `test.yml` used to carry its own
+# `schedule:` trigger, but the default branch was `master`, whose copy of
+# `test.yml` predates sharding and has no schedule at all — so the nightly
+# tier had never run, not once. Owning the schedule in a dedicated top-level
+# workflow makes that failure mode visible instead of silent.
+#
+# The schedule-gated jobs inside test.yml (`e2e-tauri`, `e2e-ios-weekly`) key
+# off `github.event_name`. A reusable workflow sees the CALLER's triggering
+# event, so calling test.yml from here on a schedule enables exactly those
+# jobs, while ci.yml's push/pull_request runs continue to skip them.
+# ============================================================================
+
+on:
+  schedule:
+    # 03:00 UTC daily.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Re-runs the full test workflow; the difference from the ci.yml call is
+  # that `github.event_name` is now `schedule`/`workflow_dispatch`, which
+  # switches on the Tauri and iOS E2E jobs.
+  test:
+    name: Test (full matrix)
+    uses: ./.github/workflows/test.yml
+
+  # Bundle for all four targets. No `tagName`, so tauri-action builds without
+  # creating a release — this is a packaging sanity check, and it needs no
+  # write scope (release.yml is the only caller that grants it).
+  build-tauri:
+    name: Build Tauri
+    needs: test
+    uses: ./.github/workflows/build-tauri.yml

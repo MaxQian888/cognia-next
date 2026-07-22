@@ -41,8 +41,14 @@ jobs:
   build-tauri:
     name: Build Tauri App (${{ matrix.platform }})
 
-    permissions:
-      contents: write
+    # Deliberately NO job-level `permissions:` here. This is a REUSABLE
+    # workflow, and a called workflow may not request more scope than its
+    # caller holds. `ci.yml` calls it with the repo-default read-only token
+    # (`default_workflow_permissions: read`), so declaring `contents: write`
+    # here made GitHub refuse to compile the whole job graph — every single
+    # `ci.yml` run was `startup_failure` from the repo's first run onwards.
+    # The write scope tauri-action needs to publish a release is granted by
+    # the CALLER instead; see the `build-tauri` job in release.yml.
 
     strategy:
       fail-fast: false

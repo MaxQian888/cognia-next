@@ -236,6 +236,7 @@ const projectCommon: Config = {
     // we redirect them to CJS-compatible manual mocks. The react-markdown mock
     // provides a functional line-based markdown parser sufficient for unit tests.
     "^react-markdown$": "<rootDir>/__mocks__/react-markdown.js",
+    "^@streamdown/cjk$": "<rootDir>/__mocks__/streamdown-cjk.js",
     "^rehype-sanitize$": "<rootDir>/__mocks__/rehype-sanitize.js",
     "^remark-gfm$": "<rootDir>/__mocks__/esm-plugin-stub.js",
     "^remark-math$": "<rootDir>/__mocks__/esm-plugin-stub.js",
@@ -292,6 +293,10 @@ const globalConfig: Config = {
     "components/**/*.{js,jsx,ts,tsx}",
     "hooks/**/*.{js,jsx,ts,tsx}",
     "lib/**/*.{js,jsx,ts,tsx}",
+    // First-party Work Mode is a browser-bundled plugin and follows the same
+    // co-located ≥90% coverage contract as host modules.
+    "plugins/cognia-work-mode/src/**/*.{ts,tsx}",
+    "!plugins/cognia-work-mode/src/**/*.test.{ts,tsx}",
     // The overlay is shipped as a string and loaded by its suites via
     // readFileSync + eval, so V8 cannot attribute any coverage to it and all
     // ~1.8k lines report 0% — diluting the `global` bucket (the

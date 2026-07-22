@@ -6802,6 +6802,11 @@ rl.on("line", (line) => {
         let missing: Vec<&str> = known_commands()
             .iter()
             .copied()
+            // Browser commands intentionally dispatch through the typed
+            // browser gateway before the general match table. Treat that
+            // gateway as a real dispatch arm instead of reporting the entire
+            // family as a false-positive runtime 404.
+            .filter(|cmd| !crate::companion_api::browser_gateway::is_browser_rpc(cmd))
             .filter(|cmd| !body.contains(&format!("\"{cmd}\"")))
             .collect();
 

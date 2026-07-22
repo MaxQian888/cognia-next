@@ -14,7 +14,7 @@ These are project-level hard rules. They override any default behavior to the co
 
 1. **Research before implementing.** Before writing any new code, search `lib/`, `components/`, `hooks/`, `src-tauri/`, and the relevant ADR for an existing implementation. Reuse — don't reimplement. If you think you need a new utility/component/hook, first prove (with grep results or file paths) that no equivalent exists. The Subsystem Map and **Cross-cutting hooks** section below list the most reused entry points; check them first.
 2. **No simplifications.** Implement the full behavior the task requires. Do not stub, mock-out, abbreviate, or "// TODO later" production paths. Do not strip error handling, validation, or edge cases to ship faster. If something genuinely cannot be implemented now, stop and surface the blocker — do not silently degrade scope.
-3. **Every component ships with a unit test.** Any new file under `components/**`, `hooks/**`, `lib/**`, or `src-tauri/src/**` (excluding `components/ui/` and `components/ai-elements/`) must have a co-located `*.test.ts(x)` / in-file `#[cfg(test)]` test. Coverage must stay ≥90% lines/branches/functions; verify with `pnpm test:coverage` before claiming done. Editing an existing component? Update or add tests in the same change.
+3. **Every component ships with a unit test.** Any new file under `components/**`, `hooks/**`, `lib/**`, or `src-tauri/src/**` (excluding `components/ui/` and `components/ai-elements/`) must have a co-located `*.test.ts(x)` / in-file `#[cfg(test)]` test — enforced by `pnpm audit:colocated-tests`, which fails on any new or renamed source file without one. Files you touch must reach **≥90% lines/branches/functions**; verify with `pnpm test:coverage:changed -- --strict` before claiming done. Editing an existing component? Update or add tests in the same change. (Repo-wide coverage is held to the lower layered floors in `scripts/test/coverage-thresholds.json` — see **Testing Standards**.)
 4. **Every frontend component is i18n-wired.** No hard-coded user-facing strings in `.tsx`. Use `useTranslations()` / `getTranslations()` from `next-intl`, add the new keys to **both** `i18n/messages/en.json` and `i18n/messages/zh-CN.json`, and run `pnpm lint:i18n` to confirm parity with the baseline. Aria labels, placeholders, toasts, and error messages count as user-facing.
 5. **Language convention.** Internal narration (status updates, tool-call rationale, end-of-turn summaries, code comments) is written in **English**. Questions to the user — clarifications, `AskUserQuestion` prompts, confirmation requests — are written in **Chinese**.
 6. **Record a changeset for every user-facing change.** After implementing a feature, fix, or behavior/breaking change that a user would notice, run `pnpm changeset` — select the **`cognia-next`** package, pick the semver bump (`patch` fix, `minor` feature, `major` breaking), and write a one-line summary. This creates a `.changeset/*.md` file you commit alongside the code. Skip it only for internal-only work (tests, refactors, docs, chore, CI). See **Versioning & Release** below for the full model.
@@ -31,14 +31,14 @@ pnpm dev / build / start / lint / lint:fix / format / format:check / typecheck
 # everything else (and any `/** @jest-environment jsdom */`-docblocked .ts
 # file — required for Dexie/getDb, localStorage, window stubs) runs in jsdom
 pnpm test / test:watch / test:coverage
-pnpm test:changed            # only suites affected by your diff vs master
+pnpm test:changed            # only suites affected by your diff vs origin/dev
 pnpm test:coverage:changed   # scoped coverage for changed files only (fast; -- --strict gates at 90%)
 
 # Playwright E2E (tests/e2e/; chromium+mobile run file-parallel, tauri stays serial)
 pnpm test:e2e                # against the Turbopack dev server (60s test budget)
 pnpm test:e2e:build          # NEXT_PUBLIC_E2E=1 static export → out/
 pnpm test:e2e:static         # against the prebuilt out/ (fast, no per-route compiles; run test:e2e:build first)
-pnpm test:e2e:changed        # only specs affected by your diff vs master
+pnpm test:e2e:changed        # only specs affected by your diff vs origin/dev
 
 # Tauri desktop
 pnpm tauri dev / build / info
@@ -174,6 +174,7 @@ One line per subsystem — the **full detail lives in the ADR** under `docs/cont
 | Risk→ceremony policy       | `lib/policy/risk/`, `lib/ai/agent/team/risk-input.ts`, gate wiring in `lib/ai/agent/agent-team-runtime.ts`                                                                                             | —                                          | 0070             |
 | Voice / TTS                | `packages/tts/`, `crates/cognia-tts/`, `lib/tts/`, `components/settings/speech/`, `app/me/speech/`, pet voice in `hooks/pet/use-pet-speak.ts`                                                          | Dexie tts-cache                            | 0075             |
 | 源代码管理 (SCM)           | `crates/cognia-git/`, `components/source-control/`, `lib/git/`, `stores/git/`, `hooks/git/`, `app/source-control/`, settings `components/settings/source-control/`                                     | `AppSettings.gitSettings.panel` (非 Dexie) | 0038             |
+| Pro IDE (code-server)      | `src-tauri/src/codeserver/`, `lib/codeserver/`, `hooks/codeserver/`, `components/editor/project/{code-server-pane,editor-engine-toggle}.tsx`, `components/settings/pro-ide/`                           | 无（磁盘 + settings.json）                 | 0088             |
 
 ### Cross-cutting hooks (reuse, don't reinvent)
 
@@ -186,11 +187,16 @@ One line per subsystem — the **full detail lives in the ADR** under `docs/cont
 
 ## Testing Standards
 
-- **Coverage**: ≥90% lines/branches/functions; verify with `pnpm test:coverage`
-- **Co-located**: `xxx.test.ts(x)` next to source. No `__tests__/` or `tests/` directories
+Coverage is enforced at **two** levels, and they are not the same number. Quoting the 90% figure as if it applied repo-wide is wrong — the repo has never been near it.
+
+- **Changed files: ≥90%** lines/branches/functions — the real bar for anything you touch. `pnpm test:coverage:changed -- --strict`, gated on every PR.
+- **Repo-wide: layered floors** in `scripts/test/coverage-thresholds.json`, enforced by `scripts/test/merge-coverage.mjs --check` after the shards merge. They are far below 90 (`global` sits at lines 25 / functions 30 / branches 60; `lib/**` at 75/60/50; only `stores/**` is at 90/90/90). These are a **ratchet, not a target**: `pnpm coverage:ratchet` reports which floors have gained enough headroom to raise, and `-- --write` locks the gain in.
+- **Co-located**: `xxx.test.ts(x)` next to source. No `__tests__/` or `tests/` directories. Enforced by `pnpm audit:colocated-tests`; the 452 pre-existing gaps are recorded in `scripts/gates/colocated-test-baseline.json` and that list may only shrink.
 - **Rust**: in-file `#[cfg(test)] mod tests { ... }`; integration tests in `src-tauri/tests/` allowed
 - **Excluded from coverage**: `components/ui/` (shadcn) and `components/ai-elements/` (vendored) — don't add tests there
 - **Sidecar**: `pnpm sidecar:test` (uses `node --test`, not Jest)
+
+Which runner owns what, and where each runs, is documented in [`CI_CD.md`](./CI_CD.md).
 
 ## Commit Hooks
 

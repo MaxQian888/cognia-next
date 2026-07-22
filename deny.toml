@@ -1,0 +1,50 @@
+# cargo-deny configuration — supply-chain scanning for the Rust workspace.
+#
+# Wired as the `rust:deny` gate (scripts/gates/check-all.mjs, `supply-chain`
+# group). It is ADVISORY: it reports and never blocks a merge. Two reasons —
+# advisory databases change under you, so a green build can go red without any
+# code change; and cargo-deny is not installed by default, so a blocking gate
+# would fail every local `pnpm check:all`. CI installs the binary so the scan
+# actually runs and its findings land in the job summary.
+#
+# Promote a section to blocking by moving the gate's `blocking: false` in
+# check-all.mjs — not by editing severities here.
+
+[graph]
+all-features = false
+
+[advisories]
+# RUSTSEC advisories. `deny` here still only surfaces as an advisory gate
+# result; the severity is what makes the OUTPUT useful.
+yanked = "warn"
+ignore = []
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Duplicate versions are near-unavoidable in a tree this size; the value is
+# the report, not the failure.
+highlight = "all-duplicates"
+
+[licenses]
+# Permissive licenses this project is happy to ship.
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-3.0",
+  "Unicode-DFS-2016",
+  "CC0-1.0",
+  "MPL-2.0",
+  "Zlib",
+  "OpenSSL",
+]
+confidence-threshold = 0.8
+
+[sources]
+unknown-registry = "warn"
+unknown-git = "warn"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

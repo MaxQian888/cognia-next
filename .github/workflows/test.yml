@@ -28,13 +28,15 @@ name: Test Suite
 #   - CODECOV_TOKEN: Token from codecov.io
 # ============================================================================
 
+# The nightly schedule lives in nightly.yml, NOT here. `schedule` only fires
+# from the repository's default branch, so a cron declared in a workflow that
+# is primarily `workflow_call`ed silently never runs when the default branch
+# carries an older copy of this file — which is exactly what happened. The
+# `e2e-tauri` / `e2e-ios-weekly` jobs below still gate on `github.event_name`,
+# which a reusable workflow inherits from its caller's trigger.
 on:
   workflow_call:
   workflow_dispatch:
-  schedule:
-    # Nightly full run — re-enables the desktop Tauri E2E job (`e2e-tauri`),
-    # which is too slow (Windows + cargo build) to run on every PR.
-    - cron: "0 3 * * *"
 
 concurrency:
   group: test-${{ github.ref }}
@@ -64,7 +66,7 @@ jobs:
         with:
           version: 10
 
-      - name: Setup Node.js 20.x
+      - name: Setup Node.js 26.x
         uses: actions/setup-node@v6
         with:
           node-version: 26.x
@@ -117,7 +119,7 @@ jobs:
         with:
           version: 10
 
-      - name: Setup Node.js 20.x
+      - name: Setup Node.js 26.x
         uses: actions/setup-node@v6
         with:
           node-version: 26.x
@@ -152,11 +154,16 @@ jobs:
       - name: Generate coverage summary
         if: always()
         run: |
-          echo "## Test Coverage Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          tail -n 10 coverage/lcov-report/index.html | grep -oP '(?<=<div class="pad1">).*?(?=</div>)' | head -1 || echo "Coverage report generated" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## Test Coverage Summary"
+            echo ""
+            echo '```'
+            tail -n 10 coverage/lcov-report/index.html \
+              | grep -oP '(?<=<div class="pad1">).*?(?=</div>)' \
+              | head -1 \
+              || echo "Coverage report generated"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # Optional: Upload coverage to Codecov (requires CODECOV_TOKEN secret)
       # Uncomment the following steps to enable Codecov integration:
@@ -174,6 +181,14 @@ jobs:
       #     fail_ci_if_error: false
       #   continue-on-error: true
 
+      # Advisory: prints which layered floors have grown enough headroom to be
+      # raised. It never writes — CI does not commit to the repository, and
+      # raising a floor is a promise about the project, not a measurement.
+      - name: Recommend coverage floor raises
+        if: needs.test.result == 'success'
+        run: node scripts/test/coverage-ratchet.mjs --coverage coverage/coverage-final.json
+        continue-on-error: true
+
       - name: Upload merged coverage report
         uses: actions/upload-artifact@v7
         if: always()
@@ -181,6 +196,50 @@ jobs:
           name: coverage-report
           path: coverage/
           retention-days: 30
+
+  # The incremental half of the coverage story. The merged threshold gate
+  # above enforces the LAYERED floors in scripts/test/coverage-thresholds.json
+  # (global lines sits at 25) — that is what the repo can actually hold today.
+  # This job enforces CLAUDE.md's real rule, 90%, on the files a change
+  # touches, so the layered floors ratchet upward instead of being a ceiling.
+  #
+  # Pull requests only, deliberately: on a direct push to `dev` the base ref
+  # IS the commit under test, so the changed-file set is empty and the gate
+  # would be theatre. Direct pushes are still covered by the merged gate.
+  coverage-changed:
+    name: Coverage Gate (changed files)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    permissions:
+      contents: read
+
+    steps:
+      # Full history so `git merge-base HEAD <base>` can resolve.
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js 26.x
+        uses: actions/setup-node@v6
+        with:
+          node-version: 26.x
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `--base` is always explicit here: the script's default (origin/dev)
+      # serves local runs, but CI must gate against the branch the PR actually
+      # targets.
+      - name: Enforce 90% coverage on changed files
+        run: node scripts/test/coverage-changed.mjs --base "origin/${{ github.base_ref }}" --strict
 
   sidecar:
     name: Sidecar Tests
@@ -198,7 +257,7 @@ jobs:
         with:
           version: 10
 
-      - name: Setup Node.js 20.x
+      - name: Setup Node.js 26.x
         uses: actions/setup-node@v6
         with:
           node-version: 26.x
@@ -231,7 +290,7 @@ jobs:
         with:
           version: 10
 
-      - name: Setup Node.js 20.x
+      - name: Setup Node.js 26.x
         uses: actions/setup-node@v6
         with:
           node-version: 26.x
@@ -252,13 +311,21 @@ jobs:
       - name: Build Next.js application
         run: pnpm build
 
-      - name: Check bundle size
-        if: github.event_name == 'pull_request'
-        run: |
-          echo "## Bundle Size Analysis" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Output Directory Size" >> $GITHUB_STEP_SUMMARY
-          du -sh out/ >> $GITHUB_STEP_SUMMARY || echo "Build output size check skipped" >> $GITHUB_STEP_SUMMARY
+      # Structured, not `du -sh`: report.yml downloads this same artifact from
+      # the trunk branch's last successful run and diffs against it. The old
+      # step printed a human-readable string nothing could compare, and wrote
+      # its "baseline" into `.github/size-snapshot/`, a directory that does
+      # not exist — under `continue-on-error`, so no baseline was ever made.
+      - name: Measure bundle size
+        run: node scripts/ci/report/bundle.mjs out bundle-size.json
+
+      - name: Upload bundle measurement
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: bundle-size
+          path: bundle-size.json
+          retention-days: 30
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
@@ -266,13 +333,6 @@ jobs:
           name: nextjs-build
           path: out/
           retention-days: 7
-
-      - name: Store build size
-        if: github.ref == 'refs/heads/master'
-        run: |
-          mkdir -p .github/size-snapshot
-          du -sb out/ | cut -f1 > .github/size-snapshot/build-size.txt
-        continue-on-error: true
 
   build-e2e:
     name: Build E2E Static Export
@@ -290,7 +350,7 @@ jobs:
         with:
           version: 10
 
-      - name: Setup Node.js 20.x
+      - name: Setup Node.js 26.x
         uses: actions/setup-node@v6
         with:
           node-version: 26.x
@@ -351,7 +411,7 @@ jobs:
         with:
           version: 10
 
-      - name: Setup Node.js 20.x
+      - name: Setup Node.js 26.x
         uses: actions/setup-node@v6
         with:
           node-version: 26.x
@@ -428,7 +488,7 @@ jobs:
         with:
           version: 10
 
-      - name: Setup Node.js 20.x
+      - name: Setup Node.js 26.x
         uses: actions/setup-node@v6
         with:
           node-version: 26.x
@@ -447,12 +507,31 @@ jobs:
       - name: Merge into HTML report + annotations
         run: pnpm exec playwright merge-reports --reporter html,github ./all-blob-reports
 
+      # The blob reports carry per-attempt results, which is the only place a
+      # flake is visible: `retries: 1` means a test that fails once and then
+      # passes is reported green and vanishes. The JSON render is what
+      # report.yml reads to surface those.
+      - name: Merge into a machine-readable JSON report
+        if: always()
+        run: |
+          mkdir -p playwright-json
+          PLAYWRIGHT_JSON_OUTPUT_NAME=playwright-json/report.json \
+            pnpm exec playwright merge-reports --reporter json ./all-blob-reports
+
       - name: Upload merged Playwright HTML report
         uses: actions/upload-artifact@v7
         if: always()
         with:
           name: playwright-report
           path: playwright-report/
+          retention-days: 14
+
+      - name: Upload merged Playwright JSON report
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: playwright-json
+          path: playwright-json/
           retention-days: 14
 
   e2e-ios-weekly:
@@ -474,7 +553,7 @@ jobs:
         uses: pnpm/action-setup@v6
         with:
           version: 10
-      - name: Setup Node.js 20.x
+      - name: Setup Node.js 26.x
         uses: actions/setup-node@v6
         with:
           node-version: 26.x
@@ -522,13 +601,19 @@ jobs:
         uses: pnpm/action-setup@v6
         with:
           version: 10
-      - name: Setup Node.js 20.x
+      - name: Setup Node.js 26.x
         uses: actions/setup-node@v6
         with:
           node-version: 26.x
           cache: "pnpm"
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+      # This job pays for a full `tauri build --debug` below, so it needs the
+      # cargo cache as much as the two cargo-test jobs do.
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       # NOTE: tauri-driver is intentionally NOT installed — the launch helper
@@ -572,7 +657,7 @@ jobs:
         uses: pnpm/action-setup@v6
         with:
           version: 10
-      - name: Setup Node.js 20.x
+      - name: Setup Node.js 26.x
         uses: actions/setup-node@v6
         with:
           node-version: 26.x
@@ -593,8 +678,8 @@ jobs:
         working-directory: src-tauri
         run: cargo test --locked
 
-  cargo-test-cli:
-    name: Rust Tests (cognia CLI)
+  cargo-test-workspace:
+    name: Rust Tests (workspace)
     runs-on: ubuntu-latest
 
     permissions:
@@ -611,11 +696,15 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
-      # The plugin-author CLI (`crates/cognia-cli`) has no
-      # `tauri::generate_context!()`, so it needs neither a Node toolchain nor
-      # a Next.js static export — unlike the `cargo-test-windows` job above.
-      # Its 342 tests never ran in CI (the src-tauri step tests only that
-      # member); gate just this package — the full workspace is 20+ crates and
-      # cognia-next already dominates the other job's wall clock.
-      - name: Run Rust tests (cognia-cli)
-        run: cargo test --locked -p cognia-cli
+      # Every workspace member EXCEPT `cognia-next` (the src-tauri crate),
+      # which is covered by `cargo-test-windows` above — its
+      # `tauri::generate_context!()` needs the Next.js static export to exist
+      # at compile time, so it cannot run without first paying for `pnpm
+      # build`. Nothing else in the workspace needs a Node toolchain.
+      #
+      # This job replaced a `-p cognia-cli`-only step. Testing one package
+      # meant ~1800 tests across the other 22 crates — cognia-automation, -subscription,
+      # -connectors, -git, -scheduling, -gateway, -vector and the rest — had
+      # never been part of the CI design at all, on top of never having run.
+      - name: Run Rust tests (all crates except src-tauri)
+        run: cargo test --locked --workspace --exclude cognia-next

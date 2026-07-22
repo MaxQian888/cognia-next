@@ -35,9 +35,22 @@ export function extractMapRows(md) {
     // cells[0] is the empty string before the leading pipe.
     const [subsystem, livesIn, , adrCell] = cells.slice(1)
     if (!subsystem || subsystem === "Subsystem" || /^-+$/.test(subsystem)) continue
+    // Only literal paths are checkable. The "Lives in" column also carries
+    // brace expansions (`app/{sw,manifest}.ts`), elisions
+    // (`packages/document/.../html-parser.ts`) and bare prose identifiers
+    // (`SchedulerDatabase`, `AppSettings.gitSettings.panel`); reporting those
+    // as missing files is a false positive that trains readers to ignore the
+    // gate. A checkable path contains a separator and no wildcard syntax.
     const livesInPaths = [...(livesIn ?? "").matchAll(/`([^`]+)`/g)]
       .map((m) => m[1])
-      .filter((p) => !p.includes("*") && !p.includes(":"))
+      .filter(
+        (p) =>
+          p.includes("/") &&
+          !p.includes("*") &&
+          !p.includes(":") &&
+          !p.includes("{") &&
+          !p.includes("...")
+      )
     const adrs = [...(adrCell ?? "").matchAll(/\b(\d{4})\b/g)].map((m) => Number(m[1]))
     rows.push({ subsystem, livesIn: livesInPaths, adrs })
   }

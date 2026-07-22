@@ -45,11 +45,6 @@
     "reason": "Orchestration proxy client runs in the Node host process; guarded require with fallback."
   },
   {
-    "file": "lib/github/event-normalizer.ts",
-    "module": "node:crypto",
-    "reason": "Webhook event normalization runs host-side (webhook receiver lives in Tauri/Node, not the renderer)."
-  },
-  {
     "file": "lib/github/webhook-verify.ts",
     "module": "node:crypto",
     "reason": "HMAC webhook verification runs host-side (webhook receiver lives in Tauri/Node, not the renderer)."
@@ -63,6 +58,21 @@
     "file": "lib/plugin/contracts/contract-path-audit.ts",
     "module": "node:path",
     "reason": "Contract-path audit is a dev/CI tool executed under Node, not bundled into pages."
+  },
+  {
+    "file": "lib/plugin/convert/node-io.ts",
+    "module": "node:child_process",
+    "reason": "Only reached from lib/plugin/convert/bin.ts, the esbuild entry for the standalone cognia-cli convert bundle; never imported by renderer pages."
+  },
+  {
+    "file": "lib/plugin/convert/node-io.ts",
+    "module": "node:fs",
+    "reason": "Only reached from lib/plugin/convert/bin.ts, the esbuild entry for the standalone cognia-cli convert bundle; never imported by renderer pages."
+  },
+  {
+    "file": "lib/plugin/convert/node-io.ts",
+    "module": "node:path",
+    "reason": "Only reached from lib/plugin/convert/bin.ts, the esbuild entry for the standalone cognia-cli convert bundle; never imported by renderer pages."
   },
   {
     "file": "lib/plugin/vscode-shim/permission-inference.ts",

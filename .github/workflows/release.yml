@@ -43,6 +43,13 @@ jobs:
   build-tauri:
     name: Build Tauri
     needs: [quality, test]
+    # The write scope lives on the CALLER, not inside build-tauri.yml: a
+    # reusable workflow cannot request more than its caller holds, and the
+    # other caller (ci.yml) runs read-only. tauri-action needs `contents:
+    # write` to create the release and upload the installers, `.sig` files
+    # and latest.json.
+    permissions:
+      contents: write
     uses: ./.github/workflows/build-tauri.yml
     with:
       tagName: ${{ github.ref_name }}

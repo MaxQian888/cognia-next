@@ -16,7 +16,9 @@ import {
 } from "./coverage-changed.mjs"
 
 test("parseArgs defaults, overrides, and rejects unknown flags", () => {
-  assert.deepEqual(parseArgs([]), { base: "master", strict: false })
+  // origin/dev, not master: master is ~1500 commits behind this repo's real
+  // trunk, so defaulting to it made "changed files" mean "most of the repo".
+  assert.deepEqual(parseArgs([]), { base: "origin/dev", strict: false })
   assert.deepEqual(parseArgs(["--base", "dev", "--strict"]), { base: "dev", strict: true })
   assert.throws(() => parseArgs(["--nope"]), /Unknown argument/)
   assert.throws(() => parseArgs(["--base"]), /--base requires a ref/)

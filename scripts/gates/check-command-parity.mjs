@@ -31,7 +31,7 @@
  *   node scripts/gates/check-command-parity.mjs
  */
 
-import { readFileSync, realpathSync } from "node:fs"
+import { existsSync, readFileSync, realpathSync } from "node:fs"
 import { resolve, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import { execSync } from "node:child_process"
@@ -50,13 +50,20 @@ const EXEMPT_RE = /\/\/\s*invoke-parity-exempt:(.*)$/
 
 export function listSourceFiles() {
   const cmd = `git -C "${REPO_ROOT}" ls-files ${SEARCH_DIRS.map((d) => `"${d}"`).join(" ")}`
-  return execSync(cmd, { encoding: "utf8" })
-    .split("\n")
-    .filter((p) => p.endsWith(".ts") || p.endsWith(".tsx"))
-    .filter(
-      (p) =>
-        !/\.(test|stories)\.tsx?$/.test(p) && !p.includes("__tests__/") && !p.includes("__mocks__/")
-    )
+  return (
+    execSync(cmd, { encoding: "utf8" })
+      .split("\n")
+      .filter((p) => p.endsWith(".ts") || p.endsWith(".tsx"))
+      .filter(
+        (p) =>
+          !/\.(test|stories)\.tsx?$/.test(p) &&
+          !p.includes("__tests__/") &&
+          !p.includes("__mocks__/")
+      )
+      // `git ls-files` reads the index, which still lists a file deleted in the
+      // working tree but not yet staged. There is nothing left to scan there.
+      .filter((p) => existsSync(resolve(REPO_ROOT, p)))
+  )
 }
 
 function lineNumberAt(src, index) {

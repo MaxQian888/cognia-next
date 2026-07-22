@@ -67,11 +67,16 @@ function productionFiles(root) {
   const output = execFileSync("git", ["-C", root, "ls-files", ...SEARCH_ROOTS], {
     encoding: "utf8",
   })
-  return output
-    .split("\n")
-    .filter((file) => /\.(?:[cm]?[jt]s|tsx)$/.test(file))
-    .filter((file) => !/\.(?:test|spec|stories)\.[cm]?[jt]sx?$/.test(file))
-    .filter((file) => !file.includes("/__tests__/") && !file.includes("/__mocks__/"))
+  return (
+    output
+      .split("\n")
+      .filter((file) => /\.(?:[cm]?[jt]s|tsx)$/.test(file))
+      .filter((file) => !/\.(?:test|spec|stories)\.[cm]?[jt]sx?$/.test(file))
+      .filter((file) => !file.includes("/__tests__/") && !file.includes("/__mocks__/"))
+      // `git ls-files` reads the index, which still lists a file deleted in the
+      // working tree but not yet staged. There is nothing left to audit there.
+      .filter((file) => existsSync(resolve(root, file)))
+  )
 }
 
 function loadAllowlist(path) {

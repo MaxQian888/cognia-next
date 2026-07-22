@@ -131,6 +131,12 @@
     "lines": 75,
     "statements": 75
   },
+  "./plugins/cognia-work-mode/src/**/*.{ts,tsx}": {
+    "branches": 90,
+    "functions": 90,
+    "lines": 90,
+    "statements": 90
+  },
   "./hooks/**/*.{ts,tsx}": {
     "branches": 50,
     "functions": 30,

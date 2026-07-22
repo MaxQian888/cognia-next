@@ -220,6 +220,12 @@
     "protection": "No LLM or embedding payload is emitted by these imports."
   },
   {
+    "file": "sidecar/dispatch/ai-sdk-tool-search.mjs",
+    "boundaries": ["ai"],
+    "reason": "Uses the AI SDK `tool()` helper only to declare the ToolSearch schema.",
+    "protection": "Sees just the already-permission-filtered tool registry (names + descriptions) and the model's own query; no locally-derived user content crosses this import."
+  },
+  {
     "file": "sidecar/dispatch/ai-sdk-tools.mjs",
     "boundaries": ["ai"],
     "reason": "Converts tool definitions for the sidecar protocol.",

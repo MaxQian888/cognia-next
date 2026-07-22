@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Sync the Ed25519 release-signing public key from its source of truth
- * (`crates/cognia-cli/src/release_key.rs`) into the two mirrors:
+ * (`crates/cognia-cli/src/engine/release_key.rs`) into the two mirrors:
  *   - src-tauri/src/cli_bridge/release_key.rs
  *   - lib/cli-bridge/embedded-pubkey.ts
  *
@@ -21,7 +21,12 @@ import { dirname, join } from "node:path"
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 
-const SOURCE = join(root, "crates/cognia-cli/src/release_key.rs")
+// The cognia-cli crate was reorganized into commands/ engine/ shared/ ui/;
+// this path followed the key constant into engine/. `commands/release_key.rs`
+// only consumes it. The stale path went unnoticed because this gate lived in
+// `check:all` but had never run in CI — it crashed with ENOENT the first time
+// the registry actually invoked it.
+const SOURCE = join(root, "crates/cognia-cli/src/engine/release_key.rs")
 const RUST_MIRROR = join(root, "src-tauri/src/cli_bridge/release_key.rs")
 const TS_MIRROR = join(root, "lib/cli-bridge/embedded-pubkey.ts")
 

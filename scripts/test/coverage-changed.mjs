@@ -9,7 +9,7 @@
  *
  * This script:
  *   1. Diffs the working tree + branch against the merge-base with a base ref
- *      (default: master) and keeps only coverage-collected source files.
+ *      (default: origin/dev) and keeps only coverage-collected source files.
  *   2. Runs Jest with `--findRelatedTests` (only suites that import those
  *      files) and `--collectCoverageFrom` narrowed to exactly those files.
  *   3. Disables the config's layered `coverageThreshold` by default — those
@@ -17,10 +17,17 @@
  *      here. Pass `--strict` to gate the changed files at the CLAUDE.md 90%
  *      bar instead.
  *
+ * The default base is `origin/dev`, NOT `master`. `dev` is this repo's real
+ * trunk; `master` sits ~1500 commits behind it. Diffing against master made
+ * "changed files" mean "most of the repo", which turned every incremental
+ * check into a full run and made a 90% gate unshippable. CI always passes
+ * `--base` explicitly from the event context; this default only serves local
+ * invocations.
+ *
  * Usage:
- *   pnpm test:coverage:changed                 # report-only, vs master
- *   pnpm test:coverage:changed -- --base dev   # different base ref
- *   pnpm test:coverage:changed -- --strict     # enforce 90% on changed files
+ *   pnpm test:coverage:changed                        # report-only, vs origin/dev
+ *   pnpm test:coverage:changed -- --base origin/main  # different base ref
+ *   pnpm test:coverage:changed -- --strict            # enforce 90% on changed files
  */
 
 import { execFileSync, spawnSync } from "node:child_process"
@@ -44,7 +51,7 @@ const SOURCE_EXT = /\.(ts|tsx|js|jsx)$/
 const NON_SOURCE = /\.(test|spec|stories)\.[^/]+$/
 
 export function parseArgs(argv) {
-  const args = { base: "master", strict: false }
+  const args = { base: "origin/dev", strict: false }
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
     if (arg === "--base") {
