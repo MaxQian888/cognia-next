@@ -72,6 +72,7 @@ import type { ConnectorMode } from "@/types/connectors/policy"
 import { BUILT_IN_AGENT_MODES, type AgentModeConfig } from "@/types/agent/agent-mode"
 import { useAgentRuntimeStore } from "@/stores/agent"
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
+import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 import { buildAgentModeSessionUpdate } from "@/lib/agent"
 import { namespacedA2UIToolNames } from "@/lib/a2ui/mcp-tool-schemas"
 import { A2UI_SYSTEM_PROMPT } from "@/lib/ai/prompts/a2ui-prompts"
@@ -692,9 +693,9 @@ export interface TwinRuntimeDepsForBuild {
 }
 
 /**
- * Resolve the active Agent Mode by id from either the built-in registry or
- * the custom-mode store. Returns `undefined` when no mode is active or the
- * id is unknown.
+ * Resolve the active Agent Mode by id from the built-in registry, custom-mode
+ * store, or enabled plugin contributions. Returns `undefined` when no mode is
+ * active or the id is unknown.
  */
 function resolveActiveAgentMode(modeId: string | undefined | null): AgentModeConfig | undefined {
   if (!modeId) return undefined
@@ -704,7 +705,11 @@ function resolveActiveAgentMode(modeId: string | undefined | null): AgentModeCon
   // Reading via getState() is safe here because this function only runs
   // client-side (it's called from React hooks).
   const custom = useCustomModeStore.getState().customModes[modeId]
-  return custom
+  if (custom) return custom
+  return usePluginStore
+    .getState()
+    .getAllModes()
+    .find((mode) => mode.id === modeId)
 }
 
 /**
@@ -943,7 +948,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     void recordSkillUsage(skills.map((s) => s.id)).catch(() => undefined)
   }
 
-  // --- Agent Mode (built-in / custom) -------------------------------------
+  // --- Agent Mode (built-in / custom / plugin) ----------------------------
   // Reads the active mode id from `useAgentRuntimeStore` unless ctx supplies
   // an explicit override. Modes are a *prompt modifier* — their systemPrompt
   // appends to the base prompt (under the same `---` separator as skills) and

@@ -220,7 +220,10 @@ export class PluginSignatureVerifier {
         {
           site: "signature.readVerificationReceipt",
           message: "Could not read host verification receipt.",
-          expected: !isTauri(),
+          // Unreachable off-Tauri (the early return above bails first) and the
+          // `plugin_read_verification` handler is registered, so reaching this
+          // catch is always a real failure.
+          expected: false,
         },
         error
       )

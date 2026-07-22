@@ -24,6 +24,7 @@ import type {
   PluginSubagentDispatchResult,
   PluginSubagentDispatchRejection,
 } from "@/types/plugin/plugin-agent-sdk"
+import { assertNoLeakingPiiDeep } from "@/lib/plugin/api/plugin-pii-gate"
 import { getDispatchBudget, isDispatchBudgetExhausted } from "@/lib/claude/agents/dispatch-budget"
 import {
   envelopeForBudgetExhausted,
@@ -84,6 +85,9 @@ export async function dispatchSubagent(
     def = idOrDef
     thisId = idOrDef.id
   }
+
+  const pluginId = thisId.includes(":") ? thisId.slice(0, thisId.indexOf(":")) : "<builtin>"
+  assertNoLeakingPiiDeep(pluginId, "plugin.agent.dispatchSubagent", [prompt, def.prompt])
 
   // ── Policy guards (fail-closed; the enum can drift within a session) ──────
   // `disabled` defs and settings-level dispatch-rule denials are refused even
@@ -158,7 +162,10 @@ export async function dispatchSubagent(
 
   const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
   const result = await executeAgent(prompt, {
-    toolsEnabled: options.toolsEnabled ?? true,
+    // An explicit empty list is a deny-all declaration. Force the executor's
+    // top-level tool switch off as well because downstream option synthesis
+    // intentionally omits empty allowlists.
+    toolsEnabled: def.tools?.length === 0 ? false : (options.toolsEnabled ?? true),
     // Every run dispatched here is a subagent. Without a dispatchContext (leaf,
     // allowNesting unset) build-options must WITHHOLD dispatch_agent — including
     // the plan-mode force-offer — instead of treating the child as top-level.
@@ -168,7 +175,7 @@ export async function dispatchSubagent(
     // Cross-provider subagent: route the run to the def's provider (with its own
     // credentials) instead of the dispatching session's provider.
     ...(def.provider ? { provider: def.provider } : {}),
-    ...(def.tools && def.tools.length > 0 ? { allowedTools: def.tools } : {}),
+    ...(def.tools !== undefined ? { allowedTools: def.tools } : {}),
     // Parent ceiling: clamp THIS child's resolved tool surface against the
     // dispatching agent's ceiling (fail-closed). The child's own dispatchContext
     // below is for its grandchildren; this is the ceiling that bounds the child.
@@ -289,7 +296,7 @@ async function runExternalSubagent(
     await import("@/lib/ai/agent/external/permission-cascade")
   const merged = deriveExternalSessionPermission(
     options._permissionCeiling ?? {},
-    def.tools && def.tools.length > 0 ? { allowedTools: def.tools } : {}
+    def.tools !== undefined ? { allowedTools: def.tools } : {}
   )
 
   // Forward the subagent's declared MCP servers into the external agent's ACP

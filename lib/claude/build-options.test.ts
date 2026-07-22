@@ -38,6 +38,10 @@ jest.mock("@/stores/agent/custom-mode-store", () => ({
   useCustomModeStore: { getState: jest.fn() },
 }))
 
+jest.mock("@/stores/plugin-runtime/plugin-store", () => ({
+  usePluginStore: { getState: jest.fn() },
+}))
+
 // Dynamically imported only on the API-key-rotation persist path (ADR-0043
 // Phase 3) — mocked so that path never touches Dexie/Zustand in this file.
 const mockSetProviderConfig = jest.fn().mockResolvedValue(undefined)
@@ -145,6 +149,7 @@ import { ProviderRoutingEngine, RoutingNoCandidatesError } from "@cognia/provide
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import { useAgentRuntimeStore } from "@/stores/agent"
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
+import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
 
 import {
@@ -179,6 +184,7 @@ const mBuildMap = buildMcpServerMap as jest.Mock
 const mGetTeam = getTeam as jest.Mock
 const mRuntimeGet = (useAgentRuntimeStore as unknown as { getState: jest.Mock }).getState
 const mCustomGet = (useCustomModeStore as unknown as { getState: jest.Mock }).getState
+const mPluginGet = (usePluginStore as unknown as { getState: jest.Mock }).getState
 const mBuildModeUpdate = buildAgentModeSessionUpdate as jest.Mock
 const mResolveAccountId = resolveAccountId as jest.Mock
 const mResolveAccountEnv = resolveAccountEnv as jest.Mock
@@ -239,6 +245,7 @@ beforeEach(() => {
   mGetTeam.mockResolvedValue(undefined)
   mRuntimeGet.mockReturnValue({ modeId: undefined })
   mCustomGet.mockReturnValue({ customModes: {} })
+  mPluginGet.mockReturnValue({ plugins: {}, getAllModes: () => [] })
   mBuildModeUpdate.mockReturnValue(undefined)
   // ADR-0028 — default to the "no account override" path so existing tests
   // see today's behaviour. Per-test overrides activate the new flow.
@@ -2093,6 +2100,25 @@ describe("resolveSendOptions — agent mode resolution", () => {
 
     const opts = await resolveSendOptions({})
     expect(opts.allowedTools).toEqual(expect.arrayContaining(["tool-x"]))
+  })
+
+  it("looks up plugin-contributed modes by namespaced id", async () => {
+    const pluginMode: AgentModeConfig = {
+      id: "cognia-work-mode:work",
+      type: "plugin",
+      name: "Work",
+      description: "",
+      icon: "BriefcaseBusiness",
+      systemPrompt: "Use work_create_deliverable after researching with host tools.",
+    }
+    mRuntimeGet.mockReturnValue({ modeId: pluginMode.id })
+    mPluginGet.mockReturnValue({ plugins: {}, getAllModes: () => [pluginMode] })
+    mBuildModeUpdate.mockReturnValue({ agentModeId: pluginMode.id })
+
+    const opts = await resolveSendOptions({})
+
+    expect(mBuildModeUpdate).toHaveBeenCalledWith(pluginMode)
+    expect(opts.allowedTools).toBeUndefined()
   })
 
   it("returns no mode when modeId is unknown in both registries", async () => {

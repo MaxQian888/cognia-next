@@ -52,8 +52,11 @@ describe("hashBinaryFile", () => {
     await expect(hashBinaryFile("/plugins/p/bin/missing")).resolves.toBeNull()
   })
 
-  it("returns null when the read resolves but hashing throws", async () => {
-    readBinaryFileMock.mockResolvedValue(undefined as unknown as Uint8Array)
-    await expect(hashBinaryFile("/plugins/p/bin/weird")).resolves.toBeNull()
-  })
+  it.each([undefined, null, { bytes: [] }])(
+    "returns null when the bridge resolves with non-binary data (%p)",
+    async (payload) => {
+      readBinaryFileMock.mockResolvedValue(payload as unknown as Uint8Array)
+      await expect(hashBinaryFile("/plugins/p/bin/weird")).resolves.toBeNull()
+    }
+  )
 })

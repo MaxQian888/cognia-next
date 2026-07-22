@@ -30,8 +30,19 @@ export async function hashBinaryFile(path: string): Promise<string | null> {
       import("@/lib/file/file-operations"),
       import("@/lib/ocr/hash"),
     ])
-    const bytes = await readBinaryFile(path)
-    return await sha256Bytes(bytes)
+    const bytes: unknown = await readBinaryFile(path)
+    // A read that resolves with something other than bytes (an undefined
+    // payload from a bridge that swallowed its own failure, a JSON-decoded
+    // null) must NOT be hashed: `sha256Bytes` coerces such a value to an empty
+    // buffer and returns the empty-string digest, which looks like a perfectly
+    // valid identity and would let an unreadable binary satisfy an approval.
+    const hashable = ArrayBuffer.isView(bytes)
+      ? new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+      : bytes instanceof ArrayBuffer
+        ? bytes
+        : null
+    if (!hashable) return null
+    return await sha256Bytes(hashable)
   } catch {
     return null
   }

@@ -3,6 +3,7 @@ import { executeAgent } from "@/lib/ai/agent/agent-executor"
 import { getSubagent } from "@/lib/plugin/registries/subagent-registry"
 import { agentTeamManager } from "@/lib/ai/agent/agent-team"
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
+import { PluginPiiError } from "@/lib/plugin/api/plugin-pii-gate"
 
 jest.mock("@/lib/ai/agent/agent-executor", () => ({
   __esModule: true,
@@ -126,6 +127,22 @@ describe("dispatchSubagent", () => {
 
   it("throws on an empty prompt", async () => {
     await expect(dispatchSubagent(subagent, "")).rejects.toThrow(/non-empty prompt/)
+  })
+
+  it("fails closed before execution when the prompt or subagent system prompt contains PII", async () => {
+    await expect(dispatchSubagent(subagent, "Email alice@example.com")).rejects.toBeInstanceOf(
+      PluginPiiError
+    )
+    await expect(
+      dispatchSubagent({ ...subagent, prompt: "Use alice@example.com" }, "review this")
+    ).rejects.toBeInstanceOf(PluginPiiError)
+    expect(mockExecute).not.toHaveBeenCalled()
+    expect(externalExecute).not.toHaveBeenCalled()
+  })
+
+  it("treats an explicit empty tools list as deny-all instead of inheriting tools", async () => {
+    await dispatchSubagent({ ...subagent, tools: [] }, "go")
+    expect(mockExecute.mock.calls[0][1]).toMatchObject({ allowedTools: [], toolsEnabled: false })
   })
 
   it("honors toolsEnabled=false (text-only dispatch)", async () => {
@@ -270,6 +287,19 @@ describe("dispatchSubagent — external backing (A2)", () => {
       "ext-3",
       "build it",
       expect.objectContaining({ model: "gpt-5.6-sol" })
+    )
+  })
+
+  it("preserves an explicit deny-all tool list for external agents", async () => {
+    externalCreatePreset.mockReturnValue({ id: "ext-deny", metadata: { preset: "claude-code" } })
+    externalExecute.mockResolvedValue({ success: true, finalResponse: "ok" })
+
+    await dispatchSubagent({ ...externalDef, tools: [] }, "build it")
+
+    expect(externalExecute).toHaveBeenCalledWith(
+      "ext-deny",
+      "build it",
+      expect.objectContaining({ allowedTools: [] })
     )
   })
 

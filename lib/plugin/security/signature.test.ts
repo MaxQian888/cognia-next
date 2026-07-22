@@ -14,6 +14,11 @@ jest.mock("@tauri-apps/api/core", () => ({
   invoke: jest.fn(),
 }))
 
+const recordSilentFailureMock = jest.fn()
+jest.mock("../contracts/diagnostics-store", () => ({
+  recordSilentFailure: (...args: unknown[]) => recordSilentFailureMock(...args),
+}))
+
 // Control the runtime-detection gate so we can exercise both the host-present
 // (receipt consulted) and host-absent (no receipt) branches of `verify`. Keep
 // the rest of the module real — sibling consumers import isCapacitor etc.
@@ -69,6 +74,7 @@ describe("PluginSignatureVerifier", () => {
     jest.clearAllMocks()
     isTauriMock.mockReturnValue(false)
     invokeMock.mockReset()
+    recordSilentFailureMock.mockReset()
   })
 
   afterEach(() => {
@@ -273,6 +279,11 @@ describe("PluginSignatureVerifier", () => {
       const result = await verifier.verify("/plugins/demo.market")
       expect(result.valid).toBe(false)
       expect(result.reason).toBe("Signature required but not found")
+      expect(recordSilentFailureMock).toHaveBeenCalledWith(
+        "<signature>",
+        expect.objectContaining({ site: "signature.readVerificationReceipt", expected: false }),
+        expect.any(Error)
+      )
     })
   })
 })
