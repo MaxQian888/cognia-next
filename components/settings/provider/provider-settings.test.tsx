@@ -94,6 +94,32 @@ jest.mock("@/hooks/settings/use-provider-settings", () => ({
   useProviderSettings: () => mockHookState,
 }))
 
+// Exercise the defensive fallback branches (`t("key") || "Fallback"`) that
+// exist for runtime safety but are otherwise dead code when i18n keys are
+// present.
+jest.mock("next-intl", () => ({
+  useTranslations: () => {
+    const t = () => ""
+    ;(t as unknown as { rich: typeof t }).rich = t
+    ;(t as unknown as { markup: typeof t }).markup = t
+    ;(t as unknown as { has: () => boolean }).has = () => false
+    ;(t as unknown as { raw: () => unknown }).raw = () => ""
+    return t
+  },
+  useLocale: () => "en",
+  useMessages: () => ({}),
+  useNow: () => new Date(),
+  useTimeZone: () => "UTC",
+  useFormatter: () => ({
+    dateTime: (d: Date | number) => new Date(d).toISOString(),
+    number: (n: number) => String(n),
+    relativeTime: (d: Date | number) => new Date(d).toISOString(),
+    list: (items: Iterable<string>) => Array.from(items).join(", "),
+  }),
+  NextIntlClientProvider: ({ children }: { children: React.ReactNode }) => children,
+  getTranslations: async () => () => "",
+}))
+
 const mockSettingsState = {
   setProviderConfig: mockSetProviderConfig,
   setDefaultProvider: mockSetDefaultProvider,
