@@ -32,7 +32,7 @@ export const ENTRY = resolve(repoRoot, "lib/plugin/convert/bin.ts")
 export const OUTFILE = resolve(repoRoot, "crates/cognia-cli/assets/plugin-convert.cjs")
 
 const BANNER = `// GENERATED FILE — do not edit.
-// Source: lib/plugin/convert/**  ·  Rebuild: pnpm build:convert-bundle
+// Source: lib/plugin/convert/**  ·  Rebuild: pnpm plugin-convert:bundle
 // Verified in CI by: pnpm gate:convert-bundle
 `
 
@@ -155,7 +155,7 @@ async function main() {
     process.stderr.write(
       `${OUTFILE} is stale.\n` +
         "The embedded converter no longer matches lib/plugin/convert/**.\n" +
-        "Run `pnpm build:convert-bundle` and commit the result.\n"
+        "Run `pnpm plugin-convert:bundle` and commit the result.\n"
     )
     process.exitCode = 1
     return

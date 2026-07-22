@@ -586,6 +586,7 @@ MANIFEST_CONTRIBUTIONS = [
             "media",
         ],
         "execution": "javascript",
+        "pythonExecution": "supported",
         "entryPath": "ocrProviders[].entry",
     },
     {
@@ -594,6 +595,7 @@ MANIFEST_CONTRIBUTIONS = [
             "ai-provider",
         ],
         "execution": "javascript",
+        "pythonExecution": "supported",
         "entryPath": "aiProviders[].entry",
     },
     {
@@ -602,6 +604,7 @@ MANIFEST_CONTRIBUTIONS = [
             "workspace-backend",
         ],
         "execution": "javascript",
+        "pythonExecution": "supported",
         "entryPath": "workspaceBackends[].entry",
     },
     {
@@ -625,6 +628,7 @@ MANIFEST_CONTRIBUTIONS = [
             "chat-middleware",
         ],
         "execution": "javascript",
+        "pythonExecution": "experimental",
         "entryPath": "chatMiddlewares[].entry",
     },
     {
@@ -641,6 +645,7 @@ MANIFEST_CONTRIBUTIONS = [
             "terminal-completion",
         ],
         "execution": "javascript",
+        "pythonExecution": "experimental",
         "entryPath": "terminalCompletionProviders[].entry",
     },
     {
@@ -649,6 +654,7 @@ MANIFEST_CONTRIBUTIONS = [
             "routing-strategy",
         ],
         "execution": "javascript",
+        "pythonExecution": "supported",
         "entryPath": "routingStrategies[].entry",
     },
     {
@@ -657,6 +663,7 @@ MANIFEST_CONTRIBUTIONS = [
             "deployment-filter",
         ],
         "execution": "javascript",
+        "pythonExecution": "supported",
         "entryPath": "deploymentFilters[].entry",
     },
     {
@@ -665,6 +672,7 @@ MANIFEST_CONTRIBUTIONS = [
             "protocol-adapter",
         ],
         "execution": "conditional",
+        "pythonExecution": "supported",
         "javascriptWhen": {
             "path": "spec.kind",
             "equals": "code",
@@ -684,6 +692,7 @@ MANIFEST_CONTRIBUTIONS = [
             "context-provider",
         ],
         "execution": "javascript",
+        "pythonExecution": "supported",
         "entryPath": "contextProviders[].entry",
     },
     {
@@ -699,6 +708,7 @@ MANIFEST_CONTRIBUTIONS = [
             "external-agent-adapter",
         ],
         "execution": "javascript",
+        "pythonExecution": "supported",
         "entryPath": "externalAgentAdapters[].entry",
     },
     {
@@ -707,6 +717,7 @@ MANIFEST_CONTRIBUTIONS = [
             "session-importer",
         ],
         "execution": "javascript",
+        "pythonExecution": "supported",
         "entryPath": "sessionImporters[].entry",
     },
     {
@@ -799,6 +810,7 @@ MANIFEST_CONTRIBUTIONS = [
             "connectors",
         ],
         "execution": "javascript",
+        "pythonExecution": "experimental",
     },
     {
         "field": "workflows",

@@ -45,6 +45,7 @@ export const CONTEXT_RESOURCE_READ_PERMISSIONS: Record<ContextResourceKind, stri
   "canvas-document": "canvas:read",
   artifact: "artifact:read",
   workflow: "workflow:read",
+  session: "session:read",
 }
 
 export function createContextPanelAPI(

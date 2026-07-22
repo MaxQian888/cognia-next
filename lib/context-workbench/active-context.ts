@@ -39,6 +39,10 @@ function cloneResource(resource: ContextResource): ContextResource {
         : undefined,
     }
   }
+  if (resource.kind === "session") {
+    // A session never carries a selection, so there is nothing else to clone.
+    return { ...resource, capabilities: [...resource.capabilities] }
+  }
   return {
     ...resource,
     capabilities: [...resource.capabilities],

@@ -34,3 +34,22 @@ it("falls back to the newest remaining host and returns defensive copies", () =>
   })
   disposeCanvas()
 })
+
+it("returns defensive copies for session resources without inventing a selection", () => {
+  const dispose = setActiveContextForHost("session", {
+    kind: "session",
+    sessionId: "session-1",
+    capabilities: ["inspect"],
+  })
+
+  const resource = getActiveContextResource()
+  expect(resource).toEqual({
+    kind: "session",
+    sessionId: "session-1",
+    capabilities: ["inspect"],
+  })
+  resource?.capabilities.push("preview")
+  expect(getActiveContextResource()?.capabilities).toEqual(["inspect"])
+  expect(getActiveContextResource()).not.toHaveProperty("selection")
+  dispose()
+})

@@ -353,13 +353,16 @@ describe("PluginManager", () => {
         }
       ).mirrorDeclaredPermissionsToLedger("perm-plugin", ["clipboard:read", "filesystem:write"])
 
-      expect(mockInvoke).toHaveBeenCalledWith("plugin_permission_grant", {
+      // The grant rides the shared transport, never a direct `invoke`: on a
+      // separated remote UI a direct call would write the viewer's local
+      // ledger instead of the brain's (`lib/plugin/core/transport.ts`).
+      expect(mockTransportCall).toHaveBeenCalledWith("plugin_permission_grant", {
         pluginId: "perm-plugin",
         permission: "clipboard:read",
         grantedBy: "manifest",
         expiresAt: null,
       })
-      expect(mockInvoke).not.toHaveBeenCalledWith(
+      expect(mockTransportCall).not.toHaveBeenCalledWith(
         "plugin_permission_grant",
         expect.objectContaining({ permission: "filesystem:write" })
       )
@@ -374,7 +377,10 @@ describe("PluginManager", () => {
           mirrorDeclaredPermissionsToLedger: (id: string, perms: string[]) => Promise<void>
         }
       ).mirrorDeclaredPermissionsToLedger("perm-plugin", ["clipboard:read"])
-      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_permission_grant", expect.anything())
+      expect(mockTransportCall).not.toHaveBeenCalledWith(
+        "plugin_permission_grant",
+        expect.anything()
+      )
     })
 
     it("pushes the declared shell-command allowlist to the host on desktop", async () => {
@@ -1954,11 +1960,14 @@ describe("PluginManager", () => {
       )
       await manager.enablePlugin("demo.wasm.tools")
 
-      const grantCallIndex = mockInvoke.mock.calls.findIndex(
+      // Permission mirroring goes through the shared transport (see
+      // `grantPluginPermission`), and must land before the module loads so the
+      // host-side gates are already primed when the plugin first runs.
+      const grantCallIndex = mockTransportCall.mock.calls.findIndex(
         ([command]) => command === "plugin_permission_grant"
       )
       expect(grantCallIndex).toBeGreaterThanOrEqual(0)
-      expect(mockInvoke.mock.invocationCallOrder[grantCallIndex]).toBeLessThan(
+      expect(mockTransportCall.mock.invocationCallOrder[grantCallIndex]).toBeLessThan(
         loadSpy.mock.invocationCallOrder[0]
       )
 

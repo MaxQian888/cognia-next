@@ -1,5 +1,5 @@
 // GENERATED FILE — do not edit.
-// Source: lib/plugin/convert/**  ·  Rebuild: pnpm build:convert-bundle
+// Source: lib/plugin/convert/**  ·  Rebuild: pnpm plugin-convert:bundle
 // Verified in CI by: pnpm gate:convert-bundle
 
 "use strict"

@@ -61,6 +61,38 @@ describe("plugin context panel API", () => {
     dispose()
   })
 
+  it("derives session:read for session panels and active context", () => {
+    const permissions = new Set(["extension:ui", "session:read"])
+    const api = createContextPanelAPI("plugin-a", (permission) => permissions.has(permission))
+    const disposePanel = api.register({
+      id: "session-inspector",
+      activity: "inspect",
+      label: "Session inspector",
+      labelKey: "plugin.sessionInspector",
+      resourceKinds: ["session"],
+      renderer: () => null,
+    })
+    const disposeHost = setActiveContextForHost("window:session::session:s-1", {
+      kind: "session",
+      sessionId: "s-1",
+      capabilities: ["inspect"],
+    })
+
+    expect(api.getActiveContext()).toEqual({
+      kind: "session",
+      sessionId: "s-1",
+      capabilities: ["inspect"],
+    })
+    expect(
+      contextPanelRegistry.resolve(
+        { kind: "session", sessionId: "s-1", capabilities: [] },
+        permissions
+      )
+    ).toEqual([expect.objectContaining({ id: "plugin-a:session-inspector" })])
+    disposeHost()
+    disposePanel()
+  })
+
   it("registers a metadata-only panel with lazy activation", () => {
     const api = createContextPanelAPI("plugin-a", () => true)
     const dispose = api.register({

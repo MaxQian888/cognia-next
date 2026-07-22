@@ -734,7 +734,7 @@ export function vscodeInlineCompletionResultToMonaco(
     ...(list.commands
       ? {
           commands: list.commands.map((entry) => {
-            const nested = typeof entry.command === "string" ? entry : entry.command
+            const nested = "title" in entry ? entry : entry.command
             return {
               command: adaptCommand(nested),
               ...("icon" in entry ? { icon: entry.icon } : {}),

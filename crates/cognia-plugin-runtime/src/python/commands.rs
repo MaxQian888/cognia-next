@@ -1575,7 +1575,12 @@ class Tesseract:
             &plugins,
             "contrib".into(),
             CONTRIBUTION_DISPATCH.into(),
-            vec![json!("tesseract"), json!("describe"), json!([]), Value::Null],
+            vec![
+                json!("tesseract"),
+                json!("describe"),
+                json!([]),
+                Value::Null,
+            ],
         )
         .await
         .unwrap();
@@ -1638,14 +1643,8 @@ class Tesseract:
 
         // A plugin symbol that merely *looks* private is still rejected — only
         // the host-owned dispatcher is exempt from the guard.
-        let private = call_inner(
-            &state,
-            &plugins,
-            "contrib".into(),
-            "_secret".into(),
-            vec![],
-        )
-        .await;
+        let private =
+            call_inner(&state, &plugins, "contrib".into(), "_secret".into(), vec![]).await;
         assert!(private.is_err());
 
         unload_inner(&state, "contrib").await.unwrap();

@@ -263,7 +263,9 @@ describe("generated CLI skeleton plugin", () => {
   it("is structurally valid but reported as unfinished, with no new lint rule", () => {
     const validation = validatePluginManifest(readManifest(result))
     expect(validation.errors).toEqual([])
-    expect(validation.diagnostics.map((d) => d.code)).toContain("manifest.capability.field_missing")
+    expect(validation.diagnostics?.map((d) => d.code)).toContain(
+      "manifest.capability.field_missing"
+    )
   })
 
   it("contributes nothing to the host until the author fills the table in", async () => {

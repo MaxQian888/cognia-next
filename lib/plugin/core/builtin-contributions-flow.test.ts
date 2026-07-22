@@ -37,6 +37,7 @@ import { listCharacterPackIds } from "@/lib/plugin/registries/character-pack-reg
 import { listSkillIds } from "@/lib/plugin/registries/skill-registry"
 import { listMcpServerPresetIds } from "@/lib/plugin/registries/mcp-server-preset-registry"
 import { getBrowserBuiltinRegistryEntry } from "./browser-builtin-registry"
+import zhihuPluginJson from "@/plugins/zhihu-content-pipeline/plugin.json"
 
 jest.mock("@tauri-apps/api/core", () => ({
   invoke: jest.fn(),
@@ -158,7 +159,13 @@ describe("builtin plugin contribution flow", () => {
     // plugin.json identity fields survive the merge…
     expect(manifest.id).toBe(PLUGIN_ID)
     expect(manifest.description).toBeTruthy()
-    expect(manifest.activationEvents).toEqual(["startup"])
+    // Every activation event plugin.json declares survives the merge — the
+    // module manifest omits the field, so it must not blank it out. Compared
+    // against the JSON itself rather than a hard-coded list, which went stale
+    // the moment the plugin declared its `/zhihu` command
+    // (`onCommand:zhihu`).
+    expect(manifest.activationEvents).toEqual(zhihuPluginJson.activationEvents)
+    expect(manifest.activationEvents).toContain("startup")
     // …and the module manifest's declarative arrays ride along.
     expect(manifest.workflowTemplates?.length).toBe(1)
     expect(manifest.skills?.length).toBeGreaterThan(0)
