@@ -11,8 +11,9 @@ import { createAzure } from "@ai-sdk/azure"
 import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { createMistral } from "@ai-sdk/mistral"
 import { createCohere } from "@ai-sdk/cohere"
+import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock"
 import type { LanguageModel } from "ai"
-import type { ProviderName } from "@cognia/provider-types"
+import type { BedrockConnectionSettings, ProviderName } from "@cognia/provider-types"
 import { getBuiltInProviderDefaultBaseURL } from "@cognia/provider-types/built-in-provider-catalog"
 // Single source of truth for the OpenAI Responses-vs-Chat decision and the
 // provider→protocol map (shared with the sidecar; the file lives under
@@ -44,6 +45,7 @@ export interface ProviderModelOptions {
    * gateways / custom base URLs); "auto" or omitted falls back to the heuristic.
    */
   apiFlavor?: "auto" | "responses" | "chat"
+  bedrock?: BedrockConnectionSettings
 }
 
 /**
@@ -92,11 +94,27 @@ export function getProviderModel(opts: ProviderModelOptions): LanguageModel {
         flavor === "responses" ? client.responses(opts.model) : client.chat(opts.model)
       ) as LanguageModel
     }
-    case "bedrock":
-      // Bedrock's AWS SigV4 deps must not enter the renderer/mobile bundle; the
-      // sidecar chat path supports it natively. Keep it out of this in-renderer
-      // model factory.
-      throw new Error("getProviderModel: bedrock is only supported via the chat/sidecar path")
+    case "bedrock": {
+      const bedrock = opts.bedrock
+      if (bedrock?.authMode === "default-chain") {
+        throw new Error("getProviderModel: Bedrock default-chain auth requires the sidecar proxy")
+      }
+      const client = createAmazonBedrock({
+        ...(bedrock?.authMode === "api-key" || (!bedrock && apiKey)
+          ? { apiKey: bedrock?.apiKey ?? apiKey }
+          : {}),
+        ...(bedrock?.authMode === "iam"
+          ? {
+              accessKeyId: bedrock.accessKeyId,
+              secretAccessKey: bedrock.secretAccessKey,
+              ...(bedrock.sessionToken ? { sessionToken: bedrock.sessionToken } : {}),
+            }
+          : {}),
+        ...(bedrock?.region ? { region: bedrock.region } : {}),
+        ...(baseURL ? { baseURL } : bedrock?.baseURL ? { baseURL: bedrock.baseURL } : {}),
+      })
+      return client(opts.model) as LanguageModel
+    }
     default:
       if (resolveProviderProtocol(provider) === "openai") {
         // @ai-sdk/openai v3's bare `client(model)` returns a Responses-API
@@ -120,7 +138,7 @@ export function getProviderModel(opts: ProviderModelOptions): LanguageModel {
       }
       throw new Error(
         `getProviderModel: unsupported provider "${provider}". Supported: anthropic, ` +
-          `openai (+ OpenAI-compatible gateways), google/gemini, mistral, cohere.`
+          `openai (+ OpenAI-compatible gateways), google/gemini, mistral, cohere, bedrock.`
       )
   }
 }

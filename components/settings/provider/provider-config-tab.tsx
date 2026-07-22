@@ -47,7 +47,13 @@ import {
   getBuiltInProviderSettingsBaseURL,
   getBuiltInProviderProtocol,
 } from "@cognia/provider-types/built-in-provider-catalog"
-import type { UserProviderSettings, ApiKeyRotationStrategy } from "@cognia/provider-types"
+import {
+  validateBedrockConnectionSettings,
+  type UserProviderSettings,
+  type ApiKeyRotationStrategy,
+} from "@cognia/provider-types"
+import type { BedrockConnectionSettings } from "@cognia/provider-types"
+import { BedrockSettingsFields } from "./bedrock-settings-fields"
 import type { ApiTestResult } from "@/lib/ai/infrastructure/api-test"
 import { ProtocolSelectContent } from "./protocol-select-content"
 import { AnthropicSubscriptionReuseCard } from "./anthropic-subscription-reuse-card"
@@ -70,6 +76,7 @@ export interface ProviderConfigTabProps {
   providerDocsUrl?: string
   onApiKeyChange: (key: string) => void
   onBaseURLChange: (url: string) => void
+  onBedrockSettingsChange?: (settings: BedrockConnectionSettings) => void
   /**
    * Wire protocol override for non-Anthropic built-ins. Omit (or leave
    * unset) for `providerId === "anthropic"` — that slot always dispatches
@@ -309,7 +316,7 @@ function KeyRotationSection({
                           className="h-5 w-5"
                           onClick={() => handleMoveUp(index)}
                           disabled={index === 0}
-                          title="Move up"
+                          title={t("configTab.moveUp") || "Move up"}
                         >
                           <ChevronDown className="h-3 w-3 rotate-180" />
                         </Button>
@@ -319,7 +326,7 @@ function KeyRotationSection({
                           className="h-5 w-5"
                           onClick={() => handleMoveDown(index)}
                           disabled={index === apiKeys.length - 1}
-                          title="Move down"
+                          title={t("configTab.moveDown") || "Move down"}
                         >
                           <ChevronDown className="h-3 w-3" />
                         </Button>
@@ -350,7 +357,7 @@ function KeyRotationSection({
                   <Input
                     value={newKey}
                     onChange={(e) => setNewKey(e.target.value)}
-                    placeholder="sk-..."
+                    placeholder={t("configTab.newKeyPlaceholder") || "sk-..."}
                     className="h-8 flex-1 text-xs font-mono"
                     autoComplete="new-password"
                     data-lpignore="true"
@@ -413,6 +420,7 @@ export function ProviderConfigTab({
   providerDocsUrl,
   onApiKeyChange,
   onBaseURLChange,
+  onBedrockSettingsChange,
   onApiProtocolChange,
   onDefaultModelChange,
   onTestConnection,
@@ -434,6 +442,7 @@ export function ProviderConfigTab({
 
   const defaultModel = settings.defaultModel ?? ""
   const hasRotationSupport = !!(onToggleRotation || onAddApiKey || onRemoveApiKey)
+  const isBedrock = providerId === "bedrock"
 
   // Catalog-default base URL for this provider (empty for OpenAI/Anthropic/…
   // whose SDKs hard-code the endpoint). Drives both the pre-filled field value
@@ -466,91 +475,102 @@ export function ProviderConfigTab({
       {/* ── 0. Anthropic auth extras (subscription reuse, privacy, ccswitch) ── */}
       {providerId === "anthropic" && <AnthropicSubscriptionReuseCard />}
 
+      {isBedrock && onBedrockSettingsChange && (
+        <BedrockSettingsFields
+          value={settings.bedrock ?? { authMode: "default-chain", region: "us-east-1" }}
+          onChange={onBedrockSettingsChange}
+        />
+      )}
+
       {/* ── 1. API Key ─────────────────────────────────────────────── */}
-      <div className="space-y-2">
-        <Label className="flex items-center gap-1.5 text-sm font-medium">
-          <Key className="h-3.5 w-3.5" />
-          {t("configTab.apiKeyLabel") || "API Key"}
-        </Label>
+      {!isBedrock && (
+        <div className="space-y-2">
+          <Label className="flex items-center gap-1.5 text-sm font-medium">
+            <Key className="h-3.5 w-3.5" />
+            {t("configTab.apiKeyLabel") || "API Key"}
+          </Label>
 
-        <div className="relative">
-          <Input
-            type={showApiKey ? "text" : "password"}
-            value={settings.apiKey ?? ""}
-            onChange={(e) => onApiKeyChange(e.target.value)}
-            placeholder={t("configTab.apiKeyPlaceholder") || "Enter your API key"}
-            className="pr-10"
-            autoComplete="new-password"
-            data-lpignore="true"
-            data-form-type="other"
-          />
-          <Button
-            variant="ghost"
-            size="icon"
-            className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2"
-            onClick={() => setShowApiKey((prev) => !prev)}
-            title={
-              showApiKey
-                ? t("configTab.hideKey") || "Hide key"
-                : t("configTab.showKey") || "Show key"
-            }
-            type="button"
-          >
-            {showApiKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-          </Button>
-        </div>
-
-        {/* Dashboard / docs links */}
-        {(providerDashboardUrl || providerDocsUrl) && (
-          <div className="flex flex-wrap gap-3">
-            {providerDashboardUrl && (
-              <a
-                href={providerDashboardUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
-              >
-                <ExternalLink className="h-3 w-3" />
-                {t("configTab.getApiKey") || "Get API Key →"}
-              </a>
-            )}
-            {providerDocsUrl && (
-              <a
-                href={providerDocsUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
-              >
-                <ExternalLink className="h-3 w-3" />
-                Docs
-              </a>
-            )}
+          <div className="relative">
+            <Input
+              type={showApiKey ? "text" : "password"}
+              value={settings.apiKey ?? ""}
+              onChange={(e) => onApiKeyChange(e.target.value)}
+              placeholder={t("configTab.apiKeyPlaceholder") || "Enter your API key"}
+              className="pr-10"
+              autoComplete="new-password"
+              data-lpignore="true"
+              data-form-type="other"
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2"
+              onClick={() => setShowApiKey((prev) => !prev)}
+              title={
+                showApiKey
+                  ? t("configTab.hideKey") || "Hide key"
+                  : t("configTab.showKey") || "Show key"
+              }
+              type="button"
+            >
+              {showApiKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+            </Button>
           </div>
-        )}
-      </div>
+
+          {/* Dashboard / docs links */}
+          {(providerDashboardUrl || providerDocsUrl) && (
+            <div className="flex flex-wrap gap-3">
+              {providerDashboardUrl && (
+                <a
+                  href={providerDashboardUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  {t("configTab.getApiKey") || "Get API Key →"}
+                </a>
+              )}
+              {providerDocsUrl && (
+                <a
+                  href={providerDocsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  {t("configTab.docs") || "Docs"}
+                </a>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── 2. Base URL ────────────────────────────────────────────── */}
-      <div className="space-y-2">
-        <Label className="flex items-center gap-1.5 text-sm font-medium">
-          <Globe className="h-3.5 w-3.5" />
-          {t("configTab.baseURLLabel") || "Base URL"}
-          <span className="font-normal text-muted-foreground text-xs">
-            ({t("configTab.baseURLOptional") || "Optional"})
-          </span>
-        </Label>
-        <Input
-          type="text"
-          value={settings.baseURL ?? defaultBaseURL ?? ""}
-          onChange={(e) => onBaseURLChange(e.target.value)}
-          placeholder={
-            defaultBaseURL || t("configTab.baseURLPlaceholder") || "https://api.example.com/v1"
-          }
-        />
-        <p className="text-xs text-muted-foreground">{t("baseURLHint")}</p>
-      </div>
+      {!isBedrock && (
+        <div className="space-y-2">
+          <Label className="flex items-center gap-1.5 text-sm font-medium">
+            <Globe className="h-3.5 w-3.5" />
+            {t("configTab.baseURLLabel") || "Base URL"}
+            <span className="font-normal text-muted-foreground text-xs">
+              ({t("configTab.baseURLOptional") || "Optional"})
+            </span>
+          </Label>
+          <Input
+            type="text"
+            value={settings.baseURL ?? defaultBaseURL ?? ""}
+            onChange={(e) => onBaseURLChange(e.target.value)}
+            placeholder={
+              defaultBaseURL || t("configTab.baseURLPlaceholder") || "https://api.example.com/v1"
+            }
+          />
+          <p className="text-xs text-muted-foreground">{t("baseURLHint")}</p>
+        </div>
+      )}
 
       {/* ── 2b. API Protocol override (non-Anthropic built-ins only) ─── */}
-      {showProtocolSelector && (
+      {!isBedrock && showProtocolSelector && (
         <div className="space-y-2">
           <Label htmlFor={`api-protocol-${providerId}`} className="text-sm font-medium">
             {t("apiProtocol") || "API Protocol"}
@@ -619,7 +639,12 @@ export function ProviderConfigTab({
             size="sm"
             className="h-7 gap-1.5 text-xs"
             onClick={handleTest}
-            disabled={isTesting || !settings.apiKey}
+            disabled={
+              isTesting ||
+              (isBedrock
+                ? !settings.bedrock || !validateBedrockConnectionSettings(settings.bedrock).valid
+                : !settings.apiKey)
+            }
           >
             {isTesting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             {t("detailPanel.testButton") || "Test Connection"}
@@ -628,7 +653,7 @@ export function ProviderConfigTab({
       )}
 
       {/* ── 5. Key Rotation ────────────────────────────────────────── */}
-      {hasRotationSupport && (
+      {!isBedrock && hasRotationSupport && (
         <KeyRotationSection
           settings={settings}
           onAddApiKey={onAddApiKey}

@@ -16,6 +16,7 @@
 
 import { createAnthropic } from "@ai-sdk/anthropic"
 import { createAzure } from "@ai-sdk/azure"
+import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock"
 import { createCohere } from "@ai-sdk/cohere"
 import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { createMistral } from "@ai-sdk/mistral"
@@ -27,7 +28,14 @@ import {
   type LocalProviderName,
 } from "@cognia/provider-types/local-provider"
 import { getBuiltInProviderDefaultBaseURL } from "@cognia/provider-types/built-in-provider-catalog"
-import type { ApiFlavor, ApiProtocol, ResolverProtocol } from "@cognia/provider-types"
+import type {
+  ApiFlavor,
+  ApiProtocol,
+  BedrockConnectionSettings,
+  ResolverProtocol,
+} from "@cognia/provider-types"
+import { validateBedrockConnectionSettings } from "@cognia/provider-types"
+import { createBedrockSidecarLanguageModel } from "@/lib/claude/feature-call"
 // Single source of truth for provider→protocol (shared with the sidecar; the
 // sidecar can't import `lib/`, so the file lives under `sidecar/` and TS imports
 // it — see sidecar/dispatch/protocol-adapters/provider-protocol.mjs).
@@ -50,6 +58,7 @@ export interface ProviderSettingsEntry {
   enabled?: boolean
   apiKey?: string
   baseURL?: string
+  bedrock?: BedrockConnectionSettings
   /** OpenAI endpoint family override (responses/chat/auto); omitted = auto. */
   apiFlavor?: ApiFlavor
   /**
@@ -187,6 +196,7 @@ export interface ResolvedProvider {
   apiFlavor?: ApiFlavor
   apiKey: string | undefined
   baseURL: string | undefined
+  bedrock?: BedrockConnectionSettings
   model: string | undefined
   isCustomProvider: boolean
   useProxy: boolean
@@ -219,11 +229,7 @@ export interface UnresolvedProvider {
   supportedProviderIds?: string[]
   /** Machine-readable failure code, e.g., `"missing_credential"`. */
   code?:
-    | "missing_credential"
-    | "provider_disabled"
-    | "no_candidates"
-    | "policy_blocked"
-    | (string & {})
+    "missing_credential" | "provider_disabled" | "no_candidates" | "policy_blocked" | (string & {})
 }
 
 export type ProviderResolution = ResolvedProvider | UnresolvedProvider
@@ -232,6 +238,7 @@ export interface FeatureClientConfig {
   providerId: string
   apiKey: string | undefined
   baseURL: string | undefined
+  bedrock?: BedrockConnectionSettings
   protocol: ResolvedProvider["protocol"]
   apiFlavor?: ApiFlavor
   isCustomProvider: boolean
@@ -333,6 +340,7 @@ function resolveOne(
   // Explicit Responses/Chat override (built-in or custom), forwarded to the
   // sidecar so the user can opt a gateway / Azure / custom URL into /responses.
   const apiFlavor = custom ? (custom.apiFlavor ?? builtin?.apiFlavor) : builtin?.apiFlavor
+  const bedrock = !custom ? builtin?.bedrock : undefined
 
   // Local inference engines (Ollama, LM Studio, llama.cpp, vLLM, …) listen on
   // a well-known localhost port and need no API key. When the user enabled a
@@ -354,7 +362,10 @@ function resolveOne(
     baseURL = getBuiltInProviderDefaultBaseURL(providerId)
   }
 
-  if (!apiKey && !baseURL) {
+  const validBedrockCredentials =
+    protocol === "bedrock" && bedrock ? validateBedrockConnectionSettings(bedrock).valid : false
+
+  if (!apiKey && !baseURL && !validBedrockCredentials) {
     return {
       kind: "unresolved",
       reason: `Provider "${providerId}" is missing both an API key and a base URL.`,
@@ -370,6 +381,7 @@ function resolveOne(
     apiFlavor,
     apiKey,
     baseURL,
+    bedrock,
     model,
     isCustomProvider: Boolean(custom),
     useProxy: false,
@@ -440,7 +452,7 @@ export function resolveFeatureProvider(
 // =============================================================================
 
 export function createFeatureProviderClient(config: FeatureClientConfig) {
-  const { protocol, apiKey, baseURL, fetch: fetchImpl, headers } = config
+  const { protocol, apiKey, baseURL, bedrock, fetch: fetchImpl, headers } = config
   const settings: {
     apiKey?: string
     baseURL?: string
@@ -467,13 +479,25 @@ export function createFeatureProviderClient(config: FeatureClientConfig) {
     case "azure":
       return createAzure(settings)
     case "bedrock":
-      // Bedrock's AI SDK provider pulls AWS SigV4 deps that must not enter the
-      // renderer/mobile bundle, so the in-renderer feature path doesn't carry
-      // it. The chat path (sidecar/dispatch/ai-sdk-adapter.mjs) supports Bedrock
-      // natively — route Bedrock features through a chat turn instead.
-      throw new Error(
-        "bedrock is only supported via the chat/sidecar path, not the in-renderer feature client"
-      )
+      if (bedrock?.authMode === "default-chain") {
+        throw new Error("Bedrock default-chain authentication requires the sidecar feature proxy.")
+      }
+      return createAmazonBedrock({
+        ...(bedrock?.authMode === "api-key" || (!bedrock && apiKey)
+          ? { apiKey: bedrock?.apiKey ?? apiKey }
+          : {}),
+        ...(bedrock?.authMode === "iam"
+          ? {
+              accessKeyId: bedrock.accessKeyId,
+              secretAccessKey: bedrock.secretAccessKey,
+              ...(bedrock.sessionToken ? { sessionToken: bedrock.sessionToken } : {}),
+            }
+          : {}),
+        ...(bedrock?.region ? { region: bedrock.region } : {}),
+        ...(baseURL ? { baseURL } : bedrock?.baseURL ? { baseURL: bedrock.baseURL } : {}),
+        ...(fetchImpl ? { fetch: fetchImpl } : {}),
+        ...(headers ? { headers } : {}),
+      })
     case "openai":
     default:
       return createOpenAI(settings)
@@ -491,10 +515,27 @@ export function createFeatureProviderModel(
   resolved: ResolvedProvider,
   transport?: { fetch?: typeof globalThis.fetch; headers?: Record<string, string> }
 ) {
+  if (resolved.protocol === "bedrock" && resolved.bedrock?.authMode === "default-chain") {
+    const bedrock = resolved.bedrock
+    return createBedrockSidecarLanguageModel({
+      modelId: resolved.model ?? defaultModelForProtocol("bedrock"),
+      providerId: resolved.providerId,
+      credentials: {
+        protocol: "bedrock",
+        bedrockAuthMode: "default-chain",
+        region: bedrock.region,
+        baseURL: resolved.baseURL ?? bedrock.baseURL,
+        profile: bedrock.profile,
+        roleArn: bedrock.roleArn,
+        roleSessionName: bedrock.roleSessionName,
+      },
+    })
+  }
   const client = createFeatureProviderClient({
     providerId: resolved.providerId,
     apiKey: resolved.apiKey,
     baseURL: resolved.baseURL,
+    bedrock: resolved.bedrock,
     protocol: resolved.protocol,
     apiFlavor: resolved.apiFlavor,
     isCustomProvider: resolved.isCustomProvider,

@@ -27,8 +27,12 @@ import {
   type EmbeddingProviderName,
 } from "./embedding"
 import { createOpenAI } from "@ai-sdk/openai"
+import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock"
 
 const mockCreateOpenAI = createOpenAI as unknown as jest.MockedFunction<typeof createOpenAI>
+const mockCreateAmazonBedrock = createAmazonBedrock as unknown as jest.MockedFunction<
+  typeof createAmazonBedrock
+>
 
 // Mock AI SDK
 jest.mock("ai", () => ({
@@ -56,6 +60,12 @@ jest.mock("@ai-sdk/openai", () => ({
   createOpenAI: jest.fn(() => ({
     embedding: jest.fn(() => mockEmbeddingModel),
     textEmbeddingModel: jest.fn(() => mockEmbeddingModel),
+  })),
+}))
+
+jest.mock("@ai-sdk/amazon-bedrock", () => ({
+  createAmazonBedrock: jest.fn(() => ({
+    embedding: jest.fn(() => mockEmbeddingModel),
   })),
 }))
 
@@ -453,13 +463,42 @@ describe("embedding", () => {
       expect(expectedModel).toBe(defaultEmbeddingModels[provider])
     })
 
-    it("throws an actionable error for azure / amazon-bedrock (not bundled)", async () => {
+    it("throws an actionable error for Azure while Bedrock uses its native provider", async () => {
       await expect(generateEmbedding("t", { provider: "azure", apiKey: "k" })).rejects.toThrow(
         /@ai-sdk\/azure/
       )
-      await expect(
-        generateEmbedding("t", { provider: "amazon-bedrock", apiKey: "k" })
-      ).rejects.toThrow(/@ai-sdk\/amazon-bedrock/)
+      mockEmbed.mockResolvedValueOnce({
+        embedding: [0.25, 0.75],
+        value: "t",
+        usage: undefined,
+        warnings: [],
+      } as unknown as Awaited<ReturnType<typeof embed>>)
+      await generateEmbedding("t", {
+        provider: "amazon-bedrock",
+        apiKey: "bedrock-key",
+        region: "us-west-2",
+      })
+      expect(mockCreateAmazonBedrock).toHaveBeenCalledWith({
+        apiKey: "bedrock-key",
+        region: "us-west-2",
+      })
+    })
+
+    it("uses an injected sidecar model for Bedrock default-chain embeddings", async () => {
+      const sidecarModel = { modelId: "sidecar-bedrock" } as never
+      mockEmbed.mockResolvedValueOnce({
+        embedding: [0.4, 0.6],
+        value: "safe text",
+        usage: undefined,
+        warnings: [],
+      } as unknown as Awaited<ReturnType<typeof embed>>)
+      await generateEmbedding("safe text", {
+        provider: "amazon-bedrock",
+        bedrock: { authMode: "default-chain", region: "us-east-1" },
+        bedrockModel: sidecarModel,
+      })
+      expect(mockEmbed).toHaveBeenCalledWith(expect.objectContaining({ model: sidecarModel }))
+      expect(mockCreateAmazonBedrock).not.toHaveBeenCalled()
     })
 
     it("throws for unsupported embedding providers", async () => {

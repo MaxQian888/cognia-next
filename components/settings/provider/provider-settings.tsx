@@ -17,13 +17,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Skeleton } from "@/components/ui/skeleton"
 import { useProviderSettings } from "@/hooks/settings/use-provider-settings"
 import { useModelsDevCatalog } from "@/hooks/settings/use-models-dev-catalog"
 import { useOpenRouterCatalog } from "@/hooks/settings/use-openrouter-catalog"
 import { buildBuiltInProviderModelDiscoverySnapshot } from "@cognia/provider-core/providers/model-discovery"
 import { PROVIDERS } from "@cognia/provider-types/provider"
 import type { CustomProviderSettings } from "@cognia/provider-types/provider"
+import { validateBedrockConnectionSettings } from "@cognia/provider-types"
 import { ProviderDetailPanel } from "./provider-detail-panel"
 import { ProviderConfigTab } from "./provider-config-tab"
 import { ProviderModelsTab } from "./provider-models-tab"
@@ -38,6 +38,7 @@ import { ProviderOnboardingBanner } from "./provider-onboarding-banner"
 import { ProviderCompareDialog } from "./provider-compare-dialog"
 import { useSettingsStore } from "@/stores/settings"
 import type { ProviderConnectionStatus } from "./provider-sidebar-item"
+import { deriveStatus, providerMatchesCategory } from "./provider-status-utils"
 
 type SidebarProvider = {
   id: string
@@ -60,65 +61,6 @@ const LocalProviderSettings = dynamic(
   () => import("./local-provider-settings").then((m) => m.LocalProviderSettings),
   { ssr: false }
 )
-
-export function deriveStatus(
-  apiKey: string | undefined,
-  baseURL: string | undefined,
-  testOk: boolean | undefined,
-  // "limited" means the connection was verified but with caveats (e.g.
-  // couldn't be authoritatively confirmed in this runtime) — distinct from
-  // a plain pass so the sidebar badge doesn't overclaim "Connected".
-  outcome?: "verified" | "failed" | "limited" | "success" | "error" | null
-): SidebarProvider["status"] {
-  if (!apiKey && !baseURL) return "not-configured"
-  if (outcome === "limited") return "limited"
-  if (testOk === false) return "error"
-  if (testOk === true) return "connected"
-  return "warning"
-}
-
-const CATEGORY_MAP: Record<string, string[]> = {
-  ai: ["flagship"],
-  local: ["local"],
-  voice: ["specialized"],
-  vision: ["flagship", "specialized"],
-}
-
-function providerMatchesCategory(category: string, providerId: string): boolean {
-  if (category === "all") return true
-  if (category === "custom") return false
-  const categories = CATEGORY_MAP[category]
-  if (!categories) return true
-  const cfg = PROVIDERS[providerId]
-  if (!cfg) return false
-  if (category === "vision") {
-    return (
-      cfg.category !== undefined &&
-      categories.includes(cfg.category) &&
-      cfg.models.some((m) => m.supportsVision)
-    )
-  }
-  return cfg.category !== undefined && categories.includes(cfg.category)
-}
-
-/* ── Sidebar skeleton ───────────────────────────────────────────────────────── */
-
-function _SidebarSkeleton() {
-  return (
-    <div className="space-y-1 p-1">
-      {Array.from({ length: 6 }).map((_, i) => (
-        <div key={i} className="flex items-center gap-3 rounded-lg px-3 py-2.5 animate-pulse">
-          <Skeleton className="h-7 w-7 rounded-md" />
-          <div className="flex-1 space-y-2">
-            <Skeleton className="h-3.5 w-20" />
-            <Skeleton className="h-2.5 w-32" />
-          </div>
-          <Skeleton className="h-4 w-12 rounded-full" />
-        </div>
-      ))}
-    </div>
-  )
-}
 
 /* ── Custom provider inline config ──────────────────────────────────────────── */
 
@@ -260,7 +202,16 @@ export function ProviderSettings() {
           id,
           name: cfg.name,
           subtitle: settings?.defaultModel ?? cfg.defaultModel,
-          status: deriveStatus(settings?.apiKey, settings?.baseURL, test?.success, test?.outcome),
+          status: deriveStatus(
+            settings?.apiKey,
+            settings?.baseURL,
+            test?.success,
+            test?.outcome,
+            id === "bedrock" && !!settings?.bedrock
+              ? validateBedrockConnectionSettings(settings.bedrock).valid
+              : false,
+            settings?.verificationStatus ?? null
+          ),
           isCustom: false,
           modelCount: cfg.models.length,
         }
@@ -539,7 +490,12 @@ export function ProviderSettings() {
                   : deriveStatus(
                       selectedSettings?.apiKey,
                       selectedSettings?.baseURL,
-                      s.testResults[selectedId]?.success
+                      s.testResults[selectedId]?.success,
+                      s.testResults[selectedId]?.outcome,
+                      selectedId === "bedrock" && !!selectedSettings?.bedrock
+                        ? validateBedrockConnectionSettings(selectedSettings.bedrock).valid
+                        : false,
+                      selectedSettings?.verificationStatus ?? null
                     )
               }
               onToggleEnabled={(next) => {
@@ -587,6 +543,13 @@ export function ProviderSettings() {
                     providerDocsUrl={selectedBuiltIn.docsUrl}
                     onApiKeyChange={(key) => void setProviderConfig(selectedId, { apiKey: key })}
                     onBaseURLChange={(url) => void setProviderConfig(selectedId, { baseURL: url })}
+                    onBedrockSettingsChange={(bedrock) =>
+                      void setProviderConfig(selectedId, {
+                        bedrock,
+                        apiKey: bedrock.authMode === "api-key" ? bedrock.apiKey : undefined,
+                        baseURL: bedrock.baseURL,
+                      })
+                    }
                     onApiProtocolChange={(protocol) =>
                       void setProviderConfig(selectedId, { apiProtocol: protocol })
                     }
@@ -639,13 +602,16 @@ export function ProviderSettings() {
                     }
                   />
                 ) : (
-                  <div className="text-sm text-muted-foreground">Unknown provider type.</div>
+                  <div className="text-sm text-muted-foreground">
+                    {t("unknownProviderType") || "Unknown provider type."}
+                  </div>
                 )
               }
               modelsTab={
                 isCustom ? (
                   <div className="text-sm text-muted-foreground">
-                    Custom-provider models are managed inside the provider editor.
+                    {t("customProviderModelsManaged") ||
+                      "Custom-provider models are managed inside the provider editor."}
                   </div>
                 ) : selectedBuiltIn ? (
                   <ProviderModelsTab
@@ -659,7 +625,9 @@ export function ProviderSettings() {
                     isTesting={!!testingConnection[selectedId]}
                   />
                 ) : (
-                  <div className="text-sm text-muted-foreground">No models available.</div>
+                  <div className="text-sm text-muted-foreground">
+                    {t("noModelsAvailable") || "No models available."}
+                  </div>
                 )
               }
               costTab={<ProviderCostTab providerId={selectedId} />}
@@ -682,7 +650,8 @@ export function ProviderSettings() {
                       <ProviderParametersTab providerId={selectedId} settings={selectedSettings} />
                     ) : (
                       <div className="py-4 text-center text-xs text-muted-foreground">
-                        Configure this provider in the Config tab to enable parameters.
+                        {t("configureProviderForParameters") ||
+                          "Configure this provider in the Config tab to enable parameters."}
                       </div>
                     )}
                   </TabsContent>

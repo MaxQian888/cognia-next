@@ -32,6 +32,7 @@ import {
   testProviderConnection,
   type ApiTestResult,
 } from "@cognia/provider-core/providers/api-test"
+import { testAndDiscoverBedrock } from "@/lib/ai/providers/bedrock-connection"
 
 export interface UseProviderSettingsResult {
   // ---------------------------------------------------------------------------
@@ -153,7 +154,9 @@ export function useProviderSettings(): UseProviderSettingsResult {
   )
 
   // ---------------------------------------------------------------------------
-  // Connection tests — delegate to the api-test helpers.
+  // Connection tests — delegate to the api-test helpers and persist the
+  // verification lifecycle to `UserProviderSettings` so the sidebar status
+  // survives reloads and isn't stuck on a vague "warning" badge every time.
   // ---------------------------------------------------------------------------
   const testProvider = useCallback(
     async (id: string) => {
@@ -161,22 +164,57 @@ export function useProviderSettings(): UseProviderSettingsResult {
       if (!cfg) return null
       setTestingProviders((s) => ({ ...s, [id]: true }))
       try {
-        const result = await testProviderConnection(id, cfg.apiKey ?? "", cfg.baseURL)
+        let result: ApiTestResult
+        if (id === "bedrock") {
+          const bedrockResult = await testAndDiscoverBedrock(cfg)
+          if (bedrockResult.models) {
+            await setProviderConfig(id, {
+              discoveredModels: bedrockResult.models,
+              discoveredModelsLastFetched: Date.now(),
+            })
+          }
+          result = bedrockResult.test
+        } else {
+          result = await testProviderConnection(id, cfg.apiKey ?? "", cfg.baseURL)
+        }
+
+        const verificationPatch: Partial<UserProviderSettings> = result.success
+          ? {
+              verificationStatus: "verified",
+              lastVerifiedAt: Date.now(),
+              verificationMessage: result.message,
+              healthStatus: "healthy",
+            }
+          : {
+              verificationStatus: "unverified",
+              lastVerifiedAt: Date.now(),
+              verificationMessage: result.message,
+              healthStatus: "error",
+            }
+        await setProviderConfig(id, verificationPatch)
+
         setTestResults((s) => ({ ...s, [id]: result }))
         return result
       } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
         const result: ApiTestResult = {
           success: false,
-          message: err instanceof Error ? err.message : String(err),
+          message,
           outcome: "failed",
         }
+        await setProviderConfig(id, {
+          verificationStatus: "unverified",
+          lastVerifiedAt: Date.now(),
+          verificationMessage: message,
+          healthStatus: "error",
+        })
         setTestResults((s) => ({ ...s, [id]: result }))
         return result
       } finally {
         setTestingProviders((s) => ({ ...s, [id]: false }))
       }
     },
-    [providerSettings]
+    [providerSettings, setProviderConfig]
   )
 
   const testCustomProvider = useCallback(
@@ -191,11 +229,31 @@ export function useProviderSettings(): UseProviderSettingsResult {
           cp.apiProtocol ?? "openai"
         )
         const outcome = result.success ? "success" : "error"
+        const verificationPatch: Partial<CustomProviderSettings> = result.success
+          ? {
+              verificationStatus: "verified",
+              lastVerifiedAt: Date.now(),
+              verificationMessage: result.message,
+              healthStatus: "healthy",
+            }
+          : {
+              verificationStatus: "unverified",
+              lastVerifiedAt: Date.now(),
+              verificationMessage: result.message,
+              healthStatus: "error",
+            }
+        await updateCustomProvider(id, verificationPatch)
         setCustomTestResults((s) => ({ ...s, [id]: outcome }))
         setCustomTestMessages((s) => ({ ...s, [id]: result.message ?? null }))
         return result
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
+        await updateCustomProvider(id, {
+          verificationStatus: "unverified",
+          lastVerifiedAt: Date.now(),
+          verificationMessage: message,
+          healthStatus: "error",
+        })
         setCustomTestResults((s) => ({ ...s, [id]: "error" }))
         setCustomTestMessages((s) => ({ ...s, [id]: message }))
         return { success: false, message, outcome: "failed" } as ApiTestResult
@@ -203,7 +261,7 @@ export function useProviderSettings(): UseProviderSettingsResult {
         setTestingCustomProviders((s) => ({ ...s, [id]: false }))
       }
     },
-    [customProviders]
+    [customProviders, updateCustomProvider]
   )
 
   return {

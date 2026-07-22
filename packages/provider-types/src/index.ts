@@ -1,4 +1,5 @@
 export * from "./provider"
+export * from "./bedrock"
 export * from "./local-provider"
 export * from "./built-in-provider-catalog"
 export * from "./provider-parameter-schema"

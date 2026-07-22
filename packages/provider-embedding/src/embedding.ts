@@ -12,6 +12,9 @@
 
 import { embed, embedMany, cosineSimilarity as aiCosineSimilarity } from "ai"
 import { createOpenAI } from "@ai-sdk/openai"
+import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock"
+import type { BedrockConnectionSettings } from "@cognia/provider-types"
+import type { EmbeddingModelV3 } from "@ai-sdk/provider"
 import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { createCohere } from "@ai-sdk/cohere"
 import { createMistral } from "@ai-sdk/mistral"
@@ -76,7 +79,7 @@ export interface EmbeddingProviderOptions {
 export interface EmbeddingConfig {
   provider: EmbeddingProviderName
   model?: string
-  apiKey: string
+  apiKey?: string
   baseURL?: string // For Ollama and custom providers
   dimensions?: number
   cache?: EmbeddingCache
@@ -95,6 +98,9 @@ export interface EmbeddingConfig {
   apiVersion?: string
   // Amazon Bedrock specific
   region?: string
+  bedrock?: BedrockConnectionSettings
+  /** Node-side proxy model for AWS default-chain authentication. */
+  bedrockModel?: EmbeddingModelV3
 }
 
 /**
@@ -242,12 +248,33 @@ function getEmbeddingModel(config: EmbeddingConfig) {
       const modelId = model || defaultEmbeddingModels.voyage || "voyage-3"
       return voyage.embedding(modelId)
     }
+    case "amazon-bedrock": {
+      const bedrock = config.bedrock
+      if (bedrock?.authMode === "default-chain") {
+        if (config.bedrockModel) return config.bedrockModel
+        throw new Error("Bedrock default-chain embeddings require an injected sidecar model.")
+      }
+      const client = createAmazonBedrock({
+        ...(bedrock?.authMode === "api-key" || (!bedrock && apiKey)
+          ? { apiKey: bedrock?.apiKey ?? apiKey }
+          : {}),
+        ...(bedrock?.authMode === "iam"
+          ? {
+              accessKeyId: bedrock.accessKeyId,
+              secretAccessKey: bedrock.secretAccessKey,
+              ...(bedrock.sessionToken ? { sessionToken: bedrock.sessionToken } : {}),
+            }
+          : {}),
+        ...(bedrock?.region || config.region ? { region: bedrock?.region ?? config.region } : {}),
+        ...(baseURL ? { baseURL } : bedrock?.baseURL ? { baseURL: bedrock.baseURL } : {}),
+      })
+      return client.embedding(
+        model || defaultEmbeddingModels["amazon-bedrock"] || "amazon.titan-embed-text-v2:0"
+      )
+    }
     case "azure":
-    case "amazon-bedrock":
       throw new Error(
-        `Embedding provider "${provider}" requires the @ai-sdk/${
-          provider === "azure" ? "azure" : "amazon-bedrock"
-        } package, which is not bundled. Use openai/google/cohere/mistral/voyage or a local provider (ollama, lmstudio, llamacpp, vllm, localai, jan).`
+        `Embedding provider "${provider}" requires the @ai-sdk/azure package, which is not bundled. Use openai/google/cohere/mistral/voyage/amazon-bedrock or a local provider (ollama, lmstudio, llamacpp, vllm, localai, jan).`
       )
     default:
       throw new Error(`Embedding not supported for provider: ${provider}`)

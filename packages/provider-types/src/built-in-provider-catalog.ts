@@ -1,7 +1,7 @@
 export type BuiltInProviderType = "cloud" | "local"
 export type BuiltInProviderCategory =
   "flagship" | "aggregator" | "specialized" | "local" | "enterprise"
-export type BuiltInProviderProtocol = "openai" | "anthropic" | "gemini"
+export type BuiltInProviderProtocol = "openai" | "anthropic" | "gemini" | "bedrock"
 export type ProviderUseCase = "coding"
 export type BuiltInProviderFamily =
   | "openai-compatible"
@@ -10,6 +10,7 @@ export type BuiltInProviderFamily =
   | "openrouter"
   | "local-openai-compatible"
   | "proxy-openai-compatible"
+  | "bedrock-native"
 export type BuiltInProviderAdapterId =
   | "openai-compatible"
   | "anthropic"
@@ -17,6 +18,7 @@ export type BuiltInProviderAdapterId =
   | "openrouter"
   | "local-openai-compatible"
   | "cliproxyapi"
+  | "bedrock"
 export type BuiltInProviderQuickAddMode = "shortcut" | "promoted"
 export type BuiltInProviderQuickAddCategory = "china" | "global" | "proxy"
 
@@ -2610,11 +2612,11 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
     id: "bedrock",
     name: "Amazon Bedrock",
     type: "cloud",
-    protocol: "openai",
-    family: "openai-compatible",
-    adapter: "openai-compatible",
-    apiKeyRequired: true,
-    baseURLRequired: true,
+    protocol: "bedrock",
+    family: "bedrock-native",
+    adapter: "bedrock",
+    apiKeyRequired: false,
+    baseURLRequired: false,
     defaultModel: "us.amazon.nova-pro-v1:0",
     defaultEnabled: false,
     category: "enterprise",

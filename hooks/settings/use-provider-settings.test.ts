@@ -3,10 +3,11 @@
  */
 import { act, renderHook } from "@testing-library/react"
 import type { ApiTestResult } from "@cognia/provider-core/providers/api-test"
+import type { UserProviderSettings } from "@cognia/provider-types"
 
 interface SettingsLike {
   settings: {
-    providerSettings: Record<string, { apiKey?: string; baseURL?: string }>
+    providerSettings: Record<string, Partial<UserProviderSettings>>
     customProviders: Array<{
       id: string
       baseURL: string
@@ -52,6 +53,11 @@ jest.mock("@cognia/provider-core/providers/api-test", () => ({
     testProviderConnection(...(args as [string, string, string?])),
   testCustomProviderConnectionByProtocol: (...args: unknown[]) =>
     testCustomProviderConnectionByProtocol(...(args as [string, string, string])),
+}))
+
+const testAndDiscoverBedrock = jest.fn()
+jest.mock("@/lib/ai/providers/bedrock-connection", () => ({
+  testAndDiscoverBedrock: (...args: unknown[]) => testAndDiscoverBedrock(...args),
 }))
 
 import { useProviderSettings } from "./use-provider-settings"
@@ -154,6 +160,39 @@ describe("useProviderSettings — mutations delegate to store", () => {
 })
 
 describe("useProviderSettings — testProvider", () => {
+  it("uses native Bedrock testing and persists account-aware discovered models", async () => {
+    settingsState.settings!.providerSettings.bedrock = {
+      providerId: "bedrock",
+      enabled: true,
+      defaultModel: "us.amazon.nova-lite-v1:0",
+      bedrock: { authMode: "default-chain", region: "us-east-1" },
+    }
+    testAndDiscoverBedrock.mockResolvedValue({
+      test: { success: true, outcome: "verified", message: "ok" },
+      models: [{ id: "us.amazon.nova-lite-v1:0", name: "US Nova Lite" }],
+    })
+    const { result } = renderHook(() => useProviderSettings())
+    await act(async () => {
+      expect((await result.current.testProvider("bedrock"))?.success).toBe(true)
+    })
+    expect(testProviderConnection).not.toHaveBeenCalled()
+    expect(settingsState.setProviderConfig).toHaveBeenCalledWith(
+      "bedrock",
+      expect.objectContaining({
+        discoveredModels: [{ id: "us.amazon.nova-lite-v1:0", name: "US Nova Lite" }],
+        discoveredModelsLastFetched: expect.any(Number),
+      })
+    )
+    expect(settingsState.setProviderConfig).toHaveBeenCalledWith(
+      "bedrock",
+      expect.objectContaining({
+        verificationStatus: "verified",
+        lastVerifiedAt: expect.any(Number),
+        healthStatus: "healthy",
+      })
+    )
+  })
+
   it("returns null for unknown provider id without calling api-test", async () => {
     const { result } = renderHook(() => useProviderSettings())
     let ret: ApiTestResult | null = { success: true } as ApiTestResult
@@ -164,7 +203,7 @@ describe("useProviderSettings — testProvider", () => {
     expect(testProviderConnection).not.toHaveBeenCalled()
   })
 
-  it("stores success result and clears testing flag", async () => {
+  it("stores success result, persists verification status, and clears testing flag", async () => {
     testProviderConnection.mockResolvedValue({
       success: true,
       message: "ok",
@@ -177,9 +216,18 @@ describe("useProviderSettings — testProvider", () => {
     })
     expect(result.current.testResults.openai?.success).toBe(true)
     expect(result.current.testingProviders.openai).toBe(false)
+    expect(settingsState.setProviderConfig).toHaveBeenCalledWith(
+      "openai",
+      expect.objectContaining({
+        verificationStatus: "verified",
+        lastVerifiedAt: expect.any(Number),
+        verificationMessage: "ok",
+        healthStatus: "healthy",
+      })
+    )
   })
 
-  it("captures thrown errors as a failed ApiTestResult", async () => {
+  it("captures thrown errors as a failed ApiTestResult and persists verification status", async () => {
     testProviderConnection.mockRejectedValue(new Error("boom"))
     const { result } = renderHook(() => useProviderSettings())
     await act(async () => {
@@ -188,6 +236,15 @@ describe("useProviderSettings — testProvider", () => {
       expect(r?.message).toBe("boom")
     })
     expect(result.current.testResults.openai?.message).toBe("boom")
+    expect(settingsState.setProviderConfig).toHaveBeenCalledWith(
+      "openai",
+      expect.objectContaining({
+        verificationStatus: "unverified",
+        lastVerifiedAt: expect.any(Number),
+        verificationMessage: "boom",
+        healthStatus: "error",
+      })
+    )
   })
 
   it("stringifies non-Error throws", async () => {
@@ -211,7 +268,7 @@ describe("useProviderSettings — testCustomProvider", () => {
     expect(testCustomProviderConnectionByProtocol).not.toHaveBeenCalled()
   })
 
-  it("records success outcome and message", async () => {
+  it("records success outcome, message, and persists verification status", async () => {
     testCustomProviderConnectionByProtocol.mockResolvedValue({
       success: true,
       message: "yay",
@@ -224,9 +281,18 @@ describe("useProviderSettings — testCustomProvider", () => {
     expect(result.current.customTestResults.cp1).toBe("success")
     expect(result.current.customTestMessages.cp1).toBe("yay")
     expect(result.current.testingCustomProviders.cp1).toBe(false)
+    expect(settingsState.upsertCustomProvider).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "cp1",
+        verificationStatus: "verified",
+        lastVerifiedAt: expect.any(Number),
+        verificationMessage: "yay",
+        healthStatus: "healthy",
+      })
+    )
   })
 
-  it("records error outcome when ok=false", async () => {
+  it("records error outcome and persists verification status when ok=false", async () => {
     testCustomProviderConnectionByProtocol.mockResolvedValue({
       success: false,
       message: "nope",
@@ -238,6 +304,15 @@ describe("useProviderSettings — testCustomProvider", () => {
     })
     expect(result.current.customTestResults.cp1).toBe("error")
     expect(result.current.customTestMessages.cp1).toBe("nope")
+    expect(settingsState.upsertCustomProvider).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "cp1",
+        verificationStatus: "unverified",
+        lastVerifiedAt: expect.any(Number),
+        verificationMessage: "nope",
+        healthStatus: "error",
+      })
+    )
   })
 
   it("captures thrown errors", async () => {

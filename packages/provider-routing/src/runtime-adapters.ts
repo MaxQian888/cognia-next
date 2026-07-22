@@ -14,7 +14,6 @@ export interface SemanticToolRouterRuntimeDeps {
     config: { provider: string; model: string; dimensions?: number }
   ) => Promise<number[][]>
   cacheRouteEmbeddings: (id: string, embeddings: number[][], model: string) => Promise<void>
-  cosine: (a: number[], b: number[]) => number
 }
 
 export interface ProviderRoutingRuntimeAdapters {

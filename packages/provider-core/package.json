@@ -33,6 +33,7 @@
     "@ai-sdk/google": "*",
     "@ai-sdk/mistral": "*",
     "@ai-sdk/cohere": "*",
+    "@ai-sdk/amazon-bedrock": "*",
     "zod": "*"
   },
   "engines": {

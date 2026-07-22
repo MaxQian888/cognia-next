@@ -15,8 +15,12 @@ jest.mock("next-intl", () => ({
       "detailPanel.connected": "Connected",
       "detailPanel.connectionFailed": "Error",
       "detailPanel.defaultBadge": "Default",
+      "detailPanel.notConfigured": "Not configured",
+      "detailPanel.notConfiguredHint": "Add credentials",
       "detailPanel.setDefault": "Set as default",
       "detailPanel.setDefaultAria": "Use this provider for new chats by default",
+      "detailPanel.warning": "Warning",
+      "detailPanel.warningHint": "Configured but not verified",
       verificationLimitedShort: "Limited",
       "tabs.config": "Config",
       "tabs.models": "Models",
@@ -105,21 +109,17 @@ describe("ProviderDetailPanel", () => {
     expect(screen.queryByTestId("provider-default-badge")).not.toBeInTheDocument()
   })
 
-  it("shows no status badge for 'warning' or 'not-configured'", () => {
+  it("shows status badges for 'warning' and 'not-configured'", () => {
     const { rerender } = render(
       <ProviderDetailPanel provider={{ id: "openai", name: "OpenAI" }} connectionStatus="warning" />
     )
-    expect(screen.queryByText("Connected")).not.toBeInTheDocument()
-    expect(screen.queryByText("Error")).not.toBeInTheDocument()
-    expect(screen.queryByText("Limited")).not.toBeInTheDocument()
+    expect(screen.getByText("Warning")).toBeInTheDocument()
     rerender(
       <ProviderDetailPanel
         provider={{ id: "openai", name: "OpenAI" }}
         connectionStatus="not-configured"
       />
     )
-    expect(screen.queryByText("Connected")).not.toBeInTheDocument()
-    expect(screen.queryByText("Error")).not.toBeInTheDocument()
-    expect(screen.queryByText("Limited")).not.toBeInTheDocument()
+    expect(screen.getByText("Not configured")).toBeInTheDocument()
   })
 })

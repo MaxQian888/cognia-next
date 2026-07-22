@@ -26,6 +26,16 @@ describe("built-in provider catalog", () => {
     expect(getBuiltInProviderProtocol("google")).toBe("gemini")
   })
 
+  it("registers Amazon Bedrock as a native, region-aware provider", () => {
+    expect(getBuiltInProviderCatalogEntry("bedrock")).toMatchObject({
+      protocol: "bedrock",
+      family: "bedrock-native",
+      adapter: "bedrock",
+      apiKeyRequired: false,
+      baseURLRequired: false,
+    })
+  })
+
   it("builds default settings from catalog credential and base URL requirements", () => {
     const settings = buildDefaultBuiltInProviderSettings()
 

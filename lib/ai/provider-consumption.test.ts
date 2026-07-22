@@ -1,5 +1,6 @@
 import { createAnthropic } from "@ai-sdk/anthropic"
 import { createAzure } from "@ai-sdk/azure"
+import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock"
 import { createOpenAI } from "@ai-sdk/openai"
 
 import {
@@ -46,6 +47,10 @@ jest.mock("@ai-sdk/openai", () => ({
 
 jest.mock("@ai-sdk/azure", () => ({
   createAzure: makeEndpointFamilyFactory("azure"),
+}))
+
+jest.mock("@ai-sdk/amazon-bedrock", () => ({
+  createAmazonBedrock: makeEndpointFamilyFactory("amazon-bedrock"),
 }))
 
 describe("createProviderSettingsSnapshot", () => {
@@ -568,6 +573,7 @@ describe("createFeatureProviderClient / createFeatureProviderModel", () => {
   beforeEach(() => {
     ;(createOpenAI as jest.Mock).mockClear()
     ;(createAzure as jest.Mock).mockClear()
+    ;(createAmazonBedrock as jest.Mock).mockClear()
   })
 
   const base = {
@@ -592,8 +598,57 @@ describe("createFeatureProviderClient / createFeatureProviderModel", () => {
     }
   })
 
-  it("rejects bedrock in the in-renderer feature client (chat/sidecar path only)", () => {
-    expect(() => createFeatureProviderClient({ ...base, protocol: "bedrock" })).toThrow(/bedrock/i)
+  it("builds Bedrock clients for API-key and explicit-IAM modes", () => {
+    createFeatureProviderClient({
+      ...base,
+      protocol: "bedrock",
+      bedrock: { authMode: "api-key", region: "us-east-1", apiKey: "bedrock-key" },
+    })
+    createFeatureProviderClient({
+      ...base,
+      apiKey: undefined,
+      protocol: "bedrock",
+      bedrock: {
+        authMode: "iam",
+        region: "eu-west-1",
+        accessKeyId: "AKIAEXAMPLE",
+        secretAccessKey: "secret",
+        sessionToken: "session",
+      },
+    })
+
+    expect(createAmazonBedrock).toHaveBeenNthCalledWith(1, {
+      apiKey: "bedrock-key",
+      region: "us-east-1",
+    })
+    expect(createAmazonBedrock).toHaveBeenNthCalledWith(2, {
+      accessKeyId: "AKIAEXAMPLE",
+      secretAccessKey: "secret",
+      sessionToken: "session",
+      region: "eu-west-1",
+    })
+  })
+
+  it("builds a sidecar LanguageModelV3 proxy for the AWS default credential chain", () => {
+    const model = createFeatureProviderModel({
+      kind: "resolved",
+      providerId: "bedrock",
+      protocol: "bedrock",
+      apiKey: undefined,
+      baseURL: undefined,
+      model: "us.amazon.nova-lite-v1:0",
+      bedrock: {
+        authMode: "default-chain",
+        region: "us-east-1",
+        profile: "engineering",
+      },
+      isCustomProvider: false,
+      useProxy: false,
+    }) as { specificationVersion?: string; provider?: string }
+
+    expect(model.specificationVersion).toBe("v3")
+    expect(model.provider).toBe("amazon-bedrock.sidecar")
+    expect(createAmazonBedrock).not.toHaveBeenCalled()
   })
 
   it("builds a model handle from a resolved provider, backfilling a default model", () => {
@@ -709,8 +764,7 @@ describe("provider client fetch/headers seam (standalone BYOK)", () => {
   }
   const lastSettings = () =>
     (createAnthropic as jest.Mock).mock.calls.at(-1)?.[0] as
-      | { fetch?: unknown; headers?: unknown }
-      | undefined
+      { fetch?: unknown; headers?: unknown } | undefined
 
   it("threads custom fetch + headers into the AI SDK provider settings", () => {
     const customFetch = (() => undefined) as unknown as typeof globalThis.fetch

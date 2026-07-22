@@ -10,10 +10,9 @@
  * fixes the drift — every selector, the adapter, the resolver, and the
  * dimension guard read the SAME list.
  *
- * azure / amazon-bedrock are intentionally excluded: their official AI-SDK
- * packages are not bundled and they carry extra-credential + mobile-bundle
- * cost. They remain a documented follow-up; the resolver returns a clear error
- * for them instead of the old confusing one.
+ * Azure remains excluded until its deployment/resource configuration is wired.
+ * Amazon Bedrock is native and supports API-key, explicit IAM, and sidecar
+ * default-chain authentication.
  */
 
 import { DEFAULT_LOCAL_EMBEDDING_MODEL } from "./local-embedding"
@@ -29,6 +28,7 @@ export const RAG_EMBEDDING_PROVIDERS = [
   "cohere",
   "mistral",
   "voyage",
+  "amazon-bedrock",
   "ollama",
   "lmstudio",
   "llamacpp",
@@ -48,7 +48,8 @@ export type RagEmbeddingProvider = (typeof RAG_EMBEDDING_PROVIDERS)[number]
  *   - local-openai: OpenAI-compatible `/v1/embeddings` engine (no key, needs baseURL)
  *   - browser:      in-process transformers.js (no key, no baseURL)
  */
-export type EmbeddingProviderKind = "cloud" | "native-local" | "local-openai" | "browser"
+export type EmbeddingProviderKind =
+  "cloud" | "bedrock" | "native-local" | "local-openai" | "browser"
 
 export interface EmbeddingProviderDescriptor {
   id: RagEmbeddingProvider
@@ -104,6 +105,14 @@ const CATALOG: Record<RagEmbeddingProvider, EmbeddingProviderDescriptor> = {
     requiresApiKey: true,
     // Fixed endpoint by default, but allow pointing at a proxy.
     requiresBaseURL: true,
+  },
+  "amazon-bedrock": {
+    id: "amazon-bedrock",
+    kind: "bedrock",
+    defaultModel: "amazon.titan-embed-text-v2:0",
+    defaultDimensions: 1024,
+    requiresApiKey: false,
+    requiresBaseURL: false,
   },
   ollama: {
     id: "ollama",

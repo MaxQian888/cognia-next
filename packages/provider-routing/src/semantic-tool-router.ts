@@ -17,6 +17,7 @@
 
 import type { SemanticToolRoutingSettings, ToolRouteRecord } from "./routing-types"
 import { getProviderRoutingRuntimeAdapters } from "./runtime-adapters"
+import { calculateSimilarity } from "@cognia/vector/embedding"
 
 export interface SemanticToolCandidate {
   name: string
@@ -46,7 +47,6 @@ interface RouterDeps {
   ) => Promise<number[][]>
   /** Write computed vectors back onto a persisted route (best-effort). */
   cacheRouteEmbeddings: (id: string, embeddings: number[][], model: string) => Promise<void>
-  cosine: (a: number[], b: number[]) => number
 }
 
 let depsOverride: RouterDeps | null = null
@@ -182,7 +182,7 @@ export async function pruneToolsSemantica(
       for (const text of texts) {
         const vector = vectorCache.get(cacheKey(model, text))
         if (!vector) continue
-        const similarity = deps.cosine(queryVector, vector)
+        const similarity = calculateSimilarity(queryVector, vector)
         if (similarity > best) best = similarity
       }
       scores[candidate.name] = best

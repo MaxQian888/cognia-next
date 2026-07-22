@@ -46,6 +46,10 @@ jest.mock("@ai-sdk/azure", () => ({
   __esModule: true,
   createAzure: makeFactoryMock("azure"),
 }))
+jest.mock("@ai-sdk/amazon-bedrock", () => ({
+  __esModule: true,
+  createAmazonBedrock: makeFactoryMock("amazon-bedrock"),
+}))
 
 import { getProviderModel, isGenuineOpenAiEndpoint } from "./client"
 import { createAnthropic } from "@ai-sdk/anthropic"
@@ -54,6 +58,7 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { createMistral } from "@ai-sdk/mistral"
 import { createCohere } from "@ai-sdk/cohere"
 import { createAzure } from "@ai-sdk/azure"
+import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock"
 
 type ResolvedModel = { provider: string; modelId?: string; factoryOpts?: Record<string, unknown> }
 
@@ -63,6 +68,7 @@ const mockGoogle = createGoogleGenerativeAI as unknown as jest.Mock
 const mockMistral = createMistral as unknown as jest.Mock
 const mockCohere = createCohere as unknown as jest.Mock
 const mockAzure = createAzure as unknown as jest.Mock
+const mockBedrock = createAmazonBedrock as unknown as jest.Mock
 
 describe("getProviderModel", () => {
   beforeEach(() => {
@@ -72,6 +78,7 @@ describe("getProviderModel", () => {
     mockMistral.mockClear()
     mockCohere.mockClear()
     mockAzure.mockClear()
+    mockBedrock.mockClear()
     delete process.env.ANTHROPIC_API_KEY
   })
 
@@ -236,8 +243,24 @@ describe("getProviderModel", () => {
     expect(resp.provider).toBe("azure.responses")
   })
 
-  it("rejects bedrock in the in-renderer model factory (chat/sidecar path only)", () => {
-    expect(() => getProviderModel({ provider: "bedrock" as never, model: "x" })).toThrow(/bedrock/i)
+  it("routes Bedrock explicit IAM credentials through the native factory", () => {
+    const model = getProviderModel({
+      provider: "bedrock" as never,
+      model: "us.amazon.nova-pro-v1:0",
+      bedrock: {
+        authMode: "iam",
+        region: "us-east-1",
+        accessKeyId: "AKIAEXAMPLE",
+        secretAccessKey: "secret",
+      },
+    }) as ResolvedModel
+
+    expect(model.provider).toBe("amazon-bedrock")
+    expect(mockBedrock).toHaveBeenCalledWith({
+      region: "us-east-1",
+      accessKeyId: "AKIAEXAMPLE",
+      secretAccessKey: "secret",
+    })
   })
 
   it("throws for an unsupported provider instead of silently using Anthropic", () => {

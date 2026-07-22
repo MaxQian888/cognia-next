@@ -12,7 +12,8 @@
  */
 import React from "react"
 import { render, screen, fireEvent } from "@testing-library/react"
-import { ProviderSettings, deriveStatus } from "./provider-settings"
+import { ProviderSettings } from "./provider-settings"
+import { deriveStatus } from "./provider-status-utils"
 
 const mockSetSelectedProviderId = jest.fn()
 const mockSetProviderConfig = jest.fn()
@@ -111,8 +112,12 @@ jest.mock("./custom-provider-dialog", () => ({
     open ? <div data-testid="custom-provider-dialog" /> : null,
 }))
 jest.mock("./quick-add-provider-dialog", () => ({
-  QuickAddProviderDialog: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="quick-add-provider-dialog" /> : null,
+  QuickAddProviderDialog: ({ open, onAddCustom }: { open: boolean; onAddCustom?: () => void }) =>
+    open ? (
+      <button data-testid="quick-add-provider-dialog" onClick={onAddCustom}>
+        add-custom
+      </button>
+    ) : null,
 }))
 jest.mock("./local-provider-settings", () => ({
   LocalProviderSettings: () => <div data-testid="local-provider-settings" />,
@@ -124,13 +129,25 @@ jest.mock("./provider-detail-panel", () => ({
   ProviderDetailPanel: ({
     provider,
     configTab,
+    modelsTab,
+    costTab,
+    advancedTab,
     isDefault,
+    isCustom,
     onSetDefault,
+    onToggleEnabled,
+    onDelete,
   }: {
     provider: { id: string; name: string } | null
     configTab?: React.ReactNode
+    modelsTab?: React.ReactNode
+    costTab?: React.ReactNode
+    advancedTab?: React.ReactNode
     isDefault?: boolean
+    isCustom?: boolean
     onSetDefault?: () => void
+    onToggleEnabled?: (enabled: boolean) => void
+    onDelete?: () => void
   }) => (
     <div
       data-testid="provider-detail-panel"
@@ -143,7 +160,20 @@ jest.mock("./provider-detail-panel", () => ({
           set-default
         </button>
       )}
+      {onToggleEnabled && (
+        <button data-testid="mock-toggle-enabled" onClick={() => onToggleEnabled(!isDefault)}>
+          toggle-enabled
+        </button>
+      )}
+      {isCustom && onDelete && (
+        <button data-testid="mock-delete-provider" onClick={onDelete}>
+          delete
+        </button>
+      )}
       <div data-testid="provider-detail-config-tab">{configTab}</div>
+      <div data-testid="provider-detail-models-tab">{modelsTab}</div>
+      <div data-testid="provider-detail-cost-tab">{costTab}</div>
+      <div data-testid="provider-detail-advanced-tab">{advancedTab}</div>
     </div>
   ),
 }))
@@ -153,17 +183,24 @@ jest.mock("./provider-sidebar", () => ({
     onSelect,
     addButton,
     onSearchChange,
+    categoryFilter,
+    onCategoryChange,
   }: {
     providers: Array<{ id: string; name: string }>
     onSelect: (id: string) => void
     addButton?: React.ReactNode
     onSearchChange: (q: string) => void
+    categoryFilter?: string
+    onCategoryChange?: (c: string) => void
   }) => (
     <div data-testid="provider-sidebar">
       <input
         data-testid="provider-sidebar-search"
         onChange={(e) => onSearchChange(e.target.value)}
       />
+      <button data-testid="provider-sidebar-category" onClick={() => onCategoryChange("ai")}>
+        {categoryFilter ?? "all"}
+      </button>
       {providers.map((p) => (
         <button
           key={p.id}
@@ -187,12 +224,112 @@ jest.mock("./provider-empty-state", () => ({
 jest.mock("./provider-onboarding-banner", () => ({
   ProviderOnboardingBanner: () => <div data-testid="provider-onboarding-banner" />,
 }))
-jest.mock("./provider-config-tab", () => ({ ProviderConfigTab: () => null }))
-jest.mock("./provider-models-tab", () => ({ ProviderModelsTab: () => null }))
+jest.mock("./provider-config-tab", () => ({
+  ProviderConfigTab: (props: Record<string, unknown>) => (
+    <div data-testid="mock-provider-config-tab">
+      <button
+        data-testid="mock-api-key-change"
+        onClick={() => (props.onApiKeyChange as (k: string) => void)("new-key")}
+      >
+        api-key
+      </button>
+      <button
+        data-testid="mock-base-url-change"
+        onClick={() => (props.onBaseURLChange as (u: string) => void)("https://x")}
+      >
+        base-url
+      </button>
+      <button
+        data-testid="mock-bedrock-change"
+        onClick={() =>
+          (props.onBedrockSettingsChange as (s: unknown) => void)({
+            authMode: "api-key",
+            region: "us-east-1",
+            apiKey: "bk",
+          })
+        }
+      >
+        bedrock
+      </button>
+      <button
+        data-testid="mock-protocol-change"
+        onClick={() => (props.onApiProtocolChange as (p: string) => void)("anthropic")}
+      >
+        protocol
+      </button>
+      <button
+        data-testid="mock-default-model-change"
+        onClick={() => (props.onDefaultModelChange as (m: string) => void)("m")}
+      >
+        model
+      </button>
+      <button
+        data-testid="mock-test-connection"
+        onClick={() => (props.onTestConnection as () => void)()}
+      >
+        test
+      </button>
+      <button
+        data-testid="mock-add-api-key"
+        onClick={() => (props.onAddApiKey as (k: string) => void)("k2")}
+      >
+        add-key
+      </button>
+      <button
+        data-testid="mock-remove-api-key"
+        onClick={() => (props.onRemoveApiKey as (i: number) => void)(0)}
+      >
+        remove-key
+      </button>
+      <button
+        data-testid="mock-reorder-api-keys"
+        onClick={() => (props.onReorderApiKeys as (f: number, t: number) => void)(0, 1)}
+      >
+        reorder
+      </button>
+      <button
+        data-testid="mock-toggle-rotation"
+        onClick={() => (props.onToggleRotation as (e: boolean) => void)(true)}
+      >
+        toggle-rotation
+      </button>
+      <button
+        data-testid="mock-rotation-strategy"
+        onClick={() => (props.onRotationStrategyChange as (s: string) => void)("round-robin")}
+      >
+        strategy
+      </button>
+    </div>
+  ),
+}))
+jest.mock("./provider-models-tab", () => ({
+  ProviderModelsTab: (props: Record<string, unknown>) => (
+    <div data-testid="mock-provider-models-tab">
+      <button
+        data-testid="mock-enabled-models-change"
+        onClick={() => (props.onEnabledModelsChange as (ids: string[]) => void)(["m1"])}
+      >
+        enabled-models
+      </button>
+      <button
+        data-testid="mock-models-test-connection"
+        onClick={() => (props.onTestConnection as () => void)()}
+      >
+        test
+      </button>
+    </div>
+  ),
+}))
 jest.mock("./provider-cost-tab", () => ({ ProviderCostTab: () => null }))
 jest.mock("./provider-parameters-tab", () => ({ ProviderParametersTab: () => null }))
 jest.mock("./routing-tab", () => ({ RoutingTab: () => null }))
-jest.mock("./health-tab", () => ({ HealthTab: () => null }))
+jest.mock("./health-tab", () => ({
+  HealthTab: (props: Record<string, unknown>) => (
+    <button data-testid="mock-health-test" onClick={() => (props.onTestConnection as () => void)()}>
+      health-test
+    </button>
+  ),
+}))
 jest.mock("./presets-tab", () => ({ PresetsTab: () => null }))
 
 beforeEach(() => {
@@ -352,6 +489,12 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     expect(mockHookState.updateCustomProvider).toHaveBeenCalledWith("my-custom", {
       baseURL: "https://proxy.example.com/v2",
     })
+    fireEvent.change(configTab.querySelector('input[type="password"]') as HTMLInputElement, {
+      target: { value: "new-key" },
+    })
+    expect(mockHookState.updateCustomProvider).toHaveBeenCalledWith("my-custom", {
+      apiKey: "new-key",
+    })
   })
 
   it("filters custom providers by customName against the search input", () => {
@@ -369,34 +512,153 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     expect(screen.getByTestId("provider-sidebar-item-c1")).toBeInTheDocument()
     expect(screen.queryByTestId("provider-sidebar-item-c2")).not.toBeInTheDocument()
   })
-})
 
-describe("deriveStatus", () => {
-  it("returns not-configured when neither an apiKey nor a baseURL is set", () => {
-    expect(deriveStatus(undefined, undefined, undefined)).toBe("not-configured")
+  it("toggles a built-in provider through the detail panel", () => {
+    mockHookState = makeHookState({
+      filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
+      selectedProviderId: "openai",
+    })
+    render(<ProviderSettings />)
+    fireEvent.click(screen.getByTestId("mock-toggle-enabled"))
+    expect(mockSetProviderConfig).toHaveBeenCalledWith("openai", { enabled: expect.any(Boolean) })
   })
 
-  it("returns limited when the test outcome is 'limited', even though testOk is true", () => {
-    expect(deriveStatus("sk-x", undefined, true, "limited")).toBe("limited")
+  it("toggles a custom provider through the detail panel", () => {
+    mockHookState = makeHookState({
+      visibleCustomProviderIds: ["my-custom"],
+      customProviders: {
+        "my-custom": {
+          customName: "My Custom",
+          baseURL: "https://example.com",
+          apiKey: "sk-custom-123",
+          defaultModel: "x-1",
+        },
+      },
+      selectedProviderId: "my-custom",
+    })
+    render(<ProviderSettings />)
+    fireEvent.click(screen.getByTestId("mock-toggle-enabled"))
+    expect(mockHookState.updateCustomProvider).toHaveBeenCalledWith("my-custom", {
+      enabled: expect.any(Boolean),
+    })
   })
 
-  it("prioritizes limited over a failed testOk (outcome is the more specific signal)", () => {
-    expect(deriveStatus("sk-x", undefined, false, "limited")).toBe("limited")
+  it("deletes a custom provider and clears selection", () => {
+    mockHookState = makeHookState({
+      visibleCustomProviderIds: ["my-custom"],
+      customProviders: {
+        "my-custom": {
+          customName: "My Custom",
+          baseURL: "https://example.com",
+          apiKey: "sk-custom-123",
+          defaultModel: "x-1",
+        },
+      },
+      selectedProviderId: "my-custom",
+    })
+    render(<ProviderSettings />)
+    fireEvent.click(screen.getByTestId("mock-delete-provider"))
+    expect(mockHookState.removeCustomProvider).toHaveBeenCalledWith("my-custom")
+    expect(mockSetSelectedProviderId).toHaveBeenCalledWith(null)
   })
 
-  it("returns error when the test failed and outcome is not limited", () => {
-    expect(deriveStatus("sk-x", undefined, false)).toBe("error")
+  it("routes all Config tab callbacks to the settings store", () => {
+    mockHookState = makeHookState({
+      filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
+      selectedProviderId: "openai",
+    })
+    mockHookState.providerSettings.openai = {
+      apiKey: "k",
+      apiKeys: ["k"],
+    }
+    render(<ProviderSettings />)
+    fireEvent.click(screen.getByTestId("mock-api-key-change"))
+    expect(mockSetProviderConfig).toHaveBeenCalledWith("openai", { apiKey: "new-key" })
+    fireEvent.click(screen.getByTestId("mock-base-url-change"))
+    expect(mockSetProviderConfig).toHaveBeenCalledWith("openai", { baseURL: "https://x" })
+    fireEvent.click(screen.getByTestId("mock-protocol-change"))
+    expect(mockSetProviderConfig).toHaveBeenCalledWith("openai", { apiProtocol: "anthropic" })
+    fireEvent.click(screen.getByTestId("mock-default-model-change"))
+    expect(mockSetProviderConfig).toHaveBeenCalledWith("openai", { defaultModel: "m" })
+    fireEvent.click(screen.getByTestId("mock-add-api-key"))
+    expect(mockSetProviderConfig).toHaveBeenCalledWith("openai", { apiKeys: ["k", "k2"] })
+    fireEvent.click(screen.getByTestId("mock-remove-api-key"))
+    expect(mockSetProviderConfig).toHaveBeenCalledWith("openai", { apiKeys: [] })
+    fireEvent.click(screen.getByTestId("mock-reorder-api-keys"))
+    expect(mockSetProviderConfig).toHaveBeenCalledWith("openai", { apiKeys: ["k"] })
+    fireEvent.click(screen.getByTestId("mock-toggle-rotation"))
+    expect(mockSetProviderConfig).toHaveBeenCalledWith("openai", { apiKeyRotationEnabled: true })
+    fireEvent.click(screen.getByTestId("mock-rotation-strategy"))
+    expect(mockSetProviderConfig).toHaveBeenCalledWith("openai", {
+      apiKeyRotationStrategy: "round-robin",
+    })
+    fireEvent.click(screen.getByTestId("mock-test-connection"))
+    expect(mockHookState.testProvider).toHaveBeenCalledWith("openai")
   })
 
-  it("returns connected when the test succeeded outright", () => {
-    expect(deriveStatus("sk-x", undefined, true)).toBe("connected")
+  it("routes Bedrock settings changes to the store", () => {
+    mockHookState = makeHookState({
+      filteredProviders: [["bedrock", { name: "Amazon Bedrock", defaultModel: "nova-lite" }]],
+      selectedProviderId: "bedrock",
+    })
+    mockHookState.providerSettings.bedrock = {
+      bedrock: { authMode: "default-chain", region: "us-east-1" },
+    }
+    render(<ProviderSettings />)
+    fireEvent.click(screen.getByTestId("mock-bedrock-change"))
+    expect(mockSetProviderConfig).toHaveBeenCalledWith(
+      "bedrock",
+      expect.objectContaining({
+        bedrock: { authMode: "api-key", region: "us-east-1", apiKey: "bk" },
+        apiKey: "bk",
+      })
+    )
   })
 
-  it("returns warning when configured but never tested", () => {
-    expect(deriveStatus("sk-x", undefined, undefined)).toBe("warning")
+  it("routes Models tab callbacks to the store and the hook", () => {
+    mockHookState = makeHookState({
+      filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
+      selectedProviderId: "openai",
+    })
+    render(<ProviderSettings />)
+    fireEvent.click(screen.getByTestId("mock-enabled-models-change"))
+    expect(mockSetProviderConfig).toHaveBeenCalledWith("openai", { enabledModels: ["m1"] })
+    fireEvent.click(screen.getByTestId("mock-models-test-connection"))
+    expect(mockHookState.testProvider).toHaveBeenCalledWith("openai")
   })
 
-  it("treats a configured baseURL (no key) the same as a configured key", () => {
-    expect(deriveStatus(undefined, "https://x.example.com", undefined)).toBe("warning")
+  it("opens the custom-provider dialog from QuickAdd", async () => {
+    const { findByTestId } = render(<ProviderSettings />)
+    fireEvent.click(screen.getByTestId("provider-empty-state"))
+    fireEvent.click(await findByTestId("quick-add-provider-dialog"))
+    expect(await findByTestId("custom-provider-dialog")).toBeInTheDocument()
+  })
+
+  it("applies the category filter from the sidebar", () => {
+    mockHookState = makeHookState({
+      filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
+    })
+    render(<ProviderSettings />)
+    expect(screen.getByTestId("provider-sidebar-item-openai")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("provider-sidebar-category"))
+    // openai has no category in the inline provider map, so the "ai" filter empties the list.
+    expect(screen.queryByTestId("provider-sidebar-item-openai")).not.toBeInTheDocument()
+    expect(screen.getByTestId("provider-empty-state")).toBeInTheDocument()
+  })
+
+  it("uses persisted discovered models and the OpenRouter live catalog", () => {
+    mockHookState = makeHookState({
+      filteredProviders: [["openrouter", { name: "OpenRouter", defaultModel: "openrouter/auto" }]],
+      selectedProviderId: "openrouter",
+    })
+    mockHookState.providerSettings.openrouter = {
+      apiKey: "rk",
+      discoveredModels: [{ id: "discovered", name: "Discovered Model" }],
+    }
+    render(<ProviderSettings />)
+    expect(screen.getByTestId("provider-detail-panel")).toHaveAttribute(
+      "data-provider-id",
+      "openrouter"
+    )
   })
 })

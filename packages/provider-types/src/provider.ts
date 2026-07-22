@@ -9,6 +9,7 @@ import type {
   BuiltInProviderCatalogEntry,
   BuiltInProviderModelEntry,
 } from "./built-in-provider-catalog"
+import type { BedrockConnectionSettings } from "./bedrock"
 
 export type ProviderType = "cloud" | "local"
 
@@ -202,6 +203,8 @@ export interface UserProviderSettings {
   providerId: string
   apiKey?: string
   baseURL?: string
+  /** Native Amazon Bedrock authentication and region settings. */
+  bedrock?: BedrockConnectionSettings
   /**
    * OpenAI endpoint family override (responses/chat/auto). Lets the user opt a
    * provider into the Responses API regardless of host — Azure OpenAI, a
@@ -337,13 +340,14 @@ export type BYOKProvider =
  * - anthropic: Anthropic Claude API format
  * - gemini: Google Gemini API format
  */
-export type BuiltInApiProtocol = "openai" | "anthropic" | "gemini"
+export type BuiltInApiProtocol = "openai" | "anthropic" | "gemini" | "bedrock"
 
 /** The built-in protocols, for pickers and exhaustive iteration. */
 export const BUILTIN_API_PROTOCOLS: readonly BuiltInApiProtocol[] = [
   "openai",
   "anthropic",
   "gemini",
+  "bedrock",
 ]
 
 /**
@@ -366,7 +370,7 @@ export type ApiProtocol = BuiltInApiProtocol | (string & {})
  * `packages/provider-core/.../provider-persistence.ts`) share one definition.
  */
 export type ResolverProtocol =
-  "openai" | "anthropic" | "google" | "mistral" | "cohere" | (string & {})
+  "openai" | "anthropic" | "google" | "mistral" | "cohere" | "azure" | "bedrock" | (string & {})
 
 /**
  * OpenAI endpoint family selection. "responses"/"chat" override the host

@@ -24,7 +24,9 @@
     "@cognia/provider-core": "workspace:*"
   },
   "peerDependencies": {
-    "ai": "*"
+    "ai": "*",
+    "@ai-sdk/amazon-bedrock": "*",
+    "@ai-sdk/provider": "*"
   },
   "engines": {
     "node": ">=26.0.0"

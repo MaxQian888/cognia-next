@@ -23,18 +23,6 @@ function fakeEmbed(texts: string[]): Promise<number[][]> {
   return Promise.resolve(texts.map((t) => VECTORS[t] ?? [0.001, 0.001, 0.001]))
 }
 
-function cosine(a: number[], b: number[]): number {
-  let dot = 0
-  let na = 0
-  let nb = 0
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i]
-    na += a[i] * a[i]
-    nb += b[i] * b[i]
-  }
-  return dot / (Math.sqrt(na) * Math.sqrt(nb) || 1)
-}
-
 const SETTINGS: SemanticToolRoutingSettings = {
   enabled: true,
   activationToolCount: 2,
@@ -55,7 +43,6 @@ function installDeps(routes: ToolRouteRecord[] = [], cacheSpy = jest.fn()) {
     listRoutes: async () => routes,
     embed: (texts) => fakeEmbed(texts),
     cacheRouteEmbeddings: cacheSpy,
-    cosine,
   })
   return cacheSpy
 }
@@ -144,7 +131,6 @@ describe("pruneToolsSemantica", () => {
         throw new Error("engine offline")
       },
       cacheRouteEmbeddings: jest.fn(),
-      cosine,
     })
     expect(
       await pruneToolsSemantica({

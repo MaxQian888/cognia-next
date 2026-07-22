@@ -125,6 +125,24 @@ export function ProviderDetailPanel({
               {t("verificationLimitedShort") || "Limited"}
             </Badge>
           )}
+          {connectionStatus === "warning" && (
+            <Badge
+              variant="outline"
+              title={t("detailPanel.warningHint") || "Configured but not verified"}
+              className="border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-400"
+            >
+              {t("detailPanel.warning") || "Warning"}
+            </Badge>
+          )}
+          {connectionStatus === "not-configured" && (
+            <Badge
+              variant="outline"
+              className="text-muted-foreground"
+              title={t("detailPanel.notConfiguredHint") || "Add credentials to use this provider"}
+            >
+              {t("detailPanel.notConfigured") || "Not configured"}
+            </Badge>
+          )}
           {isCustom && onDelete && (
             <Button
               variant="ghost"
@@ -149,16 +167,18 @@ export function ProviderDetailPanel({
         </TabsList>
         <div className="flex-1 overflow-y-auto">
           <TabsContent value="config" className="m-0 p-4">
-            {configTab ?? <div>Config placeholder</div>}
+            {configTab ?? <div>{t("detailPanel.configPlaceholder") || "Config placeholder"}</div>}
           </TabsContent>
           <TabsContent value="models" className="m-0 p-4">
-            {modelsTab ?? <div>Models placeholder</div>}
+            {modelsTab ?? <div>{t("detailPanel.modelsPlaceholder") || "Models placeholder"}</div>}
           </TabsContent>
           <TabsContent value="cost" className="m-0 p-4">
-            {costTab ?? <div>Cost placeholder</div>}
+            {costTab ?? <div>{t("detailPanel.costPlaceholder") || "Cost placeholder"}</div>}
           </TabsContent>
           <TabsContent value="advanced" className="m-0 p-4">
-            {advancedTab ?? <div>Advanced placeholder</div>}
+            {advancedTab ?? (
+              <div>{t("detailPanel.advancedPlaceholder") || "Advanced placeholder"}</div>
+            )}
           </TabsContent>
         </div>
       </Tabs>

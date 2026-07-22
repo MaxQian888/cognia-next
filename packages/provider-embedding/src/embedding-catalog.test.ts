@@ -9,13 +9,14 @@ import {
 } from "./embedding-catalog"
 
 describe("embedding-catalog", () => {
-  it("exposes the canonical provider set including local + voyage", () => {
+  it("exposes the canonical provider set including Bedrock, local, and Voyage", () => {
     expect(RAG_EMBEDDING_PROVIDERS).toEqual([
       "openai",
       "google",
       "cohere",
       "mistral",
       "voyage",
+      "amazon-bedrock",
       "ollama",
       "lmstudio",
       "llamacpp",
@@ -26,9 +27,9 @@ describe("embedding-catalog", () => {
     ])
   })
 
-  it("does NOT expose azure/amazon-bedrock (documented follow-up)", () => {
+  it("keeps Azure excluded while exposing native Amazon Bedrock", () => {
     expect(isRagEmbeddingProvider("azure")).toBe(false)
-    expect(isRagEmbeddingProvider("amazon-bedrock")).toBe(false)
+    expect(isRagEmbeddingProvider("amazon-bedrock")).toBe(true)
   })
 
   it("isRagEmbeddingProvider narrows known ids", () => {
@@ -47,6 +48,7 @@ describe("embedding-catalog", () => {
   it("cloud providers require an API key; local/browser do not", () => {
     expect(embeddingProviderRequiresApiKey("openai")).toBe(true)
     expect(embeddingProviderRequiresApiKey("voyage")).toBe(true)
+    expect(embeddingProviderRequiresApiKey("amazon-bedrock")).toBe(false)
     expect(embeddingProviderRequiresApiKey("ollama")).toBe(false)
     expect(embeddingProviderRequiresApiKey("lmstudio")).toBe(false)
     expect(embeddingProviderRequiresApiKey("transformersjs")).toBe(false)
