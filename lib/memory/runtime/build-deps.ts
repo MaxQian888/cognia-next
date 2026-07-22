@@ -19,8 +19,10 @@
 import type { MemoryConfig } from "@/types/memory/memory"
 import type { ApplyMemoryContextDeps } from "./apply-memory-context"
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
-import { generateEmbedding, type EmbeddingConfig } from "@cognia/provider-embedding/embedding"
+import { createProviderEmbeddingAdapter } from "@cognia/memory/runtime/provider-embedding-adapter"
 import { listActiveForReader, listActiveProcedural, touchMemories } from "@/lib/db/memories"
+import { createBedrockSidecarEmbeddingModel } from "@/lib/claude/feature-call"
+import type { EmbeddingConfig } from "@cognia/provider-embedding/embedding"
 
 /** Single global collection for memory vectors. */
 export const MEMORY_VECTOR_COLLECTION = "cognia_memory"
@@ -76,11 +78,27 @@ export async function tryBuildMemoryDeps(
   try {
     const backend = await resolveMemoryBackend(config, prebuiltTwinDeps)
     if (backend) {
-      const embedConfig = backend.embedding as unknown as EmbeddingConfig
-      deps.embed = async (text) => {
-        const result = await generateEmbedding(text, embedConfig)
-        return result.embedding
+      const baseEmbedConfig = backend.embedding as unknown as EmbeddingConfig
+      const embedConfig: EmbeddingConfig = { ...baseEmbedConfig }
+      if (
+        embedConfig.provider === "amazon-bedrock" &&
+        embedConfig.bedrock?.authMode === "default-chain"
+      ) {
+        embedConfig.bedrockModel = createBedrockSidecarEmbeddingModel({
+          modelId: embedConfig.model || "amazon.titan-embed-text-v2:0",
+          providerId: "bedrock",
+          credentials: {
+            protocol: "bedrock",
+            bedrockAuthMode: "default-chain",
+            region: embedConfig.bedrock.region,
+            baseURL: embedConfig.bedrock.baseURL,
+            profile: embedConfig.bedrock.profile,
+            roleArn: embedConfig.bedrock.roleArn,
+            roleSessionName: embedConfig.bedrock.roleSessionName,
+          },
+        })
       }
+      deps.embed = createProviderEmbeddingAdapter(embedConfig)
       deps.vectorSearch = async (vector, topK) => {
         const hits = await backend.store.searchByEmbedding!(MEMORY_VECTOR_COLLECTION, vector, {
           limit: topK,

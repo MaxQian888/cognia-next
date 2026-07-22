@@ -18,6 +18,12 @@ jest.mock("@/lib/ai/transformers/transformers-manager", () => ({
   getTransformersManager: jest.fn(),
 }))
 
+const createBedrockSidecarEmbeddingModel = jest.fn(() => ({ modelId: "bedrock-sidecar" }))
+jest.mock("@/lib/claude/feature-call", () => ({
+  createBedrockSidecarEmbeddingModel: (...args: unknown[]) =>
+    createBedrockSidecarEmbeddingModel(...args),
+}))
+
 import {
   DEFAULT_EMBEDDING_MODELS,
   EmbeddingProviderRuntimeError,
@@ -46,6 +52,13 @@ const mockGetTransformersManager = jest.requireMock("@/lib/ai/transformers/trans
   .getTransformersManager as jest.Mock
 
 describe("DEFAULT_EMBEDDING_MODELS", () => {
+  it("has a native Amazon Bedrock model config", () => {
+    expect(DEFAULT_EMBEDDING_MODELS["amazon-bedrock"]).toMatchObject({
+      provider: "amazon-bedrock",
+      model: "amazon.titan-embed-text-v2:0",
+      dimensions: 1024,
+    })
+  })
   it("has OpenAI model config", () => {
     expect(DEFAULT_EMBEDDING_MODELS.openai).toBeDefined()
     expect(DEFAULT_EMBEDDING_MODELS.openai.provider).toBe("openai")
@@ -97,6 +110,31 @@ describe("DEFAULT_EMBEDDING_MODELS", () => {
       expect(typeof config.dimensions).toBe("number")
       expect(config.dimensions).toBeGreaterThan(0)
     })
+  })
+})
+
+describe("Amazon Bedrock embedding wiring", () => {
+  it("uses the sidecar proxy for a default-chain embedding", async () => {
+    mockGenerateAiEmbedding.mockResolvedValueOnce({ embedding: [0.1, 0.2] })
+    await generateEmbedding(
+      "safe text",
+      {
+        provider: "amazon-bedrock",
+        model: "amazon.titan-embed-text-v2:0",
+        bedrock: { authMode: "default-chain", region: "us-east-1" },
+      },
+      ""
+    )
+    expect(createBedrockSidecarEmbeddingModel).toHaveBeenCalledWith(
+      expect.objectContaining({ modelId: "amazon.titan-embed-text-v2:0" })
+    )
+    expect(mockGenerateAiEmbedding).toHaveBeenCalledWith(
+      "safe text",
+      expect.objectContaining({
+        provider: "amazon-bedrock",
+        bedrockModel: { modelId: "bedrock-sidecar" },
+      })
+    )
   })
 })
 

@@ -40,6 +40,7 @@ export * from "./control-plane/contamination"
 export * from "./procedural"
 export * from "./history-filter"
 export * from "./runtime/apply-memory-context"
+export * from "./runtime/provider-embedding-adapter"
 
 // External-surface row projection
 export * from "./api/wire"

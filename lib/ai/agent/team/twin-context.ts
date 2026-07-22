@@ -28,6 +28,7 @@ import type { ApplyTwinContextDeps } from "@/lib/twin/runtime/apply-twin-context
 import type { TwinRuntimeDepsForBuild } from "@/lib/claude/build-options"
 import type { TwinSettings } from "@/types/twin"
 import type { TeamTwinSummary } from "./team-run-context"
+import { estimateFallbackTokens } from "@/lib/ai/tokens/fallback-estimator"
 
 /** Default / max knowledge hits returned by `searchTwinKnowledge`. */
 const DEFAULT_TWIN_SEARCH_TOPK = 5
@@ -213,7 +214,7 @@ export async function applyTeammateTwinContext(
       degradedReason: result.degradedReason ?? null,
       chunkCount: result.applied.metadata.retrievedChunkIds.length,
       styleSampleCount: result.applied.metadata.styleSampleIds.length,
-      tokensApprox: Math.ceil(systemPrompt.length / 4),
+      tokensApprox: estimateFallbackTokens(systemPrompt),
     })
     return { systemPrompt, applied: true }
   } catch (err) {

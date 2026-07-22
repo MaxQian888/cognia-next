@@ -56,6 +56,31 @@ describe("tryBuildTwinDeps", () => {
     )
   })
 
+  it("threads default-chain Bedrock settings into the vector runtime", async () => {
+    const bedrock = { authMode: "default-chain" as const, region: "us-west-2", profile: "dev" }
+    getTwinRuntimeSettings.mockResolvedValue(
+      settings({
+        storage: { vectorBackend: "qdrant", qdrant: { url: "http://q" } },
+        embedding: {
+          provider: "amazon-bedrock",
+          model: "amazon.titan-embed-text-v2:0",
+          apiKey: "",
+          bedrock,
+        },
+      })
+    )
+
+    const deps = await tryBuildTwinDeps()
+
+    expect(deps?.embedding.bedrock).toEqual(bedrock)
+    expect(createVectorStore).toHaveBeenCalledWith(
+      expect.objectContaining({
+        embeddingConfig: expect.objectContaining({ bedrock }),
+        embeddingApiKey: "",
+      })
+    )
+  })
+
   it("omits reranker by default (disabled) so RAG does not over-fetch (T2.6)", async () => {
     getTwinRuntimeSettings.mockResolvedValue(
       settings({ storage: { vectorBackend: "qdrant", qdrant: { url: "http://q" } } })

@@ -1,7 +1,7 @@
-// Mock the embedding module *before* importing the unit under test so the
+// Mock the vector embedding adapter *before* importing the unit under test so the
 // import chain picks up the mock. embed.ts only consumes generateEmbeddings.
 const mockGenerateEmbeddings = jest.fn()
-jest.mock("@cognia/provider-embedding/embedding", () => ({
+jest.mock("@cognia/vector/embedding", () => ({
   generateEmbeddings: (...args: unknown[]) => mockGenerateEmbeddings(...args),
 }))
 
@@ -104,7 +104,25 @@ describe("embedRedactedChunks", () => {
     expect(callConfig.baseURL).toBe("https://proxy.example/v1")
     expect(callConfig.provider).toBe("openai")
     expect(callConfig.model).toBe("text-embedding-3-small")
-    expect(callConfig.apiKey).toBe("sk-test")
+    expect(mockGenerateEmbeddings.mock.calls[0][2]).toBe("sk-test")
+  })
+
+  it("threads default-chain Bedrock settings through the canonical vector adapter", async () => {
+    mockGenerateEmbeddings.mockResolvedValue({ embeddings: [[0]], usage: { tokens: 1 } })
+    const bedrock = { authMode: "default-chain" as const, region: "eu-west-1", profile: "dev" }
+
+    await embedRedactedChunks(["redacted"], {
+      provider: "amazon-bedrock",
+      model: "amazon.titan-embed-text-v2:0",
+      apiKey: "",
+      bedrock,
+    })
+
+    expect(mockGenerateEmbeddings).toHaveBeenCalledWith(
+      ["redacted"],
+      expect.objectContaining({ provider: "amazon-bedrock", bedrock }),
+      ""
+    )
   })
 
   it("tolerates missing usage.tokens on a batch (treats as 0)", async () => {

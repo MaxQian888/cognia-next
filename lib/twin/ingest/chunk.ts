@@ -20,6 +20,7 @@ import type {
   TwinPageMapEntry,
   TwinSourceFormat,
 } from "@/types/twin"
+import { estimateFallbackTokens } from "@/lib/ai/tokens/fallback-estimator"
 
 export interface PreparedChunk {
   /** Strategy actually used (after the format-based picker). */
@@ -59,10 +60,8 @@ const FORMAT_TO_STRATEGY: Record<TwinSourceFormat, ChunkingStrategy> = {
   "git-repo": "code",
 }
 
-const APPROX_CHARS_PER_TOKEN = 4
-
 function approxTokenCount(text: string): number {
-  return Math.max(1, Math.ceil(text.length / APPROX_CHARS_PER_TOKEN))
+  return Math.max(1, estimateFallbackTokens(text))
 }
 
 /**

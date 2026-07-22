@@ -12,7 +12,7 @@ import "fake-indexeddb/auto"
 // `applyTwinContext` calls `generateEmbedding` for the user message; the
 // helper below lets each test pin the resolved value or trigger a reject.
 let mockEmbeddingResult: { embedding: number[] } | Error | string = { embedding: [0.1, 0.2, 0.3] }
-jest.mock("@cognia/provider-embedding/embedding", () => ({
+jest.mock("@cognia/vector/embedding", () => ({
   generateEmbedding: jest.fn(async () => {
     if (mockEmbeddingResult instanceof Error) throw mockEmbeddingResult
     if (typeof mockEmbeddingResult === "string") throw mockEmbeddingResult
@@ -546,7 +546,7 @@ describe("applyTwinContext", () => {
   })
 
   it("skips internal embed when precomputedQueryEmbedding is provided", async () => {
-    const generateEmbeddingMock = jest.requireMock("@cognia/provider-embedding/embedding")
+    const generateEmbeddingMock = jest.requireMock("@cognia/vector/embedding")
       .generateEmbedding as jest.Mock
     generateEmbeddingMock.mockClear()
     const character = makeCharacter({ twinId: "twin_alice" })

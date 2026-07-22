@@ -1,14 +1,18 @@
 import { DEFAULT_MEMORY_CONFIG, type MemoryConfig } from "@/types/memory/memory"
 
 const mockTryBuildTwinDeps = jest.fn()
-const mockGenerateEmbedding = jest.fn()
+const mockCreateProviderEmbeddingAdapter = jest.fn()
 const mockSearchByEmbedding = jest.fn()
 
 jest.mock("@/lib/twin/runtime/build-deps", () => ({
   tryBuildTwinDeps: () => mockTryBuildTwinDeps(),
 }))
-jest.mock("@cognia/provider-embedding/embedding", () => ({
-  generateEmbedding: (...args: unknown[]) => mockGenerateEmbedding(...args),
+jest.mock("@cognia/memory/runtime/provider-embedding-adapter", () => ({
+  createProviderEmbeddingAdapter: (...args: unknown[]) =>
+    mockCreateProviderEmbeddingAdapter(...args),
+}))
+jest.mock("@/lib/claude/feature-call", () => ({
+  createBedrockSidecarEmbeddingModel: jest.fn(() => ({ specificationVersion: "v3" })),
 }))
 jest.mock("@/lib/db/memories", () => ({
   listActiveForReader: jest.fn(async () => [{ id: "c1" }]),
@@ -29,7 +33,7 @@ function cfg(over: Partial<MemoryConfig> = {}): MemoryConfig {
 beforeEach(() => {
   jest.clearAllMocks()
   mockSearchByEmbedding.mockResolvedValue([{ id: "v1", content: "x", score: 0.7 }])
-  mockGenerateEmbedding.mockResolvedValue({ embedding: [0.1, 0.2] })
+  mockCreateProviderEmbeddingAdapter.mockReturnValue(async () => [0.1, 0.2])
 })
 
 describe("tryBuildMemoryDeps", () => {
@@ -87,6 +91,30 @@ describe("tryBuildMemoryDeps", () => {
     const deps = await tryBuildMemoryDeps(cfg({ allowCloudEmbedding: true }))
     expect(deps!.embed).toBeDefined()
     expect(deps!.vectorSearch).toBeDefined()
+  })
+
+  it("builds a sidecar embedding proxy for Bedrock default-chain auth", async () => {
+    const bedrock = { authMode: "default-chain" as const, region: "us-west-2", profile: "dev" }
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding },
+      embedding: {
+        provider: "amazon-bedrock",
+        model: "amazon.titan-embed-text-v2:0",
+        apiKey: "",
+        bedrock,
+      },
+    })
+
+    const deps = await tryBuildMemoryDeps(cfg({ allowCloudEmbedding: true }))
+
+    expect(deps?.embed).toBeDefined()
+    expect(mockCreateProviderEmbeddingAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "amazon-bedrock",
+        bedrock,
+        bedrockModel: { specificationVersion: "v3" },
+      })
+    )
   })
 
   it("falls back to BM25-only when building the backend throws", async () => {

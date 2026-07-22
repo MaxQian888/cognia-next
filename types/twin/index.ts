@@ -21,6 +21,7 @@
  */
 
 import type { RagEmbeddingProvider } from "@cognia/provider-embedding/embedding-catalog"
+import type { BedrockConnectionSettings } from "@cognia/provider-types"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Sources — original ingested artifacts.
@@ -588,6 +589,7 @@ export interface TwinRuntimeEmbeddingSettings {
   model: string
   apiKey: string
   baseURL?: string
+  bedrock?: BedrockConnectionSettings
 }
 
 export interface TwinRuntimeLlmSettings {

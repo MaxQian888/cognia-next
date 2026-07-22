@@ -42,6 +42,7 @@ import {
 import { bulkCreateWikiSections } from "@/lib/db/wiki-sections"
 import { diffManifest, getWikiManifest, upsertWikiManifest } from "@/lib/db/wiki-manifest"
 import type { WikiArticle, WikiScope, WikiSourceRef } from "@/types/wiki"
+import { estimateFallbackTokens } from "@/lib/ai/tokens/fallback-estimator"
 
 /** Inversion-of-control surface for the host filesystem. */
 export interface FileSystem {
@@ -307,7 +308,7 @@ function sliceFileToChunks(filePath: string, content: string, fileHash: string):
       module: modulePath,
       lineStart: 1,
       lineEnd: totalLines,
-      tokenCount: Math.max(1, Math.ceil(content.length / 4)),
+      tokenCount: Math.max(1, estimateFallbackTokens(content)),
       content,
       fileHash,
     })

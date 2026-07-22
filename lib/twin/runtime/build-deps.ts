@@ -31,6 +31,7 @@ export async function tryBuildTwinDeps(): Promise<TwinDepsForBuild | undefined> 
       model: settings.embedding.model,
       dimensions: undefined as number | undefined,
       baseURL: settings.embedding.baseURL,
+      bedrock: settings.embedding.bedrock,
     }
     const apiKey = settings.embedding.apiKey
 

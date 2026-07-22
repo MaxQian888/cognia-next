@@ -13,7 +13,12 @@ import {
   embeddingProviderRequiresApiKey as catalogRequiresApiKey,
   type RagEmbeddingProvider,
 } from "@cognia/provider-embedding/embedding-catalog"
-import type { ProviderName } from "@cognia/provider-types"
+import {
+  validateBedrockConnectionSettings,
+  type BedrockConnectionSettings,
+  type ProviderName,
+} from "@cognia/provider-types"
+import { createBedrockSidecarEmbeddingModel } from "@/lib/claude/feature-call"
 import type { TransformersErrorCode } from "@/types/transformers"
 
 /**
@@ -29,6 +34,7 @@ export interface EmbeddingModelConfig {
   dimensions?: number
   /** Base URL for local engines (ollama/lmstudio/…) and proxy overrides. */
   baseURL?: string
+  bedrock?: BedrockConnectionSettings
 }
 
 export const DEFAULT_EMBEDDING_MODELS = Object.fromEntries(
@@ -45,12 +51,14 @@ export interface EmbeddingResult {
   embedding: number[]
   model: string
   provider: EmbeddingProvider
+  usage?: { tokens: number }
 }
 
 export interface BatchEmbeddingResult {
   embeddings: number[][]
   model: string
   provider: EmbeddingProvider
+  usage?: { tokens: number }
 }
 
 export const TRANSFORMERS_RUNTIME_ERROR_CODE: TransformersErrorCode = "runtime_unavailable"
@@ -72,6 +80,12 @@ const PROVIDER_MAP: Partial<Record<EmbeddingProvider, ProviderName>> = {
   vllm: "vllm",
   localai: "localai",
   jan: "jan",
+  "amazon-bedrock": "bedrock",
+}
+
+interface EmbeddingProviderSettings {
+  apiKey?: string
+  bedrock?: BedrockConnectionSettings
 }
 
 export class EmbeddingProviderRuntimeError extends Error {
@@ -90,26 +104,34 @@ export function embeddingProviderRequiresApiKey(provider: EmbeddingProvider): bo
 
 export function getEmbeddingApiKey(
   provider: EmbeddingProvider,
-  providerSettings: Record<string, { apiKey?: string }>
+  providerSettings: Record<string, EmbeddingProviderSettings>
 ): string | null {
   if (provider === "transformersjs") return ""
 
   const mappedProvider = PROVIDER_MAP[provider]
   if (!mappedProvider) return null
-  return providerSettings[mappedProvider]?.apiKey || null
+  const settings = providerSettings[mappedProvider]
+  if (provider === "amazon-bedrock" && settings?.bedrock?.authMode === "api-key") {
+    return settings.bedrock.apiKey || settings.apiKey || null
+  }
+  return settings?.apiKey || null
 }
 
 export function resolveEmbeddingApiKey(
   provider: EmbeddingProvider,
-  providerSettings: Record<string, { apiKey?: string }>
+  providerSettings: Record<string, EmbeddingProviderSettings>
 ): string {
   return getEmbeddingApiKey(provider, providerSettings) || ""
 }
 
 export function isEmbeddingProviderConfigured(
   provider: EmbeddingProvider,
-  providerSettings: Record<string, { apiKey?: string }>
+  providerSettings: Record<string, EmbeddingProviderSettings>
 ): boolean {
+  if (provider === "amazon-bedrock") {
+    const settings = providerSettings.bedrock?.bedrock
+    return !!settings && validateBedrockConnectionSettings(settings).valid
+  }
   if (!embeddingProviderRequiresApiKey(provider)) {
     return true
   }
@@ -177,12 +199,30 @@ export async function generateEmbedding(
     apiKey,
     dimensions: config.dimensions,
     baseURL: config.baseURL,
+    bedrock: config.bedrock,
+    bedrockModel:
+      config.provider === "amazon-bedrock" && config.bedrock?.authMode === "default-chain"
+        ? createBedrockSidecarEmbeddingModel({
+            modelId: config.model,
+            providerId: "bedrock",
+            credentials: {
+              protocol: "bedrock",
+              bedrockAuthMode: "default-chain",
+              region: config.bedrock.region,
+              baseURL: config.bedrock.baseURL,
+              profile: config.bedrock.profile,
+              roleArn: config.bedrock.roleArn,
+              roleSessionName: config.bedrock.roleSessionName,
+            },
+          })
+        : undefined,
   })
 
   return {
     embedding: result.embedding,
     model: config.model,
     provider: config.provider,
+    ...(result.usage ? { usage: result.usage } : {}),
   }
 }
 
@@ -213,12 +253,30 @@ export async function generateEmbeddings(
     apiKey,
     dimensions: config.dimensions,
     baseURL: config.baseURL,
+    bedrock: config.bedrock,
+    bedrockModel:
+      config.provider === "amazon-bedrock" && config.bedrock?.authMode === "default-chain"
+        ? createBedrockSidecarEmbeddingModel({
+            modelId: config.model,
+            providerId: "bedrock",
+            credentials: {
+              protocol: "bedrock",
+              bedrockAuthMode: "default-chain",
+              region: config.bedrock.region,
+              baseURL: config.bedrock.baseURL,
+              profile: config.bedrock.profile,
+              roleArn: config.bedrock.roleArn,
+              roleSessionName: config.bedrock.roleSessionName,
+            },
+          })
+        : undefined,
   })
 
   return {
     embeddings: result.embeddings,
     model: config.model,
     provider: config.provider,
+    ...(result.usage ? { usage: result.usage } : {}),
   }
 }
 

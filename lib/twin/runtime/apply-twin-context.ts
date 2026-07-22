@@ -11,8 +11,9 @@
  * without spinning up a vector store, embedding API, or IndexedDB.
  */
 
-import { generateEmbedding } from "@cognia/provider-embedding/embedding"
 import type { RagEmbeddingProvider } from "@cognia/provider-embedding/embedding-catalog"
+import type { BedrockConnectionSettings } from "@cognia/provider-types"
+import { generateEmbedding } from "@cognia/vector/embedding"
 import {
   ensureCollectionDimensionCompatible,
   EmbeddingDimensionMismatchError,
@@ -43,6 +44,11 @@ export interface TwinRuntimeEmbeddingConfig {
   model: string
   apiKey: string
   baseURL?: string
+  bedrock?: BedrockConnectionSettings
+}
+
+function embed(text: string, config: TwinRuntimeEmbeddingConfig) {
+  return generateEmbedding(text, config, config.apiKey)
 }
 
 export interface ApplyTwinContextDeps {
@@ -175,7 +181,7 @@ function maybeBackfillStyleEmbeddings(
   const hasGap = samples.some((s) => !(Array.isArray(s.embedding) && s.embedding.length > 0))
   if (!hasGap || styleBackfillInFlight.has(twinId)) return
   const task = backfillStyleSampleEmbeddings(twinId, (summary) =>
-    generateEmbedding(summary, embedding).then((r) => r.embedding)
+    embed(summary, embedding).then((r) => r.embedding)
   )
     .catch(() => {
       // Swallow — a transient embed/DB failure just means we retry next turn.
@@ -230,7 +236,7 @@ export async function applyTwinContext(
   // Embed the user message — needed by both the RAG and style passes.
   if (!queryEmbedding && (settings.enableRag || settings.enableStyleFewShot)) {
     try {
-      const result = await generateEmbedding(userMessage, deps.embedding)
+      const result = await embed(userMessage, deps.embedding)
       queryEmbedding = result.embedding
     } catch (err) {
       degraded = true
@@ -278,7 +284,7 @@ export async function applyTwinContext(
                 ? await generateStepBackQuery(userMessage, deps.expansion.model)
                 : await generateHypotheticalAnswer(userMessage, deps.expansion.model)
             if (expandedText.trim().length > 0) {
-              const expEmbedding = (await generateEmbedding(expandedText, deps.embedding)).embedding
+              const expEmbedding = (await embed(expandedText, deps.embedding)).embedding
               const expHits = await deps.store.searchByEmbedding(collection, expEmbedding, {
                 limit: fetchLimit,
               })

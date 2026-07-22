@@ -18,7 +18,7 @@ import {
   setVoiceSummary,
   upsertEntities,
 } from "@/lib/db/twin-profile"
-import { generateEmbedding } from "@cognia/provider-embedding/embedding"
+import { generateEmbedding } from "@cognia/vector/embedding"
 import type { TwinDraft, TwinJob } from "@/types/twin"
 import type { EmbeddingConfig } from "@/lib/twin/ingest/embed"
 import type { LlmClient } from "./llm"
@@ -94,7 +94,17 @@ export async function runDistillJob(input: RunDistillInput): Promise<RunDistillR
   // the runtime falls back to token-overlap when the field is absent.
   const embeddingFn = input.embedding
     ? async (summary: string): Promise<number[]> => {
-        const result = await generateEmbedding(summary, input.embedding!)
+        const config = input.embedding!
+        const result = await generateEmbedding(
+          summary,
+          {
+            provider: config.provider,
+            model: config.model,
+            baseURL: config.baseURL,
+            bedrock: config.bedrock,
+          },
+          config.apiKey
+        )
         return result.embedding
       }
     : undefined

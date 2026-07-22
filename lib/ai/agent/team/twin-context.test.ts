@@ -5,6 +5,7 @@ import {
   searchTwinKnowledge,
 } from "./twin-context"
 import type { TwinRuntimeDepsForBuild } from "@/lib/claude/build-options"
+import { estimateFallbackTokens } from "@/lib/ai/tokens/fallback-estimator"
 
 // ── Module mocks (all dynamically imported inside twin-context.ts) ─────────
 const tryBuildTwinDepsMock = jest.fn()
@@ -338,7 +339,7 @@ describe("applyTeammateTwinContext", () => {
         degradedReason: null,
         chunkCount: 2,
         styleSampleCount: 1,
-        tokensApprox: Math.ceil("injected system prompt".length / 4),
+        tokensApprox: estimateFallbackTokens("injected system prompt"),
       })
     )
   })
