@@ -1,8 +1,0 @@
-export { OverviewTab } from "./overview-tab"
-export { AdaptersTab } from "./adapters-tab"
-export { OutboundTab } from "./outbound-tab"
-export { AuditTab } from "./audit-tab"
-export { ConversationsTab } from "./conversations-tab"
-export { InboxTab } from "./inbox-tab"
-export { LabelsTab } from "./labels-tab"
-export { CannedResponsesTab } from "./canned-responses-tab"
