@@ -9,6 +9,7 @@
   "downloadSuccess": "cognia CLI installed.",
   "downloadSuccessSigned": "cognia CLI installed and signature-verified.",
   "openReleases": "Open releases page",
+  "releaseKeyFingerprint": "Release-key fingerprint (SHA-256)",
   "sourceHint": "Build and install with Cargo:",
   "sourcePrereq": "Requires Rust 1.82+ on your PATH.",
   "tabDownload": "Download",
@@ -16,5 +17,8 @@
   "tabTarball": "Release page",
   "tarballHint": "Download a release archive manually from GitHub.",
   "title": "Install the cognia CLI",
+  "verificationMode": "Verification mode",
+  "verificationMode_checksum-and-signature": "SHA-256 checksum + Ed25519 signature",
+  "verificationMode_checksum-only": "SHA-256 checksum only (release key is not published)",
   "verifyNote": "Downloads are checksum-verified; signature verification activates once a release key is published."
 }

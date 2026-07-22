@@ -9,6 +9,7 @@ const runtimeEntries = {
   hooks: "src/hooks/index.ts",
   permissions: "src/permissions/index.ts",
   extensions: "src/extensions/index.ts",
+  "context-panel": "src/api/context-panel.ts",
 }
 
 const shared = {

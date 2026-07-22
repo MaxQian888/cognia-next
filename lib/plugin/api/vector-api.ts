@@ -31,6 +31,7 @@ import type {
   CollectionStats,
 } from "@/types/plugin/plugin"
 import { nanoid } from "nanoid"
+import type { UserProviderSettings } from "@cognia/provider-types"
 
 /**
  * Create the Vector API for a plugin
@@ -43,12 +44,13 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
     if (store) return store
 
     const settings = useSettingsStore.getState()
+    const providerSettings = (settings.providerSettings || {}) as Record<
+      string,
+      UserProviderSettings
+    >
     const vectorSettings = useVectorStore.getState().settings
     const embeddingProvider = (vectorSettings.embeddingProvider || "openai") as EmbeddingProvider
-    const embeddingApiKey = resolveEmbeddingApiKey(
-      embeddingProvider,
-      (settings.providerSettings || {}) as Record<string, { apiKey?: string }>
-    )
+    const embeddingApiKey = resolveEmbeddingApiKey(embeddingProvider, providerSettings)
     const embeddingDefaults = DEFAULT_EMBEDDING_MODELS[embeddingProvider]
 
     const provider = vectorSettings.provider || "native"
@@ -64,6 +66,8 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
         provider: embeddingProvider,
         model: vectorSettings.embeddingModel || embeddingDefaults.model,
         dimensions: embeddingDefaults.dimensions,
+        bedrock:
+          embeddingProvider === "amazon-bedrock" ? providerSettings.bedrock?.bedrock : undefined,
       },
       embeddingApiKey,
       configId,
@@ -74,6 +78,11 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
   }
 
   const getEmbeddingConfig = () => {
+    const settings = useSettingsStore.getState()
+    const providerSettings = (settings.providerSettings || {}) as Record<
+      string,
+      UserProviderSettings
+    >
     const vectorSettings = useVectorStore.getState().settings
     const embeddingProvider = (vectorSettings.embeddingProvider || "openai") as EmbeddingProvider
     const embeddingDefaults = DEFAULT_EMBEDDING_MODELS[embeddingProvider]
@@ -81,6 +90,8 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
       provider: embeddingProvider,
       model: vectorSettings.embeddingModel || embeddingDefaults.model,
       dimensions: embeddingDefaults.dimensions,
+      bedrock:
+        embeddingProvider === "amazon-bedrock" ? providerSettings.bedrock?.bedrock : undefined,
     }
   }
 
@@ -88,7 +99,7 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
     const settings = useSettingsStore.getState()
     return resolveEmbeddingApiKey(
       provider,
-      (settings.providerSettings || {}) as Record<string, { apiKey?: string }>
+      (settings.providerSettings || {}) as Record<string, UserProviderSettings>
     )
   }
 

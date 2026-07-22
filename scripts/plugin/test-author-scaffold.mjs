@@ -2,7 +2,7 @@
 
 import { execFileSync } from "node:child_process"
 import assert from "node:assert/strict"
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -14,6 +14,16 @@ const pluginDir = join(workDir, "sdk-probe")
 
 function run(command, args, cwd = repoRoot, env = {}) {
   execFileSync(command, args, { cwd, stdio: "inherit", env: { ...process.env, ...env } })
+}
+
+function installedVersion(packageName) {
+  for (const root of [repoRoot, sdkRoot]) {
+    const manifestPath = join(root, "node_modules", packageName, "package.json")
+    if (existsSync(manifestPath)) {
+      return JSON.parse(readFileSync(manifestPath, "utf8")).version
+    }
+  }
+  throw new Error(`cannot resolve installed version for ${packageName}`)
 }
 
 try {
@@ -58,6 +68,27 @@ try {
     "canonical scaffold must target the currently published SDK contract"
   )
   packageJson.dependencies["@cognia/plugin-sdk"] = `file:${sdkTarball}`
+  packageJson.dependencies["@cognia/provider-core"] =
+    `link:${join(repoRoot, "packages/provider-core")}`
+  packageJson.dependencies["@cognia/provider-routing"] =
+    `link:${join(repoRoot, "packages/provider-routing")}`
+  packageJson.dependencies["@cognia/provider-types"] =
+    `link:${join(repoRoot, "packages/provider-types")}`
+  packageJson.dependencies.ai = installedVersion("ai")
+  packageJson.dependencies.dexie = installedVersion("dexie")
+  packageJson.dependencies.react = installedVersion("react")
+  packageJson.devDependencies["@types/json-schema"] = installedVersion("@types/json-schema")
+  packageJson.devDependencies["@types/node"] = installedVersion("@types/node")
+  packageJson.devDependencies["@types/react"] = installedVersion("@types/react")
+  packageJson.pnpm = {
+    ...(packageJson.pnpm ?? {}),
+    overrides: {
+      ...(packageJson.pnpm?.overrides ?? {}),
+      "@cognia/provider-core": `link:${join(repoRoot, "packages/provider-core")}`,
+      "@cognia/provider-routing": `link:${join(repoRoot, "packages/provider-routing")}`,
+      "@cognia/provider-types": `link:${join(repoRoot, "packages/provider-types")}`,
+    },
+  }
   writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`)
 
   run("pnpm", ["install", "--no-frozen-lockfile"], pluginDir)

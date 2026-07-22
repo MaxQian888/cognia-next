@@ -1,7 +1,15 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process"
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -9,6 +17,16 @@ import { fileURLToPath } from "node:url"
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const packageRoot = join(repoRoot, "packages/plugin-sdk")
 const workDir = mkdtempSync(join(tmpdir(), "cognia-plugin-sdk-pack-"))
+
+function installedVersion(packageName) {
+  for (const root of [repoRoot, packageRoot]) {
+    const manifestPath = join(root, "node_modules", packageName, "package.json")
+    if (existsSync(manifestPath)) {
+      return JSON.parse(readFileSync(manifestPath, "utf8")).version
+    }
+  }
+  throw new Error(`cannot resolve installed version for ${packageName}`)
+}
 
 function run(command, args, cwd = repoRoot) {
   execFileSync(command, args, { cwd, stdio: "inherit" })
@@ -41,27 +59,65 @@ try {
   if (/\b(?:from|import)\s*\(?["']@\//.test(declarationsWithoutComments)) {
     throw new Error("packed declarations contain a monorepo @/ import")
   }
-  if (/\b(?:from|import)\s*\(?["']@cognia\//.test(declarationsWithoutComments)) {
-    throw new Error("packed declarations depend on an unpublished @cognia package")
+  const packedManifest = JSON.parse(readFileSync(join(packedPackage, "package.json"), "utf8"))
+  const cogniaDependencies = Object.keys(packedManifest.dependencies || {}).filter((dependency) =>
+    dependency.startsWith("@cognia/")
+  )
+  for (const expected of [
+    "@cognia/provider-core",
+    "@cognia/provider-routing",
+    "@cognia/provider-types",
+  ]) {
+    if (!cogniaDependencies.includes(expected)) {
+      throw new Error(`packed SDK is missing declared Cognia dependency ${expected}`)
+    }
+  }
+  const declarationDependencies = new Set(
+    Array.from(declarationsWithoutComments.matchAll(/["'](@cognia\/[^/"']+)/g), (match) => match[1])
+  )
+  for (const dependency of declarationDependencies) {
+    if (!cogniaDependencies.includes(dependency)) {
+      throw new Error(`packed declarations use undeclared Cognia dependency ${dependency}`)
+    }
   }
 
   const consumer = join(workDir, "consumer")
   mkdirSync(consumer)
   writeFileSync(
     join(consumer, "package.json"),
-    '{"type":"module","private":true,"packageManager":"pnpm@10.30.3"}\n'
+    `${JSON.stringify(
+      {
+        type: "module",
+        private: true,
+        packageManager: "pnpm@10.30.3",
+        dependencies: {
+          "@cognia/provider-core": `link:${join(repoRoot, "packages/provider-core")}`,
+          "@cognia/provider-routing": `link:${join(repoRoot, "packages/provider-routing")}`,
+          "@cognia/provider-types": `link:${join(repoRoot, "packages/provider-types")}`,
+        },
+        pnpm: {
+          overrides: {
+            "@cognia/provider-core": `link:${join(repoRoot, "packages/provider-core")}`,
+            "@cognia/provider-routing": `link:${join(repoRoot, "packages/provider-routing")}`,
+            "@cognia/provider-types": `link:${join(repoRoot, "packages/provider-types")}`,
+          },
+        },
+      },
+      null,
+      2
+    )}\n`
   )
   run(
     "pnpm",
     [
       "add",
       tarball,
-      "react@^19.0.0",
-      "ai@^6.0.0",
-      "dexie@^4.0.0",
-      "@types/react@^19.0.0",
-      "@types/node@^22.0.0",
-      "@types/json-schema@^7.0.0",
+      `react@${installedVersion("react")}`,
+      `ai@${installedVersion("ai")}`,
+      `dexie@${installedVersion("dexie")}`,
+      `@types/react@${installedVersion("@types/react")}`,
+      `@types/node@${installedVersion("@types/node")}`,
+      `@types/json-schema@${installedVersion("@types/json-schema")}`,
     ],
     consumer
   )
@@ -71,9 +127,11 @@ try {
       'import { definePlugin } from "@cognia/plugin-sdk";',
       'import { SystemEvents } from "@cognia/plugin-sdk/events";',
       'import { CANONICAL_EXTENSION_POINTS } from "@cognia/plugin-sdk/extensions";',
+      'import { defineContextPanel } from "@cognia/plugin-sdk/api/context-panel";',
       "if (definePlugin({ manifest: {} }).manifest == null) process.exit(1);",
       'if (SystemEvents.PLUGIN_LOADED !== "system:plugin:loaded") process.exit(1);',
       'if (!CANONICAL_EXTENSION_POINTS.includes("chat.input.above")) process.exit(1);',
+      'if (defineContextPanel({ id: "panel", entry: "panel.js", export: "Panel", resourceKinds: ["project-file"], activity: "inspect", labelKey: "panel", label: "Panel" }).id !== "panel") process.exit(1);',
       "",
     ].join("\n")
   )

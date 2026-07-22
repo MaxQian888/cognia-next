@@ -28,6 +28,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { isTauri } from "@/lib/tauri"
 import { openUrl } from "@/lib/native/opener"
 import { downloadCogniaCli, type DownloadProgress } from "@/lib/cli-bridge/download-release"
+import {
+  EMBEDDED_COGNIA_RELEASE_KEY_FINGERPRINT_SHA256,
+  getCliReleaseVerificationMode,
+} from "@/lib/cli-bridge/embedded-pubkey"
 
 const RELEASES_URL = "https://github.com/MaxQian888/cognia-next/releases"
 const CARGO_INSTALL_CMD =
@@ -50,6 +54,7 @@ export function CogniaCliInstallDialog({
   const [progress, setProgress] = useState<DownloadProgress | null>(null)
   const [downloading, setDownloading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const verificationMode = getCliReleaseVerificationMode()
 
   const handleDownload = useCallback(async () => {
     setError(null)
@@ -163,10 +168,18 @@ export function CogniaCliInstallDialog({
           </TabsContent>
         </Tabs>
 
-        <p className="flex items-center gap-1 text-[11px] text-muted-foreground">
-          <CheckIcon className="size-3" aria-hidden="true" />
-          {t("verifyNote")}
-        </p>
+        <div className="space-y-1 rounded-md border bg-muted/30 p-2 text-[11px] text-muted-foreground">
+          <p className="flex items-center gap-1">
+            <CheckIcon className="size-3" aria-hidden="true" />
+            {t("verifyNote")}
+          </p>
+          <p>
+            {t("verificationMode")}: {t(`verificationMode_${verificationMode}`)}
+          </p>
+          <p className="break-all font-mono" data-testid="cognia-cli-release-key-fingerprint">
+            {t("releaseKeyFingerprint")}: {EMBEDDED_COGNIA_RELEASE_KEY_FINGERPRINT_SHA256}
+          </p>
+        </div>
       </DialogContent>
     </Dialog>
   )

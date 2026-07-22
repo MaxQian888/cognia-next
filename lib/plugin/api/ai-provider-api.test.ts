@@ -2,12 +2,9 @@
  * Tests for AI Provider Plugin API
  */
 
-import { embedMany, streamText } from "ai"
-import {
-  createFeatureProviderClient,
-  createFeatureProviderModel,
-  resolveFeatureProvider,
-} from "@/lib/ai/provider-consumption"
+import { streamText } from "ai"
+import { createFeatureProviderModel, resolveFeatureProvider } from "@/lib/ai/provider-consumption"
+import { generateEmbeddings } from "@cognia/vector/embedding"
 import {
   createAIProviderAPI,
   getCustomAIProviders,
@@ -43,26 +40,25 @@ jest.mock("@/stores/settings/settings-store", () => ({
 
 jest.mock("ai", () => ({
   streamText: jest.fn(),
-  embedMany: jest.fn(),
+}))
+
+jest.mock("@cognia/vector/embedding", () => ({
+  generateEmbeddings: jest.fn(),
 }))
 
 jest.mock("@/lib/ai/provider-consumption", () => ({
   createProviderSettingsSnapshot: jest.fn((input) => input),
   resolveFeatureProvider: jest.fn(),
   createFeatureProviderModel: jest.fn(),
-  createFeatureProviderClient: jest.fn(),
 }))
 
 const mockStreamText = streamText as jest.MockedFunction<typeof streamText>
-const mockEmbedMany = embedMany as jest.MockedFunction<typeof embedMany>
+const mockGenerateEmbeddings = generateEmbeddings as jest.MockedFunction<typeof generateEmbeddings>
 const mockResolveFeatureProvider = resolveFeatureProvider as jest.MockedFunction<
   typeof resolveFeatureProvider
 >
 const mockCreateFeatureProviderModel = createFeatureProviderModel as jest.MockedFunction<
   typeof createFeatureProviderModel
->
-const mockCreateFeatureProviderClient = createFeatureProviderClient as jest.MockedFunction<
-  typeof createFeatureProviderClient
 >
 
 async function collectChunks(iterable: AsyncIterable<AIChatChunk>): Promise<AIChatChunk[]> {
@@ -98,21 +94,20 @@ describe("AI Provider API", () => {
       fallbackProviderIds: [],
     })
     mockCreateFeatureProviderModel.mockReturnValue({ id: "built-in-chat-model" } as never)
-    mockCreateFeatureProviderClient.mockReturnValue({
-      embedding: jest.fn(() => ({ id: "built-in-embedding-model" })),
-    } as never)
     mockStreamText.mockReturnValue({
       textStream: (async function* () {
         yield "Hello"
         yield " from built-in"
       })(),
     } as never)
-    mockEmbedMany.mockResolvedValue({
+    mockGenerateEmbeddings.mockResolvedValue({
       embeddings: [
         [0.1, 0.2, 0.3],
         [0.4, 0.5, 0.6],
       ],
-    } as never)
+      model: "text-embedding-3-small",
+      provider: "openai",
+    })
   })
 
   describe("createAIProviderAPI", () => {
@@ -517,8 +512,11 @@ describe("AI Provider API", () => {
         [0.1, 0.2, 0.3],
         [0.4, 0.5, 0.6],
       ])
-      expect(mockCreateFeatureProviderClient).toHaveBeenCalled()
-      expect(mockEmbedMany).toHaveBeenCalled()
+      expect(mockGenerateEmbeddings).toHaveBeenCalledWith(
+        ["text1", "text2"],
+        expect.objectContaining({ provider: "openai", model: "text-embedding-3-small" }),
+        "sk-openai"
+      )
     })
 
     it("should use custom provider embedding function when available", async () => {
@@ -543,7 +541,43 @@ describe("AI Provider API", () => {
 
       expect(result.length).toBe(2)
       expect(result[0]).toEqual([0.1, 0.2, 0.3])
-      expect(mockEmbedMany).not.toHaveBeenCalled()
+      expect(mockGenerateEmbeddings).not.toHaveBeenCalled()
+    })
+
+    it("uses the canonical Bedrock embedding adapter for default-chain credentials", async () => {
+      mockResolveFeatureProvider.mockReturnValue({
+        kind: "resolved",
+        featureId: "plugin-ai-provider-fallback",
+        routeProfile: "general-text",
+        providerId: "bedrock",
+        model: "anthropic.claude-3-5-sonnet-20240620-v1:0",
+        apiKey: undefined,
+        baseURL: undefined,
+        bedrock: { authMode: "default-chain", region: "us-west-2", profile: "dev" },
+        protocol: "bedrock",
+        isCustomProvider: false,
+        executionMode: "direct-model",
+        useProxy: true,
+        attemptedProviderIds: ["bedrock"],
+        fallbackProviderIds: [],
+      })
+      mockGenerateEmbeddings.mockResolvedValueOnce({
+        embeddings: [[0.5]],
+        model: "amazon.titan-embed-text-v2:0",
+        provider: "amazon-bedrock",
+      })
+
+      const result = await createAIProviderAPI(testPluginId).embed(["safe text"])
+
+      expect(result).toEqual([[0.5]])
+      expect(mockGenerateEmbeddings).toHaveBeenCalledWith(
+        ["safe text"],
+        expect.objectContaining({
+          provider: "amazon-bedrock",
+          bedrock: expect.objectContaining({ authMode: "default-chain", profile: "dev" }),
+        }),
+        ""
+      )
     })
 
     it("should throw NO_PROVIDER_AVAILABLE when no custom or built-in embedding provider can be used", async () => {

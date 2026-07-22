@@ -4,13 +4,13 @@
  * Provides AI provider capabilities to plugins.
  */
 
-import { embedMany, streamText } from "ai"
+import { streamText } from "ai"
 import {
-  createFeatureProviderClient,
   createFeatureProviderModel,
   createProviderSettingsSnapshot,
   resolveFeatureProvider,
 } from "@/lib/ai/provider-consumption"
+import { generateEmbeddings, type EmbeddingProvider } from "@cognia/vector/embedding"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import type {
   PluginAIProviderAPI,
@@ -107,13 +107,14 @@ type PluginAIProviderStructuredError = Error & {
   details?: unknown
 }
 
-type EmbeddingCapableProviderId = "openai" | "google" | "cohere" | "mistral"
+type EmbeddingCapableProviderId = "openai" | "google" | "cohere" | "mistral" | "bedrock"
 
 const DEFAULT_EMBEDDING_MODELS: Record<EmbeddingCapableProviderId, string> = {
   openai: "text-embedding-3-small",
   google: "text-embedding-004",
   cohere: "embed-english-v3.0",
   mistral: "mistral-embed",
+  bedrock: "amazon.titan-embed-text-v2:0",
 }
 
 function createNoProviderAvailableError(
@@ -362,34 +363,19 @@ export function createAIProviderAPI(pluginId: string): PluginAIProviderAPI {
         )
       }
 
-      const providerClient = createFeatureProviderClient({
-        providerId: resolution.providerId,
-        apiKey: resolution.apiKey,
-        baseURL: resolution.baseURL,
-        protocol: resolution.protocol,
-        isCustomProvider: resolution.isCustomProvider,
-        useProxy: resolution.useProxy,
-      }) as {
-        embedding?: (modelId: string) => unknown
-        textEmbeddingModel?: (modelId: string) => unknown
-      }
-
-      const embeddingModel =
-        providerClient.embedding?.(embeddingModelId) ||
-        providerClient.textEmbeddingModel?.(embeddingModelId)
-
-      if (!embeddingModel) {
-        throw createNoProviderAvailableError(
-          `Built-in provider ${resolution.providerId} does not support embedding fallback.`,
-          "open_provider_settings",
-          resolution
-        )
-      }
-
-      const result = await embedMany({
-        model: embeddingModel as never,
-        values: texts,
-      })
+      const embeddingProvider = (
+        resolution.providerId === "bedrock" ? "amazon-bedrock" : resolution.providerId
+      ) as EmbeddingProvider
+      const result = await generateEmbeddings(
+        texts,
+        {
+          provider: embeddingProvider,
+          model: embeddingModelId,
+          baseURL: resolution.baseURL,
+          bedrock: resolution.bedrock,
+        },
+        resolution.apiKey || ""
+      )
       return result.embeddings
     },
 

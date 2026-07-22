@@ -105,6 +105,11 @@ jest.mock("@cognia/vector/embedding", () => ({
       model: "Xenova/all-MiniLM-L6-v2",
       dimensions: 384,
     },
+    "amazon-bedrock": {
+      provider: "amazon-bedrock",
+      model: "amazon.titan-embed-text-v2:0",
+      dimensions: 1024,
+    },
   },
   generateEmbedding: jest.fn(async (_text, _config, _apiKey) => ({
     embedding: [0.1, 0.2, 0.3, 0.4, 0.5],
@@ -113,8 +118,8 @@ jest.mock("@cognia/vector/embedding", () => ({
     embeddings: texts.map(() => [0.1, 0.2, 0.3, 0.4, 0.5]),
   })),
   resolveEmbeddingApiKey: jest.fn(
-    (_provider: string, providerSettings: Record<string, { apiKey?: string }>) => {
-      return providerSettings?.openai?.apiKey || ""
+    (provider: string, providerSettings: Record<string, { apiKey?: string }>) => {
+      return provider === "openai" ? providerSettings?.openai?.apiKey || "" : ""
     }
   ),
 }))
@@ -325,6 +330,36 @@ describe("Vector API", () => {
       expect(Array.isArray(embeddings)).toBe(true)
       expect(embeddings.length).toBe(3)
       expect(embeddings[0].length).toBeGreaterThan(0)
+    })
+
+    it("threads default-chain Bedrock settings into plugin embeddings", async () => {
+      const { useVectorStore, useSettingsStore } = jest.requireMock("@/stores")
+      const { generateEmbedding } = jest.requireMock("@cognia/vector/embedding")
+      useVectorStore.getState.mockReturnValueOnce({
+        settings: {
+          provider: "native",
+          embeddingProvider: "amazon-bedrock",
+          embeddingModel: "amazon.titan-embed-text-v2:0",
+        },
+      })
+      useSettingsStore.getState.mockReturnValueOnce({
+        providerSettings: {
+          bedrock: {
+            bedrock: { authMode: "default-chain", region: "us-west-2", profile: "dev" },
+          },
+        },
+      })
+
+      await createVectorAPI(testPluginId).embed("Hello Bedrock")
+
+      expect(generateEmbedding).toHaveBeenCalledWith(
+        "Hello Bedrock",
+        expect.objectContaining({
+          provider: "amazon-bedrock",
+          bedrock: { authMode: "default-chain", region: "us-west-2", profile: "dev" },
+        }),
+        ""
+      )
     })
   })
 

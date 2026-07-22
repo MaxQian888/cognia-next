@@ -15,6 +15,7 @@ it("builds standalone ESM, CJS, and declaration entrypoints", async () => {
       manifest: "src/manifest/index.ts",
       events: "src/events/index.ts",
       extensions: "src/extensions/index.ts",
+      "context-panel": "src/api/context-panel.ts",
     })
   )
   expect(declarations.dts).toEqual({ only: true })
@@ -23,5 +24,5 @@ it("builds standalone ESM, CJS, and declaration entrypoints", async () => {
     Object.keys(runtime.entry as Record<string, string>).filter((entry) =>
       entry.startsWith("context")
     )
-  ).toEqual(["context"])
+  ).toEqual(["context", "context-panel"])
 })
