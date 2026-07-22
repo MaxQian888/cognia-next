@@ -9,9 +9,10 @@ import { GatewayProvider } from "@/components/providers/gateway-provider"
 import { ConnectorBusProvider } from "@/components/connectors/connector-bus-provider"
 import { CodeAdoptionTrackerInitializer } from "./code-adoption-tracker-initializer"
 import { MemoryJobWorkerInitializer } from "./memory-job-worker-initializer"
+import { A2UISurfacePersistenceInitializer } from "./a2ui-surface-persistence-initializer"
 
 /**
- * The deferred boot bundle's SINGLE chunk graph (ADR-0068 C3). All seven
+ * The deferred boot bundle's SINGLE chunk graph (ADR-0068 C3). All
  * initializers are statically imported here — one `dynamic()` boundary in
  * `deferred-boot-initializers.tsx` loads this module, so the children mount
  * in document order within one commit, exactly like the pre-deferral static
@@ -34,6 +35,7 @@ export function DeferredBootInitializersImpl() {
       <AgentTeamRuntimeInitializer />
       <CodeAdoptionTrackerInitializer />
       <MemoryJobWorkerInitializer />
+      <A2UISurfacePersistenceInitializer />
       <SchedulerInitializer />
       <WorkflowRuntimeProvider />
       <ProviderCoreRuntimeInitializer />

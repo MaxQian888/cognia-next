@@ -37,6 +37,12 @@ import {
   rewriteComponentCollectionSlot,
   type A2UIComponentPlacement,
 } from "@/lib/a2ui/component-tree"
+import {
+  deleteSurface as deleteDurableSurface,
+  listSurfaces as listDurableSurfaces,
+  upsertSurface as upsertDurableSurface,
+} from "@/lib/db/a2ui-surfaces"
+import type { A2UISurfaceRow } from "@/lib/db/a2ui-types"
 
 /**
  * History entry for undo/redo
@@ -298,6 +304,9 @@ function normalizePersistedSurfaces(persistedSurfaces: unknown): Record<string, 
     }
 
     const surface = value as Partial<A2UISurfaceState>
+    if (surface.type === "inline") {
+      continue
+    }
     const rawComponents =
       surface.components && typeof surface.components === "object"
         ? (surface.components as Record<string, A2UIComponent>)
@@ -326,6 +335,69 @@ function normalizePersistedSurfaces(persistedSurfaces: unknown): Record<string, 
   }
 
   return normalized
+}
+
+function toDurableSurface(surface: A2UISurfaceState): A2UISurfaceRow {
+  return {
+    id: surface.id,
+    type: surface.type,
+    components: surface.components,
+    dataModel: surface.dataModel,
+    rootId: surface.rootId,
+    catalogId: surface.catalogId,
+    title: surface.title,
+    widget: surface.widget,
+    createdAt: surface.createdAt,
+    updatedAt: surface.updatedAt,
+  }
+}
+
+function fromDurableSurface(row: A2UISurfaceRow): A2UISurfaceState {
+  return {
+    ...row,
+    components: migrateComponentMap(row.components),
+    dataModel: deepClone(row.dataModel),
+    ready: Boolean(row.components[row.rootId]),
+  }
+}
+
+function readySurfaceCache(
+  surfaces: Record<string, A2UISurfaceState>
+): Record<string, A2UISurfaceState> {
+  const limit = getA2UIPersistenceLimit(useSettingsStore.getState().settings)
+  return Object.fromEntries(
+    Object.entries(surfaces)
+      .filter(([, surface]) => surface.type !== "inline" && surface.ready)
+      .sort(([, left], [, right]) => right.updatedAt - left.updatedAt)
+      .slice(0, limit)
+  )
+}
+
+let durableSurfaceHydrated = false
+let durableSurfaceAvailable = true
+let durableSurfaceSyncQueue = Promise.resolve()
+
+function enqueueDurableSurfaceSync(task: () => Promise<void>): void {
+  if (!durableSurfaceHydrated || !durableSurfaceAvailable) return
+  durableSurfaceSyncQueue = durableSurfaceSyncQueue.then(task).catch(() => {
+    durableSurfaceAvailable = false
+  })
+}
+
+function syncDurableSurfaceChanges(
+  surfaces: Record<string, A2UISurfaceState>,
+  previous: Record<string, A2UISurfaceState>
+): void {
+  for (const [id, surface] of Object.entries(surfaces)) {
+    if (surface.type === "inline" || !surface.ready) continue
+    const old = previous[id]
+    if (old === surface) continue
+    enqueueDurableSurfaceSync(() => upsertDurableSurface(toDurableSurface(surface)))
+  }
+  for (const [id, surface] of Object.entries(previous)) {
+    if (surface.type === "inline" || surfaces[id]) continue
+    enqueueDurableSurfaceSync(() => deleteDurableSurface(id))
+  }
 }
 
 function collectReachableComponentIds(
@@ -1220,7 +1292,7 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
           const maxPersistedSurfaces = getA2UIPersistenceLimit(useSettingsStore.getState().settings)
           const entries = Object.entries(state.surfaces)
           const sorted = entries
-            .filter(([, s]) => s.ready)
+            .filter(([, s]) => s.ready && s.type !== "inline")
             .sort(([, a], [, b]) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
             .slice(0, maxPersistedSurfaces)
 
@@ -1239,6 +1311,70 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
     )
   )
 )
+
+useA2UIStore.subscribe(
+  (state) => state.surfaces,
+  (surfaces, previous) => syncDurableSurfaceChanges(surfaces, previous)
+)
+
+/** Merge the durable Dexie source into the local ready-surface LRU cache. */
+export async function hydrateA2UISurfaceCache(): Promise<boolean> {
+  if (durableSurfaceHydrated) return durableSurfaceAvailable
+
+  let rows: A2UISurfaceRow[]
+  try {
+    rows = await listDurableSurfaces()
+  } catch {
+    durableSurfaceHydrated = true
+    durableSurfaceAvailable = false
+    return false
+  }
+
+  const local = useA2UIStore.getState().surfaces
+  const merged: Record<string, A2UISurfaceState> = {}
+  for (const row of rows) {
+    if (row.type !== "inline") merged[row.id] = fromDurableSurface(row)
+  }
+  for (const [id, surface] of Object.entries(local)) {
+    if (surface.type === "inline") {
+      merged[id] = surface
+      continue
+    }
+    const durable = merged[id]
+    if (!durable || surface.updatedAt >= durable.updatedAt) merged[id] = surface
+  }
+
+  const inline = Object.fromEntries(
+    Object.entries(merged).filter(([, surface]) => surface.type === "inline")
+  )
+  const cached = { ...inline, ...readySurfaceCache(merged) }
+  useA2UIStore.setState((state) => ({
+    surfaces: cached,
+    activeSurfaceId:
+      state.activeSurfaceId && cached[state.activeSurfaceId]
+        ? state.activeSurfaceId
+        : (Object.keys(cached)[0] ?? null),
+  }))
+
+  durableSurfaceHydrated = true
+  durableSurfaceAvailable = true
+  const durableSnapshot = Object.fromEntries(
+    rows.filter((row) => row.type !== "inline").map((row) => [row.id, fromDurableSurface(row)])
+  )
+  syncDurableSurfaceChanges(cached, durableSnapshot)
+  return true
+}
+
+/** Test/explicit-flush hook for queued Dexie writes. */
+export async function flushA2UISurfacePersistence(): Promise<void> {
+  await durableSurfaceSyncQueue
+}
+
+export function __resetA2UISurfacePersistenceForTesting(): void {
+  durableSurfaceHydrated = false
+  durableSurfaceAvailable = true
+  durableSurfaceSyncQueue = Promise.resolve()
+}
 
 /**
  * Selectors

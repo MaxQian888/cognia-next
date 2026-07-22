@@ -5,8 +5,8 @@
  * transparent, always-on-top "island" Tauri window. Mirrors PetOverlayView's
  * contract: mark `<html data-island-overlay>` so the page paints transparent
  * (globals.css), then reveal the hidden window after the first painted frame
- * (`schedulePetWindowReveal` — shared with the pet windows; it operates on
- * "the current window", so it needs no pet-specific state).
+ * (`schedulePetWindowReveal` — shared scheduling with the pet windows; on macOS
+ * it routes to the island-specific NSPanel reveal command).
  */
 
 import { useEffect } from "react"

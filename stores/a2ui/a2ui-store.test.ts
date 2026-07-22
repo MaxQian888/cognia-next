@@ -5,6 +5,9 @@
 
 import { act } from "@testing-library/react"
 import {
+  __resetA2UISurfacePersistenceForTesting,
+  flushA2UISurfacePersistence,
+  hydrateA2UISurfaceCache,
   useA2UIStore,
   selectSurface,
   selectActiveSurface,
@@ -15,6 +18,16 @@ import {
   selectEventHistory,
   selectRecentEvents,
 } from "./a2ui-store"
+
+const mockListDurableSurfaces = jest.fn()
+const mockUpsertDurableSurface = jest.fn()
+const mockDeleteDurableSurface = jest.fn()
+
+jest.mock("@/lib/db/a2ui-surfaces", () => ({
+  listSurfaces: (...args: unknown[]) => mockListDurableSurfaces(...args),
+  upsertSurface: (...args: unknown[]) => mockUpsertDurableSurface(...args),
+  deleteSurface: (...args: unknown[]) => mockDeleteDurableSurface(...args),
+}))
 
 const mockSettingsState: { settings: { a2uiPersistenceLimit?: number } } = {
   settings: { a2uiPersistenceLimit: 20 },
@@ -85,10 +98,116 @@ jest.mock("@/lib/a2ui/events", () => ({
 
 describe("useA2UIStore", () => {
   beforeEach(() => {
+    __resetA2UISurfacePersistenceForTesting()
+    mockListDurableSurfaces.mockReset().mockResolvedValue([])
+    mockUpsertDurableSurface.mockReset().mockResolvedValue(undefined)
+    mockDeleteDurableSurface.mockReset().mockResolvedValue(undefined)
     localStorage.clear()
     mockSettingsState.settings.a2uiPersistenceLimit = 20
     act(() => {
       useA2UIStore.getState().reset()
+    })
+  })
+
+  describe("Dexie surface persistence", () => {
+    const durableSurface = (id: string, updatedAt: number, title = id) => ({
+      id,
+      type: "panel" as const,
+      title,
+      components: { root: { id: "root", component: "Text", text: title } },
+      dataModel: { title },
+      rootId: "root",
+      createdAt: 1,
+      updatedAt,
+    })
+
+    it("hydrates from Dexie and merges by updatedAt with local state winning ties", async () => {
+      mockListDurableSurfaces.mockResolvedValue([
+        durableSurface("durable-newer", 10, "Dexie"),
+        durableSurface("tie", 20, "Dexie tie"),
+      ])
+      useA2UIStore.setState({
+        surfaces: {
+          "durable-newer": { ...durableSurface("durable-newer", 5, "Local old"), ready: true },
+          tie: { ...durableSurface("tie", 20, "Local tie"), ready: true },
+        },
+      })
+
+      await expect(hydrateA2UISurfaceCache()).resolves.toBe(true)
+
+      expect(useA2UIStore.getState().surfaces["durable-newer"].title).toBe("Dexie")
+      expect(useA2UIStore.getState().surfaces.tie.title).toBe("Local tie")
+    })
+
+    it("caps hydrated ready surfaces to the configured LRU size", async () => {
+      mockListDurableSurfaces.mockResolvedValue(
+        Array.from({ length: 25 }, (_, index) => durableSurface(`surface-${index}`, index))
+      )
+
+      await hydrateA2UISurfaceCache()
+
+      const ids = Object.keys(useA2UIStore.getState().surfaces)
+      expect(ids).toHaveLength(20)
+      expect(ids).toContain("surface-24")
+      expect(ids).not.toContain("surface-0")
+    })
+
+    it("synchronizes ready writes and deletes after hydration", async () => {
+      await hydrateA2UISurfaceCache()
+      act(() => {
+        useA2UIStore.getState().createSurface("surface-1", "panel")
+        useA2UIStore
+          .getState()
+          .updateComponents("surface-1", [
+            { id: "root", component: "Text", text: "Durable" } as never,
+          ])
+        useA2UIStore.getState().setSurfaceReady("surface-1")
+      })
+      await flushA2UISurfacePersistence()
+      expect(mockUpsertDurableSurface).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "surface-1", type: "panel" })
+      )
+
+      act(() => useA2UIStore.getState().deleteSurface("surface-1"))
+      await flushA2UISurfacePersistence()
+      expect(mockDeleteDurableSurface).toHaveBeenCalledWith("surface-1")
+    })
+
+    it("keeps inline surfaces ephemeral", async () => {
+      await hydrateA2UISurfaceCache()
+      act(() => {
+        useA2UIStore.getState().createSurface("inline-1", "inline")
+        useA2UIStore
+          .getState()
+          .updateComponents("inline-1", [
+            { id: "root", component: "Text", text: "Ephemeral" } as never,
+          ])
+        useA2UIStore.getState().setSurfaceReady("inline-1")
+      })
+      await flushA2UISurfacePersistence()
+      expect(mockUpsertDurableSurface).not.toHaveBeenCalled()
+
+      useA2UIStore.getState().flushPersistence()
+      const persisted = JSON.parse(localStorage.getItem("cognia-a2ui-surfaces") || "{}")
+      expect(persisted.state?.surfaces?.["inline-1"]).toBeUndefined()
+    })
+
+    it("degrades to local-only operation when Dexie hydration fails", async () => {
+      mockListDurableSurfaces.mockRejectedValue(new Error("IndexedDB unavailable"))
+      await expect(hydrateA2UISurfaceCache()).resolves.toBe(false)
+
+      act(() => {
+        useA2UIStore.getState().createSurface("local-only", "panel")
+        useA2UIStore
+          .getState()
+          .updateComponents("local-only", [
+            { id: "root", component: "Text", text: "Local" } as never,
+          ])
+        useA2UIStore.getState().setSurfaceReady("local-only")
+      })
+      await flushA2UISurfacePersistence()
+      expect(useA2UIStore.getState().surfaces["local-only"]).toBeDefined()
+      expect(mockUpsertDurableSurface).not.toHaveBeenCalled()
     })
   })
 
@@ -918,7 +1037,7 @@ describe("useA2UIStore", () => {
             surfaces: {
               "surface-meta": {
                 id: "surface-meta",
-                type: "inline",
+                type: "panel",
                 rootId: "root",
                 createdAt: 1,
                 updatedAt: 2,
@@ -952,7 +1071,7 @@ describe("useA2UIStore", () => {
       act(() => {
         for (let index = 0; index < 7; index += 1) {
           const surfaceId = `surface-${index}`
-          useA2UIStore.getState().createSurface(surfaceId, "inline")
+          useA2UIStore.getState().createSurface(surfaceId, "panel")
           useA2UIStore
             .getState()
             .updateComponents(surfaceId, [
@@ -971,7 +1090,7 @@ describe("useA2UIStore", () => {
       act(() => {
         for (let index = 0; index < 7; index += 1) {
           const surfaceId = `surface-${index}`
-          useA2UIStore.getState().createSurface(surfaceId, "inline")
+          useA2UIStore.getState().createSurface(surfaceId, "panel")
           useA2UIStore
             .getState()
             .updateComponents(surfaceId, [
@@ -999,7 +1118,7 @@ describe("useA2UIStore", () => {
 
     it("persists the component tree + data model, not just metadata", () => {
       act(() => {
-        useA2UIStore.getState().createSurface("surface-1", "inline", { title: "Calc" })
+        useA2UIStore.getState().createSurface("surface-1", "panel", { title: "Calc" })
         useA2UIStore
           .getState()
           .updateComponents("surface-1", [
@@ -1027,7 +1146,7 @@ describe("useA2UIStore", () => {
             surfaces: {
               "surface-full": {
                 id: "surface-full",
-                type: "inline",
+                type: "panel",
                 rootId: "root",
                 components: { root: { id: "root", component: "Button", text: "1" } },
                 dataModel: { display: "0" },
