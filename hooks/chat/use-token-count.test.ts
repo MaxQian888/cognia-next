@@ -7,15 +7,15 @@ describe("countTokens", () => {
     expect(countTokens("")).toBe(0)
   })
 
-  it("rounds up length / 4 for short strings", () => {
-    expect(countTokens("a")).toBe(1) // ceil(1/4)
-    expect(countTokens("abcd")).toBe(1) // ceil(4/4)
-    expect(countTokens("abcde")).toBe(2) // ceil(5/4)
+  it("uses cl100k for short strings", () => {
+    expect(countTokens("a")).toBe(1)
+    expect(countTokens("abcd")).toBe(1)
+    expect(countTokens("abcde")).toBe(2)
   })
 
-  it("scales linearly for larger strings", () => {
-    expect(countTokens("a".repeat(100))).toBe(25)
-    expect(countTokens("a".repeat(1001))).toBe(251)
+  it("handles multilingual text", () => {
+    expect(countTokens("你好，世界")).toBeGreaterThan(0)
+    expect(countTokens("Cognia 支持 Bedrock")).toBeGreaterThan(0)
   })
 })
 
@@ -26,8 +26,8 @@ describe("calculateTokenBreakdown", () => {
 
   it("computes per-message counts and their sum", () => {
     const result = calculateTokenBreakdown(["abcd", "abcdefgh", "x"])
-    expect(result.byMessage).toEqual([1, 2, 1])
-    expect(result.total).toBe(4)
+    expect(result.byMessage).toEqual([1, 1, 1])
+    expect(result.total).toBe(3)
   })
 
   it("treats null/undefined entries as zero tokens", () => {

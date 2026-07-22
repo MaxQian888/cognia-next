@@ -1,20 +1,14 @@
 /**
- * Stub for `@/hooks/chat/use-token-count`.
+ * Shared synchronous token-count facade for renderer prompt estimates.
  *
  * `lib/ai/embedding/compression.ts` imports `calculateTokenBreakdown` and
- * `countTokens` to estimate prompt sizes. cognia-next ships `js-tiktoken`
- * (used elsewhere); these wrappers compute approximate token counts
- * synchronously without requiring the React-hook surface that Cognia uses.
- *
- * If a future PR wants exact tiktoken counts, replace these with a
- * `js-tiktoken/lite` GPT-style encoder lookup.
+ * `countTokens` to estimate prompt sizes. The implementation delegates to the
+ * shared lightweight `cl100k_base` encoder without requiring a React hook.
  */
-
-const APPROX_CHARS_PER_TOKEN = 4
+import { estimateFallbackTokens } from "@/lib/ai/tokens/fallback-estimator"
 
 export function countTokens(text: string | undefined | null): number {
-  if (!text) return 0
-  return Math.ceil(text.length / APPROX_CHARS_PER_TOKEN)
+  return estimateFallbackTokens(text)
 }
 
 export interface TokenBreakdown {

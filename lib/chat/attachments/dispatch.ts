@@ -27,17 +27,14 @@ import { decodeDataUrl, downscaleImage, bytesToBase64, isImageMimeType } from "@
 // Import the specific submodules (not the `@cognia/document` barrel) so the heavy
 // pdfjs/mammoth/xlsx parsers stay lazily loaded — the same pattern the Twin
 // uploader uses. `processDocumentAsync` dynamic-imports those internally.
-import {
-  detectDocumentType,
-  processDocumentAsync,
-  estimateTokenCount,
-} from "@cognia/document/document-processor"
+import { detectDocumentType, processDocumentAsync } from "@cognia/document/document-processor"
 import { isBinaryDocumentType } from "@cognia/document/support-matrix"
 import { detectLanguage } from "@cognia/document/parsers/code-parser"
 import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import type { DocumentType } from "@/types/document"
 import type { SendContent, SendContentBlock } from "@cognia/agent-config-types"
 import { COMPOSER_IMAGE_MAX_LONG_EDGE } from "./prepare"
+import { estimateFallbackTokens } from "@/lib/ai/tokens/fallback-estimator"
 
 /**
  * The longest edge (px) we downscale large images to before base64-encoding.
@@ -246,7 +243,7 @@ export async function buildAttachmentBlocks(
   }
 
   const tokens = docs.reduce(
-    (sum, b) => sum + (b.type === "text" ? estimateTokenCount(b.text) : 0),
+    (sum, b) => sum + (b.type === "text" ? estimateFallbackTokens(b.text) : 0),
     0
   )
   return { blocks: [...images, ...docs], rejected, tokens }
@@ -275,5 +272,5 @@ export async function buildSendContent(
 
 /** Estimate the inline token cost of a document's extracted text. */
 export function estimateDocumentTokens(content: string): number {
-  return estimateTokenCount(content)
+  return estimateFallbackTokens(content)
 }
