@@ -17,7 +17,7 @@
 
 import type { PermissionRequestEvent } from "@cognia/agent-config-types"
 import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
-import type { ConversationReference } from "@/types/connectors/event"
+import type { ConversationDeliveryTarget, ConversationReference } from "@/types/connectors/event"
 import type { A2UISegmentContent } from "@/types/connectors/segment"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
 import { recordCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
@@ -89,6 +89,7 @@ export interface ImPermissionResponderContext {
   adapterId: string
   conversationKey: string
   conversationRef: ConversationReference
+  deliveryTarget?: ConversationDeliveryTarget
   /** `"yolo"` auto-approves every ask-tier tool; default `"prompt"`. */
   approvalMode?: "prompt" | "yolo"
   // Injectable for tests.
@@ -175,6 +176,7 @@ export function makeImPermissionResponder(
         conversationKey: ctx.conversationKey,
         request: {
           conversationRef: ctx.conversationRef,
+          ...(ctx.deliveryTarget ? { deliveryTarget: ctx.deliveryTarget } : {}),
           segments: [buildA2UISegment(surfaceId, surface)],
           metadata: { idempotencyKey: newIdempotencyKey() },
         },

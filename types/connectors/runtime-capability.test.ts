@@ -33,9 +33,13 @@ describe("connector runtime capability matrix", () => {
       textStreaming: true,
       componentMutation: true,
       fullReplacement: true,
-      followUpBubbles: true,
+      followUpBubbles: false,
       ambiguousDelivery: "remote_idempotent",
     })
+  })
+
+  it("does not advertise live steer for Slack until a runtime injection bridge is installed", () => {
+    expect(builtInConnectorRuntimeCapabilities("slack").liveSteer).toBe(false)
   })
 
   it("does not silently claim topic isolation for channel-only adapters", () => {

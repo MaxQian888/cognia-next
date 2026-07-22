@@ -12,6 +12,28 @@ import type { InboundActivationPolicy } from "@/types/connectors/policy"
 
 export const DEFAULT_TOPIC_ACTIVATION_TTL_MS = 24 * 60 * 60 * 1_000
 
+export function resolveDeliveryReadiness(
+  conversationReadiness: AdapterInstanceRow["deliveryReadiness"] | undefined,
+  adapterReadiness: AdapterInstanceRow["deliveryReadiness"] | undefined
+): NonNullable<AdapterInstanceRow["deliveryReadiness"]> {
+  return conversationReadiness && conversationReadiness !== "unknown"
+    ? conversationReadiness
+    : (adapterReadiness ?? "unknown")
+}
+
+export function resolveActivationTtlMs(
+  adapter: Pick<AdapterInstanceRow, "activationTtlMs">,
+  override?: Pick<ConversationOverrideRow, "activationTtlMs">,
+  explicit?: number
+): number {
+  return (
+    explicit ??
+    override?.activationTtlMs ??
+    adapter.activationTtlMs ??
+    DEFAULT_TOPIC_ACTIVATION_TTL_MS
+  )
+}
+
 export type ConversationAdmissionReason =
   | "at_mention_required"
   | "at_direct_only"
@@ -96,7 +118,7 @@ export async function admitConversationEvent(
   }
 
   const now = options.now ?? Date.now()
-  const ttl = options.activationTtlMs ?? DEFAULT_TOPIC_ACTIVATION_TTL_MS
+  const ttl = resolveActivationTtlMs(adapter, override, options.activationTtlMs)
   const deliveryTarget = deliveryTargetFromEvent(event)
 
   if (event.mentions.selfMentioned) {

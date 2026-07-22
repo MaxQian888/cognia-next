@@ -3,6 +3,7 @@
 import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb } from "./schema"
 import {
+  bindConnectorInboundJobExecutionRun,
   claimConnectorInboundJob,
   claimNextConnectorInboundJob,
   completeConnectorInboundJob,
@@ -186,6 +187,40 @@ describe("connector inbound jobs", () => {
         status: "recovery_required",
         recoveryReason: "inbound_run_lease_expired",
       })
+    )
+  })
+
+  it("reclaims every running job when a newly elected runtime owner starts", async () => {
+    const job = await enqueueConnectorInboundJob(event("om-restart", 10), "queue", { now: 100 })
+    await claimNextConnectorInboundJob(job.conversationKey, {
+      leaseOwner: "dead-process",
+      leaseMs: 20 * 60_000,
+      now: 200,
+    })
+
+    await expect(
+      recoverStaleConnectorInboundJobs({ now: 300, reclaimAllRunning: true })
+    ).resolves.toBe(1)
+    expect(await getDb().connectorInboundJobs.get(job.id)).toEqual(
+      expect.objectContaining({
+        status: "recovery_required",
+        recoveryReason: "inbound_runtime_restarted",
+      })
+    )
+  })
+
+  it("binds an execution run before completion and preserves it when completing", async () => {
+    const job = await enqueueConnectorInboundJob(event("om-run", 10), "queue", { now: 100 })
+    await claimNextConnectorInboundJob(job.conversationKey, {
+      leaseOwner: "active-runner",
+      leaseMs: 1_000,
+      now: 150,
+    })
+    await bindConnectorInboundJobExecutionRun(job.id, "execution:run-1", { now: 200 })
+    await completeConnectorInboundJob(job.id, { now: 300 })
+
+    expect(await getDb().connectorInboundJobs.get(job.id)).toEqual(
+      expect.objectContaining({ status: "completed", executionRunId: "execution:run-1" })
     )
   })
 })

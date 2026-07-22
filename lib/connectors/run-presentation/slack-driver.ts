@@ -1,4 +1,3 @@
-import { parseConversationKey } from "@/types/connectors/event"
 import type {
   RunPresentationDriver,
   RunPresentationRef,
@@ -63,7 +62,10 @@ export function createSlackRunPresentationDriver(request: SlackRunRequest): RunP
       if (!target.sourceMessageId) {
         throw new Error("Slack native stream requires sourceMessageId")
       }
-      const { remoteChatId } = parseConversationKey(target.conversationKey)
+      const remoteChatId = target.deliveryTarget?.address.containerId
+      if (!remoteChatId || target.deliveryTarget?.address.platform !== "slack") {
+        throw new Error("Slack native stream requires a persisted Slack delivery target")
+      }
       const response = (await request("POST", "chat.startStream", {
         channel: remoteChatId,
         thread_ts: target.sourceMessageId,

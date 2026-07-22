@@ -1,8 +1,10 @@
-import type { ConversationReference } from "./event"
+import type { ConversationDeliveryTarget, ConversationReference } from "./event"
 import type { MessageSegment, SegmentType } from "./segment"
 
 export interface OutboundRequest {
   conversationRef: ConversationReference
+  /** Complete persisted destination; preferred over the legacy loose reference. */
+  deliveryTarget?: ConversationDeliveryTarget
   segments: MessageSegment[]
   replyTo?: { messageId: string }
   threadId?: string

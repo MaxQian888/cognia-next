@@ -1,6 +1,20 @@
 import { createSlackRunPresentationDriver } from "./slack-driver"
 import type { RunProjectionSnapshot } from "@/types/execution/run"
 
+const deliveryTarget = {
+  address: {
+    conversationKey: "slack:slack-1:C1",
+    platform: "slack" as const,
+    adapterId: "slack-1",
+    scopeKind: "thread" as const,
+    containerId: "C1",
+    topicId: "111.2",
+  },
+  conversationRef: { platform: "slack" as const, adapterId: "slack-1", channelId: "C1" },
+  sourceMessageId: "111.2",
+  refreshedAt: 1,
+}
+
 function snapshot(kind: RunProjectionSnapshot["kind"]): RunProjectionSnapshot {
   return {
     runId: "run-1",
@@ -34,6 +48,7 @@ describe("Slack run presentation driver", () => {
         adapterId: "slack-1",
         conversationKey: "slack:slack-1:C1",
         sourceMessageId: "111.2",
+        deliveryTarget,
         recipientUserId: "U1",
         recipientTeamId: "T1",
       },
@@ -68,7 +83,12 @@ describe("Slack run presentation driver", () => {
       return { ok: true, ts: "1" }
     })
     await dense.open(
-      { adapterId: "slack-1", conversationKey: "slack:slack-1:C1", sourceMessageId: "0.1" },
+      {
+        adapterId: "slack-1",
+        conversationKey: "slack:slack-1:C1",
+        sourceMessageId: "0.1",
+        deliveryTarget,
+      },
       snapshot("agent-turn")
     )
     expect(mode).toBe("dense")

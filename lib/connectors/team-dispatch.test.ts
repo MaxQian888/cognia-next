@@ -122,13 +122,14 @@ describe("startTeamRunFromIM", () => {
       },
       h.deps
     )
-    expect(res).toEqual({ started: true })
+    expect(res).toEqual({ started: true, runId: expect.stringMatching(/^run_team_/) })
     // objective seeded
     expect(h.updates).toEqual([{ teamId: "team_x", updates: { task: "build a parser" } }])
     // lifecycle launched (await a microtask so the fire-and-forget call lands)
     await Promise.resolve()
     expect(h.runCalls).toHaveLength(1)
     expect(h.runCalls[0].teamId).toBe("team_x")
+    expect(h.runCalls[0].deps.runId).toBe(res.runId)
     const triggeredFrom = h.runCalls[0].deps.triggeredFrom as Record<string, unknown>
     expect(triggeredFrom).toEqual({
       source: "im",
@@ -170,7 +171,7 @@ describe("startTeamRunFromIM", () => {
       adapterId: "tg-1",
       conversationKey: "telegram:tg-1:1",
     })
-    expect(res).toEqual({ started: true })
+    expect(res).toEqual({ started: true, runId: expect.stringMatching(/^run_team_/) })
     await Promise.resolve()
     expect(runTeamLifecycleMock).toHaveBeenCalledTimes(1)
   })

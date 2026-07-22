@@ -31,7 +31,8 @@ async function seedAdapter(
   presence?: AdapterInstanceRow["presence"],
   presenceState?: AdapterInstanceRow["presenceState"]
 ): Promise<AdapterInstanceRow> {
-  return createAdapterInstance({
+  const row = await createAdapterInstance({
+    id: "ad-1",
     type: "lark",
     displayName: "Lark Bot",
     enabled: true,
@@ -43,6 +44,26 @@ async function seedAdapter(
     presence,
     presenceState,
   } as unknown as Parameters<typeof createAdapterInstance>[0])
+  await getDb().connectorConversationStates.put({
+    conversationKey: "lark:ad-1:oc_chat",
+    adapterId: "ad-1",
+    activationStatus: "inactive",
+    deliveryReadiness: "unknown",
+    deliveryTarget: {
+      address: {
+        conversationKey: "lark:ad-1:oc_chat",
+        platform: "lark",
+        adapterId: "ad-1",
+        scopeKind: "group",
+        containerId: "oc_chat",
+      },
+      conversationRef: { platform: "lark", adapterId: "ad-1", channelId: "oc_chat" },
+      refreshedAt: 1,
+    },
+    createdAt: 1,
+    updatedAt: 1,
+  })
+  return row
 }
 
 function fakeAdapter(overrides: Partial<PlatformAdapter> = {}): PlatformAdapter {

@@ -6,7 +6,10 @@ import { GitBranchIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { getDb } from "@/lib/db/schema"
-import { resolveInboundActivationPolicy } from "@/lib/connectors/conversation-admission"
+import {
+  resolveDeliveryReadiness,
+  resolveInboundActivationPolicy,
+} from "@/lib/connectors/conversation-admission"
 import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
 
 interface TopicRuntimeChipProps {
@@ -27,7 +30,7 @@ export function TopicRuntimeChip({ adapterId, conversationKey }: TopicRuntimeChi
     ])
     if (!adapter) return undefined
     const requested = resolveInboundActivationPolicy(adapter, override)
-    const readiness = state?.deliveryReadiness ?? adapter.deliveryReadiness ?? "unknown"
+    const readiness = resolveDeliveryReadiness(state?.deliveryReadiness, adapter.deliveryReadiness)
     const needsVerifiedDelivery =
       adapter.type === "lark" && (requested === "always" || requested === "mention_activates")
     const effective =

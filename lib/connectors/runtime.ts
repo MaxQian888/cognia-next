@@ -23,11 +23,12 @@
  */
 
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
-import { parseConversationKey, buildConversationKey } from "@/types/connectors/event"
+import { buildConversationKey } from "@/types/connectors/event"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import type { A2UISegmentContent, MessageSegment } from "@/types/connectors/segment"
 import { projectInboundToA2UI } from "@/lib/connectors/adapters/_shared/inbound-a2ui-dispatch"
 import type { RouteDecision } from "./mode-router"
+import type { LiveSteerHandler } from "./bus"
 import type { ResolvedBinding } from "./policy-resolve"
 import { matchDispatchRule, resolveEffectiveRouting } from "./dispatch-rules"
 import type {
@@ -153,6 +154,7 @@ export interface RespondViaTarget {
   adapterId: string
   conversationKey: string
   conversationRef: NormalizedInboundEvent["conversationRef"]
+  deliveryTarget: import("@/types/connectors/event").ConversationDeliveryTarget
 }
 
 /**
@@ -167,13 +169,14 @@ export interface RespondViaTarget {
  */
 export async function resolveRespondViaTarget(
   respondViaAdapterId: string | undefined,
-  event: Pick<NormalizedInboundEvent, "adapterId" | "conversationKey" | "conversationRef">,
+  event: NormalizedInboundEvent,
   adapterRow: Pick<AdapterInstanceRow, "type">
 ): Promise<RespondViaTarget> {
   const fallback: RespondViaTarget = {
     adapterId: event.adapterId,
     conversationKey: event.conversationKey,
     conversationRef: event.conversationRef,
+    deliveryTarget: deliveryTargetFromEvent(event),
   }
   if (!respondViaAdapterId || respondViaAdapterId === event.adapterId) return fallback
 
@@ -213,24 +216,33 @@ export async function resolveRespondViaTarget(
     return fallback
   }
 
-  let parsed: ReturnType<typeof parseConversationKey>
-  try {
-    parsed = parseConversationKey(event.conversationKey)
-  } catch {
-    await auditDecision(false, { reason: "malformed_conversation_key" })
-    return fallback
-  }
+  const sourceAddress = deliveryTargetFromEvent(event).address
 
   await auditDecision(true)
   return {
     adapterId: targetRow.id,
     conversationKey: buildConversationKey(
-      parsed.platform,
+      sourceAddress.platform,
       targetRow.id,
-      parsed.remoteChatId,
-      parsed.threadId
+      sourceAddress.containerId,
+      sourceAddress.topicId
     ),
     conversationRef: { ...event.conversationRef, adapterId: targetRow.id },
+    deliveryTarget: {
+      address: {
+        ...(event.conversationAddress ?? deliveryTargetFromEvent(event).address),
+        adapterId: targetRow.id,
+        conversationKey: buildConversationKey(
+          sourceAddress.platform,
+          targetRow.id,
+          sourceAddress.containerId,
+          sourceAddress.topicId
+        ),
+      },
+      conversationRef: { ...event.conversationRef, adapterId: targetRow.id },
+      sourceMessageId: event.messageId,
+      refreshedAt: event.timestamp,
+    },
   }
 }
 
@@ -319,6 +331,8 @@ export interface RuntimeOptions {
    * to a deterministic `{ text, messageId }`.
    */
   runAndCapture: RunAndCaptureFn
+  /** Optional phase-aware injection bridge; absent runtimes replay at the next safe boundary. */
+  tryLiveSteer?: LiveSteerHandler
 }
 
 // Session ↔ conversation binding lookups live in `session-bindings.ts` so the
@@ -643,12 +657,14 @@ async function resolveInboundSendOptions(params: {
  * Call this once at app startup (e.g. from ConnectorBusProvider).
  */
 export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOptions): void {
+  bus.liveSteerHandler = opts.tryLiveSteer ?? null
   bus.routeHandler = async (
     event: NormalizedInboundEvent,
     decision: RouteDecision,
     resolved: ResolvedBinding,
     override: ConversationOverrideRow | null,
-    adapterRow: AdapterInstanceRow
+    adapterRow: AdapterInstanceRow,
+    routeContext
   ): Promise<void> => {
     const now = Date.now()
 
@@ -780,6 +796,9 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             conversationKey: event.conversationKey,
             sessionId: session.id,
           })
+          if (res.started && res.runId) {
+            await routeContext.bindExecutionRun(res.runId)
+          }
           const staleInstanceDefault =
             !res.started &&
             res.reason === "team_not_found" &&
@@ -850,6 +869,9 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
               },
             },
           })
+          if (res.ok) {
+            await routeContext.bindExecutionRun(res.runId)
+          }
           await appendAudit({
             adapterId: event.adapterId,
             kind: res.ok ? "workflow.dispatched" : "adapter.error",
@@ -987,6 +1009,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           startedAt: Date.now(),
           updatedAt: Date.now(),
         })
+        await routeContext.bindExecutionRun(executionRunId)
         if (liveActivityEnabled) {
           const teamId =
             typeof event.conversationRef.teamId === "string"
@@ -1039,6 +1062,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             adapterId: event.adapterId,
             conversationKey: event.conversationKey,
             conversationRef: event.conversationRef,
+            deliveryTarget: deliveryTargetFromEvent(event),
             approvalMode: override?.approvalMode,
           }),
           onEvent: (ev: import("@/lib/claude/run-and-capture").CaptureStreamEvent) => {
@@ -1138,7 +1162,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           a2uiSurfaceOrder: captured.a2uiSurfaceOrder,
           telemetry: {
             adapterId: outboundTarget.adapterId,
-            platform: parseConversationKey(outboundTarget.conversationKey).platform,
+            platform: outboundTarget.deliveryTarget.address.platform,
           },
         })
         const idempotencyKey = `airun:${captured.messageId}`
@@ -1149,6 +1173,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           conversationKey: outboundTarget.conversationKey,
           request: {
             conversationRef: outboundTarget.conversationRef,
+            deliveryTarget: outboundTarget.deliveryTarget,
             segments: outboundSegments,
             metadata: {
               idempotencyKey,

@@ -499,7 +499,7 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
     // jobs resolve the same capabilities and delivery paths as live traffic.
     // Stale running leases are surfaced as recovery-required and are never
     // replayed automatically by the bus.
-    await bus.resumeDurableInboundJobs().catch((error) => {
+    await bus.resumeDurableInboundJobs({ reclaimRunning: true }).catch((error) => {
       log(
         "error",
         `[connector-bus] durable inbound recovery failed: ${

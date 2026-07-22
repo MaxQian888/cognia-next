@@ -59,6 +59,8 @@ export interface LeadPlanResult {
 }
 
 export interface RunTeamLifecycleDeps {
+  /** Optional caller-allocated id used to bind an inbound job before side effects begin. */
+  runId?: string
   storeReader: {
     getTeam(teamId: string): AgentTeam | undefined
     getTeammates(teamId: string): AgentTeammate[]
@@ -302,7 +304,7 @@ export async function runTeamLifecycle(
     }
 
     // ── Allocate runId early so the onTeamStart hook can carry it ──
-    const runId = `run_team_${nanoid(12)}`
+    const runId = deps.runId ?? `run_team_${nanoid(12)}`
     const hooks = getPluginLifecycleHooks()
     hooks.dispatchOnTeamStart({
       teamId,

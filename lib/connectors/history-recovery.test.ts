@@ -74,6 +74,14 @@ describe("active conversation history recovery", () => {
       events: [
         event("old", 20_000),
         event("recent-1", 90_000),
+        {
+          ...event("bot", 92_000),
+          sender: {
+            ...event("bot", 92_000).sender,
+            remoteUserId: "cli_other_bot",
+            kind: "bot" as const,
+          },
+        },
         event("wrong", 95_000, "lark:lk-1:oc-1:omt-2"),
         event("recent-2", 100_000),
       ],
@@ -100,9 +108,9 @@ describe("active conversation history recovery", () => {
       { max: 50 }
     )
     expect(dispatched).toEqual(["recent-1"])
-    expect(result).toEqual({ conversations: 1, executed: 1, historyOnly: 2 })
+    expect(result).toEqual({ conversations: 1, executed: 1, historyOnly: 3 })
     expect(await getDb().connectorInboundJobs.where("status").equals("history_only").count()).toBe(
-      2
+      3
     )
     expect(await getDb().connectorConversationStates.get(TARGET.address.conversationKey)).toEqual(
       expect.objectContaining({ historyCursor: { afterTimestamp: 100_000 } })

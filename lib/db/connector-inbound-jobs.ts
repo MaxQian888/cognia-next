@@ -157,12 +157,35 @@ export async function completeConnectorInboundJob(
   id: string,
   options: { executionRunId?: string; now?: number } = {}
 ): Promise<void> {
-  await getDb().connectorInboundJobs.update(id, {
+  const changes: Partial<ConnectorInboundJobRow> = {
     status: "completed",
-    executionRunId: options.executionRunId,
     leaseOwner: undefined,
     leaseExpiresAt: undefined,
     updatedAt: options.now ?? Date.now(),
+  }
+  if (options.executionRunId !== undefined) changes.executionRunId = options.executionRunId
+  await getDb().connectorInboundJobs.update(id, changes)
+}
+
+/**
+ * Durably associate the model/tool execution with its inbound job before any
+ * irreversible work begins. Recovery controls use this identity to avoid
+ * replaying a run whose side effects may already have happened.
+ */
+export async function bindConnectorInboundJobExecutionRun(
+  id: string,
+  executionRunId: string,
+  options: { now?: number } = {}
+): Promise<boolean> {
+  const db = getDb()
+  return db.transaction("rw", db.connectorInboundJobs, async () => {
+    const current = await db.connectorInboundJobs.get(id)
+    if (!current || current.status !== "running") return false
+    await db.connectorInboundJobs.update(id, {
+      executionRunId,
+      updatedAt: options.now ?? Date.now(),
+    })
+    return true
   })
 }
 
@@ -196,19 +219,26 @@ export async function markConnectorInboundJobRecoveryRequired(
 }
 
 export async function recoverStaleConnectorInboundJobs(
-  options: { now?: number } = {}
+  options: { now?: number; reclaimAllRunning?: boolean } = {}
 ): Promise<number> {
   const db = getDb()
   const now = options.now ?? Date.now()
   const stale = await db.connectorInboundJobs
     .where("status")
     .equals("running")
-    .filter((row) => row.leaseExpiresAt !== undefined && row.leaseExpiresAt <= now)
+    .filter(
+      (row) =>
+        options.reclaimAllRunning === true ||
+        (row.leaseExpiresAt !== undefined && row.leaseExpiresAt <= now)
+    )
     .toArray()
   for (const row of stale) {
     await db.connectorInboundJobs.update(row.id, {
       status: "recovery_required",
-      recoveryReason: "inbound_run_lease_expired",
+      recoveryReason:
+        options.reclaimAllRunning === true
+          ? "inbound_runtime_restarted"
+          : "inbound_run_lease_expired",
       leaseOwner: undefined,
       leaseExpiresAt: undefined,
       updatedAt: now,

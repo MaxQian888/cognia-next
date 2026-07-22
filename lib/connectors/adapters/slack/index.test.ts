@@ -86,6 +86,40 @@ function makeAdapter(transport: "socket-mode" | "events-api-webhook" = "socket-m
   })
 }
 
+describe("runtime capabilities", () => {
+  it("degrades assistant presentation features unless Assistant Apps are enabled", () => {
+    const basic = makeAdapter()
+    expect(basic.runPresentation).toBeUndefined()
+    expect(basic.runtimeCapabilities).toEqual(
+      expect.objectContaining({
+        liveSteer: false,
+        textStreaming: false,
+        componentMutation: false,
+        suggestedPrompts: false,
+      })
+    )
+
+    const assistant = createSlackAdapter({
+      id: "sl-assistant",
+      displayName: "Assistant Bot",
+      botToken: async () => "xoxb-test-token",
+      signingSecret: async () => "signing-secret",
+      selfId: "UBOT123",
+      transport: "socket-mode",
+      assistantAppEnabled: true,
+    })
+    expect(assistant.runPresentation).toBeDefined()
+    expect(assistant.runtimeCapabilities).toEqual(
+      expect.objectContaining({
+        liveSteer: false,
+        textStreaming: true,
+        componentMutation: true,
+        suggestedPrompts: true,
+      })
+    )
+  })
+})
+
 // ---------------------------------------------------------------------------
 // Fake socket-mode session
 // ---------------------------------------------------------------------------
@@ -601,7 +635,9 @@ describe("createSlackAdapter", () => {
             return {
               status: 200,
               headers: {},
-              body: JSON.stringify(opts?.completeResp ?? { ok: true, files: [{ id: "F0EXAMPLE" }] }),
+              body: JSON.stringify(
+                opts?.completeResp ?? { ok: true, files: [{ id: "F0EXAMPLE" }] }
+              ),
             }
           }
           return makeSendOkResp("9999.0001")

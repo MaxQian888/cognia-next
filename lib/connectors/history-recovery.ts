@@ -84,6 +84,8 @@ export async function recoverActiveConversationHistory(
     for (const event of ordered) {
       const isHumanCreate =
         (!event.kind || event.kind === "create") &&
+        event.sender.kind !== "bot" &&
+        event.sender.kind !== "system" &&
         event.sender.remoteUserId !== event.selfId &&
         parseControlCommand(event.plainText).kind === "not-a-command"
       if (isHumanCreate && event.timestamp >= cutoff && executedForConversation < executionLimit) {
@@ -111,7 +113,8 @@ export async function recoverActiveConversationHistory(
     })
     await appendAudit({
       adapterId: state.adapterId,
-      kind: "inbound.history_recovered",
+      kind: "inbound.received",
+      reason: "history_recovered",
       at: now,
       conversationKey: state.conversationKey,
       fields: { fetched: ordered.length, executed: executedForConversation },

@@ -904,6 +904,40 @@ describe("outbound-runner — event-driven loop", () => {
     expect(adapter.send).toHaveBeenCalledTimes(1)
   })
 
+  it("requires reconciliation after an ambiguous returned network error", async () => {
+    const adapter = makeAdapter("tg-result-ambiguous", async () => ({
+      ok: false,
+      error: { code: "network", message: "response lost", retryable: true },
+    }))
+    Object.assign(adapter, {
+      runtimeCapabilities: {
+        topicIsolation: "unsupported",
+        unmentionedDelivery: true,
+        historyPagination: false,
+        liveSteer: false,
+        textStreaming: false,
+        componentMutation: false,
+        fullReplacement: false,
+        messageEditing: true,
+        appendFallback: true,
+        interactiveControls: false,
+        followUpBubbles: false,
+        staticMenus: false,
+        suggestedPrompts: false,
+        ambiguousDelivery: "reconciliation_required",
+      },
+    })
+    const job = await enqueue("tg-result-ambiguous", "telegram:tg-result-ambiguous:c1")
+
+    await runOnce(new Map([[adapter.id, adapter]]))
+
+    expect(await getDb().outboundQueue.get(job.id)).toMatchObject({
+      status: "delivery_unknown",
+      lastErrorCode: "delivery_unknown",
+    })
+    expect(adapter.send).toHaveBeenCalledTimes(1)
+  })
+
   it("fires a deferred retry near its deadline, not at the idle cap", async () => {
     // First attempt fails retryably → backoff = BASE(1000ms) * 2^0 + jitter(0)
     // = 1000 ms. With a 60 s idle cap, a poll-based loop woken only every 60 s

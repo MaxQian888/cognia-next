@@ -169,6 +169,28 @@ describe("ConnectorBus turn queue — HITL approval mid-turn (P0)", () => {
 })
 
 describe("ConnectorBus turn queue — parallelism and ordering", () => {
+  it("operator resume does not reclassify an unrelated live turn as recovery-required", async () => {
+    const adapterId = await seedAdapter()
+    const bus = getBus()
+    const gate = deferred()
+    bus.routeHandler = async () => gate.promise
+
+    await bus.dispatchInboundFull(privateEvent(adapterId, "msg_still_running"))
+    const before = await getDb()
+      .connectorInboundJobs.filter((row) => row.sourceMessageId === "msg_still_running")
+      .first()
+    expect(before?.status).toBe("running")
+
+    await expect(bus.resumeDurableInboundJobs()).resolves.toEqual({
+      resumed: 0,
+      recoveryRequired: 0,
+    })
+    expect((await getDb().connectorInboundJobs.get(before!.id))?.status).toBe("running")
+
+    gate.resolve()
+    await bus.flushInboundTurns()
+  })
+
   it("a slow turn in conversation A does not delay conversation B", async () => {
     const adapterId = await seedAdapter()
     const bus = getBus()
@@ -235,6 +257,40 @@ describe("ConnectorBus turn queue — parallelism and ordering", () => {
       ["msg_active", undefined],
       ["msg_steer", "steer-replay"],
     ])
+  })
+
+  it("injects a steer into an active safe runtime without enqueueing a second turn", async () => {
+    const adapterId = await seedAdapter()
+    await updateAdapterInstance(adapterId, { activeRunDispatchMode: "steer" })
+    const bus = getBus()
+    const gate = deferred()
+    const observed: string[] = []
+    bus.routeHandler = async (event) => {
+      observed.push(event.messageId)
+      if (event.messageId === "msg_active") await gate.promise
+    }
+    bus.liveSteerHandler = jest.fn(async () => ({
+      activeRun: true,
+      accepted: true,
+      executionRunId: "execution:active",
+    }))
+
+    await bus.dispatchInboundFull(privateEvent(adapterId, "msg_active"))
+    await bus.dispatchInboundFull(privateEvent(adapterId, "msg_steer_live"))
+
+    expect(bus.liveSteerHandler).toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: "msg_steer_live" })
+    )
+    expect(observed).toEqual(["msg_active"])
+    const job = await getDb()
+      .connectorInboundJobs.filter((row) => row.sourceMessageId === "msg_steer_live")
+      .first()
+    expect(job).toEqual(
+      expect.objectContaining({ status: "completed", executionRunId: "execution:active" })
+    )
+
+    gate.resolve()
+    await bus.flushInboundTurns()
   })
 })
 

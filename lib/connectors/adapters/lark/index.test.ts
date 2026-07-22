@@ -749,9 +749,11 @@ describe("createLarkAdapter", () => {
     expect(events[0].messageId).toBe("om_hist_001")
     expect(events[0].plainText).toBe("history from lark")
     expect(events[0].sender.remoteUserId).toBe("ou_hist_001")
+    expect(events[0].sender.kind).toBe("human")
     expect(events[1].messageId).toBe("om_hist_002")
     expect(events[1].plainText).toBe("from our own bot")
     expect(events[1].sender.remoteUserId).toBe("cli_app_1")
+    expect(events[1].sender.kind).toBe("bot")
 
     const historyCall = mockInvoke.mock.calls.find(
       ([cmd, args]: [string, { req?: { url?: string } }]) =>

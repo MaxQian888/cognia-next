@@ -34,7 +34,11 @@ import {
 import { upsertByConversationKey } from "@/lib/db/conversation-overrides"
 import { getDb } from "@/lib/db/schema"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
-import type { ConnectorMode } from "@/types/connectors/policy"
+import type {
+  ActiveRunDispatchMode,
+  ConnectorMode,
+  InboundActivationPolicy,
+} from "@/types/connectors/policy"
 
 type SkillAllowMode = "inherit" | "all" | "whitelist"
 
@@ -57,6 +61,11 @@ function parseSlaMinutes(buffer: string): number | undefined {
   if (!trimmed) return undefined
   const n = Number(trimmed)
   return Number.isFinite(n) && n > 0 ? Math.round(n) : undefined
+}
+
+function parseActivationTtlMs(buffer: string): number | undefined {
+  const hours = Number(buffer.trim())
+  return Number.isFinite(hours) && hours > 0 ? Math.round(hours * 3_600_000) : undefined
 }
 
 const MODES: ReadonlyArray<{ value: ConnectorMode | "unset"; key: string }> = [
@@ -88,6 +97,15 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
 
   const [mode, setMode] = useState<ConnectorMode | "unset">(
     (initialRow?.mode as ConnectorMode | undefined) ?? "unset"
+  )
+  const [activationPolicy, setActivationPolicy] = useState<InboundActivationPolicy | "inherit">(
+    initialRow?.inboundActivationPolicy ?? "inherit"
+  )
+  const [dispatchMode, setDispatchMode] = useState<ActiveRunDispatchMode | "inherit">(
+    initialRow?.activeRunDispatchMode ?? "inherit"
+  )
+  const [activationTtlHours, setActivationTtlHours] = useState(
+    initialRow?.activationTtlMs ? String(initialRow.activationTtlMs / 3_600_000) : ""
   )
   const [characterId, setCharacterId] = useState(initialRow?.characterId ?? "")
   // Agent Team binding (control-plane multi-agent). When set, inbound AI-run
@@ -186,6 +204,9 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
         conversationKey,
         sessionId,
         mode: mode === "unset" ? undefined : mode,
+        inboundActivationPolicy: activationPolicy === "inherit" ? undefined : activationPolicy,
+        activeRunDispatchMode: dispatchMode === "inherit" ? undefined : dispatchMode,
+        activationTtlMs: parseActivationTtlMs(activationTtlHours),
         characterId: characterId.trim() || undefined,
         teamId: teamId.trim() || undefined,
         workflowId: workflowId.trim() || undefined,
@@ -283,6 +304,9 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
           conversationKey: target.conversationKey,
           sessionId: target.sessionId,
           mode: mode === "unset" ? undefined : mode,
+          inboundActivationPolicy: activationPolicy === "inherit" ? undefined : activationPolicy,
+          activeRunDispatchMode: dispatchMode === "inherit" ? undefined : dispatchMode,
+          activationTtlMs: parseActivationTtlMs(activationTtlHours),
           characterId: characterId.trim() || undefined,
           teamId: teamId.trim() || undefined,
           workflowId: workflowId.trim() || undefined,
@@ -325,6 +349,70 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
             ))}
           </SelectContent>
         </Select>
+      </div>
+
+      <div className="grid gap-3 rounded-md border bg-muted/20 p-3 md:grid-cols-3">
+        <div className="space-y-2">
+          <Label htmlFor="conv-override-activation-policy">
+            {t("fields.activationPolicy.label")}
+          </Label>
+          <Select
+            value={activationPolicy}
+            onValueChange={(value) =>
+              setActivationPolicy(value as InboundActivationPolicy | "inherit")
+            }
+          >
+            <SelectTrigger
+              id="conv-override-activation-policy"
+              data-testid="conv-override-activation-policy"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(
+                ["inherit", "mention_activates", "mention_each", "always", "direct_only"] as const
+              ).map((value) => (
+                <SelectItem key={value} value={value}>
+                  {t(`fields.activationPolicy.options.${value}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="conv-override-dispatch-mode">{t("fields.dispatchMode.label")}</Label>
+          <Select
+            value={dispatchMode}
+            onValueChange={(value) => setDispatchMode(value as ActiveRunDispatchMode | "inherit")}
+          >
+            <SelectTrigger
+              id="conv-override-dispatch-mode"
+              data-testid="conv-override-dispatch-mode"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(["inherit", "queue", "steer"] as const).map((value) => (
+                <SelectItem key={value} value={value}>
+                  {t(`fields.dispatchMode.options.${value}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="conv-override-activation-ttl">{t("fields.activationTtl.label")}</Label>
+          <Input
+            id="conv-override-activation-ttl"
+            type="number"
+            min="1"
+            step="1"
+            value={activationTtlHours}
+            placeholder={t("fields.activationTtl.placeholder")}
+            onChange={(event) => setActivationTtlHours(event.target.value)}
+            data-testid="conv-override-activation-ttl"
+          />
+        </div>
       </div>
 
       <div className="space-y-2">

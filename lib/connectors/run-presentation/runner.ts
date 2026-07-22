@@ -13,6 +13,7 @@ import type {
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { appendAudit } from "@/lib/connectors/audit"
 import { buildA2UISegment } from "@/lib/connectors/a2ui-bridge/a2ui-to-segments"
+import { countPendingConnectorInboundJobs } from "@/lib/db/connector-inbound-jobs"
 
 const TERMINAL = new Set<RunProjectionSnapshot["status"]>(["completed", "failed", "cancelled"])
 const COALESCE_MS = 2_000
@@ -44,6 +45,7 @@ export interface ProjectionDependencies {
   deliverMilestone?(binding: ExecutionRunBinding, snapshot: RunProjectionSnapshot): Promise<void>
   recordDegraded(binding: ExecutionRunBinding, reason: string): Promise<void> | void
   nativeEnabled(binding: ExecutionRunBinding): boolean
+  resolveQueueDepth?(binding: ExecutionRunBinding): Promise<number>
 }
 
 function errorMessage(error: unknown): string {
@@ -124,6 +126,9 @@ export async function projectExecutionRunBinding(
     ...snapshot,
     ...(binding.locale ? { locale: binding.locale } : {}),
     elapsedMs: Math.max(0, (snapshot.endedAt ?? Date.now()) - snapshot.startedAt),
+    ...(deps.resolveQueueDepth
+      ? { connectorQueueDepth: await deps.resolveQueueDepth(binding) }
+      : {}),
   }
   const projectedSnapshot = piiSafeSnapshot(contextualSnapshot)
   if (projectedSnapshot !== contextualSnapshot) {
@@ -131,17 +136,19 @@ export async function projectExecutionRunBinding(
   }
 
   const driver = deps.nativeEnabled(binding) ? deps.resolveDriver(binding) : undefined
+  let latestBinding = binding
   if (driver && binding.deliveryMode === "native") {
     try {
       const checkpoint = async (checkpointRef: RunPresentationRef) => {
-        await deps.saveBinding({
-          ...binding,
+        latestBinding = {
+          ...latestBinding,
           ...(checkpointRef.platformMessageId
             ? { platformMessageId: checkpointRef.platformMessageId }
             : {}),
           ...(checkpointRef.opaqueState ? { presentationState: checkpointRef.opaqueState } : {}),
           updatedAt: Date.now(),
-        })
+        }
+        await deps.saveBinding(latestBinding)
       }
       const ref = binding.platformMessageId
         ? TERMINAL.has(snapshot.status)
@@ -166,7 +173,7 @@ export async function projectExecutionRunBinding(
         await deps.deliverMilestone?.(binding, projectedSnapshot)
       }
       const next: ExecutionRunBinding = {
-        ...binding,
+        ...latestBinding,
         ...(ref.platformMessageId ? { platformMessageId: ref.platformMessageId } : {}),
         ...(ref.opaqueState ? { presentationState: ref.opaqueState } : {}),
         lastProjectedRevision: snapshot.revision,
@@ -176,13 +183,13 @@ export async function projectExecutionRunBinding(
       await deps.saveBinding(next)
       return next
     } catch (error) {
-      await deps.recordDegraded(binding, errorMessage(error))
+      await deps.recordDegraded(latestBinding, errorMessage(error))
     }
   }
 
-  const fallbackRef = await deps.deliverFallback(binding, projectedSnapshot)
+  const fallbackRef = await deps.deliverFallback(latestBinding, projectedSnapshot)
   const next: ExecutionRunBinding = {
-    ...binding,
+    ...latestBinding,
     ...(fallbackRef.platformMessageId ? { platformMessageId: fallbackRef.platformMessageId } : {}),
     ...(fallbackRef.opaqueState ? { presentationState: fallbackRef.opaqueState } : {}),
     deliveryMode: fallbackRef.platformMessageId ? "card-edit" : "append",
@@ -234,6 +241,7 @@ async function deliverMilestone(
     conversationKey: binding.conversationKey,
     request: {
       conversationRef: deliveryConversationRef(binding),
+      deliveryTarget: binding.deliveryTarget,
       segments: [{ type: "markdown", md: markdown(snapshot) }],
       metadata: {
         idempotencyKey: `execution-run:${binding.id}:${snapshot.revision}:final`,
@@ -259,6 +267,7 @@ async function deliverFallback(
     conversationKey: binding.conversationKey,
     request: {
       conversationRef: deliveryConversationRef(binding),
+      deliveryTarget: binding.deliveryTarget,
       segments: [
         buildA2UISegment(`execution-run:${snapshot.runId}`, {
           components: {
@@ -339,6 +348,9 @@ const defaultDependencies: ProjectionDependencies = {
     })
   },
   nativeEnabled,
+  resolveQueueDepth(binding) {
+    return countPendingConnectorInboundJobs(binding.conversationKey)
+  },
 }
 
 let subscription: Subscription | null = null
@@ -396,25 +408,40 @@ export async function heartbeatExecutionRunBinding(bindingId: string): Promise<v
     : undefined
   if (!snapshot || !driver || !binding.platformMessageId || TERMINAL.has(snapshot.status)) return
   projecting.add(bindingId)
+  let latestBinding = binding
   try {
     const contextualSnapshot: RunProjectionSnapshot = {
       ...snapshot,
       ...(binding.locale ? { locale: binding.locale } : {}),
       elapsedMs: Math.max(0, Date.now() - snapshot.startedAt),
+      connectorQueueDepth: await countPendingConnectorInboundJobs(binding.conversationKey),
     }
     const projectedSnapshot = piiSafeSnapshot(contextualSnapshot)
     if (projectedSnapshot !== contextualSnapshot) {
       await defaultDependencies.recordDegraded(binding, "pii_gate_blocked")
     }
-    const ref = await driver.update(presentationRef(binding), projectedSnapshot)
+    const checkpoint = async (checkpointRef: RunPresentationRef) => {
+      latestBinding = {
+        ...latestBinding,
+        ...(checkpointRef.platformMessageId
+          ? { platformMessageId: checkpointRef.platformMessageId }
+          : {}),
+        ...(checkpointRef.opaqueState ? { presentationState: checkpointRef.opaqueState } : {}),
+        updatedAt: Date.now(),
+      }
+      await defaultDependencies.saveBinding(latestBinding)
+    }
+    const ref = await driver.update(presentationRef(latestBinding), projectedSnapshot, {
+      checkpoint,
+    })
     await defaultDependencies.saveBinding({
-      ...binding,
+      ...latestBinding,
       ...(ref.platformMessageId ? { platformMessageId: ref.platformMessageId } : {}),
       ...(ref.opaqueState ? { presentationState: ref.opaqueState } : {}),
       updatedAt: Date.now(),
     })
   } catch (error) {
-    await defaultDependencies.recordDegraded(binding, errorMessage(error))
+    await defaultDependencies.recordDegraded(latestBinding, errorMessage(error))
   } finally {
     projecting.delete(bindingId)
   }

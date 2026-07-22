@@ -43,6 +43,53 @@ export type AtGateReason =
   | "at_direct_only"
   | ConversationAdmissionReason
 
+/**
+ * Observe the operator-authorized Lark no-mention probe after the durable
+ * inbound job exists. Returns true when the event was consumed as proof and
+ * must remain history-only rather than becoming an Agent turn.
+ */
+export async function observeUnmentionedDeliveryProbe(
+  adapterId: string,
+  event: NormalizedInboundEvent,
+  row: AdapterInstanceRow
+): Promise<boolean> {
+  const probe = row.settings.unmentionedDeliveryProbe as
+    { startedAt?: number; expiresAt?: number; consoleConfirmed?: boolean } | undefined
+  const probeActive =
+    probe?.consoleConfirmed === true &&
+    typeof probe.startedAt === "number" &&
+    typeof probe.expiresAt === "number" &&
+    probe.expiresAt >= Date.now()
+  if (
+    event.platform !== "lark" ||
+    event.channel.kind === "private" ||
+    event.mentions.selfMentioned ||
+    row.deliveryReadiness === "all_messages_verified" ||
+    !probeActive
+  ) {
+    return false
+  }
+  await updateAdapterInstance(adapterId, {
+    deliveryReadiness: "all_messages_verified",
+    settings: {
+      ...row.settings,
+      unmentionedDeliveryProbe: {
+        ...probe,
+        observedAt: Date.now(),
+        sourceMessageId: event.messageId,
+      },
+    },
+  })
+  await appendAudit({
+    adapterId,
+    kind: "inbound.policy_blocked",
+    at: Date.now(),
+    conversationKey: event.conversationKey,
+    reason: "delivery_probe_observed",
+  }).catch(() => undefined)
+  return true
+}
+
 export interface AtGateDecision {
   allowed: boolean
   reason?: AtGateReason
@@ -213,46 +260,6 @@ export async function gateInboundEvent(
   } else if (row.chatAllowlist?.length && !row.chatAllowlist.includes(chatId)) {
     decision = { allowed: false, reason: "chat_allowlist" }
   } else {
-    // Receiving one unmentioned Lark group event is the only authoritative
-    // runtime proof that `im:message.group_msg` delivery is active. Persist the
-    // proof for future events, but keep evaluating this probe against the
-    // previously effective policy so it cannot unexpectedly start a turn.
-    const probe = row.settings.unmentionedDeliveryProbe as
-      { startedAt?: number; expiresAt?: number; consoleConfirmed?: boolean } | undefined
-    const probeActive =
-      probe?.consoleConfirmed === true &&
-      typeof probe.startedAt === "number" &&
-      typeof probe.expiresAt === "number" &&
-      probe.expiresAt >= Date.now()
-    if (
-      event.platform === "lark" &&
-      event.channel.kind !== "private" &&
-      !event.mentions.selfMentioned &&
-      row.deliveryReadiness !== "all_messages_verified" &&
-      probeActive
-    ) {
-      await updateAdapterInstance(adapterId, {
-        deliveryReadiness: "all_messages_verified",
-        settings: {
-          ...row.settings,
-          unmentionedDeliveryProbe: {
-            ...probe,
-            observedAt: Date.now(),
-            sourceMessageId: event.messageId,
-          },
-        },
-      }).catch(() => undefined)
-      await appendAudit({
-        adapterId,
-        kind: "inbound.policy_blocked",
-        at: Date.now(),
-        conversationKey: event.conversationKey,
-        reason: "delivery_probe_observed",
-      }).catch(() => undefined)
-      // The probe proves transport readiness; it must not also become the
-      // first ordinary turn under an `always` policy.
-      return false
-    }
     // Admission belongs to the bus, after durable job creation and override
     // resolution. Transport adapters only enforce chat/sibling guardrails.
     decision = { allowed: true }

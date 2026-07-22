@@ -68,6 +68,17 @@ export function createImDeliver(
         // silently (no adapterId to audit against).
         return
       }
+      if (!binding.deliveryTarget) {
+        await audit({
+          adapterId: binding.adapterId,
+          kind: "notify.im_skipped",
+          at: Date.now(),
+          conversationKey,
+          reason: "delivery_target_missing",
+          fields: { notificationId: rec.id },
+        })
+        return
+      }
 
       const override = await readOverride(conversationKey).catch(() => undefined)
       if (override?.proactivePush !== true) {
@@ -100,6 +111,7 @@ export function createImDeliver(
         conversationKey,
         request: {
           conversationRef: binding.conversationRef,
+          deliveryTarget: binding.deliveryTarget,
           segments: [{ type: "text", text: text || rec.title }],
           // Idempotency keyed on the record id → a coalesce bump re-delivering
           // the same record is deduped by the outbound runner.

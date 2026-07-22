@@ -40,8 +40,8 @@ import { getDb } from "@/lib/db/schema"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
 import { topoSort } from "@/lib/workflow/runtime/topo-sort"
 import { listForWorkflow as listFanoutForWorkflow } from "@/lib/db/workflow-fanout-subscriptions"
-import { parseConversationKey } from "@/types/connectors/event"
-import type { PlatformKind } from "@/types/connectors/platform-kind"
+import type { ConversationDeliveryTarget } from "@/types/connectors/event"
+import { getConnectorConversationState } from "@/lib/db/connector-conversation-state"
 import { getBus } from "@/lib/connectors/bus"
 import type {
   RunStatus,
@@ -78,6 +78,7 @@ interface ChannelState {
   channelKey: string
   adapterId: string
   conversationKey: string
+  deliveryTarget?: ConversationDeliveryTarget
   mode: "cumulative" | "append"
   /** ID of the FIRST enqueue's outbound job (cumulative mode only). */
   entryJobId: string | null
@@ -329,13 +330,18 @@ async function createWatcher(
 
   const channels = new Map<string, ChannelState>()
 
-  function addChannel(adapterId: string, conversationKey: string): void {
+  function addChannel(
+    adapterId: string,
+    conversationKey: string,
+    deliveryTarget?: ConversationDeliveryTarget
+  ): void {
     const key = channelKey(adapterId, conversationKey)
     if (channels.has(key)) return
     channels.set(key, {
       channelKey: key,
       adapterId,
       conversationKey,
+      ...(deliveryTarget ? { deliveryTarget } : {}),
       mode: supportsEdit(adapterId) ? "cumulative" : "append",
       entryJobId: null,
       entryPlatformMessageId: null,
@@ -346,7 +352,10 @@ async function createWatcher(
   }
 
   // 1. Originator is always a channel. Inferred from triggeredBy.
-  addChannel(triggeredBy.adapterId!, triggeredBy.conversationKey!)
+  const originDeliveryTarget =
+    triggeredBy.deliveryTarget ??
+    (await getConnectorConversationState(triggeredBy.conversationKey!))?.deliveryTarget
+  addChannel(triggeredBy.adapterId!, triggeredBy.conversationKey!, originDeliveryTarget)
 
   // 2. Live fan-out subscriptions for this workflow. The `addChannel`
   // dedup absorbs the case where the operator subscribed the channel
@@ -354,7 +363,11 @@ async function createWatcher(
   try {
     const subs = await listSubs(row.workflowId)
     for (const sub of subs) {
-      addChannel(sub.adapterId, sub.conversationKey)
+      addChannel(
+        sub.adapterId,
+        sub.conversationKey,
+        (await getConnectorConversationState(sub.conversationKey))?.deliveryTarget
+      )
     }
   } catch (err) {
     console.error(`[workflow-progress-runner] listSubs failed for ${row.workflowId}`, err)
@@ -679,18 +692,15 @@ async function dispatch(
   enqueue: typeof enqueueOutbound,
   editTargetMessageId: string | null
 ): Promise<OutboundJobRow | null> {
-  let platform: PlatformKind
-  try {
-    platform = parseConversationKey(channel.conversationKey).platform
-  } catch {
-    return null
-  }
+  const deliveryTarget = channel.deliveryTarget
+  if (!deliveryTarget || deliveryTarget.address.adapterId !== channel.adapterId) return null
   try {
     const job = await enqueue({
       adapterId: channel.adapterId,
       conversationKey: channel.conversationKey,
       request: {
-        conversationRef: { platform, adapterId: channel.adapterId },
+        conversationRef: deliveryTarget.conversationRef,
+        deliveryTarget,
         segments,
         metadata: { idempotencyKey },
         ...(editTargetMessageId ? { editTargetMessageId } : {}),

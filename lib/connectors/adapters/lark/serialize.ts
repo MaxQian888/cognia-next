@@ -168,10 +168,7 @@ export function serializeSend(req: OutboundRequest): SerializedLarkCall {
         },
       }
     }
-    // Legacy refs persisted before threadRootMessageId existed carry only
-    // the thread_id, which no send endpoint accepts — fall through to a
-    // plain chat send (same visible behaviour as before, minus the bogus
-    // ignored fields).
+    throw new Error("Cannot deliver a Lark topic message without a persisted thread reply anchor")
   }
 
   const payload: Record<string, unknown> = {
@@ -420,6 +417,7 @@ export async function serializeOutboundAsync(
         },
       }
     }
+    throw new Error("Cannot deliver a Lark topic message without a persisted thread reply anchor")
   }
 
   const payload: Record<string, unknown> = {

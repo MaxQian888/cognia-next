@@ -105,6 +105,16 @@ describe("OutboundStatusPill", () => {
     expect(screen.queryByTestId("outbound-retry-btn-j5")).not.toBeInTheDocument()
   })
 
+  it("renders ambiguous delivery as unknown without offering an unsafe retry", () => {
+    mockJob = makeJob("j-unknown", "delivery_unknown")
+    render(<OutboundStatusPill jobId="j-unknown" />)
+    expect(screen.getByTestId("outbound-status-pill-j-unknown")).toHaveAttribute(
+      "data-status",
+      "delivery_unknown"
+    )
+    expect(screen.queryByTestId("outbound-retry-btn-j-unknown")).not.toBeInTheDocument()
+  })
+
   it("Retry button resets status to pending", async () => {
     mockJob = makeJob("j6", "failed")
     render(<OutboundStatusPill jobId="j6" />)

@@ -58,6 +58,17 @@ const mockSession: ChatSession = {
     adapterId: "adp_discord",
     conversationKey: "discord:adp_discord:ch_test",
     conversationRef: { platform: "discord", adapterId: "adp_discord", channelId: "ch_test" },
+    deliveryTarget: {
+      address: {
+        conversationKey: "discord:adp_discord:ch_test",
+        platform: "discord",
+        adapterId: "adp_discord",
+        scopeKind: "channel",
+        containerId: "ch_test",
+      },
+      conversationRef: { platform: "discord", adapterId: "adp_discord", channelId: "ch_test" },
+      refreshedAt: 1,
+    },
   },
   createdAt: 0,
   updatedAt: 0,
@@ -179,6 +190,25 @@ describe("connection:outbound:send executor", () => {
       segments: [{ type: "text", text: "hello scheduled" }],
       idempotencyKey: "idem_001",
     }
+    await getDb().connectorConversationStates.put({
+      conversationKey,
+      adapterId: "adp_d",
+      activationStatus: "inactive",
+      deliveryReadiness: "unknown",
+      deliveryTarget: {
+        address: {
+          conversationKey,
+          platform: "discord",
+          adapterId: "adp_d",
+          scopeKind: "channel",
+          containerId: "chat_1",
+        },
+        conversationRef: { platform: "discord", adapterId: "adp_d", channelId: "chat_1" },
+        refreshedAt: 1,
+      },
+      createdAt: 1,
+      updatedAt: 1,
+    })
 
     const result = await callExecutor(
       "connection:outbound:send",
@@ -194,6 +224,25 @@ describe("connection:outbound:send executor", () => {
   })
 
   it("derives platform from the conversationKey (not hardcoded telegram)", async () => {
+    await getDb().connectorConversationStates.put({
+      conversationKey: "slack:adp_sl:ch_xyz",
+      adapterId: "adp_sl",
+      activationStatus: "inactive",
+      deliveryReadiness: "unknown",
+      deliveryTarget: {
+        address: {
+          conversationKey: "slack:adp_sl:ch_xyz",
+          platform: "slack",
+          adapterId: "adp_sl",
+          scopeKind: "channel",
+          containerId: "ch_xyz",
+        },
+        conversationRef: { platform: "slack", adapterId: "adp_sl", channelId: "ch_xyz" },
+        refreshedAt: 1,
+      },
+      createdAt: 1,
+      updatedAt: 1,
+    })
     await callExecutor(
       "connection:outbound:send",
       makeTask(),

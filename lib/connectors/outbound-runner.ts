@@ -513,12 +513,15 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
     if (candidates.length === 0) return null
     const now = clock()
 
-    let parsedKey: ReturnType<typeof parseConversationKey>
-    try {
-      parsedKey = parseConversationKey(job.conversationKey)
-    } catch {
-      // Malformed key — fall through to the caller's normal path.
-      return null
+    const persistedAddress = job.request.deliveryTarget?.address
+    let parsedKey: ReturnType<typeof parseConversationKey> | undefined
+    if (!persistedAddress) {
+      try {
+        parsedKey = parseConversationKey(job.conversationKey)
+      } catch {
+        // Legacy row without a complete target and with a malformed key.
+        return null
+      }
     }
 
     for (const targetId of candidates) {
@@ -545,17 +548,30 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
 
       const keySuffix = mechanism === "failover" ? "fo" : "lb"
       const newConversationKey = buildConversationKey(
-        parsedKey.platform,
+        persistedAddress?.platform ?? parsedKey!.platform,
         targetId,
-        parsedKey.remoteChatId,
-        parsedKey.threadId
+        persistedAddress?.containerId ?? parsedKey!.remoteChatId,
+        persistedAddress?.topicId ?? parsedKey!.threadId
       )
+      const reroutedRef = { ...job.request.conversationRef, adapterId: targetId }
+      const reroutedTarget = job.request.deliveryTarget
+        ? {
+            ...job.request.deliveryTarget,
+            address: {
+              ...job.request.deliveryTarget.address,
+              adapterId: targetId,
+              conversationKey: newConversationKey,
+            },
+            conversationRef: reroutedRef,
+          }
+        : undefined
       const newJob = await enqueueOutbound({
         adapterId: targetId,
         conversationKey: newConversationKey,
         request: {
           ...job.request,
-          conversationRef: { ...job.request.conversationRef, adapterId: targetId },
+          conversationRef: reroutedRef,
+          ...(reroutedTarget ? { deliveryTarget: reroutedTarget } : {}),
           metadata: {
             ...job.request.metadata,
             idempotencyKey: `${job.request.metadata.idempotencyKey}:${keySuffix}:${targetId}`,
@@ -626,7 +642,10 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
     const job = await getDb().outboundQueue.get(jobId)
     if (!job) return // already processed or deleted
 
-    const { conversationKey, request } = job
+    const { conversationKey } = job
+    const request = job.request.deliveryTarget
+      ? { ...job.request, conversationRef: job.request.deliveryTarget.conversationRef }
+      : { ...job.request }
     const { idempotencyKey } = request.metadata
 
     // ── Cross-pass FIFO guard ─────────────────────────────────────────────
@@ -806,7 +825,9 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
       try {
         let platform = ""
         try {
-          platform = parseConversationKey(conversationKey).platform
+          platform =
+            request.deliveryTarget?.address.platform ??
+            parseConversationKey(conversationKey).platform
         } catch {
           platform = ""
         }
@@ -1089,7 +1110,22 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
         outcome: "failed",
         errorCode: err.code,
       })
-      if (err.retryable) {
+      const ambiguousRemoteFailure =
+        adapter.runtimeCapabilities?.ambiguousDelivery === "reconciliation_required" &&
+        (err.code === "network" || err.code === "platform_5xx")
+      if (ambiguousRemoteFailure) {
+        await markDeliveryUnknown(job.id, "delivery_unknown", err.message)
+        breaker.recordFailure()
+        await appendAudit({
+          adapterId,
+          kind: "delivery.error",
+          at: now,
+          conversationKey,
+          idempotencyKey,
+          reason: "delivery_unknown",
+          message: err.message,
+        })
+      } else if (err.retryable) {
         const retryAfter = err.retryAfterMs ?? 0
         const backoff =
           computeBackoffDelay(job.attempts, {

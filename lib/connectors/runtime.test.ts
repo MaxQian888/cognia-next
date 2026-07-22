@@ -70,7 +70,10 @@ jest.mock("@cognia/provider-embedding/embedding", () => ({
 
 // Team dispatch is mocked so the team-branch can be probed without importing
 // the heavy Agent-Team graph. Returns `started: true` by default.
-const mockStartTeamRunFromIM = jest.fn(async (..._args: unknown[]) => ({ started: true as const }))
+const mockStartTeamRunFromIM = jest.fn(async (..._args: unknown[]) => ({
+  started: true as const,
+  runId: "run_team_default",
+}))
 jest.mock("./team-dispatch", () => ({
   __esModule: true,
   startTeamRunFromIM: (...args: unknown[]) => mockStartTeamRunFromIM(...(args as [])),
@@ -175,7 +178,10 @@ async function callHandler(
   const adapterRow =
     (await getAdapterInstance(event.adapterId)) ?? ({ id: event.adapterId } as AdapterInstanceRow)
   const override = (await readForResolution(event.conversationKey)) ?? null
-  await bus.routeHandler(event, decision, resolved, override, adapterRow)
+  await bus.routeHandler(event, decision, resolved, override, adapterRow, {
+    inboundJobId: `test:${event.messageId}`,
+    bindExecutionRun: mockBindExecutionRun,
+  })
 }
 
 /**
@@ -215,6 +221,7 @@ const DEFAULT_RUN_AND_CAPTURE: RunAndCaptureFn = jest.fn(async () => ({
   text: "Hello back from Claude!",
   messageId: "uuid-asst-1",
 }))
+const mockBindExecutionRun = jest.fn(async () => undefined)
 
 // ── setup ─────────────────────────────────────────────────────────────────────
 
@@ -233,6 +240,7 @@ beforeEach(async () => {
   tryBuildTwinDepsImpl = jest.fn(async () => undefined)
   tryBuildMemoryDepsImpl = jest.fn(async () => undefined)
   endSpanMock.mockClear()
+  mockBindExecutionRun.mockClear()
   installRuntime(bus, { runAndCapture: DEFAULT_RUN_AND_CAPTURE })
 })
 
@@ -778,7 +786,7 @@ describe("installRuntime — ai-run (team dispatch branch)", () => {
 
   beforeEach(() => {
     mockStartTeamRunFromIM.mockClear()
-    mockStartTeamRunFromIM.mockResolvedValue({ started: true })
+    mockStartTeamRunFromIM.mockResolvedValue({ started: true, runId: "run_team_bound" })
     mockStartWorkflowFromIM.mockClear()
     mockStartWorkflowFromIM.mockResolvedValue({ ok: true, runId: "run_x" })
   })
@@ -813,6 +821,7 @@ describe("installRuntime — ai-run (team dispatch branch)", () => {
     expect(arg.teamId).toBe("team_r")
     expect(arg.goal).toBe("hello runtime")
     expect(arg.conversationKey).toBe(key)
+    expect(mockBindExecutionRun).toHaveBeenCalledWith("run_team_bound")
 
     const audit = await getDb().connectorAudit.toArray()
     expect(audit.some((r) => r.kind === "team.dispatched")).toBe(true)
@@ -874,6 +883,7 @@ describe("installRuntime — ai-run (team dispatch branch)", () => {
     expect(arg.runParams.message).toBe("hello runtime")
     expect(arg.triggeredFrom.source).toBe("im")
     expect(arg.triggeredFrom.conversationKey).toBe(key)
+    expect(mockBindExecutionRun).toHaveBeenCalledWith("run_x")
 
     const audit = await getDb().connectorAudit.toArray()
     expect(audit.some((r) => r.kind === "workflow.dispatched")).toBe(true)
@@ -1178,7 +1188,7 @@ describe("installRuntime — ai-run (team dispatch branch)", () => {
 describe("installRuntime — ai-run (dispatch rules W3)", () => {
   beforeEach(() => {
     mockStartTeamRunFromIM.mockClear()
-    mockStartTeamRunFromIM.mockResolvedValue({ started: true })
+    mockStartTeamRunFromIM.mockResolvedValue({ started: true, runId: "run_team_rule" })
     mockStartWorkflowFromIM.mockClear()
     mockStartWorkflowFromIM.mockResolvedValue({ ok: true, runId: "run_x" })
   })
@@ -1794,7 +1804,16 @@ describe("installRuntime — ai-run respond-via rule", () => {
       dispatchRules: [{ id: "r_via", match: {}, action: { respondViaAdapterId: "adapter_2" } }],
     })
     await putInstance("adapter_2")
-    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_42" })
+    const event = makeEvent({
+      conversationKey: "telegram:adapter_1:chat_42",
+      conversationAddress: {
+        conversationKey: "telegram:adapter_1:chat_42",
+        platform: "telegram",
+        adapterId: "adapter_1",
+        scopeKind: "private",
+        containerId: "chat_42",
+      },
+    })
     await callHandler(event, "ai-run")
 
     const jobs = await getDb().outboundQueue.toArray()

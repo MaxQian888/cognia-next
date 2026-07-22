@@ -267,6 +267,41 @@ describe("ConversationOverrideForm", () => {
     expect(persisted?.slaResponseMinutes).toBe(45)
   })
 
+  it("persists topic activation, queue/steer dispatch, and TTL overrides", async () => {
+    const initial: ConversationOverrideRow = {
+      id: "co-runtime",
+      conversationKey: "lark:lark-1:oc_runtime:omt_1",
+      sessionId: "s_runtime",
+      inboundActivationPolicy: "mention_activates",
+      activeRunDispatchMode: "steer",
+      activationTtlMs: 24 * 3_600_000,
+      createdAt: 0,
+      updatedAt: 0,
+    }
+    await getDb().conversationOverrides.put(initial)
+    const onDone = jest.fn()
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey={initial.conversationKey}
+        sessionId={initial.sessionId}
+        initialRow={initial}
+        onDone={onDone}
+      />
+    )
+    fireEvent.change(screen.getByTestId("conv-override-activation-ttl"), {
+      target: { value: "48" },
+    })
+    fireEvent.click(screen.getByTestId("conv-override-save"))
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+
+    expect(await getDb().conversationOverrides.get(initial.id)).toMatchObject({
+      inboundActivationPolicy: "mention_activates",
+      activeRunDispatchMode: "steer",
+      activationTtlMs: 48 * 3_600_000,
+    })
+  })
+
   it("updates an existing row in place (no second row created)", async () => {
     await getDb().conversationOverrides.put({
       id: "co-existing",

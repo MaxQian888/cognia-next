@@ -39,6 +39,7 @@ const STATUS_CONFIG: Record<
   sending: { icon: LoaderIcon, colorClass: "text-amber-500" },
   sent: { icon: CheckIcon, colorClass: "text-emerald-500" },
   failed: { icon: AlertCircleIcon, colorClass: "text-destructive" },
+  delivery_unknown: { icon: AlertCircleIcon, colorClass: "text-amber-600" },
   deadlettered: { icon: BanIcon, colorClass: "text-destructive" },
 }
 

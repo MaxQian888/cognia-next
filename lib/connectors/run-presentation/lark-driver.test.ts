@@ -42,6 +42,7 @@ const snapshot = (
   recentSteps: [],
   pendingSteps: [],
   pendingStepCount: 1,
+  connectorQueueDepth: 2,
   elapsedMs: 1_000,
   artifacts: [],
   allowedActions: status === "running" ? ["stop", "pause"] : [],
@@ -71,9 +72,11 @@ describe("Lark run presentation driver", () => {
     expect(calls[1].body).toEqual(
       expect.objectContaining({ reply_in_thread: true, uuid: expect.any(String) })
     )
+    expect(calls[0].body).toEqual(expect.objectContaining({ uuid: expect.any(String) }))
     expect((calls[2].body as { sequence: number }).sequence).toBe(1)
     expect((calls[3].body as { sequence: number }).sequence).toBe(2)
     expect((calls[4].body as { sequence: number }).sequence).toBe(3)
+    expect(JSON.stringify(calls[2].body)).toContain("Queue depth: 2")
     expect(ref.platformMessageId).toBe("msg-1")
     expect(updated.opaqueState?.lastAcknowledgedSequence).toBe(2)
     expect(updated.opaqueState?.elementIds).toEqual({
@@ -100,6 +103,22 @@ describe("Lark run presentation driver", () => {
     expect(createdData).toContain("truncated")
   })
 
+  it("uses full replacement when the action component structure changes", async () => {
+    const paths: string[] = []
+    const driver = createLarkRunPresentationDriver(async (_method, path) => {
+      paths.push(path)
+      if (path === "/cardkit/v1/cards") return { data: { card_id: "card-structure" } }
+      if (path.startsWith("/im/v1/messages")) return { data: { message_id: "msg-structure" } }
+      return { data: {} }
+    })
+    const opened = await driver.open(topicTarget, snapshot(1))
+
+    await driver.update(opened, { ...snapshot(2), allowedActions: [] })
+
+    expect(paths.at(-1)).toBe("/cardkit/v1/cards/card-structure")
+    expect(paths.filter((path) => path.includes("/elements/"))).toHaveLength(0)
+  })
+
   it("checkpoints the card entity and resumes without creating a duplicate", async () => {
     const calls: string[] = []
     const checkpoints: Array<{ opaqueState?: Record<string, unknown> }> = []
@@ -117,7 +136,42 @@ describe("Lark run presentation driver", () => {
     await driver.open(topicTarget, snapshot(1), { previousRef: first })
 
     expect(calls.filter((path) => path === "/cardkit/v1/cards")).toHaveLength(1)
-    expect(checkpoints[0]?.opaqueState?.cardId).toBe("card-checkpoint")
+    expect(checkpoints[0]?.opaqueState?.pendingCreate).toEqual(
+      expect.objectContaining({ uuid: expect.any(String) })
+    )
+    expect(checkpoints.some((ref) => ref.opaqueState?.cardId === "card-checkpoint")).toBe(true)
+  })
+
+  it("reuses the same deterministic creation UUID after an ambiguous create response", async () => {
+    const createUuids: string[] = []
+    let first = true
+    let pendingRef: { opaqueState?: Record<string, unknown> } | undefined
+    const driver = createLarkRunPresentationDriver(async (_method, path, body) => {
+      if (path === "/cardkit/v1/cards") {
+        createUuids.push((body as { uuid: string }).uuid)
+        if (first) {
+          first = false
+          throw new Error("connection reset after create")
+        }
+        return { data: { card_id: "card-reconciled" } }
+      }
+      return { data: { message_id: "message-reconciled" } }
+    })
+
+    await expect(
+      driver.open(topicTarget, snapshot(1), {
+        checkpoint: async (ref) => {
+          pendingRef = ref
+        },
+      })
+    ).rejects.toThrow("connection reset")
+    await driver.open(topicTarget, snapshot(1), {
+      previousRef: pendingRef,
+      checkpoint: async () => undefined,
+    })
+
+    expect(createUuids).toHaveLength(2)
+    expect(createUuids[1]).toBe(createUuids[0])
   })
 
   it("checkpoints and reuses the same sequence and UUID across an ambiguous retry", async () => {
@@ -167,5 +221,29 @@ describe("Lark run presentation driver", () => {
 
     await expect(driver.update(opened, snapshot(2))).resolves.toBeDefined()
     expect(sleep).toHaveBeenCalledWith(150)
+  })
+
+  it("keeps mutation UUIDs unique for long execution run identifiers", async () => {
+    const uuids: string[] = []
+    const driver = createLarkRunPresentationDriver(async (_method, path, body) => {
+      if (path === "/cardkit/v1/cards") return { data: { card_id: "card-long" } }
+      if (path.startsWith("/im/v1/messages")) return { data: { message_id: "msg-long" } }
+      uuids.push((body as { uuid: string }).uuid)
+      return { data: {} }
+    })
+    const long = snapshot(1)
+    long.runId = `execution:agent:${"session".repeat(20)}:${"message".repeat(20)}`
+    const opened = await driver.open(topicTarget, long)
+    const next = { ...long, revision: 2 }
+
+    await driver.update(opened, next)
+
+    expect(new Set(uuids).size).toBe(2)
+    expect(uuids.every((uuid) => uuid.length <= 64)).toBe(true)
+  })
+
+  it("declares follow-up bubbles unsupported until Feishu exposes a durable server API", () => {
+    const driver = createLarkRunPresentationDriver(async () => ({ data: {} }))
+    expect(driver.capabilities.followUpBubbles).toBe(false)
   })
 })

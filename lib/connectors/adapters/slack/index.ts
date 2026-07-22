@@ -973,7 +973,12 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
     runPresentation: opts.assistantAppEnabled
       ? createSlackRunPresentationDriver(doRequest)
       : undefined,
-    runtimeCapabilities: builtInConnectorRuntimeCapabilities("slack"),
+    runtimeCapabilities: {
+      ...builtInConnectorRuntimeCapabilities("slack"),
+      textStreaming: opts.assistantAppEnabled === true,
+      componentMutation: opts.assistantAppEnabled === true,
+      suggestedPrompts: opts.assistantAppEnabled === true,
+    },
     start,
     stop,
     health,

@@ -25,6 +25,12 @@ interface PendingCardMutation {
   body: Record<string, unknown>
 }
 
+interface PendingCardCreate {
+  uuid: string
+  target: RunPresentationTarget
+  createdAt: number
+}
+
 interface LarkCardState {
   cardId: string
   lastAcknowledgedSequence: number
@@ -32,6 +38,7 @@ interface LarkCardState {
   elementIds: { summary: string; actions: string }
   target: RunPresentationTarget
   pendingMutation?: PendingCardMutation
+  hasActions: boolean
 }
 
 export interface LarkRunPresentationDriverOptions {
@@ -86,6 +93,21 @@ function clamp(value: string | undefined, max: number): string | undefined {
   return `${value.slice(0, max - 14)}… (truncated)`
 }
 
+/** Build a compact deterministic UUID whose entropy includes the entire input. */
+function deterministicUuid(input: string): string {
+  const hash = (seed: number): string => {
+    let value = seed >>> 0
+    for (let index = 0; index < input.length; index += 1) {
+      value ^= input.charCodeAt(index)
+      value = Math.imul(value, 0x01000193)
+      value ^= value >>> 13
+    }
+    return (value >>> 0).toString(16).padStart(8, "0")
+  }
+  const hex = [0x811c9dc5, 0x9e3779b9, 0x85ebca6b, 0xc2b2ae35].map(hash).join("")
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`
+}
+
 function cardJson(snapshot: RunProjectionSnapshot, streaming: boolean): Record<string, unknown> {
   const zh = snapshot.locale?.toLowerCase().startsWith("zh") === true
   const statusLabel = zh ? STATUS_LABEL_ZH : STATUS_LABEL_EN
@@ -108,6 +130,11 @@ function cardJson(snapshot: RunProjectionSnapshot, streaming: boolean): Record<s
     clamp(snapshot.waitingReason ?? snapshot.error ?? snapshot.summary, 4_000),
     ...stepLines,
     snapshot.pendingStepCount > 0 ? `_${snapshot.pendingStepCount} more pending_` : undefined,
+    snapshot.connectorQueueDepth !== undefined
+      ? zh
+        ? `队列深度：${snapshot.connectorQueueDepth}`
+        : `Queue depth: ${snapshot.connectorQueueDepth}`
+      : undefined,
     ...snapshot.artifacts
       .slice(0, 4)
       .map((artifact) =>
@@ -245,6 +272,8 @@ function state(ref: RunPresentationRef): LarkCardState {
     ...(pendingMutation && typeof pendingMutation === "object"
       ? { pendingMutation: pendingMutation as PendingCardMutation }
       : {}),
+    hasActions:
+      typeof ref.opaqueState?.hasActions === "boolean" ? ref.opaqueState.hasActions : false,
   }
 }
 
@@ -295,7 +324,9 @@ export function createLarkRunPresentationDriver(
   ): Promise<string | undefined> {
     const delivery = sendTarget(target)
     const content = JSON.stringify({ type: "card", data: { card_id: cardId } })
-    const uuid = `run-card:${snapshot.runId}:${delivery.address.conversationKey}`.slice(0, 64)
+    const uuid = deterministicUuid(
+      `card-send:${snapshot.runId}:${delivery.address.conversationKey}`
+    )
     if (delivery.address.topicId) {
       const anchor = delivery.sourceMessageId ?? target.sourceMessageId
       if (!anchor) throw new Error("Lark topic presentation has no valid reply anchor")
@@ -319,11 +350,23 @@ export function createLarkRunPresentationDriver(
   async function openCard(
     target: RunPresentationTarget,
     snapshot: RunProjectionSnapshot,
-    checkpoint?: (ref: RunPresentationRef) => Promise<void>
+    checkpoint?: (ref: RunPresentationRef) => Promise<void>,
+    previousRef?: RunPresentationRef
   ): Promise<RunPresentationRef> {
+    const previousCreate = previousRef?.opaqueState?.pendingCreate as PendingCardCreate | undefined
+    const pendingCreate: PendingCardCreate = previousCreate ?? {
+      uuid: deterministicUuid(`card-create:${snapshot.runId}:${target.conversationKey}`),
+      target,
+      createdAt: now(),
+    }
+    await checkpoint?.({
+      ...previousRef,
+      opaqueState: { ...previousRef?.opaqueState, pendingCreate },
+    })
     const created = (await request("POST", "/cardkit/v1/cards", {
       type: "card_json",
       data: serializeCard(snapshot, true),
+      uuid: pendingCreate.uuid,
     })) as { data?: { card_id?: string } }
     const cardId = created.data?.card_id
     if (!cardId) throw new Error("Lark CardKit create response omitted card_id")
@@ -334,6 +377,8 @@ export function createLarkRunPresentationDriver(
         [CARD_CREATED_AT_KEY]: now(),
         elementIds: { summary: SUMMARY_ELEMENT_ID, actions: ACTIONS_ELEMENT_ID },
         target,
+        hasActions: snapshot.allowedActions.length > 0,
+        pendingCreate: undefined,
       },
     }
     await checkpoint?.(provisional)
@@ -354,43 +399,45 @@ export function createLarkRunPresentationDriver(
       return openCard(current.target, snapshot, checkpoint)
     }
     const sequence = current.lastAcknowledgedSequence + 1
+    const mutationUuid = (kind: string) =>
+      deterministicUuid(`card-mutation:${snapshot.runId}:${sequence}:${kind}`)
     const desired: PendingCardMutation =
       operation === "stream_summary"
         ? {
             sequence,
-            uuid: `${snapshot.runId}:${sequence}:summary`.slice(0, 64),
+            uuid: mutationUuid("summary"),
             operation,
             method: "PUT",
             path: `/cardkit/v1/cards/${current.cardId}/elements/${current.elementIds.summary}/content`,
             body: {
               content: summaryContent(snapshot),
               sequence,
-              uuid: `${snapshot.runId}:${sequence}:summary`.slice(0, 64),
+              uuid: mutationUuid("summary"),
             },
           }
         : operation === "update_actions"
           ? {
               sequence,
-              uuid: `${snapshot.runId}:${sequence}:actions`.slice(0, 64),
+              uuid: mutationUuid("actions"),
               operation,
               method: "PUT",
               path: `/cardkit/v1/cards/${current.cardId}/elements/${current.elementIds.actions}`,
               body: {
                 element: actionsElement(snapshot),
                 sequence,
-                uuid: `${snapshot.runId}:${sequence}:actions`.slice(0, 64),
+                uuid: mutationUuid("actions"),
               },
             }
           : {
               sequence,
-              uuid: `${snapshot.runId}:${sequence}:replace`.slice(0, 64),
+              uuid: mutationUuid("replace"),
               operation,
               method: "PUT",
               path: `/cardkit/v1/cards/${current.cardId}`,
               body: {
                 card: { type: "card_json", data: serializeCard(snapshot, false) },
                 sequence,
-                uuid: `${snapshot.runId}:${sequence}:replace`.slice(0, 64),
+                uuid: mutationUuid("replace"),
               },
             }
     const pending = current.pendingMutation ?? desired
@@ -413,6 +460,7 @@ export function createLarkRunPresentationDriver(
         ...ref.opaqueState,
         lastAcknowledgedSequence: pending.sequence,
         pendingMutation: undefined,
+        hasActions: snapshot.allowedActions.length > 0,
       },
     }
     await checkpoint?.(acknowledged)
@@ -434,12 +482,12 @@ export function createLarkRunPresentationDriver(
       messageEditing: true,
       appendFallback: true,
       interactiveControls: true,
-      followUpBubbles: true,
+      followUpBubbles: false,
     },
     async open(target, snapshot, options) {
       const provisional = options?.previousRef
       if (!provisional?.opaqueState?.cardId) {
-        return openCard(target, snapshot, options?.checkpoint)
+        return openCard(target, snapshot, options?.checkpoint, provisional)
       }
       if (provisional.platformMessageId) return provisional
       const current = state(provisional)
@@ -452,7 +500,12 @@ export function createLarkRunPresentationDriver(
       return result
     },
     async update(ref, snapshot, mutationOptions) {
+      const current = state(ref)
+      if (current.hasActions !== snapshot.allowedActions.length > 0) {
+        return mutate(ref, snapshot, "replace_card", mutationOptions?.checkpoint)
+      }
       const streamed = await mutate(ref, snapshot, "stream_summary", mutationOptions?.checkpoint)
+      if (snapshot.allowedActions.length === 0) return streamed
       return mutate(streamed, snapshot, "update_actions", mutationOptions?.checkpoint)
     },
     finish(ref, snapshot, mutationOptions) {

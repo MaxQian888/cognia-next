@@ -82,6 +82,17 @@ export function LarkAtStrategy({ adapterId }: LarkAtStrategyProps) {
     }
   }
 
+  const onActivationTtlChange = async (raw: string) => {
+    const hours = Number(raw)
+    if (!Number.isFinite(hours) || hours <= 0) return
+    setSaving(true)
+    try {
+      await updateAdapterInstance(adapterId, { activationTtlMs: Math.round(hours * 3_600_000) })
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const startReadinessProbe = async () => {
     setSaving(true)
     const startedAt = Date.now()
@@ -183,6 +194,20 @@ export function LarkAtStrategy({ adapterId }: LarkAtStrategyProps) {
               </div>
             ))}
           </RadioGroup>
+          <div className="space-y-1 pt-1">
+            <Label htmlFor="lark-activation-ttl">{t("activationTtl.label")}</Label>
+            <Input
+              key={row?.activationTtlMs ?? "default"}
+              id="lark-activation-ttl"
+              type="number"
+              min="1"
+              step="1"
+              defaultValue={(row?.activationTtlMs ?? 24 * 3_600_000) / 3_600_000}
+              onBlur={(event) => void onActivationTtlChange(event.target.value)}
+              data-testid="lark-activation-ttl"
+            />
+            <p className="text-xs text-muted-foreground">{t("activationTtl.help")}</p>
+          </div>
         </div>
 
         <div className="space-y-2 border-t pt-3">

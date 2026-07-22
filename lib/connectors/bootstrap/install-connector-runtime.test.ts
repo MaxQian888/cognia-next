@@ -284,7 +284,7 @@ describe("installConnectorRuntime", () => {
       expect(mockRegisterAdapter).toHaveBeenCalledWith(fakeAdapter)
     })
     expect(mockInstallRuntime).toHaveBeenCalledTimes(1)
-    expect(mockResumeDurableInboundJobs).toHaveBeenCalledTimes(1)
+    expect(mockResumeDurableInboundJobs).toHaveBeenCalledWith({ reclaimRunning: true })
     expect(mockStartOutboundRunner).toHaveBeenCalledTimes(1)
   })
 

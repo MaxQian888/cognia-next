@@ -47,6 +47,8 @@ export interface PlatformIdentity {
   displayName?: string
   avatarUrl?: string
   mergedFromIds?: string[]
+  /** Sender class as reported by the adapter; omitted for legacy human rows. */
+  kind?: "human" | "bot" | "system"
 }
 
 export type ChannelKind = "private" | "group" | "channel" | "thread"

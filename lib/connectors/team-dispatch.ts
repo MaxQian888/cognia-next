@@ -29,6 +29,7 @@ export interface StartTeamRunFromIMInput {
 
 export interface StartTeamRunFromIMResult {
   started: boolean
+  runId?: string
   reason?: "team_not_found" | "no_team_id" | "dispatch_error"
 }
 
@@ -130,8 +131,10 @@ export async function startTeamRunFromIM(
   }
 
   const partial = buildAgentTeamRuntimeDeps()
+  const runId = `run_team_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`
   const lifecycleDeps: Record<string, unknown> = {
     ...partial,
+    runId,
     triggeredFrom,
     // Belt-and-braces: the lifecycle also derives "im" from triggeredFrom,
     // but stating it keeps the headless gate policy explicit.
@@ -155,7 +158,7 @@ export async function startTeamRunFromIM(
   // notification path), never letting them reject the inbound dispatch.
   void Promise.resolve(runTeamLifecycle(teamId, lifecycleDeps)).catch(() => undefined)
 
-  return { started: true }
+  return { started: true, runId }
 }
 
 /**

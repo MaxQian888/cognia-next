@@ -245,6 +245,8 @@ export interface AdapterInstanceRow {
   inboundActivationPolicy?: InboundActivationPolicy
   /** Default handling of new messages while this adapter already has an active run. */
   activeRunDispatchMode?: ActiveRunDispatchMode
+  /** Sliding topic activation lifetime; defaults to 24 hours. */
+  activationTtlMs?: number
   /** Runtime-observed delivery readiness; configuration alone never sets this to verified. */
   deliveryReadiness?: DeliveryReadiness
   /**
@@ -629,6 +631,8 @@ export interface ConversationOverrideRow {
   inboundActivationPolicy?: InboundActivationPolicy
   /** Optional topic/channel-specific override of the adapter active-run policy. */
   activeRunDispatchMode?: ActiveRunDispatchMode
+  /** Topic-specific sliding activation lifetime override. */
+  activationTtlMs?: number
   characterId?: string
   trigger?: Partial<TriggerPolicy>
   pinned?: boolean

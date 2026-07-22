@@ -32,7 +32,6 @@ import { resolveSendOptions, type InboxSendPolicy } from "@/lib/claude/build-opt
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
 import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
 import { resolveMemoryConfig } from "@/types/memory/memory"
-import { parseConversationKey } from "@/types/connectors/event"
 import { assistantReplyToSegments } from "@/lib/connectors/a2ui-bridge/a2ui-to-segments"
 import { safeSendPrompt, PiiGateBlocked } from "@/lib/connectors/ai-loop/safe-send-prompt"
 import { findSessionByConversationKey } from "./runtime"
@@ -40,6 +39,7 @@ import { appendAudit } from "./audit"
 import type { MessageSegment } from "@/types/connectors/segment"
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 import type { OutboundJobSource, OutboundJobWorkflowSource } from "@/lib/db/connector-types"
+import { getConnectorConversationState } from "@/lib/db/connector-conversation-state"
 
 // ---------------------------------------------------------------------------
 // Payload shapes (informal — the scheduler passes Record<string,unknown>)
@@ -114,17 +114,21 @@ async function handleOutboundSend(
   const { adapterId, conversationKey, segments, idempotencyKey } = payload
   const now = Date.now()
 
-  // Recover platform from the conversationKey so we don't lie about the
-  // ref shape (the prior stub hard-coded `"telegram"`, which corrupted
-  // any non-Telegram adapter the operator scheduled an outbound on).
-  const { platform } = parseConversationKey(conversationKey)
+  const deliveryTarget = (await getConnectorConversationState(conversationKey))?.deliveryTarget
+  if (!deliveryTarget || deliveryTarget.address.adapterId !== adapterId) {
+    return {
+      success: false,
+      error: "No persisted delivery target is available for this scheduled conversation",
+    }
+  }
 
   try {
     const job = await enqueueOutbound({
       adapterId,
       conversationKey,
       request: {
-        conversationRef: { platform, adapterId },
+        conversationRef: deliveryTarget.conversationRef,
+        deliveryTarget,
         segments,
         metadata: {
           idempotencyKey: idempotencyKey ?? crypto.randomUUID(),
@@ -305,7 +309,11 @@ export async function runConnectorDigestTurn(input: RunDigestInput): Promise<Run
   }
 
   // ── Step 5: project text + A2UI surfaces into outbound segments ─────
-  const { platform } = parseConversationKey(conversationKey)
+  const deliveryTarget = session.platformBinding?.deliveryTarget
+  if (!deliveryTarget || deliveryTarget.address.adapterId !== adapterId) {
+    return { success: false, error: "Scheduled digest has no persisted delivery target" }
+  }
+  const platform = deliveryTarget.address.platform
   const outboundSegments: MessageSegment[] = assistantReplyToSegments({
     text: captured.text,
     a2uiSurfaces: captured.a2uiSurfaces,
@@ -322,7 +330,8 @@ export async function runConnectorDigestTurn(input: RunDigestInput): Promise<Run
       adapterId,
       conversationKey,
       request: {
-        conversationRef: session.platformBinding?.conversationRef ?? { platform, adapterId },
+        conversationRef: deliveryTarget.conversationRef,
+        deliveryTarget,
         segments: outboundSegments,
         metadata: {
           idempotencyKey,

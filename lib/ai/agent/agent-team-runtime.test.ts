@@ -248,6 +248,7 @@ describe("runTeamLifecycle (F-path synthesizer)", () => {
     })
     const deps = {
       ...buildDeps(baseTeam, [task("t1")], [lead, worker("w1")]),
+      runId: "run_team_connector_bound",
       triggeredFrom: {
         source: "im" as const,
         adapterId: "lark:a1",
@@ -257,6 +258,7 @@ describe("runTeamLifecycle (F-path synthesizer)", () => {
     }
     const result = await runTeamLifecycle("team-1", deps)
     expect(result.status).toBe("completed")
+    expect(result.runId).toBe("run_team_connector_bound")
     const row = await getDb().workflowRuns.get(result.runId)
     expect(row?.triggeredBy).toEqual({
       source: "im",

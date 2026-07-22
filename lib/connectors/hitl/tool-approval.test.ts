@@ -19,7 +19,7 @@ import {
   __resetApprovalRegistryForTesting,
 } from "./approval-registry"
 import type { PermissionRequestEvent } from "@cognia/agent-config-types"
-import type { ConversationReference } from "@/types/connectors/event"
+import type { ConversationDeliveryTarget, ConversationReference } from "@/types/connectors/event"
 
 const REF: ConversationReference = { platform: "telegram", adapterId: "tg-1" }
 
@@ -33,13 +33,16 @@ function req(over: Partial<PermissionRequestEvent> = {}): PermissionRequestEvent
 }
 
 interface Harness {
-  enqueued: Array<{ segments: unknown[] }>
+  enqueued: Array<{ segments: unknown[]; deliveryTarget?: ConversationDeliveryTarget }>
   bindings: Array<{ actionId: string; kind?: string; payload?: Record<string, unknown> }>
   audits: string[]
   ctx: Parameters<typeof makeImPermissionResponder>[0]
 }
 
-function harness(approvalMode?: "prompt" | "yolo"): Harness {
+function harness(
+  approvalMode?: "prompt" | "yolo",
+  deliveryTarget?: ConversationDeliveryTarget
+): Harness {
   const enqueued: Harness["enqueued"] = []
   const bindings: Harness["bindings"] = []
   const audits: string[] = []
@@ -48,9 +51,15 @@ function harness(approvalMode?: "prompt" | "yolo"): Harness {
     adapterId: "tg-1",
     conversationKey: "telegram:tg-1:9",
     conversationRef: REF,
+    deliveryTarget,
     approvalMode,
-    enqueue: (async (job: { request: { segments: unknown[] } }) => {
-      enqueued.push({ segments: job.request.segments })
+    enqueue: (async (job: {
+      request: { segments: unknown[]; deliveryTarget?: ConversationDeliveryTarget }
+    }) => {
+      enqueued.push({
+        segments: job.request.segments,
+        deliveryTarget: job.request.deliveryTarget,
+      })
     }) as unknown as Harness["ctx"]["enqueue"],
     recordBinding: (async (b: {
       actionId: string
@@ -121,6 +130,34 @@ describe("makeImPermissionResponder", () => {
     // Resolve via the registry → the suspended promise settles.
     resolveApproval("s1", "req_1", { decision: "allow" })
     await expect(pending).resolves.toEqual({ decision: "allow" })
+  })
+
+  it("carries the persisted delivery target onto the approval job", async () => {
+    const target: ConversationDeliveryTarget = {
+      address: {
+        conversationKey: "lark:lk-1:oc-1:omt-1",
+        platform: "lark",
+        adapterId: "lk-1",
+        scopeKind: "thread",
+        containerId: "oc-1",
+        topicId: "omt-1",
+      },
+      conversationRef: {
+        platform: "lark",
+        adapterId: "lk-1",
+        channelId: "oc-1",
+        threadTs: "omt-1",
+        threadRootMessageId: "om-1",
+      },
+      sourceMessageId: "om-1",
+      refreshedAt: 1,
+    }
+    const h = harness("prompt", target)
+    const pending = makeImPermissionResponder(h.ctx)(req())
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(h.enqueued[0].deliveryTarget).toEqual(target)
+    resolveApproval("s1", "req_1", { decision: "deny" })
+    await pending
   })
 
   it("denies (fail-closed) when surfacing the card throws", async () => {

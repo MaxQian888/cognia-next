@@ -6,6 +6,7 @@ import {
   activateConnectorConversation,
   closeConnectorConversation,
   getConnectorConversationState,
+  refreshConnectorConversationDeliveryTarget,
   touchConnectorConversation,
 } from "./connector-conversation-state"
 import type { ConversationDeliveryTarget } from "@/types/connectors/event"
@@ -78,5 +79,32 @@ describe("connector conversation state", () => {
     const closed = await getConnectorConversationState(TARGET.address.conversationKey)
     expect(closed).toEqual(expect.objectContaining({ activationStatus: "inactive" }))
     expect(closed?.expiresAt).toBeUndefined()
+  })
+
+  it("creates an inactive target row and never downgrades verified readiness", async () => {
+    const initial = await refreshConnectorConversationDeliveryTarget(TARGET, {
+      deliveryReadiness: "all_messages_verified",
+      now: 1_000,
+    })
+    expect(initial).toEqual(
+      expect.objectContaining({
+        activationStatus: "inactive",
+        deliveryReadiness: "all_messages_verified",
+        createdAt: 1_000,
+      })
+    )
+
+    const refreshed = await refreshConnectorConversationDeliveryTarget(
+      { ...TARGET, sourceMessageId: "om-2", refreshedAt: 2_000 },
+      { deliveryReadiness: "mentions_only", now: 2_000 }
+    )
+    expect(refreshed).toEqual(
+      expect.objectContaining({
+        deliveryReadiness: "all_messages_verified",
+        createdAt: 1_000,
+        updatedAt: 2_000,
+      })
+    )
+    expect(refreshed.deliveryTarget.sourceMessageId).toBe("om-2")
   })
 })

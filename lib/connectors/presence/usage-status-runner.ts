@@ -24,7 +24,7 @@ import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-inst
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
 import { getBus } from "@/lib/connectors/bus"
 import { appendAudit } from "@/lib/connectors/audit"
-import { parseConversationKey } from "@/types/connectors/event"
+import { getConnectorConversationState } from "@/lib/db/connector-conversation-state"
 import {
   buildUsageCardMarkdown,
   buildUsageStatusSnapshot,
@@ -151,7 +151,10 @@ async function refreshCard(args: {
 }): Promise<void> {
   const { adapterId, config, state, snapshot, now } = args
   const conversationKey = config.cardConversationKey!
-  const { platform } = parseConversationKey(conversationKey)
+  const deliveryTarget = (await getConnectorConversationState(conversationKey))?.deliveryTarget
+  if (!deliveryTarget || deliveryTarget.address.adapterId !== adapterId) {
+    throw new Error("Usage status card has no persisted delivery target")
+  }
 
   // Resolve the card's platform message id from the creating job (the
   // outbound runner records `platformMessageId` on delivery). Mirrors
@@ -189,7 +192,8 @@ async function refreshCard(args: {
     adapterId,
     conversationKey,
     request: {
-      conversationRef: { platform, adapterId },
+      conversationRef: deliveryTarget.conversationRef,
+      deliveryTarget,
       segments,
       metadata: { idempotencyKey: `usage-presence:${adapterId}:${now}` },
       ...(state.cardMessageId ? { editTargetMessageId: state.cardMessageId } : {}),

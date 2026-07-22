@@ -7737,34 +7737,6 @@
       "mention_only": "仅 @提及",
       "tooltip": "该适配器的回复范围：{strategy}"
     },
-    "topicRuntime": {
-      "active": "已激活",
-      "activeRun": "当前运行：{value}",
-      "activation": "话题激活：{value}",
-      "aria": "话题运行时：{policy}，{dispatch}",
-      "badge": "{policy} · {dispatch}",
-      "capabilities": "话题隔离：{topic}；{count} 项丰富展示能力",
-      "effective": "生效策略：{value}",
-      "fallback": {
-        "delivery_unverified": "降级原因：尚未验证免 @ 投递，因此仍要求 @。"
-      },
-      "inactive": "未激活",
-      "none": "无",
-      "queue": "队列深度：{count}",
-      "readiness": "投递就绪：{value}",
-      "recovery": "待恢复：{count}",
-      "requested": "请求策略：{value}"
-    },
-    "inboundRecovery": {
-      "continueSafely": "安全继续",
-      "description": "消息已持久化接收，但执行中断，模型或工具副作用可能已经发生。请选择明确的恢复操作。",
-      "dismiss": "忽略",
-      "message": "消息 {id} · {reason}",
-      "retryFromStart": "从头重试",
-      "retryWarning": "从头重试可能重复模型输出或工具副作用。请先核对外部状态，再决定是否继续。",
-      "title": "入站消息需要恢复",
-      "unknown": "未知原因"
-    },
     "banner": {
       "outboundSaturated": {
         "count": "{count, plural, =1 {1 条消息被限流} other {# 条消息被限流}}",
@@ -7926,6 +7898,20 @@
       "deleteOverrideConfirm": "删除该会话的覆盖？该会话将回退到适配器默认配置。",
       "dialogTitle": "会话覆盖设置",
       "fields": {
+        "activationPolicy": {
+          "label": "激活策略",
+          "options": {
+            "always": "始终响应",
+            "direct_only": "仅私聊",
+            "inherit": "继承适配器默认值",
+            "mention_activates": "首次 @ 激活话题",
+            "mention_each": "每次都需要 @"
+          }
+        },
+        "activationTtl": {
+          "label": "激活有效期（小时）",
+          "placeholder": "继承适配器默认值"
+        },
         "advancedJson": "高级 (勿扰时段 + 冷却 + 静音)",
         "advancedJsonHelp": "这些字段会写入该会话的 `trigger` 部分覆盖，覆盖适配器级触发策略。",
         "allowComputerUse": "允许 Computer Use 工具",
@@ -7952,6 +7938,14 @@
         "character": "角色 (id)",
         "characterPlaceholder": "（无）",
         "cooldownMs": "机器人回复后冷却时间 (ms)",
+        "dispatchMode": {
+          "label": "运行中消息派发",
+          "options": {
+            "inherit": "继承适配器默认值",
+            "queue": "进入队列",
+            "steer": "Steering"
+          }
+        },
         "liveActivity": "实时活动卡片",
         "liveActivityHint": "助手工作时在对话中显示实时进度卡片（工具数、用时、当前操作、文件编辑）。默认开启；频道消息过多时可关闭。",
         "mode": "模式",
@@ -8043,6 +8037,16 @@
     "inboundA2UI": {
       "rawPayload": "原始负载"
     },
+    "inboundRecovery": {
+      "continueSafely": "安全继续",
+      "description": "消息已持久化接收，但执行中断，模型或工具副作用可能已经发生。请选择明确的恢复操作。",
+      "dismiss": "忽略",
+      "message": "消息 {id} · {reason}",
+      "retryFromStart": "从头重试",
+      "retryWarning": "从头重试可能重复模型输出或工具副作用。请先核对外部状态，再决定是否继续。",
+      "title": "入站消息需要恢复",
+      "unknown": "未知原因"
+    },
     "labels": {
       "addAria": "添加或移除标签",
       "empty": "暂无标签——请在设置中创建。",
@@ -8083,6 +8087,7 @@
       "retry": "重试",
       "status": {
         "deadlettered": "已死信",
+        "delivery_unknown": "投递状态未知",
         "failed": "失败",
         "pending": "排队中",
         "sending": "发送中",
@@ -8171,6 +8176,24 @@
       "syncing": {
         "label": "正在加载缓存…"
       }
+    },
+    "topicRuntime": {
+      "activation": "话题激活：{value}",
+      "active": "已激活",
+      "activeRun": "当前运行：{value}",
+      "aria": "话题运行时：{policy}，{dispatch}",
+      "badge": "{policy} · {dispatch}",
+      "capabilities": "话题隔离：{topic}；{count} 项丰富展示能力",
+      "effective": "生效策略：{value}",
+      "fallback": {
+        "delivery_unverified": "降级原因：尚未验证免 @ 投递，因此仍要求 @。"
+      },
+      "inactive": "未激活",
+      "none": "无",
+      "queue": "队列深度：{count}",
+      "readiness": "投递就绪：{value}",
+      "recovery": "待恢复：{count}",
+      "requested": "请求策略：{value}"
     },
     "unreadPill": {
       "aria": "{count} 条未读"
@@ -19586,14 +19609,19 @@
         "appSecretPlaceholder": "App secret…",
         "appSecretRequired": "App Secret 不能为空。",
         "atStrategy": {
+          "activationTtl": {
+            "help": "每次接收人类消息后滑动续期，默认 24 小时。",
+            "label": "话题激活有效期（小时）"
+          },
           "defaultNotice": "默认：首次 @ 激活当前话题 24 小时，仅影响该话题。",
-          "help": "控制话题激活方式。私聊始终处理；群聊免 @ 还必须先完成消息投递就绪验证。",
-          "options": {
-            "always": "始终响应每一条消息",
-            "directOnly": "仅私聊 — 群聊永不回应",
-            "mentionActivates": "首次 @ 激活当前话题，后续无需 @",
-            "mentionEach": "群聊每条消息都必须 @机器人",
-            "mentionOnly": "仅 @ 机器人 — 群聊中需要被 @（默认）"
+          "diagnostics": {
+            "capabilities": "能力 — 话题隔离：{topic}；文本流式：{stream}；组件更新：{mutate}",
+            "effective": "生效策略：{value}",
+            "no": "否",
+            "requested": "请求策略：{value}",
+            "title": "运行时生效诊断",
+            "unverifiedFallback": "降级：尚未验证免 @ 投递，因此群聊每条消息仍需 @。",
+            "yes": "是"
           },
           "dispatch": {
             "help": "选择话题已有运行任务时新消息的处理方式。运行时不支持安全实时注入时，steer 会在最早安全边界作为独立消息重放。",
@@ -19603,14 +19631,13 @@
             },
             "title": "运行中消息派发"
           },
-          "diagnostics": {
-            "capabilities": "能力 — 话题隔离：{topic}；文本流式：{stream}；组件更新：{mutate}",
-            "effective": "生效策略：{value}",
-            "no": "否",
-            "requested": "请求策略：{value}",
-            "title": "运行时生效诊断",
-            "unverifiedFallback": "降级：尚未验证免 @ 投递，因此群聊每条消息仍需 @。",
-            "yes": "是"
+          "help": "控制话题激活方式。私聊始终处理；群聊免 @ 还必须先完成消息投递就绪验证。",
+          "options": {
+            "always": "始终响应每一条消息",
+            "directOnly": "仅私聊 — 群聊永不回应",
+            "mentionActivates": "首次 @ 激活当前话题，后续无需 @",
+            "mentionEach": "群聊每条消息都必须 @机器人",
+            "mentionOnly": "仅 @ 机器人 — 群聊中需要被 @（默认）"
           },
           "readiness": {
             "help": "先在开发者后台开通 im:message.group_msg 并发布应用。启动 10 分钟探测后，在群里发送一条不 @机器人的消息；只有实际观察到该事件才会通过验证。",

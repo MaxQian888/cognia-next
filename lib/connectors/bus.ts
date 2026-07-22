@@ -63,6 +63,7 @@ import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { segmentsToPlainText, type MessageSegment } from "@/types/connectors/segment"
 import {
   claimConnectorInboundJob,
+  bindConnectorInboundJobExecutionRun,
   completeConnectorInboundJob,
   ensureConnectorInboundJob,
   listRecoverableConnectorInboundJobs,
@@ -72,10 +73,26 @@ import {
   updateConnectorInboundJobPayload,
 } from "@/lib/db/connector-inbound-jobs"
 import { admitConversationEvent } from "./conversation-admission"
+import { observeUnmentionedDeliveryProbe } from "./at-gate"
+import { deliveryTargetFromEvent } from "@/types/connectors/event"
+import { refreshConnectorConversationDeliveryTarget } from "@/lib/db/connector-conversation-state"
 
 export interface BusInboundHandler {
   (event: NormalizedInboundEvent): Promise<void>
 }
+
+export interface RouteHandlerContext {
+  inboundJobId: string
+  bindExecutionRun(executionRunId: string): Promise<void>
+}
+
+export interface LiveSteerResult {
+  activeRun: boolean
+  accepted: boolean
+  executionRunId?: string
+}
+
+export type LiveSteerHandler = (event: NormalizedInboundEvent) => Promise<LiveSteerResult>
 
 /**
  * Called by the runtime (Task 37) to handle the final routing decision.
@@ -91,7 +108,8 @@ export type RouteHandler = (
   decision: RouteDecision,
   resolved: ResolvedBinding,
   override: ConversationOverrideRow | null,
-  adapterRow: AdapterInstanceRow
+  adapterRow: AdapterInstanceRow,
+  context: RouteHandlerContext
 ) => void | Promise<void>
 
 /**
@@ -164,6 +182,8 @@ export class ConnectorBus {
   >()
   /** Optional: set by Task 37 runtime. */
   routeHandler: RouteHandler | null = null
+  /** Optional safe live-injection bridge supplied by an active runtime. */
+  liveSteerHandler: LiveSteerHandler | null = null
   /**
    * Optional connector-callback handler. Wired in production to
    * `lib/a2ui/connector-callback-handler.ts`, which forwards the event
@@ -363,8 +383,12 @@ export class ConnectorBus {
    * Expired running leases are deliberately converted to `recovery_required`
    * and are not replayed because model/tool side effects may already exist.
    */
-  async resumeDurableInboundJobs(): Promise<{ resumed: number; recoveryRequired: number }> {
-    const recoveryRequired = await recoverStaleConnectorInboundJobs()
+  async resumeDurableInboundJobs(
+    options: { reclaimRunning?: boolean } = {}
+  ): Promise<{ resumed: number; recoveryRequired: number }> {
+    const recoveryRequired = options.reclaimRunning
+      ? await recoverStaleConnectorInboundJobs({ reclaimAllRunning: true })
+      : 0
     const jobs = await listRecoverableConnectorInboundJobs()
     for (const job of jobs) {
       try {
@@ -479,6 +503,14 @@ export class ConnectorBus {
         at: now,
         reason: "missing_adapter_instance",
       })
+      return
+    }
+    await refreshConnectorConversationDeliveryTarget(deliveryTargetFromEvent(event), {
+      deliveryReadiness: adapterRow.deliveryReadiness ?? "unknown",
+      now,
+    })
+    if (await observeUnmentionedDeliveryProbe(event.adapterId, event, adapterRow)) {
+      await markConnectorInboundJobHistoryOnly(inboundJob.id, "delivery_probe_observed", { now })
       return
     }
 
@@ -787,12 +819,51 @@ export class ConnectorBus {
         reason: "turn_queue_overflow",
         message: `retained inbound message ${event.messageId} as history-only (${queue.depth} turns queued)`,
       }).catch(() => undefined)
-      void markConnectorInboundJobHistoryOnly(inboundJobId, "pending_limit_exceeded").catch(
-        () => undefined
-      )
+      await markConnectorInboundJobHistoryOnly(inboundJobId, "pending_limit_exceeded")
       return false
     }
-    if (queue.depth > 0 && event.channelData?.activeRunDispatchMode === "steer") {
+    const wantsLiveSteer =
+      queue.depth > 0 &&
+      event.channelData?.activeRunDispatchMode === "steer" &&
+      this.liveSteerHandler !== null
+    const liveSteerPayloadSafe =
+      !wantsLiveSteer ||
+      hasNoLeakingPiiDeep({ plainText: event.plainText, segments: event.segments })
+    if (wantsLiveSteer && liveSteerPayloadSafe && this.liveSteerHandler) {
+      const liveSteer = await this.liveSteerHandler(event)
+      if (liveSteer.accepted) {
+        await completeConnectorInboundJob(inboundJobId, {
+          executionRunId: liveSteer.executionRunId,
+          now: Date.now(),
+        })
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "inbound.received",
+          at: Date.now(),
+          conversationKey: key,
+          reason: "inbound_live_steered",
+          fields: { inboundJobId, executionRunId: liveSteer.executionRunId },
+        }).catch(() => undefined)
+        return true
+      }
+      if (liveSteer.activeRun) {
+        event = {
+          ...event,
+          channelData: { ...event.channelData, dispatchIntent: "steer-replay" },
+        }
+        await updateConnectorInboundJobPayload(inboundJobId, event, "steer")
+      }
+    } else if (queue.depth > 0 && event.channelData?.activeRunDispatchMode === "steer") {
+      if (wantsLiveSteer && !liveSteerPayloadSafe) {
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "inbound.policy_blocked",
+          at: Date.now(),
+          conversationKey: key,
+          reason: "live_steer_pii_blocked",
+          fields: { inboundJobId },
+        }).catch(() => undefined)
+      }
       event = {
         ...event,
         channelData: { ...event.channelData, dispatchIntent: "steer-replay" },
@@ -842,7 +913,14 @@ export class ConnectorBus {
     if (!claimed) return { completion: Promise.resolve() }
     const handler = this.routeHandler
     try {
-      const result = handler?.(event, decision, resolved, override, adapterRow)
+      const context: RouteHandlerContext = {
+        inboundJobId,
+        bindExecutionRun: async (executionRunId) => {
+          const bound = await bindConnectorInboundJobExecutionRun(inboundJobId, executionRunId)
+          if (!bound) throw new Error(`Inbound job ${inboundJobId} is no longer running`)
+        },
+      }
+      const result = handler?.(event, decision, resolved, override, adapterRow, context)
       if (!result || typeof (result as Promise<void>).then !== "function") {
         await completeConnectorInboundJob(inboundJobId, { now: Date.now() })
         return { completion: Promise.resolve() }

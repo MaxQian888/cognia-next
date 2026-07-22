@@ -36,10 +36,32 @@ async function putInstance(id: string, patch: Partial<AdapterInstanceRow> = {}):
 }
 
 const EVENT = {
+  platform: "telegram",
   adapterId: "adapter_1",
+  selfId: "bot_1",
+  messageId: "message_1",
   conversationKey: "telegram:adapter_1:chat_42",
-  conversationRef: { platform: "telegram", adapterId: "adapter_1" },
-} as Pick<NormalizedInboundEvent, "adapterId" | "conversationKey" | "conversationRef">
+  conversationAddress: {
+    conversationKey: "telegram:adapter_1:chat_42",
+    platform: "telegram",
+    adapterId: "adapter_1",
+    scopeKind: "private",
+    containerId: "chat_42",
+  },
+  conversationRef: { platform: "telegram", adapterId: "adapter_1", channelId: "chat_42" },
+  sender: {
+    id: "user_1",
+    platform: "telegram",
+    adapterId: "adapter_1",
+    remoteUserId: "user_1",
+  },
+  channel: { id: "chat_42", kind: "private" },
+  segments: [{ type: "text", text: "hello" }],
+  plainText: "hello",
+  mentions: { selfMentioned: false, users: [] },
+  timestamp: 1_000,
+  raw: {},
+} satisfies NormalizedInboundEvent
 const ROW = { type: "telegram" } as AdapterInstanceRow
 
 beforeEach(async () => {
@@ -53,10 +75,17 @@ describe("resolveRespondViaTarget", () => {
   it("rewrites adapterId + conversationKey + conversationRef for a valid sibling", async () => {
     await putInstance("adapter_2")
     const target = await resolveRespondViaTarget("adapter_2", EVENT, ROW)
-    expect(target).toEqual({
+    expect(target).toMatchObject({
       adapterId: "adapter_2",
       conversationKey: "telegram:adapter_2:chat_42",
-      conversationRef: { platform: "telegram", adapterId: "adapter_2" },
+      conversationRef: { platform: "telegram", adapterId: "adapter_2", channelId: "chat_42" },
+      deliveryTarget: {
+        address: {
+          conversationKey: "telegram:adapter_2:chat_42",
+          adapterId: "adapter_2",
+          containerId: "chat_42",
+        },
+      },
     })
     const audits = await getDb().connectorAudit.toArray()
     const decision = audits.find((a) => a.kind === "dispatch.respond_via")

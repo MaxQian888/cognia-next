@@ -637,7 +637,13 @@ export function parseLarkEventEnvelope(
   const threadId = message.thread_id ?? undefined
 
   const conversationKey = buildConversationKey("lark", adapterId, chatId, threadId)
-  const senderIdentity = buildPlatformIdentity(adapterId, openId)
+  const senderIdentity = {
+    ...buildPlatformIdentity(adapterId, openId),
+    kind:
+      sender.id_type === "app_id" || sender.sender_type === "app" || sender.sender_type === "bot"
+        ? ("bot" as const)
+        : ("human" as const),
+  }
   const { selfMentioned, users } = detectMentions(selfBotOpenId, message)
   const segments = buildSegments(message)
   const plainText = segmentsToPlainText(segments)

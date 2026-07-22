@@ -71,6 +71,18 @@ describe("LarkAtStrategy", () => {
     })
   })
 
+  it("persists the adapter topic activation lifetime", async () => {
+    await getDb().adapterInstances.put(baseRow())
+    render(<LarkAtStrategy adapterId="lark-as" />)
+    const input = await screen.findByTestId("lark-activation-ttl")
+    fireEvent.change(input, { target: { value: "48" } })
+    fireEvent.blur(input)
+
+    await waitFor(async () => {
+      expect((await getDb().adapterInstances.get("lark-as"))?.activationTtlMs).toBe(48 * 3_600_000)
+    })
+  })
+
   it("starts an explicit no-mention delivery probe without claiming verification", async () => {
     await getDb().adapterInstances.put(baseRow())
     render(<LarkAtStrategy adapterId="lark-as" />)

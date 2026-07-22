@@ -65,6 +65,17 @@ async function putRun(partial: Partial<WorkflowRunRow>): Promise<WorkflowRunRow>
       adapterId: "wecom:a",
       conversationKey: "wecom:wecom:a:room1",
       sessionId: "s1",
+      deliveryTarget: {
+        address: {
+          conversationKey: "wecom:wecom:a:room1",
+          platform: "wecom",
+          adapterId: "wecom:a",
+          scopeKind: "group",
+          containerId: "room1",
+        },
+        conversationRef: { platform: "wecom", adapterId: "wecom:a", chatId: "room1" },
+        refreshedAt: 1,
+      },
     },
     ...partial,
   }
@@ -77,6 +88,33 @@ async function putRun(partial: Partial<WorkflowRunRow>): Promise<WorkflowRunRow>
   }
   await getDb().workflowRuns.put(row)
   return row
+}
+
+async function seedDeliveryTarget(
+  platform: "lark" | "wecom",
+  adapterId: string,
+  conversationKey: string,
+  containerId: string
+): Promise<void> {
+  await getDb().connectorConversationStates.put({
+    conversationKey,
+    adapterId,
+    activationStatus: "inactive",
+    deliveryReadiness: "unknown",
+    deliveryTarget: {
+      address: {
+        conversationKey,
+        platform,
+        adapterId,
+        scopeKind: "group",
+        containerId,
+      },
+      conversationRef: { platform, adapterId, channelId: containerId },
+      refreshedAt: 1,
+    },
+    createdAt: 1,
+    updatedAt: 1,
+  })
 }
 
 async function putEvent(ev: Partial<WorkflowRunEventRow> & { id: string }): Promise<void> {
@@ -183,6 +221,12 @@ beforeEach(async () => {
   __resetDbForTesting()
   getDb()
   await whenSeeded()
+  await Promise.all([
+    seedDeliveryTarget("lark", "lark:ops", "lark:lark:ops:oc_ops", "oc_ops"),
+    seedDeliveryTarget("wecom", "wecom:audit", "wecom:wecom:audit:audit_room", "audit_room"),
+    seedDeliveryTarget("wecom", "wecom:mirror", "wecom:wecom:mirror:c1", "c1"),
+    seedDeliveryTarget("lark", "lark:a", "lark:lark:a:c1", "c1"),
+  ])
   __resetWorkflowProgressRunnerForTesting()
   mockNotifyConversationOverIM.mockClear()
 })

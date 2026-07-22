@@ -35,6 +35,17 @@ function session(): ChatSession {
       adapterId: "tg-1",
       conversationKey: "telegram:tg-1:9",
       conversationRef: { platform: "telegram", adapterId: "tg-1", chatId: "9" },
+      deliveryTarget: {
+        address: {
+          conversationKey: "telegram:tg-1:9",
+          platform: "telegram",
+          adapterId: "tg-1",
+          scopeKind: "private",
+          containerId: "9",
+        },
+        conversationRef: { platform: "telegram", adapterId: "tg-1", chatId: "9" },
+        refreshedAt: 0,
+      },
     },
     createdAt: 0,
     updatedAt: 0,

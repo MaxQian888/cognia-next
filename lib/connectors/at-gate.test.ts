@@ -3,6 +3,7 @@
 import {
   shouldRespondToMessage,
   gateInboundEvent,
+  observeUnmentionedDeliveryProbe,
   consumeSiblingInterplayBudget,
   DEFAULT_AT_RESPONSE_STRATEGY,
   DEFAULT_BOT_INTERPLAY_BUDGET,
@@ -404,7 +405,14 @@ describe("gateInboundEvent", () => {
       mentions: { selfMentioned: false, users: [] },
     })
 
-    await expect(gateInboundEvent("tg-1", event)).resolves.toBe(false)
+    await expect(gateInboundEvent("tg-1", event)).resolves.toBe(true)
+    await expect(
+      observeUnmentionedDeliveryProbe(
+        "tg-1",
+        event,
+        await mockGetAdapterInstance.mock.results[0].value
+      )
+    ).resolves.toBe(true)
     expect(mockUpdateAdapterInstance).toHaveBeenCalledWith(
       "tg-1",
       expect.objectContaining({ deliveryReadiness: "all_messages_verified" })

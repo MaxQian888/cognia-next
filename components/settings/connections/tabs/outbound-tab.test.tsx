@@ -206,7 +206,14 @@ describe("OutboundTab", () => {
     render(<OutboundTab />)
     // Labels are reused from the inbox's `inbox.outboundStatus.status.*` namespace
     // (pending→Queued, deadlettered→Dead-lettered, …) instead of the raw enum.
-    const statusLabels = ["Queued", "Sending", "Sent", "Failed", "Dead-lettered"]
+    const statusLabels = [
+      "Queued",
+      "Sending",
+      "Sent",
+      "Failed",
+      "Delivery unknown",
+      "Dead-lettered",
+    ]
     for (const s of statusLabels) {
       expect(
         screen.getByRole("button", { name: new RegExp(`filter ${s}`, "i") })

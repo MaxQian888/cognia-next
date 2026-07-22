@@ -41,7 +41,10 @@ import {
 import { countPendingConnectorInboundJobs } from "@/lib/db/connector-inbound-jobs"
 import { updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { getDb } from "@/lib/db/schema"
-import { resolveInboundActivationPolicy } from "@/lib/connectors/conversation-admission"
+import {
+  resolveDeliveryReadiness,
+  resolveInboundActivationPolicy,
+} from "@/lib/connectors/conversation-admission"
 import { parseControlCommand, isReadonlyCommand } from "./parse"
 import { handleGoalCommand } from "./goal"
 import * as R from "./render"
@@ -110,7 +113,7 @@ async function loadAgentTopicStatus(
       override?.activeRunDispatchMode ??
       adapterRow.activeRunDispatchMode ??
       "queue",
-    readiness: state?.deliveryReadiness ?? adapterRow.deliveryReadiness ?? "unknown",
+    readiness: resolveDeliveryReadiness(state?.deliveryReadiness, adapterRow.deliveryReadiness),
     recoveryCount,
   }
 }

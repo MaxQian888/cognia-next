@@ -243,6 +243,140 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
     expect(auditRows.some((r) => r.kind === "inbound.received")).toBe(true)
   })
 
+  it("binds the durable inbound job to the execution run before handler side effects", async () => {
+    const bus = getBus()
+    routeHandler.mockImplementationOnce(
+      async (_event, _decision, _resolved, _override, _row, ctx) => {
+        await ctx.bindExecutionRun("execution:bound")
+      }
+    )
+    await bus.dispatchInboundFull(privateEvent(autoAdapterId, "msg_bound_run"))
+    await bus.flushInboundTurns()
+
+    const job = await getDb()
+      .connectorInboundJobs.filter((row) => row.sourceMessageId === "msg_bound_run")
+      .first()
+    expect(job).toEqual(
+      expect.objectContaining({ status: "completed", executionRunId: "execution:bound" })
+    )
+  })
+
+  it("keeps unsafe live-steer payloads durable for safe-boundary replay", async () => {
+    const bus = getBus()
+    await updateAdapterInstance(autoAdapterId, { activeRunDispatchMode: "steer" })
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    routeHandler.mockImplementationOnce(async () => gate).mockResolvedValueOnce(undefined)
+    bus.liveSteerHandler = jest.fn(async () => ({
+      activeRun: true,
+      accepted: true,
+      executionRunId: "execution:unsafe",
+    }))
+
+    await bus.dispatchInboundFull(privateEvent(autoAdapterId, "msg_active_safe_boundary"))
+    mockPiiDeep.mockReturnValue(false)
+    await bus.dispatchInboundFull(privateEvent(autoAdapterId, "msg_unsafe_steer"))
+
+    expect(bus.liveSteerHandler).not.toHaveBeenCalled()
+    const queued = await getDb()
+      .connectorInboundJobs.filter((row) => row.sourceMessageId === "msg_unsafe_steer")
+      .first()
+    expect(queued).toEqual(expect.objectContaining({ status: "steering" }))
+
+    release()
+    await bus.flushInboundTurns()
+    expect(routeHandler.mock.calls[1][0]).toEqual(
+      expect.objectContaining({
+        messageId: "msg_unsafe_steer",
+        channelData: expect.objectContaining({ dispatchIntent: "steer-replay" }),
+      })
+    )
+    const audit = await listRecent(autoAdapterId)
+    expect(audit).toEqual(
+      expect.arrayContaining([expect.objectContaining({ reason: "live_steer_pii_blocked" })])
+    )
+  })
+
+  it("records an unmentioned Lark probe durably before enabling all-message delivery", async () => {
+    const bus = getBus()
+    const now = Date.now()
+    const row = await createAdapterInstance({
+      type: "lark",
+      displayName: "Probe Bot",
+      enabled: true,
+      transportMode: "stub",
+      settings: {
+        unmentionedDeliveryProbe: {
+          consoleConfirmed: true,
+          startedAt: now - 1_000,
+          expiresAt: now + 60_000,
+        },
+      },
+      credentialsRef: { keyringService: "test", accounts: [] },
+      trigger: AUTO_TRIGGER,
+      defaultMode: "auto",
+      inboundActivationPolicy: "mention_activates",
+      deliveryReadiness: "mentions_only",
+    })
+    const larkAdapter = makeAdapter(row.id)
+    Object.defineProperty(larkAdapter.meta, "type", { value: "lark" })
+    bus.registerAdapter(larkAdapter)
+    const conversationKey = `lark:${row.id}:oc-1:omt-1`
+    const event: NormalizedInboundEvent = {
+      platform: "lark",
+      adapterId: row.id,
+      selfId: "ou_bot",
+      messageId: "om_probe",
+      conversationKey,
+      conversationAddress: {
+        conversationKey,
+        platform: "lark",
+        adapterId: row.id,
+        scopeKind: "thread",
+        containerId: "oc-1",
+        topicId: "omt-1",
+      },
+      conversationRef: {
+        platform: "lark",
+        adapterId: row.id,
+        channelId: "oc-1",
+        threadTs: "omt-1",
+        threadRootMessageId: "om_probe",
+      },
+      sender: {
+        id: "ou_human",
+        platform: "lark",
+        adapterId: row.id,
+        remoteUserId: "ou_human",
+        kind: "human",
+      },
+      channel: { id: conversationKey, kind: "thread", platformChannelId: "oc-1" },
+      segments: [{ type: "text", text: "probe" }],
+      plainText: "probe",
+      mentions: { selfMentioned: false, users: [] },
+      timestamp: now,
+      raw: {},
+    }
+
+    await bus.dispatchInboundFull(event)
+    expect((await getDb().adapterInstances.get(row.id))?.deliveryReadiness).toBe(
+      "all_messages_verified"
+    )
+    expect(
+      await getDb()
+        .connectorInboundJobs.filter((job) => job.sourceMessageId === "om_probe")
+        .first()
+    ).toEqual(
+      expect.objectContaining({
+        status: "history_only",
+        recoveryReason: "delivery_probe_observed",
+      })
+    )
+    expect(routeHandler).not.toHaveBeenCalled()
+  })
+
   it("stamps the response-SLA deadline on inbound when the conversation has an SLA target", async () => {
     const bus = getBus()
     const conversationKey = `telegram:${autoAdapterId}:private`

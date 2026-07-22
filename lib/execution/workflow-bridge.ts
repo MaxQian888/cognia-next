@@ -100,7 +100,7 @@ export async function syncWorkflowExecutionRun(
     const existing = await getDb().executionRunBindings.get(id)
     if (existing) continue
     const deliveryTarget =
-      target.deliveryTarget ??
+      ("deliveryTarget" in target ? target.deliveryTarget : undefined) ??
       (await getConnectorConversationState(target.conversationKey))?.deliveryTarget
     await putExecutionRunBinding({
       id,

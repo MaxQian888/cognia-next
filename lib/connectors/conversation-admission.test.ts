@@ -4,7 +4,13 @@ import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import { createAdapterInstance } from "@/lib/db/adapter-instances"
 import { getConnectorConversationState } from "@/lib/db/connector-conversation-state"
-import { admitConversationEvent, resolveInboundActivationPolicy } from "./conversation-admission"
+import {
+  admitConversationEvent,
+  DEFAULT_TOPIC_ACTIVATION_TTL_MS,
+  resolveActivationTtlMs,
+  resolveDeliveryReadiness,
+  resolveInboundActivationPolicy,
+} from "./conversation-admission"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 
 function event(options: { mentioned: boolean; thread?: boolean; messageId?: string }) {
@@ -59,6 +65,21 @@ describe("conversation admission", () => {
     expect(resolveInboundActivationPolicy({ atResponseStrategy: "direct_only" })).toBe(
       "direct_only"
     )
+  })
+
+  it("uses verified adapter readiness when the topic state is still unknown", () => {
+    expect(resolveDeliveryReadiness("unknown", "all_messages_verified")).toBe(
+      "all_messages_verified"
+    )
+    expect(resolveDeliveryReadiness("mentions_only", "all_messages_verified")).toBe("mentions_only")
+    expect(resolveDeliveryReadiness(undefined, undefined)).toBe("unknown")
+  })
+
+  it("resolves activation TTL using explicit, topic, adapter, then default precedence", () => {
+    expect(resolveActivationTtlMs({ activationTtlMs: 30 }, { activationTtlMs: 20 }, 10)).toBe(10)
+    expect(resolveActivationTtlMs({ activationTtlMs: 30 }, { activationTtlMs: 20 })).toBe(20)
+    expect(resolveActivationTtlMs({ activationTtlMs: 30 })).toBe(30)
+    expect(resolveActivationTtlMs({})).toBe(DEFAULT_TOPIC_ACTIVATION_TTL_MS)
   })
 
   it("activates a verified topic on mention and accepts direct follow-ups until expiry", async () => {

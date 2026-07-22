@@ -46,7 +46,14 @@ import {
 import { buildDlqDownload } from "@/lib/connectors/dlq-export"
 import { FileTextIcon, FileJsonIcon, Trash2Icon } from "lucide-react"
 
-const ALL_STATUSES: OutboundJobStatus[] = ["pending", "sending", "sent", "failed", "deadlettered"]
+const ALL_STATUSES: OutboundJobStatus[] = [
+  "pending",
+  "sending",
+  "sent",
+  "failed",
+  "delivery_unknown",
+  "deadlettered",
+]
 
 type StatusFilter = OutboundJobStatus | "all"
 
@@ -58,6 +65,7 @@ const STATUS_VARIANT_MAP: Record<
   sending: "default",
   sent: "outline",
   failed: "destructive",
+  delivery_unknown: "secondary",
   deadlettered: "destructive",
 }
 

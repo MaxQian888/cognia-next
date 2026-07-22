@@ -90,6 +90,8 @@ export interface RunProjectionSnapshot {
   recentSteps: RunStepSnapshot[]
   pendingSteps: RunStepSnapshot[]
   pendingStepCount: number
+  /** Durable inbound turns waiting behind this run in the same conversation. */
+  connectorQueueDepth?: number
   elapsedMs: number
   detailsUrl?: string
   summary?: string

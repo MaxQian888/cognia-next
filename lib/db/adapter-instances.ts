@@ -73,6 +73,7 @@ export async function updateAdapterInstance(
       | "atResponseStrategy"
       | "inboundActivationPolicy"
       | "activeRunDispatchMode"
+      | "activationTtlMs"
       | "deliveryReadiness"
       | "chatAllowlist"
       | "chatBlocklist"

@@ -69,12 +69,10 @@ describe("serializeSend", () => {
     expect(call.payload["parent_id"]).toBeUndefined()
   })
 
-  it("legacy thread ref without anchor id falls back to a plain send (no bogus thread fields)", () => {
-    const call = serializeSend(makeReq({ channelId: "oc_chat_001", threadTs: "omt_thread_001" }))
-    expect(call.url).toContain("/im/v1/messages?receive_id_type=chat_id")
-    expect(call.payload["receive_id"]).toBe("oc_chat_001")
-    expect(call.payload["reply_in_thread"]).toBeUndefined()
-    expect(call.payload["parent_id"]).toBeUndefined()
+  it("rejects a legacy thread ref without an anchor instead of leaking into the parent chat", () => {
+    expect(() =>
+      serializeSend(makeReq({ channelId: "oc_chat_001", threadTs: "omt_thread_001" }))
+    ).toThrow("without a persisted thread reply anchor")
   })
 
   it("does not include reply_in_thread when no threadTs", () => {
@@ -242,14 +240,13 @@ describe("serializeOutboundAsync (explicit recipient routing)", () => {
     expect(call.payload["parent_id"]).toBeUndefined()
   })
 
-  it("legacy thread ref without anchor id falls back to a plain send on the async path", async () => {
-    const call = await serializeOutboundAsync(
-      makeReq({ channelId: "oc_chat_001", threadTs: "omt_thread_001" }),
-      ADAPTER
-    )
-    expect(call.url).toContain("/im/v1/messages?receive_id_type=chat_id")
-    expect(call.payload["reply_in_thread"]).toBeUndefined()
-    expect(call.payload["parent_id"]).toBeUndefined()
+  it("rejects a legacy thread ref without an anchor on the async path", async () => {
+    await expect(
+      serializeOutboundAsync(
+        makeReq({ channelId: "oc_chat_001", threadTs: "omt_thread_001" }),
+        ADAPTER
+      )
+    ).rejects.toThrow("without a persisted thread reply anchor")
   })
 
   it("routes replyTo through the dedicated /reply endpoint on the async path", async () => {

@@ -39,6 +39,7 @@ describe("parseLarkEventEnvelope", () => {
       expect(result!.sender.id).toBe("lark:ou_user_001")
       expect(result!.sender.platform).toBe("lark")
       expect(result!.sender.remoteUserId).toBe("ou_user_001")
+      expect(result!.sender.kind).toBe("human")
     })
 
     it("produces a text segment from content.text", () => {
@@ -161,6 +162,17 @@ describe("parseLarkEventEnvelope", () => {
           content: JSON.stringify(content),
         },
       },
+    })
+
+    it("attributes application senders as bots", () => {
+      const envelope = receive("text", { text: "automated" })
+      envelope.event!.sender = {
+        sender_id: { open_id: "ou_other_bot" },
+        sender_type: "bot",
+      }
+      expect(parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope)?.sender.kind).toBe(
+        "bot"
+      )
     })
 
     it("file → file segment with key, name, mime, sizeBytes", () => {

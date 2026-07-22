@@ -105,6 +105,36 @@ describe("execution run presentation projection", () => {
     })
   })
 
+  it("preserves a pending native mutation checkpoint when degrading to fallback", async () => {
+    const saved: ExecutionRunBinding[] = []
+    const recordDegraded = jest.fn()
+    const pendingMutation = { sequence: 4, uuid: "mutation-4", operation: "stream_summary" }
+    const driver: RunPresentationDriver = {
+      capabilities: { interactiveControls: true },
+      open: jest.fn(async (_target, _snapshot, options) => {
+        await options?.checkpoint?.({ opaqueState: { pendingMutation } })
+        throw new Error("ambiguous mutation")
+      }),
+      update: jest.fn(),
+      finish: jest.fn(),
+    }
+
+    const projected = await projectExecutionRunBinding(binding, snapshot, {
+      resolveDriver: () => driver,
+      deliverFallback: jest.fn(async () => ({ platformMessageId: "fallback-pending" })),
+      saveBinding: async (row) => void saved.push(row),
+      recordDegraded,
+      nativeEnabled: () => true,
+    })
+
+    expect(recordDegraded).toHaveBeenCalledWith(
+      expect.objectContaining({ presentationState: { pendingMutation } }),
+      "ambiguous mutation"
+    )
+    expect(projected.presentationState).toEqual({ pendingMutation })
+    expect(saved.some((row) => row.presentationState?.pendingMutation)).toBe(true)
+  })
+
   it("freezes an agent card without duplicating the authoritative final reply", async () => {
     const driver: RunPresentationDriver = {
       capabilities: {
