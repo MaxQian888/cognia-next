@@ -2382,8 +2382,23 @@ export interface AppSettings {
    * applied at boot via `<WebviewZoomBootstrap />`. Range 0.5..2.0.
    */
   webviewZoom?: number
-  /** Forward-compat opt-in for future telemetry; never wired in v1. */
+  /** Compatibility alias for behaviorTelemetry.enabled. */
   telemetryEnabled?: boolean
+  /** Host-neutral behavior-event consent, routing, sampling, and local retention policy. */
+  behaviorTelemetry?: {
+    enabled: boolean
+    destinations: { local: boolean; remote: boolean }
+    categories: {
+      chat: boolean
+      workflow: boolean
+      connector: boolean
+      agentTeam: boolean
+      system: boolean
+    }
+    sampleRate: number
+    retentionDays: number
+    maxStoredEvents: number
+  }
   /**
    * Integrated terminal preferences (plan: vscode-vivid-wilkinson).
    * `defaultShell` is the absolute path or PATH-resolvable name of the

@@ -149,6 +149,14 @@ setToolSpanEventPublisher((eventType, payload) => {
 // `tool_use` blocks and from `permission_request` events; bounded so a long
 // session can't grow it unboundedly.
 const chatToolCallsById = new Map<string, { name: string; input: Record<string, unknown> }>()
+const behaviorTurnStartedAt = new Map<string, number>()
+
+function finishBehaviorTurn(sessionId: string): number | undefined {
+  const startedAt = behaviorTurnStartedAt.get(sessionId)
+  if (startedAt === undefined) return undefined
+  behaviorTurnStartedAt.delete(sessionId)
+  return Math.max(0, Date.now() - startedAt)
+}
 const CHAT_TOOL_CALLS_CAP = 500
 
 function rememberChatToolCall(id: string, name: string, input: Record<string, unknown>): void {
@@ -1136,6 +1144,16 @@ export function useClaudeChat() {
       // (external + SDK) since this is upstream of the branch below.
       emitSystemBusEvent(SystemEvents.MESSAGE_SENT, { sessionId })
       emitSystemBusEvent(SystemEvents.AGENT_STARTED, { sessionId })
+      if (!callOptions?.skipUserAppend) {
+        behaviorTurnStartedAt.set(sessionId, Date.now())
+        void trackEvent("chat.message.sent", {
+          sessionId,
+          provider:
+            sendOptions.provider ??
+            (useAgentRuntimeStore.getState().runtime === "external" ? "external" : "unknown"),
+          surface: "chat",
+        })
+      }
 
       // Experimental task workspace: snapshot the live workspace and redirect
       // this turn into an isolated worktree/shadow root before any agent starts.
@@ -1261,6 +1279,16 @@ export function useClaudeChat() {
             })
             return
           }
+          const durationMs = finishBehaviorTurn(sessionId)
+          if (durationMs !== undefined) {
+            void trackEvent("chat.turn.failed", {
+              sessionId,
+              provider: "external",
+              surface: "chat",
+              errorType: error?.name || "ExternalAgentError",
+              durationMs,
+            })
+          }
           store.getState().replaceSessionMessages(sessionId, previousMessages)
           store.getState().setSessionError(sessionId, message)
           store.getState().setSessionStatus(sessionId, "idle")
@@ -1355,6 +1383,15 @@ export function useClaudeChat() {
           ]
           await persistMessages(sessionId, finalMessages)
           store.getState().setSessionStatus(sessionId, "idle")
+          const durationMs = finishBehaviorTurn(sessionId)
+          if (durationMs !== undefined) {
+            void trackEvent("chat.turn.completed", {
+              sessionId,
+              provider: "external",
+              surface: "chat",
+              durationMs,
+            })
+          }
           // Plugin bus: external-agent run finished (ids only).
           emitSystemBusEvent(SystemEvents.MESSAGE_RECEIVED, { sessionId })
           emitSystemBusEvent(SystemEvents.AGENT_COMPLETED, { sessionId })
@@ -1479,6 +1516,16 @@ export function useClaudeChat() {
           endSpan(sendOptions.spanId, {
             errorType: "send_failed",
             errorMessage: error.message,
+          })
+        }
+        const durationMs = finishBehaviorTurn(sessionId)
+        if (durationMs !== undefined) {
+          void trackEvent("chat.turn.failed", {
+            sessionId,
+            surface: "chat",
+            errorType: "send_failed",
+            durationMs,
+            ...(sendOptions.provider ? { provider: sendOptions.provider } : {}),
           })
         }
       }
@@ -2111,11 +2158,22 @@ async function handleEvent(
           messagesMirrorRef.current.delete(sid)
         }
         chat.setSessionError(sid, SIDECAR_EXITED_ERROR)
-        const cached = chat.lastSendBySession[sid] as { options?: { spanId?: string } } | undefined
+        const cached = chat.lastSendBySession[sid] as
+          { options?: { spanId?: string; provider?: string } } | undefined
         if (cached?.options?.spanId) {
           endSpan(cached.options.spanId, {
             errorType: "turn_error",
             errorMessage: SIDECAR_EXITED_ERROR,
+          })
+        }
+        const durationMs = finishBehaviorTurn(sid)
+        if (durationMs !== undefined) {
+          void trackEvent("chat.turn.failed", {
+            sessionId: sid,
+            surface: "chat",
+            errorType: "sidecar_exited",
+            durationMs,
+            ...(cached?.options?.provider ? { provider: cached.options.provider } : {}),
           })
         }
         chat.clearLastSend(sid)
@@ -2202,6 +2260,17 @@ async function handleEvent(
                 errorMessage: evt.error,
               })
             }
+            const durationMs = finishBehaviorTurn(evt.sessionId)
+            if (durationMs !== undefined) {
+              void trackEvent("chat.turn.failed", {
+                sessionId: evt.sessionId,
+                surface: "chat",
+                durationMs,
+                errorType:
+                  typeof evt.httpStatus === "number" ? `http_${evt.httpStatus}` : "provider_error",
+                ...(failedProvider ? { provider: failedProvider } : {}),
+              })
+            }
             useChatStore.getState().clearLastSend(evt.sessionId)
           }
         } else {
@@ -2209,6 +2278,16 @@ async function handleEvent(
           // turn): flush pending streaming work and drop the mirror.
           sealSession(evt.sessionId)
           useChatStore.getState().setSessionStatus(evt.sessionId, "idle")
+          const cached = useChatStore.getState().lastSendBySession[evt.sessionId]
+          const durationMs = finishBehaviorTurn(evt.sessionId)
+          if (durationMs !== undefined) {
+            void trackEvent("chat.turn.completed", {
+              sessionId: evt.sessionId,
+              provider: cached?.options.provider ?? "unknown",
+              surface: "chat",
+              durationMs,
+            })
+          }
           useChatStore.getState().clearLastSend(evt.sessionId)
         }
         // Turn settled — replay any steer the user queued mid-run. A clean end
@@ -2621,11 +2700,15 @@ async function handleEvent(
             parentSpanId: lastSendForSpan?.options.spanId,
             surface: "chat",
           })
-          void trackEvent("chat.message.sent", {
-            sessionId,
-            provider: telemetryProvider,
-            surface: "chat",
-          })
+          const durationMs = finishBehaviorTurn(sessionId)
+          if (durationMs !== undefined) {
+            void trackEvent("chat.turn.completed", {
+              sessionId,
+              provider: telemetryProvider,
+              surface: "chat",
+              durationMs,
+            })
+          }
         }
         // Plugin token-usage observability (System-A onTokenUsage) — previously
         // dormant on the built-in chat path. Fail-open + no-op when no plugin

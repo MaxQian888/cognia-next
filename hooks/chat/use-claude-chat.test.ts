@@ -9,6 +9,11 @@ import { act, renderHook } from "@testing-library/react"
 
 import { useAgentRuntimeStore, useExternalAgentStore } from "@/stores/agent"
 
+const mockTrackEvent = jest.fn().mockResolvedValue(true)
+jest.mock("@/lib/telemetry/events/track-event", () => ({
+  trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
+}))
+
 // `stores/index.ts` calls `isTauri()` at module top-level; declaring the
 // jest.fn inside the factory dodges the TDZ that closures over an outer
 // const would otherwise hit during ES import hoisting.
@@ -509,6 +514,7 @@ beforeEach(() => {
   getConnectedAgentsMock.mockReset().mockReturnValue([])
   checkDelegationMock.mockReset().mockReturnValue({ shouldDelegate: false })
   setDelegationRulesMock.mockReset()
+  mockTrackEvent.mockClear()
 })
 
 async function flush() {
@@ -532,6 +538,20 @@ describe("useClaudeChat — actions", () => {
       await result.current.send("   ")
     })
     expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("records message submission before the provider settles", async () => {
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello", { provider: "anthropic", model: "sonnet" })
+    })
+
+    expect(mockTrackEvent).toHaveBeenCalledWith("chat.message.sent", {
+      sessionId: "sess-1",
+      provider: "anthropic",
+      surface: "chat",
+    })
   })
 
   it("send() guards against empty array content", async () => {
@@ -679,6 +699,14 @@ describe("useClaudeChat — actions", () => {
     expect(targets.every((id) => id === "sess-1")).toBe(true)
     // Persist targets THIS session id.
     expect(persistMessagesMock).toHaveBeenCalledWith("sess-1", expect.any(Array))
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "chat.turn.completed",
+      expect.objectContaining({
+        sessionId: "sess-1",
+        provider: "external",
+        surface: "chat",
+      })
+    )
   })
 
   it("delegates a matching turn to the external agent (Thread B)", async () => {
@@ -751,6 +779,16 @@ describe("useClaudeChat — actions", () => {
     })
     expect(sendPromptMock).not.toHaveBeenCalled()
     expect(chatState.setSessionError).toHaveBeenCalledWith("sess-1", "spawn failed")
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "chat.turn.failed",
+      expect.objectContaining({
+        sessionId: "sess-1",
+        provider: "external",
+        surface: "chat",
+        errorType: "ExternalAgentError",
+      })
+    )
+    expect(JSON.stringify(mockTrackEvent.mock.calls)).not.toContain("spawn failed")
   })
 
   it("send() updates the title for a new session and marks it machine-set", async () => {
@@ -1081,23 +1119,94 @@ describe("useClaudeChat — actions", () => {
     expect(setSdkSessionIdMock).toHaveBeenCalledWith("sess-1", "sdk-abc")
   })
 
-  it("incoming session_ended (no error) flips status to idle", async () => {
-    renderHook(() => useClaudeChat())
+  it("incoming session_ended (no error) completes a tool-only turn", async () => {
+    const { result } = renderHook(() => useClaudeChat())
     await flush()
     await act(async () => {
+      await result.current.send("hello", { provider: "anthropic", model: "sonnet" })
       _messageCallback?.({ type: "session_ended", sessionId: "sess-1" })
     })
     expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "idle")
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "chat.turn.completed",
+      expect.objectContaining({
+        sessionId: "sess-1",
+        provider: "anthropic",
+        surface: "chat",
+      })
+    )
+  })
+
+  it("records a permanent provider failure without exporting its message", async () => {
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello", { provider: "anthropic", model: "sonnet" })
+      _messageCallback?.({
+        type: "session_ended",
+        sessionId: "sess-1",
+        error: "private upstream response",
+        httpStatus: 429,
+      })
+    })
+    await flush()
+
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "chat.turn.failed",
+      expect.objectContaining({
+        sessionId: "sess-1",
+        provider: "anthropic",
+        surface: "chat",
+        errorType: "http_429",
+      })
+    )
+    expect(JSON.stringify(mockTrackEvent.mock.calls)).not.toContain("private upstream response")
+  })
+
+  it("classifies a permanent provider failure without an HTTP status", async () => {
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello", { provider: "anthropic", model: "sonnet" })
+      _messageCallback?.({
+        type: "session_ended",
+        sessionId: "sess-1",
+        error: "private upstream response",
+      })
+    })
+    await flush()
+
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "chat.turn.failed",
+      expect.objectContaining({
+        sessionId: "sess-1",
+        provider: "anthropic",
+        surface: "chat",
+        errorType: "provider_error",
+      })
+    )
+    expect(JSON.stringify(mockTrackEvent.mock.calls)).not.toContain("private upstream response")
   })
 
   it("sidecar_exited settles a streaming session with a retryable error", async () => {
-    chatState.status = "streaming"
-    renderHook(() => useClaudeChat())
+    chatState.status = "idle"
+    const { result } = renderHook(() => useClaudeChat())
     await flush()
     await act(async () => {
+      await result.current.send("hello", { provider: "anthropic", model: "sonnet" })
+      chatState.status = "streaming"
       _messageCallback?.({ type: "sidecar_exited" })
     })
     expect(chatState.setSessionError).toHaveBeenCalledWith("sess-1", SIDECAR_EXITED_ERROR)
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "chat.turn.failed",
+      expect.objectContaining({
+        sessionId: "sess-1",
+        provider: "anthropic",
+        surface: "chat",
+        errorType: "sidecar_exited",
+      })
+    )
     chatState.status = "idle"
   })
 
@@ -1380,6 +1489,27 @@ describe("useClaudeChat — goal loop wiring (ADR-0019)", () => {
     await flush()
     await flush()
   }
+
+  it("records one successful turn outcome at the SDK result boundary", async () => {
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello", { provider: "anthropic", model: "sonnet" })
+    })
+    await driveTurnComplete()
+
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "chat.turn.completed",
+      expect.objectContaining({
+        sessionId: "sess-1",
+        provider: "anthropic",
+        surface: "chat",
+      })
+    )
+    expect(
+      mockTrackEvent.mock.calls.filter(([name]) => name === "chat.turn.completed")
+    ).toHaveLength(1)
+  })
 
   it("send pauses an active goal on a fresh user message", async () => {
     goalRuntimeMock.getActiveGoalForSession.mockResolvedValue(activeGoal())
@@ -1700,6 +1830,15 @@ describe("useClaudeChat — agent-trace wiring (Phase B4)", () => {
     expect(captured).toHaveLength(1)
     expect(captured[0].errorType).toBe("send_failed")
     expect(captured[0].errorMessage).toBe("network down")
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "chat.turn.failed",
+      expect.objectContaining({
+        sessionId: "sess-1",
+        surface: "chat",
+        errorType: "send_failed",
+      })
+    )
+    expect(JSON.stringify(mockTrackEvent.mock.calls)).not.toContain("network down")
     setAgentTraceWriter(null)
   })
 })

@@ -20,6 +20,7 @@
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { startSpan, endSpan } from "@cognia/agent-trace/emitter"
+import { trackEvent } from "@/lib/telemetry/events/track-event"
 import { recordTeamUsage, swallowUsageWrite } from "@/lib/db/session-usage"
 import type { SpanUsage } from "@/types/agent-trace/span"
 import type { AgentTeammate, ResolvedCapabilities, AgentTeamConfig } from "@/types/agent/agent-team"
@@ -411,6 +412,14 @@ export async function dispatchTeammate(
     role: teammate.role,
   })
 
+  const behaviorStartedAt = Date.now()
+  let channel: TeammateChannel = "text"
+  void trackEvent("agent.teammate.started", {
+    runId: teamCtx.runId,
+    teamId: teamCtx.teamId,
+    role: teammate.role,
+  })
+
   const release = (kind: "success" | "failure", error?: Error): void => {
     hooks.dispatchOnTeammateRelease({
       teamId: teamCtx.teamId,
@@ -429,6 +438,22 @@ export async function dispatchTeammate(
     if (kind === "success") emitSystemBusEvent(SystemEvents.AGENT_COMPLETED, busPayload)
     else if (error)
       emitSystemBusEvent(SystemEvents.AGENT_ERROR, { ...busPayload, error: error.name })
+    const durationMs = Math.max(0, Date.now() - behaviorStartedAt)
+    if (kind === "success") {
+      void trackEvent("agent.teammate.completed", {
+        runId: teamCtx.runId,
+        teamId: teamCtx.teamId,
+        channel,
+        durationMs,
+      })
+    } else if (error) {
+      void trackEvent("agent.teammate.failed", {
+        runId: teamCtx.runId,
+        teamId: teamCtx.teamId,
+        errorType: error.name || "Error",
+        durationMs,
+      })
+    }
   }
 
   const timeoutMs =
@@ -458,7 +483,6 @@ export async function dispatchTeammate(
     positive(teammate.config?.maxSteps) ?? positive(teamCtx.team.config?.defaultMaxSteps)
 
   const runtime = teammate.config?.runtime ?? "claude"
-  let channel: TeammateChannel = "text"
   let externalAgentId: string | null = null
   if (runtime !== "claude" || resolvedCaps.externalAgentPresetIds.length > 0) {
     // External-backed teammate: route to the external CLI agent when a preset

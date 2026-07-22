@@ -4,6 +4,11 @@ import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 
 const mockedBusEmit = emitSystemBusEvent as jest.Mock
+const mockTrackEvent = jest.fn().mockResolvedValue(true)
+
+jest.mock("@/lib/telemetry/events/track-event", () => ({
+  trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
+}))
 
 // ── Module mocks ────────────────────────────────────────────────────────────
 const isTauriMock = jest.fn<boolean, []>(() => false)
@@ -190,6 +195,27 @@ describe("dispatchTeammate — text-only fallback", () => {
       SystemEvents.AGENT_COMPLETED,
       expect.objectContaining({ agentId: "tm1" })
     )
+    expect(mockTrackEvent.mock.calls).toEqual([
+      ["agent.teammate.started", { runId: "run1", teamId: "team1", role: "teammate" }],
+      [
+        "agent.teammate.completed",
+        expect.objectContaining({ runId: "run1", teamId: "team1", channel: "text" }),
+      ],
+    ])
+  })
+
+  it("records a bounded failure class without exporting the error message", async () => {
+    executeAgentMock.mockRejectedValue(new TypeError("private provider response"))
+    const { ctx } = makeCtx(makeTeammate())
+
+    await expect(dispatchTeammate(ctx, { taskId: "t1", prompt: "do it" })).rejects.toThrow(
+      "private provider response"
+    )
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "agent.teammate.failed",
+      expect.objectContaining({ runId: "run1", teamId: "team1", errorType: "TypeError" })
+    )
+    expect(JSON.stringify(mockTrackEvent.mock.calls)).not.toContain("private provider response")
   })
 
   it("forwards preferTeammateId to pool.claim (skill-aware assignment)", async () => {
