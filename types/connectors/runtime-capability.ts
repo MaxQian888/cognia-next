@@ -1,4 +1,5 @@
 import type { PlatformKind } from "./platform-kind"
+import type { ChannelKind } from "./event"
 
 export type TopicIsolationCapability = "native" | "unsupported"
 export type AmbiguousDeliveryCapability = "remote_idempotent" | "reconciliation_required"
@@ -29,7 +30,7 @@ const FINAL_ONLY: ConnectorRuntimeCapabilityMatrix = {
   topicIsolation: "unsupported",
   unmentionedDelivery: false,
   historyPagination: false,
-  liveSteer: false,
+  liveSteer: true,
   textStreaming: false,
   componentMutation: false,
   fullReplacement: false,
@@ -53,7 +54,7 @@ const BUILT_IN_OVERRIDES: Partial<Record<PlatformKind, Partial<ConnectorRuntimeC
       fullReplacement: true,
       messageEditing: true,
       interactiveControls: true,
-      followUpBubbles: false,
+      followUpBubbles: true,
       staticMenus: true,
       ambiguousDelivery: "remote_idempotent",
     },
@@ -61,7 +62,6 @@ const BUILT_IN_OVERRIDES: Partial<Record<PlatformKind, Partial<ConnectorRuntimeC
       topicIsolation: "native",
       unmentionedDelivery: true,
       historyPagination: true,
-      liveSteer: false,
       textStreaming: true,
       messageEditing: true,
       interactiveControls: true,
@@ -95,4 +95,16 @@ export function builtInConnectorRuntimeCapabilities(
   platform: PlatformKind
 ): ConnectorRuntimeCapabilityMatrix {
   return { ...FINAL_ONLY, ...BUILT_IN_OVERRIDES[platform] }
+}
+
+/** Resolve platform features whose contract varies by conversation scope. */
+export function connectorRuntimeCapabilitiesForScope(
+  platform: PlatformKind,
+  scopeKind: ChannelKind
+): ConnectorRuntimeCapabilityMatrix {
+  const capabilities = builtInConnectorRuntimeCapabilities(platform)
+  if (platform === "lark" && scopeKind !== "private") {
+    return { ...capabilities, followUpBubbles: false }
+  }
+  return capabilities
 }

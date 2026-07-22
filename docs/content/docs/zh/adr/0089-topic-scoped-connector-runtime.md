@@ -48,7 +48,7 @@ description: "为 IM 连接器提供持久化的话题隔离、激活、派发�
 - Dexie v120 新增 `connectorConversationStates` 与 `connectorInboundJobs`。
 - 激活策略与运行中派发模式（`queue` / `steer`）相互独立，默认 `queue`。
 - 话题是共享协作上下文，但每条消息保留真实发送者身份。
-- 静态机器人菜单只承载 status/new/help；CardKit 是持久进度面，跟随气泡只作临时增强。
+- 静态机器人菜单只承载 status/new/help；CardKit 是持久进度面。跟随气泡通过
+  `push_follow_up` 仅在机器人单聊作临时增强，群聊/话题明确降级为 CardKit 按钮。
 - 第三方适配器可以降低展示丰富度，但必须显式声明，并在远端无幂等能力且结果不确定时进入
   reconciliation，而不是自动重复发送。
-

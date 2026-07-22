@@ -41,6 +41,22 @@ interface LarkCardState {
   hasActions: boolean
 }
 
+interface FollowUpControlItem {
+  action: RunControlAction | "status"
+  content: string
+  localizedContent: string
+  interruptId?: string
+}
+
+interface FollowUpControlState {
+  platformMessageId: string
+  runId: string
+  revision: number
+  createdAt: number
+  expiresAt: number
+  items: FollowUpControlItem[]
+}
+
 export interface LarkRunPresentationDriverOptions {
   sleep?: (ms: number) => Promise<void>
   now?: () => number
@@ -243,6 +259,22 @@ function actionsElement(snapshot: RunProjectionSnapshot): Record<string, unknown
   )
 }
 
+function followUpItems(snapshot: RunProjectionSnapshot): FollowUpControlItem[] {
+  const actionable = snapshot.allowedActions
+    .filter((action) => action !== "open_details")
+    .slice(0, 2)
+    .map((action) => ({
+      action,
+      content: ACTION_LABEL_EN[action],
+      localizedContent: ACTION_LABEL_ZH[action],
+      ...(snapshot.pendingInterrupt ? { interruptId: snapshot.pendingInterrupt.id } : {}),
+    }))
+  return [
+    ...actionable,
+    { action: "status" as const, content: "View status", localizedContent: "查看状态" },
+  ].slice(0, 3)
+}
+
 function state(ref: RunPresentationRef): LarkCardState {
   const cardId = ref.opaqueState?.cardId
   const lastAcknowledgedSequence =
@@ -347,6 +379,90 @@ export function createLarkRunPresentationDriver(
     return sent.data?.message_id
   }
 
+  async function ensureFollowUpControl(
+    ref: RunPresentationRef,
+    target: RunPresentationTarget,
+    snapshot: RunProjectionSnapshot,
+    checkpoint?: (ref: RunPresentationRef) => Promise<void>
+  ): Promise<RunPresentationRef> {
+    const platformMessageId = ref.platformMessageId
+    if (
+      !platformMessageId ||
+      target.deliveryTarget?.address.scopeKind !== "private" ||
+      snapshot.allowedActions.length === 0 ||
+      ref.opaqueState?.followUpControl
+    ) {
+      return ref
+    }
+    const pending = ref.opaqueState?.pendingFollowUpControl as FollowUpControlState | undefined
+    const createdAt = now()
+    const followUpControl: FollowUpControlState = pending ?? {
+      platformMessageId,
+      runId: snapshot.runId,
+      revision: snapshot.revision,
+      createdAt,
+      expiresAt: createdAt + 600_000,
+      items: followUpItems(snapshot),
+    }
+    const pendingRef: RunPresentationRef = {
+      ...ref,
+      opaqueState: { ...ref.opaqueState, pendingFollowUpControl: followUpControl },
+    }
+    await checkpoint?.(pendingRef)
+    try {
+      await request(
+        "POST",
+        `/im/v1/messages/${encodeURIComponent(platformMessageId)}/push_follow_up`,
+        {
+          follow_ups: followUpControl.items.map((item) => ({
+            content: item.content,
+            i18n_contents: [
+              { language: "zh_cn", content: item.localizedContent },
+              { language: "en_us", content: item.content },
+            ],
+          })),
+        }
+      )
+      const acknowledged = {
+        ...ref,
+        opaqueState: {
+          ...ref.opaqueState,
+          pendingFollowUpControl: undefined,
+          followUpFallbackReason: undefined,
+          followUpControl,
+        },
+      }
+      await checkpoint?.(acknowledged)
+      return acknowledged
+    } catch (error) {
+      const code = errorCode(error)
+      if (code === 230008) {
+        const reconciled = {
+          ...ref,
+          opaqueState: {
+            ...ref.opaqueState,
+            pendingFollowUpControl: undefined,
+            followUpFallbackReason: undefined,
+            followUpControl,
+          },
+        }
+        await checkpoint?.(reconciled)
+        return reconciled
+      }
+      const degraded = {
+        ...ref,
+        opaqueState: {
+          ...ref.opaqueState,
+          ...(code === undefined ? { pendingFollowUpControl: followUpControl } : {}),
+          followUpFallbackReason:
+            code === undefined ? "delivery_unknown" : `lark_follow_up_${code}`,
+        },
+      }
+      await checkpoint?.(degraded)
+      return degraded
+    }
+  }
+
   async function openCard(
     target: RunPresentationTarget,
     snapshot: RunProjectionSnapshot,
@@ -383,7 +499,12 @@ export function createLarkRunPresentationDriver(
     }
     await checkpoint?.(provisional)
     const platformMessageId = await sendCard(target, cardId, snapshot)
-    const result = { ...provisional, platformMessageId }
+    const result = await ensureFollowUpControl(
+      { ...provisional, platformMessageId },
+      target,
+      snapshot,
+      checkpoint
+    )
     await checkpoint?.(result)
     return result
   }
@@ -482,22 +603,25 @@ export function createLarkRunPresentationDriver(
       messageEditing: true,
       appendFallback: true,
       interactiveControls: true,
-      followUpBubbles: false,
+      followUpBubbles: true,
     },
     async open(target, snapshot, options) {
       const provisional = options?.previousRef
       if (!provisional?.opaqueState?.cardId) {
         return openCard(target, snapshot, options?.checkpoint, provisional)
       }
-      if (provisional.platformMessageId) return provisional
+      if (provisional.platformMessageId) {
+        const current = state(provisional)
+        return ensureFollowUpControl(provisional, current.target, snapshot, options?.checkpoint)
+      }
       const current = state(provisional)
       const platformMessageId = await sendCard(current.target, current.cardId, snapshot)
-      const result = {
+      const result: RunPresentationRef = {
         platformMessageId,
         opaqueState: provisional.opaqueState,
       }
       await options?.checkpoint?.(result)
-      return result
+      return ensureFollowUpControl(result, current.target, snapshot, options?.checkpoint)
     },
     async update(ref, snapshot, mutationOptions) {
       const current = state(ref)

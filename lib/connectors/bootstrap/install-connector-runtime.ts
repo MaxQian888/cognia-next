@@ -39,7 +39,13 @@ import type { PlatformAdapter } from "@/types/connectors/adapter"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { isTauri } from "@/lib/tauri"
 import { getBus } from "@/lib/connectors/bus"
-import { installRuntime } from "@/lib/connectors/runtime"
+import {
+  inboundEventToSendContent,
+  insertInboundMessage,
+  installRuntime,
+} from "@/lib/connectors/runtime"
+import { createConnectorLiveSteerCoordinator } from "@/lib/connectors/live-steer"
+import { steerSession } from "@/lib/claude/ipc"
 import { startOutboundRunner } from "@/lib/connectors/outbound-runner"
 import { installScheduledOutboundHandlers } from "@/lib/connectors/scheduled-outbound"
 import { installUsagePresenceHandlers } from "@/lib/connectors/presence/usage-status-runner"
@@ -58,7 +64,11 @@ import { listEnabledAdapterInstances } from "@/lib/db/adapter-instances"
 import { buildAdapterFromRow } from "@/lib/connectors/adapter-registry"
 import { buildAdapterContext } from "@/lib/connectors/adapter-context"
 import { appendAudit } from "@/lib/connectors/audit"
-import { safeSendPrompt } from "@/lib/connectors/ai-loop/safe-send-prompt"
+import {
+  isPiiSafeSendContent,
+  PiiGateBlocked,
+  safeSendPrompt,
+} from "@/lib/connectors/ai-loop/safe-send-prompt"
 import { defaultConnectorCallbackHandler } from "@/lib/a2ui/connector-callback-handler"
 import {
   startHeartbeatSweep,
@@ -434,6 +444,25 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
     }
 
     const bus = getBus()
+    const liveSteerCoordinator = createConnectorLiveSteerCoordinator({
+      storeInbound: insertInboundMessage,
+      admit: async (event) => {
+        const prompt = inboundEventToSendContent(event)
+        if (isPiiSafeSendContent(prompt)) return true
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "adapter.error",
+          at: Date.now(),
+          conversationKey: event.conversationKey,
+          reason: "pii_blocked",
+          message: "live-steer prompt rejected by PII gate before sidecar input",
+          fields: { sourceMessageId: event.messageId },
+        })
+        throw new PiiGateBlocked("prompt", event.adapterId, event.conversationKey)
+      },
+      steer: (sessionId, event) =>
+        steerSession(sessionId, inboundEventToSendContent(event), event.messageId),
+    })
 
     // Wire the runtime through `safeSendPrompt` — the PII gate that walks
     // the inbound prompt + injected system-prompt through `hasNoLeakingPii`
@@ -450,6 +479,7 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
           adapterId: cap?.adapterId ?? "",
           conversationKey: cap?.conversationKey ?? "",
         }),
+      liveSteerCoordinator,
     })
 
     // Wire the connector callback handler so inbound interactive events

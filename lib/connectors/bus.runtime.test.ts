@@ -17,6 +17,7 @@ import { upsertByConversationKey, readForResolution } from "@/lib/db/conversatio
 import { getByPlatformUser } from "@/lib/db/platform-identities"
 import { listRecent } from "@/lib/db/connector-audit"
 import { getBus, __resetBusForTesting } from "./bus"
+import { LarkFollowUpControlDispatchError } from "./follow-up-control"
 import { __resetPruneCounterForTesting } from "./dedup"
 import type { NormalizedInboundEvent, PlatformAdapter } from "@/types/connectors"
 import type { RouteDecision } from "./mode-router"
@@ -34,6 +35,13 @@ const mockPiiDeep = jest.fn(() => true)
 jest.mock("@cognia/redact", () => ({
   hasNoLeakingPiiDeep: (...args: unknown[]) => mockPiiDeep(...(args as [])),
   hasNoLeakingPii: () => true,
+}))
+
+const mockMaybeHandleLarkFollowUpControl = jest.fn(async () => false)
+jest.mock("./follow-up-control", () => ({
+  ...jest.requireActual("./follow-up-control"),
+  maybeHandleLarkFollowUpControl: (...args: unknown[]) =>
+    mockMaybeHandleLarkFollowUpControl(...args),
 }))
 
 // Inbound OCR is mocked so the image-gate true-branch can be asserted without
@@ -135,6 +143,8 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
     mockConnectorDecision.mockResolvedValue({ action: "allow" })
     mockPiiDeep.mockReset()
     mockPiiDeep.mockReturnValue(true)
+    mockMaybeHandleLarkFollowUpControl.mockReset()
+    mockMaybeHandleLarkFollowUpControl.mockResolvedValue(false)
     mockRunInboundOcr.mockClear()
 
     // Seed adapter instances
@@ -169,6 +179,50 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
     // 30s hook budget: the first cold open of the full schema (100+ Dexie
     // versions) can exceed jest's default 5s under parallel suite load.
   }, 30_000)
+
+  it("short-circuits a matched follow-up control and completes its durable inbound job", async () => {
+    mockMaybeHandleLarkFollowUpControl.mockResolvedValue(true)
+    const event = privateEvent(autoAdapterId, "msg_follow_up")
+
+    await getBus().dispatchInboundFull(event)
+    await getBus().flushInboundTurns()
+
+    expect(routeHandler).not.toHaveBeenCalled()
+    const job = await getDb()
+      .connectorInboundJobs.filter((row) => row.sourceMessageId === event.messageId)
+      .first()
+    expect(job?.status).toBe("completed")
+    expect(
+      (await listRecent(autoAdapterId)).some((row) => row.reason === "lark_follow_up_control")
+    ).toBe(true)
+  })
+
+  it("does not reinterpret a failed matched follow-up label as an AI prompt", async () => {
+    mockMaybeHandleLarkFollowUpControl.mockRejectedValue(
+      new LarkFollowUpControlDispatchError(new Error("control storage unavailable"))
+    )
+    const event = privateEvent(autoAdapterId, "msg_follow_up_failed")
+
+    await getBus().dispatchInboundFull(event)
+    await getBus().flushInboundTurns()
+
+    expect(routeHandler).not.toHaveBeenCalled()
+    const job = await getDb()
+      .connectorInboundJobs.filter((row) => row.sourceMessageId === event.messageId)
+      .first()
+    expect(job?.status).toBe("completed")
+    expect(
+      (await listRecent(autoAdapterId)).some(
+        (row) => row.reason === "lark_follow_up_control_failed"
+      )
+    ).toBe(true)
+  })
+
+  it("falls through normally when no follow-up registration matches", async () => {
+    await getBus().dispatchInboundFull(privateEvent(autoAdapterId, "msg_not_follow_up"))
+    await getBus().flushInboundTurns()
+    expect(routeHandler).toHaveBeenCalledTimes(1)
+  })
 
   it("runs inbound OCR only when an inbound image carries inline bytes (gate)", async () => {
     const bus = getBus()

@@ -1,5 +1,8 @@
 import { ALL_PLATFORM_KINDS } from "./platform-kind"
-import { builtInConnectorRuntimeCapabilities } from "./runtime-capability"
+import {
+  builtInConnectorRuntimeCapabilities,
+  connectorRuntimeCapabilitiesForScope,
+} from "./runtime-capability"
 
 describe("connector runtime capability matrix", () => {
   it.each(ALL_PLATFORM_KINDS)("returns a complete declaration for %s", (platform) => {
@@ -24,22 +27,29 @@ describe("connector runtime capability matrix", () => {
     )
   })
 
-  it("declares rich Lark topic/CardKit support without claiming live steer", () => {
+  it("declares rich Lark presentation support and its direct-chat follow-up surface", () => {
     expect(builtInConnectorRuntimeCapabilities("lark")).toMatchObject({
       topicIsolation: "native",
       unmentionedDelivery: true,
       historyPagination: true,
-      liveSteer: false,
+      liveSteer: true,
       textStreaming: true,
       componentMutation: true,
       fullReplacement: true,
-      followUpBubbles: false,
+      followUpBubbles: true,
       ambiguousDelivery: "remote_idempotent",
     })
   })
 
-  it("does not advertise live steer for Slack until a runtime injection bridge is installed", () => {
-    expect(builtInConnectorRuntimeCapabilities("slack").liveSteer).toBe(false)
+  it("limits Lark follow-up bubbles to private bot chats", () => {
+    expect(connectorRuntimeCapabilitiesForScope("lark", "private").followUpBubbles).toBe(true)
+    expect(connectorRuntimeCapabilitiesForScope("lark", "group").followUpBubbles).toBe(false)
+    expect(connectorRuntimeCapabilitiesForScope("lark", "thread").followUpBubbles).toBe(false)
+  })
+
+  it("advertises the shared sidecar live-input bridge independently of platform richness", () => {
+    expect(builtInConnectorRuntimeCapabilities("slack").liveSteer).toBe(true)
+    expect(builtInConnectorRuntimeCapabilities("onebot").liveSteer).toBe(true)
   })
 
   it("does not silently claim topic isolation for channel-only adapters", () => {

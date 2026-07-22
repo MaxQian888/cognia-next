@@ -9,6 +9,7 @@
 import { installConnectorRuntime } from "./install-connector-runtime"
 import { isTauri } from "@/lib/tauri"
 import { hasTaskExecutor, unregisterTaskExecutor } from "@/lib/scheduler"
+import type { NormalizedInboundEvent } from "@/types/connectors"
 
 // ── Mock isTauri ─────────────────────────────────────────────────────────────
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn() }))
@@ -22,8 +23,25 @@ jest.mock("@/lib/db/adapter-instances", () => ({
 
 // ── Mock installRuntime ───────────────────────────────────────────────────────
 const mockInstallRuntime = jest.fn()
+const mockInsertInboundMessage = jest.fn().mockResolvedValue({ id: "stored-message" })
+const mockInboundEventToSendContent = jest.fn((event: NormalizedInboundEvent) => event.plainText)
 jest.mock("@/lib/connectors/runtime", () => ({
   installRuntime: (...args: unknown[]) => mockInstallRuntime(...args),
+  insertInboundMessage: (...args: unknown[]) => mockInsertInboundMessage(...args),
+  inboundEventToSendContent: (...args: [NormalizedInboundEvent]) =>
+    mockInboundEventToSendContent(...args),
+}))
+
+const mockSteerSession = jest.fn().mockResolvedValue({ accepted: true })
+jest.mock("@/lib/claude/ipc", () => ({
+  steerSession: (...args: unknown[]) => mockSteerSession(...args),
+}))
+
+const mockIsPiiSafeSendContent = jest.fn(() => true)
+jest.mock("@/lib/connectors/ai-loop/safe-send-prompt", () => ({
+  safeSendPrompt: jest.fn(),
+  isPiiSafeSendContent: (...args: unknown[]) => mockIsPiiSafeSendContent(...args),
+  PiiGateBlocked: class PiiGateBlocked extends Error {},
 }))
 
 // ── Mock startOutboundRunner ─────────────────────────────────────────────────
@@ -216,6 +234,8 @@ const install = (...args: Parameters<typeof installConnectorRuntime>) => {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockIsPiiSafeSendContent.mockReturnValue(true)
+  mockSteerSession.mockResolvedValue({ accepted: true })
   mockListAdapters.mockReturnValue([])
   lifecycleRegistry.clear()
   mockStartHeartbeatSweep.mockImplementation(() => ({ dispose: mockSweepDispose }))
@@ -286,6 +306,70 @@ describe("installConnectorRuntime", () => {
     expect(mockInstallRuntime).toHaveBeenCalledTimes(1)
     expect(mockResumeDurableInboundJobs).toHaveBeenCalledWith({ reclaimRunning: true })
     expect(mockStartOutboundRunner).toHaveBeenCalledTimes(1)
+  })
+
+  it("wires durable PII-gated live steer into the installed runtime", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockListEnabled.mockResolvedValue([])
+    install()
+    await waitFor(() => expect(mockInstallRuntime).toHaveBeenCalledTimes(1))
+
+    const options = mockInstallRuntime.mock.calls[0]?.[1] as {
+      liveSteerCoordinator: {
+        activate(run: {
+          conversationKey: string
+          sessionId: string
+          executionRunId: string
+          provider: string
+        }): () => void
+        handle(event: NormalizedInboundEvent): Promise<{ accepted: boolean }>
+      }
+    }
+    options.liveSteerCoordinator.activate({
+      conversationKey: "lark:lark-1:chat-1",
+      sessionId: "session-1",
+      executionRunId: "run-1",
+      provider: "anthropic",
+    })
+    const event: NormalizedInboundEvent = {
+      platform: "lark",
+      adapterId: "lark-1",
+      selfId: "bot-1",
+      messageId: "om-steer",
+      conversationRef: { platform: "lark", adapterId: "lark-1", channelId: "chat-1" },
+      conversationKey: "lark:lark-1:chat-1",
+      sender: {
+        id: "identity-1",
+        platform: "lark",
+        adapterId: "lark-1",
+        remoteUserId: "ou-1",
+      },
+      channel: { id: "chat-1", kind: "private" },
+      segments: [{ type: "text", text: "redirect" }],
+      plainText: "redirect",
+      mentions: { selfMentioned: false, users: [] },
+      timestamp: 1,
+      raw: {},
+    }
+
+    await expect(options.liveSteerCoordinator.handle(event)).resolves.toMatchObject({
+      accepted: true,
+    })
+    expect(mockInsertInboundMessage).toHaveBeenCalledWith(event, "session-1")
+    expect(mockSteerSession).toHaveBeenCalledWith("session-1", "redirect", "om-steer")
+
+    mockIsPiiSafeSendContent.mockReturnValue(false)
+    await expect(
+      options.liveSteerCoordinator.handle({ ...event, messageId: "om-blocked" })
+    ).resolves.toMatchObject({ accepted: false })
+    expect(mockSteerSession).toHaveBeenCalledTimes(1)
+    expect(mockAppendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        adapterId: "lark-1",
+        reason: "pii_blocked",
+        fields: { sourceMessageId: "om-blocked" },
+      })
+    )
   })
 
   it("does not start a second runtime when the singleton lock is already held", async () => {

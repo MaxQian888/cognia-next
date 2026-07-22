@@ -272,6 +272,26 @@ describe("installRuntime — ai-run (happy path)", () => {
     expect(messages[0].metadata?.platformMessage?.platform).toBe("telegram")
   })
 
+  it("reuses the same inbound StoredMessage when a failed live steer falls back to FIFO", async () => {
+    const event = makeEvent({
+      conversationKey: "telegram:adapter_1:chat_ai",
+      messageId: "msg_idempotent_steer",
+    })
+    const session = await getDb().sessions.add({
+      id: "session-steer",
+      title: "Steer",
+      createdAt: 1,
+      updatedAt: 1,
+    } as never)
+
+    await insertInboundMessage(event, String(session))
+    await insertInboundMessage(event, String(session))
+
+    expect(await getDb().messages.where("platformMessageId").equals(event.messageId).count()).toBe(
+      1
+    )
+  })
+
   it("invokes runAndCapture with the session id and event content", async () => {
     const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_ai" })
     await callHandler(event, "ai-run")

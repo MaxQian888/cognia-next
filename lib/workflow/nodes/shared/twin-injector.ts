@@ -18,6 +18,7 @@
 
 import { getCharacter } from "@/lib/db/characters"
 import { recordTwinInject } from "@/lib/twin/runtime/inject-log"
+import { estimateFallbackTokens } from "@/lib/ai/tokens/fallback-estimator"
 
 export interface TwinInjectionInput {
   characterId?: string
@@ -103,7 +104,7 @@ export async function injectTwinContext(input: TwinInjectionInput): Promise<Twin
       degradedReason: result.degradedReason ?? null,
       chunkCount: result.applied.metadata.retrievedChunkIds.length,
       styleSampleCount: result.applied.metadata.styleSampleIds.length,
-      tokensApprox: Math.ceil(systemPrompt.length / 4),
+      tokensApprox: estimateFallbackTokens(systemPrompt),
     })
     return { systemPrompt, applied: true }
   } catch (err) {

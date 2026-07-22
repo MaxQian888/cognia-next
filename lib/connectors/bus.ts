@@ -56,6 +56,10 @@ import { trackInboxEvent } from "@/lib/telemetry/inbox-events"
 import { trackEvent } from "@/lib/telemetry/events/track-event"
 import { maybeHandleHelpCommand, maybeSendWelcome } from "./help/help-dispatch"
 import { maybeHandleControlCommand } from "./commands/dispatch"
+import {
+  LarkFollowUpControlDispatchError,
+  maybeHandleLarkFollowUpControl,
+} from "./follow-up-control"
 import { parseControlCommand } from "./commands/parse"
 import { parseConversationKey } from "@/types/connectors/event"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
@@ -722,6 +726,18 @@ export class ConnectorBus {
     // inbound pipeline.
     if (decision !== "drop" && !evalResult.blocked) {
       try {
+        if (await maybeHandleLarkFollowUpControl(event, adapterRow)) {
+          await appendAudit({
+            adapterId: event.adapterId,
+            kind: "inbound.received",
+            at: Date.now(),
+            conversationKey: event.conversationKey,
+            reason: "lark_follow_up_control",
+            fields: { sourceMessageId: event.messageId },
+          })
+          await completeConnectorInboundJob(inboundJob.id, { now: Date.now() })
+          return
+        }
         // Control commands (`/model`, `/mode`, `/new`, …) are intercepted
         // before help so they short-circuit the AI turn + workflow fan-out
         // and never become a stored user message. More specific than the
@@ -735,14 +751,19 @@ export class ConnectorBus {
           return
         }
       } catch (err) {
+        const followUpFailure = err instanceof LarkFollowUpControlDispatchError
         await appendAudit({
           adapterId: event.adapterId,
           kind: "adapter.error",
           at: Date.now(),
           conversationKey: event.conversationKey,
-          reason: "help_dispatch_failed",
+          reason: followUpFailure ? "lark_follow_up_control_failed" : "help_dispatch_failed",
           message: err instanceof Error ? err.message : String(err),
         })
+        if (followUpFailure) {
+          await completeConnectorInboundJob(inboundJob.id, { now: Date.now() })
+          return
+        }
       }
       await maybeSendWelcome(event, adapterRow).catch(() => undefined)
     }

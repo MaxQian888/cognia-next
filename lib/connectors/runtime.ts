@@ -70,6 +70,7 @@ import { makeImPermissionResponder } from "./hitl/tool-approval"
 import { createExecutionRun, putExecutionRunBinding } from "@/lib/db/execution-runs"
 import { AgentRunEventProducer } from "@/lib/execution/sources/agent-turn"
 import { registerAgentRunController } from "@/lib/execution/control-handlers"
+import type { ConnectorLiveSteerCoordinator } from "./live-steer"
 
 /**
  * Turn-capture timeout for connector AI-run turns. Raised above the 5-min chat
@@ -333,6 +334,8 @@ export interface RuntimeOptions {
   runAndCapture: RunAndCaptureFn
   /** Optional phase-aware injection bridge; absent runtimes replay at the next safe boundary. */
   tryLiveSteer?: LiveSteerHandler
+  /** Active-run registry used by the production Anthropic sidecar bridge. */
+  liveSteerCoordinator?: ConnectorLiveSteerCoordinator
 }
 
 // Session ↔ conversation binding lookups live in `session-bindings.ts` so the
@@ -430,6 +433,19 @@ export async function insertInboundMessage(
   overrideTimestamp?: number
 ): Promise<StoredMessage> {
   const now = overrideTimestamp ?? Date.now()
+  const existing = await getDb()
+    .messages.where("platformMessageId")
+    .equals(event.messageId)
+    .filter((message) => {
+      const platform = message.metadata?.platformMessage
+      return (
+        message.sessionId === sessionId &&
+        platform?.adapterId === event.adapterId &&
+        platform?.conversationKey === event.conversationKey
+      )
+    })
+    .first()
+  if (existing) return existing
   // Map MessageSegment[] → UIMessage parts (text & image; others as text-fallback)
   const parts: StoredMessage["parts"] = event.segments
     .map((seg) => {
@@ -657,7 +673,7 @@ async function resolveInboundSendOptions(params: {
  * Call this once at app startup (e.g. from ConnectorBusProvider).
  */
 export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOptions): void {
-  bus.liveSteerHandler = opts.tryLiveSteer ?? null
+  bus.liveSteerHandler = opts.tryLiveSteer ?? opts.liveSteerCoordinator?.handle ?? null
   bus.routeHandler = async (
     event: NormalizedInboundEvent,
     decision: RouteDecision,
@@ -1042,6 +1058,12 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         const adapterSignal = getRunningAdapter(event.adapterId)?.abortController.signal
         const runController = new AbortController()
         const unregisterRunController = registerAgentRunController(executionRunId, runController)
+        const unregisterLiveSteer = opts.liveSteerCoordinator?.activate({
+          conversationKey: event.conversationKey,
+          sessionId: session.id,
+          executionRunId,
+          provider: sendOptions.provider ?? "anthropic",
+        })
         const captureSignal = adapterSignal
           ? AbortSignal.any([adapterSignal, runController.signal])
           : runController.signal
@@ -1136,9 +1158,11 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             })
           }
           unregisterRunController()
+          unregisterLiveSteer?.()
           break
         }
         unregisterRunController()
+        unregisterLiveSteer?.()
 
         try {
           await runProducer.finish("completed", Date.now(), "Response ready")

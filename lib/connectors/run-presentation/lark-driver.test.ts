@@ -1,5 +1,5 @@
 import { createLarkRunPresentationDriver } from "./lark-driver"
-import type { RunProjectionSnapshot } from "@/types/execution/run"
+import type { RunPresentationRef, RunProjectionSnapshot } from "@/types/execution/run"
 
 const topicTarget = {
   adapterId: "lark-1",
@@ -23,6 +23,27 @@ const topicTarget = {
     },
     sourceMessageId: "om-anchor",
     refreshedAt: 1,
+  },
+}
+
+const directTarget = {
+  ...topicTarget,
+  conversationKey: "opaque-direct-key",
+  sourceMessageId: "om-user-anchor",
+  deliveryTarget: {
+    ...topicTarget.deliveryTarget,
+    address: {
+      ...topicTarget.deliveryTarget.address,
+      conversationKey: "opaque-direct-key",
+      scopeKind: "private" as const,
+      topicId: undefined,
+    },
+    conversationRef: {
+      platform: "lark" as const,
+      adapterId: "lark-1",
+      channelId: "chat-1",
+    },
+    sourceMessageId: "om-user-anchor",
   },
 }
 
@@ -242,8 +263,103 @@ describe("Lark run presentation driver", () => {
     expect(uuids.every((uuid) => uuid.length <= 64)).toBe(true)
   })
 
-  it("declares follow-up bubbles unsupported until Feishu exposes a durable server API", () => {
+  it("pushes localized follow-up controls only for a direct-chat progress message", async () => {
+    const calls: Array<{ path: string; body: unknown }> = []
+    const driver = createLarkRunPresentationDriver(async (_method, path, body) => {
+      calls.push({ path, body })
+      if (path === "/cardkit/v1/cards") return { data: { card_id: "card-direct" } }
+      if (path === "/im/v1/messages?receive_id_type=chat_id") {
+        return { data: { message_id: "om-bot-progress" } }
+      }
+      return { data: {} }
+    })
+
+    const opened = await driver.open(directTarget, snapshot(1))
+    const followUp = calls.find((call) => call.path.endsWith("/push_follow_up"))
+
+    expect(followUp?.path).toBe("/im/v1/messages/om-bot-progress/push_follow_up")
+    expect(followUp?.body).toEqual({
+      follow_ups: expect.arrayContaining([
+        expect.objectContaining({
+          content: "Stop",
+          i18n_contents: expect.arrayContaining([
+            { language: "zh_cn", content: "停止" },
+            { language: "en_us", content: "Stop" },
+          ]),
+        }),
+        expect.objectContaining({ content: "View status" }),
+      ]),
+    })
+    expect(opened.opaqueState?.followUpControl).toEqual(
+      expect.objectContaining({
+        platformMessageId: "om-bot-progress",
+        items: expect.arrayContaining([expect.objectContaining({ action: "stop" })]),
+      })
+    )
+  })
+
+  it("does not call the P2P-only follow-up API for group topics", async () => {
+    const paths: string[] = []
+    const driver = createLarkRunPresentationDriver(async (_method, path) => {
+      paths.push(path)
+      if (path === "/cardkit/v1/cards") return { data: { card_id: "card-topic" } }
+      return { data: { message_id: "om-topic-progress" } }
+    })
+
+    await driver.open(topicTarget, snapshot(1))
+    expect(paths.some((path) => path.endsWith("/push_follow_up"))).toBe(false)
+  })
+
+  it("treats 230008 as reconciliation evidence for an ambiguous follow-up retry", async () => {
+    const driver = createLarkRunPresentationDriver(async (_method, path) => {
+      if (path === "/cardkit/v1/cards") return { data: { card_id: "card-existing" } }
+      if (path === "/im/v1/messages?receive_id_type=chat_id") {
+        return { data: { message_id: "om-existing" } }
+      }
+      if (path.endsWith("/push_follow_up")) throw { code: 230008 }
+      return { data: {} }
+    })
+
+    await expect(driver.open(directTarget, snapshot(1))).resolves.toEqual(
+      expect.objectContaining({ platformMessageId: "om-existing" })
+    )
+  })
+
+  it("reuses a durable pending follow-up registration after an ambiguous response", async () => {
+    let followUpAttempts = 0
+    const checkpoints: RunPresentationRef[] = []
+    const driver = createLarkRunPresentationDriver(async (_method, path) => {
+      if (path === "/cardkit/v1/cards") return { data: { card_id: "card-pending" } }
+      if (path === "/im/v1/messages?receive_id_type=chat_id") {
+        return { data: { message_id: "om-pending" } }
+      }
+      if (path.endsWith("/push_follow_up")) {
+        followUpAttempts += 1
+        if (followUpAttempts === 1) throw new Error("connection reset after write")
+        throw { code: 230008 }
+      }
+      return { data: {} }
+    })
+
+    const first = await driver.open(directTarget, snapshot(1), {
+      checkpoint: async (ref) => {
+        checkpoints.push(ref)
+      },
+    })
+    expect(first.opaqueState?.pendingFollowUpControl).toBeDefined()
+
+    const recovered = await driver.open(directTarget, snapshot(1), { previousRef: first })
+    expect(followUpAttempts).toBe(2)
+    expect(recovered.opaqueState?.pendingFollowUpControl).toBeUndefined()
+    expect(recovered.opaqueState?.followUpFallbackReason).toBeUndefined()
+    expect(recovered.opaqueState?.followUpControl).toEqual(
+      expect.objectContaining({ platformMessageId: "om-pending" })
+    )
+    expect(checkpoints.some((ref) => ref.opaqueState?.pendingFollowUpControl)).toBe(true)
+  })
+
+  it("declares platform follow-up support with scope resolved by the delivery target", () => {
     const driver = createLarkRunPresentationDriver(async () => ({ data: {} }))
-    expect(driver.capabilities.followUpBubbles).toBe(false)
+    expect(driver.capabilities.followUpBubbles).toBe(true)
   })
 })

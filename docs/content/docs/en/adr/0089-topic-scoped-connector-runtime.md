@@ -66,7 +66,7 @@ in the same topic.
 - Adapter/topic activation and active-run dispatch (`queue` or `steer`) are independent settings;
   `queue` is the default.
 - Static bot menus remain suitable for status/new/help commands, not live progress. CardKit is the
-  durable progress surface; follow-up bubbles are temporary enhancements only.
+  durable progress surface. `push_follow_up` bubbles are a direct-chat-only
+  temporary enhancement; groups and topics explicitly fall back to CardKit buttons.
 - Plugin adapters may omit rich features, but must expose an explicit degradation contract and
   must require reconciliation after ambiguous delivery when the remote platform has no idempotency.
-

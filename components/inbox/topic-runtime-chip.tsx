@@ -10,7 +10,7 @@ import {
   resolveDeliveryReadiness,
   resolveInboundActivationPolicy,
 } from "@/lib/connectors/conversation-admission"
-import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
+import { connectorRuntimeCapabilitiesForScope } from "@/types/connectors/runtime-capability"
 
 interface TopicRuntimeChipProps {
   adapterId: string
@@ -35,7 +35,7 @@ export function TopicRuntimeChip({ adapterId, conversationKey }: TopicRuntimeChi
       adapter.type === "lark" && (requested === "always" || requested === "mention_activates")
     const effective =
       needsVerifiedDelivery && readiness !== "all_messages_verified" ? "mention_each" : requested
-    const capabilities = builtInConnectorRuntimeCapabilities(adapter.type)
+    const capabilities = connectorRuntimeCapabilitiesForScope(adapter.type, "thread")
     return {
       requested,
       effective,

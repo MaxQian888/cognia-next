@@ -156,12 +156,15 @@ direct bot chats. Keep them to commands such as `status`, `new`, and `help`;
 they are not a per-topic progress surface. CardKit progress cards are used for
 live Agent status inside topics.
 
-Feishu lists follow-up bubbles as an AI-bot presentation feature configured in
-the developer console, not as a documented server API that can carry dynamic
-per-run controls. Treat them as an optional temporary enhancement only: they
-may disappear after a click or after the next message. Durable `Stop`, status,
-and approval controls remain on the CardKit card. Do not advertise a follow-up
-bubble until the released app has been verified in the target tenant/client.
+Feishu exposes follow-up bubbles through
+`POST /im/v1/messages/:message_id/push_follow_up`. In **bot-user direct chats**,
+cognia-next projects up to three temporary Stop, status, and approval controls
+from the latest progress card. A click is authorized using the real inbound
+sender. The feature requires Feishu 7.20+ and a latest bot message no older than
+600 seconds. The API rejects groups and topics with `230003`, so durable CardKit
+buttons remain the topic control surface. Expired, superseded, or ambiguous
+bubble delivery degrades only this temporary enhancement, never the progress
+card or final reply.
 
 ### Verify topic no-@ delivery
 
@@ -185,8 +188,12 @@ Topic controls:
 - `/agent verify` — start the ten-minute no-@ probe (configured operator only).
 
 Choose **Queue** to preserve every new message as an independent FIFO turn. Choose **Steer** to
-request live injection into an active run; if the runtime cannot safely steer at that phase, the
-message and attachments remain durable and run at the earliest safe boundary.
+request live injection into an active run. The built-in Anthropic sidecar first persists the real
+sender's message, then uses acknowledged SDK streaming input to queue it into the current query.
+After a short burst window it closes that query's input so the run settles normally. A missing
+acknowledgement, closed input, or non-Anthropic provider keeps the message and attachments durable
+for replay at the earliest safe boundary. This guarantees live queued input; it does not claim to
+rewrite a model HTTP request that has already been issued.
 
 ---
 
