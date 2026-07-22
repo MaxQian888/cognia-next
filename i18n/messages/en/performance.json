@@ -50,6 +50,7 @@
     "subsystems": {
       "acpTerminal": "Agent terminals",
       "chatSidecar": "Chat sidecar",
+      "codeServer": "Pro IDE (code-server)",
       "externalAgent": "External agents",
       "integratedTerminal": "Terminals",
       "mcpServer": "MCP server"

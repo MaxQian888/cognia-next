@@ -64,6 +64,7 @@
   "namePlaceholder": "我的自定义代理",
   "noCustomModes": "暂无自定义模式",
   "noTemplateSelected": "未选择模板",
+  "pluginModes": "插件模式",
   "systemPrompt": "系统提示词",
   "systemPromptPlaceholder": "你是一个能够……",
   "teammatesCount": "{count, plural, other {# 个队友}}",

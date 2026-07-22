@@ -4,8 +4,9 @@
     "label": "Claude Code hooks"
   },
   "codex": {
-    "desc": "将 ~/.codex/config.toml 的 notify 指向转发脚本。仅观察——每轮完成上报一次，无需信任步骤。",
-    "label": "Codex notify"
+    "desc": "把转发脚本注册进 ~/.codex/hooks.json。采用合并写入，其它工具已注册的 hook 照常工作；卸载只移除我们自己的条目。",
+    "label": "Codex hooks",
+    "trustHint": "Codex 只运行你信任过的 hook，且信任与 hook 的命令原文绑定——安装后请在 Codex TUI 里确认信任提示。条目一旦被改动就会失去信任，重新安装前不会触发。"
   },
   "description": "监控并控制本机任意位置启动的编码 Agent（终端、编辑器）——不限于 Cognia 启动的实例。",
   "error": "舰队操作失败：{detail}",
@@ -45,7 +46,7 @@
   },
   "saved": "舰队设置已更新。",
   "status": {
-    "codexConflict": "notify 已占用",
+    "codexStale": "需重新安装",
     "codexUnavailable": "未找到 Codex",
     "installed": "已安装",
     "opencodeUnavailable": "未找到 OpenCode",

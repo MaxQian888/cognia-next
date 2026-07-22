@@ -64,6 +64,7 @@
   "namePlaceholder": "My Custom Agent",
   "noCustomModes": "No custom modes yet",
   "noTemplateSelected": "No template selected",
+  "pluginModes": "Plugin Modes",
   "systemPrompt": "System Prompt",
   "systemPromptPlaceholder": "You are a helpful assistant that...",
   "teammatesCount": "{count, plural, one {# teammate} other {# teammates}}",

@@ -134,26 +134,30 @@
     "undoSuccess": "对话已恢复"
   },
   "composer": {
-    "ariaAttachImage": "添加图片",
+    "ariaAttachImage": "添加文件",
     "ariaMessage": "消息",
     "ariaSend": "发送",
     "ariaSending": "发送中…",
     "ariaStop": "停止",
     "ariaToggleWebSearch": "切换网络搜索",
-    "ariaUploadImage": "上传图片",
-    "attachImageTooltip": "添加图片",
+    "ariaUploadImage": "上传文件",
+    "attachImageTooltip": "添加文件",
     "attachments": {
       "countLimit": "最多只能附加 {max} 个附件。",
       "fallbackFile": "文件",
       "fallbackName": "附件",
       "fileSizeExceeded": "{count, plural, =1 {1 个文件超过} other {# 个文件超过}} {max}MB。",
+      "linkSkipped": "有 {count} 个链接无法读取，仍会发送原始网址。",
+      "optimized": "添加前已优化 {count} 张大图。",
       "oversizeBody": "这些附件大约会增加 {tokens}k tokens 的上下文。仍要发送吗？",
       "oversizeCancel": "取消",
       "oversizeConfirm": "仍然发送",
       "oversizeTitle": "附件较大",
+      "preparing": "正在处理附件…",
       "removeAria": "移除 {filename}",
       "removeFallback": "移除附件",
-      "skipped": "{count, plural, =1 {1 个附件已被} other {# 个附件已被}}跳过（不支持的文件类型）。"
+      "skipped": "{count, plural, =1 {1 个附件已被} other {# 个附件已被}}跳过（不支持的文件类型）。",
+      "unsupported": "有 {count} 个文件不受支持。"
     },
     "camera": {
       "captureAria": "拍照或添加照片",
@@ -167,7 +171,7 @@
       "unavailable": "/{name} 暂不可用。"
     },
     "context": {
-      "ariaLabel": "已附加的文件与引用"
+      "ariaLabel": "已附加的文件、链接与引用"
     },
     "draftRestore": {
       "dismiss": "关闭",
@@ -181,7 +185,7 @@
       "title": "查看待处理草稿"
     },
     "dragOverlay": {
-      "dropToAttach": "松开以添加图片"
+      "dropToAttach": "松开以添加文件"
     },
     "effort": {
       "aria": "思考等级",
@@ -230,9 +234,18 @@
     "ghostAcceptHint": "Tab",
     "ghostDismiss": "忽略建议",
     "helperHints": {
-      "dropImages": "拖拽 / 粘贴图片",
+      "dropImages": "拖拽 / 粘贴文件或链接",
       "send": "⏎ 发送 · ⇧⏎ 换行",
       "tryPrefix": "试试"
+    },
+    "links": {
+      "add": "添加链接",
+      "addAction": "附加链接",
+      "inputAria": "网页地址",
+      "inputPlaceholder": "https://example.com",
+      "invalid": "请输入有效的 HTTP(S) 链接。",
+      "openAria": "打开 {host}",
+      "removeAria": "移除 {host}"
     },
     "memory": {
       "appended": "已写入 {path}",
@@ -923,14 +936,20 @@
     "image": {
       "close": "关闭",
       "copyUrl": "复制链接",
+      "counter": "第 {current} 张，共 {total} 张",
       "defaultFilename": "image",
       "defaultTitle": "图片",
       "download": "下载",
       "failedToLoad": "图片加载失败",
+      "galleryAria": "图片画廊，共 {count} 张",
+      "next": "下一张图片",
       "openInNewTab": "在新标签页打开",
       "openUrl": "打开链接",
+      "previewAria": "预览{name}",
       "previewDescription": "预览所选图片，可缩放或旋转。",
+      "previous": "上一张图片",
       "rotate": "旋转",
+      "selectImage": "查看{name}",
       "viewFullscreen": "全屏查看",
       "zoomIn": "放大",
       "zoomOut": "缩小"

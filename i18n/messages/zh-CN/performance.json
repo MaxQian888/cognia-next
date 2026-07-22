@@ -50,6 +50,7 @@
     "subsystems": {
       "acpTerminal": "Agent 终端",
       "chatSidecar": "聊天 sidecar",
+      "codeServer": "Pro IDE（code-server）",
       "externalAgent": "外部 Agent",
       "integratedTerminal": "集成终端",
       "mcpServer": "MCP 服务器"

@@ -505,7 +505,32 @@
       "disclosure": "When enabled, Cognia stores registered interaction events locally and can send them to your configured OTLP endpoint. Message content, prompts, responses, and secrets are not collected.",
       "optIn": "Share behavior events",
       "optInDesc": "Off by default. Engineering traces and behavior events use separate switches.",
-      "export": "Export local events",
+      "destinations": {
+        "title": "Destinations",
+        "description": "Choose where eligible events are written. Remote export also requires an enabled OTLP exporter.",
+        "local": {
+          "label": "Store locally",
+          "description": "Keep a bounded event history in this device's local database."
+        },
+        "remote": {
+          "label": "Export remotely",
+          "description": "Send sampled events to the configured OTLP Logs endpoint."
+        }
+      },
+      "categories": {
+        "title": "Event categories",
+        "description": "Disable any product area you do not want included.",
+        "chat": "Chat lifecycle",
+        "workflow": "Workflow runs",
+        "connector": "Connector messages",
+        "agentTeam": "Agent Team execution",
+        "system": "Telemetry preferences"
+      },
+      "sampleRate": "Sampling rate",
+      "retentionDays": "Local retention (days)",
+      "maxStoredEvents": "Maximum local events",
+      "exportJson": "Export JSON",
+      "exportCsv": "Export CSV",
       "clear": "Clear local events"
     },
     "saveError": "Failed to save settings",

@@ -465,8 +465,8 @@
     "maintenance": "维护",
     "overview": "概览"
   },
-  "telemetryHint": "默认关闭。留作未来可选的使用情况统计——当前并未发送任何遥测。",
-  "telemetryLabel": "允许匿名遥测",
+  "telemetryHint": "默认关闭。请在「设置 → 日志」中配置行为遥测的分类、写入目标、采样率和保留策略。",
+  "telemetryLabel": "启用行为遥测",
   "title": "数据与隐私",
   "typeToConfirm": "输入 DELETE 以确认",
   "webdav": {

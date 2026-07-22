@@ -134,26 +134,30 @@
     "undoSuccess": "Conversation restored"
   },
   "composer": {
-    "ariaAttachImage": "Attach image",
+    "ariaAttachImage": "Attach files",
     "ariaMessage": "Message",
     "ariaSend": "Send",
     "ariaSending": "Sending…",
     "ariaStop": "Stop",
     "ariaToggleWebSearch": "Toggle web search",
-    "ariaUploadImage": "Upload image",
-    "attachImageTooltip": "Attach image",
+    "ariaUploadImage": "Upload files",
+    "attachImageTooltip": "Attach files",
     "attachments": {
       "countLimit": "Only {max} attachments allowed.",
       "fallbackFile": "file",
       "fallbackName": "attachment",
       "fileSizeExceeded": "{count, plural, =1 {1 file exceeded} other {# files exceeded}} {max}MB.",
+      "linkSkipped": "{count, plural, =1 {1 link couldn't be read} other {# links couldn't be read}}; the original URL will still be sent.",
+      "optimized": "{count, plural, =1 {1 large image was optimized} other {# large images were optimized}} before attaching.",
       "oversizeBody": "These attachments add about {tokens}k tokens of context. Send anyway?",
       "oversizeCancel": "Cancel",
       "oversizeConfirm": "Send anyway",
       "oversizeTitle": "Large attachment",
+      "preparing": "Preparing attachments…",
       "removeAria": "Remove {filename}",
       "removeFallback": "Remove attachment",
-      "skipped": "{count, plural, =1 {1 attachment was} other {# attachments were}} skipped (unsupported file type)."
+      "skipped": "{count, plural, =1 {1 attachment was} other {# attachments were}} skipped (unsupported file type).",
+      "unsupported": "{count, plural, =1 {1 file isn't supported} other {# files aren't supported}}."
     },
     "camera": {
       "captureAria": "Take or attach a photo",
@@ -167,7 +171,7 @@
       "unavailable": "/{name} is not available yet."
     },
     "context": {
-      "ariaLabel": "Attached files and references"
+      "ariaLabel": "Attached files, links, and references"
     },
     "draftRestore": {
       "dismiss": "Dismiss",
@@ -181,7 +185,7 @@
       "title": "Review pending drafts"
     },
     "dragOverlay": {
-      "dropToAttach": "Drop image to attach"
+      "dropToAttach": "Drop files to attach"
     },
     "effort": {
       "aria": "Thinking level",
@@ -230,9 +234,18 @@
     "ghostAcceptHint": "Tab",
     "ghostDismiss": "Dismiss suggestion",
     "helperHints": {
-      "dropImages": "Drop / paste images",
+      "dropImages": "Drop / paste files or links",
       "send": "⏎ Send · ⇧⏎ New line",
       "tryPrefix": "Try"
+    },
+    "links": {
+      "add": "Attach a link",
+      "addAction": "Attach link",
+      "inputAria": "Web address",
+      "inputPlaceholder": "https://example.com",
+      "invalid": "Enter a valid HTTP(S) link.",
+      "openAria": "Open {host}",
+      "removeAria": "Remove {host}"
     },
     "memory": {
       "appended": "Appended to {path}",
@@ -923,14 +936,20 @@
     "image": {
       "close": "Close",
       "copyUrl": "Copy URL",
+      "counter": "{current} of {total}",
       "defaultFilename": "image",
       "defaultTitle": "Image",
       "download": "Download",
       "failedToLoad": "Failed to load image",
+      "galleryAria": "Image gallery with {count} images",
+      "next": "Next image",
       "openInNewTab": "Open in new tab",
       "openUrl": "Open URL",
+      "previewAria": "Preview {name}",
       "previewDescription": "Preview the selected image, zoom or rotate it.",
+      "previous": "Previous image",
       "rotate": "Rotate",
+      "selectImage": "View {name}",
       "viewFullscreen": "View fullscreen",
       "zoomIn": "Zoom in",
       "zoomOut": "Zoom out"

@@ -38,6 +38,7 @@
   "pet": "Your animated desktop companion.",
   "plugins": "Browse, install, configure, and govern plugins. Review permissions, scheduled jobs, devtools, and contract audits.",
   "presets": "Reusable session configurations — system prompt plus model, tool, MCP, and skill overrides.",
+  "proIde": "Embedded VS Code install and disk usage",
   "profile": "Your local display name, avatar and bio — synced to companion devices and included in backups.",
   "providers": "AI provider API keys, models, and connection settings.",
   "remoteControl": "Local HTTP listener for inbound triggers, plus webhook signing and custom headers for outbound calls.",

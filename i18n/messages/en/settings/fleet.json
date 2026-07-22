@@ -4,8 +4,9 @@
     "label": "Claude Code hooks"
   },
   "codex": {
-    "desc": "Point ~/.codex/config.toml's notify at a forwarder. Observe-only — one event per completed turn, no trust step.",
-    "label": "Codex notify"
+    "desc": "Register the forwarder in ~/.codex/hooks.json. Merged into the file, so hooks other tools registered keep working; uninstall removes only ours.",
+    "label": "Codex hooks",
+    "trustHint": "Codex only runs hooks you have trusted, and it keys that trust to the hook's exact command — approve the prompt in the Codex TUI after installing. A modified entry loses its trust and will not fire until reinstalled."
   },
   "description": "Watch and control coding agents launched anywhere on this machine (terminals, editors) — not just ones started by Cognia.",
   "error": "Fleet action failed: {detail}",
@@ -45,7 +46,7 @@
   },
   "saved": "Fleet settings updated.",
   "status": {
-    "codexConflict": "Notify in use",
+    "codexStale": "Reinstall needed",
     "codexUnavailable": "Codex not found",
     "installed": "Installed",
     "opencodeUnavailable": "OpenCode not found",

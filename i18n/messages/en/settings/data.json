@@ -465,8 +465,8 @@
     "maintenance": "Maintenance",
     "overview": "Overview"
   },
-  "telemetryHint": "Off by default. Reserved for future opt-in usage stats — no telemetry is currently sent.",
-  "telemetryLabel": "Allow anonymous telemetry",
+  "telemetryHint": "Off by default. Configure behavior telemetry categories, destinations, sampling, and retention under Settings → Logs.",
+  "telemetryLabel": "Enable behavior telemetry",
   "title": "Data & privacy",
   "typeToConfirm": "Type DELETE to confirm",
   "webdav": {

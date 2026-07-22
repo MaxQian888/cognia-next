@@ -38,6 +38,7 @@
   "pet": "你的桌面动画伙伴。",
   "plugins": "浏览、安装、配置并治理插件。查看权限、定时任务、devtools 与契约审计。",
   "presets": "可复用的会话配置 — 系统提示词加上模型、工具、MCP 与技能覆盖。",
+  "proIde": "内嵌 VS Code 的安装与磁盘占用",
   "profile": "本地显示名称、头像与简介 — 同步到伴侣设备并包含在备份中。",
   "providers": "AI 提供商的 API 密钥、模型与连接设置。",
   "remoteControl": "桌面端本地 HTTP 入站监听器，搭配出站 webhook 的 HMAC 签名与自定义请求头。",

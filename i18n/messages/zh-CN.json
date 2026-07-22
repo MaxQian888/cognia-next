@@ -1622,6 +1622,7 @@
     "namePlaceholder": "我的自定义代理",
     "noCustomModes": "暂无自定义模式",
     "noTemplateSelected": "未选择模板",
+    "pluginModes": "插件模式",
     "systemPrompt": "系统提示词",
     "systemPromptPlaceholder": "你是一个能够……",
     "teammatesCount": "{count, plural, other {# 个队友}}",
@@ -2108,19 +2109,6 @@
       "newFile": "新建文件",
       "newFolder": "新建文件夹",
       "noWorkingDir": "该团队未设置工作目录。",
-      "proIde": {
-        "disabledTooltip": "此平台不支持，请改用本机 VS Code。",
-        "downloading": "正在下载 VS Code… {percent}%",
-        "errorTitle": "无法启动 VS Code",
-        "openFileFailed": "无法在 VS Code 中打开文件：{error}",
-        "retry": "重试",
-        "starting": "正在启动 VS Code…",
-        "switchLabel": "编辑器引擎",
-        "toggleMonaco": "Monaco",
-        "toggleVsCode": "VS Code",
-        "unsupportedDesc": "code-server 没有适配你操作系统的版本，请改用本机 VS Code。",
-        "unsupportedTitle": "此平台不支持 Pro IDE"
-      },
       "refresh": "刷新",
       "rename": "重命名",
       "rootLabel": "项目根目录",
@@ -4068,26 +4056,30 @@
       "undoSuccess": "对话已恢复"
     },
     "composer": {
-      "ariaAttachImage": "添加图片",
+      "ariaAttachImage": "添加文件",
       "ariaMessage": "消息",
       "ariaSend": "发送",
       "ariaSending": "发送中…",
       "ariaStop": "停止",
       "ariaToggleWebSearch": "切换网络搜索",
-      "ariaUploadImage": "上传图片",
-      "attachImageTooltip": "添加图片",
+      "ariaUploadImage": "上传文件",
+      "attachImageTooltip": "添加文件",
       "attachments": {
         "countLimit": "最多只能附加 {max} 个附件。",
         "fallbackFile": "文件",
         "fallbackName": "附件",
         "fileSizeExceeded": "{count, plural, =1 {1 个文件超过} other {# 个文件超过}} {max}MB。",
+        "linkSkipped": "有 {count} 个链接无法读取，仍会发送原始网址。",
+        "optimized": "添加前已优化 {count} 张大图。",
         "oversizeBody": "这些附件大约会增加 {tokens}k tokens 的上下文。仍要发送吗？",
         "oversizeCancel": "取消",
         "oversizeConfirm": "仍然发送",
         "oversizeTitle": "附件较大",
+        "preparing": "正在处理附件…",
         "removeAria": "移除 {filename}",
         "removeFallback": "移除附件",
-        "skipped": "{count, plural, =1 {1 个附件已被} other {# 个附件已被}}跳过（不支持的文件类型）。"
+        "skipped": "{count, plural, =1 {1 个附件已被} other {# 个附件已被}}跳过（不支持的文件类型）。",
+        "unsupported": "有 {count} 个文件不受支持。"
       },
       "camera": {
         "captureAria": "拍照或添加照片",
@@ -4101,7 +4093,7 @@
         "unavailable": "/{name} 暂不可用。"
       },
       "context": {
-        "ariaLabel": "已附加的文件与引用"
+        "ariaLabel": "已附加的文件、链接与引用"
       },
       "draftRestore": {
         "dismiss": "关闭",
@@ -4115,7 +4107,7 @@
         "title": "查看待处理草稿"
       },
       "dragOverlay": {
-        "dropToAttach": "松开以添加图片"
+        "dropToAttach": "松开以添加文件"
       },
       "effort": {
         "aria": "思考等级",
@@ -4164,9 +4156,18 @@
       "ghostAcceptHint": "Tab",
       "ghostDismiss": "忽略建议",
       "helperHints": {
-        "dropImages": "拖拽 / 粘贴图片",
+        "dropImages": "拖拽 / 粘贴文件或链接",
         "send": "⏎ 发送 · ⇧⏎ 换行",
         "tryPrefix": "试试"
+      },
+      "links": {
+        "add": "添加链接",
+        "addAction": "附加链接",
+        "inputAria": "网页地址",
+        "inputPlaceholder": "https://example.com",
+        "invalid": "请输入有效的 HTTP(S) 链接。",
+        "openAria": "打开 {host}",
+        "removeAria": "移除 {host}"
       },
       "memory": {
         "appended": "已写入 {path}",
@@ -4857,14 +4858,20 @@
       "image": {
         "close": "关闭",
         "copyUrl": "复制链接",
+        "counter": "第 {current} 张，共 {total} 张",
         "defaultFilename": "image",
         "defaultTitle": "图片",
         "download": "下载",
         "failedToLoad": "图片加载失败",
+        "galleryAria": "图片画廊，共 {count} 张",
+        "next": "下一张图片",
         "openInNewTab": "在新标签页打开",
         "openUrl": "打开链接",
+        "previewAria": "预览{name}",
         "previewDescription": "预览所选图片，可缩放或旋转。",
+        "previous": "上一张图片",
         "rotate": "旋转",
+        "selectImage": "查看{name}",
         "viewFullscreen": "全屏查看",
         "zoomIn": "放大",
         "zoomOut": "缩小"
@@ -8574,11 +8581,36 @@
         "title": "高级控制"
       },
       "behaviorTelemetry": {
+        "categories": {
+          "agentTeam": "Agent Team 执行",
+          "chat": "聊天生命周期",
+          "connector": "连接器消息",
+          "description": "可以关闭不希望采集的产品领域。",
+          "system": "遥测偏好",
+          "title": "事件分类",
+          "workflow": "工作流运行"
+        },
         "clear": "清除本地事件",
+        "destinations": {
+          "description": "选择符合条件的事件写入位置。远程导出还需要启用 OTLP 导出器。",
+          "local": {
+            "description": "在当前设备的本地数据库中保留有上限的事件历史。",
+            "label": "保存在本地"
+          },
+          "remote": {
+            "description": "把采样后的事件发送到已配置的 OTLP Logs 端点。",
+            "label": "远程导出"
+          },
+          "title": "写入目标"
+        },
         "disclosure": "开启后，Cognia 会在本地保存已注册的交互事件，并可发送到你配置的 OTLP 端点。不会采集消息内容、提示词、响应内容或密钥。",
-        "export": "导出本地事件",
+        "exportCsv": "导出 CSV",
+        "exportJson": "导出 JSON",
+        "maxStoredEvents": "本地事件数量上限",
         "optIn": "共享行为事件",
         "optInDesc": "默认关闭。工程链路追踪与行为事件使用相互独立的开关。",
+        "retentionDays": "本地保留天数",
+        "sampleRate": "采样率",
         "title": "行为遥测"
       },
       "logLevel": {
@@ -12115,6 +12147,7 @@
       "subsystems": {
         "acpTerminal": "Agent 终端",
         "chatSidecar": "聊天 sidecar",
+        "codeServer": "Pro IDE（code-server）",
         "externalAgent": "外部 Agent",
         "integratedTerminal": "集成终端",
         "mcpServer": "MCP 服务器"
@@ -14405,6 +14438,23 @@
     "filesTab": "文件",
     "newFile": "新建文件",
     "newFolder": "新建文件夹",
+    "proIde": {
+      "checkingTooltip": "正在检查 Pro IDE 是否可用…",
+      "disabledTooltip": "此平台不支持，请改用本机 VS Code。",
+      "downloading": "正在下载 VS Code… {percent}%",
+      "errorTitle": "无法启动 VS Code",
+      "localVsCodeFailed": "无法打开本机 VS Code：{error}",
+      "openFileFailed": "无法在 VS Code 中打开文件：{error}",
+      "openLocalVsCode": "用本机 VS Code 打开",
+      "retry": "重试",
+      "starting": "正在启动 VS Code…",
+      "supportCheckFailed": "无法检查 Pro IDE 是否可用。请重新连接桌面端后再试。",
+      "switchLabel": "编辑器引擎",
+      "toggleMonaco": "Monaco",
+      "toggleVsCode": "VS Code",
+      "unsupportedDesc": "code-server 没有适配你操作系统的版本，请改用本机 VS Code。",
+      "unsupportedTitle": "此平台不支持 Pro IDE"
+    },
     "refresh": "刷新",
     "rename": "重命名",
     "rootLabel": "项目根目录",
@@ -20858,8 +20908,8 @@
         "maintenance": "维护",
         "overview": "概览"
       },
-      "telemetryHint": "默认关闭。留作未来可选的使用情况统计——当前并未发送任何遥测。",
-      "telemetryLabel": "允许匿名遥测",
+      "telemetryHint": "默认关闭。请在「设置 → 日志」中配置行为遥测的分类、写入目标、采样率和保留策略。",
+      "telemetryLabel": "启用行为遥测",
       "title": "数据与隐私",
       "typeToConfirm": "输入 DELETE 以确认",
       "webdav": {
@@ -20972,6 +21022,7 @@
       "pet": "你的桌面动画伙伴。",
       "plugins": "浏览、安装、配置并治理插件。查看权限、定时任务、devtools 与契约审计。",
       "presets": "可复用的会话配置 — 系统提示词加上模型、工具、MCP 与技能覆盖。",
+      "proIde": "内嵌 VS Code 的安装与磁盘占用",
       "profile": "本地显示名称、头像与简介 — 同步到伴侣设备并包含在备份中。",
       "providers": "AI 提供商的 API 密钥、模型与连接设置。",
       "remoteControl": "桌面端本地 HTTP 入站监听器，搭配出站 webhook 的 HMAC 签名与自定义请求头。",
@@ -21347,8 +21398,9 @@
         "label": "Claude Code hooks"
       },
       "codex": {
-        "desc": "将 ~/.codex/config.toml 的 notify 指向转发脚本。仅观察——每轮完成上报一次，无需信任步骤。",
-        "label": "Codex notify"
+        "desc": "把转发脚本注册进 ~/.codex/hooks.json。采用合并写入，其它工具已注册的 hook 照常工作；卸载只移除我们自己的条目。",
+        "label": "Codex hooks",
+        "trustHint": "Codex 只运行你信任过的 hook，且信任与 hook 的命令原文绑定——安装后请在 Codex TUI 里确认信任提示。条目一旦被改动就会失去信任，重新安装前不会触发。"
       },
       "description": "监控并控制本机任意位置启动的编码 Agent（终端、编辑器）——不限于 Cognia 启动的实例。",
       "error": "舰队操作失败：{detail}",
@@ -21388,7 +21440,7 @@
       },
       "saved": "舰队设置已更新。",
       "status": {
-        "codexConflict": "notify 已占用",
+        "codexStale": "需重新安装",
         "codexUnavailable": "未找到 Codex",
         "installed": "已安装",
         "opencodeUnavailable": "未找到 OpenCode",
@@ -22468,6 +22520,28 @@
       },
       "title": "插件"
     },
+    "proIde": {
+      "cancel": "取消",
+      "clean": "清理旧版本",
+      "cleanDone": "已释放 {size}。",
+      "description": "项目编辑器可选的内嵌 VS Code。此处管理安装；正在运行的实例见「性能 → 托管进程」。",
+      "diskUsage": "磁盘占用",
+      "download": "立即下载",
+      "downloadDone": "已安装 code-server {version}。",
+      "failed": "操作失败：{error}",
+      "installed": "已安装",
+      "location": "安装位置",
+      "notInstalled": "未安装",
+      "reclaimable": "可回收",
+      "staleVersions": "旧版本：{versions}",
+      "title": "Pro IDE（code-server）",
+      "uninstall": "卸载",
+      "uninstallConfirmBody": "这会停止所有正在运行的实例，并删除安装及其编辑器状态（设置、扩展、打开的文件）。下次切到 Pro IDE 会重新下载。",
+      "uninstallConfirmTitle": "确定卸载 code-server？",
+      "uninstallDone": "已卸载，释放 {size}。",
+      "unsupported": "code-server 没有发布适配此平台的版本，因此这里无法使用 Pro IDE。",
+      "version": "锁定版本"
+    },
     "profile": {
       "avatarClear": "移除",
       "avatarEditAlt": "正在裁剪的图片",
@@ -23472,6 +23546,7 @@
       "pet": "宠物",
       "plugins": "插件",
       "presets": "预设",
+      "proIde": "Pro IDE",
       "profile": "个人资料",
       "providers": "提供商",
       "remoteControl": "远程控制",
