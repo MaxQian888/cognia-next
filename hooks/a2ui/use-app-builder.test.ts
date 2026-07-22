@@ -197,6 +197,12 @@ jest.mock("@/lib/a2ui/templates", () => ({
     messages: [{ type: "createSurface" }],
   })),
   generateTemplateId: jest.fn(() => "custom-app-123"),
+  // Built-in action handlers format their runtime copy through this; the suite
+  // only asserts that the data write happened, so a marker string is enough.
+  formatBuiltInRuntimeMessage: jest.fn(
+    (_locale: string, key: string, values: Record<string, string | number> = {}) =>
+      `${key}:${JSON.stringify(values)}`
+  ),
 }))
 
 describe("useA2UIAppBuilder", () => {
@@ -270,7 +276,7 @@ describe("useA2UIAppBuilder", () => {
     it("returns not-configured when sharing is unavailable", async () => {
       mockSurfaces["pub-app"] = { components: {}, dataModel: {} }
       getAppInstancesCache().set("pub-app", fullInstance("pub-app"))
-      jest.mocked(createShareLink).mockRejectedValue(new ShareNotConfiguredError("nope"))
+      jest.mocked(createShareLink).mockRejectedValue(new ShareNotConfiguredError())
       const { result } = renderHook(() => useA2UIAppBuilder())
       let outcome: A2UIPublishOutcome | undefined
       await act(async () => {

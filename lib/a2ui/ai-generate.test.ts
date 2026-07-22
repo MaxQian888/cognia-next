@@ -107,6 +107,12 @@ describe("toolCallToDispatch", () => {
         surfaceType: "dialog",
       })
     ).toMatchObject({ surfaceType: "dialog" })
+    expect(
+      toolCallToDispatch("mcp__a2ui-bridge__a2ui_create_surface", {
+        surfaceId: "s",
+        surfaceType: "fullscreen",
+      })
+    ).toMatchObject({ surfaceType: "fullscreen" })
   })
 
   it("maps update_components and defaults missing components to []", () => {

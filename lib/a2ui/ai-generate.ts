@@ -175,7 +175,7 @@ export function toolCallToDispatch(
   }
 }
 
-function normalizeSurfaceType(value: unknown): A2UISegmentContent["surfaceType"] {
+function normalizeSurfaceType(value: unknown): NonNullable<A2UISegmentContent["surfaceType"]> {
   return value === "dialog" || value === "panel" || value === "fullscreen" ? value : "inline"
 }
 
@@ -299,7 +299,7 @@ export async function generateA2UIApp(opts: A2UIGenerateOptions): Promise<A2UIGe
       if (opts.mode === "edit") throw new A2UIAiUnavailableError("empty")
     } catch (err) {
       if (err instanceof A2UIAiUnavailableError) throw err
-      log.warn("A2UI generate: model turn failed; falling back", err as Error)
+      log.warn("A2UI generate: model turn failed; falling back", { error: String(err) })
       if (opts.mode === "edit") throw new A2UIAiUnavailableError("turn-failed")
     }
   } else if (opts.mode === "edit") {
