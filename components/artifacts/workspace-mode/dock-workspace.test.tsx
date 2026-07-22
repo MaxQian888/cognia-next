@@ -41,6 +41,33 @@ jest.mock("@/lib/files/workspace-backend", () => ({
   hasWorkspaceFsBackend: () => backendAvailable,
 }))
 
+jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
+
+const supportedMock = jest.fn<Promise<boolean>, []>()
+jest.mock("@/lib/codeserver/client", () => ({
+  codeServerClient: { supported: () => supportedMock() },
+}))
+jest.mock("@/components/editor/project/editor-engine-toggle", () => ({
+  EditorEngineToggle: ({
+    onChange,
+    proIdeSupport,
+  }: {
+    onChange: (value: "codeserver") => void
+    proIdeSupport: string
+  }) => (
+    <button
+      data-testid="mock-engine-toggle"
+      data-support={proIdeSupport}
+      onClick={() => onChange("codeserver")}
+    />
+  ),
+}))
+jest.mock("@/components/editor/project/code-server-pane", () => ({
+  CodeServerPane: ({ root, ownerId }: { root: string; ownerId: string }) => (
+    <div data-testid="mock-code-server" data-root={root} data-owner={ownerId} />
+  ),
+}))
+
 jest.mock("@/hooks/data", () => ({
   useClientLiveQuery: () => session,
 }))
@@ -188,6 +215,7 @@ jest.mock("@/components/source-control/diff-pane", () => ({
 
 import { DockWorkspace } from "./dock-workspace"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
+import { useProjectEditorSessionStore } from "@/stores/editor/project-editor-session-store"
 import { PROJECT_EDITOR_GOTO_EVENT } from "@/components/editor/project/editor-events"
 
 beforeEach(() => {
@@ -216,12 +244,14 @@ beforeEach(() => {
   saveFile.mockClear().mockResolvedValue(undefined)
   saveAll.mockClear().mockResolvedValue(undefined)
   mockUseProjectEditor.mockClear()
+  supportedMock.mockReset().mockImplementation(() => new Promise(() => {}))
   activePath = null
   editorRootKey = "/repo"
   editorRootPath = "/repo"
   activeFile = null
   openFiles = []
   act(() => useArtifactDockLayoutStore.getState().resetLayout())
+  act(() => useProjectEditorSessionStore.setState({ sessions: {} }))
   useArtifactDockLayoutStore.setState({ clearWorkspaceRevealRequest: clearReveal })
 })
 
@@ -270,10 +300,9 @@ describe("DockWorkspace", () => {
     expect(clearReveal).toHaveBeenCalledWith(expect.stringMatching(/^workspace-reveal-/))
     expect(screen.getByTestId("workspace-file-layout")).toBeInTheDocument()
     expect(screen.getByTestId("file-tree")).toBeInTheDocument()
-    expect(mockUseProjectEditor).toHaveBeenCalledWith({
-      scopeKey: "session:split-session",
-      workingDir: "/repo",
-    })
+    expect(mockUseProjectEditor).toHaveBeenCalledWith(
+      expect.objectContaining({ scopeKey: "session:split-session", workingDir: "/repo" })
+    )
     window.removeEventListener(PROJECT_EDITOR_GOTO_EVENT, gotoListener)
   })
 
@@ -471,5 +500,22 @@ describe("DockWorkspace", () => {
       expect(saveFile).toHaveBeenCalledWith("src/a.ts")
       expect(saveAll).toHaveBeenCalled()
     })
+  })
+
+  it("hands the desktop workspace editor to Pro IDE without keeping Monaco routing", async () => {
+    supportedMock.mockResolvedValue(true)
+    render(<DockWorkspace activeSessionId="session-1" />)
+
+    await waitFor(() =>
+      expect(screen.getByTestId("mock-engine-toggle")).toHaveAttribute("data-support", "supported")
+    )
+    fireEvent.click(screen.getByTestId("mock-engine-toggle"))
+
+    expect(screen.getByTestId("mock-code-server")).toHaveAttribute("data-root", "/repo")
+    expect(screen.getByTestId("mock-code-server")).toHaveAttribute(
+      "data-owner",
+      "session:session-1"
+    )
+    expect(screen.queryByTestId("monaco")).not.toBeInTheDocument()
   })
 })

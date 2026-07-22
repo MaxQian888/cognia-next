@@ -6,6 +6,8 @@ import { useTranslations } from "next-intl"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
+import { CodeServerPane } from "@/components/editor/project/code-server-pane"
+import { EditorEngineToggle } from "@/components/editor/project/editor-engine-toggle"
 import { ProjectEditorTabs } from "@/components/editor/project/project-editor-tabs"
 import { ProjectRootSwitcher } from "@/components/editor/project/project-root-switcher"
 import {
@@ -17,12 +19,15 @@ import { DiffPane } from "@/components/source-control/diff-pane"
 import { useClientLiveQuery } from "@/hooks/data"
 import { useGitActions } from "@/hooks/git/use-git-actions"
 import { getSession } from "@/lib/db/sessions"
+import { useCodeServerSupported } from "@/hooks/codeserver/use-code-server-supported"
 import { hasWorkspaceFsBackend } from "@/lib/files/workspace-backend"
 import { refreshGitStatus } from "@/lib/git/load"
+import { isTauri } from "@/lib/tauri"
 import { listTaskRuns, listTaskWorkspaces } from "@/lib/task-workspace/client"
 import { cn } from "@/lib/utils"
 import { resolveSessionProjectRoot } from "@/lib/workspace/roots"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
+import { useProjectEditorSessionStore } from "@/stores/editor/project-editor-session-store"
 import { useGitStore } from "@/stores/git/git-store"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings"
@@ -147,10 +152,31 @@ function WorkspaceEditorBody({
   const [mobileReviewPane, setMobileReviewPane] = useState<"changes" | "diff">("changes")
   const processedRequest = useRef<string | null>(null)
   const showFileSurface = useCallback(() => setSurface("file"), [])
+  const scopeKey = `session:${sessionId}`
+
+  // Pro IDE (code-server) is a native child webview pinned over this pane, so it
+  // exists only in the desktop shell and never in the mobile dock layout. The
+  // engine choice is persisted per session, shared with the Agent Team editor's
+  // own switcher via the same store.
+  const persistedEngine = useProjectEditorSessionStore(
+    (state) => state.sessions[scopeKey]?.editorMode
+  )
+  const setEditorSession = useProjectEditorSessionStore((state) => state.setSession)
+  const proIdeAllowed = isTauri() && layout !== "mobile"
+  const engine = proIdeAllowed && persistedEngine === "codeserver" ? "codeserver" : "monaco"
+  const setEngine = useCallback(
+    (next: "monaco" | "codeserver") => setEditorSession(scopeKey, { editorMode: next }),
+    [scopeKey, setEditorSession]
+  )
+  const proIdeSupport = useCodeServerSupported(proIdeAllowed)
+
   const workbench = useProjectEditorWorkbench({
-    scopeKey: `session:${sessionId}`,
+    scopeKey,
     workingDir,
     beforeOpen: showFileSurface,
+    // Whichever engine is mounted owns project-editor jumps; in Pro IDE mode the
+    // CodeServerPane registers the opener instead.
+    registerProjectOpener: engine === "monaco",
   })
   const { gotoLine } = workbench
   const editor = workbench.editor
@@ -298,36 +324,46 @@ function WorkspaceEditorBody({
           onSelect={selectRoot}
           density={layout === "mobile" ? "touch" : "compact"}
         />
-        {hasTaskScope && (
-          <div
-            className="ml-auto flex rounded-md border bg-muted/30 p-0.5"
-            role="group"
-            aria-label={t("scopeLabel")}
-          >
-            <button
-              type="button"
-              aria-pressed={visibleScope === "task"}
-              className={cn(
-                "rounded px-2 py-1 text-xs",
-                visibleScope === "task" ? "bg-background shadow-sm" : "text-muted-foreground"
-              )}
-              onClick={() => setScope("task")}
+        <div className="ml-auto flex items-center gap-2">
+          {hasTaskScope && (
+            <div
+              className="flex rounded-md border bg-muted/30 p-0.5"
+              role="group"
+              aria-label={t("scopeLabel")}
             >
-              {t("currentTask")}
-            </button>
-            <button
-              type="button"
-              aria-pressed={visibleScope === "workspace"}
-              className={cn(
-                "rounded px-2 py-1 text-xs",
-                visibleScope === "workspace" ? "bg-background shadow-sm" : "text-muted-foreground"
-              )}
-              onClick={() => setScope("workspace")}
-            >
-              {t("allWorkspace")}
-            </button>
-          </div>
-        )}
+              <button
+                type="button"
+                aria-pressed={visibleScope === "task"}
+                className={cn(
+                  "rounded px-2 py-1 text-xs",
+                  visibleScope === "task" ? "bg-background shadow-sm" : "text-muted-foreground"
+                )}
+                onClick={() => setScope("task")}
+              >
+                {t("currentTask")}
+              </button>
+              <button
+                type="button"
+                aria-pressed={visibleScope === "workspace"}
+                className={cn(
+                  "rounded px-2 py-1 text-xs",
+                  visibleScope === "workspace" ? "bg-background shadow-sm" : "text-muted-foreground"
+                )}
+                onClick={() => setScope("workspace")}
+              >
+                {t("allWorkspace")}
+              </button>
+            </div>
+          )}
+          {proIdeAllowed && visibleScope === "workspace" && (
+            <EditorEngineToggle
+              value={engine}
+              onChange={setEngine}
+              proIdeSupport={proIdeSupport}
+              projectRoot={rootPath}
+            />
+          )}
+        </div>
       </div>
       {visibleScope === "task" ? (
         <div className="min-h-0 flex-1">
@@ -350,9 +386,12 @@ function WorkspaceEditorBody({
                   ]
                 : undefined
             }
-            files={openFiles}
+            // Pro IDE keeps its own editor tabs inside VS Code; showing Monaco's
+            // open-file strip alongside would list a different set of files. The
+            // strip still renders so the fixed "review" tab stays reachable.
+            files={engine === "codeserver" ? [] : openFiles}
             activePath={visibleSurface === "file" ? activePath : null}
-            dirtyCount={dirtyCount}
+            dirtyCount={engine === "codeserver" ? 0 : dirtyCount}
             onSelect={(path) => {
               setSurface("file")
               if (layout === "mobile") workbench.setMobilePane("editor")
@@ -415,13 +454,21 @@ function WorkspaceEditorBody({
             </div>
           ) : (
             <div className="min-h-0 flex-1" data-testid="workspace-file-layout">
-              <ProjectEditorFileWorkbench
-                workbench={workbench}
-                sidebarPosition="right"
-                panelIdPrefix="workspace"
-                showContextWorkbench={false}
-                layout={layout === "mobile" ? "mobile" : "split"}
-              />
+              {engine === "codeserver" ? (
+                <CodeServerPane
+                  root={rootPath}
+                  ownerId={scopeKey}
+                  onRevoked={() => setEngine("monaco")}
+                />
+              ) : (
+                <ProjectEditorFileWorkbench
+                  workbench={workbench}
+                  sidebarPosition="right"
+                  panelIdPrefix="workspace"
+                  showContextWorkbench={false}
+                  layout={layout === "mobile" ? "mobile" : "split"}
+                />
+              )}
             </div>
           )}
         </>

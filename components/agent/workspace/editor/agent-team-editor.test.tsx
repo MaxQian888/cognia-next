@@ -68,9 +68,15 @@ jest.mock("@/components/editor/project/project-root-switcher", () => ({
 }))
 const supportedMock = jest.fn(async () => true)
 jest.mock("@/lib/codeserver/client", () => ({
-  codeServerClient: { supported: () => supportedMock() },
+  codeServerClient: {
+    supported: () => supportedMock(),
+    // Probed by the engine toggle's local-VS-Code fallback when Pro IDE is
+    // unsupported; false keeps that branch out of these assertions.
+    localVsCodeAvailable: async () => false,
+    openInLocalVsCode: async () => undefined,
+  },
 }))
-jest.mock("./code-server-pane", () => ({
+jest.mock("@/components/editor/project/code-server-pane", () => ({
   CodeServerPane: (p: { root: string }) => (
     <div data-testid="mock-code-server" data-root={p.root} />
   ),

@@ -13,9 +13,14 @@
  *  - **Rust-supervised subsystems** (chat sidecar, ACP + PTY terminals, MCP
  *    server) are controlled through the unified `control_managed_process`
  *    command, which dispatches to the owning subsystem's kill/stop path.
+ *  - **code-server** is Rust-supervised like the rest, but it additionally owns
+ *    a native webview floating above the DOM. Killing only the process would
+ *    leave that pane pinned over the app showing a dead page, so the renderer
+ *    half is torn down here as well.
  */
 
 import { getExternalAgentManager } from "@/lib/ai/agent/external/manager"
+import { destroyCodeServerPane } from "@/lib/codeserver/pane-manager"
 import { controlManagedProcess } from "./commands"
 import type { ManagedControlAction, ManagedProcess } from "./types"
 
@@ -36,6 +41,14 @@ export async function controlManaged(
       await manager.disconnect(target.id)
     }
     return
+  }
+  if (target.subsystem === "codeServer") {
+    // Both actions take the loopback port the pane is navigated to away — a
+    // restart comes back on a fresh one — so the webview cannot outlive the
+    // call. Done first: the stop happens either way, and a restart only returns
+    // once the replacement is healthy, which would leave a dead page on screen
+    // for the whole spawn.
+    await destroyCodeServerPane()
   }
   await controlManagedProcess(target.subsystem, target.id, action)
 }

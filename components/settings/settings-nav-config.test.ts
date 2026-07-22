@@ -50,6 +50,19 @@ describe("settings-nav-config", () => {
       expect(item?.labelKey).toBe("remoteControl")
     })
 
+    it("Pro IDE is a searchable desktop-only interface section", () => {
+      const item = SETTINGS_NAV.find((n) => n.id === "pro-ide")
+      expect(item).toMatchObject({
+        group: "interface",
+        labelKey: "proIde",
+        descriptionKey: "proIde",
+        desktopOnly: true,
+      })
+      expect(SETTINGS_SEARCH_KEYWORDS["pro-ide"]).toEqual(
+        expect.arrayContaining(["code-server", "vscode", "内嵌编辑器"])
+      )
+    })
+
     it("each nav group appears in SETTINGS_GROUP_ORDER", () => {
       const groupSet = new Set(SETTINGS_NAV.map((n) => n.group))
       for (const g of groupSet) {

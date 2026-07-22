@@ -247,6 +247,10 @@ const LspServersSection = dynamic(
   () => import("./lsp/lsp-servers-section").then((m) => m.LspServersSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
+const ProIdeSection = dynamic(
+  () => import("./pro-ide/pro-ide-section").then((m) => m.ProIdeSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 const SandboxSection = dynamic(
   () => import("./sandbox/sandbox-section").then((m) => m.SandboxSection),
   { ssr: false, loading: () => <SectionLoading /> }
@@ -538,6 +542,8 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <AutomationSection />
     case "lsp":
       return <LspServersSection />
+    case "pro-ide":
+      return <ProIdeSection />
     case "sandbox":
       return <SandboxSection />
     case "security":

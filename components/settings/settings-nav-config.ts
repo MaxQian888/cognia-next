@@ -13,6 +13,7 @@ import {
   BookmarkIcon,
   DatabaseIcon,
   MonitorIcon,
+  SquareCodeIcon,
   InfoIcon,
   ServerCogIcon,
   ServerIcon,
@@ -115,6 +116,7 @@ export type SettingsSectionId =
   | "desktop"
   | "automation"
   | "lsp"
+  | "pro-ide"
   | "sandbox"
   | "security"
   | "about"
@@ -414,6 +416,14 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "sourceControl",
     group: "interface",
     icon: GitBranchIcon,
+    desktopOnly: true,
+  },
+  {
+    id: "pro-ide",
+    labelKey: "proIde",
+    descriptionKey: "proIde",
+    group: "interface",
+    icon: SquareCodeIcon,
     desktopOnly: true,
   },
   {
@@ -1375,6 +1385,17 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
     "提交",
     "提交信息",
     "分支",
+  ],
+  "pro-ide": [
+    "pro ide",
+    "code-server",
+    "codeserver",
+    "vs code",
+    "vscode",
+    "editor engine",
+    "embedded editor",
+    "编辑器引擎",
+    "内嵌编辑器",
   ],
   lsp: [
     "lsp",

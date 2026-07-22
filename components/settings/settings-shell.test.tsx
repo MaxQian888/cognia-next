@@ -108,6 +108,13 @@ describe("SettingsShell reset row", () => {
     render(<SettingsShell />)
     expect(replace).toHaveBeenCalledWith("/settings?section=account", { scroll: false })
   })
+
+  it("mounts the Pro IDE settings section without redirecting it", () => {
+    mockSection = "pro-ide"
+    render(<SettingsShell />)
+    expect(screen.getByTestId("section-body")).toBeInTheDocument()
+    expect(replace).not.toHaveBeenCalled()
+  })
 })
 
 describe("SettingsShell fill-height layout", () => {

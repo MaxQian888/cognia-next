@@ -10,45 +10,69 @@ import type { ElementRect } from "@/lib/browser/protocol"
 import {
   CODESERVER_EVENTS,
   type CodeServerDownloadProgress,
+  type CodeServerExited,
   codeServerClient,
 } from "@/lib/codeserver/client"
+import {
+  claimCodeServerPane,
+  getCodeServerPaneOwner,
+  releaseCodeServerPane,
+  setCodeServerPaneVisible,
+  updateCodeServerPaneRect,
+} from "@/lib/codeserver/pane-manager"
 import { isTauri } from "@/lib/tauri"
 import { onTauriEvent } from "@/lib/tauri/events"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 
 /**
- * `idle` — not active; `unsupported` — no code-server binary for this OS;
- * `starting` — spawning/health-polling; `downloading` — first-run fetch in
- * flight; `ready` — serving (native webview mounted); `error` — install/spawn
- * failed (retryable).
+ * `unsupported` — no code-server binary for this OS; `starting` —
+ * checking support / spawning / health-polling; `downloading` — first-run fetch
+ * in flight; `ready` — serving (native webview claimed); `error` —
+ * install/spawn/embed failed (retryable).
  */
-export type CodeServerPhase =
-  "idle" | "unsupported" | "starting" | "downloading" | "ready" | "error"
+export type CodeServerPhase = "unsupported" | "starting" | "downloading" | "ready" | "error"
 
 export interface UseCodeServerPane {
   phase: CodeServerPhase
+  /**
+   * Whether the native webview is actually up and pointed at this root. `phase`
+   * reaches `ready` a beat earlier — when code-server answers `/healthz` — so a
+   * surface that hides its placeholder on `phase` alone flashes bare background
+   * until the webview paints. Gate the placeholder on this instead.
+   */
+  mounted: boolean
   /** Download fraction 0..1 while `downloading`; null otherwise / unknown. */
   progress: number | null
   error: string | null
   retry: () => void
 }
 
-const ZERO_RECT: ElementRect = { x: 0, y: 0, width: 0, height: 0 }
+export interface UseCodeServerPaneOptions {
+  /** Project root code-server should serve. */
+  root: string
+  /** Stable id identifying this surface to the pane manager. */
+  ownerId: string
+  /** Called when another surface claims the shared pane away from this one. */
+  onRevoked: () => void
+}
 
 /**
- * Owns the code-server "Pro IDE" pane over a reserved `ref` div: ensures a
+ * Drives the code-server "Pro IDE" pane over a reserved `ref` div: ensures a
  * loopback code-server is serving `root` (downloading it on first use, with
- * progress), then mounts + positions the dedicated native webview and keeps its
- * bounds / visibility synced — mirroring the in-app browser's embedded-pane
- * lifecycle ({@link useElementRect} + {@link useRegionVisibility}) but against a
- * separate `codeserver-embed` webview so it coexists with the browser preview.
+ * progress), then claims the shared native webview from
+ * {@link claimCodeServerPane} and keeps its bounds / visibility synced.
+ *
+ * The webview itself is owned by `lib/codeserver/pane-manager`, not by this
+ * hook — unmounting only releases and parks it, so VS Code keeps its open
+ * editors, cursor and terminals when the user switches tabs or routes.
  */
 export function useCodeServerPane(
   ref: RefObject<HTMLElement | null>,
-  options: { root: string; active: boolean }
+  options: UseCodeServerPaneOptions
 ): UseCodeServerPane {
-  const { root, active } = options
-  const [phase, setPhase] = useState<CodeServerPhase>("idle")
+  const { root, ownerId, onRevoked } = options
+  const [phase, setPhase] = useState<CodeServerPhase>("starting")
+  const [mounted, setMounted] = useState(false)
   const [progress, setProgress] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
@@ -56,72 +80,58 @@ export function useCodeServerPane(
 
   const visible = useRegionVisibility(ref)
 
-  const createdRef = useRef(false)
-  const mountedUrlRef = useRef<string | null>(null)
   const rectRef = useRef<ElementRect | null>(null)
   const visibleRef = useRef(visible)
   const url = port != null ? `http://127.0.0.1:${port}/` : null
   const urlRef = useRef(url)
 
-  // Create the webview once both the loopback url and a rect are known; both
+  // Keep the revoke callback current without re-claiming on every render.
+  const onRevokedRef = useRef(onRevoked)
+  useEffect(() => {
+    onRevokedRef.current = onRevoked
+  }, [onRevoked])
+
+  // Claim the shared pane once both the loopback url and a rect are known; both
   // the rect callback and the url effect call this so whichever lands last wins.
-  const syncWebview = useCallback(() => {
+  const claimPane = useCallback(() => {
     const rect = rectRef.current
     const target = urlRef.current
     if (!isTauri() || !target || !rect) return
-    if (createdRef.current) {
-      if (mountedUrlRef.current === target) return
-      mountedUrlRef.current = target
-      void codeServerClient.embedNavigate(target).catch((cause) => {
-        if (mountedUrlRef.current === target) mountedUrlRef.current = null
-        setError(String(cause))
-        setPhase("error")
-      })
-      return
-    }
-    createdRef.current = true
-    mountedUrlRef.current = target
-    void codeServerClient.embedCreate(target, rect).then(
+    void claimCodeServerPane(ownerId, target, rect, () => onRevokedRef.current()).then(
       () => {
-        if (!visibleRef.current) {
-          void codeServerClient.embedSetVisible(false, rectRef.current ?? rect).catch(() => {})
-        }
+        setMounted(true)
+        // Claiming shows the pane; re-park immediately if it must stay hidden.
+        if (!visibleRef.current) setCodeServerPaneVisible(ownerId, false)
       },
       (cause) => {
-        createdRef.current = false
-        if (mountedUrlRef.current === target) mountedUrlRef.current = null
+        setMounted(false)
         setError(String(cause))
         setPhase("error")
       }
     )
-  }, [])
+  }, [ownerId])
 
   const onRect = useCallback(
     (next: ElementRect) => {
       rectRef.current = next
       if (!isTauri()) return
-      if (!createdRef.current) {
-        syncWebview()
+      if (getCodeServerPaneOwner() !== ownerId) {
+        claimPane()
         return
       }
-      // Parked (hidden) webviews sit off-screen; don't churn their bounds.
-      if (visibleRef.current) void codeServerClient.embedSetBounds(next).catch(() => {})
+      updateCodeServerPaneRect(ownerId, next)
     },
-    [syncWebview]
+    [claimPane, ownerId]
   )
   useElementRect(ref, onRect, { trackState: false })
 
-  // Ensure code-server is up for `root` (re-runs on root/active/retry change).
-  // All state transitions live inside the async task so none run synchronously
-  // in the effect body (react-hooks/set-state-in-effect).
+  // Ensure code-server is up for `root` (re-runs on root/retry change). All
+  // state transitions live inside the async task so none run synchronously in
+  // the effect body (react-hooks/set-state-in-effect).
   useEffect(() => {
     let cancelled = false
     let unlistenProgress: (() => void) | null = null
     void (async () => {
-      if (!active) {
-        setPhase("idle")
-        return
-      }
       if (!isTauri()) {
         setPhase("unsupported")
         return
@@ -151,7 +161,7 @@ export function useCodeServerPane(
         setPort(nextPort)
         setProgress(null)
         setPhase("ready")
-        syncWebview()
+        claimPane()
       } catch (e) {
         if (cancelled) return
         setError(String(e))
@@ -162,43 +172,58 @@ export function useCodeServerPane(
       cancelled = true
       safeUnlisten(unlistenProgress)
     }
-  }, [root, active, attempt, syncWebview])
+  }, [root, attempt, claimPane])
 
-  // Mount the webview once the port (→ url) is known.
+  // Claim the pane once the port (→ url) is known.
   useEffect(() => {
     urlRef.current = url
-    syncWebview()
-  }, [url, syncWebview])
+    claimPane()
+  }, [url, claimPane])
 
-  // Reflect region visibility onto the native webview (park off-screen when the
-  // tab is switched away / a modal covers it).
+  // A code-server that dies mid-session leaves the native webview showing a dead
+  // page with no way back. The backend watchdog reports it; leave `ready` so the
+  // retry affordance appears. The retry below is a plain re-`ensure`: the
+  // watchdog also flags the instance unhealthy backend-side, so `codeserver_ensure`
+  // kills that child and spawns a fresh one instead of handing back the port of a
+  // process that is alive but no longer serving (`codeserver::process`).
   useEffect(() => {
-    visibleRef.current = visible
-    if (!isTauri() || !createdRef.current) return
-    void codeServerClient.embedSetVisible(visible, rectRef.current ?? ZERO_RECT).catch(() => {})
-  }, [visible])
-
-  // Tear the webview down when the pane goes inactive (tab switched) — the
-  // code-server process stays up so re-opening is instant.
-  useEffect(() => {
-    if (active) return
-    if (createdRef.current) {
-      void codeServerClient.embedDestroy().catch(() => {})
-      createdRef.current = false
-      mountedUrlRef.current = null
+    if (!isTauri() || port == null) return
+    let cancelled = false
+    let unlisten: (() => void) | null = null
+    void onTauriEvent<CodeServerExited>(CODESERVER_EVENTS.instanceExited, (payload) => {
+      if (cancelled || payload.port !== port) return
+      setError(`code-server for ${payload.root} stopped responding`)
+      setPhase("error")
+    }).then((fn) => {
+      if (cancelled) fn()
+      else unlisten = fn
+    })
+    return () => {
+      cancelled = true
+      safeUnlisten(unlisten)
     }
-  }, [active])
+  }, [port])
 
-  // Final teardown on unmount.
+  // Reflect visibility onto the native webview. Two things park it: the region
+  // going off-screen (tab switch / modal), and any phase other than `ready` —
+  // the webview floats ABOVE the DOM and cannot be covered, so leaving a dead or
+  // loading instance on screen would hide this pane's own error + retry UI.
+  const shouldShow = visible && phase === "ready"
+  useEffect(() => {
+    visibleRef.current = shouldShow
+    if (!isTauri()) return
+    setCodeServerPaneVisible(ownerId, shouldShow)
+  }, [ownerId, shouldShow])
+
+  // Release — never destroy — on unmount, so the next surface to claim the pane
+  // gets the same live VS Code back instead of a fresh workbench boot.
   useEffect(() => {
     return () => {
-      if (createdRef.current) void codeServerClient.embedDestroy().catch(() => {})
-      createdRef.current = false
-      mountedUrlRef.current = null
+      releaseCodeServerPane(ownerId)
     }
-  }, [])
+  }, [ownerId])
 
   const retry = useCallback(() => setAttempt((n) => n + 1), [])
 
-  return { phase, progress, error, retry }
+  return { phase, mounted, progress, error, retry }
 }

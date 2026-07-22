@@ -11,6 +11,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -19,6 +21,25 @@ use tokio::sync::Mutex;
 
 use super::download;
 
+/// Emitted when a healthy instance stops answering `/healthz`, so the pane can
+/// leave `ready` instead of sitting on a dead page.
+pub const CODESERVER_EXITED_EVENT: &str = "codeserver://instance-exited";
+
+/// How often the watchdog probes a healthy instance.
+const WATCHDOG_INTERVAL: Duration = Duration::from_secs(5);
+/// Consecutive probe failures before we declare the instance gone.
+const WATCHDOG_FAILURES: u8 = 2;
+
+/// Payload of [`CODESERVER_EXITED_EVENT`]. `port` is the match key the frontend
+/// uses — it already knows the port it navigated to, whereas its `root` string
+/// may not be spelled the same way as our canonicalized one.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeServerExited {
+    pub root: String,
+    pub port: u16,
+}
+
 /// A live code-server instance for one project root.
 struct RunningInstance {
     port: u16,
@@ -26,6 +47,14 @@ struct RunningInstance {
     binary_path: String,
     user_data_dir: PathBuf,
     extensions_dir: PathBuf,
+    /// Set by the health watchdog once this instance has stopped answering
+    /// `/healthz`. Shared with the watchdog task so it can report without
+    /// holding a reference back to [`CodeServerState`].
+    unhealthy: Arc<AtomicBool>,
+    /// Health watchdog for this instance. Always aborted when the instance is
+    /// retired: a detached poll loop would outlive its process and hang
+    /// `cargo test`.
+    watchdog: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl RunningInstance {
@@ -33,15 +62,43 @@ impl RunningInstance {
     fn is_alive(&mut self) -> bool {
         matches!(self.child.try_wait(), Ok(None))
     }
+
+    /// Whether this instance may still be handed out to a caller.
+    ///
+    /// Liveness alone is not enough. The failure mode the watchdog exists to
+    /// catch is a child that is *alive but no longer serving* — the "dead page".
+    /// Re-adopting that child is what made the pane's retry button useless: it
+    /// asked for a port, got the hung instance's port back, and flipped straight
+    /// to `ready` over the same dead page. Once the watchdog has given up on an
+    /// instance it is never reusable again, so every entry point (retry, a fresh
+    /// pane mount, the second host, agent file-open) tears it down and respawns.
+    fn is_reusable(&mut self) -> bool {
+        self.is_alive() && !self.unhealthy.load(Ordering::Relaxed)
+    }
+
+    /// Stop supervising this instance (does not kill the child).
+    fn stop_watchdog(&mut self) {
+        if let Some(handle) = self.watchdog.take() {
+            handle.abort();
+        }
+    }
+
+    /// Stop supervising **and** kill the child. The single teardown primitive:
+    /// explicit stop, kill-switch, and the unhealthy-instance eviction below all
+    /// go through it so there is only one way an instance dies.
+    fn retire(&mut self) {
+        self.stop_watchdog();
+        let _ = self.child.start_kill();
+    }
 }
 
-/// Tauri managed state: the registry of running code-server instances plus a
-/// spawn lock that serializes installs/spawns (a first-run download is a shared,
-/// single-version resource, so concurrent spawns must not race the tarball).
+/// Tauri managed state: the registry of running code-server instances plus an
+/// operation lock that serializes installs, spawns, downloads, and uninstalls.
+/// All four touch the same pinned install tree, so none may race another.
 #[derive(Default)]
 pub struct CodeServerState {
     instances: Mutex<HashMap<String, RunningInstance>>,
-    spawn_lock: Mutex<()>,
+    operation_lock: Mutex<()>,
 }
 
 impl CodeServerState {
@@ -54,9 +111,11 @@ impl CodeServerState {
         let canonical = canonicalize_root(root).unwrap_or_else(|_| root.to_string());
         let mut map = self.instances.lock().await;
         if let Some(inst) = map.get_mut(&canonical) {
-            if inst.is_alive() {
+            if inst.is_reusable() {
                 return (true, Some(inst.port));
             }
+            inst.retire();
+            map.remove(&canonical);
         }
         (false, None)
     }
@@ -72,7 +131,7 @@ impl CodeServerState {
         }
 
         // Serialize install + spawn across all roots.
-        let _guard = self.spawn_lock.lock().await;
+        let _guard = self.operation_lock.lock().await;
         // Re-check under the lock — another caller may have just spawned it.
         if let Some(port) = self.live_port(&canonical).await {
             return Ok(port);
@@ -100,12 +159,25 @@ impl CodeServerState {
                     binary_path: info.binary_path,
                     user_data_dir,
                     extensions_dir,
+                    unhealthy: Arc::new(AtomicBool::new(false)),
+                    watchdog: None,
                 },
             );
         }
 
         match wait_healthy(port, Duration::from_secs(30)).await {
-            Ok(()) => Ok(port),
+            Ok(()) => {
+                // Supervise only once healthy — before that `wait_healthy` owns
+                // the liveness question.
+                let mut map = self.instances.lock().await;
+                if let Some(inst) = map.get_mut(&canonical) {
+                    inst.stop_watchdog();
+                    let flag = inst.unhealthy.clone();
+                    inst.watchdog =
+                        Some(spawn_watchdog(app.clone(), canonical.clone(), port, flag));
+                }
+                Ok(port)
+            }
             Err(e) => {
                 self.stop(&canonical).await;
                 Err(e)
@@ -113,12 +185,56 @@ impl CodeServerState {
         }
     }
 
+    /// Liveness snapshot for the unified managed-process registry
+    /// (`crate::process_registry`). Dead children are pruned on the way past so
+    /// the perf panel never lists a code-server that already exited.
+    pub async fn managed_snapshot(&self) -> Vec<CodeServerManagedInfo> {
+        let mut map = self.instances.lock().await;
+        map.retain(|_, inst| {
+            if inst.is_reusable() {
+                return true;
+            }
+            inst.retire();
+            false
+        });
+        map.iter()
+            .map(|(root, inst)| CodeServerManagedInfo {
+                root: root.clone(),
+                port: inst.port,
+                pid: inst.child.id(),
+            })
+            .collect()
+    }
+
+    /// Install the pinned code-server without spawning it. Serialized with
+    /// ensure/uninstall so the shared partial archive and install tree cannot
+    /// be concurrently replaced or deleted.
+    pub async fn download(&self, app: &tauri::AppHandle) -> Result<download::InstallInfo, String> {
+        let _guard = self.operation_lock.lock().await;
+        download::ensure_code_server(app)
+            .await
+            .map_err(|e| format!("{e:#}"))
+    }
+
+    /// Stop all children and reclaim code-server files as one serialized
+    /// operation. Holding the lock through deletion prevents an overlapping
+    /// ensure/download from recreating or reading a half-removed tree.
+    pub async fn uninstall(&self, app: tauri::AppHandle, everything: bool) -> Result<u64, String> {
+        let _guard = self.operation_lock.lock().await;
+        self.stop_all().await;
+        tokio::task::spawn_blocking(move || {
+            download::uninstall(&app, everything).map_err(|e| format!("{e:#}"))
+        })
+        .await
+        .map_err(|e| format!("code-server uninstall task: {e}"))?
+    }
+
     /// Kill + forget the instance for a root (canonical or raw). No-op if none.
     pub async fn stop(&self, root: &str) -> bool {
         let canonical = canonicalize_root(root).unwrap_or_else(|_| root.to_string());
         let mut map = self.instances.lock().await;
         if let Some(mut inst) = map.remove(&canonical) {
-            let _ = inst.child.start_kill();
+            inst.retire();
             true
         } else {
             false
@@ -129,7 +245,7 @@ impl CodeServerState {
     pub async fn stop_all(&self) {
         let mut map = self.instances.lock().await;
         for (_, mut inst) in map.drain() {
-            let _ = inst.child.start_kill();
+            inst.retire();
         }
     }
 
@@ -156,7 +272,8 @@ impl CodeServerState {
             let Some(instance) = map.get_mut(&canonical) else {
                 return Err("code-server is not running for this project root".to_string());
             };
-            if !instance.is_alive() {
+            if !instance.is_reusable() {
+                instance.retire();
                 map.remove(&canonical);
                 return Err("code-server exited before the file could be opened".to_string());
             }
@@ -186,17 +303,31 @@ impl CodeServerState {
 
     async fn live_port(&self, canonical: &str) -> Option<u16> {
         let mut map = self.instances.lock().await;
-        if let Some(inst) = map.get_mut(canonical) {
-            if inst.is_alive() {
-                return Some(inst.port);
+        match map.get_mut(canonical) {
+            Some(inst) => {
+                if inst.is_reusable() {
+                    return Some(inst.port);
+                }
+                // Dead — or alive but past its health check, in which case the
+                // child is still holding the port and has to be killed here, or
+                // the respawn below would collide with a zombie workbench.
+                inst.retire();
             }
-        } else {
-            return None;
+            None => return None,
         }
-        // Dead child — drop it so the next ensure respawns.
+        // Drop it so the next ensure spawns a fresh instance.
         map.remove(canonical);
         None
     }
+}
+
+/// One live code-server instance as seen by the managed-process registry. The
+/// canonical `root` doubles as the control-routing key for kill / restart.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeServerManagedInfo {
+    pub root: String,
+    pub port: u16,
+    pub pid: Option<u32>,
 }
 
 /// Serializable status for the IPC layer.
@@ -226,6 +357,15 @@ fn state_subdir(app: &tauri::AppHandle, name: &str) -> Result<PathBuf, String> {
         .join(name);
     std::fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     Ok(dir)
+}
+
+/// `<user-data>/User/settings.json` — the file VS Code hot-watches, and so the
+/// only channel that can repaint a *running* workbench. Creating the directory
+/// here is safe: it is the same one `--user-data-dir` points code-server at.
+pub fn user_settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = state_subdir(app, "user-data")?.join("User");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+    Ok(dir.join("settings.json"))
 }
 
 /// Build the code-server argv. Pure so the flag set is unit-tested. Loopback
@@ -349,6 +489,57 @@ where
             }
         });
     }
+}
+
+/// Supervise a healthy instance: probe `/healthz` on an interval and, after
+/// [`WATCHDOG_FAILURES`] consecutive misses, flag the instance unhealthy,
+/// announce that it is gone, and stop.
+///
+/// The task deliberately does **not** touch `CodeServerState` (that would need a
+/// self-reference); it flips the shared `unhealthy` flag instead, which is what
+/// makes the prune paths — `live_port`, `status`, `open_file` — retire the
+/// instance rather than hand it out again to a caller that is retrying.
+fn spawn_watchdog(
+    app: tauri::AppHandle,
+    root: String,
+    port: u16,
+    unhealthy: Arc<AtomicBool>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        use tauri::Emitter as _;
+        let Ok(client) = reqwest::Client::builder()
+            .timeout(Duration::from_secs(2))
+            .build()
+        else {
+            return;
+        };
+        let url = format!("http://127.0.0.1:{port}/healthz");
+        let mut failures: u8 = 0;
+        loop {
+            tokio::time::sleep(WATCHDOG_INTERVAL).await;
+            let healthy = matches!(client.get(&url).send().await, Ok(r) if r.status().is_success());
+            if healthy {
+                failures = 0;
+                continue;
+            }
+            failures += 1;
+            if failures < WATCHDOG_FAILURES {
+                continue;
+            }
+            log::warn!("code-server on port {port} stopped responding; reporting exit");
+            // Flag before emitting: the renderer's retry lands on `ensure`, and
+            // that must already see the instance as unusable.
+            unhealthy.store(true, Ordering::Relaxed);
+            let _ = app.emit(
+                CODESERVER_EXITED_EVENT,
+                CodeServerExited {
+                    root: root.clone(),
+                    port,
+                },
+            );
+            return;
+        }
+    })
 }
 
 /// Poll `http://127.0.0.1:<port>/healthz` until it answers 200 or `budget`
@@ -485,5 +676,102 @@ mod tests {
     async fn stop_unknown_root_is_noop() {
         let state = CodeServerState::new();
         assert!(!state.stop("/tmp/nope").await);
+    }
+
+    /// Register a long-lived stand-in child under `root` so the reuse rules can
+    /// be exercised without a real code-server install.
+    #[cfg(unix)]
+    async fn insert_fake_instance(
+        state: &CodeServerState,
+        root: &str,
+        port: u16,
+    ) -> Arc<AtomicBool> {
+        let child = Command::new("sleep")
+            .arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn stand-in child");
+        let unhealthy = Arc::new(AtomicBool::new(false));
+        state.instances.lock().await.insert(
+            root.to_string(),
+            RunningInstance {
+                port,
+                child,
+                binary_path: "/bin/code-server".to_string(),
+                user_data_dir: PathBuf::from("/tmp/ud"),
+                extensions_dir: PathBuf::from("/tmp/ext"),
+                unhealthy: unhealthy.clone(),
+                watchdog: None,
+            },
+        );
+        unhealthy
+    }
+
+    /// The retry regression: the watchdog fires while the child is still alive,
+    /// so liveness alone would hand the hung instance straight back and the pane
+    /// would flip to `ready` over the same dead page.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_instance_that_failed_its_health_check_is_never_handed_out_again() {
+        let state = CodeServerState::new();
+        let unhealthy = insert_fake_instance(&state, "/work/proj", 43117).await;
+
+        // Alive and healthy → reused.
+        assert_eq!(state.live_port("/work/proj").await, Some(43117));
+
+        unhealthy.store(true, Ordering::Relaxed);
+
+        // Still alive, but no longer serving: refused, killed and forgotten so
+        // the next `ensure` spawns a fresh one.
+        assert_eq!(state.live_port("/work/proj").await, None);
+        assert!(state.instances.lock().await.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn status_stops_reporting_an_instance_that_failed_its_health_check() {
+        let state = CodeServerState::new();
+        let unhealthy = insert_fake_instance(&state, "/work/proj", 43118).await;
+        assert_eq!(state.status("/work/proj").await, (true, Some(43118)));
+
+        unhealthy.store(true, Ordering::Relaxed);
+
+        assert_eq!(state.status("/work/proj").await, (false, None));
+        assert!(state.instances.lock().await.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn managed_snapshot_retires_unhealthy_live_children() {
+        let state = CodeServerState::new();
+        let unhealthy = insert_fake_instance(&state, "/work/proj", 43120).await;
+        assert_eq!(state.managed_snapshot().await.len(), 1);
+
+        unhealthy.store(true, Ordering::Relaxed);
+
+        assert!(state.managed_snapshot().await.is_empty());
+        assert!(state.instances.lock().await.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn open_file_refuses_an_instance_that_failed_its_health_check() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("main.ts"), "export {}\n").unwrap();
+        let canonical = root.path().canonicalize().unwrap();
+        let state = CodeServerState::new();
+        let unhealthy = insert_fake_instance(&state, &canonical.to_string_lossy(), 43119).await;
+
+        unhealthy.store(true, Ordering::Relaxed);
+
+        let err = state
+            .open_file(&canonical.to_string_lossy(), "main.ts", None, None)
+            .await
+            .unwrap_err();
+        assert!(err.contains("code-server"));
+        assert!(state.instances.lock().await.is_empty());
     }
 }

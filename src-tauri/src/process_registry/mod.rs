@@ -27,6 +27,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
 use crate::claude::sidecar::{kill_sidecar, SidecarState};
+use crate::codeserver::process::{CodeServerManagedInfo, CodeServerState};
 use crate::external_agent::commands::{AcpTerminalState, ExternalAgentState};
 use crate::external_agent::process::ExternalAgentProcessState;
 use crate::external_agent::terminal::AcpTerminalManagedInfo;
@@ -48,6 +49,7 @@ pub enum ManagedSubsystem {
     AcpTerminal,
     IntegratedTerminal,
     McpServer,
+    CodeServer,
 }
 
 /// Lifecycle state of a managed process, normalized across subsystems.
@@ -167,6 +169,23 @@ fn mcp_row(info: &McpManagedInfo) -> ManagedProcess {
     }
 }
 
+fn codeserver_row(info: &CodeServerManagedInfo) -> ManagedProcess {
+    ManagedProcess {
+        subsystem: ManagedSubsystem::CodeServer,
+        // The canonical project root is the instance key, so it is also what
+        // kill / restart route on.
+        id: info.root.clone(),
+        name: format!("code-server 127.0.0.1:{}", info.port),
+        pid: info.pid,
+        // `managed_snapshot` prunes exited children, so a listed row is alive.
+        status: ManagedStatus::Running,
+        can_kill: true,
+        // Restart = stop + re-ensure, both available natively for this subsystem.
+        can_restart: true,
+        detail: Some(info.root.clone()),
+    }
+}
+
 fn sidecar_row(pid: Option<u32>, ready: bool) -> ManagedProcess {
     ManagedProcess {
         subsystem: ManagedSubsystem::ChatSidecar,
@@ -241,6 +260,15 @@ pub async fn collect(app: &AppHandle) -> Vec<ManagedProcess> {
         }
     }
 
+    // Pro IDE code-server instances (one per project root). These outlive the
+    // pane that opened them, so this row is the user's only way to see and stop
+    // them short of quitting the app.
+    if let Some(st) = app.try_state::<CodeServerState>() {
+        for info in st.inner().managed_snapshot().await {
+            out.push(codeserver_row(&info));
+        }
+    }
+
     out
 }
 
@@ -277,15 +305,39 @@ async fn kill_subsystem(
             kill_sidecar(st.inner().clone()).await;
             Ok(())
         }
+        ManagedSubsystem::CodeServer => {
+            app.state::<CodeServerState>().inner().stop(id).await;
+            Ok(())
+        }
         ManagedSubsystem::ExternalAgent => {
             Err("external-agent lifecycle is controlled in the renderer".to_string())
         }
     }
 }
 
-/// Control a managed process. Only `Kill` is served natively; `Restart` for the
-/// Rust-supervised subsystems is not supported (the panel greys it out), and
-/// external-agent control is routed through the renderer.
+/// Restart the managed process `id`. Only code-server supports this natively —
+/// its instances are keyed by project root, so a restart is just stop +
+/// re-ensure with no renderer state to keep in sync.
+async fn restart_subsystem(
+    app: &AppHandle,
+    subsystem: ManagedSubsystem,
+    id: &str,
+) -> Result<(), String> {
+    match subsystem {
+        ManagedSubsystem::CodeServer => {
+            let state = app.state::<CodeServerState>();
+            state.inner().stop(id).await;
+            state.inner().ensure(app, id).await.map(|_| ())
+        }
+        _ => Err(format!(
+            "restart is not supported for {subsystem:?} via the native registry"
+        )),
+    }
+}
+
+/// Control a managed process. `Kill` is served natively for every
+/// Rust-supervised subsystem; `Restart` only for code-server (the panel greys it
+/// out elsewhere), and external-agent control is routed through the renderer.
 #[tauri::command]
 pub async fn control_managed_process(
     app: AppHandle,
@@ -295,9 +347,7 @@ pub async fn control_managed_process(
 ) -> Result<(), String> {
     match action {
         ManagedControlAction::Kill => kill_subsystem(&app, subsystem, &id).await,
-        ManagedControlAction::Restart => Err(format!(
-            "restart is not supported for {subsystem:?} via the native registry"
-        )),
+        ManagedControlAction::Restart => restart_subsystem(&app, subsystem, &id).await,
     }
 }
 
@@ -344,6 +394,24 @@ mod tests {
             "\"integratedTerminal\""
         );
         assert_eq!(s(&ManagedSubsystem::McpServer), "\"mcpServer\"");
+        assert_eq!(s(&ManagedSubsystem::CodeServer), "\"codeServer\"");
+    }
+
+    #[test]
+    fn codeserver_row_routes_on_the_project_root_and_allows_restart() {
+        let row = codeserver_row(&CodeServerManagedInfo {
+            root: "/work/proj".into(),
+            port: 43117,
+            pid: Some(4242),
+        });
+        assert_eq!(row.subsystem, ManagedSubsystem::CodeServer);
+        // Kill / restart route on the id, which must be the instance key.
+        assert_eq!(row.id, "/work/proj");
+        assert!(row.name.contains("43117"));
+        assert_eq!(row.pid, Some(4242));
+        assert_eq!(row.status, ManagedStatus::Running);
+        assert!(row.can_kill && row.can_restart);
+        assert_eq!(row.detail.as_deref(), Some("/work/proj"));
     }
 
     #[test]

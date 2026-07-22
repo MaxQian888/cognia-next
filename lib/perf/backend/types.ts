@@ -71,7 +71,12 @@ export interface SystemMemory {
 
 /** The cognia subsystem that owns a managed process (matches Rust `ManagedSubsystem`). */
 export type ManagedSubsystem =
-  "externalAgent" | "chatSidecar" | "acpTerminal" | "integratedTerminal" | "mcpServer"
+  | "externalAgent"
+  | "chatSidecar"
+  | "acpTerminal"
+  | "integratedTerminal"
+  | "mcpServer"
+  | "codeServer"
 
 /** Normalized lifecycle state of a managed process (matches Rust `ManagedStatus`). */
 export type ManagedStatus = "starting" | "running" | "stopping" | "stopped" | "error"

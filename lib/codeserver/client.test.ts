@@ -29,6 +29,28 @@ it("maps process commands to the right invoke names + args", () => {
   void codeServerClient.download()
   expect(call).toHaveBeenCalledWith("codeserver_download", {})
 
+  void codeServerClient.diskUsage()
+  expect(call).toHaveBeenCalledWith("codeserver_disk_usage", {})
+
+  void codeServerClient.readUserSettings()
+  expect(call).toHaveBeenCalledWith("codeserver_read_user_settings", {})
+
+  void codeServerClient.writeUserSettings("{}")
+  expect(call).toHaveBeenCalledWith("codeserver_write_user_settings", { contents: "{}" })
+
+  void codeServerClient.localVsCodeAvailable()
+  expect(call).toHaveBeenCalledWith("codeserver_local_vscode_available", {})
+
+  void codeServerClient.openInLocalVsCode("/work/proj", 3, 1)
+  expect(call).toHaveBeenCalledWith("codeserver_open_in_local_vscode", {
+    path: "/work/proj",
+    line: 3,
+    column: 1,
+  })
+
+  void codeServerClient.uninstall(true)
+  expect(call).toHaveBeenCalledWith("codeserver_uninstall", { everything: true })
+
   void codeServerClient.openFile("/work/proj", "src/index.ts", 12, 4)
   expect(call).toHaveBeenCalledWith("codeserver_open_file", {
     root: "/work/proj",
@@ -59,6 +81,7 @@ it("spreads the rect into the embed command payloads", () => {
   expect(call).toHaveBeenCalledWith("codeserver_embed_destroy", {})
 })
 
-it("exposes the download-progress event name", () => {
+it("exposes the backend event names", () => {
   expect(CODESERVER_EVENTS.downloadProgress).toBe("codeserver://download-progress")
+  expect(CODESERVER_EVENTS.instanceExited).toBe("codeserver://instance-exited")
 })

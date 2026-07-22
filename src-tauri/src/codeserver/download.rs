@@ -145,6 +145,123 @@ pub fn install_dir_for(app: &tauri::AppHandle) -> Result<PathBuf> {
     Ok(code_server_root(app)?.join(CODE_SERVER_VERSION))
 }
 
+/// Sibling directories of the version installs that hold code-server's own
+/// state (`process::state_subdir`), never reclaimable as "old versions".
+const STATE_DIRS: [&str; 2] = ["user-data", "extensions"];
+
+/// Install + disk state for the Pro IDE settings card.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeServerDiskUsage {
+    /// The pinned version this build installs.
+    pub version: String,
+    pub root: String,
+    /// Whether the pinned version's launcher is present on disk.
+    pub installed: bool,
+    /// Every byte under the code-server root: installs plus user-data.
+    pub total_bytes: u64,
+    /// Bytes held by non-pinned installs and abandoned `.partial` downloads.
+    pub reclaimable_bytes: u64,
+    /// Directory names of the non-pinned versions still on disk.
+    pub stale_versions: Vec<String>,
+}
+
+/// Recursive size of `path`, following no symlinks (a code-server tarball ships
+/// them, and following would both double-count and risk a loop).
+fn dir_size(path: &Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return 0;
+    };
+    let mut total = 0;
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
+            total += dir_size(&entry.path());
+        } else if file_type.is_file() {
+            total += entry.metadata().map(|meta| meta.len()).unwrap_or(0);
+        }
+    }
+    total
+}
+
+/// Paths under the root that a cleanup may delete: installs of other versions
+/// and leftover partial downloads. The pinned install and the state dirs are
+/// never included.
+fn reclaimable_paths(root: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name == CODE_SERVER_VERSION || STATE_DIRS.contains(&name.as_ref()) {
+                return false;
+            }
+            entry.file_type().is_ok_and(|kind| {
+                !kind.is_symlink() && (kind.is_dir() || name.ends_with(".partial"))
+            })
+        })
+        .map(|entry| entry.path())
+        .collect()
+}
+
+/// Snapshot the install for the settings card. Never fails on a missing root —
+/// "nothing installed yet" is a normal state, reported as zeroes.
+pub fn disk_usage(app: &tauri::AppHandle) -> Result<CodeServerDiskUsage> {
+    let root = code_server_root(app)?;
+    let reclaimable = reclaimable_paths(&root);
+    Ok(CodeServerDiskUsage {
+        version: CODE_SERVER_VERSION.to_string(),
+        installed: binary_path_in(&install_dir_for(app)?).exists(),
+        total_bytes: dir_size(&root),
+        reclaimable_bytes: reclaimable.iter().map(|p| dir_size(p)).sum(),
+        stale_versions: reclaimable
+            .iter()
+            .filter(|p| p.is_dir())
+            .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .collect(),
+        root: root.to_string_lossy().into_owned(),
+    })
+}
+
+/// Delete non-pinned installs and partial downloads, or — when `everything` —
+/// the whole code-server root including the pinned install and user data.
+/// Returns the bytes freed.
+pub fn uninstall(app: &tauri::AppHandle, everything: bool) -> Result<u64> {
+    let root = code_server_root(app)?;
+    if !root.exists() {
+        return Ok(0);
+    }
+    if everything {
+        let freed = dir_size(&root);
+        std::fs::remove_dir_all(&root).context("remove code-server root")?;
+        return Ok(freed);
+    }
+    remove_paths(reclaimable_paths(&root))
+}
+
+fn remove_paths(paths: impl IntoIterator<Item = PathBuf>) -> Result<u64> {
+    let mut freed = 0;
+    for path in paths {
+        let size = dir_size(&path);
+        let removed = if path.is_dir() {
+            std::fs::remove_dir_all(&path)
+        } else {
+            std::fs::remove_file(&path)
+        };
+        removed.with_context(|| format!("remove {}", path.display()))?;
+        freed += size;
+    }
+    Ok(freed)
+}
+
 /// Strip the leading path component (the `code-server-<ver>-<os>-<arch>/`
 /// wrapper dir) and reject anything that would escape via `..`. Returns `None`
 /// for entries to skip (the bare wrapper dir, or a traversal attempt).
@@ -292,6 +409,84 @@ async fn stream_to_file(app: &tauri::AppHandle, url: &str, dest: &Path) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Build a plausible code-server root: the pinned install, an older one,
+    /// both state dirs, and an abandoned partial download.
+    fn seed_root() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for version in [CODE_SERVER_VERSION, "4.100.0"] {
+            let bin = root.join(version).join("bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            std::fs::write(bin.join("code-server"), vec![b'x'; 10]).unwrap();
+        }
+        for state in STATE_DIRS {
+            std::fs::create_dir_all(root.join(state)).unwrap();
+            std::fs::write(root.join(state).join("settings.json"), vec![b'y'; 5]).unwrap();
+        }
+        std::fs::write(
+            root.join("4.128.0-macos-arm64.tar.gz.partial"),
+            vec![b'z'; 7],
+        )
+        .unwrap();
+        dir
+    }
+
+    #[test]
+    fn dir_size_sums_nested_files() {
+        let dir = seed_root();
+        // 2 installs × 10B + 2 state files × 5B + 7B partial.
+        assert_eq!(dir_size(dir.path()), 10 + 10 + 5 + 5 + 7);
+    }
+
+    #[test]
+    fn dir_size_of_a_missing_path_is_zero() {
+        assert_eq!(dir_size(Path::new("/definitely/not/here/xyzzy")), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dir_size_does_not_follow_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("data"), vec![b'x'; 7]).unwrap();
+        symlink(dir.path(), dir.path().join("cycle")).unwrap();
+
+        assert_eq!(dir_size(dir.path()), 7);
+    }
+
+    #[test]
+    fn partial_cleanup_propagates_removal_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("already-gone.partial");
+
+        let error = remove_paths([missing]).unwrap_err();
+
+        assert!(error.to_string().contains("already-gone.partial"));
+    }
+
+    #[test]
+    fn reclaimable_skips_the_pinned_install_and_state_dirs() {
+        let dir = seed_root();
+        let names: Vec<String> = reclaimable_paths(dir.path())
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+
+        assert!(names.contains(&"4.100.0".to_string()));
+        assert!(names.contains(&"4.128.0-macos-arm64.tar.gz.partial".to_string()));
+        // Never reclaim what we are about to run, or the user's editor state.
+        assert!(!names.contains(&CODE_SERVER_VERSION.to_string()));
+        for state in STATE_DIRS {
+            assert!(!names.contains(&state.to_string()));
+        }
+    }
+
+    #[test]
+    fn reclaimable_paths_of_a_missing_root_is_empty() {
+        assert!(reclaimable_paths(Path::new("/definitely/not/here/xyzzy")).is_empty());
+    }
 
     #[test]
     fn resolve_platform_does_not_panic() {

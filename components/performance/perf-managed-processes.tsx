@@ -53,6 +53,7 @@ const SUBSYSTEM_ORDER: ManagedSubsystem[] = [
   "externalAgent",
   "chatSidecar",
   "mcpServer",
+  "codeServer",
   "acpTerminal",
   "integratedTerminal",
 ]

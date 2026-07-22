@@ -332,11 +332,13 @@ function AgentTeamWorkspaceInner() {
     ? (activeTab as Tab)
     : "overview"
 
-  // The chat tab fills the pane as a full-height flex column (header on top,
-  // message list flex-grows with an internal scroll, composer pinned at the
-  // bottom) so the lower half of the pane is no longer dead space. Every other
-  // tab keeps the classic "page scrolls as a whole" behaviour.
-  const isChat = tab === "chat"
+  // Chat and editor fill the pane as a full-height flex column (header on top,
+  // body flex-grows with its own internal scroll) so the lower half of the pane
+  // is no longer dead space. The editor additionally *requires* this: in
+  // CodeServer mode a native webview is pinned over the pane and cannot follow
+  // DOM scroll, so a page that scrolls as a whole makes it visibly tear.
+  // Every other tab keeps the classic "page scrolls as a whole" behaviour.
+  const isFullHeight = tab === "chat" || tab === "editor"
 
   return (
     <SidebarProvider
@@ -354,10 +356,10 @@ function AgentTeamWorkspaceInner() {
       />
 
       <SidebarInset
-        className={cn("min-h-0", isChat ? "overflow-hidden" : "overflow-y-auto")}
+        className={cn("min-h-0", isFullHeight ? "overflow-hidden" : "overflow-y-auto")}
         data-bg-target="chat"
       >
-        <div className={cn("flex flex-col gap-4 p-4 sm:p-6", isChat && "min-h-0 flex-1")}>
+        <div className={cn("flex flex-col gap-4 p-4 sm:p-6", isFullHeight && "min-h-0 flex-1")}>
           <WorkspaceHeader team={team} teammates={teammates} />
 
           {tab === "overview" && (

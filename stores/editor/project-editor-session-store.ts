@@ -1,5 +1,6 @@
 import { create } from "zustand"
-import { createJSONStorage, persist } from "zustand/middleware"
+import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import type { ProjectEditorSession } from "@/types/editor/project-editor"
 
 const STORAGE_KEY = "cognia-project-editor-sessions"
@@ -70,7 +71,7 @@ export const useProjectEditorSessionStore = create<ProjectEditorSessionState>()(
     }),
     {
       name: STORAGE_KEY,
-      storage: createJSONStorage(() => localStorage),
+      storage: persistLocalStorage(),
       partialize: (state) => ({ sessions: state.sessions }),
     }
   )

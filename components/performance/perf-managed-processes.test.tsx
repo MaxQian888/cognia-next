@@ -116,6 +116,40 @@ describe("PerfManagedProcesses", () => {
     expect(screen.getByTestId("perf-managed-row-a1")).toHaveTextContent("—")
   })
 
+  it("groups Pro IDE code-server instances and offers kill + restart", async () => {
+    render(
+      <PerfManagedProcesses
+        latest={sample(
+          [
+            mp({
+              subsystem: "codeServer",
+              id: "/work/proj",
+              name: "code-server 127.0.0.1:43117",
+              pid: 4242,
+              detail: "/work/proj",
+            }),
+          ],
+          [proc(4242)]
+        )}
+      />
+    )
+
+    const group = screen.getByTestId("perf-managed-group-codeServer")
+    expect(within(group).getByTestId("perf-managed-row-/work/proj")).toBeInTheDocument()
+    // A long-lived code-server must be stoppable from here — it is the only
+    // surface that lists one.
+    expect(screen.getByTestId("perf-managed-restart-/work/proj")).toBeEnabled()
+
+    fireEvent.click(screen.getByTestId("perf-managed-kill-/work/proj"))
+    fireEvent.click(screen.getByTestId("perf-managed-kill-confirm"))
+    await waitFor(() =>
+      expect(mockControl).toHaveBeenCalledWith(
+        expect.objectContaining({ subsystem: "codeServer", id: "/work/proj" }),
+        "kill"
+      )
+    )
+  })
+
   it("disables restart for subsystems that don't support it", () => {
     render(
       <PerfManagedProcesses
