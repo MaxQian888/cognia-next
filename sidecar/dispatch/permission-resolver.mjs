@@ -96,12 +96,219 @@ function better(a, b) {
   return b.globScore >= a.globScore ? b : a
 }
 
-/** Naive top-level split for Bash targets (operators, quotes ignored). */
+/** Index of the `)` matching the `(` at `openIdx`, or -1. Quote-aware. */
+function matchParen(text, openIdx) {
+  let depth = 0
+  let inSingle = false
+  let inDouble = false
+  for (let i = openIdx; i < text.length; i++) {
+    const c = text[i]
+    if (inSingle) {
+      if (c === "'") inSingle = false
+      continue
+    }
+    if (inDouble) {
+      if (c === '"') inDouble = false
+      continue
+    }
+    if (c === "'") {
+      inSingle = true
+      continue
+    }
+    if (c === '"') {
+      inDouble = true
+      continue
+    }
+    if (c === "(") depth++
+    else if (c === ")") {
+      depth--
+      if (depth === 0) return i
+    }
+  }
+  return -1
+}
+
+/** Split a command into top-level statements, respecting quotes + paren depth. */
+function splitTopLevel(command) {
+  const out = []
+  let cur = ""
+  let inSingle = false
+  let inDouble = false
+  let inBacktick = false
+  let depth = 0
+  const flush = () => {
+    if (cur.trim()) out.push(cur.trim())
+    cur = ""
+  }
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i]
+    const next = command[i + 1]
+    if (inSingle) {
+      cur += c
+      if (c === "'") inSingle = false
+      continue
+    }
+    if (inDouble) {
+      cur += c
+      if (c === '"') inDouble = false
+      continue
+    }
+    if (inBacktick) {
+      cur += c
+      if (c === "`") inBacktick = false
+      continue
+    }
+    if (c === "'") {
+      inSingle = true
+      cur += c
+      continue
+    }
+    if (c === '"') {
+      inDouble = true
+      cur += c
+      continue
+    }
+    if (c === "`") {
+      inBacktick = true
+      cur += c
+      continue
+    }
+    if (c === "(") {
+      depth++
+      cur += c
+      continue
+    }
+    if (c === ")") {
+      if (depth > 0) depth--
+      cur += c
+      continue
+    }
+    if (depth > 0) {
+      cur += c
+      continue
+    }
+    if (c === "&" && next === "&") {
+      flush()
+      i++
+      continue
+    }
+    if (c === "|" && next === "|") {
+      flush()
+      i++
+      continue
+    }
+    if (c === ";" || c === "\n" || c === "|" || c === "&") {
+      flush()
+      continue
+    }
+    cur += c
+  }
+  flush()
+  return out
+}
+
+/**
+ * Pull `$(...)`, backtick, and `(...)` spans out of `text`. Returns their inner
+ * command strings (for recursive processing) plus a `stripped` copy with each
+ * span replaced by a space.
+ */
+function extractSubstitutions(text) {
+  const inner = []
+  let stripped = ""
+  let inSingle = false
+  let inDouble = false
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    if (inSingle) {
+      stripped += c
+      if (c === "'") inSingle = false
+      continue
+    }
+    if (inDouble) {
+      stripped += c
+      if (c === '"') inDouble = false
+      continue
+    }
+    if (c === "'") {
+      inSingle = true
+      stripped += c
+      continue
+    }
+    if (c === '"') {
+      inDouble = true
+      stripped += c
+      continue
+    }
+    if (c === "`") {
+      const end = text.indexOf("`", i + 1)
+      if (end === -1) {
+        stripped += c
+        continue
+      }
+      inner.push(text.slice(i + 1, end))
+      i = end
+      stripped += " "
+      continue
+    }
+    if (c === "$" && text[i + 1] === "(") {
+      const close = matchParen(text, i + 1)
+      if (close === -1) {
+        stripped += c
+        continue
+      }
+      inner.push(text.slice(i + 2, close))
+      i = close
+      stripped += " "
+      continue
+    }
+    if (c === "(") {
+      const close = matchParen(text, i)
+      if (close === -1) {
+        stripped += c
+        continue
+      }
+      inner.push(text.slice(i + 1, close))
+      i = close
+      stripped += " "
+      continue
+    }
+    stripped += c
+  }
+  return { inner, stripped }
+}
+
+const MAX_SPLIT_DEPTH = 20
+
+function collectSegments(command, out, depth) {
+  if (depth > MAX_SPLIT_DEPTH) return
+  for (const raw of splitTopLevel(command)) {
+    const trimmed = raw.trim()
+    if (trimmed) out.push(trimmed)
+    const { inner } = extractSubstitutions(raw)
+    for (const sub of inner) {
+      if (sub.trim()) collectSegments(sub, out, depth + 1)
+    }
+  }
+}
+
+/**
+ * Split a Bash target into the segments the rules are matched against.
+ *
+ * Quote- and depth-aware, and it recursively surfaces commands hidden inside
+ * `$(...)`, backticks, and subshells — the mirror of `splitCommandSegments` in
+ * `lib/claude/permissions/command-parse.ts`, pinned by
+ * `lib/claude/permissions/ruleset.sidecar-parity.test.ts`.
+ *
+ * The previous version split on a bare `/&&|\|\||;|\n|\|/`, which meant a
+ * denied command wrapped in a substitution (`echo $(git push)`) produced one
+ * segment that matched no rule, resolved to "ask", and therefore fell out of
+ * this hard gate into the approval round-trip. Splitting inside quotes was the
+ * other half of the mismatch: `git commit -m "a; b"` became two bogus segments.
+ */
 function splitBash(command) {
-  return String(command)
-    .split(/&&|\|\||;|\n|\|/)
-    .map((s) => s.trim())
-    .filter(Boolean)
+  const out = []
+  collectSegments(String(command ?? ""), out, 0)
+  return out
 }
 
 /**

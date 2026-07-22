@@ -130,6 +130,67 @@ function resolveInWorkspace(
   return { ok: true, path: resolved, root: base }
 }
 
+/** The subset of `@tauri-apps/plugin-fs` the symlink guard needs. */
+interface LstatCapableFs {
+  lstat: (path: string) => Promise<{ isSymlink?: boolean }>
+}
+
+/**
+ * Find the first component of `resolved` that is a symlink, or null if none is.
+ *
+ * {@link resolveInWorkspace} is purely lexical: it collapses `.` / `..` as text
+ * and compares string prefixes. That stops `../../etc/passwd`, but it cannot
+ * see a symlink — and git tracks symlinks, so merely cloning a hostile repo
+ * into the workspace is enough to plant `docs/notes -> /Users/me/.ssh`, which
+ * `readTextFile` and `readDir` both follow. Since the declared
+ * `filesystem:read` permission gates nothing here (see the note on
+ * `resolveInWorkspace`), the on-disk check has to live in this plugin.
+ *
+ * Walks every component BELOW the workspace root with `lstat`, which does not
+ * follow links. The root itself is exempt: a workspace opened through a
+ * symlinked path (`/tmp` on macOS is a link to `/private/tmp`) is the user's
+ * own choice, not an escape.
+ *
+ * A component that cannot be stat'd is treated as clean — it does not exist,
+ * so the operation that follows fails on its own and reports the real error
+ * rather than a misleading "escapes the workspace".
+ */
+async function findSymlinkComponent(
+  fs: LstatCapableFs,
+  resolved: string,
+  root: string
+): Promise<string | null> {
+  if (resolved === root || !resolved.startsWith(`${root}/`)) return null
+  let current = root
+  for (const segment of resolved.slice(root.length + 1).split("/")) {
+    if (!segment) continue
+    current = `${current}/${segment}`
+    try {
+      const info = await fs.lstat(current)
+      if (info?.isSymlink) return current
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
+/**
+ * Guard a resolved in-workspace path against symlink escape. Returns an error
+ * payload shaped like the tools' own failure result, or null when the path is
+ * safe to hand to the real filesystem call.
+ */
+async function symlinkEscapeError(
+  fs: LstatCapableFs,
+  resolved: string,
+  root: string
+): Promise<{ ok: false; error: string } | null> {
+  const link = await findSymlinkComponent(fs, resolved, root)
+  return link
+    ? { ok: false as const, error: `Path escapes the workspace via symlink: ${link}` }
+    : null
+}
+
 /**
  * Cached `tauri` flag — set by `activate()` from `ctx.capabilities.tauri`
  * when the host exposes ADR-0026 §5 §C, otherwise falls back to the
@@ -150,6 +211,8 @@ async function listFiles(args: ListFilesArgs): Promise<unknown> {
   const resolved = resolveInWorkspace(args.path)
   if (!resolved.ok) return { ok: false as const, error: resolved.error }
   const fs = await import("@tauri-apps/plugin-fs")
+  const escaped = await symlinkEscapeError(fs, resolved.path, resolved.root)
+  if (escaped) return escaped
   const path = resolved.path
   const entries = await fs.readDir(path)
   return {
@@ -171,6 +234,8 @@ async function readFile(args: ReadFileArgs): Promise<unknown> {
   const resolved = resolveInWorkspace(args.path)
   if (!resolved.ok) return { ok: false as const, error: resolved.error }
   const fs = await import("@tauri-apps/plugin-fs")
+  const escaped = await symlinkEscapeError(fs, resolved.path, resolved.root)
+  if (escaped) return escaped
   const text = await fs.readTextFile(resolved.path)
   const cap = args.maxBytes && args.maxBytes > 0 ? args.maxBytes : 64 * 1024
   return {
@@ -209,6 +274,8 @@ async function search(args: SearchArgs): Promise<unknown> {
   const resolvedRoot = resolveInWorkspace(args.path)
   if (!resolvedRoot.ok) return { ok: false as const, error: resolvedRoot.error }
   const fs = await import("@tauri-apps/plugin-fs")
+  const escaped = await symlinkEscapeError(fs, resolvedRoot.path, resolvedRoot.root)
+  if (escaped) return escaped
   const root = resolvedRoot.path
   const flags = args.ignoreCase ? "i" : ""
   let re: RegExp
@@ -231,6 +298,11 @@ async function search(args: SearchArgs): Promise<unknown> {
     const entries = await fs.readDir(dir)
     for (const entry of entries) {
       const child = `${dir}/${entry.name}`
+      // A symlink can point anywhere, including outside the workspace. Skipping
+      // it here keeps the sweep inside the tree the caller asked for, and does
+      // not depend on whether the host reports a link-to-directory as a
+      // directory (`readDir` uses the entry's own file type, so it does not).
+      if (entry.isSymlink) continue
       if (entry.isDirectory) {
         // Dot-directories were the ONLY exclusion, so a search rooted at a real
         // project descended into node_modules / target / dist and read every
@@ -242,9 +314,17 @@ async function search(args: SearchArgs): Promise<unknown> {
         await walk(child, depth + 1)
       } else if (entry.isFile && entry.name) {
         try {
+          // Check the size BEFORE reading. Testing `body.length` afterwards
+          // still pulls the whole file into a string first, so a multi-GB file
+          // in the tree was an out-of-memory crash rather than a skip.
+          const info = await fs.stat(child)
+          if (typeof info?.size === "number" && info.size > SEARCH_MAX_FILE_CHARS) {
+            // Almost always a bundle, lockfile, or binary read as text.
+            truncated = true
+            continue
+          }
           const body = await fs.readTextFile(child)
           if (body.length > SEARCH_MAX_FILE_CHARS) {
-            // Almost always a bundle, lockfile, or binary read as text.
             truncated = true
             continue
           }

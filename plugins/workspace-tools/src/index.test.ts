@@ -12,11 +12,17 @@ jest.mock("@/lib/tauri", () => ({ isTauri: () => false }))
 // references the mocks lazily.
 const mockReadDir = jest.fn(async (_p: string) => [] as Array<Record<string, unknown>>)
 const mockReadTextFile = jest.fn(async (_p: string) => "")
+// `lstat` backs the symlink guard and `stat` the pre-read size bound; both
+// default to "ordinary small file" so existing cases are unaffected.
+const mockLstat = jest.fn(async (_p: string) => ({ isSymlink: false }) as Record<string, unknown>)
+const mockStat = jest.fn(async (_p: string) => ({ size: 10 }) as Record<string, unknown>)
 jest.mock(
   "@tauri-apps/plugin-fs",
   () => ({
     readDir: (...a: unknown[]) => (mockReadDir as (...x: unknown[]) => unknown)(...a),
     readTextFile: (...a: unknown[]) => (mockReadTextFile as (...x: unknown[]) => unknown)(...a),
+    lstat: (...a: unknown[]) => (mockLstat as (...x: unknown[]) => unknown)(...a),
+    stat: (...a: unknown[]) => (mockStat as (...x: unknown[]) => unknown)(...a),
   }),
   { virtual: true }
 )
@@ -407,6 +413,10 @@ describe("workspace confinement", () => {
     mockReadDir.mockResolvedValue([])
     mockReadTextFile.mockReset()
     mockReadTextFile.mockResolvedValue("")
+    mockLstat.mockReset()
+    mockLstat.mockResolvedValue({ isSymlink: false })
+    mockStat.mockReset()
+    mockStat.mockResolvedValue({ size: 10 })
   })
 
   // These tools import `@tauri-apps/plugin-fs` directly and MUST keep doing so:
@@ -463,6 +473,115 @@ describe("workspace confinement", () => {
     }
     expect(result.ok).toBe(true)
     expect(result.path).toBe(`${WS}/src/a.ts`)
+    await workspaceTools.deactivate?.(ctx)
+  })
+
+  // The lexical resolver above cannot see a symlink, and git tracks symlinks —
+  // so cloning a hostile repo into the workspace is enough to plant a link to
+  // ~/.ssh that `readTextFile` / `readDir` follow straight out of the tree.
+  describe("symlink escape", () => {
+    /** Report `link` (and nothing else) as a symlink. */
+    const linkAt = (link: string) =>
+      mockLstat.mockImplementation(async (p: string) => ({ isSymlink: p === link }))
+
+    it("workspace_read_file rejects a symlinked final component", async () => {
+      linkAt(`${WS}/notes.txt`)
+      const { ctx, tools } = makeDesktopCtx()
+      await workspaceTools.activate?.(ctx)
+      const result = (await tools.workspace_read_file({ path: "notes.txt" })) as {
+        ok: boolean
+        error?: string
+      }
+      expect(result.ok).toBe(false)
+      expect(result.error).toMatch(/escapes the workspace via symlink/)
+      expect(mockReadTextFile).not.toHaveBeenCalled()
+      await workspaceTools.deactivate?.(ctx)
+    })
+
+    it("workspace_read_file rejects a symlinked intermediate directory", async () => {
+      linkAt(`${WS}/docs`)
+      const { ctx, tools } = makeDesktopCtx()
+      await workspaceTools.activate?.(ctx)
+      const result = (await tools.workspace_read_file({ path: "docs/id_rsa" })) as {
+        ok: boolean
+        error?: string
+      }
+      expect(result.ok).toBe(false)
+      expect(result.error).toMatch(/escapes the workspace via symlink/)
+      expect(mockReadTextFile).not.toHaveBeenCalled()
+      await workspaceTools.deactivate?.(ctx)
+    })
+
+    it("workspace_list_files rejects a symlinked directory", async () => {
+      linkAt(`${WS}/docs`)
+      const { ctx, tools } = makeDesktopCtx()
+      await workspaceTools.activate?.(ctx)
+      const result = (await tools.workspace_list_files({ path: "docs" })) as {
+        ok: boolean
+        error?: string
+      }
+      expect(result.ok).toBe(false)
+      expect(result.error).toMatch(/escapes the workspace via symlink/)
+      expect(mockReadDir).not.toHaveBeenCalled()
+      await workspaceTools.deactivate?.(ctx)
+    })
+
+    it("workspace_search does not follow a symlinked entry", async () => {
+      mockReadDir.mockResolvedValue([
+        { name: "escape", isDirectory: false, isFile: false, isSymlink: true },
+        { name: "real.ts", isDirectory: false, isFile: true, isSymlink: false },
+      ])
+      mockReadTextFile.mockResolvedValue("hit")
+      const { ctx, tools } = makeDesktopCtx()
+      await workspaceTools.activate?.(ctx)
+      const result = (await tools.workspace_search({ pattern: "hit" })) as {
+        ok: boolean
+        matches: Array<{ path: string }>
+      }
+      expect(result.ok).toBe(true)
+      expect(result.matches.map((m) => m.path)).toEqual([`${WS}/real.ts`])
+      expect(mockReadTextFile).not.toHaveBeenCalledWith(`${WS}/escape`)
+      await workspaceTools.deactivate?.(ctx)
+    })
+
+    it("treats an unstattable component as clean so the real error surfaces", async () => {
+      mockLstat.mockRejectedValue(new Error("ENOENT"))
+      mockReadTextFile.mockRejectedValue(new Error("no such file"))
+      const { ctx, tools } = makeDesktopCtx()
+      await workspaceTools.activate?.(ctx)
+      await expect(tools.workspace_read_file({ path: "missing.ts" })).rejects.toThrow(
+        /no such file/
+      )
+      await workspaceTools.deactivate?.(ctx)
+    })
+
+    it("allows a workspace root that is itself reached through a symlink", async () => {
+      linkAt(WS)
+      mockReadTextFile.mockResolvedValue("inside")
+      const { ctx, tools } = makeDesktopCtx()
+      await workspaceTools.activate?.(ctx)
+      const result = (await tools.workspace_read_file({ path: "a.ts" })) as { ok: boolean }
+      expect(result.ok).toBe(true)
+      await workspaceTools.deactivate?.(ctx)
+    })
+  })
+
+  // A multi-GB file used to be pulled into a string before its length was
+  // checked, so the bound has to be enforced from `stat` instead.
+  it("workspace_search skips an oversized file without reading it", async () => {
+    mockReadDir.mockResolvedValue([
+      { name: "huge.bin", isDirectory: false, isFile: true, isSymlink: false },
+    ])
+    mockStat.mockResolvedValue({ size: 512 * 1024 + 1 })
+    const { ctx, tools } = makeDesktopCtx()
+    await workspaceTools.activate?.(ctx)
+    const result = (await tools.workspace_search({ pattern: "x" })) as {
+      ok: boolean
+      truncated: boolean
+    }
+    expect(result.ok).toBe(true)
+    expect(result.truncated).toBe(true)
+    expect(mockReadTextFile).not.toHaveBeenCalled()
     await workspaceTools.deactivate?.(ctx)
   })
 

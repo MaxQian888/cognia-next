@@ -202,8 +202,13 @@ describe("SidecarIssueLoopDriver", () => {
 })
 
 describe("ISSUE_LOOP_PERMISSION_RULESET", () => {
-  // Resolve through the REAL matcher the sidecar's canUseTool gate uses, so
-  // this pins actual enforcement rather than "an options object was passed".
+  // NOTE: this is the RENDERER matcher, not the one that enforces this ruleset.
+  // The driver hands `permissionRuleset` to the sidecar, whose `canUseTool`
+  // gate consults its own hand-written mirror
+  // (`sidecar/dispatch/permission-resolver.mjs`) — a separate implementation
+  // that this suite cannot import. The two agreeing is pinned by
+  // `lib/claude/permissions/ruleset.sidecar-parity.test.ts`; that file is what
+  // proves these verdicts are the ones actually enforced.
   const verdict = (command: string) =>
     resolveBashPermission(command, [ISSUE_LOOP_PERMISSION_RULESET as unknown as Ruleset]).verdict
 
@@ -223,6 +228,22 @@ describe("ISSUE_LOOP_PERMISSION_RULESET", () => {
     expect(verdict("cd /tmp; gh pr merge 1")).toBe("deny")
   })
 
+  // The rules are globs matched against the raw segment text, so any spelling
+  // that is not literally "git push …" slipped past them. That matters here
+  // more than usual: the issue body this driver is handed is written by anyone
+  // who can open an issue, so the bypass is reachable by prompt injection.
+  it.each([
+    "git -C /tmp/checkout push",
+    "git -c user.name=x push origin main",
+    "git  push",
+    "git --git-dir=/tmp/x/.git push",
+    "git -C /tmp/checkout remote set-url origin https://x@github.com/a/b.git",
+    "env gh pr create --fill",
+    "command gh pr merge 1",
+  ])("denies the equivalent spelling %s", (command) => {
+    expect(verdict(command)).toBe("deny")
+  })
+
   it("leaves the commands the driver actually needs alone", () => {
     for (const command of [
       "npm test",
@@ -231,6 +252,11 @@ describe("ISSUE_LOOP_PERMISSION_RULESET", () => {
       "git add -A",
       "git commit -m 'fix'",
       "git diff",
+      // The word "push" inside a commit message or a log filter must not trip
+      // the gate — a bare `git ** push` glob would have denied both.
+      'git commit -m "fix the push flow"',
+      "git log --grep=push",
+      "git -C /tmp/checkout commit -m 'push it later'",
     ]) {
       expect(verdict(command)).not.toBe("deny")
     }

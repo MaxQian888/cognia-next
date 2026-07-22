@@ -38,20 +38,59 @@ import { buildIssueSystemPrompt, buildIssueUserPrompt, extractSummary } from "./
  * The host pushes and opens the PR itself after the driver returns
  * (`issue-loop.ts`), so nothing legitimate needs these commands.
  */
+/**
+ * Global options `git` accepts BEFORE the subcommand. Without these, `git -C
+ * /tmp/clone push` sails past a rule anchored on `git push`.
+ *
+ * `**` (not `*`): a single star is `[^/\\]*` and therefore stops at a path
+ * separator, so `-C *` would MISS `-C /tmp/clone`.
+ */
+const GIT_GLOBAL_OPTIONS = ["-C **", "-c **", "--git-dir=**", "--work-tree=**", "--namespace=**"]
+
+/**
+ * Programs whose whole job is to exec another program, hiding it from a glob
+ * anchored on the segment head (`env gh pr create`).
+ */
+const EXEC_WRAPPERS = ["env", "command", "sudo", "nohup", "setsid"]
+
+/** Every spelling of `command` this gate must refuse. */
+function denySpellings(command: string): string[] {
+  const [program, ...rest] = command.split(" ")
+  const subcommand = rest.join(" ")
+  const spellings = [command]
+  if (subcommand) {
+    // `git  push` — an extra space is not a glob match but is the same command.
+    spellings.push(`${program}  ${subcommand}`)
+    for (const option of GIT_GLOBAL_OPTIONS) {
+      spellings.push(`${program} ${option} ${subcommand}`)
+    }
+  }
+  for (const wrapper of EXEC_WRAPPERS) spellings.push(`${wrapper} ${command}`)
+  // Each spelling needs both the bare and the argument-bearing form.
+  return spellings.flatMap((spelling) => [spelling, `${spelling} **`])
+}
+
+/**
+ * Tool-layer enforcement of the operations the Issue → PR system prompt forbids
+ * ("Never `git push`, never `gh` — leave the remote untouched").
+ *
+ * Denying the whole `Bash` tool is not an option — the agent has to run the
+ * project's build and tests — so the rules are command-scoped.
+ *
+ * Scope of this gate, stated honestly: glob matching over the raw segment text
+ * cannot tokenize a shell command, so this enumerates the realistic spellings
+ * rather than proving the absence of all of them. It is defence in depth. The
+ * primary control is that the clone carries no credential (the token is
+ * supplied per-operation), so a push that does slip through has nothing to
+ * authenticate with. The patterns deliberately do NOT use a bare `git ** push`,
+ * which would also deny `git commit -m "fix the push flow"`.
+ */
 export const ISSUE_LOOP_PERMISSION_RULESET = {
-  Bash: {
-    // `**` (not `*`): a single star is `[^/\\]*` and therefore stops at a path
-    // separator, so `git remote*` would MISS
-    // `git remote set-url origin https://…/a/b.git` — exactly the command that
-    // matters most here. Each command needs both the bare and the
-    // argument-bearing form.
-    "git push": "deny",
-    "git push **": "deny",
-    "git remote": "deny",
-    "git remote **": "deny",
-    gh: "deny",
-    "gh **": "deny",
-  },
+  Bash: Object.fromEntries(
+    ["git push", "git remote", "gh"].flatMap((command) =>
+      denySpellings(command).map((glob) => [glob, "deny" as const])
+    )
+  ),
 } as const
 
 /**
