@@ -886,7 +886,10 @@ export type ConnectorInboundJobStatus =
 export interface ConnectorInboundJobRow {
   id: string
   adapterId: string
+  /** Conversation-scoped platform identity used by the unique Dexie index. */
   platformMessageId: string
+  /** Original adapter message id, retained for diagnostics and outbound anchors. */
+  sourceMessageId: string
   conversationKey: string
   event: NormalizedInboundEvent
   dispatchMode: ActiveRunDispatchMode

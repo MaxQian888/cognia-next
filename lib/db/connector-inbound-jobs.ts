@@ -5,27 +5,38 @@ import { getDb } from "./schema"
 
 const PENDING_STATUSES = new Set<ConnectorInboundJobRow["status"]>(["queued", "steering"])
 
+function scopedPlatformMessageId(event: NormalizedInboundEvent): string {
+  return `${event.conversationKey}\u001f${event.messageId}`
+}
+
 function inboundJobId(adapterId: string, platformMessageId: string): string {
   return `${adapterId}:inbound:${platformMessageId}`
 }
 
-export async function enqueueConnectorInboundJob(
+export interface ConnectorInboundEnqueueResult {
+  job: ConnectorInboundJobRow
+  inserted: boolean
+}
+
+export async function ensureConnectorInboundJob(
   event: NormalizedInboundEvent,
   dispatchMode: ActiveRunDispatchMode,
   options: { now?: number; historyOnly?: boolean } = {}
-): Promise<ConnectorInboundJobRow> {
+): Promise<ConnectorInboundEnqueueResult> {
   const db = getDb()
+  const platformMessageId = scopedPlatformMessageId(event)
   const existing = await db.connectorInboundJobs
     .where("[adapterId+platformMessageId]")
-    .equals([event.adapterId, event.messageId])
+    .equals([event.adapterId, platformMessageId])
     .first()
-  if (existing) return existing
+  if (existing) return { job: existing, inserted: false }
 
   const now = options.now ?? Date.now()
   const row: ConnectorInboundJobRow = {
-    id: inboundJobId(event.adapterId, event.messageId),
+    id: inboundJobId(event.adapterId, platformMessageId),
     adapterId: event.adapterId,
-    platformMessageId: event.messageId,
+    platformMessageId,
+    sourceMessageId: event.messageId,
     conversationKey: event.conversationKey,
     event,
     dispatchMode,
@@ -37,16 +48,26 @@ export async function enqueueConnectorInboundJob(
   }
   try {
     await db.connectorInboundJobs.add(row)
-    return row
+    return { job: row, inserted: true }
   } catch (error) {
-    if (!(error instanceof DOMException) || error.name !== "ConstraintError") throw error
+    // Another transport delivery may win the unique insert between the read
+    // and add. Dexie uses different constraint error classes in browser and
+    // fake-indexeddb, so resolve by identity before deciding whether to throw.
     const duplicate = await db.connectorInboundJobs
       .where("[adapterId+platformMessageId]")
-      .equals([event.adapterId, event.messageId])
+      .equals([event.adapterId, platformMessageId])
       .first()
     if (!duplicate) throw error
-    return duplicate
+    return { job: duplicate, inserted: false }
   }
+}
+
+export async function enqueueConnectorInboundJob(
+  event: NormalizedInboundEvent,
+  dispatchMode: ActiveRunDispatchMode,
+  options: { now?: number; historyOnly?: boolean } = {}
+): Promise<ConnectorInboundJobRow> {
+  return (await ensureConnectorInboundJob(event, dispatchMode, options)).job
 }
 
 export async function listPendingConnectorInboundJobs(
@@ -62,6 +83,52 @@ export async function listPendingConnectorInboundJobs(
 
 export async function countPendingConnectorInboundJobs(conversationKey: string): Promise<number> {
   return (await listPendingConnectorInboundJobs(conversationKey)).length
+}
+
+export async function listRecoverableConnectorInboundJobs(): Promise<ConnectorInboundJobRow[]> {
+  const rows = await getDb()
+    .connectorInboundJobs.where("status")
+    .anyOf("queued", "steering")
+    .toArray()
+  return rows.sort((a, b) => a.receivedAt - b.receivedAt || a.createdAt - b.createdAt)
+}
+
+export async function updateConnectorInboundJobPayload(
+  id: string,
+  event: NormalizedInboundEvent,
+  dispatchMode: ActiveRunDispatchMode,
+  options: { now?: number } = {}
+): Promise<void> {
+  const current = await getDb().connectorInboundJobs.get(id)
+  if (!current || !PENDING_STATUSES.has(current.status)) return
+  await getDb().connectorInboundJobs.update(id, {
+    event,
+    dispatchMode,
+    status: dispatchMode === "steer" ? "steering" : "queued",
+    updatedAt: options.now ?? Date.now(),
+  })
+}
+
+export async function claimConnectorInboundJob(
+  id: string,
+  options: { leaseOwner: string; leaseMs: number; now?: number }
+): Promise<ConnectorInboundJobRow | undefined> {
+  const db = getDb()
+  return db.transaction("rw", db.connectorInboundJobs, async () => {
+    const current = await db.connectorInboundJobs.get(id)
+    if (!current || !PENDING_STATUSES.has(current.status)) return undefined
+    const now = options.now ?? Date.now()
+    const claimed: ConnectorInboundJobRow = {
+      ...current,
+      status: "running",
+      leaseOwner: options.leaseOwner,
+      leaseExpiresAt: now + options.leaseMs,
+      attempts: current.attempts + 1,
+      updatedAt: now,
+    }
+    await db.connectorInboundJobs.put(claimed)
+    return claimed
+  })
 }
 
 export async function claimNextConnectorInboundJob(
@@ -93,6 +160,35 @@ export async function completeConnectorInboundJob(
   await getDb().connectorInboundJobs.update(id, {
     status: "completed",
     executionRunId: options.executionRunId,
+    leaseOwner: undefined,
+    leaseExpiresAt: undefined,
+    updatedAt: options.now ?? Date.now(),
+  })
+}
+
+export async function markConnectorInboundJobHistoryOnly(
+  id: string,
+  reason: string,
+  options: { now?: number } = {}
+): Promise<void> {
+  await getDb().connectorInboundJobs.update(id, {
+    status: "history_only",
+    recoveryReason: reason,
+    leaseOwner: undefined,
+    leaseExpiresAt: undefined,
+    updatedAt: options.now ?? Date.now(),
+  })
+}
+
+export async function markConnectorInboundJobRecoveryRequired(
+  id: string,
+  reason: string,
+  options: { error?: string; now?: number } = {}
+): Promise<void> {
+  await getDb().connectorInboundJobs.update(id, {
+    status: "recovery_required",
+    recoveryReason: reason,
+    lastError: options.error,
     leaseOwner: undefined,
     leaseExpiresAt: undefined,
     updatedAt: options.now ?? Date.now(),

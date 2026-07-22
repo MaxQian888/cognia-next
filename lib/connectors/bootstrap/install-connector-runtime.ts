@@ -494,6 +494,20 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
 
     if (cancelled) return
 
+    // Reclaim messages durably accepted before the previous process stopped.
+    // This runs only after every enabled adapter is registered so recovered
+    // jobs resolve the same capabilities and delivery paths as live traffic.
+    // Stale running leases are surfaced as recovery-required and are never
+    // replayed automatically by the bus.
+    await bus.resumeDurableInboundJobs().catch((error) => {
+      log(
+        "error",
+        `[connector-bus] durable inbound recovery failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      )
+    })
+
     // Start the Rust axum inbound server iff a webhook / reverse-WS adapter
     // is enabled. Bind loopback-only — public reachability for webhook
     // adapters comes from the cloudflared tunnel, never a bound public

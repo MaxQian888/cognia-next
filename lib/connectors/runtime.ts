@@ -51,6 +51,7 @@ import { generateEmbedding } from "@cognia/provider-embedding/embedding"
 import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
 import { resolveMemoryConfig } from "@/types/memory/memory"
 import { assistantReplyToSegments } from "@/lib/connectors/a2ui-bridge/a2ui-to-segments"
+import { buildSteerPayload, steerBlocksOf } from "@/lib/claude/steer"
 import { hasNoLeakingPii } from "@cognia/redact"
 import { appendAudit } from "./audit"
 import { getBus } from "./bus"
@@ -1057,7 +1058,11 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             : {}),
         }
 
-        const prompt = inboundEventToSendContent(event)
+        const inboundPrompt = inboundEventToSendContent(event)
+        const prompt =
+          event.channelData?.dispatchIntent === "steer-replay"
+            ? buildSteerPayload([{ text: event.plainText, blocks: steerBlocksOf(inboundPrompt) }])
+            : inboundPrompt
         let captured: Awaited<ReturnType<RunAndCaptureFn>>
         try {
           captured = await opts.runAndCapture(session.id, prompt, sendOptions, cap)

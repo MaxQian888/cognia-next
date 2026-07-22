@@ -275,6 +275,15 @@ describe("installRuntime — ai-run (happy path)", () => {
     expect(content).toBe("hello runtime")
   })
 
+  it("replays a durable steer as one framed turn at the safe boundary", async () => {
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_ai" })
+    event.channelData = { dispatchIntent: "steer-replay" }
+    await callHandler(event, "ai-run")
+
+    const [, content] = (DEFAULT_RUN_AND_CAPTURE as jest.Mock).mock.calls[0]
+    expect(content).toBe("By the way (steering): hello runtime")
+  })
+
   it("wires a HITL onPermissionRequest responder + raised timeout into the capture options", async () => {
     const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_ai" })
     await callHandler(event, "ai-run")

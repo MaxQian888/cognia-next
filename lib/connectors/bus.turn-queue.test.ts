@@ -16,12 +16,12 @@
  *   (c) a throwing route handler is audited, dispatch resolves, and the next
  *       event still dispatches (transport-loop survivability).
  *   (d) same-conversation ordering is preserved.
- *   (e) queue overflow drops with a turn_queue_overflow audit.
+ *   (e) queue overflow remains durable as history-only work with a diagnostic.
  */
 
 import "fake-indexeddb/auto"
 import { getDb, __resetDbForTesting } from "@/lib/db/schema"
-import { createAdapterInstance } from "@/lib/db/adapter-instances"
+import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { listRecent } from "@/lib/db/connector-audit"
 import { getBus, __resetBusForTesting } from "./bus"
 import { __resetPruneCounterForTesting } from "./dedup"
@@ -212,6 +212,30 @@ describe("ConnectorBus turn queue — parallelism and ordering", () => {
 
     expect(completed).toEqual(["msg_1", "msg_2", "msg_3"])
   })
+
+  it("marks a configured steer follow-up for safe-boundary replay", async () => {
+    const adapterId = await seedAdapter()
+    await updateAdapterInstance(adapterId, { activeRunDispatchMode: "steer" })
+    const bus = getBus()
+    const gate = deferred()
+    const observed: Array<[string, unknown]> = []
+
+    bus.routeHandler = async (event) => {
+      observed.push([event.messageId, event.channelData?.dispatchIntent])
+      if (event.messageId === "msg_active") await gate.promise
+    }
+
+    await bus.dispatchInboundFull(privateEvent(adapterId, "msg_active"))
+    await bus.dispatchInboundFull(privateEvent(adapterId, "msg_steer"))
+    expect(observed).toEqual([["msg_active", undefined]])
+
+    gate.resolve()
+    await bus.flushInboundTurns()
+    expect(observed).toEqual([
+      ["msg_active", undefined],
+      ["msg_steer", "steer-replay"],
+    ])
+  })
 })
 
 describe("ConnectorBus turn queue — error containment", () => {
@@ -261,11 +285,17 @@ describe("ConnectorBus turn queue — error containment", () => {
     expect(
       audit.some((r) => r.kind === "adapter.error" && r.reason === "inbound_pipeline_failed")
     ).toBe(true)
+    expect(
+      await getDb()
+        .connectorInboundJobs.toCollection()
+        .filter((job) => job.sourceMessageId === event.messageId)
+        .first()
+    ).toEqual(expect.objectContaining({ status: "queued" }))
   })
 })
 
 describe("ConnectorBus turn queue — overflow backpressure", () => {
-  it("drops beyond 10 queued turns per conversation with a turn_queue_overflow audit", async () => {
+  it("keeps 100 turns and marks excess messages history-only with a diagnostic", async () => {
     const adapterId = await seedAdapter()
     const bus = getBus()
     const gate = deferred()
@@ -274,9 +304,9 @@ describe("ConnectorBus turn queue — overflow backpressure", () => {
     })
     bus.routeHandler = handler
 
-    // 12 distinct messages on ONE conversation while the handler is wedged:
-    // 10 queue (incl. the running one), 2 drop.
-    for (let i = 0; i < 12; i++) {
+    // 102 distinct messages on ONE conversation while the handler is wedged:
+    // 100 queue (including the running one), 2 remain in durable history only.
+    for (let i = 0; i < 102; i++) {
       await bus.dispatchInboundFull(privateEvent(adapterId, `msg_flood_${i}`))
     }
 
@@ -288,11 +318,18 @@ describe("ConnectorBus turn queue — overflow backpressure", () => {
 
     gate.resolve()
     await bus.flushInboundTurns()
-    expect(handler).toHaveBeenCalledTimes(10)
+    expect(handler).toHaveBeenCalledTimes(100)
+
+    const historyOnly = await getDb()
+      .connectorInboundJobs.where("status")
+      .equals("history_only")
+      .toArray()
+    expect(historyOnly).toHaveLength(2)
+    expect(historyOnly.every((job) => job.recoveryReason === "pending_limit_exceeded")).toBe(true)
 
     // The queue map is cleaned up once drained (bounded map).
     await bus.dispatchInboundFull(privateEvent(adapterId, "msg_after_flood"))
     await bus.flushInboundTurns()
-    expect(handler).toHaveBeenCalledTimes(11)
+    expect(handler).toHaveBeenCalledTimes(101)
   })
 })

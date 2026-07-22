@@ -12,7 +12,7 @@
 
 import "fake-indexeddb/auto"
 import { getDb, __resetDbForTesting } from "@/lib/db/schema"
-import { createAdapterInstance } from "@/lib/db/adapter-instances"
+import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { upsertByConversationKey, readForResolution } from "@/lib/db/conversation-overrides"
 import { getByPlatformUser } from "@/lib/db/platform-identities"
 import { listRecent } from "@/lib/db/connector-audit"
@@ -316,6 +316,50 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
 
     const auditRows = await listRecent(autoAdapterId)
     expect(auditRows.some((r) => r.kind === "inbound.deduped")).toBe(true)
+  })
+
+  it("persists dispatch mode before execution and completes the durable job", async () => {
+    const bus = getBus()
+    await updateAdapterInstance(autoAdapterId, { activeRunDispatchMode: "steer" })
+    const event = privateEvent(autoAdapterId, "msg_durable_steer")
+
+    await bus.dispatchInboundFull(event)
+    const queued = await getDb()
+      .connectorInboundJobs.toCollection()
+      .filter((job) => job.sourceMessageId === event.messageId)
+      .first()
+    expect(queued).toEqual(
+      expect.objectContaining({
+        dispatchMode: "steer",
+      })
+    )
+
+    await bus.flushInboundTurns()
+    expect(await getDb().connectorInboundJobs.get(queued!.id)).toEqual(
+      expect.objectContaining({ dispatchMode: "steer", status: "completed" })
+    )
+  })
+
+  it("leaves a failed model turn recovery-required instead of replaying it", async () => {
+    const bus = getBus()
+    routeHandler.mockRejectedValueOnce(new Error("ambiguous side effect"))
+    const event = privateEvent(autoAdapterId, "msg_recovery_required")
+
+    await bus.dispatchInboundFull(event)
+    await bus.flushInboundTurns()
+
+    expect(
+      await getDb()
+        .connectorInboundJobs.toCollection()
+        .filter((job) => job.sourceMessageId === event.messageId)
+        .first()
+    ).toEqual(
+      expect.objectContaining({
+        status: "recovery_required",
+        recoveryReason: "route_handler_failed",
+        lastError: "ambiguous side effect",
+      })
+    )
   })
 
   it("dedup is scoped per conversation: same messageId in two chats both deliver", async () => {

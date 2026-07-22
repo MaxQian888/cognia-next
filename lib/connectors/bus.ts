@@ -32,7 +32,11 @@ import type {
 } from "@/types/connectors"
 import type { PlatformSkillCapability } from "@/types/connectors/skill-capability"
 import type { StoredMessage } from "@cognia/agent-config-types"
-import type { ConversationOverrideRow, AdapterInstanceRow } from "@/lib/db/connector-types"
+import type {
+  ConversationOverrideRow,
+  AdapterInstanceRow,
+  ConnectorInboundJobRow,
+} from "@/lib/db/connector-types"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import { readForResolution, setStatus, setSlaDue } from "@/lib/db/conversation-overrides"
 import { computeDueAt } from "@/lib/connectors/sla"
@@ -56,6 +60,16 @@ import { parseConversationKey } from "@/types/connectors/event"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { segmentsToPlainText, type MessageSegment } from "@/types/connectors/segment"
+import {
+  claimConnectorInboundJob,
+  completeConnectorInboundJob,
+  ensureConnectorInboundJob,
+  listRecoverableConnectorInboundJobs,
+  markConnectorInboundJobHistoryOnly,
+  markConnectorInboundJobRecoveryRequired,
+  recoverStaleConnectorInboundJobs,
+  updateConnectorInboundJobPayload,
+} from "@/lib/db/connector-inbound-jobs"
 
 export interface BusInboundHandler {
   (event: NormalizedInboundEvent): Promise<void>
@@ -119,7 +133,8 @@ const RATE_BUCKET_WINDOW_MS = 60_000
  * inbound turns with an `adapter.error` / `turn_queue_overflow` audit instead
  * of queueing unboundedly.
  */
-const MAX_TURN_QUEUE_DEPTH = 10
+const MAX_TURN_QUEUE_DEPTH = 100
+const INBOUND_JOB_LEASE_MS = 20 * 60_000
 
 export class ConnectorBus {
   private adapters = new Map<string, PlatformAdapter>()
@@ -316,7 +331,36 @@ export class ConnectorBus {
     }
   }
 
-  private async runInboundPipeline(event: NormalizedInboundEvent): Promise<void> {
+  /**
+   * Reclaim durable work that was inserted but never started before a restart.
+   * Expired running leases are deliberately converted to `recovery_required`
+   * and are not replayed because model/tool side effects may already exist.
+   */
+  async resumeDurableInboundJobs(): Promise<{ resumed: number; recoveryRequired: number }> {
+    const recoveryRequired = await recoverStaleConnectorInboundJobs()
+    const jobs = await listRecoverableConnectorInboundJobs()
+    for (const job of jobs) {
+      try {
+        await this.runInboundPipeline(job.event, job)
+      } catch (err) {
+        await appendAudit({
+          adapterId: job.adapterId,
+          kind: "adapter.error",
+          at: Date.now(),
+          conversationKey: job.conversationKey,
+          reason: "inbound_recovery_failed",
+          message: err instanceof Error ? err.message : String(err),
+          fields: { inboundJobId: job.id },
+        }).catch(() => undefined)
+      }
+    }
+    return { resumed: jobs.length, recoveryRequired }
+  }
+
+  private async runInboundPipeline(
+    event: NormalizedInboundEvent,
+    recoveredJob?: ConnectorInboundJobRow
+  ): Promise<void> {
     const now = Date.now()
 
     // Passive plugin observers see every event up front (read-only tap).
@@ -336,22 +380,41 @@ export class ConnectorBus {
       return
     }
 
-    // ── Step 1: dedup ────────────────────────────────────────────────────────
-    // Scoped by conversationKey: Telegram message_id (and Slack ts) are only
-    // unique per CHAT, so deduping on the bare id permanently dropped
-    // legitimate messages whose ids collided across chats.
-    const isNew = await recordAndCheckInbound(
-      event.adapterId,
-      event.messageId,
-      "inbound",
-      event.conversationKey
-    )
-    if (!isNew) {
+    // ── Step 1: durable insert, then compatibility ledger ────────────────────
+    // The job is the authoritative dedup record. It is committed before the
+    // legacy inbound ledger so a crash in the old breadcrumb path cannot lose
+    // the message. Its unique identity is conversation-scoped because several
+    // platforms only guarantee message ids within one chat.
+    let inboundJob = recoveredJob
+    if (!inboundJob) {
+      const ensured = await ensureConnectorInboundJob(event, "queue", { now })
+      inboundJob = ensured.job
+      if (!ensured.inserted) {
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "inbound.deduped",
+          at: now,
+          conversationKey: event.conversationKey,
+        })
+        return
+      }
+      // Preserve the old ledger for edit/delete lookup and observability. Its
+      // boolean is intentionally ignored: a legacy ledger row without a v120
+      // job represents the historical crash window and must be recoverable.
+      await recordAndCheckInbound(
+        event.adapterId,
+        event.messageId,
+        "inbound",
+        event.conversationKey
+      )
+    }
+    if (!inboundJob) {
       await appendAudit({
         adapterId: event.adapterId,
-        kind: "inbound.deduped",
+        kind: "adapter.error",
         at: now,
         conversationKey: event.conversationKey,
+        reason: "inbound_job_missing",
       })
       return
     }
@@ -393,6 +456,8 @@ export class ConnectorBus {
 
     // ── Step 3: conversation override lookup ──────────────────────────────────
     const override = (await readForResolution(event.conversationKey)) ?? null
+    const dispatchMode =
+      override?.activeRunDispatchMode ?? adapterRow.activeRunDispatchMode ?? "queue"
 
     // ── Step 3.5: lifecycle auto-reopen (CRM, schema v83) ─────────────────────
     // A fresh inbound on a resolved or snoozed conversation reopens it
@@ -468,6 +533,7 @@ export class ConnectorBus {
           conversationKey: event.conversationKey,
           reason: decision.reason ?? "plugin_blocked",
         })
+        await markConnectorInboundJobHistoryOnly(inboundJob.id, "plugin_blocked", { now })
         return
       }
       if (decision.action === "transform") {
@@ -494,6 +560,15 @@ export class ConnectorBus {
       // Hook dispatch must never break the inbound pipeline.
       console.error("[connector-bus] onConnectorInbound dispatch failed", err)
     }
+
+    event = {
+      ...event,
+      channelData: {
+        ...event.channelData,
+        activeRunDispatchMode: dispatchMode,
+      },
+    }
+    await updateConnectorInboundJobPayload(inboundJob.id, event, dispatchMode, { now })
 
     // ── Step 5: resolve binding ───────────────────────────────────────────────
     const resolved = resolveBinding({ adapter: adapterRow, character, override })
@@ -545,6 +620,14 @@ export class ConnectorBus {
       })
     }
 
+    if (decision === "drop" || evalResult.blocked) {
+      await markConnectorInboundJobHistoryOnly(
+        inboundJob.id,
+        evalResult.blocked ? "policy_blocked" : "routing_dropped",
+        { now }
+      )
+    }
+
     // ── Step 9.5: help / welcome short-circuit (cross-provider) ──────────────
     // A help-trigger message serves a help card and skips the AI turn +
     // workflow fan-out entirely. Otherwise, the first inbound on a fresh
@@ -559,9 +642,13 @@ export class ConnectorBus {
         // and never become a stored user message. More specific than the
         // generic help trigger, so it runs first.
         if (await maybeHandleControlCommand(event, adapterRow, override ?? undefined, resolved)) {
+          await completeConnectorInboundJob(inboundJob.id, { now: Date.now() })
           return
         }
-        if (await maybeHandleHelpCommand(event, adapterRow)) return
+        if (await maybeHandleHelpCommand(event, adapterRow)) {
+          await completeConnectorInboundJob(inboundJob.id, { now: Date.now() })
+          return
+        }
       } catch (err) {
         await appendAudit({
           adapterId: event.adapterId,
@@ -590,7 +677,14 @@ export class ConnectorBus {
     // in parallel, and frees the loop so `dispatchConnectorCallback` (approval
     // clicks) executes while a turn is suspended.
     if (this.routeHandler && decision !== "drop") {
-      this.enqueueRouteHandlerTurn(event, decision, resolved, override, adapterRow)
+      await this.enqueueRouteHandlerTurn(
+        inboundJob.id,
+        event,
+        decision,
+        resolved,
+        override,
+        adapterRow
+      )
     }
 
     // ── Step 11: workflow fan-out ────────────────────────────────────────────
@@ -606,6 +700,9 @@ export class ConnectorBus {
     if (!evalResult.blocked && decision !== "drop") {
       await this.fanOutWorkflowTriggers(event)
     }
+    if (!this.routeHandler && decision !== "drop" && !evalResult.blocked) {
+      await completeConnectorInboundJob(inboundJob.id, { now: Date.now() })
+    }
   }
 
   /**
@@ -614,13 +711,14 @@ export class ConnectorBus {
    * `adapter.error` / `turn_queue_overflow` audit. Queue entries are deleted
    * once their tail settles so the map stays bounded.
    */
-  private enqueueRouteHandlerTurn(
+  private async enqueueRouteHandlerTurn(
+    inboundJobId: string,
     event: NormalizedInboundEvent,
     decision: RouteDecision,
     resolved: ResolvedBinding,
     override: ConversationOverrideRow | null,
     adapterRow: AdapterInstanceRow
-  ): void {
+  ): Promise<boolean> {
     const key = event.conversationKey
     let queue = this.turnQueues.get(key)
     if (!queue) {
@@ -634,45 +732,121 @@ export class ConnectorBus {
         at: Date.now(),
         conversationKey: key,
         reason: "turn_queue_overflow",
-        message: `dropped inbound turn for message ${event.messageId} (${queue.depth} turns queued)`,
+        message: `retained inbound message ${event.messageId} as history-only (${queue.depth} turns queued)`,
       }).catch(() => undefined)
-      return
+      void markConnectorInboundJobHistoryOnly(inboundJobId, "pending_limit_exceeded").catch(
+        () => undefined
+      )
+      return false
     }
+    if (queue.depth > 0 && event.channelData?.activeRunDispatchMode === "steer") {
+      event = {
+        ...event,
+        channelData: { ...event.channelData, dispatchIntent: "steer-replay" },
+      }
+      await updateConnectorInboundJobPayload(inboundJobId, event, "steer")
+    }
+    const isFirst = queue.depth === 0
     queue.depth += 1
-    const step: Promise<void> = queue.tail
-      .then(() => this.runRouteHandlerTurn(event, decision, resolved, override, adapterRow))
-      .then(() => {
-        // `runRouteHandlerTurn` never rejects (it audits internally), so this
-        // cleanup always runs. Delete the entry only when this step is still
-        // the mapped tail — a later enqueue must not lose its queue.
-        if (this.turnQueues.get(key) !== queue) return
-        queue.depth -= 1
-        if (queue.depth === 0 && queue.tail === step) this.turnQueues.delete(key)
-      })
+    const previousTail = queue.tail
+    const started = isFirst
+      ? this.startRouteHandlerTurn(inboundJobId, event, decision, resolved, override, adapterRow)
+      : undefined
+    const completion = started
+      ? started.then((turn) => turn.completion)
+      : previousTail.then(() =>
+          this.runRouteHandlerTurn(inboundJobId, event, decision, resolved, override, adapterRow)
+        )
+    const step: Promise<void> = completion.then(() => {
+      // `runRouteHandlerTurn` never rejects (it audits internally), so this
+      // cleanup always runs. Delete the entry only when this step is still
+      // the mapped tail — a later enqueue must not lose its queue.
+      if (this.turnQueues.get(key) !== queue) return
+      queue.depth -= 1
+      if (queue.depth === 0 && queue.tail === step) this.turnQueues.delete(key)
+    })
     queue.tail = step
+    // For the head turn, wait only until the durable claim has completed and
+    // the handler has been invoked. Long model/tool work remains detached so
+    // callback envelopes can still arrive on the adapter transport.
+    if (started) await started
+    return true
+  }
+
+  /** Claim and invoke one turn without waiting for a long-running handler. */
+  private async startRouteHandlerTurn(
+    inboundJobId: string,
+    event: NormalizedInboundEvent,
+    decision: RouteDecision,
+    resolved: ResolvedBinding,
+    override: ConversationOverrideRow | null,
+    adapterRow: AdapterInstanceRow
+  ): Promise<{ completion: Promise<void> }> {
+    const claimed = await claimConnectorInboundJob(inboundJobId, {
+      leaseOwner: `connector-bus:${crypto.randomUUID()}`,
+      leaseMs: INBOUND_JOB_LEASE_MS,
+    })
+    if (!claimed) return { completion: Promise.resolve() }
+    const handler = this.routeHandler
+    try {
+      const result = handler?.(event, decision, resolved, override, adapterRow)
+      if (!result || typeof (result as Promise<void>).then !== "function") {
+        await completeConnectorInboundJob(inboundJobId, { now: Date.now() })
+        return { completion: Promise.resolve() }
+      }
+      return {
+        completion: Promise.resolve(result).then(
+          async () => {
+            await completeConnectorInboundJob(inboundJobId, { now: Date.now() })
+          },
+          async (err: unknown) => {
+            await this.handleRouteHandlerFailure(inboundJobId, event, err)
+          }
+        ),
+      }
+    } catch (err) {
+      await this.handleRouteHandlerFailure(inboundJobId, event, err)
+      return { completion: Promise.resolve() }
+    }
   }
 
   /** Run one queued turn; a throwing route handler is audited, never rethrown. */
   private async runRouteHandlerTurn(
+    inboundJobId: string,
     event: NormalizedInboundEvent,
     decision: RouteDecision,
     resolved: ResolvedBinding,
     override: ConversationOverrideRow | null,
     adapterRow: AdapterInstanceRow
   ): Promise<void> {
-    try {
-      await this.routeHandler?.(event, decision, resolved, override, adapterRow)
-    } catch (err) {
-      console.error("[connector-bus] route handler failed", err)
-      await appendAudit({
-        adapterId: event.adapterId,
-        kind: "adapter.error",
-        at: Date.now(),
-        conversationKey: event.conversationKey,
-        reason: "route_handler_failed",
-        message: err instanceof Error ? err.message : String(err),
-      }).catch(() => undefined)
-    }
+    const { completion } = await this.startRouteHandlerTurn(
+      inboundJobId,
+      event,
+      decision,
+      resolved,
+      override,
+      adapterRow
+    )
+    await completion
+  }
+
+  private async handleRouteHandlerFailure(
+    inboundJobId: string,
+    event: NormalizedInboundEvent,
+    err: unknown
+  ): Promise<void> {
+    console.error("[connector-bus] route handler failed", err)
+    await appendAudit({
+      adapterId: event.adapterId,
+      kind: "adapter.error",
+      at: Date.now(),
+      conversationKey: event.conversationKey,
+      reason: "route_handler_failed",
+      message: err instanceof Error ? err.message : String(err),
+    }).catch(() => undefined)
+    await markConnectorInboundJobRecoveryRequired(inboundJobId, "route_handler_failed", {
+      error: err instanceof Error ? err.message : String(err),
+    }).catch(() => undefined)
   }
 
   /**

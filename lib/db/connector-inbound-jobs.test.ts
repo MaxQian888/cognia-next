@@ -3,11 +3,17 @@
 import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb } from "./schema"
 import {
+  claimConnectorInboundJob,
   claimNextConnectorInboundJob,
   completeConnectorInboundJob,
   enqueueConnectorInboundJob,
+  ensureConnectorInboundJob,
+  listRecoverableConnectorInboundJobs,
   listPendingConnectorInboundJobs,
+  markConnectorInboundJobHistoryOnly,
+  markConnectorInboundJobRecoveryRequired,
   recoverStaleConnectorInboundJobs,
+  updateConnectorInboundJobPayload,
 } from "./connector-inbound-jobs"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 
@@ -65,6 +71,62 @@ describe("connector inbound jobs", () => {
     await completeConnectorInboundJob(first.id, { executionRunId: "run-1", now: 2_000 })
     expect(await getDb().connectorInboundJobs.get(first.id)).toEqual(
       expect.objectContaining({ status: "completed", executionRunId: "run-1" })
+    )
+  })
+
+  it("reports whether insertion won and scopes platform ids by conversation", async () => {
+    const firstEvent = event("42", 10)
+    const otherConversation = {
+      ...event("42", 20),
+      conversationKey: "lark:lk-1:oc-2:omt-2",
+    }
+
+    const first = await ensureConnectorInboundJob(firstEvent, "queue", { now: 100 })
+    const duplicate = await ensureConnectorInboundJob(firstEvent, "steer", { now: 200 })
+    const other = await ensureConnectorInboundJob(otherConversation, "queue", { now: 300 })
+
+    expect(first.inserted).toBe(true)
+    expect(duplicate).toEqual({ job: first.job, inserted: false })
+    expect(other.inserted).toBe(true)
+    expect(other.job.id).not.toBe(first.job.id)
+    expect(first.job.sourceMessageId).toBe("42")
+  })
+
+  it("updates the durable payload, claims a specific job, and exposes recoverable work", async () => {
+    const initial = await enqueueConnectorInboundJob(event("om-update", 10), "queue", { now: 100 })
+    const transformed = {
+      ...event("om-update", 10),
+      plainText: "transformed",
+      segments: [{ type: "text" as const, text: "transformed" }],
+    }
+    await updateConnectorInboundJobPayload(initial.id, transformed, "steer", { now: 200 })
+
+    expect(await listRecoverableConnectorInboundJobs()).toEqual([
+      expect.objectContaining({ id: initial.id, status: "steering", dispatchMode: "steer" }),
+    ])
+    await expect(
+      claimConnectorInboundJob(initial.id, { leaseOwner: "runner", leaseMs: 100, now: 300 })
+    ).resolves.toEqual(expect.objectContaining({ status: "running", event: transformed }))
+  })
+
+  it("records non-executing overflow and ambiguous execution recovery states", async () => {
+    const overflow = await enqueueConnectorInboundJob(event("om-overflow", 10), "queue")
+    await markConnectorInboundJobHistoryOnly(overflow.id, "pending_limit_exceeded", { now: 200 })
+    expect(await getDb().connectorInboundJobs.get(overflow.id)).toEqual(
+      expect.objectContaining({ status: "history_only", recoveryReason: "pending_limit_exceeded" })
+    )
+
+    const ambiguous = await enqueueConnectorInboundJob(event("om-ambiguous", 20), "steer")
+    await markConnectorInboundJobRecoveryRequired(ambiguous.id, "route_handler_failed", {
+      error: "tool may have run",
+      now: 300,
+    })
+    expect(await getDb().connectorInboundJobs.get(ambiguous.id)).toEqual(
+      expect.objectContaining({
+        status: "recovery_required",
+        recoveryReason: "route_handler_failed",
+        lastError: "tool may have run",
+      })
     )
   })
 

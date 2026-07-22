@@ -36,10 +36,14 @@ jest.mock("@/lib/connectors/outbound-runner", () => ({
 const mockRegisterAdapter = jest.fn()
 const mockUnregisterAdapterBus = jest.fn()
 const mockListAdapters = jest.fn().mockReturnValue([])
+const mockResumeDurableInboundJobs = jest
+  .fn()
+  .mockResolvedValue({ resumed: 0, recoveryRequired: 0 })
 const mockBus = {
   registerAdapter: mockRegisterAdapter,
   unregisterAdapter: mockUnregisterAdapterBus,
   listAdapters: mockListAdapters,
+  resumeDurableInboundJobs: mockResumeDurableInboundJobs,
 }
 jest.mock("@/lib/connectors/bus", () => ({
   getBus: () => mockBus,
@@ -276,6 +280,7 @@ describe("installConnectorRuntime", () => {
       expect(mockRegisterAdapter).toHaveBeenCalledWith(fakeAdapter)
     })
     expect(mockInstallRuntime).toHaveBeenCalledTimes(1)
+    expect(mockResumeDurableInboundJobs).toHaveBeenCalledTimes(1)
     expect(mockStartOutboundRunner).toHaveBeenCalledTimes(1)
   })
 
