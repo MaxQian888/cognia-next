@@ -1,5 +1,6 @@
 import { create } from "zustand"
-import { persist, createJSONStorage } from "zustand/middleware"
+import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import { DEFAULT_TEAM_CONFIG } from "@/types/agent/agent-team"
 import { initialState } from "./initial-state"
 import { createAgentTeamActionsSlice } from "./slices/actions.slice"
@@ -236,7 +237,7 @@ export const useAgentTeamStore = create<AgentTeamState>()(
     }),
     {
       name: AGENT_TEAM_STORAGE_KEY,
-      storage: createJSONStorage(() => localStorage),
+      storage: persistLocalStorage(),
       version: PERSIST_VERSION,
       partialize: partializeAgentTeamState,
       migrate: migrateAgentTeamPersisted,

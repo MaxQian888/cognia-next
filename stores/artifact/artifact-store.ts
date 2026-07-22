@@ -13,6 +13,7 @@
 
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import { nanoid } from "nanoid"
 import { getPluginEventHooks } from "@/lib/plugin"
 import { getPluginRateLimiter, RateLimitError } from "@/lib/plugin/security/rate-limiter"
@@ -1866,6 +1867,7 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
     }),
     {
       name: ARTIFACT_STORAGE_KEY,
+      storage: persistLocalStorage(),
       version: 3,
       migrate: (persistedState: unknown) => {
         const state = persistedState as Record<string, unknown>

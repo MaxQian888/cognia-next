@@ -30,7 +30,8 @@
 //   * `listViewMode` is the only persisted field (localStorage).
 
 import { create } from "zustand"
-import { persist, createJSONStorage } from "zustand/middleware"
+import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 
 export type PluginNavSection = "library" | "discover" | "governance" | "devtools"
 
@@ -39,12 +40,7 @@ export type PluginLibrarySubFilter = "all" | "enabled" | "updates" | "configurab
 export type PluginGovernanceView = "permissions" | "scheduled" | "analytics" | "audit" | "policy"
 
 export type PluginDetailSubTab =
-  | "overview"
-  | "capabilities"
-  | "configure"
-  | "permissions"
-  | "data"
-  | "logs"
+  "overview" | "capabilities" | "configure" | "permissions" | "data" | "logs"
 
 export type PluginListViewMode = "list" | "card"
 
@@ -288,7 +284,7 @@ export const usePluginsStore = create<PluginsStoreState>()(
     {
       name: "plugins-ui-prefs",
       version: 1,
-      storage: createJSONStorage(() => localStorage),
+      storage: persistLocalStorage(),
       // Only `listViewMode` survives reloads. Everything else is ephemeral UI
       // state and should reset every session.
       partialize: (s) => ({ listViewMode: s.listViewMode }),

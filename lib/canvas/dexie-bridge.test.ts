@@ -285,19 +285,8 @@ describe("startCanvasDexieBridge", () => {
     expect(canvasDocumentsTable.bulkPut).not.toHaveBeenCalled()
   })
 
-  it("returns a noop disposer when called outside the browser", async () => {
-    const originalWindow = global.window
-    // @ts-expect-error -- simulate node runtime
-    delete global.window
-    try {
-      const { startCanvasDexieBridge } = await import("./dexie-bridge")
-      const dispose = startCanvasDexieBridge()
-      expect(typeof dispose).toBe("function")
-      dispose()
-    } finally {
-      global.window = originalWindow
-    }
-  })
+  // The outside-the-browser branch lives in `dexie-bridge.ssr.test.ts` —
+  // jsdom's `window` is non-configurable from Node 26 on.
 
   it("removes documents from Dexie when artifact-store drops them", async () => {
     // Seed memory with one doc, then start bridge.

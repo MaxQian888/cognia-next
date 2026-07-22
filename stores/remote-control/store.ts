@@ -17,6 +17,7 @@
 
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
 import {
@@ -282,6 +283,7 @@ export const useRemoteControlStore = create<RemoteControlStore>()(
     }),
     {
       name: "cognia-remote-control",
+      storage: persistLocalStorage(),
       // Don't persist live status, error, or hydration flag; the listener +
       // Rust own those. Persist only the user-edited config so the UI doesn't
       // flash defaults on page reload.

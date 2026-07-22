@@ -1,5 +1,6 @@
 import { create } from "zustand"
-import { persist, createJSONStorage } from "zustand/middleware"
+import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import { initialState } from "./initial-state"
 import { createExternalAgentActionsSlice } from "./slices/actions.slice"
 import type { ExternalAgentStore } from "./types"
@@ -98,7 +99,7 @@ export const useExternalAgentStore = create<ExternalAgentStore>()(
     {
       name: "cognia-external-agents",
       version: EXTERNAL_AGENT_STORE_VERSION,
-      storage: createJSONStorage(() => localStorage),
+      storage: persistLocalStorage(),
       migrate: (persistedState) => {
         const state = (persistedState ?? {}) as PersistedExternalAgentState
         const agents = migratePersistedAgents(state.agents) ?? {}

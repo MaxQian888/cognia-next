@@ -2,6 +2,10 @@
  * @jest-environment jsdom
  */
 
+// Module marker: this file has no imports, so without it TS treats it as a
+// global script and its mock consts collide with `monaco-loader.ssr.test.ts`.
+export {}
+
 const mockConfig = jest.fn()
 const mockIsTauri = jest.fn(() => false)
 
@@ -53,18 +57,8 @@ describe("configureMonacoLoader", () => {
     expect(mockConfig).toHaveBeenCalledTimes(1)
   })
 
-  it("returns early when window is undefined (SSR)", async () => {
-    const originalWindow = global.window
-    // @ts-expect-error -- simulate node runtime
-    delete global.window
-    try {
-      const { configureMonacoLoader } = await import("./monaco-loader")
-      configureMonacoLoader()
-      expect(mockConfig).not.toHaveBeenCalled()
-    } finally {
-      global.window = originalWindow
-    }
-  })
+  // The no-window (SSR) branch lives in `monaco-loader.ssr.test.ts` — jsdom's
+  // `window` is non-configurable from Node 26 on and cannot be deleted.
 
   it("survives when process is undefined (browser-only env)", async () => {
     const originalProcess = global.process

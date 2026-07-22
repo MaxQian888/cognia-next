@@ -1,6 +1,7 @@
 import { createStore } from "zustand/vanilla"
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import type { ContextPanelMode, ContextWorkbenchMode } from "@/types/context-workbench"
 
 export interface ContextWorkbenchLayout {
@@ -202,6 +203,7 @@ export function createContextWorkbenchStoreForTesting() {
 export const useContextWorkbenchStore = create<ContextWorkbenchState>()(
   persist(stateCreator, {
     name: "cognia-context-workbench-v1",
+    storage: persistLocalStorage(),
     version: 2,
     migrate: (persisted) => {
       const persistedState = persisted as Partial<ContextWorkbenchState> | undefined

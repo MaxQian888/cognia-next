@@ -13,7 +13,8 @@
  */
 
 import { create } from "zustand"
-import { createJSONStorage, persist } from "zustand/middleware"
+import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 
 import type { HunkDecision, StoredHunkDecision } from "@/lib/git/hunk-review"
 import type { HunkAiFinding } from "@/types/git"
@@ -164,7 +165,7 @@ export const useDiffReviewStore = create<DiffReviewState>()(
       // is provided — so an identity migrate is load-bearing here.
       version: 2,
       migrate: migrateDiffReviewState,
-      storage: createJSONStorage(() => localStorage),
+      storage: persistLocalStorage(),
       partialize: (s) => ({ decisions: s.decisions, order: s.order }),
     }
   )

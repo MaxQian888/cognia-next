@@ -16,15 +16,11 @@
 
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import type { ApprovalKey } from "@/lib/runtime/approval-bus"
 
 export type PendingGateType =
-  | "budget"
-  | "deadlock"
-  | "plan"
-  | "teammate_fix"
-  | "replan"
-  | "capability_audit"
+  "budget" | "deadlock" | "plan" | "teammate_fix" | "replan" | "capability_audit"
 
 export type PendingGateStatus = "open" | "interrupted"
 
@@ -78,6 +74,7 @@ export const usePendingGatesStore = create<PendingGatesState>()(
     }),
     {
       name: "cognia-pending-gates",
+      storage: persistLocalStorage(),
       version: 1,
       partialize: (s) => ({ gates: s.gates }),
       // The approval-bus waiter died with the previous page: every restored

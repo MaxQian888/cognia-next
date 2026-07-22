@@ -1,7 +1,8 @@
 "use client"
 
 import { create } from "zustand"
-import { persist, createJSONStorage } from "zustand/middleware"
+import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import { pushRecent, toggleInList } from "@cognia/primitives"
 
 /**
@@ -40,7 +41,7 @@ export const useComposerCommandStore = create<ComposerCommandState>()(
     }),
     {
       name: "cognia-composer-commands",
-      storage: createJSONStorage(() => localStorage),
+      storage: persistLocalStorage(),
       partialize: (s) => ({
         recentCommands: s.recentCommands,
         pinnedCommands: s.pinnedCommands,

@@ -2,8 +2,17 @@ packages:
   # The repo root is listed so Changesets can version the app as a single
   # unit (its version lives in the root package.json). pnpm still excludes the
   # root from recursive commands unless --include-workspace-root is passed.
-  - "."
+  - .
   - docs
   - mobile
   - packages/*
   - services/workspace-runtime
+
+# fake-timers only restores a global on uninstall if it was an OWN property at
+# install time. On Node >= 26 that check reads false for the timer globals, so
+# uninstall DELETED setTimeout & friends and every suite that ran after a
+# useFakeTimers()/useRealTimers() cycle in the same worker died with
+# "setTimeout is not defined". The patch restores whatever it captured.
+# Test-infra only — nothing ships to users, hence no changeset.
+patchedDependencies:
+  "@sinonjs/fake-timers@15.4.0": patches/@sinonjs__fake-timers@15.4.0.patch

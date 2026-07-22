@@ -16,6 +16,7 @@
 
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import type { ContextPanelMode } from "@/types/context-workbench"
 
 /**
@@ -363,6 +364,7 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
     }),
     {
       name: "cognia-artifact-dock-layout",
+      storage: persistLocalStorage(),
       version: 3,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- subset persistence
       partialize: (state): any => ({

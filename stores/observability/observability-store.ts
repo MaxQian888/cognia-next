@@ -14,7 +14,8 @@
  */
 
 import { create } from "zustand"
-import { persist, createJSONStorage } from "zustand/middleware"
+import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import type { RangePreset } from "@/lib/observability/time-range"
 import type { TraceFilters } from "@/lib/observability/filters"
 import type { ThresholdMetric, ThresholdOverrides } from "@/lib/observability/thresholds"
@@ -115,7 +116,7 @@ export const useObservabilityStore = create<ObservabilityState>()(
     }),
     {
       name: "cognia-observability",
-      storage: createJSONStorage(() => localStorage),
+      storage: persistLocalStorage(),
       // editMode stays transient — see file header.
       partialize: (s) => ({
         layouts: s.layouts,

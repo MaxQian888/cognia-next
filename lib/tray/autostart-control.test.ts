@@ -63,19 +63,5 @@ describe("onAutostartChanged", () => {
   })
 })
 
-describe("DOM-less (SSR) guards", () => {
-  it("broadcast + subscribe are inert with no window", () => {
-    const orig = global.window
-    // @ts-expect-error — simulate SSR where `window` is absent.
-    delete global.window
-    try {
-      // Neither call throws, and subscribe returns a usable noop unsubscribe.
-      expect(() => broadcastAutostartChanged(true)).not.toThrow()
-      const off = onAutostartChanged(() => {})
-      expect(typeof off).toBe("function")
-      expect(() => off()).not.toThrow()
-    } finally {
-      global.window = orig
-    }
-  })
-})
+// DOM-less (SSR) guards live in `autostart-control.ssr.test.ts` — jsdom's
+// `window` is non-configurable from Node 26 on and cannot be deleted.

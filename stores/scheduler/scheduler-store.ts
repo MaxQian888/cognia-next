@@ -5,6 +5,7 @@
 
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import type {
   ScheduledTask,
   TaskExecution,
@@ -769,6 +770,7 @@ export const useSchedulerStore = create<SchedulerStore>()(
     }),
     {
       name: "cognia-scheduler",
+      storage: persistLocalStorage(),
       partialize: (state) => ({
         autoRefreshInterval: state.autoRefreshInterval,
         filter: state.filter,

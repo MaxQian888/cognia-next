@@ -1,0 +1,22 @@
+diff --git a/src/fake-timers-src.js b/src/fake-timers-src.js
+index 241a7ad3eeb8b5eb691439fab31a87ef13c76345..a64dfde371acdf277ccacc3e50f5e75b110e759d 100644
+--- a/src/fake-timers-src.js
++++ b/src/fake-timers-src.js
+@@ -2608,7 +2608,16 @@ function withGlobal(_global) {
+                             _global[method] = clock[`_${method}`];
+                         }
+                     } else {
+-                        if (clock[method] && clock[method].hasOwnProperty) {
++                        if (clock[`_${method}`] !== undefined) {
++                            // PATCHED (cognia): restore whenever an original was
++                            // captured. Upstream only restores when the method was
++                            // an OWN property of the global at install time, and on
++                            // Node >= 26 that check reads false for the timer
++                            // globals, so uninstall DELETED setTimeout & friends —
++                            // every test after a useFakeTimers()/useRealTimers()
++                            // cycle then died with "setTimeout is not defined".
++                            _global[method] = clock[`_${method}`];
++                        } else if (clock[method] && clock[method].hasOwnProperty) {
+                             _global[method] = clock[`_${method}`];
+                         } else {
+                             try {

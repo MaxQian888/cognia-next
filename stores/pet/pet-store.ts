@@ -7,7 +7,8 @@
 // `stores/agent/agent-team-store/store.ts`.
 
 import { create } from "zustand"
-import { createJSONStorage, persist } from "zustand/middleware"
+import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import type { PetOneShot, PetStatKey, PetVisualState } from "@/types/pet"
 
 export interface PetBubble {
@@ -94,7 +95,7 @@ export const usePetStore = create<PetStoreState>()(
     }),
     {
       name: "cognia-pet-ui",
-      storage: createJSONStorage(() => localStorage),
+      storage: persistLocalStorage(),
       // Only the widget placement is durable; visual/bubble/queue are ephemeral.
       partialize: (state) => ({ minimized: state.minimized, position: state.position }),
     }

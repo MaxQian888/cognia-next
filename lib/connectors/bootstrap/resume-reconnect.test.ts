@@ -1,4 +1,5 @@
 import {
+  isBrowserOffline,
   startResumeReconnect,
   DEFAULT_MIN_AWAY_MS,
   DEFAULT_ACTIVITY_FRESH_MS,
@@ -284,6 +285,59 @@ describe("startResumeReconnect", () => {
       windowTarget: globalThis as never,
       documentTarget: undefined,
     })
+    expect(() => handle.dispose()).not.toThrow()
+  })
+})
+
+describe("isBrowserOffline (default isOffline seam)", () => {
+  const setOnLine = (value: unknown) => {
+    const original = Object.getOwnPropertyDescriptor(globalThis.navigator, "onLine")
+    Object.defineProperty(globalThis.navigator, "onLine", { configurable: true, value })
+    return () => {
+      if (original) Object.defineProperty(globalThis.navigator, "onLine", original)
+      else delete (globalThis.navigator as { onLine?: unknown }).onLine
+    }
+  }
+
+  it("reports offline only when navigator.onLine is literally false", () => {
+    const restore = setOnLine(false)
+    try {
+      expect(isBrowserOffline()).toBe(true)
+    } finally {
+      restore()
+    }
+  })
+
+  it("reports online when navigator.onLine is true", () => {
+    const restore = setOnLine(true)
+    try {
+      expect(isBrowserOffline()).toBe(false)
+    } finally {
+      restore()
+    }
+  })
+
+  it("reports online when navigator has no onLine at all (Node >= 26)", () => {
+    // Node 26 ships a global navigator without onLine; treating that as offline
+    // stranded every headless/CLI/sidecar adapter.
+    const restore = setOnLine(undefined)
+    try {
+      expect(isBrowserOffline()).toBe(false)
+    } finally {
+      restore()
+    }
+  })
+})
+
+describe("startResumeReconnect default seams (no DOM)", () => {
+  it("returns an inert handle when there is neither window nor document", () => {
+    // The node project has no DOM, so this exercises the real defaults for
+    // windowTarget / documentTarget / isHidden instead of injected seams —
+    // the shape every CLI / sidecar / headless run actually takes.
+    expect(typeof window).toBe("undefined")
+    expect(typeof document).toBe("undefined")
+    const handle = startResumeReconnect()
+    expect(typeof handle.dispose).toBe("function")
     expect(() => handle.dispose()).not.toThrow()
   })
 })

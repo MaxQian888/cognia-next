@@ -9,14 +9,10 @@
 
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 
 export type CanvasRightTab =
-  | "suggestions"
-  | "history"
-  | "comments"
-  | "collaboration"
-  | "execution"
-  | "outline"
+  "suggestions" | "history" | "comments" | "collaboration" | "execution" | "outline"
 
 /** Left-rail presentation: time-grouped buckets vs a flat filename.ext list. */
 export type CanvasRailViewMode = "grouped" | "files"
@@ -167,6 +163,7 @@ export const useCanvasLayoutStore = create<CanvasLayoutState>()(
     }),
     {
       name: "cognia-canvas-layout",
+      storage: persistLocalStorage(),
       version: 6,
       migrate: (_oldState: unknown, _oldVersion: number) => ({
         ...CANVAS_LAYOUT_DEFAULTS,

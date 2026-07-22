@@ -1,5 +1,6 @@
 import { create } from "zustand"
-import { persist, createJSONStorage } from "zustand/middleware"
+import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import { initialState } from "./initial-state"
 import { createCustomModeActionsSlice } from "./slices/actions.slice"
 import type { CustomModeState } from "./types"
@@ -12,7 +13,7 @@ export const useCustomModeStore = create<CustomModeState>()(
     }),
     {
       name: "cognia-custom-modes",
-      storage: createJSONStorage(() => localStorage),
+      storage: persistLocalStorage(),
       partialize: (state) => ({
         customModes: Object.fromEntries(
           Object.entries(state.customModes).map(([id, mode]) => [

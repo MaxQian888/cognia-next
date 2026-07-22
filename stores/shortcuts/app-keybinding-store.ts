@@ -10,6 +10,7 @@
 
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import { normalizeKeyCombo } from "@/lib/shortcuts/utils"
 import {
   APP_SHORTCUT_CATALOG,
@@ -92,6 +93,7 @@ export const useAppKeybindingStore = create<AppKeybindingState>()(
     }),
     {
       name: "cognia-app-keybindings",
+      storage: persistLocalStorage(),
       partialize: (state) => ({ overrides: state.overrides }),
     }
   )

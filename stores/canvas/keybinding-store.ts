@@ -4,6 +4,7 @@
 
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import { loggers } from "@cognia/logging"
 import {
   normalizeKeyCombo,
@@ -163,6 +164,7 @@ export const useKeybindingStore = create<KeybindingState>()(
     }),
     {
       name: "cognia-canvas-keybindings",
+      storage: persistLocalStorage(),
       partialize: (state) => ({
         bindings: state.bindings,
       }),

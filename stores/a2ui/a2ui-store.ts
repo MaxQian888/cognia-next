@@ -5,6 +5,7 @@
 
 import { create } from "zustand"
 import { persist, subscribeWithSelector } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import type {
   A2UISurfaceState,
   A2UISurfaceType,
@@ -1168,6 +1169,7 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
       }),
       {
         name: "cognia-a2ui-surfaces",
+        storage: persistLocalStorage(),
         version: 3,
         migrate: (persistedState) => {
           if (!persistedState || typeof persistedState !== "object") {

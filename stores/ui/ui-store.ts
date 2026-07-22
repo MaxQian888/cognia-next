@@ -1,7 +1,8 @@
 "use client"
 
 import { create } from "zustand"
-import { persist, createJSONStorage } from "zustand/middleware"
+import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import { getPluginEventHooks } from "@/lib/plugin"
 import { nextNavEpoch } from "@/lib/ui/nav-epoch"
 
@@ -356,7 +357,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: "cognia-ui",
-      storage: createJSONStorage(() => localStorage),
+      storage: persistLocalStorage(),
       // Bumped 0 → 1 when the conversation-sidebar layout fields were added,
       // then 1 → 2 when per-segment `barItems` visibility was added. Missing
       // keys fall back to defaults via `merge` below, so migration stays a

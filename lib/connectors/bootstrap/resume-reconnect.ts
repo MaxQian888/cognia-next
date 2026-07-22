@@ -83,6 +83,19 @@ export interface ResumeReconnectHandle {
 }
 
 /**
+ * Default `isOffline` seam.
+ *
+ * `typeof navigator !== "undefined"` is no longer a browser check: Node 26 ships
+ * a global `navigator` that has NO `onLine`, so the previous
+ * `!navigator.onLine` read `!undefined` → `true` and every headless / CLI /
+ * sidecar run would declare itself permanently offline and never resume an
+ * adapter. Only trust the flag when it really is a boolean.
+ */
+export function isBrowserOffline(): boolean {
+  return typeof navigator?.onLine === "boolean" ? !navigator.onLine : false
+}
+
+/**
  * Start the resume-reconnect watcher. Returns a disposer the caller must invoke
  * on teardown. No-op (returns an inert handle) when there is no DOM to listen
  * on (SSR / node tests without seams).
@@ -98,7 +111,7 @@ export function startResumeReconnect(options: ResumeReconnectOptions = {}): Resu
     windowTarget = typeof window !== "undefined" ? window : undefined,
     documentTarget = typeof document !== "undefined" ? document : undefined,
     isHidden = () => (typeof document !== "undefined" ? document.hidden : false),
-    isOffline = () => (typeof navigator !== "undefined" ? !navigator.onLine : false),
+    isOffline = isBrowserOffline,
     audit = (adapterId, reason, awayMs) => {
       void appendAudit({
         adapterId,

@@ -25,6 +25,24 @@ describe("network.getStatus", () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true })
   })
 
+  it("assumes connected when navigator exists but has no onLine (Node >= 26)", async () => {
+    // Node 26 ships a global `navigator` without `onLine`. The fallback must not
+    // read that as "disconnected".
+    const original = Object.getOwnPropertyDescriptor(navigator, "onLine")
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: undefined })
+    try {
+      const out = await getStatus(async () => {
+        throw new Error("not native")
+      })
+      expect(out).toEqual({
+        kind: "fallback",
+        status: { connected: true, connectionType: "unknown" },
+      })
+    } finally {
+      if (original) Object.defineProperty(navigator, "onLine", original)
+    }
+  })
+
   it("returns error when plugin throws", async () => {
     const out = await getStatus(async () => ({
       getStatus: async () => {

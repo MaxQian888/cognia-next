@@ -85,16 +85,9 @@ describe("applyUserCss", () => {
     expect(res.css).not.toContain("@import")
   })
 
-  it("is a no-op without a document (SSR)", () => {
-    const originalDocument = globalThis.document
-    // Simulate SSR by removing the JSDOM document. The cast keeps TS happy
-    // because `document` on the cast type is optional.
-    delete (globalThis as { document?: Document }).document
-    const res = applyUserCss(`a { color: red }`, true)
-    expect(res.removedCount).toBe(0)
-    expect(res.css).toBe(`a { color: red }`)
-    globalThis.document = originalDocument
-  })
+  // The no-document (SSR) branch lives in `apply.ssr.test.ts` — jsdom's
+  // `document` is non-configurable from Node 26 on, so it can only be tested
+  // in the node project, where there is genuinely no document.
 })
 
 describe("applyUserCss — scope", () => {
@@ -134,12 +127,5 @@ describe("removeUserCss", () => {
   it("is a no-op when the tag is missing", () => {
     expect(() => removeUserCss()).not.toThrow()
   })
-  it("is a no-op without a document", () => {
-    const originalDocument = globalThis.document
-    // Simulate SSR by removing the JSDOM document. The cast keeps TS happy
-    // because `document` on the cast type is optional.
-    delete (globalThis as { document?: Document }).document
-    expect(() => removeUserCss()).not.toThrow()
-    globalThis.document = originalDocument
-  })
+  // No-document branch: see `apply.ssr.test.ts`.
 })

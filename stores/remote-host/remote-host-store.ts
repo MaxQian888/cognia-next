@@ -22,6 +22,7 @@
 import { nanoid } from "nanoid"
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 
 import type { CompanionConfig } from "@/lib/tauri/companion-storage"
 import { CompanionTransport } from "@/lib/tauri/transport-companion"
@@ -145,6 +146,7 @@ export const useRemoteHostStore = create<RemoteHostState>()(
     }),
     {
       name: "cognia-remote-hosts",
+      storage: persistLocalStorage(),
       version: 1,
       // Persist the host list only — the active host is session-scoped so every
       // launch starts local (ADR-0082).

@@ -16,6 +16,7 @@
 
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import type { PendingApproval } from "@cognia/agent-config-types"
 
 export type PersistedApprovalStatus = "pending" | "interrupted" | "settled"
@@ -95,6 +96,7 @@ export const useApprovalJournalStore = create<ApprovalJournalState>()(
     }),
     {
       name: "cognia-approval-journal",
+      storage: persistLocalStorage(),
       version: 1,
       partialize: (s) => ({ entries: s.entries }),
       // The sidecar waiter died with the previous page — every restored ask is

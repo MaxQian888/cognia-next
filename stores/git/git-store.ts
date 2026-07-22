@@ -10,7 +10,8 @@
  */
 
 import { create } from "zustand"
-import { createJSONStorage, persist } from "zustand/middleware"
+import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import type {
   GitBranch,
   GitCommit,
@@ -273,7 +274,7 @@ export const useGitStore = create<GitState>()(
     {
       name: "cognia-git-ui",
       version: 1,
-      storage: createJSONStorage(() => localStorage),
+      storage: persistLocalStorage(),
       // Persist only durable UI shape; everything backend-derived is transient.
       partialize: (s) => ({
         expandedGroups: s.expandedGroups,

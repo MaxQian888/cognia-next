@@ -5,6 +5,7 @@
 
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import {
   type CanvasSettings,
   type CanvasEditorSettings,
@@ -133,6 +134,7 @@ export const useCanvasSettingsStore = create<CanvasSettingsState>()(
     }),
     {
       name: "cognia-canvas-settings",
+      storage: persistLocalStorage(),
       partialize: (state) => ({
         settings: state.settings,
       }),

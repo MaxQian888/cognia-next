@@ -3,7 +3,8 @@
  */
 
 import { create } from "zustand"
-import { persist, createJSONStorage } from "zustand/middleware"
+import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import { invoke } from "@tauri-apps/api/core"
 import type {
   ExtensionCompatibilityDiagnostic,
@@ -1115,7 +1116,7 @@ export const usePluginStore = create<PluginState>()(
     {
       name: "cognia-plugins",
       version: 2,
-      storage: createJSONStorage(() => localStorage),
+      storage: persistLocalStorage(),
       migrate: (persistedState: unknown, version: number) => {
         const state = persistedState as Record<string, unknown>
         if (version === 0) {

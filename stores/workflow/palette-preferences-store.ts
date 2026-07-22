@@ -7,7 +7,8 @@
 // uninstalled.
 
 import { create } from "zustand"
-import { persist, createJSONStorage } from "zustand/middleware"
+import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import { pushRecent, toggleInList } from "@cognia/primitives"
 
 /** How many recently-used kinds to keep. */
@@ -40,7 +41,7 @@ export const usePalettePreferencesStore = create<PalettePreferencesState>()(
     {
       name: "workflow-palette-prefs",
       version: 1,
-      storage: createJSONStorage(() => localStorage),
+      storage: persistLocalStorage(),
       partialize: (s) => ({
         favoriteNodeKinds: s.favoriteNodeKinds,
         recentlyUsedNodeKinds: s.recentlyUsedNodeKinds,

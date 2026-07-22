@@ -52,7 +52,11 @@ export async function getStatus(loader: NetworkLoader = defaultLoader): Promise<
 }
 
 function webStatusFallback(): NetworkStatus {
-  const connected = typeof navigator !== "undefined" ? navigator.onLine : true
+  // Node 26 ships a global `navigator` WITHOUT `onLine`, so the old
+  // `typeof navigator !== "undefined"` check would hand back `undefined` and
+  // report a permanently disconnected network off-browser. Only trust the flag
+  // when it is really a boolean; otherwise assume connected, as before.
+  const connected = typeof navigator?.onLine === "boolean" ? navigator.onLine : true
   return {
     connected,
     connectionType: connected ? "unknown" : "none",

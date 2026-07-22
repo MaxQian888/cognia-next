@@ -47,20 +47,8 @@ describe("LocalStorageCompanionStorage", () => {
     expect(await storage.load()).toBeNull()
   })
 
-  it("treats SSR (no window) as empty", async () => {
-    // Simulate the server-rendering branch by stashing then deleting window.
-    const realWindow = globalThis.window
-    // @ts-expect-error — exercising the SSR guard.
-    delete globalThis.window
-    try {
-      const ssrStorage = new LocalStorageCompanionStorage()
-      expect(await ssrStorage.load()).toBeNull()
-      await ssrStorage.save(MOCK) // no-op
-      await ssrStorage.clear() // no-op
-    } finally {
-      globalThis.window = realWindow
-    }
-  })
+  // The SSR (no-window) branch lives in `companion-storage.ssr.test.ts` —
+  // jsdom's `window` is non-configurable from Node 26 on.
 })
 
 describe("SecureStorageCompanionStorage", () => {

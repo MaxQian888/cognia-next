@@ -15,33 +15,6 @@ import React from "react"
 // holds) and removes the starvation lottery.
 configureTestingLibrary({ asyncUtilTimeout: 5000 })
 
-// Node >= 26: jest's fake timers (@sinonjs/fake-timers 15.4.0, the latest)
-// DELETE the timer globals on uninstall and never restore them, so every test
-// after a `jest.useFakeTimers()` / `jest.useRealTimers()` cycle sees
-// `ReferenceError: setTimeout is not defined`. Minimal repro: one test that
-// cycles the fake timers, a second that reads `typeof setTimeout` — green on
-// Node 20, red on Node 26. Capture the real implementations once and put back
-// whatever went missing. Drop this once jest ships a fix.
-const REAL_TIMER_GLOBALS = new Map<string, unknown>()
-for (const name of [
-  "setTimeout",
-  "setInterval",
-  "setImmediate",
-  "clearTimeout",
-  "clearInterval",
-  "clearImmediate",
-]) {
-  const value = (globalThis as Record<string, unknown>)[name]
-  if (typeof value === "function") REAL_TIMER_GLOBALS.set(name, value)
-}
-afterEach(() => {
-  for (const [name, value] of REAL_TIMER_GLOBALS) {
-    if (typeof (globalThis as Record<string, unknown>)[name] === "undefined") {
-      ;(globalThis as Record<string, unknown>)[name] = value
-    }
-  }
-})
-
 // jsdom omits `window.matchMedia` — provide a default (non-matching) stub so
 // viewport hooks (`hooks/ui/use-mobile.ts:useIsMobile`, the shadcn sidebar,
 // the goal detail sheet's responsive Sheet/Drawer switch) render their

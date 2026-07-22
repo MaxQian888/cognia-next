@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@sinonjs/fake-timers@15.4.0':
+    hash: 989a2bbf216c35c0a239565777e46732670f0ee40c085e03622285b8f541e78e
+    path: patches/@sinonjs__fake-timers@15.4.0.patch
+
 importers:
 
   .:
@@ -15687,7 +15692,7 @@ snapshots:
   '@jest/fake-timers@30.4.1':
     dependencies:
       '@jest/types': 30.4.1
-      '@sinonjs/fake-timers': 15.4.0
+      '@sinonjs/fake-timers': 15.4.0(patch_hash=989a2bbf216c35c0a239565777e46732670f0ee40c085e03622285b8f541e78e)
       '@types/node': 26.1.1
       jest-message-util: 30.4.1
       jest-mock: 30.4.1
@@ -17966,7 +17971,7 @@ snapshots:
     dependencies:
       type-detect: 4.0.8
 
-  '@sinonjs/fake-timers@15.4.0':
+  '@sinonjs/fake-timers@15.4.0(patch_hash=989a2bbf216c35c0a239565777e46732670f0ee40c085e03622285b8f541e78e)':
     dependencies:
       '@sinonjs/commons': 3.0.1
 

@@ -20,7 +20,8 @@
  */
 
 import { create } from "zustand"
-import { persist, createJSONStorage } from "zustand/middleware"
+import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import {
   BUILT_IN_SUBAGENT_TEMPLATES,
   type SubAgent,
@@ -256,16 +257,7 @@ export const useSubagentRuntimeStore = create<SubagentRuntimeState>()(
     }),
     {
       name: "cognia.subagent-runtime",
-      storage: createJSONStorage(() => {
-        if (typeof window === "undefined") {
-          return {
-            getItem: () => null,
-            setItem: () => undefined,
-            removeItem: () => undefined,
-          }
-        }
-        return window.localStorage
-      }),
+      storage: persistLocalStorage(),
       // Only persist templates; runtime data is ephemeral by design.
       partialize: (state) => ({ templates: state.templates }) as Partial<SubagentRuntimeState>,
       // On rehydrate, re-seed any missing built-ins so a contributor
