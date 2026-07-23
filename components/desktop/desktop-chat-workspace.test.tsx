@@ -253,7 +253,7 @@ jest.mock("@/components/artifacts/artifact-workspace-dock", () => ({
     <div data-testid="artifact-workspace-dock">{children}</div>
   ),
 }))
-jest.mock("@/components/canvas", () => ({
+jest.mock("@/components/canvas/canvas-shell", () => ({
   CanvasShell: () => <div data-testid="canvas-shell" />,
 }))
 jest.mock("@/components/shell/onboarding-dialog", () => ({

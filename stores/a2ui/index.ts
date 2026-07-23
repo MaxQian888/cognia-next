@@ -9,4 +9,7 @@ export {
   selectEventHistory,
   selectRecentEvents,
   selectIsSurfaceStreaming,
+  hydrateA2UISurfaceCache,
+  flushA2UISurfacePersistence,
+  __resetA2UISurfacePersistenceForTesting,
 } from "./a2ui-store"
