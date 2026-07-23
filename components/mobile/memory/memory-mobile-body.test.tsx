@@ -15,6 +15,7 @@ const invalidateMock = jest.fn()
 
 jest.mock("dexie-react-hooks", () => ({ useLiveQuery: jest.fn() }))
 // jsdom has no layout — render every item so count/text assertions hold.
+const scrollToIndexMock = jest.fn()
 jest.mock("@tanstack/react-virtual", () => ({
   useVirtualizer: ({ count }: { count: number }) => ({
     getVirtualItems: () =>
@@ -28,6 +29,7 @@ jest.mock("@tanstack/react-virtual", () => ({
       })),
     getTotalSize: () => count * 104,
     measureElement: jest.fn(),
+    scrollToIndex: (...args: unknown[]) => scrollToIndexMock(...args),
   }),
 }))
 const mobileToastError = jest.fn()
@@ -132,6 +134,12 @@ describe("<MemoryMobileBody />", () => {
     expect(pinMock).toHaveBeenCalledWith("m1", true)
     expect(updateMock).toHaveBeenCalledWith("m1", { text: "updated", bumpVersion: true })
     expect(invalidateMock).toHaveBeenCalledWith("m1")
+  })
+
+  it("scrolls the deep-linked memory into view once", () => {
+    liveQuery.mockReturnValue([mem({ id: "m1" }), mem({ id: "m2", text: "second" })])
+    render(<MemoryMobileBody initialSelectedId="m2" />)
+    expect(scrollToIndexMock).toHaveBeenCalledWith(1)
   })
 
   it("surfaces a toast when the outbound enqueue fails", async () => {

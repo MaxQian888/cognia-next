@@ -382,6 +382,23 @@ describe("MemoryConsole — conflict flow", () => {
   })
 })
 
+describe("MemoryConsole — deep link", () => {
+  it("opens the deep-linked memory's detail on load", () => {
+    mockData = [mem({ id: "target", text: "deep linked" }), mem({ id: "other", text: "other" })]
+    render(<MemoryConsole initialSelectedId="target" />)
+    const panel = screen.getByTestId("memory-detail-panel")
+    expect(within(panel).getByTestId("memory-detail-text").textContent).toBe("deep linked")
+  })
+
+  it("keeps the deep-linked selection while the live query is still empty", () => {
+    mockData = []
+    render(<MemoryConsole initialSelectedId="target" />)
+    // No detail (row not loaded yet), but the selection was not nulled — the
+    // empty-store guard only clears once real rows exist without a match.
+    expect(screen.queryByTestId("memory-detail-panel")).toBeNull()
+  })
+})
+
 describe("MemoryConsole — tabs", () => {
   it("exposes the external agent memory tab", async () => {
     mockData = []

@@ -10,7 +10,7 @@
  * authority and applies the shared policy, PII, audit, and vector lifecycle.
  */
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useVirtualizer } from "@tanstack/react-virtual"
@@ -29,7 +29,12 @@ import {
 import { enqueue as enqueueOutbound } from "@/lib/db/mobile-outbound-queue"
 import { runSyncDown } from "@/lib/sync/companion-sync"
 
-export function MemoryMobileBody() {
+export interface MemoryMobileBodyProps {
+  /** Scroll the deep-linked memory into view once (`/memory?id=` from chips). */
+  initialSelectedId?: string
+}
+
+export function MemoryMobileBody({ initialSelectedId }: MemoryMobileBodyProps = {}) {
   const t = useTranslations("mobile.memory")
   const tErrors = useTranslations("memory.errors")
   const memories = useLiveQuery(() => listMemories({ status: "active" }), [])
@@ -60,6 +65,16 @@ export function MemoryMobileBody() {
   const guarded = (work: Promise<void>) => {
     void work.catch(() => toast.error(tErrors("mutation_failed")))
   }
+
+  // One-shot deep-link scroll once the target row is present in the live list.
+  const scrolledToInitialRef = useRef(false)
+  useEffect(() => {
+    if (!initialSelectedId || scrolledToInitialRef.current) return
+    const index = visible.findIndex((m) => m.id === initialSelectedId)
+    if (index < 0) return
+    scrolledToInitialRef.current = true
+    virtualizer.scrollToIndex(index)
+  }, [initialSelectedId, visible, virtualizer])
 
   const handleRefresh = async (): Promise<void> => {
     try {

@@ -65,7 +65,12 @@ const PROVENANCE_OPTIONS: MemoryProvenance[] = ["user", "explicit", "inbound", "
  * that surfaces the full memory record. Composed from reused primitives over
  * the pure `filterAndSortMemories` helper and a live Dexie query.
  */
-export function MemoryConsole() {
+export interface MemoryConsoleProps {
+  /** Preselect this memory's detail panel (`/memory?id=` deep link from chat chips). */
+  initialSelectedId?: string
+}
+
+export function MemoryConsole({ initialSelectedId }: MemoryConsoleProps = {}) {
   const t = useTranslations("memory.panel")
   const tTypes = useTranslations("memory.types")
   const tScopes = useTranslations("memory.scopes")
@@ -81,7 +86,7 @@ export function MemoryConsole() {
   const [activeTags, setActiveTags] = useState<Set<string>>(new Set())
   const [showAll, setShowAll] = useState(false)
   const [sort, setSort] = useState<MemorySortKey>("recent")
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [addOpen, setAddOpen] = useState(false)
   /** "待处理" preset: restrict the list to reviewStatus=conflict rows. */
@@ -149,8 +154,9 @@ export function MemoryConsole() {
   // Adjusted during render (React's documented "adjust state while rendering"
   // pattern) instead of in an effect, so we avoid a synchronous setState inside
   // useEffect. Nulling the id makes the guard false on the re-render, so it
-  // converges after one extra pass.
-  if (selectedId && !memoryById.has(selectedId)) setSelectedId(null)
+  // converges after one extra pass. Gated on a non-empty store so a deep-linked
+  // `initialSelectedId` survives the first render while the live query loads.
+  if (selectedId && all.length > 0 && !memoryById.has(selectedId)) setSelectedId(null)
 
   const navigate = useCallback(
     (delta: -1 | 1) => {
