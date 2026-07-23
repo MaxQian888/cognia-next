@@ -103,6 +103,8 @@ const REGISTRY = [
   // ADR-0090: unified execution paths must stay vendor-neutral (no
   // GLM/Kimi/provider-name branches in dispatch logic).
   { script: "check:provider-name-branches", group: "audit" },
+  // ADR-0090 Phase 5: certification staleness inputs must match real pins.
+  { script: "check:runtime-versions", group: "audit" },
   { script: "audit:trusted-publishers", group: "audit" },
   { script: "audit:silent-flags", group: "audit" },
   { script: "audit:pii-boundaries", group: "audit" },

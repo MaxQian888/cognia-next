@@ -179,9 +179,10 @@
     "mobile:open:android": "pnpm -F mobile open:android",
     "mobile:deploy": "pwsh -NoProfile -File mobile/scripts/deploy-android.ps1",
     "mobile:deploy:fast": "pwsh -NoProfile -File mobile/scripts/deploy-android.ps1 -SkipWeb",
-    "test:conformance": "node --test tests/conformance/anthropic-server/server.test.mjs tests/conformance/cases/*.test.mjs",
+    "test:conformance": "node --test tests/conformance/anthropic-server/server.test.mjs tests/conformance/suite-manifest.test.mjs tests/conformance/cases/*.test.mjs",
     "conformance:prepare": "cargo build --manifest-path src-tauri/Cargo.toml --bin cognia-server",
-    "check:provider-name-branches": "node scripts/gates/check-provider-name-branches.mjs"
+    "check:provider-name-branches": "node scripts/gates/check-provider-name-branches.mjs",
+    "check:runtime-versions": "node scripts/gates/check-runtime-versions.mjs"
   },
   "dependencies": {
     "@ai-sdk/amazon-bedrock": "4.0.123",

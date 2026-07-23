@@ -31,6 +31,7 @@ import type {
   TransportProfile,
 } from "@cognia/provider-types/provider-profile"
 import type { ProfileStoreMetaRow } from "./provider-profiles"
+import type { AgentCompatibilityRecordRow } from "./agent-compatibility"
 import type { BackupHistoryRow } from "./backup-history"
 import type { NotificationRecord } from "@/types/notifications"
 import type { SandboxConnectionRow } from "./sandbox-connections"
@@ -326,6 +327,8 @@ export class CogniaDB extends Dexie {
   // v120 — topic-scoped activation/delivery state and durable inbound execution jobs.
   connectorConversationStates!: Table<ConnectorConversationStateRow, string>
   connectorInboundJobs!: Table<ConnectorInboundJobRow, string>
+  // v123 — Certification projection (ADR-0090 Phase 5). See `lib/db/agent-compatibility.ts`.
+  agentCompatibilityRecords!: Table<AgentCompatibilityRecordRow, string>
   // v121 — Provider Profile Store (ADR-0090 Phase 1). See `lib/db/provider-profiles.ts`.
   providerProfiles!: Table<ProviderProfile, string>
   deploymentProfiles!: Table<DeploymentProfile, string>
@@ -2700,6 +2703,13 @@ export class CogniaDB extends Dexie {
     this.version(122).stores({
       memories:
         "&id, scope, type, characterId, projectId, agentId, status, reviewStatus, lastAccessedAt, vectorDocId, sourceSessionId, sourceMessageId, pinned, [scope+type], [scope+status], [type+status], [projectId+status], [agentId+status]",
+    })
+
+    // v123 — Certification-manifest projection (ADR-0090 Phase 5). Pure index
+    // over the signed bundle files (the authority); rebuildable at any time
+    // via `rebuildCompatibilityProjection`, so no upgrade backfill.
+    this.version(123).stores({
+      agentCompatibilityRecords: "&keyId, bundleId, deploymentRef",
     })
 
     // First full-chain construction under Jest: cache the merged spec so every

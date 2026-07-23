@@ -55,6 +55,7 @@ import {
 import type { BedrockConnectionSettings } from "@cognia/provider-types"
 import { BedrockSettingsFields } from "./bedrock-settings-fields"
 import { DeploymentProfileCard } from "./deployment-profile-card"
+import { DeploymentCertificationPanel } from "./deployment-certification-panel"
 import type { ApiTestResult } from "@/lib/ai/infrastructure/api-test"
 import { ProtocolSelectContent } from "./protocol-select-content"
 import { AnthropicSubscriptionReuseCard } from "./anthropic-subscription-reuse-card"
@@ -670,6 +671,9 @@ export function ProviderConfigTab({
 
       {/* ── 7. Derived unified-execution profile (ADR-0090 Phase 1) ── */}
       <DeploymentProfileCard providerId={providerId} />
+
+      {/* ── 8. Execution-path certification status (ADR-0090 Phase 5) ── */}
+      <DeploymentCertificationPanel deploymentRef={providerId} />
     </div>
   )
 }

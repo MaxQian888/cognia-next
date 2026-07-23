@@ -220,6 +220,16 @@ describe("getDb", () => {
     expect(db.memories.schema.indexes.map((index) => index.name)).toContain("sourceMessageId")
   })
 
+  it("v123 opens the certification projection table", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(123)
+    expect(db.agentCompatibilityRecords.schema.primKey.name).toBe("keyId")
+    expect(db.agentCompatibilityRecords.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["bundleId", "deploymentRef"])
+    )
+  })
+
   it("v121 opens the Provider Profile Store tables and seeds meta", async () => {
     const db = getDb()
     await db.open()

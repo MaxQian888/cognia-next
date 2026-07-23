@@ -120,6 +120,19 @@ export interface AgentExecutionResolveInput {
   flags: Record<AgentExecutionFlag, boolean>
   /** ISO timestamp for the trace. Injected for determinism in tests. */
   now?: string
+  /**
+   * ADR-0090 Phase 5 — a certification-gate acceptance for the resolved
+   * path. Callers may ONLY construct this from
+   * `evaluateCompatibilityGate(...)` output (its recordRef encodes
+   * bundle+key); probes/opt-ins have no way in. Absent ⇒ evidence stays the
+   * legacy default and `auto` never adopts a certified non-default path.
+   */
+  certifiedPath?: {
+    recordRef: string
+    evidence: "native" | "vendor-certified" | "cognia-verified"
+    suiteVersion?: string
+    disabledOptional: AgentCapabilityId[]
+  }
 }
 
 export interface AgentExecutionResolution {
@@ -233,10 +246,27 @@ export function resolveAgentExecutionSpec(
     },
     route,
     hostRef,
-    compatibility: { evidence: "native" },
+    compatibility: input.certifiedPath
+      ? {
+          evidence: input.certifiedPath.evidence,
+          recordRef: input.certifiedPath.recordRef,
+          ...(input.certifiedPath.suiteVersion
+            ? { suiteVersion: input.certifiedPath.suiteVersion }
+            : {}),
+        }
+      : { evidence: "native" },
     capabilities: {
-      effective: runtimeCaps.filter((cap) => !disabledOptional.includes(cap)),
-      disabledOptional,
+      effective: runtimeCaps.filter(
+        (cap) =>
+          !disabledOptional.includes(cap) &&
+          !(input.certifiedPath?.disabledOptional.includes(cap) ?? false)
+      ),
+      disabledOptional: [
+        ...disabledOptional,
+        ...(input.certifiedPath?.disabledOptional.filter(
+          (cap) => !disabledOptional.includes(cap)
+        ) ?? []),
+      ],
     },
     credential: input.policy?.credentialProfileRef
       ? {
