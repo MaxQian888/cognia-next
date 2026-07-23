@@ -283,7 +283,7 @@ export function ProviderCostTab({ providerId }: ProviderCostTabProps) {
       </div>
 
       {/* ── Overview cards ────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 gap-3 @3xl/provider-pane:grid-cols-4">
         <OverviewCard label={t("costTab.monthlyCost")} value={formatCost(totals.totalCost)} />
         <OverviewCard label={t("costTab.totalCalls")} value={String(totals.totalCalls)} />
         <OverviewCard
@@ -294,8 +294,10 @@ export function ProviderCostTab({ providerId }: ProviderCostTabProps) {
       </div>
 
       {/* ── Per-model cost table ──────────────────────────────────────── */}
-      <div className="rounded-lg border overflow-hidden">
-        <table className="w-full text-sm">
+      {/* overflow-x-auto, not just overflow-hidden: five columns plus the rate
+          breakdown clip rather than scroll in a narrow pane. */}
+      <div className="overflow-x-auto rounded-lg border">
+        <table className="w-full min-w-[32rem] text-sm">
           <thead>
             <tr className="border-b bg-muted/40">
               <th className="px-3 py-2 text-left font-medium text-muted-foreground">

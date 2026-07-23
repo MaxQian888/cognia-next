@@ -52,7 +52,8 @@ export function deriveStatus(
   // connected unless a newer in-session test has already resolved above.
   if (verificationStatus === "verified") return "connected"
   if (verificationStatus === "stale") return "limited"
-  return "warning"
+  // Configured but never tested. NOT a warning — nothing is wrong yet.
+  return "untested"
 }
 
 // Imported here so this file stays self-contained for tests; the catalog is

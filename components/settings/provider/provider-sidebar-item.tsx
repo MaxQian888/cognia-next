@@ -12,6 +12,13 @@ export type ProviderConnectionStatus =
   | "not-configured"
   | "error"
   | "limited"
+  /**
+   * Credentials are present but no test has run yet. Its own state because
+   * "configured, not yet verified" is the normal resting state of a freshly
+   * added provider — painting it amber "warning" told the user something was
+   * wrong when nothing was.
+   */
+  | "untested"
 
 interface ProviderSidebarItemProps {
   providerId: string
@@ -52,6 +59,12 @@ const STATUS_CONFIG: Record<
     reasonKey: "reasonWarning",
     className:
       "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-400",
+  },
+  untested: {
+    icon: Circle,
+    labelKey: "statusUntested",
+    reasonKey: "reasonUntested",
+    className: "border-muted-foreground/20 bg-muted/50 text-muted-foreground",
   },
   "not-configured": {
     icon: Circle,
@@ -173,7 +186,7 @@ export const ProviderSidebarItem = React.memo(function ProviderSidebarItem({
         className={cn("shrink-0 gap-1 text-[10px] px-1.5 py-0", statusCfg.className)}
       >
         <StatusIcon className="h-3 w-3" />
-        <span className="hidden sm:inline">{statusLabel}</span>
+        <span className="hidden @[16rem]/provider-rail:inline">{statusLabel}</span>
       </Badge>
     </button>
   )

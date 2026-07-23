@@ -58,7 +58,7 @@ const meta = {
     models: MODELS,
     enabledModels: ["gpt-4.1", "o3"],
     onEnabledModelsChange: fn(),
-    onTestConnection: fn(),
+    onRefreshModels: fn(),
   },
 } satisfies Meta<typeof ProviderModelsTab>
 
@@ -71,7 +71,7 @@ export const Populated: Story = {}
 // Refresh in progress — spinner on the refresh button.
 export const Refreshing: Story = {
   args: {
-    isTesting: true,
+    isRefreshing: true,
   },
 }
 

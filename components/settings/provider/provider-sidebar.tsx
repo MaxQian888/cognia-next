@@ -40,6 +40,19 @@ interface ProviderSidebarProps {
   searchQuery: string
   onSearchChange: (query: string) => void
   addButton?: React.ReactNode
+  /**
+   * Shown inside the list area when the user genuinely has no providers.
+   *
+   * It belongs HERE, not in place of the whole sidebar: replacing the sidebar
+   * took the search box and the category tabs down with it, so picking a
+   * category with no matches (e.g. "custom" before adding one) removed every
+   * control that could undo the filter. There was no way back.
+   */
+  emptyState?: React.ReactNode
+  /** True when the parent's search or category filter is narrowing the list. */
+  hasActiveFilters?: boolean
+  /** Reset the parent's search + category filters. */
+  onClearFilters?: () => void
 }
 
 export function ProviderSidebar({
@@ -52,6 +65,9 @@ export function ProviderSidebar({
   searchQuery,
   onSearchChange,
   addButton,
+  emptyState,
+  hasActiveFilters = false,
+  onClearFilters,
 }: ProviderSidebarProps) {
   const t = useTranslations("providers")
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
@@ -66,8 +82,19 @@ export function ProviderSidebar({
   const total = visibleProviders.length
   const active = visibleProviders.filter((p) => p.status === "connected").length
 
+  // Whether SOMETHING the user chose is hiding rows — the parent's search /
+  // category, or this component's own status filter.
+  const filtersNarrowTheList = hasActiveFilters || statusFilter !== "all"
+
+  const clearFilters = () => {
+    setStatusFilter("all")
+    onClearFilters?.()
+  }
+
+  // `@container/provider-rail`: the rail is a fixed-width column, so its
+  // children must size against it rather than the viewport.
   return (
-    <div className="flex h-full w-full min-w-0 flex-col overflow-hidden">
+    <div className="@container/provider-rail flex h-full w-full min-w-0 flex-col overflow-hidden">
       {/* Top: search + add button */}
       <div className="flex min-w-0 gap-2 border-b p-3">
         <div className="relative flex-1">
@@ -123,19 +150,34 @@ export function ProviderSidebar({
 
       {/* Provider list (scrollable) */}
       <div className="flex-1 overflow-x-hidden overflow-y-auto p-1">
-        {visibleProviders.map((p) => (
-          <ProviderSidebarItem
-            key={p.id}
-            providerId={p.id}
-            name={p.name}
-            icon={p.icon}
-            subtitle={p.subtitle}
-            status={p.status}
-            isSelected={p.id === selectedId}
-            onClick={onSelect}
-            modelCount={p.modelCount}
-          />
-        ))}
+        {visibleProviders.length === 0 ? (
+          filtersNarrowTheList ? (
+            // A filtered-to-nothing list used to render as a blank box with no
+            // explanation and no way out.
+            <div className="flex flex-col items-center gap-2 px-3 py-8 text-center">
+              <p className="text-xs text-muted-foreground">{t("sidebar.noMatches")}</p>
+              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={clearFilters}>
+                {t("sidebar.clearFilters")}
+              </Button>
+            </div>
+          ) : (
+            emptyState
+          )
+        ) : (
+          visibleProviders.map((p) => (
+            <ProviderSidebarItem
+              key={p.id}
+              providerId={p.id}
+              name={p.name}
+              icon={p.icon}
+              subtitle={p.subtitle}
+              status={p.status}
+              isSelected={p.id === selectedId}
+              onClick={onSelect}
+              modelCount={p.modelCount}
+            />
+          ))
+        )}
       </div>
 
       {/* Model Compare button */}

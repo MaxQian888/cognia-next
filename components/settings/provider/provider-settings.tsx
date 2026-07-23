@@ -2,13 +2,23 @@
 
 import dynamic from "next/dynamic"
 import { useEffect, useMemo, useState, useCallback } from "react"
-import { Plus, Menu, Settings, Key, Globe } from "lucide-react"
+import { Plus, Menu, Settings, Key, Globe, PlugZap, Loader2 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Select,
@@ -31,11 +41,12 @@ import { ProviderCostTab } from "./provider-cost-tab"
 import { ProviderParametersTab } from "./provider-parameters-tab"
 import { RoutingTab } from "./routing-tab"
 import { HealthTab } from "./health-tab"
-import { PresetsTab } from "./presets-tab"
 import { ProviderSidebar } from "./provider-sidebar"
 import { ProviderEmptyState } from "./provider-empty-state"
+import { ProviderSkeleton } from "./provider-skeleton"
 import { ProviderOnboardingBanner } from "./provider-onboarding-banner"
 import { ProviderCompareDialog } from "./provider-compare-dialog"
+import { OAuthLoginButton } from "./oauth-login-button"
 import { useSettingsStore } from "@/stores/settings"
 import type { ProviderConnectionStatus } from "./provider-sidebar-item"
 import { deriveStatus, providerMatchesCategory } from "./provider-status-utils"
@@ -61,6 +72,27 @@ const LocalProviderSettings = dynamic(
   () => import("./local-provider-settings").then((m) => m.LocalProviderSettings),
   { ssr: false }
 )
+// Provider-specific config panels — lazy because each is 18-27 KB and only
+// loads for the one provider that needs it.
+const OpenRouterSettings = dynamic(
+  () => import("./openrouter-settings").then((m) => m.OpenRouterSettings),
+  { ssr: false }
+)
+const OpenRouterKeyManagement = dynamic(
+  () => import("./openrouter-key-management").then((m) => m.OpenRouterKeyManagement),
+  { ssr: false }
+)
+const CLIProxyAPISettings = dynamic(
+  () => import("./cliproxyapi-settings").then((m) => m.CLIProxyAPISettings),
+  { ssr: false }
+)
+// Export/import of the whole provider configuration. Renders as a two-button
+// toolbar that owns its own dialogs (conflict detection + skip/overwrite/merge
+// resolution live inside it).
+const ProviderImportExport = dynamic(
+  () => import("./provider-import-export").then((m) => m.ProviderImportExport),
+  { ssr: false }
+)
 
 /* ── Custom provider inline config ──────────────────────────────────────────── */
 
@@ -74,12 +106,18 @@ function CustomProviderInlineConfig({
   onBaseURLChange,
   onDefaultModelChange,
   onEditClick,
+  onTestConnection,
+  testResult,
+  isTesting = false,
 }: {
   cp: CustomProviderSettings
   onApiKeyChange: (key: string) => void
   onBaseURLChange: (url: string) => void
   onDefaultModelChange: (model: string) => void
   onEditClick: () => void
+  onTestConnection: () => void
+  testResult?: "success" | "error" | "limited" | null
+  isTesting?: boolean
 }) {
   const t = useTranslations("providers")
   const [showKey, setShowKey] = useState(false)
@@ -149,15 +187,61 @@ function CustomProviderInlineConfig({
         </div>
       )}
 
-      {/* Protocol badge + edit button */}
-      <div className="flex items-center justify-between">
-        <Badge variant="secondary" className="text-[10px]">
-          {cp.apiProtocol}
-        </Badge>
-        <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs" onClick={onEditClick}>
-          <Settings className="h-3 w-3" />
-          {t("editCustomProvider") || "Edit"}
-        </Button>
+      {/* Protocol badge + test/edit buttons */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <Badge variant="secondary" className="text-[10px]">
+            {cp.apiProtocol}
+          </Badge>
+          {testResult && (
+            <span
+              data-testid="custom-provider-test-result"
+              className={
+                testResult === "success"
+                  ? "truncate text-[11px] text-emerald-600 dark:text-emerald-400"
+                  : testResult === "limited"
+                    ? "truncate text-[11px] text-amber-600 dark:text-amber-400"
+                    : "truncate text-[11px] text-destructive"
+              }
+            >
+              {testResult === "success"
+                ? t("customTestSuccess")
+                : testResult === "limited"
+                  ? t("customTestLimited")
+                  : t("customTestError")}
+            </span>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {/* `testCustomProvider` was fully implemented but had zero callers, so
+              `customTestResults` stayed empty forever and a custom provider's
+              status badge could never leave "warning". */}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1.5 text-xs"
+            onClick={onTestConnection}
+            disabled={isTesting}
+            data-testid="custom-provider-test"
+          >
+            {isTesting ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <PlugZap className="h-3 w-3" />
+            )}
+            {t("testConnection")}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1.5 text-xs"
+            onClick={onEditClick}
+            data-testid="custom-provider-edit"
+          >
+            <Settings className="h-3 w-3" />
+            {t("editCustomProvider") || "Edit"}
+          </Button>
+        </div>
       </div>
     </div>
   )
@@ -170,18 +254,24 @@ export function ProviderSettings() {
   const s = useProviderSettings()
   const setProviderConfig = useSettingsStore((store) => store.setProviderConfig)
   const defaultProvider = useSettingsStore((store) => store.settings?.defaultProvider)
+  // Before Dexie hydrates, `providerSettings` is {} — every row would derive
+  // "not-configured", the auto-select effect would pick the alphabetically
+  // first provider, and all the badges would flip once the real settings
+  // landed. Show the skeleton until we actually know.
+  const settingsLoaded = useSettingsStore((store) => store.loaded)
 
   const [search, setSearch] = useState("")
   const [categoryFilter, setCategoryFilter] = useState("all")
   const [showQuickAdd, setShowQuickAdd] = useState(false)
   const [customDialogOpen, setCustomDialogOpen] = useState(false)
   const [editingCustomId, setEditingCustomId] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<"parameters" | "routing" | "health" | "presets">(
-    "parameters"
-  )
+  const [activeTab, setActiveTab] = useState<"parameters" | "routing" | "health">("parameters")
   const [compareOpen, setCompareOpen] = useState(false)
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false)
   const [testingConnection, setTestingConnection] = useState<Record<string, boolean>>({})
+  // Deleting a custom provider drops its saved credentials and cannot be
+  // undone, so it gets a confirmation step instead of firing on first click.
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
 
   // Build sidebar providers with category filter
   const sidebarProviders = useMemo<SidebarProvider[]>(() => {
@@ -278,7 +368,7 @@ export function ProviderSettings() {
   // models.dev catalog (reactive) → enrich the built-in provider's model list
   // with models.dev-authoritative metadata (pricing/context/capabilities) plus
   // the extra display fields (variants/family/release date/adapter).
-  const { row: modelsDevRow } = useModelsDevCatalog()
+  const { row: modelsDevRow, sync: syncModelsDevCatalog } = useModelsDevCatalog()
   const enrichedBuiltInModels = useMemo(() => {
     if (!selectedBuiltIn || !selectedId) return []
     const devModels = modelsDevRow?.providers[selectedId]?.models ?? []
@@ -329,7 +419,7 @@ export function ProviderSettings() {
   // `discoveredModels`) carry far more. Fold those dynamic sources in — deduped
   // by id, static first — so the Default Model dropdown actually lists the models
   // a dynamic provider can serve instead of an empty/stale set.
-  const { row: openRouterCatalogRow } = useOpenRouterCatalog()
+  const { row: openRouterCatalogRow, sync: syncOpenRouterCatalog } = useOpenRouterCatalog()
   const configModelOptions = useMemo<Array<{ id: string; name: string }>>(() => {
     if (!selectedBuiltIn || !selectedId) return []
     const byId = new Map<string, string>()
@@ -345,7 +435,37 @@ export function ProviderSettings() {
     return Array.from(byId, ([id, name]) => ({ id, name }))
   }, [selectedBuiltIn, selectedId, selectedSettings?.discoveredModels, openRouterCatalogRow])
 
-  // Model refresh handler
+  /**
+   * Actually refresh the model list for the selected built-in provider.
+   *
+   * This used to call `s.testProvider(...)`, which only writes
+   * `discoveredModels` on the `bedrock` branch — so for every other provider
+   * the "Refresh models" button ran a connection test and changed no models at
+   * all. Each provider family has a real refresh path already:
+   *   - bedrock     → `testProvider` (its `testAndDiscoverBedrock` branch does
+   *                   discover + persist)
+   *   - openrouter  → the live `/models` catalog
+   *   - everything  → the models.dev catalog, which feeds
+   *     else          `enrichedBuiltInModels` via
+   *                   `buildBuiltInProviderModelDiscoverySnapshot`
+   */
+  const handleRefreshModels = useCallback(async () => {
+    if (!selectedId) return
+    setTestingConnection((prev) => ({ ...prev, [selectedId]: true }))
+    try {
+      if (selectedId === "bedrock") {
+        await s.testProvider(selectedId)
+      } else if (selectedId === "openrouter") {
+        await syncOpenRouterCatalog(selectedSettings?.apiKey)
+      } else {
+        await syncModelsDevCatalog()
+      }
+    } finally {
+      setTestingConnection((prev) => ({ ...prev, [selectedId]: false }))
+    }
+  }, [selectedId, s, selectedSettings?.apiKey, syncOpenRouterCatalog, syncModelsDevCatalog])
+
+  /** Connection test, split out of the refresh button so each says what it does. */
   const handleTestConnection = useCallback(async () => {
     if (!selectedId) return
     setTestingConnection((prev) => ({ ...prev, [selectedId]: true }))
@@ -376,14 +496,36 @@ export function ProviderSettings() {
       onCategoryChange={setCategoryFilter}
       searchQuery={search}
       onSearchChange={setSearch}
+      emptyState={
+        <ProviderEmptyState
+          onAddProvider={() => setShowQuickAdd(true)}
+          importButton={<ProviderImportExport />}
+        />
+      }
+      hasActiveFilters={search.trim() !== "" || categoryFilter !== "all"}
+      onClearFilters={() => {
+        setSearch("")
+        setCategoryFilter("all")
+      }}
       addButton={
-        <Button size="sm" variant="outline" onClick={() => setShowQuickAdd(true)}>
-          <Plus className="mr-1 h-4 w-4" />
-          <span className="hidden sm:inline">{t("addProvider" as never) as string}</span>
-        </Button>
+        <div className="flex items-center gap-1.5">
+          <Button size="sm" variant="outline" onClick={() => setShowQuickAdd(true)}>
+            <Plus className="mr-1 h-4 w-4" />
+            <span className="hidden sm:inline">{t("addProvider" as never) as string}</span>
+          </Button>
+          <ProviderImportExport />
+        </div>
       }
     />
   )
+
+  if (!settingsLoaded) {
+    return (
+      <div className="flex h-full min-h-0 flex-col gap-4 p-1" data-testid="provider-skeleton">
+        <ProviderSkeleton />
+      </div>
+    )
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
@@ -401,13 +543,7 @@ export function ProviderSettings() {
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[320px_1fr]">
         {/* ── Desktop sidebar ──────────────────────────────────────────── */}
         <div className="hidden min-h-0 md:flex md:flex-col md:overflow-hidden md:rounded-lg md:border">
-          {sidebarProviders.length === 0 && search.trim() === "" ? (
-            <div className="flex-1 p-4">
-              <ProviderEmptyState onAddProvider={() => setShowQuickAdd(true)} />
-            </div>
-          ) : (
-            sidebar
-          )}
+          {sidebar}
         </div>
 
         {/* ── Mobile top bar ───────────────────────────────────────────── */}
@@ -433,8 +569,13 @@ export function ProviderSettings() {
           )}
         </div>
 
-        {/* ── Detail panel ─────────────────────────────────────────────── */}
-        <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">
+        {/* ── Detail panel ─────────────────────────────────────────────
+            `@container/provider-pane`: the pane is pinned beside a fixed 320px
+            rail, so its width and the viewport width are different numbers.
+            Children that sized themselves with `md:`/`sm:` were reading the
+            window and laying out 2- and 4-column grids into a ~430px pane at
+            the md breakpoint. Same fix the subscription pane already uses. */}
+        <div className="@container/provider-pane flex min-h-0 flex-col overflow-hidden rounded-lg border">
           {selectedId === null ? (
             <div className="flex h-full items-center justify-center">
               <div className="flex flex-col items-center gap-4 py-12 text-center">
@@ -450,10 +591,6 @@ export function ProviderSettings() {
                   </p>
                 </div>
               </div>
-            </div>
-          ) : isLocalProvider ? (
-            <div className="flex-1 overflow-y-auto p-3">
-              <LocalProviderSettings />
             </div>
           ) : (
             <ProviderDetailPanel
@@ -505,16 +642,15 @@ export function ProviderSettings() {
                   void setProviderConfig(selectedId, { enabled: next })
                 }
               }}
-              onDelete={
-                isCustom
-                  ? () => {
-                      void s.removeCustomProvider(selectedId)
-                      s.setSelectedProviderId(null)
-                    }
-                  : undefined
-              }
+              onDelete={isCustom ? () => setPendingDeleteId(selectedId) : undefined}
               configTab={
-                isCustom && selectedCustom ? (
+                // A local engine (Ollama, LM Studio, llama.cpp, …) is keyless
+                // and gets its own dashboard, but it stays INSIDE the shared
+                // detail shell so it keeps the header, enable switch, default
+                // badge and status the rest of the list has.
+                isLocalProvider ? (
+                  <LocalProviderSettings />
+                ) : isCustom && selectedCustom ? (
                   <CustomProviderInlineConfig
                     cp={selectedCustom}
                     onApiKeyChange={(key) =>
@@ -527,88 +663,115 @@ export function ProviderSettings() {
                       void s.updateCustomProvider(selectedId, { defaultModel: model })
                     }
                     onEditClick={handleEditCustom}
+                    onTestConnection={() => void s.testCustomProvider(selectedId)}
+                    testResult={s.customTestResults[selectedId] ?? null}
+                    isTesting={!!s.testingCustomProviders[selectedId]}
                   />
                 ) : selectedBuiltIn ? (
-                  <ProviderConfigTab
-                    providerId={selectedId}
-                    settings={
-                      selectedSettings ?? {
-                        providerId: selectedId,
-                        enabled: false,
-                        defaultModel: selectedBuiltIn.defaultModel,
+                  <div className="space-y-6">
+                    <ProviderConfigTab
+                      providerId={selectedId}
+                      settings={
+                        selectedSettings ?? {
+                          providerId: selectedId,
+                          enabled: false,
+                          defaultModel: selectedBuiltIn.defaultModel,
+                        }
                       }
-                    }
-                    providerModels={configModelOptions}
-                    providerDashboardUrl={selectedBuiltIn.dashboardUrl}
-                    providerDocsUrl={selectedBuiltIn.docsUrl}
-                    onApiKeyChange={(key) => void setProviderConfig(selectedId, { apiKey: key })}
-                    onBaseURLChange={(url) => void setProviderConfig(selectedId, { baseURL: url })}
-                    onBedrockSettingsChange={(bedrock) =>
-                      void setProviderConfig(selectedId, {
-                        bedrock,
-                        apiKey: bedrock.authMode === "api-key" ? bedrock.apiKey : undefined,
-                        baseURL: bedrock.baseURL,
-                      })
-                    }
-                    onApiProtocolChange={(protocol) =>
-                      void setProviderConfig(selectedId, { apiProtocol: protocol })
-                    }
-                    onDefaultModelChange={(model) =>
-                      void setProviderConfig(selectedId, { defaultModel: model })
-                    }
-                    onTestConnection={async () => {
-                      const result = await s.testProvider(selectedId)
-                      return {
-                        success: !!result?.success,
-                        latency: result?.latency_ms,
-                        error: result?.success ? undefined : result?.message,
-                        outcome: result?.outcome,
+                      providerModels={configModelOptions}
+                      providerDashboardUrl={selectedBuiltIn.dashboardUrl}
+                      providerDocsUrl={selectedBuiltIn.docsUrl}
+                      onApiKeyChange={(key) => void setProviderConfig(selectedId, { apiKey: key })}
+                      onBaseURLChange={(url) =>
+                        void setProviderConfig(selectedId, { baseURL: url })
                       }
-                    }}
-                    testResult={
-                      s.testResults[selectedId]
-                        ? {
-                            success: !!s.testResults[selectedId]?.success,
-                            latency: s.testResults[selectedId]?.latency_ms,
-                            error: s.testResults[selectedId]?.success
-                              ? undefined
-                              : s.testResults[selectedId]?.message,
-                          }
-                        : null
-                    }
-                    isTesting={!!s.testingProviders[selectedId]}
-                    onAddApiKey={(key) => {
-                      const pool = selectedSettings?.apiKeys ?? []
-                      void setProviderConfig(selectedId, { apiKeys: [...pool, key] })
-                    }}
-                    onRemoveApiKey={(index) => {
-                      const pool = selectedSettings?.apiKeys ?? []
-                      void setProviderConfig(selectedId, {
-                        apiKeys: pool.filter((_, i) => i !== index),
-                      })
-                    }}
-                    onReorderApiKeys={(from, to) => {
-                      const pool = [...(selectedSettings?.apiKeys ?? [])]
-                      const [moved] = pool.splice(from, 1)
-                      if (moved === undefined) return
-                      pool.splice(to, 0, moved)
-                      void setProviderConfig(selectedId, { apiKeys: pool })
-                    }}
-                    onToggleRotation={(enabled) =>
-                      void setProviderConfig(selectedId, { apiKeyRotationEnabled: enabled })
-                    }
-                    onRotationStrategyChange={(strategy) =>
-                      void setProviderConfig(selectedId, { apiKeyRotationStrategy: strategy })
-                    }
-                  />
+                      onBedrockSettingsChange={(bedrock) =>
+                        void setProviderConfig(selectedId, {
+                          bedrock,
+                          apiKey: bedrock.authMode === "api-key" ? bedrock.apiKey : undefined,
+                          baseURL: bedrock.baseURL,
+                        })
+                      }
+                      onApiProtocolChange={(protocol) =>
+                        void setProviderConfig(selectedId, { apiProtocol: protocol })
+                      }
+                      onDefaultModelChange={(model) =>
+                        void setProviderConfig(selectedId, { defaultModel: model })
+                      }
+                      onTestConnection={async () => {
+                        const result = await s.testProvider(selectedId)
+                        return {
+                          success: !!result?.success,
+                          latency: result?.latency_ms,
+                          error: result?.success ? undefined : result?.message,
+                          outcome: result?.outcome,
+                        }
+                      }}
+                      testResult={
+                        s.testResults[selectedId]
+                          ? {
+                              success: !!s.testResults[selectedId]?.success,
+                              latency: s.testResults[selectedId]?.latency_ms,
+                              error: s.testResults[selectedId]?.success
+                                ? undefined
+                                : s.testResults[selectedId]?.message,
+                            }
+                          : null
+                      }
+                      isTesting={!!s.testingProviders[selectedId]}
+                      onAddApiKey={(key) => {
+                        const pool = selectedSettings?.apiKeys ?? []
+                        void setProviderConfig(selectedId, { apiKeys: [...pool, key] })
+                      }}
+                      onRemoveApiKey={(index) => {
+                        const pool = selectedSettings?.apiKeys ?? []
+                        void setProviderConfig(selectedId, {
+                          apiKeys: pool.filter((_, i) => i !== index),
+                        })
+                      }}
+                      onReorderApiKeys={(from, to) => {
+                        const pool = [...(selectedSettings?.apiKeys ?? [])]
+                        const [moved] = pool.splice(from, 1)
+                        if (moved === undefined) return
+                        pool.splice(to, 0, moved)
+                        void setProviderConfig(selectedId, { apiKeys: pool })
+                      }}
+                      onToggleRotation={(enabled) =>
+                        void setProviderConfig(selectedId, { apiKeyRotationEnabled: enabled })
+                      }
+                      onRotationStrategyChange={(strategy) =>
+                        void setProviderConfig(selectedId, { apiKeyRotationStrategy: strategy })
+                      }
+                    />
+                    {/* Self-gates on the catalog's `supportsOAuth` and renders
+                        null otherwise, so mounting it for every built-in is
+                        safe and picks up any future OAuth provider for free.
+                        Until now nothing rendered it, which left
+                        `oauthConnected` / `oauthExpiresAt` unreachable from the
+                        UI even though both are persisted on the settings row. */}
+                    <OAuthLoginButton providerId={selectedId} />
+                    {/* Provider-specific panels. Both shipped with a catalog
+                        entry and a full settings schema but were never mounted,
+                        so every field they expose was unreachable. */}
+                    {selectedId === "openrouter" && (
+                      <>
+                        <OpenRouterSettings />
+                        <OpenRouterKeyManagement />
+                      </>
+                    )}
+                    {selectedId === "cliproxyapi" && <CLIProxyAPISettings />}
+                  </div>
                 ) : (
                   <div className="text-sm text-muted-foreground">
                     {t("unknownProviderType") || "Unknown provider type."}
                   </div>
                 )
               }
+              // Local engines manage their own models/setup inside the config
+              // dashboard, and have no per-token cost or cloud routing — so
+              // these slots stay empty and the tabs simply don't render.
               modelsTab={
-                isCustom ? (
+                isLocalProvider ? undefined : isCustom ? (
                   <div className="text-sm text-muted-foreground">
                     {t("customProviderModelsManaged") ||
                       "Custom-provider models are managed inside the provider editor."}
@@ -621,8 +784,10 @@ export function ProviderSettings() {
                     onEnabledModelsChange={(ids) =>
                       void setProviderConfig(selectedId, { enabledModels: ids })
                     }
+                    onRefreshModels={handleRefreshModels}
+                    isRefreshing={!!testingConnection[selectedId]}
                     onTestConnection={handleTestConnection}
-                    isTesting={!!testingConnection[selectedId]}
+                    isTesting={!!s.testingProviders[selectedId]}
                   />
                 ) : (
                   <div className="text-sm text-muted-foreground">
@@ -630,53 +795,57 @@ export function ProviderSettings() {
                   </div>
                 )
               }
-              costTab={<ProviderCostTab providerId={selectedId} />}
+              costTab={isLocalProvider ? undefined : <ProviderCostTab providerId={selectedId} />}
               advancedTab={
-                <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
-                  <TabsList>
-                    <TabsTrigger value="parameters">
-                      {t("tabs.parameters" as never) as string}
-                    </TabsTrigger>
-                    <TabsTrigger value="routing">
-                      {t("tabs.routing" as never) as string}
-                    </TabsTrigger>
-                    <TabsTrigger value="health">{t("tabs.health" as never) as string}</TabsTrigger>
-                    <TabsTrigger value="presets">
-                      {t("tabs.presets" as never) as string}
-                    </TabsTrigger>
-                  </TabsList>
-                  <TabsContent value="parameters">
-                    {selectedSettings ? (
-                      <ProviderParametersTab providerId={selectedId} settings={selectedSettings} />
-                    ) : (
-                      <div className="py-4 text-center text-xs text-muted-foreground">
-                        {t("configureProviderForParameters") ||
-                          "Configure this provider in the Config tab to enable parameters."}
-                      </div>
-                    )}
-                  </TabsContent>
-                  <TabsContent value="routing">
-                    <RoutingTab />
-                  </TabsContent>
-                  <TabsContent value="health">
-                    <HealthTab
-                      providerId={selectedId}
-                      onTestConnection={async () => {
-                        const result = await s.testProvider(selectedId)
-                        return {
-                          success: !!result?.success,
-                          latency: result?.latency_ms,
-                          error: result?.success ? undefined : result?.message,
-                          outcome: result?.outcome,
-                        }
-                      }}
-                      isTesting={!!s.testingProviders[selectedId]}
-                    />
-                  </TabsContent>
-                  <TabsContent value="presets">
-                    <PresetsTab providerId={selectedId} providerName={selectedName} />
-                  </TabsContent>
-                </Tabs>
+                isLocalProvider ? undefined : (
+                  <Tabs
+                    value={activeTab}
+                    onValueChange={(v) => setActiveTab(v as typeof activeTab)}
+                  >
+                    <TabsList>
+                      <TabsTrigger value="parameters">
+                        {t("tabs.parameters" as never) as string}
+                      </TabsTrigger>
+                      <TabsTrigger value="routing">
+                        {t("tabs.routing" as never) as string}
+                      </TabsTrigger>
+                      <TabsTrigger value="health">
+                        {t("tabs.health" as never) as string}
+                      </TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="parameters">
+                      {selectedSettings ? (
+                        <ProviderParametersTab
+                          providerId={selectedId}
+                          settings={selectedSettings}
+                        />
+                      ) : (
+                        <div className="py-4 text-center text-xs text-muted-foreground">
+                          {t("configureProviderForParameters") ||
+                            "Configure this provider in the Config tab to enable parameters."}
+                        </div>
+                      )}
+                    </TabsContent>
+                    <TabsContent value="routing">
+                      <RoutingTab />
+                    </TabsContent>
+                    <TabsContent value="health">
+                      <HealthTab
+                        providerId={selectedId}
+                        onTestConnection={async () => {
+                          const result = await s.testProvider(selectedId)
+                          return {
+                            success: !!result?.success,
+                            latency: result?.latency_ms,
+                            error: result?.success ? undefined : result?.message,
+                            outcome: result?.outcome,
+                          }
+                        }}
+                        isTesting={!!s.testingProviders[selectedId]}
+                      />
+                    </TabsContent>
+                  </Tabs>
+                )
               }
             />
           )}
@@ -701,11 +870,49 @@ export function ProviderSettings() {
           editingProviderId={editingCustomId}
         />
       )}
-      <ProviderCompareDialog
-        open={compareOpen}
-        onOpenChange={setCompareOpen}
-        availableProviders={sidebarProviders.map((p) => ({ id: p.id, name: p.name }))}
-      />
+      {compareOpen && (
+        <ProviderCompareDialog
+          open={compareOpen}
+          onOpenChange={setCompareOpen}
+          availableProviders={sidebarProviders.map((p) => ({ id: p.id, name: p.name }))}
+        />
+      )}
+      <AlertDialog
+        open={pendingDeleteId !== null}
+        onOpenChange={(next) => {
+          if (!next) setPendingDeleteId(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("deleteProviderTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("deleteProviderConfirm", {
+                name:
+                  (pendingDeleteId ? s.customProviders[pendingDeleteId]?.customName : undefined) ??
+                  pendingDeleteId ??
+                  "",
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="cancel-delete-custom-provider">
+              {t("cancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="confirm-delete-custom-provider"
+              onClick={() => {
+                if (!pendingDeleteId) return
+                void s.removeCustomProvider(pendingDeleteId)
+                s.setSelectedProviderId(null)
+                setPendingDeleteId(null)
+              }}
+            >
+              {t("delete")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

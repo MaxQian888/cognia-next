@@ -11,6 +11,7 @@ import { additionalDirsOf, allRootPaths } from "@/lib/workspace/roots"
 import { resolveEffectiveCwd } from "@/lib/workspace/effective-cwd"
 import type { MarkdownAgentFile } from "@/lib/claude/agents/markdown-agents"
 import type { RagEmbeddingProvider } from "@cognia/provider-embedding/embedding-catalog"
+import type { BedrockConnectionSettings } from "@cognia/provider-types"
 import { RESTRICTED_MODE_DENIED_TOOLS } from "@/lib/workspace/restricted-tools"
 import { mergeRulesets } from "@/lib/claude/permissions/ruleset"
 import { deterministicRulesetSort } from "@/lib/claude/permissions/ruleset-edit"
@@ -661,6 +662,14 @@ export interface TwinRuntimeDepsForBuild {
     model: string
     apiKey: string
     baseURL?: string
+    /**
+     * Amazon Bedrock connection settings. Unlike the other providers, Bedrock
+     * is not configured by `apiKey` + `baseURL` alone — the auth mode decides
+     * whether credentials come from a key, explicit IAM, or the ambient AWS
+     * chain, and the endpoint derives from the region. `tryBuildTwinDeps`
+     * already forwards this; the type just never carried it.
+     */
+    bedrock?: BedrockConnectionSettings
   }
   vectorBackend?: "qdrant" | "pinecone" | "milvus" | "weaviate" | "chroma" | "native"
   vectorCollection?: string

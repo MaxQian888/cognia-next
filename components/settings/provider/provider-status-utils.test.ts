@@ -50,16 +50,18 @@ describe("deriveStatus", () => {
     expect(deriveStatus("sk-x", undefined, true)).toBe("connected")
   })
 
-  it("returns warning when configured but never tested", () => {
-    expect(deriveStatus("sk-x", undefined, undefined)).toBe("warning")
+  it("returns a neutral untested state when configured but never tested", () => {
+    // NOT "warning": a freshly configured provider has nothing wrong with it,
+    // and amber told the user otherwise on every reload.
+    expect(deriveStatus("sk-x", undefined, undefined)).toBe("untested")
   })
 
   it("treats a configured baseURL (no key) the same as a configured key", () => {
-    expect(deriveStatus(undefined, "https://x.example.com", undefined)).toBe("warning")
+    expect(deriveStatus(undefined, "https://x.example.com", undefined)).toBe("untested")
   })
 
   it("treats a validated keyless provider configuration as configured", () => {
-    expect(deriveStatus(undefined, undefined, undefined, undefined, true)).toBe("warning")
+    expect(deriveStatus(undefined, undefined, undefined, undefined, true)).toBe("untested")
   })
 
   it("falls back to persisted verification status when no in-session test exists", () => {

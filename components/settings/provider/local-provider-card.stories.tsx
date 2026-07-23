@@ -22,9 +22,11 @@ const meta = {
     latency: 38,
     onToggle: fn(),
     onBaseUrlChange: fn(),
-    onTestConnection: fn(
-      async (): Promise<TestResult> => ({ success: true, message: "Connected", latency: 38 })
-    ),
+    onTestConnection: fn(async (): Promise<TestResult> => ({
+      success: true,
+      message: "Connected",
+      latency: 38,
+    })),
     onManageModels: fn(),
   },
   decorators: [
@@ -47,9 +49,10 @@ export const Disconnected: Story = {
     modelsCount: undefined,
     latency: undefined,
     error: "Connection refused on http://localhost:11434",
-    onTestConnection: fn(
-      async (): Promise<TestResult> => ({ success: false, message: "Connection refused" })
-    ),
+    onTestConnection: fn(async (): Promise<TestResult> => ({
+      success: false,
+      message: "Connection refused",
+    })),
   },
 }
 

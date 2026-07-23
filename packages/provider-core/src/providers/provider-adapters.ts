@@ -118,6 +118,27 @@ const PROVIDER_ADAPTERS: Record<BuiltInProviderAdapterId, ProviderAdapterDefinit
       isLocal: false,
     },
   },
+  bedrock: {
+    id: "bedrock",
+    family: "bedrock-native",
+    protocol: "bedrock",
+    // `requiresCredential` is false because Bedrock's `default-chain` auth mode
+    // takes credentials from the ambient AWS chain (env / profile / instance
+    // role) — there is nothing for the user to paste. Which fields a given mode
+    // actually needs is decided per-mode by `validateBedrockConnectionSettings`,
+    // not by this coarse flag. `requiresBaseUrl` is false for the same reason:
+    // the endpoint is derived from the region, and `baseURL` is an override.
+    builtInDefaults: {
+      requiresCredential: false,
+      requiresBaseUrl: false,
+      isLocal: false,
+    },
+    customDefaults: {
+      requiresCredential: false,
+      requiresBaseUrl: false,
+      isLocal: false,
+    },
+  },
 }
 
 // Exhaustive over the BUILT-IN protocols only — plugin-contributed protocol
@@ -128,6 +149,7 @@ const PROTOCOL_ADAPTER_IDS: Record<BuiltInApiProtocol, BuiltInProviderAdapterId>
   openai: "openai-compatible",
   anthropic: "anthropic",
   gemini: "gemini",
+  bedrock: "bedrock",
 }
 
 function isBuiltInApiProtocol(protocol: ApiProtocol): protocol is BuiltInApiProtocol {

@@ -20,13 +20,11 @@ const meta = {
   args: {
     providerId: "openai",
     isTesting: false,
-    onTestConnection: fn(
-      async (): Promise<HealthResult> => ({
-        success: true,
-        latency: 142,
-        outcome: "verified",
-      })
-    ),
+    onTestConnection: fn(async (): Promise<HealthResult> => ({
+      success: true,
+      latency: 142,
+      outcome: "verified",
+    })),
   },
   decorators: [
     (Story) => (
@@ -47,12 +45,10 @@ export const Testing: Story = {
 
 export const FailingProbe: Story = {
   args: {
-    onTestConnection: fn(
-      async (): Promise<HealthResult> => ({
-        success: false,
-        error: "401 Unauthorized — invalid API key",
-        outcome: "failed",
-      })
-    ),
+    onTestConnection: fn(async (): Promise<HealthResult> => ({
+      success: false,
+      error: "401 Unauthorized — invalid API key",
+      outcome: "failed",
+    })),
   },
 }

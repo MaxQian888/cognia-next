@@ -21,7 +21,9 @@ jest.mock("next-intl", () => ({
       "detailPanel.setDefaultAria": "Use this provider for new chats by default",
       "detailPanel.warning": "Warning",
       "detailPanel.warningHint": "Configured but not verified",
+      "sidebar.statusUntested": "Not tested",
       verificationLimitedShort: "Limited",
+      delete: "Delete",
       "tabs.config": "Config",
       "tabs.models": "Models",
       "tabs.cost": "Cost",
@@ -38,12 +40,16 @@ describe("ProviderDetailPanel", () => {
     expect(screen.getByText("Select a provider to configure, or add a new one")).toBeInTheDocument()
   })
 
-  it("shows provider header and tabs when provider is selected", () => {
+  it("shows the provider header and every tab whose slot is filled", () => {
     render(
       <ProviderDetailPanel
         provider={{ id: "openai", name: "OpenAI", icon: "🤖", modelCount: 12 }}
         onToggleEnabled={jest.fn()}
         isEnabled={true}
+        configTab={<div />}
+        modelsTab={<div />}
+        costTab={<div />}
+        advancedTab={<div />}
       />
     )
     expect(screen.getByText("OpenAI")).toBeInTheDocument()
@@ -51,6 +57,26 @@ describe("ProviderDetailPanel", () => {
     expect(screen.getByText("Models")).toBeInTheDocument()
     expect(screen.getByText("Cost")).toBeInTheDocument()
     expect(screen.getByText("Advanced")).toBeInTheDocument()
+  })
+
+  it("hides the tabs whose slots are empty, keeping the shared header", () => {
+    // Lets a local inference engine live in this shell (header, enable switch,
+    // default badge, status) while showing only the Config tab that applies,
+    // instead of replacing the whole panel with a different layout.
+    render(
+      <ProviderDetailPanel
+        provider={{ id: "ollama", name: "Ollama", icon: "🦙" }}
+        onToggleEnabled={jest.fn()}
+        isEnabled={true}
+        configTab={<div data-testid="local-config" />}
+      />
+    )
+    expect(screen.getByText("Ollama")).toBeInTheDocument()
+    expect(screen.getByText("Config")).toBeInTheDocument()
+    expect(screen.getByTestId("local-config")).toBeInTheDocument()
+    expect(screen.queryByText("Models")).not.toBeInTheDocument()
+    expect(screen.queryByText("Cost")).not.toBeInTheDocument()
+    expect(screen.queryByText("Advanced")).not.toBeInTheDocument()
   })
 
   it("shows a green Connected badge for connectionStatus='connected'", () => {
@@ -76,6 +102,16 @@ describe("ProviderDetailPanel", () => {
     )
     expect(screen.getByText("Limited")).toBeInTheDocument()
     expect(screen.queryByText("Connected")).not.toBeInTheDocument()
+  })
+
+  it("shows a neutral Not tested badge for configured credentials that have not been verified", () => {
+    render(
+      <ProviderDetailPanel
+        provider={{ id: "openai", name: "OpenAI" }}
+        connectionStatus="untested"
+      />
+    )
+    expect(screen.getByText("Not tested")).toBeInTheDocument()
   })
 
   it("shows the Default badge (and no set-default button) when this provider is the default", () => {
@@ -121,5 +157,41 @@ describe("ProviderDetailPanel", () => {
       />
     )
     expect(screen.getByText("Not configured")).toBeInTheDocument()
+  })
+
+  it("renders the custom delete action and forwards the click", () => {
+    const onDelete = jest.fn()
+    render(
+      <ProviderDetailPanel
+        provider={{ id: "custom", name: "Custom" }}
+        isCustom
+        onDelete={onDelete}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }))
+    expect(onDelete).toHaveBeenCalledTimes(1)
+  })
+
+  it("forwards toggle-enabled changes", () => {
+    const onToggleEnabled = jest.fn()
+    render(
+      <ProviderDetailPanel
+        provider={{ id: "openai", name: "OpenAI" }}
+        isEnabled={false}
+        onToggleEnabled={onToggleEnabled}
+      />
+    )
+    fireEvent.click(screen.getByRole("switch"))
+    expect(onToggleEnabled).toHaveBeenCalledWith(true)
+  })
+
+  it("renders tab content slots when provided", () => {
+    render(
+      <ProviderDetailPanel
+        provider={{ id: "openai", name: "OpenAI" }}
+        configTab={<div>Config content</div>}
+      />
+    )
+    expect(screen.getByText("Config content")).toBeInTheDocument()
   })
 })

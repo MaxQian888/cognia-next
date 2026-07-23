@@ -36,15 +36,22 @@ describe("protocol-adapter renderer ↔ sidecar parity", () => {
   })
 
   it("sidecar builtins not in the renderer set are AI-SDK-only families", () => {
-    // mistral/cohere/azure/bedrock have no custom-provider picker entry — they're
-    // configured as built-in catalog providers (azure/bedrock) or dispatched via
-    // an aggregator — but all must be dispatchable; google is gemini's wire name.
+    // mistral/cohere/azure have no custom-provider picker entry — they're
+    // configured as built-in catalog providers (azure) or dispatched via an
+    // aggregator — but all must be dispatchable; google is gemini's wire name.
     // Pin the exact remainder so an unnoticed addition forces a conscious update.
+    //
+    // `bedrock` left this list when it became a renderer builtin protocol
+    // (`BuiltInApiProtocol` + `BUILTIN_API_PROTOCOLS`): it now has a first-class
+    // catalog entry, a settings form, and its own adapter in PROVIDER_ADAPTERS,
+    // so it is renderer-mapped rather than sidecar-only. Execution still happens
+    // in the sidecar (`amazon-bedrock.sidecar`), which is what the first parity
+    // assertion above covers.
     const rendererMapped = new Set(BUILTIN_API_PROTOCOLS.map((p) => RENDERER_TO_SIDECAR[p] ?? p))
     const remainder = [...(SIDECAR_BUILTIN_PROTOCOLS as Set<string>)]
       .filter((p) => !rendererMapped.has(p))
       .sort()
-    expect(remainder).toEqual(["azure", "bedrock", "cohere", "mistral"])
+    expect(remainder).toEqual(["azure", "cohere", "mistral"])
   })
 
   it("a canonical renderer spec validates against the sidecar adapter", () => {

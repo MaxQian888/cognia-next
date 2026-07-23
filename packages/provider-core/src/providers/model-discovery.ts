@@ -10,10 +10,7 @@ import type {
 import { proxyFetch } from "./runtime-adapters"
 
 export type ProviderModelSource =
-  | "catalog-static"
-  | "models-dev"
-  | "remote-discovered"
-  | "user-curated"
+  "catalog-static" | "models-dev" | "remote-discovered" | "user-curated"
 export type ProviderModelFreshness = "static" | "fresh" | "stale"
 
 export type ProviderModelCandidate = ProviderModelDiscoveryEntry

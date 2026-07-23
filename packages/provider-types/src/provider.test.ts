@@ -21,7 +21,7 @@ describe("provider catalog fallback", () => {
   })
 
   it("exposes built-in API protocols and merges dynamic providers", () => {
-    expect(BUILTIN_API_PROTOCOLS).toEqual(["openai", "anthropic", "gemini"])
+    expect(BUILTIN_API_PROTOCOLS).toEqual(["openai", "anthropic", "gemini", "bedrock"])
     expect(getAllProviders().openai).toBe(PROVIDERS.openai)
   })
 })

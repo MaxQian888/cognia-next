@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo } from "react"
 import { useTranslations } from "next-intl"
-import { Search, RefreshCw, Loader2, ArrowUpDown, X } from "lucide-react"
+import { Search, RefreshCw, Loader2, ArrowUpDown, X, PlugZap } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -64,7 +64,19 @@ export interface ProviderModelsTabProps {
   models: ModelConfig[]
   enabledModels: string[]
   onEnabledModelsChange: (modelIds: string[]) => void
-  onTestConnection: () => void
+  /**
+   * Re-fetch the provider's model list. This used to be `onTestConnection`,
+   * which is a different operation entirely — the button said "Refresh models"
+   * and ran a connection test, changing no models for any provider but Bedrock.
+   */
+  onRefreshModels: () => void
+  isRefreshing?: boolean
+  /**
+   * Verify credentials/reachability. Separate from `onRefreshModels` on
+   * purpose: one button used to do both jobs under the refresh label and
+   * actually performed only this one.
+   */
+  onTestConnection?: () => void
   isTesting?: boolean
 }
 
@@ -202,6 +214,8 @@ export function ProviderModelsTab({
   models,
   enabledModels,
   onEnabledModelsChange,
+  onRefreshModels,
+  isRefreshing = false,
   onTestConnection,
   isTesting = false,
 }: ProviderModelsTabProps) {
@@ -310,14 +324,30 @@ export function ProviderModelsTab({
             className="pl-8"
           />
         </div>
-        <Button variant="outline" size="sm" onClick={onTestConnection} disabled={isTesting}>
-          {isTesting ? (
+        <Button variant="outline" size="sm" onClick={onRefreshModels} disabled={isRefreshing}>
+          {isRefreshing ? (
             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
           ) : (
             <RefreshCw className="h-4 w-4 mr-2" />
           )}
           {t("modelsTab.refreshModels")}
         </Button>
+        {onTestConnection && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onTestConnection}
+            disabled={isTesting}
+            data-testid="models-tab-test-connection"
+          >
+            {isTesting ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <PlugZap className="h-4 w-4 mr-2" />
+            )}
+            {t("testConnection")}
+          </Button>
+        )}
       </div>
 
       {/* Filter toolbar — only when models exist */}
@@ -415,7 +445,7 @@ export function ProviderModelsTab({
 
       {/* Model grid */}
       {filtered.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 @2xl/provider-pane:grid-cols-2">
           {filtered.map((model) => (
             <ModelCard
               key={model.id}

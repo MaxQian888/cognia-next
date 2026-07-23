@@ -110,11 +110,7 @@ export type SimpleBYOKConfig = string
 
 // Union type for all BYOK configurations
 export type BYOKConfig =
-  | SimpleBYOKConfig
-  | AzureBYOKConfig
-  | AzureBYOKConfig[]
-  | BedrockBYOKConfig
-  | VertexBYOKConfig
+  SimpleBYOKConfig | AzureBYOKConfig | AzureBYOKConfig[] | BedrockBYOKConfig | VertexBYOKConfig
 
 // Note: BYOKKeyEntry is defined in @/types/provider for use across the app
 // This file contains the config types used within those entries

@@ -165,8 +165,7 @@ export interface CodeAdapterUiToolApprovalRequestChunk {
 }
 
 export type CodeAdapterToolApprovalRequestChunk =
-  | CodeAdapterFullStreamToolApprovalRequestChunk
-  | CodeAdapterUiToolApprovalRequestChunk
+  CodeAdapterFullStreamToolApprovalRequestChunk | CodeAdapterUiToolApprovalRequestChunk
 
 export interface CodeAdapterToolResultChunk {
   type: "tool-result"

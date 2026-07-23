@@ -16,6 +16,8 @@ jest.mock("next-intl", () => ({
       "sidebar.statusConnected": "Connected",
       "sidebar.statusUnconfigured": "Unconfigured",
       "sidebar.statusError": "Error",
+      "sidebar.noMatches": "No providers match these filters.",
+      "sidebar.clearFilters": "Clear filters",
       "categories.all": "All",
       "categories.ai": "AI",
       "categories.local": "Local",
@@ -94,6 +96,66 @@ describe("ProviderSidebar", () => {
     // Auto width + nowrap triggers = the strip can overflow and scroll.
     expect(list).toHaveClass("w-max")
     expect(list?.parentElement).toHaveClass("overflow-x-auto")
+  })
+
+  describe("empty list", () => {
+    it("keeps the search box and category tabs when nothing matches", () => {
+      // The whole sidebar used to be replaced by the empty state, taking these
+      // controls with it — so picking a category with no matches left no way
+      // to undo the filter.
+      render(<ProviderSidebar {...defaultProps} providers={[]} categoryFilter="custom" />)
+      expect(screen.getByPlaceholderText("Search providers...")).toBeInTheDocument()
+      expect(screen.getByText("Custom")).toBeInTheDocument()
+    })
+
+    it("explains a filtered-to-nothing list and offers a way out", () => {
+      const onClearFilters = jest.fn()
+      const onCategoryChange = jest.fn()
+      render(
+        <ProviderSidebar
+          {...defaultProps}
+          providers={[]}
+          categoryFilter="custom"
+          hasActiveFilters
+          onClearFilters={onClearFilters}
+          onCategoryChange={onCategoryChange}
+          emptyState={<div data-testid="empty-state" />}
+        />
+      )
+      expect(screen.getByText("No providers match these filters.")).toBeInTheDocument()
+      expect(screen.queryByTestId("empty-state")).not.toBeInTheDocument()
+
+      fireEvent.click(screen.getByText("Clear filters"))
+      expect(onClearFilters).toHaveBeenCalled()
+    })
+
+    it("shows the real empty state when no filter is responsible", () => {
+      render(
+        <ProviderSidebar
+          {...defaultProps}
+          providers={[]}
+          emptyState={<div data-testid="empty-state" />}
+        />
+      )
+      expect(screen.getByTestId("empty-state")).toBeInTheDocument()
+      expect(screen.queryByText("No providers match these filters.")).not.toBeInTheDocument()
+    })
+
+    it("treats its own status filter as a filter, and clearing resets it", () => {
+      render(
+        <ProviderSidebar
+          {...defaultProps}
+          providers={[mockProviders[2]]}
+          emptyState={<div data-testid="empty-state" />}
+        />
+      )
+      // Narrow to "Connected" while only an unconfigured provider exists.
+      fireEvent.click(screen.getByText("Connected"))
+      expect(screen.getByText("No providers match these filters.")).toBeInTheDocument()
+
+      fireEvent.click(screen.getByText("Clear filters"))
+      expect(screen.getByText("Google")).toBeInTheDocument()
+    })
   })
 
   it("filters the visible list by connection status", () => {

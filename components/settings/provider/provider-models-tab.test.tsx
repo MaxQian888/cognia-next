@@ -87,8 +87,8 @@ const defaultProps = {
   models: mockModels,
   enabledModels: ["gpt-4o"],
   onEnabledModelsChange: jest.fn(),
-  onTestConnection: jest.fn(),
-  isTesting: false,
+  onRefreshModels: jest.fn(),
+  isRefreshing: false,
 }
 
 describe("ProviderModelsTab", () => {
@@ -235,18 +235,38 @@ describe("ProviderModelsTab", () => {
     expect(screen.queryByTestId("switch")).not.toBeInTheDocument()
   })
 
-  // ── 6. Refresh button calls onTestConnection ───────────────────────────────
+  // ── 6. Refresh button calls onRefreshModels ───────────────────────────────
 
-  it("calls onTestConnection when refresh button is clicked", () => {
+  it("offers a connection test that is distinct from the model refresh", () => {
+    const onRefreshModels = jest.fn()
     const onTestConnection = jest.fn()
-    render(<ProviderModelsTab {...defaultProps} onTestConnection={onTestConnection} />)
+    render(
+      <ProviderModelsTab
+        {...defaultProps}
+        onRefreshModels={onRefreshModels}
+        onTestConnection={onTestConnection}
+      />
+    )
+    fireEvent.click(screen.getByTestId("models-tab-test-connection"))
+    expect(onTestConnection).toHaveBeenCalledTimes(1)
+    expect(onRefreshModels).not.toHaveBeenCalled()
+  })
+
+  it("hides the connection test when no handler is supplied", () => {
+    render(<ProviderModelsTab {...defaultProps} />)
+    expect(screen.queryByTestId("models-tab-test-connection")).not.toBeInTheDocument()
+  })
+
+  it("calls onRefreshModels when refresh button is clicked", () => {
+    const onRefreshModels = jest.fn()
+    render(<ProviderModelsTab {...defaultProps} onRefreshModels={onRefreshModels} />)
     const refreshButton = screen.getByText("Refresh Model List")
     fireEvent.click(refreshButton)
-    expect(onTestConnection).toHaveBeenCalledTimes(1)
+    expect(onRefreshModels).toHaveBeenCalledTimes(1)
   })
 
   it("disables refresh button while refreshing", () => {
-    render(<ProviderModelsTab {...defaultProps} isTesting={true} />)
+    render(<ProviderModelsTab {...defaultProps} isRefreshing={true} />)
     const refreshButton = screen.getByText("Refresh Model List").closest("button")
     expect(refreshButton).toBeDisabled()
   })

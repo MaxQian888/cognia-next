@@ -30,7 +30,7 @@ interface ProviderDetailPanelProps {
   isEnabled?: boolean
   isTesting?: boolean
   isCustom?: boolean
-  connectionStatus?: "connected" | "error" | "not-configured" | "warning" | "limited"
+  connectionStatus?: "connected" | "error" | "not-configured" | "warning" | "limited" | "untested"
   /** Tab content slots — passed by parent to inject actual tab components */
   configTab?: React.ReactNode
   modelsTab?: React.ReactNode
@@ -106,7 +106,7 @@ export function ProviderDetailPanel({
               variant="outline"
               className="border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-950 dark:text-green-400"
             >
-              {t("detailPanel.connected") || "Connected"}
+              {t("detailPanel.connected")}
             </Badge>
           )}
           {connectionStatus === "error" && (
@@ -114,7 +114,7 @@ export function ProviderDetailPanel({
               variant="outline"
               className="border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-400"
             >
-              {t("detailPanel.connectionFailed") || "Error"}
+              {t("detailPanel.connectionFailed")}
             </Badge>
           )}
           {connectionStatus === "limited" && (
@@ -122,25 +122,30 @@ export function ProviderDetailPanel({
               variant="outline"
               className="border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-400"
             >
-              {t("verificationLimitedShort") || "Limited"}
+              {t("verificationLimitedShort")}
+            </Badge>
+          )}
+          {connectionStatus === "untested" && (
+            <Badge variant="outline" className="text-muted-foreground">
+              {t("sidebar.statusUntested")}
             </Badge>
           )}
           {connectionStatus === "warning" && (
             <Badge
               variant="outline"
-              title={t("detailPanel.warningHint") || "Configured but not verified"}
+              title={t("detailPanel.warningHint")}
               className="border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-400"
             >
-              {t("detailPanel.warning") || "Warning"}
+              {t("detailPanel.warning")}
             </Badge>
           )}
           {connectionStatus === "not-configured" && (
             <Badge
               variant="outline"
               className="text-muted-foreground"
-              title={t("detailPanel.notConfiguredHint") || "Add credentials to use this provider"}
+              title={t("detailPanel.notConfiguredHint")}
             >
-              {t("detailPanel.notConfigured") || "Not configured"}
+              {t("detailPanel.notConfigured")}
             </Badge>
           )}
           {isCustom && onDelete && (
@@ -149,6 +154,7 @@ export function ProviderDetailPanel({
               size="icon"
               className="h-8 w-8 text-muted-foreground hover:text-destructive"
               onClick={onDelete}
+              aria-label={t("delete")}
             >
               <Trash2 className="h-4 w-4" />
             </Button>
@@ -159,27 +165,35 @@ export function ProviderDetailPanel({
 
       {/* Tabs */}
       <Tabs defaultValue="config" className="flex flex-1 flex-col overflow-hidden">
+        {/* A tab appears only when its slot is filled. Local inference engines
+            have no cloud models/cost/routing story, so they render just Config
+            — and still keep the shared header (enable switch, default badge,
+            status) instead of replacing the whole panel with a foreign shell. */}
         <TabsList className="w-full shrink-0 justify-start rounded-none border-b bg-transparent px-4">
           <TabsTrigger value="config">{t("tabs.config")}</TabsTrigger>
-          <TabsTrigger value="models">{t("tabs.models")}</TabsTrigger>
-          <TabsTrigger value="cost">{t("tabs.cost")}</TabsTrigger>
-          <TabsTrigger value="advanced">{t("tabs.advanced")}</TabsTrigger>
+          {modelsTab && <TabsTrigger value="models">{t("tabs.models")}</TabsTrigger>}
+          {costTab && <TabsTrigger value="cost">{t("tabs.cost")}</TabsTrigger>}
+          {advancedTab && <TabsTrigger value="advanced">{t("tabs.advanced")}</TabsTrigger>}
         </TabsList>
         <div className="flex-1 overflow-y-auto">
           <TabsContent value="config" className="m-0 p-4">
-            {configTab ?? <div>{t("detailPanel.configPlaceholder") || "Config placeholder"}</div>}
+            {configTab ?? <div>{t("detailPanel.configPlaceholder")}</div>}
           </TabsContent>
-          <TabsContent value="models" className="m-0 p-4">
-            {modelsTab ?? <div>{t("detailPanel.modelsPlaceholder") || "Models placeholder"}</div>}
-          </TabsContent>
-          <TabsContent value="cost" className="m-0 p-4">
-            {costTab ?? <div>{t("detailPanel.costPlaceholder") || "Cost placeholder"}</div>}
-          </TabsContent>
-          <TabsContent value="advanced" className="m-0 p-4">
-            {advancedTab ?? (
-              <div>{t("detailPanel.advancedPlaceholder") || "Advanced placeholder"}</div>
-            )}
-          </TabsContent>
+          {modelsTab && (
+            <TabsContent value="models" className="m-0 p-4">
+              {modelsTab}
+            </TabsContent>
+          )}
+          {costTab && (
+            <TabsContent value="cost" className="m-0 p-4">
+              {costTab}
+            </TabsContent>
+          )}
+          {advancedTab && (
+            <TabsContent value="advanced" className="m-0 p-4">
+              {advancedTab}
+            </TabsContent>
+          )}
         </div>
       </Tabs>
     </div>

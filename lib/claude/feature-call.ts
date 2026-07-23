@@ -21,7 +21,17 @@ const SIDECAR_EVENT = "claude://message"
 
 interface FeatureCallDependencies {
   call: (command: string, args?: Record<string, unknown>) => Promise<unknown>
-  subscribe: (event: string, handler: (event: ClaudeEvent) => void) => Promise<() => void>
+  /**
+   * Returns the unsubscribe handle, synchronously or not: the real
+   * `transport.subscribe` is sync (`() => void`, see `lib/tauri/transport-types.ts`)
+   * while the tests inject an async one. `ensureListener` awaits the result
+   * either way, so both are correct — the union is what makes the declared
+   * contract match reality.
+   */
+  subscribe: (
+    event: string,
+    handler: (event: ClaudeEvent) => void
+  ) => (() => void) | Promise<() => void>
   randomUUID: () => string
 }
 
@@ -57,7 +67,7 @@ function abortError(): DOMException {
 
 export function createSidecarFeatureCallClient(deps: FeatureCallDependencies) {
   const pending = new Map<string, Pending>()
-  let listener: Promise<() => void> | undefined
+  let listener: (() => void) | Promise<() => void> | undefined
 
   function settle(event: FeatureCallEvent) {
     const entry = pending.get(event.requestId)

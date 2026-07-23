@@ -19,10 +19,7 @@ function resolveEffectiveBaseURL(providerId: string, settings?: SettingsLike): s
 export type ProviderReadinessState = "unconfigured" | "configured" | "verified"
 
 export type ProviderGuardCode =
-  | "provider_disabled"
-  | "missing_credential"
-  | "missing_base_url"
-  | "invalid_base_url"
+  "provider_disabled" | "missing_credential" | "missing_base_url" | "invalid_base_url"
 
 export type ProviderNextAction =
   | "enable_provider"
@@ -46,10 +43,7 @@ export interface ProviderRequirements {
 }
 
 export type ProviderSetupChecklistStepId =
-  | "credential"
-  | "base_url"
-  | "default_model"
-  | "verification"
+  "credential" | "base_url" | "default_model" | "verification"
 
 export interface ProviderSetupChecklistStep {
   id: ProviderSetupChecklistStepId
