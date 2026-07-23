@@ -38,6 +38,7 @@ import {
   attentionCount,
   attentionSeverity,
   fleetStatusSummary,
+  normalizeIslandGeometry,
   sortForIsland,
 } from "@/lib/fleet/format"
 import {
@@ -63,8 +64,25 @@ export const ISLAND_PEEK_HEIGHT = 6
 export const ISLAND_TUCK_DELAY_MS = 1500
 /** Window-shrink deferral: the 300ms width transition plus a settle margin. */
 export const ISLAND_SHRINK_SETTLE_MS = 320
+/**
+ * Window height (logical px) while the island is fully withdrawn on a
+ * full-screen Space. Not zero — a zero-sized window is a degenerate case for
+ * the OS window layer, and Rust clamps it to 1 anyway.
+ */
+export const ISLAND_HIDDEN_HEIGHT = 1
 /** Per-row entrance stagger step in the expanded list. */
 export const ISLAND_ROW_STAGGER_MS = 30
+/**
+ * Session count from which rows switch to their compact shape.
+ *
+ * A row can render up to eight stacked blocks (meta chips, detail, last prompt,
+ * error, permission controls, question card, plan preview, subagent chips), so
+ * three busy sessions already fill the list's 420px cap and the rest scroll out
+ * of sight. Past this threshold the rows keep only what the user must act on
+ * and fold the rest behind their existing chevron — triage beats detail once
+ * the fleet is big enough that you're scanning rather than reading.
+ */
+export const ISLAND_COMPACT_THRESHOLD = 4
 
 export function IslandShell() {
   const t = useTranslations("fleet.island")
@@ -73,6 +91,7 @@ export function IslandShell() {
   const [pinnedOpen, setPinnedOpen] = useState(false)
   const [tucked, setTucked] = useState(false)
   const [topInset, setTopInset] = useState(0)
+  const [fullscreen, setFullscreen] = useState(false)
   // Which rows have their detail panel expanded (keyed by agent:sessionId).
   // Owned here — not in the row — so the resize effect can key `contentKey` on
   // it: an expanded row is taller, and the frameless window must re-hug it.
@@ -86,20 +105,30 @@ export function IslandShell() {
     })
   }, [])
   const cardRef = useRef<HTMLDivElement | null>(null)
-  const insetRef = useRef(0)
+  // Measured separately from the card: the card's height is the *animated*
+  // value, so measuring it would feed the animation back into itself.
+  const contentRef = useRef<HTMLDivElement | null>(null)
+  const geometryRef = useRef<IslandGeometry>({ topInset: 0, fullscreen: false })
 
-  // Top safe-area inset (notch height, logical px) of the island's display.
-  // The window spans the notch strip (so slam-to-top hover still lands on the
-  // window); the card is padded below the inset so its content clears the
-  // camera housing. The value comes back from every `island_resize`, and Rust
-  // pushes `fleet://island-geometry` when a monitor change may have altered it.
-  // Ref-guarded so an unchanged inset never schedules a state update (the
-  // resize promise resolves outside React's act/event scope).
-  const applyInset = useCallback((raw: unknown) => {
-    const next = typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : 0
-    if (insetRef.current === next) return
-    insetRef.current = next
-    setTopInset(next)
+  // Display geometry for the island's screen.
+  //
+  // `topInset` is the notch height (logical px): the window spans the notch
+  // strip (so slam-to-top hover still lands on the window) and the card is
+  // padded below the inset so its content clears the camera housing.
+  // `fullscreen` says a full-screen app owns this display right now.
+  //
+  // Both arrive two ways: as the return of every `island_resize` (so the very
+  // first layout already knows the regime) and as a `fleet://island-geometry`
+  // push when Rust's watch loop notices a Space switch or monitor change.
+  // Ref-guarded so an unchanged sample never schedules a state update — the
+  // resize promise resolves outside React's act/event scope.
+  const applyGeometry = useCallback((raw: unknown) => {
+    const next = normalizeIslandGeometry(raw)
+    const prev = geometryRef.current
+    if (prev.topInset === next.topInset && prev.fullscreen === next.fullscreen) return
+    geometryRef.current = next
+    setTopInset(next.topInset)
+    setFullscreen(next.fullscreen)
   }, [])
 
   useEffect(() => {
@@ -112,7 +141,7 @@ export function IslandShell() {
       if (!alive) return
       const uns = await Promise.all([
         listen<IslandGeometry>(FLEET_ISLAND_GEOMETRY_EVENT, (e) => {
-          if (alive) applyInset(e.payload?.topInset)
+          if (alive) applyGeometry(e.payload)
         }),
         // Authoritative hover: while tucked the window is click-through, so
         // the DOM never sees mouseenter — Rust polls the global cursor and
@@ -133,7 +162,7 @@ export function IslandShell() {
       alive = false
       unlistens.forEach(safeUnlisten)
     }
-  }, [applyInset])
+  }, [applyGeometry])
 
   const sessions = sortForIsland(snapshot.sessions)
   const waiting = attentionCount(snapshot.sessions)
@@ -143,6 +172,7 @@ export function IslandShell() {
 
   // Per-status counts for the expanded triage legend. Buckets with a zero
   // count are dropped so the legend only ever shows what's actually present.
+  const compactRows = sessions.length >= ISLAND_COMPACT_THRESHOLD
   const summary = fleetStatusSummary(sessions)
   const legendSegments = [
     { key: "needsYou", count: summary.attention, dot: "bg-amber-400" },
@@ -200,45 +230,84 @@ export function IslandShell() {
   if (tucked && !shouldTuck) {
     setTucked(false)
   }
+
+  // Full-screen Space: the top strip belongs to that app. An idle status pill
+  // parked there is noise over a video / presentation / editor, and even the
+  // 6px tucked sliver is a visible black bar. So while a full-screen app owns
+  // this display the island withdraws COMPLETELY — nothing painted, window
+  // shrunk to a sliver and click-through — and materializes only when a session
+  // actually needs the user. Hover reveal is deliberately not a way back in
+  // here: slamming to the top of a full-screen app is how you reach that app's
+  // own menu bar, and two overlays fighting for that gesture is worse than
+  // neither. A pin the user placed before going full-screen still wins.
+  const hiddenEntirely = fullscreen && waiting === 0 && !pinnedOpen && !forceExpanded
   useEffect(() => {
     if (!shouldTuck) return undefined
     const timer = setTimeout(() => setTucked(true), ISLAND_TUCK_DELAY_MS)
     return () => clearTimeout(timer)
   }, [shouldTuck])
 
-  // Mirror the tuck state to the window layer: a tucked island's window turns
-  // click-through (so the invisible pill strip under the notch can't swallow
-  // clicks meant for the menu bar behind it); untucking restores
-  // interactivity. The reveal path stays alive via `fleet://island-hover`.
+  // Mirror the non-interactive state to the window layer: a tucked island's
+  // window turns click-through (so the invisible pill strip under the notch
+  // can't swallow clicks meant for the menu bar behind it), and a fully
+  // withdrawn one must be click-through for the same reason with even less
+  // excuse. Untucking restores interactivity. The reveal path stays alive via
+  // `fleet://island-hover`.
+  const clickThrough = tucked || hiddenEntirely
+  // Mirrored into a ref (inside the effect — writing a ref during render is
+  // blocked by `react-hooks/refs`) so the deferred-shrink path below can
+  // restore the *current* interactivity when its timer fires, rather than the
+  // value that was true when the timer was armed.
+  const clickThroughRef = useRef(clickThrough)
   useEffect(() => {
-    void islandSetTucked(tucked)
-  }, [tucked])
+    clickThroughRef.current = clickThrough
+    void islandSetTucked(clickThrough)
+  }, [clickThrough])
 
-  // Report the measured content size to the window layer after every paint
-  // where shape/content changed. useLayoutEffect: resize before the frame is
-  // shown, so expand/collapse doesn't flash a clipped island. While tucked the
-  // card is pill-only (tucking requires no hover/pin/force-expand, so
-  // `expanded` is false), and the window stays at the pill footprint and
-  // keeps catching hover.
+  // Measure the content, drive the card's animated height, and report the
+  // window size — all in one layout effect, because they must agree.
   //
-  // Grow-now / shrink-later: the card's width animates over 300ms, but the OS
-  // window resize is instant. Growing the window ahead of the animation is
-  // invisible (the extra area is transparent); shrinking it instantly clips
-  // the still-animating card at the window edge. So any dimension that grows
-  // is applied immediately, and the shrink to the final size is deferred until
-  // the CSS transition has settled.
+  // The card's height is written straight to the DOM node rather than held in
+  // state: a measurement can only be taken in an effect, and this repo's
+  // `react-hooks/set-state-in-effect` rule (rightly) blocks setState there.
+  // Writing the animated property imperatively sidesteps the round-trip
+  // entirely — the CSS transition animates it exactly the same way.
+  //
+  // The list stays mounted whenever there are sessions; `expanded` only chooses
+  // between the pill height and the full content height. That is what gives the
+  // collapse a real exit animation: the card's height eases down while the list
+  // fades out and `overflow-hidden` wipes it, instead of the list vanishing in
+  // one frame while an empty shell kept animating its width for 300ms.
+  //
+  // Grow-now / shrink-later: the card animates over 300ms but the OS window
+  // resize is instant. Growing the window ahead of the animation is invisible
+  // (the extra area is transparent); shrinking it instantly clips the
+  // still-animating card at the window edge. So any dimension that grows is
+  // applied immediately and the shrink is deferred until the transition settles.
   const width = expanded ? ISLAND_EXPANDED_WIDTH : ISLAND_COLLAPSED_WIDTH
   const lastSizeRef = useRef({ w: 0, h: 0 })
   const lastInsetRef = useRef(0)
   useLayoutEffect(() => {
-    const el = cardRef.current
-    if (!el) return
-    // Rust grows the window by the display's top inset and returns that inset;
-    // `Promise.resolve` tolerates sloppy test doubles that return undefined.
+    const card = cardRef.current
+    // While withdrawn there is no card to measure — the window still has to be
+    // told to shrink, so this path reports a fixed sliver instead of bailing.
+    if (!card && !hiddenEntirely) return
+    // Rust grows the window by the display's top inset and returns the full
+    // geometry; `Promise.resolve` tolerates sloppy test doubles that return
+    // undefined.
     const report = (w: number, h: number) => {
-      void Promise.resolve(islandResize(w, h)).then(applyInset)
+      void Promise.resolve(islandResize(w, h)).then(applyGeometry)
     }
-    const height = Math.max(ISLAND_PILL_HEIGHT, Math.ceil(el.getBoundingClientRect().height))
+
+    const content = contentRef.current
+    const measured = content ? Math.ceil(content.getBoundingClientRect().height) : 0
+    const height = hiddenEntirely
+      ? ISLAND_HIDDEN_HEIGHT
+      : expanded
+        ? Math.max(ISLAND_PILL_HEIGHT, measured)
+        : ISLAND_PILL_HEIGHT
+    if (card) card.style.height = `${height}px`
+
     const prev = lastSizeRef.current
     const growW = Math.max(width, prev.w)
     const growH = Math.max(height, prev.h)
@@ -251,19 +320,55 @@ export function IslandShell() {
       report(growW, growH)
     }
     if (width >= growW && height >= growH) return
+
+    // A shrink is pending, so for the next ~320ms the window is larger than
+    // what is painted in it. That surplus is transparent but still hit-tested,
+    // and it sits at the top-center of the screen — it used to swallow clicks
+    // aimed at whatever is behind. Make the window click-through for the
+    // duration, but ONLY when the pointer isn't on the island: a session ending
+    // while the user hovers the expanded list also shrinks it, and going
+    // click-through there would eat the click they are about to make.
+    const surplusIsDead = !hovering && !pinnedOpen
+    if (surplusIsDead) void islandSetTucked(true)
+    const restore = () => {
+      if (surplusIsDead) void islandSetTucked(clickThroughRef.current)
+    }
     const timer = setTimeout(() => {
       lastSizeRef.current = { w: width, h: height }
       report(width, height)
+      restore()
     }, ISLAND_SHRINK_SETTLE_MS)
-    return () => clearTimeout(timer)
-  }, [width, expanded, sessions.length, contentKey, topInset, applyInset])
+    return () => {
+      clearTimeout(timer)
+      restore()
+    }
+  }, [
+    width,
+    expanded,
+    hiddenEntirely,
+    hovering,
+    pinnedOpen,
+    sessions.length,
+    contentKey,
+    topInset,
+    applyGeometry,
+  ])
 
   const toggle = useCallback(() => setPinnedOpen((v) => !v), [])
+
+  if (hiddenEntirely) {
+    // Nothing painted at all — not the pill, not the tucked sliver, not the
+    // hover zone. The window is a click-through sliver until something needs
+    // the user, at which point `hiddenEntirely` flips and the normal shell
+    // renders and re-reports its size.
+    return <div data-testid="island-hidden" data-fullscreen="true" className="w-full" />
+  }
 
   return (
     <div
       data-testid="island-hover-zone"
       className="w-full"
+      data-fullscreen={fullscreen ? "true" : "false"}
       style={{ minHeight: ISLAND_PILL_HEIGHT + topInset }}
       onMouseEnter={() => setHovering(true)}
       onMouseLeave={() => setHovering(false)}
@@ -282,84 +387,108 @@ export function IslandShell() {
           data-testid="island-shell"
           data-expanded={expanded ? "true" : "false"}
           data-tucked={tucked ? "true" : "false"}
-          className="relative mx-auto select-none overflow-hidden rounded-2xl border border-white/10 bg-black/85 text-white shadow-2xl backdrop-blur-xl transition-[transform,width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] will-change-transform motion-reduce:transition-none"
+          // Height joins transform and width in the transition: it is written
+          // imperatively by the layout effect above, so expanding and
+          // collapsing ease together instead of the width sliding while the
+          // height jumps in one frame.
+          className="relative mx-auto select-none overflow-hidden rounded-2xl border border-white/10 bg-black/85 text-white shadow-2xl backdrop-blur-xl transition-[transform,width,height] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] will-change-transform motion-reduce:transition-none"
           style={{
             width,
+            // Seed the pill height so the first painted frame isn't zero-height
+            // (the layout effect takes over immediately after).
+            height: ISLAND_PILL_HEIGHT,
             transform: tucked
               ? `translateY(${ISLAND_PEEK_HEIGHT - ISLAND_PILL_HEIGHT}px)`
               : "translateY(0px)",
           }}
         >
-          <button
-            type="button"
-            data-testid="island-pill"
-            onClick={toggle}
-            aria-expanded={expanded}
-            aria-label={t("toggle")}
-            className={cn(
-              "flex h-11 w-full items-center justify-center gap-2 px-4 text-xs text-white/80 transition-opacity duration-200",
-              tucked && "opacity-0"
-            )}
-          >
-            <span
-              aria-hidden
+          <div ref={contentRef} data-testid="island-content">
+            <button
+              type="button"
+              data-testid="island-pill"
+              onClick={toggle}
+              aria-expanded={expanded}
+              aria-label={t("toggle")}
               className={cn(
-                "size-1.5 rounded-full transition-colors duration-300",
-                waiting > 0
-                  ? "animate-pulse bg-amber-400"
-                  : sessions.length > 0
-                    ? "bg-emerald-400"
-                    : "bg-white/30"
+                "flex h-11 w-full items-center justify-center gap-2 px-4 text-xs text-white/80 transition-opacity duration-200",
+                tucked && "opacity-0"
               )}
-            />
-            <span data-testid="island-summary">
-              {sessions.length === 0
-                ? t("empty")
-                : waiting > 0
-                  ? t("summaryWaiting", { count: sessions.length, waiting })
-                  : t("summary", { count: sessions.length })}
-            </span>
-          </button>
+            >
+              <span
+                aria-hidden
+                className={cn(
+                  "size-1.5 rounded-full transition-colors duration-300",
+                  waiting > 0
+                    ? "animate-pulse bg-amber-400"
+                    : sessions.length > 0
+                      ? "bg-emerald-400"
+                      : "bg-white/30"
+                )}
+              />
+              <span data-testid="island-summary">
+                {sessions.length === 0
+                  ? t("empty")
+                  : waiting > 0
+                    ? t("summaryWaiting", { count: sessions.length, waiting })
+                    : t("summary", { count: sessions.length })}
+              </span>
+            </button>
 
-          {expanded && sessions.length > 0 ? (
-            <>
-              {sessions.length >= 2 && legendSegments.length > 0 ? (
-                <div
-                  data-testid="island-legend"
-                  className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pb-1.5 text-[10px] text-white/50 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200"
-                >
-                  {legendSegments.map((seg) => (
-                    <span
-                      key={seg.key}
-                      data-testid={`island-legend-${seg.key}`}
-                      className="inline-flex items-center gap-1 tabular-nums"
-                    >
-                      <span aria-hidden className={cn("size-1.5 rounded-full", seg.dot)} />
-                      {t(`legend.${seg.key}`, { count: seg.count })}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
+            {/*
+             * The list stays mounted whenever there are sessions and only fades
+             * with `expanded` — the card's animating height plus `overflow-hidden`
+             * is what reveals and hides it. Unmounting on collapse is what made
+             * the old close a hard cut: `animate-in` has no counterpart, so the
+             * content disappeared in one frame while the shell kept easing.
+             */}
+            {sessions.length > 0 ? (
               <div
-                className="flex max-h-[420px] flex-col gap-0.5 overflow-y-auto px-1 pb-2 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1 motion-safe:duration-200"
-                data-testid="island-list"
+                data-testid="island-body"
+                aria-hidden={!expanded}
+                className={cn(
+                  "transition-opacity duration-200 ease-out motion-reduce:transition-none",
+                  expanded ? "opacity-100" : "pointer-events-none opacity-0"
+                )}
               >
-                {sessions.map((s, i) => {
-                  const key = `${s.agent}:${s.sessionId}`
-                  return (
-                    <IslandRow
-                      key={key}
-                      session={s}
-                      // Gentle stagger, capped so a long list doesn't feel sluggish.
-                      enterDelayMs={Math.min(i, 6) * ISLAND_ROW_STAGGER_MS}
-                      detailExpanded={expandedKeys.has(key)}
-                      onToggleDetail={() => toggleDetail(key)}
-                    />
-                  )
-                })}
+                {sessions.length >= 2 && legendSegments.length > 0 ? (
+                  <div
+                    data-testid="island-legend"
+                    className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pb-1.5 text-[10px] text-white/50"
+                  >
+                    {legendSegments.map((seg) => (
+                      <span
+                        key={seg.key}
+                        data-testid={`island-legend-${seg.key}`}
+                        className="inline-flex items-center gap-1 tabular-nums"
+                      >
+                        <span aria-hidden className={cn("size-1.5 rounded-full", seg.dot)} />
+                        {t(`legend.${seg.key}`, { count: seg.count })}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                <div
+                  className="island-scroll flex max-h-[420px] flex-col gap-0.5 overflow-y-auto px-1 pb-2"
+                  data-testid="island-list"
+                >
+                  {sessions.map((s, i) => {
+                    const key = `${s.agent}:${s.sessionId}`
+                    return (
+                      <IslandRow
+                        key={key}
+                        session={s}
+                        // Gentle stagger, capped so a long list doesn't feel sluggish.
+                        enterDelayMs={Math.min(i, 6) * ISLAND_ROW_STAGGER_MS}
+                        compact={compactRows}
+                        detailExpanded={expandedKeys.has(key)}
+                        onToggleDetail={() => toggleDetail(key)}
+                      />
+                    )
+                  })}
+                </div>
               </div>
-            </>
-          ) : null}
+            ) : null}
+          </div>
 
           {/*
            * Attention ring: a breathing amber inset ring while any session

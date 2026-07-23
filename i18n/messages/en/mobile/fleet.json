@@ -13,6 +13,14 @@
     "request": "Permission: {tool}",
     "requestGeneric": "Permission requested"
   },
+  "question": {
+    "answered": "Answered.",
+    "controlLost": "Remote control was revoked.",
+    "countdown": "{seconds}s left",
+    "expired": "The answer window closed — answer in the terminal.",
+    "failed": "Could not send the answer.",
+    "submit": "Submit"
+  },
   "reply": {
     "failed": "Couldn't send — try again.",
     "open": "Reply",

@@ -202,15 +202,21 @@ export async function resizePetPopup(width: number, height: number): Promise<boo
   }
 }
 
+/** Window labels allowed to request a native pet-panel reveal. */
+export type PetRevealTarget = "pet" | "pet-popup"
+
 /**
- * Reveal the current pet overlay after its first paint. On macOS Rust orders
- * the NSPanel front without activating Cognia; callers outside the two pet
- * windows are rejected by the native command.
+ * Reveal a pet overlay after its first paint. The target is explicit because
+ * an overlay can be hosted by a plain Webview rather than a Tauri
+ * `WebviewWindow`; Rust resolves this label to its native window.
  */
-export async function revealPetWindow(focus = false): Promise<boolean> {
+export async function revealPetWindow(
+  focus = false,
+  targetLabel: PetRevealTarget = "pet"
+): Promise<boolean> {
   if (!isTauri()) return false
   try {
-    await invoke("reveal_pet_window", { focus })
+    await invoke("reveal_pet_window", { focus, targetLabel })
     return true
   } catch (err) {
     console.warn("revealPetWindow failed", err)

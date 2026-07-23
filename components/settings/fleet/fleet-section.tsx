@@ -30,6 +30,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
@@ -60,6 +61,7 @@ import {
   fleetOpencodeInstall,
   fleetOpencodeStatus,
   fleetOpencodeUninstall,
+  islandDebugGeometry,
   isIslandWindowOpen,
   islandListMonitors,
   islandSetMonitor,
@@ -74,12 +76,17 @@ import {
   RelatedSectionsStrip,
 } from "@/components/settings/common/related-sections-strip"
 import { FleetHistoryPanel } from "./fleet-history-panel"
+import { AgentLivenessChip } from "./agent-liveness-chip"
+import { useFleetStream } from "@/hooks/fleet/use-fleet-stream"
 import { createLogger } from "@cognia/logging"
 
 const log = createLogger("settings.fleet")
 
 export function FleetSection() {
   const t = useTranslations("settings.fleet")
+  // Liveness rides the same snapshot stream the island uses — no second poll.
+  const { snapshot } = useFleetStream()
+  const livenessFor = (agent: string) => snapshot.liveness?.find((l) => l.agent === agent)
   const [loaded, setLoaded] = useState(false)
   const [monitorEnabled, setMonitorEnabled] = useState(false)
   const [monitorPort, setMonitorPort] = useState<number | null>(null)
@@ -291,6 +298,32 @@ export function FleetSection() {
     [busy, refresh]
   )
 
+  /**
+   * Copy every input the island's placement math reads to the clipboard.
+   *
+   * Island placement bugs are the one class this codebase cannot chase with a
+   * test: `island_window.rs`'s live window ops don't run under
+   * `tauri::test::mock_app()`, and the quantities that go wrong
+   * (`NSScreen.safeAreaInsets` under a hidden menu bar, the Space-dependent
+   * work area) only exist on a real desktop in a real Space. Sampling this on a
+   * normal Space, on a full-screen Space, and on an external display turns
+   * "the island looks wrong" into numbers.
+   */
+  const copyDiagnostics = useCallback(async () => {
+    const dump = await islandDebugGeometry()
+    if (!dump) {
+      toast.error(t("island.diagnostics.unavailable"))
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(dump, null, 2))
+      toast.success(t("island.diagnostics.copied"))
+    } catch (err) {
+      log.warn("copying island diagnostics failed", { err })
+      toast.error(t("island.diagnostics.copyFailed"))
+    }
+  }, [t])
+
   const codexBadge = (() => {
     switch (codexStatus) {
       case "installed":
@@ -397,6 +430,11 @@ export function FleetSection() {
                   {t(`status.${installBadge.key}`)}
                 </Badge>
               ) : null}
+              <AgentLivenessChip
+                agent="claude-code"
+                liveness={livenessFor("claude-code")}
+                installed={installState === "installed"}
+              />
             </div>
             <p className="text-[11px] text-muted-foreground">{t("claude.desc")}</p>
           </div>
@@ -425,6 +463,11 @@ export function FleetSection() {
                   {t(`status.${codexBadge.key}`)}
                 </Badge>
               ) : null}
+              <AgentLivenessChip
+                agent="codex"
+                liveness={livenessFor("codex")}
+                installed={codexStatus === "installed" || codexStatus === "stale"}
+              />
             </div>
             <p className="text-[11px] text-muted-foreground">{t("codex.desc")}</p>
             {codexStatus === "installed" || codexStatus === "stale" ? (
@@ -528,6 +571,28 @@ export function FleetSection() {
             </Select>
           </div>
         ) : null}
+
+        <div
+          className="flex items-center justify-between gap-3"
+          data-testid="fleet-island-diagnostics-row"
+        >
+          <div className="space-y-0.5">
+            <Label className="text-xs font-medium text-muted-foreground">
+              {t("island.diagnostics.label")}
+            </Label>
+            <p className="text-[11px] text-muted-foreground">{t("island.diagnostics.desc")}</p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="shrink-0 text-xs"
+            onClick={() => void copyDiagnostics()}
+            data-testid="fleet-island-diagnostics-copy"
+          >
+            {t("island.diagnostics.copy")}
+          </Button>
+        </div>
       </Card>
 
       <Card className="p-3">

@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { IslandRow } from "./island-row"
 import type { FleetSession } from "@/lib/fleet/types"
 
@@ -18,6 +18,7 @@ jest.mock("motion/react", () => ({ useReducedMotion: () => true }))
 const focusMock = jest.fn()
 const sendMock = jest.fn()
 const revealMock = jest.fn()
+const interruptMock = jest.fn()
 const questionRespondMock = jest.fn()
 jest.mock("@/lib/tauri/fleet", () => ({
   fleetPermissionRespond: jest.fn(),
@@ -25,6 +26,7 @@ jest.mock("@/lib/tauri/fleet", () => ({
   fleetFocusTerminal: (...args: unknown[]) => focusMock(...args),
   fleetOpencodeSendMessage: (...args: unknown[]) => sendMock(...args),
   fleetRevealTranscript: (...args: unknown[]) => revealMock(...args),
+  fleetInterruptSession: (...args: unknown[]) => interruptMock(...args),
 }))
 
 function session(overrides: Partial<FleetSession> = {}): FleetSession {
@@ -43,10 +45,11 @@ function session(overrides: Partial<FleetSession> = {}): FleetSession {
     agentPid: 123,
     pendingPermission: null,
     capabilities: {
-      approvePermission: false,
+      approvePermission: true,
       sendMessage: false,
       focusTerminal: true,
       openTranscript: true,
+      interrupt: false,
     },
     startedAt: Date.now() - 134_000, // 2m14s ago
     lastEventAt: Date.now(),
@@ -59,6 +62,8 @@ function session(overrides: Partial<FleetSession> = {}): FleetSession {
 beforeEach(() => {
   focusMock.mockClear()
   revealMock.mockClear()
+  interruptMock.mockClear()
+  interruptMock.mockResolvedValue({ ok: true })
 })
 
 describe("IslandRow", () => {
@@ -92,6 +97,7 @@ describe("IslandRow", () => {
             sendMessage: false,
             focusTerminal: false,
             openTranscript: false,
+            interrupt: false,
           },
         })}
       />
@@ -102,7 +108,7 @@ describe("IslandRow", () => {
     expect(focusMock).not.toHaveBeenCalled()
   })
 
-  it("does not focus the terminal when clicking the permission buttons", () => {
+  it("does not focus the terminal when clicking the permission buttons", async () => {
     render(
       <IslandRow
         session={session({
@@ -120,6 +126,7 @@ describe("IslandRow", () => {
     // Keyboard on the controls must not bubble to the row's focus handler.
     fireEvent.keyDown(screen.getByTestId("permission-deny"), { key: "Enter" })
     expect(focusMock).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.getByTestId("permission-deny")).not.toBeDisabled())
   })
 
   it("renders project, agent badge, terminal badge, prompt and activity", () => {
@@ -336,6 +343,7 @@ describe("IslandRow", () => {
             sendMessage: true,
             focusTerminal: false,
             openTranscript: false,
+            interrupt: false,
           },
         })}
       />
@@ -354,6 +362,7 @@ describe("IslandRow", () => {
             sendMessage: true,
             focusTerminal: false,
             openTranscript: false,
+            interrupt: false,
           },
         })}
       />
@@ -384,6 +393,7 @@ describe("IslandRow", () => {
             sendMessage: false,
             focusTerminal: true,
             openTranscript: false,
+            interrupt: false,
           },
         })}
       />
@@ -529,5 +539,248 @@ describe("IslandRow", () => {
     expect(screen.queryByTestId("row-flash")).toBeNull()
     rerender(<IslandRow session={session({ status: "waiting-permission" })} />)
     expect(screen.queryByTestId("row-flash")).toBeNull()
+  })
+})
+
+describe("IslandRow compact mode", () => {
+  const subagents = [{ description: "explore the repo", background: false, startedAt: Date.now() }]
+
+  it("folds ambient context behind the chevron", () => {
+    render(<IslandRow compact session={session({ subagents })} onToggleDetail={() => {}} />)
+    // Kept: the lead line, which is what you triage on.
+    expect(screen.getByTestId("status-dot")).toBeInTheDocument()
+    // Folded: everything that only adds context.
+    expect(screen.queryByTestId("last-prompt")).toBeNull()
+    expect(screen.queryByTestId("subagents")).toBeNull()
+    expect(screen.queryByTestId("session-meta-chips")).toBeNull()
+  })
+
+  it("brings the folded context back when the row is expanded", () => {
+    render(
+      <IslandRow
+        compact
+        detailExpanded
+        session={session({ subagents })}
+        onToggleDetail={() => {}}
+      />
+    )
+    // Nothing is lost — the chevron still reaches all of it.
+    expect(screen.getByTestId("last-prompt")).toBeInTheDocument()
+    expect(screen.getByTestId("subagents")).toBeInTheDocument()
+    expect(screen.getByTestId("session-detail")).toBeInTheDocument()
+  })
+
+  it("keeps a pending permission visible while compact", () => {
+    render(
+      <IslandRow
+        compact
+        session={session({
+          status: "waiting-permission",
+          pendingPermission: {
+            requestId: "r1",
+            toolName: "Bash",
+            detail: "rm -rf build",
+            requestedAt: Date.now(),
+          },
+        })}
+      />
+    )
+    expect(screen.getByTestId("island-permission-actions")).toBeInTheDocument()
+  })
+
+  it("shows only the highest-priority blocking block when several compete", () => {
+    // A permission outranks a parked plan: it is the one with a deadline.
+    render(
+      <IslandRow
+        compact
+        session={session({
+          status: "plan-pending",
+          pendingPlan: "1. do the thing",
+          pendingPermission: {
+            requestId: "r1",
+            toolName: "Bash",
+            detail: null,
+            requestedAt: Date.now(),
+          },
+        })}
+      />
+    )
+    expect(screen.getByTestId("island-permission-actions")).toBeInTheDocument()
+    expect(screen.queryByTestId("pending-plan")).toBeNull()
+  })
+
+  it("keeps a parked plan when it IS the blocking block", () => {
+    render(
+      <IslandRow
+        compact
+        session={session({ status: "plan-pending", pendingPlan: "1. do the thing" })}
+      />
+    )
+    expect(screen.getByTestId("pending-plan")).toBeInTheDocument()
+  })
+
+  it("keeps the error banner — it is never ambient", () => {
+    render(
+      <IslandRow
+        compact
+        session={session({ lastError: { kind: "tool", detail: "boom", at: 0 } })}
+      />
+    )
+    expect(screen.getByTestId("row-error")).toBeInTheDocument()
+  })
+
+  it("changes nothing when compact is off", () => {
+    render(<IslandRow session={session({ subagents })} onToggleDetail={() => {}} />)
+    expect(screen.getByTestId("last-prompt")).toBeInTheDocument()
+    expect(screen.getByTestId("subagents")).toBeInTheDocument()
+  })
+})
+
+describe("IslandRow inner controls don't leak to the row's focus handler", () => {
+  // The whole row is a focus-the-terminal button when the agent supports it, so
+  // every interactive control nested inside it has to stop propagation — a
+  // mis-click that also yanks the user's terminal to the foreground is a much
+  // worse outcome than the control simply not working.
+
+  it("keeps the chevron from focusing the terminal (click and keyboard)", () => {
+    const toggle = jest.fn()
+    render(<IslandRow session={session()} onToggleDetail={toggle} />)
+    const chevron = screen.getByTestId("session-detail-toggle")
+
+    fireEvent.click(chevron)
+    expect(toggle).toHaveBeenCalledTimes(1)
+    expect(focusMock).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(chevron, { key: "Enter" })
+    expect(focusMock).not.toHaveBeenCalled()
+  })
+
+  it("keeps the transcript button from focusing the terminal", () => {
+    render(<IslandRow session={session({ transcriptPath: "/x/t.jsonl" })} />)
+    const button = screen.getByTestId("island-reveal-transcript")
+
+    fireEvent.click(button)
+    expect(revealMock).toHaveBeenCalledWith("/x/t.jsonl")
+    expect(focusMock).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(button, { key: "Enter" })
+    expect(focusMock).not.toHaveBeenCalled()
+  })
+
+  it("keeps the answerable question card from focusing the terminal", () => {
+    render(
+      <IslandRow
+        session={session({
+          status: "waiting-input",
+          pendingQuestions: [{ question: "Pick?", options: ["A", "B"], multiSelect: false }],
+          pendingQuestionRequest: { requestId: "q-1", requestedAt: Date.now() },
+        })}
+      />
+    )
+    const card = screen.getByTestId("island-question-actions")
+
+    fireEvent.click(card)
+    expect(focusMock).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(card, { key: "Enter" })
+    expect(focusMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("IslandRow permission gating (capabilities.approvePermission)", () => {
+  const pending = {
+    requestId: "r1",
+    toolName: "Bash",
+    detail: "rm -rf build",
+    requestedAt: Date.now(),
+  }
+
+  it("offers Approve/Deny when the agent's ingress can carry a decision back", () => {
+    render(
+      <IslandRow session={session({ status: "waiting-permission", pendingPermission: pending })} />
+    )
+    expect(screen.getByTestId("island-permission-actions")).toBeInTheDocument()
+    expect(screen.queryByTestId("status-line")).toBeNull()
+  })
+
+  it("degrades to a read-only hint when it cannot", () => {
+    // An observe-only adapter must not render buttons that would silently do
+    // nothing — this is the branch the capability flag exists to drive.
+    render(
+      <IslandRow
+        session={session({
+          status: "waiting-permission",
+          pendingPermission: pending,
+          capabilities: {
+            approvePermission: false,
+            sendMessage: false,
+            focusTerminal: false,
+            openTranscript: false,
+            interrupt: false,
+          },
+        })}
+      />
+    )
+    expect(screen.queryByTestId("island-permission-actions")).toBeNull()
+    expect(screen.getByTestId("status-line")).toHaveTextContent("status.waitingPermission")
+  })
+})
+
+describe("IslandRow interrupt", () => {
+  const interruptible = (overrides = {}) =>
+    session({
+      capabilities: {
+        approvePermission: true,
+        sendMessage: false,
+        focusTerminal: true,
+        openTranscript: false,
+        interrupt: true,
+      },
+      ...overrides,
+    })
+
+  it("is absent unless the session declares the capability", () => {
+    render(<IslandRow session={session()} />)
+    expect(screen.queryByTestId("island-interrupt")).toBeNull()
+  })
+
+  it("sends the interrupt without also focusing the terminal", async () => {
+    render(<IslandRow session={interruptible()} />)
+    fireEvent.click(screen.getByTestId("island-interrupt"))
+    await waitFor(() => expect(interruptMock).toHaveBeenCalledWith("claude-code", "s1"))
+    // The row itself is a focus-terminal button; the interrupt must not trip it.
+    expect(focusMock).not.toHaveBeenCalled()
+  })
+
+  it("surfaces a refusal instead of pretending the turn stopped", async () => {
+    interruptMock.mockResolvedValue({ ok: false, reason: "interrupt_identity_mismatch" })
+    render(<IslandRow session={interruptible()} />)
+    fireEvent.click(screen.getByTestId("island-interrupt"))
+    await waitFor(() =>
+      expect(screen.getByTestId("island-interrupt-error")).toHaveTextContent(
+        "interrupt.error.interrupt_identity_mismatch"
+      )
+    )
+  })
+
+  it("stays quiet on success — the session's next event is the real evidence", async () => {
+    render(<IslandRow session={interruptible()} />)
+    fireEvent.click(screen.getByTestId("island-interrupt"))
+    await waitFor(() => expect(interruptMock).toHaveBeenCalled())
+    expect(screen.queryByTestId("island-interrupt-error")).toBeNull()
+  })
+
+  it("ignores a second click while one is in flight", async () => {
+    let release: (v: unknown) => void = () => {}
+    interruptMock.mockReturnValue(new Promise((r) => (release = r)))
+    render(<IslandRow session={interruptible()} />)
+    const button = screen.getByTestId("island-interrupt")
+    fireEvent.click(button)
+    await waitFor(() => expect(button).toBeDisabled())
+    fireEvent.click(button)
+    expect(interruptMock).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      release({ ok: true })
+    })
   })
 })

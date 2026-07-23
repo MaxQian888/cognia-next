@@ -31,6 +31,7 @@ function session(overrides: Partial<FleetSession>): FleetSession {
       sendMessage: false,
       focusTerminal: false,
       openTranscript: false,
+      interrupt: false,
     },
     startedAt: 0,
     lastEventAt: 0,

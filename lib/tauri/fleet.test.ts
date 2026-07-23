@@ -42,6 +42,8 @@ import {
   fleetQuestionRespond,
   fleetRevealTranscript,
   islandListMonitors,
+  fleetInterruptSession,
+  islandDebugGeometry,
   islandResize,
   islandSetMonitor,
   islandSetTucked,
@@ -97,7 +99,8 @@ describe("off Tauri (web)", () => {
     expect(await openIslandWindow()).toBe(false)
     expect(await closeIslandWindow()).toBe(false)
     expect(await isIslandWindowOpen()).toBe(false)
-    expect(await islandResize(400, 44)).toBe(0)
+    expect(await islandResize(400, 44)).toEqual({ topInset: 0, fullscreen: false })
+    expect(await islandDebugGeometry()).toBeNull()
     expect(await islandSetTucked(true)).toBe(false)
     expect(await fleetRevealTranscript("/x/t.jsonl")).toBe(false)
     expect(invokeMock).not.toHaveBeenCalled()
@@ -252,14 +255,20 @@ describe("on Tauri", () => {
     })
     expect(await openIslandWindow()).toBe(true)
     expect(invokeMock).toHaveBeenCalledWith("open_island_window", { opts: null })
-    // island_resize answers with the display's top safe-area inset; anything
-    // non-numeric (older backends, undefined) normalizes to 0.
-    expect(await islandResize(640, 200)).toBe(0)
+    // island_resize answers with the display's full geometry (notch inset +
+    // full-screen regime); a malformed / older-backend answer normalizes to the
+    // conservative "no notch, not full screen".
+    expect(await islandResize(640, 200)).toEqual({ topInset: 0, fullscreen: false })
     expect(invokeMock).toHaveBeenCalledWith("island_resize", { width: 640, height: 200 })
+    invokeMock.mockResolvedValueOnce({ topInset: 37, fullscreen: true })
+    expect(await islandResize(420, 44)).toEqual({ topInset: 37, fullscreen: true })
+    // Negative / non-boolean junk can't reach the shell.
+    invokeMock.mockResolvedValueOnce({ topInset: -5, fullscreen: "yes" })
+    expect(await islandResize(420, 44)).toEqual({ topInset: 0, fullscreen: false })
+    // A bare number is what the pre-geometry backend returned — it must not
+    // resurrect as a truthy notch.
     invokeMock.mockResolvedValueOnce(37)
-    expect(await islandResize(420, 44)).toBe(37)
-    invokeMock.mockResolvedValueOnce(-5)
-    expect(await islandResize(420, 44)).toBe(0)
+    expect(await islandResize(420, 44)).toEqual({ topInset: 0, fullscreen: false })
     invokeMock.mockResolvedValueOnce(undefined)
     expect(await closeIslandWindow()).toBe(true)
     invokeMock.mockResolvedValue(true)
@@ -301,8 +310,72 @@ describe("on Tauri", () => {
     expect(await openIslandWindow()).toBe(false)
     expect(await closeIslandWindow()).toBe(false)
     expect(await isIslandWindowOpen()).toBe(false)
-    expect(await islandResize(1, 1)).toBe(0)
+    expect(await islandResize(1, 1)).toEqual({ topInset: 0, fullscreen: false })
     expect(await islandSetTucked(true)).toBe(false)
+    expect(await islandDebugGeometry()).toBeNull()
     expect(warnSpy).toHaveBeenCalled()
+  })
+
+  it("classifies a structured interrupt refusal", async () => {
+    // The refusal codes are the whole point: "we refused to signal a recycled
+    // pid" must not read the same as "the interrupt worked".
+    for (const code of [
+      "interrupt_unsupported",
+      "interrupt_not_running",
+      "interrupt_identity_mismatch",
+    ] as const) {
+      invokeMock.mockRejectedValueOnce(new Error(`fleet: ${code}`))
+      expect(await fleetInterruptSession("claude-code", "s1")).toEqual({
+        ok: false,
+        reason: code,
+      })
+    }
+  })
+
+  it("falls back to `unknown` for an unrecognized failure", async () => {
+    invokeMock.mockRejectedValueOnce(new Error("ESRCH"))
+    expect(await fleetInterruptSession("claude-code", "s1")).toEqual({
+      ok: false,
+      reason: "unknown",
+    })
+  })
+
+  it("reports a sent interrupt — never that the turn stopped", async () => {
+    invokeMock.mockResolvedValueOnce(null)
+    expect(await fleetInterruptSession("codex", "s2")).toEqual({ ok: true })
+    expect(invokeMock).toHaveBeenCalledWith("fleet_interrupt_session", {
+      agent: "codex",
+      sessionId: "s2",
+    })
+  })
+
+  it("passes the island diagnostics dump straight through", async () => {
+    // A diagnostic dump is meant for a human to read, so it is deliberately
+    // NOT normalized — whatever the backend reports is what gets copied.
+    const dump = {
+      displays: [
+        {
+          name: "Built-in Retina Display",
+          cacheKey: "Built-in Retina Display",
+          isPrimary: true,
+          isTarget: true,
+          scale: 2,
+          frame: [0, 0, 3024, 1964],
+          workArea: [0, 76, 3024, 1888],
+          safeAreaTopRaw: 0,
+          safeAreaTopCached: 74,
+          menuBarOccupiesTop: false,
+          fullscreen: true,
+        },
+      ],
+      preferredMonitor: null,
+      windowPosition: [1302, 0],
+      windowSize: [420, 44],
+      windowVisible: true,
+      geometry: { topInset: 37, fullscreen: true },
+    }
+    invokeMock.mockResolvedValueOnce(dump)
+    expect(await islandDebugGeometry()).toEqual(dump)
+    expect(invokeMock).toHaveBeenCalledWith("island_debug_geometry")
   })
 })

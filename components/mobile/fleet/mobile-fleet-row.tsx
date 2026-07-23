@@ -15,6 +15,7 @@ import { toast } from "sonner"
 
 import { Card, CardContent } from "@/components/ui/card"
 import { MobileFleetPermissionActions } from "./mobile-fleet-permission-actions"
+import { MobileFleetQuestionActions } from "./mobile-fleet-question-actions"
 import { MobileFleetReply } from "./mobile-fleet-reply"
 import { useNowTicker } from "@/hooks/fleet/use-now-ticker"
 import { fleetRemoteFocusTerminal } from "@/lib/fleet/fleet-remote-actions"
@@ -38,6 +39,14 @@ export function MobileFleetRow({ session }: { session: FleetSession }) {
   const activity = activityLine(session)
   const lastError = session.lastError ?? null
   const elapsedRef = session.status === "ended" ? (session.endedAt ?? nowMs) : nowMs
+  // Answerable only while its hook long-poll is still waiting; a bare
+  // `PreToolUse` question has no handle to answer through.
+  const answerableQuestion =
+    session.status === "waiting-input" &&
+    session.pendingQuestionRequest &&
+    (session.pendingQuestions?.length ?? 0) > 0
+      ? session.pendingQuestionRequest
+      : null
 
   const statusLabel = (() => {
     switch (session.status) {
@@ -109,8 +118,16 @@ export function MobileFleetRow({ session }: { session: FleetSession }) {
           </p>
         ) : null}
 
-        {session.pendingPermission ? (
+        {session.pendingPermission && session.capabilities.approvePermission ? (
           <MobileFleetPermissionActions pending={session.pendingPermission} />
+        ) : answerableQuestion ? (
+          // MUST be keyed on the request id: without it a new question inherits
+          // the previous one's selections.
+          <MobileFleetQuestionActions
+            key={answerableQuestion.requestId}
+            request={answerableQuestion}
+            questions={session.pendingQuestions ?? []}
+          />
         ) : statusLabel ? (
           <p className="truncate text-xs text-muted-foreground" data-testid="mobile-fleet-status">
             {statusLabel}

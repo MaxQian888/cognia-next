@@ -146,16 +146,22 @@ describe("lib/tauri/pet-window — happy path command mapping", () => {
     expect(mockInvoke).toHaveBeenCalledWith("pet_popup_resize", { width: 316, height: 416 })
   })
 
-  it("revealPetWindow delegates first-paint reveal to the native window owner", async () => {
+  it("revealPetWindow identifies the popup target to the native window owner", async () => {
     mockInvoke.mockResolvedValue(undefined)
-    await expect(revealPetWindow(true)).resolves.toBe(true)
-    expect(mockInvoke).toHaveBeenCalledWith("reveal_pet_window", { focus: true })
+    await expect(revealPetWindow(true, "pet-popup")).resolves.toBe(true)
+    expect(mockInvoke).toHaveBeenCalledWith("reveal_pet_window", {
+      focus: true,
+      targetLabel: "pet-popup",
+    })
   })
 
   it("revealPetWindow defaults to a non-activating reveal", async () => {
     mockInvoke.mockResolvedValue(undefined)
     await expect(revealPetWindow()).resolves.toBe(true)
-    expect(mockInvoke).toHaveBeenCalledWith("reveal_pet_window", { focus: false })
+    expect(mockInvoke).toHaveBeenCalledWith("reveal_pet_window", {
+      focus: false,
+      targetLabel: "pet",
+    })
   })
 
   it("revealIslandWindow delegates first-paint reveal to the island window owner", async () => {

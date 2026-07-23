@@ -61,6 +61,16 @@
       "turn": "Turn failed"
     },
     "focusTerminal": "Focus terminal",
+    "interrupt": {
+      "error": {
+        "interrupt_identity_mismatch": "That process is no longer the agent — nothing was sent.",
+        "interrupt_not_running": "That session is no longer reachable.",
+        "interrupt_unsupported": "Interrupting isn't supported on this platform.",
+        "unknown": "Could not send the interrupt."
+      },
+      "hint": "Sends one Ctrl-C to the agent, cancelling the current turn. The session keeps running.",
+      "label": "Interrupt this turn"
+    },
     "meta": {
       "model": "Model: {model}",
       "permissionMode": "Permission mode: {mode}"
@@ -68,8 +78,6 @@
     "multiSelect": "Select all that apply",
     "openTranscript": "Reveal transcript",
     "questionMore": "{count, plural, one {+# more question} other {+# more questions}}",
-    "subagentBackground": "bg",
-    "subagents": "{count, plural, one {# subagent} other {# subagents}}",
     "status": {
       "ended": "Session ended",
       "idle": "Idle",
@@ -78,6 +86,8 @@
       "waitingPermission": "Waiting for permission approval",
       "working": "Working…"
     },
+    "subagentBackground": "bg",
+    "subagents": "{count, plural, one {# subagent} other {# subagents}}",
     "waitingFor": "waiting {duration}",
     "you": "You:"
   }

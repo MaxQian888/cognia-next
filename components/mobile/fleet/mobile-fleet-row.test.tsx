@@ -35,10 +35,11 @@ function session(over: Partial<FleetSession> = {}): FleetSession {
     agentPid: null,
     pendingPermission: null,
     capabilities: {
-      approvePermission: false,
+      approvePermission: true,
       sendMessage: false,
       focusTerminal: false,
       openTranscript: false,
+      interrupt: false,
     },
     startedAt: 0,
     lastEventAt: 0,
@@ -124,6 +125,7 @@ describe("MobileFleetRow", () => {
             sendMessage: false,
             focusTerminal: true,
             openTranscript: false,
+            interrupt: false,
           },
         })}
       />
@@ -138,6 +140,7 @@ describe("MobileFleetRow", () => {
       sendMessage: true,
       focusTerminal: false,
       openTranscript: false,
+      interrupt: false,
     }
     const { rerender } = render(
       <MobileFleetRow session={session({ agent: "opencode", capabilities: sendCaps })} />
@@ -149,5 +152,55 @@ describe("MobileFleetRow", () => {
       <MobileFleetRow session={session({ agent: "opencode", status: "ended", capabilities: sendCaps })} />
     )
     expect(screen.queryByTestId("mobile-fleet-reply")).toBeNull()
+  })
+})
+
+describe("MobileFleetRow answerable questions", () => {
+  it("renders the question card so a phone can answer instead of timing out", () => {
+    render(
+      <MobileFleetRow
+        session={session({
+          status: "waiting-input",
+          pendingQuestions: [{ question: "Pick?", options: ["A", "B"], multiSelect: false }],
+          pendingQuestionRequest: { requestId: "q-1", requestedAt: Date.now() },
+        })}
+      />
+    )
+    expect(screen.getByTestId("mobile-fleet-question")).toBeInTheDocument()
+    expect(screen.queryByTestId("mobile-fleet-status")).toBeNull()
+  })
+
+  it("falls back to the status line for a display-only question", () => {
+    // A bare PreToolUse question has no long-poll handle to answer through, so
+    // offering controls would be a lie.
+    render(
+      <MobileFleetRow
+        session={session({
+          status: "waiting-input",
+          pendingQuestions: [{ question: "Pick?", options: ["A"], multiSelect: false }],
+        })}
+      />
+    )
+    expect(screen.queryByTestId("mobile-fleet-question")).toBeNull()
+    expect(screen.getByTestId("mobile-fleet-status")).toBeInTheDocument()
+  })
+
+  it("lets a pending permission outrank a parked question", () => {
+    render(
+      <MobileFleetRow
+        session={session({
+          status: "waiting-permission",
+          pendingPermission: {
+            requestId: "r1",
+            toolName: "Bash",
+            detail: null,
+            requestedAt: Date.now(),
+          },
+          pendingQuestionRequest: { requestId: "q-1", requestedAt: Date.now() },
+        })}
+      />
+    )
+    expect(screen.getByTestId("mobile-fleet-permission")).toBeInTheDocument()
+    expect(screen.queryByTestId("mobile-fleet-question")).toBeNull()
   })
 })

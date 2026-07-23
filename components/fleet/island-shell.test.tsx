@@ -6,7 +6,9 @@ import { act, fireEvent, render, screen } from "@testing-library/react"
 import {
   IslandShell,
   ISLAND_COLLAPSED_WIDTH,
+  ISLAND_COMPACT_THRESHOLD,
   ISLAND_EXPANDED_WIDTH,
+  ISLAND_HIDDEN_HEIGHT,
   ISLAND_PEEK_HEIGHT,
   ISLAND_PILL_HEIGHT,
   ISLAND_SHRINK_SETTLE_MS,
@@ -70,10 +72,11 @@ function session(overrides: Partial<FleetSession> = {}): FleetSession {
     agentPid: null,
     pendingPermission: null,
     capabilities: {
-      approvePermission: false,
+      approvePermission: true,
       sendMessage: false,
       focusTerminal: false,
       openTranscript: false,
+      interrupt: false,
     },
     startedAt: 0,
     lastEventAt: 0,
@@ -85,6 +88,10 @@ function session(overrides: Partial<FleetSession> = {}): FleetSession {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  // `clearAllMocks` wipes call records but NOT implementations, so a test that
+  // sets a geometry (notably `fullscreen: true`, which withdraws the island
+  // entirely) would otherwise leak that regime into every later test.
+  resizeMock.mockReturnValue(Promise.resolve({ topInset: 0, fullscreen: false }))
   streamState.snapshot = { sessions: [], generatedAt: 0 }
   tauriState.on = false
 })
@@ -128,7 +135,13 @@ describe("IslandShell", () => {
     expect(rows[0].getAttribute("data-status")).toBe("waiting-permission")
     fireEvent.mouseLeave(zone)
     expect(shell.getAttribute("data-expanded")).toBe("false")
-    expect(screen.queryByTestId("island-list")).toBeNull()
+    // The list deliberately stays mounted so the collapse has an exit
+    // animation (the card's height eases down and clips it). It is hidden from
+    // assistive tech and made inert instead of being torn out of the DOM.
+    const body = screen.getByTestId("island-body")
+    expect(body.getAttribute("aria-hidden")).toBe("true")
+    expect(body.className).toContain("opacity-0")
+    expect(body.className).toContain("pointer-events-none")
   })
 
   it("toggles via the pill button (click affordance for touch/no-hover)", () => {
@@ -467,7 +480,7 @@ describe("IslandShell", () => {
 
   describe("notch inset (top safe area)", () => {
     it("pads the card below the notch when island_resize returns an inset", async () => {
-      resizeMock.mockReturnValue(Promise.resolve(37))
+      resizeMock.mockReturnValue(Promise.resolve({ topInset: 37, fullscreen: false }))
       streamState.snapshot = { generatedAt: 1, sessions: [session()] }
       render(<IslandShell />)
       // Flush the resize promise the layout effect chained applyInset onto.
@@ -479,7 +492,7 @@ describe("IslandShell", () => {
     })
 
     it("keeps a zero margin on displays without a notch", async () => {
-      resizeMock.mockReturnValue(Promise.resolve(0))
+      resizeMock.mockReturnValue(Promise.resolve({ topInset: 0, fullscreen: false }))
       render(<IslandShell />)
       await act(async () => {})
       expect(screen.getByTestId("island-clip").style.marginTop).toBe("0px")
@@ -519,6 +532,234 @@ describe("IslandShell", () => {
 
       unmount()
       expect(unlisten).toHaveBeenCalled()
+    })
+  })
+
+  describe("full-screen Space withdrawal", () => {
+    /** Render and let the resize round-trip deliver the geometry. */
+    async function renderWithGeometry(geometry: { topInset: number; fullscreen: boolean }) {
+      resizeMock.mockReturnValue(Promise.resolve(geometry))
+      render(<IslandShell />)
+      await act(async () => {})
+    }
+
+    it("paints nothing at all while a full-screen app owns the display", async () => {
+      // A merely working session doesn't need the user — on a normal Space this
+      // would still leave the tucked 6px sliver, which is exactly the black bar
+      // that shows up over a full-screen video.
+      streamState.snapshot = { generatedAt: 1, sessions: [session({ status: "working" })] }
+      await renderWithGeometry({ topInset: 0, fullscreen: true })
+
+      expect(screen.getByTestId("island-hidden")).toBeInTheDocument()
+      expect(screen.queryByTestId("island-shell")).toBeNull()
+      expect(screen.queryByTestId("island-pill")).toBeNull()
+      expect(screen.queryByTestId("island-hover-zone")).toBeNull()
+    })
+
+    it("makes the withdrawn window click-through and shrinks it to a sliver", async () => {
+      jest.useFakeTimers()
+      try {
+        streamState.snapshot = { generatedAt: 1, sessions: [session({ status: "idle" })] }
+        await renderWithGeometry({ topInset: 0, fullscreen: true })
+
+        // Click-through is the load-bearing half and must not wait: a
+        // full-height transparent strip pinned over a full-screen app's toolbar
+        // swallows its clicks for as long as it lingers.
+        expect(setTuckedMock).toHaveBeenCalledWith(true)
+
+        // The window shrink itself is deferred (grow-now / shrink-later), so an
+        // in-flight CSS transition is never clipped at the window edge.
+        await act(async () => {
+          jest.advanceTimersByTime(ISLAND_SHRINK_SETTLE_MS)
+        })
+        const heights = resizeMock.mock.calls.map((c: unknown[]) => c[1])
+        expect(heights).toContain(ISLAND_HIDDEN_HEIGHT)
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it("materializes for a pending permission even while full-screen", async () => {
+      streamState.snapshot = {
+        generatedAt: 1,
+        sessions: [
+          session({
+            status: "waiting-permission",
+            pendingPermission: {
+              requestId: "r1",
+              toolName: "Bash",
+              detail: null,
+              requestedAt: 0,
+            },
+          }),
+        ],
+      }
+      await renderWithGeometry({ topInset: 0, fullscreen: true })
+
+      expect(screen.queryByTestId("island-hidden")).toBeNull()
+      expect(screen.getByTestId("island-shell").getAttribute("data-expanded")).toBe("true")
+    })
+
+    it("materializes for a session waiting on input while full-screen", async () => {
+      streamState.snapshot = {
+        generatedAt: 1,
+        sessions: [session({ status: "waiting-input" })],
+      }
+      await renderWithGeometry({ topInset: 0, fullscreen: true })
+      expect(screen.queryByTestId("island-hidden")).toBeNull()
+      expect(screen.getByTestId("island-shell")).toBeInTheDocument()
+    })
+
+    it("keeps a user's pin honored when the display goes full-screen", async () => {
+      streamState.snapshot = { generatedAt: 1, sessions: [session({ status: "working" })] }
+      await renderWithGeometry({ topInset: 0, fullscreen: false })
+
+      // Pin it on a normal Space...
+      fireEvent.click(screen.getByTestId("island-pill"))
+      expect(screen.getByTestId("island-shell").getAttribute("data-expanded")).toBe("true")
+
+      // ...then a full-screen app takes the display. The pin is an explicit
+      // user choice and outranks the withdrawal rule.
+      tauriState.on = true
+      await act(async () => {})
+      expect(screen.queryByTestId("island-hidden")).toBeNull()
+    })
+
+    it("returns to the normal tucked sliver once full-screen ends", async () => {
+      tauriState.on = true
+      const handlers = new Map<string, (e: { payload?: unknown }) => void>()
+      listenMock.mockImplementation(
+        async (event: string, cb: (e: { payload?: unknown }) => void) => {
+          handlers.set(event, cb)
+          return jest.fn()
+        }
+      )
+      streamState.snapshot = { generatedAt: 1, sessions: [session({ status: "working" })] }
+      await renderWithGeometry({ topInset: 0, fullscreen: true })
+      expect(screen.getByTestId("island-hidden")).toBeInTheDocument()
+
+      // Rust's watch loop notices the Space switch and pushes the new regime.
+      act(() => handlers.get("fleet://island-geometry")?.({ payload: { fullscreen: false } }))
+      expect(screen.queryByTestId("island-hidden")).toBeNull()
+      expect(screen.getByTestId("island-shell")).toBeInTheDocument()
+    })
+  })
+
+  describe("open/close animation", () => {
+    /** jsdom reports 0 for every measurement; stub the content box instead. */
+    function stubContentHeight(px: number) {
+      jest.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+        height: px,
+        width: 0,
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: px,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect)
+    }
+
+    afterEach(() => jest.restoreAllMocks())
+
+    it("animates height alongside width instead of jumping", () => {
+      streamState.snapshot = { generatedAt: 1, sessions: [session()] }
+      stubContentHeight(180)
+      render(<IslandShell />)
+      const shell = screen.getByTestId("island-shell")
+
+      // Height must be a transitioned property — the old shell animated only
+      // transform and width, so expanding slid sideways while the content
+      // popped in at full height in a single frame.
+      expect(shell.className).toContain("transition-[transform,width,height]")
+
+      expect(shell.style.height).toBe(`${ISLAND_PILL_HEIGHT}px`)
+      fireEvent.mouseEnter(screen.getByTestId("island-hover-zone"))
+      expect(shell.style.height).toBe("180px")
+      fireEvent.mouseLeave(screen.getByTestId("island-hover-zone"))
+      expect(shell.style.height).toBe(`${ISLAND_PILL_HEIGHT}px`)
+    })
+
+    it("never lets the collapsed card fall below the pill height", () => {
+      streamState.snapshot = { generatedAt: 1, sessions: [session()] }
+      // A content box shorter than the pill (mid-teardown measurement).
+      stubContentHeight(4)
+      render(<IslandShell />)
+      fireEvent.mouseEnter(screen.getByTestId("island-hover-zone"))
+      expect(screen.getByTestId("island-shell").style.height).toBe(`${ISLAND_PILL_HEIGHT}px`)
+    })
+
+    it("stops swallowing clicks during the deferred window shrink", async () => {
+      jest.useFakeTimers()
+      try {
+        streamState.snapshot = { generatedAt: 1, sessions: [session()] }
+        render(<IslandShell />)
+        const zone = screen.getByTestId("island-hover-zone")
+        fireEvent.mouseEnter(zone)
+        setTuckedMock.mockClear()
+
+        // Collapsing shrinks the card immediately but the OS window keeps the
+        // expanded footprint for the settle window. That surplus is transparent
+        // yet hit-tested and sits at the top-center of the screen, so it used to
+        // eat clicks aimed at whatever is behind it.
+        fireEvent.mouseLeave(zone)
+        expect(setTuckedMock).toHaveBeenCalledWith(true)
+
+        await act(async () => {
+          jest.advanceTimersByTime(ISLAND_SHRINK_SETTLE_MS)
+        })
+        // ...and interactivity comes back once the window actually shrank.
+        expect(setTuckedMock).toHaveBeenLastCalledWith(false)
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it("keeps the window interactive when the shrink happens under the pointer", async () => {
+      jest.useFakeTimers()
+      try {
+        // A session ending while the user hovers the expanded list also shrinks
+        // it. Going click-through there would eat the click they are aiming.
+        streamState.snapshot = {
+          generatedAt: 1,
+          sessions: [session({ sessionId: "a" }), session({ sessionId: "b" })],
+        }
+        const { rerender } = render(<IslandShell />)
+        fireEvent.mouseEnter(screen.getByTestId("island-hover-zone"))
+        setTuckedMock.mockClear()
+
+        streamState.snapshot = { generatedAt: 2, sessions: [session({ sessionId: "a" })] }
+        rerender(<IslandShell />)
+        await act(async () => {})
+
+        expect(setTuckedMock).not.toHaveBeenCalledWith(true)
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+  })
+
+  describe("compact rows past the size threshold", () => {
+    const many = (n: number) =>
+      Array.from({ length: n }, (_, i) => session({ sessionId: `s${i}`, status: "idle" }))
+
+    it("keeps full rows for a small fleet", () => {
+      streamState.snapshot = { generatedAt: 1, sessions: many(ISLAND_COMPACT_THRESHOLD - 1) }
+      render(<IslandShell />)
+      fireEvent.mouseEnter(screen.getByTestId("island-hover-zone"))
+      for (const row of screen.getByTestId("island-list").querySelectorAll("[data-compact]")) {
+        expect(row.getAttribute("data-compact")).toBe("false")
+      }
+    })
+
+    it("compacts every row once the fleet reaches the threshold", () => {
+      streamState.snapshot = { generatedAt: 1, sessions: many(ISLAND_COMPACT_THRESHOLD) }
+      render(<IslandShell />)
+      fireEvent.mouseEnter(screen.getByTestId("island-hover-zone"))
+      const rows = screen.getByTestId("island-list").querySelectorAll("[data-compact]")
+      expect(rows.length).toBe(ISLAND_COMPACT_THRESHOLD)
+      for (const row of rows) expect(row.getAttribute("data-compact")).toBe("true")
     })
   })
 

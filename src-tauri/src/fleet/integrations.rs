@@ -195,6 +195,7 @@ const CLAUDE_CODE: AgentManifest = AgentManifest {
         send_message: false,
         focus_terminal: true,
         open_transcript: true,
+        interrupt: true,
     },
     decision_shape: DecisionShape::HookSpecificOutput,
     multi_session_host: false,
@@ -238,6 +239,7 @@ const CODEX: AgentManifest = AgentManifest {
         send_message: false,
         focus_terminal: true,
         open_transcript: true,
+        interrupt: true,
     },
     decision_shape: DecisionShape::HookSpecificOutput,
     multi_session_host: false,
@@ -261,6 +263,11 @@ const OPENCODE: AgentManifest = AgentManifest {
         send_message: true,
         focus_terminal: false,
         open_transcript: false,
+        // One OpenCode server process hosts every session, so a SIGINT aimed at
+        // "this session's turn" would take down all of them. Interrupting a
+        // single OpenCode session needs the reverse command channel to grow an
+        // abort verb; declaring `false` keeps the button off until it does.
+        interrupt: false,
     },
     decision_shape: DecisionShape::OpencodeStatus,
     multi_session_host: true,

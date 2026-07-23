@@ -56,6 +56,7 @@ const mockFleet = {
   isIslandWindowOpen: jest.fn(),
   islandListMonitors: jest.fn(),
   islandSetMonitor: jest.fn(),
+  islandDebugGeometry: jest.fn(),
 }
 jest.mock("@/lib/tauri/fleet", () => ({
   fleetMonitorStart: () => mockFleet.fleetMonitorStart(),
@@ -75,6 +76,7 @@ jest.mock("@/lib/tauri/fleet", () => ({
   isIslandWindowOpen: () => mockFleet.isIslandWindowOpen(),
   islandListMonitors: () => mockFleet.islandListMonitors(),
   islandSetMonitor: (name: string | null) => mockFleet.islandSetMonitor(name),
+  islandDebugGeometry: () => mockFleet.islandDebugGeometry(),
 }))
 
 // Radix Select can't be driven in jsdom (pointer-capture APIs missing); a
@@ -456,6 +458,54 @@ describe("FleetSection", () => {
 
     fireEvent.change(select, { target: { value: "primary" } })
     await waitFor(() => expect(mockFleet.islandSetMonitor).toHaveBeenCalledWith(null))
+  })
+
+  describe("placement diagnostics", () => {
+    const dump = {
+      displays: [],
+      preferredMonitor: null,
+      windowPosition: null,
+      windowSize: null,
+      windowVisible: false,
+      geometry: { topInset: 0, fullscreen: false },
+    }
+
+    it("copies the placement dump to the clipboard", async () => {
+      const writeText = jest.fn().mockResolvedValue(undefined)
+      Object.assign(navigator, { clipboard: { writeText } })
+      mockFleet.islandDebugGeometry.mockResolvedValue(dump)
+
+      await renderLoaded()
+      fireEvent.click(screen.getByTestId("fleet-island-diagnostics-copy"))
+
+      await waitFor(() => expect(writeText).toHaveBeenCalled())
+      expect(JSON.parse(writeText.mock.calls[0][0])).toEqual(dump)
+      expect(toastSuccess).toHaveBeenCalled()
+    })
+
+    it("reports rather than copies when the backend has nothing (web build)", async () => {
+      const writeText = jest.fn()
+      Object.assign(navigator, { clipboard: { writeText } })
+      mockFleet.islandDebugGeometry.mockResolvedValue(null)
+
+      await renderLoaded()
+      fireEvent.click(screen.getByTestId("fleet-island-diagnostics-copy"))
+
+      await waitFor(() => expect(toastError).toHaveBeenCalled())
+      expect(writeText).not.toHaveBeenCalled()
+    })
+
+    it("surfaces a clipboard rejection instead of claiming success", async () => {
+      const writeText = jest.fn().mockRejectedValue(new Error("denied"))
+      Object.assign(navigator, { clipboard: { writeText } })
+      mockFleet.islandDebugGeometry.mockResolvedValue(dump)
+
+      await renderLoaded()
+      fireEvent.click(screen.getByTestId("fleet-island-diagnostics-copy"))
+
+      await waitFor(() => expect(toastError).toHaveBeenCalled())
+      expect(toastSuccess).not.toHaveBeenCalled()
+    })
   })
 
   it("re-derives install state when settings.json changes externally", async () => {

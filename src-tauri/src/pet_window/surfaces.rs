@@ -533,6 +533,25 @@ fn self_hwnds<R: Runtime>(_app: &AppHandle<R>) -> Vec<u64> {
     Vec::new()
 }
 
+/// Raw top-level window facts, scaled to physical pixels for `scale`.
+///
+/// The one seam other subsystems borrow this enumeration through — the fleet
+/// island uses it to tell a genuine full-screen Space from a merely maximized
+/// window (`fleet/island_space.rs`). Kept here rather than duplicated there so
+/// there is exactly one `CGWindowListCopyWindowInfo` / `EnumWindows` call site
+/// in the app. Self-owned windows are already excluded by the platform layer
+/// on macOS (owner-PID match); on Windows callers must still filter by
+/// `hwnd_id` if that matters to them.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn enumerate_scaled_candidates(scale: f64) -> Vec<WindowCandidate> {
+    let candidates = platform::enumerate();
+    #[cfg(target_os = "macos")]
+    let candidates = scale_candidates(candidates, scale);
+    #[cfg(not(target_os = "macos"))]
+    let _ = scale;
+    candidates
+}
+
 /// Enumerate perchable window-top surfaces on the pet's monitor.
 #[tauri::command]
 pub async fn pet_window_get_surfaces(app: AppHandle) -> Result<PetSurfaces, String> {

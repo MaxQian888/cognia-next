@@ -28,12 +28,25 @@
   },
   "island": {
     "desc": "刘海附近的置顶状态条，实时显示各 Agent 会话。",
+    "diagnostics": {
+      "copied": "灵动岛诊断信息已复制到剪贴板。",
+      "copy": "复制",
+      "copyFailed": "无法写入剪贴板。",
+      "desc": "复制灵动岛定位所依赖的全部输入。请分别在普通桌面、有 App 全屏时、以及外接显示器上各取一次。",
+      "label": "定位诊断",
+      "unavailable": "灵动岛诊断信息仅在桌面端可用。"
+    },
     "label": "灵动岛悬浮层",
     "monitor": {
       "label": "显示在哪个屏幕",
       "option": "{name}（{width}×{height}）",
       "primary": "主显示器"
     }
+  },
+  "liveness": {
+    "dropping": "事件被丢弃",
+    "live": "活跃 · {ago}前",
+    "silent": "尚未收到事件"
   },
   "monitor": {
     "desc": "外部 Agent hook 的本地事件入口。运行在 companion 服务器上，仅监听回环地址。",

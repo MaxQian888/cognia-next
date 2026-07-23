@@ -8,7 +8,9 @@ jest.mock("@/lib/tauri", () => ({
 import {
   fleetRemoteFocusTerminal,
   fleetRemoteGetSnapshot,
+  fleetRemoteInterrupt,
   fleetRemotePermissionRespond,
+  fleetRemoteQuestionRespond,
   fleetRemoteSendMessage,
   isControlForbidden,
 } from "./fleet-remote-actions"
@@ -56,6 +58,40 @@ describe("fleet-remote-actions", () => {
     await expect(fleetRemotePermissionRespond("r", "deny")).rejects.toEqual({
       code: "remote_control_forbidden",
     })
+  })
+
+  it("answers an AskUserQuestion with option indices", async () => {
+    // Indices, not labels: the snapshot truncates long option text for display,
+    // so a label-keyed answer would never match the agent's real options.
+    callMock.mockResolvedValue(true)
+    await expect(fleetRemoteQuestionRespond("q-1", [[2], [0, 1]])).resolves.toBe(true)
+    expect(callMock).toHaveBeenCalledWith("fleet_question_respond", {
+      requestId: "q-1",
+      selections: [[2], [0, 1]],
+    })
+  })
+
+  it("reports a lapsed answer window rather than throwing", async () => {
+    callMock.mockResolvedValue(false)
+    await expect(fleetRemoteQuestionRespond("q-1", [[0]])).resolves.toBe(false)
+  })
+
+  it("interrupts a session over the transport", async () => {
+    callMock.mockResolvedValue(null)
+    await expect(fleetRemoteInterrupt("claude-code", "s1")).resolves.toBeUndefined()
+    expect(callMock).toHaveBeenCalledWith("fleet_interrupt_session", {
+      agent: "claude-code",
+      sessionId: "s1",
+    })
+  })
+
+  it("propagates an interrupt refusal so the caller can classify it", async () => {
+    // Refusals (dead pid, recycled pid, unsupported platform) must reach the
+    // caller — silently swallowing them would look like a successful interrupt.
+    callMock.mockRejectedValue(new Error("interrupt_identity_mismatch"))
+    await expect(fleetRemoteInterrupt("claude-code", "s1")).rejects.toThrow(
+      "interrupt_identity_mismatch"
+    )
   })
 
   it("classifies the remote-control-forbidden error", () => {

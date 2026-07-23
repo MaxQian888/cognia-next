@@ -68,6 +68,11 @@ pub struct FleetCapabilities {
     pub send_message: bool,
     pub focus_terminal: bool,
     pub open_transcript: bool,
+    /// Whether the island may interrupt this session's current turn. Needs a
+    /// known agent pid AND a platform where a single `SIGINT` means "cancel the
+    /// turn" (see `control::interrupt_session`), so it is narrowed hard at
+    /// runtime rather than trusted from the manifest.
+    pub interrupt: bool,
 }
 
 /// A permission request currently parked on this session (Claude
@@ -253,6 +258,15 @@ impl FleetSession {
                     .as_ref()
                     .is_some_and(|t| super::control::can_focus(t.app)),
             open_transcript: declared.open_transcript && self.transcript_path.is_some(),
+            // An interrupt is a signal to a process this app did not start, so
+            // it needs a target: no observed pid, no button. An ended session
+            // has no turn left to cancel. The platform gate lives in
+            // `control::can_interrupt` (Windows has no reliable cross-console
+            // Ctrl-C delivery, so it is off there).
+            interrupt: declared.interrupt
+                && self.agent_pid.is_some()
+                && self.status != FleetStatus::Ended
+                && super::control::can_interrupt(),
         };
     }
 }
@@ -262,6 +276,10 @@ impl FleetSession {
 #[serde(rename_all = "camelCase")]
 pub struct FleetSnapshot {
     pub sessions: Vec<FleetSession>,
+    /// Per-agent ingress liveness — present for every agent that has ever sent
+    /// an event this process lifetime, absent for the rest. See
+    /// [`AgentLiveness`].
+    pub liveness: Vec<AgentLivenessRow>,
     pub generated_at: u64,
 }
 
@@ -305,6 +323,41 @@ pub enum RegistryEffect {
 #[derive(Debug, Default)]
 pub struct FleetRegistry {
     sessions: HashMap<(FleetAgent, String), FleetSession>,
+    liveness: HashMap<FleetAgent, AgentLiveness>,
+}
+
+/// Per-agent ingress liveness, so the settings card can say whether an
+/// integration is actually working rather than merely installed.
+///
+/// Two clocks, because "not working" has two very different shapes and the UI
+/// must not conflate them:
+///
+///   * `last_seen_at` — the last event that reached the ingress at all,
+///     including ones we dropped. Nothing here means the hooks never fired:
+///     not installed, or (for Codex) installed but never granted trust in its
+///     TUI, which is not readable from disk.
+///   * `last_accepted_at` — the last event that actually folded into a row.
+///     Seen-but-never-accepted is the contract-mismatch shape: this is exactly
+///     how the Codex `notify` integration failed for its entire life (its
+///     payload names the session `thread-id`, never `session_id`, so every POST
+///     was dropped at the door while the settings card reported a healthy
+///     install).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentLiveness {
+    pub last_seen_at: Option<u64>,
+    pub last_accepted_at: Option<u64>,
+    pub seen_count: u64,
+    pub accepted_count: u64,
+}
+
+/// One agent's liveness, flattened for the snapshot DTO.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentLivenessRow {
+    pub agent: FleetAgent,
+    #[serde(flatten)]
+    pub liveness: AgentLiveness,
 }
 
 impl FleetRegistry {
@@ -318,6 +371,15 @@ impl FleetRegistry {
 
     /// Fold one hook event into the registry.
     pub fn apply(&mut self, ev: &FleetEvent, now_ms: u64) -> RegistryEffect {
+        // Recorded before any validation: an event we drop still proves the
+        // agent's hooks fired and reached us, which is the fact that separates
+        // "never installed / never trusted" from "installed but the payload
+        // contract doesn't match".
+        {
+            let live = self.liveness.entry(ev.agent).or_default();
+            live.last_seen_at = Some(now_ms);
+            live.seen_count = live.seen_count.saturating_add(1);
+        }
         let Some(session_id) = extract_session_id(ev) else {
             return RegistryEffect::Ignored;
         };
@@ -331,6 +393,14 @@ impl FleetRegistry {
         let Some(event) = manifest.normalize(&ev.event) else {
             return RegistryEffect::Ignored;
         };
+
+        // Past every drop gate: this event is one the agent and the fleet agree
+        // on, so the integration is genuinely working.
+        {
+            let live = self.liveness.entry(ev.agent).or_default();
+            live.last_accepted_at = Some(now_ms);
+            live.accepted_count = live.accepted_count.saturating_add(1);
+        }
 
         let key = (ev.agent, session_id.clone());
 
@@ -727,6 +797,16 @@ impl FleetRegistry {
             .and_then(|s| s.terminal.clone())
     }
 
+    /// Agent process id for one session, for the interrupt action. Only
+    /// returned while the session is live: an ended row's pid either belongs to
+    /// nothing or, worse, to whatever the OS recycled it onto.
+    pub fn session_agent_pid(&self, agent: FleetAgent, session_id: &str) -> Option<u32> {
+        self.sessions
+            .get(&(agent, session_id.to_string()))
+            .filter(|s| s.status != FleetStatus::Ended)
+            .and_then(|s| s.agent_pid)
+    }
+
     /// Attach a terminal source resolved outside the event fold (the
     /// parent-chain fallback in `FleetRuntime::ingest`). Returns true when
     /// the snapshot changed.
@@ -846,8 +926,20 @@ impl FleetRegistry {
     pub fn snapshot(&self, now_ms: u64) -> FleetSnapshot {
         let mut sessions: Vec<FleetSession> = self.sessions.values().cloned().collect();
         sessions.sort_by(|a, b| b.last_event_at.cmp(&a.last_event_at));
+        // Stable order (declaration order of the enum) so the settings card
+        // doesn't reshuffle its rows between snapshots.
+        let mut liveness: Vec<AgentLivenessRow> = self
+            .liveness
+            .iter()
+            .map(|(agent, liveness)| AgentLivenessRow {
+                agent: *agent,
+                liveness: *liveness,
+            })
+            .collect();
+        liveness.sort_by_key(|row| row.agent as u8);
         FleetSnapshot {
             sessions,
+            liveness,
             generated_at: now_ms,
         }
     }
@@ -1770,6 +1862,109 @@ mod tests {
         assert_eq!(s.status, FleetStatus::Working);
         assert!(s.pending_permission.is_none());
         assert!(s.pending_plan.is_none());
+    }
+
+    #[test]
+    fn liveness_separates_never_arrived_from_arrived_but_dropped() {
+        let mut reg = FleetRegistry::new();
+        // Nothing sent yet: the agent has no liveness row at all, which is what
+        // "never installed / never trusted" looks like.
+        assert!(reg.snapshot(0).liveness.is_empty());
+
+        // An event that reaches us but carries no usable session id is dropped
+        // — and yet it PROVES the hooks fired. This is the shape the Codex
+        // `notify` integration had for its entire life (its payload names the
+        // session `thread-id`, which the manifest did not then accept), so it
+        // must stay distinguishable from silence even now that the accepted key
+        // list has grown to cover that case.
+        let dropped = FleetEvent {
+            agent: FleetAgent::Codex,
+            event: "SessionStart".into(),
+            payload: serde_json::json!({ "conversation": "t-1" }),
+            pid: None,
+            ppid: None,
+            env: Default::default(),
+        };
+        assert_eq!(reg.apply(&dropped, 100), RegistryEffect::Ignored);
+        let rows = reg.snapshot(100).liveness;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].agent, FleetAgent::Codex);
+        assert_eq!(rows[0].liveness.last_seen_at, Some(100));
+        assert_eq!(rows[0].liveness.seen_count, 1);
+        // Seen but never accepted → integration installed, contract mismatched.
+        assert_eq!(rows[0].liveness.last_accepted_at, None);
+        assert_eq!(rows[0].liveness.accepted_count, 0);
+    }
+
+    #[test]
+    fn liveness_records_an_accepted_event() {
+        let mut reg = FleetRegistry::new();
+        let good = FleetEvent {
+            agent: FleetAgent::ClaudeCode,
+            event: "SessionStart".into(),
+            payload: serde_json::json!({ "session_id": "s-1" }),
+            pid: None,
+            ppid: Some(1234),
+            env: Default::default(),
+        };
+        reg.apply(&good, 200);
+        let rows = reg.snapshot(200).liveness;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].liveness.last_seen_at, Some(200));
+        assert_eq!(rows[0].liveness.last_accepted_at, Some(200));
+        assert_eq!(rows[0].liveness.seen_count, 1);
+        assert_eq!(rows[0].liveness.accepted_count, 1);
+    }
+
+    #[test]
+    fn liveness_rows_keep_a_stable_order() {
+        let mut reg = FleetRegistry::new();
+        for (agent, key) in [
+            (FleetAgent::Opencode, "session_id"),
+            (FleetAgent::ClaudeCode, "session_id"),
+            (FleetAgent::Codex, "session_id"),
+        ] {
+            reg.apply(
+                &FleetEvent {
+                    agent,
+                    event: "SessionStart".into(),
+                    payload: serde_json::json!({ key: "s-1" }),
+                    pid: None,
+                    ppid: None,
+                    env: Default::default(),
+                },
+                1,
+            );
+        }
+        // HashMap iteration order is arbitrary; the snapshot must not be, or
+        // the settings card reshuffles its rows on every update.
+        let order: Vec<FleetAgent> = reg.snapshot(1).liveness.iter().map(|r| r.agent).collect();
+        assert_eq!(
+            order,
+            vec![
+                FleetAgent::ClaudeCode,
+                FleetAgent::Codex,
+                FleetAgent::Opencode
+            ]
+        );
+    }
+
+    #[test]
+    fn liveness_row_serializes_flat_and_camel_case() {
+        let json = serde_json::to_string(&AgentLivenessRow {
+            agent: FleetAgent::ClaudeCode,
+            liveness: AgentLiveness {
+                last_seen_at: Some(5),
+                last_accepted_at: None,
+                seen_count: 3,
+                accepted_count: 0,
+            },
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            r#"{"agent":"claude-code","lastSeenAt":5,"lastAcceptedAt":null,"seenCount":3,"acceptedCount":0}"#
+        );
     }
 
     #[test]

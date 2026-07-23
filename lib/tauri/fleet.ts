@@ -10,7 +10,13 @@
 import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/tauri"
 import { revealInExplorer } from "@/lib/tauri/opener"
-import type { FleetMonitorStatus, FleetSnapshot, PermissionBehavior } from "@/lib/fleet/types"
+import { EMPTY_ISLAND_GEOMETRY, normalizeIslandGeometry } from "@/lib/fleet/format"
+import type {
+  FleetMonitorStatus,
+  FleetSnapshot,
+  IslandGeometry,
+  PermissionBehavior,
+} from "@/lib/fleet/types"
 
 const STOPPED: FleetMonitorStatus = { enabled: false, port: null, configPath: null }
 const EMPTY_SNAPSHOT: FleetSnapshot = { sessions: [], generatedAt: 0 }
@@ -250,6 +256,49 @@ export async function fleetFocusTerminal(agent: string, sessionId: string): Prom
 }
 
 /**
+ * Structured refusal reasons from the interrupt path (mirrors Rust
+ * `InterruptRefusal::code`). Anything else is an OS-level send failure.
+ */
+export type FleetInterruptRefusal =
+  "interrupt_unsupported" | "interrupt_not_running" | "interrupt_identity_mismatch"
+
+export type FleetInterruptResult =
+  { ok: true } | { ok: false; reason: FleetInterruptRefusal | "unknown" }
+
+const INTERRUPT_REFUSALS: readonly string[] = [
+  "interrupt_unsupported",
+  "interrupt_not_running",
+  "interrupt_identity_mismatch",
+]
+
+/**
+ * Interrupt a session's current turn — one `SIGINT` to the agent process,
+ * exactly what pressing Ctrl-C once in that terminal does.
+ *
+ * Deliberately reports "sent", never "stopped": there is no acknowledgement
+ * channel back from an agent this app did not start, and the session's own next
+ * event is the only real evidence. Rust re-verifies the pid is alive and still
+ * looks like that agent before signalling, so a recycled pid is refused rather
+ * than hit — those refusals come back as {@link FleetInterruptRefusal} codes so
+ * the UI can say which one happened.
+ */
+export async function fleetInterruptSession(
+  agent: string,
+  sessionId: string
+): Promise<FleetInterruptResult> {
+  if (!isTauri()) return { ok: false, reason: "interrupt_unsupported" }
+  try {
+    await invoke("fleet_interrupt_session", { agent, sessionId })
+    return { ok: true }
+  } catch (err) {
+    console.warn("fleetInterruptSession failed", err)
+    const message = typeof err === "string" ? err : ((err as Error)?.message ?? "")
+    const reason = INTERRUPT_REFUSALS.find((code) => message.includes(code))
+    return { ok: false, reason: (reason as FleetInterruptRefusal) ?? "unknown" }
+  }
+}
+
+/**
  * Reveal a monitored session's transcript file in the OS file manager (Finder /
  * Explorer / the Linux default), surfacing the session's `openTranscript`
  * capability. Cross-platform via the shared reveal helper; a benign `false`
@@ -321,20 +370,24 @@ export async function isIslandWindowOpen(): Promise<boolean> {
 
 /**
  * Resize the island to its measured content size (logical px). Returns the
- * display's top safe-area inset (logical px — the notch height) that Rust
- * grew the window by; the shell pads its card below it so the content clears
- * the camera housing while the window still spans the notch strip (keeping
- * slam-to-top hover on target). `0` off Tauri, on failure, and on
- * non-notched displays.
+ * display's {@link IslandGeometry}: the top safe-area inset (logical px — the
+ * notch height) that Rust grew the window by, and whether a full-screen app
+ * currently owns that display.
+ *
+ * The shell pads its card below the inset so the content clears the camera
+ * housing while the window still spans the notch strip (keeping slam-to-top
+ * hover on target), and suppresses the idle pill entirely while full-screen.
+ * Returning both from the resize round-trip the shell already makes after every
+ * layout means the full-screen regime is known synchronously at mount instead
+ * of racing the first `fleet://island-geometry` push.
  */
-export async function islandResize(width: number, height: number): Promise<number> {
-  if (!isTauri()) return 0
+export async function islandResize(width: number, height: number): Promise<IslandGeometry> {
+  if (!isTauri()) return EMPTY_ISLAND_GEOMETRY
   try {
-    const inset = await invoke<number>("island_resize", { width, height })
-    return typeof inset === "number" && Number.isFinite(inset) && inset > 0 ? inset : 0
+    return normalizeIslandGeometry(await invoke<IslandGeometry>("island_resize", { width, height }))
   } catch (err) {
     console.warn("islandResize failed", err)
-    return 0
+    return EMPTY_ISLAND_GEOMETRY
   }
 }
 
@@ -393,5 +446,66 @@ export async function islandSetMonitor(name: string | null): Promise<boolean> {
   } catch (err) {
     console.warn("islandSetMonitor failed", err)
     return false
+  }
+}
+
+/**
+ * Boot restore: reopen the island overlay if it was showing at last quit.
+ * Resolves `false` when it was closed (a no-op, not a failure), so the boot
+ * path can call it unconditionally next to {@link fleetMonitorRestore}.
+ */
+export async function islandRestore(): Promise<boolean> {
+  if (!isTauri()) return false
+  try {
+    return await invoke<boolean>("island_restore")
+  } catch (err) {
+    console.warn("islandRestore failed", err)
+    return false
+  }
+}
+
+/**
+ * Every input the island's placement math reads, for one moment (mirrors Rust
+ * `IslandDebugGeometry`). Deliberately loosely typed on the display rows: this
+ * is a diagnostic dump meant to be copied to a human, not a stable contract.
+ */
+export interface IslandDebugGeometry {
+  displays: {
+    name: string | null
+    cacheKey: string
+    isPrimary: boolean
+    isTarget: boolean
+    scale: number
+    /** Physical px: x, y, width, height. */
+    frame: [number, number, number, number]
+    workArea: [number, number, number, number]
+    safeAreaTopRaw: number
+    safeAreaTopCached: number
+    menuBarOccupiesTop: boolean
+    fullscreen: boolean
+  }[]
+  preferredMonitor: string | null
+  windowPosition: [number, number] | null
+  windowSize: [number, number] | null
+  windowVisible: boolean
+  geometry: IslandGeometry
+}
+
+/**
+ * Dump the island's placement inputs.
+ *
+ * The placement failures this exists for are invisible to the test suite —
+ * `island_window.rs`'s live window ops can't run under `tauri::test::mock_app()`,
+ * and the quantities that go wrong (`safeAreaInsets` under a hidden menu bar,
+ * the Space-dependent work area) only exist on a real desktop in a real Space.
+ * `null` off Tauri or on failure.
+ */
+export async function islandDebugGeometry(): Promise<IslandDebugGeometry | null> {
+  if (!isTauri()) return null
+  try {
+    return await invoke<IslandDebugGeometry>("island_debug_geometry")
+  } catch (err) {
+    console.warn("islandDebugGeometry failed", err)
+    return null
   }
 }

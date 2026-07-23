@@ -35,6 +35,13 @@ export interface FleetCapabilities {
   sendMessage: boolean
   focusTerminal: boolean
   openTranscript: boolean
+  /**
+   * Whether the island may interrupt this session's current turn. Narrowed hard
+   * by Rust: needs a known agent pid, a live (non-ended) session, and a platform
+   * where a single SIGINT means "cancel the turn" — so it is false on Windows
+   * and for OpenCode (one server process hosts every session).
+   */
+  interrupt: boolean
 }
 
 export interface PendingPermission {
@@ -140,8 +147,29 @@ export interface FleetSession {
   gitBranch?: string | null
 }
 
+/**
+ * Per-agent ingress liveness (mirrors Rust `AgentLiveness`).
+ *
+ * Two clocks, because "not working" has two very different shapes:
+ * `lastSeenAt` is the last event that reached the ingress **at all** (including
+ * ones we dropped), `lastAcceptedAt` the last one that folded into a session
+ * row. No `lastSeenAt` means the hooks never fired — not installed, or (Codex)
+ * installed but never granted trust in its TUI, which is not readable from
+ * disk. Seen but never accepted means installed and firing, with a payload
+ * contract that doesn't match.
+ */
+export interface AgentLiveness {
+  agent: FleetAgent
+  lastSeenAt: number | null
+  lastAcceptedAt: number | null
+  seenCount: number
+  acceptedCount: number
+}
+
 export interface FleetSnapshot {
   sessions: FleetSession[]
+  /** Present for every agent that has sent an event this process lifetime. */
+  liveness?: AgentLiveness[]
   generatedAt: number
 }
 
@@ -163,10 +191,19 @@ export const FLEET_UPDATE_EVENT = "fleet://update"
  */
 export const FLEET_ISLAND_GEOMETRY_EVENT = "fleet://island-geometry"
 
-/** Payload of `FLEET_ISLAND_GEOMETRY_EVENT` (mirrors Rust `IslandGeometry`). */
+/**
+ * Payload of `FLEET_ISLAND_GEOMETRY_EVENT` — and the return of `island_resize`
+ * (mirrors Rust `IslandGeometry`).
+ */
 export interface IslandGeometry {
   /** Top safe-area inset (logical px): notch height, 0 on non-notched displays. */
   topInset: number
+  /**
+   * Whether a full-screen app currently owns the island's display. The top
+   * strip belongs to that app, so the shell suppresses the idle pill entirely
+   * in this regime and only materializes when a session needs the user.
+   */
+  fullscreen: boolean
 }
 
 /**

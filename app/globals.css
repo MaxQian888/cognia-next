@@ -379,6 +379,29 @@ html[data-pro-ide-active] [data-slot="sidebar-container"] {
     overflow: hidden !important;
   }
 
+  /* The one thing inside the island that IS allowed to scroll: the session
+     list past its height cap. Chromium's default scrollbar is an opaque light
+     bar, which reads as a seam down the right edge of a dark glass pill — the
+     one piece of chrome the island's whole look depends on not having. Scoped
+     to the overlay so the main window keeps the platform scrollbar. */
+  html[data-island-overlay] .island-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(255 255 255 / 0.18) transparent;
+  }
+  html[data-island-overlay] .island-scroll::-webkit-scrollbar {
+    width: 6px;
+  }
+  html[data-island-overlay] .island-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  html[data-island-overlay] .island-scroll::-webkit-scrollbar-thumb {
+    background-color: rgb(255 255 255 / 0.18);
+    border-radius: 9999px;
+  }
+  html[data-island-overlay] .island-scroll:hover::-webkit-scrollbar-thumb {
+    background-color: rgb(255 255 255 / 0.3);
+  }
+
   /* Kill every wallpaper layer inside the pet windows. `<BackgroundApplier />`
      mounts in this same root layout, so a user wallpaper is painted through TWO
      pseudo-element layers — `body[data-bg-enabled]::before` (fixed, full-window)
@@ -465,9 +488,18 @@ body[data-bg-enabled="true"][data-bg-scope="sidebar"]::before {
   display: none;
 }
 
-[data-bg-target] {
-  position: relative;
-  isolation: isolate;
+/* Layered on purpose. An UNLAYERED rule beats every `@layer utilities`
+   declaration no matter the specificity, so leaving this at the top level made
+   `position: relative` win over a Tailwind `fixed` / `absolute` class on the
+   same element — the Context Workbench's focus (full-screen) mode is
+   `fixed inset-0` on the very element that carries `data-bg-target="sidebar"`,
+   and it silently degraded to a 100vw block clipped by the dock. Inside
+   `@layer base` this is only the default for hosts that position themselves. */
+@layer base {
+  [data-bg-target] {
+    position: relative;
+    isolation: isolate;
+  }
 }
 [data-bg-target]::before {
   content: "";

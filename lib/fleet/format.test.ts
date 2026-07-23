@@ -6,6 +6,7 @@ import {
   formatCwdMiddle,
   formatElapsed,
   formatModelLabel,
+  normalizeIslandGeometry,
   sortForIsland,
   truncateLine,
 } from "./format"
@@ -31,6 +32,7 @@ function session(overrides: Partial<FleetSession>): FleetSession {
       sendMessage: false,
       focusTerminal: false,
       openTranscript: false,
+      interrupt: false,
     },
     startedAt: 0,
     lastEventAt: 0,
@@ -209,5 +211,37 @@ describe("formatCwdMiddle", () => {
     expect(out.startsWith("/Users")).toBe(true)
     expect(out.endsWith("x")).toBe(true)
     expect(out.length).toBeLessThanOrEqual(20)
+  })
+})
+
+describe("normalizeIslandGeometry", () => {
+  it("passes a well-formed payload through", () => {
+    expect(normalizeIslandGeometry({ topInset: 37, fullscreen: true })).toEqual({
+      topInset: 37,
+      fullscreen: true,
+    })
+  })
+
+  it("treats a missing or malformed payload as no-notch, not-full-screen", () => {
+    // Both defaults are the conservative direction: a wrong inset hides the card
+    // under the camera housing, and a wrong full-screen verdict makes the whole
+    // island vanish.
+    for (const raw of [undefined, null, {}, 37, "37", [], { topInset: null }]) {
+      expect(normalizeIslandGeometry(raw)).toEqual({ topInset: 0, fullscreen: false })
+    }
+  })
+
+  it("rejects non-finite and non-positive insets", () => {
+    expect(normalizeIslandGeometry({ topInset: NaN }).topInset).toBe(0)
+    expect(normalizeIslandGeometry({ topInset: Infinity }).topInset).toBe(0)
+    expect(normalizeIslandGeometry({ topInset: -5 }).topInset).toBe(0)
+    expect(normalizeIslandGeometry({ topInset: 0 }).topInset).toBe(0)
+  })
+
+  it("requires an explicit boolean true for full-screen", () => {
+    expect(normalizeIslandGeometry({ fullscreen: "true" }).fullscreen).toBe(false)
+    expect(normalizeIslandGeometry({ fullscreen: 1 }).fullscreen).toBe(false)
+    expect(normalizeIslandGeometry({ fullscreen: false }).fullscreen).toBe(false)
+    expect(normalizeIslandGeometry({ fullscreen: true }).fullscreen).toBe(true)
   })
 })

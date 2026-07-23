@@ -343,6 +343,176 @@ pub async fn fleet_focus_terminal(agent: String, session_id: String) -> Result<(
     focus_session_terminal(&agent, &session_id).await
 }
 
+// ---------------------------------------------------------------------------
+// Interrupt (cancel the current turn)
+// ---------------------------------------------------------------------------
+//
+// Sending a signal to a process this app did not start is the most dangerous
+// thing the fleet does, so the contract is deliberately narrow:
+//
+//   * ONE `SIGINT`, never a second and never `SIGTERM`. In every agent CLI a
+//     single Ctrl-C cancels the in-flight turn and a second one exits — so one
+//     signal is exactly "interrupt", and escalation is the user's job in their
+//     own terminal, not a button in an overlay.
+//   * The pid must still be alive AND still look like the agent we recorded.
+//     The pid comes from the hook's ppid, so it is the agent process itself;
+//     the identity re-check exists because pids get recycled, and a recycled
+//     pid means signalling an unrelated process.
+//   * Nothing is claimed about the result. We get no acknowledgement back, so
+//     the command reports "sent", and the UI says so too — the session's own
+//     next event is the only real evidence.
+
+/// Executable names that a given agent's process may legitimately have. Used
+/// only as a pid-recycling guard: the pid already came from that agent's hook,
+/// so this is re-confirmation, not identification.
+pub fn expected_process_names(agent: super::registry::FleetAgent) -> &'static [&'static str] {
+    use super::registry::FleetAgent;
+    match agent {
+        FleetAgent::ClaudeCode => &["claude"],
+        FleetAgent::Codex => &["codex"],
+        // Declared non-interruptible (one server hosts every session), listed
+        // for completeness so a future reverse-channel abort has a home.
+        FleetAgent::Opencode => &["opencode"],
+    }
+}
+
+/// Does an observed process look like one of `expected`?
+///
+/// Matches the executable stem of the process name or of `argv[0]`, so both a
+/// bare `claude` and a `/usr/local/bin/claude.exe` style path resolve. Pure.
+pub fn process_identity_matches(name: &str, argv0: Option<&str>, expected: &[&str]) -> bool {
+    fn stem(raw: &str) -> String {
+        let base = raw.rsplit(['/', '\\']).next().unwrap_or(raw);
+        let base = base.strip_suffix(".exe").unwrap_or(base);
+        base.to_ascii_lowercase()
+    }
+    let candidates = [Some(name), argv0];
+    candidates
+        .iter()
+        .flatten()
+        .filter(|c| !c.is_empty())
+        .any(|c| expected.iter().any(|e| stem(c) == e.to_ascii_lowercase()))
+}
+
+/// Whether this platform can deliver a turn-cancelling interrupt at all.
+///
+/// Unix: `SIGINT` to the agent's pid is exactly what Ctrl-C in its terminal
+/// does. Windows: `GenerateConsoleCtrlEvent` only reaches processes sharing our
+/// console, which an externally-launched agent never does — rather than ship a
+/// button that silently no-ops, the capability stays off there.
+pub fn can_interrupt() -> bool {
+    cfg!(unix)
+}
+
+/// Verified outcome of the pre-signal checks. Split from the signal itself so
+/// the decision is unit-testable without a live process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InterruptRefusal {
+    Unsupported,
+    NotRunning,
+    IdentityMismatch,
+}
+
+impl InterruptRefusal {
+    /// Stable, machine-readable reason the frontend maps to a message.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Unsupported => "interrupt_unsupported",
+            Self::NotRunning => "interrupt_not_running",
+            Self::IdentityMismatch => "interrupt_identity_mismatch",
+        }
+    }
+}
+
+/// Decide whether a signal may be sent, given already-gathered facts. Pure.
+pub fn check_interrupt(
+    supported: bool,
+    observed: Option<(&str, Option<&str>)>,
+    expected: &[&str],
+) -> Result<(), InterruptRefusal> {
+    if !supported {
+        return Err(InterruptRefusal::Unsupported);
+    }
+    let Some((name, argv0)) = observed else {
+        return Err(InterruptRefusal::NotRunning);
+    };
+    if !process_identity_matches(name, argv0, expected) {
+        return Err(InterruptRefusal::IdentityMismatch);
+    }
+    Ok(())
+}
+
+/// Look up the live process behind `pid`, returning its name and `argv[0]`.
+fn observe_process(pid: u32) -> Option<(String, Option<String>)> {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+    let mut system = System::new();
+    let target = Pid::from_u32(pid);
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[target]),
+        true,
+        ProcessRefreshKind::nothing().with_cmd(sysinfo::UpdateKind::Always),
+    );
+    let process = system.process(target)?;
+    Some((
+        process.name().to_string_lossy().to_string(),
+        process
+            .cmd()
+            .first()
+            .map(|a| a.to_string_lossy().to_string()),
+    ))
+}
+
+/// Deliver a single `SIGINT` to `pid`.
+#[cfg(unix)]
+fn send_interrupt(pid: u32) -> Result<(), String> {
+    // SAFETY: `kill` with a valid signal number is safe to call; the pid was
+    // just verified alive and identity-checked by the caller. A racing exit
+    // between the check and here surfaces as ESRCH, which we report rather
+    // than retry — retrying a signal at a pid that just died is precisely how
+    // a recycled pid gets hit.
+    let rc = unsafe { libc::kill(pid as libc::pid_t, libc::SIGINT) };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error().to_string())
+    }
+}
+
+#[cfg(not(unix))]
+fn send_interrupt(_pid: u32) -> Result<(), String> {
+    Err(InterruptRefusal::Unsupported.code().to_string())
+}
+
+/// Interrupt a session's current turn. Shared by the Tauri command and the
+/// companion RPC arm so the two transports can never drift.
+pub async fn interrupt_session(agent: &str, session_id: &str) -> Result<(), String> {
+    let agent = super::registry::FleetAgent::parse(agent).ok_or("unknown agent")?;
+    let pid = super::runtime()
+        .session_agent_pid(agent, session_id)
+        .ok_or(InterruptRefusal::NotRunning.code())?;
+    let expected = expected_process_names(agent);
+    // `sysinfo` refresh + `kill` are blocking; hop off the async runtime like
+    // the other commands in this module that touch the OS.
+    tauri::async_runtime::spawn_blocking(move || {
+        let observed = observe_process(pid);
+        let observed_ref = observed
+            .as_ref()
+            .map(|(name, argv0)| (name.as_str(), argv0.as_deref()));
+        check_interrupt(can_interrupt(), observed_ref, expected)
+            .map_err(|r| r.code().to_string())?;
+        send_interrupt(pid)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Tauri command: interrupt a session's current turn (agent + session id, so
+/// the frontend never passes a raw pid).
+#[tauri::command]
+pub async fn fleet_interrupt_session(agent: String, session_id: String) -> Result<(), String> {
+    interrupt_session(&agent, &session_id).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -489,6 +659,111 @@ mod tests {
     #[test]
     fn sway_criteria_wraps_the_app_id() {
         assert_eq!(sway_focus_criteria("kitty"), "[app_id=\"kitty\"] focus");
+    }
+
+    #[test]
+    fn process_identity_matches_the_agent_binary() {
+        // Both real agents ship as native binaries whose `comm` is the agent
+        // name (verified against live `ps` output), so the common case is exact.
+        assert!(process_identity_matches("claude", None, &["claude"]));
+        assert!(process_identity_matches("codex", None, &["codex"]));
+        // A path or an .exe suffix still resolves to the same stem.
+        assert!(process_identity_matches(
+            "/Users/x/.local/bin/claude",
+            None,
+            &["claude"]
+        ));
+        assert!(process_identity_matches(
+            "C:\\bin\\codex.exe",
+            None,
+            &["codex"]
+        ));
+        assert!(process_identity_matches("CLAUDE", None, &["claude"]));
+        // A wrapper whose process name is the interpreter is recognized via argv[0].
+        assert!(process_identity_matches(
+            "node",
+            Some("/usr/local/bin/claude"),
+            &["claude"]
+        ));
+    }
+
+    #[test]
+    fn process_identity_rejects_a_recycled_pid() {
+        // The whole point: the pid died and the OS handed it to something else.
+        assert!(!process_identity_matches("Finder", None, &["claude"]));
+        assert!(!process_identity_matches("", None, &["claude"]));
+        assert!(!process_identity_matches("", Some(""), &["claude"]));
+        // Substring collisions must NOT pass — `codex-helper` is a different
+        // program (the ChatGPT desktop app ships several such helpers).
+        assert!(!process_identity_matches("codex-helper", None, &["codex"]));
+        assert!(!process_identity_matches("mycodex", None, &["codex"]));
+        // Right shape, wrong agent.
+        assert!(!process_identity_matches("codex", None, &["claude"]));
+    }
+
+    #[test]
+    fn check_interrupt_refuses_before_signalling() {
+        let expected = &["claude"];
+        // Happy path.
+        assert_eq!(
+            check_interrupt(true, Some(("claude", None)), expected),
+            Ok(())
+        );
+        // Platform can't deliver a turn-cancelling interrupt.
+        assert_eq!(
+            check_interrupt(false, Some(("claude", None)), expected),
+            Err(InterruptRefusal::Unsupported)
+        );
+        // Nothing at that pid any more.
+        assert_eq!(
+            check_interrupt(true, None, expected),
+            Err(InterruptRefusal::NotRunning)
+        );
+        // Something at that pid, but not our agent — the misfire we must never make.
+        assert_eq!(
+            check_interrupt(true, Some(("Finder", None)), expected),
+            Err(InterruptRefusal::IdentityMismatch)
+        );
+        // The platform gate is checked FIRST, so an unsupported platform never
+        // even consults a process it has no business signalling.
+        assert_eq!(
+            check_interrupt(false, None, expected),
+            Err(InterruptRefusal::Unsupported)
+        );
+    }
+
+    #[test]
+    fn refusal_codes_are_stable_for_the_frontend() {
+        assert_eq!(
+            InterruptRefusal::Unsupported.code(),
+            "interrupt_unsupported"
+        );
+        assert_eq!(InterruptRefusal::NotRunning.code(), "interrupt_not_running");
+        assert_eq!(
+            InterruptRefusal::IdentityMismatch.code(),
+            "interrupt_identity_mismatch"
+        );
+    }
+
+    #[test]
+    fn expected_names_cover_every_agent() {
+        use crate::fleet::registry::FleetAgent;
+        assert_eq!(expected_process_names(FleetAgent::ClaudeCode), &["claude"]);
+        assert_eq!(expected_process_names(FleetAgent::Codex), &["codex"]);
+        assert_eq!(expected_process_names(FleetAgent::Opencode), &["opencode"]);
+    }
+
+    #[test]
+    fn interrupt_is_a_unix_only_capability() {
+        // Windows console control events cannot reach a process that does not
+        // share our console, so the capability (and the button) stay off there.
+        assert_eq!(can_interrupt(), cfg!(unix));
+    }
+
+    #[tokio::test]
+    async fn interrupt_session_rejects_an_unknown_agent() {
+        let err = interrupt_session("not-an-agent", "s1").await.unwrap_err();
+        assert!(err.contains("unknown agent"));
     }
 
     #[tokio::test]

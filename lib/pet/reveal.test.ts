@@ -18,7 +18,7 @@ jest.mock("@/lib/tauri/os", () => ({ isMacPlatform: () => mockIsMac }))
 const revealPetWindowMock = jest.fn().mockResolvedValue(true)
 const revealIslandWindowMock = jest.fn().mockResolvedValue(true)
 jest.mock("@/lib/tauri/pet-window", () => ({
-  revealPetWindow: (focus: boolean) => revealPetWindowMock(focus),
+  revealPetWindow: (focus: boolean, label: string) => revealPetWindowMock(focus, label),
   revealIslandWindow: (focus: boolean) => revealIslandWindowMock(focus),
 }))
 
@@ -136,7 +136,7 @@ describe("schedulePetWindowReveal", () => {
 
     // Native NSPanel reveal uses `orderFrontRegardless`, so the pet remains
     // visible without activating Cognia or racing generic NSWindow.show().
-    expect(revealPetWindowMock).toHaveBeenCalledWith(false)
+    expect(revealPetWindowMock).toHaveBeenCalledWith(false, "pet")
     expect(showMock).not.toHaveBeenCalled()
     expect(setResizableMock).not.toHaveBeenCalled()
     expect(setSizeMock).not.toHaveBeenCalled()
@@ -151,7 +151,7 @@ describe("schedulePetWindowReveal", () => {
     flushRaf()
     await flushAsync()
 
-    expect(revealPetWindowMock).toHaveBeenCalledWith(true)
+    expect(revealPetWindowMock).toHaveBeenCalledWith(true, "pet-popup")
     expect(revealIslandWindowMock).not.toHaveBeenCalled()
     expect(showMock).not.toHaveBeenCalled()
     expect(setFocusMock).not.toHaveBeenCalled()

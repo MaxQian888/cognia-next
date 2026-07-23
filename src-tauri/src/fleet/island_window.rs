@@ -32,8 +32,11 @@
 //! so only the pure placement math is unit-tested; the runtime behavior is
 //! covered by `tauri-smoke`.
 
+use crate::fleet::island_space::{self, Rect};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Runtime, WebviewWindow};
 
 pub const ISLAND_LABEL: &str = "island";
@@ -62,16 +65,70 @@ const HOVER_POLL_MS: u64 = 120;
 /// Idle cadence while the island window is hidden.
 const HOVER_POLL_HIDDEN_MS: u64 = 500;
 
+/// How many hover ticks pass between geometry samples. The geometry probe is
+/// cheap in the common case (the menu-bar delta short-circuits before any
+/// window enumeration — see `island_space`), but there is no reason to run it
+/// at cursor cadence: a Space switch is a human-scale event.
+const GEOMETRY_SAMPLE_EVERY_TICKS: u32 = 4;
+
 /// Single-flight guard for the hover monitor task (mirrors the runtime's
 /// `reaper_running` pattern).
 static HOVER_MONITOR_RUNNING: AtomicBool = AtomicBool::new(false);
 
-#[derive(Debug, Clone, Serialize)]
+/// Per-display notch heights (physical px), keyed by [`monitor_cache_key`].
+///
+/// A display's camera housing is a **physical property** — it does not come and
+/// go with the menu bar. `NSScreen.safeAreaInsets.top`, however, is queried
+/// against the current Space, and Apple documents no guarantee that it keeps
+/// reporting the housing once the menu bar is hidden. Caching the largest value
+/// ever observed per display makes the island's notch padding Space-independent
+/// no matter which way that API behaves, which is the other half of the fix
+/// begun when the anchor moved off `work_area` (see the module docs).
+static NOTCH_CACHE: OnceLock<Mutex<HashMap<String, f64>>> = OnceLock::new();
+
+fn notch_cache() -> &'static Mutex<HashMap<String, f64>> {
+    NOTCH_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Fold a fresh `safeAreaInsets.top` sample into the cached value: monotonic,
+/// never negative. Pure for unit tests.
+pub(crate) fn fold_notch_sample(cached: f64, sampled: f64) -> f64 {
+    let sampled = if sampled.is_finite() { sampled } else { 0.0 };
+    cached.max(sampled).max(0.0)
+}
+
+/// Stable identity for the notch cache. `Monitor::name` when the OS provides
+/// one, else a synthetic key from the display's geometry — good enough to
+/// distinguish concurrently-connected displays, which is all the cache needs.
+fn monitor_cache_key(monitor: &tauri::Monitor) -> String {
+    if let Some(name) = monitor.name() {
+        if !name.is_empty() {
+            return name.clone();
+        }
+    }
+    let p = monitor.position();
+    let s = monitor.size();
+    format!(
+        "@{},{} {}x{} @{}",
+        p.x,
+        p.y,
+        s.width,
+        s.height,
+        monitor.scale_factor()
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IslandGeometry {
     /// Top safe-area inset (logical px) of the island's current display —
     /// the notch height on built-in notched displays, 0 everywhere else.
     pub top_inset: f64,
+    /// Whether a full-screen app currently owns the island's display. The
+    /// renderer suppresses the idle pill entirely in this regime (the top strip
+    /// belongs to that app), and only materializes when a session needs the
+    /// user. See `island_space`.
+    pub fullscreen: bool,
 }
 
 /// Persisted island preferences (`<cognia-home>/island-window.json`). Written
@@ -82,6 +139,13 @@ pub struct IslandGeometry {
 pub struct IslandConfig {
     /// Preferred monitor name (`Monitor::name`). `None` → primary monitor.
     pub monitor: Option<String>,
+    /// Whether the island was showing when the app last quit, so a relaunch can
+    /// put it back. Without this the monitor preference survived a restart but
+    /// the island itself did not — the ingress came back up and kept collecting
+    /// events with no overlay to show them in, which reads as "monitoring is
+    /// broken" rather than "you closed the window". `#[serde(default)]` keeps
+    /// config files written before this field readable (they restore closed).
+    pub open: bool,
 }
 
 fn island_config_path() -> Option<std::path::PathBuf> {
@@ -146,6 +210,8 @@ struct IslandAnchor {
     /// Notch / camera-housing height (physical px); 0 off macOS and on
     /// non-notched displays.
     top_inset: f64,
+    /// Whether a full-screen app owns this display right now.
+    fullscreen: bool,
 }
 
 impl IslandAnchor {
@@ -157,6 +223,14 @@ impl IslandAnchor {
             h: 1080.0,
             scale: 1.0,
             top_inset: 0.0,
+            fullscreen: false,
+        }
+    }
+
+    fn geometry(&self) -> IslandGeometry {
+        IslandGeometry {
+            top_inset: self.top_inset_logical(),
+            fullscreen: self.fullscreen,
         }
     }
 
@@ -218,6 +292,26 @@ fn resolve_target_monitor<R: Runtime>(app: &AppHandle<R>) -> Option<tauri::Monit
 /// never a deadlock risk because off-main implies the main loop is free.
 #[cfg(target_os = "macos")]
 fn monitor_top_safe_inset<R: Runtime>(app: &AppHandle<R>, monitor: &tauri::Monitor) -> f64 {
+    let sampled = raw_top_safe_inset(app, monitor);
+
+    // Fold through the monotonic cache: a Space where the menu bar is hidden
+    // may report 0 for a display that demonstrably has a notch, and trusting
+    // that zero is what slid the card up under the camera housing.
+    let key = monitor_cache_key(monitor);
+    let Ok(mut cache) = notch_cache().lock() else {
+        return sampled.max(0.0);
+    };
+    let folded = fold_notch_sample(cache.get(&key).copied().unwrap_or(0.0), sampled);
+    cache.insert(key, folded);
+    folded
+}
+
+/// The un-cached `NSScreen.safeAreaInsets.top` sample (physical px) — the raw
+/// reading before [`fold_notch_sample`] makes it Space-independent. Separate so
+/// the diagnostics dump can show both numbers side by side; everything else
+/// should call [`monitor_top_safe_inset`].
+#[cfg(target_os = "macos")]
+fn raw_top_safe_inset<R: Runtime>(app: &AppHandle<R>, monitor: &tauri::Monitor) -> f64 {
     use objc2::MainThreadMarker;
 
     let scale = monitor.scale_factor();
@@ -273,27 +367,38 @@ fn island_anchor<R: Runtime>(app: &AppHandle<R>) -> IslandAnchor {
     let Some(monitor) = resolve_target_monitor(app) else {
         return IslandAnchor::fallback();
     };
+    let scale = monitor.scale_factor();
+    let work_y = monitor.work_area().position.y as f64;
     #[cfg(target_os = "macos")]
     {
-        IslandAnchor {
+        let frame = Rect {
             x: monitor.position().x as f64,
             y: monitor.position().y as f64,
             w: monitor.size().width as f64,
             h: monitor.size().height as f64,
-            scale: monitor.scale_factor(),
+        };
+        IslandAnchor {
+            x: frame.x,
+            y: frame.y,
+            w: frame.w,
+            h: frame.h,
+            scale,
             top_inset: monitor_top_safe_inset(app, &monitor),
+            fullscreen: island_space::display_is_fullscreen(frame, work_y, scale),
         }
     }
     #[cfg(not(target_os = "macos"))]
     {
         let rect = monitor.work_area();
+        let _ = work_y;
         IslandAnchor {
             x: rect.position.x as f64,
             y: rect.position.y as f64,
             w: rect.size.width as f64,
             h: rect.size.height as f64,
-            scale: monitor.scale_factor(),
+            scale,
             top_inset: 0.0,
+            fullscreen: false,
         }
     }
 }
@@ -342,6 +447,10 @@ fn spawn_hover_monitor<R: Runtime>(app: &AppHandle<R>) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let mut was_inside = false;
+        // `None` until the first sample, so the renderer always receives an
+        // initial geometry push shortly after mount even if nothing changes.
+        let mut last_geometry: Option<(IslandGeometry, (f64, f64, f64))> = None;
+        let mut tick: u32 = 0;
         loop {
             let Some(window) = app.get_webview_window(ISLAND_LABEL) else {
                 // Window destroyed (app teardown) — let a future open respawn.
@@ -362,6 +471,21 @@ fn spawn_hover_monitor<R: Runtime>(app: &AppHandle<R>) {
                     IslandHover { hovering: inside },
                 );
             }
+
+            // Geometry sample: catches a Space switch (enter/leave full screen),
+            // a display rearrangement, and a menu-bar auto-hide toggle — none of
+            // which fire any event we could listen for, and all of which used to
+            // leave the strip anchored to stale numbers until the next content
+            // change happened to call `island_resize`.
+            if tick.is_multiple_of(GEOMETRY_SAMPLE_EVERY_TICKS) {
+                let anchor = island_anchor(&app);
+                let sample = (anchor.geometry(), (anchor.x, anchor.y, anchor.w));
+                if last_geometry.as_ref() != Some(&sample) {
+                    last_geometry = Some(sample);
+                    let _ = reposition_island_with(&app, &window, anchor);
+                }
+            }
+            tick = tick.wrapping_add(1);
             tokio::time::sleep(std::time::Duration::from_millis(HOVER_POLL_MS)).await;
         }
     });
@@ -393,13 +517,7 @@ pub async fn island_set_tucked(app: AppHandle, tucked: bool) -> Result<(), Strin
 /// Push the current display geometry to a live island renderer so it can
 /// re-pad below the notch after a monitor change. Best-effort.
 fn emit_island_geometry<R: Runtime>(app: &AppHandle<R>, anchor: &IslandAnchor) {
-    let _ = app.emit_to(
-        ISLAND_LABEL,
-        ISLAND_GEOMETRY_EVENT,
-        IslandGeometry {
-            top_inset: anchor.top_inset_logical(),
-        },
-    );
+    let _ = app.emit_to(ISLAND_LABEL, ISLAND_GEOMETRY_EVENT, anchor.geometry());
 }
 
 /// Recompute the top-center placement from the CURRENT preferred monitor and
@@ -411,7 +529,17 @@ fn reposition_island<R: Runtime>(
     app: &AppHandle<R>,
     window: &tauri::WebviewWindow<R>,
 ) -> Result<(), String> {
-    let anchor = island_anchor(app);
+    reposition_island_with(app, window, island_anchor(app))
+}
+
+/// [`reposition_island`] against an anchor the caller already computed — the
+/// watch loop samples one per tick and must not pay for a second full-screen
+/// sweep just to apply it.
+fn reposition_island_with<R: Runtime>(
+    app: &AppHandle<R>,
+    window: &tauri::WebviewWindow<R>,
+    anchor: IslandAnchor,
+) -> Result<(), String> {
     let size = window.inner_size().map_err(|e| e.to_string())?;
     let (x, y) = resolve_island_position((anchor.x, anchor.y, anchor.w), size.width as f64);
     window
@@ -427,6 +555,7 @@ pub(crate) fn open_island_window_inner<R: Runtime>(
     app: &AppHandle<R>,
     opts: IslandWindowOpts,
 ) -> Result<(), String> {
+    set_island_open_flag(true);
     if let Some(window) = app.get_webview_window(ISLAND_LABEL) {
         // Recompute the top-center placement before re-showing: the monitor
         // layout / preferred monitor may have changed since the window was
@@ -526,10 +655,38 @@ pub(crate) fn open_island_window_inner<R: Runtime>(
 }
 
 pub(crate) fn close_island_window_inner<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    set_island_open_flag(false);
     if let Some(window) = app.get_webview_window(ISLAND_LABEL) {
         window.hide().map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// Record the island's shown/hidden intent. Best-effort: failing to persist the
+/// preference must never fail the window operation the user actually asked for.
+fn set_island_open_flag(open: bool) {
+    let mut cfg = load_island_config();
+    if cfg.open == open {
+        return;
+    }
+    cfg.open = open;
+    if let Err(e) = save_island_config(&cfg) {
+        log::warn!("island: persisting open={open} failed: {e}");
+    }
+}
+
+/// Boot restore: reopen the island when it was showing at last quit.
+///
+/// Deliberately a no-op (not an error) when it was closed, so the caller can
+/// fire it unconditionally alongside `fleet_monitor_restore` — the two halves of
+/// "put the fleet back the way the user left it" belong on the same boot path.
+#[tauri::command]
+pub async fn island_restore(app: AppHandle) -> Result<bool, String> {
+    if !load_island_config().open {
+        return Ok(false);
+    }
+    open_island_window_inner(&app, IslandWindowOpts::default())?;
+    Ok(true)
 }
 
 pub(crate) fn is_island_window_open_inner<R: Runtime>(app: &AppHandle<R>) -> bool {
@@ -576,14 +733,23 @@ pub async fn reveal_island_window(window: WebviewWindow, focus: bool) -> Result<
 /// Resize on expand/collapse, keeping the strip centered under the notch.
 /// `width`/`height` are the renderer-measured logical CONTENT size, clamped
 /// so the strip never spills off-screen; the window grows by the display's
-/// top safe-area inset, which is returned so the renderer pads its card
-/// below the notch.
+/// top safe-area inset.
+///
+/// Returns the display's full [`IslandGeometry`] rather than a bare inset, so
+/// the renderer learns the notch padding AND the full-screen regime from the
+/// same round-trip it already makes after every layout. The
+/// `fleet://island-geometry` event carries the same payload for changes that
+/// happen without a resize (Space switch, monitor change).
 #[tauri::command]
-pub async fn island_resize(app: AppHandle, width: f64, height: f64) -> Result<f64, String> {
+pub async fn island_resize(
+    app: AppHandle,
+    width: f64,
+    height: f64,
+) -> Result<IslandGeometry, String> {
     let anchor = island_anchor(&app);
     let inset_logical = anchor.top_inset_logical();
     let Some(window) = app.get_webview_window(ISLAND_LABEL) else {
-        return Ok(inset_logical);
+        return Ok(anchor.geometry());
     };
     let (width, height) = clamp_island_size(width, height, anchor.content_max_logical());
     window
@@ -594,7 +760,125 @@ pub async fn island_resize(app: AppHandle, width: f64, height: f64) -> Result<f6
     window
         .set_position(PhysicalPosition::new(x, y))
         .map_err(|e| e.to_string())?;
-    Ok(inset_logical)
+    Ok(anchor.geometry())
+}
+
+/// One display's raw placement inputs, for the diagnostics dump.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IslandDisplayDebug {
+    pub name: Option<String>,
+    pub cache_key: String,
+    pub is_primary: bool,
+    pub is_target: bool,
+    pub scale: f64,
+    /// Full display frame (physical px): x, y, width, height.
+    pub frame: [f64; 4],
+    /// Work area (physical px) — `NSScreen.visibleFrame` on macOS.
+    pub work_area: [f64; 4],
+    /// Raw `NSScreen.safeAreaInsets.top` for this sample (physical px).
+    pub safe_area_top_raw: f64,
+    /// The monotonic cached notch height actually used (physical px).
+    pub safe_area_top_cached: f64,
+    /// Free menu-bar probe: does the work area start below the frame top?
+    pub menu_bar_occupies_top: bool,
+    /// Full verdict, including the window sweep when the probe says hidden.
+    pub fullscreen: bool,
+}
+
+/// Everything the island's placement math reads, in one snapshot.
+///
+/// This exists because the failure mode being chased is invisible from a unit
+/// test: `island_window.rs`'s live window ops can't run under
+/// `tauri::test::mock_app()`, and the quantities that go wrong
+/// (`safeAreaInsets` under a hidden menu bar, the Space-dependent work area)
+/// are only observable on a real desktop in a real Space. Dumping them lets a
+/// placement bug be diagnosed from numbers instead of screenshots.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IslandDebugGeometry {
+    pub displays: Vec<IslandDisplayDebug>,
+    /// Preferred monitor name from `island-window.json`, if any.
+    pub preferred_monitor: Option<String>,
+    /// Island window outer position (physical px), when the window exists.
+    pub window_position: Option<[f64; 2]>,
+    /// Island window outer size (physical px), when the window exists.
+    pub window_size: Option<[f64; 2]>,
+    pub window_visible: bool,
+    /// The geometry currently being pushed to the renderer.
+    pub geometry: IslandGeometry,
+}
+
+/// Dump every placement input for the current moment. Read-only.
+#[tauri::command]
+pub async fn island_debug_geometry(app: AppHandle) -> Result<IslandDebugGeometry, String> {
+    let preferred = load_island_config().monitor;
+    let target_key = resolve_target_monitor(&app).map(|m| monitor_cache_key(&m));
+    let primary_pos = app.primary_monitor().ok().flatten().map(|m| *m.position());
+    let monitors = app.available_monitors().map_err(|e| e.to_string())?;
+
+    let displays = monitors
+        .into_iter()
+        .map(|m| {
+            let scale = m.scale_factor();
+            let frame = Rect {
+                x: m.position().x as f64,
+                y: m.position().y as f64,
+                w: m.size().width as f64,
+                h: m.size().height as f64,
+            };
+            let work = m.work_area();
+            let work_y = work.position.y as f64;
+            let cache_key = monitor_cache_key(&m);
+            // `monitor_top_safe_inset` folds into the cache as a side effect, so
+            // read the raw sample first to show both numbers side by side.
+            #[cfg(target_os = "macos")]
+            let raw = raw_top_safe_inset(&app, &m);
+            #[cfg(not(target_os = "macos"))]
+            let raw = 0.0;
+            #[cfg(target_os = "macos")]
+            let cached = monitor_top_safe_inset(&app, &m);
+            #[cfg(not(target_os = "macos"))]
+            let cached = 0.0;
+            IslandDisplayDebug {
+                name: m.name().cloned(),
+                is_primary: primary_pos.as_ref() == Some(m.position()),
+                is_target: target_key.as_deref() == Some(cache_key.as_str()),
+                cache_key,
+                scale,
+                frame: [frame.x, frame.y, frame.w, frame.h],
+                work_area: [
+                    work.position.x as f64,
+                    work_y,
+                    work.size.width as f64,
+                    work.size.height as f64,
+                ],
+                safe_area_top_raw: raw,
+                safe_area_top_cached: cached,
+                menu_bar_occupies_top: island_space::menu_bar_occupies_top(frame.y, work_y, scale),
+                fullscreen: island_space::display_is_fullscreen(frame, work_y, scale),
+            }
+        })
+        .collect();
+
+    let window = app.get_webview_window(ISLAND_LABEL);
+    Ok(IslandDebugGeometry {
+        displays,
+        preferred_monitor: preferred,
+        window_position: window
+            .as_ref()
+            .and_then(|w| w.outer_position().ok())
+            .map(|p| [p.x as f64, p.y as f64]),
+        window_size: window
+            .as_ref()
+            .and_then(|w| w.outer_size().ok())
+            .map(|s| [s.width as f64, s.height as f64]),
+        window_visible: window
+            .as_ref()
+            .map(|w| w.is_visible().unwrap_or(false))
+            .unwrap_or(false),
+        geometry: island_anchor(&app).geometry(),
+    })
 }
 
 /// One entry per connected monitor, for the settings display picker.
@@ -708,9 +992,38 @@ mod tests {
             h: 1964.0,
             scale: 2.0,
             top_inset: 74.0,
+            fullscreen: false,
         };
         assert_eq!(anchor.top_inset_logical(), 37.0);
         assert_eq!(anchor.content_max_logical(), (1512.0, 982.0 - 37.0));
+        assert_eq!(
+            anchor.geometry(),
+            IslandGeometry {
+                top_inset: 37.0,
+                fullscreen: false
+            }
+        );
+    }
+
+    #[test]
+    fn notch_sample_folds_monotonically() {
+        // First observation on a notched display seeds the cache.
+        assert_eq!(fold_notch_sample(0.0, 74.0), 74.0);
+        // A Space that reports 0 (menu bar hidden) must NOT erase it — this is
+        // the whole point of the cache and the root of the misplacement bug.
+        assert_eq!(fold_notch_sample(74.0, 0.0), 74.0);
+        // A larger reading wins (display swapped / scale changed).
+        assert_eq!(fold_notch_sample(74.0, 80.0), 80.0);
+        // Non-notched displays stay at zero forever.
+        assert_eq!(fold_notch_sample(0.0, 0.0), 0.0);
+        // Garbage in can't poison the cache.
+        assert_eq!(fold_notch_sample(74.0, f64::NAN), 74.0);
+        assert_eq!(fold_notch_sample(0.0, -5.0), 0.0);
+        // A non-finite sample is rejected outright rather than folded — an
+        // infinite "notch" would pin the card off the bottom of the screen
+        // forever, and the cache is monotonic so it could never recover.
+        assert_eq!(fold_notch_sample(74.0, f64::INFINITY), 74.0);
+        assert_eq!(fold_notch_sample(0.0, f64::NEG_INFINITY), 0.0);
     }
 
     #[test]
@@ -734,8 +1047,12 @@ mod tests {
 
     #[test]
     fn geometry_event_payload_is_camel_case() {
-        let json = serde_json::to_string(&IslandGeometry { top_inset: 37.0 }).unwrap();
-        assert_eq!(json, r#"{"topInset":37.0}"#);
+        let json = serde_json::to_string(&IslandGeometry {
+            top_inset: 37.0,
+            fullscreen: true,
+        })
+        .unwrap();
+        assert_eq!(json, r#"{"topInset":37.0,"fullscreen":true}"#);
     }
 
     #[test]
@@ -745,8 +1062,14 @@ mod tests {
         assert_eq!(empty, IslandConfig::default());
         assert!(empty.monitor.is_none());
 
+        // A config written before `open` existed restores as closed.
+        let legacy: IslandConfig = serde_json::from_str(r#"{"monitor":"DELL U2723QE"}"#).unwrap();
+        assert_eq!(legacy.monitor.as_deref(), Some("DELL U2723QE"));
+        assert!(!legacy.open);
+
         let cfg = IslandConfig {
             monitor: Some("DELL U2723QE".into()),
+            open: true,
         };
         let json = serde_json::to_string(&cfg).unwrap();
         let back: IslandConfig = serde_json::from_str(&json).unwrap();

@@ -4,7 +4,31 @@
  * translatable labels live in the components.
  */
 
-import type { FleetSession, FleetStatus } from "./types"
+import type { FleetSession, FleetStatus, IslandGeometry } from "./types"
+
+/** Island geometry with every field defaulted — the shape callers can rely on. */
+export const EMPTY_ISLAND_GEOMETRY: IslandGeometry = { topInset: 0, fullscreen: false }
+
+/**
+ * Coerce an untrusted geometry payload into a total {@link IslandGeometry}.
+ *
+ * Both sources are untrusted in the same way: an event payload can be absent
+ * mid-teardown, and the `island_resize` round-trip resolves against whatever a
+ * test double or an older Rust build returns. A missing / non-finite / negative
+ * inset means "no notch", and anything other than an explicit `true` means "not
+ * full screen" — the conservative direction in both cases, since a wrong inset
+ * hides the card under the camera housing and a wrong full-screen verdict makes
+ * the island vanish.
+ */
+export function normalizeIslandGeometry(raw: unknown): IslandGeometry {
+  const g = raw as Partial<IslandGeometry> | null | undefined
+  const topInset = g?.topInset
+  return {
+    topInset:
+      typeof topInset === "number" && Number.isFinite(topInset) && topInset > 0 ? topInset : 0,
+    fullscreen: g?.fullscreen === true,
+  }
+}
 
 /**
  * Compact elapsed rendering matching the reference design:

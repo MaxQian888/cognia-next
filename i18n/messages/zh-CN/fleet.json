@@ -61,6 +61,16 @@
       "turn": "本轮失败"
     },
     "focusTerminal": "聚焦终端",
+    "interrupt": {
+      "error": {
+        "interrupt_identity_mismatch": "该进程已不是这个 Agent，未发送任何信号。",
+        "interrupt_not_running": "该会话已不可达。",
+        "interrupt_unsupported": "当前平台不支持中断。",
+        "unknown": "中断信号发送失败。"
+      },
+      "hint": "向 Agent 发送一次 Ctrl-C，取消当前回合。会话本身继续运行。",
+      "label": "中断本回合"
+    },
     "meta": {
       "model": "模型：{model}",
       "permissionMode": "权限模式：{mode}"
@@ -68,8 +78,6 @@
     "multiSelect": "可多选",
     "openTranscript": "在文件管理器中显示会话记录",
     "questionMore": "还有 {count} 个问题",
-    "subagentBackground": "后台",
-    "subagents": "{count} 个子代理",
     "status": {
       "ended": "会话已结束",
       "idle": "空闲",
@@ -78,6 +86,8 @@
       "waitingPermission": "等待权限审批",
       "working": "工作中…"
     },
+    "subagentBackground": "后台",
+    "subagents": "{count} 个子代理",
     "waitingFor": "已等待 {duration}",
     "you": "你："
   }

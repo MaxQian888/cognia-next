@@ -574,14 +574,17 @@ const KNOWN_COMMANDS: &[&str] = &[
     "logs_list_files",
     // ── Agent Fleet (ADR-0009): view/act on the desktop's live agent fleet ──
     // A phone / companion browser can watch the island snapshot and answer a
-    // parked permission remotely. `fleet_get_snapshot` is a pure read; the three
-    // control ops (answer permission, inject an OpenCode prompt, focus a
-    // terminal) are control-gated. All reach the process-global runtime directly
-    // (no AppHandle), so they also work on a headless server.
+    // parked permission or AskUserQuestion remotely. `fleet_get_snapshot` is a
+    // pure read; the control ops (answer a permission, answer a question, inject
+    // an OpenCode prompt, focus a terminal, interrupt a turn) are control-gated.
+    // All reach the process-global runtime directly (no AppHandle), so they also
+    // work on a headless server.
     "fleet_get_snapshot",
     "fleet_permission_respond",
+    "fleet_question_respond",
     "fleet_opencode_send_message",
     "fleet_focus_terminal",
+    "fleet_interrupt_session",
     // ADR-0085 — host-neutral shared browser session and tool contract.
     "browser_session_ensure",
     "browser_session_get",
@@ -935,12 +938,15 @@ const CONTROL_COMMANDS: &[&str] = &[
     "memory_forget",
     // App-data restore overwrites local state.
     "backup_import",
-    // Fleet control — answering a parked permission, injecting an OpenCode
-    // prompt, and focusing a terminal all steer a host-owned agent session,
-    // the same elevation as the session-attach / goal controls above.
+    // Fleet control — answering a parked permission or question, injecting an
+    // OpenCode prompt, focusing a terminal, and interrupting a turn all steer a
+    // host-owned agent session, the same elevation as the session-attach / goal
+    // controls above.
     "fleet_permission_respond",
+    "fleet_question_respond",
     "fleet_opencode_send_message",
     "fleet_focus_terminal",
+    "fleet_interrupt_session",
 ];
 
 /// O(1) membership mirrors of the command allowlists above. The `&[&str]`
@@ -4818,6 +4824,14 @@ pub(super) async fn dispatch(
                 crate::fleet::runtime().respond_permission(&request_id, behavior),
             )
         }
+        "fleet_question_respond" => {
+            // Without this arm an AskUserQuestion stranded anyone who wasn't at
+            // the desktop island: the phone could see the question in the
+            // snapshot but had no way to answer it, so it simply timed out.
+            let request_id: String = required(&args, "requestId")?;
+            let selections: Vec<Vec<u32>> = required(&args, "selections")?;
+            to_json(crate::fleet::runtime().respond_question(&request_id, selections))
+        }
         "fleet_opencode_send_message" => {
             let session_id: String = required(&args, "sessionId")?;
             let text: String = required(&args, "text")?;
@@ -4830,6 +4844,14 @@ pub(super) async fn dispatch(
             let agent: String = required(&args, "agent")?;
             let session_id: String = required(&args, "sessionId")?;
             crate::fleet::control::focus_session_terminal(&agent, &session_id)
+                .await
+                .map(|()| Value::Null)
+                .map_err(RpcError::internal)
+        }
+        "fleet_interrupt_session" => {
+            let agent: String = required(&args, "agent")?;
+            let session_id: String = required(&args, "sessionId")?;
+            crate::fleet::control::interrupt_session(&agent, &session_id)
                 .await
                 .map(|()| Value::Null)
                 .map_err(RpcError::internal)
@@ -5082,8 +5104,10 @@ mod tests {
     fn fleet_writes_are_control_gated() {
         for cmd in [
             "fleet_permission_respond",
+            "fleet_question_respond",
             "fleet_opencode_send_message",
             "fleet_focus_terminal",
+            "fleet_interrupt_session",
         ] {
             assert!(
                 CONTROL_COMMANDS_SET.contains(cmd),

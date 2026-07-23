@@ -13,6 +13,14 @@
     "request": "权限请求：{tool}",
     "requestGeneric": "收到权限请求"
   },
+  "question": {
+    "answered": "已回答。",
+    "controlLost": "远程控制权限已被撤销。",
+    "countdown": "剩余 {seconds} 秒",
+    "expired": "回答窗口已关闭，请在终端里回答。",
+    "failed": "回答发送失败。",
+    "submit": "提交"
+  },
   "reply": {
     "failed": "发送失败——请重试。",
     "open": "回复",

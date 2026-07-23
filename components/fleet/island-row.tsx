@@ -10,7 +10,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { AlertTriangleIcon, ChevronDownIcon, FileTextIcon } from "lucide-react"
+import { AlertTriangleIcon, ChevronDownIcon, FileTextIcon, SquareIcon } from "lucide-react"
 import { AgentBadge } from "./agent-badge"
 import { TerminalBadge } from "./terminal-badge"
 import { IslandPermissionActions } from "./island-permission-actions"
@@ -20,7 +20,7 @@ import { SessionMetaChips } from "./session-meta-chips"
 import { SessionDetail } from "./session-detail"
 import { activityLine, formatElapsed, truncateLine } from "@/lib/fleet/format"
 import { useNowTicker } from "@/hooks/fleet/use-now-ticker"
-import { fleetFocusTerminal, fleetRevealTranscript } from "@/lib/tauri/fleet"
+import { fleetFocusTerminal, fleetInterruptSession, fleetRevealTranscript } from "@/lib/tauri/fleet"
 import type { FleetSession, FleetStatus } from "@/lib/fleet/types"
 import { cn } from "@/lib/utils"
 
@@ -43,12 +43,20 @@ const ATTENTION_STATUSES = new Set<FleetStatus>([
 export function IslandRow({
   session,
   enterDelayMs = 0,
+  compact = false,
   detailExpanded = false,
   onToggleDetail,
 }: {
   session: FleetSession
   /** Stagger offset for the entrance animation (list index × step). */
   enterDelayMs?: number
+  /**
+   * Trim the row to what the user must act on, folding the rest behind the
+   * chevron. Set by the shell once the fleet is large enough that a full row
+   * would push later sessions out of the list's height cap — see
+   * `ISLAND_COMPACT_THRESHOLD`.
+   */
+  compact?: boolean
   /** Whether this row's detail panel is expanded (state owned by the shell so
    * the resize round-trip can key on it). */
   detailExpanded?: boolean
@@ -76,6 +84,11 @@ export function IslandRow({
 
   const activity = activityLine(session)
 
+  // Whether this agent's ingress can carry a decision back at all. Declared per
+  // agent in the Rust manifest; reading it here is what keeps the flag honest —
+  // an agent that can only OBSERVE a permission must show the waiting hint, not
+  // Approve/Deny buttons that would silently do nothing.
+  const canApprove = session.capabilities.approvePermission
   const canFocus = session.capabilities.focusTerminal
   const focusTerminal = () => {
     if (canFocus) void fleetFocusTerminal(session.agent, session.sessionId)
@@ -91,6 +104,26 @@ export function IslandRow({
 
   // OpenCode sessions can receive an injected prompt (see fleet/opencode.rs).
   const canReply = session.capabilities.sendMessage && session.status !== "ended"
+
+  // Interrupting sends ONE SIGINT to the agent process — literally what Ctrl-C
+  // once in that terminal does. There is no acknowledgement channel back, so the
+  // button reports only that the signal went out and then goes quiet; the
+  // session's own next event is what actually updates the row. A refusal (dead
+  // pid, recycled pid, unsupported platform) surfaces instead of being swallowed.
+  const canInterrupt = session.capabilities.interrupt
+  const [interrupting, setInterrupting] = useState(false)
+  const [interruptError, setInterruptError] = useState<string | null>(null)
+  const interrupt = async () => {
+    if (!canInterrupt || interrupting) return
+    setInterrupting(true)
+    setInterruptError(null)
+    try {
+      const result = await fleetInterruptSession(session.agent, session.sessionId)
+      if (!result.ok) setInterruptError(result.reason)
+    } finally {
+      setInterrupting(false)
+    }
+  }
 
   // How long a blocked session has been waiting (its last event is the moment
   // it entered the waiting state). Permission rows carry their own countdown.
@@ -114,12 +147,28 @@ export function IslandRow({
   // Ended rows freeze their runtime at the end time; live rows keep ticking.
   const elapsedReference = session.status === "ended" ? (session.endedAt ?? nowMs) : nowMs
 
+  // Compact rows keep only the blocking block that outranks the others, and
+  // fold the ambient context (meta chips, last prompt, subagents) behind the
+  // chevron. Expanding the row brings all of it back, so nothing is lost —
+  // it just stops competing for the list's limited height by default.
+  const blocking: "permission" | "question" | "plan" | null = session.pendingPermission
+    ? "permission"
+    : questions.length > 0
+      ? "question"
+      : session.status === "plan-pending" && session.pendingPlan
+        ? "plan"
+        : null
+  const showSecondary = !compact || detailExpanded
+  const showQuestionBlock = !compact || blocking === "question"
+  const showPlanBlock = !compact || blocking === "plan"
+
   const statusLine = (() => {
     switch (session.status) {
       case "waiting-permission":
         // Rendered by IslandPermissionActions below (or a plain hint when the
-        // request isn't approvable from here).
-        return session.pendingPermission ? null : t("status.waitingPermission")
+        // request isn't approvable from here — either because nothing is parked
+        // or because this agent's ingress can't carry a decision back).
+        return session.pendingPermission && canApprove ? null : t("status.waitingPermission")
       case "plan-pending":
         return t("status.planPending")
       case "waiting-input":
@@ -137,6 +186,7 @@ export function IslandRow({
     <div
       data-testid={`island-row-${session.agent}-${session.sessionId}`}
       data-status={session.status}
+      data-compact={compact ? "true" : "false"}
       className={cn(
         "relative flex flex-col gap-0.5 rounded-xl px-3 py-2 transition-colors duration-200 hover:bg-white/5",
         "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1 motion-safe:duration-200",
@@ -229,14 +279,31 @@ export function IslandRow({
             <FileTextIcon className="size-3" aria-hidden />
           </button>
         ) : null}
+        {canInterrupt ? (
+          <button
+            type="button"
+            data-testid="island-interrupt"
+            aria-label={t("interrupt.label")}
+            title={t("interrupt.hint")}
+            disabled={interrupting}
+            onClick={(e) => {
+              e.stopPropagation()
+              void interrupt()
+            }}
+            onKeyDown={(e) => e.stopPropagation()}
+            className="shrink-0 rounded-md p-0.5 text-white/50 transition-colors hover:bg-red-500/20 hover:text-red-300 disabled:opacity-40"
+          >
+            <SquareIcon className="size-3 fill-current" aria-hidden />
+          </button>
+        ) : null}
         {canReply ? <IslandReply sessionId={session.sessionId} /> : null}
       </div>
 
-      <SessionMetaChips session={session} className="pl-3.5" />
+      {showSecondary ? <SessionMetaChips session={session} className="pl-3.5" /> : null}
 
       {detailExpanded ? <SessionDetail session={session} /> : null}
 
-      {session.lastPrompt ? (
+      {session.lastPrompt && showSecondary ? (
         <p className="truncate pl-3.5 text-[11px] text-white/60" data-testid="last-prompt">
           {t("you")} {truncateLine(session.lastPrompt, 140)}
         </p>
@@ -259,7 +326,16 @@ export function IslandRow({
         </div>
       ) : null}
 
-      {session.pendingPermission ? (
+      {interruptError ? (
+        <p
+          data-testid="island-interrupt-error"
+          className="pl-3.5 text-[10px] leading-snug text-red-200/80"
+        >
+          {t(`interrupt.error.${interruptError}`)}
+        </p>
+      ) : null}
+
+      {session.pendingPermission && canApprove ? (
         // Stop clicks on the Approve/Deny controls from also focusing the
         // terminal (the row is a focus-terminal button when capable).
         <div
@@ -281,7 +357,7 @@ export function IslandRow({
         </p>
       ) : null}
 
-      {answerableQuestion ? (
+      {answerableQuestion && showQuestionBlock ? (
         // Answerable: selectable options + Submit, wired back to the agent.
         // Stop clicks bubbling to the row's focus-terminal handler.
         <div
@@ -296,7 +372,7 @@ export function IslandRow({
             questions={questions}
           />
         </div>
-      ) : firstQuestion ? (
+      ) : firstQuestion && showQuestionBlock ? (
         <div
           data-testid="pending-question"
           className="ml-3.5 space-y-1 rounded-lg border border-amber-400/20 bg-amber-500/10 px-2 py-1.5 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200"
@@ -349,7 +425,7 @@ export function IslandRow({
         </div>
       ) : null}
 
-      {session.status === "plan-pending" && session.pendingPlan ? (
+      {session.status === "plan-pending" && session.pendingPlan && showPlanBlock ? (
         <div
           data-testid="pending-plan"
           className="ml-3.5 line-clamp-3 whitespace-pre-wrap rounded-lg border border-sky-400/20 bg-sky-500/10 px-2 py-1.5 text-[10px] leading-snug text-sky-100/85 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200"
@@ -358,7 +434,7 @@ export function IslandRow({
         </div>
       ) : null}
 
-      {subagents.length > 0 ? (
+      {subagents.length > 0 && showSecondary ? (
         <div
           data-testid="subagents"
           className="ml-3.5 flex flex-wrap items-center gap-1 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200"

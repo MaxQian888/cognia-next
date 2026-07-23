@@ -18,13 +18,17 @@
 //! window ops are smoke-tested via `pnpm tauri dev`.
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Runtime, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Runtime, Webview};
 
 mod macos_panel;
 mod popup;
 mod surfaces;
 pub use popup::*;
 pub use surfaces::*;
+// Explicit (not glob) so the crate-internal window enumeration the fleet island
+// borrows for full-screen detection can't be dropped by a future refactor of
+// the glob above without a compile error. See `fleet/island_space.rs`.
+pub(crate) use surfaces::enumerate_scaled_candidates;
 
 // Shared overlay seam: the fleet island window reuses the exact NSPanel
 // reclassing the pet windows pioneered (non-activating, all-Spaces,
@@ -32,8 +36,7 @@ pub use surfaces::*;
 pub(crate) use macos_panel::{
     apply_pet_panel_behavior as apply_overlay_panel_behavior,
     current_panel_generation as current_overlay_panel_generation,
-    reveal_pet_panel as reveal_overlay_panel,
-    PetPanelRole as OverlayPanelRole,
+    reveal_pet_panel as reveal_overlay_panel, PetPanelRole as OverlayPanelRole,
 };
 
 /// Default overlay size used when the tray opens the pet with no renderer
@@ -451,9 +454,9 @@ pub async fn open_pet_window(app: AppHandle, opts: PetWindowOpts) -> Result<(), 
     open_pet_window_inner(&app, opts)
 }
 
-/// Reveal the current pet webview after its first painted frame. The caller's
-/// label is injected by Tauri and restricted to the two pet windows, so the
-/// non-activating NSPanel path cannot be used to raise arbitrary app windows.
+/// Resolve a caller-supplied target label to one of the two pet-panel roles.
+/// Keeping this allowlist native prevents a renderer from raising arbitrary
+/// application windows through the reveal command.
 fn pet_panel_role_for_label(label: &str) -> Result<macos_panel::PetPanelRole, String> {
     match label {
         "pet" => Ok(macos_panel::PetPanelRole::Sprite),
@@ -463,8 +466,16 @@ fn pet_panel_role_for_label(label: &str) -> Result<macos_panel::PetPanelRole, St
 }
 
 #[tauri::command]
-pub async fn reveal_pet_window(window: WebviewWindow, focus: bool) -> Result<(), String> {
-    let role = pet_panel_role_for_label(window.label())?;
+pub async fn reveal_pet_window(
+    app: AppHandle,
+    _caller: Webview,
+    target_label: String,
+    focus: bool,
+) -> Result<(), String> {
+    let role = pet_panel_role_for_label(&target_label)?;
+    let window = app
+        .get_webview_window(&target_label)
+        .ok_or_else(|| format!("pet overlay window '{target_label}' no longer exists"))?;
     let generation = macos_panel::current_panel_generation(role);
     macos_panel::reveal_pet_panel(&window, role, focus, generation)
 }

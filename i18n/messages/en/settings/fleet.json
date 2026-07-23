@@ -28,12 +28,25 @@
   },
   "island": {
     "desc": "Dynamic-Island-style always-on-top strip showing live agent sessions near the notch.",
+    "diagnostics": {
+      "copied": "Island diagnostics copied to the clipboard.",
+      "copy": "Copy",
+      "copyFailed": "Could not write to the clipboard.",
+      "desc": "Copy every input the island uses to place itself. Sample it once on a normal Space, once with an app full-screen, and once on an external display.",
+      "label": "Placement diagnostics",
+      "unavailable": "Island diagnostics are only available in the desktop app."
+    },
     "label": "Island overlay",
     "monitor": {
       "label": "Show on display",
       "option": "{name} ({width}×{height})",
       "primary": "Primary display"
     }
+  },
+  "liveness": {
+    "dropping": "Events dropped",
+    "live": "Active · {ago} ago",
+    "silent": "No events yet"
   },
   "monitor": {
     "desc": "Local event ingress for external agent hooks. Runs on the companion server, loopback only.",

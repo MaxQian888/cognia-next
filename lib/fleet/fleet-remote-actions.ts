@@ -31,6 +31,31 @@ export async function fleetRemotePermissionRespond(
   return transport.call<boolean>("fleet_permission_respond", { requestId, behavior })
 }
 
+/**
+ * Answer a parked AskUserQuestion remotely.
+ *
+ * `selections` are per-question option INDICES in question order — indices, not
+ * labels, because the snapshot truncates long option text for display and an
+ * answer keyed on the truncated string would never match. Without this arm an
+ * AskUserQuestion stranded anyone away from the desktop island: the phone could
+ * see the question but had no way to answer, so it just timed out.
+ */
+export async function fleetRemoteQuestionRespond(
+  requestId: string,
+  selections: number[][]
+): Promise<boolean> {
+  return transport.call<boolean>("fleet_question_respond", { requestId, selections })
+}
+
+/**
+ * Interrupt a session's current turn (one SIGINT — see `fleetInterruptSession`).
+ * Rejects on refusal so callers can classify a lost-control 403 with
+ * {@link isControlForbidden}, or surface the structured refusal code.
+ */
+export async function fleetRemoteInterrupt(agent: string, sessionId: string): Promise<void> {
+  await transport.call<null>("fleet_interrupt_session", { agent, sessionId })
+}
+
 /** Inject a prompt into an OpenCode fleet session; returns the queued id. */
 export async function fleetRemoteSendMessage(sessionId: string, text: string): Promise<string> {
   return transport.call<string>("fleet_opencode_send_message", { sessionId, text })

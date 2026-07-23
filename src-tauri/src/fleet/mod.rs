@@ -18,6 +18,7 @@ pub mod control;
 pub mod gitinfo;
 pub mod install;
 pub mod integrations;
+pub mod island_space;
 pub mod island_window;
 pub mod opencode;
 pub mod registry;
@@ -218,6 +219,13 @@ impl FleetRuntime {
         session_id: &str,
     ) -> Option<terminal::TerminalSource> {
         self.registry.lock().session_terminal(agent, session_id)
+    }
+
+    /// Agent process id for one session (interrupt-action lookup). `None` when
+    /// the session is unknown or never reported a pid — the interrupt path
+    /// treats that as "not running" rather than guessing a target.
+    pub fn session_agent_pid(&self, agent: registry::FleetAgent, session_id: &str) -> Option<u32> {
+        self.registry.lock().session_agent_pid(agent, session_id)
     }
 
     /// Fold an event, run the terminal parent-chain fallback if the env
