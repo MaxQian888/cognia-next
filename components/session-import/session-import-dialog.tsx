@@ -27,7 +27,7 @@ import { isTauri } from "@/lib/tauri"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSessionImport, summaryKey } from "@/hooks/session-import/use-session-import"
 import { useSessionImportWatch } from "@/hooks/session-import/use-session-import-watch"
-import type { SessionSummary } from "@/lib/session-import"
+import { getSessionSource, type SessionSummary } from "@/lib/session-import"
 
 /** Rows shown before the first "show more", and each page-step increment. */
 const INITIAL_VISIBLE = 50
@@ -65,6 +65,17 @@ export function SessionImportDialog({ trigger }: SessionImportDialogProps) {
 
   const onImport = async () => {
     await importSelected(activeProjectId ?? undefined)
+  }
+
+  /**
+   * Built-in sources translate under `sources.<id>`; a plugin source is keyed
+   * `${pluginId}:${id}` and has no catalog entry, so translating it would print
+   * the raw key path in the badge. Adapters already declare a `displayName` —
+   * it just had no consumer.
+   */
+  const sourceLabel = (id: string): string => {
+    if (id.includes(":")) return getSessionSource(id)?.displayName ?? id
+    return t(`sources.${id}` as never)
   }
 
   // Surface a terminal error/done toast is left to inline rendering below.
@@ -150,7 +161,7 @@ export function SessionImportDialog({ trigger }: SessionImportDialogProps) {
               summaries={state.summaries}
               selected={selected}
               onToggle={toggle}
-              sourceLabel={(id) => t(`sources.${id}` as never)}
+              sourceLabel={sourceLabel}
               messagesLabel={(n) => t("messagesLabel", { count: n })}
             />
           </div>
@@ -191,11 +202,10 @@ export function SessionImportDialog({ trigger }: SessionImportDialogProps) {
               <Button
                 size="sm"
                 disabled={selectedCount === 0}
-                onClick={() => {
-                  void onImport().then(() => {
-                    if (selectedCount > 0) toast.success(t("importing"))
-                  })
-                }}
+                // `t("importing")` here announced "Importing…" as a SUCCESS
+                // toast after the run had already finished. The completion
+                // copy is what belongs on a completion toast.
+                onClick={() => void onImport().then(() => toast.success(t("doneTitle")))}
               >
                 {t("importSelected", { count: selectedCount })}
               </Button>

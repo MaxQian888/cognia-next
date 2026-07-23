@@ -1,6 +1,12 @@
 import { createImportAPI, clearCustomImporters } from "./import-api"
 import { getSessionSource } from "@/lib/session-import/registry"
 import type { AgentSessionSourceAdapter } from "@/lib/session-import/types"
+import {
+  __resetDynamicImportersForTesting,
+  detectFormat,
+  getImporterLabel,
+  importChatExport,
+} from "@/lib/data/import-registry"
 
 jest.mock("../core/logger", () => ({
   createPluginSystemLogger: () => ({ info: jest.fn(), error: jest.fn(), warn: jest.fn() }),
@@ -97,6 +103,73 @@ describe("createImportAPI", () => {
     expect(getSessionSource("acme:opencode-fork")).toBeDefined()
     dispose()
     expect(getSessionSource("acme:opencode-fork")).toBeUndefined()
+  })
+
+  describe("registerChatImporter (§A-4)", () => {
+    afterEach(() => __resetDynamicImportersForTesting())
+
+    const slackImporter = {
+      format: "slack",
+      label: "Slack",
+      detect: (d: unknown): d is { slack: unknown[] } =>
+        !!d && typeof d === "object" && Array.isArray((d as { slack?: unknown }).slack),
+      parse: async () => [],
+    }
+
+    it("makes the plugin format detectable, namespaced by plugin id", () => {
+      const api = createImportAPI("acme")
+      expect(detectFormat({ slack: [] })).toBe("unknown")
+
+      api.registerChatImporter(slackImporter)
+
+      expect(detectFormat({ slack: [] })).toBe("acme:slack")
+      expect(getImporterLabel("acme:slack")).toBe("Slack")
+    })
+
+    it("disposer removes the importer again", () => {
+      const api = createImportAPI("acme")
+      const dispose = api.registerChatImporter(slackImporter)
+      expect(detectFormat({ slack: [] })).toBe("acme:slack")
+
+      dispose()
+
+      expect(detectFormat({ slack: [] })).toBe("unknown")
+      expect(getImporterLabel("acme:slack")).toBeUndefined()
+    })
+
+    it("cannot shadow a built-in format even when it detects the same payload", () => {
+      const api = createImportAPI("evil")
+      // A greedy importer that claims everything must still lose to ChatGPT,
+      // because the static registry is consulted first.
+      api.registerChatImporter({
+        format: "chatgpt",
+        label: "Not ChatGPT",
+        detect: (d: unknown): d is unknown => !!d,
+        parse: async () => [],
+      })
+      const chatgptExport = [{ title: "t", mapping: {} }]
+      expect(detectFormat(chatgptExport)).toBe("chatgpt")
+    })
+
+    it("parses through the plugin importer", async () => {
+      const api = createImportAPI("acme")
+      const session = { id: "s1", title: "hi", createdAt: 0, updatedAt: 0 }
+      api.registerChatImporter({
+        ...slackImporter,
+        parse: async () => [{ session: session as never, messages: [] }],
+      })
+      const result = await importChatExport({ slack: [] })
+      expect(result.format).toBe("acme:slack")
+      expect(result.conversations).toHaveLength(1)
+      expect(result.conversations[0].session.id).toBe("s1")
+    })
+
+    it("keeps two plugins' formats separate", () => {
+      createImportAPI("a").registerChatImporter({ ...slackImporter, format: "x", label: "A" })
+      createImportAPI("b").registerChatImporter({ ...slackImporter, format: "x", label: "B" })
+      expect(getImporterLabel("a:x")).toBe("A")
+      expect(getImporterLabel("b:x")).toBe("B")
+    })
   })
 
   it("isolates importers across plugins by namespacing", () => {

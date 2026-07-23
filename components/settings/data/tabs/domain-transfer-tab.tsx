@@ -17,7 +17,7 @@ import {
   buildDomainExport,
   defaultDomainFileName,
   serializeDomainFile,
-  DOMAIN_TRANSFERS,
+  getAllDomainTransfers,
   type DomainKey,
 } from "@/lib/data/domain"
 import { isTauri } from "@/lib/tauri"
@@ -110,15 +110,32 @@ function PerDomainCard() {
         <p className="text-xs text-muted-foreground">{t("domain.perDomainBody")}</p>
       </div>
       <ul className="divide-y rounded-md border">
-        {DOMAIN_TRANSFERS.map((spec) => (
-          <DomainRow key={spec.key} domain={spec.key} labelKey={spec.labelKey} />
+        {/* `getAllDomainTransfers()`, not the static `DOMAIN_TRANSFERS` array:
+            the §A-5 overlay lets plugins contribute transfer specs, and
+            rendering the static list meant a registered spec could never
+            appear here. */}
+        {getAllDomainTransfers().map((spec) => (
+          <DomainRow
+            key={spec.key}
+            domain={spec.key}
+            labelKey={spec.labelKey}
+            displayName={spec.displayName}
+          />
         ))}
       </ul>
     </Card>
   )
 }
 
-function DomainRow({ domain, labelKey }: { domain: DomainKey; labelKey: string }) {
+function DomainRow({
+  domain,
+  labelKey,
+  displayName,
+}: {
+  domain: DomainKey
+  labelKey: string
+  displayName?: string
+}) {
   const t = useTranslations("settings.data")
   const [busy, setBusy] = useState(false)
 
@@ -157,10 +174,16 @@ function DomainRow({ domain, labelKey }: { domain: DomainKey; labelKey: string }
   return (
     <li className="flex flex-col gap-2 px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium">{t(`domain.${labelKey}.title` as never)}</p>
-        <p className="truncate text-[11px] text-muted-foreground">
-          {t(`domain.${labelKey}.body` as never)}
+        {/* Plugin-contributed specs carry their own label — they have no entry
+            in the app's message catalog, so translating would print the key. */}
+        <p className="text-sm font-medium">
+          {displayName ?? t(`domain.${labelKey}.title` as never)}
         </p>
+        {!displayName && (
+          <p className="truncate text-[11px] text-muted-foreground">
+            {t(`domain.${labelKey}.body` as never)}
+          </p>
+        )}
       </div>
       <div className="flex w-full shrink-0 gap-1.5 sm:w-auto">
         <Button

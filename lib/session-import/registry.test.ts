@@ -2,6 +2,7 @@ import {
   __resetDynamicSessionSourcesForTesting,
   detectSourceForFiles,
   detectSourceForPath,
+  getAcceptedPickerExtensions,
   getSessionSource,
   getSessionSources,
   registerSessionSource,
@@ -77,6 +78,34 @@ describe("session-source registry", () => {
   it("returns null when no source claims the files", () => {
     __resetDynamicSessionSourcesForTesting()
     expect(detectSourceForFiles([{ name: "z.txt", path: "/z.txt", content: "nope" }])).toBeNull()
+  })
+
+  describe("getAcceptedPickerExtensions", () => {
+    it("covers every shipping source, including the non-JSONL ones", () => {
+      const exts = getAcceptedPickerExtensions()
+      // The picker used to hard-code ["jsonl","json"], which made Aider (.md)
+      // and OpenCode (.db) impossible to select even though both ship.
+      expect(exts).toEqual(expect.arrayContaining(["jsonl", "json", "md"]))
+    })
+
+    it("strips the leading dot the adapters declare", () => {
+      expect(getAcceptedPickerExtensions().every((e) => !e.startsWith("."))).toBe(true)
+    })
+
+    it("de-dupes extensions shared by several sources", () => {
+      const exts = getAcceptedPickerExtensions()
+      expect(new Set(exts).size).toBe(exts.length)
+    })
+
+    it("picks up a plugin source's extension as soon as it registers", () => {
+      expect(getAcceptedPickerExtensions()).not.toContain("sqlite3")
+      registerSessionSource(
+        { ...fakeSource("weird", () => "no"), acceptedExtensions: [".SQLite3"] },
+        { pluginId: "p" }
+      )
+      // Also proves the normalisation lower-cases.
+      expect(getAcceptedPickerExtensions()).toContain("sqlite3")
+    })
   })
 
   describe("detectSourceForPath", () => {

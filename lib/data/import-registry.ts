@@ -99,6 +99,15 @@ function getImporters(): ChatImporter[] {
   return [...REGISTRY, ...dynamicImporters.map((d) => d.importer)]
 }
 
+/**
+ * The display name a registered importer declared for `format`, if any. Only
+ * plugin importers set one — built-ins are labelled by the import dialog's own
+ * switch, which cannot know about formats registered at runtime.
+ */
+export function getImporterLabel(format: ChatImportFormat): string | undefined {
+  return getImporters().find((i) => i.format === format)?.label
+}
+
 export function detectFormat(data: unknown): ChatImportFormat {
   if (isEncryptedEnvelope(data)) return "unknown"
   if (data && typeof data === "object") {

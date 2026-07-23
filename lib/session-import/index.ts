@@ -22,6 +22,7 @@ export {
   getSessionSource,
   detectSourceForFiles,
   detectSourceForPath,
+  getAcceptedPickerExtensions,
   __resetDynamicSessionSourcesForTesting,
 } from "./registry"
 export { realSessionFs, walkFiles } from "./fs"

@@ -315,10 +315,17 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     id: "importers",
     support: "supported",
     manifestFields: [],
-    runtimeBinding: "ctx.import.registerImporter + CustomImporter registry",
-    hostBindings: ["lib/plugin/api/import-api.ts"],
+    runtimeBinding:
+      "ctx.import.registerImporter + CustomImporter registry; " +
+      "ctx.import.registerChatImporter → import-registry dynamic overlay (§A-4)",
+    hostBindings: [
+      "lib/plugin/api/import-api.ts",
+      "lib/data/import-registry.ts",
+      "components/data/import/chat-import-dialog.tsx",
+    ],
     typescriptSdk: [
       "packages/plugin-sdk/src/define/define-importer.ts",
+      "packages/plugin-sdk/src/define/define-chat-importer.ts",
       "packages/plugin-sdk/src/index.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
@@ -1368,10 +1375,13 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     support: "supported",
     manifestFields: ["contextPanels"],
     runtimeBinding:
-      "manifest.contextPanels → context-panels module bridge → Context Workbench panel registry",
+      "manifest.contextPanels → context-panels module bridge → Context Workbench panel registry; ctx.contextPanels.* → context-panel-api → panel registry + workbench layout store",
     hostBindings: [
       "lib/plugin/bridge/context-panels-bridge.ts",
+      "lib/plugin/api/context-panel-api.ts",
       "lib/context-workbench/panel-registry.ts",
+      "lib/context-workbench/panel-icons.ts",
+      "lib/context-workbench/active-context.ts",
       "components/context-workbench/context-workbench.tsx",
       "lib/plugin/contracts/module-bridge-map.ts",
     ],
@@ -1384,7 +1394,15 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#context-workbench-panels",
     requiredTests: [
       "lib/plugin/bridge/context-panels-bridge.test.ts",
+      // The declarative path end to end. No in-tree plugin can cover it —
+      // `contextPanels` resolves its renderer from a separate `entry` module,
+      // which `builtin://` plugins have no fetchable install path for — so
+      // this is the only thing standing behind it.
+      "lib/plugin/bridge/context-panels-bridge.integration.test.tsx",
       "lib/plugin/api/context-panel-api.test.ts",
+      "lib/context-workbench/panel-registry.test.ts",
+      "lib/context-workbench/panel-icons.test.ts",
+      "lib/context-workbench/active-context.test.ts",
       "packages/plugin-sdk/src/define/define-context-panel.test.ts",
     ],
   },

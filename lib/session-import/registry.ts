@@ -83,6 +83,27 @@ export function getSessionSource(id: string): AgentSessionSourceAdapter | undefi
   return getSessionSources().find((s) => s.id === id)
 }
 
+/**
+ * Union of every registered source's `acceptedExtensions`, de-duped and without
+ * the leading dot (the shape a file-picker filter wants).
+ *
+ * The picker used to hard-code `["jsonl", "json"]`, which silently made two
+ * shipping sources unreachable through it: Aider stores `.md` and OpenCode a
+ * `.db`, so their files could not even be selected. Deriving the list means a
+ * source — including a plugin-contributed one — is pickable the moment it
+ * registers, with no second place to update.
+ */
+export function getAcceptedPickerExtensions(): string[] {
+  const seen = new Set<string>()
+  for (const source of getSessionSources()) {
+    for (const ext of source.acceptedExtensions) {
+      const bare = ext.replace(/^\./, "").toLowerCase()
+      if (bare) seen.add(bare)
+    }
+  }
+  return [...seen]
+}
+
 /** Normalize separators + drop trailing slashes for a prefix comparison. */
 function normalizeSep(p: string): string {
   return p.replace(/\\/g, "/").replace(/\/+$/, "")

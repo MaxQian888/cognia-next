@@ -62,6 +62,13 @@ export interface DomainSpec {
   key: DomainKey
   /** UI label key under `settings.data.domain.<key>.title`. */
   labelKey: string
+  /**
+   * Human-readable label for plugin-contributed specs. Builtins leave this
+   * unset and are translated via `labelKey`; a plugin has no entry in the
+   * app's message catalog, so without this its row would render the raw key
+   * path. The UI prefers `displayName` when present.
+   */
+  displayName?: string
   /** Read the rows currently in Dexie. Returns the v3 payload subset. */
   read: () => Promise<BackupPayloadV3>
   /** Default merge strategy applied when the user hasn't picked one. */

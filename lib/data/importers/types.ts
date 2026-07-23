@@ -2,8 +2,23 @@
 
 import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 
-export type ChatImportFormat =
+/** Formats the host itself knows how to sniff and parse. */
+export type BuiltInChatImportFormat =
   "chatgpt" | "claude" | "gemini" | "cognia-v3" | "cognia-v1" | "unknown"
+
+/**
+ * A plugin-contributed format, always namespaced `${pluginId}:${format}`.
+ *
+ * The namespace is not decoration: it is what makes the union open without
+ * letting a plugin claim (or accidentally collide with) a built-in format —
+ * no built-in contains a colon. Before this existed `ChatImportFormat` was a
+ * closed union, so the §A-4 overlay's promise that "plugins can contribute new
+ * chat-export importers (e.g. a Slack importer)" was one the type system
+ * forbade: there was no legal value a plugin importer could put in `format`.
+ */
+export type PluginChatImportFormat = `${string}:${string}`
+
+export type ChatImportFormat = BuiltInChatImportFormat | PluginChatImportFormat
 
 export interface ImportedConversation {
   session: ChatSession
@@ -29,6 +44,13 @@ export interface ChatImportResult {
 
 export interface ChatImporter<TData = unknown> {
   format: ChatImportFormat
+  /**
+   * Human-readable name for the import dialog. Built-ins omit it and are
+   * labelled by `formatLabel`'s switch; a plugin format has no entry there
+   * (nor in the message catalog), so without this its row would show the raw
+   * `${pluginId}:${format}` string.
+   */
+  label?: string
   /** Cheap structural sniff. Run on every parsed JSON candidate. */
   detect: (data: unknown) => data is TData
   /** Convert detected data into our internal conversation shape. */

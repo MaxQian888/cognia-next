@@ -94,6 +94,7 @@ import type {
 } from "@/lib/ai/generation/canvas-actions"
 import type { AddCommentInput, ReplyInput } from "@/lib/db/canvas-comments"
 import type { AgentSessionSourceAdapter } from "@/lib/session-import/types"
+import type { ChatImporter } from "@/lib/data/importers/types"
 import type { PythonExecResult } from "@/lib/tauri/canvas"
 import type { CanvasComment, CollaborativeSession } from "../canvas/collaboration"
 // PluginMediaAPI and CanonicalExtensionPoint live in `lib/plugin/api/media-api`
@@ -2184,6 +2185,9 @@ export interface PluginContext {
   /** Platform-capability flags (ADR-0026 §5 §C). */
   capabilities?: import("@/lib/plugin/api/capabilities-api").PluginCapabilitiesAPI
 
+  /** Resource-scoped Context Workbench panel registration. */
+  contextPanels?: import("@/lib/plugin/api/context-panel-api").PluginContextPanelAPI
+
   /** Desktop pet — available only with the "pet" capability; warn-once no-op otherwise. */
   pet?: import("@/lib/plugin/api/pet-api").PluginPetAPI
 }
@@ -3900,6 +3904,25 @@ export interface CustomImporter<T = unknown> {
 }
 
 /**
+ * A chat-export importer contributed by a plugin (§A-4).
+ *
+ * Differs from the host's {@link ChatImporter} in two ways, both so the host
+ * stays in control of the namespace:
+ *   - `format` is the plugin's own bare id (`"slack"`); the host stores it as
+ *     `${pluginId}:${format}` so a plugin can never claim or collide with a
+ *     built-in format.
+ *   - `label` is required, because a plugin format has no entry in the import
+ *     dialog's label switch or in the message catalog.
+ */
+export interface PluginChatImporter<TData = unknown> extends Omit<
+  ChatImporter<TData>,
+  "format" | "label"
+> {
+  format: string
+  label: string
+}
+
+/**
  * Import API for plugins. Mirrors {@link PluginExportAPI}: a per-plugin
  * registry of {@link CustomImporter}s plus a `importContent` runner that
  * dispatches to the importer registered for a format.
@@ -3922,6 +3945,15 @@ export interface PluginImportAPI {
    * a plugin can never shadow a built-in source. Returns a disposer.
    */
   registerSessionSource: (adapter: AgentSessionSourceAdapter) => () => void
+
+  /**
+   * Register a chat-export importer (§A-4). Lets a plugin teach the app to
+   * recognise and parse a conversation-export format the host doesn't ship
+   * (Slack, Discord, Poe, …); once registered the format is sniffed by
+   * `detectFormat` and offered in the chat-import dialog like a built-in.
+   * The format id is namespaced `${pluginId}:${format}`. Returns a disposer.
+   */
+  registerChatImporter: <T = unknown>(importer: PluginChatImporter<T>) => () => void
 }
 
 // =============================================================================

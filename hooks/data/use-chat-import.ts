@@ -66,9 +66,18 @@ export function useChatImport() {
     }
   }, [])
 
-  const applyAll = useCallback(async () => {
+  /**
+   * Returns the write counts on success and `null` on failure, so callers can
+   * react without reading `state` — which, right after `await applyAll()`, is
+   * still the render-time closure's value (`"preview"`), never `"done"`. The
+   * dialog's success toast was gated on exactly that and so never fired.
+   */
+  const applyAll = useCallback(async (): Promise<{
+    sessions: number
+    messages: number
+  } | null> => {
     const prev = stateRef.current
-    if (prev.status !== "preview") return
+    if (prev.status !== "preview") return null
     setState({ status: "applying", format: prev.format, conversations: prev.conversations })
     try {
       const counts = await applyImported(prev.conversations)
@@ -78,9 +87,11 @@ export function useChatImport() {
         sessionsAdded: counts.sessions,
         messagesAdded: counts.messages,
       })
+      return counts
     } catch (err) {
       log.error("chat-import-apply-failed", { format: prev.format, error: err })
       setState({ status: "error", message: err instanceof Error ? err.message : String(err) })
+      return null
     }
   }, [])
 

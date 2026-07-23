@@ -14,6 +14,7 @@ import { pickAndReadFiles } from "@/lib/files/file-bridge"
 import { createLogger } from "@cognia/logging"
 import {
   detectSourceForFiles,
+  getAcceptedPickerExtensions as getAcceptedPickerExtensionsDefault,
   importSessions as importSessionsDefault,
   scanAllSources as scanAllSourcesDefault,
   listSessionsForSource as listSessionsForSourceDefault,
@@ -48,6 +49,7 @@ export interface UseSessionImportDeps {
   importSessions?: typeof importSessionsDefault
   pick?: typeof pickAndReadFiles
   detect?: typeof detectSourceForFiles
+  acceptedExtensions?: typeof getAcceptedPickerExtensionsDefault
 }
 
 export function useSessionImport(deps: UseSessionImportDeps = {}) {
@@ -57,6 +59,7 @@ export function useSessionImport(deps: UseSessionImportDeps = {}) {
   const importSessions = deps.importSessions ?? importSessionsDefault
   const pick = deps.pick ?? pickAndReadFiles
   const detect = deps.detect ?? detectSourceForFiles
+  const acceptedExtensions = deps.acceptedExtensions ?? getAcceptedPickerExtensionsDefault
 
   const [state, setState] = useState<SessionImportState>({ status: "idle" })
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -100,9 +103,12 @@ export function useSessionImport(deps: UseSessionImportDeps = {}) {
     async (sourceId?: string) => {
       setState({ status: "scanning" })
       try {
+        // Derived from the registered adapters, not hard-coded: a fixed
+        // ["jsonl","json"] made Aider (.md) and OpenCode (.db) unselectable
+        // through the picker even though both ship as sources.
         const picked = await pick({
           multiple: true,
-          filters: [{ name: "Agent session", extensions: ["jsonl", "json"] }],
+          filters: [{ name: "Agent session", extensions: acceptedExtensions() }],
         })
         if (picked.length === 0) {
           setState({ status: "idle" })
@@ -126,7 +132,7 @@ export function useSessionImport(deps: UseSessionImportDeps = {}) {
         setState({ status: "error", message: err instanceof Error ? err.message : String(err) })
       }
     },
-    [pick, resolveScanInput, detect, listSessionsForSource, showList]
+    [pick, resolveScanInput, detect, listSessionsForSource, showList, acceptedExtensions]
   )
 
   const toggle = useCallback((key: string) => {

@@ -10,10 +10,13 @@ import { createPluginSystemLogger } from "../core/logger"
 import { createApiGuardedAPI } from "./api-permission-gate"
 import { registerSessionSource } from "@/lib/session-import/registry"
 import type { AgentSessionSourceAdapter } from "@/lib/session-import/types"
+import { registerChatImporter, unregisterChatImporter } from "@/lib/data/import-registry"
+import type { ChatImporter } from "@/lib/data/importers/types"
 import type {
   CustomImporter,
   ImportResult,
   ImportSource,
+  PluginChatImporter,
   PluginImportAPI,
 } from "@/types/plugin/plugin"
 
@@ -42,6 +45,24 @@ export function createImportAPI(pluginId: string): PluginImportAPI {
       return () => {
         dispose()
         logger.info(`Unregistered session source: ${adapter.id}`)
+      }
+    },
+
+    registerChatImporter: <T = unknown>(importer: PluginChatImporter<T>) => {
+      // Namespace the format so a plugin can neither claim a built-in id nor
+      // collide with another plugin. `detectFormat` runs the static registry
+      // first, so a built-in always wins a tie regardless.
+      const chatImporter: ChatImporter<T> = {
+        format: `${pluginId}:${importer.format}`,
+        label: importer.label,
+        detect: importer.detect,
+        parse: importer.parse,
+      }
+      registerChatImporter(chatImporter, { pluginId })
+      logger.info(`Registered chat importer: ${importer.label} (${chatImporter.format})`)
+      return () => {
+        unregisterChatImporter(chatImporter)
+        logger.info(`Unregistered chat importer: ${chatImporter.format}`)
       }
     },
 
@@ -74,6 +95,7 @@ export function createImportAPI(pluginId: string): PluginImportAPI {
         "registerImporter",
         "getCustomImporters",
         "registerSessionSource",
+        "registerChatImporter",
         "importContent",
       ],
     }

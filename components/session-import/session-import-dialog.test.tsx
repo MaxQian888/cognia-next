@@ -10,6 +10,10 @@ jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: (sel: (s: unknown) => unknown) => sel({ activeProjectId: "proj-1" }),
 }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn() } }))
+jest.mock("@/lib/session-import", () => ({
+  getSessionSource: (id: string) =>
+    id === "acme:cursor" ? { id, displayName: "Cursor (Acme)" } : undefined,
+}))
 
 const hookState: { current: Record<string, unknown> } = { current: {} }
 jest.mock("@/hooks/session-import/use-session-import", () => ({
@@ -120,6 +124,40 @@ describe("SessionImportDialog", () => {
     expect(screen.queryByText("Session 55")).not.toBeInTheDocument()
     fireEvent.click(screen.getByText(/loadMore/))
     expect(screen.getByText("Session 55")).toBeInTheDocument()
+  })
+
+  describe("source badge", () => {
+    const summaryFor = (sourceId: string) => ({
+      ref: { sourceId, originalSessionId: "a", locator: "/p/a.jsonl" },
+      title: "Some session",
+      sourceId,
+      messageCount: 1,
+      updatedAt: 1,
+    })
+
+    it("translates a built-in source", () => {
+      setHook({ state: { status: "list", summaries: [summaryFor("codex")] } })
+      render(<SessionImportDialog trigger={<button>open</button>} />)
+      fireEvent.click(screen.getByText("open"))
+      expect(screen.getByText("sources.codex")).toBeInTheDocument()
+    })
+
+    it("uses a plugin source's displayName instead of a raw translation key", () => {
+      // `t("sources.acme:cursor")` has no catalog entry, so translating would
+      // print the key path into the badge.
+      setHook({ state: { status: "list", summaries: [summaryFor("acme:cursor")] } })
+      render(<SessionImportDialog trigger={<button>open</button>} />)
+      fireEvent.click(screen.getByText("open"))
+      expect(screen.getByText("Cursor (Acme)")).toBeInTheDocument()
+      expect(screen.queryByText("sources.acme:cursor")).not.toBeInTheDocument()
+    })
+
+    it("falls back to the id when the plugin source is already gone", () => {
+      setHook({ state: { status: "list", summaries: [summaryFor("ghost:x")] } })
+      render(<SessionImportDialog trigger={<button>open</button>} />)
+      fireEvent.click(screen.getByText("open"))
+      expect(screen.getByText("ghost:x")).toBeInTheDocument()
+    })
   })
 
   it("maps the unrecognized error to a friendly message", () => {

@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/dialog"
 import { useChatImport } from "@/hooks/data/use-chat-import"
 import { toast } from "sonner"
-import type { ChatImportFormat } from "@/lib/data/import-registry"
+import { getImporterLabel, type ChatImportFormat } from "@/lib/data/import-registry"
 
 interface Props {
   trigger: React.ReactNode
@@ -34,14 +34,12 @@ export function ChatImportDialog({ trigger, defaultPlatform, open, onOpenChange 
   const flow = useChatImport()
 
   const onApply = async () => {
-    await flow.applyAll()
-    if (flow.state.status === "done") {
-      toast.success(
-        t("summary.success", {
-          sessions: flow.state.sessionsAdded,
-          messages: flow.state.messagesAdded,
-        })
-      )
+    // Read the counts from the call, not from `flow.state`: this closure was
+    // captured at render time, so `flow.state` is still "preview" here no
+    // matter how the write went.
+    const counts = await flow.applyAll()
+    if (counts) {
+      toast.success(t("summary.success", { sessions: counts.sessions, messages: counts.messages }))
     }
   }
 
@@ -159,6 +157,9 @@ function formatLabel(format: ChatImportFormat): string {
     case "cognia-v1":
       return "Cognia (v1)"
     default:
-      return "Unknown"
+      // Plugin-contributed formats are namespaced `${pluginId}:${format}` and
+      // carry their own label. Fall back to the namespaced id rather than
+      // "Unknown", which would hide which plugin actually matched the file.
+      return getImporterLabel(format) ?? (format === "unknown" ? "Unknown" : format)
   }
 }

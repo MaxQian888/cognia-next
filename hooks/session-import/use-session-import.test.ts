@@ -195,4 +195,22 @@ describe("useSessionImport", () => {
     })
     expect(result.current.state.status).toBe("idle")
   })
+
+  it("offers the registered sources' extensions, not a hard-coded pair", async () => {
+    // A fixed ["jsonl","json"] filter made Aider (.md) and OpenCode (.db)
+    // unselectable; the filter has to come from the adapters.
+    const acceptedExtensions = jest.fn(() => ["jsonl", "json", "md", "db"])
+    const d = deps({ acceptedExtensions })
+    const { result } = renderHook(() => useSessionImport(d))
+    await act(async () => {
+      await result.current.pickFiles()
+    })
+
+    expect(acceptedExtensions).toHaveBeenCalled()
+    expect(d.pick).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filters: [expect.objectContaining({ extensions: ["jsonl", "json", "md", "db"] })],
+      })
+    )
+  })
 })
