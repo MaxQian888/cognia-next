@@ -29,6 +29,7 @@ jest.mock("@/lib/db/calibration-items", () => ({
   upsertCalibrationItem: (...args: unknown[]) => mockUpsert(...args),
   setGoldLabel: (...args: unknown[]) => mockSetGold(...args),
   deleteCalibrationItem: (...args: unknown[]) => mockDelete(...args),
+  newCalibrationSetId: () => "calset_fixed",
 }))
 
 const mockRun = jest.fn()
@@ -135,7 +136,14 @@ describe("CalibrationPanel", () => {
 
   it("adds a handwritten item with the chosen gold label", async () => {
     mockSets.mockReturnValue([
-      { setId: "set-a", criterion: "task completion", rubric: "r", itemCount: 0 },
+      {
+        setId: "set-a",
+        setName: "Set A",
+        criterion: "task completion",
+        rubric: "r",
+        itemCount: 0,
+        criterionMismatch: false,
+      },
     ])
     render(<CalibrationPanel />)
     fireEvent.change(screen.getByLabelText("calibration.input"), { target: { value: "q" } })
@@ -151,7 +159,16 @@ describe("CalibrationPanel", () => {
   })
 
   it("lists items and toggles a gold label", () => {
-    mockSets.mockReturnValue([{ setId: "set-a", criterion: "c", rubric: "r", itemCount: 1 }])
+    mockSets.mockReturnValue([
+      {
+        setId: "set-a",
+        setName: "Set A",
+        criterion: "c",
+        rubric: "r",
+        itemCount: 1,
+        criterionMismatch: false,
+      },
+    ])
     mockItems.mockReturnValue([item({ goldLabel: "pass" })])
     render(<CalibrationPanel />)
     expect(screen.getByText("the request")).toBeInTheDocument()
@@ -162,7 +179,16 @@ describe("CalibrationPanel", () => {
   })
 
   it("deletes an item", () => {
-    mockSets.mockReturnValue([{ setId: "set-a", criterion: "c", rubric: "r", itemCount: 1 }])
+    mockSets.mockReturnValue([
+      {
+        setId: "set-a",
+        setName: "Set A",
+        criterion: "c",
+        rubric: "r",
+        itemCount: 1,
+        criterionMismatch: false,
+      },
+    ])
     mockItems.mockReturnValue([item()])
     render(<CalibrationPanel />)
     fireEvent.click(screen.getByLabelText("calibration.delete"))
@@ -170,7 +196,16 @@ describe("CalibrationPanel", () => {
   })
 
   it("runs calibration when items exist", async () => {
-    mockSets.mockReturnValue([{ setId: "set-a", criterion: "c", rubric: "r", itemCount: 1 }])
+    mockSets.mockReturnValue([
+      {
+        setId: "set-a",
+        setName: "Set A",
+        criterion: "c",
+        rubric: "r",
+        itemCount: 1,
+        criterionMismatch: false,
+      },
+    ])
     mockItems.mockReturnValue([item()])
     mockRun.mockResolvedValue(run())
     render(<CalibrationPanel />)
@@ -182,7 +217,16 @@ describe("CalibrationPanel", () => {
   })
 
   it("shows the noJudge message when the runner reports no judge", async () => {
-    mockSets.mockReturnValue([{ setId: "set-a", criterion: "c", rubric: "r", itemCount: 1 }])
+    mockSets.mockReturnValue([
+      {
+        setId: "set-a",
+        setName: "Set A",
+        criterion: "c",
+        rubric: "r",
+        itemCount: 1,
+        criterionMismatch: false,
+      },
+    ])
     mockItems.mockReturnValue([item()])
     mockRun.mockRejectedValue(new FakeNoJudge())
     render(<CalibrationPanel />)
@@ -191,7 +235,16 @@ describe("CalibrationPanel", () => {
   })
 
   it("surfaces a generic runner error", async () => {
-    mockSets.mockReturnValue([{ setId: "set-a", criterion: "c", rubric: "r", itemCount: 1 }])
+    mockSets.mockReturnValue([
+      {
+        setId: "set-a",
+        setName: "Set A",
+        criterion: "c",
+        rubric: "r",
+        itemCount: 1,
+        criterionMismatch: false,
+      },
+    ])
     mockItems.mockReturnValue([item()])
     mockRun.mockRejectedValue(new Error("boom"))
     render(<CalibrationPanel />)
@@ -200,7 +253,16 @@ describe("CalibrationPanel", () => {
   })
 
   it("renders the metrics card with Cohen's κ and the scored summary", () => {
-    mockSets.mockReturnValue([{ setId: "set-a", criterion: "c", rubric: "r", itemCount: 2 }])
+    mockSets.mockReturnValue([
+      {
+        setId: "set-a",
+        setName: "Set A",
+        criterion: "c",
+        rubric: "r",
+        itemCount: 2,
+        criterionMismatch: false,
+      },
+    ])
     mockLatestRun.mockReturnValue(run())
     render(<CalibrationPanel />)
     expect(screen.getByTestId("kappa-value")).toHaveTextContent("0.400")
@@ -208,7 +270,16 @@ describe("CalibrationPanel", () => {
   })
 
   it("shows an em-dash and the undefined title when κ is null", () => {
-    mockSets.mockReturnValue([{ setId: "set-a", criterion: "c", rubric: "r", itemCount: 1 }])
+    mockSets.mockReturnValue([
+      {
+        setId: "set-a",
+        setName: "Set A",
+        criterion: "c",
+        rubric: "r",
+        itemCount: 1,
+        criterionMismatch: false,
+      },
+    ])
     mockLatestRun.mockReturnValue(
       run({
         metrics: {
@@ -230,7 +301,16 @@ describe("CalibrationPanel", () => {
   })
 
   it("lists disagreements with the judge's reasoning", () => {
-    mockSets.mockReturnValue([{ setId: "set-a", criterion: "c", rubric: "r", itemCount: 2 }])
+    mockSets.mockReturnValue([
+      {
+        setId: "set-a",
+        setName: "Set A",
+        criterion: "c",
+        rubric: "r",
+        itemCount: 2,
+        criterionMismatch: false,
+      },
+    ])
     mockLatestRun.mockReturnValue(run())
     render(<CalibrationPanel />)
     // i2: gold fail but judge passed → a disagreement, with reasoning.
@@ -238,14 +318,32 @@ describe("CalibrationPanel", () => {
   })
 
   it("renders κ history when prior runs exist", () => {
-    mockSets.mockReturnValue([{ setId: "set-a", criterion: "c", rubric: "r", itemCount: 2 }])
+    mockSets.mockReturnValue([
+      {
+        setId: "set-a",
+        setName: "Set A",
+        criterion: "c",
+        rubric: "r",
+        itemCount: 2,
+        criterionMismatch: false,
+      },
+    ])
     mockRuns.mockReturnValue([run({ runId: "r1" }), run({ runId: "r2" })])
     render(<CalibrationPanel />)
     expect(screen.getByText("calibration.history.heading")).toBeInTheDocument()
   })
 
   it("shows the empty-disagreement message when judge matches every label", () => {
-    mockSets.mockReturnValue([{ setId: "set-a", criterion: "c", rubric: "r", itemCount: 1 }])
+    mockSets.mockReturnValue([
+      {
+        setId: "set-a",
+        setName: "Set A",
+        criterion: "c",
+        rubric: "r",
+        itemCount: 1,
+        criterionMismatch: false,
+      },
+    ])
     mockLatestRun.mockReturnValue(
       run({
         verdicts: [
@@ -258,7 +356,16 @@ describe("CalibrationPanel", () => {
   })
 
   it("surfaces a non-Error rejection via String()", async () => {
-    mockSets.mockReturnValue([{ setId: "set-a", criterion: "c", rubric: "r", itemCount: 1 }])
+    mockSets.mockReturnValue([
+      {
+        setId: "set-a",
+        setName: "Set A",
+        criterion: "c",
+        rubric: "r",
+        itemCount: 1,
+        criterionMismatch: false,
+      },
+    ])
     mockItems.mockReturnValue([item()])
     mockRun.mockRejectedValue("weird failure")
     render(<CalibrationPanel />)
@@ -268,8 +375,22 @@ describe("CalibrationPanel", () => {
 
   it("switches the active set via the picker", () => {
     mockSets.mockReturnValue([
-      { setId: "set-a", criterion: "c", rubric: "r", itemCount: 1 },
-      { setId: "set-b", criterion: "c2", rubric: "r2", itemCount: 0 },
+      {
+        setId: "set-a",
+        setName: "Set A",
+        criterion: "c",
+        rubric: "r",
+        itemCount: 1,
+        criterionMismatch: false,
+      },
+      {
+        setId: "set-b",
+        setName: "Set B",
+        criterion: "c2",
+        rubric: "r2",
+        itemCount: 0,
+        criterionMismatch: false,
+      },
     ])
     render(<CalibrationPanel />)
     fireEvent.change(screen.getByLabelText("calibration.pickSet"), { target: { value: "set-b" } })
@@ -279,7 +400,16 @@ describe("CalibrationPanel", () => {
   })
 
   it("toggles gold labels to pass in both the item row and the add form", () => {
-    mockSets.mockReturnValue([{ setId: "set-a", criterion: "c", rubric: "r", itemCount: 1 }])
+    mockSets.mockReturnValue([
+      {
+        setId: "set-a",
+        setName: "Set A",
+        criterion: "c",
+        rubric: "r",
+        itemCount: 1,
+        criterionMismatch: false,
+      },
+    ])
     mockItems.mockReturnValue([item({ goldLabel: "fail" })])
     render(<CalibrationPanel />)
     // item-row pass toggle (last goldPass button) flips i1 → pass
@@ -294,7 +424,16 @@ describe("CalibrationPanel", () => {
   it("can cancel a calibration run", async () => {
     // The runner always accepted a signal; the panel simply never passed one,
     // so a run over a large set could not be stopped.
-    mockSets.mockReturnValue([{ setId: "set-a", criterion: "c", rubric: "r", itemCount: 1 }])
+    mockSets.mockReturnValue([
+      {
+        setId: "set-a",
+        setName: "Set A",
+        criterion: "c",
+        rubric: "r",
+        itemCount: 1,
+        criterionMismatch: false,
+      },
+    ])
     mockItems.mockReturnValue([item()])
     let captured: AbortSignal | undefined
     let release: () => void = () => {}
@@ -315,7 +454,16 @@ describe("CalibrationPanel", () => {
   })
 
   it("treats an abort as a stop, not an error", async () => {
-    mockSets.mockReturnValue([{ setId: "set-a", criterion: "c", rubric: "r", itemCount: 1 }])
+    mockSets.mockReturnValue([
+      {
+        setId: "set-a",
+        setName: "Set A",
+        criterion: "c",
+        rubric: "r",
+        itemCount: 1,
+        criterionMismatch: false,
+      },
+    ])
     mockItems.mockReturnValue([item()])
     mockRun.mockImplementationOnce(async () => {
       throw new DOMException("Calibration aborted", "AbortError")
@@ -324,5 +472,87 @@ describe("CalibrationPanel", () => {
     fireEvent.click(screen.getByText("calibration.run"))
     await waitFor(() => expect(screen.queryByText("calibration.cancel")).not.toBeInTheDocument())
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+  })
+
+  it("disambiguates repeated set names with an id suffix in the picker", () => {
+    // Names are no longer identity, so two "Judge A" sets must be told apart
+    // rather than silently merged.
+    mockSets.mockReturnValue([
+      {
+        setId: "calset_aaaaaa",
+        setName: "Judge A",
+        criterion: "c",
+        rubric: "r",
+        itemCount: 1,
+        criterionMismatch: false,
+      },
+      {
+        setId: "calset_bbbbbb",
+        setName: "Judge A",
+        criterion: "c",
+        rubric: "r",
+        itemCount: 2,
+        criterionMismatch: false,
+      },
+    ])
+    render(<CalibrationPanel />)
+    const picker = screen.getByLabelText("calibration.pickSet")
+    expect(picker).toHaveTextContent("Judge A (aaaaaa)")
+    expect(picker).toHaveTextContent("Judge A (bbbbbb)")
+  })
+
+  it("warns when a set's items name different judges", () => {
+    // The oldest item defines the judge; a mismatched one used to silently
+    // re-label every earlier item. It is reported now.
+    mockSets.mockReturnValue([
+      {
+        setId: "set-a",
+        setName: "Judge A",
+        criterion: "task completion",
+        rubric: "r",
+        itemCount: 3,
+        criterionMismatch: true,
+      },
+    ])
+    render(<CalibrationPanel />)
+    expect(screen.getByTestId("criterion-mismatch")).toHaveTextContent("task completion")
+  })
+
+  it("creates a set with an opaque id, not the typed name", () => {
+    render(<CalibrationPanel />)
+    fireEvent.change(screen.getByLabelText("calibration.setName"), { target: { value: "Judge A" } })
+    fireEvent.change(screen.getByLabelText("calibration.criterion"), {
+      target: { value: "task completion" },
+    })
+    fireEvent.change(screen.getByLabelText("calibration.rubric"), { target: { value: "pass if…" } })
+    fireEvent.click(screen.getByText("calibration.createSet"))
+    // The pending set appears in the picker under its NAME.
+    expect(screen.getByLabelText("calibration.pickSet")).toHaveTextContent("Judge A")
+  })
+
+  it("renders the kappa history oldest-first with deltas", () => {
+    // It was a flat row of badges with no time axis, so "did the judge get
+    // worse after the rubric change?" — the whole point — was unreadable.
+    mockSets.mockReturnValue([
+      {
+        setId: "set-a",
+        setName: "Set A",
+        criterion: "c",
+        rubric: "r",
+        itemCount: 1,
+        criterionMismatch: false,
+      },
+    ])
+    mockRuns.mockReturnValue([
+      run({ runId: "r2", createdAt: 20, metrics: { ...run().metrics, cohenKappa: 0.3 } }),
+      run({ runId: "r1", createdAt: 10, metrics: { ...run().metrics, cohenKappa: 0.7 } }),
+    ])
+    render(<CalibrationPanel />)
+    const history = screen.getByTestId("kappa-history")
+    const rows = history.querySelectorAll("li")
+    // Oldest (κ 0.7) first, then the drop to 0.3.
+    expect(rows[0]).toHaveTextContent("0.700")
+    expect(rows[1]).toHaveTextContent("0.300")
+    expect(rows[1]).toHaveTextContent("-0.40")
   })
 })

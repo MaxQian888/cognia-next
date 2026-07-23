@@ -33,14 +33,24 @@ jest.mock("@/hooks/eval/use-eval-data", () => ({
     { id: "c1", input: "first prompt" },
     { id: "c2", input: "second prompt" },
   ]),
+  useCalibrationSets: jest.fn(() => calibrationSets),
 }))
 jest.mock("@/lib/db/eval-runs", () => ({
   getRun: jest.fn(),
 }))
+let calibrationSets: {
+  setId: string
+  setName: string
+  criterion: string
+  rubric: string
+  itemCount: number
+  criterionMismatch: boolean
+}[] = []
 const upsertCalibrationItem = jest.fn<Promise<unknown>, [Record<string, unknown>]>(async () => ({}))
 jest.mock("@/lib/db/calibration-items", () => ({
   upsertCalibrationItem: (...a: unknown[]) =>
     upsertCalibrationItem(...(a as unknown as [Record<string, unknown>])),
+  newCalibrationSetId: () => "calset_fixed",
 }))
 
 import { useEvalRunCaseResults } from "@/hooks/eval/use-eval-data"
@@ -88,6 +98,7 @@ function agg(scorerId: string, over: Record<string, number> = {}) {
 }
 
 beforeEach(() => {
+  calibrationSets = []
   ;(getRun as jest.Mock).mockResolvedValue(RUN)
 })
 
@@ -303,13 +314,15 @@ describe("RunDetail", () => {
       render(<RunDetail runId="r1" onBack={jest.fn()} />)
       fireEvent.click(await screen.findByTestId("seed-calibration-open"))
       expect(screen.getByTestId("seed-preview")).toHaveTextContent('{"count":1,"skipped":0}')
-      fireEvent.change(screen.getByLabelText("calibration.setId"), {
+      // A new set: the typed name is the human label, the id is minted opaque.
+      fireEvent.change(screen.getByLabelText("calibration.newSetName"), {
         target: { value: "judge-v1" },
       })
       fireEvent.click(screen.getByText('calibration.seed:{"count":1}'))
       await waitFor(() => expect(upsertCalibrationItem).toHaveBeenCalledTimes(1))
       expect(upsertCalibrationItem.mock.calls[0][0]).toMatchObject({
-        setId: "judge-v1",
+        setId: "calset_fixed",
+        setName: "judge-v1",
         input: "first prompt",
         output: "the agent's answer",
         goldLabel: "pass",
@@ -335,7 +348,7 @@ describe("RunDetail", () => {
       fireEvent.change(screen.getByLabelText("calibration.scorer"), {
         target: { value: "judge-task-completion" },
       })
-      fireEvent.change(screen.getByLabelText("calibration.setId"), { target: { value: "s" } })
+      fireEvent.change(screen.getByLabelText("calibration.newSetName"), { target: { value: "s" } })
       fireEvent.click(screen.getByText('calibration.seed:{"count":1}'))
       await waitFor(() => expect(upsertCalibrationItem).toHaveBeenCalled())
       expect(upsertCalibrationItem.mock.calls[0][0]).toMatchObject({
@@ -344,10 +357,39 @@ describe("RunDetail", () => {
       })
     })
 
+    it("seeds into an existing set when one is picked", async () => {
+      calibrationSets = [
+        {
+          setId: "calset_existing",
+          setName: "Judge A",
+          criterion: "task completion",
+          rubric: "r",
+          itemCount: 5,
+          criterionMismatch: false,
+        },
+      ]
+      ;(useEvalRunCaseResults as jest.Mock).mockReturnValue(judged)
+      upsertCalibrationItem.mockClear()
+      render(<RunDetail runId="r1" onBack={jest.fn()} />)
+      fireEvent.click(await screen.findByTestId("seed-calibration-open"))
+      fireEvent.change(screen.getByLabelText("calibration.set"), {
+        target: { value: "calset_existing" },
+      })
+      // No free-text id — picking an existing set is enough to seed.
+      fireEvent.click(screen.getByText('calibration.seed:{"count":1}'))
+      await waitFor(() => expect(upsertCalibrationItem).toHaveBeenCalled())
+      expect(upsertCalibrationItem.mock.calls[0][0]).toMatchObject({
+        setId: "calset_existing",
+        setName: "Judge A",
+      })
+      calibrationSets = []
+    })
+
     it("will not seed without a set name", async () => {
       ;(useEvalRunCaseResults as jest.Mock).mockReturnValue(judged)
       render(<RunDetail runId="r1" onBack={jest.fn()} />)
       fireEvent.click(await screen.findByTestId("seed-calibration-open"))
+      // New-set path with a blank name → nothing to seed into.
       expect(screen.getByText('calibration.seed:{"count":1}')).toBeDisabled()
     })
 

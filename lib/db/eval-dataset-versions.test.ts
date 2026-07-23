@@ -5,10 +5,18 @@ import {
   getVersion,
   listVersions,
   tagVersion,
+  restoreVersion,
   deleteVersionsForDataset,
   hashCases,
 } from "./eval-dataset-versions"
-import { createDataset, addCase, updateCase } from "./eval-datasets"
+import {
+  createDataset,
+  getDataset,
+  addCase,
+  updateCase,
+  listCases,
+  deleteCase,
+} from "./eval-datasets"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
 import type { EvalCase } from "@/types/eval/eval"
 
@@ -135,5 +143,69 @@ describe("eval-dataset-versions", () => {
     expect(after.caseIds).toEqual(before.caseIds)
     expect(after.casesHash).not.toBe(before.casesHash)
     expect(after.id).not.toBe(before.id)
+  })
+})
+
+describe("restoreVersion", () => {
+  it("deletes cases added since the snapshot and bumps the version once", async () => {
+    const ds = await createDataset({ name: "A", capability: "chat.qa" })
+    const a = await addCase(ds.id, { input: "first", source: "handwritten" })
+    const snap = await snapshotVersion(ds.id)
+    await addCase(ds.id, { input: "second", source: "handwritten" })
+    await addCase(ds.id, { input: "third", source: "handwritten" })
+    const versionBefore = (await getDataset(ds.id))!.version
+
+    const result = await restoreVersion(snap.id)
+    expect(result).toEqual({ deleted: 2, readded: 0 })
+    expect((await listCases(ds.id)).map((c) => c.id)).toEqual([a.id])
+    // A restore is ONE version bump, like any other edit — not two per case.
+    expect((await getDataset(ds.id))!.version).toBe(versionBefore + 1)
+  })
+
+  it("cannot resurrect a case an id-only snapshot did not copy", async () => {
+    const ds = await createDataset({ name: "A", capability: "chat.qa" })
+    const a = await addCase(ds.id, { input: "first", source: "handwritten" })
+    const b = await addCase(ds.id, { input: "second", source: "handwritten" })
+    const snap = await snapshotVersion(ds.id)
+    await deleteCase(b.id)
+
+    const result = await restoreVersion(snap.id)
+    // `b` is gone from the dataset and the snapshot kept no copy, so restore
+    // leaves it deleted rather than silently dropping the request.
+    expect(result.readded).toBe(0)
+    expect((await listCases(ds.id)).map((c) => c.id)).toEqual([a.id])
+  })
+
+  it("re-adds a deleted case from a legacy full-copy snapshot", async () => {
+    const ds = await createDataset({ name: "A", capability: "chat.qa" })
+    const a = await addCase(ds.id, { input: "first", source: "handwritten" })
+    const b = await addCase(ds.id, { input: "second", source: "handwritten" })
+    // Simulate a pre-slimming snapshot by writing the copies onto the row.
+    const snap = await snapshotVersion(ds.id)
+    await getDb().evalDatasetVersions.put({
+      ...snap,
+      cases: [
+        { ...a, createdAt: 1, updatedAt: 1 },
+        { ...b, createdAt: 1, updatedAt: 1 },
+      ],
+    })
+    await deleteCase(b.id)
+
+    const result = await restoreVersion(snap.id)
+    expect(result.readded).toBe(1)
+    expect((await listCases(ds.id)).map((c) => c.id).sort()).toEqual([a.id, b.id].sort())
+  })
+
+  it("no-ops (no version bump) when the dataset already matches", async () => {
+    const ds = await createDataset({ name: "A", capability: "chat.qa" })
+    await addCase(ds.id, { input: "first", source: "handwritten" })
+    const snap = await snapshotVersion(ds.id)
+    const versionBefore = (await getDataset(ds.id))!.version
+    expect(await restoreVersion(snap.id)).toEqual({ deleted: 0, readded: 0 })
+    expect((await getDataset(ds.id))!.version).toBe(versionBefore)
+  })
+
+  it("rejects an unknown version id", async () => {
+    await expect(restoreVersion("ghost")).rejects.toThrow(/not found/)
   })
 })

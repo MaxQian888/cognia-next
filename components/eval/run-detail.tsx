@@ -23,11 +23,11 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { getRun, type EvalRunRow } from "@/lib/db/eval-runs"
-import { useEvalCases, useEvalRunCaseResults } from "@/hooks/eval/use-eval-data"
+import { useCalibrationSets, useEvalCases, useEvalRunCaseResults } from "@/hooks/eval/use-eval-data"
 import { evaluateGate } from "@/lib/ai/eval/gate"
 import { fullyErroredScorers, isLegacyScoring, isPartialRun } from "@/lib/ai/eval/report"
 import { buildCalibrationSeed, judgeScorerIds } from "@/lib/ai/eval/calibration/seed-from-run"
-import { upsertCalibrationItem } from "@/lib/db/calibration-items"
+import { newCalibrationSetId, upsertCalibrationItem } from "@/lib/db/calibration-items"
 import type { GateThresholds } from "@/types/eval/gate"
 import type { EvalRunCaseRow } from "@/lib/db/eval-run-cases"
 
@@ -113,8 +113,12 @@ function SeedCalibration({
   referenceByCase: Record<string, string>
 }) {
   const t = useTranslations("eval.runDetail")
+  const sets = useCalibrationSets()
   const [open, setOpen] = useState(false)
-  const [setId, setSetId] = useState("")
+  // "" = create a new set under `newSetName`; otherwise an existing set's id.
+  // Free-typing an id would recreate the collision the set model just fixed.
+  const [targetSetId, setTargetSetId] = useState("")
+  const [newSetName, setNewSetName] = useState("")
   const [scorerId, setScorerId] = useState("")
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState<{ added: number; skipped: number } | null>(null)
@@ -122,32 +126,40 @@ function SeedCalibration({
   const judgeIds = useMemo(() => judgeScorerIds(rows), [rows])
   const effectiveScorer = scorerId || judgeIds[0] || ""
 
+  const existing = sets.find((s) => s.setId === targetSetId)
+  const resolvedName = existing?.setName ?? newSetName.trim()
+  const canSeed = Boolean(targetSetId || newSetName.trim())
+
   const preview = useMemo(
     () =>
       effectiveScorer
         ? buildCalibrationSeed({
-            setId: setId.trim() || "preview",
+            setId: targetSetId || "preview",
             criterion: effectiveScorer,
-            rubric: "",
+            rubric: existing?.rubric ?? "",
             scorerId: effectiveScorer,
             rows,
             inputsByCase: Object.fromEntries(inputByCase),
             referencesByCase: referenceByCase,
           })
         : { items: [], skipped: [] },
-    [effectiveScorer, setId, rows, inputByCase, referenceByCase]
+    [effectiveScorer, targetSetId, existing?.rubric, rows, inputByCase, referenceByCase]
   )
 
   const seed = useCallback(async () => {
-    if (!setId.trim() || preview.items.length === 0) return
+    if (!canSeed || preview.items.length === 0) return
     setBusy(true)
     try {
-      for (const item of preview.items) await upsertCalibrationItem(item)
+      // A brand-new set gets a fresh opaque id here, not the typed name.
+      const setId = targetSetId || newCalibrationSetId()
+      for (const item of preview.items) {
+        await upsertCalibrationItem({ ...item, setId, setName: resolvedName })
+      }
       setDone({ added: preview.items.length, skipped: preview.skipped.length })
     } finally {
       setBusy(false)
     }
-  }, [setId, preview])
+  }, [canSeed, targetSetId, resolvedName, preview])
 
   if (judgeIds.length === 0) return null
 
@@ -174,13 +186,31 @@ function SeedCalibration({
       <p className="text-muted-foreground text-xs">{t("calibration.hint")}</p>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">
-          <span>{t("calibration.setId")}</span>
-          <Input
-            aria-label={t("calibration.setId")}
-            value={setId}
-            onChange={(e) => setSetId(e.target.value)}
-          />
+          <span>{t("calibration.set")}</span>
+          <select
+            aria-label={t("calibration.set")}
+            className="bg-background rounded-md border px-2 py-1 text-sm"
+            value={targetSetId}
+            onChange={(e) => setTargetSetId(e.target.value)}
+          >
+            <option value="">{t("calibration.newSet")}</option>
+            {sets.map((s) => (
+              <option key={s.setId} value={s.setId}>
+                {s.setName}
+              </option>
+            ))}
+          </select>
         </label>
+        {!targetSetId && (
+          <label className="flex flex-col gap-1 text-sm">
+            <span>{t("calibration.newSetName")}</span>
+            <Input
+              aria-label={t("calibration.newSetName")}
+              value={newSetName}
+              onChange={(e) => setNewSetName(e.target.value)}
+            />
+          </label>
+        )}
         <label className="flex flex-col gap-1 text-sm">
           <span>{t("calibration.scorer")}</span>
           <select
@@ -211,7 +241,7 @@ function SeedCalibration({
       <div className="flex gap-2">
         <Button
           size="sm"
-          disabled={busy || !setId.trim() || preview.items.length === 0}
+          disabled={busy || !canSeed || preview.items.length === 0}
           onClick={() => void seed()}
         >
           {t("calibration.seed", { count: preview.items.length })}

@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
+import { cn } from "@/lib/utils"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import {
   useCalibrationSets,
@@ -27,6 +28,7 @@ import {
 } from "@/hooks/eval/use-eval-data"
 import {
   upsertCalibrationItem,
+  newCalibrationSetId,
   setGoldLabel,
   deleteCalibrationItem,
   type CalibrationItemRow,
@@ -109,7 +111,7 @@ function ItemRow({ item }: { item: CalibrationItemRow }) {
 function NewSetForm({
   onCreate,
 }: {
-  onCreate: (setId: string, criterion: string, rubric: string) => void
+  onCreate: (set: { setId: string; setName: string; criterion: string; rubric: string }) => void
 }) {
   const t = useTranslations("eval")
   const [name, setName] = useState("")
@@ -119,9 +121,15 @@ function NewSetForm({
   const canSubmit = name.trim() && criterion.trim() && rubric.trim()
   const submit = useCallback(async () => {
     if (!canSubmit) return
-    // The set is created lazily on its first item; we hand the id + the judge
-    // (criterion/rubric) up so the AddItemForm can denormalize them onto items.
-    onCreate(name.trim(), criterion.trim(), rubric.trim())
+    // The set is created lazily on its first item; we hand a FRESH opaque id
+    // plus the judge (criterion/rubric) up so AddItemForm can denormalize them.
+    // The typed name used to BE the id, so two sets called "judge-v1" merged.
+    onCreate({
+      setId: newCalibrationSetId(),
+      setName: name.trim(),
+      criterion: criterion.trim(),
+      rubric: rubric.trim(),
+    })
     setName("")
     setCriterion("")
     setRubric("")
@@ -159,10 +167,12 @@ function NewSetForm({
 
 function AddItemForm({
   setId,
+  setName,
   criterion,
   rubric,
 }: {
   setId: string
+  setName: string
   criterion: string
   rubric: string
 }) {
@@ -177,6 +187,7 @@ function AddItemForm({
     if (!canSubmit) return
     await upsertCalibrationItem({
       setId,
+      setName,
       criterion,
       rubric,
       input: input.trim(),
@@ -189,7 +200,7 @@ function AddItemForm({
     setOutput("")
     setReference("")
     setGold("pass")
-  }, [canSubmit, setId, criterion, rubric, input, output, reference, goldLabel])
+  }, [canSubmit, setId, setName, criterion, rubric, input, output, reference, goldLabel])
 
   return (
     <Card className="flex flex-col gap-2 p-3">
@@ -340,19 +351,71 @@ function DisagreementList({ run }: { run: CalibrationRunRow }) {
   )
 }
 
+/**
+ * κ over time — the point of keeping calibration history at all.
+ *
+ * This was a flat row of badges in whatever order the query returned, with no
+ * time axis and no judge attribution, so "did the judge get worse when we
+ * changed the rubric?" — the question the history exists to answer — could not
+ * be read off it. Now: oldest → newest, with the judge model that produced each
+ * point and the change from the previous one.
+ *
+ * A bar chart rather than a charting library: κ is a bounded [-1, 1] scalar
+ * over a handful of points, and the repo's chart dependency is not worth
+ * pulling into a panel that shows at most a few dozen bars.
+ */
 function HistoryStrip({ runs }: { runs: CalibrationRunRow[] }) {
   const t = useTranslations("eval")
-  if (runs.length === 0) return null
+  // Oldest first: a trend read right-to-left is not a trend.
+  const ordered = useMemo(() => [...runs].sort((a, b) => a.createdAt - b.createdAt), [runs])
+  if (ordered.length === 0) return null
+
   return (
-    <Card className="flex flex-col gap-1 p-4">
+    <Card className="flex flex-col gap-2 p-4" data-testid="kappa-history">
       <p className="text-sm font-medium">{t("calibration.history.heading")}</p>
-      <div className="flex flex-wrap gap-2">
-        {runs.map((r) => (
-          <Badge key={r.runId} variant="outline" className="text-xs tabular-nums">
-            κ {kappa(r.metrics.cohenKappa)}
-          </Badge>
-        ))}
-      </div>
+      <ul className="flex flex-col gap-1">
+        {ordered.map((r, i) => {
+          const k = r.metrics.cohenKappa
+          const prev = i > 0 ? ordered[i - 1].metrics.cohenKappa : null
+          const delta = k !== null && prev !== null ? k - prev : null
+          // κ spans [-1, 1]; map it onto a 0-100% bar so negative agreement is
+          // visibly different from "no data" rather than both rendering empty.
+          const width = k === null ? 0 : ((k + 1) / 2) * 100
+          return (
+            <li key={r.runId} className="flex items-center gap-2 text-xs">
+              <span className="text-muted-foreground w-28 shrink-0 truncate">
+                {new Date(r.createdAt).toLocaleDateString()}
+              </span>
+              <span className="bg-muted h-2 min-w-0 flex-1 overflow-hidden rounded">
+                <span
+                  className={cn(
+                    "block h-full",
+                    k !== null && k < 0 ? "bg-destructive" : "bg-primary"
+                  )}
+                  style={{ width: `${width}%` }}
+                />
+              </span>
+              <span className="w-14 shrink-0 text-right tabular-nums">κ {kappa(k)}</span>
+              <span
+                className={cn(
+                  "w-12 shrink-0 text-right tabular-nums",
+                  delta === null
+                    ? "text-muted-foreground"
+                    : delta < 0
+                      ? "text-destructive"
+                      : "text-muted-foreground"
+                )}
+              >
+                {delta === null ? DASH : `${delta > 0 ? "+" : ""}${delta.toFixed(2)}`}
+              </span>
+              <span className="text-muted-foreground w-32 shrink-0 truncate" title={r.judgeModel}>
+                {r.judgeModel}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+      <p className="text-muted-foreground text-xs">{t("calibration.history.hint")}</p>
     </Card>
   )
 }
@@ -364,6 +427,7 @@ export function CalibrationPanel() {
   const [activeSetId, setActiveSetId] = useState<string | undefined>(undefined)
   const [pendingSet, setPendingSet] = useState<{
     setId: string
+    setName: string
     criterion: string
     rubric: string
   } | null>(null)
@@ -377,8 +441,19 @@ export function CalibrationPanel() {
   const latestRun = useLatestCalibrationRun(effectiveSetId)
   const runs = useCalibrationRuns(effectiveSetId)
 
+  const duplicateNames = useMemo(() => {
+    const seen = new Set<string>()
+    const dupes = new Set<string>()
+    for (const s of sets) {
+      if (seen.has(s.setName)) dupes.add(s.setName)
+      seen.add(s.setName)
+    }
+    return dupes
+  }, [sets])
+
   const activeSet = sets.find((s) => s.setId === effectiveSetId)
-  // A brand-new set has no items yet; carry its criterion/rubric from the form.
+  // A brand-new set has no items yet; carry its name/criterion/rubric from the form.
+  const setName = activeSet?.setName ?? pendingSet?.setName ?? ""
   const criterion = activeSet?.criterion ?? pendingSet?.criterion ?? ""
   const rubric = activeSet?.rubric ?? pendingSet?.rubric ?? ""
 
@@ -437,11 +512,15 @@ export function CalibrationPanel() {
             onChange={(e) => setActiveSetId(e.target.value || undefined)}
           >
             {pendingSet && !sets.some((s) => s.setId === pendingSet.setId) && (
-              <option value={pendingSet.setId}>{pendingSet.setId}</option>
+              <option value={pendingSet.setId}>{pendingSet.setName}</option>
             )}
             {sets.map((s) => (
               <option key={s.setId} value={s.setId}>
-                {s.setId} · {s.itemCount}
+                {/* Names may repeat now that they are not identity; the id
+                    suffix disambiguates rather than merging them. */}
+                {duplicateNames.has(s.setName)
+                  ? `${s.setName} (${s.setId.slice(-6)}) · ${s.itemCount}`
+                  : `${s.setName} · ${s.itemCount}`}
               </option>
             ))}
           </select>
@@ -471,16 +550,27 @@ export function CalibrationPanel() {
         )}
       </div>
 
+      {activeSet?.criterionMismatch && (
+        <p className="text-destructive text-xs" role="alert" data-testid="criterion-mismatch">
+          {t("calibration.criterionMismatch", { criterion: activeSet.criterion })}
+        </p>
+      )}
+
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="flex flex-col gap-3">
           <NewSetForm
-            onCreate={(setId, newCriterion, newRubric) => {
-              setActiveSetId(setId)
-              setPendingSet({ setId, criterion: newCriterion, rubric: newRubric })
+            onCreate={(next) => {
+              setActiveSetId(next.setId)
+              setPendingSet(next)
             }}
           />
           {effectiveSetId && (
-            <AddItemForm setId={effectiveSetId} criterion={criterion} rubric={rubric} />
+            <AddItemForm
+              setId={effectiveSetId}
+              setName={setName}
+              criterion={criterion}
+              rubric={rubric}
+            />
           )}
           {items.length === 0 ? (
             <p className="text-muted-foreground text-sm">{t("calibration.empty")}</p>

@@ -26,6 +26,7 @@
     "cancel": "Cancel",
     "createSet": "Create set",
     "criterion": "Criterion",
+    "criterionMismatch": "This set's items name different judges. A set calibrates ONE judge — the oldest item's ({criterion}) defines it, and the others are not comparable.",
     "criterionPlaceholder": "e.g. task completion",
     "delete": "Delete item",
     "disagreement": {
@@ -41,7 +42,8 @@
     "goldPass": "Pass",
     "heading": "Judge calibration",
     "history": {
-      "heading": "κ over time"
+      "heading": "κ over time",
+      "hint": "Oldest first. A drop after a rubric or judge-model change means the judge became less aligned with your labels."
     },
     "input": "User request",
     "inputPlaceholder": "The request the judge scores",
@@ -282,10 +284,13 @@
       "cancel": "Cancel",
       "done": "Added {count} calibration item(s)",
       "hint": "Turns this run's judged cases into calibration items, pre-labelled with the judge's own verdict for you to confirm or flip.",
+      "newSet": "New set…",
+      "newSetName": "New set name",
       "open": "Send to judge calibration",
       "preview": "{count} case(s) will be added, {skipped} skipped",
       "scorer": "Judge",
       "seed": "Add {count} item(s)",
+      "set": "Calibration set",
       "setId": "Calibration set"
     },
     "caseColumn": "Case",
@@ -417,7 +422,17 @@
   "versions": {
     "applyTag": "Apply",
     "cases": "{count, plural, =1 {# case} other {# cases}}",
+    "closeDiff": "Close",
+    "compare": "Compare",
+    "compareWith": "Compare with",
+    "diffCounts": "+{added} added · −{removed} removed · {changed} changed · {unchanged} unchanged",
+    "diffHeading": "Changes from {from} to {to}",
+    "diffNone": "These snapshots contain the same cases.",
     "empty": "No version snapshots yet. A snapshot is frozen each time you run.",
+    "restore": "Restore",
+    "restoreConfirm": "Restoring deletes {deleted} case(s) added since this snapshot. Press again to confirm.",
+    "restoreDone": "Restored: {deleted} deleted, {readded} re-added",
+    "restoreMissing": "{count} case(s) in this snapshot were deleted and cannot be brought back — this snapshot stored ids only.",
     "tag": "Tag",
     "tagPlaceholder": "Tag (e.g. prod)",
     "version": "v{version}"

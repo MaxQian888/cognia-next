@@ -21,8 +21,22 @@ export type CalibrationItemSource = "real-trace" | "eval-case" | "handwritten"
 
 export interface CalibrationItemRow {
   id: string
-  /** Groups items into a calibration set. */
+  /**
+   * Groups items into a calibration set. OPAQUE — see {@link newCalibrationSetId}.
+   *
+   * It used to be whatever name the user typed, so two sets called "judge-v1"
+   * silently merged into one, and the newest item's criterion/rubric then won
+   * for the whole set: items already labelled against one rubric were quietly
+   * re-attributed to another. Legacy rows still carry the typed name here,
+   * which stays a valid (if collision-prone) id.
+   */
   setId: string
+  /**
+   * Human label for the set, denormalized onto every item like
+   * {@link criterion}. Absent on rows written before sets had a separate id;
+   * readers fall back to {@link setId}.
+   */
+  setName?: string
   /** The single criterion of the judge being calibrated. */
   criterion: string
   /** The judge rubric (pass/fail definition) being calibrated. */
@@ -50,19 +64,36 @@ export interface CalibrationItemRow {
 /** Compact summary of one calibration set for the picker. */
 export interface CalibrationSetSummary {
   setId: string
+  /** Human label; falls back to the id on legacy rows. */
+  setName: string
   criterion: string
   rubric: string
   itemCount: number
+  /**
+   * True when the set's items do not all name the same judge. A set IS one
+   * judge, so this is a data error — reported rather than resolved by letting
+   * the newest item win, which used to silently re-label the older ones.
+   */
+  criterionMismatch: boolean
 }
 
 function calibrationItemId(): string {
   return "calit_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
 }
 
+/**
+ * A fresh, opaque calibration-set id. Names are for humans and may repeat;
+ * identity must not depend on one.
+ */
+export function newCalibrationSetId(): string {
+  return "calset_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
+}
+
 export interface UpsertCalibrationItemInput {
   /** Provide to edit an existing row in place; omit to create. */
   id?: string
   setId: string
+  setName?: string
   criterion: string
   rubric: string
   input: string
@@ -85,6 +116,7 @@ export async function upsertCalibrationItem(
   const row: CalibrationItemRow = {
     id: existing?.id ?? input.id ?? calibrationItemId(),
     setId: input.setId,
+    ...(input.setName !== undefined ? { setName: input.setName } : {}),
     criterion: input.criterion,
     rubric: input.rubric,
     input: input.input,
@@ -116,22 +148,35 @@ export async function listItemsBySet(setId: string): Promise<CalibrationItemRow[
   return rows
 }
 
-/** Distinct calibration sets with item counts (in-memory group-by). */
+/**
+ * Distinct calibration sets with item counts (in-memory group-by).
+ *
+ * The OLDEST item defines the set's judge, and a later item naming a different
+ * criterion raises {@link CalibrationSetSummary.criterionMismatch} instead of
+ * overwriting it. Letting the newest win meant adding one stray item silently
+ * re-attributed every earlier label to a rubric it was never judged against.
+ */
 export async function listCalibrationSets(): Promise<CalibrationSetSummary[]> {
   const rows = await getDb().calibrationItems.toArray()
   const map = new Map<string, CalibrationSetSummary>()
-  // Newest item per set wins for the denormalized criterion/rubric.
   const ordered = [...rows].sort((a, b) => a.createdAt - b.createdAt)
   for (const r of ordered) {
     const existing = map.get(r.setId)
-    map.set(r.setId, {
-      setId: r.setId,
-      criterion: r.criterion,
-      rubric: r.rubric,
-      itemCount: (existing?.itemCount ?? 0) + 1,
-    })
+    if (!existing) {
+      map.set(r.setId, {
+        setId: r.setId,
+        setName: r.setName ?? r.setId,
+        criterion: r.criterion,
+        rubric: r.rubric,
+        itemCount: 1,
+        criterionMismatch: false,
+      })
+      continue
+    }
+    existing.itemCount += 1
+    if (r.criterion !== existing.criterion) existing.criterionMismatch = true
   }
-  return [...map.values()].sort((a, b) => a.setId.localeCompare(b.setId))
+  return [...map.values()].sort((a, b) => a.setName.localeCompare(b.setName))
 }
 
 export async function setGoldLabel(id: string, label: CalibrationLabel): Promise<void> {

@@ -5,6 +5,7 @@ import {
   getCalibrationItem,
   listItemsBySet,
   listCalibrationSets,
+  newCalibrationSetId,
   setGoldLabel,
   deleteCalibrationItem,
   deleteItemsBySet,
@@ -92,15 +93,56 @@ describe("calibration items", () => {
     expect(await listItemsBySet("")).toEqual([])
   })
 
-  it("summarizes sets with counts, newest item supplying criterion/rubric", async () => {
-    await upsertCalibrationItem(base({ setId: "set-a", criterion: "old-crit", createdAt: 1 }))
-    await upsertCalibrationItem(base({ setId: "set-a", criterion: "new-crit", createdAt: 2 }))
-    await upsertCalibrationItem(base({ setId: "set-b", criterion: "b-crit", createdAt: 3 }))
+  it("summarizes sets by count, with the OLDEST item defining the judge", async () => {
+    // The newest item used to win, so adding one stray item silently
+    // re-attributed every earlier label to a different rubric.
+    await upsertCalibrationItem(
+      base({ setId: "set-a", setName: "Judge A", criterion: "crit-a", createdAt: 1 })
+    )
+    await upsertCalibrationItem(base({ setId: "set-a", criterion: "crit-a", createdAt: 2 }))
+    await upsertCalibrationItem(
+      base({ setId: "set-b", setName: "Judge B", criterion: "crit-b", createdAt: 3 })
+    )
     const sets = await listCalibrationSets()
-    expect(sets).toEqual([
-      { setId: "set-a", criterion: "new-crit", rubric: expect.any(String), itemCount: 2 },
-      { setId: "set-b", criterion: "b-crit", rubric: expect.any(String), itemCount: 1 },
+    expect(sets).toMatchObject([
+      {
+        setId: "set-a",
+        setName: "Judge A",
+        criterion: "crit-a",
+        itemCount: 2,
+        criterionMismatch: false,
+      },
+      {
+        setId: "set-b",
+        setName: "Judge B",
+        criterion: "crit-b",
+        itemCount: 1,
+        criterionMismatch: false,
+      },
     ])
+  })
+
+  it("flags a set whose items name different judges instead of overwriting", async () => {
+    await upsertCalibrationItem(
+      base({ setId: "set-a", setName: "Judge A", criterion: "task-completion", createdAt: 1 })
+    )
+    await upsertCalibrationItem(
+      base({ setId: "set-a", criterion: "instruction-following", createdAt: 2 })
+    )
+    const [set] = await listCalibrationSets()
+    // Oldest wins for the label; the mismatch is reported, not resolved.
+    expect(set.criterion).toBe("task-completion")
+    expect(set.criterionMismatch).toBe(true)
+  })
+
+  it("falls back to the id for a set with no denormalized name (legacy rows)", async () => {
+    await upsertCalibrationItem(base({ setId: "typed-name", criterion: "c", createdAt: 1 }))
+    expect((await listCalibrationSets())[0].setName).toBe("typed-name")
+  })
+
+  it("mints opaque, unique set ids", () => {
+    expect(newCalibrationSetId()).toMatch(/^calset_/)
+    expect(newCalibrationSetId()).not.toBe(newCalibrationSetId())
   })
 
   it("setGoldLabel flips the label and bumps updatedAt", async () => {

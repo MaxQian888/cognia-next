@@ -10,20 +10,36 @@ jest.mock("next-intl", () => ({
 }))
 
 let versions: EvalDatasetVersion[] = []
+let cases: { id: string; input: string }[] = []
 jest.mock("@/hooks/eval/use-eval-data", () => ({
   useEvalDatasetVersions: () => versions,
+  useEvalCases: () => cases,
 }))
 const tagVersion = jest.fn(async () => {})
+const restoreVersion = jest.fn(async () => ({ deleted: 0, readded: 0 }))
 jest.mock("@/lib/db/eval-dataset-versions", () => ({
   tagVersion: (...a: unknown[]) => tagVersion(...(a as [])),
+  restoreVersion: (...a: unknown[]) => restoreVersion(...(a as unknown as [string])),
 }))
 
 import { VersionHistory } from "./version-history"
 
 beforeEach(() => {
   versions = []
+  cases = []
   tagVersion.mockClear()
+  restoreVersion.mockClear().mockResolvedValue({ deleted: 0, readded: 0 })
 })
+
+const version = (id: string, num: number, caseIds: string[]): EvalDatasetVersion =>
+  ({
+    id,
+    datasetId: "d",
+    version: num,
+    caseIds,
+    casesHash: `hash-${id}`,
+    createdAt: num,
+  }) as EvalDatasetVersion
 
 describe("VersionHistory", () => {
   it("renders the empty state", () => {
@@ -75,5 +91,81 @@ describe("VersionHistory", () => {
     ]
     render(<VersionHistory datasetId="d" />)
     expect(screen.getByText('versions.cases:{"count":2}')).toBeInTheDocument()
+  })
+
+  it("diffs a compared snapshot against the others", () => {
+    // Snapshots were write-only — "run A 80%, run B 60%" is unactionable
+    // without knowing which cases moved underneath the two runs.
+    versions = [version("v2", 2, ["a", "c"]), version("v1", 1, ["a", "b"])]
+    cases = [
+      { id: "a", input: "one" },
+      { id: "c", input: "three" },
+    ]
+    render(<VersionHistory datasetId="d" />)
+    fireEvent.click(screen.getAllByLabelText("versions.compare")[1]) // pick v1 as the baseline
+    const diff = screen.getByTestId("version-diff")
+    // v1 → v2: dropped b, added c, kept a.
+    expect(diff).toHaveTextContent('{"added":1,"removed":1,"changed":0,"unchanged":1}')
+  })
+
+  it("toggles the compare baseline off again", () => {
+    versions = [version("v2", 2, ["a"]), version("v1", 1, ["a"])]
+    cases = [{ id: "a", input: "one" }]
+    render(<VersionHistory datasetId="d" />)
+    const compareV1 = screen.getAllByLabelText("versions.compare")[1]
+    fireEvent.click(compareV1)
+    expect(screen.getByTestId("version-diff")).toBeInTheDocument()
+    fireEvent.click(compareV1) // same button again clears the baseline
+    expect(screen.queryByTestId("version-diff")).not.toBeInTheDocument()
+
+    // …and the footer's explicit close button clears it too.
+    fireEvent.click(compareV1)
+    fireEvent.click(screen.getByText("versions.closeDiff"))
+    expect(screen.queryByTestId("version-diff")).not.toBeInTheDocument()
+  })
+
+  it("says the snapshots are identical when nothing moved", () => {
+    versions = [version("v2", 2, ["a", "b"]), version("v1", 1, ["a", "b"])]
+    cases = [
+      { id: "a", input: "one" },
+      { id: "b", input: "two" },
+    ]
+    render(<VersionHistory datasetId="d" />)
+    fireEvent.click(screen.getAllByLabelText("versions.compare")[1])
+    expect(screen.getByTestId("version-diff")).toHaveTextContent("versions.diffNone")
+  })
+
+  it("confirms before a destructive restore, then runs it", async () => {
+    versions = [version("v1", 1, ["a"])]
+    cases = [
+      { id: "a", input: "one" },
+      { id: "b", input: "two" },
+    ]
+    render(<VersionHistory datasetId="d" />)
+    fireEvent.click(screen.getByLabelText("versions.restore"))
+    // First click only warns — restoring deletes the case added since.
+    expect(screen.getByTestId("restore-confirm")).toHaveTextContent('{"deleted":1}')
+    expect(restoreVersion).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByLabelText("versions.restore"))
+    await waitFor(() => expect(restoreVersion).toHaveBeenCalledWith("v1"))
+  })
+
+  it("warns that an id-only snapshot cannot resurrect deleted cases", () => {
+    // v1 pinned {a,b}; b was later deleted. Its ids-only snapshot kept no copy.
+    versions = [version("v1", 1, ["a", "b"])]
+    cases = [{ id: "a", input: "one" }]
+    render(<VersionHistory datasetId="d" />)
+    fireEvent.click(screen.getByLabelText("versions.restore"))
+    expect(screen.getByTestId("restore-confirm")).toHaveTextContent("restoreMissing")
+  })
+
+  it("reports the outcome of a restore", async () => {
+    restoreVersion.mockResolvedValue({ deleted: 2, readded: 1 })
+    versions = [version("v1", 1, ["a"])]
+    cases = [{ id: "a", input: "one" }]
+    render(<VersionHistory datasetId="d" />)
+    fireEvent.click(screen.getByLabelText("versions.restore"))
+    fireEvent.click(screen.getByLabelText("versions.restore"))
+    expect(await screen.findByRole("status")).toHaveTextContent('{"deleted":2,"readded":1}')
   })
 })

@@ -26,6 +26,7 @@
     "cancel": "取消",
     "createSet": "创建集合",
     "criterion": "评判标准",
+    "criterionMismatch": "这个集合里的用例指向了不同的评审器。一个集合只校准一个评审器 —— 以最早那条（{criterion}）为准，其余不可比。",
     "criterionPlaceholder": "例如 任务完成度",
     "delete": "删除样本",
     "disagreement": {
@@ -41,7 +42,8 @@
     "goldPass": "通过",
     "heading": "评委校准",
     "history": {
-      "heading": "κ 历史趋势"
+      "heading": "κ 历史趋势",
+      "hint": "从旧到新。改动 rubric 或评审模型后 κ 下降，说明评审器与你的人工标注更不一致了。"
     },
     "input": "用户请求",
     "inputPlaceholder": "评委要评判的请求",
@@ -282,10 +284,13 @@
       "cancel": "取消",
       "done": "已添加 {count} 条校准项",
       "hint": "把本次运行中已判定的用例转成校准项，并用评审模型自己的判定预填金标，供你确认或推翻。",
+      "newSet": "新建集合…",
+      "newSetName": "新集合名称",
       "open": "送去评审校准",
       "preview": "将添加 {count} 条用例，跳过 {skipped} 条",
       "scorer": "评审器",
       "seed": "添加 {count} 条",
+      "set": "校准集",
       "setId": "校准集"
     },
     "caseColumn": "用例",
@@ -417,7 +422,17 @@
   "versions": {
     "applyTag": "应用",
     "cases": "{count} 条用例",
+    "closeDiff": "关闭",
+    "compare": "对比",
+    "compareWith": "对比对象",
+    "diffCounts": "新增 {added} · 移除 {removed} · 变更 {changed} · 未变 {unchanged}",
+    "diffHeading": "从 {from} 到 {to} 的变化",
+    "diffNone": "两个快照包含的用例相同。",
     "empty": "暂无版本快照。每次运行会冻结一个快照。",
+    "restore": "回滚",
+    "restoreConfirm": "回滚会删除该快照之后新增的 {deleted} 条用例。再点一次以确认。",
+    "restoreDone": "已回滚：删除 {deleted} 条，恢复 {readded} 条",
+    "restoreMissing": "该快照中有 {count} 条用例已被删除且无法恢复 —— 这个快照只存了 id。",
     "tag": "打标签",
     "tagPlaceholder": "标签（如 prod）",
     "version": "v{version}"
