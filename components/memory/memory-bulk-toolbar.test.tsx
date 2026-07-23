@@ -58,4 +58,14 @@ describe("MemoryBulkToolbar", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }))
     expect(onDelete).toHaveBeenCalled()
   })
+
+  it("disables every action while a bulk mutation is in flight", () => {
+    const { onPin } = setup({ busy: true })
+    const pin = screen.getByRole("button", { name: /^pin$/i })
+    expect(pin).toBeDisabled()
+    expect(screen.getByRole("button", { name: /^unpin$/i })).toBeDisabled()
+    expect(screen.getByRole("button", { name: /^delete$/i })).toBeDisabled()
+    fireEvent.click(pin)
+    expect(onPin).not.toHaveBeenCalled()
+  })
 })

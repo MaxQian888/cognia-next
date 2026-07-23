@@ -9,6 +9,31 @@ let mockData: Memory[] = []
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => mockData,
 }))
+
+// jsdom has no layout, so the real virtualizer would render zero rows. Render
+// every item instead — count assertions below stay meaningful.
+jest.mock("@tanstack/react-virtual", () => ({
+  useVirtualizer: ({ count }: { count: number }) => ({
+    getVirtualItems: () =>
+      Array.from({ length: count }, (_, index) => ({
+        index,
+        key: index,
+        start: index * 104,
+        size: 104,
+        end: (index + 1) * 104,
+        lane: 0,
+      })),
+    getTotalSize: () => count * 104,
+    measureElement: jest.fn(),
+  }),
+}))
+
+jest.mock("motion/react", () => jest.requireActual("../../__mocks__/motion-react.js"))
+
+const mockToastError = jest.fn()
+jest.mock("sonner", () => ({
+  toast: { error: (...args: unknown[]) => mockToastError(...args), success: jest.fn() },
+}))
 // The external tab is exercised by its own suite; stub it here so the console
 // tests stay focused on the app-memory tab and don't pull in CodeMirror / fs.
 jest.mock("./external/external-memory-tab", () => ({
@@ -175,14 +200,15 @@ describe("MemoryConsole — list & filters", () => {
 })
 
 describe("MemoryConsole — row & detail", () => {
-  it("wires per-row pin/delete to the db helpers", () => {
+  it("wires per-row pin/delete to the db helpers", async () => {
     mockData = [mem({ id: "m1", text: "x", pinned: false })]
     render(<MemoryConsole />)
     const row = screen.getByTestId("memory-row")
     fireEvent.click(within(row).getByRole("button", { name: /^pin$/i }))
     expect(mockManage).toHaveBeenCalledWith({ kind: "pin", id: "m1", pinned: true })
     fireEvent.click(within(row).getByRole("button", { name: /delete/i }))
-    expect(mockManage).toHaveBeenCalledWith({ kind: "delete", id: "m1" })
+    // Row delete defers behind its fade-out.
+    await waitFor(() => expect(mockManage).toHaveBeenCalledWith({ kind: "delete", id: "m1" }))
   })
 
   it("opens the detail sidebar on row click and navigates through the list", () => {
@@ -285,6 +311,32 @@ describe("MemoryConsole — add & bulk", () => {
     fireEvent.click(screen.getByTestId("memory-bulk-select-all"))
     const toolbar = screen.getByTestId("memory-bulk-toolbar")
     expect(within(toolbar).getByTestId("memory-bulk-count").textContent).toContain("2")
+  })
+})
+
+describe("MemoryConsole — mutation feedback", () => {
+  it("surfaces a toast when a mutation is rejected", async () => {
+    mockManage.mockResolvedValueOnce({ ok: false, reason: "disabled" })
+    mockData = [mem({ id: "m1", text: "x" })]
+    render(<MemoryConsole />)
+    fireEvent.click(
+      within(screen.getByTestId("memory-row")).getByRole("button", { name: /^pin$/i })
+    )
+    await waitFor(() =>
+      expect(mockToastError).toHaveBeenCalledWith("Memory is disabled in settings")
+    )
+  })
+
+  it("surfaces a generic toast when a mutation throws", async () => {
+    mockManage.mockRejectedValueOnce(new Error("boom"))
+    mockData = [mem({ id: "m1", text: "x" })]
+    render(<MemoryConsole />)
+    fireEvent.click(
+      within(screen.getByTestId("memory-row")).getByRole("button", { name: /^pin$/i })
+    )
+    await waitFor(() =>
+      expect(mockToastError).toHaveBeenCalledWith("The memory operation failed — please try again")
+    )
   })
 })
 

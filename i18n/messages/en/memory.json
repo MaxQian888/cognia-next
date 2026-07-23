@@ -92,6 +92,7 @@
   },
   "errors": {
     "disabled": "Memory is disabled in settings",
+    "mutation_failed": "The memory operation failed — please try again",
     "not_found": "This memory no longer exists",
     "pii_blocked": "Blocked: the text contains personal information",
     "temporary": "Memory is in temporary mode"

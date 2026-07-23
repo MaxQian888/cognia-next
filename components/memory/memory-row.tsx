@@ -51,6 +51,10 @@ function MemoryRowImpl({
   const now = useNow()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(memory.text)
+  // Brief fade-out before the delete mutation removes the row from the live
+  // query — a virtualized list can't host AnimatePresence exits, so the row
+  // animates itself and then hands off to `onDelete`.
+  const [removing, setRemoving] = useState(false)
 
   const invalidated = memory.status === "invalidated"
   const clickable = Boolean(onOpenDetail) && !editing
@@ -80,11 +84,13 @@ function MemoryRowImpl({
       onKeyDown={clickable ? handleRowKeyDown : undefined}
       className={cn(
         "flex items-start gap-2 rounded-lg border border-border/50 bg-card/80 p-3 backdrop-blur-sm",
+        "transition-[opacity,transform] duration-150 ease-out",
         clickable && "cursor-pointer transition-colors hover:border-border",
         invalidated && "opacity-60",
         memory.pinned && "border-primary/40",
         active && "border-primary ring-1 ring-primary/50",
-        selected && "bg-primary/5"
+        selected && "bg-primary/5",
+        removing && "scale-[0.98] opacity-0"
       )}
     >
       {selectable && (
@@ -232,9 +238,11 @@ function MemoryRowImpl({
               size="icon"
               variant="ghost"
               aria-label={t("delete")}
+              disabled={removing}
               onClick={(e) => {
                 stop(e)
-                onDelete(memory.id)
+                setRemoving(true)
+                window.setTimeout(() => onDelete(memory.id), 160)
               }}
             >
               <Trash2Icon className="size-4" />

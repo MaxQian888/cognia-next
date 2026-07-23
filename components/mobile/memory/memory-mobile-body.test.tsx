@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { MemoryMobileBody } from "./memory-mobile-body"
@@ -14,6 +14,26 @@ const updateMock = jest.fn()
 const invalidateMock = jest.fn()
 
 jest.mock("dexie-react-hooks", () => ({ useLiveQuery: jest.fn() }))
+// jsdom has no layout — render every item so count/text assertions hold.
+jest.mock("@tanstack/react-virtual", () => ({
+  useVirtualizer: ({ count }: { count: number }) => ({
+    getVirtualItems: () =>
+      Array.from({ length: count }, (_, index) => ({
+        index,
+        key: index,
+        start: index * 104,
+        size: 104,
+        end: (index + 1) * 104,
+        lane: 0,
+      })),
+    getTotalSize: () => count * 104,
+    measureElement: jest.fn(),
+  }),
+}))
+const mobileToastError = jest.fn()
+jest.mock("sonner", () => ({
+  toast: { error: (...args: unknown[]) => mobileToastError(...args), success: jest.fn() },
+}))
 jest.mock("@/lib/sync/companion-sync", () => ({ runSyncDown: jest.fn().mockResolvedValue([]) }))
 jest.mock("@/lib/db/memories", () => ({
   listMemories: jest.fn(),
@@ -112,5 +132,17 @@ describe("<MemoryMobileBody />", () => {
     expect(pinMock).toHaveBeenCalledWith("m1", true)
     expect(updateMock).toHaveBeenCalledWith("m1", { text: "updated", bumpVersion: true })
     expect(invalidateMock).toHaveBeenCalledWith("m1")
+  })
+
+  it("surfaces a toast when the outbound enqueue fails", async () => {
+    liveQuery.mockReturnValue([mem({ id: "m1" })])
+    enqueueMock.mockRejectedValueOnce(new Error("queue full"))
+    render(<MemoryMobileBody />)
+    fireEvent.click(screen.getByText("pin"))
+    await waitFor(() =>
+      expect(mobileToastError).toHaveBeenCalledWith("The memory operation failed — please try again")
+    )
+    // The optimistic local write must not run when the enqueue failed.
+    expect(pinMock).not.toHaveBeenCalled()
   })
 })

@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, fireEvent, within } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import type { Memory } from "@/types/memory/memory"
 import { MemoryRow } from "./memory-row"
 
@@ -81,10 +81,13 @@ describe("MemoryRow", () => {
     expect(screen.getByText("The user prefers pnpm")).toBeTruthy()
   })
 
-  it("deletes", () => {
+  it("deletes after the brief fade-out", async () => {
     const { onDelete } = setup()
     fireEvent.click(screen.getByRole("button", { name: /delete/i }))
-    expect(onDelete).toHaveBeenCalledWith("m1")
+    // Delete defers ~160ms while the row fades itself out.
+    expect(onDelete).not.toHaveBeenCalled()
+    expect(screen.getByTestId("memory-row").className).toContain("opacity-0")
+    await waitFor(() => expect(onDelete).toHaveBeenCalledWith("m1"))
   })
 
   it("renders a source link when sourceSessionId is set", () => {
@@ -117,11 +120,11 @@ describe("MemoryRow", () => {
     expect(onOpenDetail).toHaveBeenCalledTimes(2)
   })
 
-  it("does not open the detail view when an action button is clicked", () => {
+  it("does not open the detail view when an action button is clicked", async () => {
     const onOpenDetail = jest.fn()
     const { onDelete } = setup({ id: "m1" }, { onOpenDetail })
     fireEvent.click(screen.getByRole("button", { name: /delete/i }))
-    expect(onDelete).toHaveBeenCalledWith("m1")
+    await waitFor(() => expect(onDelete).toHaveBeenCalledWith("m1"))
     expect(onOpenDetail).not.toHaveBeenCalled()
   })
 

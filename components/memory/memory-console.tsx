@@ -1,8 +1,11 @@
 "use client"
 
-import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react"
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
+import { useVirtualizer } from "@tanstack/react-virtual"
+import { AnimatePresence, motion } from "motion/react"
+import { toast } from "sonner"
 import {
   BrainIcon,
   SearchIcon,
@@ -16,7 +19,7 @@ import {
 import type { Memory, MemoryProvenance, MemoryScope, MemoryType } from "@/types/memory/memory"
 import { listMemories } from "@/lib/db/memories"
 import { listMemoryAuditEvents, listMemoryEvidence } from "@/lib/db/memory-governance"
-import { manageMemory } from "@/lib/memory/control-plane/manage"
+import { manageMemory, type ManageMemoryCommand } from "@/lib/memory/control-plane/manage"
 import {
   computeMemoryStats,
   filterAndSortMemories,
@@ -68,6 +71,7 @@ export function MemoryConsole() {
   const tScopes = useTranslations("memory.scopes")
   const tProv = useTranslations("memory.provenance")
   const tConflicts = useTranslations("memory.conflicts")
+  const tErrors = useTranslations("memory.errors")
   const all = useLiveQuery(() => listMemories({}), [], [] as Memory[])
 
   const [query, setQuery] = useState("")
@@ -213,6 +217,21 @@ export function MemoryConsole() {
     setConflictPreset(false)
   }
 
+  // Every console mutation funnels through this helper: rejected commands
+  // ({ ok: false, reason }) and thrown failures both surface a toast instead of
+  // failing silently (the pre-round behavior was fire-and-forget).
+  const runManaged = useCallback(
+    (command: ManageMemoryCommand): Promise<void> =>
+      manageMemory(command)
+        .then((result) => {
+          if (!result.ok) toast.error(tErrors(result.reason))
+        })
+        .catch(() => {
+          toast.error(tErrors("mutation_failed"))
+        }),
+    [tErrors]
+  )
+
   // Row-level handlers — stable so the memoized rows don't re-render on
   // unrelated state changes (selection, detail navigation).
   const handleOpenDetail = useCallback((id: string) => setSelectedId(id), [])
@@ -224,30 +243,45 @@ export function MemoryConsole() {
       return next
     })
   }, [])
-  const handleRowPin = useCallback((id: string, pinned: boolean) => {
-    void manageMemory({ kind: "pin", id, pinned })
-  }, [])
-  const handleRowSave = useCallback((id: string, text: string) => {
-    void manageMemory({ kind: "update", id, patch: { text } })
-  }, [])
-  const handleRowDelete = useCallback((id: string) => {
-    void manageMemory({ kind: "delete", id })
-    setSelectedId((cur) => (cur === id ? null : cur))
-    setSelectedIds((prev) => {
-      if (!prev.has(id)) return prev
-      const next = new Set(prev)
-      next.delete(id)
-      return next
-    })
-  }, [])
+  const handleRowPin = useCallback(
+    (id: string, pinned: boolean) => {
+      void runManaged({ kind: "pin", id, pinned })
+    },
+    [runManaged]
+  )
+  const handleRowSave = useCallback(
+    (id: string, text: string) => {
+      void runManaged({ kind: "update", id, patch: { text } })
+    },
+    [runManaged]
+  )
+  const handleRowDelete = useCallback(
+    (id: string) => {
+      void runManaged({ kind: "delete", id })
+      setSelectedId((cur) => (cur === id ? null : cur))
+      setSelectedIds((prev) => {
+        if (!prev.has(id)) return prev
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
+    },
+    [runManaged]
+  )
 
   // Detail-panel handlers.
-  const handleDetailSave = useCallback((id: string, patch: MemoryDetailPatch) => {
-    void manageMemory({ kind: "update", id, patch })
-  }, [])
-  const handleReview = useCallback((id: string, status: "verified" | "conflict") => {
-    void manageMemory({ kind: "review", id, status })
-  }, [])
+  const handleDetailSave = useCallback(
+    (id: string, patch: MemoryDetailPatch) => {
+      void runManaged({ kind: "update", id, patch })
+    },
+    [runManaged]
+  )
+  const handleReview = useCallback(
+    (id: string, status: "verified" | "conflict") => {
+      void runManaged({ kind: "review", id, status })
+    },
+    [runManaged]
+  )
   const resolveMemory = useCallback((id: string) => memoryById.get(id), [memoryById])
 
   // Bulk handlers.
@@ -265,15 +299,24 @@ export function MemoryConsole() {
     })
 
   const clearSelection = () => setSelectedIds(new Set())
+  // Bulk ops keep the selection visible (toolbar disabled) until every
+  // mutation settles, then clear — so in-flight work has a visible pending
+  // state instead of the toolbar vanishing on click.
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const runBulk = (commands: ManageMemoryCommand[]) => {
+    setBulkBusy(true)
+    void Promise.all(commands.map(runManaged)).finally(() => {
+      setBulkBusy(false)
+      clearSelection()
+    })
+  }
   const bulkPin = (pinned: boolean) => {
-    void Promise.all([...selectedIds].map((id) => manageMemory({ kind: "pin", id, pinned })))
-    clearSelection()
+    runBulk([...selectedIds].map((id) => ({ kind: "pin", id, pinned })))
   }
   const bulkDelete = () => {
     const ids = [...selectedIds]
-    void Promise.all(ids.map((id) => manageMemory({ kind: "delete", id })))
     if (selectedId && ids.includes(selectedId)) setSelectedId(null)
-    clearSelection()
+    runBulk(ids.map((id) => ({ kind: "delete", id })))
   }
 
   const handleCreate = useCallback(async (input: AddMemoryInput) => {
@@ -286,10 +329,41 @@ export function MemoryConsole() {
   const detailOpenPane = isDesktopViewport && Boolean(selectedMemory)
   const detailOpenSheet = !isDesktopViewport && Boolean(selectedMemory)
 
+  // Virtualized list: only the visible window (plus overscan) renders, so a
+  // thousand-row store no longer mounts a thousand MemoryRow trees.
+  const listScrollRef = useRef<HTMLDivElement | null>(null)
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const listVirtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => listScrollRef.current,
+    // Typical two-line row incl. badges/meta; measureElement corrects per-row
+    // (tag rows, inline edit mode grow taller).
+    estimateSize: () => 104,
+    overscan: 10,
+    getItemKey: (index) => rows[index]?.id ?? index,
+  })
+
   const renderDetail = (className?: string) =>
     selectedMemory ? (
+      // Crossfade between memories (keyed remount stays — it resets the edit
+      // drafts by design) instead of the old abrupt swap on keyboard nav.
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.div
+          key={selectedMemory.id}
+          initial={{ opacity: 0, x: 8 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: -8 }}
+          transition={{ duration: 0.15 }}
+          className="h-full min-h-0"
+        >
+          {renderDetailPanel(className)}
+        </motion.div>
+      </AnimatePresence>
+    ) : null
+
+  const renderDetailPanel = (className?: string) =>
+    selectedMemory ? (
       <MemoryDetailPanel
-        key={selectedMemory.id}
         memory={selectedMemory}
         resolveMemory={resolveMemory}
         onClose={() => setSelectedId(null)}
@@ -311,7 +385,8 @@ export function MemoryConsole() {
 
   const renderList = () => (
     <div
-      className="flex h-full min-h-0 flex-col gap-2 overflow-y-auto pr-1"
+      ref={listScrollRef}
+      className="h-full min-h-0 overflow-y-auto pr-1"
       data-testid="memory-list"
     >
       {rows.length === 0 ? (
@@ -340,22 +415,35 @@ export function MemoryConsole() {
           </Empty>
         )
       ) : (
-        rows.map((m) => (
-          <MemoryRow
-            key={m.id}
-            memory={m}
-            selectable
-            selected={selectedIds.has(m.id)}
-            active={m.id === selectedId}
-            activeTags={activeTags}
-            onOpenDetail={handleOpenDetail}
-            onSelectToggle={handleSelectToggle}
-            onTagClick={toggleTag}
-            onPinToggle={handleRowPin}
-            onSave={handleRowSave}
-            onDelete={handleRowDelete}
-          />
-        ))
+        <div className="relative w-full" style={{ height: `${listVirtualizer.getTotalSize()}px` }}>
+          {listVirtualizer.getVirtualItems().map((virtualRow) => {
+            const m = rows[virtualRow.index]
+            if (!m) return null
+            return (
+              <div
+                key={m.id}
+                data-index={virtualRow.index}
+                ref={listVirtualizer.measureElement}
+                className="absolute left-0 top-0 w-full pb-2"
+                style={{ transform: `translateY(${virtualRow.start}px)` }}
+              >
+                <MemoryRow
+                  memory={m}
+                  selectable
+                  selected={selectedIds.has(m.id)}
+                  active={m.id === selectedId}
+                  activeTags={activeTags}
+                  onOpenDetail={handleOpenDetail}
+                  onSelectToggle={handleSelectToggle}
+                  onTagClick={toggleTag}
+                  onPinToggle={handleRowPin}
+                  onSave={handleRowSave}
+                  onDelete={handleRowDelete}
+                />
+              </div>
+            )
+          })}
+        </div>
       )}
     </div>
   )
@@ -548,6 +636,7 @@ export function MemoryConsole() {
               onUnpin={() => bulkPin(false)}
               onDelete={bulkDelete}
               onClear={clearSelection}
+              busy={bulkBusy}
             />
           )}
 

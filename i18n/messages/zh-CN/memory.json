@@ -92,6 +92,7 @@
   },
   "errors": {
     "disabled": "记忆功能已在设置中关闭",
+    "mutation_failed": "记忆操作失败，请重试",
     "not_found": "这条记忆已不存在",
     "pii_blocked": "已拦截：文本包含个人隐私信息",
     "temporary": "记忆当前处于临时模式"

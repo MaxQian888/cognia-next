@@ -17,6 +17,8 @@ export interface MemoryBulkToolbarProps {
   onUnpin: () => void
   onDelete: () => void
   onClear: () => void
+  /** Disables every action while a bulk mutation is in flight. */
+  busy?: boolean
 }
 
 /**
@@ -32,6 +34,7 @@ export function MemoryBulkToolbar({
   onUnpin,
   onDelete,
   onClear,
+  busy = false,
 }: MemoryBulkToolbarProps) {
   const t = useTranslations("memory.bulk")
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -51,11 +54,11 @@ export function MemoryBulkToolbar({
         {t("selected", { count: selectedCount })}
       </span>
       <div className="flex-1" />
-      <Button size="sm" variant="outline" onClick={onPin}>
+      <Button size="sm" variant="outline" disabled={busy} onClick={onPin}>
         <PinIcon className="size-4" />
         {t("pin")}
       </Button>
-      <Button size="sm" variant="outline" onClick={onUnpin}>
+      <Button size="sm" variant="outline" disabled={busy} onClick={onUnpin}>
         <PinOffIcon className="size-4" />
         {t("unpin")}
       </Button>
@@ -63,12 +66,13 @@ export function MemoryBulkToolbar({
         size="sm"
         variant="outline"
         className="text-destructive hover:text-destructive"
+        disabled={busy}
         onClick={() => setConfirmDelete(true)}
       >
         <Trash2Icon className="size-4" />
         {t("delete")}
       </Button>
-      <Button size="sm" variant="ghost" onClick={onClear} aria-label={t("clear")}>
+      <Button size="sm" variant="ghost" disabled={busy} onClick={onClear} aria-label={t("clear")}>
         <XIcon className="size-4" />
       </Button>
 

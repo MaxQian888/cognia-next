@@ -13,6 +13,8 @@
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
+import { useVirtualizer } from "@tanstack/react-virtual"
+import { toast } from "sonner"
 
 import { Input } from "@/components/ui/input"
 import { EmptyState } from "@/components/mobile/empty-state"
@@ -29,6 +31,7 @@ import { runSyncDown } from "@/lib/sync/companion-sync"
 
 export function MemoryMobileBody() {
   const t = useTranslations("mobile.memory")
+  const tErrors = useTranslations("memory.errors")
   const memories = useLiveQuery(() => listMemories({ status: "active" }), [])
   const [query, setQuery] = useState("")
 
@@ -40,6 +43,23 @@ export function MemoryMobileBody() {
       (m) => m.text.toLowerCase().includes(q) || (m.key ?? "").toLowerCase().includes(q)
     )
   }, [memories, query])
+
+  // The PullToRefresh wrapper is the scroll container; virtualize against it
+  // so large synced stores don't render every row on a phone.
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null)
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const virtualizer = useVirtualizer({
+    count: visible.length,
+    getScrollElement: () => scrollEl,
+    estimateSize: () => 104,
+    overscan: 8,
+    getItemKey: (index) => visible[index]?.id ?? index,
+  })
+
+  /** Enqueue failures were silently swallowed — surface them as a toast. */
+  const guarded = (work: Promise<void>) => {
+    void work.catch(() => toast.error(tErrors("mutation_failed")))
+  }
 
   const handleRefresh = async (): Promise<void> => {
     try {
@@ -92,20 +112,37 @@ export function MemoryMobileBody() {
         />
       </header>
 
-      <PullToRefresh onRefresh={handleRefresh}>
-        <section className="flex flex-col gap-2 px-4 pb-4">
+      <PullToRefresh onRefresh={handleRefresh} onScrollElChange={setScrollEl}>
+        <section className="px-4 pb-4">
           {visible.length === 0 ? (
             <EmptyState spotIcon="memory" title={t("empty")} />
           ) : (
-            visible.map((m) => (
-              <MemoryRow
-                key={m.id}
-                memory={m}
-                onPinToggle={(id, pinned) => void handlePinToggle(id, pinned)}
-                onSave={(id, text) => void handleSave(id, text)}
-                onDelete={(id) => void handleForget(id)}
-              />
-            ))
+            <div
+              className="relative w-full"
+              style={{ height: `${virtualizer.getTotalSize()}px` }}
+              data-testid="mobile-memory-virtual-list"
+            >
+              {virtualizer.getVirtualItems().map((virtualRow) => {
+                const m = visible[virtualRow.index]
+                if (!m) return null
+                return (
+                  <div
+                    key={m.id}
+                    data-index={virtualRow.index}
+                    ref={virtualizer.measureElement}
+                    className="absolute left-0 top-0 w-full pb-2"
+                    style={{ transform: `translateY(${virtualRow.start}px)` }}
+                  >
+                    <MemoryRow
+                      memory={m}
+                      onPinToggle={(id, pinned) => guarded(handlePinToggle(id, pinned))}
+                      onSave={(id, text) => guarded(handleSave(id, text))}
+                      onDelete={(id) => guarded(handleForget(id))}
+                    />
+                  </div>
+                )
+              })}
+            </div>
           )}
         </section>
       </PullToRefresh>
