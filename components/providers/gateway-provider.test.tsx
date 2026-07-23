@@ -40,6 +40,15 @@ jest.mock("@/lib/subscription/opencode/chat-bridge", () => ({
   resolveOpencodeVaultCredential: jest.fn().mockResolvedValue(null),
 }))
 
+// The profile-meta join reads Dexie, which never settles under fake timers —
+// stub the accessor layer (its own behavior is covered in
+// lib/db/provider-profiles.test.ts). `undefined` meta = legacy push shape.
+jest.mock("@/lib/db/provider-profiles", () => ({
+  getProfileMeta: jest.fn().mockResolvedValue(undefined),
+  listDeploymentProfiles: jest.fn().mockResolvedValue([]),
+  listTransportProfiles: jest.fn().mockResolvedValue([]),
+}))
+
 // Stubbed so the deps `overrides` the provider assembles can be inspected. The
 // stub engine's `selectProvider` returns undefined, which `resolveGatewayDecision`
 // maps to `[]` — the same answer the real engine gives for an unmatched alias.
@@ -112,8 +121,7 @@ describe("GatewayProvider", () => {
     expect(mockPushSnapshot).not.toHaveBeenCalled() // debounced
     await act(async () => {
       jest.advanceTimersByTime(1500)
-      await Promise.resolve()
-      await Promise.resolve()
+      for (let i = 0; i < 12; i += 1) await Promise.resolve()
     })
     expect(mockGetStatus).toHaveBeenCalled()
     expect(mockPushSnapshot).toHaveBeenCalledWith(
@@ -176,8 +184,7 @@ describe("GatewayProvider", () => {
     expect(handlers["gateway://decide"]).toBeTruthy()
     await act(async () => {
       handlers["gateway://decide"]({ requestId: "r1", model: "no-such-alias" })
-      await Promise.resolve()
-      await Promise.resolve()
+      for (let i = 0; i < 12; i += 1) await Promise.resolve()
       await Promise.resolve()
     })
     // No alias matches → empty entries (gateway falls back to its snapshot),

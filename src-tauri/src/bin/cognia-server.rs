@@ -119,6 +119,29 @@ enum CliCommand {
         #[command(subcommand)]
         command: ProfilesCommand,
     },
+    /// Headless LLM Gateway administration (ADR-0090 Phase 2). `serve`
+    /// starts the gateway when its persisted config is enabled (or
+    /// COGNIA_GATEWAY=1); these subcommands manage the gateway API keys a
+    /// client needs, without a renderer.
+    Gateway {
+        #[command(subcommand)]
+        command: GatewayCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum GatewayCommand {
+    /// Print status (running is always false here — this inspects config/keys).
+    Status,
+    /// Create a gateway API key; prints the FULL secret once.
+    KeyCreate {
+        #[arg(long, default_value = "headless")]
+        name: String,
+    },
+    /// List keys (redacted).
+    KeyList,
+    /// Revoke (delete) a key by id.
+    KeyRevoke { id: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -247,7 +270,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
         CliCommand::Profiles { command } => run_profiles(&dir, command),
+        CliCommand::Gateway { command } => run_gateway_admin(command),
         CliCommand::RotateMasterKey { .. } => unreachable!("handled above"),
+    }
+}
+
+/// `cognia-server gateway status|key-create|key-list|key-revoke` — gateway
+/// admin without a renderer. Keys persist through the same encrypted secret
+/// store the desktop uses (strict headless init already ran).
+fn run_gateway_admin(command: GatewayCommand) -> Result<(), Box<dyn std::error::Error>> {
+    let state = app_lib::gateway::GatewayState::new();
+    match command {
+        GatewayCommand::Status => {
+            println!("{}", serde_json::to_string_pretty(&state.status())?);
+            Ok(())
+        }
+        GatewayCommand::KeyCreate { name } => {
+            let key = state.create_key(name, vec![], None, None, None)?;
+            println!("{}", key.secret);
+            eprintln!(
+                "[cognia-server] gateway key id={} (secret shown once)",
+                key.id
+            );
+            Ok(())
+        }
+        GatewayCommand::KeyList => {
+            println!("{}", serde_json::to_string_pretty(&state.list_keys())?);
+            Ok(())
+        }
+        GatewayCommand::KeyRevoke { id } => {
+            state.delete_key(&id)?;
+            eprintln!("[cognia-server] gateway key {id} revoked");
+            Ok(())
+        }
     }
 }
 
@@ -462,6 +517,70 @@ async fn run_serve(
     // append-only JSONL beside the SQLite store.
     app_lib::companion_api::audit::install(&data_dir);
 
+    // ADR-0090 Phase 2 — headless LLM Gateway. The SAME crate/state the
+    // desktop manages; snapshots are the Provider Profile Store projection
+    // (authority: profile-store) refreshed on every profileVersion bump, so
+    // the gateway serves the last valid profile set with no renderer.
+    if let Some(services) = headless_services() {
+        let gateway = Arc::clone(&services.gateway);
+        gateway.hydrate_from_disk(data_dir.join(".cognia").join("gateway-config.json"));
+
+        let profiles = Arc::clone(&services.profiles);
+        let publish = {
+            let gateway = Arc::clone(&gateway);
+            let profiles = Arc::clone(&profiles);
+            move || {
+                let docs = match profiles.load_all() {
+                    Ok(docs) => docs,
+                    Err(error) => {
+                        log::warn!("profile load for gateway projection failed: {error}");
+                        return;
+                    }
+                };
+                let version = profiles.profile_version().unwrap_or(0);
+                let now = chrono::Utc::now().timestamp_millis();
+                let snapshot_json = app_lib::provider_profiles::gateway_snapshot_json(
+                    &docs,
+                    version,
+                    now,
+                    &app_lib::provider_profiles::resolve_credential_ref,
+                );
+                match serde_json::from_value(snapshot_json) {
+                    Ok(snapshot) => match gateway.try_set_snapshot(snapshot) {
+                        Ok(_) => {
+                            log::info!("gateway snapshot projected (profileVersion {version})")
+                        }
+                        Err(error) => log::warn!("gateway snapshot rejected: {error}"),
+                    },
+                    Err(error) => log::warn!("gateway snapshot deserialize failed: {error}"),
+                }
+            }
+        };
+        publish();
+        let mut version_rx = profiles.subscribe();
+        let publish_on_change = publish.clone();
+        tokio::spawn(async move {
+            while version_rx.changed().await.is_ok() {
+                publish_on_change();
+            }
+        });
+
+        let env_enabled = std::env::var("COGNIA_GATEWAY").is_ok_and(|v| v == "1" || v == "true");
+        if gateway.config().enabled || env_enabled {
+            let host: Arc<dyn app_lib::gateway::host::GatewayHost> =
+                Arc::new(app_lib::headless::gateway_host::HeadlessGatewayHost {
+                    event_bus: Arc::clone(&shared.event_bus),
+                });
+            match gateway.start(host).await {
+                Ok(()) => println!(
+                    "[cognia-server] LLM gateway listening on port {:?}",
+                    gateway.status().bound_port
+                ),
+                Err(error) => eprintln!("[cognia-server] LLM gateway not started: {error}"),
+            }
+        }
+    }
+
     // /metrics uptime baseline (D9) — anchor before the server starts.
     app_lib::companion_api::metrics::init();
 
@@ -525,6 +644,7 @@ async fn run_serve(
         supervisor.shutdown();
     }
     if let Some(services) = headless_services() {
+        let _ = services.gateway.stop();
         kill_sidecar(services.sidecar.clone()).await;
     }
     let _ = handle.shutdown.send(());

@@ -84,6 +84,46 @@ pub struct ChatIR {
     pub top_p: Option<f64>,
     pub stop: Vec<String>,
     pub stream: bool,
+    /// Structured record of every field the translation dropped, merged, or
+    /// approximated (ADR-0090 Phase 2). Attached to the request log — never
+    /// injected into response bodies. Silent drops are forbidden: a
+    /// translator that cannot represent a field MUST push a loss.
+    pub losses: Vec<TranslationLoss>,
+}
+
+/// One recorded semantic loss during cross-protocol translation.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranslationLoss {
+    /// JSON-ish path of the inbound field (e.g. "system", "messages[2].content[0]").
+    pub path: String,
+    /// "dropped" | "merged" | "approximated".
+    pub kind: &'static str,
+    pub detail: String,
+}
+
+impl TranslationLoss {
+    pub fn dropped(path: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            kind: "dropped",
+            detail: detail.into(),
+        }
+    }
+    pub fn merged(path: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            kind: "merged",
+            detail: detail.into(),
+        }
+    }
+    pub fn approximated(path: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            kind: "approximated",
+            detail: detail.into(),
+        }
+    }
 }
 
 impl Default for IrMessage {

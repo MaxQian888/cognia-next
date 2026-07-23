@@ -392,6 +392,130 @@ impl ProviderProfileStore for SqliteProfileStore {
     }
 }
 
+// ---- Gateway snapshot projection (ADR-0090 Phase 2) -------------------------
+
+/// Well-known default endpoints for `builtin:<id>` sentinel deployments.
+fn builtin_default_endpoint(protocol: &str) -> Option<&'static str> {
+    match protocol {
+        "anthropic" => Some("https://api.anthropic.com/v1"),
+        "openai" => Some("https://api.openai.com/v1"),
+        _ => None,
+    }
+}
+
+/// Resolve a credential REFERENCE to its secret value for the gateway
+/// snapshot (Rust memory only — same contract as the renderer's inline
+/// projection). Desktop-only kinds (`legacy-provider-settings`,
+/// `subscription-vault`) resolve to `None` headless; admins use
+/// `secret-store` / `env` references there.
+pub fn resolve_credential_ref(reference: &Value) -> Option<String> {
+    use cognia_gateway::credentials::{
+        CredentialResolver, CredentialSource, EnvResolver, SecretStoreResolver,
+    };
+    match reference.get("kind").and_then(Value::as_str)? {
+        "secret-store" => {
+            let id = reference.get("secretId").and_then(Value::as_str)?;
+            SecretStoreResolver {
+                service: "com.cognia.provider-credentials".into(),
+            }
+            .resolve(&CredentialSource::SecretStore { id })
+            .ok()
+            .map(|r| r.secret)
+        }
+        "env" => {
+            let var = reference.get("var").and_then(Value::as_str)?;
+            EnvResolver
+                .resolve(&CredentialSource::Env { var })
+                .ok()
+                .map(|r| r.secret)
+        }
+        _ => None,
+    }
+}
+
+/// Project the Provider Profile Store into a gateway `RoutingSnapshot` JSON
+/// (authority: profile-store). Pure over its inputs — the credential
+/// resolver is injected so tests never touch the secret store.
+pub fn gateway_snapshot_json(
+    docs: &ProfileDocs,
+    profile_version: u64,
+    generated_at_ms: i64,
+    resolve: &dyn Fn(&Value) -> Option<String>,
+) -> Value {
+    let transports: std::collections::HashMap<&str, &TransportProfileDoc> = docs
+        .transport_profiles
+        .iter()
+        .map(|t| (t.id.as_str(), t))
+        .collect();
+
+    let providers: Vec<Value> = docs
+        .deployment_profiles
+        .iter()
+        .filter(|d| d.enabled != Some(false))
+        .filter_map(|deployment| {
+            let transport = transports.get(deployment.transport_profile_ref.as_str())?;
+            let base_url = if let Some(rest) = deployment.endpoint.strip_prefix("builtin:") {
+                let _ = rest;
+                builtin_default_endpoint(&transport.protocol)?.to_string()
+            } else {
+                deployment.endpoint.clone()
+            };
+            let api_key = deployment
+                .credential_profile_ref
+                .as_ref()
+                .and_then(|reference| resolve(reference));
+            let (auth_scheme, auth_header_name) =
+                match transport.auth.get("scheme").and_then(Value::as_str) {
+                    Some("custom-header") => (
+                        "custom-header",
+                        transport.auth.get("name").and_then(Value::as_str),
+                    ),
+                    Some("bearer") => ("bearer", None),
+                    _ => ("x-api-key", None),
+                };
+            let static_headers: Vec<Value> = transport
+                .static_headers
+                .as_ref()
+                .map(|headers| {
+                    headers
+                        .iter()
+                        .map(|(k, v)| serde_json::json!([k, v]))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let models: Vec<Value> = deployment
+                .models
+                .iter()
+                .filter_map(|m| m.get("id").cloned())
+                .collect();
+            Some(serde_json::json!({
+                "id": deployment.id,
+                "protocol": transport.protocol,
+                "baseUrl": base_url,
+                "apiKey": api_key,
+                "enabled": true,
+                "models": models,
+                "deploymentId": deployment.id,
+                "transport": {
+                    "authScheme": auth_scheme,
+                    "authHeaderName": auth_header_name,
+                    "staticHeaders": static_headers,
+                    "forwardedSemanticHeaders":
+                        transport.forwarded_semantic_headers.clone().unwrap_or_default(),
+                },
+            }))
+        })
+        .collect();
+
+    serde_json::json!({
+        "aliases": [],
+        "providers": providers,
+        "generatedAtMs": generated_at_ms,
+        "profileVersion": profile_version,
+        "authority": "profile-store",
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -530,5 +654,56 @@ mod tests {
         assert_eq!(*rx.borrow(), 0);
         store.replace_all(&docs(), None).unwrap();
         assert_eq!(*rx.borrow(), 1);
+    }
+
+    #[test]
+    fn gateway_projection_maps_deployments_transports_and_versions() {
+        let mut d = docs();
+        d.transport_profiles[0].static_headers = Some(
+            [("anthropic-beta".to_string(), "computer-use".to_string())]
+                .into_iter()
+                .collect(),
+        );
+        let resolver = |reference: &Value| -> Option<String> {
+            (reference["kind"] == "secret-store").then(|| "sk-resolved-xyz".to_string())
+        };
+        let snapshot = gateway_snapshot_json(&d, 7, 1234, &resolver);
+        assert_eq!(snapshot["authority"], "profile-store");
+        assert_eq!(snapshot["profileVersion"], 7);
+        let provider = &snapshot["providers"][0];
+        assert_eq!(provider["id"], "glm-anthropic");
+        assert_eq!(provider["deploymentId"], "glm-anthropic");
+        assert_eq!(provider["protocol"], "anthropic");
+        assert_eq!(provider["apiKey"], "sk-resolved-xyz");
+        assert_eq!(provider["transport"]["authScheme"], "x-api-key");
+        assert_eq!(
+            provider["transport"]["staticHeaders"][0][0],
+            "anthropic-beta"
+        );
+        // It deserializes into the gateway's RoutingSnapshot and validates.
+        let parsed: cognia_gateway::snapshot::RoutingSnapshot =
+            serde_json::from_value(snapshot).unwrap();
+        parsed.validate().unwrap();
+        assert!(parsed.provider_by_deployment("glm-anthropic").is_some());
+    }
+
+    #[test]
+    fn gateway_projection_skips_disabled_and_unresolvable_builtin_endpoints() {
+        let mut d = docs();
+        d.deployment_profiles[0].enabled = Some(false);
+        let none = |_: &Value| -> Option<String> { None };
+        let snapshot = gateway_snapshot_json(&d, 1, 0, &none);
+        assert_eq!(snapshot["providers"].as_array().unwrap().len(), 0);
+
+        // builtin: sentinel resolves for anthropic/openai, else the row drops.
+        let mut d2 = docs();
+        d2.deployment_profiles[0].endpoint = "builtin:glm-anthropic".into();
+        let snapshot2 = gateway_snapshot_json(&d2, 1, 0, &none);
+        assert_eq!(
+            snapshot2["providers"][0]["baseUrl"],
+            "https://api.anthropic.com/v1"
+        );
+        // Credential unresolvable -> apiKey null, provider still projected.
+        assert!(snapshot2["providers"][0]["apiKey"].is_null());
     }
 }

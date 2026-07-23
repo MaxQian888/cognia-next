@@ -25,12 +25,17 @@
 //! config file.
 
 pub mod api_keys;
+#[cfg(feature = "tauri-host")]
 pub mod commands;
 pub mod concurrency;
 pub mod cooldown;
+pub mod credentials;
 pub mod execute;
 pub mod header_policy;
+pub mod host;
 pub mod keyed_rate_limit;
+pub mod lease;
+pub mod route_ticket;
 pub mod server;
 pub mod session_key;
 pub mod snapshot;
@@ -41,8 +46,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::host::GatewayHost;
 use parking_lot::{Mutex, RwLock};
-use tauri::AppHandle;
 use tokio::sync::oneshot;
 
 use api_keys::{ApiKeyPatch, GatewayApiKey, RedactedApiKey};
@@ -51,6 +56,26 @@ use cooldown::{CooldownRow, KeyCooldownMap};
 use execute::KeyRotationMap;
 use server::{RequestObserver, ServerHandle};
 use snapshot::{RoutingSnapshot, SnapshotEntry};
+
+/// Successful [`GatewayState::try_set_snapshot`] ingest.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotAccepted {
+    pub profile_version: Option<u64>,
+}
+
+/// Rejected snapshot ingest (R3 — no last-writer-wins between authorities).
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum SnapshotRejected {
+    #[error("snapshot is stale: current profileVersion {current}")]
+    StaleVersion { current: u64 },
+    #[error("authority conflict at profileVersion {current}: refusing same-version overwrite from a different publisher")]
+    AuthorityConflict { current: u64 },
+    #[error("legacy (unversioned) snapshot refused: a versioned snapshot at profileVersion {current} is live")]
+    LegacyOverVersioned { current: u64 },
+    #[error("snapshot failed validation: {0}")]
+    Invalid(String),
+}
 use types::{GatewayConfig, GatewayError, GatewayStatus};
 
 /// Pending live-routing decisions keyed by request id. The server registers a
@@ -83,6 +108,11 @@ pub struct GatewayState {
     key_cooldown: Arc<KeyCooldownMap>,
     /// In-flight concurrency caps per gateway key / upstream key (W1.2).
     concurrency: Arc<ConcurrencyLimiter>,
+    /// Route-ticket registry (ADR-0090 Phase 2). Secrets in memory only;
+    /// metadata persisted via the store configured in `hydrate_from_disk`.
+    pub tickets: Arc<route_ticket::RouteTicketRegistry>,
+    /// Session → credential leases backing ticket affinity (R4).
+    pub leases: Arc<lease::CredentialLeaseMap>,
 }
 
 struct GatewayInner {
@@ -120,6 +150,10 @@ impl GatewayState {
             key_rotation: Arc::new(KeyRotationMap::default()),
             key_cooldown: Arc::new(KeyCooldownMap::default()),
             concurrency: Arc::new(ConcurrencyLimiter::default()),
+            tickets: Arc::new(route_ticket::RouteTicketRegistry::new(Arc::new(
+                route_ticket::InMemoryTicketMetaStore::default(),
+            ))),
+            leases: Arc::new(lease::CredentialLeaseMap::default()),
         }
     }
 
@@ -136,6 +170,13 @@ impl GatewayState {
     /// once, before the boot auto-start check.
     pub fn hydrate_from_disk(&self, path: PathBuf) {
         self.inner.lock().config_path = Some(path.clone());
+        // Ticket metadata persists beside the config (secrets never do).
+        if let Some(dir) = path.parent() {
+            self.tickets
+                .attach_store(Arc::new(route_ticket::FileTicketMetaStore {
+                    path: dir.join("gateway-tickets.json"),
+                }));
+        }
         let Ok(raw) = std::fs::read_to_string(&path) else {
             return;
         };
@@ -309,7 +350,10 @@ impl GatewayState {
         }
     }
 
-    /// Replace the live routing snapshot. Updates the status counters.
+    /// Replace the live routing snapshot unconditionally. Legacy path — the
+    /// authority-checked [`Self::try_set_snapshot`] is what publishers call;
+    /// this remains only for pre-Phase-2 in-crate tests and is equivalent to
+    /// a legacy (unversioned) accept.
     pub fn set_snapshot(&self, snapshot: RoutingSnapshot) {
         let provider_count = snapshot.providers.iter().filter(|p| p.enabled).count() as u32;
         let alias_count = snapshot.aliases.len() as u32;
@@ -321,7 +365,53 @@ impl GatewayState {
         inner.status.snapshot_alias_count = alias_count;
     }
 
-    pub async fn start(&self, app_handle: AppHandle) -> Result<(), GatewayError> {
+    /// Authority-checked snapshot ingest (ADR-0090 Phase 2, R3).
+    ///
+    /// CAS semantics over `(profile_version, authority)`:
+    /// - an invalid snapshot (header policy / missing authority) is rejected
+    ///   WHOLE — the previous snapshot keeps serving (fail closed);
+    /// - a versioned push older than the current version is rejected;
+    /// - an equal-version push from a DIFFERENT authority is rejected — there
+    ///   is no last-writer-wins between the renderer and the profile store;
+    /// - a legacy (unversioned) push is accepted only while the current
+    ///   snapshot is also legacy/absent.
+    pub fn try_set_snapshot(
+        &self,
+        snapshot: RoutingSnapshot,
+    ) -> Result<SnapshotAccepted, SnapshotRejected> {
+        if let Err(reason) = snapshot.validate() {
+            return Err(SnapshotRejected::Invalid(reason));
+        }
+        let current = {
+            let guard = self.snapshot.read();
+            guard
+                .as_ref()
+                .map(|s| (s.profile_version, s.authority))
+                .unwrap_or((None, None))
+        };
+        match (snapshot.profile_version, current.0) {
+            (Some(incoming), Some(cur)) => {
+                if incoming < cur {
+                    return Err(SnapshotRejected::StaleVersion { current: cur });
+                }
+                if incoming == cur && snapshot.authority != current.1 {
+                    return Err(SnapshotRejected::AuthorityConflict { current: cur });
+                }
+            }
+            (None, Some(cur)) => {
+                return Err(SnapshotRejected::LegacyOverVersioned { current: cur });
+            }
+            // Versioned over legacy, or legacy over legacy: accept.
+            (Some(_), None) | (None, None) => {}
+        }
+        let accepted = SnapshotAccepted {
+            profile_version: snapshot.profile_version,
+        };
+        self.set_snapshot(snapshot);
+        Ok(accepted)
+    }
+
+    pub async fn start(&self, host: Arc<dyn GatewayHost>) -> Result<(), GatewayError> {
         {
             let now = chrono::Utc::now().timestamp_millis();
             if !api_keys::has_usable_key(&self.keys.read(), now) {
@@ -339,7 +429,7 @@ impl GatewayState {
         });
 
         let handle = server::spawn_server(
-            app_handle,
+            host,
             self.config.clone(),
             self.keys.clone(),
             self.snapshot.clone(),
@@ -348,6 +438,8 @@ impl GatewayState {
             self.key_cooldown.clone(),
             self.concurrency.clone(),
             observer,
+            self.tickets.clone(),
+            self.leases.clone(),
         )
         .await?;
 
@@ -379,6 +471,27 @@ impl GatewayState {
         Ok(())
     }
 
+    /// Mint a route ticket against the CURRENT snapshot (ADR-0090 Phase 2).
+    pub fn mint_route_ticket(
+        &self,
+        request: route_ticket::MintRequest,
+    ) -> Result<route_ticket::MintedTicket, route_ticket::TicketError> {
+        let now = chrono::Utc::now().timestamp_millis();
+        let snapshot = self.snapshot.read();
+        self.tickets.mint(request, snapshot.as_ref(), now)
+    }
+
+    pub fn revoke_route_ticket(&self, ticket_id: &str) -> bool {
+        self.tickets.revoke(ticket_id)
+    }
+
+    /// Redacted ticket metadata (no secrets are ever stored).
+    pub fn list_route_tickets(&self) -> Vec<route_ticket::RouteTicket> {
+        let now = chrono::Utc::now().timestamp_millis();
+        self.tickets.sweep_expired(now);
+        self.tickets.list()
+    }
+
     /// Bump the call counter + last-call timestamp from the request observer.
     fn observe(&self) {
         let mut inner = self.inner.lock();
@@ -394,8 +507,10 @@ impl Default for GatewayState {
 }
 
 /// Type-erased `&'static GatewayState` handle for the request observer. The
-/// state is owned by Tauri's `manage()` for the entire process lifetime, so
-/// holding a raw pointer for the server task's duration is sound. Mirrors
+/// state is owned for the entire process lifetime by Tauri's `manage()` on
+/// desktop, or by `HeadlessServices` (an `Arc` installed process-wide at
+/// boot and never dropped) under `cognia-server` — so holding a raw pointer
+/// for the server task's duration is sound in both hosts. Mirrors
 /// `remote_control::SelfPtr`.
 #[derive(Clone)]
 struct SelfPtr(*const GatewayState);
@@ -620,5 +735,97 @@ mod tests {
         assert!(rows.iter().any(|r| r.permanent));
         // Fingerprinted — no full secret leaks.
         assert!(!serde_json::to_string(&rows).unwrap().contains("sk-abcd"));
+    }
+
+    fn versioned_snapshot(version: u64, authority: &str, generated_at: i64) -> RoutingSnapshot {
+        serde_json::from_value(serde_json::json!({
+            "aliases": [],
+            "providers": [],
+            "generatedAtMs": generated_at,
+            "profileVersion": version,
+            "authority": authority,
+        }))
+        .unwrap()
+    }
+
+    fn legacy_snapshot(generated_at: i64) -> RoutingSnapshot {
+        serde_json::from_value(serde_json::json!({
+            "aliases": [], "providers": [], "generatedAtMs": generated_at,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn snapshot_cas_accepts_newer_versions_and_rejects_stale_ones() {
+        let state = GatewayState::new();
+        assert!(state
+            .try_set_snapshot(versioned_snapshot(2, "renderer", 1))
+            .is_ok());
+        assert!(state
+            .try_set_snapshot(versioned_snapshot(3, "renderer", 2))
+            .is_ok());
+        match state.try_set_snapshot(versioned_snapshot(2, "renderer", 3)) {
+            Err(SnapshotRejected::StaleVersion { current }) => assert_eq!(current, 3),
+            other => panic!("expected StaleVersion, got {other:?}"),
+        }
+        // The live snapshot is unchanged by the rejection.
+        assert_eq!(state.snapshot.read().as_ref().unwrap().generated_at_ms, 2);
+    }
+
+    #[test]
+    fn snapshot_cas_refuses_same_version_from_a_different_authority() {
+        let state = GatewayState::new();
+        assert!(state
+            .try_set_snapshot(versioned_snapshot(5, "profile-store", 1))
+            .is_ok());
+        match state.try_set_snapshot(versioned_snapshot(5, "renderer", 2)) {
+            Err(SnapshotRejected::AuthorityConflict { current }) => assert_eq!(current, 5),
+            other => panic!("expected AuthorityConflict, got {other:?}"),
+        }
+        // Same version + same authority is an idempotent republish — accepted.
+        assert!(state
+            .try_set_snapshot(versioned_snapshot(5, "profile-store", 3))
+            .is_ok());
+    }
+
+    #[test]
+    fn snapshot_cas_gates_legacy_pushes_once_versioned() {
+        let state = GatewayState::new();
+        // Legacy over empty and legacy over legacy: accepted.
+        assert!(state.try_set_snapshot(legacy_snapshot(1)).is_ok());
+        assert!(state.try_set_snapshot(legacy_snapshot(2)).is_ok());
+        // Versioned over legacy: accepted (migration direction).
+        assert!(state
+            .try_set_snapshot(versioned_snapshot(1, "renderer", 3))
+            .is_ok());
+        // Legacy over versioned: refused — no silent downgrade.
+        assert!(matches!(
+            state.try_set_snapshot(legacy_snapshot(4)),
+            Err(SnapshotRejected::LegacyOverVersioned { current: 1 })
+        ));
+    }
+
+    #[test]
+    fn snapshot_cas_rejects_invalid_transports_whole() {
+        let state = GatewayState::new();
+        state.set_snapshot(legacy_snapshot(1));
+        let bad: RoutingSnapshot = serde_json::from_value(serde_json::json!({
+            "aliases": [],
+            "providers": [{
+                "id": "p", "protocol": "anthropic", "baseUrl": "u", "enabled": true,
+                "transport": {
+                    "authScheme": "bearer",
+                    "staticHeaders": [["x-cognia-run", "1"]],
+                }
+            }],
+            "generatedAtMs": 2,
+        }))
+        .unwrap();
+        assert!(matches!(
+            state.try_set_snapshot(bad),
+            Err(SnapshotRejected::Invalid(_))
+        ));
+        // Previous snapshot keeps serving.
+        assert_eq!(state.snapshot.read().as_ref().unwrap().generated_at_ms, 1);
     }
 }

@@ -73,6 +73,20 @@ pub async fn healthz_handler(State(state): State<SharedState>) -> Response {
                 "restart_count": services.sidecar.restart_count(),
             }),
         );
+        // ADR-0090 Phase 2 — headless LLM Gateway health.
+        let gateway_status = services.gateway.status();
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        obj.insert(
+            "gateway".to_string(),
+            json!({
+                "running": gateway_status.running,
+                "boundPort": gateway_status.bound_port,
+                "snapshotGeneratedAtMs": gateway_status.snapshot_generated_at_ms,
+                "snapshotProviderCount": gateway_status.snapshot_provider_count,
+                "profileVersion": services.profiles.profile_version().ok(),
+                "activeTickets": services.gateway.tickets.active_count(now_ms),
+            }),
+        );
     }
     (StatusCode::OK, Json(payload)).into_response()
 }

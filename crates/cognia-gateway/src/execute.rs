@@ -256,6 +256,147 @@ pub fn upstream_headers(protocol: &str, api_key: Option<&str>) -> Vec<(&'static 
     headers
 }
 
+/// Transport-profile-driven upstream headers (ADR-0090 Phase 2). Supersedes
+/// [`upstream_headers`] for providers that carry a `TransportSnapshot`:
+/// - auth scheme comes from the transport (x-api-key / bearer / custom name,
+///   the custom name defense-in-depth re-checked against the header policy);
+/// - policy-clean static headers are stamped;
+/// - `anthropic-version` is defaulted ONLY when the client did not send one
+///   (`inbound_version`), fixing the R2 override-the-client bug;
+/// - never logged.
+pub fn upstream_headers_for(
+    protocol: &str,
+    transport: Option<&crate::snapshot::TransportSnapshot>,
+    api_key: Option<&str>,
+    inbound_version: Option<&str>,
+) -> Vec<(String, String)> {
+    let mut headers: Vec<(String, String)> =
+        vec![("content-type".into(), "application/json".into())];
+
+    let scheme = transport
+        .map(|t| t.auth_scheme.as_str())
+        .unwrap_or(match protocol {
+            "anthropic" => "x-api-key",
+            _ => "bearer",
+        });
+    if let Some(key) = api_key {
+        match scheme {
+            "x-api-key" => headers.push(("x-api-key".into(), key.to_string())),
+            "custom-header" => {
+                let name = transport
+                    .and_then(|t| t.auth_header_name.as_deref())
+                    .unwrap_or("x-api-key");
+                let verdict = crate::header_policy::check_header(
+                    name,
+                    Some(key),
+                    crate::header_policy::HeaderContext::Static,
+                );
+                let acceptable = verdict.allowed
+                    || verdict.reason == crate::header_policy::HeaderPolicyReason::AuthHeader;
+                if acceptable {
+                    headers.push((name.to_ascii_lowercase(), key.to_string()));
+                } else {
+                    // Fail safe: an invalid custom name falls back to the
+                    // protocol default rather than dropping auth entirely.
+                    headers.push(("x-api-key".into(), key.to_string()));
+                }
+            }
+            _ => headers.push(("authorization".into(), format!("Bearer {key}"))),
+        }
+    }
+
+    if protocol == "anthropic" {
+        headers.push((
+            "anthropic-version".into(),
+            inbound_version.unwrap_or("2023-06-01").to_string(),
+        ));
+    }
+
+    if let Some(transport) = transport {
+        for (name, value) in &transport.static_headers {
+            let verdict = crate::header_policy::check_header(
+                name,
+                Some(value),
+                crate::header_policy::HeaderContext::Static,
+            );
+            if verdict.allowed && !name.eq_ignore_ascii_case("anthropic-version") {
+                headers.push((name.to_ascii_lowercase(), value.clone()));
+            }
+        }
+    }
+
+    headers
+}
+
+/// Ticket-scoped candidate expansion (ADR-0090 Phase 2, R4). The base
+/// candidates are the ticket's FROZEN, ordered walk; affinity narrows or
+/// reorders it:
+/// - `per-request`: today's rotation across the whole walk;
+/// - `session-sticky`: the leased deployment only (first candidate
+///   establishes the lease when none exists) — no alternate accounts, ever;
+/// - `sticky-with-failover`: the leased deployment first, remaining
+///   candidates appended as the pre-first-byte failover chain.
+pub fn expand_for_ticket(
+    base: Vec<Candidate>,
+    affinity: crate::route_ticket::TicketAffinity,
+    leases: &crate::lease::CredentialLeaseMap,
+    session_id: &str,
+    rotation: &KeyRotationMap,
+    cooldown: &crate::cooldown::KeyCooldownMap,
+    now_ms: i64,
+) -> Vec<Candidate> {
+    use crate::route_ticket::TicketAffinity;
+
+    let expanded = expand_key_pools(base, rotation, cooldown, now_ms);
+    if expanded.is_empty() {
+        return expanded;
+    }
+
+    let deployment_of = |c: &Candidate| -> String {
+        c.provider
+            .deployment_id
+            .clone()
+            .unwrap_or_else(|| c.provider.id.clone())
+    };
+    let fingerprint_of = |c: &Candidate| -> String {
+        crate::credentials::fingerprint_of(c.provider.api_key.as_deref().unwrap_or(""))
+    };
+
+    match affinity {
+        TicketAffinity::PerRequest => expanded,
+        TicketAffinity::SessionSticky => {
+            if let Some(lease) = leases.get(session_id) {
+                let leased: Vec<Candidate> = expanded
+                    .iter()
+                    .filter(|c| {
+                        deployment_of(c) == lease.deployment_id
+                            && fingerprint_of(c) == lease.credential_fingerprint
+                    })
+                    .cloned()
+                    .collect();
+                // The leased credential only — if it is cooling/vanished the
+                // request fails rather than silently switching accounts.
+                leased
+            } else {
+                expanded.into_iter().take(1).collect()
+            }
+        }
+        TicketAffinity::StickyWithFailover => {
+            if let Some(lease) = leases.get(session_id) {
+                let (mut leased, rest): (Vec<Candidate>, Vec<Candidate>) =
+                    expanded.into_iter().partition(|c| {
+                        deployment_of(c) == lease.deployment_id
+                            && fingerprint_of(c) == lease.credential_fingerprint
+                    });
+                leased.extend(rest);
+                leased
+            } else {
+                expanded
+            }
+        }
+    }
+}
+
 /// Incremental SSE de-framer: feed raw bytes, get back complete `data:`
 /// payloads. `event:` lines are dropped — every payload the gateway cares
 /// about carries a `type` discriminator in the JSON itself.

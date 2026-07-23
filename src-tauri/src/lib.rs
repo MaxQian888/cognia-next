@@ -1006,6 +1006,9 @@ pub fn run() {
             gateway::commands::gateway_get_config,
             gateway::commands::gateway_update_config,
             gateway::commands::gateway_start,
+            gateway::commands::gateway_mint_route_ticket,
+            gateway::commands::gateway_revoke_route_ticket,
+            gateway::commands::gateway_list_route_tickets,
             gateway::commands::gateway_stop,
             gateway::commands::gateway_list_keys,
             gateway::commands::gateway_create_key,
@@ -1680,7 +1683,9 @@ pub fn run() {
                             .hydrate_from_disk(dir.join("cognia").join("gateway-config.json"));
                     }
                     if gw_state.config().enabled {
-                        match gw_state.start(app.clone()).await {
+                        let host: std::sync::Arc<dyn gateway::host::GatewayHost> =
+                            std::sync::Arc::new(gateway::host::TauriGatewayHost(app.clone()));
+                        match gw_state.start(host).await {
                             Ok(()) => log::info!("inbound gateway listener started"),
                             Err(e) => log::warn!("inbound gateway auto-start skipped: {e}"),
                         }

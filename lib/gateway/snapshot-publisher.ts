@@ -194,16 +194,87 @@ function buildAliases(slice: SnapshotSettingsSlice): GatewayAliasSnapshot[] {
     }))
 }
 
+/**
+ * Provider Profile Store projection joined onto the snapshot (ADR-0090
+ * Phase 2). Injected (not read from Dexie here) so the builder stays pure
+ * and synchronous.
+ */
+export interface SnapshotProfileMeta {
+  profileVersion: number
+  /** legacy provider id → derived deployment id + transport. */
+  byLegacyId: Record<
+    string,
+    { deploymentId: string; transport?: import("@/types/gateway").GatewayTransportSnapshot }
+  >
+}
+
 /** Assemble the full snapshot. `generatedAtMs` is injected by the caller. */
 export function buildGatewaySnapshot(
   slice: SnapshotSettingsSlice,
-  generatedAtMs: number
+  generatedAtMs: number,
+  profileMeta?: SnapshotProfileMeta
 ): GatewayRoutingSnapshot {
+  const providers = buildProviders(slice).map((provider) => {
+    const derived = profileMeta?.byLegacyId[provider.id]
+    if (!derived) return provider
+    return {
+      ...provider,
+      deploymentId: derived.deploymentId,
+      ...(derived.transport ? { transport: derived.transport } : {}),
+    }
+  })
   return {
-    providers: buildProviders(slice),
+    providers,
     aliases: buildAliases(slice),
     generatedAtMs,
+    // R3: versioned + authority-stamped so the Rust CAS check can reject
+    // stale/conflicting publishers instead of last-writer-wins.
+    ...(profileMeta !== undefined
+      ? { profileVersion: profileMeta.profileVersion, authority: "renderer" as const }
+      : {}),
   }
+}
+
+/**
+ * Read the Provider Profile Store projection for `buildGatewaySnapshot`.
+ * Returns undefined when the store has not been derived yet (legacy push).
+ */
+export async function loadSnapshotProfileMeta(): Promise<SnapshotProfileMeta | undefined> {
+  const [{ getProfileMeta, listDeploymentProfiles, listTransportProfiles }] = await Promise.all([
+    import("@/lib/db/provider-profiles"),
+  ])
+  const meta = await getProfileMeta()
+  if (!meta) return undefined
+  const [deployments, transports] = await Promise.all([
+    listDeploymentProfiles(),
+    listTransportProfiles(),
+  ])
+  const transportById = new Map(transports.map((t) => [t.id, t]))
+  const byLegacyId: SnapshotProfileMeta["byLegacyId"] = {}
+  for (const deployment of deployments) {
+    const legacy = deployment.legacyProviderId ?? deployment.id
+    const transport = transportById.get(deployment.transportProfileRef)
+    byLegacyId[legacy] = {
+      deploymentId: deployment.id,
+      ...(transport
+        ? {
+            transport: {
+              authScheme: transport.auth.scheme,
+              ...(transport.auth.scheme === "custom-header"
+                ? { authHeaderName: transport.auth.name }
+                : {}),
+              ...(transport.staticHeaders
+                ? { staticHeaders: Object.entries(transport.staticHeaders) }
+                : {}),
+              ...(transport.forwardedSemanticHeaders
+                ? { forwardedSemanticHeaders: transport.forwardedSemanticHeaders }
+                : {}),
+            },
+          }
+        : {}),
+    }
+  }
+  return { profileVersion: meta.profileVersion, byLegacyId }
 }
 
 /** Resolves a subscription-vault credential for a provider id, or null. */

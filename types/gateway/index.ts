@@ -167,6 +167,15 @@ export interface GatewayAliasSnapshot {
  * `ApiKeyRotationStrategy`. */
 export type GatewayRotationStrategy = "round-robin" | "random" | "least-used"
 
+/** Wire/auth behavior projected from the Provider Profile Store's
+ * TransportProfile (ADR-0090 Phase 2). Absent = legacy protocol defaults. */
+export interface GatewayTransportSnapshot {
+  authScheme: "x-api-key" | "bearer" | "custom-header"
+  authHeaderName?: string
+  staticHeaders?: Array<[string, string]>
+  forwardedSemanticHeaders?: string[]
+}
+
 /** A provider the gateway can execute against. Credentials stay Rust-side. */
 export interface GatewayProviderSnapshot {
   id: string
@@ -184,6 +193,10 @@ export interface GatewayProviderSnapshot {
   rotationEnabled?: boolean
   enabled: boolean
   models: string[]
+  /** Provider Profile Store deployment this entry projects (ADR-0090). */
+  deploymentId?: string
+  /** Transport behavior override; absent = legacy protocol defaults. */
+  transport?: GatewayTransportSnapshot
 }
 
 /** Routing + credential snapshot pushed into the Rust gateway. */
@@ -191,6 +204,55 @@ export interface GatewayRoutingSnapshot {
   aliases: GatewayAliasSnapshot[]
   providers: GatewayProviderSnapshot[]
   generatedAtMs: number
+  /** Provider Profile Store CAS version this snapshot projects (R3). */
+  profileVersion?: number
+  /** Publisher identity; required alongside profileVersion. */
+  authority?: "renderer" | "profile-store"
+}
+
+/** Result of a snapshot push — a rejected push (stale/conflicting version)
+ * keeps the previous snapshot serving and reports why. */
+export interface GatewayPushSnapshotResult {
+  accepted: boolean
+  profileVersion?: number | null
+  reason?: string | null
+}
+
+/** Route-ticket metadata (never the secret) — ADR-0090 Phase 2 §3.4. */
+export interface GatewayRouteTicket {
+  ticketId: string
+  routePinId: string
+  executionFingerprint: string
+  sessionId: string
+  parentSessionId?: string | null
+  candidates: Array<{ deploymentId: string; modelId: string }>
+  modelBindings: Record<string, string>
+  credentialAffinity: "session-sticky" | "sticky-with-failover" | "per-request"
+  allowAuthFailover?: boolean
+  routePolicy: string
+  issuedAtMs: number
+  expiresAtMs: number
+  profileVersion?: number | null
+  revoked?: boolean
+}
+
+/** Mint request for a route ticket (frozen spec projection). */
+export interface GatewayMintRouteTicketRequest {
+  sessionId: string
+  parentSessionId?: string
+  executionFingerprint: string
+  candidates: Array<{ deploymentId: string; modelId: string }>
+  modelBindings?: Record<string, string>
+  credentialAffinity: "session-sticky" | "sticky-with-failover" | "per-request"
+  allowAuthFailover?: boolean
+  routePolicy: string
+  ttlMs?: number
+}
+
+/** Mint response: the secret appears ONCE and must never be persisted. */
+export interface GatewayMintedRouteTicket {
+  ticket: GatewayRouteTicket
+  secret: string
 }
 
 /**

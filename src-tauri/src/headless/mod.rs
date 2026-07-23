@@ -15,6 +15,7 @@
 //! don't have to thread it.
 
 pub mod brain;
+pub mod gateway_host;
 
 use std::sync::Arc;
 
@@ -136,6 +137,10 @@ pub struct HeadlessServices {
     /// SQLite mirror of the renderer's Dexie v121 tables). Feeds the Phase 2
     /// Gateway snapshot projection; secret-free by construction.
     pub profiles: Arc<dyn crate::provider_profiles::ProviderProfileStore>,
+    /// ADR-0090 Phase 2 — the SAME Gateway crate/state the desktop manages,
+    /// started by `cognia-server` when enabled. Snapshots come from the
+    /// profile-store projection (authority: profile-store), not a renderer.
+    pub gateway: Arc<crate::gateway::GatewayState>,
 }
 
 impl HeadlessServices {
@@ -225,6 +230,7 @@ impl HeadlessServices {
             sidecar: SidecarState::new(),
             sidecar_host,
             api_keys,
+            gateway: Arc::new(crate::gateway::GatewayState::new()),
             mcp_server: Arc::new(crate::mcp_server::McpServerState::new()),
             mcp_automation: tokio::sync::OnceCell::new(),
             plugin_runtime: Arc::new(crate::plugin_api::PluginRuntimeState::new(

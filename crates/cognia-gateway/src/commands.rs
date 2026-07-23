@@ -31,7 +31,9 @@ pub async fn gateway_update_config(
 
 #[tauri::command]
 pub async fn gateway_start(state: State<'_, GatewayState>, app: AppHandle) -> Result<(), String> {
-    state.start(app).await.map_err(Into::into)
+    let host: std::sync::Arc<dyn crate::host::GatewayHost> =
+        std::sync::Arc::new(crate::host::TauriGatewayHost(app));
+    state.start(host).await.map_err(Into::into)
 }
 
 #[tauri::command]
@@ -103,15 +105,38 @@ pub async fn gateway_reveal_key(
     Ok(state.reveal_key(&id))
 }
 
+/// Push result surfaced to the renderer so a rejected push (stale version /
+/// authority conflict — R3) can reload the profile store and retry instead of
+/// silently believing it published.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PushSnapshotResult {
+    pub accepted: bool,
+    pub profile_version: Option<u64>,
+    pub reason: Option<String>,
+}
+
 /// Push the renderer's latest routing+credential snapshot into the live
 /// server. The snapshot carries API keys — they stay in Rust memory only.
+/// Ingest is authority-checked (ADR-0090 Phase 2): stale or conflicting
+/// versions are refused and the previous snapshot keeps serving.
 #[tauri::command]
 pub async fn gateway_push_snapshot(
     state: State<'_, GatewayState>,
     snapshot: RoutingSnapshot,
-) -> Result<(), String> {
-    state.set_snapshot(snapshot);
-    Ok(())
+) -> Result<PushSnapshotResult, String> {
+    match state.try_set_snapshot(snapshot) {
+        Ok(accepted) => Ok(PushSnapshotResult {
+            accepted: true,
+            profile_version: accepted.profile_version,
+            reason: None,
+        }),
+        Err(rejected) => Ok(PushSnapshotResult {
+            accepted: false,
+            profile_version: None,
+            reason: Some(rejected.to_string()),
+        }),
+    }
 }
 
 /// Answer a live routing decision the server requested via `gateway://decide`.
@@ -123,6 +148,36 @@ pub async fn gateway_decision_response(
 ) -> Result<(), String> {
     state.resolve_decision(&request_id, entries);
     Ok(())
+}
+
+// ---- Route tickets (ADR-0090 Phase 2) ---------------------------------------
+
+/// Mint a session-scoped route ticket. The response carries the secret ONCE;
+/// callers stamp it into the subprocess env (`ANTHROPIC_API_KEY`) and it is
+/// never persisted or logged. Renderer-side the call is gated behind the
+/// `gatewayAgentRouteTickets` feature flag.
+#[tauri::command]
+pub async fn gateway_mint_route_ticket(
+    state: State<'_, GatewayState>,
+    request: super::route_ticket::MintRequest,
+) -> Result<super::route_ticket::MintedTicket, String> {
+    state.mint_route_ticket(request).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn gateway_revoke_route_ticket(
+    state: State<'_, GatewayState>,
+    ticket_id: String,
+) -> Result<bool, String> {
+    Ok(state.revoke_route_ticket(&ticket_id))
+}
+
+/// Redacted ticket metadata for the settings/audit surface.
+#[tauri::command]
+pub async fn gateway_list_route_tickets(
+    state: State<'_, GatewayState>,
+) -> Result<Vec<super::route_ticket::RouteTicket>, String> {
+    Ok(state.list_route_tickets())
 }
 
 /// List the pooled upstream keys currently cooling (429/529) or permanently

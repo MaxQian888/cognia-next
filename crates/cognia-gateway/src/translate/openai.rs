@@ -61,6 +61,7 @@ pub fn to_ir(body: &Value) -> Result<ChatIR, NotTranslatable> {
     }
 
     let mut ir = ChatIR {
+        losses: Vec::new(),
         model,
         stream: body.get("stream").and_then(Value::as_bool).unwrap_or(false),
         max_tokens: body

@@ -20,6 +20,11 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::host::GatewayHost;
+use crate::lease::CredentialLeaseMap;
+use crate::route_ticket::{
+    RouteTicket, RouteTicketRegistry, TicketAffinity, TicketReject, TICKET_SECRET_PREFIX,
+};
 use axum::{
     body::Body,
     extract::{ConnectInfo, Extension, State},
@@ -33,7 +38,6 @@ use bytes::Bytes;
 use futures_util::StreamExt;
 use parking_lot::RwLock;
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter};
 use tokio::sync::{oneshot, watch};
 use tower_http::limit::RequestBodyLimitLayer;
 
@@ -44,9 +48,9 @@ use super::api_keys::{self, GatewayApiKey};
 use super::concurrency::{ConcurrencyLimiter, InFlightGuard, InFlightTracker, Slot};
 use super::cooldown::{self, KeyCooldownMap};
 use super::execute::{
-    candidates_from_entries, embeddings_url, expand_key_pools, is_executable_protocol,
-    record_key_success, resolve_candidates, rewrite_model, strip_request_fields, upstream_headers,
-    upstream_url, Candidate, KeyRotationMap, SseDeframer,
+    candidates_from_entries, embeddings_url, expand_for_ticket, expand_key_pools,
+    is_executable_protocol, record_key_success, resolve_candidates, rewrite_model,
+    strip_request_fields, upstream_headers, upstream_url, Candidate, KeyRotationMap, SseDeframer,
 };
 use super::keyed_rate_limit::KeyedRateLimiter;
 use super::session_key::derive_session_id;
@@ -111,11 +115,18 @@ struct ReqCtx {
     /// Client User-Agent, captured for the W1.3 fallback session key (all
     /// loopback callers share `remote_ip`, so the UA carries the distinctness).
     user_agent: String,
+    /// Present when the request authenticated with a route-ticket secret
+    /// (ADR-0090 Phase 2). Frozen candidates/bindings; never the secret.
+    ticket: Option<RouteTicket>,
+    /// Inbound headers whose NAMES pass the shared header policy (auth,
+    /// hop-by-hop, Host, browser and internal headers already stripped).
+    /// Same-protocol sends forward the semantic subset of these (R2).
+    inbound_headers: Vec<(String, String)>,
 }
 
 #[derive(Clone)]
 struct AppState {
-    app_handle: AppHandle,
+    host: Arc<dyn GatewayHost>,
     keys: Arc<RwLock<Vec<GatewayApiKey>>>,
     /// Request-time config (timeouts, retry policy, model exposure) — read live
     /// so an `update_config` applies without a restart.
@@ -138,12 +149,16 @@ struct AppState {
     /// Serialized into each decide request so the renderer's `least-busy`
     /// strategy can see the load the gateway itself is generating.
     in_flight: Arc<InFlightTracker>,
+    /// Route-ticket registry (ADR-0090 Phase 2) — session-scoped frozen routes.
+    tickets: Arc<RouteTicketRegistry>,
+    /// Session → credential leases backing ticket affinity (R4).
+    leases: Arc<CredentialLeaseMap>,
     http: reqwest::Client,
 }
 
 #[allow(clippy::too_many_arguments)]
 pub async fn spawn_server(
-    app_handle: AppHandle,
+    host: Arc<dyn GatewayHost>,
     config: Arc<RwLock<GatewayConfig>>,
     keys: Arc<RwLock<Vec<GatewayApiKey>>>,
     snapshot: Arc<RwLock<Option<RoutingSnapshot>>>,
@@ -152,6 +167,8 @@ pub async fn spawn_server(
     key_cooldown: Arc<KeyCooldownMap>,
     concurrency: Arc<ConcurrencyLimiter>,
     on_request: Arc<dyn RequestObserver>,
+    tickets: Arc<RouteTicketRegistry>,
+    leases: Arc<CredentialLeaseMap>,
 ) -> Result<ServerHandle, GatewayError> {
     // Snapshot the bind-time config (these apply only on start).
     let (port, bind_interface, allowlist_raw, rate_limit_per_min, connect_timeout_secs) = {
@@ -196,7 +213,7 @@ pub async fn spawn_server(
     // original moves into `AppState`.
     let keys_for_flush = keys.clone();
     let state = AppState {
-        app_handle,
+        host,
         keys,
         config,
         allowlist: Arc::new(parsed_allowlist),
@@ -212,6 +229,8 @@ pub async fn spawn_server(
         // Transient by nature — nothing is in flight when a listener starts, so
         // this is built per-spawn rather than threaded through from the state.
         in_flight: Arc::new(InFlightTracker::default()),
+        tickets,
+        leases,
         http,
     };
 
@@ -440,6 +459,30 @@ fn supplied_token(headers: &HeaderMap) -> Option<&str> {
     headers.get("x-api-key").and_then(|v| v.to_str().ok())
 }
 
+/// Collect inbound headers whose names the shared policy allows (values
+/// re-checked for injection bytes). Auth headers never appear here.
+fn clean_inbound_headers(headers: &HeaderMap) -> Vec<(String, String)> {
+    headers
+        .iter()
+        .filter_map(|(name, value)| {
+            let name = name.as_str();
+            let verdict = crate::header_policy::check_header(
+                name,
+                None,
+                crate::header_policy::HeaderContext::Forward,
+            );
+            if !verdict.allowed {
+                return None;
+            }
+            let value = value.to_str().ok()?;
+            if value.contains(['\r', '\n', '\0']) {
+                return None;
+            }
+            Some((name.to_ascii_lowercase(), value.to_string()))
+        })
+        .collect()
+}
+
 async fn middleware(
     State(state): State<AppState>,
     ConnectInfo(connect_info): ConnectInfo<SocketAddr>,
@@ -453,7 +496,7 @@ async fn middleware(
     let reject = |status: StatusCode, message: &str, key_id: Option<String>| -> Response {
         state.on_request.on_call(&route, status, remote_ip);
         emit_request_log(
-            &state.app_handle,
+            state.host.as_ref(),
             &route,
             &remote_ip.to_string(),
             key_id.as_deref(),
@@ -510,6 +553,46 @@ async fn middleware(
         );
     };
     let now_ms = chrono::Utc::now().timestamp_millis();
+
+    // 2a. Route-ticket auth (ADR-0090 Phase 2). Ticket secrets have their own
+    // prefix and NEVER fall through into the ordinary key path — an expired,
+    // revoked, or unknown ticket is a hard 401 (fail closed).
+    if supplied.starts_with(TICKET_SECRET_PREFIX) {
+        let ticket = match state.tickets.validate(supplied, now_ms) {
+            Ok(ticket) => ticket,
+            Err(kind) => {
+                let message = match kind {
+                    TicketReject::Expired => "route ticket expired",
+                    TicketReject::Revoked => "route ticket revoked",
+                    TicketReject::Unknown => "unknown route ticket",
+                };
+                return reject(StatusCode::UNAUTHORIZED, message, None);
+            }
+        };
+        if !state.rate_limiter.try_acquire() {
+            return reject(StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded", None);
+        }
+        let user_agent = headers
+            .get(axum::http::header::USER_AGENT)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        request.extensions_mut().insert(ReqCtx {
+            route: route.clone(),
+            remote_ip: remote_ip.to_string(),
+            key_id: None,
+            key_model_allowlist: Vec::new(),
+            user_agent,
+            ticket: Some(ticket),
+            inbound_headers: clean_inbound_headers(&headers),
+        });
+        let response = next.run(request).await;
+        state
+            .on_request
+            .on_call(&route, response.status(), remote_ip);
+        return response;
+    }
+
     let matched = {
         let keys = state.keys.read();
         api_keys::match_index(&keys, supplied, now_ms).map(|i| {
@@ -573,6 +656,8 @@ async fn middleware(
         key_id: Some(key_id),
         key_model_allowlist,
         user_agent,
+        ticket: None,
+        inbound_headers: clean_inbound_headers(&headers),
     });
 
     let response = next.run(request).await;
@@ -812,7 +897,7 @@ async fn openai_embeddings(
                 // stores as chat. `session_id` is None: embeddings must never
                 // pin a chat session's affinity (same rule as /v1/responses).
                 emit_outcome(
-                    &state.app_handle,
+                    state.host.as_ref(),
                     candidate,
                     false,
                     started,
@@ -853,7 +938,7 @@ async fn openai_embeddings(
             // Forward the cooldown window so the renderer breaker gets the same
             // dynamic backoff the chat path already feeds it.
             emit_outcome(
-                &state.app_handle,
+                state.host.as_ref(),
                 candidate,
                 false,
                 started,
@@ -862,7 +947,14 @@ async fn openai_embeddings(
                 retry_after_ms,
                 None,
             );
-            if cfg.should_retry(status) {
+            // R4: an auth failure on a ticket route never switches accounts
+            // unless the ticket explicitly allows it — surface it instead.
+            let auth_failure = status == 401 || status == 403;
+            let ticket_blocks_failover = ctx
+                .ticket
+                .as_ref()
+                .is_some_and(|t| auth_failure && !t.allow_auth_failover);
+            if cfg.should_retry(status) && !ticket_blocks_failover {
                 failures.push(format!("{}: {message}", candidate.provider.id));
                 continue;
             }
@@ -886,7 +978,7 @@ async fn openai_embeddings(
                 // never sees a provider that reliably returns garbage.
                 let message = format!("invalid upstream JSON: {err}");
                 emit_outcome(
-                    &state.app_handle,
+                    state.host.as_ref(),
                     candidate,
                     false,
                     started,
@@ -911,7 +1003,7 @@ async fn openai_embeddings(
             .as_u64()
             .or_else(|| upstream["usage"]["total_tokens"].as_u64());
         emit_outcome(
-            &state.app_handle,
+            state.host.as_ref(),
             candidate,
             true,
             started,
@@ -1084,7 +1176,7 @@ async fn openai_responses(
                 // so a provider failing every Responses call never opened its
                 // breaker. `session_id` stays None (no chat-affinity key here).
                 emit_outcome(
-                    &state.app_handle,
+                    state.host.as_ref(),
                     candidate,
                     false,
                     started,
@@ -1121,7 +1213,7 @@ async fn openai_responses(
                 text.chars().take(500).collect::<String>()
             );
             emit_outcome(
-                &state.app_handle,
+                state.host.as_ref(),
                 candidate,
                 false,
                 started,
@@ -1130,7 +1222,14 @@ async fn openai_responses(
                 retry_after_ms,
                 None,
             );
-            if cfg.should_retry(status) {
+            // R4: an auth failure on a ticket route never switches accounts
+            // unless the ticket explicitly allows it — surface it instead.
+            let auth_failure = status == 401 || status == 403;
+            let ticket_blocks_failover = ctx
+                .ticket
+                .as_ref()
+                .is_some_and(|t| auth_failure && !t.allow_auth_failover);
+            if cfg.should_retry(status) && !ticket_blocks_failover {
                 failures.push(format!("{}: {message}", candidate.provider.id));
                 continue;
             }
@@ -1152,7 +1251,7 @@ async fn openai_responses(
                 // provider-health signal, not a client error.
                 let message = format!("invalid upstream JSON: {err}");
                 emit_outcome(
-                    &state.app_handle,
+                    state.host.as_ref(),
                     candidate,
                     false,
                     started,
@@ -1175,7 +1274,7 @@ async fn openai_responses(
         match response_to_ir(&candidate.provider.protocol, &upstream) {
             Ok(ir_resp) => {
                 emit_outcome(
-                    &state.app_handle,
+                    state.host.as_ref(),
                     candidate,
                     true,
                     started,
@@ -1213,7 +1312,7 @@ async fn openai_responses(
                 // the chat path draws the same line.)
                 let message = format!("unreadable upstream response: {}", err.reason);
                 emit_outcome(
-                    &state.app_handle,
+                    state.host.as_ref(),
                     candidate,
                     false,
                     started,
@@ -1256,7 +1355,7 @@ fn logged_error(
     model: Option<&str>,
 ) -> Response {
     emit_request_log_ctx(
-        &state.app_handle,
+        state.host.as_ref(),
         ctx,
         model,
         None,
@@ -1280,7 +1379,7 @@ fn all_failed(
 ) -> Response {
     let message = format!("every candidate failed: {}", failures.join(" | "));
     emit_request_log_ctx(
-        &state.app_handle,
+        state.host.as_ref(),
         ctx,
         Some(model),
         None,
@@ -1452,7 +1551,10 @@ async fn live_decision(
             _ => None,
         });
 
-    let emitted = state.app_handle.emit(
+    if !state.host.supports_live_decisions() {
+        return None;
+    }
+    let emitted = state.host.emit(
         DECIDE_EVENT,
         json!({
             "requestId": request_id,
@@ -1466,7 +1568,7 @@ async fn live_decision(
             "inFlight": state.in_flight.snapshot(),
         }),
     );
-    if emitted.is_err() {
+    if !emitted {
         state.decisions.lock().remove(&request_id);
         return None;
     }
@@ -1513,22 +1615,47 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
             None,
         );
     };
-    if let Some(resp) = exposure_guard(&state, &ctx, format, &cfg, &model) {
-        return resp;
+    let ticket = ctx.ticket.clone();
+    // Ticket requests skip the exposure guard: their model surface was frozen
+    // and validated at mint, and live exposure edits must not alter it.
+    if ticket.is_none() {
+        if let Some(resp) = exposure_guard(&state, &ctx, format, &cfg, &model) {
+            return resp;
+        }
     }
     let stream = body["stream"].as_bool().unwrap_or(false);
     let now_ms = chrono::Utc::now().timestamp_millis();
+
+    // Frozen selector mapping (ADR-0090 Phase 2): a ticket request whose model
+    // selector is not bound fails closed BEFORE any upstream work — never a
+    // live-alias substitution.
+    if let Some(t) = &ticket {
+        if t.resolve_model(&model).is_none() {
+            return logged_error(
+                &state,
+                &ctx,
+                format,
+                StatusCode::BAD_REQUEST,
+                "invalid_request_error",
+                &format!("model \"{model}\" is not bound by this route ticket"),
+                Some(&model),
+            );
+        }
+    }
 
     // W1.3: derive a stable affinity key for this request and thread it through
     // the live decision (so the routing engine's session-affinity filter sticks
     // this conversation to one deployment) and the outcome event (so a
     // successful turn pins it — the same machinery the chat plane already uses).
-    let session_id = derive_session_id(
-        &body,
-        &ctx.remote_ip,
-        &ctx.user_agent,
-        ctx.key_id.as_deref().unwrap_or(""),
-    );
+    let session_id = match &ticket {
+        Some(t) => t.session_id.clone(),
+        None => derive_session_id(
+            &body,
+            &ctx.remote_ip,
+            &ctx.user_agent,
+            ctx.key_id.as_deref().unwrap_or(""),
+        ),
+    };
 
     // W1.2: gateway-key in-flight cap for the whole request. Held until the
     // response completes — moved into the streaming task below so it releases at
@@ -1543,15 +1670,55 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
         Err(()) => return concurrency_rejected(&state, &ctx, format, Some(&model)),
     };
 
-    let candidates = expand_key_pools(
-        match live_decision(&state, &snapshot, &model, &body, &session_id).await {
-            Some(candidates) => candidates,
-            None => resolve_candidates(&snapshot, &model),
-        },
-        &state.key_rotation,
-        &state.key_cooldown,
-        now_ms,
-    );
+    let candidates = if let Some(t) = &ticket {
+        // Frozen walk: ONLY the ticket's candidates, joined against the live
+        // snapshot by deployment id. A global alias update cannot change this
+        // set; a candidate whose deployment vanished is skipped, and zero
+        // servable candidates is a 503 (gateway-generated — legitimate here).
+        let base: Vec<Candidate> = t
+            .candidates
+            .iter()
+            .filter_map(|tc| {
+                snapshot
+                    .provider_by_deployment(&tc.deployment_id)
+                    .or_else(|| snapshot.provider(&tc.deployment_id))
+                    .map(|p| Candidate {
+                        provider: p.clone(),
+                        model_id: tc.model_id.clone(),
+                    })
+            })
+            .collect();
+        if base.is_empty() {
+            return logged_error(
+                &state,
+                &ctx,
+                format,
+                StatusCode::SERVICE_UNAVAILABLE,
+                "overloaded_error",
+                "no ticket candidate is servable by the current snapshot",
+                Some(&model),
+            );
+        }
+        expand_for_ticket(
+            base,
+            t.credential_affinity,
+            &state.leases,
+            &session_id,
+            &state.key_rotation,
+            &state.key_cooldown,
+            now_ms,
+        )
+    } else {
+        expand_key_pools(
+            match live_decision(&state, &snapshot, &model, &body, &session_id).await {
+                Some(candidates) => candidates,
+                None => resolve_candidates(&snapshot, &model),
+            },
+            &state.key_rotation,
+            &state.key_cooldown,
+            now_ms,
+        )
+    };
     if candidates.is_empty() {
         return logged_error(
             &state,
@@ -1587,6 +1754,17 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
     } else {
         None
     };
+
+    // ADR-0090: cross-protocol translation may drop/merge fields — surface
+    // every recorded loss as a trace event (never in response bodies).
+    if let Some(ir) = &ir {
+        if !ir.losses.is_empty() {
+            let _ = state.host.emit(
+                "gateway://translation-loss",
+                json!({ "model": model, "losses": ir.losses }),
+            );
+        }
+    }
 
     let mut failures: Vec<String> = Vec::new();
     for candidate in candidates.iter().take(cfg.attempt_budget(candidates.len())) {
@@ -1645,11 +1823,49 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
         if !stream {
             req = apply_timeout(req, &cfg);
         }
-        for (name, value) in upstream_headers(
+        // R2: the client's own anthropic-version wins over the pinned default.
+        let inbound_version = ctx
+            .inbound_headers
+            .iter()
+            .find(|(name, _)| name == "anthropic-version")
+            .map(|(_, value)| value.as_str());
+        for (name, value) in super::execute::upstream_headers_for(
             &candidate.provider.protocol,
+            candidate.provider.transport.as_ref(),
             candidate.provider.api_key.as_deref(),
+            inbound_version,
         ) {
             req = req.header(name, value);
+        }
+        // R2: forward inbound SEMANTIC headers on same-protocol routes — the
+        // built-in allowlist (anthropic-*, x-claude-code-*, x-stainless-*,
+        // x-app) plus the transport's declared extras. Auth/hop-by-hop/etc.
+        // were already stripped at capture. anthropic-version was handled
+        // above; skip it here to avoid duplicates.
+        if passthrough {
+            let transport_extra: Vec<&str> = candidate
+                .provider
+                .transport
+                .as_ref()
+                .map(|t| {
+                    t.forwarded_semantic_headers
+                        .iter()
+                        .map(String::as_str)
+                        .collect()
+                })
+                .unwrap_or_default();
+            for (name, value) in &ctx.inbound_headers {
+                if name == "anthropic-version" {
+                    continue;
+                }
+                let semantic = crate::header_policy::is_forwardable_semantic_header(name)
+                    || transport_extra
+                        .iter()
+                        .any(|extra| extra.eq_ignore_ascii_case(name));
+                if semantic {
+                    req = req.header(name, value);
+                }
+            }
         }
 
         let resp = match req.send().await {
@@ -1657,7 +1873,7 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
             Err(err) => {
                 let message = format!("connect error: {err}");
                 emit_outcome(
-                    &state.app_handle,
+                    state.host.as_ref(),
                     candidate,
                     false,
                     started,
@@ -1697,7 +1913,7 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
             }
             message.push_str(&format!(": {}", text.chars().take(500).collect::<String>()));
             emit_outcome(
-                &state.app_handle,
+                state.host.as_ref(),
                 candidate,
                 false,
                 started,
@@ -1706,9 +1922,44 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
                 retry_after_ms,
                 Some(&session_id),
             );
-            if cfg.should_retry(status) {
+            // R4: an auth failure on a ticket route never switches accounts
+            // unless the ticket explicitly allows it — surface it instead.
+            let auth_failure = status == 401 || status == 403;
+            let ticket_blocks_failover = ctx
+                .ticket
+                .as_ref()
+                .is_some_and(|t| auth_failure && !t.allow_auth_failover);
+            if cfg.should_retry(status) && !ticket_blocks_failover {
                 failures.push(format!("{}: {message}", candidate.provider.id));
                 continue;
+            }
+            // R2: on same-protocol routes the upstream error body reaches the
+            // client VERBATIM (status + bytes + safe headers) — Claude Code's
+            // capability/error matching depends on the exact wire shape.
+            // Gateway-wrapped errors remain only for translated routes and
+            // gateway-generated failures.
+            if passthrough {
+                emit_request_log_ctx(
+                    state.host.as_ref(),
+                    &ctx,
+                    Some(&model),
+                    Some(&candidate.provider.id),
+                    status,
+                    started.elapsed().as_millis() as u64,
+                    None,
+                    None,
+                    Some(&message),
+                    false,
+                );
+                let mut builder = axum::http::Response::builder()
+                    .status(StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY))
+                    .header("content-type", "application/json");
+                for (name, value) in safe_upstream_response_headers(&headers) {
+                    builder = builder.header(name, value);
+                }
+                return builder
+                    .body(Body::from(text))
+                    .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
             }
             return logged_error(
                 &state,
@@ -1719,6 +1970,30 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
                 &message,
                 Some(&model),
             );
+        }
+
+        // Sticky affinity: the credential that produced a 2xx owns the lease
+        // from here on (a pre-first-byte failover that succeeded elsewhere
+        // MOVES the lease and sticks).
+        if let Some(t) = &ticket {
+            if matches!(
+                t.credential_affinity,
+                TicketAffinity::SessionSticky | TicketAffinity::StickyWithFailover
+            ) {
+                let deployment = candidate
+                    .provider
+                    .deployment_id
+                    .clone()
+                    .unwrap_or_else(|| candidate.provider.id.clone());
+                state.leases.acquire(
+                    &session_id,
+                    &deployment,
+                    &crate::credentials::fingerprint_of(
+                        candidate.provider.api_key.as_deref().unwrap_or(""),
+                    ),
+                    now_ms,
+                );
+            }
         }
 
         if stream {
@@ -1762,12 +2037,13 @@ async fn buffered_response(
     model: &str,
     session_id: &str,
 ) -> Response {
+    let upstream_headers_snapshot = resp.headers().clone();
     let upstream: Value = match resp.json().await {
         Ok(v) => v,
         Err(err) => {
             let message = format!("invalid upstream JSON: {err}");
             emit_outcome(
-                &state.app_handle,
+                state.host.as_ref(),
                 candidate,
                 false,
                 started,
@@ -1800,7 +2076,7 @@ async fn buffered_response(
             ),
         };
         emit_outcome(
-            &state.app_handle,
+            state.host.as_ref(),
             candidate,
             true,
             started,
@@ -1819,13 +2095,23 @@ async fn buffered_response(
             usage.1,
             false,
         );
-        return Json(upstream).into_response();
+        // R2: correlation/rate-limit headers survive the proxy hop.
+        let mut response = Json(upstream).into_response();
+        for (name, value) in safe_upstream_response_headers(&upstream_headers_snapshot) {
+            if let (Ok(name), Ok(value)) = (
+                axum::http::HeaderName::try_from(name),
+                axum::http::HeaderValue::try_from(value),
+            ) {
+                response.headers_mut().insert(name, value);
+            }
+        }
+        return response;
     }
 
     match response_to_ir(&candidate.provider.protocol, &upstream) {
         Ok(ir_resp) => {
             emit_outcome(
-                &state.app_handle,
+                state.host.as_ref(),
                 candidate,
                 true,
                 started,
@@ -1852,7 +2138,7 @@ async fn buffered_response(
         }
         Err(err) => {
             emit_outcome(
-                &state.app_handle,
+                state.host.as_ref(),
                 candidate,
                 false,
                 started,
@@ -1945,7 +2231,7 @@ async fn stream_response(
                 )
             });
             emit_outcome(
-                &task_state.app_handle,
+                task_state.host.as_ref(),
                 &candidate,
                 !stalled,
                 started,
@@ -2014,6 +2300,21 @@ async fn stream_response(
                 break;
             }
         }
+        // R2/ADR-0090: a mid-stream upstream failure on a TRANSLATED route
+        // must surface as the inbound protocol's own error framing instead of
+        // a silent close — Anthropic clients get `event: error`.
+        if stalled {
+            let error_frame = match direction {
+                Direction::OpenAiToAnthropic => Some(
+                    "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"upstream stream stalled\"}}\n\n"
+                        .to_string(),
+                ),
+                Direction::AnthropicToOpenAi => None,
+            };
+            if let Some(frame) = error_frame {
+                let _ = tx.send(Ok(Bytes::from(frame))).await;
+            }
+        }
         let usage = transcoder.usage();
         let stall_error = stalled.then(|| {
             format!(
@@ -2022,7 +2323,7 @@ async fn stream_response(
             )
         });
         emit_outcome(
-            &task_state.app_handle,
+            task_state.host.as_ref(),
             &candidate,
             !stalled,
             started,
@@ -2092,12 +2393,32 @@ fn sse_response(body: Body) -> Response {
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
+/// Upstream response headers that may safely reach the client on
+/// same-protocol routes (R2): request correlation ids, rate-limit metadata,
+/// retry hints. Cookies and hop-by-hop headers never pass.
+fn safe_upstream_response_headers(upstream: &reqwest::header::HeaderMap) -> Vec<(String, String)> {
+    upstream
+        .iter()
+        .filter_map(|(name, value)| {
+            let name = name.as_str().to_ascii_lowercase();
+            let keep = name == "request-id"
+                || name == "x-request-id"
+                || name == "retry-after"
+                || name.starts_with("anthropic-ratelimit-");
+            if !keep {
+                return None;
+            }
+            Some((name, value.to_str().ok()?.to_string()))
+        })
+        .collect()
+}
+
 /// Per-attempt outcome event — the renderer forwards it into
 /// `recordProviderOutcome` so gateway traffic feeds the same health / breaker /
 /// cost stores the chat plane reads.
 #[allow(clippy::too_many_arguments)]
 fn emit_outcome(
-    app_handle: &AppHandle,
+    host: &dyn GatewayHost,
     candidate: &Candidate,
     ok: bool,
     started: Instant,
@@ -2119,7 +2440,7 @@ fn emit_outcome(
         retry_after_ms,
         session_id,
     );
-    let _ = app_handle.emit(REQUEST_OUTCOME_EVENT, payload);
+    let _ = host.emit(REQUEST_OUTCOME_EVENT, payload);
 }
 
 /// The `gateway://request-outcome` body. Split out from [`emit_outcome`] so the
@@ -2154,7 +2475,7 @@ fn outcome_payload(
 /// rejection). Persisted renderer-side into Dexie + shown in the live panel.
 #[allow(clippy::too_many_arguments)]
 fn emit_request_log(
-    app_handle: &AppHandle,
+    host: &dyn GatewayHost,
     route: &str,
     remote_ip: &str,
     key_id: Option<&str>,
@@ -2182,7 +2503,7 @@ fn emit_request_log(
         "error": error,
         "stream": stream,
     });
-    let _ = app_handle.emit(REQUEST_LOG_EVENT, payload);
+    let _ = host.emit(REQUEST_LOG_EVENT, payload);
 }
 
 /// Success terminal: emit the durable log row, draw the consumed tokens down
@@ -2201,7 +2522,7 @@ fn log_success(
     stream: bool,
 ) {
     emit_request_log_ctx(
-        &state.app_handle,
+        state.host.as_ref(),
         ctx,
         Some(model),
         Some(&candidate.provider.id),
@@ -2262,7 +2583,7 @@ fn sniff_passthrough_usage(
 /// Convenience wrapper that pulls route/remoteIp/keyId off a [`ReqCtx`].
 #[allow(clippy::too_many_arguments)]
 fn emit_request_log_ctx(
-    app_handle: &AppHandle,
+    host: &dyn GatewayHost,
     ctx: &ReqCtx,
     model: Option<&str>,
     provider_id: Option<&str>,
@@ -2274,7 +2595,7 @@ fn emit_request_log_ctx(
     stream: bool,
 ) {
     emit_request_log(
-        app_handle,
+        host,
         &ctx.route,
         &ctx.remote_ip,
         ctx.key_id.as_deref(),
@@ -2300,6 +2621,8 @@ mod tests {
             key_id: Some("k1".into()),
             key_model_allowlist: vec![],
             user_agent: "test-agent".into(),
+            ticket: None,
+            inbound_headers: Vec::new(),
         }
     }
 

@@ -71,6 +71,8 @@ export function GatewayProvider() {
       } catch {
         return // not in a Tauri shell after all / command unavailable
       }
+      const { loadSnapshotProfileMeta } = await import("@/lib/gateway/snapshot-publisher")
+      const profileMeta = await loadSnapshotProfileMeta().catch(() => undefined)
       const base = buildGatewaySnapshot(
         {
           defaultProvider: live.defaultProvider,
@@ -78,7 +80,8 @@ export function GatewayProvider() {
           customProviders: live.customProviders,
           modelMappings: live.modelMappings,
         },
-        Date.now()
+        Date.now(),
+        profileMeta
       )
       // Fill in subscription-vault creds (opencode Zen/Go) the plain
       // provider-settings path can't supply, so subscription providers are
@@ -88,7 +91,24 @@ export function GatewayProvider() {
         OPENCODE_CHAT_PROVIDER_IDS,
         resolveOpencodeVaultCredential
       ).catch(() => base)
-      if (!cancelled) await gatewayPushSnapshot(snapshot).catch(() => {})
+      if (cancelled) return
+      const result = await gatewayPushSnapshot(snapshot).catch(() => undefined)
+      // R3: a rejected push means another authority moved the profileVersion
+      // — reload the store projection and retry ONCE with fresh metadata.
+      if (result && !result.accepted && !cancelled) {
+        const freshMeta = await loadSnapshotProfileMeta().catch(() => undefined)
+        const retry = buildGatewaySnapshot(
+          {
+            defaultProvider: live.defaultProvider,
+            providerSettings: live.providerSettings,
+            customProviders: live.customProviders,
+            modelMappings: live.modelMappings,
+          },
+          Date.now(),
+          freshMeta
+        )
+        await gatewayPushSnapshot(retry).catch(() => {})
+      }
     }
 
     // Debounced push on slice change.

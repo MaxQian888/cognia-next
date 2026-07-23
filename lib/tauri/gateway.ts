@@ -16,10 +16,15 @@ import type {
   GatewayApiKeyRedacted,
   GatewayConfig,
   GatewayKeyCooldown,
+  GatewayMintedRouteTicket,
+  GatewayMintRouteTicketRequest,
+  GatewayPushSnapshotResult,
+  GatewayRouteTicket,
   GatewayRoutingSnapshot,
   GatewaySnapshotEntry,
   GatewayStatus,
 } from "@/types/gateway"
+import { isAgentExecutionFlagEnabled } from "@/lib/ai/agent/execution/feature-flags"
 
 export async function gatewayGetStatus(): Promise<GatewayStatus> {
   return transport.call<GatewayStatus>("gateway_get_status")
@@ -93,8 +98,40 @@ export async function gatewayRevealKey(id: string): Promise<string | null> {
  * Push the renderer's routing + credential snapshot into the live server.
  * The snapshot carries API keys — they stay in Rust memory only.
  */
-export async function gatewayPushSnapshot(snapshot: GatewayRoutingSnapshot): Promise<void> {
-  await transport.call<void>("gateway_push_snapshot", { snapshot })
+/**
+ * Mint a session-scoped route ticket (ADR-0090 Phase 2). Gated behind the
+ * `gatewayAgentRouteTickets` feature flag — disabled ⇒ typed error, never a
+ * silent no-op. The returned secret appears ONCE; stamp it into the
+ * subprocess env and drop it.
+ */
+export async function gatewayMintRouteTicket(
+  request: GatewayMintRouteTicketRequest
+): Promise<GatewayMintedRouteTicket> {
+  if (!isAgentExecutionFlagEnabled("gatewayAgentRouteTickets")) {
+    throw new Error("gatewayAgentRouteTickets feature flag is disabled")
+  }
+  return transport.call<GatewayMintedRouteTicket>("gateway_mint_route_ticket", { request })
+}
+
+export async function gatewayRevokeRouteTicket(ticketId: string): Promise<boolean> {
+  return transport.call<boolean>("gateway_revoke_route_ticket", { ticketId })
+}
+
+/** Redacted ticket metadata (no secrets are ever stored Rust-side). */
+export async function gatewayListRouteTickets(): Promise<GatewayRouteTicket[]> {
+  return transport.call<GatewayRouteTicket[]>("gateway_list_route_tickets")
+}
+
+/**
+ * Push a routing snapshot. Ingest is authority-checked Rust-side (R3): a
+ * stale or conflicting `profileVersion` is refused and reported here so the
+ * publisher can reload the profile store and retry — never assume a push
+ * landed.
+ */
+export async function gatewayPushSnapshot(
+  snapshot: GatewayRoutingSnapshot
+): Promise<GatewayPushSnapshotResult> {
+  return transport.call<GatewayPushSnapshotResult>("gateway_push_snapshot", { snapshot })
 }
 
 /**

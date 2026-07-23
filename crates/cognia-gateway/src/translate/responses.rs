@@ -113,6 +113,7 @@ pub fn request_to_ir(body: &Value) -> Result<ChatIR, NotTranslatable> {
     }
 
     Ok(ChatIR {
+        losses: Vec::new(),
         model,
         system: if system_parts.is_empty() {
             None

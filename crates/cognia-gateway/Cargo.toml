@@ -16,11 +16,19 @@ publish = false
 name = "cognia_gateway"
 path = "src/lib.rs"
 
+[features]
+# The Tauri host adapter + #[tauri::command] surface. On by default so the
+# desktop build is unchanged; `cognia-server` paths and the crate's own
+# integration tests also build with `--no-default-features` (host-neutral,
+# ADR-0090 Phase 2).
+default = ["tauri-host"]
+tauri-host = ["dep:tauri"]
+
 [dependencies]
 cognia-secrets = { path = "../cognia-secrets" }
 cognia-remote-control = { path = "../cognia-remote-control" }
 cognia-instrument = { path = "../cognia-instrument" }
-tauri = { version = "=2.11.1" }
+tauri = { version = "=2.11.1", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 axum = { version = "0.8", features = ["macros", "ws"] }

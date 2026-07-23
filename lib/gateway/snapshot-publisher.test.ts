@@ -25,6 +25,42 @@ describe("buildGatewaySnapshot", () => {
     expect(buildGatewaySnapshot({}, 999).generatedAtMs).toBe(999)
   })
 
+  it("omits version/authority for legacy pushes (no profile meta)", () => {
+    const snap = buildGatewaySnapshot({}, 1)
+    expect(snap.profileVersion).toBeUndefined()
+    expect(snap.authority).toBeUndefined()
+  })
+
+  it("stamps profileVersion + renderer authority and joins deployment/transport (ADR-0090)", () => {
+    const slice: SnapshotSettingsSlice = {
+      providerSettings: {
+        openai: { providerId: "openai", apiKey: "sk-o", enabled: true },
+      } as unknown as SnapshotSettingsSlice["providerSettings"],
+    }
+    const snap = buildGatewaySnapshot(slice, 1, {
+      profileVersion: 7,
+      byLegacyId: {
+        openai: {
+          deploymentId: "openai",
+          transport: {
+            authScheme: "bearer",
+            staticHeaders: [["x-tenant", "t1"]],
+          },
+        },
+      },
+    })
+    expect(snap.profileVersion).toBe(7)
+    expect(snap.authority).toBe("renderer")
+    const openai = snap.providers.find((p) => p.id === "openai")
+    expect(openai?.deploymentId).toBe("openai")
+    expect(openai?.transport).toEqual({
+      authScheme: "bearer",
+      staticHeaders: [["x-tenant", "t1"]],
+    })
+    // Providers without a derived row stay untouched.
+    expect(snap.providers.filter((p) => p.id !== "openai").every((p) => !p.deploymentId)).toBe(true)
+  })
+
   it("resolves enabled built-in providers with protocol + key + baseURL", () => {
     const slice: SnapshotSettingsSlice = {
       providerSettings: {

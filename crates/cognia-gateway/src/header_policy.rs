@@ -164,7 +164,9 @@ pub fn is_forwardable_semantic_header(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     let lower = lower.as_str();
     SEMANTIC_FORWARD_HEADERS.contains(&lower)
-        || SEMANTIC_FORWARD_PREFIXES.iter().any(|p| lower.starts_with(p))
+        || SEMANTIC_FORWARD_PREFIXES
+            .iter()
+            .any(|p| lower.starts_with(p))
 }
 
 /// Validate a static header map; returns `(name, reason-code)` violations.

@@ -57,6 +57,7 @@ pub fn to_ir(body: &Value) -> Result<ChatIR, NotTranslatable> {
     let model = s(&body["model"]).ok_or_else(|| NotTranslatable::new("model is required"))?;
 
     let mut ir = ChatIR {
+        losses: Vec::new(),
         model,
         stream: body.get("stream").and_then(Value::as_bool).unwrap_or(false),
         max_tokens: body.get("max_tokens").and_then(Value::as_u64),
@@ -75,6 +76,12 @@ pub fn to_ir(body: &Value) -> Result<ChatIR, NotTranslatable> {
                 .collect::<Vec<_>>()
                 .join("\n\n");
             if !joined.is_empty() {
+                if blocks.len() > 1 {
+                    ir.losses.push(super::ir::TranslationLoss::merged(
+                        "system",
+                        format!("{} system blocks concatenated; per-block metadata (incl. cache_control) not represented", blocks.len()),
+                    ));
+                }
                 ir.system = Some(joined);
             }
         }
@@ -148,8 +155,14 @@ pub fn to_ir(body: &Value) -> Result<ChatIR, NotTranslatable> {
                             content.push(IrContent::Image(parse_anthropic_image(&block["source"])?))
                         }
                         // Thinking blocks are an Anthropic-internal detail —
-                        // they don't survive a protocol hop; drop them.
-                        Some("thinking") | Some("redacted_thinking") => {}
+                        // they don't survive a protocol hop. Dropped, but
+                        // NEVER silently (ADR-0090: structured loss record).
+                        Some(kind @ ("thinking" | "redacted_thinking")) => {
+                            ir.losses.push(super::ir::TranslationLoss::dropped(
+                                format!("messages[].content[] ({kind})"),
+                                "thinking blocks cannot be represented on a non-Anthropic upstream",
+                            ));
+                        }
                         other => {
                             return Err(NotTranslatable::new(format!(
                                 "unsupported content block type: {}",

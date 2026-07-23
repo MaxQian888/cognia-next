@@ -19,6 +19,35 @@ pub struct SnapshotEntry {
     pub model_id: String,
 }
 
+/// Wire/auth behavior for a provider entry (ADR-0090 Phase 2). Projected from
+/// the Provider Profile Store's TransportProfile; validated at snapshot ingest
+/// by the shared header policy. Absent ⇒ the legacy protocol defaults
+/// (anthropic → x-api-key + pinned version header, else Bearer).
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TransportSnapshot {
+    /// "x-api-key" | "bearer" | "custom-header".
+    pub auth_scheme: String,
+    /// Custom auth header name (only for `auth_scheme == "custom-header"`).
+    #[serde(default)]
+    pub auth_header_name: Option<String>,
+    /// Extra static headers, policy-validated at ingest AND at send time.
+    #[serde(default)]
+    pub static_headers: Vec<(String, String)>,
+    /// Additional inbound semantic headers forwarded on same-protocol routes.
+    #[serde(default)]
+    pub forwarded_semantic_headers: Vec<String>,
+}
+
+/// Who produced a snapshot — the CAS authority axis (R3). Same-version pushes
+/// from DIFFERENT authorities are rejected; last-writer-wins is forbidden.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SnapshotAuthority {
+    Renderer,
+    ProfileStore,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AliasSnapshot {
@@ -58,6 +87,12 @@ pub struct ProviderSnapshot {
     pub enabled: bool,
     #[serde(default)]
     pub models: Vec<String>,
+    /// The Provider Profile Store deployment this entry projects (Phase 2).
+    #[serde(default)]
+    pub deployment_id: Option<String>,
+    /// Transport behavior override; absent ⇒ legacy protocol defaults.
+    #[serde(default)]
+    pub transport: Option<TransportSnapshot>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -68,6 +103,13 @@ pub struct RoutingSnapshot {
     #[serde(default)]
     pub providers: Vec<ProviderSnapshot>,
     pub generated_at_ms: i64,
+    /// Provider Profile Store CAS version this snapshot projects. Legacy
+    /// (pre-Phase-2) publishers omit it.
+    #[serde(default)]
+    pub profile_version: Option<u64>,
+    /// Which publisher produced it. Required alongside `profile_version`.
+    #[serde(default)]
+    pub authority: Option<SnapshotAuthority>,
 }
 
 impl RoutingSnapshot {
@@ -80,6 +122,87 @@ impl RoutingSnapshot {
 
     pub fn provider(&self, id: &str) -> Option<&ProviderSnapshot> {
         self.providers.iter().find(|p| p.id == id && p.enabled)
+    }
+
+    /// Provider entry projecting a given Profile Store deployment (ticket
+    /// candidates address deployments, not live provider ids).
+    pub fn provider_by_deployment(&self, deployment_id: &str) -> Option<&ProviderSnapshot> {
+        self.providers
+            .iter()
+            .find(|p| p.enabled && p.deployment_id.as_deref() == Some(deployment_id))
+    }
+
+    /// Fail-closed ingest validation: every transport's static headers and
+    /// custom auth-header name must pass the shared header policy, and a
+    /// versioned snapshot must name its authority. An invalid snapshot is
+    /// rejected WHOLE — the gateway keeps serving the previous one.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.profile_version.is_some() && self.authority.is_none() {
+            return Err("versioned snapshot must declare its authority".into());
+        }
+        for provider in &self.providers {
+            let Some(transport) = &provider.transport else {
+                continue;
+            };
+            match transport.auth_scheme.as_str() {
+                "x-api-key" | "bearer" => {}
+                "custom-header" => {
+                    let name = transport.auth_header_name.as_deref().unwrap_or("");
+                    // The auth header itself may be a normally-blocked name
+                    // ONLY if it is a well-formed token that is not hop-by-hop
+                    // or internal; re-use the policy but allow the dedicated
+                    // auth classification (a custom auth header IS an auth
+                    // header by design — e.g. `x-goog-api-key`).
+                    let verdict = crate::header_policy::check_header(
+                        name,
+                        Some("x"),
+                        crate::header_policy::HeaderContext::Static,
+                    );
+                    let acceptable = verdict.allowed
+                        || verdict.reason == crate::header_policy::HeaderPolicyReason::AuthHeader;
+                    if !acceptable {
+                        return Err(format!(
+                            "provider {}: invalid custom auth header name '{name}' ({})",
+                            provider.id,
+                            verdict.reason.code()
+                        ));
+                    }
+                }
+                other => {
+                    return Err(format!(
+                        "provider {}: unknown auth scheme '{other}'",
+                        provider.id
+                    ));
+                }
+            }
+            let violations = crate::header_policy::validate_static_headers(
+                transport
+                    .static_headers
+                    .iter()
+                    .map(|(k, v)| (k.as_str(), v.as_str())),
+            );
+            if let Some((name, reason)) = violations.first() {
+                return Err(format!(
+                    "provider {}: blocked static header '{name}' ({reason})",
+                    provider.id
+                ));
+            }
+            for name in &transport.forwarded_semantic_headers {
+                let verdict = crate::header_policy::check_header(
+                    name,
+                    None,
+                    crate::header_policy::HeaderContext::Forward,
+                );
+                if !verdict.allowed {
+                    return Err(format!(
+                        "provider {}: blocked forwarded header '{name}' ({})",
+                        provider.id,
+                        verdict.reason.code()
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 }
 
