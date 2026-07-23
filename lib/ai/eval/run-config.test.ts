@@ -165,6 +165,64 @@ describe("runConfiguredEval", () => {
     expect(row.scores["always-pass"]).not.toHaveProperty("reasoning")
   })
 
+  it("persists the agent's answer, truncating at the configured cap", async () => {
+    // Runs used to store scores and nothing else, so "case 7 failed" came with
+    // no way to see what the model said or why the judge rejected it.
+    const long = "x".repeat(50)
+    const target: EvalTarget = { label: "t", run: async () => ({ ...sample, output: long }) }
+    const { deps, savedCases } = makeDeps({
+      buildTarget: () => target,
+      maxStoredOutputChars: 10,
+    })
+    await runConfiguredEval(
+      "d",
+      { targets: [{ kind: "chat", label: "A", model: "m" }], scorerIds: [], k: 1 },
+      deps
+    )
+    const row = savedCases.mock.calls[0][0] as { output: string; outputTruncated: boolean }
+    expect(row.output).toBe("x".repeat(10))
+    expect(row.outputTruncated).toBe(true)
+  })
+
+  it("stores the full answer when it fits, and none when the cap is 0", async () => {
+    const target: EvalTarget = { label: "t", run: async () => ({ ...sample, output: "short" }) }
+    const fits = makeDeps({ buildTarget: () => target, maxStoredOutputChars: 100 })
+    await runConfiguredEval(
+      "d",
+      { targets: [{ kind: "chat", label: "A", model: "m" }], scorerIds: [], k: 1 },
+      fits.deps
+    )
+    const kept = fits.savedCases.mock.calls[0][0] as { output?: string; outputTruncated?: boolean }
+    expect(kept.output).toBe("short")
+    expect(kept.outputTruncated).toBeUndefined()
+
+    const off = makeDeps({ buildTarget: () => target, maxStoredOutputChars: 0 })
+    await runConfiguredEval(
+      "d",
+      { targets: [{ kind: "chat", label: "A", model: "m" }], scorerIds: [], k: 1 },
+      off.deps
+    )
+    expect(off.savedCases.mock.calls[0][0]).not.toHaveProperty("output")
+  })
+
+  it("records a run failure on the row instead of losing it", async () => {
+    const target: EvalTarget = {
+      label: "t",
+      run: async () => {
+        throw new Error("sidecar unavailable")
+      },
+    }
+    const { deps, savedCases } = makeDeps({ buildTarget: () => target })
+    await runConfiguredEval(
+      "d",
+      { targets: [{ kind: "chat", label: "A", model: "m" }], scorerIds: [], k: 1 },
+      deps
+    )
+    expect((savedCases.mock.calls[0][0] as { sampleError: string }).sampleError).toBe(
+      "sidecar unavailable"
+    )
+  })
+
   it("clamps a zero/absent k to 1 and forwards an abort signal", async () => {
     const { deps, saved } = makeDeps()
     const controller = new AbortController()

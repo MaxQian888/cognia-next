@@ -32,6 +32,65 @@ function rowVerdict(row: EvalRunCaseRow): "pass" | "fail" | "ungraded" {
   return row.verdict ?? (row.passAt1 ? "pass" : "fail")
 }
 
+/**
+ * The case prompt, expandable to what the agent actually answered and why each
+ * scorer decided what it did.
+ *
+ * A run used to be a wall of numbers with no way to reach the underlying
+ * answer — "case 7 failed" and nothing more. `<details>` rather than a dialog
+ * so several cases can be open side by side while reading a run, and because
+ * the repo's other eval forms already use it (jsdom-friendly, no Radix).
+ */
+function CaseCell({
+  label,
+  row,
+  scorerIds,
+}: {
+  label: string
+  row: EvalRunCaseRow
+  scorerIds: string[]
+}) {
+  const t = useTranslations("eval.runDetail")
+  const reasoned = scorerIds
+    .map((id) => ({ id, score: row.scores[id] }))
+    .filter((x) => x.score?.reasoning)
+  const hasDetail = Boolean(row.output || row.sampleError || reasoned.length > 0)
+
+  if (!hasDetail) return <span className="line-clamp-2">{label}</span>
+
+  return (
+    <details data-testid="case-detail">
+      <summary className="cursor-pointer">
+        <span className="line-clamp-2 align-middle">{label}</span>
+      </summary>
+      <div className="mt-2 flex flex-col gap-2 text-xs">
+        {row.sampleError && (
+          <p className="text-destructive" role="alert">
+            {t("sampleError", { error: row.sampleError })}
+          </p>
+        )}
+        {row.output && (
+          <div>
+            <p className="text-muted-foreground font-medium">{t("agentOutput")}</p>
+            <p className="whitespace-pre-wrap break-words" data-testid="case-output">
+              {row.output}
+              {row.outputTruncated && (
+                <span className="text-muted-foreground"> {t("outputTruncated")}</span>
+              )}
+            </p>
+          </div>
+        )}
+        {reasoned.map(({ id, score }) => (
+          <div key={id}>
+            <p className="text-muted-foreground font-medium">{id}</p>
+            <p className="break-words">{score!.reasoning}</p>
+          </div>
+        ))}
+      </div>
+    </details>
+  )
+}
+
 export interface RunDetailProps {
   runId: string
   gate?: GateThresholds
@@ -159,9 +218,11 @@ export function RunDetail({ runId, gate, onBack }: RunDetailProps) {
                 return (
                   <tr key={row.id}>
                     <td className="border p-2 align-top">
-                      <span className="line-clamp-2">
-                        {inputByCase.get(row.caseId) ?? row.caseId}
-                      </span>
+                      <CaseCell
+                        label={inputByCase.get(row.caseId) ?? row.caseId}
+                        row={row}
+                        scorerIds={scorerIds}
+                      />
                     </td>
                     {scorerIds.map((id) => {
                       const s = row.scores[id]

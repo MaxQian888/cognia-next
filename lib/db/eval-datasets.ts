@@ -67,7 +67,7 @@ export async function listDatasetsByCapability(capability: string): Promise<Eval
 
 export async function updateDataset(
   id: string,
-  patch: Partial<Pick<EvalDataset, "name" | "description" | "gate">>
+  patch: Partial<Pick<EvalDataset, "name" | "description" | "gate" | "defaultGrading">>
 ): Promise<EvalDataset | undefined> {
   const existing = await getDataset(id)
   if (!existing) return undefined
@@ -144,6 +144,120 @@ export async function addCase(datasetIdValue: string, input: AddCaseInput): Prom
   await getDb().evalCases.put(row)
   await bumpDatasetVersion(datasetIdValue)
   return row
+}
+
+/**
+ * Stable, dataset-scoped id for a case imported from a source that has its own
+ * row id. Namespacing by dataset lets two datasets import the same benchmark
+ * without colliding, and keeps the id in the PRIMARY KEY so an upsert is a
+ * plain `put` — no new compound index, so no Dexie version bump.
+ */
+export function importedCaseId(datasetIdValue: string, sourceId: string): string {
+  // FNV-1a over the dataset id: short, stable, and collision risk is irrelevant
+  // because the source id already scopes within a dataset in practice.
+  let h = 0x811c9dc5
+  for (let i = 0; i < datasetIdValue.length; i++) {
+    h ^= datasetIdValue.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return `evc_${(h >>> 0).toString(36)}_${sourceId}`
+}
+
+export interface BulkAddCasesOptions {
+  /**
+   * Treat `input.id` as a stable source id: existing rows with the same id are
+   * OVERWRITTEN rather than duplicated, so re-importing a test set (e.g. after
+   * fixing the field mapping) converges instead of doubling the dataset.
+   */
+  upsertBySourceId?: boolean
+  /** Fired after each chunk lands, for import progress. */
+  onProgress?: (written: number, total: number) => void
+  /** Aborts between chunks; already-written chunks stay. */
+  signal?: AbortSignal
+}
+
+export interface BulkAddCasesResult {
+  added: number
+  updated: number
+}
+
+/** Rows per transaction. Large enough to amortize, small enough to stay cancellable. */
+const BULK_CHUNK = 200
+
+/**
+ * Insert many cases in chunked transactions, bumping the dataset version ONCE.
+ *
+ * The per-case {@link addCase} does four Dexie round-trips (read dataset, put
+ * case, read dataset, put dataset) and a version bump each time, so importing a
+ * real test set through it meant thousands of serial operations on the main
+ * thread with no progress and no way out. This does one `bulkPut` per chunk and
+ * a single version bump at the end.
+ *
+ * Not atomic across chunks by design: a 1300-case import held in one
+ * transaction blocks every other Dexie reader for its duration, and a partial
+ * import that reports how far it got is more useful than one that silently
+ * rolls back. `onProgress` reports what actually landed.
+ */
+export async function bulkAddCases(
+  datasetIdValue: string,
+  inputs: AddCaseInput[],
+  options: BulkAddCasesOptions = {}
+): Promise<BulkAddCasesResult> {
+  const ds = await getDataset(datasetIdValue)
+  if (!ds) throw new Error(`bulkAddCases: dataset "${datasetIdValue}" not found`)
+  if (inputs.length === 0) return { added: 0, updated: 0 }
+
+  const db = getDb()
+  const now = Date.now()
+  let added = 0
+  let updated = 0
+  let written = 0
+
+  for (let offset = 0; offset < inputs.length; offset += BULK_CHUNK) {
+    if (options.signal?.aborted) break
+    const slice = inputs.slice(offset, offset + BULK_CHUNK)
+    const rows: EvalCase[] = slice.map((input) => ({
+      id:
+        input.id && options.upsertBySourceId
+          ? importedCaseId(datasetIdValue, input.id)
+          : (input.id ?? caseId()),
+      datasetId: datasetIdValue,
+      input: input.input,
+      capability: input.capability ?? ds.capability,
+      source: input.source,
+      createdAt: input.createdAt ?? now,
+      updatedAt: now,
+      ...(input.history ? { history: input.history } : {}),
+      ...(input.reference ? { reference: input.reference } : {}),
+      ...(input.failureMode ? { failureMode: input.failureMode } : {}),
+      ...(input.sourceTraceId ? { sourceTraceId: input.sourceTraceId } : {}),
+      ...(input.notes ? { notes: input.notes } : {}),
+      ...(input.tags ? { tags: input.tags } : {}),
+      ...(input.split ? { split: input.split } : {}),
+      ...(input.metadata ? { metadata: input.metadata } : {}),
+      ...(input.inputVars ? { inputVars: input.inputVars } : {}),
+    }))
+
+    await db.transaction("rw", db.evalCases, async () => {
+      const existing = await db.evalCases.bulkGet(rows.map((r) => r.id))
+      existing.forEach((row, i) => {
+        if (row) {
+          updated += 1
+          // Preserve the original creation time on re-import.
+          rows[i].createdAt = row.createdAt
+        } else {
+          added += 1
+        }
+      })
+      await db.evalCases.bulkPut(rows)
+    })
+
+    written += rows.length
+    options.onProgress?.(written, inputs.length)
+  }
+
+  if (written > 0) await bumpDatasetVersion(datasetIdValue)
+  return { added, updated }
 }
 
 export async function getCase(id: string): Promise<EvalCase | undefined> {

@@ -143,6 +143,7 @@ export function DatasetDetail({ dataset, appSettings, runOptions }: DatasetDetai
           <ImportDialog
             datasetId={dataset.id}
             capability={dataset.capability}
+            {...(dataset.defaultGrading ? { defaultGrading: dataset.defaultGrading } : {})}
             onClose={() => setDialog("none")}
           />
         </DialogContent>

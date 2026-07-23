@@ -156,10 +156,40 @@
     "save": "Save gate",
     "savedNotice": "Gate saved"
   },
+  "grading": {
+    "alphabet": "Option letters",
+    "extractNothing": "This rule extracts nothing from \"{sample}\" — cases using it will be ungraded.",
+    "extracted": "This rule extracts: {value}",
+    "hints": {
+      "choice": "Pull a multiple-choice letter (or 1-based index) out of both sides and compare.",
+      "contains-any": "Passes when the answer contains ANY of the expected values — for answers with several acceptable forms.",
+      "exact": "The answer must equal the expected output after normalization.",
+      "numeric": "Pull a number out of both sides and compare. Use a pattern when the expected output marks its answer (e.g. GSM8K's ####).",
+      "regex": "The answer must match the pattern."
+    },
+    "mode": "Comparison",
+    "modes": {
+      "choice": "Multiple choice",
+      "contains-any": "Contains any (alias set)",
+      "exact": "Exact match",
+      "numeric": "Numeric answer",
+      "regex": "Regex match"
+    },
+    "normalize": {
+      "caseInsensitive": "Ignore case",
+      "stripArticles": "Ignore a / an / the",
+      "stripPunctuation": "Ignore punctuation"
+    },
+    "pattern": "Extraction pattern",
+    "tolerance": "Tolerance"
+  },
   "import": {
     "action": "Import {count, plural, =1 {# case} other {# cases}}",
+    "actionHf": "Import {count} case(s)",
+    "cancel": "Cancel",
     "close": "Close",
     "done": "Imported {count, plural, =1 {# case} other {# cases}}.",
+    "doneUpsert": "Imported {added} new case(s), updated {updated}",
     "failed": "Import failed: {error}",
     "file": {
       "expectedColumn": "Expected column",
@@ -174,14 +204,28 @@
     "heading": "Import test set",
     "hf": {
       "fetch": "Fetch & import",
+      "limit": "Rows to import",
       "offline": "Offline — HuggingFace import needs a network connection.",
+      "probe": "Inspect",
+      "split": "Config / split",
       "uri": "Dataset URI"
     },
     "history": {
       "empty": "No recent traces to import.",
       "pick": "Pick trace for session {id}"
     },
+    "mapping": {
+      "heading": "Column mapping",
+      "idColumn": "Stable id column (enables re-import without duplicates)",
+      "splitColumn": "Split column",
+      "splitLiteral": "Split applied to every case",
+      "useGrading": "Grade the expected answer automatically"
+    },
+    "nothingToImport": "Nothing to import — check the column mapping.",
     "preview": "{count, plural, =1 {# case} other {# cases}} parsed",
+    "previewSample": "Previewing {count} sample row(s); {total} will be imported",
+    "skipped": "{count} row(s) skipped",
+    "stage": "Stage {count} case(s)",
     "tabs": {
       "file": "File",
       "foreign": "Foreign format",
@@ -219,6 +263,7 @@
     "targets": "Targets"
   },
   "runDetail": {
+    "agentOutput": "Agent answer",
     "back": "Back",
     "caseColumn": "Case",
     "fail": "Fail",
@@ -230,9 +275,11 @@
     "legacyScoringHint": "This run predates the scoring fix: measurement-only scorers counted as passes, so its pass rate is inflated and not comparable with newer runs. Its gate verdict is withheld.",
     "loading": "Loading run…",
     "noCases": "No per-case results recorded for this run.",
+    "outputTruncated": "(truncated)",
     "pass": "Pass",
     "passAt1": "pass@1 {pct}%",
     "passHatK": "pass^{k} {pct}%",
+    "sampleError": "This case failed to run: {error}",
     "scorersFailed": "These scorers failed on every case and graded nothing: {scorers}. The numbers above are not trustworthy — check the judge provider and re-run.",
     "status": {
       "errored": "The scorer itself failed",

@@ -29,7 +29,16 @@ export interface RunConfiguredDeps {
   saveCaseResult(row: SaveCaseResultInput): Promise<void>
   now(): number
   newRunId(): string
+  /**
+   * Characters of the agent's answer to persist per case. `0` stores none.
+   * Defaults to {@link DEFAULT_STORED_OUTPUT_CHARS} when the caller says
+   * nothing, so a run always leaves something to look at.
+   */
+  maxStoredOutputChars?: number
 }
+
+/** Fallback when a caller supplies no `maxStoredOutputChars`. */
+export const DEFAULT_STORED_OUTPUT_CHARS = 4096
 
 /** Apply a case subset (AND-combined). Undefined subset → all cases. */
 export function filterCases(cases: EvalCase[], subset?: CaseSubset): EvalCase[] {
@@ -92,12 +101,18 @@ export async function runConfiguredEval(
         // not-applicable scores as failures), so the header read 100% while
         // every row below it read FAIL.
         const verdict = repetitionVerdict(rep0)
+        const cap = deps.maxStoredOutputChars ?? DEFAULT_STORED_OUTPUT_CHARS
+        const raw = rep0.sample.output
+        const truncated = cap > 0 && raw.length > cap
         void deps.saveCaseResult({
           runId,
           caseId: result.caseId,
           scores,
           verdict,
           passAt1: verdict === "pass",
+          ...(cap > 0 && raw.length > 0 ? { output: truncated ? raw.slice(0, cap) : raw } : {}),
+          ...(truncated ? { outputTruncated: true } : {}),
+          ...(rep0.sample.error ? { sampleError: rep0.sample.error } : {}),
         })
       },
     })

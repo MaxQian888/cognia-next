@@ -162,6 +162,70 @@ describe("RunDetail", () => {
     expect(screen.queryByText("gateFailed")).not.toBeInTheDocument()
   })
 
+  it("expands a case to the agent's answer and each judge's reasoning", async () => {
+    // A failing case used to be a dead end: a score and a red cell, with no way
+    // to see what the model said or why the judge rejected it.
+    ;(useEvalRunCaseResults as jest.Mock).mockReturnValue([
+      {
+        id: "r1::c1",
+        runId: "r1",
+        caseId: "c1",
+        scores: {
+          "judge-task-completion": {
+            value: 0,
+            passed: false,
+            status: "scored",
+            reasoning: "the answer never states a total",
+          },
+        },
+        verdict: "fail",
+        passAt1: false,
+        output: "I am not sure how to work this out.",
+      },
+    ])
+    render(<RunDetail runId="r1" onBack={jest.fn()} />)
+    expect(await screen.findByTestId("case-detail")).toBeInTheDocument()
+    expect(screen.getByTestId("case-output")).toHaveTextContent(
+      "I am not sure how to work this out."
+    )
+    expect(screen.getByText("the answer never states a total")).toBeInTheDocument()
+  })
+
+  it("marks a truncated answer and surfaces a failed run", async () => {
+    ;(useEvalRunCaseResults as jest.Mock).mockReturnValue([
+      {
+        id: "r1::c1",
+        runId: "r1",
+        caseId: "c1",
+        scores: {},
+        verdict: "ungraded",
+        passAt1: false,
+        output: "cut short",
+        outputTruncated: true,
+        sampleError: "sidecar unavailable",
+      },
+    ])
+    render(<RunDetail runId="r1" onBack={jest.fn()} />)
+    expect(await screen.findByTestId("case-output")).toHaveTextContent("outputTruncated")
+    expect(screen.getByRole("alert")).toHaveTextContent("sidecar unavailable")
+  })
+
+  it("renders a plain label when a row carries no answer or reasoning", async () => {
+    ;(useEvalRunCaseResults as jest.Mock).mockReturnValue([
+      {
+        id: "r1::c1",
+        runId: "r1",
+        caseId: "c1",
+        scores: { assertion: { value: 1, passed: true, status: "scored" } },
+        verdict: "pass",
+        passAt1: true,
+      },
+    ])
+    render(<RunDetail runId="r1" onBack={jest.fn()} />)
+    expect(await screen.findByText("first prompt")).toBeInTheDocument()
+    expect(screen.queryByTestId("case-detail")).not.toBeInTheDocument()
+  })
+
   it("calls onBack and renders without a gate", async () => {
     const onBack = jest.fn()
     render(<RunDetail runId="r1" onBack={onBack} />)

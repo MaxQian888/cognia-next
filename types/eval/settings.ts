@@ -45,10 +45,24 @@ export interface EvalSettings {
    * USD. Undefined / 0 disables the guard.
    */
   costWarnUsd?: number
+  /**
+   * How much of the agent's answer to keep on each per-case result row, in
+   * characters. `0` stores none.
+   *
+   * Runs used to persist scores and nothing else, so "case 7 failed" came with
+   * no way to see what the model actually said or why the judge rejected it —
+   * the one thing error analysis needs. Truncated because a thousand-case run
+   * would otherwise put megabytes of prose in IndexedDB.
+   */
+  maxStoredOutputChars: number
 }
 
 /** Baseline used by DEFAULTS and as the merge base when the field is absent. */
 export const DEFAULT_EVAL_SETTINGS: EvalSettings = {
   defaultK: 1,
   defaultScorerIds: [],
+  maxStoredOutputChars: 4096,
 }
+
+/** Upper bound for {@link EvalSettings.maxStoredOutputChars}. */
+export const MAX_STORED_OUTPUT_CHARS = 32_768

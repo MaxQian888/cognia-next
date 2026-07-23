@@ -82,6 +82,13 @@ export interface EvalReference {
   expectedContains?: string[]
   /** Ground-truth context needed (RAG context recall). */
   expectedContext?: string[]
+  /**
+   * How {@link expectedOutput} / {@link expectedContains} should be compared
+   * against the answer — see {@link import("./grading").GradingSpec}. Without
+   * it the match scorers report `not-applicable`: a golden answer with no
+   * stated comparison rule is not something to guess at.
+   */
+  grading?: import("./grading").GradingSpec
 }
 
 export type EvalCaseSource = "real-trace" | "synthetic" | "handwritten"
@@ -135,6 +142,13 @@ export interface EvalDataset {
   version: number
   /** Optional pass/fail thresholds applied to this dataset's runs. */
   gate?: import("./gate").GateThresholds
+  /**
+   * The grading rule last used when importing into / adding cases to this
+   * dataset, pre-filling the next one. A UI convenience ONLY — scoring reads
+   * `EvalCase.reference.grading`, never this, so a case always says how it is
+   * judged even after the dataset default changes.
+   */
+  defaultGrading?: import("./grading").GradingSpec
   createdAt: number
   updatedAt: number
 }

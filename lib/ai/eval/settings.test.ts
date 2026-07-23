@@ -47,3 +47,34 @@ describe("resolveEvalSettings", () => {
     expect(r.costWarnUsd).toBe(5)
   })
 })
+
+describe("resolveEvalSettings — stored output cap", () => {
+  it("defaults to 4096 characters", () => {
+    expect(resolveEvalSettings(null).maxStoredOutputChars).toBe(4096)
+  })
+
+  it("keeps a valid value, allows 0 to disable, and rounds", () => {
+    expect(
+      resolveEvalSettings(asSettings({ maxStoredOutputChars: 1000 })).maxStoredOutputChars
+    ).toBe(1000)
+    expect(resolveEvalSettings(asSettings({ maxStoredOutputChars: 0 })).maxStoredOutputChars).toBe(
+      0
+    )
+    expect(
+      resolveEvalSettings(asSettings({ maxStoredOutputChars: 1000.6 })).maxStoredOutputChars
+    ).toBe(1001)
+  })
+
+  it("clamps out-of-range and non-finite values instead of trusting them", () => {
+    // A huge cap would put megabytes of prose per run into IndexedDB.
+    expect(
+      resolveEvalSettings(asSettings({ maxStoredOutputChars: 10_000_000 })).maxStoredOutputChars
+    ).toBe(32_768)
+    expect(resolveEvalSettings(asSettings({ maxStoredOutputChars: -5 })).maxStoredOutputChars).toBe(
+      0
+    )
+    expect(
+      resolveEvalSettings(asSettings({ maxStoredOutputChars: Number.NaN })).maxStoredOutputChars
+    ).toBe(4096)
+  })
+})

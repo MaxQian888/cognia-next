@@ -15,6 +15,7 @@ import { saveRun } from "@/lib/db/eval-runs"
 import { snapshotVersion } from "@/lib/db/eval-dataset-versions"
 import { saveCaseResult } from "@/lib/db/eval-run-cases"
 import { deterministicScorers, llmScorers } from "./scorers"
+import { resolveEvalSettings } from "./settings"
 import { defaultChatTargetDeps } from "./targets/chat"
 import { defaultTeamTargetDeps } from "./targets/team-default-deps"
 import { defaultWorkflowTargetDeps } from "./targets/workflow-default-deps"
@@ -81,6 +82,7 @@ export function buildConfiguredRunDeps(args: BrowserRunDepsArgs): ConfiguredRunD
       saveCaseResult,
       now: () => Date.now(),
       newRunId: newEvalRunId,
+      maxStoredOutputChars: resolveEvalSettings(args.appSettings).maxStoredOutputChars,
     },
   }
 }

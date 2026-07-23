@@ -7,7 +7,7 @@
 
 import type { AppSettings } from "@cognia/agent-config-types"
 import type { EvalSettings } from "@/types/eval/settings"
-import { DEFAULT_EVAL_SETTINGS } from "@/types/eval/settings"
+import { DEFAULT_EVAL_SETTINGS, MAX_STORED_OUTPUT_CHARS } from "@/types/eval/settings"
 import { sanitizeScorerIds } from "./scorers/catalog"
 
 const MIN_K = 1
@@ -18,6 +18,11 @@ function clampK(k: number): number {
   return Math.min(MAX_K, Math.max(MIN_K, Math.round(k)))
 }
 
+function clampStoredOutput(n: number | undefined): number {
+  if (n === undefined || !Number.isFinite(n)) return DEFAULT_EVAL_SETTINGS.maxStoredOutputChars
+  return Math.min(MAX_STORED_OUTPUT_CHARS, Math.max(0, Math.round(n)))
+}
+
 /** Merge + sanitize the persisted eval settings. Always returns a full object. */
 export function resolveEvalSettings(appSettings: AppSettings | null | undefined): EvalSettings {
   const raw = appSettings?.evalSettings
@@ -26,6 +31,7 @@ export function resolveEvalSettings(appSettings: AppSettings | null | undefined)
     ...merged,
     defaultK: clampK(merged.defaultK),
     defaultScorerIds: sanitizeScorerIds(merged.defaultScorerIds ?? []),
+    maxStoredOutputChars: clampStoredOutput(merged.maxStoredOutputChars),
   }
 }
 

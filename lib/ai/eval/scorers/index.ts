@@ -17,6 +17,7 @@ import {
 } from "./tool-correctness"
 import { trajectoryScorer, makeTrajectoryScorer } from "./trajectory"
 import { assertionScorer } from "./assertion"
+import { matchScorers } from "./match"
 import { costScorer, makeCostScorer, type CostBudget } from "./cost"
 import { makeJudgeScorer } from "./judge"
 import { makeRagScorer } from "./rag"
@@ -34,13 +35,31 @@ export {
   makeJudgeScorer,
   makeRagScorer,
 }
+export {
+  exactMatchScorer,
+  containsAnyScorer,
+  regexMatchScorer,
+  numericMatchScorer,
+  choiceMatchScorer,
+  matchScorers,
+  normalizeAnswer,
+  extractNumber,
+  extractChoice,
+} from "./match"
 
 export interface DeterministicScorerOptions {
   /** Optional cost budget to turn the cost scorer into a gate. */
   costBudget?: CostBudget
 }
 
-/** The L1+L2 deterministic tier — safe to run in CI with no LLM. */
+/**
+ * The L1+L2 deterministic tier — safe to run in CI with no LLM.
+ *
+ * Includes the five reference-answer matchers ({@link matchScorers}). Each is
+ * inert unless the case's `reference.grading` selects its mode, so adding them
+ * costs nothing on tool-use datasets while making imported benchmarks gradable
+ * without a judge.
+ */
 export function deterministicScorers(options: DeterministicScorerOptions = {}): Scorer[] {
   return [
     toolSelectionScorer,
@@ -49,6 +68,7 @@ export function deterministicScorers(options: DeterministicScorerOptions = {}): 
     redundancyScorer,
     trajectoryScorer,
     assertionScorer,
+    ...matchScorers,
     options.costBudget ? makeCostScorer(options.costBudget) : costScorer,
     makeRagScorer({ metric: "context-recall" }),
   ]

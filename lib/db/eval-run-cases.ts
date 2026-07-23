@@ -38,6 +38,20 @@ export interface EvalRunCaseRow {
   verdict?: import("@/types/eval/eval").RepetitionVerdict
   /** Legacy mirror of `verdict === "pass"`. Kept so old rows stay readable. */
   passAt1: boolean
+  /**
+   * What the agent actually said, truncated to
+   * `EvalSettings.maxStoredOutputChars`. Absent when storage is disabled or on
+   * rows written before outputs were kept.
+   *
+   * Without this, "case 7 failed" was a dead end: no way to see the answer, no
+   * way to judge whether the scorer was right, and no way to seed a judge
+   * calibration set from a real run.
+   */
+  output?: string
+  /** True when {@link output} was cut short. */
+  outputTruncated?: boolean
+  /** Set when the RUN itself failed for this case (vs. a clean low-quality answer). */
+  sampleError?: string
 }
 
 export type SaveCaseResultInput = Omit<EvalRunCaseRow, "id">
