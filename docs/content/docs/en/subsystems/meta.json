@@ -21,6 +21,7 @@
     "observability",
     "misc-subsystems",
     "employee-twin",
-    "ocr"
+    "ocr",
+    "unified-agent-execution"
   ]
 }

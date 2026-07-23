@@ -1,0 +1,73 @@
+---
+title: Overview
+description: ADR-0090's unified agent execution authority — one resolver freezes runtime, route, host and credentials into an immutable spec; the sidecar dispatches on it; the gateway routes it with tickets; every caller (chat, workflow, team, plugin) funnels through one service.
+---
+
+# Unified Agent Execution
+
+# ADR-0090 · flag-gated rollout (`agentExecutionResolverV2`) · spec version 1
+
+Cognia has exactly **three agent runtime rails** — the Claude Agent SDK, the
+provider-neutral AI SDK loop (both hosted by the Node sidecar), and external
+agents behind the `ExternalAgentManager`. Everything else is a *dimension*,
+not a rail: gateway vs direct is a **route**, desktop vs headless is a
+**host**, native vs orchestrated is a **delegation mode**, and the text-only
+`executeAgent` channel is a **completion fallback**, never a fourth runtime.
+
+## The authority chain
+
+```
+AgentExecutionPolicy (caller intent, declarative)
+        │
+        ▼
+resolveAgentExecutionSpec()          ← the ONLY decision authority
+        │   lib/ai/agent/execution/resolve-agent-execution-spec.ts
+        ▼
+ResolvedAgentExecutionSpec (FROZEN: runtime · route · host · bindings ·
+        │                   capabilities · credential REF · fingerprint)
+        ▼
+AgentExecutionService                ← the ONLY execution entry
+        │   lib/ai/agent/execution/agent-execution-service.ts
+        ├── agent rail      → resolveSendOptions stamps SendOptions.execution
+        │                     → sidecar dispatch routes on runtimeAdapter
+        ├── completion rail → explicit-only fallback, result carries
+        │                     degradedReason
+        └── external rail   → ExternalAgentManager
+```
+
+Once a spec exists for a session, **nobody re-derives** runtime, route, host
+or credentials from anything else. The spec's `executionFingerprint`
+(canonical-JSON FNV-1a-128, volatile fields excluded) is the identity that
+tickets, budgets, recovery and audits key on.
+
+## Fail-closed rules
+
+- A hard capability (`policy.requires`) the frozen runtime cannot serve
+  rejects **before any provider call** — a completion is never silently
+  consumed instead (`AgentCapabilityUnsatisfiedError`).
+- Losing the agent host degrades to the completion rail **only** when the
+  policy explicitly allows it (`fallbackPolicy: "completion"`), and the
+  result then carries a machine-readable `degradedReason` that surfaces on
+  workflow node outputs, team dispatch results, and plugin meta.
+- Headless/managed installs prohibit the legacy completion fallback outright.
+
+## Wire shape
+
+The spec rides `SendOptions.execution` (`AgentExecutionSendSpec`) — secret
+free by construction: gateway routes carry an endpoint plus a ticket **id**;
+direct routes carry a credential **profile reference**. Raw keys stay on the
+existing `sendOptions.env` redaction path. The Rust `SendOptions` flattens
+unknown fields, so the sidecar receives the spec unchanged and its dispatch
+(`sidecar/dispatch/index.mjs`) routes on `execution.runtimeAdapter`, counting
+spec-less sends as `legacy_dispatch` telemetry.
+
+## Where things live
+
+| Concern | Lives in |
+| --- | --- |
+| Contracts (policy, spec, envelope, events) | `packages/agent-config-types/src/agent-execution.ts` |
+| Resolver + service + flags | `lib/ai/agent/execution/` |
+| Provider/deployment/transport profiles | `packages/provider-types/`, `lib/db/provider-profiles.ts`, `src-tauri/src/provider_profiles/` |
+| Gateway (tickets, snapshot CAS, parity) | `crates/cognia-gateway/` |
+| Generic agent host | `sidecar/agent-host.mjs` (+ `claude-host.mjs` compatibility shim) |
+| Conformance suite | `tests/conformance/` (`pnpm test:conformance`) |

@@ -392,3 +392,53 @@ Heterogeneous Teams and cross-protocol auto-selection follow only after this sli
 - Gateway tickets are scoped, expiring, revocable, and bound to the frozen execution spec.
 - Permission decisions remain fail-closed and approvals never survive as implicit authorization.
 - Compatibility and certification records include exact runtime and Gateway versions.
+
+## Addendum (2026-07-24) — implementation record
+
+Phases 0–8 landed on `dev` (contracts → profiles → gateway → agent host →
+conformance → certification → caller migration → teams → recovery). This
+addendum records the operational facts the plan required to be written down.
+
+### Conformance suite location
+
+`tests/conformance/` (top-level, plain `node:test`): the deterministic
+Anthropic-protocol server (`anthropic-server/`), scenario matrix, harness
+(real `cognia-server` binary + real sidecar), and cases. Run with
+`pnpm test:conformance` after `pnpm conformance:prepare`. Certification
+bundles emit from the same suite (`--emit-manifest`); rollback via
+`scripts/certify/rollback-bundle.mjs` restores the previous bundle pointer
+and reports installed-artifact version mismatches that must move with it.
+
+### R1 spike verdict (frozen)
+
+`sidecar/dispatch/session-materialize.spike.live.test.mjs`, run against the
+real SDK: no public create-from-external-messages API exists; a foreign-id
+resume never silently succeeds as that id; no private JSONL is forged. The
+claude-code codec's `materialize` fidelity is therefore **contextual**
+(replay prompt). The spike is an SDK-upgrade tripwire — if a materialize API
+appears, its surface assertion fails and the verdict must be revisited.
+
+### Retirement schedule (Phase 9)
+
+Every legacy-path deletion is telemetry-gated and ships as its own commit
+with a flag escape. Observation counters: sidecar `legacy_dispatch`
+(spec-less sends), Rust `DeprecatedCommandCounters` /
+`agent_command_telemetry` (`claude_*` alias calls), and the
+`agent.execution.resolved` event volume.
+
+| Step | Precondition (observation window) | Action |
+| --- | --- | --- |
+| 1 | `agentExecutionResolverV2` default-on for one full release AND `legacy_dispatch` = 0 across desktop + headless for 14 consecutive days | Delete the provider-id branch in `sidecar/dispatch/index.mjs`; spec-less sends fail with `LegacyDispatchRemovedError` |
+| 2 | Release cadence decision after step 1 | Shrink `claude-host.mjs` to a ≤30-line name-adapter wrapper; verify bundle resources via tauri-smoke (the COPY trap) |
+| 3 | `claude_*` alias counters = 0 for 14 consecutive days | Three-stage `claude_set_*` retirement: forward+count → dev-error → delete (+ ACL/registration updates), tauri-smoke each stage |
+| 4 | Step 1 complete | Remove duplicate writers: executeAgent's flag-off legacy branch, relay provider creation paths (readers stay, documented LTS); renderer snapshot publisher becomes control-plane only (closes R3) |
+
+Until step 1's precondition holds, the flag-off legacy paths are the
+production fleet and MUST keep byte-identical behavior (pinned by the
+per-caller parity tests added in Phase 6).
+
+### Long-lived gates
+
+`check:provider-name-branches` (greps runtime code for provider-name
+special-casing), `check:runtime-versions` (stale-detection version pins), the
+suite-manifest hash pin, and the colocated-test audit all run in `check:all`.

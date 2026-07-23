@@ -358,3 +358,48 @@ job。异构 Team 与跨协议自动选择只能在该切片稳定后继续。
 - Gateway ticket 必须限定范围、短期有效、可撤销，并绑定冻结 execution spec。
 - 权限决策保持 fail closed，approval 不得被继承为隐式授权。
 - compatibility 与 certification 记录包含精确 runtime 和 Gateway 版本。
+
+## 附录（2026-07-24）— 实施记录
+
+Phase 0–8 已在 `dev` 落地（契约 → 档案 → gateway → agent host → conformance
+→ 认证 → 调用方迁移 → 团队 → 恢复）。本附录记录计划要求写明的运维事实。
+
+### Conformance 套件位置
+
+`tests/conformance/`（顶层,纯 `node:test`）:确定性 Anthropic 协议服务器
+（`anthropic-server/`）、场景矩阵、harness（真 `cognia-server` 二进制 + 真
+sidecar）与用例。先 `pnpm conformance:prepare` 再 `pnpm test:conformance`。
+认证 bundle 由同一套件产出（`--emit-manifest`）;回滚用
+`scripts/certify/rollback-bundle.mjs`,恢复上一 bundle 指针并报告需一并
+移动的已安装工件版本漂移。
+
+### R1 spike 结论（冻结）
+
+`sidecar/dispatch/session-materialize.spike.live.test.mjs` 对真 SDK 运行:
+不存在公开的"从外部消息创建会话"API;外来 id resume 绝不以该 id 静默成功;
+绝不伪造私有 JSONL。因此 claude-code codec 的 `materialize` 保真度为
+**contextual**（重放 prompt）。spike 是 SDK 升级绊线——若 materialize API
+出现,其 surface 断言失败,结论必须复议。
+
+### 退役时点表（Phase 9）
+
+每个 legacy 路径删除都受遥测门控,独立提交并带 flag 逃生。观察计数器:
+sidecar `legacy_dispatch`（无 spec 发送）、Rust `DeprecatedCommandCounters`
+/ `agent_command_telemetry`（`claude_*` 别名调用）、以及
+`agent.execution.resolved` 事件量。
+
+| 步骤 | 前置条件（观察窗） | 动作 |
+| --- | --- | --- |
+| 1 | `agentExecutionResolverV2` 默认开启满一个完整发布周期,且桌面+headless 的 `legacy_dispatch` 连续 14 天为 0 | 删除 `sidecar/dispatch/index.mjs` 的 provider-id 分支;无 spec 发送报 `LegacyDispatchRemovedError` |
+| 2 | 步骤 1 后按发布节奏决定 | `claude-host.mjs` 缩为 ≤30 行名称适配 wrapper;tauri-smoke 验 bundle 资源（COPY 陷阱） |
+| 3 | `claude_*` 别名计数连续 14 天为 0 | `claude_set_*` 三段退役:转发+计数 → dev 报错 → 删除（+ ACL/注册更新）,每段 tauri-smoke |
+| 4 | 步骤 1 完成 | 清理重复 writer:executeAgent flag-off legacy 分支、relay provider 创建路径（reader 保留并注明 LTS）;renderer snapshot publisher 退为纯控制面（闭合 R3） |
+
+在步骤 1 前置条件满足之前,flag-off legacy 路径就是生产主路径,必须保持
+字节级一致行为（由 Phase 6 的逐调用方 parity 测试钉住）。
+
+### 长期门禁
+
+`check:provider-name-branches`（grep 运行时代码的 provider 名特判）、
+`check:runtime-versions`（stale 判定版本钉）、suite-manifest hash 钉、
+colocated-test 审计,均在 `check:all` 中。

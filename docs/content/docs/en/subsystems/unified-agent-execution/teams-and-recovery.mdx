@@ -1,0 +1,56 @@
+---
+title: Teams, Delegation and Recovery
+description: Heterogeneous teammate execution bindings, delegation depth, the run budget governor, canonical sessions with honest fidelity, and strict-dominance recovery.
+---
+
+# Teams, Delegation and Recovery
+
+## Execution bindings (Phase 7)
+
+A teammate binds `inherit | pinned | pool` (`TeammateConfig.execution`),
+resolved by fixed precedence **managed > member > run > team default > app
+default** — the managed override is explicit in the decision trace. Pool mode
+exposes candidate deployment **ids** only (first candidate is today's
+deterministic pick). New raw `apiKey`/`baseURL` teammate writes are rejected
+at every store path; legacy rows stay readable and migrate to their
+provider-id deployment ref at dispatch.
+
+`decideDelegationMode` classifies native vs orchestrated on six axes
+(runtime, route, host, deployment, credential, hard capabilities): only
+frozen model-role variance stays native. Provider- or external-pinned
+subagent defs are excluded from the SDK-native agents map — the orchestrated
+`dispatch_agent` rail honors them instead of the SDK silently mis-running
+them. Team-to-team delegation carries a validated secret-free
+`HandoffEnvelope` and a `maxTeamDelegationDepth` gate (default 2). One
+`RunBudgetGovernor` ledgers every child's usage, attempts and failures on the
+root pool; the plugin budget rebases on it.
+
+## Canonical sessions (Phase 8)
+
+`CanonicalSession` (`packages/agent-config-types/src/canonical-session.ts`)
+is the runtime-neutral record: five fidelity levels
+(`native-exact > structured > contextual > summary-only > unsupported`), an
+integrity-checked sequence digest, and an honest `SessionLossReport` on every
+conversion. Import adapters for claude-code/codex/opencode declare codecs;
+imports project header rows into Dexie v124 (`agentCanonicalSessions`,
+rebuildable) and the import dialog shows a per-source fidelity report.
+
+The R1 spike (`sidecar/dispatch/session-materialize.spike.live.test.mjs`)
+pins the verdict against the real SDK: **no public materialize API exists**,
+foreign-id resume never silently succeeds, and no private JSONL is ever
+forged — so claude-code materialization is `contextual` (replay prompt seeds
+a NEW native session). The spike stays in the suite as an SDK-upgrade
+tripwire.
+
+## Recovery (Phase 8)
+
+The canonical run log is the `AgentEventEnvelope` stream on the existing
+workflow event-log (`run_log` rows with an `agent_envelope` discriminator;
+idempotent on `eventId`). `recoverRun` claims the single-writer run lease
+FIRST, then plans via strict dominance: auto-recovery requires one candidate
+with superset coverage, ≥ fidelity, and agreeing shared-prefix digests —
+forks, ties, and ambiguous side effects all pause as a first-class
+`run.recovery_required` event. `RecoveryCandidate` has no modification-time
+field, so last-modified-wins is structurally impossible. Permission restore
+never replays an allowance; route tickets remint only for the identical
+frozen spec.
