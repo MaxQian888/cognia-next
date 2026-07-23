@@ -54,6 +54,7 @@ import {
   AiPromptConfig,
   AiExtractConfig,
   AiEmbedConfig,
+  BrowserModelConfig,
   MemoryRecallConfig,
   MemoryStoreConfig,
 } from "./index"
@@ -80,6 +81,46 @@ describe("AiPromptConfig — structured output (B1)", () => {
     const schema = screen.getByLabelText("JSON shape (optional)")
     fireEvent.change(schema, { target: { value: '{"a":"string"}' } })
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ jsonSchema: '{"a":"string"}' }))
+  })
+})
+
+describe("BrowserModelConfig", () => {
+  it("offers curated tasks and model presets without starting inference", () => {
+    Object.defineProperty(globalThis, "Worker", { configurable: true, value: class {} })
+    const onChange = jest.fn()
+    wrap(
+      <BrowserModelConfig
+        params={{ operation: "infer", task: "summarization" }}
+        onChange={onChange}
+      />
+    )
+
+    expect(screen.getByText("Operation")).toBeInTheDocument()
+    expect(screen.getByText("Task")).toBeInTheDocument()
+    expect(screen.getByLabelText(/^Model ID/)).toBeInTheDocument()
+    expect(screen.getByText(/Runtime available/)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText("Candidate labels"), {
+      target: { value: "positive, negative" },
+    })
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ candidateLabels: ["positive", "negative"] })
+    )
+  })
+
+  it("hides model controls for status and clamps cache settings", () => {
+    wrap(<BrowserModelConfig params={{ operation: "status" }} onChange={jest.fn()} />)
+    expect(screen.queryByLabelText(/^Model ID/)).toBeNull()
+
+    const onChange = jest.fn()
+    const { unmount } = wrap(
+      <BrowserModelConfig
+        params={{ operation: "preload", task: "summarization" }}
+        onChange={onChange}
+      />
+    )
+    fireEvent.change(screen.getByLabelText("Cached models"), { target: { value: "99" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ maxCachedModels: 8 }))
+    unmount()
   })
 })
 

@@ -548,6 +548,10 @@
     }
   },
   "ai": {
+    "browserModel": {
+      "description": "在浏览器中本地运行明确选择的 Transformers.js 模型。",
+      "label": "浏览器模型"
+    },
     "classify": {
       "description": "基于 LLM 把输入分到 N 个标签之一。",
       "label": "分类"

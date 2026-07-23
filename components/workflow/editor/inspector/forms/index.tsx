@@ -53,6 +53,9 @@ import { TypedOutputFields, OutputSchemaField } from "./output-schema-field"
 import { SchemaForm, type JsonSchema } from "./schema-form"
 import { useLiveQuery } from "dexie-react-hooks"
 import { getWorkflow } from "@/lib/db/workflows"
+import { getTransformersCapabilities } from "@cognia/transformers-runtime/capabilities"
+import { TRANSFORMERS_MODEL_PRESETS } from "@cognia/transformers-runtime/models"
+import type { TransformersTask } from "@cognia/transformers-runtime/types"
 
 type Params = Record<string, unknown>
 type ChangeFn = (next: Params) => void
@@ -6197,6 +6200,371 @@ export function AiEmbedConfig({ params, onChange }: ConfigProps) {
           onChange={(e) => onChange(patchParam(params, "dimension", Number(e.target.value) || 384))}
         />
       </Field>
+    </FieldGroup>
+  )
+}
+
+const BROWSER_MODEL_TASKS: readonly TransformersTask[] = [
+  "text-classification",
+  "translation",
+  "summarization",
+  "text-generation",
+  "text2text-generation",
+  "question-answering",
+  "zero-shot-classification",
+  "token-classification",
+  "fill-mask",
+  "feature-extraction",
+  "sentence-similarity",
+  "automatic-speech-recognition",
+  "image-classification",
+  "object-detection",
+  "image-to-text",
+  "image-segmentation",
+  "depth-estimation",
+  "text-to-speech",
+]
+
+// ── ai.browserModel ──────────────────────────────────────────────────────
+export function BrowserModelConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.aiBrowserModel")
+  const operation = readString(params, "operation", "infer")
+  const task = readString(params, "task", "text-classification") as TransformersTask
+  const modelId = readString(params, "modelId")
+  const capabilities = getTransformersCapabilities()
+  const presets = TRANSFORMERS_MODEL_PRESETS.filter((preset) => preset.task === task)
+  const needsModel = operation !== "status" && operation !== "disposeAll"
+  const candidateLabels = Array.isArray(params.candidateLabels)
+    ? params.candidateLabels.filter((item): item is string => typeof item === "string").join(", ")
+    : ""
+
+  return (
+    <FieldGroup>
+      <div className="text-xs text-muted-foreground" role="status">
+        {capabilities.available ? t("runtime.available") : t("runtime.unavailable")}
+        {capabilities.webgpu ? ` · ${t("runtime.webgpu")}` : ` · ${t("runtime.wasm")}`}
+      </div>
+      <Field label={t("operation.label")} htmlFor="abm-operation" name="operation" required>
+        <Select
+          value={operation}
+          onValueChange={(value) => onChange(patchParam(params, "operation", value))}
+        >
+          <SelectTrigger id="abm-operation">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="infer">{t("operation.infer")}</SelectItem>
+            <SelectItem value="preload">{t("operation.preload")}</SelectItem>
+            <SelectItem value="status">{t("operation.status")}</SelectItem>
+            <SelectItem value="disposeModel">{t("operation.disposeModel")}</SelectItem>
+            <SelectItem value="disposeAll">{t("operation.disposeAll")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+      {needsModel && (
+        <>
+          <Field label={t("task.label")} htmlFor="abm-task" name="task" required>
+            <Select
+              value={task}
+              onValueChange={(value) => onChange(patchParam(params, "task", value))}
+            >
+              <SelectTrigger id="abm-task">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {BROWSER_MODEL_TASKS.map((item) => (
+                  <SelectItem key={item} value={item}>
+                    {t(`tasks.${item}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          {presets.length > 0 && (
+            <Field label={t("preset.label")} htmlFor="abm-preset" name="preset">
+              <Select
+                value={presets.some((preset) => preset.modelId === modelId) ? modelId : undefined}
+                onValueChange={(value) => onChange(patchParam(params, "modelId", value))}
+              >
+                <SelectTrigger id="abm-preset">
+                  <SelectValue placeholder={t("preset.placeholder")} />
+                </SelectTrigger>
+                <SelectContent>
+                  {presets.map((preset) => (
+                    <SelectItem key={preset.modelId} value={preset.modelId}>
+                      {preset.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
+          <Field label={t("modelId.label")} htmlFor="abm-model" name="modelId" required>
+            <Input
+              id="abm-model"
+              value={modelId}
+              onChange={(event) => onChange(patchParam(params, "modelId", event.target.value))}
+              placeholder={t("modelId.placeholder")}
+            />
+          </Field>
+        </>
+      )}
+      {operation === "infer" && (
+        <>
+          <Field label={t("input.label")} htmlFor="abm-input" name="input">
+            <Textarea
+              id="abm-input"
+              value={readString(params, "input")}
+              onChange={(event) => onChange(patchParam(params, "input", event.target.value))}
+              rows={3}
+            />
+          </Field>
+          <Field label={t("inputJson.label")} htmlFor="abm-input-json" name="inputJson">
+            <Textarea
+              id="abm-input-json"
+              value={readString(params, "inputJson")}
+              onChange={(event) => onChange(patchParam(params, "inputJson", event.target.value))}
+              placeholder={t("inputJson.placeholder")}
+              rows={4}
+            />
+          </Field>
+        </>
+      )}
+      {needsModel && (
+        <>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={t("device.label")} htmlFor="abm-device" name="device">
+              <Select
+                value={readString(params, "device", capabilities.recommendedDevice)}
+                onValueChange={(value) => onChange(patchParam(params, "device", value))}
+              >
+                <SelectTrigger id="abm-device">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {/* i18n-exempt: WASM and WebGPU are the runtime backends' own names */}
+                  <SelectItem value="wasm">WASM</SelectItem>
+                  {/* i18n-exempt: WASM and WebGPU are the runtime backends' own names */}
+                  <SelectItem value="webgpu">WebGPU</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label={t("dtype.label")} htmlFor="abm-dtype" name="dtype">
+              <Select
+                value={readString(params, "dtype", "q8")}
+                onValueChange={(value) => onChange(patchParam(params, "dtype", value))}
+              >
+                <SelectTrigger id="abm-dtype">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(["q4", "q8", "fp16", "fp32"] as const).map((dtype) => (
+                    <SelectItem key={dtype} value={dtype}>
+                      {dtype}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
+          <Field label={t("cacheEnabled.label")} htmlFor="abm-cache" name="cacheEnabled">
+            <Switch
+              id="abm-cache"
+              checked={readBoolean(params, "cacheEnabled", true)}
+              onCheckedChange={(checked) => onChange(patchParam(params, "cacheEnabled", checked))}
+            />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field
+              label={t("maxCachedModels.label")}
+              htmlFor="abm-max-cached"
+              name="maxCachedModels"
+            >
+              <Input
+                id="abm-max-cached"
+                type="number"
+                min={1}
+                max={8}
+                value={readNumber(params, "maxCachedModels", 2)}
+                onChange={(event) =>
+                  onChange(
+                    patchParam(
+                      params,
+                      "maxCachedModels",
+                      clampNumberInput(event.target.value, 1, 8, 2)
+                    )
+                  )
+                }
+              />
+            </Field>
+            <Field label={t("timeoutMs.label")} htmlFor="abm-timeout" name="timeoutMs">
+              <Input
+                id="abm-timeout"
+                type="number"
+                min={1000}
+                max={600000}
+                value={readNumber(params, "timeoutMs", 120000)}
+                onChange={(event) =>
+                  onChange(
+                    patchParam(
+                      params,
+                      "timeoutMs",
+                      clampNumberInput(event.target.value, 1000, 600000, 120000)
+                    )
+                  )
+                }
+              />
+            </Field>
+          </div>
+        </>
+      )}
+      {operation === "infer" && (
+        <>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={t("topK.label")} htmlFor="abm-top-k" name="topK">
+              <Input
+                id="abm-top-k"
+                type="number"
+                min={1}
+                max={100}
+                value={readNumber(params, "topK", 1)}
+                onChange={(event) =>
+                  onChange(
+                    patchParam(params, "topK", clampNumberInput(event.target.value, 1, 100, 1))
+                  )
+                }
+              />
+            </Field>
+            <Field label={t("maxNewTokens.label")} htmlFor="abm-max-tokens" name="maxNewTokens">
+              <Input
+                id="abm-max-tokens"
+                type="number"
+                min={1}
+                max={8192}
+                value={readNumber(params, "maxNewTokens", 256)}
+                onChange={(event) =>
+                  onChange(
+                    patchParam(
+                      params,
+                      "maxNewTokens",
+                      clampNumberInput(event.target.value, 1, 8192, 256)
+                    )
+                  )
+                }
+              />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={t("temperature.label")} htmlFor="abm-temperature" name="temperature">
+              <Input
+                id="abm-temperature"
+                type="number"
+                min={0}
+                max={2}
+                step={0.1}
+                value={readNumber(params, "temperature", 1)}
+                onChange={(event) =>
+                  onChange(
+                    patchParam(
+                      params,
+                      "temperature",
+                      Math.max(0, Math.min(2, Number(event.target.value) || 0))
+                    )
+                  )
+                }
+              />
+            </Field>
+            <Field label={t("maxLength.label")} htmlFor="abm-max-length" name="maxLength">
+              <Input
+                id="abm-max-length"
+                type="number"
+                min={1}
+                max={32768}
+                value={readNumber(params, "maxLength", 512)}
+                onChange={(event) =>
+                  onChange(
+                    patchParam(
+                      params,
+                      "maxLength",
+                      clampNumberInput(event.target.value, 1, 32768, 512)
+                    )
+                  )
+                }
+              />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={t("language.label")} htmlFor="abm-language" name="language">
+              <Input
+                id="abm-language"
+                value={readString(params, "language")}
+                onChange={(event) => onChange(patchParam(params, "language", event.target.value))}
+                placeholder={t("language.placeholder")}
+              />
+            </Field>
+            <Field
+              label={t("returnTimestamps.label")}
+              htmlFor="abm-timestamps"
+              name="returnTimestamps"
+            >
+              <Select
+                value={String(params.returnTimestamps ?? false)}
+                onValueChange={(value) =>
+                  onChange(
+                    patchParam(
+                      params,
+                      "returnTimestamps",
+                      value === "word" ? "word" : value === "true"
+                    )
+                  )
+                }
+              >
+                <SelectTrigger id="abm-timestamps">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="false">{t("returnTimestamps.none")}</SelectItem>
+                  <SelectItem value="true">{t("returnTimestamps.segment")}</SelectItem>
+                  <SelectItem value="word">{t("returnTimestamps.word")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
+          <Field label={t("candidateLabels.label")} htmlFor="abm-candidates" name="candidateLabels">
+            <Input
+              id="abm-candidates"
+              value={candidateLabels}
+              onChange={(event) =>
+                onChange(
+                  patchParam(
+                    params,
+                    "candidateLabels",
+                    event.target.value
+                      .split(",")
+                      .map((item) => item.trim())
+                      .filter(Boolean)
+                  )
+                )
+              }
+              placeholder={t("candidateLabels.placeholder")}
+            />
+          </Field>
+          <Field
+            label={t("hypothesisTemplate.label")}
+            htmlFor="abm-hypothesis"
+            name="hypothesisTemplate"
+          >
+            <Input
+              id="abm-hypothesis"
+              value={readString(params, "hypothesisTemplate")}
+              onChange={(event) =>
+                onChange(patchParam(params, "hypothesisTemplate", event.target.value))
+              }
+              placeholder={t("hypothesisTemplate.placeholder")}
+            />
+          </Field>
+        </>
+      )}
     </FieldGroup>
   )
 }

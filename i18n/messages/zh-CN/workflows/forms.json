@@ -75,6 +75,67 @@
       "placeholder": "acc + item.value"
     }
   },
+  "aiBrowserModel": {
+    "cacheEnabled": { "label": "缓存模型" },
+    "candidateLabels": { "label": "候选标签", "placeholder": "正向, 负向" },
+    "device": { "label": "设备" },
+    "dtype": { "label": "数据类型" },
+    "hypothesisTemplate": { "label": "假设模板", "placeholder": "这个示例是 '{}'。" },
+    "input": { "label": "输入" },
+    "inputJson": { "label": "输入 JSON", "placeholder": "可选的结构化模型输入" },
+    "language": { "label": "语言", "placeholder": "zh" },
+    "maxCachedModels": { "label": "缓存模型数" },
+    "maxLength": { "label": "最大长度" },
+    "maxNewTokens": { "label": "最大新令牌数" },
+    "modelId": { "label": "模型 ID", "placeholder": "Xenova/model-name" },
+    "operation": {
+      "disposeAll": "释放所有模型",
+      "disposeModel": "释放模型",
+      "infer": "运行推理",
+      "label": "操作",
+      "preload": "预加载模型",
+      "status": "运行时状态"
+    },
+    "preset": { "label": "模型预设", "placeholder": "选择精选模型" },
+    "returnTimestamps": {
+      "label": "返回时间戳",
+      "none": "不返回",
+      "segment": "分段",
+      "word": "逐词"
+    },
+    "runtime": {
+      "available": "运行时可用",
+      "unavailable": "运行时不可用",
+      "wasm": "WASM",
+      "webgpu": "WebGPU"
+    },
+    "task": { "label": "任务" },
+    "tasks": {
+      "audio-classification": "音频分类",
+      "automatic-speech-recognition": "自动语音识别",
+      "depth-estimation": "深度估计",
+      "feature-extraction": "特征提取",
+      "fill-mask": "掩码填充",
+      "image-classification": "图像分类",
+      "image-segmentation": "图像分割",
+      "image-to-text": "图像转文本",
+      "object-detection": "目标检测",
+      "question-answering": "问答",
+      "sentence-similarity": "句子相似度",
+      "summarization": "摘要",
+      "text-classification": "文本分类",
+      "text-generation": "文本生成",
+      "text2text-generation": "文本到文本生成",
+      "text-to-speech": "文本转语音",
+      "token-classification": "词元分类",
+      "translation": "翻译",
+      "zero-shot-classification": "零样本分类",
+      "zero-shot-image-classification": "零样本图像分类"
+    },
+    "temperature": { "label": "温度" },
+    "timeoutMs": { "label": "超时（毫秒）" },
+    "topK": { "label": "Top K" }
+  },
   "aiClassify": {
     "apiFlavor": {
       "auto": "自动",

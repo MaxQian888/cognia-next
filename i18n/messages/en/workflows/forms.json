@@ -75,6 +75,76 @@
       "placeholder": "acc + item.value"
     }
   },
+  "aiBrowserModel": {
+    "cacheEnabled": { "label": "Cache model" },
+    "candidateLabels": {
+      "label": "Candidate labels",
+      "placeholder": "positive, negative"
+    },
+    "device": { "label": "Device" },
+    "dtype": { "label": "Data type" },
+    "hypothesisTemplate": {
+      "label": "Hypothesis template",
+      "placeholder": "This example is '{}'."
+    },
+    "input": { "label": "Input" },
+    "inputJson": {
+      "label": "Input JSON",
+      "placeholder": "Optional structured model input"
+    },
+    "language": { "label": "Language", "placeholder": "en" },
+    "maxCachedModels": { "label": "Cached models" },
+    "maxLength": { "label": "Maximum length" },
+    "maxNewTokens": { "label": "Maximum new tokens" },
+    "modelId": { "label": "Model ID", "placeholder": "Xenova/model-name" },
+    "operation": {
+      "disposeAll": "Dispose all models",
+      "disposeModel": "Dispose model",
+      "infer": "Run inference",
+      "label": "Operation",
+      "preload": "Preload model",
+      "status": "Runtime status"
+    },
+    "preset": { "label": "Model preset", "placeholder": "Select a curated model" },
+    "returnTimestamps": {
+      "label": "Return timestamps",
+      "none": "None",
+      "segment": "Segments",
+      "word": "Words"
+    },
+    "runtime": {
+      "available": "Runtime available",
+      "unavailable": "Runtime unavailable",
+      "wasm": "WASM",
+      "webgpu": "WebGPU"
+    },
+    "task": { "label": "Task" },
+    "tasks": {
+      "audio-classification": "Audio classification",
+      "automatic-speech-recognition": "Automatic speech recognition",
+      "depth-estimation": "Depth estimation",
+      "feature-extraction": "Feature extraction",
+      "fill-mask": "Fill mask",
+      "image-classification": "Image classification",
+      "image-segmentation": "Image segmentation",
+      "image-to-text": "Image to text",
+      "object-detection": "Object detection",
+      "question-answering": "Question answering",
+      "sentence-similarity": "Sentence similarity",
+      "summarization": "Summarization",
+      "text-classification": "Text classification",
+      "text-generation": "Text generation",
+      "text2text-generation": "Text-to-text generation",
+      "text-to-speech": "Text to speech",
+      "token-classification": "Token classification",
+      "translation": "Translation",
+      "zero-shot-classification": "Zero-shot classification",
+      "zero-shot-image-classification": "Zero-shot image classification"
+    },
+    "temperature": { "label": "Temperature" },
+    "timeoutMs": { "label": "Timeout (ms)" },
+    "topK": { "label": "Top K" }
+  },
   "aiClassify": {
     "apiFlavor": {
       "auto": "Auto",

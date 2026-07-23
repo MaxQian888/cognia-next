@@ -20,8 +20,7 @@ import { getEditorStore, listEditorStores } from "@/lib/workflow/editor/store-re
 import type { EditorStore } from "@/lib/workflow/editor/store"
 
 export type StoreResolutionFailure =
-  | { kind: "not-open"; requestedId?: string }
-  | { kind: "ambiguous"; openIds: string[] }
+  { kind: "not-open"; requestedId?: string } | { kind: "ambiguous"; openIds: string[] }
 
 export class EditorNotOpenError extends Error {
   readonly code = "editor-not-open" as const

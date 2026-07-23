@@ -227,6 +227,7 @@ export type WorkflowNodeKind =
   | "ai.classify"
   | "ai.extract"
   | "ai.embed"
+  | "ai.browserModel"
   | "ai.council"
   | "ai.ensemble"
   // Flow control
@@ -440,6 +441,7 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "ai.classify",
   "ai.extract",
   "ai.embed",
+  "ai.browserModel",
   "ai.council",
   "ai.ensemble",
   "flow.branch",

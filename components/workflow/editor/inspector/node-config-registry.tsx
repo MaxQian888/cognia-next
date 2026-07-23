@@ -64,6 +64,7 @@ import {
   AiClassifyConfig,
   AiCouncilConfig,
   AiEmbedConfig,
+  BrowserModelConfig,
   AiExtractConfig,
   AiPromptConfig,
   EnsembleConfig,
@@ -324,6 +325,7 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "ai.classify": AiClassifyConfig,
   "ai.extract": AiExtractConfig,
   "ai.embed": AiEmbedConfig,
+  "ai.browserModel": BrowserModelConfig,
   "ai.council": AiCouncilConfig,
   "ai.ensemble": EnsembleConfig,
   // Flow

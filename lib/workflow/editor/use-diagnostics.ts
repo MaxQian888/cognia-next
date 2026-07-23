@@ -29,13 +29,11 @@ const EMPTY_LIST: Diagnostic[] = Object.freeze([] as Diagnostic[]) as Diagnostic
 /** Severity counts for the Problems tab badge and the save/run gate. */
 export function useDiagnosticsSummary(): DiagnosticsSummary {
   const store = useEditorStoreOrNull()
-  const selector = useShallow(
-    (s: EditorState): DiagnosticsSummary => ({
-      errorCount: s.diagnostics.errorCount,
-      warningCount: s.diagnostics.warningCount,
-      infoCount: s.diagnostics.infoCount,
-    })
-  )
+  const selector = useShallow((s: EditorState): DiagnosticsSummary => ({
+    errorCount: s.diagnostics.errorCount,
+    warningCount: s.diagnostics.warningCount,
+    infoCount: s.diagnostics.infoCount,
+  }))
   return (store ? store(selector) : null) ?? EMPTY_SUMMARY
 }
 

@@ -10,7 +10,7 @@
  * (only nodes on the current workflow, no editor actions).
  */
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { useShallow } from "zustand/react/shallow"
 import { useTranslations } from "next-intl"
 import type { ReactFlowInstance } from "@xyflow/react"
@@ -42,6 +42,7 @@ export function SpotlightSearch({
   animationsEnabled,
 }: SpotlightSearchProps) {
   const t = useTranslations("workflows.editor.spotlight")
+  const [query, setQuery] = useState("")
   const { nodes, setSelectedNodes, pulseNode } = store(
     useShallow((s: EditorState) => ({
       nodes: s.nodes,
@@ -118,6 +119,11 @@ export function SpotlightSearch({
   }, [nodes, groupRects])
   /* eslint-enable react-hooks/preserve-manual-memoization */
 
+  const filteredRows = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase()
+    return normalizedQuery ? rows.filter((row) => row.value.includes(normalizedQuery)) : rows
+  }, [query, rows])
+
   const handleSelect = (rowId: string) => {
     const row = rows.find((r) => r.id === rowId)
     if (!row) return
@@ -148,10 +154,15 @@ export function SpotlightSearch({
       title={t("openShortcut")}
       description={t("placeholder")}
     >
-      <CommandInput placeholder={t("placeholder")} data-testid="spotlight-input" />
+      <CommandInput
+        value={query}
+        onValueChange={setQuery}
+        placeholder={t("placeholder")}
+        data-testid="spotlight-input"
+      />
       <CommandList>
         <CommandEmpty>{t("empty")}</CommandEmpty>
-        {rows.map((r) => {
+        {filteredRows.map((r) => {
           const Icon = getNodeIcon(r.kind as WorkflowNodeKind)
           return (
             <CommandItem

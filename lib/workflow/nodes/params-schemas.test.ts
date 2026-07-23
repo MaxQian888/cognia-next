@@ -917,6 +917,20 @@ describe("ai schemas", () => {
     expect(s.safeParse({ input: "x", dimension: 16 }).success).toBe(false)
     expect(s.safeParse({ input: "x", dimension: 384 }).success).toBe(true)
   })
+
+  it("ai.browserModel validates operation-specific requirements", () => {
+    const schema = PARAMS_SCHEMAS["ai.browserModel"]
+    expect(schema.safeParse({ operation: "status" }).success).toBe(true)
+    expect(schema.safeParse({ operation: "infer" }).success).toBe(false)
+    expect(
+      schema.safeParse({
+        operation: "infer",
+        task: "summarization",
+        modelId: "Xenova/summary",
+        input: "long text",
+      }).success
+    ).toBe(true)
+  })
 })
 
 describe("flow schemas", () => {

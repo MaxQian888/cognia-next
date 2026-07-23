@@ -57,15 +57,13 @@ export function useNodeDecoration(nodeId: string): NodeDecoration {
   // Build the selector unconditionally so `useShallow` retains a stable
   // identity across renders — calling `useShallow` inside a conditional
   // would violate the hook rules.
-  const selector = useShallow(
-    (s: EditorState): NodeDecoration => ({
-      runStatus: s.runStatusByStepId[nodeId],
-      validation: s.validationByStepId[nodeId],
-      lastRun: s.lastRunByStepId[nodeId],
-      pinned: s.baseWorkflow.pinData?.[nodeId] !== undefined,
-      referenced: !!(s.referencedNodeIds[nodeId] || s.highlightedNodeIds[nodeId]),
-    })
-  )
+  const selector = useShallow((s: EditorState): NodeDecoration => ({
+    runStatus: s.runStatusByStepId[nodeId],
+    validation: s.validationByStepId[nodeId],
+    lastRun: s.lastRunByStepId[nodeId],
+    pinned: s.baseWorkflow.pinData?.[nodeId] !== undefined,
+    referenced: !!(s.referencedNodeIds[nodeId] || s.highlightedNodeIds[nodeId]),
+  }))
   // `store` is itself a hook (Zustand `useBoundStore`), so we either call
   // it or fall through to the empty decoration. The optional-call pattern
   // matches the rest of the editor's "render-without-store" affordance

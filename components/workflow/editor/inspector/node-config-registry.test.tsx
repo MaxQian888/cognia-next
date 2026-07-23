@@ -56,6 +56,7 @@ const NEWLY_WIRED: WorkflowNodeKind[] = [
   "trigger.pet.event",
   "action.pet.interact",
   "ai.council",
+  "ai.browserModel",
   "action.plan.create",
   "action.plan.get",
   "action.plan.list",

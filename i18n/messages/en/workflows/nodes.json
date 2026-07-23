@@ -548,6 +548,10 @@
     }
   },
   "ai": {
+    "browserModel": {
+      "description": "Run an explicitly selected Transformers.js model locally in the browser.",
+      "label": "Browser model"
+    },
     "classify": {
       "description": "LLM-based classification into one of N labels.",
       "label": "Classify"

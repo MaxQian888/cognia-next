@@ -1267,6 +1267,59 @@ const AiEmbedParams = z.object({
   apiKey: optionalString,
 })
 
+const BrowserModelParams = z
+  .object({
+    operation: z.enum(["infer", "preload", "status", "disposeModel", "disposeAll"]),
+    task: z
+      .enum([
+        "automatic-speech-recognition",
+        "depth-estimation",
+        "feature-extraction",
+        "fill-mask",
+        "image-classification",
+        "image-segmentation",
+        "image-to-text",
+        "object-detection",
+        "question-answering",
+        "sentence-similarity",
+        "summarization",
+        "text-classification",
+        "text-generation",
+        "text-to-speech",
+        "text2text-generation",
+        "token-classification",
+        "translation",
+        "zero-shot-classification",
+      ])
+      .optional(),
+    modelId: optionalString,
+    input: optionalString,
+    inputJson: optionalString,
+    device: z.enum(["wasm", "webgpu"]).optional(),
+    dtype: z.enum(["fp32", "fp16", "q8", "q4"]).optional(),
+    cacheEnabled: z.boolean().optional(),
+    maxCachedModels: numberRange(1, 8).optional(),
+    timeoutMs: numberRange(1_000, 600_000).optional(),
+    topK: numberRange(1, 100).optional(),
+    temperature: z.number().min(0).max(2).optional(),
+    maxNewTokens: numberRange(1, 8_192).optional(),
+    maxLength: numberRange(1, 32_768).optional(),
+    language: optionalString,
+    returnTimestamps: z.union([z.boolean(), z.literal("word")]).optional(),
+    candidateLabels: z.array(z.string().min(1)).optional(),
+    hypothesisTemplate: optionalString,
+  })
+  .superRefine((params, context) => {
+    if (params.operation === "status" || params.operation === "disposeAll") return
+    if (!params.task) context.addIssue({ code: "custom", path: ["task"], message: "required" })
+    if (!params.modelId) {
+      context.addIssue({ code: "custom", path: ["modelId"], message: "required" })
+    }
+    if (params.operation === "infer" && !params.input && !params.inputJson) {
+      context.addIssue({ code: "custom", path: ["input"], message: "required" })
+    }
+  })
+
 // ai.council — multi-model consensus. Councillors + synthesizer are addressed
 // by routing alias; the prompt fans out, then one synthesizer merges them.
 const CouncillorSpecSchema = z.object({
@@ -1838,6 +1891,7 @@ export const PARAMS_SCHEMAS = {
   "ai.classify": AiClassifyParams,
   "ai.extract": AiExtractParams,
   "ai.embed": AiEmbedParams,
+  "ai.browserModel": BrowserModelParams,
   "ai.council": AiCouncilParams,
   "ai.ensemble": AiEnsembleParams,
   // Flow

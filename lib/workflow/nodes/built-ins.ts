@@ -111,6 +111,10 @@ import "./pet"
 // Eval nodes — run a dataset eval / gate a run from a workflow.
 import "./eval"
 
+// Optional browser-local Transformers.js inference. The module only registers
+// an executor; the runtime itself is dynamically imported when the node runs.
+import "./browser-model"
+
 // Wave 3 — registers the `action.system.terminal` executor that drives
 // the integrated terminal dock from a workflow step.
 import "./terminal"

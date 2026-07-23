@@ -151,12 +151,7 @@ export async function defaultRoutedPromptDeps(): Promise<RoutedPromptDeps> {
       }
       return {
         protocol: resolution.protocol as
-          | "anthropic"
-          | "openai"
-          | "azure"
-          | "google"
-          | "mistral"
-          | "cohere",
+          "anthropic" | "openai" | "azure" | "google" | "mistral" | "cohere",
         apiKey: resolution.apiKey,
         baseURL: resolution.baseURL,
         apiFlavor: resolution.apiFlavor,

@@ -209,6 +209,9 @@ function RightSidebarInner({
       value={tab}
       onValueChange={handleTabChange}
       className={cn("flex h-full w-full flex-col border-l bg-card/40", className)}
+      // Keep the legacy workflow rail on the shared sidebar background path;
+      // the ContextWorkbench branch below receives the same marker itself.
+      data-bg-target="sidebar"
       data-testid="workflow-right-sidebar"
     >
       {/* Single scrollable row: tabs size to their label (flex-none overrides

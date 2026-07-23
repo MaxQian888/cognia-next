@@ -22,24 +22,13 @@ export type WorkflowType =
  * Workflow step status
  */
 export type WorkflowStepStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "skipped"
-  | "waiting_approval"
+  "pending" | "running" | "completed" | "failed" | "skipped" | "waiting_approval"
 
 /**
  * Workflow execution status
  */
 export type WorkflowExecutionStatus =
-  | "idle"
-  | "planning"
-  | "executing"
-  | "paused"
-  | "completed"
-  | "failed"
-  | "cancelled"
+  "idle" | "planning" | "executing" | "paused" | "completed" | "failed" | "cancelled"
 
 export type WorkflowRuntimeSource = "browser" | "tauri"
 
@@ -354,12 +343,7 @@ export interface PPTTheme {
  * Canva-inspired generation controls
  */
 export type PPTTemplateDirection =
-  | "storytelling"
-  | "pitch-deck"
-  | "reporting"
-  | "educational"
-  | "product-showcase"
-  | "portfolio"
+  "storytelling" | "pitch-deck" | "reporting" | "educational" | "product-showcase" | "portfolio"
 
 export type PPTAudienceTone = "executive" | "professional" | "friendly" | "academic" | "creative"
 
@@ -503,23 +487,13 @@ export type PPTAnimationEffect =
  * Animation timing function
  */
 export type PPTAnimationTiming =
-  | "linear"
-  | "ease"
-  | "ease-in"
-  | "ease-out"
-  | "ease-in-out"
-  | "bounce"
-  | "elastic"
+  "linear" | "ease" | "ease-in" | "ease-out" | "ease-in-out" | "bounce" | "elastic"
 
 /**
  * Animation trigger type
  */
 export type PPTAnimationTrigger =
-  | "on-click"
-  | "with-previous"
-  | "after-previous"
-  | "on-enter"
-  | "on-exit"
+  "on-click" | "with-previous" | "after-previous" | "on-enter" | "on-exit"
 
 /**
  * Animation configuration for an element
@@ -638,13 +612,7 @@ export interface PPTOutlineItem {
   imageStyle?: string
   dataVisualization?: {
     type:
-      | "bar-chart"
-      | "line-chart"
-      | "pie-chart"
-      | "table"
-      | "timeline"
-      | "flowchart"
-      | "comparison"
+      "bar-chart" | "line-chart" | "pie-chart" | "table" | "timeline" | "flowchart" | "comparison"
     data?: Record<string, unknown>
     description?: string
   }

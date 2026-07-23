@@ -218,6 +218,18 @@ const FIXTURES = {
       label: "Embed",
       params: { provider: "anthropic", model: "voyage-3", apiKey: "test", input: "vector me" },
     }),
+  "ai-browser-model": () =>
+    single("E2E Browser Model", {
+      id: "n_browser_model",
+      type: "ai.browserModel",
+      label: "Browser Model",
+      params: {
+        operation: "infer",
+        task: "text-classification",
+        modelId: "Xenova/distilbert-base-uncased-finetuned-sst-2-english",
+        input: "This fixture runs locally.",
+      },
+    }),
 
   // Data.
   "data-transform": () =>

@@ -49,8 +49,7 @@ export interface RemoteStepRequest {
 
 /** What the phone's executor produces (before chunking). */
 export type RemoteStepResult =
-  | { ok: true; output: unknown }
-  | { ok: false; message: string; code?: string }
+  { ok: true; output: unknown } | { ok: false; message: string; code?: string }
 
 interface PendingRemoteStep {
   request: RemoteStepRequest

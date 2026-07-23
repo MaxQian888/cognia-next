@@ -32,8 +32,7 @@ export interface StartWorkflowFromIMInput {
 }
 
 export type StartWorkflowFromIMResult =
-  | { ok: true; runId: string }
-  | { ok: false; reason: "workflow-not-found"; workflowId: string }
+  { ok: true; runId: string } | { ok: false; reason: "workflow-not-found"; workflowId: string }
 
 /**
  * Start a workflow on behalf of an IM user. Returns as soon as the run row

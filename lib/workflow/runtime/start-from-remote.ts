@@ -28,8 +28,7 @@ export interface StartWorkflowFromRemoteInput {
 }
 
 export type StartWorkflowFromRemoteResult =
-  | { ok: true; runId: string }
-  | { ok: false; reason: "workflow-not-found"; workflowId: string }
+  { ok: true; runId: string } | { ok: false; reason: "workflow-not-found"; workflowId: string }
 
 export async function startWorkflowFromRemote(
   input: StartWorkflowFromRemoteInput

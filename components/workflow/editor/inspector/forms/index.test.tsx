@@ -18,6 +18,7 @@ import {
   AiClassifyConfig,
   AiExtractConfig,
   AiCouncilConfig,
+  BrowserModelConfig,
   GoalCompletedTriggerConfig,
   GoalAnalyticsConfig,
   GoalCreateConfig,
@@ -728,6 +729,12 @@ function wrap(ui: React.ReactNode) {
     </NextIntlClientProvider>
   )
 }
+
+describe("BrowserModelConfig export", () => {
+  it("is exposed from the inspector forms module", () => {
+    expect(BrowserModelConfig).toEqual(expect.any(Function))
+  })
+})
 
 describe("TeamTriggerConfig", () => {
   it("renders the scoping fields (team picker + terminal-status select)", () => {

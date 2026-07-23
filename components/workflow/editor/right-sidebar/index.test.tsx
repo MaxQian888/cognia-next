@@ -145,6 +145,35 @@ describe("RightSidebar", () => {
     expect(screen.getByTestId("mock-inspector-panel")).toBeInTheDocument()
   })
 
+  it("opts the shared workbench into the sidebar background scope", () => {
+    window.localStorage.setItem(
+      "cognia-context-workbench-surfaces-v1",
+      JSON.stringify({ workflow: true })
+    )
+    const store = makeFakeStore({
+      selectedNodeIds: [],
+      selectedEdgeIds: [],
+      baseWorkflow: { id: "wf_background", name: "Background" },
+    })
+    harness(store)
+
+    expect(screen.getByTestId("context-workbench")).toHaveAttribute("data-bg-target", "sidebar")
+  })
+
+  it("opts the legacy workflow sidebar into the sidebar background scope", () => {
+    const store = makeFakeStore({
+      selectedNodeIds: [],
+      selectedEdgeIds: [],
+      baseWorkflow: { id: "wf_legacy_background", name: "Background" },
+    })
+    harness(store)
+
+    expect(screen.getByTestId("workflow-right-sidebar")).toHaveAttribute(
+      "data-bg-target",
+      "sidebar"
+    )
+  })
+
   it("uses mobile Sheet semantics without desktop layout controls", async () => {
     window.localStorage.setItem(
       "cognia-context-workbench-surfaces-v1",

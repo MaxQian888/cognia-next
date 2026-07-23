@@ -1016,6 +1016,19 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Bot",
     keywords: ["embed", "vector", "embedding"],
   },
+  "ai.browserModel": {
+    label: "Browser model",
+    description: "Run an explicitly selected Transformers.js model locally in the browser.",
+    iconName: "Cpu",
+    keywords: ["browser", "local", "transformers", "wasm", "webgpu", "onnx"],
+    defaultParams: {
+      operation: "infer",
+      task: "text-classification",
+      dtype: "q8",
+      cacheEnabled: true,
+      maxCachedModels: 2,
+    },
+  },
   // ── Flow ──────────────────────────────────────────────────────────────────
   "flow.branch": {
     label: "If / else",
