@@ -141,14 +141,19 @@ describe("reconcileCrashedAgentRuns", () => {
       ...run("run-snap", "queued"),
       latestSnapshot: { status: "running" } as never,
     })
-    await getDb().executionRuns.put(run("run-ok", "running"))
-    // First lease claim explodes (run-snap alphabetically first is not
-    // guaranteed — make BOTH resilient by failing once, then succeeding).
-    claimLease.mockRejectedValueOnce(new Error("lease store down"))
+    await getDb().executionRuns.put(run("run-fail", "running"))
+    // Deterministic per-run failure (table iteration order and leftover runs
+    // from earlier tests in this shared fake-indexeddb must not matter).
+    claimLease.mockImplementation(async (id: unknown) => {
+      if (id === "run-fail") throw new Error("lease store down")
+      return "claimed"
+    })
     const outcomes = await reconcileCrashedAgentRuns()
-    // Exactly one of the two survived; the failed one was skipped best-effort.
-    const survivors = outcomes.filter((o) => ["run-snap", "run-ok"].includes(o.runId))
-    expect(survivors).toHaveLength(1)
+    const ids = outcomes.map((o) => o.runId)
+    // The snapshot-projected run WAS reconciled (latestSnapshot.status branch)…
+    expect(ids).toContain("run-snap")
+    // …while the lease-failing run was skipped best-effort, blocking nothing.
+    expect(ids).not.toContain("run-fail")
   })
 
   it("ignores non-agent runs and runs that are not stale-running", async () => {
