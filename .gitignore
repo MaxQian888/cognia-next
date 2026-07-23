@@ -24,6 +24,7 @@ junit.xml
 /playwright-report/
 /test-results/
 /playwright/.cache/
+/.cache/
 
 # next.js
 /.next/
@@ -158,6 +159,10 @@ cli/dist/
 
 # Storybook static build output
 storybook-static/
+
+# Serwist service-worker build output
+public/sw.js
+public/swe-worker-*.js
 
 # Conversation/share export artifacts (produced by /export)
 cognia-export-*.md

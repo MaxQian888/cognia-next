@@ -37,6 +37,7 @@ const buildTime = process.env.NEXT_PUBLIC_BUILD_TIME || new Date().toISOString()
 // interference.
 const disableSerwist =
   process.env.NEXT_PUBLIC_PLATFORM === "mobile" || process.env.NODE_ENV !== "production"
+const MAX_PRECACHE_ASSET_BYTES = 2 * 1024 * 1024
 
 const withSerwist = withSerwistInit({
   swSrc: "app/sw.ts",
@@ -44,12 +45,18 @@ const withSerwist = withSerwistInit({
   cacheOnNavigation: true,
   reloadOnOnline: true,
   disable: disableSerwist,
+  // Large optional runtimes (Transformers.js WASM and its lazy worker chunk)
+  // must remain network-on-demand. Filtering them explicitly preserves the
+  // default 2 MiB precache budget without emitting a warning for every build.
+  maximumFileSizeToCacheInBytes: MAX_PRECACHE_ASSET_BYTES,
+  exclude: [({ asset }) => asset.source.size() > MAX_PRECACHE_ASSET_BYTES],
 })
 
 const internalHost = process.env.TAURI_DEV_HOST || "localhost"
 
 // Relative path: Turbopack on Windows rejects absolute paths in resolveAlias.
 const browserStub = "./lib/browser-stubs/empty.js"
+const browserStubAbs = path.resolve(process.cwd(), "lib/browser-stubs/empty.js")
 
 // `os` is the one Node built-in that gets a non-empty browser stub. Unlike the
 // rest of NODE_ONLY_MODULES (read by nobody in the browser), some third-party
@@ -81,6 +88,17 @@ const osShimStubAbs = path.resolve(process.cwd(), "lib/browser-stubs/os-shim.js"
 // uses a repo-relative path; webpack wants an absolute one.
 const PIXI_PREBUNDLED_REL = "./node_modules/pixi.js/dist/pixi.mjs"
 const PIXI_PREBUNDLED_ABS = path.resolve(process.cwd(), "node_modules/pixi.js/dist/pixi.mjs")
+
+// `@huggingface/transformers` exports a Node build whenever webpack evaluates
+// the worker import from the server compilation. That build pulls native
+// `onnxruntime-node` binaries into the static export and webpack tries to parse
+// every platform's `.node` file as JavaScript. This package is browser-only by
+// contract, so pin its worker dependency to the web export in every webpack
+// compilation context.
+const TRANSFORMERS_WEB_ABS = path.resolve(
+  process.cwd(),
+  "packages/transformers-runtime/node_modules/@huggingface/transformers/dist/transformers.web.js"
+)
 
 // Node.js built-ins that third-party deps reach for. Our first-party code no
 // longer touches any of these (the two surviving Node-leaning modules,
@@ -184,7 +202,7 @@ const nextConfig: NextConfig = {
     // this repo has fought before; the trade-off is slower cold starts (no
     // cross-session cache restore), which also makes the predev
     // `clean-stale-turbopack-cache.mjs` purge largely redundant for dev.
-    turbopackFileSystemCacheForDev: false,
+    // turbopackFileSystemCacheForDev: false,
   },
   // Build-time metadata for the About page. Inlined as NEXT_PUBLIC_* envs.
   env: {
@@ -226,7 +244,7 @@ const nextConfig: NextConfig = {
     },
   },
   // Webpack (pnpm build): client-side fallbacks for Node built-ins.
-  webpack: (config, { isServer }) => {
+  webpack: (config, { isServer, webpack }) => {
     if (!isServer) {
       config.resolve.fallback = {
         ...config.resolve.fallback,
@@ -238,12 +256,22 @@ const nextConfig: NextConfig = {
         os: osShimStubAbs,
         "node:os": osShimStubAbs,
       }
+      // Webpack's fallback table only handles ordinary package requests; the
+      // `node:` URI scheme is rejected earlier by its module reader. Replace
+      // those browser-incompatible requests before resolution, matching the
+      // Turbopack aliases above.
+      config.plugins.push(
+        new webpack.NormalModuleReplacementPlugin(/^node:/, (resource: { request: string }) => {
+          resource.request = resource.request === "node:os" ? osShimStubAbs : browserStubAbs
+        })
+      )
     }
     // Same pixi collapse for the production export consumed by Tauri/Capacitor,
     // so the Live2D lazy chunk pulls one pre-bundled file instead of the barrel.
     config.resolve.alias = {
       ...config.resolve.alias,
       "pixi.js$": PIXI_PREBUNDLED_ABS,
+      "@huggingface/transformers$": TRANSFORMERS_WEB_ABS,
     }
     return config
   },

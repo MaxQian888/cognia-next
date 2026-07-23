@@ -10,6 +10,9 @@ pnpm-lock.yaml
 *.min.js
 *.min.css
 public/monaco
+# Serwist owns these generated, minified service-worker bundles.
+public/sw.js
+public/swe-worker-*.js
 # Vendored skill content — managed by the skill plugin, not hand-edited.
 .agents/skills
 .claude/skills
@@ -18,6 +21,9 @@ public/monaco
 # `skills:build` codegen (pnpm skills:build) owns both.
 skills/built-in
 lib/skills/built-in-catalog.generated.ts
+# esbuild owns this generated CommonJS bundle; formatting it would make the
+# committed artifact diverge from `pnpm plugin-convert:bundle`.
+crates/cognia-cli/assets/plugin-convert.cjs
 # Generated i18n message bundles — built from the per-namespace split sources
 # by `pnpm i18n:build`. Prettier collapses the build's expanded arrays, which
 # desyncs the committed bundle from `i18n:build:check`; the codegen owns format.
