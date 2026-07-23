@@ -61,7 +61,14 @@ const passScorer: Scorer = {
   id: "assertion",
   dimension: "response-quality",
   requiresLlm: false,
-  score: () => ({ scorerId: "assertion", dimension: "response-quality", value: 1, passed: true }),
+  gating: true,
+  score: () => ({
+    scorerId: "assertion",
+    dimension: "response-quality",
+    status: "scored",
+    value: 1,
+    passed: true,
+  }),
 }
 
 function makeDeps(): RunConfiguredDeps {
@@ -103,8 +110,8 @@ describe("runEvalService", () => {
     })
     expect(res.reports).toHaveLength(1)
     expect(ticks).toEqual([
-      { done: 1, total: 2, passing: 1 },
-      { done: 2, total: 2, passing: 2 },
+      { done: 1, total: 2, passing: 1, ungraded: 0 },
+      { done: 2, total: 2, passing: 2, ungraded: 0 },
     ])
     expect(res.gates?.["run_1"]?.passed).toBe(true)
     expect(res.gatePassed).toBe(true)

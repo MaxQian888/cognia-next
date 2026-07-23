@@ -15,6 +15,7 @@ import type { EvalDatasetVersion } from "@/types/eval/version"
 import type { EvalRunConfig, TargetSpec, CaseSubset } from "@/types/eval/run-config"
 import type { SaveCaseResultInput } from "@/lib/db/eval-run-cases"
 import { runDatasetEval } from "./index"
+import { repetitionVerdict } from "./report"
 import { selectScorers } from "./scorer-select"
 import type { EvalTarget } from "./runner"
 
@@ -77,10 +78,27 @@ export async function runConfiguredEval(
       onCaseComplete: (result) => {
         const rep0 = result.repetitions[0]
         if (!rep0) return
-        const scores: Record<string, { value: number; passed: boolean }> = {}
-        for (const s of rep0.scores) scores[s.scorerId] = { value: s.value, passed: s.passed }
-        const passAt1 = rep0.scores.length > 0 && rep0.scores.every((s) => s.passed)
-        void deps.saveCaseResult({ runId, caseId: result.caseId, scores, passAt1 })
+        const scores: SaveCaseResultInput["scores"] = {}
+        for (const s of rep0.scores) {
+          scores[s.scorerId] = {
+            value: s.value,
+            passed: s.passed,
+            status: s.status,
+            ...(s.reasoning ? { reasoning: s.reasoning } : {}),
+          }
+        }
+        // Reuse the report's verdict — this row and the run header MUST agree.
+        // They used to disagree (`scores.every(s => s.passed)` here counted
+        // not-applicable scores as failures), so the header read 100% while
+        // every row below it read FAIL.
+        const verdict = repetitionVerdict(rep0)
+        void deps.saveCaseResult({
+          runId,
+          caseId: result.caseId,
+          scores,
+          verdict,
+          passAt1: verdict === "pass",
+        })
       },
     })
     const enriched: EvalReport = {

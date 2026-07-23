@@ -38,12 +38,31 @@ describe("GateConfigSection", () => {
     render(
       <GateConfigSection
         datasetId="d1"
-        gate={{ minPassHatK: 0.7, minScorerPassRate: 0.6, maxTotalCostUsd: 2 }}
+        gate={{
+          minPassHatK: 0.7,
+          minScorerPassRate: 0.6,
+          maxUngradedRatio: 0.2,
+          maxTotalCostUsd: 2,
+        }}
       />
     )
     expect(screen.getByLabelText("fields.minPassHatK")).toHaveValue(0.7)
     expect(screen.getByLabelText("fields.minScorerPassRate")).toHaveValue(0.6)
+    expect(screen.getByLabelText("fields.maxUngradedRatio")).toHaveValue(0.2)
     expect(screen.getByLabelText("fields.maxTotalCostUsd")).toHaveValue(2)
+  })
+
+  it("saves the ungraded-ratio guard", async () => {
+    // Without this threshold a run where almost nothing was graded still
+    // clears minPassAt1 on the handful of cases that were.
+    render(<GateConfigSection datasetId="d1" />)
+    fireEvent.change(screen.getByLabelText("fields.maxUngradedRatio"), {
+      target: { value: "0.1" },
+    })
+    fireEvent.click(screen.getByText("save"))
+    await waitFor(() =>
+      expect(updateDataset).toHaveBeenCalledWith("d1", { gate: { maxUngradedRatio: 0.1 } })
+    )
   })
 
   it("ignores non-numeric input on save", async () => {

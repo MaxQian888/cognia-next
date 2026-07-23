@@ -21,7 +21,10 @@ jest.mock("@/lib/db/eval-run-cases", () => ({
 
 import { RunComparisonView } from "./run-comparison-view"
 
-const run = (runId: string, passAt1: number): EvalRunRow =>
+// `legacy: true` omits `scoringVersion` — a run written before the scoring fix.
+// (Do NOT model this as an optional `scoringVersion` param: passing `undefined`
+// explicitly still triggers a JS default parameter, so the run comes back v2.)
+const run = (runId: string, passAt1: number, legacy = false): EvalRunRow =>
   ({
     runId,
     datasetId: "d",
@@ -29,12 +32,15 @@ const run = (runId: string, passAt1: number): EvalRunRow =>
     targetLabel: runId,
     k: 1,
     caseCount: 1,
+    gradedCaseCount: 1,
+    ungradedCaseCount: 0,
     scorers: {},
     passAt1,
     passHatK: 0,
     totalCostUsd: 0,
     avgLatencyMs: 0,
     createdAt: 0,
+    ...(legacy ? {} : { scoringVersion: 2 }),
   }) as EvalRunRow
 
 describe("RunComparisonView", () => {
@@ -68,5 +74,23 @@ describe("RunComparisonView", () => {
     // re-adding restores the grid
     fireEvent.click(screen.getByLabelText('compare.selectRun:{"label":"B"}'))
     await waitFor(() => expect(screen.getByTestId("compare-cards")).toBeInTheDocument())
+  })
+
+  it("warns when the selection straddles the scoring change", async () => {
+    // A legacy run counted measurement-only scorers as passes, so putting it
+    // next to a v2 run in the same grid invites the wrong conclusion.
+    render(<RunComparisonView runs={[run("A", 1, true), run("B", 0)]} />)
+    await waitFor(() => expect(screen.getByTestId("mixed-scoring-warning")).toBeInTheDocument())
+  })
+
+  it("does not warn when every selected run uses the same scoring", async () => {
+    const { rerender } = render(<RunComparisonView runs={[run("A", 1), run("B", 0)]} />)
+    await waitFor(() => expect(screen.getByTestId("compare-cards")).toBeInTheDocument())
+    expect(screen.queryByTestId("mixed-scoring-warning")).not.toBeInTheDocument()
+    // …including when they are all legacy.
+    rerender(<RunComparisonView runs={[run("A", 1, true), run("B", 0, true)]} />)
+    await waitFor(() =>
+      expect(screen.queryByTestId("mixed-scoring-warning")).not.toBeInTheDocument()
+    )
   })
 })

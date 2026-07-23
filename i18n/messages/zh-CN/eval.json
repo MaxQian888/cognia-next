@@ -100,6 +100,7 @@
   "compare": {
     "case": "用例",
     "fail": "失败",
+    "mixedScoring": "你正在对比评分修复前后的运行。旧运行把纯测量类评分器算作通过，因此跨越这条分界线的下降是修复生效，而不是能力退化。",
     "noCases": "所选运行没有记录逐用例结果。",
     "pass": "通过",
     "pickTwo": "至少选择两个运行进行对比。",
@@ -145,6 +146,7 @@
   "gate": {
     "fields": {
       "maxTotalCostUsd": "最高总成本（USD）",
+      "maxUngradedRatio": "最大无判定比例",
       "minPassAt1": "最低 pass@1",
       "minPassHatK": "最低 pass^k",
       "minScorerPassRate": "最低单评分器通过率"
@@ -204,7 +206,7 @@
       "workflow": "工作流"
     },
     "noTargets": "至少添加一个带模型 / 团队 / 工作流 ID 的目标。",
-    "progress": "{done} / {total} · {passing} 通过",
+    "progress": "{done} / {total} · 通过 {passing} · 无判定 {ungraded}",
     "progressLabel": "运行进度",
     "removeTarget": "移除目标",
     "run": "运行评估",
@@ -222,12 +224,24 @@
     "fail": "失败",
     "gateFailed": "门限未过",
     "gatePassed": "门限通过",
+    "graded": "已判定 {graded} · 无判定 {ungraded}",
     "latency": "{ms} 毫秒",
+    "legacyScoring": "旧评分口径",
+    "legacyScoringHint": "这次运行早于评分修复：当时纯测量类评分器被算作通过，因此它的通过率偏高，且无法与新运行对比。其质量门结论已隐藏。",
     "loading": "正在加载运行…",
     "noCases": "该运行没有逐用例结果。",
     "pass": "通过",
     "passAt1": "pass@1 {pct}%",
     "passHatK": "pass^{k} {pct}%",
+    "scorersFailed": "以下评分器在每条用例上都失败、未产出任何判定：{scorers}。上方数字不可信 —— 请检查评审模型的服务状态后重跑。",
+    "status": {
+      "errored": "评分器本身执行失败",
+      "measurement": "仅测量 —— 不参与判定",
+      "not-applicable": "不适用 —— 该用例没有这个评分器需要的参考值",
+      "scored": "已判定"
+    },
+    "ungraded": "无判定",
+    "ungradedHint": "有 {count} 条用例没有任何可用的评分器，已从上方通过率中排除。请补充参考答案（期望输出 / 期望工具 / 期望上下文），或选择一个能判定它们的评分器。",
     "verdict": "判定"
   },
   "runs": {
@@ -248,9 +262,11 @@
     "empty": "暂无运行记录 — 配置并运行该数据集。",
     "gateFailed": "门限未过",
     "gatePassed": "门限通过",
+    "legacyScoring": "旧评分口径",
     "openRun": "打开运行 {label}",
     "passAt1": "pass@1 {pct}%",
-    "passHatK": "pass^{k} {pct}%"
+    "passHatK": "pass^{k} {pct}%",
+    "ungraded": "{count} 条无判定"
   },
   "scorerCatalog": {
     "assertion": "断言",

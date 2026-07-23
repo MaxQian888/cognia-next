@@ -4,6 +4,7 @@ import {
   SCORER_CATALOG,
   ALL_SCORER_IDS,
   DETERMINISTIC_SCORER_IDS,
+  GATING_SCORER_IDS,
   SCORER_DIMENSIONS,
   scorersForDimension,
   sanitizeScorerIds,
@@ -16,17 +17,25 @@ const fakeClient: LlmClient = {
 }
 
 describe("SCORER_CATALOG", () => {
-  it("matches the real scorer factory output exactly (id + dimension + requiresLlm)", () => {
+  it("matches the real scorer factory output exactly (id + dimension + requiresLlm + gating)", () => {
     const real = [...deterministicScorers(), ...llmScorers({ client: fakeClient })].map((s) => ({
       id: s.id,
       dimension: s.dimension,
       requiresLlm: s.requiresLlm,
+      gating: s.gating,
     }))
     // Same set, ordering-independent — the catalog documents report order but
-    // the guard only needs id/dimension/requiresLlm parity.
+    // the guard only needs id/dimension/requiresLlm/gating parity.
     const sortById = <T extends { id: string }>(xs: T[]) =>
       [...xs].sort((a, b) => a.id.localeCompare(b.id))
     expect(sortById([...SCORER_CATALOG])).toEqual(sortById(real))
+  })
+
+  it("marks the standard cost wiring as non-gating and everything else as gating", () => {
+    // The default tier wires the UNBUDGETED cost scorer, which only measures.
+    // If this ever flips silently, runs get a free passing verdict again.
+    expect(GATING_SCORER_IDS).not.toContain("cost")
+    expect(SCORER_CATALOG.filter((s) => !s.gating).map((s) => s.id)).toEqual(["cost"])
   })
 
   it("has unique ids", () => {

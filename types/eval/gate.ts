@@ -16,6 +16,12 @@ export interface GateThresholds {
   minScorerPassRate?: number | Record<string, number>
   /** Maximum acceptable total cost. */
   maxTotalCostUsd?: number
+  /**
+   * Maximum acceptable fraction of cases no scorer could grade (0..1).
+   * Without this, a run where 95% of cases are ungraded and the remaining 5%
+   * pass still clears `minPassAt1` — a high pass rate over almost nothing.
+   */
+  maxUngradedRatio?: number
 }
 
 export interface GateResult {

@@ -5,18 +5,32 @@
  * verdict incl. failure reasons) plus the per-case scorer table fed by the
  * (previously dormant) `useEvalRunCaseResults`. Case inputs are labelled via
  * `useEvalCases` on the report's dataset.
+ *
+ * Three things this view has to be honest about, all of which it used to hide:
+ *  - pass rates are over GRADED cases, so the ungraded count sits next to them;
+ *  - a scorer that failed on every case (judge provider down) is an alert, not
+ *    a silently-excluded observation that leaves a confident-looking number;
+ *  - runs written before the scoring-status change carry an inflated pass rate
+ *    that is not comparable, so they are badged and their gate is withheld.
  */
 
 import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { ArrowLeftIcon } from "lucide-react"
+import { AlertTriangleIcon, ArrowLeftIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { getRun, type EvalRunRow } from "@/lib/db/eval-runs"
 import { useEvalCases, useEvalRunCaseResults } from "@/hooks/eval/use-eval-data"
 import { evaluateGate } from "@/lib/ai/eval/gate"
+import { fullyErroredScorers, isLegacyScoring } from "@/lib/ai/eval/report"
 import type { GateThresholds } from "@/types/eval/gate"
+import type { EvalRunCaseRow } from "@/lib/db/eval-run-cases"
+
+/** Verdict for a row, tolerating legacy rows that only have `passAt1`. */
+function rowVerdict(row: EvalRunCaseRow): "pass" | "fail" | "ungraded" {
+  return row.verdict ?? (row.passAt1 ? "pass" : "fail")
+}
 
 export interface RunDetailProps {
   runId: string
@@ -46,7 +60,14 @@ export function RunDetail({ runId, gate, onBack }: RunDetailProps) {
     return m
   }, [cases])
 
-  const gateResult = useMemo(() => (run && gate ? evaluateGate(run, gate) : undefined), [run, gate])
+  const legacy = run ? isLegacyScoring(run) : false
+  // A legacy run's pass rate is inflated by the old scoring, so its gate
+  // verdict would be equally wrong — withhold it rather than show a green tick.
+  const gateResult = useMemo(
+    () => (run && gate && !isLegacyScoring(run) ? evaluateGate(run, gate) : undefined),
+    [run, gate]
+  )
+  const brokenScorers = useMemo(() => (run ? fullyErroredScorers(run) : []), [run])
   const scorerIds = useMemo(() => {
     const ids = new Set<string>()
     for (const row of rows) for (const id of Object.keys(row.scores)) ids.add(id)
@@ -67,14 +88,46 @@ export function RunDetail({ runId, gate, onBack }: RunDetailProps) {
         <Badge variant="outline">
           {t("passHatK", { pct: Math.round(run.passHatK * 100), k: run.k })}
         </Badge>
+        {!legacy && (
+          <Badge variant="outline" data-testid="graded-count">
+            {t("graded", {
+              graded: run.gradedCaseCount ?? 0,
+              ungraded: run.ungradedCaseCount ?? 0,
+            })}
+          </Badge>
+        )}
         <Badge variant="secondary">${run.totalCostUsd.toFixed(4)}</Badge>
         <Badge variant="secondary">{t("latency", { ms: Math.round(run.avgLatencyMs) })}</Badge>
+        {legacy && (
+          <Badge variant="outline" data-testid="legacy-scoring">
+            {t("legacyScoring")}
+          </Badge>
+        )}
         {gateResult && (
           <Badge variant={gateResult.passed ? "secondary" : "destructive"}>
             {gateResult.passed ? t("gatePassed") : t("gateFailed")}
           </Badge>
         )}
       </div>
+
+      {legacy && <p className="text-muted-foreground text-xs">{t("legacyScoringHint")}</p>}
+
+      {brokenScorers.length > 0 && (
+        <p
+          className="text-destructive flex items-center gap-1.5 text-xs"
+          role="alert"
+          data-testid="scorer-error-alert"
+        >
+          <AlertTriangleIcon className="size-3.5 shrink-0" />
+          {t("scorersFailed", { scorers: brokenScorers.join(", ") })}
+        </p>
+      )}
+
+      {!legacy && (run.ungradedCaseCount ?? 0) > 0 && (
+        <p className="text-muted-foreground text-xs" data-testid="ungraded-hint">
+          {t("ungradedHint", { count: run.ungradedCaseCount ?? 0 })}
+        </p>
+      )}
 
       {gateResult && !gateResult.passed && (
         <ul className="text-destructive flex flex-col gap-0.5 text-xs" role="alert">
@@ -101,37 +154,55 @@ export function RunDetail({ runId, gate, onBack }: RunDetailProps) {
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
-                <tr key={row.id}>
-                  <td className="border p-2 align-top">
-                    <span className="line-clamp-2">
-                      {inputByCase.get(row.caseId) ?? row.caseId}
-                    </span>
-                  </td>
-                  {scorerIds.map((id) => {
-                    const s = row.scores[id]
-                    return (
-                      <td
-                        key={id}
-                        className={cn(
-                          "border p-2 text-center text-xs tabular-nums",
-                          s && (s.passed ? "bg-emerald-500/15" : "bg-destructive/15")
-                        )}
-                      >
-                        {s ? s.value.toFixed(2) : "—"}
-                      </td>
-                    )
-                  })}
-                  <td
-                    className={cn(
-                      "border p-2 text-center",
-                      row.passAt1 ? "bg-emerald-500/15" : "bg-destructive/15"
-                    )}
-                  >
-                    {row.passAt1 ? t("pass") : t("fail")}
-                  </td>
-                </tr>
-              ))}
+              {rows.map((row) => {
+                const verdict = rowVerdict(row)
+                return (
+                  <tr key={row.id}>
+                    <td className="border p-2 align-top">
+                      <span className="line-clamp-2">
+                        {inputByCase.get(row.caseId) ?? row.caseId}
+                      </span>
+                    </td>
+                    {scorerIds.map((id) => {
+                      const s = row.scores[id]
+                      // Only a real verdict gets a pass/fail colour. A
+                      // not-applicable / errored / measurement observation used
+                      // to render as a red 0.00, which read as "the model got
+                      // this wrong" when nothing had been graded at all.
+                      const scored = !s || s.status === undefined || s.status === "scored"
+                      return (
+                        <td
+                          key={id}
+                          title={
+                            s?.status && !scored ? t(`status.${s.status}` as never) : undefined
+                          }
+                          className={cn(
+                            "border p-2 text-center text-xs tabular-nums",
+                            s && scored && (s.passed ? "bg-emerald-500/15" : "bg-destructive/15"),
+                            s && !scored && "text-muted-foreground"
+                          )}
+                        >
+                          {!s ? "—" : scored ? s.value.toFixed(2) : "–"}
+                        </td>
+                      )
+                    })}
+                    <td
+                      className={cn(
+                        "border p-2 text-center",
+                        verdict === "pass" && "bg-emerald-500/15",
+                        verdict === "fail" && "bg-destructive/15",
+                        verdict === "ungraded" && "text-muted-foreground"
+                      )}
+                    >
+                      {verdict === "ungraded"
+                        ? t("ungraded")
+                        : verdict === "pass"
+                          ? t("pass")
+                          : t("fail")}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>

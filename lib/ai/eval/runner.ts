@@ -62,9 +62,11 @@ async function safeScore(scorer: Scorer, sample: EvalSample, evalCase: EvalCase)
   try {
     return await scorer.score(sample, evalCase)
   } catch (err) {
+    // The SCORER blew up, not the agent — `errored`, never a failed verdict.
     return {
       scorerId: scorer.id,
       dimension: scorer.dimension,
+      status: "errored",
       value: 0,
       passed: false,
       error: err instanceof Error ? err.message : String(err),

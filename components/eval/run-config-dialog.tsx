@@ -363,6 +363,7 @@ export function RunConfigDialog({
               done: progress.done,
               total: progress.total,
               passing: progress.passing,
+              ungraded: progress.ungraded,
             })}
           </span>
           <Button size="sm" variant="outline" onClick={() => abortRef.current?.abort()}>

@@ -13,14 +13,19 @@ jest.mock("@/hooks/eval/use-eval-data", () => ({
       id: "r1::c1",
       runId: "r1",
       caseId: "c1",
-      scores: { assertion: { value: 1, passed: true } },
+      scores: { assertion: { value: 1, passed: true, status: "scored" } },
+      verdict: "pass",
       passAt1: true,
     },
     {
       id: "r1::c2",
       runId: "r1",
       caseId: "c2",
-      scores: { assertion: { value: 0, passed: false }, cost: { value: 0.5, passed: true } },
+      scores: {
+        assertion: { value: 0, passed: false, status: "scored" },
+        cost: { value: 0.5, passed: true, status: "scored" },
+      },
+      verdict: "fail",
       passAt1: false,
     },
   ]),
@@ -30,24 +35,49 @@ jest.mock("@/hooks/eval/use-eval-data", () => ({
   ]),
 }))
 jest.mock("@/lib/db/eval-runs", () => ({
-  getRun: jest.fn(async () => ({
-    runId: "r1",
-    datasetId: "d1",
-    datasetVersion: 1,
-    targetLabel: "opus",
-    k: 1,
-    caseCount: 2,
-    scorers: {},
-    passAt1: 0.5,
-    passHatK: 0.5,
-    totalCostUsd: 0.12,
-    avgLatencyMs: 800,
-    createdAt: 1717400000000,
-  })),
+  getRun: jest.fn(),
 }))
 
 import { useEvalRunCaseResults } from "@/hooks/eval/use-eval-data"
+import { getRun } from "@/lib/db/eval-runs"
 import { RunDetail } from "./run-detail"
+
+const RUN = {
+  runId: "r1",
+  datasetId: "d1",
+  datasetVersion: 1,
+  targetLabel: "opus",
+  k: 1,
+  caseCount: 2,
+  gradedCaseCount: 2,
+  ungradedCaseCount: 0,
+  scorers: {},
+  passAt1: 0.5,
+  passHatK: 0.5,
+  totalCostUsd: 0.12,
+  avgLatencyMs: 800,
+  createdAt: 1717400000000,
+  scoringVersion: 2 as const,
+}
+
+function agg(scorerId: string, over: Record<string, number> = {}) {
+  return {
+    scorerId,
+    dimension: "response-quality" as const,
+    meanValue: 0,
+    passRate: 0,
+    scoredCount: 0,
+    notApplicableCount: 0,
+    erroredCount: 0,
+    measurementCount: 0,
+    observations: 2,
+    ...over,
+  }
+}
+
+beforeEach(() => {
+  ;(getRun as jest.Mock).mockResolvedValue(RUN)
+})
 
 describe("RunDetail", () => {
   it("renders the report header, failing gate verdict with reasons, and per-case table", async () => {
@@ -64,17 +94,72 @@ describe("RunDetail", () => {
     expect(screen.getByText("—")).toBeInTheDocument()
     expect(screen.getByText("pass")).toBeInTheDocument()
     expect(screen.getByText("fail")).toBeInTheDocument()
+    expect(screen.getByTestId("graded-count")).toHaveTextContent('{"graded":2,"ungraded":0}')
   })
 
   it("shows a passing gate badge and falls back to caseId for unknown cases", async () => {
     // Persistent (not Once): the hook re-runs on the post-getRun re-render.
     ;(useEvalRunCaseResults as jest.Mock).mockReturnValue([
-      { id: "r1::cX", runId: "r1", caseId: "cX", scores: {}, passAt1: true },
+      { id: "r1::cX", runId: "r1", caseId: "cX", scores: {}, verdict: "pass", passAt1: true },
     ])
     render(<RunDetail runId="r1" gate={{ minPassAt1: 0.1 }} onBack={jest.fn()} />)
     expect(await screen.findByText("gatePassed")).toBeInTheDocument()
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
     expect(screen.getByText("cX")).toBeInTheDocument() // no input → caseId label
+  })
+
+  it("renders an ungraded row as neutral rather than as a failure", async () => {
+    ;(useEvalRunCaseResults as jest.Mock).mockReturnValue([
+      {
+        id: "r1::c9",
+        runId: "r1",
+        caseId: "c9",
+        scores: {
+          assertion: { value: 0, passed: false, status: "not-applicable" },
+          cost: { value: 1, passed: false, status: "measurement" },
+        },
+        verdict: "ungraded",
+        passAt1: false,
+      },
+    ])
+    render(<RunDetail runId="r1" onBack={jest.fn()} />)
+    expect(await screen.findByText("ungraded")).toBeInTheDocument()
+    // Neither non-verdict cell renders a red 0.00 that reads as "model wrong".
+    expect(screen.queryByText("0.00")).not.toBeInTheDocument()
+    expect(screen.queryByText("fail")).not.toBeInTheDocument()
+  })
+
+  it("raises an alert when a scorer failed on every case", async () => {
+    ;(getRun as jest.Mock).mockResolvedValue({
+      ...RUN,
+      scorers: { "judge-task-completion": agg("judge-task-completion", { erroredCount: 2 }) },
+    })
+    render(<RunDetail runId="r1" onBack={jest.fn()} />)
+    expect(await screen.findByTestId("scorer-error-alert")).toHaveTextContent(
+      "judge-task-completion"
+    )
+  })
+
+  it("shows the ungraded hint and count when cases went unjudged", async () => {
+    ;(getRun as jest.Mock).mockResolvedValue({
+      ...RUN,
+      caseCount: 5,
+      gradedCaseCount: 2,
+      ungradedCaseCount: 3,
+    })
+    render(<RunDetail runId="r1" onBack={jest.fn()} />)
+    expect(await screen.findByTestId("ungraded-hint")).toHaveTextContent('{"count":3}')
+    expect(screen.getByTestId("graded-count")).toHaveTextContent('{"graded":2,"ungraded":3}')
+  })
+
+  it("badges a legacy run, hides the graded counts, and withholds its gate verdict", async () => {
+    const { scoringVersion: _drop, ...legacy } = RUN
+    ;(getRun as jest.Mock).mockResolvedValue(legacy)
+    render(<RunDetail runId="r1" gate={{ minPassAt1: 0.1 }} onBack={jest.fn()} />)
+    expect(await screen.findByTestId("legacy-scoring")).toBeInTheDocument()
+    expect(screen.queryByTestId("graded-count")).not.toBeInTheDocument()
+    expect(screen.queryByText("gatePassed")).not.toBeInTheDocument()
+    expect(screen.queryByText("gateFailed")).not.toBeInTheDocument()
   })
 
   it("calls onBack and renders without a gate", async () => {

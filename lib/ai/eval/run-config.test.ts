@@ -31,7 +31,14 @@ const passScorer: Scorer = {
   id: "always-pass",
   dimension: "response-quality",
   requiresLlm: false,
-  score: () => ({ scorerId: "always-pass", dimension: "response-quality", value: 1, passed: true }),
+  gating: true,
+  score: () => ({
+    scorerId: "always-pass",
+    dimension: "response-quality",
+    status: "scored",
+    value: 1,
+    passed: true,
+  }),
 }
 
 const dataset: EvalDataset = {
@@ -122,10 +129,96 @@ describe("runConfiguredEval", () => {
     expect(savedCases).toHaveBeenCalledTimes(3)
     const firstRow = savedCases.mock.calls[0][0] as {
       passAt1: boolean
+      verdict: string
       scores: Record<string, unknown>
     }
+    expect(firstRow.verdict).toBe("pass")
     expect(firstRow.passAt1).toBe(true)
-    expect(firstRow.scores["always-pass"]).toEqual({ value: 1, passed: true })
+    expect(firstRow.scores["always-pass"]).toEqual({ value: 1, passed: true, status: "scored" })
+  })
+
+  it("carries judge reasoning onto the row and skips the key when absent", async () => {
+    const withReasoning: Scorer = {
+      id: "judge",
+      dimension: "response-quality",
+      requiresLlm: true,
+      gating: true,
+      score: () => ({
+        scorerId: "judge",
+        dimension: "response-quality",
+        status: "scored",
+        value: 1,
+        passed: true,
+        reasoning: "the answer covers every requested field",
+      }),
+    }
+    const { deps, savedCases } = makeDeps({ allScorers: [withReasoning, passScorer] })
+    await runConfiguredEval(
+      "d",
+      { targets: [{ kind: "chat", label: "A", model: "m" }], scorerIds: [], k: 1 },
+      deps
+    )
+    const row = savedCases.mock.calls[0][0] as {
+      scores: Record<string, { reasoning?: string }>
+    }
+    expect(row.scores.judge.reasoning).toBe("the answer covers every requested field")
+    expect(row.scores["always-pass"]).not.toHaveProperty("reasoning")
+  })
+
+  it("clamps a zero/absent k to 1 and forwards an abort signal", async () => {
+    const { deps, saved } = makeDeps()
+    const controller = new AbortController()
+    const reports = await runConfiguredEval(
+      "d",
+      { targets: [{ kind: "chat", label: "A", model: "m" }], scorerIds: [], k: 0 },
+      deps,
+      controller.signal
+    )
+    expect(reports[0].k).toBe(1)
+    expect(saved).toHaveBeenCalledTimes(1)
+    // Aborting before the run starts yields a report over zero cases, not a throw.
+    const pre = new AbortController()
+    pre.abort()
+    const aborted = await runConfiguredEval(
+      "d",
+      { targets: [{ kind: "chat", label: "A", model: "m" }], scorerIds: [], k: 1 },
+      makeDeps().deps,
+      pre.signal
+    )
+    expect(aborted[0].caseCount).toBe(0)
+  })
+
+  it("writes the SAME verdict the report header uses (no second opinion)", async () => {
+    // The row verdict used to be `scores.every(s => s.passed)`, which counted
+    // not-applicable scores as failures while the report excluded them — the
+    // run header said 100% and every row below it said FAIL. Both sides now
+    // call `repetitionVerdict`, so a case only its non-applicable scorers
+    // touched is `ungraded` in BOTH places.
+    const naScorer: Scorer = {
+      id: "needs-ref",
+      dimension: "response-quality",
+      requiresLlm: false,
+      gating: true,
+      score: () => ({
+        scorerId: "needs-ref",
+        dimension: "response-quality",
+        status: "not-applicable",
+        value: 0,
+        passed: false,
+        error: "not-applicable: no reference",
+      }),
+    }
+    const { deps, savedCases } = makeDeps({ allScorers: [naScorer] })
+    const reports = await runConfiguredEval(
+      "d",
+      { targets: [{ kind: "chat", label: "A", model: "m" }], scorerIds: [], k: 1 },
+      deps
+    )
+    const rows = savedCases.mock.calls.map((c) => (c[0] as { verdict: string }).verdict)
+    expect(rows).toEqual(["ungraded", "ungraded", "ungraded"])
+    expect(reports[0].ungradedCaseCount).toBe(3)
+    expect(reports[0].gradedCaseCount).toBe(0)
+    expect(reports[0].passAt1).toBe(0)
   })
 
   it("applies the case subset before running", async () => {

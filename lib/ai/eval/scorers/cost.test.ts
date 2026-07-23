@@ -26,11 +26,21 @@ const CASE: EvalCase = {
 }
 
 describe("costScorer (measurement-only default)", () => {
-  it("always passes with value 1 and records raw measurements when no budget is set", async () => {
+  it("reports measurement — never a passing verdict — when no budget is set", async () => {
     const score = await costScorer.score(sample(), CASE)
-    expect(score.passed).toBe(true)
+    // Regression guard: this used to return `passed: true`, which handed every
+    // run a free pass and made toolless question/answer datasets report 100%.
+    expect(score.status).toBe("measurement")
+    expect(score.passed).toBe(false)
     expect(score.value).toBe(1)
     expect(score.metadata).toMatchObject({ costUsd: 0.05, latencyMs: 1200, stepCount: 3 })
+  })
+
+  it("is not gating without a budget, and gating with one", () => {
+    expect(costScorer.gating).toBe(false)
+    expect(makeCostScorer({ maxCostUsd: 1 }).gating).toBe(true)
+    expect(makeCostScorer({ maxLatencyMs: 1 }).gating).toBe(true)
+    expect(makeCostScorer({ maxSteps: 1 }).gating).toBe(true)
   })
 })
 
@@ -38,6 +48,7 @@ describe("makeCostScorer (budgeted)", () => {
   it("passes when all measurements are within budget", async () => {
     const scorer = makeCostScorer({ maxCostUsd: 0.1, maxLatencyMs: 2000, maxSteps: 5 })
     const score = await scorer.score(sample(), CASE)
+    expect(score.status).toBe("scored")
     expect(score.passed).toBe(true)
     expect(score.value).toBe(1)
   })

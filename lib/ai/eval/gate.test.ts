@@ -1,13 +1,16 @@
 import type { EvalReport, ScorerAggregate } from "@/types/eval/eval"
 import { evaluateGate } from "./gate"
 
-function agg(scorerId: string, passRate: number): ScorerAggregate {
+function agg(scorerId: string, passRate: number, scoredCount = 4): ScorerAggregate {
   return {
     scorerId,
     dimension: "tool-use",
     meanValue: passRate,
     passRate,
-    errorCount: 0,
+    scoredCount,
+    notApplicableCount: 4 - scoredCount,
+    erroredCount: 0,
+    measurementCount: 0,
     observations: 4,
   }
 }
@@ -20,12 +23,15 @@ function report(overrides: Partial<EvalReport> = {}): EvalReport {
     targetLabel: "t",
     k: 1,
     caseCount: 4,
+    gradedCaseCount: 4,
+    ungradedCaseCount: 0,
     scorers: { "tool-selection": agg("tool-selection", 1) },
     passAt1: 1,
     passHatK: 1,
     totalCostUsd: 0.1,
     avgLatencyMs: 100,
     createdAt: 0,
+    scoringVersion: 2,
     ...overrides,
   }
 }
@@ -69,5 +75,55 @@ describe("evaluateGate", () => {
   it("ignores scorers absent from the report when a per-scorer floor names them", () => {
     const result = evaluateGate(report(), { minScorerPassRate: { "not-present": 0.9 } })
     expect(result.passed).toBe(true)
+  })
+
+  it("skips scorers that graded nothing instead of reading their 0% as a failure", () => {
+    // The unbudgeted `cost` scorer only ever measures, so it reports
+    // passRate 0 with scoredCount 0. Gating on that would fail every run that
+    // simply doesn't budget cost.
+    const result = evaluateGate(
+      report({ scorers: { cost: agg("cost", 0, 0), "tool-selection": agg("tool-selection", 1) } }),
+      { minScorerPassRate: 1 }
+    )
+    expect(result.passed).toBe(true)
+  })
+
+  it("still gates a legacy report that has no scoredCount", () => {
+    const legacy = agg("tool-selection", 0.5)
+    delete (legacy as Partial<ScorerAggregate>).scoredCount
+    const result = evaluateGate(report({ scorers: { "tool-selection": legacy } }), {
+      minScorerPassRate: 0.9,
+    })
+    expect(result.passed).toBe(false)
+  })
+
+  it("fails when too many cases were ungraded", () => {
+    // 3 of 4 ungraded: the surviving case passes, so passAt1 is a perfect 1.0
+    // over almost nothing. Without this guard that clears minPassAt1.
+    const result = evaluateGate(
+      report({ caseCount: 4, gradedCaseCount: 1, ungradedCaseCount: 3 }),
+      {
+        minPassAt1: 0.9,
+        maxUngradedRatio: 0.2,
+      }
+    )
+    expect(result.passed).toBe(false)
+    expect(result.failures.join(" ")).toContain("ungraded")
+  })
+
+  it("passes the ungraded guard when the ratio is within budget", () => {
+    const result = evaluateGate(
+      report({ caseCount: 4, gradedCaseCount: 4, ungradedCaseCount: 0 }),
+      {
+        maxUngradedRatio: 0.2,
+      }
+    )
+    expect(result.passed).toBe(true)
+  })
+
+  it("skips the ungraded guard on legacy reports that never counted them", () => {
+    const legacy = report()
+    delete (legacy as Partial<EvalReport>).ungradedCaseCount
+    expect(evaluateGate(legacy, { maxUngradedRatio: 0 }).passed).toBe(true)
   })
 })

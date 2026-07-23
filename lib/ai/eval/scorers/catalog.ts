@@ -19,6 +19,12 @@ export interface ScorerCatalogEntry {
   dimension: EvalDimension
   /** True for the L3 judge / RAG-generation scorers that call an LLM. */
   requiresLlm: boolean
+  /**
+   * True when this scorer, as the STANDARD tiers wire it, can decide pass/fail.
+   * `cost` is false: the default wiring carries no budget, so it only ever
+   * measures. Mirrors `Scorer.gating`; pinned by `catalog.test.ts`.
+   */
+  gating: boolean
 }
 
 /**
@@ -28,19 +34,24 @@ export interface ScorerCatalogEntry {
  * resolved judge client.
  */
 export const SCORER_CATALOG: readonly ScorerCatalogEntry[] = [
-  { id: "tool-selection", dimension: "tool-use", requiresLlm: false },
-  { id: "tool-args", dimension: "tool-use", requiresLlm: false },
-  { id: "tool-order", dimension: "tool-use", requiresLlm: false },
-  { id: "tool-redundancy", dimension: "tool-use", requiresLlm: false },
-  { id: "trajectory-unordered", dimension: "tool-use", requiresLlm: false },
-  { id: "assertion", dimension: "response-quality", requiresLlm: false },
-  { id: "cost", dimension: "cost", requiresLlm: false },
-  { id: "rag-context-recall", dimension: "rag", requiresLlm: false },
-  { id: "judge-task-completion", dimension: "response-quality", requiresLlm: true },
-  { id: "judge-instruction-following", dimension: "response-quality", requiresLlm: true },
-  { id: "rag-faithfulness", dimension: "rag", requiresLlm: true },
-  { id: "rag-answer-relevancy", dimension: "rag", requiresLlm: true },
-  { id: "rag-context-precision", dimension: "rag", requiresLlm: true },
+  { id: "tool-selection", dimension: "tool-use", requiresLlm: false, gating: true },
+  { id: "tool-args", dimension: "tool-use", requiresLlm: false, gating: true },
+  { id: "tool-order", dimension: "tool-use", requiresLlm: false, gating: true },
+  { id: "tool-redundancy", dimension: "tool-use", requiresLlm: false, gating: true },
+  { id: "trajectory-unordered", dimension: "tool-use", requiresLlm: false, gating: true },
+  { id: "assertion", dimension: "response-quality", requiresLlm: false, gating: true },
+  { id: "cost", dimension: "cost", requiresLlm: false, gating: false },
+  { id: "rag-context-recall", dimension: "rag", requiresLlm: false, gating: true },
+  { id: "judge-task-completion", dimension: "response-quality", requiresLlm: true, gating: true },
+  {
+    id: "judge-instruction-following",
+    dimension: "response-quality",
+    requiresLlm: true,
+    gating: true,
+  },
+  { id: "rag-faithfulness", dimension: "rag", requiresLlm: true, gating: true },
+  { id: "rag-answer-relevancy", dimension: "rag", requiresLlm: true, gating: true },
+  { id: "rag-context-precision", dimension: "rag", requiresLlm: true, gating: true },
 ] as const
 
 /** All scorer ids, in catalog order. */
@@ -50,6 +61,15 @@ export const ALL_SCORER_IDS: readonly string[] = SCORER_CATALOG.map((s) => s.id)
 export const DETERMINISTIC_SCORER_IDS: readonly string[] = SCORER_CATALOG.filter(
   (s) => !s.requiresLlm
 ).map((s) => s.id)
+
+/**
+ * Ids that can actually decide pass/fail as wired by the standard tiers. A run
+ * whose selection contains none of these can only ever produce ungraded cases —
+ * the run dialog warns on that rather than reporting a meaningless number.
+ */
+export const GATING_SCORER_IDS: readonly string[] = SCORER_CATALOG.filter((s) => s.gating).map(
+  (s) => s.id
+)
 
 /** The four dimensions, in catalog order (each appears once). */
 export const SCORER_DIMENSIONS: readonly EvalDimension[] = SCORER_CATALOG.reduce<EvalDimension[]>(

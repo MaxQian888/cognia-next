@@ -42,8 +42,9 @@ const passScorer: Scorer = {
   id: "s1",
   dimension: "tool-use",
   requiresLlm: false,
+  gating: true,
   score(): Score {
-    return { scorerId: "s1", dimension: "tool-use", value: 1, passed: true }
+    return { scorerId: "s1", dimension: "tool-use", status: "scored", value: 1, passed: true }
   },
 }
 

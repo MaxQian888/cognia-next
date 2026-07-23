@@ -17,8 +17,14 @@ import { buildConfiguredRunDeps } from "./browser-deps"
 export interface EvalProgress {
   done: number
   total: number
-  /** Cases that passed all scorers on repetition 1 so far. */
+  /** Cases that passed every scored scorer on repetition 1 so far. */
   passing: number
+  /**
+   * Cases no selected scorer could grade so far. Reported separately because a
+   * live "0 passing" that is really "nothing is being graded" is the single
+   * most misleading thing this progress bar can say.
+   */
+  ungraded: number
 }
 
 export interface RunEvalServiceInput {
@@ -65,14 +71,16 @@ export async function runEvalService(input: RunEvalServiceInput): Promise<RunEva
   const total = caseCount * Math.max(1, input.config.targets.length)
   let done = 0
   let passing = 0
+  let ungraded = 0
   const baseSave = deps.saveCaseResult.bind(deps)
   const progressDeps: RunConfiguredDeps = {
     ...deps,
     saveCaseResult: async (row) => {
       await baseSave(row)
       done += 1
-      if (row.passAt1) passing += 1
-      input.onProgress?.({ done, total, passing })
+      if (row.verdict === "ungraded") ungraded += 1
+      else if (row.verdict === "pass") passing += 1
+      input.onProgress?.({ done, total, passing, ungraded })
     },
   }
 

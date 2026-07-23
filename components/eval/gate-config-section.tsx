@@ -1,11 +1,15 @@
 "use client"
 
 /**
- * Dataset gate thresholds editor — four optional numeric fields persisted to
+ * Dataset gate thresholds editor — five optional numeric fields persisted to
  * `EvalDataset.gate` and consumed by `evaluateGate` (run badges, the
  * `eval.gate` workflow node, CI). Empty field = threshold unset; all empty =
  * gate removed. The per-scorer map form of `minScorerPassRate` stays an
  * engine-only capability (UI exposes the single-number floor).
+ *
+ * `maxUngradedRatio` is the guard against a perfect pass rate measured over
+ * almost nothing: without it, a run where 95% of cases had no applicable
+ * scorer and the remaining 5% passed still clears `minPassAt1`.
  */
 
 import { useState } from "react"
@@ -20,6 +24,7 @@ const FIELDS = [
   { key: "minPassAt1", min: 0, max: 1 },
   { key: "minPassHatK", min: 0, max: 1 },
   { key: "minScorerPassRate", min: 0, max: 1 },
+  { key: "maxUngradedRatio", min: 0, max: 1 },
   { key: "maxTotalCostUsd", min: 0 },
 ] as const
 
@@ -31,6 +36,7 @@ function initialDraft(gate?: GateThresholds): Record<FieldKey, string> {
     minPassHatK: gate?.minPassHatK !== undefined ? String(gate.minPassHatK) : "",
     minScorerPassRate:
       typeof gate?.minScorerPassRate === "number" ? String(gate.minScorerPassRate) : "",
+    maxUngradedRatio: gate?.maxUngradedRatio !== undefined ? String(gate.maxUngradedRatio) : "",
     maxTotalCostUsd: gate?.maxTotalCostUsd !== undefined ? String(gate.maxTotalCostUsd) : "",
   }
 }

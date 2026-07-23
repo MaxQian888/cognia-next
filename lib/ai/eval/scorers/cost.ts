@@ -3,9 +3,13 @@
  *
  * Reference-free: reads cost, latency, and step count straight off the
  * captured {@link EvalSample} (rolled up from `agentTraces` usage). The default
- * `costScorer` is measurement-only (always passes, records the raw numbers in
- * metadata) so a run always surfaces cost; {@link makeCostScorer} turns it into
- * a gate by attaching budgets.
+ * `costScorer` carries NO budget, so it reports `measurement` — the raw numbers
+ * are surfaced, but they decide nothing. {@link makeCostScorer} turns it into a
+ * real gate by attaching budgets, and only then is it `gating`.
+ *
+ * It used to return `passed: true` in the unbudgeted case, which handed every
+ * run a free passing verdict — together with `tool-redundancy` on a toolless
+ * run, that is what made plain question/answer datasets report 100%.
  *
  * When budgeted, `value` is the worst within-budget ratio (1 = comfortably
  * within all budgets; <1 means at least one dimension is over).
@@ -27,10 +31,15 @@ function consumed(actual: number, budget: number | undefined): number | null {
 }
 
 export function makeCostScorer(budget: CostBudget = {}): Scorer {
+  const budgeted =
+    budget.maxCostUsd !== undefined ||
+    budget.maxLatencyMs !== undefined ||
+    budget.maxSteps !== undefined
   return {
     id: "cost",
     dimension: "cost",
     requiresLlm: false,
+    gating: budgeted,
     score(sample: EvalSample): Score {
       const ratios = [
         consumed(sample.costUsd, budget.maxCostUsd),
@@ -47,15 +56,22 @@ export function makeCostScorer(budget: CostBudget = {}): Scorer {
       }
 
       if (ratios.length === 0) {
-        // Measurement-only: no budget configured.
-        return { scorerId: "cost", dimension: "cost", value: 1, passed: true, metadata }
+        // No budget configured — surface the numbers, decide nothing.
+        return {
+          scorerId: "cost",
+          dimension: "cost",
+          status: "measurement",
+          value: 1,
+          passed: false,
+          metadata,
+        }
       }
 
       const worst = Math.max(...ratios)
       const passed = worst <= 1
       // value: 1 when within budget; otherwise shrinks toward 0 as overage grows.
       const value = passed ? 1 : Math.max(0, 1 / worst)
-      return { scorerId: "cost", dimension: "cost", value, passed, metadata }
+      return { scorerId: "cost", dimension: "cost", status: "scored", value, passed, metadata }
     },
   }
 }

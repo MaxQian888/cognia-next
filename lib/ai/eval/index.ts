@@ -11,7 +11,13 @@ import { runEval, type EvalTarget, type RunEvalOptions } from "./runner"
 import { buildReport } from "./report"
 
 export { runEval, type EvalTarget, type RunEvalOptions } from "./runner"
-export { buildReport, type BuildReportInput } from "./report"
+export {
+  buildReport,
+  gatingScores,
+  repetitionVerdict,
+  SCORING_VERSION,
+  type BuildReportInput,
+} from "./report"
 export {
   assembleSampleFromSpans,
   createChatTarget,

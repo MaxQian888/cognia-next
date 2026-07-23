@@ -3,8 +3,12 @@
  *
  * Encodes the applied-evals best practices: ONE judge per criterion, BINARY
  * pass/fail (not Likert), chain-of-thought before the verdict, and fail-open
- * (a flaky judge never crashes the run — it yields an errored Score the report
- * treats as not-applicable). Cross-model judging (don't judge with the model
+ * (a flaky judge never crashes the run — it yields an `errored` Score that
+ * decides nothing). `errored` is deliberately distinct from `not-applicable`:
+ * a judge that died on every case must not read as "this dataset had no judge
+ * criteria", so the report counts it separately and the UI raises an alert
+ * rather than quietly reporting a verdict built from whatever survived.
+ * Cross-model judging (don't judge with the model
  * that generated the answer, to dodge self-preference bias) is the caller's
  * responsibility: build the {@link LlmClient} via `buildRendererLlmClient` with
  * a different `modelOverride` than the target.
@@ -65,6 +69,7 @@ export function makeJudgeScorer(options: JudgeScorerOptions): Scorer {
     id,
     dimension,
     requiresLlm: true,
+    gating: true,
     async score(sample: EvalSample, evalCase: EvalCase): Promise<Score> {
       const referenceBlock = evalCase.reference?.expectedOutput
         ? `Reference (gold) answer:\n${evalCase.reference.expectedOutput}\n\n`
@@ -89,6 +94,7 @@ export function makeJudgeScorer(options: JudgeScorerOptions): Scorer {
         return {
           scorerId: id,
           dimension,
+          status: "errored",
           value: 0,
           passed: false,
           error: err instanceof Error ? err.message : String(err),
@@ -102,6 +108,7 @@ export function makeJudgeScorer(options: JudgeScorerOptions): Scorer {
         return {
           scorerId: id,
           dimension,
+          status: "errored",
           value: 0,
           passed: false,
           error: `judge parse error: ${err instanceof Error ? err.message : String(err)}`,
@@ -112,6 +119,7 @@ export function makeJudgeScorer(options: JudgeScorerOptions): Scorer {
         return {
           scorerId: id,
           dimension,
+          status: "errored",
           value: 0,
           passed: false,
           error: 'judge response missing or non-boolean "pass" field',
@@ -121,6 +129,7 @@ export function makeJudgeScorer(options: JudgeScorerOptions): Scorer {
       return {
         scorerId: id,
         dimension,
+        status: "scored",
         value: parsed.pass ? 1 : 0,
         passed: parsed.pass,
         ...(typeof parsed.reasoning === "string" ? { reasoning: parsed.reasoning } : {}),

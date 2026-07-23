@@ -61,12 +61,14 @@ export function makeTrajectoryScorer(options: TrajectoryScorerOptions = {}): Sco
     id: `trajectory-${mode}`,
     dimension: "tool-use",
     requiresLlm: false,
+    gating: true,
     score(sample: EvalSample, evalCase: EvalCase): Score {
       const expected = evalCase.reference?.expectedTools
       if (!expected || expected.length === 0) {
         return {
           scorerId: `trajectory-${mode}`,
           dimension: "tool-use",
+          status: "not-applicable",
           value: 0,
           passed: false,
           error: "not-applicable: no expectedTools reference",
@@ -115,6 +117,7 @@ export function makeTrajectoryScorer(options: TrajectoryScorerOptions = {}): Sco
       return {
         scorerId: `trajectory-${mode}`,
         dimension: "tool-use",
+        status: "scored",
         value,
         passed: value === 1,
         metadata: { mode, namesMatch, argsMatch },

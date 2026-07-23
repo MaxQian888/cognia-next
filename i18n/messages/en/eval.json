@@ -100,6 +100,7 @@
   "compare": {
     "case": "Case",
     "fail": "fail",
+    "mixedScoring": "You are comparing runs from before and after the scoring fix. Older runs counted measurement-only scorers as passes, so a drop across that boundary is the fix landing, not a regression.",
     "noCases": "No per-case results recorded for the selected runs.",
     "pass": "pass",
     "pickTwo": "Pick at least two runs to compare.",
@@ -145,6 +146,7 @@
   "gate": {
     "fields": {
       "maxTotalCostUsd": "Max total cost (USD)",
+      "maxUngradedRatio": "Max ungraded ratio",
       "minPassAt1": "Min pass@1",
       "minPassHatK": "Min pass^k",
       "minScorerPassRate": "Min per-scorer pass rate"
@@ -204,7 +206,7 @@
       "workflow": "Workflow"
     },
     "noTargets": "Add at least one target with a model / team / workflow id.",
-    "progress": "{done} / {total} · {passing} passing",
+    "progress": "{done} / {total} · {passing} passing · {ungraded} ungraded",
     "progressLabel": "Run progress",
     "removeTarget": "Remove target",
     "run": "Run evaluation",
@@ -222,12 +224,24 @@
     "fail": "Fail",
     "gateFailed": "Gate failed",
     "gatePassed": "Gate passed",
+    "graded": "{graded} graded · {ungraded} ungraded",
     "latency": "{ms} ms",
+    "legacyScoring": "Legacy scoring",
+    "legacyScoringHint": "This run predates the scoring fix: measurement-only scorers counted as passes, so its pass rate is inflated and not comparable with newer runs. Its gate verdict is withheld.",
     "loading": "Loading run…",
     "noCases": "No per-case results recorded for this run.",
     "pass": "Pass",
     "passAt1": "pass@1 {pct}%",
     "passHatK": "pass^{k} {pct}%",
+    "scorersFailed": "These scorers failed on every case and graded nothing: {scorers}. The numbers above are not trustworthy — check the judge provider and re-run.",
+    "status": {
+      "errored": "The scorer itself failed",
+      "measurement": "Measurement only — decides nothing",
+      "not-applicable": "Not applicable — this case carries no reference for this scorer",
+      "scored": "Scored"
+    },
+    "ungraded": "Ungraded",
+    "ungradedHint": "{count} case(s) had no applicable scorer, so they are excluded from the pass rates above. Add a reference (expected output, tools or context) or select a scorer that can grade them.",
     "verdict": "Verdict"
   },
   "runs": {
@@ -248,9 +262,11 @@
     "empty": "No runs yet — configure and run this dataset.",
     "gateFailed": "Gate failed",
     "gatePassed": "Gate passed",
+    "legacyScoring": "Legacy scoring",
     "openRun": "Open run {label}",
     "passAt1": "pass@1 {pct}%",
-    "passHatK": "pass^{k} {pct}%"
+    "passHatK": "pass^{k} {pct}%",
+    "ungraded": "{count} ungraded"
   },
   "scorerCatalog": {
     "assertion": "Assertions",

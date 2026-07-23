@@ -10,6 +10,7 @@ import { useTranslations } from "next-intl"
 import { Badge } from "@/components/ui/badge"
 import { useEvalRuns } from "@/hooks/eval/use-eval-data"
 import { evaluateGate } from "@/lib/ai/eval/gate"
+import { isLegacyScoring } from "@/lib/ai/eval/report"
 import type { EvalRunRow } from "@/lib/db/eval-runs"
 import type { GateThresholds } from "@/types/eval/gate"
 
@@ -42,7 +43,10 @@ export function RunsListView({ runs, gate, onOpenRun }: RunsListViewProps) {
   return (
     <ul className="flex flex-col gap-1" data-testid="runs-list">
       {runs.map((run) => {
-        const gateResult = gate ? evaluateGate(run, gate) : undefined
+        // Legacy runs carry an inflated pass rate, so their gate verdict would
+        // be equally wrong — badge them and withhold it.
+        const legacy = isLegacyScoring(run)
+        const gateResult = gate && !legacy ? evaluateGate(run, gate) : undefined
         return (
           <li key={run.runId}>
             <button
@@ -66,7 +70,17 @@ export function RunsListView({ runs, gate, onOpenRun }: RunsListViewProps) {
                     {t("passHatK", { pct: Math.round(run.passHatK * 100), k: run.k })}
                   </Badge>
                 )}
+                {!legacy && (run.ungradedCaseCount ?? 0) > 0 && (
+                  <Badge variant="outline" data-testid="runs-list-ungraded">
+                    {t("ungraded", { count: run.ungradedCaseCount ?? 0 })}
+                  </Badge>
+                )}
                 <Badge variant="secondary">${run.totalCostUsd.toFixed(2)}</Badge>
+                {legacy && (
+                  <Badge variant="outline" data-testid="runs-list-legacy">
+                    {t("legacyScoring")}
+                  </Badge>
+                )}
                 {gateResult && (
                   <Badge variant={gateResult.passed ? "secondary" : "destructive"}>
                     {gateResult.passed ? t("gatePassed") : t("gateFailed")}

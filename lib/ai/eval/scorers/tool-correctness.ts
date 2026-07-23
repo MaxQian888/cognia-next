@@ -6,10 +6,15 @@
  * order, and redundancy. All four are pure functions over an {@link EvalSample}
  * so they run in the CI deterministic tier every change.
  *
- * Reference-based scorers (selection / args / order) return a Score with
- * `error` set ("not-applicable") when the case carries no matching reference,
- * rather than throwing — the report aggregator excludes errored observations
- * from means and pass-rates.
+ * Reference-based scorers (selection / args / order) return a `not-applicable`
+ * Score when the case carries no matching reference, rather than throwing —
+ * the report aggregator excludes them from means, pass-rates and the verdict.
+ *
+ * `tool-redundancy` is reference-FREE but only meaningful once the agent
+ * actually called something: a run with zero tool calls reports `measurement`,
+ * not a pass. It used to return `passed: true` there, which meant a plain
+ * question/answer dataset (no tools at all) got a free passing verdict on
+ * every case — half of the reason such runs reported 100%.
  */
 
 import type { EvalCase, EvalSample, Score, Scorer } from "@/types/eval/eval"
@@ -43,6 +48,7 @@ function notApplicable(scorerId: string, reason: string): Score {
   return {
     scorerId,
     dimension: "tool-use",
+    status: "not-applicable",
     value: 0,
     passed: false,
     error: `not-applicable: ${reason}`,
@@ -53,6 +59,7 @@ export const toolSelectionScorer: Scorer = {
   id: "tool-selection",
   dimension: "tool-use",
   requiresLlm: false,
+  gating: true,
   score(sample: EvalSample, evalCase: EvalCase): Score {
     const expected = evalCase.reference?.expectedTools
     if (!expected || expected.length === 0) {
@@ -71,6 +78,7 @@ export const toolSelectionScorer: Scorer = {
     return {
       scorerId: this.id,
       dimension: "tool-use",
+      status: "scored",
       value,
       passed: value >= 1,
       metadata: { precision, recall, missingTools, extraTools },
@@ -82,6 +90,7 @@ export const toolArgsScorer: Scorer = {
   id: "tool-args",
   dimension: "tool-use",
   requiresLlm: false,
+  gating: true,
   score(sample: EvalSample, evalCase: EvalCase): Score {
     const expectedArgs = evalCase.reference?.expectedToolArgs
     if (!expectedArgs || Object.keys(expectedArgs).length === 0) {
@@ -108,6 +117,7 @@ export const toolArgsScorer: Scorer = {
     return {
       scorerId: this.id,
       dimension: "tool-use",
+      status: "scored",
       value,
       passed: value >= 1,
       metadata: { matched, total: toolNames.length, argsUnknown },
@@ -132,6 +142,7 @@ export const toolOrderScorer: Scorer = {
   id: "tool-order",
   dimension: "tool-use",
   requiresLlm: false,
+  gating: true,
   score(sample: EvalSample, evalCase: EvalCase): Score {
     const expected = evalCase.reference?.expectedTools
     if (!expected || expected.length === 0) {
@@ -143,6 +154,7 @@ export const toolOrderScorer: Scorer = {
     return {
       scorerId: this.id,
       dimension: "tool-use",
+      status: "scored",
       value,
       passed: value >= 1,
       metadata: { lcs, expectedLength: expected.length },
@@ -154,14 +166,18 @@ export const redundancyScorer: Scorer = {
   id: "tool-redundancy",
   dimension: "tool-use",
   requiresLlm: false,
+  gating: true,
   score(sample: EvalSample): Score {
     const total = sample.toolCalls.length
     if (total === 0) {
+      // Nothing was called, so there is nothing to be redundant about. This is
+      // information, NOT a passing verdict — see the module docblock.
       return {
         scorerId: this.id,
         dimension: "tool-use",
+        status: "measurement",
         value: 1,
-        passed: true,
+        passed: false,
         metadata: { redundantCount: 0, totalCalls: 0 },
       }
     }
@@ -176,6 +192,7 @@ export const redundancyScorer: Scorer = {
     return {
       scorerId: this.id,
       dimension: "tool-use",
+      status: "scored",
       value,
       passed: value >= 1,
       metadata: { redundantCount: redundant, totalCalls: total },
