@@ -184,7 +184,13 @@ export function TimeSeriesPanel({ panel, series, editMode, thresholds }: TimeSer
           </div>
         )}
         <div className="min-h-0 flex-1">
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer
+            width="100%"
+            height="100%"
+            minWidth={1}
+            minHeight={1}
+            initialDimension={{ width: 320, height: 180 }}
+          >
             {cfg.type === "area" ? (
               <AreaChart data={cfg.data} margin={CHART_MARGINS.default}>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />

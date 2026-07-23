@@ -86,7 +86,13 @@ export function BreakdownBarPanel({
               ))}
             </div>
           )}
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer
+            width="100%"
+            height="100%"
+            minWidth={1}
+            minHeight={1}
+            initialDimension={{ width: 320, height: 180 }}
+          >
             <BarChart
               data={data}
               layout="vertical"

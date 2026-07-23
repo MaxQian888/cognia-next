@@ -74,7 +74,13 @@ export function DonutPanel({
       ) : (
         <div className="flex h-full items-center gap-2">
           <div className="h-full min-w-0 flex-1" data-testid={`donut-chart-${panel.id}`}>
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer
+              width="100%"
+              height="100%"
+              minWidth={1}
+              minHeight={1}
+              initialDimension={{ width: 320, height: 180 }}
+            >
               <PieChart>
                 <Pie
                   data={data}

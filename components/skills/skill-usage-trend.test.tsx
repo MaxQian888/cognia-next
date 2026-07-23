@@ -20,17 +20,25 @@ jest.mock("@/hooks/skills", () => ({
 // records the props it receives so we can assert a positive `initialDimension`
 // is passed (guards against the width(-1)/height(-1) mount flash — see below).
 jest.mock("recharts", () => {
-  const captured: { initialDimension?: { width: number; height: number } }[] = []
+  const captured: {
+    initialDimension?: { width: number; height: number }
+    minWidth?: number
+    minHeight?: number
+  }[] = []
   return {
     __captured: captured,
     ResponsiveContainer: ({
       children,
       initialDimension,
+      minWidth,
+      minHeight,
     }: {
       children: React.ReactNode
       initialDimension?: { width: number; height: number }
+      minWidth?: number
+      minHeight?: number
     }) => {
-      captured.push({ initialDimension })
+      captured.push({ initialDimension, minWidth, minHeight })
       return <div data-testid="rc-container">{children}</div>
     },
     LineChart: ({ children }: { children: React.ReactNode }) => (
@@ -47,7 +55,11 @@ import { fireEvent, render, screen } from "@testing-library/react"
 import { SkillUsageTrend } from "./skill-usage-trend"
 
 const rechartsMock = jest.requireMock("recharts") as {
-  __captured: { initialDimension?: { width: number; height: number } }[]
+  __captured: {
+    initialDimension?: { width: number; height: number }
+    minWidth?: number
+    minHeight?: number
+  }[]
 }
 
 beforeEach(() => {
@@ -71,6 +83,8 @@ describe("SkillUsageTrend", () => {
     expect(dim).toBeDefined()
     expect(dim!.width).toBeGreaterThan(0)
     expect(dim!.height).toBeGreaterThan(0)
+    expect(rechartsMock.__captured[0]?.minWidth).toBe(1)
+    expect(rechartsMock.__captured[0]?.minHeight).toBe(1)
   })
 
   it("provides a 7d / 30d toggle", () => {

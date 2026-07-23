@@ -112,6 +112,8 @@ export function PerfGraphCard({
           <ResponsiveContainer
             width="100%"
             height={fill ? "100%" : height}
+            minWidth={1}
+            minHeight={1}
             initialDimension={{ width: 320, height }}
           >
             <AreaChart data={data} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>

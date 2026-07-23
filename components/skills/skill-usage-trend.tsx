@@ -42,6 +42,8 @@ export function SkillUsageTrend() {
         <ResponsiveContainer
           width="100%"
           height="100%"
+          minWidth={1}
+          minHeight={1}
           initialDimension={{ width: 320, height: 192 }}
         >
           <LineChart data={data}>

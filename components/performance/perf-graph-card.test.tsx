@@ -10,15 +10,21 @@ jest.mock("recharts", () => ({
     children,
     height,
     initialDimension,
+    minWidth,
+    minHeight,
   }: {
     children?: React.ReactNode
     height?: number | string
     initialDimension?: { width: number; height: number }
+    minWidth?: number
+    minHeight?: number
   }) => (
     <div
       data-testid="rc"
       data-height={String(height)}
       data-initial-dimension={JSON.stringify(initialDimension)}
+      data-min-width={minWidth}
+      data-min-height={minHeight}
     >
       {children}
     </div>
@@ -89,6 +95,8 @@ describe("PerfGraphCard", () => {
     }
     expect(dim.width).toBeGreaterThan(0)
     expect(dim.height).toBe(220)
+    expect(screen.getByTestId("rc")).toHaveAttribute("data-min-width", "1")
+    expect(screen.getByTestId("rc")).toHaveAttribute("data-min-height", "1")
   })
 
   it("renders an optional subtitle", () => {
