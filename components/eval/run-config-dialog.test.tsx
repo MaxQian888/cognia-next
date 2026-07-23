@@ -258,13 +258,18 @@ describe("RunConfigDialog", () => {
       evalCases.mockReturnValue([{ id: "c1" }, { id: "c2" }])
       render(<RunConfigDialog datasetId="d" appSettings={settings(0.1)} onClose={jest.fn()} />)
       expect(screen.getByText(/cost\.overBudget/)).toBeInTheDocument()
-      // NOTE: the labels are currently inverted — the button reads "run anyway"
-      // BEFORE the acknowledgement (where clicking only acknowledges) and
-      // reverts to plain "run" for the click that actually spends the money.
-      // Pinned as-is here; the run dialog's interaction rework owns the fix.
-      fireEvent.click(screen.getByText("runConfig.runAnyway"))
-      expect(runEvalService).not.toHaveBeenCalled()
+
+      // The confirming click is the one labelled "anyway". The labels used to
+      // be inverted: "run anyway" showed BEFORE the confirmation (where the
+      // click only acknowledged) and reverted to plain "run" for the click
+      // that actually spent the money.
+      expect(screen.queryByTestId("cost-confirm")).not.toBeInTheDocument()
       fireEvent.click(screen.getByText("runConfig.run"))
+      expect(runEvalService).not.toHaveBeenCalled()
+      // …and the first click gets visible feedback, not just a label swap.
+      expect(screen.getByTestId("cost-confirm")).toBeInTheDocument()
+
+      fireEvent.click(screen.getByText("runConfig.runAnyway"))
       await waitFor(() => expect(runEvalService).toHaveBeenCalledTimes(1))
     })
 
@@ -274,11 +279,12 @@ describe("RunConfigDialog", () => {
       evalRuns.mockReturnValue([priorRun])
       evalCases.mockReturnValue([{ id: "c1" }, { id: "c2" }])
       render(<RunConfigDialog datasetId="d" appSettings={settings(0.1)} onClose={jest.fn()} />)
-      fireEvent.click(screen.getByText("runConfig.runAnyway"))
-      expect(screen.getByText("runConfig.run")).toBeInTheDocument()
+      fireEvent.click(screen.getByText("runConfig.run"))
+      expect(screen.getByText("runConfig.runAnyway")).toBeInTheDocument()
       // Raise k → the estimate changes → the acknowledgement no longer applies.
       fireEvent.change(screen.getByLabelText("runConfig.k"), { target: { value: "5" } })
-      expect(screen.getByText("runConfig.runAnyway")).toBeInTheDocument()
+      expect(screen.getByText("runConfig.run")).toBeInTheDocument()
+      expect(screen.queryByTestId("cost-confirm")).not.toBeInTheDocument()
       expect(runEvalService).not.toHaveBeenCalled()
     })
 
@@ -288,6 +294,35 @@ describe("RunConfigDialog", () => {
       render(<RunConfigDialog datasetId="d" appSettings={settings(100)} onClose={jest.fn()} />)
       expect(screen.queryByText(/cost\.overBudget/)).not.toBeInTheDocument()
       expect(screen.getByText("runConfig.run")).toBeInTheDocument()
+      expect(screen.queryByTestId("cost-confirm")).not.toBeInTheDocument()
+    })
+
+    it("runs on the first click when no cost guard is configured", async () => {
+      // Without a guard there is nothing to confirm — the extra click would be
+      // pure friction.
+      evalRuns.mockReturnValue([priorRun])
+      evalCases.mockReturnValue([{ id: "c1" }, { id: "c2" }])
+      render(<RunConfigDialog datasetId="d" appSettings={settings()} onClose={jest.fn()} />)
+      fireEvent.click(screen.getByText("runConfig.run"))
+      await waitFor(() => expect(runEvalService).toHaveBeenCalledTimes(1))
+    })
+
+    it("drops the confirmation once the run starts", async () => {
+      evalRuns.mockReturnValue([priorRun])
+      evalCases.mockReturnValue([{ id: "c1" }, { id: "c2" }])
+      let release: () => void = () => {}
+      runEvalService.mockImplementationOnce(async () => {
+        await new Promise<void>((r) => {
+          release = r
+        })
+        return { reports: [{ runId: "r1" }], deterministicOnly: false }
+      })
+      render(<RunConfigDialog datasetId="d" appSettings={settings(0.1)} onClose={jest.fn()} />)
+      fireEvent.click(screen.getByText("runConfig.run"))
+      fireEvent.click(screen.getByText("runConfig.runAnyway"))
+      await waitFor(() => expect(screen.queryByTestId("cost-confirm")).not.toBeInTheDocument())
+      release()
+      await waitFor(() => expect(useEvalRunStore.getState().active).toBeNull())
     })
   })
 

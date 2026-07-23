@@ -164,7 +164,8 @@ export function RunConfigDialog({
       .filter(Boolean)
 
   const handleRun = useCallback(async () => {
-    // First click while over the cost guard: acknowledge, don't run yet.
+    // Over the cost guard, the first click only asks for confirmation. The
+    // button and the message below it flip to say so — see the render.
     if (overBudget && !costAck) {
       setAckedConfig(configKey)
       return
@@ -373,6 +374,14 @@ export function RunConfigDialog({
         </p>
       )}
 
+      {/* The first click over budget confirms rather than launches, so it needs
+          feedback of its own — a label change alone reads as a dead button. */}
+      {overBudget && costAck && !running && (
+        <p className="text-destructive text-xs" role="alert" data-testid="cost-confirm">
+          {t("cost.confirm")}
+        </p>
+      )}
+
       {running && (
         <div className="flex items-center gap-2" data-testid="run-progress">
           <Progress
@@ -408,10 +417,14 @@ export function RunConfigDialog({
         </p>
       )}
 
+      {/* The labels used to be inverted: "run anyway" appeared BEFORE the
+          confirmation (where clicking only acknowledged) and reverted to plain
+          "run" for the click that actually spent the money. The confirming
+          click is the one that says "anyway". */}
       <Button
         onClick={() => void handleRun()}
         disabled={running}
-        variant={overBudget && !costAck ? "destructive" : "default"}
+        variant={overBudget && costAck ? "destructive" : "default"}
       >
         {running ? (
           <Loader2Icon className="size-4 animate-spin" />
@@ -420,7 +433,7 @@ export function RunConfigDialog({
         )}
         {running
           ? t("runConfig.running")
-          : overBudget && !costAck
+          : overBudget && costAck
             ? t("runConfig.runAnyway")
             : t("runConfig.run")}
       </Button>

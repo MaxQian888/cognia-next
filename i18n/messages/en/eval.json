@@ -104,6 +104,7 @@
   "compare": {
     "case": "Case",
     "fail": "fail",
+    "loading": "Loading per-case results…",
     "mixedScoring": "You are comparing runs from before and after the scoring fix. Older runs counted measurement-only scorers as passes, so a drop across that boundary is the fix landing, not a regression.",
     "noCases": "No per-case results recorded for the selected runs.",
     "pass": "pass",
@@ -111,6 +112,9 @@
     "selectRun": "Select run {label}",
     "subtitle": "Pick two or more runs to compare case-by-case.",
     "title": "Runs & comparison"
+  },
+  "cost": {
+    "confirm": "This run is over your cost guard. Press again to run it anyway."
   },
   "datasets": {
     "back": "Back to datasets",
@@ -133,6 +137,7 @@
     "gate": "Gate",
     "gateConfigured": "Gated",
     "import": "Import",
+    "moreActions": "More dataset actions",
     "run": "Run",
     "segments": {
       "cases": "Cases",

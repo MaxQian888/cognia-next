@@ -9,9 +9,22 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { DownloadIcon, PlayIcon, UploadIcon, HistoryIcon, ShieldCheckIcon } from "lucide-react"
+import {
+  DownloadIcon,
+  MoreHorizontalIcon,
+  PlayIcon,
+  UploadIcon,
+  HistoryIcon,
+  ShieldCheckIcon,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import type { AppSettings } from "@cognia/agent-config-types"
 import type { EvalDataset } from "@/types/eval/eval"
@@ -71,35 +84,45 @@ export function DatasetDetail({ dataset, appSettings, runOptions }: DatasetDetai
             </Badge>
           )}
         </div>
-        <div className="flex flex-wrap gap-1">
-          <Button size="sm" variant="outline" onClick={() => setDialog("import")}>
-            <UploadIcon className="size-4" />
-            {t("detail.import")}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => download(`${dataset.name}.jsonl`, toJsonl(cases), "application/jsonl")}
-          >
-            <DownloadIcon className="size-4" />
-            {t("detail.exportJsonl")}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => download(`${dataset.name}.csv`, toCsv(cases), "text/csv")}
-          >
-            <DownloadIcon className="size-4" />
-            {t("detail.exportCsv")}
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => setDialog("gate")}>
-            <ShieldCheckIcon className="size-4" />
-            {t("detail.gate")}
-          </Button>
+        {/* Run is the primary action; the rest collapse into an overflow menu.
+            Five side-by-side buttons plus three badges wrapped onto three rows
+            in the 320px detail pane. */}
+        <div className="flex shrink-0 gap-1">
           <Button size="sm" onClick={() => setDialog("run")}>
             <PlayIcon className="size-4" />
             {t("detail.run")}
           </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="icon" variant="outline" aria-label={t("detail.moreActions")}>
+                <MoreHorizontalIcon className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setDialog("import")}>
+                <UploadIcon className="size-4" />
+                {t("detail.import")}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() =>
+                  download(`${dataset.name}.jsonl`, toJsonl(cases), "application/jsonl")
+                }
+              >
+                <DownloadIcon className="size-4" />
+                {t("detail.exportJsonl")}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => download(`${dataset.name}.csv`, toCsv(cases), "text/csv")}
+              >
+                <DownloadIcon className="size-4" />
+                {t("detail.exportCsv")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setDialog("gate")}>
+                <ShieldCheckIcon className="size-4" />
+                {t("detail.gate")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
 

@@ -1,5 +1,7 @@
 import { runConfiguredEval, filterCases, type RunConfiguredDeps } from "./run-config"
-import type { EvalCase, EvalDataset, EvalSample, Scorer } from "@/types/eval/eval"
+import type { EvalCase, EvalDataset, EvalReport, EvalSample, Scorer } from "@/types/eval/eval"
+import type { EvalDatasetVersion } from "@/types/eval/version"
+import type { SaveCaseResultInput } from "@/lib/db/eval-run-cases"
 import type { TargetSpec } from "@/types/eval/run-config"
 import type { EvalTarget } from "./runner"
 
@@ -73,15 +75,13 @@ describe("filterCases", () => {
 describe("runConfiguredEval", () => {
   function makeDeps(over: Partial<RunConfiguredDeps> = {}): {
     deps: RunConfiguredDeps
-    saved: jest.MockedFunction<RunConfiguredDeps["saveRun"]>
-    savedCases: jest.MockedFunction<RunConfiguredDeps["saveCaseResult"]>
-    snapshot: jest.MockedFunction<RunConfiguredDeps["snapshot"]>
+    saved: jest.Mock<Promise<void>, [EvalReport]>
+    savedCases: jest.Mock<Promise<void>, [SaveCaseResultInput]>
+    snapshot: jest.Mock<Promise<EvalDatasetVersion>, [string]>
   } {
-    const saved: jest.MockedFunction<RunConfiguredDeps["saveRun"]> = jest.fn(async () => {})
-    const savedCases: jest.MockedFunction<RunConfiguredDeps["saveCaseResult"]> = jest.fn(
-      async () => {}
-    )
-    const snapshot: jest.MockedFunction<RunConfiguredDeps["snapshot"]> = jest.fn(async () => ({
+    const saved = jest.fn<Promise<void>, [EvalReport]>(async () => {})
+    const savedCases = jest.fn<Promise<void>, [SaveCaseResultInput]>(async () => {})
+    const snapshot = jest.fn<Promise<EvalDatasetVersion>, [string]>(async () => ({
       id: "ver_1",
       datasetId: "d",
       version: 3,

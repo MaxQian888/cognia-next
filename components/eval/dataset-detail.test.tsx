@@ -2,6 +2,29 @@
  * @jest-environment jsdom
  */
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+
+// Radix's DropdownMenu opens on pointer events, which jsdom does not deliver.
+// The repo's established pattern is to flatten the primitives so the items are
+// always rendered and directly clickable.
+jest.mock("@/components/ui/dropdown-menu", () => {
+  const React = jest.requireActual("react")
+  return {
+    DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+    DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+    DropdownMenuItem: ({
+      children,
+      onClick,
+    }: {
+      children: React.ReactNode
+      onClick?: () => void
+    }) => (
+      <button type="button" onClick={onClick}>
+        {children}
+      </button>
+    ),
+  }
+})
 import type { EvalDataset } from "@/types/eval/eval"
 
 jest.mock("next-intl", () => ({
@@ -201,5 +224,17 @@ describe("DatasetDetail", () => {
     expect(importProps).toHaveBeenCalledWith(
       expect.objectContaining({ defaultGrading: { mode: "numeric" } })
     )
+  })
+
+  it("keeps Run primary and collapses the rest into an overflow menu", () => {
+    // Five side-by-side buttons plus three badges wrapped onto three rows in
+    // the 320px detail pane.
+    render(<DatasetDetail dataset={dataset} appSettings={null} />)
+    expect(screen.getByLabelText("detail.moreActions")).toBeInTheDocument()
+    // Run stays a first-class button, the rest live behind the menu.
+    expect(screen.getByText("detail.run").closest("button")).toBeInTheDocument()
+    for (const key of ["detail.import", "detail.exportJsonl", "detail.exportCsv", "detail.gate"]) {
+      expect(screen.getByText(key)).toBeInTheDocument()
+    }
   })
 })

@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
+import { Skeleton } from "@/components/ui/skeleton"
 import { listCaseResults, type EvalRunCaseRow } from "@/lib/db/eval-run-cases"
 import { buildComparison } from "@/lib/ai/eval/compare"
 import { isLegacyScoring } from "@/lib/ai/eval/report"
@@ -36,6 +37,13 @@ export function RunComparisonView({ runs, inputsByCase = {} }: RunComparisonView
     [override, runs]
   )
 
+  // Which selection `resultsByRun` describes. While it lags `selected`, the
+  // grid is still loading — it used to render "no per-case results recorded",
+  // which reads as a finished, empty answer.
+  const [loadedFor, setLoadedFor] = useState<string | null>(null)
+  const selectionKey = selected.join("|")
+  const loading = selected.length >= 2 && loadedFor !== selectionKey
+
   useEffect(() => {
     let cancelled = false
     void Promise.all(selected.map((id) => listCaseResults(id))).then((lists) => {
@@ -45,11 +53,12 @@ export function RunComparisonView({ runs, inputsByCase = {} }: RunComparisonView
         next[id] = lists[i]
       })
       setResultsByRun(next)
+      setLoadedFor(selectionKey)
     })
     return () => {
       cancelled = true
     }
-  }, [selected])
+  }, [selected, selectionKey])
 
   const selectedReports = useMemo(
     () => selected.map((id) => runs.find((r) => r.runId === id)).filter(Boolean) as EvalRunRow[],
@@ -102,6 +111,11 @@ export function RunComparisonView({ runs, inputsByCase = {} }: RunComparisonView
 
       {selected.length < 2 ? (
         <p className="text-muted-foreground text-sm">{t("compare.pickTwo")}</p>
+      ) : loading ? (
+        <div className="flex flex-col gap-2" role="status" aria-label={t("compare.loading")}>
+          <Skeleton className="h-6 w-full" />
+          <Skeleton className="h-24 w-full" />
+        </div>
       ) : comparison.rows.length === 0 ? (
         <p className="text-muted-foreground text-sm">{t("compare.noCases")}</p>
       ) : (

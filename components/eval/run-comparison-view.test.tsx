@@ -93,4 +93,25 @@ describe("RunComparisonView", () => {
       expect(screen.queryByTestId("mixed-scoring-warning")).not.toBeInTheDocument()
     )
   })
+
+  it("shows a loading state, not an empty one, while results are in flight", async () => {
+    // It used to render "no per-case results recorded" during the load, which
+    // reads as a finished, empty answer.
+    let release: (v: EvalRunCaseRow[]) => void = () => {}
+    listCaseResults.mockImplementationOnce(
+      () => new Promise<EvalRunCaseRow[]>((r) => (release = r))
+    )
+    render(<RunComparisonView runs={[run("A", 1), run("B", 0)]} />)
+    expect(screen.getByRole("status")).toBeInTheDocument()
+    expect(screen.queryByText("compare.noCases")).not.toBeInTheDocument()
+    release([])
+    await waitFor(() => expect(screen.queryByRole("status")).not.toBeInTheDocument())
+  })
+
+  it("reports a genuinely empty comparison once loading finishes", async () => {
+    listCaseResults.mockImplementation(async () => [])
+    render(<RunComparisonView runs={[run("A", 1), run("B", 0)]} />)
+    await waitFor(() => expect(screen.getByText("compare.noCases")).toBeInTheDocument())
+    listCaseResults.mockImplementation(async (id: string) => rows[id] ?? [])
+  })
 })

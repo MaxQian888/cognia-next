@@ -39,7 +39,8 @@ jest.mock("@/lib/db/eval-runs", () => ({
 }))
 const upsertCalibrationItem = jest.fn<Promise<unknown>, [Record<string, unknown>]>(async () => ({}))
 jest.mock("@/lib/db/calibration-items", () => ({
-  upsertCalibrationItem: (...a: unknown[]) => upsertCalibrationItem(...(a as [])),
+  upsertCalibrationItem: (...a: unknown[]) =>
+    upsertCalibrationItem(...(a as unknown as [Record<string, unknown>])),
 }))
 
 import { useEvalRunCaseResults } from "@/hooks/eval/use-eval-data"

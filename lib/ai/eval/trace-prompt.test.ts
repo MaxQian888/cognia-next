@@ -93,7 +93,7 @@ describe("resolveTracePrompts", () => {
   })
 
   it("loads a shared session once and maps it onto every trace in it", async () => {
-    const load: jest.MockedFunction<SessionMessageLoader> = jest.fn(async () => [
+    const load = jest.fn<ReturnType<SessionMessageLoader>, [string]>(async () => [
       userMessage("shared"),
     ])
     const out = await resolveTracePrompts(

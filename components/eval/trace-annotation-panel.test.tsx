@@ -37,7 +37,7 @@ const addCase = jest.fn<Promise<{ id: string }>, [string, Record<string, unknown
   id: "evc_new",
 }))
 jest.mock("@/lib/db/eval-datasets", () => ({
-  addCase: (...a: unknown[]) => addCase(...(a as [])),
+  addCase: (...a: unknown[]) => addCase(...(a as unknown as [string, Record<string, unknown>])),
 }))
 
 import { TraceAnnotationPanel } from "./trace-annotation-panel"

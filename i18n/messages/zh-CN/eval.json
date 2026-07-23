@@ -104,6 +104,7 @@
   "compare": {
     "case": "用例",
     "fail": "失败",
+    "loading": "正在加载逐例结果…",
     "mixedScoring": "你正在对比评分修复前后的运行。旧运行把纯测量类评分器算作通过，因此跨越这条分界线的下降是修复生效，而不是能力退化。",
     "noCases": "所选运行没有记录逐用例结果。",
     "pass": "通过",
@@ -111,6 +112,9 @@
     "selectRun": "选择运行 {label}",
     "subtitle": "选择两个或更多运行，逐用例对比。",
     "title": "运行与对比"
+  },
+  "cost": {
+    "confirm": "这次运行超出你设置的成本护栏。再点一次以确认运行。"
   },
   "datasets": {
     "back": "返回评测集列表",
@@ -133,6 +137,7 @@
     "gate": "门限",
     "gateConfigured": "已设门限",
     "import": "导入",
+    "moreActions": "更多数据集操作",
     "run": "运行",
     "segments": {
       "cases": "用例",

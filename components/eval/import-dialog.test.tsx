@@ -19,7 +19,7 @@ const bulkAddCases = jest.fn<Promise<{ added: number; updated: number }>, BulkAr
 }))
 const updateDataset = jest.fn(async () => undefined)
 jest.mock("@/lib/db/eval-datasets", () => ({
-  bulkAddCases: (...a: unknown[]) => bulkAddCases(...(a as [])),
+  bulkAddCases: (...a: unknown[]) => bulkAddCases(...(a as unknown as BulkArgs)),
   updateDataset: (...a: unknown[]) => updateDataset(...(a as [])),
 }))
 
