@@ -17,12 +17,11 @@
       "project": [
         "{__mocks__,app,cli,components,hooks,i18n,lib,plugins,scripts,src-tauri/scripts,stores,tests,types}/**/*.{js,jsx,cjs,mjs,ts,tsx,cts,mts}",
       ],
-      "ignore": [".agents/**", ".claude/**"],
+      "ignore": [".agents/**"],
       // Loaded from CSS, dynamic imports, or as providers for workspace peer dependencies.
       "ignoreDependencies": [
         "@ai-sdk/react",
         "@hookform/resolvers",
-        "@huggingface/transformers",
         "@radix-ui/react-slot",
         "@tauri-apps/api",
         "@tauri-apps/plugin-shell",
@@ -39,7 +38,8 @@
         "ts-jest",
         "xlsx",
       ],
-      "ignoreBinaries": ["chcp.com", "pwsh", "rustfmt", "taskkill"],
+      // Host toolchains installed outside pnpm and invoked by repository scripts.
+      "ignoreBinaries": ["chcp.com", "pwsh", "rustfmt", "uv"],
       "ignoreIssues": {
         "**/*.generated.{js,ts,tsx}": [
           "files",

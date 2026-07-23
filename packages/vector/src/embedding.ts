@@ -19,7 +19,7 @@ import {
   type ProviderName,
 } from "@cognia/provider-types"
 import { createBedrockSidecarEmbeddingModel } from "@/lib/claude/feature-call"
-import type { TransformersErrorCode } from "@/types/transformers"
+import type { TransformersErrorCode } from "@cognia/transformers-runtime"
 
 /**
  * Selectable embedding provider for the vector / RAG path. Aliases the
@@ -183,7 +183,7 @@ export async function generateEmbedding(
   assertEmbeddingExecutionInput(config, apiKey)
 
   if (config.provider === "transformersjs") {
-    const { getTransformersManager } = await import("@/lib/ai/transformers/transformers-manager")
+    const { getTransformersManager } = await import("@cognia/transformers-runtime")
     const manager = getTransformersManager()
     const result = await manager.generateEmbedding(text, config.model)
     return {
@@ -237,7 +237,7 @@ export async function generateEmbeddings(
   assertEmbeddingExecutionInput(config, apiKey)
 
   if (config.provider === "transformersjs") {
-    const { getTransformersManager } = await import("@/lib/ai/transformers/transformers-manager")
+    const { getTransformersManager } = await import("@cognia/transformers-runtime")
     const manager = getTransformersManager()
     const result = await manager.generateEmbeddings(texts, config.model)
     return {

@@ -15,7 +15,8 @@
       "@cognia/provider-routing": ["../provider-routing/src/index.ts"],
       "@cognia/provider-routing/*": ["../provider-routing/src/*"],
       "@cognia/vector": ["./src/index.ts"],
-      "@cognia/vector/*": ["./src/*"]
+      "@cognia/vector/*": ["./src/*"],
+      "@cognia/transformers-runtime": ["../transformers-runtime/src/index.ts"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],

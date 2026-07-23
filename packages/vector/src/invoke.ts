@@ -38,9 +38,7 @@ export type VectorCredentials =
 /** Result of `vector_cloud_health_check`. The Rust side serialises this
  *  enum as `"healthy" | { degraded: {...} } | { unreachable: {...} }`. */
 export type HealthStatus =
-  | "healthy"
-  | { degraded: { reason: string } }
-  | { unreachable: { reason: string } }
+  "healthy" | { degraded: { reason: string } } | { unreachable: { reason: string } }
 
 /** Wire-shape of a single point. Mirrors `types::Point`. */
 export interface PointWire {

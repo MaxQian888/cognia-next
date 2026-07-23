@@ -14,11 +14,13 @@ jest.mock("@cognia/provider-embedding/embedding", () => ({
   }),
 }))
 
-jest.mock("@/lib/ai/transformers/transformers-manager", () => ({
+jest.mock("@cognia/transformers-runtime", () => ({
   getTransformersManager: jest.fn(),
 }))
 
-const createBedrockSidecarEmbeddingModel = jest.fn(() => ({ modelId: "bedrock-sidecar" }))
+const createBedrockSidecarEmbeddingModel = jest.fn((..._args: unknown[]) => ({
+  modelId: "bedrock-sidecar",
+}))
 jest.mock("@/lib/claude/feature-call", () => ({
   createBedrockSidecarEmbeddingModel: (...args: unknown[]) =>
     createBedrockSidecarEmbeddingModel(...args),
@@ -48,7 +50,7 @@ import * as providerEmbedding from "@cognia/provider-embedding/embedding"
 
 const mockGenerateAiEmbedding = jest.mocked(providerEmbedding.generateEmbedding)
 const mockGenerateAiEmbeddings = jest.mocked(providerEmbedding.generateEmbeddings)
-const mockGetTransformersManager = jest.requireMock("@/lib/ai/transformers/transformers-manager")
+const mockGetTransformersManager = jest.requireMock("@cognia/transformers-runtime")
   .getTransformersManager as jest.Mock
 
 describe("DEFAULT_EMBEDDING_MODELS", () => {

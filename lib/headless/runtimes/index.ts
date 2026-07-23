@@ -38,6 +38,8 @@
  * - `window-liveness-initializers` — reveals and heartbeats the Tauri main
  *   window; a headless/cloud runtime has no native window to manage.
  * - `ocr-runtime` — native OCR is desktop-only hardware (ADR-0059 D4).
+ * - `transformers-runtime` — its Web Worker/WebGPU/WASM execution is an
+ *   explicitly enabled browser feature; headless callers must use a server runtime.
  * - `desktop-only-initializers` / `mobile-only-initializers` — shell-specific
  *   by definition; anything inside them that belongs in the brain must be
  *   extracted out and registered individually.

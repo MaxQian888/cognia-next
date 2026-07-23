@@ -1527,8 +1527,7 @@ describe("NativeVectorStore", () => {
       await store.importCollection!(data)
 
       const callArgs = mockInvoke.mock.calls.at(-1)?.[1] as
-        | { jsonl: string; overwrite: boolean }
-        | undefined
+        { jsonl: string; overwrite: boolean } | undefined
       expect(callArgs?.overwrite).toBe(false)
       expect(callArgs?.jsonl).toContain("2022-01-01T00:00:00.000Z")
       expect(callArgs?.jsonl).toContain("2022-01-01T00:01:40.000Z")

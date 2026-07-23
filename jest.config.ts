@@ -154,6 +154,8 @@ const projectCommon: Config = {
     "^@cognia/rag(.*)$": "<rootDir>/packages/rag/src$1",
     "^@cognia/error-parsers(.*)$": "<rootDir>/packages/error-parsers/src$1",
     "^@cognia/vector(.*)$": "<rootDir>/packages/vector/src$1",
+    "^@cognia/transformers-runtime$": "<rootDir>/packages/transformers-runtime/src/index.ts",
+    "^@cognia/transformers-runtime/(.*)$": "<rootDir>/packages/transformers-runtime/src/$1",
     "^@cognia/document(.*)$": "<rootDir>/packages/document/src$1",
     "^@cognia/agent-trace(.*)$": "<rootDir>/packages/agent-trace/src$1",
     "^@cognia/primitives(.*)$": "<rootDir>/packages/primitives/src$1",
@@ -178,6 +180,11 @@ const projectCommon: Config = {
     // The HTML parser uses dynamic import("cheerio"), so map Jest to the CJS
     // build that the CommonJS runtime can execute.
     "^cheerio$": "<rootDir>/node_modules/cheerio/dist/commonjs/index.js",
+
+    // streamdown 2.5 exposes only an ESM `import` condition and its bundled
+    // output remains ESM after next/jest's node_modules handling. Tests assert
+    // our wrappers, so use a small rendering-compatible CJS boundary.
+    "^streamdown$": "<rootDir>/__mocks__/streamdown.js",
 
     // Handle module aliases (this will be automatically configured for you by Next.js)
     "^@/(.*)$": "<rootDir>/$1",
@@ -261,7 +268,7 @@ const projectCommon: Config = {
   },
 
   // An array of regexp pattern strings, matched against all module paths before considered 'visible' to the module loader
-  modulePathIgnorePatterns: ["<rootDir>/out/", "<rootDir>/.next/"],
+  modulePathIgnorePatterns: ["<rootDir>/out/", "<rootDir>/.next/", "<rootDir>/target/"],
 
   // A list of paths to modules that run some code to configure or set up the testing framework before each test.
   // jest.setup.ts is env-agnostic — every DOM touch is behind a
@@ -320,6 +327,8 @@ const globalConfig: Config = {
     "packages/ocr/src/**/*.{ts,tsx}",
     // vector / document / agent-trace were lifted out of lib/* (coverage-collected).
     "packages/vector/src/**/*.{ts,tsx}",
+    "packages/transformers-runtime/src/**/*.{ts,tsx}",
+    "!packages/transformers-runtime/src/types.ts",
     "packages/document/src/**/*.{ts,tsx}",
     "packages/agent-trace/src/**/*.{ts,tsx}",
     // primitives / time / latex / mermaid were lifted out of lib/* (coverage-collected).
@@ -391,6 +400,31 @@ const globalConfig: Config = {
     "!lib/memory/external/types.ts",
     "!lib/execution/types.ts",
     "!lib/pet/live2d/types.ts",
+    "!lib/a2ui/from-execution/types.ts",
+    "!lib/attention/types.ts",
+    "!lib/chat/mentions/types.ts",
+    "!lib/claude/agents/subagents/types.ts",
+    "!lib/db/behavior-event-types.ts",
+    "!lib/db/crm-types.ts",
+    "!lib/db/inbox-telemetry-types.ts",
+    "!lib/headless/types.ts",
+    "!lib/scheduler/sources/types.ts",
+    "!lib/session-import/types.ts",
+    "!lib/share/types.ts",
+    "!lib/shortcuts/types.ts",
+    "!lib/skills/built-in/types.ts",
+    "!lib/sync/types.ts",
+    "!lib/task-workspace/types.ts",
+    "!lib/terminal/types.ts",
+    "!lib/terminal/completion/spec/types.ts",
+    "!lib/tray/types.ts",
+    "!lib/webdav/types.ts",
+    "!lib/workflow/copilot-templates/types.ts",
+    "!lib/workflow/nodes/typed-params.ts",
+    "!packages/memory/src/llm/types.ts",
+    "!packages/memory/src/types/governance.ts",
+    "!packages/ocr/src/types/document.ts",
+    "!packages/ocr/src/types/platform.ts",
     "!packages/tts/src/providers/adapter.ts",
     "!components/editor/diagnostics/types.ts",
     // The ACP / OpenCode external-agent protocol adapters are 1.5k–2.5k LOC

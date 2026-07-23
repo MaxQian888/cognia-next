@@ -10,12 +10,7 @@ import { generateEmbedding, generateEmbeddings } from "./embedding"
 import { vectorCloudInvoke, type CloudProvider, type FilterOpWire, type FilterWire } from "./invoke"
 
 export type VectorStoreProvider =
-  | "chroma"
-  | "pinecone"
-  | "qdrant"
-  | "milvus"
-  | "native"
-  | "weaviate"
+  "chroma" | "pinecone" | "qdrant" | "milvus" | "native" | "weaviate"
 
 export interface VectorDocument {
   id: string

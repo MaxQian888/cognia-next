@@ -21,7 +21,8 @@
   },
   "dependencies": {
     "@cognia/provider-types": "workspace:*",
-    "@cognia/provider-embedding": "workspace:*"
+    "@cognia/provider-embedding": "workspace:*",
+    "@cognia/transformers-runtime": "workspace:*"
   },
   "peerDependencies": {
     "@tauri-apps/api": "*"

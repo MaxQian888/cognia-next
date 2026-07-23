@@ -36,6 +36,8 @@
       "@cognia/error-parsers/*": ["./packages/error-parsers/src/*"],
       "@cognia/vector": ["./packages/vector/src/index.ts"],
       "@cognia/vector/*": ["./packages/vector/src/*"],
+      "@cognia/transformers-runtime": ["./packages/transformers-runtime/src/index.ts"],
+      "@cognia/transformers-runtime/*": ["./packages/transformers-runtime/src/*"],
       "@cognia/document": ["./packages/document/src/index.ts"],
       "@cognia/document/*": ["./packages/document/src/*"],
       "@cognia/agent-trace": ["./packages/agent-trace/src/index.ts"],
@@ -94,6 +96,8 @@
     "services/share-server",
     "out",
     ".next",
+    "target",
+    "packages/*/dist",
     "packages/*/tsup.config.ts"
   ]
 }
