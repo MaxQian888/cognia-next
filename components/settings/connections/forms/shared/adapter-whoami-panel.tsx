@@ -225,10 +225,12 @@ export function AdapterWhoamiPanel({ adapterId, platform }: AdapterWhoamiPanelPr
               </div>
               <div className="text-xs text-muted-foreground space-y-0.5">
                 <div>
+                  {/* i18n-exempt: raw credential field name, shown verbatim beside its value */}
                   <span>app: </span>
                   <span className="font-mono">{whoami.appId}</span>
                 </div>
                 <div>
+                  {/* i18n-exempt: raw credential field name, shown verbatim beside its value */}
                   <span>id: </span>
                   <span className="font-mono break-all">{whoami.openId}</span>
                 </div>
@@ -256,6 +258,7 @@ export function AdapterWhoamiPanel({ adapterId, platform }: AdapterWhoamiPanelPr
               <div className="flex items-center gap-2">
                 <span className="text-sm font-semibold truncate">{fallbackBotName}</span>
                 <Badge variant="outline" className="text-xs">
+                  {/* i18n-exempt: OneBot is the protocol's own name, not prose */}
                   onebot
                 </Badge>
               </div>
@@ -280,7 +283,10 @@ export function AdapterWhoamiPanel({ adapterId, platform }: AdapterWhoamiPanelPr
           >
             <XCircleIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span className="flex-1 break-words">
-              {t("onebotUinMismatch", { configured: configuredUin ?? "", actual: whoami?.openId ?? "" })}
+              {t("onebotUinMismatch", {
+                configured: configuredUin ?? "",
+                actual: whoami?.openId ?? "",
+              })}
             </span>
           </div>
         )}
