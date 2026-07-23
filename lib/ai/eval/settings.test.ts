@@ -2,7 +2,7 @@ import type { AppSettings } from "@cognia/agent-config-types"
 import { DEFAULT_EVAL_SETTINGS } from "@/types/eval/settings"
 import { resolveEvalSettings, EVAL_K_RANGE } from "./settings"
 
-const asSettings = (evalSettings: AppSettings["evalSettings"]): AppSettings =>
+const asSettings = (evalSettings: Partial<NonNullable<AppSettings["evalSettings"]>>): AppSettings =>
   ({ evalSettings }) as AppSettings
 
 describe("resolveEvalSettings", () => {

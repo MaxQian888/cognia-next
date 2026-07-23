@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen, within } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vals?: Record<string, unknown>) =>
@@ -36,6 +36,10 @@ jest.mock("@/hooks/eval/use-eval-data", () => ({
 }))
 jest.mock("@/lib/db/eval-runs", () => ({
   getRun: jest.fn(),
+}))
+const upsertCalibrationItem = jest.fn<Promise<unknown>, [Record<string, unknown>]>(async () => ({}))
+jest.mock("@/lib/db/calibration-items", () => ({
+  upsertCalibrationItem: (...a: unknown[]) => upsertCalibrationItem(...(a as [])),
 }))
 
 import { useEvalRunCaseResults } from "@/hooks/eval/use-eval-data"
@@ -252,5 +256,108 @@ describe("RunDetail", () => {
     ;(useEvalRunCaseResults as jest.Mock).mockReturnValue([])
     render(<RunDetail runId="r1" onBack={jest.fn()} />)
     expect(await screen.findByText("noCases")).toBeInTheDocument()
+  })
+
+  describe("calibration seeding", () => {
+    const judged = [
+      {
+        id: "r1::c1",
+        runId: "r1",
+        caseId: "c1",
+        scores: {
+          "judge-task-completion": {
+            value: 1,
+            passed: true,
+            status: "scored",
+            reasoning: "covers every field",
+          },
+        },
+        verdict: "pass",
+        passAt1: true,
+        output: "the agent's answer",
+      },
+    ]
+
+    it("stays hidden when the run has no judged cases", async () => {
+      ;(useEvalRunCaseResults as jest.Mock).mockReturnValue([
+        {
+          id: "r1::c1",
+          runId: "r1",
+          caseId: "c1",
+          scores: {},
+          verdict: "ungraded",
+          passAt1: false,
+        },
+      ])
+      render(<RunDetail runId="r1" onBack={jest.fn()} />)
+      await screen.findByRole("table")
+      expect(screen.queryByTestId("seed-calibration-open")).not.toBeInTheDocument()
+    })
+
+    it("seeds a set with the judge's verdict as the starting gold label", async () => {
+      // Calibration sets could only be built by retyping (request, answer)
+      // pairs by hand, so nobody built one and no judge was ever measured.
+      ;(useEvalRunCaseResults as jest.Mock).mockReturnValue(judged)
+      upsertCalibrationItem.mockClear()
+      render(<RunDetail runId="r1" onBack={jest.fn()} />)
+      fireEvent.click(await screen.findByTestId("seed-calibration-open"))
+      expect(screen.getByTestId("seed-preview")).toHaveTextContent('{"count":1,"skipped":0}')
+      fireEvent.change(screen.getByLabelText("calibration.setId"), {
+        target: { value: "judge-v1" },
+      })
+      fireEvent.click(screen.getByText('calibration.seed:{"count":1}'))
+      await waitFor(() => expect(upsertCalibrationItem).toHaveBeenCalledTimes(1))
+      expect(upsertCalibrationItem.mock.calls[0][0]).toMatchObject({
+        setId: "judge-v1",
+        input: "first prompt",
+        output: "the agent's answer",
+        goldLabel: "pass",
+        source: "eval-case",
+        sourceCaseId: "c1",
+        notes: "covers every field",
+      })
+    })
+
+    it("lets the user pick which judge to calibrate", async () => {
+      ;(useEvalRunCaseResults as jest.Mock).mockReturnValue([
+        {
+          ...judged[0],
+          scores: {
+            "judge-task-completion": { value: 1, passed: true, status: "scored" },
+            "judge-instruction-following": { value: 0, passed: false, status: "scored" },
+          },
+        },
+      ])
+      upsertCalibrationItem.mockClear()
+      render(<RunDetail runId="r1" onBack={jest.fn()} />)
+      fireEvent.click(await screen.findByTestId("seed-calibration-open"))
+      fireEvent.change(screen.getByLabelText("calibration.scorer"), {
+        target: { value: "judge-task-completion" },
+      })
+      fireEvent.change(screen.getByLabelText("calibration.setId"), { target: { value: "s" } })
+      fireEvent.click(screen.getByText('calibration.seed:{"count":1}'))
+      await waitFor(() => expect(upsertCalibrationItem).toHaveBeenCalled())
+      expect(upsertCalibrationItem.mock.calls[0][0]).toMatchObject({
+        criterion: "judge-task-completion",
+        goldLabel: "pass",
+      })
+    })
+
+    it("will not seed without a set name", async () => {
+      ;(useEvalRunCaseResults as jest.Mock).mockReturnValue(judged)
+      render(<RunDetail runId="r1" onBack={jest.fn()} />)
+      fireEvent.click(await screen.findByTestId("seed-calibration-open"))
+      expect(screen.getByText('calibration.seed:{"count":1}')).toBeDisabled()
+    })
+
+    it("closes without seeding", async () => {
+      ;(useEvalRunCaseResults as jest.Mock).mockReturnValue(judged)
+      upsertCalibrationItem.mockClear()
+      render(<RunDetail runId="r1" onBack={jest.fn()} />)
+      fireEvent.click(await screen.findByTestId("seed-calibration-open"))
+      fireEvent.click(screen.getByText("calibration.cancel"))
+      expect(screen.queryByTestId("seed-calibration")).not.toBeInTheDocument()
+      expect(upsertCalibrationItem).not.toHaveBeenCalled()
+    })
   })
 })

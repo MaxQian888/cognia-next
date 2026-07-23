@@ -73,17 +73,19 @@ describe("filterCases", () => {
 describe("runConfiguredEval", () => {
   function makeDeps(over: Partial<RunConfiguredDeps> = {}): {
     deps: RunConfiguredDeps
-    saved: ReturnType<typeof jest.fn>
-    savedCases: ReturnType<typeof jest.fn>
-    snapshot: ReturnType<typeof jest.fn>
+    saved: jest.MockedFunction<RunConfiguredDeps["saveRun"]>
+    savedCases: jest.MockedFunction<RunConfiguredDeps["saveCaseResult"]>
+    snapshot: jest.MockedFunction<RunConfiguredDeps["snapshot"]>
   } {
-    const saved = jest.fn(async () => {})
-    const savedCases = jest.fn(async () => {})
-    const snapshot = jest.fn(async () => ({
+    const saved: jest.MockedFunction<RunConfiguredDeps["saveRun"]> = jest.fn(async () => {})
+    const savedCases: jest.MockedFunction<RunConfiguredDeps["saveCaseResult"]> = jest.fn(
+      async () => {}
+    )
+    const snapshot: jest.MockedFunction<RunConfiguredDeps["snapshot"]> = jest.fn(async () => ({
       id: "ver_1",
       datasetId: "d",
       version: 3,
-      cases: [],
+      caseIds: [],
       casesHash: "h",
       createdAt: 0,
     }))

@@ -33,7 +33,7 @@ describe("VersionHistory", () => {
 
   it("lists versions and tags one", async () => {
     versions = [
-      { id: "v1", datasetId: "d", version: 2, cases: [], casesHash: "abcd1234ef", createdAt: 0 },
+      { id: "v1", datasetId: "d", version: 2, caseIds: [], casesHash: "abcd1234ef", createdAt: 0 },
     ]
     render(<VersionHistory datasetId="d" />)
     expect(screen.getByText("abcd1234")).toBeInTheDocument()
@@ -43,5 +43,37 @@ describe("VersionHistory", () => {
     })
     fireEvent.click(screen.getByText("versions.applyTag"))
     await waitFor(() => expect(tagVersion).toHaveBeenCalledWith("v1", "prod"))
+  })
+
+  it("counts cases from the snapshot's ids", () => {
+    versions = [
+      {
+        id: "v9",
+        datasetId: "d",
+        version: 3,
+        caseIds: ["c1", "c2", "c3"],
+        casesHash: "hash",
+        createdAt: 0,
+      } as EvalDatasetVersion,
+    ]
+    render(<VersionHistory datasetId="d" />)
+    expect(screen.getByText('versions.cases:{"count":3}')).toBeInTheDocument()
+  })
+
+  it("still counts a legacy snapshot that stored full copies", () => {
+    // Snapshots used to duplicate every case's text; those rows must stay
+    // readable rather than reporting zero.
+    versions = [
+      {
+        id: "v-legacy",
+        datasetId: "d",
+        version: 1,
+        cases: [{ id: "c1" }, { id: "c2" }],
+        casesHash: "hash",
+        createdAt: 0,
+      } as unknown as EvalDatasetVersion,
+    ]
+    render(<VersionHistory datasetId="d" />)
+    expect(screen.getByText('versions.cases:{"count":2}')).toBeInTheDocument()
   })
 })

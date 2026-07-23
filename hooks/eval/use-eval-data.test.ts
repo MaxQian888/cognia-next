@@ -33,9 +33,14 @@ jest.mock("@/lib/db/calibration-runs", () => ({
   listRunsBySet: jest.fn((id: string) => [`calrun-${id}`, `calrun-${id}-older`]),
 }))
 jest.mock("@/lib/db/agent-traces", () => ({
-  queryRecent: jest.fn(async () => [
+  queryRecentTraces: jest.fn(async () => [
     { traceId: "t", sessionId: "s", startTime: 1, operationName: "chat" },
   ]),
+  countTraces: jest.fn(async () => 7),
+}))
+jest.mock("@/lib/ai/eval/trace-prompt", () => ({
+  defaultPromptLoader: () => async () => [],
+  resolveTracePrompts: jest.fn(async () => ({ t: "the original prompt" })),
 }))
 
 import {
@@ -51,7 +56,10 @@ import {
   useCalibrationItems,
   useCalibrationRuns,
   useLatestCalibrationRun,
+  useTraceCount,
+  useTracePrompts,
 } from "./use-eval-data"
+import { queryRecentTraces } from "@/lib/db/agent-traces"
 import { listRunsByDataset } from "@/lib/db/eval-runs"
 import { listCases } from "@/lib/db/eval-datasets"
 import { listItemsBySet } from "@/lib/db/calibration-items"
@@ -92,10 +100,34 @@ describe("use-eval-data hooks", () => {
     expect(result.current).toEqual(["ann"])
   })
 
-  it("useRecentTraces summarizes recent spans", async () => {
-    const { result } = renderHook(() => useRecentTraces(10))
+  it("useRecentTraces summarizes recent spans, paging by TRACE", async () => {
+    // It used to call `queryRecent`, which counts SPANS — so "50 traces" was
+    // however few traces the last 50 spans covered.
+    const { result } = renderHook(() => useRecentTraces(10, 20))
     const summaries = (await result.current) as unknown as { traceId: string }[]
     expect(summaries[0].traceId).toBe("t")
+    expect(queryRecentTraces).toHaveBeenCalledWith(10, 20)
+  })
+
+  it("useRecentTraces defaults to the first page", async () => {
+    renderHook(() => useRecentTraces())
+    expect(queryRecentTraces).toHaveBeenCalledWith(50, 0)
+  })
+
+  it("useTraceCount reports the distinct trace total", async () => {
+    const { result } = renderHook(() => useTraceCount())
+    await expect(result.current as unknown as Promise<number>).resolves.toBe(7)
+  })
+
+  it("useTracePrompts resolves original prompts keyed by trace id", async () => {
+    const { result } = renderHook(() =>
+      useTracePrompts([
+        { traceId: "t", sessionId: "s", startTime: 1, toolNames: [], preview: "clipped…" },
+      ])
+    )
+    await expect(result.current as unknown as Promise<Record<string, string>>).resolves.toEqual({
+      t: "the original prompt",
+    })
   })
 
   it("useEvalDatasetVersions queries by dataset id when given", () => {

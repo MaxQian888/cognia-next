@@ -43,7 +43,7 @@ import {
   tracesToCases,
   type MappingDeps,
 } from "@/lib/ai/eval/import"
-import { useRecentTraces } from "@/hooks/eval/use-eval-data"
+import { useRecentTraces, useTracePrompts } from "@/hooks/eval/use-eval-data"
 import type {
   FieldSpec,
   ForeignFormat,
@@ -140,6 +140,7 @@ export function ImportDialog({
   const [directCases, setDirectCases] = useState<EvalCase[] | null>(null)
   const [foreignFormat, setForeignFormat] = useState<ForeignFormat>("promptfoo")
   const traces = useRecentTraces(50)
+  const tracePrompts = useTracePrompts(traces)
   const [picked, setPicked] = useState<Set<string>>(new Set())
 
   // ── Import execution ──
@@ -244,9 +245,15 @@ export function ImportDialog({
   const stageHistory = useCallback(() => {
     clearSource()
     setDirectCases(
-      tracesToCases(traces, makeDeps(datasetId, capability), { traceIds: [...picked] }).cases
+      tracesToCases(
+        traces,
+        makeDeps(datasetId, capability),
+        { traceIds: [...picked] },
+        // The original prompts, not the truncated previews.
+        { prompts: tracePrompts }
+      ).cases
     )
-  }, [traces, picked, datasetId, capability, clearSource])
+  }, [traces, tracePrompts, picked, datasetId, capability, clearSource])
 
   /**
    * Persist the staged preview. HuggingFace re-fetches at full `hfLimit` here

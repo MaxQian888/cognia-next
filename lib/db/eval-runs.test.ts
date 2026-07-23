@@ -29,6 +29,8 @@ function report(overrides: Partial<EvalReport> = {}): EvalReport {
     targetLabel: "opus",
     k: 1,
     caseCount: 3,
+    gradedCaseCount: 3,
+    ungradedCaseCount: 0,
     scorers: {},
     passAt1: 0.66,
     passHatK: 0.66,

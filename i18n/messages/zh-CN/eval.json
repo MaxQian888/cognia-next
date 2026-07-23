@@ -7,7 +7,10 @@
     "firstFailure": "首个失败",
     "firstFailurePlaceholder": "这条轨迹里最先出错的是什么？",
     "heading": "轨迹分析",
+    "nextPage": "下一页",
+    "pageOf": "第 {page} / {pages} 页",
     "pickDataset": "选择评测集",
+    "prevPage": "上一页",
     "saturation": "已达饱和——可以停止阅读了。",
     "save": "保存标注",
     "saveAsCase": "存为评测用例",
@@ -20,6 +23,7 @@
   "calibration": {
     "add": "添加",
     "addItem": "添加标注样本",
+    "cancel": "取消",
     "createSet": "创建集合",
     "criterion": "评判标准",
     "criterionPlaceholder": "例如 任务完成度",
@@ -269,6 +273,16 @@
   "runDetail": {
     "agentOutput": "模型回答",
     "back": "返回",
+    "calibration": {
+      "cancel": "取消",
+      "done": "已添加 {count} 条校准项",
+      "hint": "把本次运行中已判定的用例转成校准项，并用评审模型自己的判定预填金标，供你确认或推翻。",
+      "open": "送去评审校准",
+      "preview": "将添加 {count} 条用例，跳过 {skipped} 条",
+      "scorer": "评审器",
+      "seed": "添加 {count} 条",
+      "setId": "校准集"
+    },
     "caseColumn": "用例",
     "fail": "失败",
     "gateFailed": "门限未过",

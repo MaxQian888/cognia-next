@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { tagVersion } from "@/lib/db/eval-dataset-versions"
 import { useEvalDatasetVersions } from "@/hooks/eval/use-eval-data"
+import { snapshotCaseCount } from "@/types/eval/version"
 
 export function VersionHistory({ datasetId }: { datasetId: string }) {
   const t = useTranslations("eval")
@@ -45,7 +46,7 @@ export function VersionHistory({ datasetId }: { datasetId: string }) {
               {v.casesHash.slice(0, 8)}
             </span>
             <span className="text-muted-foreground text-xs">
-              {t("versions.cases", { count: v.cases.length })}
+              {t("versions.cases", { count: snapshotCaseCount(v) })}
             </span>
             {v.tag && <Badge>{v.tag}</Badge>}
           </div>

@@ -290,4 +290,39 @@ describe("CalibrationPanel", () => {
     fireEvent.click(screen.getAllByText("calibration.goldFail")[0])
     fireEvent.click(passButtons[0])
   })
+
+  it("can cancel a calibration run", async () => {
+    // The runner always accepted a signal; the panel simply never passed one,
+    // so a run over a large set could not be stopped.
+    mockSets.mockReturnValue([{ setId: "set-a", criterion: "c", rubric: "r", itemCount: 1 }])
+    mockItems.mockReturnValue([item()])
+    let captured: AbortSignal | undefined
+    let release: () => void = () => {}
+    mockRun.mockImplementationOnce(async (input: { signal?: AbortSignal }) => {
+      captured = input.signal
+      await new Promise<void>((r) => {
+        release = r
+      })
+      return {}
+    })
+    render(<CalibrationPanel />)
+    fireEvent.click(screen.getByText("calibration.run"))
+    const cancel = await screen.findByText("calibration.cancel")
+    fireEvent.click(cancel)
+    expect(captured?.aborted).toBe(true)
+    release()
+    await waitFor(() => expect(screen.queryByText("calibration.cancel")).not.toBeInTheDocument())
+  })
+
+  it("treats an abort as a stop, not an error", async () => {
+    mockSets.mockReturnValue([{ setId: "set-a", criterion: "c", rubric: "r", itemCount: 1 }])
+    mockItems.mockReturnValue([item()])
+    mockRun.mockImplementationOnce(async () => {
+      throw new DOMException("Calibration aborted", "AbortError")
+    })
+    render(<CalibrationPanel />)
+    fireEvent.click(screen.getByText("calibration.run"))
+    await waitFor(() => expect(screen.queryByText("calibration.cancel")).not.toBeInTheDocument())
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+  })
 })

@@ -96,6 +96,8 @@ describe("dataset CRUD", () => {
       targetLabel: "opus",
       k: 1,
       caseCount: 1,
+      gradedCaseCount: 1,
+      ungradedCaseCount: 0,
       scorers: {},
       passAt1: 1,
       passHatK: 1,

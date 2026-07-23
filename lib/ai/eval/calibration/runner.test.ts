@@ -43,11 +43,13 @@ function scriptedJudge(
     id: "judge-task-completion",
     dimension: "response-quality",
     requiresLlm: true,
+    gating: true,
     score(_sample, evalCase): Score {
       const v = verdicts[evalCase.id] ?? { passed: false }
       return {
         scorerId: "judge-task-completion",
         dimension: "response-quality",
+        status: v.error ? "errored" : "scored",
         value: v.passed ? 1 : 0,
         passed: v.passed ?? false,
         ...(v.reasoning ? { reasoning: v.reasoning } : {}),

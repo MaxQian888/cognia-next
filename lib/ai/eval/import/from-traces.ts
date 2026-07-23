@@ -33,16 +33,28 @@ function matches(summary: TraceSummary, filter?: TraceImportFilter): boolean {
   return true
 }
 
+export interface TraceImportOptions {
+  /**
+   * traceId → the ORIGINAL user prompt, from
+   * `lib/ai/eval/trace-prompt.ts:resolveTracePrompts`. A summary's `preview` is
+   * a truncated, PII-gated span field; using it as the case input meant every
+   * case built from real traffic was a clipped fragment of the real request.
+   * Falls back to the preview when a prompt cannot be recovered.
+   */
+  prompts?: Record<string, string>
+}
+
 export function tracesToCases(
   summaries: TraceSummary[],
   deps: MappingDeps,
-  filter?: TraceImportFilter
+  filter?: TraceImportFilter,
+  options: TraceImportOptions = {}
 ): ImportPreview {
   const cases: EvalCase[] = []
   const skipped: { row: number; reason: string }[] = []
   summaries.forEach((summary, index) => {
     if (!matches(summary, filter)) return
-    const input = summary.preview || summary.traceId
+    const input = options.prompts?.[summary.traceId] || summary.preview || summary.traceId
     if (!input.trim()) {
       skipped.push({ row: index, reason: "empty trace preview" })
       return

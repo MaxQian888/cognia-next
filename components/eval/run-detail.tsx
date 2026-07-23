@@ -14,17 +14,20 @@
  *    that is not comparable, so they are badged and their gate is withheld.
  */
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { AlertTriangleIcon, ArrowLeftIcon } from "lucide-react"
+import { AlertTriangleIcon, ArrowLeftIcon, ScaleIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { getRun, type EvalRunRow } from "@/lib/db/eval-runs"
 import { useEvalCases, useEvalRunCaseResults } from "@/hooks/eval/use-eval-data"
 import { evaluateGate } from "@/lib/ai/eval/gate"
 import { fullyErroredScorers, isLegacyScoring, isPartialRun } from "@/lib/ai/eval/report"
+import { buildCalibrationSeed, judgeScorerIds } from "@/lib/ai/eval/calibration/seed-from-run"
+import { upsertCalibrationItem } from "@/lib/db/calibration-items"
 import type { GateThresholds } from "@/types/eval/gate"
 import type { EvalRunCaseRow } from "@/lib/db/eval-run-cases"
 
@@ -92,6 +95,135 @@ function CaseCell({
   )
 }
 
+/**
+ * Send this run's judged cases to a calibration set.
+ *
+ * Calibration measures whether a judge agrees with a human, but a set could
+ * only be built by retyping (request, answer) pairs by hand — so nobody built
+ * one and no judge's agreement was ever measured. Everything it needs is
+ * already in the run now that answers and reasoning are persisted.
+ */
+function SeedCalibration({
+  rows,
+  inputByCase,
+  referenceByCase,
+}: {
+  rows: EvalRunCaseRow[]
+  inputByCase: Map<string, string>
+  referenceByCase: Record<string, string>
+}) {
+  const t = useTranslations("eval.runDetail")
+  const [open, setOpen] = useState(false)
+  const [setId, setSetId] = useState("")
+  const [scorerId, setScorerId] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [done, setDone] = useState<{ added: number; skipped: number } | null>(null)
+
+  const judgeIds = useMemo(() => judgeScorerIds(rows), [rows])
+  const effectiveScorer = scorerId || judgeIds[0] || ""
+
+  const preview = useMemo(
+    () =>
+      effectiveScorer
+        ? buildCalibrationSeed({
+            setId: setId.trim() || "preview",
+            criterion: effectiveScorer,
+            rubric: "",
+            scorerId: effectiveScorer,
+            rows,
+            inputsByCase: Object.fromEntries(inputByCase),
+            referencesByCase: referenceByCase,
+          })
+        : { items: [], skipped: [] },
+    [effectiveScorer, setId, rows, inputByCase, referenceByCase]
+  )
+
+  const seed = useCallback(async () => {
+    if (!setId.trim() || preview.items.length === 0) return
+    setBusy(true)
+    try {
+      for (const item of preview.items) await upsertCalibrationItem(item)
+      setDone({ added: preview.items.length, skipped: preview.skipped.length })
+    } finally {
+      setBusy(false)
+    }
+  }, [setId, preview])
+
+  if (judgeIds.length === 0) return null
+
+  if (!open) {
+    return (
+      <Button
+        size="sm"
+        variant="outline"
+        className="self-start"
+        onClick={() => setOpen(true)}
+        data-testid="seed-calibration-open"
+      >
+        <ScaleIcon className="size-4" />
+        {t("calibration.open")}
+      </Button>
+    )
+  }
+
+  return (
+    <div
+      className="motion-safe:animate-in motion-safe:fade-in flex flex-col gap-2 rounded-md border p-2"
+      data-testid="seed-calibration"
+    >
+      <p className="text-muted-foreground text-xs">{t("calibration.hint")}</p>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <label className="flex flex-col gap-1 text-sm">
+          <span>{t("calibration.setId")}</span>
+          <Input
+            aria-label={t("calibration.setId")}
+            value={setId}
+            onChange={(e) => setSetId(e.target.value)}
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span>{t("calibration.scorer")}</span>
+          <select
+            aria-label={t("calibration.scorer")}
+            className="bg-background rounded-md border px-2 py-1 text-sm"
+            value={effectiveScorer}
+            onChange={(e) => setScorerId(e.target.value)}
+          >
+            {judgeIds.map((id) => (
+              <option key={id} value={id}>
+                {id}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <p className="text-muted-foreground text-xs" data-testid="seed-preview">
+        {t("calibration.preview", {
+          count: preview.items.length,
+          skipped: preview.skipped.length,
+        })}
+      </p>
+      {done && (
+        <p className="text-sm text-emerald-600 dark:text-emerald-400" role="status">
+          {t("calibration.done", { count: done.added })}
+        </p>
+      )}
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          disabled={busy || !setId.trim() || preview.items.length === 0}
+          onClick={() => void seed()}
+        >
+          {t("calibration.seed", { count: preview.items.length })}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
+          {t("calibration.cancel")}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 export interface RunDetailProps {
   runId: string
   gate?: GateThresholds
@@ -117,6 +249,13 @@ export function RunDetail({ runId, gate, onBack }: RunDetailProps) {
   const inputByCase = useMemo(() => {
     const m = new Map<string, string>()
     for (const c of cases) m.set(c.id, c.input)
+    return m
+  }, [cases])
+  const referenceByCase = useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const c of cases) {
+      if (c.reference?.expectedOutput) m[c.id] = c.reference.expectedOutput
+    }
     return m
   }, [cases])
 
@@ -194,6 +333,8 @@ export function RunDetail({ runId, gate, onBack }: RunDetailProps) {
           {t("partialHint", { done: run.caseCount })}
         </p>
       )}
+
+      <SeedCalibration rows={rows} inputByCase={inputByCase} referenceByCase={referenceByCase} />
 
       {brokenScorers.length > 0 && (
         <p

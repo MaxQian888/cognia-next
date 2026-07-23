@@ -7,7 +7,10 @@
     "firstFailure": "First failure",
     "firstFailurePlaceholder": "What went wrong first in this trace?",
     "heading": "Trace analysis",
+    "nextPage": "Next",
+    "pageOf": "Page {page} of {pages}",
     "pickDataset": "Choose a dataset",
+    "prevPage": "Previous",
     "saturation": "Saturation reached — you can stop reading.",
     "save": "Save annotation",
     "saveAsCase": "Save as eval case",
@@ -20,6 +23,7 @@
   "calibration": {
     "add": "Add",
     "addItem": "Add labeled example",
+    "cancel": "Cancel",
     "createSet": "Create set",
     "criterion": "Criterion",
     "criterionPlaceholder": "e.g. task completion",
@@ -269,6 +273,16 @@
   "runDetail": {
     "agentOutput": "Agent answer",
     "back": "Back",
+    "calibration": {
+      "cancel": "Cancel",
+      "done": "Added {count} calibration item(s)",
+      "hint": "Turns this run's judged cases into calibration items, pre-labelled with the judge's own verdict for you to confirm or flip.",
+      "open": "Send to judge calibration",
+      "preview": "{count} case(s) will be added, {skipped} skipped",
+      "scorer": "Judge",
+      "seed": "Add {count} item(s)",
+      "setId": "Calibration set"
+    },
     "caseColumn": "Case",
     "fail": "Fail",
     "gateFailed": "Gate failed",

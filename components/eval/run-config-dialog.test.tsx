@@ -32,7 +32,7 @@ interface ServiceInput {
   datasetId: string
   config: EvalRunConfig
   signal?: AbortSignal
-  onProgress?: (p: { done: number; total: number; passing: number }) => void
+  onProgress?: (p: { done: number; total: number; passing: number; ungraded: number }) => void
 }
 const runEvalService = jest.fn(async (_input: ServiceInput) => ({
   reports: [{ runId: "r1" }, { runId: "r2" }],

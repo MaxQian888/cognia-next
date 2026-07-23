@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import type { TraceSummary } from "@/lib/ai/eval/trace-summary"
 import type { TraceAnnotationRow } from "@/lib/db/trace-annotations"
 import type { EvalDataset } from "@/types/eval/eval"
@@ -14,8 +14,16 @@ let traces: TraceSummary[] = []
 let annotations: TraceAnnotationRow[] = []
 let datasets: EvalDataset[] = []
 
+let traceCount = 0
+let prompts: Record<string, string> = {}
+const recentTracesArgs = jest.fn()
 jest.mock("@/hooks/eval/use-eval-data", () => ({
-  useRecentTraces: () => traces,
+  useRecentTraces: (limit?: number, offset?: number) => {
+    recentTracesArgs(limit, offset)
+    return traces
+  },
+  useTraceCount: () => traceCount,
+  useTracePrompts: () => prompts,
   useTraceAnnotations: () => annotations,
   useEvalDatasets: () => datasets,
 }))
@@ -25,7 +33,9 @@ jest.mock("@/lib/db/trace-annotations", () => ({
   upsertAnnotation: (...a: unknown[]) => upsertAnnotation(...(a as [])),
   markSavedAsCase: (...a: unknown[]) => markSavedAsCase(...(a as [])),
 }))
-const addCase = jest.fn(async () => ({ id: "evc_new" }))
+const addCase = jest.fn<Promise<{ id: string }>, [string, Record<string, unknown>]>(async () => ({
+  id: "evc_new",
+}))
 jest.mock("@/lib/db/eval-datasets", () => ({
   addCase: (...a: unknown[]) => addCase(...(a as [])),
 }))
@@ -216,5 +226,79 @@ describe("TraceAnnotationPanel", () => {
     annotations = [{ traceId: "t2", sessionId: "s2", updatedAt: 3 } as TraceAnnotationRow]
     rerender(<TraceAnnotationPanel />)
     expect(screen.getAllByLabelText("annotate.firstFailure")[0]).toHaveValue("in progress")
+  })
+
+  it("promotes a trace using the ORIGINAL prompt, not the truncated preview", async () => {
+    // `preview` is a PII-gated, clipped span field; cases built from real
+    // traffic used to carry a fragment of the actual request.
+    traces = [trace("t1")]
+    annotations = []
+    datasets = [{ id: "d1", name: "D", capability: "chat.qa" } as EvalDataset]
+    prompts = { t1: "explain the difference between a mutex and a semaphore" }
+    addCase.mockClear()
+    render(<TraceAnnotationPanel />)
+    expect(screen.getByTestId("trace-prompt")).toHaveTextContent(
+      "explain the difference between a mutex and a semaphore"
+    )
+    fireEvent.click(screen.getByText("annotate.saveAsCase"))
+    await waitFor(() => expect(addCase).toHaveBeenCalled())
+    expect(addCase.mock.calls[0][1]).toMatchObject({
+      input: "explain the difference between a mutex and a semaphore",
+      source: "real-trace",
+      sourceTraceId: "t1",
+    })
+    prompts = {}
+  })
+
+  it("falls back to the preview when the prompt cannot be recovered", async () => {
+    traces = [trace("t1")]
+    annotations = []
+    datasets = [{ id: "d1", name: "D", capability: "chat.qa" } as EvalDataset]
+    prompts = {}
+    addCase.mockClear()
+    render(<TraceAnnotationPanel />)
+    fireEvent.click(screen.getByText("annotate.saveAsCase"))
+    await waitFor(() => expect(addCase).toHaveBeenCalled())
+    expect(addCase.mock.calls[0][1].input).toBeTruthy()
+  })
+
+  it("pages by trace once there are more than one page", () => {
+    traces = [trace("t1")]
+    annotations = []
+    datasets = []
+    traceCount = 60
+    recentTracesArgs.mockClear()
+    render(<TraceAnnotationPanel />)
+    // 25 traces per page — NOT 25 spans, which is what the old hook counted.
+    expect(recentTracesArgs).toHaveBeenCalledWith(25, 0)
+    const pager = screen.getByTestId("trace-pager")
+    expect(within(pager).getByText("annotate.prevPage")).toBeDisabled()
+    fireEvent.click(within(pager).getByText("annotate.nextPage"))
+    expect(recentTracesArgs).toHaveBeenLastCalledWith(25, 25)
+    traceCount = 0
+  })
+
+  it("pages back to the previous page", () => {
+    traces = [trace("t1")]
+    annotations = []
+    datasets = []
+    traceCount = 60
+    recentTracesArgs.mockClear()
+    render(<TraceAnnotationPanel />)
+    const pager = screen.getByTestId("trace-pager")
+    fireEvent.click(within(pager).getByText("annotate.nextPage"))
+    fireEvent.click(within(pager).getByText("annotate.prevPage"))
+    expect(recentTracesArgs).toHaveBeenLastCalledWith(25, 0)
+    traceCount = 0
+  })
+
+  it("hides the pager when everything fits on one page", () => {
+    traces = [trace("t1")]
+    annotations = []
+    datasets = []
+    traceCount = 3
+    render(<TraceAnnotationPanel />)
+    expect(screen.queryByTestId("trace-pager")).not.toBeInTheDocument()
+    traceCount = 0
   })
 })

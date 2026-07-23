@@ -8,7 +8,7 @@ import {
   deleteVersionsForDataset,
   hashCases,
 } from "./eval-dataset-versions"
-import { createDataset, addCase } from "./eval-datasets"
+import { createDataset, addCase, updateCase } from "./eval-datasets"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
 import type { EvalCase } from "@/types/eval/eval"
 
@@ -56,13 +56,13 @@ describe("eval-dataset-versions", () => {
     await addCase(ds.id, { input: "hi", source: "handwritten" })
     const v1 = await snapshotVersion(ds.id)
     expect(v1.id).toMatch(/^evdv_/)
-    expect(v1.cases).toHaveLength(1)
+    expect(v1.caseIds).toHaveLength(1)
     expect(v1.casesHash).toMatch(/.+/)
 
     // adding a case after the snapshot must NOT mutate the snapshot
     await addCase(ds.id, { input: "again", source: "handwritten" })
     const reloaded = await getVersion(v1.id)
-    expect(reloaded?.cases).toHaveLength(1)
+    expect(reloaded?.caseIds).toHaveLength(1)
   })
 
   it("dedups identical snapshots within the same dataset version", async () => {
@@ -82,7 +82,7 @@ describe("eval-dataset-versions", () => {
     await addCase(ds.id, { input: "second", source: "handwritten" })
     const b = await snapshotVersion(ds.id)
     expect(b.id).not.toBe(a.id)
-    expect(b.cases).toHaveLength(2)
+    expect(b.caseIds).toHaveLength(2)
   })
 
   it("throws on a missing dataset", async () => {
@@ -107,5 +107,33 @@ describe("eval-dataset-versions", () => {
     await deleteVersionsForDataset(ds.id)
     expect(await listVersions(ds.id)).toHaveLength(0)
     await deleteVersionsForDataset("") // no-op
+  })
+
+  it("stores case IDS, not full frozen copies", async () => {
+    // Snapshots used to duplicate every case's text. Each case edit bumps the
+    // dataset version and the next run snapshots it, so a thousand-case
+    // benchmark wrote about half a megabyte per edit-then-run cycle for data
+    // already sitting in `evalCases`.
+    const ds = await createDataset({ name: "A", capability: "chat.qa" })
+    const a = await addCase(ds.id, { input: "first", source: "handwritten" })
+    const b = await addCase(ds.id, { input: "second", source: "handwritten" })
+    const version = await snapshotVersion(ds.id)
+    // Order-insensitive: `listCases` sorts by createdAt, and two cases added in
+    // the same millisecond tie.
+    expect([...version.caseIds].sort()).toEqual([a.id, b.id].sort())
+    expect(version.cases).toBeUndefined()
+    expect(version.casesHash).toBeTruthy()
+  })
+
+  it("still yields a new snapshot when case CONTENT changes under the same ids", async () => {
+    // The hash pins content, so editing a case in place is still a new version.
+    const ds = await createDataset({ name: "A", capability: "chat.qa" })
+    const c = await addCase(ds.id, { input: "first", source: "handwritten" })
+    const before = await snapshotVersion(ds.id)
+    await updateCase(c.id, { input: "edited" })
+    const after = await snapshotVersion(ds.id)
+    expect(after.caseIds).toEqual(before.caseIds)
+    expect(after.casesHash).not.toBe(before.casesHash)
+    expect(after.id).not.toBe(before.id)
   })
 })

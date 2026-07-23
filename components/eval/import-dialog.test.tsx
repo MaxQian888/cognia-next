@@ -8,7 +8,15 @@ jest.mock("next-intl", () => ({
     vals ? `${key}:${JSON.stringify(vals)}` : key,
 }))
 
-const bulkAddCases = jest.fn(async () => ({ added: 0, updated: 0 }))
+type BulkArgs = [
+  string,
+  Record<string, unknown>[],
+  { upsertBySourceId: boolean; onProgress?: (w: number, t: number) => void },
+]
+const bulkAddCases = jest.fn<Promise<{ added: number; updated: number }>, BulkArgs>(async () => ({
+  added: 0,
+  updated: 0,
+}))
 const updateDataset = jest.fn(async () => undefined)
 jest.mock("@/lib/db/eval-datasets", () => ({
   bulkAddCases: (...a: unknown[]) => bulkAddCases(...(a as [])),
@@ -28,8 +36,10 @@ jest.mock("@/lib/ai/eval/import", () => {
 })
 
 const recentTraces = jest.fn<unknown[], []>(() => [])
+const tracePrompts: Record<string, string> = {}
 jest.mock("@/hooks/eval/use-eval-data", () => ({
   useRecentTraces: () => recentTraces(),
+  useTracePrompts: () => tracePrompts,
 }))
 
 import type { ComponentProps } from "react"
@@ -522,15 +532,13 @@ describe("ImportDialog — chrome", () => {
 
   it("shows progress with a cancel affordance while writing", async () => {
     let release: () => void = () => {}
-    bulkAddCases.mockImplementation(
-      async (_d: string, _c: unknown[], opts: { onProgress?: (w: number, t: number) => void }) => {
-        opts.onProgress?.(1, 2)
-        await new Promise<void>((r) => {
-          release = r
-        })
-        return { added: 2, updated: 0 }
-      }
-    )
+    bulkAddCases.mockImplementation(async (_datasetId, _cases, opts) => {
+      opts.onProgress?.(1, 2)
+      await new Promise<void>((r) => {
+        release = r
+      })
+      return { added: 2, updated: 0 }
+    })
     renderDialog()
     await loadCsv()
     fireEvent.click(screen.getByText('import.action:{"count":2}'))

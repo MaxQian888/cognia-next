@@ -10,7 +10,7 @@
  * detecting judge regressions across model/rubric changes.
  */
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { ScaleIcon, PlayIcon, Trash2Icon, PlusIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -370,6 +370,7 @@ export function CalibrationPanel() {
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
   const effectiveSetId = activeSetId ?? sets[0]?.setId ?? pendingSet?.setId
   const items = useCalibrationItems(effectiveSetId)
@@ -386,23 +387,33 @@ export function CalibrationPanel() {
     setRunning(true)
     setError(null)
     setProgress({ done: 0, total: items.length })
+    // The runner has always accepted a signal; the panel simply never passed
+    // one, so a calibration run over a large set could not be stopped.
+    const controller = new AbortController()
+    abortRef.current = controller
     try {
       await runCalibration({
         setId: effectiveSetId,
         appSettings,
+        signal: controller.signal,
         onProgress: setProgress,
       })
     } catch (err) {
-      setError(
-        err instanceof CalibrationNoJudgeError
-          ? t("calibration.noJudge")
-          : err instanceof Error
-            ? err.message
-            : String(err)
-      )
+      if (err instanceof DOMException && err.name === "AbortError") {
+        // Cancelling is not a failure; the runner persists nothing.
+      } else {
+        setError(
+          err instanceof CalibrationNoJudgeError
+            ? t("calibration.noJudge")
+            : err instanceof Error
+              ? err.message
+              : String(err)
+        )
+      }
     } finally {
       setRunning(false)
       setProgress(null)
+      abortRef.current = null
     }
   }, [effectiveSetId, items.length, appSettings, t])
 
@@ -447,6 +458,11 @@ export function CalibrationPanel() {
           <span className="text-muted-foreground text-xs" role="status">
             {progress.done}/{progress.total}
           </span>
+        )}
+        {running && (
+          <Button size="sm" variant="outline" onClick={() => abortRef.current?.abort()}>
+            {t("calibration.cancel")}
+          </Button>
         )}
         {error && (
           <span className="text-destructive text-xs" role="alert">

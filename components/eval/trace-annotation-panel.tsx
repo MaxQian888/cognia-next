@@ -15,12 +15,21 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
-import { useEvalDatasets, useRecentTraces, useTraceAnnotations } from "@/hooks/eval/use-eval-data"
+import {
+  useEvalDatasets,
+  useRecentTraces,
+  useTraceAnnotations,
+  useTraceCount,
+  useTracePrompts,
+} from "@/hooks/eval/use-eval-data"
 import { upsertAnnotation, markSavedAsCase } from "@/lib/db/trace-annotations"
 import { addCase } from "@/lib/db/eval-datasets"
 import { buildFailureTaxonomy, saturationReached } from "@/lib/ai/eval/error-analysis/coding"
 import type { TraceSummary } from "@/lib/ai/eval/trace-summary"
 import type { TraceAnnotationRow } from "@/lib/db/trace-annotations"
+
+/** Traces per page. The list is one card per trace, so keep it scannable. */
+const PAGE_SIZE = 25
 
 interface DraftEdits {
   note: string
@@ -32,6 +41,7 @@ function TraceRow({
   annotation,
   datasetId,
   draft,
+  prompt,
   onEdit,
 }: {
   trace: TraceSummary
@@ -39,6 +49,8 @@ function TraceRow({
   datasetId?: string
   /** Unsaved edits, or `undefined` when the row is showing what is persisted. */
   draft?: DraftEdits
+  /** The ORIGINAL user prompt, when it could be recovered from the session. */
+  prompt?: string
   onEdit: (traceId: string, next: DraftEdits) => void
 }) {
   const t = useTranslations("eval")
@@ -64,15 +76,18 @@ function TraceRow({
 
   const handleSaveAsCase = useCallback(async () => {
     if (!datasetId) return
+    // The ORIGINAL prompt, not `trace.preview` — the preview is a truncated,
+    // PII-gated span field, so cases promoted from real traffic used to carry
+    // a clipped fragment of what the user actually asked.
     const created = await addCase(datasetId, {
-      input: trace.preview || trace.traceId,
+      input: prompt || trace.preview || trace.traceId,
       source: "real-trace",
       sourceTraceId: trace.traceId,
       ...(mode.trim() ? { failureMode: mode.trim() } : {}),
     })
     await markSavedAsCase(trace.traceId, created.id)
     setSavedCase(true)
-  }, [datasetId, trace.preview, trace.traceId, mode])
+  }, [datasetId, prompt, trace.preview, trace.traceId, mode])
 
   return (
     <Card className="flex flex-col gap-2 p-3" data-testid="trace-row">
@@ -86,7 +101,11 @@ function TraceRow({
           ))}
         </span>
       </div>
-      {trace.preview && <p className="line-clamp-2 text-sm">{trace.preview}</p>}
+      {(prompt || trace.preview) && (
+        <p className="line-clamp-2 text-sm" data-testid="trace-prompt">
+          {prompt || trace.preview}
+        </p>
+      )}
       <Textarea
         aria-label={t("annotate.firstFailure")}
         placeholder={t("annotate.firstFailurePlaceholder")}
@@ -116,7 +135,10 @@ function TraceRow({
 
 export function TraceAnnotationPanel() {
   const t = useTranslations("eval")
-  const traces = useRecentTraces()
+  const [page, setPage] = useState(0)
+  const traces = useRecentTraces(PAGE_SIZE, page * PAGE_SIZE)
+  const traceCount = useTraceCount()
+  const prompts = useTracePrompts(traces)
   const annotations = useTraceAnnotations()
   const datasets = useEvalDatasets()
   const [datasetId, setDatasetId] = useState<string | undefined>(undefined)
@@ -191,9 +213,37 @@ export function TraceAnnotationPanel() {
               annotation={annotationByTrace.get(trace.traceId)}
               datasetId={effectiveDataset}
               {...(drafts[trace.traceId] ? { draft: drafts[trace.traceId] } : {})}
+              {...(prompts[trace.traceId] ? { prompt: prompts[trace.traceId] } : {})}
               onEdit={handleEdit}
             />
           ))}
+        </div>
+      )}
+
+      {traceCount > PAGE_SIZE && (
+        <div className="flex items-center gap-2 text-xs" data-testid="trace-pager">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={page === 0}
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+          >
+            {t("annotate.prevPage")}
+          </Button>
+          <span className="text-muted-foreground tabular-nums">
+            {t("annotate.pageOf", {
+              page: page + 1,
+              pages: Math.ceil(traceCount / PAGE_SIZE),
+            })}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={(page + 1) * PAGE_SIZE >= traceCount}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            {t("annotate.nextPage")}
+          </Button>
         </div>
       )}
     </div>

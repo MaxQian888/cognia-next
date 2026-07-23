@@ -90,7 +90,7 @@ export function makeVersion(over: Partial<EvalDatasetVersion> = {}): EvalDataset
     id: "ver-1",
     datasetId: "ds-1",
     version: 3,
-    cases: makeCases(6),
+    caseIds: makeCases(6).map((c) => c.id),
     casesHash: "a1b2c3d4e5f60718",
     createdAt: NOW,
     ...over,

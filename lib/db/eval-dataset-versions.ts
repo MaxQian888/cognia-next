@@ -5,6 +5,11 @@
  * order-independent content hash so runs pin to an exact snapshot and
  * comparison stays apples-to-apples after later case edits. All Dexie access
  * for the table lives here (mirrors `lib/db/eval-datasets.ts`).
+ *
+ * Snapshots store case IDS, not copies. Storing copies meant every
+ * edit-then-run cycle on a thousand-case benchmark wrote about half a megabyte
+ * of duplicated case text into IndexedDB. Rows written before that change keep
+ * their `cases` array and are still readable.
  */
 
 import type { EvalDatasetVersion } from "@/types/eval/version"
@@ -54,7 +59,10 @@ export async function snapshotVersion(datasetId: string): Promise<EvalDatasetVer
     id: versionId(),
     datasetId,
     version: ds.version,
-    cases,
+    // Ids, not full copies — see the type's docblock. The hash still pins the
+    // CONTENT, so an edit that leaves the id set unchanged still yields a new
+    // snapshot.
+    caseIds: cases.map((c) => c.id),
     casesHash,
     createdAt: Date.now(),
   }

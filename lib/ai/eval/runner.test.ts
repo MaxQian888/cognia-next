@@ -33,8 +33,9 @@ function constScorer(id: string, value: number, passed: boolean): Scorer {
     id,
     dimension: "response-quality",
     requiresLlm: false,
+    gating: true,
     score(): Score {
-      return { scorerId: id, dimension: "response-quality", value, passed }
+      return { scorerId: id, dimension: "response-quality", status: "scored", value, passed }
     },
   }
 }
@@ -108,6 +109,7 @@ describe("runEval", () => {
       id: "boom",
       dimension: "tool-use",
       requiresLlm: false,
+      gating: true,
       score() {
         throw new Error("scorer bug")
       },
