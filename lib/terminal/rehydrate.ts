@@ -5,11 +5,12 @@
  *
  * The Tauri Rust process — and thus every live `PtySession` — outlives a
  * webview reload (F5 / HMR). Only the JS Channel + the in-memory
- * session-registry are torn down. On boot we ask Rust which sessions are
- * still alive (`terminal_list_all`), rebuild the dock rows, reattach a
- * fresh Channel to each (replaying the retained buffer so recent
- * scrollback comes back), and re-wire events to the store via the same
- * `wireSessionToStore` the spawn path uses.
+ * session-registry are torn down. On boot we ask Rust for its sessions
+ * (`terminal_list_all`), skip the ones whose shell has already exited,
+ * rebuild the dock rows for the rest, reattach a fresh Channel to each
+ * (replaying the retained buffer so recent scrollback comes back), and
+ * re-wire events to the store via the same `wireSessionToStore` the spawn
+ * path uses.
  *
  * Sessions are NOT restored across a full app restart — the Rust process
  * and its PTYs are gone then, so `terminal_list_all` returns nothing.
@@ -55,6 +56,11 @@ export async function rehydrateTerminals(
   let restored = 0
   let failed = 0
   for (const info of infos) {
+    // Rust keeps exited sessions in its store so scrollback survives the shell
+    // exiting, so the list is not a liveness list. Restoring a dead one gives
+    // the user a tab whose PTY is gone. `undefined` means a transport that
+    // predates the flag — assume alive, as before.
+    if (info.alive === false) continue
     try {
       // Order matters: reattach (which makes the live session) and register it
       // in the live registry BEFORE adding the store row. The store row is what

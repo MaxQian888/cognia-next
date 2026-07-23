@@ -10,9 +10,11 @@
  *    the store in sync, which is the whole point of the external-agent
  *    state-management fix. Restart reuses `reconnect` (disconnect + connect with
  *    the existing config + orphan-reclaim logic).
- *  - **Rust-supervised subsystems** (chat sidecar, ACP + PTY terminals, MCP
- *    server) are controlled through the unified `control_managed_process`
- *    command, which dispatches to the owning subsystem's kill/stop path.
+ *  - **Rust-supervised subsystems** (chat sidecar, ACP + PTY terminals, headless
+ *    shells, MCP server, Node plugin hosts, the cloudflared tunnel) are
+ *    controlled through the unified `control_managed_process` command, which
+ *    dispatches to the owning subsystem's kill/stop path. New subsystems need
+ *    no change here — they fall through to that default.
  *  - **code-server** is Rust-supervised like the rest, but it additionally owns
  *    a native webview floating above the DOM. Killing only the process would
  *    leave that pane pinned over the app showing a dead page, so the renderer

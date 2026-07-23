@@ -569,6 +569,54 @@ fn generation_matches(state: &NodePluginProcessState, generation: uuid::Uuid) ->
     }
 }
 
+/// One long-lived Node plugin host as the managed-process registry sees it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodePluginManagedInfo {
+    pub plugin_id: String,
+    pub pid: Option<u32>,
+    /// The host is spawning — it has a slot reserved but no child yet.
+    pub launching: bool,
+}
+
+/// Snapshot every Node plugin host for the managed-process registry.
+///
+/// Non-blocking on purpose: this runs on the perf sampler tick, so a host
+/// whose child lock is momentarily held (a kill in flight) reports `pid: None`
+/// rather than stalling the whole frame.
+pub fn node_plugin_snapshot(state: &PluginRuntimeState) -> Vec<NodePluginManagedInfo> {
+    state
+        .node_plugin_processes
+        .lock()
+        .iter()
+        .map(|(plugin_id, process)| match process {
+            NodePluginProcessState::Launching { .. } => NodePluginManagedInfo {
+                plugin_id: plugin_id.clone(),
+                pid: None,
+                launching: true,
+            },
+            NodePluginProcessState::Running { child, .. } => NodePluginManagedInfo {
+                plugin_id: plugin_id.clone(),
+                pid: child.try_lock().ok().and_then(|c| c.id()),
+                launching: false,
+            },
+        })
+        .collect()
+}
+
+/// Kill one Node plugin host by plugin id. Returns whether a process was found.
+pub async fn stop_node_plugin(state: &PluginRuntimeState, plugin_id: &str) -> Result<bool> {
+    stop_node_plugin_process(state, plugin_id, None).await
+}
+
+/// Kill every Node plugin host. Called from the app-exit teardown — these are
+/// long-lived children with no other shutdown path.
+pub async fn stop_all_node_plugins(state: &PluginRuntimeState) {
+    let ids: Vec<String> = state.node_plugin_processes.lock().keys().cloned().collect();
+    for id in ids {
+        let _ = stop_node_plugin_process(state, &id, None).await;
+    }
+}
+
 fn remove_node_generation(
     state: &PluginRuntimeState,
     plugin_id: &str,
@@ -1639,6 +1687,44 @@ mod tests {
             .await
             .unwrap());
         assert!(!state.node_plugin_processes.lock().contains_key("demo"));
+    }
+
+    #[tokio::test]
+    async fn node_plugin_snapshot_reports_launching_hosts_without_a_pid() {
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        assert!(node_plugin_snapshot(&state).is_empty());
+
+        state.node_plugin_processes.lock().insert(
+            "demo".into(),
+            NodePluginProcessState::Launching {
+                generation: uuid::Uuid::new_v4(),
+            },
+        );
+        let snapshot = node_plugin_snapshot(&state);
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].plugin_id, "demo");
+        assert!(snapshot[0].launching);
+        assert_eq!(snapshot[0].pid, None);
+    }
+
+    #[tokio::test]
+    async fn stop_all_node_plugins_empties_the_registry() {
+        // The app-exit teardown depends on this: these hosts are long-lived
+        // children with no other shutdown path.
+        let tmp = TempDir::new().unwrap();
+        let state = make_state(&tmp);
+        for id in ["a", "b", "c"] {
+            state.node_plugin_processes.lock().insert(
+                id.into(),
+                NodePluginProcessState::Launching {
+                    generation: uuid::Uuid::new_v4(),
+                },
+            );
+        }
+        stop_all_node_plugins(&state).await;
+        assert!(state.node_plugin_processes.lock().is_empty());
+        assert!(node_plugin_snapshot(&state).is_empty());
     }
 
     #[tokio::test]

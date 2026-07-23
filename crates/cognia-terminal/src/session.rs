@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
@@ -203,6 +204,15 @@ pub struct TerminalSessionInfo {
     /// test-built sessions with no real child. Consumed by the unified
     /// managed-process registry so the performance panel can join CPU/memory.
     pub pid: Option<u32>,
+    /// Whether the PTY child is still running. Flipped to `false` by the
+    /// waiter thread the moment `child.wait()` returns.
+    ///
+    /// Sessions are **not** evicted from the store on natural exit — the
+    /// renderer still reads the replay buffer for scrollback after the shell
+    /// exits — so "present in the map" does not mean "alive", and every
+    /// consumer that reports liveness (the managed-process registry) or acts
+    /// on `pid` must read this instead.
+    pub alive: bool,
 }
 
 /// Wire envelope for the desktop Tauri Channel (1C). Pairs the replay seq
@@ -265,6 +275,9 @@ pub struct PtySession {
     /// sessions built without a real child.
     pub(super) pid: Option<u32>,
     pub(super) tempdir: Option<PathBuf>,
+    /// Cleared by the waiter thread when the child is reaped. See
+    /// [`TerminalSessionInfo::alive`] for why the session outlives its child.
+    pub(super) alive: Arc<AtomicBool>,
     /// Wave 2 — timestamped + monotonic-seq replay buffer. Every event
     /// the reader / waiter threads emit lands here before fan-out so
     /// reconnecting WS clients can resume with `?resumeFrom=<seq>`. See
@@ -591,12 +604,14 @@ pub fn spawn_session_with_sink(
         .spawn(move || pty_reader_loop(reader, reader_sink, reader_replay, nonce_for_reader))
         .map_err(|e| format!("reader thread spawn: {e}"))?;
 
+    let alive = Arc::new(AtomicBool::new(true));
     let waiter_sink = sink.clone();
     let waiter_replay = replay.clone();
     let waiter_id = id.clone();
+    let waiter_alive = alive.clone();
     thread::Builder::new()
         .name(format!("pty-waiter-{waiter_id}"))
-        .spawn(move || pty_waiter_loop(child, waiter_sink, waiter_replay))
+        .spawn(move || pty_waiter_loop(child, waiter_sink, waiter_replay, waiter_alive))
         .map_err(|e| format!("waiter thread spawn: {e}"))?;
 
     Ok(PtySession {
@@ -610,6 +625,7 @@ pub fn spawn_session_with_sink(
         killer: StdMutex::new(killer),
         pid,
         tempdir: setup.tempdir,
+        alive,
         replay,
         channel_slot,
     })
@@ -693,11 +709,16 @@ fn pty_waiter_loop(
     mut child: Box<dyn Child + Send + Sync>,
     sink: EventSink,
     replay: Arc<ReplayBuffer>,
+    alive: Arc<AtomicBool>,
 ) {
     let code = match child.wait() {
         Ok(status) => Some(status.exit_code()),
         Err(_) => None,
     };
+    // Publish liveness *before* the event so anything woken by the event
+    // (managed-process registry, kill path) never observes a reaped child as
+    // running — the PID is free for reuse from here on.
+    alive.store(false, Ordering::SeqCst);
     let exit = TerminalEvent::Exit { code };
     let seq = replay.push(exit.clone());
     sink(seq, exit);
@@ -737,11 +758,23 @@ impl PtySession {
     }
 
     pub fn kill(&self) -> std::io::Result<()> {
+        // The child has already been reaped by the waiter thread, so its PID
+        // is free for the OS to hand to an unrelated process. `ChildKiller`
+        // signals by PID, so killing here could hit that stranger — the only
+        // safe action on an exited session is nothing.
+        if !self.is_alive() {
+            return Ok(());
+        }
         let mut killer = self
             .killer
             .lock()
             .map_err(|_| std::io::Error::other("killer mutex poisoned"))?;
         killer.kill()
+    }
+
+    /// Whether the PTY child is still running. See [`TerminalSessionInfo::alive`].
+    pub fn is_alive(&self) -> bool {
+        self.alive.load(Ordering::SeqCst)
     }
 
     pub fn info(&self) -> TerminalSessionInfo {
@@ -752,6 +785,7 @@ impl PtySession {
             origin: self.origin,
             shell: self.shell.clone(),
             pid: self.pid,
+            alive: self.is_alive(),
         }
     }
 
@@ -1136,6 +1170,70 @@ mod tests {
             "expected to see the echoed payload, got: {events:?}"
         );
         assert!(saw_exit, "expected an Exit event, got: {events:?}");
+    }
+
+    #[test]
+    fn natural_exit_clears_alive_and_makes_kill_a_no_op() {
+        // Regression: the session stays in the store after its shell exits, so
+        // "present in the map" was reported as Running and a kill would signal
+        // a PID the OS may already have reused.
+        let Some(shell) = detect_default_shell() else {
+            eprintln!("skip — no default shell on this platform");
+            return;
+        };
+        let (cmd_arg, payload) = if cfg!(target_os = "windows") {
+            ("/C", "exit 0")
+        } else {
+            ("-c", "exit 0")
+        };
+        let (channel, sink) = capture_channel();
+        let req = SpawnRequest {
+            shell,
+            args: vec![cmd_arg.to_string(), payload.to_string()],
+            cwd: None,
+            env: HashMap::new(),
+            rows: 24,
+            cols: 80,
+            project_id: None,
+            extension_id: None,
+            enable_shell_integration: false,
+            force_utf8: false,
+            origin: SessionOrigin::Local,
+            skip_user_profile: false,
+            sandboxed: false,
+            sandbox_network: None,
+        };
+        let session =
+            match spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("skip — spawn failed in this env: {e}");
+                    return;
+                }
+            };
+        assert!(session.is_alive(), "a freshly spawned session is alive");
+        assert!(session.info().alive);
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if sink
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|e| matches!(e, TerminalEvent::Exit { .. }))
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+
+        assert!(
+            !session.is_alive(),
+            "the waiter thread must clear `alive` when the child is reaped"
+        );
+        assert!(!session.info().alive, "info() must report the reaped child");
+        // Kill on a reaped session must not signal the (possibly reused) PID.
+        assert!(session.kill().is_ok());
     }
 
     /// A `Write` that blocks forever on first write — models a child that

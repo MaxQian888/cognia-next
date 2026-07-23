@@ -381,6 +381,18 @@ pub fn run() {
         // first request and can legitimately take longer than the 8s grace;
         // measuring from process boot exposed the still-unpainted black webview.
         .on_page_load(|webview, payload| {
+            // A navigation tears down every `perf://sample` listener in the
+            // document, but the renderer never gets to send the balancing
+            // `perf_stop_sampling` — so a reload (or a renderer crash) would
+            // otherwise leave the 1 Hz process-tree walk running for the rest
+            // of the session. Drop the leases and let the panel re-take one.
+            if webview.label() == "main" && payload.event() == tauri::webview::PageLoadEvent::Started
+            {
+                if let Some(perf) = webview.app_handle().try_state::<perf::PerfState>() {
+                    perf.sampler.halt();
+                }
+            }
+
             if !webview_watchdog::should_arm_boot_reveal(
                 webview.label(),
                 payload.event() == tauri::webview::PageLoadEvent::Finished,
@@ -639,6 +651,7 @@ pub fn run() {
             fleet::fleet_question_respond,
             fleet::fleet_opencode_send_message,
             fleet::control::fleet_focus_terminal,
+            fleet::control::fleet_interrupt_session,
             fleet::codex::fleet_codex_install,
             fleet::codex::fleet_codex_uninstall,
             fleet::codex::fleet_codex_status,
@@ -659,6 +672,8 @@ pub fn run() {
             fleet::island_window::island_set_tucked,
             fleet::island_window::island_list_monitors,
             fleet::island_window::island_set_monitor,
+            fleet::island_window::island_debug_geometry,
+            fleet::island_window::island_restore,
             tray::commands::tray_set_menu,
             tray::commands::tray_set_icon_state,
             tray::commands::tray_set_tooltip,
@@ -1716,28 +1731,11 @@ pub fn run() {
                     .inner()
                     .clone();
                 tauri::async_runtime::block_on(cua.shutdown_all());
-                // Kill external-agent processes (auto-spawned `opencode serve`,
-                // ACP `npx …` shims) and their ACP terminals so they are not
-                // orphaned past app exit.
-                let agents = app_handle
-                    .state::<external_agent::commands::ExternalAgentState>()
-                    .inner()
-                    .0
-                    .clone();
-                let terminals = app_handle
-                    .state::<external_agent::commands::AcpTerminalState>()
-                    .inner()
-                    .0
-                    .clone();
-                tauri::async_runtime::block_on(async move {
-                    let _ = agents.kill_all().await;
-                    let _ = terminals.kill_all().await;
-                });
-                // Stop the remaining cognia-managed child processes that this
-                // arm did NOT already tear down — chat sidecar, integrated
-                // terminal PTYs, and the MCP server — so a graceful shutdown
-                // (incl. Ctrl+C / SIGTERM via `shutdown::install`) doesn't
-                // orphan them.
+                // Stop every cognia-spawned child process — external agents,
+                // ACP terminals, chat sidecar, integrated terminal PTYs, the
+                // MCP server, code-server instances, and the cloudflared
+                // tunnel. `process_registry::teardown` is the single
+                // exhaustive list; do NOT add subsystems here instead.
                 tauri::async_runtime::block_on(process_registry::teardown(app_handle));
                 // Graceful shutdown — clear the crash sentinel so the next
                 // launch doesn't mistake this clean exit for a crash.

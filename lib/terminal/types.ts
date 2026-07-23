@@ -58,6 +58,13 @@ export interface SessionInfo {
   extensionId: string | null
   origin: SessionOrigin
   shell: string
+  /**
+   * Whether the PTY child is still running. Rust keeps exited sessions in its
+   * store so scrollback survives the shell exiting, so a listed session is not
+   * necessarily a live one. Optional: remote (WS/RTC) transports predate the
+   * field, and `undefined` is treated as alive.
+   */
+  alive?: boolean
 }
 
 export type IntegrationEvent =

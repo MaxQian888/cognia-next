@@ -152,6 +152,58 @@ impl HeadlessTerminalState {
             .unwrap_or_else(|p| p.into_inner())
             .remove(id)
     }
+
+    /// Snapshot for the unified managed-process registry. Headless sessions
+    /// are a second, independent PTY registry alongside `TerminalState`, so
+    /// without this they were invisible to the performance panel and survived
+    /// app exit.
+    pub fn managed_snapshot(&self) -> Vec<HeadlessManagedInfo> {
+        self.sessions
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .values()
+            .map(|s| HeadlessManagedInfo {
+                id: s.id.clone(),
+                shell: s.shell.clone(),
+                pid: s.session.info().pid,
+                alive: s.session.is_alive(),
+            })
+            .collect()
+    }
+
+    /// Kill one session and drop it from the registry.
+    pub fn kill(&self, id: &str) -> bool {
+        match self.remove(id) {
+            Some(session) => {
+                session.kill();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Kill every session. Called from the app-exit teardown.
+    pub fn kill_all(&self) {
+        let sessions: Vec<Arc<HeadlessSession>> = self
+            .sessions
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .drain()
+            .map(|(_, s)| s)
+            .collect();
+        for session in sessions {
+            session.kill();
+        }
+    }
+}
+
+/// One headless PTY session as the managed-process registry sees it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeadlessManagedInfo {
+    pub id: String,
+    pub shell: String,
+    pub pid: Option<u32>,
+    pub alive: bool,
 }
 
 /// Strip terminal escape sequences from captured bytes: OSC
@@ -673,6 +725,43 @@ mod tests {
             result.output
         );
         assert_eq!(result.exit_code, Some(0));
+    }
+
+    #[test]
+    fn managed_snapshot_lists_sessions_and_kill_all_drains_the_registry() {
+        // Headless PTYs are a second, independent terminal registry; before
+        // this they were invisible to the performance panel and survived exit.
+        let state = HeadlessTerminalState::new();
+        assert!(state.managed_snapshot().is_empty());
+
+        let session = Arc::new(spawn_test_session());
+        let id = session.id.clone();
+        state.insert(session);
+
+        let snapshot = state.managed_snapshot();
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].id, id);
+        assert!(snapshot[0].alive, "a freshly spawned shell is alive");
+
+        assert!(!state.kill("no-such-session"));
+        state.kill_all();
+        assert!(state.managed_snapshot().is_empty());
+    }
+
+    #[test]
+    fn kill_removes_only_the_named_session() {
+        let state = HeadlessTerminalState::new();
+        let a = Arc::new(spawn_test_session());
+        let b = Arc::new(spawn_test_session());
+        let (id_a, id_b) = (a.id.clone(), b.id.clone());
+        state.insert(a);
+        state.insert(b);
+
+        assert!(state.kill(&id_a));
+        let remaining = state.managed_snapshot();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, id_b);
+        state.kill_all();
     }
 
     #[tokio::test(flavor = "multi_thread")]

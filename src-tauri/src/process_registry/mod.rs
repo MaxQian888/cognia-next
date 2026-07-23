@@ -32,7 +32,14 @@ use crate::external_agent::commands::{AcpTerminalState, ExternalAgentState};
 use crate::external_agent::process::ExternalAgentProcessState;
 use crate::external_agent::terminal::AcpTerminalManagedInfo;
 use crate::mcp_server::{McpManagedInfo, McpServerState};
+use crate::terminal::headless::{HeadlessManagedInfo, HeadlessTerminalState};
 use crate::terminal::{TerminalSessionInfo, TerminalState};
+use cognia_plugin_runtime::lifecycle::{
+    node_plugin_snapshot, stop_all_node_plugins, stop_node_plugin, NodePluginManagedInfo,
+};
+use cognia_plugin_runtime::PluginRuntimeState;
+
+use crate::companion_api::tunnel::TunnelManagedInfo;
 
 /// Singleton logical id for the one-per-app MCP server row.
 const MCP_SINGLETON_ID: &str = "mcp-server";
@@ -50,6 +57,13 @@ pub enum ManagedSubsystem {
     IntegratedTerminal,
     McpServer,
     CodeServer,
+    /// Long-lived Node plugin hosts (one per running Node-runtime plugin).
+    PluginHost,
+    /// Headless PTY sessions — a second, independent terminal registry.
+    HeadlessTerminal,
+    /// The cloudflared tunnel. Not a cognia binary, but a child we spawn and
+    /// the only one that exposes a public hostname, so it belongs on the list.
+    Tunnel,
 }
 
 /// Lifecycle state of a managed process, normalized across subsystems.
@@ -148,8 +162,17 @@ fn integrated_row(info: &TerminalSessionInfo) -> ManagedProcess {
         id: info.id.clone(),
         name: info.shell.clone(),
         pid: info.pid,
-        // Presence in the session map means the PTY is live; exit removes it.
-        status: ManagedStatus::Running,
+        // Sessions are deliberately *kept* in the store after the shell exits
+        // so the renderer can still read scrollback, so presence proves
+        // nothing — only the waiter thread's `alive` flag does.
+        status: if info.alive {
+            ManagedStatus::Running
+        } else {
+            ManagedStatus::Stopped
+        },
+        // Kill on an exited session degrades to evicting the row (the PID is
+        // already reaped and may have been reused), which is what the user
+        // means by "clear this out".
         can_kill: true,
         can_restart: false,
         detail: info.project_id.clone(),
@@ -183,6 +206,60 @@ fn codeserver_row(info: &CodeServerManagedInfo) -> ManagedProcess {
         // Restart = stop + re-ensure, both available natively for this subsystem.
         can_restart: true,
         detail: Some(info.root.clone()),
+    }
+}
+
+fn plugin_host_row(info: &NodePluginManagedInfo) -> ManagedProcess {
+    ManagedProcess {
+        subsystem: ManagedSubsystem::PluginHost,
+        id: info.plugin_id.clone(),
+        name: format!("node ({})", info.plugin_id),
+        pid: info.pid,
+        status: if info.launching {
+            ManagedStatus::Starting
+        } else {
+            ManagedStatus::Running
+        },
+        can_kill: true,
+        // Restarting means re-running the plugin's activation, which is the
+        // plugin manager's job, not this registry's.
+        can_restart: false,
+        detail: Some(info.plugin_id.clone()),
+    }
+}
+
+fn headless_row(info: &HeadlessManagedInfo) -> ManagedProcess {
+    ManagedProcess {
+        subsystem: ManagedSubsystem::HeadlessTerminal,
+        id: info.id.clone(),
+        name: info.shell.clone(),
+        pid: info.pid,
+        // Same rule as the interactive PTYs: the session outlives its child,
+        // so only the waiter thread's flag can be trusted.
+        status: if info.alive {
+            ManagedStatus::Running
+        } else {
+            ManagedStatus::Stopped
+        },
+        can_kill: true,
+        can_restart: false,
+        detail: None,
+    }
+}
+
+/// Singleton logical id for the one-per-app cloudflared tunnel row.
+const TUNNEL_SINGLETON_ID: &str = "cloudflared";
+
+fn tunnel_row(info: &TunnelManagedInfo) -> ManagedProcess {
+    ManagedProcess {
+        subsystem: ManagedSubsystem::Tunnel,
+        id: TUNNEL_SINGLETON_ID.to_string(),
+        name: "cloudflared".to_string(),
+        pid: info.pid,
+        status: ManagedStatus::Running,
+        can_kill: true,
+        can_restart: false,
+        detail: info.public_url.clone(),
     }
 }
 
@@ -269,6 +346,27 @@ pub async fn collect(app: &AppHandle) -> Vec<ManagedProcess> {
         }
     }
 
+    // Node plugin hosts — long-lived children of the plugin runtime.
+    if let Some(st) = app.try_state::<PluginRuntimeState>() {
+        for info in node_plugin_snapshot(st.inner()) {
+            out.push(plugin_host_row(&info));
+        }
+    }
+
+    // Headless PTYs (agent/automation shells), independent of `TerminalState`.
+    if let Some(st) = app.try_state::<HeadlessTerminalState>() {
+        for info in st.inner().managed_snapshot() {
+            out.push(headless_row(&info));
+        }
+    }
+
+    // The cloudflared tunnel, when one is up.
+    if let Some(st) = app.try_state::<crate::companion_api::CompanionServerState>() {
+        if let Some(info) = st.inner().tunnel.managed_snapshot() {
+            out.push(tunnel_row(&info));
+        }
+    }
+
     out
 }
 
@@ -292,6 +390,8 @@ async fn kill_subsystem(
                 .inner()
                 .get(id)
                 .ok_or_else(|| format!("terminal {id} not found"))?;
+            // `PtySession::kill` is a no-op once the child has been reaped, so
+            // this is safe for the exited rows the panel also lists.
             session.kill().map_err(|e| e.to_string())?;
             st.inner().remove(id);
             Ok(())
@@ -307,6 +407,26 @@ async fn kill_subsystem(
         }
         ManagedSubsystem::CodeServer => {
             app.state::<CodeServerState>().inner().stop(id).await;
+            Ok(())
+        }
+        ManagedSubsystem::PluginHost => {
+            let st = app.state::<PluginRuntimeState>();
+            stop_node_plugin(st.inner(), id)
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        }
+        ManagedSubsystem::HeadlessTerminal => {
+            let st = app.state::<HeadlessTerminalState>();
+            if st.inner().kill(id) {
+                Ok(())
+            } else {
+                Err(format!("headless terminal {id} not found"))
+            }
+        }
+        ManagedSubsystem::Tunnel => {
+            let st = app.state::<crate::companion_api::CompanionServerState>();
+            st.inner().tunnel.stop();
             Ok(())
         }
         ManagedSubsystem::ExternalAgent => {
@@ -358,23 +478,110 @@ pub async fn list_managed_processes(app: AppHandle) -> Result<Vec<ManagedProcess
     Ok(collect(&app).await)
 }
 
-/// Stop the managed processes that the pre-existing `RunEvent::Exit` arm does
-/// **not** already tear down (chat sidecar, integrated terminals, MCP server),
-/// so a graceful shutdown doesn't orphan them. External agents + ACP terminals
-/// are killed by their own `kill_all()` calls in that arm.
-pub async fn teardown(app: &AppHandle) {
-    if let Some(st) = app.try_state::<SidecarState>() {
-        kill_sidecar(st.inner().clone()).await;
+/// Every subsystem in the registry, in teardown order.
+///
+/// Paired with [`subsystem_index`] so the list cannot silently fall behind the
+/// enum: adding a variant breaks that function's exhaustive `match`, and the
+/// `every_subsystem_is_torn_down` test then catches a missing array entry.
+/// This drift is not hypothetical — code-server was added to [`collect`] but
+/// not to the shutdown path, and leaked a Node server holding a port past every
+/// app exit until this list existed.
+pub const ALL_SUBSYSTEMS: [ManagedSubsystem; 9] = [
+    ManagedSubsystem::ExternalAgent,
+    ManagedSubsystem::AcpTerminal,
+    ManagedSubsystem::IntegratedTerminal,
+    ManagedSubsystem::HeadlessTerminal,
+    ManagedSubsystem::ChatSidecar,
+    ManagedSubsystem::McpServer,
+    ManagedSubsystem::CodeServer,
+    ManagedSubsystem::PluginHost,
+    ManagedSubsystem::Tunnel,
+];
+
+/// Position of `subsystem` in [`ALL_SUBSYSTEMS`]. Exhaustive by construction.
+///
+/// Only the parity test calls this, but it stays in non-test builds so the
+/// exhaustive `match` still fails compilation the moment a variant is added.
+#[allow(dead_code)]
+const fn subsystem_index(subsystem: ManagedSubsystem) -> usize {
+    match subsystem {
+        ManagedSubsystem::ExternalAgent => 0,
+        ManagedSubsystem::AcpTerminal => 1,
+        ManagedSubsystem::IntegratedTerminal => 2,
+        ManagedSubsystem::HeadlessTerminal => 3,
+        ManagedSubsystem::ChatSidecar => 4,
+        ManagedSubsystem::McpServer => 5,
+        ManagedSubsystem::CodeServer => 6,
+        ManagedSubsystem::PluginHost => 7,
+        ManagedSubsystem::Tunnel => 8,
     }
-    if let Some(st) = app.try_state::<TerminalState>() {
-        for info in st.inner().list_all() {
-            if let Some(session) = st.inner().remove(&info.id) {
-                let _ = session.kill();
+}
+
+/// Stop every process owned by one subsystem. Each arm calls that subsystem's
+/// own teardown path; missing state (mobile, a failed init) is a no-op.
+async fn teardown_subsystem(app: &AppHandle, subsystem: ManagedSubsystem) {
+    match subsystem {
+        ManagedSubsystem::ExternalAgent => {
+            if let Some(st) = app.try_state::<ExternalAgentState>() {
+                let _ = st.inner().0.clone().kill_all().await;
+            }
+        }
+        ManagedSubsystem::AcpTerminal => {
+            if let Some(st) = app.try_state::<AcpTerminalState>() {
+                let _ = st.inner().0.clone().kill_all().await;
+            }
+        }
+        ManagedSubsystem::IntegratedTerminal => {
+            if let Some(st) = app.try_state::<TerminalState>() {
+                for info in st.inner().list_all() {
+                    if let Some(session) = st.inner().remove(&info.id) {
+                        let _ = session.kill();
+                    }
+                }
+            }
+        }
+        ManagedSubsystem::ChatSidecar => {
+            if let Some(st) = app.try_state::<SidecarState>() {
+                kill_sidecar(st.inner().clone()).await;
+            }
+        }
+        ManagedSubsystem::McpServer => {
+            if let Some(st) = app.try_state::<McpServerState>() {
+                let _ = st.inner().stop();
+            }
+        }
+        ManagedSubsystem::CodeServer => {
+            if let Some(st) = app.try_state::<CodeServerState>() {
+                st.inner().stop_all().await;
+            }
+        }
+        ManagedSubsystem::HeadlessTerminal => {
+            if let Some(st) = app.try_state::<HeadlessTerminalState>() {
+                st.inner().kill_all();
+            }
+        }
+        ManagedSubsystem::PluginHost => {
+            if let Some(st) = app.try_state::<PluginRuntimeState>() {
+                stop_all_node_plugins(st.inner()).await;
+            }
+        }
+        ManagedSubsystem::Tunnel => {
+            if let Some(st) = app.try_state::<crate::companion_api::CompanionServerState>() {
+                st.inner().tunnel.stop();
             }
         }
     }
-    if let Some(st) = app.try_state::<McpServerState>() {
-        let _ = st.inner().stop();
+}
+
+/// Stop every cognia-spawned child process on app exit.
+///
+/// Covers the whole registry plus the long-lived children that predate it and
+/// have no registry row yet (the cloudflared tunnel). `kill_on_drop` is *not* a
+/// fallback here: on macOS the Tauri event loop never returns, so managed state
+/// is never dropped and every one of these needs an explicit call.
+pub async fn teardown(app: &AppHandle) {
+    for subsystem in ALL_SUBSYSTEMS {
+        teardown_subsystem(app, subsystem).await;
     }
 }
 
@@ -481,22 +688,120 @@ mod tests {
         assert_eq!(dead.status, ManagedStatus::Stopped);
     }
 
-    #[test]
-    fn integrated_row_uses_shell_and_project() {
-        let info = TerminalSessionInfo {
+    fn pty_info(alive: bool) -> TerminalSessionInfo {
+        TerminalSessionInfo {
             id: "pty-1".into(),
             project_id: Some("proj-a".into()),
             extension_id: None,
             origin: SessionOrigin::Local,
             shell: "/bin/zsh".into(),
             pid: Some(11),
-        };
-        let row = integrated_row(&info);
+            alive,
+        }
+    }
+
+    #[test]
+    fn integrated_row_uses_shell_and_project() {
+        let row = integrated_row(&pty_info(true));
         assert_eq!(row.subsystem, ManagedSubsystem::IntegratedTerminal);
         assert_eq!(row.name, "/bin/zsh");
         assert_eq!(row.pid, Some(11));
         assert_eq!(row.detail.as_deref(), Some("proj-a"));
+        assert_eq!(row.status, ManagedStatus::Running);
         assert!(row.can_kill && !row.can_restart);
+    }
+
+    #[test]
+    fn integrated_row_reports_an_exited_shell_as_stopped() {
+        // Regression: the status was hardcoded `Running`, so a shell the user
+        // exited normally stayed listed as live forever with a stale PID.
+        let row = integrated_row(&pty_info(false));
+        assert_eq!(row.status, ManagedStatus::Stopped);
+        // Still killable — that is how the user evicts the dead row.
+        assert!(row.can_kill);
+    }
+
+    #[test]
+    fn plugin_host_row_is_kill_only_and_shows_launching() {
+        let running = plugin_host_row(&NodePluginManagedInfo {
+            plugin_id: "web-tools".into(),
+            pid: Some(4242),
+            launching: false,
+        });
+        assert_eq!(running.subsystem, ManagedSubsystem::PluginHost);
+        assert_eq!(running.id, "web-tools");
+        assert!(running.name.contains("web-tools"));
+        assert_eq!(running.pid, Some(4242));
+        assert_eq!(running.status, ManagedStatus::Running);
+        assert!(running.can_kill && !running.can_restart);
+
+        // A reserved-but-not-yet-spawned host has no pid to join on.
+        let launching = plugin_host_row(&NodePluginManagedInfo {
+            plugin_id: "web-tools".into(),
+            pid: None,
+            launching: true,
+        });
+        assert_eq!(launching.status, ManagedStatus::Starting);
+        assert_eq!(launching.pid, None);
+    }
+
+    #[test]
+    fn headless_row_tracks_child_liveness() {
+        let info = HeadlessManagedInfo {
+            id: "hl-1".into(),
+            shell: "/bin/zsh".into(),
+            pid: Some(77),
+            alive: true,
+        };
+        let row = headless_row(&info);
+        assert_eq!(row.subsystem, ManagedSubsystem::HeadlessTerminal);
+        assert_eq!(row.name, "/bin/zsh");
+        assert_eq!(row.status, ManagedStatus::Running);
+
+        let dead = headless_row(&HeadlessManagedInfo {
+            alive: false,
+            ..info
+        });
+        assert_eq!(dead.status, ManagedStatus::Stopped);
+    }
+
+    #[test]
+    fn tunnel_row_is_a_singleton_carrying_the_public_url() {
+        let row = tunnel_row(&TunnelManagedInfo {
+            pid: Some(909),
+            public_url: Some("https://x.trycloudflare.com".into()),
+        });
+        assert_eq!(row.subsystem, ManagedSubsystem::Tunnel);
+        assert_eq!(row.id, TUNNEL_SINGLETON_ID);
+        assert_eq!(row.pid, Some(909));
+        assert!(row.can_kill && !row.can_restart);
+        assert_eq!(row.detail.as_deref(), Some("https://x.trycloudflare.com"));
+    }
+
+    #[test]
+    fn new_subsystems_serialize_camel_case() {
+        let s = |v: &ManagedSubsystem| serde_json::to_string(v).unwrap();
+        assert_eq!(s(&ManagedSubsystem::PluginHost), "\"pluginHost\"");
+        assert_eq!(
+            s(&ManagedSubsystem::HeadlessTerminal),
+            "\"headlessTerminal\""
+        );
+        assert_eq!(s(&ManagedSubsystem::Tunnel), "\"tunnel\"");
+    }
+
+    #[test]
+    fn every_subsystem_is_torn_down() {
+        // `teardown_subsystem` is exhaustive by `match`, but the list it is
+        // driven from is not. Pin the two together so a new variant cannot be
+        // collected without also being shut down (the code-server leak).
+        assert_eq!(ALL_SUBSYSTEMS.len(), 9);
+        for (i, subsystem) in ALL_SUBSYSTEMS.iter().enumerate() {
+            assert_eq!(
+                subsystem_index(*subsystem),
+                i,
+                "{subsystem:?} is out of order or listed twice in ALL_SUBSYSTEMS"
+            );
+        }
     }
 
     #[test]

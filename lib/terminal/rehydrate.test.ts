@@ -58,6 +58,26 @@ describe("rehydrateTerminals", () => {
     expect(store.restorePersistedLayout).toHaveBeenCalledTimes(1)
   })
 
+  it("skips sessions whose shell already exited", async () => {
+    // Rust keeps exited sessions listed so scrollback survives; restoring one
+    // would give the user a tab with no PTY behind it.
+    const store = makeStore()
+    const list = jest.fn(async () => [
+      info("alive"),
+      { ...info("dead"), alive: false },
+      { ...info("legacy"), alive: undefined },
+    ])
+    const reattach = jest.fn(fakeReattach) as unknown as ReattachFn
+
+    const res = await rehydrateTerminals({ store, list, reattach })
+
+    // The legacy row (transport predating the flag) is still restored.
+    expect(res).toEqual({ restored: 2, failed: 0 })
+    expect(reattach).toHaveBeenCalledWith("alive", 0)
+    expect(reattach).toHaveBeenCalledWith("legacy", 0)
+    expect(reattach).not.toHaveBeenCalledWith("dead", 0)
+  })
+
   it("restores layout only after every surviving PTY row is registered", async () => {
     const order: string[] = []
     const store = makeStore()

@@ -128,6 +128,7 @@ mod tests {
             killer: std::sync::Mutex::new(make_dummy_killer()),
             pid: None,
             tempdir: None,
+            alive: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             replay: Arc::new(ReplayBuffer::new()),
             channel_slot: session::detached_desk_channel(),
         };

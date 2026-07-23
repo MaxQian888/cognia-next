@@ -83,6 +83,24 @@ describe("PerfManagedProcesses", () => {
     expect(screen.getAllByTestId("perf-managed-empty").length).toBeGreaterThan(0)
   })
 
+  it("renders a group for every subsystem the backend can report", () => {
+    // Grouping filters by a fixed display order, so a subsystem missing from
+    // that list is collected and killed on exit but never shown. These three
+    // were exactly that gap.
+    render(
+      <PerfManagedProcesses
+        latest={sample([
+          mp({ subsystem: "pluginHost", id: "web-tools", name: "node (web-tools)", pid: 301 }),
+          mp({ subsystem: "headlessTerminal", id: "hl-1", name: "/bin/zsh", pid: 302 }),
+          mp({ subsystem: "tunnel", id: "cloudflared", name: "cloudflared", pid: 303 }),
+        ])}
+      />
+    )
+    expect(screen.getByTestId("perf-managed-row-web-tools")).toBeInTheDocument()
+    expect(screen.getByTestId("perf-managed-row-hl-1")).toBeInTheDocument()
+    expect(screen.getByTestId("perf-managed-row-cloudflared")).toBeInTheDocument()
+  })
+
   it("groups rows by subsystem and joins CPU/memory by PID", () => {
     render(
       <PerfManagedProcesses

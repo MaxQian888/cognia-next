@@ -48,15 +48,29 @@ import type {
   ProcessSample,
 } from "@/lib/perf/backend/types"
 
-/** Fixed display order for subsystem groups (most agent-relevant first). */
-const SUBSYSTEM_ORDER: ManagedSubsystem[] = [
-  "externalAgent",
-  "chatSidecar",
-  "mcpServer",
-  "codeServer",
-  "acpTerminal",
-  "integratedTerminal",
-]
+/**
+ * Display rank per subsystem group (most agent-relevant first).
+ *
+ * A `Record` rather than an array: grouping *filters* by this order, so a
+ * subsystem missing from it is silently dropped from the panel — a new backend
+ * subsystem would be collected, killed on exit, and still invisible. Keying on
+ * the union makes omitting one a type error.
+ */
+const SUBSYSTEM_RANK: Record<ManagedSubsystem, number> = {
+  externalAgent: 0,
+  chatSidecar: 1,
+  mcpServer: 2,
+  codeServer: 3,
+  pluginHost: 4,
+  acpTerminal: 5,
+  integratedTerminal: 6,
+  headlessTerminal: 7,
+  tunnel: 8,
+}
+
+const SUBSYSTEM_ORDER = (Object.keys(SUBSYSTEM_RANK) as ManagedSubsystem[]).sort(
+  (a, b) => SUBSYSTEM_RANK[a] - SUBSYSTEM_RANK[b]
+)
 
 /** Status badge tint by lifecycle state. */
 const STATUS_BADGE: Record<ManagedStatus, string> = {

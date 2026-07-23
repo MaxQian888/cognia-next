@@ -1,11 +1,15 @@
 //! The 1 Hz sampler that composes process + runtime + span data into a
 //! [`PerfSample`] and emits it over `perf://sample`.
 //!
-//! Lifecycle is ref-counted like Windows Task Manager itself: the renderer
-//! calls `perf_start_sampling` when the panel mounts and `perf_stop_sampling`
-//! when it unmounts, so there is **zero** sampling overhead while the panel is
-//! closed. A bounded ring keeps the last [`RING_CAP`] samples so a freshly
-//! opened panel can backfill its rolling graphs without waiting.
+//! Lifecycle is ref-counted like Windows Task Manager itself: each renderer
+//! consumer calls `perf_start_sampling` when it mounts and
+//! `perf_stop_sampling` when it unmounts, and the loop runs while any lease is
+//! outstanding — so there is **zero** sampling overhead once every consumer is
+//! gone, and no single consumer can freeze the others by unmounting. A webview
+//! reload can't send the balancing stops, so `on_page_load` calls
+//! [`SamplerHandle::halt`] to drop the leases outright. A bounded ring keeps
+//! the last [`RING_CAP`] samples so a freshly opened panel can backfill its
+//! rolling graphs without waiting.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -51,6 +55,11 @@ pub struct PerfSample {
 #[derive(Default)]
 pub struct SamplerHandle {
     running: AtomicBool,
+    /// Number of renderer consumers that have called `perf_start_sampling`
+    /// without a matching stop. The panel is not the only one — the desktop
+    /// status bar has its own perf segment — so an unconditional stop would
+    /// freeze whichever consumer is left mounted.
+    leases: AtomicU64,
     interval_ms: AtomicU64,
     /// Bumped on stop so a stale loop exits even if a restart races it.
     generation: AtomicU64,
@@ -76,10 +85,31 @@ impl SamplerHandle {
             .store(ms.clamp(MIN_INTERVAL_MS, MAX_INTERVAL_MS), Ordering::SeqCst);
     }
 
-    /// Stop the loop and invalidate its generation.
+    /// Release one consumer's lease. The loop only halts once the last one is
+    /// gone; a stop with no outstanding lease is a no-op.
     pub fn stop(&self) {
+        let prev = self
+            .leases
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                Some(n.saturating_sub(1))
+            })
+            .unwrap_or(0);
+        if prev <= 1 {
+            self.halt();
+        }
+    }
+
+    /// Stop the loop unconditionally and invalidate its generation, dropping
+    /// every outstanding lease.
+    pub fn halt(&self) {
+        self.leases.store(0, Ordering::SeqCst);
         self.running.store(false, Ordering::SeqCst);
         self.generation.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// Outstanding consumer count (test/diagnostic surface).
+    pub fn leases(&self) -> u64 {
+        self.leases.load(Ordering::SeqCst)
     }
 
     pub fn recent(&self) -> Vec<PerfSample> {
@@ -95,11 +125,13 @@ impl SamplerHandle {
     }
 }
 
-/// Start (or reconfigure) the sampler loop. Idempotent: if a loop is already
-/// running, this only updates the interval and returns. Otherwise it spawns the
-/// background task on the traced runtime.
+/// Take a sampling lease and start the loop if it isn't already running. Every
+/// call must be balanced by one [`SamplerHandle::stop`]; the loop keeps running
+/// while any lease is outstanding. If a loop is already running this only
+/// updates the interval and returns.
 pub fn start(app: AppHandle, handle: Arc<SamplerHandle>, interval_ms: u64) {
     handle.set_interval(interval_ms);
+    handle.leases.fetch_add(1, Ordering::SeqCst);
     // `swap` makes the start atomic: only the caller that flips false→true wins.
     if handle.running.swap(true, Ordering::SeqCst) {
         return;
@@ -213,9 +245,48 @@ mod tests {
     fn stop_marks_not_running_and_bumps_generation() {
         let h = SamplerHandle::default();
         h.running.store(true, Ordering::SeqCst);
+        h.leases.store(1, Ordering::SeqCst);
         let g0 = h.generation.load(Ordering::SeqCst);
         h.stop();
         assert!(!h.is_running());
         assert_eq!(h.generation.load(Ordering::SeqCst), g0 + 1);
+    }
+
+    #[test]
+    fn the_loop_survives_until_the_last_consumer_stops() {
+        // Regression: `stop` used to halt unconditionally, so closing the
+        // /performance panel froze the desktop status bar's perf segment.
+        let h = SamplerHandle::default();
+        h.running.store(true, Ordering::SeqCst);
+        h.leases.store(2, Ordering::SeqCst);
+
+        h.stop();
+        assert!(h.is_running(), "one consumer is still mounted");
+        assert_eq!(h.leases(), 1);
+
+        h.stop();
+        assert!(!h.is_running(), "the last stop halts the loop");
+        assert_eq!(h.leases(), 0);
+    }
+
+    #[test]
+    fn stop_without_a_lease_does_not_underflow() {
+        let h = SamplerHandle::default();
+        h.stop();
+        h.stop();
+        assert_eq!(h.leases(), 0);
+        assert!(!h.is_running());
+    }
+
+    #[test]
+    fn halt_drops_every_lease() {
+        // A webview reload never sends the balancing stops, so page-load must
+        // be able to reset the count outright.
+        let h = SamplerHandle::default();
+        h.running.store(true, Ordering::SeqCst);
+        h.leases.store(3, Ordering::SeqCst);
+        h.halt();
+        assert_eq!(h.leases(), 0);
+        assert!(!h.is_running());
     }
 }
