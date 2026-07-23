@@ -2571,6 +2571,33 @@
     "teamUpdated": "Team updated.",
     "teammateConfig": {
       "description": "Edit identity, prompt, tools, and plugin capabilities for this teammate.",
+      "executionBinding": {
+        "candidateIds": "Candidate deployments",
+        "candidateIdsHint": "The coordinator picks among these deployment ids only (currently: the first candidate is selected).",
+        "candidateIdsPlaceholder": "dep-a, dep-b",
+        "credentialProfileRef": "Credential profile",
+        "credentialProfileRefPlaceholder": "credential profile reference",
+        "credentialRefHint": "A reference into the credential store — never a raw key.",
+        "deploymentRef": "Deployment profile",
+        "deploymentRefPlaceholder": "deployment id (e.g. dep-vendor-a)",
+        "description": "How this teammate's runtime, deployment and credentials are bound. References only — endpoints and keys live in provider profiles.",
+        "flagOffHint": "Inert until the unified execution resolver flag (agentExecutionResolverV2) is enabled — dispatch ignores this binding while it is off.",
+        "modeInherit": "Inherit team default",
+        "modePinned": "Pinned",
+        "modePool": "Candidate pool",
+        "modelRole": "Model role",
+        "modelRoleFast": "Fast",
+        "modelRoleInherit": "Inherit",
+        "modelRolePowerful": "Powerful",
+        "modelRolePrimary": "Primary",
+        "previewNative": "Native delegation",
+        "previewOrchestrated": "Orchestrated ({reasons})",
+        "runtimeAiSdk": "AI SDK",
+        "runtimeAuto": "Auto",
+        "runtimeClaudeSdk": "Claude Agent SDK",
+        "runtimePolicy": "Runtime",
+        "title": "Execution binding"
+      },
       "rosterSection": {
         "description": "Fields that live on the teammate row, not on its preset config.",
         "provider": "Provider",
@@ -4074,49 +4101,21 @@
       },
       "attachments": {
         "countLimit": "Only {max} attachments allowed.",
-        "extracting": "Reading…",
         "fallbackFile": "file",
         "fallbackName": "attachment",
         "fileSizeExceeded": "{count, plural, =1 {1 file exceeded} other {# files exceeded}} {max}MB.",
         "folderEmpty": "That folder has no attachable files.",
         "folderTruncated": "Only the first {max} files from the dropped folder were read.",
         "linkSkipped": "{count, plural, =1 {1 link couldn't be read} other {# links couldn't be read}}; the original URL will still be sent.",
-        "openPreviewAria": "Preview {filename}",
         "optimized": "{count, plural, =1 {1 large image was optimized} other {# large images were optimized}} before attaching.",
         "oversizeBody": "These attachments add about {tokens}k tokens of context. Send anyway?",
         "oversizeCancel": "Cancel",
         "oversizeConfirm": "Send anyway",
         "oversizeTitle": "Large attachment",
         "preparing": "Preparing attachments…",
-        "preview": {
-          "close": "Close",
-          "empty": "Nothing was extracted from this file.",
-          "fileTab": "File",
-          "fullSize": "Full size",
-          "imageHint": "Downscaled to at most {maxEdge}px on the long edge before sending.",
-          "imageSize": "{width}×{height} · {size}",
-          "modelHint": "This is exactly what the model receives.",
-          "modelTab": "Model view",
-          "ocrDetail": "View per-page result",
-          "ocrEmpty": "No text recognised in this image.",
-          "ocrRun": "Run OCR",
-          "ocrRunning": "Running OCR…",
-          "ocrToInput": "Add text to message",
-          "ocrToggle": "Also send OCR text",
-          "redactedNote": "Highlighted spans were redacted before sending.",
-          "title": "Attachment",
-          "tokens": "{tokens} tokens"
-        },
-        "rejectReason": {
-          "empty": "No readable text found",
-          "notDataUrl": "Couldn't read this file",
-          "parseFailed": "Couldn't parse this file",
-          "unsupportedType": "Unsupported file type"
-        },
         "removeAria": "Remove {filename}",
-        "reorderAria": "Reorder {filename}",
+        "removeFallback": "Remove attachment",
         "skipped": "{count, plural, =1 {1 attachment was} other {# attachments were}} skipped (unsupported file type).",
-        "tokenBadge": "{tokens} tok",
         "unsupported": "{count, plural, =1 {1 file isn't supported} other {# files aren't supported}}."
       },
       "camera": {
@@ -4464,7 +4463,6 @@
       "title": "What do you want to get done?"
     },
     "filePreview": {
-      "extractedChars": "{count, plural, =1 {1 char} other {# chars}} extracted",
       "loading": "Loading {name}…",
       "pdfFallback": "PDF preview is unavailable."
     },
@@ -4689,31 +4687,6 @@
     },
     "mcpContent": {
       "embeddedResource": "Embedded resource: {uri}"
-    },
-    "memoryChips": {
-      "budgetLine": "Context budget: {used}/{limit} tokens",
-      "cancel": "Cancel",
-      "degradedNotice": "Memory retrieval was degraded this turn (keyword-only fallback).",
-      "deletedFallback": "Deleted from memory",
-      "details": "Open in memory console",
-      "edit": "Edit memory",
-      "editAria": "Edit memory text",
-      "errors": {
-        "disabled": "Memory is disabled in settings",
-        "not_found": "This memory no longer exists",
-        "pii_blocked": "Blocked: the new text contains personal information",
-        "temporary": "Memory is in temporary mode"
-      },
-      "learnedAria": "Memories learned from this reply",
-      "learnedLabel": "{count, plural, =1 {Learned 1 memory} other {Learned # memories}}",
-      "learnedTitle": "Learned from this reply",
-      "recalledAria": "Memories recalled for this reply",
-      "recalledLabel": "{count, plural, =0 {No memories recalled} =1 {Recalled 1 memory} other {Recalled # memories}}",
-      "recalledTitle": "Recalled for this reply",
-      "save": "Save",
-      "truncated": "truncated",
-      "undo": "Undo — forget this memory",
-      "undone": "Undone"
     },
     "message": {
       "attachmentAlt": "attachment",
@@ -5351,8 +5324,7 @@
         "description": "Filesystem workspace tools require a supported desktop or sandbox backend.",
         "title": "Workspace is not available"
       }
-    },
-    "webviewPanelPending": "This panel's webview has not loaded yet."
+    }
   },
   "crashDialog": {
     "description": "A session started {time} (version {version}) ended in a crash. A crash report was saved with the details.",
@@ -6558,10 +6530,40 @@
       "save": "Save gate",
       "savedNotice": "Gate saved"
     },
+    "grading": {
+      "alphabet": "Option letters",
+      "extractNothing": "This rule extracts nothing from \"{sample}\" — cases using it will be ungraded.",
+      "extracted": "This rule extracts: {value}",
+      "hints": {
+        "choice": "Pull a multiple-choice letter (or 1-based index) out of both sides and compare.",
+        "contains-any": "Passes when the answer contains ANY of the expected values — for answers with several acceptable forms.",
+        "exact": "The answer must equal the expected output after normalization.",
+        "numeric": "Pull a number out of both sides and compare. Use a pattern when the expected output marks its answer (e.g. GSM8K's ####).",
+        "regex": "The answer must match the pattern."
+      },
+      "mode": "Comparison",
+      "modes": {
+        "choice": "Multiple choice",
+        "contains-any": "Contains any (alias set)",
+        "exact": "Exact match",
+        "numeric": "Numeric answer",
+        "regex": "Regex match"
+      },
+      "normalize": {
+        "caseInsensitive": "Ignore case",
+        "stripArticles": "Ignore a / an / the",
+        "stripPunctuation": "Ignore punctuation"
+      },
+      "pattern": "Extraction pattern",
+      "tolerance": "Tolerance"
+    },
     "import": {
       "action": "Import {count, plural, =1 {# case} other {# cases}}",
+      "actionHf": "Import {count} case(s)",
+      "cancel": "Cancel",
       "close": "Close",
       "done": "Imported {count, plural, =1 {# case} other {# cases}}.",
+      "doneUpsert": "Imported {added} new case(s), updated {updated}",
       "failed": "Import failed: {error}",
       "file": {
         "expectedColumn": "Expected column",
@@ -6576,20 +6578,37 @@
       "heading": "Import test set",
       "hf": {
         "fetch": "Fetch & import",
+        "limit": "Rows to import",
         "offline": "Offline — HuggingFace import needs a network connection.",
+        "probe": "Inspect",
+        "split": "Config / split",
         "uri": "Dataset URI"
       },
       "history": {
         "empty": "No recent traces to import.",
         "pick": "Pick trace for session {id}"
       },
+      "mapping": {
+        "heading": "Column mapping",
+        "idColumn": "Stable id column (enables re-import without duplicates)",
+        "splitColumn": "Split column",
+        "splitLiteral": "Split applied to every case",
+        "useGrading": "Grade the expected answer automatically"
+      },
+      "nothingToImport": "Nothing to import — check the column mapping.",
       "preview": "{count, plural, =1 {# case} other {# cases}} parsed",
+      "previewSample": "Previewing {count} sample row(s); {total} will be imported",
+      "skipped": "{count} row(s) skipped",
+      "stage": "Stage {count} case(s)",
       "tabs": {
         "file": "File",
         "foreign": "Foreign format",
         "history": "From history",
         "huggingface": "HuggingFace"
       }
+    },
+    "runBar": {
+      "label": "Running {label}"
     },
     "runConfig": {
       "addTarget": "Add target",
@@ -6615,6 +6634,7 @@
       "running": "Running…",
       "scorers": "Scorers ({count})",
       "split": "Split filter",
+      "starting": "Starting…",
       "targetKind": "Target kind",
       "targetLabel": "Label",
       "targetRef": "Model / team / workflow id",
@@ -6634,15 +6654,20 @@
       "loading": "Loading run…",
       "noCases": "No per-case results recorded for this run.",
       "outputTruncated": "(truncated)",
+      "partialHint": "This run stopped after {done} case(s); its rates cover only those, and no quality gate is applied.",
       "pass": "Pass",
       "passAt1": "pass@1 {pct}%",
       "passHatK": "pass^{k} {pct}%",
       "sampleError": "This case failed to run: {error}",
       "scorersFailed": "These scorers failed on every case and graded nothing: {scorers}. The numbers above are not trustworthy — check the judge provider and re-run.",
       "status": {
+        "aborted": "Cancelled",
+        "completed": "Completed",
         "errored": "The scorer itself failed",
+        "failed": "Failed",
         "measurement": "Measurement only — decides nothing",
         "not-applicable": "Not applicable — this case carries no reference for this scorer",
+        "running": "Running",
         "scored": "Scored"
       },
       "ungraded": "Ungraded",
@@ -6671,6 +6696,12 @@
       "openRun": "Open run {label}",
       "passAt1": "pass@1 {pct}%",
       "passHatK": "pass^{k} {pct}%",
+      "status": {
+        "aborted": "Cancelled",
+        "completed": "Completed",
+        "failed": "Failed",
+        "running": "Running"
+      },
       "ungraded": "{count} ungraded"
     },
     "scorerCatalog": {

@@ -286,6 +286,48 @@ describe("useAgentTeamStore Teammate CRUD", () => {
     ).toThrow(/Team not found/)
   })
 
+  it("rejects NEW raw apiKey/baseURL writes; legacy unchanged values stay readable (ADR-0090)", () => {
+    const team = useAgentTeamStore.getState().createTeam({ name: "X", task: "t" })
+    // New config with a raw key is refused at the store boundary.
+    expect(() =>
+      useAgentTeamStore.getState().addTeammate({
+        teamId: team.id,
+        name: "W",
+        config: { apiKey: "sk-raw-key" },
+      })
+    ).toThrow(/raw "apiKey" writes are retired/)
+
+    // A pinned-reference binding is the sanctioned shape.
+    const tm = useAgentTeamStore.getState().addTeammate({
+      teamId: team.id,
+      name: "W",
+      config: { execution: { mode: "pinned", deploymentRef: "dep-1" } },
+    })
+
+    // Updating with a NEW raw baseURL is refused; carrying an unchanged
+    // legacy value through an update passes.
+    expect(() =>
+      useAgentTeamStore
+        .getState()
+        .updateTeammate(tm.id, { config: { baseURL: "https://vendor.example" } })
+    ).toThrow(/raw "baseURL" writes are retired/)
+    useAgentTeamStore.getState().updateTeammate(tm.id, {
+      config: { execution: { mode: "pool", candidateIds: ["dep-1", "dep-2"] } },
+    })
+    expect(useAgentTeamStore.getState().teammates[tm.id].config.execution).toEqual({
+      mode: "pool",
+      candidateIds: ["dep-1", "dep-2"],
+    })
+
+    // upsertTeammate (whole-object replace) is guarded too — no bypass channel.
+    expect(() =>
+      useAgentTeamStore.getState().upsertTeammate({
+        ...useAgentTeamStore.getState().teammates[tm.id],
+        config: { apiKey: "sk-smuggled" },
+      })
+    ).toThrow(/raw "apiKey" writes are retired/)
+  })
+
   it("upsertTeammate replaces an existing teammate", () => {
     const team = useAgentTeamStore.getState().createTeam({ name: "X", task: "t" })
     const tm = useAgentTeamStore.getState().addTeammate({ teamId: team.id, name: "W" })

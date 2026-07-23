@@ -485,6 +485,22 @@ export interface AgentTeamConfig {
    */
   capabilities?: TeamCapabilityBundle
   /**
+   * Team-level default execution binding (ADR-0090 Phase 7). Precedence:
+   * member `execution` → run override → THIS team default → app default.
+   * Refs only — never raw credentials or endpoints. No dedicated UI writer
+   * yet: set via team templates / programmatic config (the member-level field
+   * ships first; the team-default editor lands with the coordinator picker).
+   */
+  defaultExecution?: TeammateExecutionBinding
+  /**
+   * Maximum TEAM delegation depth (ADR-0090 Phase 7). Counts orchestrated
+   * teammate→teammate delegations only and is DISTINCT from the native
+   * subagent `dispatchContext.maxDepth` budget. Default 2: depths 0/1/2 may
+   * delegate; a depth-2 child asking to delegate again is refused with a
+   * typed `DelegationDepthExceededError`.
+   */
+  maxTeamDelegationDepth?: number
+  /**
    * Optional id of the plugin-contributed shared-memory adapter this team
    * mirrors its KV into (see `shared-memory-adapter-registry`). Undefined =
    * local-only (Zustand). When set, `publishEntry` / `deleteEntry` mirror to
@@ -730,16 +746,56 @@ export const TEAM_USER_SENDER_ID = "__user__"
 /**
  * Teammate configuration (per-member overrides)
  */
+/**
+ * Per-teammate execution binding (ADR-0090 Phase 7). Everything here is an
+ * id/ref — the resolver freezes the actual spec at dispatch:
+ *  - `inherit`: use the run/team/app default chain;
+ *  - `pinned`: pin runtime/deployment/credential/model-role by REFERENCE;
+ *  - `pool`: the coordinator may pick among candidate deployment ids only —
+ *    it never sees endpoints or credentials.
+ */
+export type TeammateExecutionBinding =
+  | { mode: "inherit" }
+  | {
+      mode: "pinned"
+      /** External runtimes pin via `TeammateConfig.runtime`, not here. */
+      runtimePolicy?: "auto" | "claude-agent-sdk" | "ai-sdk"
+      /** Deployment profile id (ADR-0090 P1 store) — an id, never a URL. */
+      deploymentRef?: string
+      /** Credential PROFILE reference — never key material. */
+      credentialProfileRef?: string
+      /** Frozen model role the teammate runs as. */
+      modelRole?: "primary" | "fast" | "powerful"
+    }
+  | {
+      mode: "pool"
+      /** Deployment/profile candidate ids the coordinator may choose from. */
+      candidateIds: string[]
+    }
+
 export interface TeammateConfig {
   /** Custom system prompt */
   systemPrompt?: string
-  /** Provider override */
+  /**
+   * Provider override.
+   * @deprecated ADR-0090 Phase 7: readable for legacy rows; new configs use
+   * `execution` (pinned `deploymentRef`) instead.
+   */
   provider?: ProviderName
   /** Model override */
   model?: string
-  /** API key override */
+  /**
+   * API key override.
+   * @deprecated ADR-0090 Phase 7: deprecated-READABLE only. New writes are
+   * rejected (`assertNoNewRawTeammateCredentials`); use a credential profile
+   * reference on `execution` instead — raw keys never enter new team configs.
+   */
   apiKey?: string
-  /** Base URL override */
+  /**
+   * Base URL override.
+   * @deprecated ADR-0090 Phase 7: deprecated-READABLE only. New writes are
+   * rejected; endpoints live on the deployment profile (`execution`).
+   */
   baseURL?: string
   /** Temperature override */
   temperature?: number
@@ -795,6 +851,12 @@ export interface TeammateConfig {
    * resolves enabled.
    */
   sandboxPolicy?: import("@cognia/agent-config-types").SandboxResourcePolicy
+  /**
+   * Execution binding for this teammate (ADR-0090 Phase 7): inherit | pinned |
+   * pool. Wins the precedence chain (member → run → team default → app
+   * default). Refs only — raw credentials are rejected at write time.
+   */
+  execution?: TeammateExecutionBinding
 }
 
 /**
@@ -1207,6 +1269,12 @@ export interface TeamDelegationRecord {
   error?: string
   result?: string
   metadata?: Record<string, unknown>
+  /**
+   * The parent↔child exchange contract for this delegation (ADR-0090
+   * Phase 7). Refs/ids only — validated secret-free at build time. Additive:
+   * legacy records simply lack it.
+   */
+  envelope?: import("@cognia/agent-config-types/handoff-envelope").HandoffEnvelope
 }
 
 /**

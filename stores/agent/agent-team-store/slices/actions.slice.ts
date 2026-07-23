@@ -14,6 +14,7 @@ import {
   type TeammateCapabilityOverlay,
 } from "@/types/agent/agent-team"
 import { normalizeAgentTeamConfig, normalizeAgentTeamTask } from "@/lib/ai/agent/agent-team-compat"
+import { assertNoNewRawTeammateCredentials } from "@/lib/ai/agent/team/execution-binding-resolver"
 import { canMoveTask, reorderColumn, sortColumn } from "@/lib/ai/agent/team/task-move-guard"
 import { loggers } from "@cognia/logging"
 import { useProjectStore } from "@/stores/project/project-store"
@@ -367,6 +368,8 @@ export const createAgentTeamActionsSlice = (
   addTeammate: (input) => {
     const team = get().teams[input.teamId]
     if (!team) throw new Error(`Team not found: ${input.teamId}`)
+    // ADR-0090 Phase 7: new configs bind credentials by REFERENCE only.
+    assertNoNewRawTeammateCredentials(input.config)
 
     const teammate: AgentTeammate = {
       id: nanoid(),
@@ -398,6 +401,10 @@ export const createAgentTeamActionsSlice = (
   },
 
   upsertTeammate: (teammate) => {
+    // ADR-0090 Phase 7: the raw-credential rejection covers EVERY teammate
+    // write path — upsert included (whole-object replace would otherwise be a
+    // bypass channel). Legacy rows carrying an unchanged value stay readable.
+    assertNoNewRawTeammateCredentials(teammate.config, get().teammates[teammate.id]?.config)
     set((state) => {
       const destinationTeam = state.teams[teammate.teamId]
       if (!destinationTeam) {
@@ -469,6 +476,12 @@ export const createAgentTeamActionsSlice = (
   },
 
   updateTeammate: (teammateId, updates) => {
+    // ADR-0090 Phase 7: reject NEW raw apiKey/baseURL values (legacy rows
+    // carrying an unchanged value stay readable). Checked outside the set()
+    // updater so a rejection never half-applies state.
+    if (updates.config) {
+      assertNoNewRawTeammateCredentials(updates.config, get().teammates[teammateId]?.config)
+    }
     set((state) => {
       const teammate = state.teammates[teammateId]
       if (!teammate) return state

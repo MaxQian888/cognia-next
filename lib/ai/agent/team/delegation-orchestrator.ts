@@ -29,6 +29,10 @@
  */
 
 import { nanoid } from "nanoid"
+import {
+  validateHandoffEnvelope,
+  type HandoffEnvelope,
+} from "@cognia/agent-config-types/handoff-envelope"
 import type {
   AgentSystemType,
   TeamDelegationRecord,
@@ -204,6 +208,102 @@ export interface DelegateToExternalInput {
 }
 
 /** Build a fresh delegation record with the canonical lifecycle defaults. */
+/** Default team delegation depth cap (ADR-0090 Phase 7) — depths 0/1/2 may
+ * delegate; a depth-2 child delegating again is refused. Distinct from the
+ * native subagent `dispatchContext.maxDepth` budget. */
+export const DEFAULT_MAX_TEAM_DELEGATION_DEPTH = 2
+
+export class DelegationDepthExceededError extends Error {
+  readonly depth: number
+  readonly maxDepth: number
+
+  constructor(depth: number, maxDepth: number) {
+    super(
+      `team delegation refused: depth ${depth} exceeds maxTeamDelegationDepth ${maxDepth} ` +
+        `(ADR-0090 Phase 7)`
+    )
+    this.name = "DelegationDepthExceededError"
+    this.depth = depth
+    this.maxDepth = maxDepth
+  }
+}
+
+/**
+ * Walk the ACTIVE team-delegation graph upward from `teamId` and return
+ * `{ depth, chain }`: how many active team→team hops sit above it (a root
+ * team is depth 0) and the team-id chain root→…→teamId.
+ */
+export function activeTeamDelegationDepth(teamId: string): { depth: number; chain: string[] } {
+  const delegations = Object.values(useAgentTeamStore.getState().delegations).filter(
+    (d) =>
+      d.targetType === "team" &&
+      d.targetId &&
+      (d.status === "active" || d.status === "awaiting_approval")
+  )
+  const chain: string[] = [teamId]
+  const seen = new Set<string>([teamId])
+  let current = teamId
+  for (;;) {
+    const incoming = delegations.find((d) => d.targetId === current)
+    if (!incoming || seen.has(incoming.sourceTeamId)) break
+    seen.add(incoming.sourceTeamId)
+    chain.unshift(incoming.sourceTeamId)
+    current = incoming.sourceTeamId
+  }
+  return { depth: chain.length - 1, chain }
+}
+
+/**
+ * Throw the typed depth error when a delegation FROM `sourceTeamId` would put
+ * its child past the source team's `maxTeamDelegationDepth` (default 2).
+ * Returns the child depth + root chain for envelope construction.
+ */
+export function assertTeamDelegationDepth(sourceTeamId: string): {
+  childDepth: number
+  chain: string[]
+} {
+  const { depth, chain } = activeTeamDelegationDepth(sourceTeamId)
+  const maxDepth =
+    useAgentTeamStore.getState().teams[sourceTeamId]?.config.maxTeamDelegationDepth ??
+    DEFAULT_MAX_TEAM_DELEGATION_DEPTH
+  const childDepth = depth + 1
+  if (childDepth > maxDepth) {
+    throw new DelegationDepthExceededError(childDepth, maxDepth)
+  }
+  return { childDepth, chain }
+}
+
+/**
+ * Build (and validate) the persisted HandoffEnvelope for a delegation. The
+ * persisted task text is the delegation REASON — raw prompts intentionally
+ * never hit disk (see `PendingRun`). Refuses to attach an envelope that fails
+ * the secret-free validator rather than persisting a leaking one.
+ */
+function buildDelegationEnvelope(input: {
+  delegationId: string
+  sourceTeamId: string
+  taskId: string
+  reason: string
+  depth: number
+  chain: string[]
+}): HandoffEnvelope | undefined {
+  const envelope: HandoffEnvelope = {
+    envelopeVersion: 1,
+    identity: {
+      parentRunId: input.sourceTeamId,
+      childRunId: input.delegationId,
+      teamId: input.sourceTeamId,
+      taskId: input.taskId,
+      depth: input.depth,
+      parentChain: input.chain,
+    },
+    task: { prompt: input.reason },
+    execution: { mode: "orchestrated" },
+    createdAt: new Date().toISOString(),
+  }
+  return validateHandoffEnvelope(envelope).length === 0 ? envelope : undefined
+}
+
 function buildDelegation(input: {
   sourceTeamId: string
   sourceTaskId: string
@@ -213,10 +313,19 @@ function buildDelegation(input: {
   manual?: boolean
   metadata?: Record<string, unknown>
   status?: TeamDelegationStatus
+  /** Delegation depth of the child; defaults to a fresh walk from the source. */
+  depth?: { childDepth: number; chain: string[] }
 }): TeamDelegationRecord {
   const now = new Date()
+  const id = nanoid()
+  const depth =
+    input.depth ??
+    (() => {
+      const walked = activeTeamDelegationDepth(input.sourceTeamId)
+      return { childDepth: walked.depth + 1, chain: walked.chain }
+    })()
   return {
-    id: nanoid(),
+    id,
     sourceTeamId: input.sourceTeamId,
     sourceTaskId: input.sourceTaskId,
     targetType: input.targetType,
@@ -227,6 +336,14 @@ function buildDelegation(input: {
     createdAt: now,
     updatedAt: now,
     metadata: input.metadata,
+    envelope: buildDelegationEnvelope({
+      delegationId: id,
+      sourceTeamId: input.sourceTeamId,
+      taskId: input.sourceTaskId,
+      reason: input.reason,
+      depth: depth.childDepth,
+      chain: depth.chain,
+    }),
   }
 }
 
@@ -553,6 +670,33 @@ export function delegateToTeam(input: DelegateToTeamInput): {
     return { delegation: failed, completionPromise: Promise.resolve(failed) }
   }
 
+  // ADR-0090 Phase 7: team delegation depth gate (default 2, per-team
+  // `maxTeamDelegationDepth`). Refused BEFORE any dispatch, persisted as a
+  // failed record so the board shows WHY nothing ran.
+  let depthInfo: { childDepth: number; chain: string[] }
+  try {
+    depthInfo = assertTeamDelegationDepth(input.sourceTeamId)
+  } catch (err) {
+    if (!(err instanceof DelegationDepthExceededError)) throw err
+    const failed = buildDelegation({
+      sourceTeamId: input.sourceTeamId,
+      sourceTaskId: input.sourceTaskId,
+      targetType: "team",
+      targetId: input.targetTeamId,
+      reason: input.reason,
+      metadata: {
+        ...input.metadata,
+        error: err.message,
+        errorCode: "delegation-depth-exceeded",
+        depth: err.depth,
+        maxDepth: err.maxDepth,
+      },
+      status: "failed",
+    })
+    store.upsertDelegation(failed)
+    return { delegation: failed, completionPromise: Promise.resolve(failed) }
+  }
+
   const quietDeferred = !input.force && isDelegationQuietGated(input.sourceTeamId)
   const delegation = buildDelegation({
     sourceTeamId: input.sourceTeamId,
@@ -562,6 +706,7 @@ export function delegateToTeam(input: DelegateToTeamInput): {
     reason: input.reason,
     metadata: quietDeferred ? { ...input.metadata, quietHoursDeferred: true } : input.metadata,
     status: quietDeferred ? "awaiting_approval" : "active",
+    depth: depthInfo,
   })
   store.upsertDelegation(delegation)
   hooks.dispatchOnTeamDelegationStart({

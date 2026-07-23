@@ -156,6 +156,31 @@ export function resolveTeamCapabilities(team: Pick<AgentTeam, "config">): Resolv
   }
 }
 
+/**
+ * ADR-0090 Phase 7: clamp a resolved capability bundle to what the FROZEN
+ * execution spec's runtime can actually serve (intersection — compatibility
+ * gating can only remove, never add). Id lists whose backing runtime
+ * capability is absent from `effective` are emptied:
+ *   - `mcp`              → `mcpServerIds`
+ *   - `subagents.native` → `subagentIds`
+ *   - `tools.ordinary`   → `nativeAnthropicToolIds` + `skillIds` (skills run on tools)
+ * Prompt-level bundles (character packs, A2UI templates) and external presets
+ * (they SELECT a different runtime rather than run on this one) pass through.
+ */
+export function clampCapabilitiesToRuntime(
+  resolved: ResolvedCapabilities,
+  effective: ReadonlyArray<string>
+): ResolvedCapabilities {
+  const has = new Set(effective)
+  return {
+    ...resolved,
+    mcpServerIds: has.has("mcp") ? resolved.mcpServerIds : [],
+    subagentIds: has.has("subagents.native") ? resolved.subagentIds : [],
+    nativeAnthropicToolIds: has.has("tools.ordinary") ? resolved.nativeAnthropicToolIds : [],
+    skillIds: has.has("tools.ordinary") ? resolved.skillIds : [],
+  }
+}
+
 /** Re-export to give callers a single import site. */
 export type {
   CapabilityListOverlay,

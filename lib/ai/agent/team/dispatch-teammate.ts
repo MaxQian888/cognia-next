@@ -513,14 +513,34 @@ export async function dispatchTeammate(
     const { isAgentExecutionFlagEnabled, getAgentExecutionFlags } =
       await import("@/lib/ai/agent/execution/feature-flags")
     if (isAgentExecutionFlagEnabled("agentExecutionResolverV2")) {
-      const { resolveAgentExecutionSpec, channelFromSpec } =
-        await import("@/lib/ai/agent/execution/resolve-agent-execution-spec")
+      const [
+        { resolveAgentExecutionSpec, channelFromSpec },
+        { resolveTeammateExecutionBinding, migrateTeammateExecutionBinding },
+      ] = await Promise.all([
+        import("@/lib/ai/agent/execution/resolve-agent-execution-spec"),
+        import("./execution-binding-resolver"),
+      ])
       const { isTauri } = await import("@/lib/tauri")
       const environment = { isTauri: isTauri(), isHeadlessHost: false }
+      // ADR-0090 Phase 7: fixed-precedence execution binding (member → team
+      // default; run/app-default/managed slots reserved). A legacy raw-cred
+      // member migrates to its provider-id deployment ref at dispatch time
+      // (refs only — the raw values are never copied). The resulting policy
+      // fragment feeds the SAME resolver call.
+      const binding = resolveTeammateExecutionBinding({
+        member:
+          teammate.config?.execution ?? migrateTeammateExecutionBinding(teammate.config ?? {}),
+        teamDefault: teamCtx.team.config?.defaultExecution,
+      })
+      // Pool mode: until the coordinator-driven pick lands, the FIRST candidate
+      // deployment id is the deterministic selection (documented on the field's
+      // pool hint) — never a silent no-op.
+      const poolPick = binding.candidateIds?.[0]
       const { spec } = resolveAgentExecutionSpec({
         surface: "team",
         environment,
         flags: getAgentExecutionFlags(),
+        policy: poolPick ? { ...binding.policy, deploymentRef: poolPick } : binding.policy,
         legacy: {
           runtime: externalAgentId ? runtime : "claude",
           modelId: modelHint ?? teammate.config?.model,
@@ -531,6 +551,16 @@ export async function dispatchTeammate(
         identity: { sessionId: teamCtx.runId, runId: teamCtx.runId },
       })
       channel = channelFromSpec(spec, environment)
+      // ADR-0090 Phase 7: intersect the plugin capability bundle with what the
+      // FROZEN runtime can serve (mcp / native subagents / tool-backed ids).
+      // In-place on the per-run cached bundle — the clamp is deterministic per
+      // teammate and only ever removes.
+      const { clampCapabilitiesToRuntime } = await import("./capability-resolver")
+      const clamped = clampCapabilitiesToRuntime(resolvedCaps, spec.capabilities.effective)
+      resolvedCaps.mcpServerIds = clamped.mcpServerIds
+      resolvedCaps.subagentIds = clamped.subagentIds
+      resolvedCaps.nativeAnthropicToolIds = clamped.nativeAnthropicToolIds
+      resolvedCaps.skillIds = clamped.skillIds
       void import("@/lib/telemetry/events/track-event")
         .then(({ trackEvent }) =>
           trackEvent("agent.execution.resolved", {
@@ -626,6 +656,12 @@ export async function dispatchTeammate(
     agentName: teammate.name,
     ...(modelHint ? { requestModel: modelHint } : {}),
   })
+
+  // ADR-0090 Phase 7: draw this dispatch through the run's budget governor
+  // (per-child ledger of usage/attempts/failures on the SAME root pool).
+  // Contexts without a governor keep the legacy guard path.
+  const budgetAccount = teamCtx.governor?.allocate(`${teamCtx.runId}:${teammate.id}:${args.taskId}`)
+  budgetAccount?.recordAttempt()
 
   let turn: { text: string; usage?: TokenUsage }
   let workspace: WorktreeHandle | undefined
@@ -729,6 +765,7 @@ export async function dispatchTeammate(
       errorMessage: err instanceof Error ? err.message : String(err),
     })
     teamCtx.pool.recordFailure(teammate.id, err)
+    budgetAccount?.recordFailure()
     if (args.recordToStore) {
       teamCtx.storeWriter.setTaskStatus(
         args.taskId,
@@ -797,7 +834,10 @@ export async function dispatchTeammate(
   if (taskWorkspaceRunId) await settleTaskWorkspaceRun(taskWorkspaceRunId, "ready")
   teamCtx.pool.recordSuccess(teammate.id)
   if (turn.usage) {
-    teamCtx.budget.add(turn.usage)
+    // One accounting authority: the governor's child account when present
+    // (it draws the same root guard), the legacy guard otherwise.
+    if (budgetAccount) budgetAccount.add(turn.usage)
+    else teamCtx.budget.add(turn.usage)
     // Shadow-write into the unified billing table so standalone team runs
     // (which otherwise only emit agent-trace spans) count toward Usage-tab
     // spend. Fire-and-forget — never let the billing mirror fail the turn.

@@ -146,6 +146,32 @@ describe("buildLeadPlanningPrompt", () => {
     expect(prompt).toContain("Add a verification step.")
     expect(prompt).toContain("Revise the plan accordingly.")
   })
+
+  it("never leaks raw credentials or endpoints into the coordinator prompt (ADR-0090)", () => {
+    // Legacy rows may still carry raw apiKey/baseURL (deprecated-readable);
+    // the coordinator sees candidate names/roles + refs ONLY.
+    const prompt = buildLeadPlanningPrompt(
+      makeTeam(),
+      [
+        makeTeammate({
+          id: "tm-legacy",
+          name: "LegacyWorker",
+          description: "legacy",
+          config: {
+            provider: "zhipu",
+            apiKey: "sk-raw-legacy-key-123456",
+            baseURL: "https://open.bigmodel.cn/api",
+            execution: { mode: "pool", candidateIds: ["dep-a", "dep-b"] },
+          },
+        } as never),
+      ],
+      undefined
+    )
+    expect(prompt).toContain("LegacyWorker")
+    expect(prompt).not.toContain("sk-raw-legacy-key-123456")
+    expect(prompt).not.toContain("open.bigmodel.cn")
+    expect(prompt).not.toMatch(/api[_-]?key/i)
+  })
 })
 
 describe("buildAgentTeamRuntimeDeps", () => {

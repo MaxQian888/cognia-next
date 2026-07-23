@@ -94,6 +94,14 @@ export interface TeamRunContext {
   readonly team: AgentTeam
   readonly pool: TeammatePool
   readonly budget: BudgetGuard
+  /**
+   * ADR-0090 Phase 7: the run's ONE budget authority. When present, teammate
+   * dispatch draws usage through `governor.allocate(childRunId)` (attempts /
+   * provider attempts / failures ledgered per child); `budget` is then the
+   * governor's own root guard. Optional so hand-built test contexts keep
+   * working on the legacy guard alone.
+   */
+  readonly governor?: import("@/lib/ai/agent/execution/run-budget-governor").RunBudgetGovernor
   readonly notifier: TeamNotifier
   readonly concurrency: ConcurrencyController
   readonly modelPref: ModelPreferenceController

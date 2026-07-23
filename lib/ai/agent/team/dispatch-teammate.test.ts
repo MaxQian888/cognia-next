@@ -226,6 +226,64 @@ describe("dispatchTeammate — text-only fallback", () => {
     expect(result.degradedReason).toBe("sidecar-unavailable")
   })
 
+  it("draws usage/attempts/failures through the run budget governor when present (ADR-0090)", async () => {
+    const { createRunBudgetGovernor } = await import("@/lib/ai/agent/execution/run-budget-governor")
+    executeAgentMock.mockResolvedValue({
+      text: "ok",
+      usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+    })
+    const { ctx, notifier } = makeCtx(makeTeammate())
+    const governor = createRunBudgetGovernor({
+      runId: "run1",
+      limit: 0,
+      onCritical: "notify",
+      notifier: notifier as never,
+    })
+    ;(ctx as { governor?: unknown }).governor = governor
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "do it" })
+
+    expect(governor.children()).toEqual([
+      expect.objectContaining({
+        childRunId: "run1:tm1:t1",
+        usedTokens: 15,
+        attempts: 1,
+        failures: 0,
+      }),
+    ])
+    expect(governor.totals().usedTokens).toBe(15)
+
+    // A failing dispatch ledgers the failure on the same child account.
+    executeAgentMock.mockRejectedValueOnce(new Error("boom"))
+    await expect(dispatchTeammate(ctx, { taskId: "t1", prompt: "again" })).rejects.toThrow("boom")
+    expect(governor.children()[0]).toMatchObject({ attempts: 2, failures: 1 })
+  })
+
+  it("resolver flag on: pool bindings pick the first candidate and legacy provider rows migrate (ADR-0090 P7)", async () => {
+    process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2 = "1"
+    try {
+      executeAgentMock.mockResolvedValue({ text: "ok" })
+      // Pool member: deterministic first-candidate pick feeds the resolver.
+      const pooled = makeTeammate({
+        config: { execution: { mode: "pool", candidateIds: ["dep-a", "dep-b"] } },
+      })
+      const { ctx } = makeCtx(pooled)
+      const result = await dispatchTeammate(ctx, { taskId: "t1", prompt: "go" })
+      expect(result.channel).toBe("text") // no sidecar in this env — parity holds
+
+      // Legacy raw-cred member migrates to its provider-id deployment ref
+      // (dispatch does not throw, raw values never leave the config).
+      const legacy = makeTeammate({
+        config: { provider: "zhipu", apiKey: "sk-legacy", baseURL: "https://x" } as never,
+      })
+      const { ctx: ctx2 } = makeCtx(legacy)
+      const result2 = await dispatchTeammate(ctx2, { taskId: "t2", prompt: "go" })
+      expect(result2.text).toBe("ok")
+    } finally {
+      delete process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2
+    }
+  })
+
   it("resolver flag on: the unified resolver picks the same text channel (parity)", async () => {
     process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2 = "1"
     try {

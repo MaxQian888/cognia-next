@@ -57,6 +57,7 @@ import type { AgentTeam, AgentTeammate, TeammateRuntime } from "@/types/agent/ag
 import { getProviderDisplayName } from "@/lib/ai/icons"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { useSettingsStore } from "@/stores/settings"
+import { TeammateExecutionBindingField } from "@/components/agent/team/teammate-execution-binding-field"
 import { RUNTIME_OPTIONS, runtimeLabelKey } from "./runtime-options"
 
 export interface TeammateConfigDialogProps {
@@ -78,11 +79,19 @@ const TWIN_NONE_VALUE = "__none__"
 export function TeammateConfigDialog({
   open,
   onOpenChange,
-  teammate,
+  teammate: teammateProp,
   team,
 }: TeammateConfigDialogProps) {
   const t = useTranslations("agentTeamsWorkspace.teammateConfig")
   const tRuntime = useTranslations("agentTeamsWorkspace.chat.runtime")
+
+  // The prop is the opener's click-time SNAPSHOT; every inline field persists
+  // through `updateTeammate` immediately, so spreading the snapshot's config
+  // would silently clobber edits made earlier in the same dialog session
+  // (e.g. an execution binding saved, then temperature dragged). Always spread
+  // from the LIVE store row.
+  const liveTeammate = useAgentTeamStore((s) => s.teammates?.[teammateProp.id])
+  const teammate = liveTeammate ?? teammateProp
 
   // Provider ids the app actually has configured. Only meaningful for a lead:
   // a lead is never dispatched through a runtime, it runs its planning/review
@@ -112,7 +121,9 @@ export function TeammateConfigDialog({
 
   const updateTeammate = useAgentTeamStore((s) => s.updateTeammate)
 
-  const initial = useMemo(() => teammateToPresetState(teammate, team), [teammate, team])
+  // PresetEditor seeds its internal state from `initial` — keep it pinned to
+  // the open-time snapshot so live inline edits don't churn the editor.
+  const initial = useMemo(() => teammateToPresetState(teammateProp, team), [teammateProp, team])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -266,6 +277,16 @@ export function TeammateConfigDialog({
                       {t("rosterSection.twinHint")}
                     </p>
                   </div>
+                  {/* ADR-0090 Phase 7: inherit | pinned | pool execution binding. */}
+                  <TeammateExecutionBindingField
+                    value={teammate.config.execution}
+                    teamDefault={team.config.defaultExecution}
+                    onChange={(execution) =>
+                      updateTeammate(teammate.id, {
+                        config: { ...teammate.config, execution },
+                      })
+                    }
+                  />
                   <div className="space-y-1">
                     <Label className="text-xs">
                       {t("rosterSection.temperature", {

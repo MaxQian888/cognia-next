@@ -787,7 +787,34 @@
       "twinNone": "None"
     },
     "save": "Save",
-    "title": "Configure {name}"
+    "title": "Configure {name}",
+    "executionBinding": {
+      "title": "Execution binding",
+      "description": "How this teammate's runtime, deployment and credentials are bound. References only — endpoints and keys live in provider profiles.",
+      "modeInherit": "Inherit team default",
+      "modePinned": "Pinned",
+      "modePool": "Candidate pool",
+      "runtimePolicy": "Runtime",
+      "runtimeAuto": "Auto",
+      "modelRole": "Model role",
+      "modelRoleInherit": "Inherit",
+      "modelRolePrimary": "Primary",
+      "modelRoleFast": "Fast",
+      "modelRolePowerful": "Powerful",
+      "deploymentRef": "Deployment profile",
+      "deploymentRefPlaceholder": "deployment id (e.g. dep-vendor-a)",
+      "credentialProfileRef": "Credential profile",
+      "credentialProfileRefPlaceholder": "credential profile reference",
+      "credentialRefHint": "A reference into the credential store — never a raw key.",
+      "candidateIds": "Candidate deployments",
+      "candidateIdsPlaceholder": "dep-a, dep-b",
+      "candidateIdsHint": "The coordinator picks among these deployment ids only (currently: the first candidate is selected).",
+      "previewNative": "Native delegation",
+      "previewOrchestrated": "Orchestrated ({reasons})",
+      "flagOffHint": "Inert until the unified execution resolver flag (agentExecutionResolverV2) is enabled — dispatch ignores this binding while it is off.",
+      "runtimeClaudeSdk": "Claude Agent SDK",
+      "runtimeAiSdk": "AI SDK"
+    }
   },
   "teammatesCount": "{count, plural, one {# teammate} other {# teammates}}",
   "templates": {

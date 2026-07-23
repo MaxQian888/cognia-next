@@ -787,7 +787,34 @@
       "twinNone": "无"
     },
     "save": "保存",
-    "title": "配置 {name}"
+    "title": "配置 {name}",
+    "executionBinding": {
+      "title": "执行绑定",
+      "description": "该成员的运行时、部署与凭证如何绑定。仅引用——端点与密钥保存在 Provider Profile 中。",
+      "modeInherit": "继承团队默认",
+      "modePinned": "固定绑定",
+      "modePool": "候选池",
+      "runtimePolicy": "运行时",
+      "runtimeAuto": "自动",
+      "modelRole": "模型角色",
+      "modelRoleInherit": "继承",
+      "modelRolePrimary": "主力",
+      "modelRoleFast": "快速",
+      "modelRolePowerful": "强力",
+      "deploymentRef": "部署档案",
+      "deploymentRefPlaceholder": "部署 id（如 dep-vendor-a）",
+      "credentialProfileRef": "凭证档案",
+      "credentialProfileRefPlaceholder": "凭证档案引用",
+      "credentialRefHint": "指向凭证存储的引用——绝不是原始密钥。",
+      "candidateIds": "候选部署",
+      "candidateIdsPlaceholder": "dep-a, dep-b",
+      "candidateIdsHint": "协调者只能在这些部署 id 中选择（当前默认选第一个候选）。",
+      "previewNative": "原生委派",
+      "previewOrchestrated": "编排委派（{reasons}）",
+      "flagOffHint": "在统一执行 resolver 开关（agentExecutionResolverV2）开启前不生效——关闭时派发忽略此绑定。",
+      "runtimeClaudeSdk": "Claude Agent SDK",
+      "runtimeAiSdk": "AI SDK"
+    }
   },
   "teammatesCount": "{count} 名队员",
   "templates": {

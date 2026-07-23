@@ -2571,6 +2571,33 @@
     "teamUpdated": "团队已更新。",
     "teammateConfig": {
       "description": "编辑该队友的身份、提示词、工具与插件能力。",
+      "executionBinding": {
+        "candidateIds": "候选部署",
+        "candidateIdsHint": "协调者只能在这些部署 id 中选择（当前默认选第一个候选）。",
+        "candidateIdsPlaceholder": "dep-a, dep-b",
+        "credentialProfileRef": "凭证档案",
+        "credentialProfileRefPlaceholder": "凭证档案引用",
+        "credentialRefHint": "指向凭证存储的引用——绝不是原始密钥。",
+        "deploymentRef": "部署档案",
+        "deploymentRefPlaceholder": "部署 id（如 dep-vendor-a）",
+        "description": "该成员的运行时、部署与凭证如何绑定。仅引用——端点与密钥保存在 Provider Profile 中。",
+        "flagOffHint": "在统一执行 resolver 开关（agentExecutionResolverV2）开启前不生效——关闭时派发忽略此绑定。",
+        "modeInherit": "继承团队默认",
+        "modePinned": "固定绑定",
+        "modePool": "候选池",
+        "modelRole": "模型角色",
+        "modelRoleFast": "快速",
+        "modelRoleInherit": "继承",
+        "modelRolePowerful": "强力",
+        "modelRolePrimary": "主力",
+        "previewNative": "原生委派",
+        "previewOrchestrated": "编排委派（{reasons}）",
+        "runtimeAiSdk": "AI SDK",
+        "runtimeAuto": "自动",
+        "runtimeClaudeSdk": "Claude Agent SDK",
+        "runtimePolicy": "运行时",
+        "title": "执行绑定"
+      },
       "rosterSection": {
         "description": "存在于队员行而非预设配置上的字段。",
         "provider": "服务商",
@@ -4074,49 +4101,21 @@
       },
       "attachments": {
         "countLimit": "最多只能附加 {max} 个附件。",
-        "extracting": "读取中…",
         "fallbackFile": "文件",
         "fallbackName": "附件",
         "fileSizeExceeded": "{count, plural, =1 {1 个文件超过} other {# 个文件超过}} {max}MB。",
         "folderEmpty": "该文件夹中没有可添加的文件。",
         "folderTruncated": "仅读取了拖入文件夹中的前 {max} 个文件。",
         "linkSkipped": "有 {count} 个链接无法读取，仍会发送原始网址。",
-        "openPreviewAria": "预览 {filename}",
         "optimized": "添加前已优化 {count} 张大图。",
         "oversizeBody": "这些附件大约会增加 {tokens}k tokens 的上下文。仍要发送吗？",
         "oversizeCancel": "取消",
         "oversizeConfirm": "仍然发送",
         "oversizeTitle": "附件较大",
         "preparing": "正在处理附件…",
-        "preview": {
-          "close": "关闭",
-          "empty": "未能从此文件中提取到内容。",
-          "fileTab": "文件",
-          "fullSize": "查看原图",
-          "imageHint": "发送前会将长边压缩到 {maxEdge}px 以内。",
-          "imageSize": "{width}×{height} · {size}",
-          "modelHint": "这就是模型将收到的完整内容。",
-          "modelTab": "模型视角",
-          "ocrDetail": "查看逐页结果",
-          "ocrEmpty": "未在图片中识别到文本。",
-          "ocrRun": "运行 OCR",
-          "ocrRunning": "OCR 识别中…",
-          "ocrToInput": "把文本加进输入框",
-          "ocrToggle": "同时发送 OCR 文本",
-          "redactedNote": "高亮部分在发送前已被脱敏。",
-          "title": "附件",
-          "tokens": "{tokens} tokens"
-        },
-        "rejectReason": {
-          "empty": "未找到可读文本",
-          "notDataUrl": "无法读取此文件",
-          "parseFailed": "无法解析此文件",
-          "unsupportedType": "不支持的文件类型"
-        },
         "removeAria": "移除 {filename}",
-        "reorderAria": "拖动排序 {filename}",
+        "removeFallback": "移除附件",
         "skipped": "{count, plural, =1 {1 个附件已被} other {# 个附件已被}}跳过（不支持的文件类型）。",
-        "tokenBadge": "{tokens} tok",
         "unsupported": "有 {count} 个文件不受支持。"
       },
       "camera": {
@@ -4464,7 +4463,6 @@
       "title": "今天想完成点什么？"
     },
     "filePreview": {
-      "extractedChars": "已提取 {count} 字符",
       "loading": "正在加载 {name}…",
       "pdfFallback": "无法预览此 PDF。"
     },
@@ -4689,31 +4687,6 @@
     },
     "mcpContent": {
       "embeddedResource": "嵌入资源：{uri}"
-    },
-    "memoryChips": {
-      "budgetLine": "上下文预算：{used}/{limit} tokens",
-      "cancel": "取消",
-      "degradedNotice": "本轮记忆检索降级（仅关键词匹配）。",
-      "deletedFallback": "已从记忆库删除",
-      "details": "在记忆控制台打开",
-      "edit": "编辑记忆",
-      "editAria": "编辑记忆内容",
-      "errors": {
-        "disabled": "记忆功能已在设置中关闭",
-        "not_found": "这条记忆已不存在",
-        "pii_blocked": "已拦截：新文本包含个人隐私信息",
-        "temporary": "记忆当前处于临时模式"
-      },
-      "learnedAria": "本条回复学到的记忆",
-      "learnedLabel": "{count, plural, other {记住了 # 条}}",
-      "learnedTitle": "从这条回复学到",
-      "recalledAria": "本条回复引用的记忆",
-      "recalledLabel": "{count, plural, =0 {未引用记忆} other {引用了 # 条记忆}}",
-      "recalledTitle": "本条回复引用的记忆",
-      "save": "保存",
-      "truncated": "已截断",
-      "undo": "撤销——忘掉这条记忆",
-      "undone": "已撤销"
     },
     "message": {
       "attachmentAlt": "附件",
@@ -5351,8 +5324,7 @@
         "description": "文件系统工作区工具需要受支持的桌面端或沙箱后端。",
         "title": "工作区暂不可用"
       }
-    },
-    "webviewPanelPending": "该面板的 webview 尚未加载。"
+    }
   },
   "crashDialog": {
     "description": "{time} 开始的会话（版本 {version}）因崩溃而结束。已保存包含详细信息的崩溃报告。",
@@ -6558,10 +6530,40 @@
       "save": "保存门限",
       "savedNotice": "门限已保存"
     },
+    "grading": {
+      "alphabet": "选项字母",
+      "extractNothing": "该规则从「{sample}」中什么都抽不到 —— 使用它的用例将无判定。",
+      "extracted": "该规则抽取到：{value}",
+      "hints": {
+        "choice": "从双方各抽取一个选项字母（或 1 起的序号）后比较。",
+        "contains-any": "回答包含期望值中的任意一个即通过 —— 适用于有多种可接受写法的答案。",
+        "exact": "归一化后回答必须与期望输出完全相同。",
+        "numeric": "从双方各抽取一个数字后比较。期望输出带答案标记时（如 GSM8K 的 ####）请填抽取正则。",
+        "regex": "回答必须匹配该正则。"
+      },
+      "mode": "比对方式",
+      "modes": {
+        "choice": "选择题",
+        "contains-any": "包含任一（别名集）",
+        "exact": "完全匹配",
+        "numeric": "数值答案",
+        "regex": "正则匹配"
+      },
+      "normalize": {
+        "caseInsensitive": "忽略大小写",
+        "stripArticles": "忽略 a / an / the",
+        "stripPunctuation": "忽略标点"
+      },
+      "pattern": "抽取正则",
+      "tolerance": "容差"
+    },
     "import": {
       "action": "导入 {count} 条用例",
+      "actionHf": "导入 {count} 条用例",
+      "cancel": "取消",
       "close": "关闭",
       "done": "已导入 {count} 条用例。",
+      "doneUpsert": "新增 {added} 条用例，更新 {updated} 条",
       "failed": "导入失败：{error}",
       "file": {
         "expectedColumn": "期望列",
@@ -6576,20 +6578,37 @@
       "heading": "导入测试集",
       "hf": {
         "fetch": "拉取并导入",
+        "limit": "导入行数",
         "offline": "离线——HuggingFace 导入需要联网。",
+        "probe": "探测",
+        "split": "配置 / split",
         "uri": "数据集 URI"
       },
       "history": {
         "empty": "没有可导入的近期轨迹。",
         "pick": "选择会话 {id} 的轨迹"
       },
+      "mapping": {
+        "heading": "列映射",
+        "idColumn": "稳定 id 列（支持重复导入不产生副本）",
+        "splitColumn": "split 列",
+        "splitLiteral": "统一写入的 split",
+        "useGrading": "自动判定期望答案"
+      },
+      "nothingToImport": "没有可导入的内容 —— 请检查列映射。",
       "preview": "已解析 {count} 条用例",
+      "previewSample": "预览 {count} 行样本；实际将导入 {total} 条",
+      "skipped": "跳过 {count} 行",
+      "stage": "暂存 {count} 条用例",
       "tabs": {
         "file": "文件",
         "foreign": "外部格式",
         "history": "从历史",
         "huggingface": "HuggingFace"
       }
+    },
+    "runBar": {
+      "label": "正在运行 {label}"
     },
     "runConfig": {
       "addTarget": "添加目标",
@@ -6615,6 +6634,7 @@
       "running": "运行中…",
       "scorers": "评分器（{count}）",
       "split": "子集筛选",
+      "starting": "启动中…",
       "targetKind": "目标类型",
       "targetLabel": "标签",
       "targetRef": "模型 / 团队 / 工作流 ID",
@@ -6634,15 +6654,20 @@
       "loading": "正在加载运行…",
       "noCases": "该运行没有逐用例结果。",
       "outputTruncated": "（已截断）",
+      "partialHint": "这次运行在 {done} 条用例后停止；上方比率只覆盖这些用例，且不判定质量门。",
       "pass": "通过",
       "passAt1": "pass@1 {pct}%",
       "passHatK": "pass^{k} {pct}%",
       "sampleError": "这条用例执行失败：{error}",
       "scorersFailed": "以下评分器在每条用例上都失败、未产出任何判定：{scorers}。上方数字不可信 —— 请检查评审模型的服务状态后重跑。",
       "status": {
+        "aborted": "已取消",
+        "completed": "已完成",
         "errored": "评分器本身执行失败",
+        "failed": "已失败",
         "measurement": "仅测量 —— 不参与判定",
         "not-applicable": "不适用 —— 该用例没有这个评分器需要的参考值",
+        "running": "运行中",
         "scored": "已判定"
       },
       "ungraded": "无判定",
@@ -6671,6 +6696,12 @@
       "openRun": "打开运行 {label}",
       "passAt1": "pass@1 {pct}%",
       "passHatK": "pass^{k} {pct}%",
+      "status": {
+        "aborted": "已取消",
+        "completed": "已完成",
+        "failed": "已失败",
+        "running": "运行中"
+      },
       "ungraded": "{count} 条无判定"
     },
     "scorerCatalog": {

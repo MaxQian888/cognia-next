@@ -111,7 +111,11 @@ describe("resolveAllSubagents — direct context", () => {
     }
   })
 
-  it("projects a template's externalPresetId + mcpServerIds onto the AgentDefinition (A2)", () => {
+  it("excludes external-backed templates from the NATIVE agents map (ADR-0090 Phase 7)", () => {
+    // A native (SDK Task) subagent inherits the parent's route/provider/
+    // credential; an external backing cannot be honored there, so the def
+    // must NOT ride the native map — it stays reachable through the
+    // orchestrated dispatch_agent rail (resolveDispatchableSubagents).
     const extTpl: SubAgentTemplate = {
       id: "user-ext-1",
       name: "External Coder",
@@ -128,11 +132,11 @@ describe("resolveAllSubagents — direct context", () => {
     useSubagentRuntimeStore.getState().addTemplate(extTpl)
     try {
       const direct = resolveAllSubagents({ context: "direct" })
-      expect(direct["template:external-coder"]).toMatchObject({
-        prompt: "You code.",
-        externalPresetId: "claude-code",
-        mcpServerIds: ["github", "linear"],
-      })
+      expect(direct["template:external-coder"]).toBeUndefined()
+      const dispatchable = resolveDispatchableSubagents().find(
+        (x) => x.id === "template:external-coder"
+      )
+      expect(dispatchable?.def).toMatchObject({ externalPresetId: "claude-code" })
     } finally {
       useSubagentRuntimeStore.getState().deleteTemplate("user-ext-1")
     }

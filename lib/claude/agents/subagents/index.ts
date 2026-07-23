@@ -128,6 +128,22 @@ function projectSubagentTemplate(tpl: SubAgentTemplate): {
  *   templates (Settings starting points) are deliberately NOT auto-injected
  *   into every direct-chat turn.
  */
+/**
+ * ADR-0090 Phase 7 (delegation-mode): a NATIVE (SDK Task) subagent runs
+ * inside the parent's process and inherits its route/provider/credential —
+ * only a frozen model role may differ. A def that pins a DIFFERENT provider
+ * or an external backing therefore may NOT ride the native agents map: the
+ * SDK would silently run it on the parent's runtime, ignoring the pinned
+ * intent. Such defs stay reachable through the orchestrated `dispatch_agent`
+ * rail, which honors them.
+ */
+function isNativeDelegationEligible(def: {
+  provider?: string
+  externalPresetId?: string
+}): boolean {
+  return !def.provider && !def.externalPresetId
+}
+
 export function resolveAllSubagents(opts: {
   context: "workflow-editor" | "team" | "direct"
 }): Record<string, Record<string, unknown>> {
@@ -135,11 +151,13 @@ export function resolveAllSubagents(opts: {
     const result: Record<string, Record<string, unknown>> = {}
     for (const entry of listSubagentEntries()) {
       if (entry.entry.disabled) continue
+      if (!isNativeDelegationEligible(entry.entry)) continue
       const { id, def } = projectPluginSubagent(entry)
       result[id] = def
     }
     for (const tpl of Object.values(useSubagentRuntimeStore.getState().templates)) {
       if (tpl.isBuiltIn || tpl.disabled) continue
+      if (!isNativeDelegationEligible(tpl.config ?? {})) continue
       const { id, def } = projectSubagentTemplate(tpl)
       result[id] = def
     }
@@ -153,6 +171,7 @@ export function resolveAllSubagents(opts: {
   const result: Record<string, Record<string, unknown>> = { ...builtIn }
   for (const entry of listSubagentEntries()) {
     if (entry.entry.disabled) continue
+    if (!isNativeDelegationEligible(entry.entry)) continue
     const { id, def } = projectPluginSubagent(entry)
     result[id] = def
   }

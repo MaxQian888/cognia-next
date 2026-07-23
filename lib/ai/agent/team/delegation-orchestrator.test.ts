@@ -723,4 +723,95 @@ describe("delegateToTeam (team → team)", () => {
     expect(abortTeamMock).toHaveBeenCalledWith("b", expect.any(String))
     expect(useAgentTeamStore.getState().delegations[delegation.id].status).toBe("cancelled")
   })
+
+  // ── ADR-0090 Phase 7: HandoffEnvelope + maxTeamDelegationDepth ─────────────
+
+  function seedActiveEdge(id: string, sourceTeamId: string, targetId: string) {
+    useAgentTeamStore.setState((s) => ({
+      delegations: {
+        ...s.delegations,
+        [id]: {
+          id,
+          sourceTeamId,
+          sourceTaskId: "t",
+          targetType: "team",
+          targetId,
+          status: "active",
+          reason: "r",
+          manual: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        } as never,
+      },
+    }))
+  }
+
+  it("persists a secret-free HandoffEnvelope with identity chain and depth", () => {
+    teamGetMock.mockReturnValue({ id: "b" })
+    teamStartMock.mockReturnValue(new Promise(() => {}))
+    const { delegation } = delegateToTeam({
+      sourceTeamId: "a",
+      sourceTaskId: "task-9",
+      targetTeamId: "b",
+      reason: "split the work",
+    })
+    expect(delegation.envelope).toMatchObject({
+      envelopeVersion: 1,
+      identity: {
+        parentRunId: "a",
+        childRunId: delegation.id,
+        taskId: "task-9",
+        depth: 1,
+        parentChain: ["a"],
+      },
+      task: { prompt: "split the work" },
+      execution: { mode: "orchestrated" },
+    })
+    expect(JSON.stringify(delegation.envelope)).not.toMatch(/sk-[a-z0-9]{6,}|api[_-]?key/i)
+  })
+
+  it("depths 0/1/2 may delegate; a depth-2 source is refused with the typed code", async () => {
+    // Active chain: root → a → b, so b sits at delegation depth 2.
+    seedActiveEdge("d-root-a", "root", "a")
+    seedActiveEdge("d-a-b", "a", "b")
+    teamGetMock.mockReturnValue({ id: "c" })
+    teamStartMock.mockReturnValue(new Promise(() => {}))
+
+    // From depth-1 team "a": child would be depth 2 — allowed.
+    const fromA = delegateToTeam({
+      sourceTeamId: "a",
+      sourceTaskId: "t",
+      targetTeamId: "c",
+      reason: "ok",
+    })
+    expect(fromA.delegation.status).toBe("active")
+    expect(fromA.delegation.envelope?.identity.depth).toBe(2)
+
+    // From depth-2 team "b": child would be depth 3 — refused before dispatch.
+    teamStartMock.mockClear()
+    const fromB = delegateToTeam({
+      sourceTeamId: "b",
+      sourceTaskId: "t",
+      targetTeamId: "d",
+      reason: "too deep",
+    })
+    expect(fromB.delegation.status).toBe("failed")
+    expect(fromB.delegation.metadata?.errorCode).toBe("delegation-depth-exceeded")
+    expect((await fromB.completionPromise).status).toBe("failed")
+    expect(teamStartMock).not.toHaveBeenCalled()
+  })
+
+  it("honors a per-team maxTeamDelegationDepth override", () => {
+    seedTeam("a", { config: { maxTeamDelegationDepth: 0 } })
+    teamGetMock.mockReturnValue({ id: "b" })
+    const { delegation } = delegateToTeam({
+      sourceTeamId: "a",
+      sourceTaskId: "t",
+      targetTeamId: "b",
+      reason: "never allowed",
+    })
+    expect(delegation.status).toBe("failed")
+    expect(delegation.metadata?.errorCode).toBe("delegation-depth-exceeded")
+    expect(delegation.metadata?.maxDepth).toBe(0)
+  })
 })

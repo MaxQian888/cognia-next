@@ -27,7 +27,6 @@ import { createConcurrencyController } from "@/lib/workflow/runtime/concurrency-
 import { createModelPreferenceController } from "@/lib/workflow/runtime/model-preference-controller"
 import { createTeammatePool } from "./team/teammate-pool"
 import { resolveTeamTwinRuntime } from "./team/twin-context"
-import { createBudgetGuard } from "./team/budget-guard"
 import { createTeamNotifier, type TeamNotifierDeps } from "./team/team-notifier"
 import {
   registerTeamRunContext,
@@ -508,7 +507,12 @@ export async function runTeamLifecycle(
     const concurrency = createConcurrencyController(team.config.maxConcurrentTeammates ?? 5)
     const modelPref = createModelPreferenceController()
     const pool = createTeammatePool({ teammates: workers, teamId, runId })
-    const budget = createBudgetGuard({
+    // ADR-0090 Phase 7: one budget authority per run tree. The governor owns
+    // the root guard (same thresholds/escalations as before); dispatches draw
+    // through `governor.allocate(childRunId)` so attempts and failures ledger
+    // per child. `budget` stays the guard for existing consumers.
+    const { createRunBudgetGovernor } = await import("@/lib/ai/agent/execution/run-budget-governor")
+    const governor = createRunBudgetGovernor({
       runId,
       limit: team.config.tokenBudget ?? 0,
       onCritical: team.config.governancePolicy?.budget?.onCritical ?? "notify",
@@ -516,6 +520,7 @@ export async function runTeamLifecycle(
       concurrencyCtrl: concurrency,
       modelCtrl: modelPref,
     })
+    const budget = governor.guard
 
     // ── Guarded rate-limit resume controller ──
     // On a teammate rate-limit failure, dispatch-teammate reports the cooldown
@@ -803,6 +808,7 @@ export async function runTeamLifecycle(
       team,
       pool,
       budget,
+      governor,
       notifier,
       concurrency,
       modelPref,
