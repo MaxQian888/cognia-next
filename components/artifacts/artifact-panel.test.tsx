@@ -39,10 +39,6 @@ jest.mock("./panel-version-history", () => ({
   PanelVersionHistory: () => <div data-testid="history" />,
 }))
 
-jest.mock("./panel-designer-wrapper", () => ({
-  ArtifactDesignerWrapper: () => <div data-testid="designer" />,
-}))
-
 // Viewport control: drive panelMode (desktop/mobile) through useMediaQuery.
 const mobileViewportRef = { current: false }
 jest.mock("@/hooks/ui", () => {

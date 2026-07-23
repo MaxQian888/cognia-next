@@ -393,6 +393,7 @@
     "retry": "Retry",
     "status": {
       "deadlettered": "Dead-lettered",
+      "delivery_unknown": "Delivery unknown",
       "failed": "Failed",
       "pending": "Queued",
       "sending": "Sending",
@@ -486,7 +487,7 @@
     "aria": "{count} unread"
   },
   "inboundRecovery": {
-    "retryWarning": "Retrying from the start will re-process the message. Continue?",
+    "retryWarning": "Retrying from the start will re-process the message and may repeat external side effects. Continue?",
     "title": "Inbound recovery",
     "description": "One or more inbound messages could not be processed and need recovery.",
     "message": "Message {id}: {reason}",

@@ -40,6 +40,14 @@ export type ArtifactLanguage =
 
 export type ArtifactRuntimeHealth = "ready" | "loading" | "error" | "unsupported"
 
+/**
+ * The subset worth remembering between sessions. `loading` is a property of
+ * the preview that is on screen right now, not of the artifact — persisting it
+ * would write on every render and leave a stale "loading" behind after a
+ * reload — so only settled outcomes are recorded.
+ */
+export type SettledArtifactRuntimeHealth = Exclude<ArtifactRuntimeHealth, "loading">
+
 export type ArtifactExportFormat = "raw" | "html" | "svg" | "png" | "pdf"
 
 export type ArtifactWorkspaceScope = "session" | "recent"
@@ -169,12 +177,7 @@ export interface ArtifactVersion {
 
 // Canvas-specific types (OpenAI-style editing)
 export type CanvasEditorNavigationSource =
-  | "cursor"
-  | "outline"
-  | "breadcrumb"
-  | "direct"
-  | "search"
-  | "restore"
+  "cursor" | "outline" | "breadcrumb" | "direct" | "search" | "restore"
 
 export type CanvasDocumentSaveState = "saved" | "autosaved" | "dirty"
 
@@ -203,11 +206,7 @@ export type CanvasReviewItemStatus = "pending" | "accepted" | "rejected" | "inva
 export type CanvasReviewStatus = "pending" | "partial" | "completed" | "rejected" | "invalidated"
 
 export type CanvasActionHistoryStatus =
-  | "pending-review"
-  | "completed"
-  | "rejected"
-  | "failed"
-  | "invalidated"
+  "pending-review" | "completed" | "rejected" | "failed" | "invalidated"
 
 export interface CanvasActionAttachment {
   id: string

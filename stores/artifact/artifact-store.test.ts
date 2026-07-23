@@ -211,6 +211,74 @@ describe("updateArtifact", () => {
   })
 })
 
+describe("setArtifactRuntimeHealth", () => {
+  function seed() {
+    return useArtifactStore.getState().createArtifact({
+      sessionId: "s",
+      messageId: "m",
+      type: "html",
+      title: "page",
+      content: "<p>hi</p>",
+    })
+  }
+
+  it("records the settled state without bumping version or updatedAt", () => {
+    const a = seed()
+    const before = useArtifactStore.getState().artifacts[a.id]
+
+    useArtifactStore.getState().setArtifactRuntimeHealth(a.id, "error", "boom")
+
+    const next = useArtifactStore.getState().artifacts[a.id]
+    expect(next.metadata?.runtimeHealth).toBe("error")
+    expect(next.metadata?.runtimeError).toBe("boom")
+    // A preview finishing its render is not an edit. Routing this through
+    // updateArtifact would spin the version counter on every panel open.
+    expect(next.version).toBe(before.version)
+    expect(next.updatedAt).toEqual(before.updatedAt)
+  })
+
+  it("clears the stored error when the artifact later renders cleanly", () => {
+    const a = seed()
+    useArtifactStore.getState().setArtifactRuntimeHealth(a.id, "error", "boom")
+
+    useArtifactStore.getState().setArtifactRuntimeHealth(a.id, "ready")
+
+    const next = useArtifactStore.getState().artifacts[a.id]
+    expect(next.metadata?.runtimeHealth).toBe("ready")
+    expect(next.metadata?.runtimeError).toBeUndefined()
+  })
+
+  it("is referentially stable when nothing changed", () => {
+    // The preview re-reports on every remount; a fresh object each time would
+    // re-render every subscriber for nothing.
+    const a = seed()
+    useArtifactStore.getState().setArtifactRuntimeHealth(a.id, "ready")
+    const first = useArtifactStore.getState().artifacts[a.id]
+
+    useArtifactStore.getState().setArtifactRuntimeHealth(a.id, "ready")
+
+    expect(useArtifactStore.getState().artifacts[a.id]).toBe(first)
+  })
+
+  it("ignores ids it does not know, which is what synthetic previews hand in", () => {
+    // Canvas documents are projected onto a throwaway Artifact for the preview
+    // stack; that object has no row here.
+    useArtifactStore.getState().setArtifactRuntimeHealth("canvas-doc-1", "ready")
+    expect(Object.keys(useArtifactStore.getState().artifacts)).toHaveLength(0)
+  })
+
+  it("makes the workspace runtime filter select real rows", () => {
+    const broken = seed()
+    const fine = seed()
+    useArtifactStore.getState().setArtifactRuntimeHealth(broken.id, "error", "boom")
+    useArtifactStore.getState().setArtifactRuntimeHealth(fine.id, "ready")
+
+    useArtifactStore.getState().setArtifactWorkspaceFilters({ runtimeFilter: "error" })
+    const list = useArtifactStore.getState().getArtifactsForWorkspace({ sessionId: "s" })
+    expect(list.map((x) => x.id)).toEqual([broken.id])
+  })
+})
+
 describe("deleteArtifact + deleteArtifacts", () => {
   it("removes the artifact and clears active when matched", () => {
     const a = useArtifactStore.getState().createArtifact({

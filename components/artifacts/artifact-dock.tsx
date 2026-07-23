@@ -15,6 +15,7 @@
 import {
   BotIcon,
   History,
+  LibraryIcon,
   MessageSquareIcon,
   PanelsTopLeftIcon,
   SearchCodeIcon,
@@ -26,6 +27,7 @@ import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { hasWorkspaceFsBackend } from "@/lib/files/workspace-backend"
+import { isRunnableArtifactType } from "@/lib/artifacts/constants"
 import { useChatStore } from "@/stores/chat"
 import {
   DOCK_MODE_WIDTH_PERCENT,
@@ -300,10 +302,14 @@ export function ArtifactContextWorkbench({
         renderer: () => <BrowserPreviewPane sessionId={activeSessionId ?? undefined} />,
       },
       {
-        id: "history",
+        // Named for what it shows — every artifact in scope — not "history".
+        // It shared that word with `PanelVersionHistory`, which is the real
+        // version history and lives in the preview panel's overflow menu, so
+        // the rail promised one thing and delivered the other.
+        id: "artifacts",
         activity: "review",
-        labelKey: "artifacts.dock.showHistory",
-        icon: History,
+        labelKey: "artifacts.dock.browseArtifacts",
+        icon: LibraryIcon,
         order: 20,
         appliesTo: (resource) => resource.kind === "artifact",
         retention: "stateful",
@@ -401,8 +407,7 @@ export function ArtifactContextWorkbench({
     capabilities: resolveContextCapabilities({
       kind: "artifact",
       previewable: true,
-      runnable:
-        artifact.metadata?.runnable ?? ["code", "html", "react", "jupyter"].includes(artifact.type),
+      runnable: artifact.metadata?.runnable ?? isRunnableArtifactType(artifact.type),
       workspaceAvailable,
     }),
   }
@@ -418,6 +423,7 @@ export function ArtifactContextWorkbench({
       // phone has no way to move between open artifacts at all.
       headerLeading={hasArtifactTabs ? <ArtifactTabStrip className="flex-1" /> : undefined}
       onCollapse={() => mobile.onOpenChange(false)}
+      onEnsureVisible={() => mobile.onOpenChange(true)}
     />
   ) : (
     <ContextWorkbench
@@ -425,6 +431,7 @@ export function ArtifactContextWorkbench({
       resource={resource}
       panels={panels}
       onCollapse={() => setDockCollapsed(true)}
+      onEnsureVisible={() => setDockCollapsed(false)}
       onModeWidthHint={dockWidthHint}
       headerLeading={hasArtifactTabs ? <ArtifactTabStrip className="flex-1" /> : undefined}
       placement="chat-dock"
@@ -494,10 +501,10 @@ export function SessionContextWorkbench({ mobile }: { mobile?: SheetHost }) {
   const panels = useMemo<ContextPanelDefinition[]>(
     () => [
       {
-        id: "history",
+        id: "artifacts",
         activity: "review",
-        labelKey: "artifacts.dock.showHistory",
-        icon: History,
+        labelKey: "artifacts.dock.browseArtifacts",
+        icon: LibraryIcon,
         order: 10,
         appliesTo: (resource) => resource.kind === "session",
         retention: "stateful",
@@ -560,6 +567,7 @@ export function SessionContextWorkbench({ mobile }: { mobile?: SheetHost }) {
       resource={resource}
       panels={panels}
       onCollapse={() => mobile.onOpenChange(false)}
+      onEnsureVisible={() => mobile.onOpenChange(true)}
     />
   ) : (
     <ContextWorkbench
@@ -567,6 +575,7 @@ export function SessionContextWorkbench({ mobile }: { mobile?: SheetHost }) {
       resource={resource}
       panels={panels}
       onCollapse={() => setDockCollapsed(true)}
+      onEnsureVisible={() => setDockCollapsed(false)}
       onModeWidthHint={dockWidthHint}
       placement="chat-dock"
       manageOwnWidth={false}

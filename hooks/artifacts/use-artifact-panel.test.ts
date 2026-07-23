@@ -29,9 +29,9 @@ jest.mock("@/lib/files/save-export", () => ({
   saveExport: (opts: unknown) => saveExportMock(opts),
 }))
 
-const clipboardWriteTextMock = jest.fn(
-  async (_v?: string): Promise<{ kind: string }> => ({ kind: "unsupported" })
-)
+const clipboardWriteTextMock = jest.fn(async (_v?: string): Promise<{ kind: string }> => ({
+  kind: "unsupported",
+}))
 jest.mock("@/lib/capacitor/clipboard", () => ({
   writeText: (v: string) => clipboardWriteTextMock(v),
 }))

@@ -147,6 +147,77 @@ describe("ArtifactList", () => {
     expect(useArtifactStore.getState().artifactWorkspace.searchQuery).toBe("alpha")
   })
 
+  it("typing in the search box actually filters the rendered list", () => {
+    // The store-level assertion above only proves the value landed. The list
+    // itself is what the user judges the filter by.
+    const keep = useArtifactStore.getState().createArtifact({
+      sessionId: "s1",
+      messageId: "m",
+      type: "code",
+      title: "Alpha",
+      content: "x",
+    })
+    const drop = useArtifactStore.getState().createArtifact({
+      sessionId: "s1",
+      messageId: "m",
+      type: "code",
+      title: "Beta",
+      content: "y",
+    })
+    render(<ArtifactList />)
+    expect(screen.getByTestId(`artifact-list-item-${drop.id}`)).toBeInTheDocument()
+
+    fireEvent.change(screen.getByPlaceholderText("search"), { target: { value: "Alpha" } })
+
+    expect(screen.getByTestId(`artifact-list-item-${keep.id}`)).toBeInTheDocument()
+    expect(screen.queryByTestId(`artifact-list-item-${drop.id}`)).toBeNull()
+  })
+
+  it("switches to the cross-session recent scope", () => {
+    // `recentArtifactIds` was maintained in eight places and read by a store
+    // branch no control could select.
+    const other = useArtifactStore.getState().createArtifact({
+      sessionId: "s2",
+      messageId: "m",
+      type: "code",
+      title: "FromAnotherChat",
+      content: "x",
+    })
+    // setActiveArtifact is what pushes an id onto the MRU list.
+    act(() => useArtifactStore.getState().setActiveArtifact(other.id))
+    const { rerender } = render(<ArtifactList sessionId="s1" />)
+    // The switcher has to be reachable even though this session is empty —
+    // that is exactly when a user wants to widen the scope.
+    expect(screen.getByTestId("scope-filter-select")).toBeInTheDocument()
+    expect(screen.queryByTestId(`artifact-list-item-${other.id}`)).toBeNull()
+
+    // Driven through the store rather than the Radix trigger: jsdom does not
+    // render Select options with role="option", so clicking them is untestable
+    // here — the other filter tests in this file take the same route.
+    act(() => useArtifactStore.getState().setArtifactWorkspaceScope("recent", null))
+    rerender(<ArtifactList sessionId="s1" />)
+
+    expect(screen.getByTestId(`artifact-list-item-${other.id}`)).toBeInTheDocument()
+  })
+
+  it("keeps the filter row on screen when a filter empties the list", () => {
+    // The empty state replaces the row that produced it, so a user who filtered
+    // down to nothing had no way back.
+    useArtifactStore.getState().createArtifact({
+      sessionId: "s1",
+      messageId: "m",
+      type: "code",
+      title: "Foo",
+      content: "x",
+    })
+    render(<ArtifactList sessionId="s1" />)
+
+    fireEvent.change(screen.getByPlaceholderText("search"), { target: { value: "zzz-no-match" } })
+
+    expect(screen.queryByText("noArtifacts")).toBeNull()
+    expect(screen.getByTestId("scope-filter-select")).toBeInTheDocument()
+  })
+
   it("keeps the whole filter row reachable in a narrow container", () => {
     useArtifactStore.getState().createArtifact({
       sessionId: "s1",

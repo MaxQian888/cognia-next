@@ -60,7 +60,6 @@ import { ArtifactList } from "./artifact-list"
 import { ArtifactReviewView } from "./artifact-review-view"
 import { SelectionCommentButton } from "./selection-comment-button"
 import { PanelVersionHistory } from "./panel-version-history"
-import { ArtifactDesignerWrapper } from "./panel-designer-wrapper"
 import {
   DESIGNABLE_TYPES,
   getMonacoLanguage,
@@ -105,15 +104,12 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
     viewMode,
     setViewMode,
     copied,
-    designerOpen,
-    setDesignerOpen,
     editContent,
     hasChanges,
     isFullscreen,
     showVersionHistory,
     setShowVersionHistory,
     isPreviewable,
-    isDesignable,
     primaryActions,
     overflowActions,
     closePanel,
@@ -512,14 +508,6 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
             </div>
           )}
         </Artifact>
-
-        {isDesignable && (
-          <ArtifactDesignerWrapper
-            artifact={activeArtifact}
-            open={designerOpen}
-            onOpenChange={setDesignerOpen}
-          />
-        )}
       </>
     )
   }

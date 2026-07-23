@@ -4,7 +4,9 @@
  * cognia-next adapts the upstream hook by:
  *  - swapping `useNativeStore.isDesktop` for `isTauri()`
  *  - using `lib/tauri/opener` (revealInExplorer / openPath)
- *  - dropping the "Open in Full Designer" code path (no Designer subsystem)
+ *  - dropping the Designer subsystem entirely: "Edit in Canvas" is the visual
+ *    authoring surface here, and it reopens the document the artifact was
+ *    already sent to rather than minting a new one
  *  - using cognia-next's `downloadFile(filename, content, mimeType)` signature
  */
 
@@ -29,10 +31,7 @@ import { saveGeneratedDocument, type DocFormat } from "@/lib/files/document-writ
 import { writeText as clipboardWriteText } from "@/lib/capacitor/clipboard"
 import { getArtifactExtension, canPreview } from "@/lib/artifacts"
 import { loggers } from "@cognia/logging"
-import {
-  getArtifactRuntimeAdapter,
-  getPreferredArtifactExportFormat,
-} from "@/components/artifacts/runtime-adapters"
+import { getPreferredArtifactExportFormat } from "@/components/artifacts/runtime-adapters"
 import type { Artifact, ArtifactAuthoringOrigin, ArtifactWorkspaceReturnContext } from "@/types"
 
 function getExtension(artifact: Artifact): string {
@@ -98,18 +97,15 @@ export function useArtifactPanelState() {
     }))
   )
 
+  const canvasDocuments = useArtifactStore((state) => state.canvasDocuments)
   const activeArtifact = activeArtifactId ? artifacts[activeArtifactId] : null
   const theme = useSettingsStore((state) => state.settings?.theme)
   const isDesktop = isTauri()
   const isMobileViewport = useMediaQuery("(max-width: 639px)")
   const isTabletViewport = useMediaQuery("(min-width: 640px) and (max-width: 1023px)")
-  const runtimeAdapter = activeArtifact ? getArtifactRuntimeAdapter(activeArtifact.type) : null
-  const canOpenEmbeddedDesigner = runtimeAdapter?.authoring.embeddedDesigner ?? false
-
   // Local state
   const [viewMode, setViewMode] = useState<ArtifactViewMode>("code")
   const [copied, setCopied] = useState(false)
-  const [designerOpen, setDesignerOpen] = useState(false)
   const [editContent, setEditContent] = useState("")
   const [hasChanges, setHasChanges] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -207,6 +203,24 @@ export function useArtifactPanelState() {
     if (activeArtifact) {
       const returnContext = buildReturnContext("artifact-panel")
       setArtifactWorkspaceReturnContext(returnContext)
+
+      // Reopen the document this artifact was already sent to. Without this the
+      // action minted a fresh copy every time, so a user who alternated between
+      // the panel and the canvas accumulated duplicates and lost their edits to
+      // whichever copy they had stopped looking at. A link pointing at a
+      // deleted document falls through to creating a new one.
+      const existingId = activeArtifact.metadata?.derivedFromCanvasDocumentId
+      if (existingId && canvasDocuments[existingId]) {
+        setActiveCanvas(existingId)
+        openPanel("canvas")
+        loggers.ui.info("artifacts.action.open-in-canvas", {
+          artifactId: activeArtifact.id,
+          canvasId: existingId,
+          reused: true,
+        })
+        return
+      }
+
       const docId = createCanvasDocument({
         title: activeArtifact.title,
         content: activeArtifact.content,
@@ -226,6 +240,7 @@ export function useArtifactPanelState() {
   }, [
     activeArtifact,
     buildReturnContext,
+    canvasDocuments,
     createCanvasDocument,
     openPanel,
     setActiveCanvas,
@@ -449,7 +464,6 @@ export function useArtifactPanelState() {
   }
 
   const isPreviewable = activeArtifact ? canPreview(activeArtifact.type) : false
-  const isDesignable = canOpenEmbeddedDesigner
   // Only html/svg render directly in a bare browser tab (react needs the
   // sandboxed bundler; other types aren't standalone documents).
   const isOpenableInNewTab = activeArtifact?.type === "html" || activeArtifact?.type === "svg"
@@ -504,8 +518,6 @@ export function useArtifactPanelState() {
     viewMode,
     setViewMode,
     copied,
-    designerOpen,
-    setDesignerOpen,
     editContent,
     hasChanges,
     isFullscreen,
@@ -514,7 +526,6 @@ export function useArtifactPanelState() {
     lastDownloadPath,
     // Derived
     isPreviewable,
-    isDesignable,
     isOpenableInNewTab,
     panelMode,
     panelWidth,

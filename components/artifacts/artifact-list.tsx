@@ -9,7 +9,7 @@
 import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { formatDistanceToNow } from "date-fns"
-import { Trash2, Code, Search, Filter, CheckSquare, Eye, Loader2 } from "lucide-react"
+import { Trash2, Code, Search, Filter, CheckSquare, Eye, Loader2, Clock } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import {
   Select,
@@ -153,10 +153,18 @@ export function ArtifactList({
     handleDelete,
     handleBatchDelete,
     confirmDelete,
+    scope,
+    setScope,
+    hasAnyArtifacts,
   } = useArtifactList({ sessionId, onArtifactClick })
   const pending = useStreamingArtifact(sessionId)
 
-  if (sessionArtifacts.length === 0 && !searchQuery && typeFilter === "all") {
+  // The full-height empty state replaces the filter row, so it is only correct
+  // when there is genuinely nothing to filter. Showing it whenever *this*
+  // session was empty hid the controls a user needs to widen the scope or clear
+  // the filter that emptied the list — including the scope switcher that would
+  // have shown them their other chats' artifacts.
+  if (!hasAnyArtifacts) {
     // "No artifacts yet" would be a lie while one is being written.
     if (pending) {
       return (
@@ -202,6 +210,26 @@ export function ArtifactList({
             aria-label={tArtifacts("search")}
           />
         </div>
+        {/* Scope. The store has always maintained a cross-session MRU list and
+            had a `recent` branch to read it with, but no control ever selected
+            that branch — the capability was complete and unreachable. */}
+        <Select value={scope} onValueChange={setScope}>
+          <SelectTrigger
+            data-testid="scope-filter-select"
+            aria-label={tArtifacts("scopeLabel")}
+            className={cn(COMPACT_FILTER_TRIGGER, "@[380px]/artifact-list:w-[110px]")}
+          >
+            <Clock className="h-3 w-3 @[380px]/artifact-list:mr-1" />
+            <span className="hidden @[380px]/artifact-list:contents">
+              <SelectValue />
+            </span>
+            {scope !== "session" && <FilterActiveDot />}
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="session">{tArtifacts("scopes.session")}</SelectItem>
+            <SelectItem value="recent">{tArtifacts("scopes.recent")}</SelectItem>
+          </SelectContent>
+        </Select>
         <Select value={typeFilter} onValueChange={setTypeFilter}>
           <SelectTrigger
             data-testid="type-filter-select"
@@ -238,7 +266,11 @@ export function ArtifactList({
           <SelectContent>
             <SelectItem value="all">{tArtifacts("allRuntimeStates")}</SelectItem>
             <SelectItem value="ready">{tArtifacts("runtimeStates.ready")}</SelectItem>
-            <SelectItem value="loading">{tArtifacts("runtimeStates.loading")}</SelectItem>
+            {/* No `loading` option. It is deliberately never persisted — it
+                describes the preview currently on screen, not the artifact —
+                so filtering by it could only ever return an empty list. The
+                `runtimeStates.loading` message stays in the bundle for the
+                in-preview badge, which does show the live state. */}
             <SelectItem value="error">{tArtifacts("runtimeStates.error")}</SelectItem>
             <SelectItem value="unsupported">{tArtifacts("runtimeStates.unsupported")}</SelectItem>
           </SelectContent>
@@ -282,6 +314,9 @@ export function ArtifactList({
       <ScrollArea className="min-h-0 flex-1">
         <div className="space-y-1 p-2">
           {pending ? <GeneratingArtifactRow pending={pending} /> : null}
+          {sessionArtifacts.length === 0 && (
+            <p className="px-3 py-6 text-center text-xs text-muted-foreground">{t("noMatches")}</p>
+          )}
           {sessionArtifacts.map((artifact) => {
             const createdAt =
               artifact.createdAt instanceof Date ? artifact.createdAt : new Date(artifact.createdAt)

@@ -8,11 +8,11 @@
 
 "use client"
 
-import { useState, useMemo, useCallback, useEffect } from "react"
+import { useState, useCallback, useEffect } from "react"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useChatStore } from "@/stores/chat"
 import { revealArtifactInWorkspace } from "@/lib/artifacts"
-import type { Artifact, ArtifactType, ArtifactRuntimeHealth } from "@/types"
+import type { Artifact, ArtifactType, ArtifactRuntimeHealth, ArtifactWorkspaceScope } from "@/types"
 
 interface UseArtifactListOptions {
   sessionId?: string
@@ -21,6 +21,7 @@ interface UseArtifactListOptions {
 
 export function useArtifactList({ sessionId, onArtifactClick }: UseArtifactListOptions) {
   const activeArtifactId = useArtifactStore((state) => state.activeArtifactId)
+  const artifacts = useArtifactStore((state) => state.artifacts)
   const deleteArtifact = useArtifactStore((state) => state.deleteArtifact)
   const deleteArtifacts = useArtifactStore((state) => state.deleteArtifacts)
   const artifactWorkspace = useArtifactStore((state) => state.artifactWorkspace)
@@ -41,11 +42,12 @@ export function useArtifactList({ sessionId, onArtifactClick }: UseArtifactListO
     }
   }, [artifactWorkspace.scope, currentSessionId, setArtifactWorkspaceScope])
 
-  const sessionArtifacts = useMemo(() => {
-    if (!currentSessionId) return []
-
-    return getArtifactsForWorkspace({ sessionId: currentSessionId })
-  }, [currentSessionId, getArtifactsForWorkspace])
+  // `artifacts` and `artifactWorkspace` are subscribed store slices, so this
+  // recomputes whenever the backing collection or any workspace filter changes.
+  const sessionArtifacts =
+    !currentSessionId && artifactWorkspace.scope === "session"
+      ? []
+      : getArtifactsForWorkspace({ sessionId: currentSessionId })
 
   const setSearchQuery = useCallback(
     (searchQuery: string) => {
@@ -59,6 +61,18 @@ export function useArtifactList({ sessionId, onArtifactClick }: UseArtifactListO
       setArtifactWorkspaceFilters({ typeFilter: typeFilter as ArtifactType | "all" })
     },
     [setArtifactWorkspaceFilters]
+  )
+
+  const setScope = useCallback(
+    (scope: string) => {
+      // The session id only matters for the session scope; `recent` reads the
+      // cross-session MRU list the store already maintains.
+      setArtifactWorkspaceScope(
+        scope as ArtifactWorkspaceScope,
+        scope === "session" ? (currentSessionId ?? null) : null
+      )
+    },
+    [currentSessionId, setArtifactWorkspaceScope]
   )
 
   const setRuntimeFilter = useCallback(
@@ -122,14 +136,18 @@ export function useArtifactList({ sessionId, onArtifactClick }: UseArtifactListO
     // State
     activeArtifactId,
     searchQuery: artifactWorkspace.searchQuery,
+    scope: artifactWorkspace.scope,
     typeFilter: artifactWorkspace.typeFilter,
     runtimeFilter: artifactWorkspace.runtimeFilter,
     selectedIds,
     batchMode,
     pendingDelete,
     sessionArtifacts,
+    /** Whether the store holds any artifact at all, in any session. */
+    hasAnyArtifacts: Object.keys(artifacts).length > 0,
     // Actions
     setSearchQuery,
+    setScope,
     setTypeFilter,
     setPendingDelete,
     toggleBatchMode,

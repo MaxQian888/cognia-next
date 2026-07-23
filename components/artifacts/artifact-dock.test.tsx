@@ -150,7 +150,7 @@ describe("ArtifactDock — converged workbench shell", () => {
     expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
     // The legacy top-tab chrome must not appear — that shape change is the bug.
     expect(screen.queryByTestId("artifact-dock-mode-artifact")).not.toBeInTheDocument()
-    // The session surface opens on its artifact history, scoped to the chat.
+    // The session surface opens on its artifact browser, scoped to the chat.
     expect(screen.getByTestId("list")).toHaveAttribute("data-session", "sess-1")
   })
 
@@ -250,7 +250,7 @@ describe("ArtifactDock — converged workbench shell", () => {
     expect(screen.queryByTestId("artifact-tab-strip")).not.toBeInTheDocument()
     // The header slot must stay free, or the panel's own tabs get displaced
     // into an overflow menu for no reason.
-    expect(screen.getByRole("tab", { name: "artifacts.dock.showHistory" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "artifacts.dock.browseArtifacts" })).toBeInTheDocument()
     expect(screen.queryByTestId("context-workbench-group-overflow")).not.toBeInTheDocument()
   })
 
@@ -274,7 +274,7 @@ describe("ArtifactDock — converged workbench shell", () => {
     expect(screen.getByTestId("artifact-tab-strip")).toBeInTheDocument()
     expect(screen.getByTestId("context-workbench-group-overflow")).toBeInTheDocument()
     expect(
-      screen.queryByRole("tab", { name: "artifacts.dock.showHistory" })
+      screen.queryByRole("tab", { name: "artifacts.dock.browseArtifacts" })
     ).not.toBeInTheDocument()
   })
 
@@ -357,7 +357,7 @@ describe("ArtifactDock — converged workbench shell", () => {
     fireEvent.click(screen.getByRole("button", { name: "artifacts.dock.workspaceMode" }))
     expect(useArtifactDockLayoutStore.getState().dockProfile).toBe("workspace")
 
-    fireEvent.click(screen.getByRole("button", { name: "artifacts.dock.showHistory" }))
+    fireEvent.click(screen.getByRole("button", { name: "artifacts.dock.browseArtifacts" }))
     expect(useArtifactDockLayoutStore.getState().dockProfile).toBe("compact")
 
     // The predecessor wrote the mode from panel lifecycle hooks AND read it
@@ -449,14 +449,14 @@ describe("ArtifactDock — converged workbench shell", () => {
     expect(screen.getByTestId("context-workbench-mobile-sheet")).toBeInTheDocument()
   })
 
-  it("reaches the artifact history from the review activity group", () => {
+  it("reaches the artifact browser from the review activity group", () => {
     activateArtifact()
     render(<ArtifactDock />)
 
     // `proposal-review` and `history` share the review activity, so history is a
     // group tab behind the rail button rather than a rail entry of its own.
     fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.proposalReview" }))
-    fireEvent.click(screen.getByRole("tab", { name: "artifacts.dock.showHistory" }))
+    fireEvent.click(screen.getByRole("tab", { name: "artifacts.dock.browseArtifacts" }))
 
     expect(screen.getByTestId("list")).toHaveAttribute("data-session", "sess-1")
   })

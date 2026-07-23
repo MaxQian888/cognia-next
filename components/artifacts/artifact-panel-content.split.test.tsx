@@ -26,7 +26,6 @@ jest.mock("./artifact-preview", () => ({
 }))
 jest.mock("./artifact-list", () => ({ ArtifactList: () => <div data-testid="list" /> }))
 jest.mock("./panel-version-history", () => ({ PanelVersionHistory: () => <div /> }))
-jest.mock("./panel-designer-wrapper", () => ({ ArtifactDesignerWrapper: () => <div /> }))
 jest.mock("@/components/editor/light-code-editor", () => ({ LightCodeEditor: () => <textarea /> }))
 
 // react-resizable-panels needs a measured container; stub the primitives so the

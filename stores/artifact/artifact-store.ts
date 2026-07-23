@@ -45,6 +45,7 @@ import type {
   ArtifactType,
   ArtifactLanguage,
   ArtifactRuntimeHealth,
+  SettledArtifactRuntimeHealth,
   ArtifactMetadata,
   ArtifactAuthoringOrigin,
   ArtifactWorkspaceScope,
@@ -471,6 +472,22 @@ interface ArtifactActions {
     metadata?: ArtifactMetadata
   }) => Artifact
   updateArtifact: (id: string, updates: Partial<Artifact>) => void
+  /**
+   * Record how the artifact's preview last settled.
+   *
+   * Deliberately not `updateArtifact`: that bumps `version` and `updatedAt`,
+   * and a preview finishing its render is not an edit — routing this through it
+   * would spin the version counter every time the user opens the panel. Follows
+   * the same shape as the `lastAccessedAt` write in `setActiveArtifact`.
+   *
+   * A no-op for an unknown id, which is what synthetic previews (the Canvas
+   * document projection) hand in.
+   */
+  setArtifactRuntimeHealth: (
+    id: string,
+    health: SettledArtifactRuntimeHealth,
+    error?: string
+  ) => void
   deleteArtifact: (id: string) => void
   /**
    * Drop an artifact's tab. When it was the active one, activate its neighbour
@@ -756,6 +773,33 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           return {
             artifacts: { ...state.artifacts, [id]: updated },
             pendingReviews,
+          }
+        })
+      },
+
+      setArtifactRuntimeHealth: (id, health, error) => {
+        set((state) => {
+          const artifact = state.artifacts[id]
+          if (!artifact) return state
+
+          const runtimeError = health === "error" ? error : undefined
+          // Bail on an unchanged value: the preview re-reports on every remount,
+          // and a fresh object here would re-render every subscriber for nothing.
+          if (
+            artifact.metadata?.runtimeHealth === health &&
+            artifact.metadata?.runtimeError === runtimeError
+          ) {
+            return state
+          }
+
+          return {
+            artifacts: {
+              ...state.artifacts,
+              [id]: {
+                ...artifact,
+                metadata: { ...artifact.metadata, runtimeHealth: health, runtimeError },
+              },
+            },
           }
         })
       },
@@ -1287,12 +1331,33 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           aiSuggestions: [],
         }
 
-        set((state) => ({
-          canvasDocuments: { ...state.canvasDocuments, [doc.id]: doc },
-          activeCanvasId: doc.id,
-          canvasOpen: true,
-          panelView: "canvas",
-        }))
+        set((state) => {
+          // Close the lineage loop. The canvas doc has always carried the
+          // forward link; without the back-link every "Edit in Canvas" on the
+          // same artifact minted another document, because nothing could tell
+          // that one already existed. Written here rather than by the caller so
+          // the two halves cannot drift, and directly rather than through
+          // `updateArtifact` — opening an editor is not an edit, and bumping
+          // `version` for it would pollute the artifact's history.
+          const source = sourceArtifactId ? state.artifacts[sourceArtifactId] : undefined
+          const artifacts = source
+            ? {
+                ...state.artifacts,
+                [source.id]: {
+                  ...source,
+                  metadata: { ...source.metadata, derivedFromCanvasDocumentId: doc.id },
+                },
+              }
+            : state.artifacts
+
+          return {
+            artifacts,
+            canvasDocuments: { ...state.canvasDocuments, [doc.id]: doc },
+            activeCanvasId: doc.id,
+            canvasOpen: true,
+            panelView: "canvas",
+          }
+        })
 
         getPluginEventHooks().dispatchCanvasCreate(toPluginCanvasDocument(doc))
         getPluginEventHooks().dispatchCanvasSwitch(doc.id)

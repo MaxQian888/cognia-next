@@ -393,6 +393,7 @@
     "retry": "重试",
     "status": {
       "deadlettered": "已死信",
+      "delivery_unknown": "投递状态未知",
       "failed": "失败",
       "pending": "排队中",
       "sending": "发送中",
@@ -486,7 +487,7 @@
     "aria": "{count} 条未读"
   },
   "inboundRecovery": {
-    "retryWarning": "从头重试会重新处理该消息，是否继续？",
+    "retryWarning": "从头重试会重新处理该消息，并可能重复触发外部副作用。是否继续？",
     "title": "入站恢复",
     "description": "有一条或多条入站消息未能处理，需要恢复。",
     "message": "消息 {id}：{reason}",

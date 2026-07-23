@@ -25,17 +25,14 @@
     "svgGraphic": "SVG Graphic",
     "untitled": "Untitled"
   },
-  "designerUnsupportedDescription": "The designer subsystem isn't included in this build of cognia-next. Artifact \"{title}\" is read-only here.",
-  "designerUnsupportedTitle": "Designer is unavailable",
   "dock": {
     "artifactMode": "Artifact",
+    "browseArtifacts": "Browse artifacts",
     "closeTab": "Close {title}",
     "collapse": "Collapse panel",
-    "hideHistory": "Hide artifact history",
     "openArtifacts": "Open artifacts",
     "openInNewTab": "Open in new tab",
     "saveToProject": "Save to project…",
-    "showHistory": "Show artifact history",
     "splitView": "Split",
     "title": "Artifacts",
     "toggleHint": "Toggle panel (Ctrl/Cmd+J)",
@@ -105,6 +102,11 @@
     "unsupported": "Unsupported"
   },
   "saveVersion": "Save Version",
+  "scopeLabel": "Scope",
+  "scopes": {
+    "recent": "Recent",
+    "session": "This chat"
+  },
   "search": "Search artifacts...",
   "sheetTitle": "Artifact Panel",
   "title": "Artifacts",
@@ -119,6 +121,7 @@
   "typeSvg": "SVG",
   "versionHistory": "Version History",
   "versionRestored": "Version restored",
+  "words": "words",
   "workspace": {
     "card": {
       "cancel": "Cancel",
@@ -207,6 +210,5 @@
       "description": "Workspace editing requires the desktop app or a paired companion filesystem.",
       "title": "Workspace is unavailable"
     }
-  },
-  "words": "words"
+  }
 }

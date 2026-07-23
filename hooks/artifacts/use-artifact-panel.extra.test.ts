@@ -377,4 +377,60 @@ describe("useArtifactPanelState — extra coverage", () => {
     act(() => result.current.handleOpenInCanvas())
     expect(Object.keys(useArtifactStore.getState().canvasDocuments)).toHaveLength(0)
   })
+
+  describe("handleOpenInCanvas document reuse", () => {
+    function openArtifactInCanvas() {
+      const artifact = useArtifactStore.getState().createArtifact({
+        sessionId: "s",
+        messageId: "m",
+        type: "html",
+        title: "page",
+        content: "<p>hi</p>",
+      })
+      act(() => useArtifactStore.getState().setActiveArtifact(artifact.id))
+      const { result } = renderHook(() => useArtifactPanelState())
+      act(() => result.current.handleOpenInCanvas())
+      return { artifact, result }
+    }
+
+    it("links the artifact to the document it created", () => {
+      const { artifact } = openArtifactInCanvas()
+
+      const docId = useArtifactStore.getState().activeCanvasId
+      expect(docId).toBeTruthy()
+      // Both directions of the lineage, so either side can find the other.
+      expect(useArtifactStore.getState().canvasDocuments[docId!]?.sourceArtifactId).toBe(
+        artifact.id
+      )
+      expect(
+        useArtifactStore.getState().artifacts[artifact.id]?.metadata?.derivedFromCanvasDocumentId
+      ).toBe(docId)
+    })
+
+    it("reopens the same document instead of minting duplicates", () => {
+      // Alternating between the panel and the canvas used to leave a trail of
+      // copies, with the user's edits stranded in whichever one they left.
+      const { result } = openArtifactInCanvas()
+      const firstDocId = useArtifactStore.getState().activeCanvasId
+
+      act(() => useArtifactStore.getState().closeCanvas())
+      act(() => result.current.handleOpenInCanvas())
+
+      expect(useArtifactStore.getState().activeCanvasId).toBe(firstDocId)
+      expect(Object.keys(useArtifactStore.getState().canvasDocuments)).toHaveLength(1)
+      expect(useArtifactStore.getState().canvasOpen).toBe(true)
+    })
+
+    it("creates a fresh document when the linked one was deleted", () => {
+      const { result } = openArtifactInCanvas()
+      const firstDocId = useArtifactStore.getState().activeCanvasId!
+
+      act(() => useArtifactStore.getState().deleteCanvasDocument(firstDocId))
+      act(() => result.current.handleOpenInCanvas())
+
+      const nextDocId = useArtifactStore.getState().activeCanvasId
+      expect(nextDocId).toBeTruthy()
+      expect(nextDocId).not.toBe(firstDocId)
+    })
+  })
 })

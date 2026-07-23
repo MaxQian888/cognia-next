@@ -25,17 +25,14 @@
     "svgGraphic": "SVG 图形",
     "untitled": "未命名"
   },
-  "designerUnsupportedDescription": "本版本 cognia-next 未集成设计器。Artifact「{title}」在此处为只读。",
-  "designerUnsupportedTitle": "设计器不可用",
   "dock": {
     "artifactMode": "产物",
+    "browseArtifacts": "浏览产物",
     "closeTab": "关闭 {title}",
     "collapse": "折叠面板",
-    "hideHistory": "隐藏产物历史",
     "openArtifacts": "已打开的产物",
     "openInNewTab": "在新标签页打开",
     "saveToProject": "保存到项目…",
-    "showHistory": "显示产物历史",
     "splitView": "分屏",
     "title": "产物",
     "toggleHint": "切换面板 (Ctrl/Cmd+J)",
@@ -105,6 +102,11 @@
     "unsupported": "不支持"
   },
   "saveVersion": "保存版本",
+  "scopeLabel": "范围",
+  "scopes": {
+    "recent": "最近",
+    "session": "本会话"
+  },
   "search": "搜索作品...",
   "sheetTitle": "Artifact 面板",
   "title": "作品",
@@ -119,6 +121,7 @@
   "typeSvg": "SVG",
   "versionHistory": "版本历史",
   "versionRestored": "版本已恢复",
+  "words": "字",
   "workspace": {
     "card": {
       "cancel": "取消",
@@ -207,6 +210,5 @@
       "description": "工作区编辑需要桌面应用或已配对的 Companion 文件系统。",
       "title": "工作区不可用"
     }
-  },
-  "words": "字"
+  }
 }

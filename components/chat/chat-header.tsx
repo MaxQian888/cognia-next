@@ -7,13 +7,12 @@ import {
   KeyRoundIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
-  PanelRightCloseIcon,
-  PanelRightOpenIcon,
   Settings2Icon,
   GlobeIcon,
 } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
+import { ArtifactDockToggle } from "@/components/artifacts/artifact-dock-toggle"
 import { Badge } from "@/components/ui/badge"
 import { useCharacter } from "@/lib/data-hooks/context"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
@@ -62,22 +61,11 @@ export function ChatHeader({ session, onOpenSettings }: Props) {
   const toggleSidebar = useUIStore((s) => s.toggleSidebar)
   const sidebarToggleLabel = sidebarCollapsed ? t("showConversations") : t("hideConversations")
 
-  // Right artifact/output dock toggle — the mirror of the left conversation
-  // toggle. Both rails now collapse/restore from the same top bar (no leftover
-  // strip, always one click away), driving the ONE `dockCollapsed` field the
-  // title-bar layout controls and ⌘J also drive — a single source of truth.
-  const dockCollapsed = useArtifactDockLayoutStore((s) => s.dockCollapsed)
-  const toggleDock = useArtifactDockLayoutStore((s) => s.toggleDock)
+  // Right artifact/output dock toggle lives in `ArtifactDockToggle`, shared
+  // with the inbox conversation header — the mirror of the left conversation
+  // toggle, driving the ONE `dockCollapsed` field the title-bar controls and
+  // ⌘J also drive.
   const openBrowser = useArtifactDockLayoutStore((s) => s.openBrowser)
-  // A new artifact arrived while the dock was dismissed — surface it as an
-  // unread dot instead of force-expanding the panel.
-  const unreadArtifact = useArtifactDockLayoutStore((s) => s.unreadArtifact)
-  const showDockUnread = dockCollapsed && unreadArtifact
-  const dockToggleLabel = showDockUnread
-    ? t("unreadArtifacts")
-    : dockCollapsed
-      ? t("showArtifacts")
-      : t("hideArtifacts")
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur">
@@ -178,29 +166,7 @@ export function ChatHeader({ session, onOpenSettings }: Props) {
         <Settings2Icon className="size-4" />
       </Button>
 
-      <Button
-        variant="ghost"
-        size="icon"
-        className="relative hidden size-8 shrink-0 md:inline-flex"
-        onClick={toggleDock}
-        aria-label={dockToggleLabel}
-        aria-pressed={!dockCollapsed}
-        title={dockToggleLabel}
-        data-testid="chat-artifact-dock-toggle"
-      >
-        {dockCollapsed ? (
-          <PanelRightOpenIcon className="size-4" />
-        ) : (
-          <PanelRightCloseIcon className="size-4" />
-        )}
-        {showDockUnread && (
-          <span
-            aria-hidden
-            data-testid="chat-artifact-dock-unread"
-            className="absolute right-1 top-1 size-1.5 rounded-full bg-primary"
-          />
-        )}
-      </Button>
+      <ArtifactDockToggle />
 
       <SessionSettingsSheet session={session} open={settingsOpen} onOpenChange={setSettingsOpen} />
       <SessionInsightsSheet session={session} open={insightsOpen} onOpenChange={setInsightsOpen} />

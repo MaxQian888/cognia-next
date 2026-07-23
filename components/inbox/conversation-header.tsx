@@ -34,6 +34,7 @@ import { effectiveStatus } from "@/lib/db/conversation-overrides"
 import { useLastInboundForConversation } from "@/hooks/connectors/use-last-inbound"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { ArtifactDockToggle } from "@/components/artifacts/artifact-dock-toggle"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { isTauri } from "@/lib/tauri"
@@ -278,6 +279,12 @@ export function ConversationHeader({
        * the heartbeat snapshots, not just the current.state. */}
       {parsedAdapterId && <AdapterHealthBadge adapterId={parsedAdapterId} />}
       <PolicyInfo policy={policy} />
+
+      {/* The chat pane below mounts with `showHeader={false}`, so the copy of
+       * this control in `chat-header` never renders here. Without it the dock —
+       * which defaults to collapsed — had no in-page opener on this route at
+       * all. */}
+      <ArtifactDockToggle className="h-7 w-7" />
 
       <Tooltip>
         <TooltipTrigger asChild>

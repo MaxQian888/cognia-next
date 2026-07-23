@@ -5,6 +5,7 @@
   "deleteConfirmTitle": "删除 Artifact",
   "noArtifacts": "暂无 Artifact",
   "noArtifactsDesc": "代码片段与生成内容会显示在这里",
+  "noMatches": "没有符合当前筛选的产物",
   "open": "打开",
   "types": {
     "chart": "图表",

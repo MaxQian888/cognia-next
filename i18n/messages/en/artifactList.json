@@ -5,6 +5,7 @@
   "deleteConfirmTitle": "Delete Artifact",
   "noArtifacts": "No artifacts yet",
   "noArtifactsDesc": "Code snippets and content will appear here",
+  "noMatches": "No artifacts match these filters",
   "open": "Open",
   "types": {
     "chart": "Chart",

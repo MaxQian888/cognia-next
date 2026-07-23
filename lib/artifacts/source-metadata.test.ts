@@ -88,6 +88,46 @@ describe("buildArtifactSourceMetadata", () => {
     expect(meta.lineageId).toBe(meta.sourceFingerprint)
   })
 
+  it("stamps runnable from the type so the badge has something to read", () => {
+    // Nothing wrote this field before, so the "Runnable" badge never rendered
+    // on real data — only on Storybook fixtures.
+    expect(
+      buildArtifactSourceMetadata({
+        sessionId: "s",
+        messageId: "m",
+        type: "react",
+        content: "x",
+        sourceOrigin: "auto",
+        userInitiated: false,
+      }).runnable
+    ).toBe(true)
+    expect(
+      buildArtifactSourceMetadata({
+        sessionId: "s",
+        messageId: "m",
+        type: "document",
+        content: "x",
+        sourceOrigin: "auto",
+        userInitiated: false,
+      }).runnable
+    ).toBe(false)
+  })
+
+  it("lets an explicit runnable override the type default", () => {
+    // The field is an override; a caller that set it deliberately outranks us.
+    expect(
+      buildArtifactSourceMetadata({
+        sessionId: "s",
+        messageId: "m",
+        type: "document",
+        content: "x",
+        sourceOrigin: "manual",
+        userInitiated: true,
+        metadata: { runnable: true },
+      }).runnable
+    ).toBe(true)
+  })
+
   it("preserves caller-supplied lineageId", () => {
     const meta = buildArtifactSourceMetadata({
       sessionId: "s",

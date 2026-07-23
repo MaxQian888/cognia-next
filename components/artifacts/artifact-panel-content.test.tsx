@@ -39,10 +39,6 @@ jest.mock("./panel-version-history", () => ({
   PanelVersionHistory: () => <div data-testid="history" />,
 }))
 
-jest.mock("./panel-designer-wrapper", () => ({
-  ArtifactDesignerWrapper: () => <div data-testid="designer" />,
-}))
-
 jest.mock("@/components/editor/light-code-editor", () => ({
   LightCodeEditor: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
     <textarea
