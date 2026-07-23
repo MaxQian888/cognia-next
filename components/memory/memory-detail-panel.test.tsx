@@ -244,6 +244,14 @@ describe("MemoryDetailPanel", () => {
     setup({ id: "m1" }, { onOpenResolver: jest.fn() })
     expect(screen.queryByTestId("memory-detail-open-resolver")).toBeNull()
   })
+
+  it("hides the resolver entry once the row is verified despite residual conflict ids", () => {
+    setup(
+      { id: "m1", reviewStatus: "verified", conflictWithIds: ["m2"] },
+      { onOpenResolver: jest.fn() }
+    )
+    expect(screen.queryByTestId("memory-detail-open-resolver")).toBeNull()
+  })
 })
 
 // Helper for the disabled-ends test that needs to re-render with new props.

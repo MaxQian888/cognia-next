@@ -372,7 +372,10 @@ export function MemoryDetailPanel({
                   </span>
                 )
               })}
-              {onOpenResolver && (
+              {/* Gated on reviewStatus too: after a `keep` disposition the row can
+                  retain further conflictWithIds while already verified, and the
+                  console only mounts the resolver for reviewStatus="conflict". */}
+              {onOpenResolver && memory.reviewStatus === "conflict" && (
                 <Button
                   size="sm"
                   variant="outline"
