@@ -32,6 +32,11 @@ jest.mock("@/lib/claude/adapter", () => ({
   applySdkEvent: jest.fn(() => ({ messages: [], turnComplete: false })),
   contentPreview: (c: unknown) => (typeof c === "string" ? c : "preview"),
   makeUserMessage: (c: unknown) => ({ id: "u1", role: "user", parts: [{ type: "text", text: c }] }),
+  mergeMemorySourcesIntoLastAssistant: jest.fn((msgs: unknown[]) => msgs),
+}))
+
+jest.mock("@/lib/db/session-usage", () => ({
+  recordResultUsage: jest.fn().mockResolvedValue(undefined),
 }))
 
 const applySdkSubagentBridgeMock = jest.fn()
@@ -1250,6 +1255,59 @@ describe("useTeamChat — event handler coverage", () => {
 
     expect(persistMessagesMock).toHaveBeenCalled()
     expect(chatState.replaceMessages).toHaveBeenCalled()
+  })
+
+  it("folds the member's recalled memories into the sealed reply (team↔direct parity)", async () => {
+    const { applySdkEvent: applySdkEventMock, mergeMemorySourcesIntoLastAssistant: mergeMock } =
+      jest.requireMock("@/lib/claude/adapter")
+    const memoryContext = {
+      retrievedMemories: [{ id: "m1", type: "semantic", text: "fact", score: 0.9 }],
+      proceduralCount: 0,
+      degraded: false,
+    }
+    resolveSendOptionsMock.mockResolvedValue({
+      model: "sonnet",
+      systemPrompt: "sys",
+      memoryContext,
+    } as never)
+
+    const reply = { id: "a-alice", role: "assistant", parts: [{ type: "text", text: "done" }] }
+    ;(applySdkEventMock as jest.Mock).mockImplementationOnce((msgs: unknown[]) => ({
+      messages: [...(msgs as object[]), reply],
+      result: { usage: {} },
+      turnComplete: true,
+    }))
+    ;(mergeMock as jest.Mock).mockClear()
+
+    let emitTeamEvent: ((evt: unknown) => void) | null = null
+    onClaudeMessageMock.mockImplementationOnce(async (cb: (evt: unknown) => void) => {
+      emitTeamEvent = cb
+      return onClaudeUnsub
+    })
+    // Emit the member's sealing event (assistant reply + sdk result) while the
+    // sub-session resolver ctx is still armed, then end the sub-session.
+    sendPromptMock.mockImplementation(async (subId: string) => {
+      Promise.resolve().then(() => {
+        emitTeamEvent?.({ type: "event", sessionId: subId, event: { type: "result" } })
+        emitTeamEvent?.({ type: "session_ended", sessionId: subId, error: null })
+      })
+    })
+
+    makeLinearTeam([{ id: "alice", name: "Alice" }])
+    const { result } = renderHook(() => useTeamChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hi")
+      await new Promise<void>((r) => setTimeout(r, 30))
+    })
+
+    // The seal path folded the stashed memoryContext onto the member's reply…
+    expect(mergeMock).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: "a-alice" })]),
+      memoryContext
+    )
+    // …and persisted the merged list.
+    expect(persistMessagesMock).toHaveBeenCalled()
   })
 
   it("event type: bumps unread for inactive sessions with new assistant message", async () => {

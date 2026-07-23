@@ -231,6 +231,18 @@ export interface SourcesPart {
    * empty. Absent on healthy turns.
    */
   twinDegraded?: boolean
+  /**
+   * Recall token budget of the memory injection pass, stamped by
+   * `mergeMemorySourcesIntoLastAssistant`. Lets the recalled-memory chip show
+   * "used/limit, truncated" without re-running retrieval. Absent when the turn
+   * recalled no memories.
+   */
+  memoryBudget?: { limit: number; used: number; truncated: boolean }
+  /**
+   * True when the memory retrieval pass degraded (vector backend unavailable →
+   * BM25-only, or retrieval failed). Mirrors `twinDegraded` for memory.
+   */
+  memoryDegraded?: boolean
 }
 
 export function isSourcesPart(part: unknown): part is SourcesPart {

@@ -3,6 +3,7 @@ import { getSettings } from "@/lib/db/settings"
 import {
   getMemory,
   hardDeleteMemory,
+  invalidateMemory,
   listMemories,
   setMemoryPinned,
   updateMemory,
@@ -38,6 +39,11 @@ export type ManageMemoryCommand =
   | { kind: "pin"; id: string; pinned: boolean }
   | { kind: "review"; id: string; status: "verified" | "conflict" }
   | { kind: "delete"; id: string }
+  /**
+   * Soft-delete (chat-chip 撤销 and conflict resolution): status →
+   * `invalidated`, history preserved; mirrors `forgetExternalMemory`.
+   */
+  | { kind: "invalidate"; id: string; supersededById?: string }
   | { kind: "clear" }
 
 export type ManageMemoryResult =
@@ -108,6 +114,24 @@ export async function manageMemory(command: ManageMemoryCommand): Promise<Manage
     await hardDeleteMemory(command.id)
     await deleteMemoryEvidence(command.id)
     await appendMemoryAuditEvent({ action: "deleted", memoryId: command.id, reason: "user" })
+    return { ok: true, memoryId: command.id }
+  }
+
+  if (command.kind === "invalidate") {
+    await invalidateMemory(command.id, command.supersededById)
+    if (existing.vectorDocId) {
+      try {
+        const sink = await tryBuildMemoryVectorSink(config)
+        await sink?.delete([existing.vectorDocId])
+      } catch {
+        // Canonical invalidation is authoritative; vector cleanup is best-effort.
+      }
+    }
+    await appendMemoryAuditEvent({
+      action: "invalidated",
+      memoryId: command.id,
+      reason: "user_undo",
+    })
     return { ok: true, memoryId: command.id }
   }
 

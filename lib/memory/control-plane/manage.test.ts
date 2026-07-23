@@ -3,6 +3,7 @@ const mockGet = jest.fn()
 const mockUpdate = jest.fn()
 const mockPin = jest.fn()
 const mockDelete = jest.fn()
+const mockInvalidate = jest.fn()
 const mockList = jest.fn()
 const mockEvidence = jest.fn()
 const mockDeleteEvidence = jest.fn()
@@ -18,6 +19,7 @@ jest.mock("@/lib/db/memories", () => ({
   updateMemory: (...args: unknown[]) => mockUpdate(...args),
   setMemoryPinned: (...args: unknown[]) => mockPin(...args),
   hardDeleteMemory: (...args: unknown[]) => mockDelete(...args),
+  invalidateMemory: (...args: unknown[]) => mockInvalidate(...args),
   listMemories: (...args: unknown[]) => mockList(...args),
 }))
 jest.mock("@/lib/db/settings", () => ({ getSettings: jest.fn(async () => ({ memory: {} })) }))
@@ -91,6 +93,24 @@ describe("manageMemory", () => {
     await manageMemory({ kind: "review", id: "m1", status: "verified" })
     expect(mockPin).toHaveBeenCalledWith("m1", true)
     expect(mockUpdate).toHaveBeenCalledWith("m1", { reviewStatus: "verified" })
+  })
+
+  it("invalidate soft-deletes, clears the vector doc, and audits", async () => {
+    mockGet.mockResolvedValue({ id: "m1", text: "old", version: 1, vectorDocId: "vec-1" })
+    const result = await manageMemory({ kind: "invalidate", id: "m1", supersededById: "m2" })
+    expect(mockInvalidate).toHaveBeenCalledWith("m1", "m2")
+    expect(mockSinkDelete).toHaveBeenCalledWith(["vec-1"])
+    expect(mockDelete).not.toHaveBeenCalled()
+    expect(mockAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "invalidated", reason: "user_undo" })
+    )
+    expect(result).toEqual({ ok: true, memoryId: "m1" })
+  })
+
+  it("invalidate skips vector cleanup when the row was never indexed", async () => {
+    await manageMemory({ kind: "invalidate", id: "m1" })
+    expect(mockInvalidate).toHaveBeenCalledWith("m1", undefined)
+    expect(mockSinkDelete).not.toHaveBeenCalled()
   })
 
   it("returns not_found without mutating", async () => {
