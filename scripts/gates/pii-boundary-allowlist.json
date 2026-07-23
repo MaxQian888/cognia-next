@@ -42,6 +42,12 @@
     "protection": "User-directed provider request."
   },
   {
+    "file": "lib/ai/providers/bedrock-connection.ts",
+    "boundaries": ["ai"],
+    "reason": "Bedrock connection verification sends a fixed application-owned probe.",
+    "protection": "The only model payload is the constant prompt `Reply with OK.`; no user or locally-derived text enters this boundary."
+  },
+  {
     "file": "lib/ai/provider-consumption.ts",
     "boundaries": [
       "@ai-sdk/anthropic",
@@ -227,6 +233,12 @@
     "boundaries": ["ai"],
     "reason": "Converts tool definitions for the sidecar protocol.",
     "protection": "No outbound model payload is emitted here."
+  },
+  {
+    "file": "sidecar/dispatch/feature-call.mjs",
+    "boundaries": ["@ai-sdk/amazon-bedrock"],
+    "reason": "Low-level sidecar feature transport constructs the Bedrock embedding model for a renderer-prepared request.",
+    "protection": "Owning renderer feature boundaries redact derived payloads before dispatch; this import only constructs the provider model."
   },
   {
     "file": "sidecar/dispatch/protocol-adapters/ai-sdk-adapter.mjs",
