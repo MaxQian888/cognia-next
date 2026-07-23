@@ -96,7 +96,7 @@ describe("saveSettings wiring", () => {
     // And the sync itself never re-entered saveSettings (updatedAt advanced
     // exactly once for the second save).
     const settingsFinal = await getSettings()
-    expect(settingsFinal.updatedAt).toBeGreaterThanOrEqual(updatedAt)
+    expect(settingsFinal.updatedAt).toBeGreaterThanOrEqual(updatedAt ?? 0)
   })
 
   it("a broken profile sync never fails the settings save", async () => {

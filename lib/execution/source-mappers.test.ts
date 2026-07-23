@@ -51,10 +51,19 @@ describe("AgentRunEventProducer", () => {
     })
 
     // Anonymous tool-call (no id) + each summary category + an error result.
-    await producer.onCaptureEvent({ type: "tool-call", toolName: "Read" }, 1_010)
-    await producer.onCaptureEvent({ type: "tool-call", id: "c2", toolName: "Edit" }, 1_011)
-    await producer.onCaptureEvent({ type: "tool-call", id: "c3", toolName: "Bash" }, 1_012)
-    await producer.onCaptureEvent({ type: "tool-call", id: "c4", toolName: "mcp_custom" }, 1_013)
+    await producer.onCaptureEvent({ type: "tool-call", toolName: "Read", input: {} }, 1_010)
+    await producer.onCaptureEvent(
+      { type: "tool-call", id: "c2", toolName: "Edit", input: {} },
+      1_011
+    )
+    await producer.onCaptureEvent(
+      { type: "tool-call", id: "c3", toolName: "Bash", input: {} },
+      1_012
+    )
+    await producer.onCaptureEvent(
+      { type: "tool-call", id: "c4", toolName: "mcp_custom", input: {} },
+      1_013
+    )
     await producer.onCaptureEvent(
       { type: "tool-result", id: "c3", toolName: "Bash", result: "boom", isError: true },
       1_014

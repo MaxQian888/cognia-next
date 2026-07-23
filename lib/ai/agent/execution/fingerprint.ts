@@ -48,9 +48,12 @@ export function canonicalizeSpec(value: unknown): string {
 }
 
 // 128-bit FNV prime = 2^88 + 2^8 + 0x3b; offset basis per the FNV spec.
-const FNV_PRIME_128 = (1n << 88n) + 0x13bn
-const FNV_OFFSET_128 = 0x6c62272e07bb014262b821756295c58dn
-const MASK_128 = (1n << 128n) - 1n
+// BigInt() constructor calls (not literals) — the root tsconfig targets
+// ES2018, where `123n` literals are a syntax error but the runtime BigInt is
+// available (lib esnext).
+const FNV_PRIME_128 = (BigInt(1) << BigInt(88)) + BigInt(0x13b)
+const FNV_OFFSET_128 = BigInt("0x6c62272e07bb014262b821756295c58d")
+const MASK_128 = (BigInt(1) << BigInt(128)) - BigInt(1)
 
 /** 128-bit FNV-1a over a UTF-8 string, hex-encoded (32 chars). */
 function fnv1a128(input: string): string {

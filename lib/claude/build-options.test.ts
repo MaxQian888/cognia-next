@@ -4388,7 +4388,7 @@ describe("resolveSendOptions — ADR-0090 execution spec stamping", () => {
     process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2 = "1"
     const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
 
-    const execution = opts.execution as Record<string, unknown>
+    const execution = opts.execution as unknown as Record<string, unknown>
     expect(execution).toBeTruthy()
     expect(execution.specVersion).toBe(1)
     expect(execution.executionKind).toBe("agent")
