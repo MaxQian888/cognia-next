@@ -221,11 +221,17 @@ export function ChannelList(props: Props) {
             <MenuIcon className="size-5" />
           </Button>
         </SheetTrigger>
-        <SheetContent side="left" className="w-72 p-0">
-          <SheetHeader className="px-3 pt-3 pb-1">
-            <SheetTitle className="text-sm">{t("conversationsTitle")}</SheetTitle>
-          </SheetHeader>
-          <ChannelListBody {...props} onSelect={handleSelect} />
+        <SheetContent side="left" className="w-72 bg-transparent p-0">
+          <div
+            className="flex h-full min-h-0 flex-col bg-background"
+            data-bg-target="chat"
+            data-slot="sidebar-inner"
+          >
+            <SheetHeader className="px-3 pt-3 pb-1">
+              <SheetTitle className="text-sm">{t("conversationsTitle")}</SheetTitle>
+            </SheetHeader>
+            <ChannelListBody {...props} onSelect={handleSelect} />
+          </div>
         </SheetContent>
       </Sheet>
     )
@@ -250,6 +256,7 @@ export function ChannelList(props: Props) {
       aria-hidden={sidebarCollapsed || undefined}
       inert={sidebarCollapsed || undefined}
       data-bg-target="chat"
+      data-slot="sidebar-inner"
       data-collapsed={sidebarCollapsed || undefined}
     >
       {/* Fixed-width inner layer: keeps the list from reflowing as the aside's

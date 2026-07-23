@@ -164,6 +164,48 @@ test("DM guild renders only direct sessions, grouped into date buckets", () => {
   expect(screen.getByText("bucketOlder")).toBeInTheDocument()
 })
 
+test("desktop history rail opts into the chat wallpaper with sidebar tonality", () => {
+  callQueue.push(characters, [], undefined)
+  const { container } = render(
+    <ChannelList
+      sessions={[dmSession]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  const rail = container.querySelector("aside")
+  expect(rail).toHaveAttribute("data-bg-target", "chat")
+  expect(rail).toHaveAttribute("data-slot", "sidebar-inner")
+})
+
+test("narrow history sheet uses the same chat wallpaper surface", async () => {
+  isNarrow = true
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[dmSession]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  await user.click(screen.getByLabelText("openSessions"))
+  const dialog = await screen.findByRole("dialog", { name: "conversationsTitle" })
+  expect(dialog).toHaveClass("bg-transparent")
+  const surface = dialog.querySelector('[data-slot="sidebar-inner"]')
+  expect(surface).toHaveAttribute("data-bg-target", "chat")
+})
+
 test("embedded resource workbench sessions stay out of the ordinary conversation list", () => {
   const embedded = baseSession("embedded", {
     title: "Canvas assistant",
