@@ -112,6 +112,27 @@ enum CliCommand {
     /// still treat it as a secret. Used by the tier-2 smoke to drive the
     /// service-only external-agent arms from inside the container.
     IssueServiceToken,
+    /// Provider Profile Store administration (ADR-0090 Phase 1). The store
+    /// is secret-free by construction: exports carry credential REFERENCES
+    /// only, and imports refuse inline secret material.
+    Profiles {
+        #[command(subcommand)]
+        command: ProfilesCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ProfilesCommand {
+    /// Print the redacted profile document set as JSON on stdout.
+    Export,
+    /// Validate and apply a redacted export file (replaces the whole set,
+    /// bumps the CAS profileVersion).
+    Import {
+        /// Path to the JSON payload produced by `profiles export`.
+        file: PathBuf,
+    },
+    /// Print the current CAS profileVersion.
+    Version,
 }
 
 /// Resolve the advertised base URL: explicit flag → `COGNIA_PUBLIC_URL` →
@@ -225,7 +246,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("[cognia-server] service token expires_at={exp} (loopback-only)");
             Ok(())
         }
+        CliCommand::Profiles { command } => run_profiles(&dir, command),
         CliCommand::RotateMasterKey { .. } => unreachable!("handled above"),
+    }
+}
+
+/// `cognia-server profiles export|import|version` — admin surface over the
+/// headless Provider Profile Store (same SQLite file `run_serve` uses via
+/// `HeadlessServices`).
+fn run_profiles(
+    data_dir: &std::path::Path,
+    command: ProfilesCommand,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use app_lib::provider_profiles::{
+        headless_store_path, ProviderProfileStore, SqliteProfileStore,
+    };
+    let store = SqliteProfileStore::open(headless_store_path(data_dir))?;
+    match command {
+        ProfilesCommand::Export => {
+            let exported = store.export_redacted()?;
+            println!("{}", serde_json::to_string_pretty(&exported)?);
+            Ok(())
+        }
+        ProfilesCommand::Import { file } => {
+            let raw = std::fs::read_to_string(&file)?;
+            let payload: serde_json::Value = serde_json::from_str(&raw)?;
+            let version = store.import(&payload)?;
+            eprintln!("[cognia-server] profiles imported; profileVersion={version}");
+            Ok(())
+        }
+        ProfilesCommand::Version => {
+            println!("{}", store.profile_version()?);
+            Ok(())
+        }
     }
 }
 
@@ -491,6 +544,22 @@ mod tests {
         assert_eq!(
             plugin_storage_dir(Path::new("/srv/cognia")),
             Path::new("/srv/cognia/.cognia/plugins")
+        );
+    }
+
+    #[test]
+    fn profiles_admin_path_matches_the_headless_services_derivation() {
+        // HeadlessServices derives the store from the plugin dir's PARENT;
+        // the `profiles` subcommands use `headless_store_path`. Pin the two
+        // to the same file so admin edits are visible to the running server.
+        let data = Path::new("/srv/cognia");
+        let from_plugin_parent = plugin_storage_dir(data)
+            .parent()
+            .unwrap()
+            .join("provider-profiles.sqlite");
+        assert_eq!(
+            app_lib::provider_profiles::headless_store_path(data),
+            from_plugin_parent
         );
     }
 }

@@ -54,6 +54,7 @@ import {
 } from "@cognia/provider-types"
 import type { BedrockConnectionSettings } from "@cognia/provider-types"
 import { BedrockSettingsFields } from "./bedrock-settings-fields"
+import { DeploymentProfileCard } from "./deployment-profile-card"
 import type { ApiTestResult } from "@/lib/ai/infrastructure/api-test"
 import { ProtocolSelectContent } from "./protocol-select-content"
 import { AnthropicSubscriptionReuseCard } from "./anthropic-subscription-reuse-card"
@@ -666,6 +667,9 @@ export function ProviderConfigTab({
 
       {/* ── 6. Provider-specific extras ────────────────────────────── */}
       {children}
+
+      {/* ── 7. Derived unified-execution profile (ADR-0090 Phase 1) ── */}
+      <DeploymentProfileCard providerId={providerId} />
     </div>
   )
 }

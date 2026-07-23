@@ -29,6 +29,7 @@ pub mod commands;
 pub mod concurrency;
 pub mod cooldown;
 pub mod execute;
+pub mod header_policy;
 pub mod keyed_rate_limit;
 pub mod server;
 pub mod session_key;

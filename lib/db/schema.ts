@@ -25,6 +25,12 @@ import type {
 import type { Project } from "@/types"
 import type { ProjectChunk } from "@/types/project-knowledge"
 import type { TrustedWorkspace } from "./trusted-workspaces"
+import type {
+  DeploymentProfile,
+  ProviderProfile,
+  TransportProfile,
+} from "@cognia/provider-types/provider-profile"
+import type { ProfileStoreMetaRow } from "./provider-profiles"
 import type { BackupHistoryRow } from "./backup-history"
 import type { NotificationRecord } from "@/types/notifications"
 import type { SandboxConnectionRow } from "./sandbox-connections"
@@ -320,6 +326,11 @@ export class CogniaDB extends Dexie {
   // v120 — topic-scoped activation/delivery state and durable inbound execution jobs.
   connectorConversationStates!: Table<ConnectorConversationStateRow, string>
   connectorInboundJobs!: Table<ConnectorInboundJobRow, string>
+  // v121 — Provider Profile Store (ADR-0090 Phase 1). See `lib/db/provider-profiles.ts`.
+  providerProfiles!: Table<ProviderProfile, string>
+  deploymentProfiles!: Table<DeploymentProfile, string>
+  transportProfiles!: Table<TransportProfile, string>
+  profileStoreMeta!: Table<ProfileStoreMetaRow, "singleton">
   // v20 — Claude subscription usage table. One row per `anthropic-ratelimit-
   // unified-*` header snapshot; capped at 1 000 rows newest-first by
   // `lib/anthropic-subscription/usage-collector.ts`.
@@ -2643,6 +2654,45 @@ export class CogniaDB extends Dexie {
       connectorInboundJobs:
         "&id, &[adapterId+platformMessageId], [conversationKey+status+receivedAt], adapterId, conversationKey, status, leaseExpiresAt, executionRunId, receivedAt",
     })
+
+    // v121 — Provider Profile Store (ADR-0090 Phase 1). Derived, secret-free
+    // projections of the legacy providerSettings/customProviders rows into
+    // provider / deployment / transport documents. The legacy rows stay the
+    // credential + read authority; these tables are kept fresh by the
+    // settings dual-write hook (`lib/settings/provider-profile-sync.ts`) and
+    // re-derivable at any time, so rollback = old code ignoring new tables.
+    this.version(121)
+      .stores({
+        providerProfiles: "&id",
+        deploymentProfiles: "&id, providerRef, legacyProviderId",
+        transportProfiles: "&id",
+        profileStoreMeta: "&id",
+      })
+      .upgrade(async (tx) => {
+        // Lazy-import: the catalog + deriver only load during the one-time
+        // upgrade transaction, not on every db open.
+        const { deriveProfiles, getBuiltInProviderCatalog } = await import("@cognia/provider-types")
+        const settings = (await tx.table("settings").get("singleton")) as
+          | {
+              providerSettings?: Record<string, never>
+              customProviders?: never[]
+            }
+          | undefined
+        const derived = deriveProfiles({
+          catalog: getBuiltInProviderCatalog(),
+          providerSettings: settings?.providerSettings,
+          customProviders: settings?.customProviders,
+        })
+        await tx.table("providerProfiles").bulkPut(derived.providerProfiles)
+        await tx.table("deploymentProfiles").bulkPut(derived.deploymentProfiles)
+        await tx.table("transportProfiles").bulkPut(derived.transportProfiles)
+        await tx.table("profileStoreMeta").put({
+          id: "singleton",
+          profileVersion: 1,
+          schemaVersion: 1,
+          migratedAt: new Date().toISOString(),
+        })
+      })
 
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.

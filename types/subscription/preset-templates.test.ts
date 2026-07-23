@@ -68,3 +68,25 @@ describe("findPresetTemplate", () => {
     expect(findPresetTemplate("codex", "does-not-exist")).toBeUndefined()
   })
 })
+
+describe("ADR-0090 Phase 1 — legacy alias stability", () => {
+  it("every relay template id keeps resolving through the profile-migration legacy aliases", async () => {
+    // The Provider Profile Store derivation is identity-preserving for relay
+    // ids (deployment id === legacy provider id), so ccswitch/subscription
+    // templates like glm-anthropic must survive migration unchanged.
+    const { deriveProfiles } = await import("@cognia/provider-types/profile-migration")
+    const { getBuiltInProviderCatalog } =
+      await import("@cognia/provider-types/built-in-provider-catalog")
+    const relays = buildPresetTemplates("anthropic").filter((t) => t.templateId !== "custom")
+    const providerSettings = Object.fromEntries(
+      relays.map((t) => [t.templateId, { providerId: t.templateId, enabled: true }])
+    )
+    const derived = deriveProfiles({
+      catalog: getBuiltInProviderCatalog(),
+      providerSettings,
+    })
+    for (const t of relays) {
+      expect(derived.legacyAliases[t.templateId]).toBe(t.templateId)
+    }
+  })
+})

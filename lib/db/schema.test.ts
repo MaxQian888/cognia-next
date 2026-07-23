@@ -213,6 +213,71 @@ describe("getDb", () => {
     expect(db.connectorInboundJobs).toBeDefined()
   })
 
+  it("v121 opens the Provider Profile Store tables and seeds meta", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(121)
+    expect(db.providerProfiles.schema.primKey.name).toBe("id")
+    expect(db.deploymentProfiles.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["providerRef", "legacyProviderId"])
+    )
+    expect(db.transportProfiles.schema.primKey.name).toBe("id")
+    // Fresh installs skip upgrade hooks (Dexie), so the CAS meta singleton
+    // appears on the first derived write, not at open time. Accessors treat
+    // a missing row as profileVersion 0.
+    expect(await db.profileStoreMeta.get("singleton")).toBeUndefined()
+  })
+
+  it("v121 upgrade derives profiles from an old-shape settings row", async () => {
+    // Seed a pre-121 database whose settings hold a vendor + relay + custom
+    // provider, then open at the current version and assert the derivation.
+    const name = `cognia-v121-provider-profiles-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(108).stores({ settings: "&id" })
+    await legacy.open()
+    await legacy.table("settings").put({
+      id: "singleton",
+      providerSettings: {
+        zhipu: { providerId: "zhipu", enabled: true, apiKey: "sk-secret-zhipu" },
+        "glm-anthropic": { providerId: "glm-anthropic", enabled: true },
+      },
+      customProviders: [
+        {
+          id: "my-relay",
+          name: "My Relay",
+          enabled: true,
+          protocol: "anthropic",
+          baseURL: "https://relay.example/anthropic",
+          defaultModel: "claude-sonnet-5",
+        },
+      ],
+    })
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+    expect(upgraded.verno).toBeGreaterThanOrEqual(121)
+
+    const zhipu = await upgraded.providerProfiles.get("zhipu")
+    expect(zhipu?.deploymentRefs).toEqual(["glm-anthropic", "zhipu"])
+    const glm = await upgraded.deploymentProfiles.get("glm-anthropic")
+    expect(glm?.providerRef).toBe("zhipu")
+    expect(glm?.legacyProviderId).toBe("glm-anthropic")
+    const custom = await upgraded.deploymentProfiles.get("my-relay")
+    expect(custom?.endpoint).toBe("https://relay.example/anthropic")
+    // The derivation must not copy secret material.
+    const all = JSON.stringify({
+      p: await upgraded.providerProfiles.toArray(),
+      d: await upgraded.deploymentProfiles.toArray(),
+      t: await upgraded.transportProfiles.toArray(),
+    })
+    expect(all).not.toContain("sk-secret-zhipu")
+    expect(await upgraded.profileStoreMeta.get("singleton")).toMatchObject({ profileVersion: 1 })
+
+    await upgraded.delete()
+    upgraded.close()
+  })
+
   it("v120 opens durable connector conversation and inbound job tables", async () => {
     const db = getDb()
     await db.open()

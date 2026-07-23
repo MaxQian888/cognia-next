@@ -3108,6 +3108,118 @@ paths:
             content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
           }
 
+  # ── Provider Profile Store admin plane (ADR-0090 Phase 1, service scope) ──
+  # Redacted provider/deployment/transport documents (credential REFERENCES
+  # only; inline secret material is refused on import).
+
+  /api/v1/_rpc/provider_profiles_list:
+    post:
+      operationId: rpcProviderProfilesList
+      tags: [rpc-control]
+      summary: Export the redacted Provider Profile Store (service scope only).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: The redacted document set incl. schemaVersion + profileVersion.
+          content:
+            application/json:
+              schema:
+                type: object
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "503":
+          {
+            description: not a headless install,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/provider_profiles_import:
+    post:
+      operationId: rpcProviderProfilesImport
+      tags: [rpc-control]
+      summary: Validate and apply a redacted profile export (service scope only).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payload]
+              properties:
+                payload:
+                  type: object
+                  description: A `provider_profiles_list` / `profiles export` payload.
+      responses:
+        "200":
+          description: Applied; the new CAS profileVersion.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [profileVersion]
+                properties:
+                  profileVersion: { type: integer }
+        "400":
+          {
+            description: validation failed (inline secrets / newer schema / malformed docs),
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "503":
+          {
+            description: not a headless install,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/provider_profiles_version:
+    post:
+      operationId: rpcProviderProfilesVersion
+      tags: [rpc-control]
+      summary: Current CAS profileVersion of the Provider Profile Store (service scope only).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: The version counter.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [profileVersion]
+                properties:
+                  profileVersion: { type: integer }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403":
+          {
+            description: device-scope token,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "503":
+          {
+            description: not a headless install,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
   # ── Connector command plane (ADR-0059 T-A5, service scope only) ──────────
   # The headless brain's connector-runtime drives the same `connectors_*`
   # wrappers the desktop uses; these arms delegate to the free functions the

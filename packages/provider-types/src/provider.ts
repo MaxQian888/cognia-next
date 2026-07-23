@@ -203,6 +203,14 @@ export interface UserProviderSettings {
   providerId: string
   apiKey?: string
   baseURL?: string
+  /**
+   * Extra static headers stamped on every request to this provider
+   * (ADR-0090 Phase 1). Validated at write time by the shared transport
+   * header policy (`transport-header-policy.ts`) — auth/hop-by-hop/internal
+   * header names are rejected before they reach the store. Projected into
+   * the derived TransportProfile's `staticHeaders`.
+   */
+  customHeaders?: Record<string, string>
   /** Native Amazon Bedrock authentication and region settings. */
   bedrock?: BedrockConnectionSettings
   /**

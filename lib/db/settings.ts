@@ -325,6 +325,20 @@ export async function saveSettings(patch: Partial<Omit<AppSettings, "id">>): Pro
     // `lib/sync/desktop-sync-source.ts:readSettingsDelta`).
     const merged: AppSettings = { ...current, ...patch, id: SINGLETON_ID, updatedAt: Date.now() }
     await getDb().settings.put(merged)
+    // ADR-0090 Phase 1: keep the derived Provider Profile Store fresh.
+    // Runs inside the serialized queue so derivations observe writes in
+    // order; awaited so a caller that immediately reads profiles sees the
+    // updated set, but failures never poison the settings save itself.
+    if ("providerSettings" in patch || "customProviders" in patch) {
+      try {
+        const { syncProviderProfilesFromSettings } =
+          await import("@/lib/settings/provider-profile-sync")
+        await syncProviderProfilesFromSettings(merged)
+      } catch {
+        // The profile store is a re-derivable projection; a failed sync is
+        // recovered by the next provider-touching save.
+      }
+    }
     return merged
   })
   // Swallow rejection on the queue tail so a single failure doesn't poison

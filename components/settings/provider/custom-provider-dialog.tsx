@@ -6,6 +6,8 @@
  */
 
 import { useState, useEffect, useMemo } from "react"
+
+import { TransportHeadersEditor } from "./transport-headers-editor"
 import { Plus, X, AlertCircle, Eye, EyeOff, Settings2, RefreshCw, Loader2 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
@@ -103,6 +105,9 @@ export function CustomProviderDialog({
   >()
   const [discoveringModels, setDiscoveringModels] = useState(false)
   const [discoveryError, setDiscoveryError] = useState<string | null>(null)
+  // ADR-0090 Phase 1 — static transport headers, validated by the shared
+  // header policy inside the editor (blocked names never reach the store).
+  const [customHeaders, setCustomHeaders] = useState<Record<string, string> | undefined>(undefined)
 
   const availableModels = useMemo(
     () =>
@@ -134,6 +139,7 @@ export function CustomProviderDialog({
         setModelMetadata(provider.customModelMetadata || {})
         setDiscoveredModels(provider.discoveredModels || [])
         setDiscoveredModelsLastFetched(provider.discoveredModelsLastFetched)
+        setCustomHeaders(provider.customHeaders)
       } else {
         // Reset for new provider
         setName("")
@@ -148,6 +154,7 @@ export function CustomProviderDialog({
         setExpandedModelSettings(null)
         setDiscoveredModels([])
         setDiscoveredModelsLastFetched(undefined)
+        setCustomHeaders(undefined)
       }
       resetTestResult()
       setShowDeleteConfirm(false)
@@ -261,6 +268,7 @@ export function CustomProviderDialog({
       customModelMetadata: modelMetadata,
       discoveredModels,
       discoveredModelsLastFetched,
+      customHeaders,
       defaultModel: defaultModel || availableModels[0]?.id || "",
       enabled: editingProviderId ? (customProviders[editingProviderId]?.enabled ?? true) : true,
     }
@@ -394,6 +402,9 @@ export function CustomProviderDialog({
             />
             <p className="text-xs text-muted-foreground">{t("baseURLHint")}</p>
           </div>
+
+          {/* Custom transport headers (ADR-0090 Phase 1) */}
+          <TransportHeadersEditor value={customHeaders} onChange={setCustomHeaders} />
 
           {/* API Key */}
           <div className="space-y-2">

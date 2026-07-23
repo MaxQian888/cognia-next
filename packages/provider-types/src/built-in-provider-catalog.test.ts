@@ -80,6 +80,34 @@ describe("built-in provider catalog", () => {
     ).toContain("kimi-k2.7-code")
   })
 
+  it("stamps relayOf on every vendor relay so Phase 1 can derive deployments (ADR-0090)", () => {
+    const catalog = getBuiltInProviderCatalog()
+
+    // Every `*-anthropic`-suffixed relay names its vendor.
+    for (const entry of catalog.filter((e) => e.id.endsWith("-anthropic"))) {
+      expect(entry.relayOf).toBeTruthy()
+      expect(entry.relayOf).not.toBe(entry.id)
+    }
+    // Suffix-less coding relays too.
+    expect(getBuiltInProviderCatalogEntry("kimi-coding")?.relayOf).toBe("moonshot")
+    expect(getBuiltInProviderCatalogEntry("kimi-anthropic")?.relayOf).toBe("moonshot")
+    expect(getBuiltInProviderCatalogEntry("glm-anthropic")?.relayOf).toBe("zhipu")
+    expect(getBuiltInProviderCatalogEntry("glm-anthropic-intl")?.relayOf).toBe("zhipu")
+    expect(getBuiltInProviderCatalogEntry("volcengine-agentplan")?.relayOf).toBe("volcengine")
+    // A relayOf naming an in-catalog vendor must resolve; slugs without a
+    // catalog entry (qianfan, longcat, …) are synthesized at migration time.
+    for (const entry of catalog) {
+      if (!entry.relayOf) continue
+      const vendor = getBuiltInProviderCatalogEntry(entry.relayOf)
+      if (vendor) expect(vendor.id).toBe(entry.relayOf)
+    }
+    // The Anthropic first-party entry and standalone anthropic-wire
+    // aggregators are vendors, not relays.
+    expect(getBuiltInProviderCatalogEntry("anthropic")?.relayOf).toBeUndefined()
+    expect(getBuiltInProviderCatalogEntry("packycode")?.relayOf).toBeUndefined()
+    expect(getBuiltInProviderCatalogEntry("shengsuanyun")?.relayOf).toBeUndefined()
+  })
+
   it("creates quick-add presets only for entries with default base URLs", () => {
     const presets = buildQuickAddProviderPresets()
 

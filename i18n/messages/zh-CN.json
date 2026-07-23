@@ -4074,21 +4074,49 @@
       },
       "attachments": {
         "countLimit": "最多只能附加 {max} 个附件。",
+        "extracting": "读取中…",
         "fallbackFile": "文件",
         "fallbackName": "附件",
         "fileSizeExceeded": "{count, plural, =1 {1 个文件超过} other {# 个文件超过}} {max}MB。",
         "folderEmpty": "该文件夹中没有可添加的文件。",
         "folderTruncated": "仅读取了拖入文件夹中的前 {max} 个文件。",
         "linkSkipped": "有 {count} 个链接无法读取，仍会发送原始网址。",
+        "openPreviewAria": "预览 {filename}",
         "optimized": "添加前已优化 {count} 张大图。",
         "oversizeBody": "这些附件大约会增加 {tokens}k tokens 的上下文。仍要发送吗？",
         "oversizeCancel": "取消",
         "oversizeConfirm": "仍然发送",
         "oversizeTitle": "附件较大",
         "preparing": "正在处理附件…",
+        "preview": {
+          "close": "关闭",
+          "empty": "未能从此文件中提取到内容。",
+          "fileTab": "文件",
+          "fullSize": "查看原图",
+          "imageHint": "发送前会将长边压缩到 {maxEdge}px 以内。",
+          "imageSize": "{width}×{height} · {size}",
+          "modelHint": "这就是模型将收到的完整内容。",
+          "modelTab": "模型视角",
+          "ocrDetail": "查看逐页结果",
+          "ocrEmpty": "未在图片中识别到文本。",
+          "ocrRun": "运行 OCR",
+          "ocrRunning": "OCR 识别中…",
+          "ocrToInput": "把文本加进输入框",
+          "ocrToggle": "同时发送 OCR 文本",
+          "redactedNote": "高亮部分在发送前已被脱敏。",
+          "title": "附件",
+          "tokens": "{tokens} tokens"
+        },
+        "rejectReason": {
+          "empty": "未找到可读文本",
+          "notDataUrl": "无法读取此文件",
+          "parseFailed": "无法解析此文件",
+          "unsupportedType": "不支持的文件类型"
+        },
         "removeAria": "移除 {filename}",
-        "removeFallback": "移除附件",
+        "reorderAria": "拖动排序 {filename}",
         "skipped": "{count, plural, =1 {1 个附件已被} other {# 个附件已被}}跳过（不支持的文件类型）。",
+        "tokenBadge": "{tokens} tok",
         "unsupported": "有 {count} 个文件不受支持。"
       },
       "camera": {
@@ -4436,6 +4464,7 @@
       "title": "今天想完成点什么？"
     },
     "filePreview": {
+      "extractedChars": "已提取 {count} 字符",
       "loading": "正在加载 {name}…",
       "pdfFallback": "无法预览此 PDF。"
     },
@@ -5297,7 +5326,8 @@
         "description": "文件系统工作区工具需要受支持的桌面端或沙箱后端。",
         "title": "工作区暂不可用"
       }
-    }
+    },
+    "webviewPanelPending": "该面板的 webview 尚未加载。"
   },
   "crashDialog": {
     "description": "{time} 开始的会话（版本 {version}）因崩溃而结束。已保存包含详细信息的崩溃报告。",
@@ -15052,6 +15082,15 @@
     "deleteProviderConfirm": "将移除“{name}”及其已保存的凭据。此操作无法撤销。",
     "deleteProviderTitle": "删除这个自定义提供商？",
     "deleteUnsupported": "该 provider 不支持删除模型。",
+    "deploymentProfileCredential": "凭证",
+    "deploymentProfileCredentialKind_env": "环境变量",
+    "deploymentProfileCredentialKind_legacy_provider_settings": "提供商设置（本行）",
+    "deploymentProfileCredentialKind_secret_store": "加密密钥库",
+    "deploymentProfileCredentialKind_subscription_vault": "订阅保管库",
+    "deploymentProfileEndpoint": "端点",
+    "deploymentProfileTitle": "统一执行档案",
+    "deploymentProfileTransport": "传输",
+    "deploymentProfileVendorOf": "{vendor} 的部署",
     "detailPanel": {
       "advancedPlaceholder": "高级占位",
       "configPlaceholder": "配置占位",
@@ -15759,6 +15798,23 @@
     "togetherai": "Together AI",
     "togetheraiDescription": "快速开源模型推理",
     "total": "共",
+    "transportHeadersAdd": "添加请求头",
+    "transportHeadersHint": "随每个请求发送到该提供商的额外请求头。认证、逐跳、Host、浏览器身份以及内部 x-cognia-* 请求头均被禁止。",
+    "transportHeadersLabel": "自定义请求头",
+    "transportHeadersName": "请求头名称",
+    "transportHeadersNamePlaceholder": "例如 anthropic-beta",
+    "transportHeadersReason_authHeader": "认证请求头由凭证存储管理，不能在此覆盖。",
+    "transportHeadersReason_browserForwarding": "浏览器身份请求头会被剥离，无法配置。",
+    "transportHeadersReason_contentFraming": "内容长度类请求头按请求自动计算。",
+    "transportHeadersReason_cookieHeader": "Cookie 请求头不会转发给提供商。",
+    "transportHeadersReason_hopByHop": "逐跳请求头无法被转发。",
+    "transportHeadersReason_hostHeader": "Host 请求头由传输层设置，不能覆盖。",
+    "transportHeadersReason_internalHeader": "x-cognia-* 请求头保留供内部使用。",
+    "transportHeadersReason_invalidName": "不是合法的 HTTP 请求头名称。",
+    "transportHeadersReason_invalidValue": "请求头值不能包含换行或 NUL 字节。",
+    "transportHeadersRemove": "移除请求头",
+    "transportHeadersValue": "请求头值",
+    "transportHeadersValuePlaceholder": "请求头值",
     "unknownProviderType": "未知服务商类型。",
     "unlimited": "无限制",
     "usage": "用量",

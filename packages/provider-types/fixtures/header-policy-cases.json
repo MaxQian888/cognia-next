@@ -1,0 +1,294 @@
+{
+  "version": 1,
+  "comment": "Canonical parity fixture for the transport header policy. Consumed by packages/provider-types/src/transport-header-policy.test.ts (TS) and crates/cognia-gateway/src/header_policy.rs (Rust). Both implementations must produce these exact verdicts.",
+  "cases": [
+    {
+      "name": "anthropic-beta",
+      "value": "prompt-caching-2024-07-31",
+      "context": "static",
+      "allowed": true,
+      "reason": "ok"
+    },
+    {
+      "name": "anthropic-version",
+      "value": "2023-06-01",
+      "context": "static",
+      "allowed": true,
+      "reason": "ok"
+    },
+    {
+      "name": "X-Portkey-Provider",
+      "value": "anthropic",
+      "context": "static",
+      "allowed": true,
+      "reason": "ok"
+    },
+    {
+      "name": "x-custom-tenant",
+      "value": "team-42",
+      "context": "static",
+      "allowed": true,
+      "reason": "ok"
+    },
+    {
+      "name": "User-Agent",
+      "value": "cognia/1.0",
+      "context": "static",
+      "allowed": true,
+      "reason": "ok"
+    },
+
+    {
+      "name": "authorization",
+      "value": "Bearer sk-x",
+      "context": "static",
+      "allowed": false,
+      "reason": "auth-header"
+    },
+    {
+      "name": "Authorization",
+      "value": "Bearer sk-x",
+      "context": "static",
+      "allowed": false,
+      "reason": "auth-header"
+    },
+    {
+      "name": "x-api-key",
+      "value": "sk-x",
+      "context": "static",
+      "allowed": false,
+      "reason": "auth-header"
+    },
+    {
+      "name": "X-Api-Key",
+      "value": "sk-x",
+      "context": "static",
+      "allowed": false,
+      "reason": "auth-header"
+    },
+    {
+      "name": "proxy-authorization",
+      "value": "Basic xyz",
+      "context": "static",
+      "allowed": false,
+      "reason": "auth-header"
+    },
+    {
+      "name": "proxy-authenticate",
+      "value": "Basic",
+      "context": "static",
+      "allowed": false,
+      "reason": "auth-header"
+    },
+
+    {
+      "name": "connection",
+      "value": "close",
+      "context": "static",
+      "allowed": false,
+      "reason": "hop-by-hop"
+    },
+    {
+      "name": "keep-alive",
+      "value": "timeout=5",
+      "context": "static",
+      "allowed": false,
+      "reason": "hop-by-hop"
+    },
+    {
+      "name": "transfer-encoding",
+      "value": "chunked",
+      "context": "static",
+      "allowed": false,
+      "reason": "hop-by-hop"
+    },
+    {
+      "name": "TE",
+      "value": "trailers",
+      "context": "static",
+      "allowed": false,
+      "reason": "hop-by-hop"
+    },
+    {
+      "name": "trailer",
+      "value": "Expires",
+      "context": "static",
+      "allowed": false,
+      "reason": "hop-by-hop"
+    },
+    {
+      "name": "upgrade",
+      "value": "websocket",
+      "context": "static",
+      "allowed": false,
+      "reason": "hop-by-hop"
+    },
+
+    {
+      "name": "host",
+      "value": "evil.example",
+      "context": "static",
+      "allowed": false,
+      "reason": "host-header"
+    },
+    {
+      "name": "Host",
+      "value": "evil.example",
+      "context": "forward",
+      "allowed": false,
+      "reason": "host-header"
+    },
+    {
+      "name": "content-length",
+      "value": "0",
+      "context": "static",
+      "allowed": false,
+      "reason": "content-framing"
+    },
+
+    {
+      "name": "cookie",
+      "value": "session=1",
+      "context": "static",
+      "allowed": false,
+      "reason": "cookie-header"
+    },
+    {
+      "name": "set-cookie",
+      "value": "a=b",
+      "context": "static",
+      "allowed": false,
+      "reason": "cookie-header"
+    },
+
+    {
+      "name": "origin",
+      "value": "https://app.example",
+      "context": "static",
+      "allowed": false,
+      "reason": "browser-forwarding"
+    },
+    {
+      "name": "referer",
+      "value": "https://app.example/page",
+      "context": "static",
+      "allowed": false,
+      "reason": "browser-forwarding"
+    },
+    {
+      "name": "forwarded",
+      "value": "for=127.0.0.1",
+      "context": "static",
+      "allowed": false,
+      "reason": "browser-forwarding"
+    },
+    {
+      "name": "x-forwarded-for",
+      "value": "127.0.0.1",
+      "context": "static",
+      "allowed": false,
+      "reason": "browser-forwarding"
+    },
+    {
+      "name": "X-Forwarded-Host",
+      "value": "app.example",
+      "context": "forward",
+      "allowed": false,
+      "reason": "browser-forwarding"
+    },
+    {
+      "name": "sec-fetch-mode",
+      "value": "cors",
+      "context": "static",
+      "allowed": false,
+      "reason": "browser-forwarding"
+    },
+
+    {
+      "name": "x-cognia-session",
+      "value": "s1",
+      "context": "static",
+      "allowed": false,
+      "reason": "internal-header"
+    },
+    {
+      "name": "X-Cognia-Route-Ticket",
+      "value": "tk",
+      "context": "forward",
+      "allowed": false,
+      "reason": "internal-header"
+    },
+
+    {
+      "name": "bad header",
+      "value": "x",
+      "context": "static",
+      "allowed": false,
+      "reason": "invalid-name"
+    },
+    {
+      "name": "bad@header",
+      "value": "x",
+      "context": "static",
+      "allowed": false,
+      "reason": "invalid-name"
+    },
+    { "name": "", "value": "x", "context": "static", "allowed": false, "reason": "invalid-name" },
+    {
+      "name": "x-ok",
+      "value": "line1\r\nx-injected: evil",
+      "context": "static",
+      "allowed": false,
+      "reason": "invalid-value"
+    },
+    {
+      "name": "x-ok",
+      "value": "nul\u0000byte",
+      "context": "static",
+      "allowed": false,
+      "reason": "invalid-value"
+    },
+
+    {
+      "name": "anthropic-beta",
+      "value": null,
+      "context": "forward",
+      "allowed": true,
+      "reason": "ok"
+    },
+    {
+      "name": "x-claude-code-version",
+      "value": null,
+      "context": "forward",
+      "allowed": true,
+      "reason": "ok"
+    },
+    {
+      "name": "x-stainless-lang",
+      "value": null,
+      "context": "forward",
+      "allowed": true,
+      "reason": "ok"
+    },
+    { "name": "x-app", "value": null, "context": "forward", "allowed": true, "reason": "ok" },
+    {
+      "name": "authorization",
+      "value": null,
+      "context": "forward",
+      "allowed": false,
+      "reason": "auth-header"
+    }
+  ],
+  "semanticForwardCases": [
+    { "name": "anthropic-beta", "semantic": true },
+    { "name": "anthropic-version", "semantic": true },
+    { "name": "x-claude-code-version", "semantic": true },
+    { "name": "x-stainless-runtime", "semantic": true },
+    { "name": "x-app", "semantic": true },
+    { "name": "authorization", "semantic": false },
+    { "name": "x-api-key", "semantic": false },
+    { "name": "user-agent", "semantic": false },
+    { "name": "x-cognia-session", "semantic": false },
+    { "name": "cookie", "semantic": false }
+  ]
+}

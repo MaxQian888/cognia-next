@@ -126,6 +126,15 @@ export interface BuiltInProviderCatalogEntry {
   type: BuiltInProviderType
   protocol: BuiltInProviderProtocol
   family?: BuiltInProviderFamily
+  /**
+   * For relay entries (`*-anthropic` et al.): the vendor this entry is a
+   * deployment OF (e.g. `glm-anthropic` → `zhipu`). Drives the ADR-0090
+   * Phase 1 provider/deployment derivation — the relay id stays a valid
+   * legacy id, but new writers treat it as a deployment of the vendor, not
+   * a provider in its own right. The slug may name a vendor without its own
+   * catalog entry (e.g. `qiniu`); the migration synthesizes the profile.
+   */
+  relayOf?: string
   adapter?: BuiltInProviderAdapterId
   apiKeyRequired: boolean
   baseURLRequired: boolean
@@ -3094,6 +3103,7 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
   // -------------------------------------------------------------------------
   "deepseek-anthropic": {
     id: "deepseek-anthropic",
+    relayOf: "deepseek",
     name: "DeepSeek (Claude)",
     type: "cloud",
     protocol: "anthropic",
@@ -3116,6 +3126,7 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
   },
   "glm-anthropic": {
     id: "glm-anthropic",
+    relayOf: "zhipu",
     name: "Zhipu GLM (Claude)",
     type: "cloud",
     protocol: "anthropic",
@@ -3141,6 +3152,7 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
   },
   "glm-anthropic-intl": {
     id: "glm-anthropic-intl",
+    relayOf: "zhipu",
     name: "Zhipu GLM · Z.ai (Claude)",
     type: "cloud",
     protocol: "anthropic",
@@ -3166,6 +3178,7 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
   },
   "kimi-anthropic": {
     id: "kimi-anthropic",
+    relayOf: "moonshot",
     name: "Kimi (Claude)",
     type: "cloud",
     protocol: "anthropic",
@@ -3184,6 +3197,7 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
   },
   "kimi-coding": {
     id: "kimi-coding",
+    relayOf: "moonshot",
     name: "Kimi For Coding (Claude)",
     type: "cloud",
     protocol: "anthropic",
@@ -3202,6 +3216,7 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
   },
   "minimax-anthropic": {
     id: "minimax-anthropic",
+    relayOf: "minimax",
     name: "MiniMax (Claude)",
     type: "cloud",
     protocol: "anthropic",
@@ -3226,6 +3241,7 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
   },
   "minimax-anthropic-intl": {
     id: "minimax-anthropic-intl",
+    relayOf: "minimax",
     name: "MiniMax · Global (Claude)",
     type: "cloud",
     protocol: "anthropic",
@@ -3250,6 +3266,7 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
   },
   "stepfun-anthropic": {
     id: "stepfun-anthropic",
+    relayOf: "stepfun",
     name: "StepFun (Claude)",
     type: "cloud",
     protocol: "anthropic",
@@ -3273,6 +3290,7 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
   },
   "volcengine-agentplan": {
     id: "volcengine-agentplan",
+    relayOf: "volcengine",
     name: "火山方舟 Agent Plan (Claude)",
     type: "cloud",
     protocol: "anthropic",
@@ -3291,6 +3309,7 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
   },
   "longcat-anthropic": {
     id: "longcat-anthropic",
+    relayOf: "longcat",
     name: "LongCat (Claude)",
     type: "cloud",
     protocol: "anthropic",
@@ -3309,6 +3328,7 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
   },
   "qianfan-coding": {
     id: "qianfan-coding",
+    relayOf: "qianfan",
     name: "Baidu Qianfan Coding (Claude)",
     type: "cloud",
     protocol: "anthropic",
@@ -3327,6 +3347,7 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
   },
   "bailian-anthropic": {
     id: "bailian-anthropic",
+    relayOf: "bailian",
     name: "Bailian · Aliyun (Claude)",
     type: "cloud",
     protocol: "anthropic",
@@ -3345,6 +3366,7 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
   },
   "xiaomi-mimo-anthropic": {
     id: "xiaomi-mimo-anthropic",
+    relayOf: "xiaomi-mimo",
     name: "Xiaomi MiMo (Claude)",
     type: "cloud",
     protocol: "anthropic",
@@ -3363,6 +3385,7 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
   },
   "openrouter-anthropic": {
     id: "openrouter-anthropic",
+    relayOf: "openrouter",
     name: "OpenRouter (Claude)",
     type: "cloud",
     protocol: "anthropic",
@@ -3381,6 +3404,7 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
   },
   "siliconflow-anthropic": {
     id: "siliconflow-anthropic",
+    relayOf: "siliconflow",
     name: "SiliconFlow (Claude)",
     type: "cloud",
     protocol: "anthropic",
@@ -3404,6 +3428,7 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
   },
   "novita-anthropic": {
     id: "novita-anthropic",
+    relayOf: "novita",
     name: "Novita AI (Claude)",
     type: "cloud",
     protocol: "anthropic",
@@ -3422,6 +3447,7 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
   },
   "qiniu-anthropic": {
     id: "qiniu-anthropic",
+    relayOf: "qiniu",
     name: "Qiniu (Claude)",
     type: "cloud",
     protocol: "anthropic",
@@ -3440,6 +3466,7 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
   },
   "modelscope-anthropic": {
     id: "modelscope-anthropic",
+    relayOf: "modelscope",
     name: "ModelScope (Claude)",
     type: "cloud",
     protocol: "anthropic",

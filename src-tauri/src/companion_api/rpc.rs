@@ -249,6 +249,11 @@ const KNOWN_COMMANDS: &[&str] = &[
     "connectors_register",
     "connectors_unregister",
     "connectors_list_adapters",
+    // ADR-0090 Phase 1 — Provider Profile Store admin plane (service scope;
+    // redacted docs only, secrets never transit these arms).
+    "provider_profiles_list",
+    "provider_profiles_import",
+    "provider_profiles_version",
     // ADR-0059 T-A5 — connector command plane for the headless brain's
     // connector-runtime. Same names as the Tauri commands; each arm
     // delegates to the same free function the command wraps.
@@ -1092,6 +1097,12 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "plugin_unload_vscode",
     "plugin_invoke_vscode_rpc",
     "plugin_vscode_send_response",
+    // ADR-0090 Phase 1 — Provider Profile Store admin plane. Exports are
+    // redacted (references only), but imports rewrite the routing control
+    // plane, so the whole surface is service-scope.
+    "provider_profiles_list",
+    "provider_profiles_import",
+    "provider_profiles_version",
 ];
 
 static SERVICE_ONLY_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
@@ -2488,6 +2499,49 @@ pub(super) async fn dispatch(
                 })
                 .collect();
             Ok(serde_json::json!({ "adapters": adapters }))
+        }
+
+        // ── Provider Profile Store admin plane (ADR-0090 Phase 1) ───────────
+        // Service-scope only (SERVICE_ONLY_COMMANDS). The store is sync
+        // rusqlite behind a parking_lot Mutex — each arm runs the whole
+        // operation inside spawn_blocking so no guard crosses an .await.
+        "provider_profiles_list" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let profiles = std::sync::Arc::clone(&services.profiles);
+            tokio::task::spawn_blocking(move || profiles.export_redacted())
+                .await
+                .map_err(|e| RpcError::internal(format!("profiles export join: {e}")))?
+                .map_err(|e| RpcError::internal(format!("profiles export: {e}")))
+        }
+
+        "provider_profiles_import" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let payload = args
+                .get("payload")
+                .cloned()
+                .ok_or_else(|| RpcError::malformed("missing 'payload'".to_string()))?;
+            let profiles = std::sync::Arc::clone(&services.profiles);
+            let version = tokio::task::spawn_blocking(move || profiles.import(&payload))
+                .await
+                .map_err(|e| RpcError::internal(format!("profiles import join: {e}")))?
+                .map_err(|e| RpcError::malformed(format!("profiles import: {e}")))?;
+            Ok(serde_json::json!({ "profileVersion": version }))
+        }
+
+        "provider_profiles_version" => {
+            let services = host
+                .headless()
+                .ok_or_else(|| RpcError::headless_unsupported(name))?;
+            let profiles = std::sync::Arc::clone(&services.profiles);
+            let version = tokio::task::spawn_blocking(move || profiles.profile_version())
+                .await
+                .map_err(|e| RpcError::internal(format!("profiles version join: {e}")))?
+                .map_err(|e| RpcError::internal(format!("profiles version: {e}")))?;
+            Ok(serde_json::json!({ "profileVersion": version }))
         }
 
         // ── Connector command plane for the headless brain (ADR-0059 T-A5) ──
@@ -6899,6 +6953,21 @@ rl.on("line", (line) => {
     #[tokio::test]
     async fn dispatch_coverage_claude_sidecar_status() {
         assert_not_404!("claude_sidecar_status", json!({}));
+    }
+
+    #[tokio::test]
+    async fn dispatch_coverage_provider_profiles_list() {
+        assert_not_404!("provider_profiles_list", json!({}));
+    }
+
+    #[tokio::test]
+    async fn dispatch_coverage_provider_profiles_import() {
+        assert_not_404!("provider_profiles_import", json!({ "payload": {} }));
+    }
+
+    #[tokio::test]
+    async fn dispatch_coverage_provider_profiles_version() {
+        assert_not_404!("provider_profiles_version", json!({}));
     }
 
     #[tokio::test]

@@ -132,6 +132,10 @@ pub struct HeadlessServices {
     /// ingress on the front door (ADR-0059 F4/R12). Adapters are registered
     /// by the brain via the service-scope `connectors_register` arm.
     pub connectors: ConnectorsState,
+    /// ADR-0090 Phase 1 — the headless Provider Profile Store (same-port
+    /// SQLite mirror of the renderer's Dexie v121 tables). Feeds the Phase 2
+    /// Gateway snapshot projection; secret-free by construction.
+    pub profiles: Arc<dyn crate::provider_profiles::ProviderProfileStore>,
 }
 
 impl HeadlessServices {
@@ -197,6 +201,26 @@ impl HeadlessServices {
                 vscode_event_bus.publish(event_name, serde_json::Value::String(raw_frame));
             }),
         );
+        // The profile store lives beside the plugin install dir (its parent is
+        // the server data dir). An open failure degrades to an in-memory
+        // store rather than failing boot — the store is a re-derivable
+        // projection, and import re-seeds it.
+        let profiles_path = plugin_install_dir
+            .parent()
+            .unwrap_or(plugin_install_dir.as_path())
+            .join("provider-profiles.sqlite");
+        let profiles: Arc<dyn crate::provider_profiles::ProviderProfileStore> =
+            match crate::provider_profiles::SqliteProfileStore::open(&profiles_path) {
+                Ok(store) => store,
+                Err(error) => {
+                    log::warn!(
+                        "open provider profile store at {}: {error}; using in-memory store",
+                        profiles_path.display()
+                    );
+                    crate::provider_profiles::SqliteProfileStore::in_memory()
+                        .expect("in-memory profile store")
+                }
+            };
         Arc::new(Self {
             sidecar: SidecarState::new(),
             sidecar_host,
@@ -213,6 +237,7 @@ impl HeadlessServices {
             exec,
             spawn_policy,
             connectors: ConnectorsState::new(),
+            profiles,
         })
     }
 
@@ -271,10 +296,12 @@ impl HeadlessServices {
             api_keys,
             event_bus,
             crate::external_agent::presets::SpawnPolicy::new(workspaces, false),
-            std::env::temp_dir().join(format!(
-                "cognia-headless-test-plugins-{}",
-                std::process::id()
-            )),
+            // Nested under a per-process dir so the sibling
+            // provider-profiles.sqlite (derived from the plugin dir's PARENT)
+            // stays test-isolated instead of landing in the shared temp root.
+            std::env::temp_dir()
+                .join(format!("cognia-headless-test-{}", std::process::id()))
+                .join("plugins"),
         )
     }
 }

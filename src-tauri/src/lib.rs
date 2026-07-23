@@ -74,6 +74,9 @@ mod plugins;
 // (external agents, chat sidecar, ACP + PTY terminals, MCP server) for the
 // performance panel's "Managed Processes" tab and the graceful teardown arm.
 mod process_registry;
+/// ADR-0090 Phase 1 — headless Provider Profile Store (SQLite mirror of the
+/// renderer's Dexie v121 tables).
+pub mod provider_profiles;
 mod proxy_config;
 // ADR-0067 follow-up — extracted to `crates/cognia-remote-control`;
 // re-aliased so `crate::remote_control::…` (gateway, generate_handler!)
