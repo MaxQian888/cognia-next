@@ -42,6 +42,7 @@ const onClaudeMessageMock = jest.fn(async (handler: (evt: ClaudeEvent) => void) 
   return unlistenMock
 })
 
+const subscribeAgentEventsMock = jest.fn()
 jest.mock("./ipc", () => ({
   sendPrompt: (sessionId: string, prompt: unknown, options?: unknown) =>
     sendPromptMock(sessionId, prompt, options),
@@ -50,6 +51,7 @@ jest.mock("./ipc", () => ({
   approveTool: (s: string, r: string, d: string, m?: string, u?: unknown) =>
     approveToolMock(s, r, d, m, u),
   toolResultDecision: (s: string, r: string, u?: unknown) => toolResultDecisionMock(s, r, u),
+  subscribeAgentEvents: (cb: (e: unknown) => void) => subscribeAgentEventsMock(cb),
 }))
 
 beforeEach(() => {
@@ -1401,5 +1403,42 @@ describe("runAndCaptureAssistantReply — execution broker admission", () => {
     fire(assistantEvent("done"))
     fire(sessionEnded())
     await promise
+  })
+})
+
+describe("subscribeCaptureFromEnvelopes (ADR-0090 Phase 3)", () => {
+  const savedFlag = process.env.NEXT_PUBLIC_GENERIC_AGENT_HOST_COMMANDS
+
+  afterEach(() => {
+    if (savedFlag === undefined) delete process.env.NEXT_PUBLIC_GENERIC_AGENT_HOST_COMMANDS
+    else process.env.NEXT_PUBLIC_GENERIC_AGENT_HOST_COMMANDS = savedFlag
+    subscribeAgentEventsMock.mockReset()
+  })
+
+  it("returns null while the flag is off (legacy parse keeps running)", async () => {
+    delete process.env.NEXT_PUBLIC_GENERIC_AGENT_HOST_COMMANDS
+    const { subscribeCaptureFromEnvelopes } = await import("./run-and-capture")
+    const result = await subscribeCaptureFromEnvelopes("s1", jest.fn())
+    expect(result).toBeNull()
+    expect(subscribeAgentEventsMock).not.toHaveBeenCalled()
+  })
+
+  it("maps this session's envelope events onto the capture union when enabled", async () => {
+    process.env.NEXT_PUBLIC_GENERIC_AGENT_HOST_COMMANDS = "1"
+    const unlisten = jest.fn()
+    let subscriber: ((e: unknown) => void) | undefined
+    subscribeAgentEventsMock.mockImplementation(async (cb: (e: unknown) => void) => {
+      subscriber = cb
+      return unlisten
+    })
+    const { subscribeCaptureFromEnvelopes } = await import("./run-and-capture")
+    const events: unknown[] = []
+    const result = await subscribeCaptureFromEnvelopes("s1", (e) => events.push(e))
+    expect(result).toBe(unlisten)
+
+    subscriber?.({ sessionId: "s1", event: { kind: "text-delta", delta: "hi" } })
+    subscriber?.({ sessionId: "other", event: { kind: "text-delta", delta: "nope" } })
+    subscriber?.({ sessionId: "s1", event: { kind: "lifecycle", phase: "ended" } })
+    expect(events).toEqual([{ type: "text-delta", delta: "hi" }])
   })
 })

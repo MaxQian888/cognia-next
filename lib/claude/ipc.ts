@@ -30,13 +30,35 @@ import type { ProtocolAdapterCancelEvent } from "@cognia/agent-config-types"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 
 const SIDECAR_EVENT = "claude://message"
+/** Canonical agent-event channel (ADR-0090 Phase 3). */
+const AGENT_EVENT = "agent://message"
 
 export async function sendPrompt(
   sessionId: string,
   prompt: SendContent,
   options?: SendOptions
 ): Promise<void> {
-  await transport.call("claude_send", { sessionId, prompt, options })
+  // Sends carrying a frozen execution spec use the canonical command (same
+  // impl body Rust-side; the alias split feeds the Phase 9 telemetry).
+  const command = options?.execution ? "agent_send" : "claude_send"
+  await transport.call(command, { sessionId, prompt, options })
+}
+
+/**
+ * Subscribe to canonical `AgentEventEnvelope` frames (ADR-0090 Phase 3).
+ * Emitted only for sessions that carry a frozen execution spec — legacy
+ * sessions produce nothing here.
+ */
+export async function subscribeAgentEvents(
+  onEnvelope: (
+    envelope: import("@cognia/agent-config-types/agent-execution").AgentEventEnvelope
+  ) => void
+): Promise<UnlistenFn> {
+  const { isAgentEventEnvelope } = await import("@cognia/agent-config-types/agent-execution")
+  return transport.subscribe<{ type: string; envelope?: unknown }>(AGENT_EVENT, (payload) => {
+    const envelope = payload?.envelope
+    if (isAgentEventEnvelope(envelope)) onEnvelope(envelope)
+  })
 }
 
 export async function interruptSession(sessionId: string): Promise<void> {

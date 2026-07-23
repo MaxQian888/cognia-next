@@ -227,6 +227,118 @@ pub struct SidecarStatus {
     pub ready: bool,
 }
 
+
+// ---- Canonical agent_* command surface (ADR-0090 Phase 3) -------------------
+//
+// Thin wrappers over the SAME impl bodies the claude_* commands use — one
+// behavior, two names during migration. Every legacy claude_* invocation
+// bumps a deprecation counter (surfaced via `agent_command_telemetry`) so
+// Phase 9 retires the aliases with evidence instead of guesswork.
+
+/// Per-command deprecation counters for the legacy `claude_*` aliases.
+pub static DEPRECATED_COMMAND_COUNTERS: once_cell::sync::Lazy<
+    parking_lot::Mutex<std::collections::BTreeMap<&'static str, u64>>,
+> = once_cell::sync::Lazy::new(|| parking_lot::Mutex::new(std::collections::BTreeMap::new()));
+
+pub fn bump_deprecated(command: &'static str) {
+    let mut counters = DEPRECATED_COMMAND_COUNTERS.lock();
+    *counters.entry(command).or_insert(0) += 1;
+}
+
+/// Old-vs-new command telemetry: quantifies the remaining migration surface
+/// (plan Phase 6 验收 / Phase 9 retirement evidence).
+#[tauri::command]
+pub async fn agent_command_telemetry() -> Result<serde_json::Value, String> {
+    let counters = DEPRECATED_COMMAND_COUNTERS.lock();
+    Ok(serde_json::json!({
+        "deprecatedCalls": counters.iter().map(|(k, v)| (k.to_string(), *v)).collect::<std::collections::BTreeMap<_, _>>(),
+    }))
+}
+
+/// Canonical send. Requires a well-formed `options.execution` spec when one
+/// is present (deep validation stays renderer-side; this guards skew).
+#[tauri::command]
+pub async fn agent_send(
+    app: AppHandle,
+    state: State<'_, SidecarState>,
+    session_id: String,
+    prompt: Value,
+    options: Option<SendOptions>,
+) -> Result<(), String> {
+    if let Some(opts) = &options {
+        if let Some(execution) = opts.extra.get("execution") {
+            let spec_ok = execution.get("specVersion").and_then(|v| v.as_i64()) == Some(1)
+                && execution
+                    .get("runtimeAdapter")
+                    .and_then(|v| v.as_str())
+                    .is_some();
+            if !spec_ok {
+                return Err("agent_send: malformed execution spec (specVersion/runtimeAdapter)".into());
+            }
+        }
+    }
+    let span = tracing::info_span!("agent.send", session_id = %session_id);
+    claude_send_with_host(
+        Arc::new(TauriSidecarHost(app)),
+        state.inner().clone(),
+        session_id,
+        prompt,
+        options,
+    )
+    .instrument(span)
+    .await
+}
+
+#[tauri::command]
+pub async fn agent_interrupt(
+    state: State<'_, SidecarState>,
+    session_id: String,
+) -> Result<(), String> {
+    claude_interrupt_impl(&state, session_id).await
+}
+
+#[tauri::command]
+pub async fn agent_compact(
+    state: State<'_, SidecarState>,
+    session_id: String,
+    focus: Option<String>,
+) -> Result<(), String> {
+    claude_compact_impl(&state, session_id, focus).await
+}
+
+#[tauri::command]
+pub async fn agent_resolve_permission(
+    state: State<'_, SidecarState>,
+    session_id: String,
+    request_id: String,
+    decision: String,
+    message: Option<String>,
+    updated_input: Option<Value>,
+) -> Result<(), String> {
+    claude_approve_impl(
+        &state,
+        session_id,
+        request_id,
+        decision,
+        message,
+        updated_input,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn agent_close_session(
+    state: State<'_, SidecarState>,
+    session_id: String,
+) -> Result<(), String> {
+    claude_close_session_impl(&state, session_id).await
+}
+
+#[tauri::command]
+pub async fn agent_status(state: State<'_, SidecarState>) -> Result<SidecarStatus, String> {
+    claude_sidecar_status_impl(&state).await
+}
+
 /// Ensure the sidecar is running, then push a user message to it.
 ///
 /// `prompt` may be a string or an array of content blocks (text + image)
@@ -240,6 +352,7 @@ pub async fn claude_send(
     prompt: Value,
     options: Option<SendOptions>,
 ) -> Result<(), String> {
+    bump_deprecated("claude_send");
     let span = tracing::info_span!("claude.send", session_id = %session_id);
     #[cfg(feature = "otel-export")]
     crate::telemetry::set_parent(
@@ -459,6 +572,7 @@ pub async fn claude_interrupt(
     state: State<'_, SidecarState>,
     session_id: String,
 ) -> Result<(), String> {
+    bump_deprecated("claude_interrupt");
     claude_interrupt_impl(&state, session_id).await
 }
 
@@ -471,6 +585,7 @@ pub async fn claude_compact(
     session_id: String,
     focus: Option<String>,
 ) -> Result<(), String> {
+    bump_deprecated("claude_compact");
     claude_compact_impl(&state, session_id, focus).await
 }
 
@@ -483,6 +598,7 @@ pub async fn claude_restore(
     session_id: String,
     messages: Value,
 ) -> Result<(), String> {
+    bump_deprecated("claude_restore");
     let msg = json!({ "type": "restore", "sessionId": session_id, "messages": messages });
     state.write_command(&msg).await
 }
@@ -496,6 +612,7 @@ pub async fn claude_approve(
     message: Option<String>,
     updated_input: Option<Value>,
 ) -> Result<(), String> {
+    bump_deprecated("claude_approve");
     claude_approve_impl(
         &state,
         session_id,
@@ -512,6 +629,7 @@ pub async fn claude_close_session(
     state: State<'_, SidecarState>,
     session_id: String,
 ) -> Result<(), String> {
+    bump_deprecated("claude_close_session");
     claude_close_session_impl(&state, session_id).await
 }
 
@@ -563,6 +681,7 @@ pub async fn claude_session_control(
     method: String,
     params: Option<Value>,
 ) -> Result<(), String> {
+    bump_deprecated("claude_session_control");
     if !is_allowed_control_method(&method) {
         return Err(format!("unsupported control method: {method}"));
     }
@@ -708,6 +827,7 @@ pub async fn claude_protocol_adapter_message(
 pub async fn claude_sidecar_status(
     state: State<'_, SidecarState>,
 ) -> Result<SidecarStatus, String> {
+    bump_deprecated("claude_sidecar_status");
     claude_sidecar_status_impl(&state).await
 }
 
@@ -1159,4 +1279,39 @@ mod tests {
         }))
         .is_err());
     }
+
+    #[test]
+    fn deprecated_counters_accumulate_per_command() {
+        // Counters are process-global; assert deltas, not absolutes.
+        let before = DEPRECATED_COMMAND_COUNTERS
+            .lock()
+            .get("claude_compact")
+            .copied()
+            .unwrap_or(0);
+        bump_deprecated("claude_compact");
+        bump_deprecated("claude_compact");
+        let after = DEPRECATED_COMMAND_COUNTERS
+            .lock()
+            .get("claude_compact")
+            .copied()
+            .unwrap_or(0);
+        assert_eq!(after - before, 2);
+    }
+
+    #[tokio::test]
+    async fn agent_command_telemetry_reports_the_deprecation_map() {
+        bump_deprecated("claude_send");
+        let payload = agent_command_telemetry().await.expect("telemetry");
+        let calls = payload
+            .get("deprecatedCalls")
+            .and_then(|v| v.as_object())
+            .expect("deprecatedCalls object");
+        assert!(calls
+            .get("claude_send")
+            .and_then(|v| v.as_u64())
+            .is_some_and(|n| n >= 1));
+        // Secret-free by construction: names + counts only.
+        assert!(!payload.to_string().to_lowercase().contains("api"));
+    }
+
 }

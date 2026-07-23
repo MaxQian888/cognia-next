@@ -23,6 +23,7 @@ import {
   SERVER_NAME as PLUGIN_TOOLS_SERVER_NAME,
 } from "../builtin-tools/plugin-tools.mjs"
 import { makeInputStream } from "./input-stream.mjs"
+import { buildSubprocessEnv } from "./subprocess-env.mjs"
 import { extractHttpErrorMeta } from "./http-error-meta.mjs"
 import { createProviderStreamLogger } from "./provider-stream-log.mjs"
 import { foldSystemPrompt, thinkingFromBudget } from "./system-prompt.mjs"
@@ -306,7 +307,7 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
   // no skills value, no `container.skills` request is built). The old header
   // was inert without the attach; the renderer now warns at resolve time
   // instead of silently dropping (see `lib/claude/build-options.ts`).
-  const baseEnv = { ...process.env, ...(sendOptions.env ?? {}) }
+  const baseEnv = buildSubprocessEnv(sendOptions)
 
   // M5 Computer Use — merge `sendOptions.appendHeaders` into
   // ANTHROPIC_DEFAULT_HEADERS. The renderer's `resolveSendOptions` populates
@@ -338,8 +339,12 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
   // dispatcher before this object is built (`builtinTools` → `mergedMcpServers`).
   const options = {
     cwd: sendOptions.cwd,
-    model: sendOptions.model,
-    fallbackModel: sendOptions.fallbackModel,
+    model:
+      sendOptions.execution?.modelBindings?.primary &&
+      sendOptions.execution.modelBindings.primary !== "inherit"
+        ? sendOptions.execution.modelBindings.primary
+        : sendOptions.model,
+    fallbackModel: sendOptions.execution?.modelBindings?.fast ?? sendOptions.fallbackModel,
     // SDK 0.3.x dropped the top-level `appendSystemPrompt` from the public
     // `Options` type. Fold the stable base + dynamic appended sections into the
     // typed `systemPrompt: string | string[]` form (array = separate system

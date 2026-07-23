@@ -47,6 +47,35 @@ import type { PluginMessage } from "@/types/plugin/plugin"
 import { runWithExecutionLease, combineAbortSignals } from "@/lib/execution/admit"
 import type { ExecutionLeaseInfo } from "@/lib/execution/types"
 
+/**
+ * Envelope-backed capture subscription (ADR-0090 Phase 3, flag-gated).
+ *
+ * When `genericAgentHostCommands` is enabled, consumers can source the SAME
+ * `CaptureStreamEvent` stream from canonical `agent://message` envelopes
+ * instead of parsing raw `claude://message` frames — `CanonicalAgentEvent`
+ * supersets the capture union, so the mapping is a pure narrowing
+ * (`captureEventFromCanonical`). Envelope kinds with no capture projection
+ * (lifecycle, permission plumbing, diagnostics) are skipped here and stay
+ * available on the envelope stream. Returns null when the flag is off so
+ * callers fall back to the legacy parse unchanged.
+ */
+export async function subscribeCaptureFromEnvelopes(
+  sessionId: string,
+  onEvent: (event: CaptureStreamEvent) => void
+): Promise<(() => void) | null> {
+  const [{ isAgentExecutionFlagEnabled }, { captureEventFromCanonical }, ipc] = await Promise.all([
+    import("@/lib/ai/agent/execution/feature-flags"),
+    import("@/lib/ai/agent/execution/event-envelope"),
+    import("./ipc"),
+  ])
+  if (!isAgentExecutionFlagEnabled("genericAgentHostCommands")) return null
+  return ipc.subscribeAgentEvents((envelope) => {
+    if (envelope.sessionId !== sessionId) return
+    const event = captureEventFromCanonical(envelope.event)
+    if (event) onEvent(event)
+  })
+}
+
 export interface RunAndCaptureResult {
   /** The accumulated assistant reply text (concatenated text blocks). */
   text: string

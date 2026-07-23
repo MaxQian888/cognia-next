@@ -24,6 +24,11 @@ pub const SIDECAR_EVENT: &str = "claude://message";
 /// every sidecar message.
 pub const A2UI_EVENT: &str = "a2ui://dispatch";
 
+/// Canonical agent-event channel (ADR-0090 Phase 3). Sessions with a frozen
+/// execution spec dual-emit `agent_event` envelopes here; the raw legacy
+/// stream on `SIDECAR_EVENT` is unchanged.
+pub const AGENT_EVENT: &str = "agent://message";
+
 /// How long a freshly spawned sidecar has to announce `{"type":"ready"}`
 /// before the watchdog kills it. Deliberately generous: a tighter bound would
 /// kill a healthy-but-slow cold start (large `node_modules`, cold disk) — the
@@ -333,6 +338,12 @@ pub fn sidecar_dir(app: &AppHandle) -> Result<PathBuf, String> {
 /// release builds. `pub(crate)` so `host::TauriSidecarHost` can delegate.
 pub(crate) fn resolve_sidecar_script(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = sidecar_dir(app)?;
+    // ADR-0090 Phase 3: the host entry is agent-host.mjs; claude-host.mjs
+    // remains as a compatibility shim for stale bundles/spawn paths.
+    let candidate = dir.join("agent-host.mjs");
+    if candidate.exists() {
+        return Ok(candidate);
+    }
     let candidate = dir.join("claude-host.mjs");
     if candidate.exists() {
         return Ok(candidate);
@@ -511,6 +522,15 @@ pub async fn spawn(host: Arc<dyn SidecarHost>, state: SidecarState) -> Result<()
                                     == Some("a2ui_dispatch")
                                 {
                                     host.emit(A2UI_EVENT, &value);
+                                    continue;
+                                }
+                                // Canonical envelopes (ADR-0090) ride their own
+                                // channel; they are additive alongside the raw
+                                // stream and never re-enter SIDECAR_EVENT.
+                                if value.get("type").and_then(|t| t.as_str())
+                                    == Some("agent_event")
+                                {
+                                    host.emit(AGENT_EVENT, &value);
                                     continue;
                                 }
                                 // Lifecycle hooks: observe the SDK event stream

@@ -1,0 +1,74 @@
+{
+  "comment": "Cross-language envelope contract (ADR-0090 Phase 3). Consumed by sidecar/dispatch/event-envelope.test.mjs (Node) and lib/ai/agent/execution/event-envelope.test.ts (TS). `timestamp` is asserted as ISO-shaped, not byte-equal.",
+  "context": {
+    "sessionId": "s1",
+    "runId": "r1",
+    "attemptId": "a1",
+    "hostRef": "desktop-sidecar",
+    "runtime": "claude-agent-sdk",
+    "turnId": "t1"
+  },
+  "cases": [
+    {
+      "wire": {
+        "type": "permission_request",
+        "sessionId": "s1",
+        "requestId": "req-1",
+        "toolName": "Bash",
+        "input": { "command": "ls" }
+      },
+      "envelope": {
+        "eventId": "s1:a1:0",
+        "sequence": 0,
+        "sessionId": "s1",
+        "runId": "r1",
+        "turnId": "t1",
+        "attemptId": "a1",
+        "hostRef": "desktop-sidecar",
+        "runtime": "claude-agent-sdk",
+        "event": {
+          "kind": "permission-request",
+          "requestId": "req-1",
+          "toolName": "Bash",
+          "input": { "command": "ls" }
+        }
+      }
+    },
+    {
+      "wire": {
+        "type": "event",
+        "sessionId": "s1",
+        "event": {
+          "type": "system",
+          "subtype": "compact_boundary",
+          "compact_metadata": { "trigger": "auto", "pre_tokens": 90000, "post_tokens": 12000 }
+        }
+      },
+      "envelope": {
+        "eventId": "s1:a1:1",
+        "sequence": 1,
+        "sessionId": "s1",
+        "runId": "r1",
+        "turnId": "t1",
+        "attemptId": "a1",
+        "hostRef": "desktop-sidecar",
+        "runtime": "claude-agent-sdk",
+        "event": { "kind": "compact", "trigger": "auto", "preTokens": 90000, "postTokens": 12000 }
+      }
+    },
+    {
+      "wire": { "type": "session_ended", "sessionId": "s1", "error": "boom" },
+      "envelope": {
+        "eventId": "s1:a1:2",
+        "sequence": 2,
+        "sessionId": "s1",
+        "runId": "r1",
+        "turnId": "t1",
+        "attemptId": "a1",
+        "hostRef": "desktop-sidecar",
+        "runtime": "claude-agent-sdk",
+        "event": { "kind": "failure", "code": "session_error", "message": "boom" }
+      }
+    }
+  ]
+}
