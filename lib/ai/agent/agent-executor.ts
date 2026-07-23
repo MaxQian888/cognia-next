@@ -476,37 +476,23 @@ async function runToolEnabledStandalone(
 }
 
 /**
- * Shadow-record what the ADR-0090 resolver would decide for this call,
- * without touching the executing path (Phase 0; authoritative in Phase 6).
+ * Agent rail (ADR-0090 Phase 6): the tool-enabled sidecar turn, exported so
+ * `AgentExecutionService` consumes the SAME body executeAgent always ran —
+ * one implementation, two entrances during migration.
  */
-function recordExecutorShadowDecision(config: ExecuteAgentConfig, tauri: boolean): void {
-  void (async () => {
-    try {
-      const [{ resolveAgentExecutionSpec }, { recordShadowDecision }, { getAgentExecutionFlags }] =
-        await Promise.all([
-          import("@/lib/ai/agent/execution/resolve-agent-execution-spec"),
-          import("@/lib/ai/agent/execution/shadow-recorder"),
-          import("@/lib/ai/agent/execution/feature-flags"),
-        ])
-      const environment = { isTauri: tauri, isHeadlessHost: false }
-      recordShadowDecision({
-        resolution: resolveAgentExecutionSpec({
-          surface: "agent-executor",
-          environment,
-          flags: getAgentExecutionFlags(),
-          legacy: {
-            providerId: config.provider ?? config.defaultProvider,
-            modelId: config.model,
-            toolsEnabled: config.toolsEnabled,
-          },
-        }),
-        environment,
-        legacyChannel: config.toolsEnabled && tauri ? "sidecar" : "text",
-      })
-    } catch {
-      // Shadow instrumentation must never affect the run.
-    }
-  })()
+export async function runAgentRail(
+  prompt: string,
+  config: ExecuteAgentConfig
+): Promise<ExecuteAgentResult> {
+  const { text, usage } = await runToolEnabledStandalone(prompt, config)
+  return {
+    text,
+    finishReason: "stop",
+    channel: "sidecar",
+    toolsAvailable: true,
+    ...(usage ? { usage } : {}),
+    ...finalizeStructured(text, config.outputFormat),
+  }
 }
 
 export async function executeAgent(
@@ -514,24 +500,37 @@ export async function executeAgent(
   config: ExecuteAgentConfig = {}
 ): Promise<ExecuteAgentResult> {
   const { isTauri } = await import("@/lib/tauri")
-  recordExecutorShadowDecision(config, isTauri())
+
+  // ADR-0090 Phase 6: behind the resolver flag the unified service is the
+  // single authority (resolver-driven rail selection, fail-closed hard
+  // capabilities, explicit-only completion fallback with degradedReason).
+  // Flag off ⇒ the legacy branch below runs byte-identically (kept until
+  // Phase 9 retirement).
+  const { isAgentExecutionFlagEnabled } = await import("@/lib/ai/agent/execution/feature-flags")
+  if (isAgentExecutionFlagEnabled("agentExecutionResolverV2")) {
+    const { executeAgentTurn } = await import("@/lib/ai/agent/execution/agent-execution-service")
+    return executeAgentTurn(prompt, config, { isTauri: isTauri(), isHeadlessHost: false })
+  }
 
   // Tool-enabled branch: route through the sidecar when requested and available.
   if (config.toolsEnabled) {
     if (isTauri()) {
-      const { text, usage } = await runToolEnabledStandalone(prompt, config)
-      return {
-        text,
-        finishReason: "stop",
-        channel: "sidecar",
-        toolsAvailable: true,
-        ...(usage ? { usage } : {}),
-        ...finalizeStructured(text, config.outputFormat),
-      }
+      return runAgentRail(prompt, config)
     }
     // Requested tools but no sidecar — fall through to the text-only channel.
   }
 
+  return runCompletionRail(prompt, config)
+}
+
+/**
+ * Completion (text) rail: a single `streamText` completion with the resolved
+ * provider. Exported for `AgentExecutionService` — same body as always.
+ */
+export async function runCompletionRail(
+  prompt: string,
+  config: ExecuteAgentConfig = {}
+): Promise<ExecuteAgentResult> {
   // A per-run `provider` override wins over the snapshot default so a
   // cross-provider subagent targets its own provider on the text channel too.
   const overrideProvider = config.provider ?? config.defaultProvider

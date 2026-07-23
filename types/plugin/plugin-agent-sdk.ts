@@ -127,6 +127,12 @@ export interface PluginAgentRunResult {
   usage?: { inputTokens: number; outputTokens: number; totalTokens: number }
   /** Cancellation handle (also returned by `runStreamed`). */
   agentId: string
+  /** Frozen runtime adapter id that ran the turn (ADR-0090; resolver flag on). */
+  runtime?: string
+  /** Route kind of the frozen execution spec (ADR-0090; resolver flag on). */
+  routeKind?: "gateway" | "direct"
+  /** Set when the run degraded to a lesser rail than requested (ADR-0090). */
+  degradedReason?: string
 }
 
 /** Typed events emitted by `runStreamed`. */
@@ -306,6 +312,12 @@ export interface PluginSubagentDispatchResult {
    * back-compat.
    */
   errorEnvelope?: PluginDispatchErrorEnvelope
+  /** Frozen runtime adapter id that ran the child (ADR-0090; resolver flag on). */
+  runtime?: string
+  /** Route kind of the child's frozen execution spec (ADR-0090; resolver flag on). */
+  routeKind?: "gateway" | "direct"
+  /** Set when the child degraded to a lesser rail than requested (ADR-0090). */
+  degradedReason?: string
 }
 
 /** Options for {@link PluginAgentAPI.runTeam}. */

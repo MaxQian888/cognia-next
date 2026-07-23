@@ -54,6 +54,12 @@ export interface PluginSessionSendResult {
   parseError?: string
   /** Token usage for the turn when the channel reports it (text channel). */
   usage?: { inputTokens: number; outputTokens: number; totalTokens: number }
+  /** Frozen runtime adapter id that ran the turn (ADR-0090; resolver flag on). */
+  runtime?: string
+  /** Route kind of the frozen execution spec (ADR-0090; resolver flag on). */
+  routeKind?: "gateway" | "direct"
+  /** Set when the turn degraded to a lesser rail than requested (ADR-0090). */
+  degradedReason?: string
 }
 
 /** A single past turn in a session's history. */

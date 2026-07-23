@@ -63,14 +63,6 @@ jest.mock("@/lib/plugin/bridge/sidecar-tools-bridge", () => ({
   buildPluginToolsManifest: jest.fn(() => []),
 }))
 
-// ADR-0090 Phase 0 — the shadow recorder is fire-and-forget at the end of
-// resolveSendOptions; mocked so these tests can assert the wiring without
-// touching telemetry/Dexie.
-const mockRecordShadowDecision = jest.fn()
-jest.mock("@/lib/ai/agent/execution/shadow-recorder", () => ({
-  recordShadowDecision: (...args: unknown[]) => mockRecordShadowDecision(...(args as [])),
-}))
-
 jest.mock("@/lib/db/conversation-overrides", () => ({
   readForResolution: jest.fn(),
 }))
@@ -4382,32 +4374,29 @@ describe("resolveSendOptions — project knowledge base (project-scoped RAG)", (
   })
 })
 
-describe("resolveSendOptions — ADR-0090 shadow recording", () => {
-  const flushShadow = () => new Promise((resolve) => setTimeout(resolve, 0))
+describe("resolveSendOptions — ADR-0090 execution spec stamping", () => {
+  afterEach(() => {
+    delete process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2
+  })
 
-  it("records the chat surface against the resolved provider/model (observation only)", async () => {
+  it("leaves SendOptions unstamped while the resolver flag is off", async () => {
     const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
-    await flushShadow()
-
-    expect(mockRecordShadowDecision).toHaveBeenCalled()
-    const call = mockRecordShadowDecision.mock.calls.at(-1)?.[0] as {
-      resolution: { trace: { surface: string; legacy: Record<string, unknown> } }
-      legacyChannel: string
-    }
-    expect(call.resolution.trace.surface).toBe("chat")
-    expect(call.legacyChannel).toBe("sidecar")
-    // Ground truth comes from the RESOLVED options, not re-derivation.
-    expect(call.resolution.trace.legacy.providerId).toBe(opts.provider)
-    // The stamped options themselves are untouched by the shadow path.
     expect(opts.execution).toBeUndefined()
   })
 
-  it("a throwing recorder never affects the resolved options", async () => {
-    mockRecordShadowDecision.mockImplementationOnce(() => {
-      throw new Error("shadow down")
-    })
+  it("stamps the frozen, secret-free execution spec when the flag is on (legacy fields intact)", async () => {
+    process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2 = "1"
     const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
-    await flushShadow()
-    expect(opts).toBeTruthy()
+
+    const execution = opts.execution as Record<string, unknown>
+    expect(execution).toBeTruthy()
+    expect(execution.specVersion).toBe(1)
+    expect(execution.executionKind).toBe("agent")
+    expect(execution.runtimeAdapter).toBe("claude-agent-sdk")
+    expect((execution.route as { kind: string }).kind).toBe("direct")
+    expect(execution.executionFingerprint).toEqual(expect.any(String))
+    // Legacy routing fields survive for rollback; no secret shapes in the spec.
+    expect(opts.provider).toBeDefined()
+    expect(JSON.stringify(execution)).not.toMatch(/sk-|api[_-]?key|bearer|token/i)
   })
 })

@@ -9,18 +9,18 @@ jest.mock("@cognia/agent-trace/emitter", () => ({
 }))
 
 const mockExecuteAgent = jest.fn()
+const mockRunAgentRail = jest.fn()
+const mockRunCompletionRail = jest.fn()
 jest.mock("@/lib/ai/agent/agent-executor", () => ({
   executeAgent: (...args: unknown[]) => mockExecuteAgent(...(args as [])),
+  // The unified service (flag-on path) consumes the rails directly.
+  runAgentRail: (...args: unknown[]) => mockRunAgentRail(...(args as [])),
+  runCompletionRail: (...args: unknown[]) => mockRunCompletionRail(...(args as [])),
 }))
 
 const mockIsTauri = jest.fn(() => false)
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => mockIsTauri(),
-}))
-
-const mockRecordShadowDecision = jest.fn()
-jest.mock("@/lib/ai/agent/execution/shadow-recorder", () => ({
-  recordShadowDecision: (...args: unknown[]) => mockRecordShadowDecision(...(args as [])),
 }))
 
 jest.mock("@/lib/db/settings", () => ({
@@ -259,31 +259,55 @@ describe("runAgentTurn", () => {
     })
   })
 
-  describe("ADR-0090 shadow recording", () => {
-    const flushShadow = () => new Promise((resolve) => setTimeout(resolve, 0))
-
-    it("records the workflow-agent-turn surface with the legacy tool signals", async () => {
-      mockIsTauri.mockReturnValue(false)
-      await runAgentTurn(makeCtx({ prompt: "go", requireTools: false }))
-      await flushShadow()
-
-      expect(mockRecordShadowDecision).toHaveBeenCalledTimes(1)
-      const call = mockRecordShadowDecision.mock.calls[0][0] as {
-        resolution: { trace: { surface: string; legacy: Record<string, unknown> } }
-        legacyChannel: string
-      }
-      expect(call.resolution.trace.surface).toBe("workflow-agent-turn")
-      expect(call.resolution.trace.legacy.toolsEnabled).toBe(true)
-      expect(call.legacyChannel).toBe("text") // isTauri mocked false
+  describe("ADR-0090 resolver flag (unified service path)", () => {
+    beforeEach(() => {
+      process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2 = "1"
+      mockRunCompletionRail.mockResolvedValue({
+        text: "completion rail",
+        finishReason: "stop",
+        channel: "text",
+        toolsAvailable: false,
+      })
+      mockRunAgentRail.mockResolvedValue({
+        text: "agent rail",
+        finishReason: "stop",
+        channel: "sidecar",
+        toolsAvailable: true,
+      })
+    })
+    afterEach(() => {
+      delete process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2
     })
 
-    it("a throwing recorder never affects the step result", async () => {
-      mockRecordShadowDecision.mockImplementation(() => {
-        throw new Error("shadow down")
-      })
+    it("requireTools with no host fails closed with the PINNED legacy copy, before any spend", async () => {
+      mockIsTauri.mockReturnValue(false)
+      await expect(runAgentTurn(makeCtx({ prompt: "go", requireTools: true }))).rejects.toThrow(
+        "action.agent.turn: tools required but the desktop sidecar is unavailable " +
+          "(web/mobile run). Unset 'requireTools' to allow the text-only fallback."
+      )
+      expect(mockRunAgentRail).not.toHaveBeenCalled()
+      expect(mockRunCompletionRail).not.toHaveBeenCalled()
+      expect(mockExecuteAgent).not.toHaveBeenCalled()
+    })
+
+    it("legacy tool degradation surfaces degradedReason on the node output", async () => {
+      mockIsTauri.mockReturnValue(false)
       const result = await runAgentTurn(makeCtx({ prompt: "go" }))
-      await flushShadow()
-      expect((result.output as Record<string, unknown>).text).toBe("agent reply")
+      const output = result.output as Record<string, unknown>
+      expect(output.text).toBe("completion rail")
+      expect(output.channel).toBe("text")
+      expect(output.degradedReason).toBe("legacy-completion-fallback")
+      expect(mockExecuteAgent).not.toHaveBeenCalled()
+    })
+
+    it("routes through the agent rail on a desktop host", async () => {
+      mockIsTauri.mockReturnValue(true)
+      const result = await runAgentTurn(makeCtx({ prompt: "go", requireTools: true }))
+      const output = result.output as Record<string, unknown>
+      expect(output.text).toBe("agent rail")
+      expect(output.channel).toBe("sidecar")
+      expect(output.degradedReason).toBeUndefined()
+      expect(mockRunAgentRail).toHaveBeenCalledTimes(1)
     })
   })
 })

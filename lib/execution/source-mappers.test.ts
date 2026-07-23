@@ -42,6 +42,64 @@ describe("AgentRunEventProducer", () => {
     expect(wire).not.toContain("secret")
     expect(wire).not.toContain("raw result")
   })
+
+  it("categorizes tools, synthesizes ids for anonymous calls, and reports failures", async () => {
+    const appended: AppendRunEventInput[] = []
+    const producer = new AgentRunEventProducer("run-agent", async (_runId, input) => {
+      appended.push(input)
+      return {} as never
+    })
+
+    // Anonymous tool-call (no id) + each summary category + an error result.
+    await producer.onCaptureEvent({ type: "tool-call", toolName: "Read" }, 1_010)
+    await producer.onCaptureEvent({ type: "tool-call", id: "c2", toolName: "Edit" }, 1_011)
+    await producer.onCaptureEvent({ type: "tool-call", id: "c3", toolName: "Bash" }, 1_012)
+    await producer.onCaptureEvent({ type: "tool-call", id: "c4", toolName: "mcp_custom" }, 1_013)
+    await producer.onCaptureEvent(
+      { type: "tool-result", id: "c3", toolName: "Bash", result: "boom", isError: true },
+      1_014
+    )
+    // A result whose call was never seen still lands on a synthesized step.
+    await producer.onCaptureEvent(
+      { type: "tool-result", toolName: "web_search", result: "ok" },
+      1_015
+    )
+    await producer.finish("failed", 1_016, "exploded")
+    await producer.finish("cancelled", 1_017)
+
+    const types = appended.map((item) => item.type)
+    expect(types).toContain("tool.failed")
+    expect(types).toContain("step.failed")
+    expect(types).toContain("run.failed")
+    expect(types).toContain("run.cancelled")
+    const started = appended.filter((item) => item.type === "tool.started")
+    expect(started.map((item) => (item.payload as { toolName: string }).toolName)).toEqual([
+      "read",
+      "write",
+      "command",
+      "integration",
+    ])
+    // The failed run event carries the summary as its error.
+    const failed = appended.find((item) => item.type === "run.failed")
+    expect(failed?.payload).toEqual({ error: "exploded" })
+  })
+
+  it("records a machine-readable run.degraded event (ADR-0090)", async () => {
+    const appended: AppendRunEventInput[] = []
+    const producer = new AgentRunEventProducer("run-agent", async (_runId, input) => {
+      appended.push(input)
+      return {} as never
+    })
+
+    await producer.degraded("sidecar-unavailable", 1_500)
+
+    expect(appended).toEqual([
+      expect.objectContaining({
+        type: "run.degraded",
+        payload: { reason: "sidecar-unavailable" },
+      }),
+    ])
+  })
 })
 
 describe("mapWorkflowRunEvent", () => {

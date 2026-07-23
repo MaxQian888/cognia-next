@@ -22,6 +22,7 @@ export type RunEventType =
   | "run.paused"
   | "run.resumed"
   | "run.recovery_required"
+  | "run.degraded"
   | "run.completed"
   | "run.failed"
   | "run.cancelled"

@@ -11,11 +11,10 @@
  * so it stays unit-testable without the plugin manager.
  */
 
-import {
-  executeAgent,
-  type ExecuteAgentConfig,
-  type ExecuteAgentResult,
-  type AgentTool,
+import type {
+  ExecuteAgentConfig,
+  ExecuteAgentResult,
+  AgentTool,
 } from "@/lib/ai/agent/agent-executor"
 import { getBackgroundAgentManager } from "@/lib/ai/agent/background-agent-manager"
 import { createPluginAgentRun } from "./stream"
@@ -152,6 +151,21 @@ function newAgentId(meta?: RunPluginAgentMeta): string {
 }
 
 /**
+ * Execute one turn through the unified authority (ADR-0090 Phase 6). Behind
+ * the resolver flag the service resolves the frozen spec with surface
+ * "plugin" and stamps runtime/routeKind/degradedReason onto the result;
+ * otherwise the legacy executor path runs unchanged.
+ */
+async function executeThroughAuthority(
+  prompt: string,
+  cfg: ExecuteAgentConfig
+): Promise<ExecuteAgentResult> {
+  const { executeAgentTurnFromRenderer } =
+    await import("@/lib/ai/agent/execution/agent-execution-service")
+  return executeAgentTurnFromRenderer(prompt, cfg, { surface: "plugin" })
+}
+
+/**
  * Append every registered context provider's contribution to `appendSystem`
  * (Package E). Returns the options unchanged when nothing is contributed.
  */
@@ -201,7 +215,7 @@ function executeWithRobustness(
         ...(traceModel ? { model: traceModel } : {}),
       },
       prompt,
-      () => executeAgent(prompt, cfg)
+      () => executeThroughAuthority(prompt, cfg)
     )
   }
   if (!enableFallback || !opts.fallbackModel) return runOnce()

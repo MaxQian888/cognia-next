@@ -118,6 +118,20 @@ export class AgentRunEventProducer {
     }
   }
 
+  /**
+   * Record that the run degraded to a lesser rail than requested (ADR-0090
+   * Phase 6) — e.g. `"sidecar-unavailable"` / `"legacy-completion-fallback"`.
+   * Machine-readable reason only; presenters own the user-facing copy.
+   *
+   * INTENTIONALLY DORMANT: the sole current producer site (connector runtime)
+   * runs the sidecar rail and has no degradation signal yet; callers with a
+   * `degradedReason` (service results) wire in with Phase 7 run surfacing.
+   * Pinned by source-mappers.test.ts.
+   */
+  async degraded(reason: string, ts: number = Date.now()): Promise<void> {
+    await this.append(this.runId, semanticRunEvent("run.degraded", { reason }, { ts }))
+  }
+
   async finish(
     status: "completed" | "failed" | "cancelled",
     ts: number = Date.now(),

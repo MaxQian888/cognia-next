@@ -7,6 +7,14 @@ jest.mock("@/lib/ai/agent/agent-executor", () => ({
   __esModule: true,
   executeAgent: jest.fn(),
 }))
+// ADR-0090 Phase 6: sends route through the unified authority. Default
+// delegates to the REAL wrapper (flag off ⇒ the executeAgent mock above).
+const mockRendererTurn = jest.fn()
+jest.mock("@/lib/ai/agent/execution/agent-execution-service", () => ({
+  __esModule: true,
+  ...jest.requireActual("@/lib/ai/agent/execution/agent-execution-service"),
+  executeAgentTurnFromRenderer: (...a: unknown[]) => mockRendererTurn(...(a as [])),
+}))
 jest.mock("@/lib/db/messages", () => ({
   __esModule: true,
   listMessages: jest.fn(),
@@ -28,6 +36,11 @@ const mockDelete = deleteSession as jest.MockedFunction<typeof deleteSession>
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockRendererTurn.mockImplementation((...a: unknown[]) =>
+    jest
+      .requireActual("@/lib/ai/agent/execution/agent-execution-service")
+      .executeAgentTurnFromRenderer(...(a as [string, never, never]))
+  )
   mockCreate.mockResolvedValue({ id: "s1", characterId: "c1" } as never)
   mockGet.mockResolvedValue({ id: "s1", characterId: "c1" } as never)
   mockList.mockResolvedValue([])
@@ -116,6 +129,33 @@ describe("createPluginAgentSession", () => {
       name: "PluginBudgetExceededError",
     })
     expect(mockExecute).toHaveBeenCalledTimes(1)
+  })
+
+  it("sends through the unified authority with surface 'plugin' and forwards execution meta (ADR-0090)", async () => {
+    mockRendererTurn.mockResolvedValueOnce({
+      text: "authoritative",
+      channel: "text",
+      toolsAvailable: false,
+      runtime: "claude-agent-sdk",
+      routeKind: "direct",
+      degradedReason: "legacy-completion-fallback",
+    })
+    const session = await createPluginAgentSession({})
+    const res = await session.send("hi")
+    expect(mockRendererTurn.mock.calls[0][2]).toEqual({ surface: "plugin" })
+    expect(res).toMatchObject({
+      runtime: "claude-agent-sdk",
+      routeKind: "direct",
+      degradedReason: "legacy-completion-fallback",
+    })
+  })
+
+  it("omits execution meta from the send result when the turn ran without it", async () => {
+    const session = await createPluginAgentSession({})
+    const res = await session.send("hi")
+    expect(res).not.toHaveProperty("runtime")
+    expect(res).not.toHaveProperty("routeKind")
+    expect(res).not.toHaveProperty("degradedReason")
   })
 
   it("surfaces usage on the send result", async () => {

@@ -36,11 +36,6 @@ jest.mock("@/lib/db/settings", () => ({ getSettings: jest.fn() }))
 jest.mock("@/lib/claude/build-options", () => ({ resolveSendOptions: jest.fn() }))
 jest.mock("@/lib/claude/run-and-capture", () => ({ runAndCaptureAssistantReply: jest.fn() }))
 
-const mockRecordShadowDecision = jest.fn()
-jest.mock("@/lib/ai/agent/execution/shadow-recorder", () => ({
-  recordShadowDecision: (...args: unknown[]) => mockRecordShadowDecision(...(args as [])),
-}))
-
 const mockStreamText = streamText as jest.MockedFunction<typeof streamText>
 const mockResolveProvider = resolveFeatureProvider as jest.MockedFunction<
   typeof resolveFeatureProvider
@@ -465,33 +460,34 @@ describe("executeAgent", () => {
     })
   })
 
-  describe("ADR-0090 shadow recording", () => {
-    const flushShadow = () => new Promise((resolve) => setTimeout(resolve, 0))
-
-    it("records the agent-executor surface with the legacy channel the old path picked", async () => {
-      primeTextChannel(["x"])
-      await executeAgent("hi", { provider: "openai", model: "gpt-4o" })
-      await flushShadow()
-
-      expect(mockRecordShadowDecision).toHaveBeenCalledTimes(1)
-      const call = mockRecordShadowDecision.mock.calls[0][0] as {
-        resolution: { trace: { surface: string; legacy: Record<string, unknown> } }
-        legacyChannel: string
-      }
-      expect(call.resolution.trace.surface).toBe("agent-executor")
-      expect(call.resolution.trace.legacy.providerId).toBe("openai")
-      expect(call.legacyChannel).toBe("text")
+  describe("ADR-0090 resolver flag delegation", () => {
+    afterEach(() => {
+      delete process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2
     })
 
-    it("a throwing recorder never affects the run result", async () => {
-      mockRecordShadowDecision.mockImplementation(() => {
-        throw new Error("shadow down")
-      })
+    it("delegates to the unified service when agentExecutionResolverV2 is on", async () => {
+      process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2 = "1"
+      // Web environment (isTauri=false) + legacy toolsEnabled:true maps to the
+      // explicit completion fallback — the service runs the completion rail and
+      // stamps degradedReason instead of silently degrading.
       primeTextChannel(["ok"])
-      const result = await executeAgent("hi")
-      await flushShadow()
+      const result = (await executeAgent("hi", { toolsEnabled: true })) as Awaited<
+        ReturnType<typeof executeAgent>
+      > & { degradedReason?: string; runtime?: string }
       expect(result.text).toBe("ok")
       expect(result.channel).toBe("text")
+      expect(result.degradedReason).toBe("legacy-completion-fallback")
+      expect(result.runtime).toBe("claude-agent-sdk")
+    })
+
+    it("keeps the legacy branch byte-identical when the flag is off", async () => {
+      primeTextChannel(["ok"])
+      const result = (await executeAgent("hi", { toolsEnabled: true })) as Awaited<
+        ReturnType<typeof executeAgent>
+      > & { degradedReason?: string }
+      expect(result.text).toBe("ok")
+      expect(result.channel).toBe("text")
+      expect(result.degradedReason).toBeUndefined()
     })
   })
 })

@@ -52,6 +52,11 @@ export interface AgentTurnParams {
 
 const DEFAULT_TIMEOUT_MS = 600_000
 
+/** Pinned copy — asserted by tests; the service path must fail with the same words. */
+const REQUIRE_TOOLS_UNAVAILABLE_MESSAGE =
+  "action.agent.turn: tools required but the desktop sidecar is unavailable " +
+  "(web/mobile run). Unset 'requireTools' to allow the text-only fallback."
+
 export async function runAgentTurn(ctx: StepExecutionContext): Promise<StepExecutionResult> {
   const params = ctx.params as AgentTurnParams
   const prompt = (params.prompt ?? "").trim()
@@ -60,16 +65,18 @@ export async function runAgentTurn(ctx: StepExecutionContext): Promise<StepExecu
   }
   const toolsEnabled = params.toolsEnabled !== false
 
-  recordAgentTurnShadowDecision(params, toolsEnabled)
+  // ADR-0090 Phase 6: behind the resolver flag the unified service owns rail
+  // selection and the requireTools fail-before-spend (its host truth comes
+  // from the resolver environment, not an ad-hoc isTauri probe here).
+  const { isAgentExecutionFlagEnabled } = await import("@/lib/ai/agent/execution/feature-flags")
+  const resolverAuthoritative = isAgentExecutionFlagEnabled("agentExecutionResolverV2")
 
   // requireTools is a hard precondition — check BEFORE spending a turn.
-  if (toolsEnabled && params.requireTools) {
+  // (Flag off only; the service enforces the same policy fail-closed.)
+  if (!resolverAuthoritative && toolsEnabled && params.requireTools) {
     const { isTauri } = await import("@/lib/tauri")
     if (!isTauri()) {
-      throw nonRetryable(
-        "action.agent.turn: tools required but the desktop sidecar is unavailable " +
-          "(web/mobile run). Unset 'requireTools' to allow the text-only fallback."
-      )
+      throw nonRetryable(REQUIRE_TOOLS_UNAVAILABLE_MESSAGE)
     }
   }
 
@@ -91,6 +98,37 @@ export async function runAgentTurn(ctx: StepExecutionContext): Promise<StepExecu
     // Provider snapshot for the text channel (the sidecar channel resolves
     // its own provider through resolveSendOptions).
     const settings = await getSettings().catch(() => undefined)
+
+    // Single turn runner: the unified service behind the flag (surface +
+    // requireTools become resolver policy; the host-unavailable failure keeps
+    // the node's pinned error copy), the legacy executor otherwise.
+    const runTurn = async (
+      turnPrompt: string,
+      cfg: Parameters<typeof executeAgent>[1]
+    ): Promise<ExecuteAgentResult & { degradedReason?: string }> => {
+      if (!resolverAuthoritative) return executeAgent(turnPrompt, cfg)
+      const [{ executeAgentTurn, AgentHostUnavailableError }, { isTauri }] = await Promise.all([
+        import("@/lib/ai/agent/execution/agent-execution-service"),
+        import("@/lib/tauri"),
+      ])
+      try {
+        return await executeAgentTurn(
+          turnPrompt,
+          cfg ?? {},
+          { isTauri: isTauri(), isHeadlessHost: false },
+          {
+            surface: "workflow-agent-turn",
+            ...(params.requireTools !== undefined ? { requireTools: params.requireTools } : {}),
+            identity: { sessionId: ctx.runId, runId: ctx.runId },
+          }
+        )
+      } catch (err) {
+        if (err instanceof AgentHostUnavailableError) {
+          throw nonRetryable(REQUIRE_TOOLS_UNAVAILABLE_MESSAGE)
+        }
+        throw err
+      }
+    }
 
     const baseOptions = {
       systemPrompt: params.systemPrompt,
@@ -134,7 +172,7 @@ export async function runAgentTurn(ctx: StepExecutionContext): Promise<StepExecu
           // The corrective re-prompt rides the user message (prompt-injection
           // is the only structured-output mechanism on the sidecar channel).
           const turnPrompt = fix ? `${prompt}\n\n${fix}` : prompt
-          const r = await executeAgent(turnPrompt, {
+          const r = await runTurn(turnPrompt, {
             ...baseOptions,
             outputFormat: { type: "json_schema", schema: outputSchema },
           })
@@ -156,14 +194,16 @@ export async function runAgentTurn(ctx: StepExecutionContext): Promise<StepExecu
         ...(outcome.schemaErrors ? { schemaErrors: outcome.schemaErrors } : {}),
       }
     } else {
-      result = await executeAgent(prompt, baseOptions)
+      result = await runTurn(prompt, baseOptions)
     }
 
+    const degradedReason = (result as { degradedReason?: string }).degradedReason
     if (toolsEnabled && !result.toolsAvailable) {
       ctx.log(
         "warn",
         "action.agent.turn: tools were requested but the sidecar is unavailable — " +
-          "ran as a text-only completion (no tool calls were possible)."
+          "ran as a text-only completion (no tool calls were possible)." +
+          (degradedReason ? ` [degradedReason: ${degradedReason}]` : "")
       )
     }
 
@@ -196,6 +236,7 @@ export async function runAgentTurn(ctx: StepExecutionContext): Promise<StepExecu
         text: result.text,
         channel: result.channel,
         toolsAvailable: result.toolsAvailable,
+        ...(degradedReason ? { degradedReason } : {}),
         ...(result.finishReason ? { finishReason: result.finishReason } : {}),
         ...(result.usage ? { usage: result.usage } : {}),
         ...(structured
@@ -220,43 +261,4 @@ function nonRetryable(message: string): Error {
   const err = new Error(message)
   ;(err as Error & { retryable: boolean }).retryable = false
   return err
-}
-
-/**
- * Shadow-record the ADR-0090 resolver decision for this node's legacy
- * toolsEnabled/requireTools signals (Phase 0 — observation only).
- */
-function recordAgentTurnShadowDecision(params: AgentTurnParams, toolsEnabled: boolean): void {
-  void (async () => {
-    try {
-      const [
-        { resolveAgentExecutionSpec },
-        { recordShadowDecision },
-        { getAgentExecutionFlags },
-        { isTauri },
-      ] = await Promise.all([
-        import("@/lib/ai/agent/execution/resolve-agent-execution-spec"),
-        import("@/lib/ai/agent/execution/shadow-recorder"),
-        import("@/lib/ai/agent/execution/feature-flags"),
-        import("@/lib/tauri"),
-      ])
-      const environment = { isTauri: isTauri(), isHeadlessHost: false }
-      recordShadowDecision({
-        resolution: resolveAgentExecutionSpec({
-          surface: "workflow-agent-turn",
-          environment,
-          flags: getAgentExecutionFlags(),
-          legacy: {
-            modelId: params.model,
-            toolsEnabled,
-            requireTools: params.requireTools,
-          },
-        }),
-        environment,
-        legacyChannel: toolsEnabled && environment.isTauri ? "sidecar" : "text",
-      })
-    } catch {
-      // Shadow instrumentation must never affect the step.
-    }
-  })()
 }

@@ -54,8 +54,9 @@ function buildSession(
     }
     // Refuse the turn when the cumulative budget is already exhausted.
     budget?.assertWithin()
-    const [{ executeAgent }, messagesDb] = await Promise.all([
-      import("@/lib/ai/agent/agent-executor"),
+    // ADR-0090 Phase 6: unified authority (surface "plugin") behind the flag.
+    const [{ executeAgentTurnFromRenderer }, messagesDb] = await Promise.all([
+      import("@/lib/ai/agent/execution/agent-execution-service"),
       import("@/lib/db/messages"),
     ])
 
@@ -66,18 +67,22 @@ function buildSession(
       .map(toSessionMessage)
       .filter((m): m is { role: "user" | "assistant"; content: string } => m.role !== "system")
 
-    const result = await executeAgent(prompt, {
-      sessionId: id,
-      toolsEnabled: options.toolsEnabled ?? true,
-      ...(base.characterId ? { characterId: base.characterId } : {}),
-      ...(base.cwd ? { cwd: base.cwd } : {}),
-      ...(options.model ? { model: options.model } : {}),
-      ...(options.appendSystem ? { appendSystem: options.appendSystem } : {}),
-      ...(options.allowedTools ? { allowedTools: options.allowedTools } : {}),
-      ...(options.outputFormat ? { outputFormat: options.outputFormat } : {}),
-      ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
-      ...(priorMessages.length > 0 ? { priorMessages } : {}),
-    })
+    const result = await executeAgentTurnFromRenderer(
+      prompt,
+      {
+        sessionId: id,
+        toolsEnabled: options.toolsEnabled ?? true,
+        ...(base.characterId ? { characterId: base.characterId } : {}),
+        ...(base.cwd ? { cwd: base.cwd } : {}),
+        ...(options.model ? { model: options.model } : {}),
+        ...(options.appendSystem ? { appendSystem: options.appendSystem } : {}),
+        ...(options.allowedTools ? { allowedTools: options.allowedTools } : {}),
+        ...(options.outputFormat ? { outputFormat: options.outputFormat } : {}),
+        ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
+        ...(priorMessages.length > 0 ? { priorMessages } : {}),
+      },
+      { surface: "plugin" }
+    )
 
     // Record the turn so history() survives reload.
     const userMsg: UIMessage = {
@@ -105,6 +110,9 @@ function buildSession(
       ...(result.object !== undefined ? { object: result.object } : {}),
       ...(result.parseError ? { parseError: result.parseError } : {}),
       ...(result.usage ? { usage: result.usage } : {}),
+      ...(result.runtime ? { runtime: result.runtime } : {}),
+      ...(result.routeKind ? { routeKind: result.routeKind } : {}),
+      ...(result.degradedReason ? { degradedReason: result.degradedReason } : {}),
     }
   }
 

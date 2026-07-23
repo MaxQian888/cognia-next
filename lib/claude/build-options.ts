@@ -3326,37 +3326,35 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
   }
 
-  // ADR-0090 Phase 0: shadow-record the unified resolver's decision against
-  // the fully-resolved SendOptions (ground truth). Observation only — the
-  // stamped options are returned unchanged.
-  void (async () => {
-    try {
-      const [{ resolveAgentExecutionSpec }, { recordShadowDecision }, { getAgentExecutionFlags }] =
-        await Promise.all([
-          import("@/lib/ai/agent/execution/resolve-agent-execution-spec"),
-          import("@/lib/ai/agent/execution/shadow-recorder"),
-          import("@/lib/ai/agent/execution/feature-flags"),
-        ])
+  // ADR-0090 Phase 6: behind the resolver flag, stamp the frozen execution
+  // spec onto the outgoing SendOptions. `execution` is the secret-free wire
+  // shape the sidecar's dispatch routes on (runtime adapter instead of the
+  // provider-id branch); the legacy `provider`/proxy fields stay untouched so
+  // rollback is turning the flag off. A stamping failure must not break the
+  // send — dispatch falls back to the provider branch and counts it as
+  // `legacy_dispatch` telemetry.
+  try {
+    const { isAgentExecutionFlagEnabled, getAgentExecutionFlags } =
+      await import("@/lib/ai/agent/execution/feature-flags")
+    if (isAgentExecutionFlagEnabled("agentExecutionResolverV2")) {
+      const { resolveAgentExecutionSpec, sendSpecFromResolved } =
+        await import("@/lib/ai/agent/execution/resolve-agent-execution-spec")
       const { isTauri } = await import("@/lib/tauri")
-      const environment = { isTauri: isTauri(), isHeadlessHost: false }
-      recordShadowDecision({
-        resolution: resolveAgentExecutionSpec({
-          surface: "chat",
-          environment,
-          flags: getAgentExecutionFlags(),
-          // Chat sessions are agent sessions by definition; the legacy
-          // provider id still drives the runtime mapping.
-          policy: { executionKind: "agent" },
-          legacy: { providerId: opts.provider, modelId: opts.model },
-          identity: session?.id ? { sessionId: session.id } : undefined,
-        }),
-        environment,
-        legacyChannel: "sidecar",
+      const { spec } = resolveAgentExecutionSpec({
+        surface: "chat",
+        environment: { isTauri: isTauri(), isHeadlessHost: false },
+        flags: getAgentExecutionFlags(),
+        // Chat sessions are agent sessions by definition; the legacy
+        // provider id still drives the runtime mapping.
+        policy: { executionKind: "agent" },
+        legacy: { providerId: opts.provider, modelId: opts.model },
+        identity: session?.id ? { sessionId: session.id } : undefined,
       })
-    } catch {
-      // Shadow instrumentation must never affect the send path.
+      opts.execution = sendSpecFromResolved(spec)
     }
-  })()
+  } catch {
+    // Never fail the send over spec stamping.
+  }
 
   return opts
 }

@@ -9,6 +9,16 @@ jest.mock("@/lib/ai/agent/agent-executor", () => ({
   __esModule: true,
   executeAgent: jest.fn(),
 }))
+// ADR-0090 Phase 6: the dispatch path routes through the unified authority.
+// Default delegates to the REAL wrapper (flag off ⇒ the executeAgent mock
+// above), so legacy assertions still hold; individual tests override it to
+// pin the surface and the execution-meta pass-through.
+const mockRendererTurn = jest.fn()
+jest.mock("@/lib/ai/agent/execution/agent-execution-service", () => ({
+  __esModule: true,
+  ...jest.requireActual("@/lib/ai/agent/execution/agent-execution-service"),
+  executeAgentTurnFromRenderer: (...a: unknown[]) => mockRendererTurn(...(a as [])),
+}))
 jest.mock("@/lib/plugin/registries/subagent-registry", () => ({
   __esModule: true,
   getSubagent: jest.fn(),
@@ -71,6 +81,11 @@ const subagent: PluginSubagentDef = {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockRendererTurn.mockImplementation((...a: unknown[]) =>
+    jest
+      .requireActual("@/lib/ai/agent/execution/agent-execution-service")
+      .executeAgentTurnFromRenderer(...(a as [string, never, never]))
+  )
   mockExecute.mockResolvedValue({
     text: "reviewed",
     channel: "sidecar",
@@ -106,6 +121,32 @@ describe("dispatchSubagent", () => {
   it("forwards a cross-provider def.provider to executeAgent", async () => {
     await dispatchSubagent({ ...subagent, provider: "anthropic" }, "go")
     expect(mockExecute.mock.calls[0][1]).toMatchObject({ provider: "anthropic" })
+  })
+
+  it("routes through the unified authority with surface 'plugin' and forwards execution meta (ADR-0090)", async () => {
+    mockRendererTurn.mockResolvedValueOnce({
+      text: "authoritative",
+      channel: "sidecar",
+      toolsAvailable: true,
+      runtime: "claude-agent-sdk",
+      routeKind: "direct",
+      degradedReason: "sidecar-unavailable",
+    })
+    const res = await dispatchSubagent(subagent, "go")
+    expect(mockRendererTurn.mock.calls[0][2]).toEqual({ surface: "plugin" })
+    expect(res).toMatchObject({
+      text: "authoritative",
+      runtime: "claude-agent-sdk",
+      routeKind: "direct",
+      degradedReason: "sidecar-unavailable",
+    })
+  })
+
+  it("omits execution meta from the result when the turn ran without it (flag off)", async () => {
+    const res = await dispatchSubagent(subagent, "go")
+    expect(res).not.toHaveProperty("runtime")
+    expect(res).not.toHaveProperty("routeKind")
+    expect(res).not.toHaveProperty("degradedReason")
   })
 
   it("omits provider when the def names none", async () => {

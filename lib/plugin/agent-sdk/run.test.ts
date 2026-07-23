@@ -11,6 +11,14 @@ jest.mock("@/lib/ai/agent/agent-executor", () => ({
   __esModule: true,
   executeAgent: jest.fn(),
 }))
+// ADR-0090 Phase 6: runs route through the unified authority. Default
+// delegates to the REAL wrapper (flag off ⇒ the executeAgent mock above).
+const mockRendererTurn = jest.fn()
+jest.mock("@/lib/ai/agent/execution/agent-execution-service", () => ({
+  __esModule: true,
+  ...jest.requireActual("@/lib/ai/agent/execution/agent-execution-service"),
+  executeAgentTurnFromRenderer: (...a: unknown[]) => mockRendererTurn(...(a as [])),
+}))
 
 const mockExecute = executeAgent as jest.MockedFunction<typeof executeAgent>
 
@@ -24,6 +32,11 @@ beforeEach(() => {
   jest.clearAllMocks()
   __resetBackgroundAgentManagerForTesting()
   __resetContextProvidersForTesting()
+  mockRendererTurn.mockImplementation((...a: unknown[]) =>
+    jest
+      .requireActual("@/lib/ai/agent/execution/agent-execution-service")
+      .executeAgentTurnFromRenderer(...(a as [string, never, never]))
+  )
   mockExecute.mockResolvedValue({ ...baseResult } as never)
 })
 
@@ -57,6 +70,22 @@ describe("runPluginAgent", () => {
   it("honours a caller-supplied agentId", async () => {
     const res = await runPluginAgent("hi", {}, { agentId: "fixed-id" })
     expect(res.agentId).toBe("fixed-id")
+  })
+
+  it("routes through the unified authority with surface 'plugin' and forwards execution meta (ADR-0090)", async () => {
+    mockRendererTurn.mockResolvedValueOnce({
+      ...baseResult,
+      runtime: "claude-agent-sdk",
+      routeKind: "direct",
+      degradedReason: "legacy-completion-fallback",
+    })
+    const res = await runPluginAgent("hi")
+    expect(mockRendererTurn.mock.calls[0][2]).toEqual({ surface: "plugin" })
+    expect(res).toMatchObject({
+      runtime: "claude-agent-sdk",
+      routeKind: "direct",
+      degradedReason: "legacy-completion-fallback",
+    })
   })
 
   it("fails closed before execution when a context provider contributes PII", async () => {

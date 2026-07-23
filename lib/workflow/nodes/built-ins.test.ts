@@ -2616,6 +2616,9 @@ describe("action.team.task.dispatch", () => {
     const r = await exec("action.team.task.dispatch", ctx)
     expect((r.output as { text: string }).text).toBe("result")
     expect((r.output as { teammateId: string }).teammateId).toBe("w1")
+    // ADR-0090 Phase 6: this test host has no sidecar, so the tool-capable
+    // claude dispatch degrades to text — the reason rides the node output.
+    expect((r.output as { degradedReason?: string }).degradedReason).toBe("sidecar-unavailable")
   })
 
   it("honors params.assignedTo as the preferred teammate (skill-aware claim)", async () => {

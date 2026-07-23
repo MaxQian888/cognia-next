@@ -117,6 +117,13 @@ export interface DispatchTeammateResult {
   teammateName: string
   usage?: TokenUsage
   channel: TeammateChannel
+  /**
+   * Set when the dispatch ran on a lesser rail than the teammate's
+   * configuration asked for (ADR-0090 Phase 6). Machine-readable — the same
+   * value keys the run notifier copy and is forwarded onto the
+   * `action.team.task` workflow node output.
+   */
+  degradedReason?: "sidecar-unavailable" | "external-agent-unavailable"
 }
 
 function toSpanUsage(usage: TokenUsage): SpanUsage {
@@ -496,12 +503,66 @@ export async function dispatchTeammate(
     const { isTauri } = await import("@/lib/tauri")
     if (isTauri()) channel = "sidecar"
   }
-  if (channel === "text" && runtime === "claude" && args.preferToolEnabled !== false) {
-    // Reached only when a tool-capable `claude` teammate could not get the
-    // desktop sidecar (isTauri() was false). On a desktop target this "should
-    // never happen"; when it does the teammate silently loses tools + sub-agent
-    // nesting, so surface it instead of degrading quietly. Excludes external,
-    // intentional text (preferToolEnabled === false), and non-claude runtimes.
+
+  // ADR-0090 Phase 6: behind the resolver flag, the unified resolver owns the
+  // channel decision. It is fed the RESOLVED external backing (external-agent
+  // availability is environment truth resolved above, exactly like host
+  // availability): a teammate whose external agent did not resolve executes as
+  // built-in — non-claude runtimes on the text rail, claude on the agent rail.
+  {
+    const { isAgentExecutionFlagEnabled, getAgentExecutionFlags } =
+      await import("@/lib/ai/agent/execution/feature-flags")
+    if (isAgentExecutionFlagEnabled("agentExecutionResolverV2")) {
+      const { resolveAgentExecutionSpec, channelFromSpec } =
+        await import("@/lib/ai/agent/execution/resolve-agent-execution-spec")
+      const { isTauri } = await import("@/lib/tauri")
+      const environment = { isTauri: isTauri(), isHeadlessHost: false }
+      const { spec } = resolveAgentExecutionSpec({
+        surface: "team",
+        environment,
+        flags: getAgentExecutionFlags(),
+        legacy: {
+          runtime: externalAgentId ? runtime : "claude",
+          modelId: modelHint ?? teammate.config?.model,
+          toolsEnabled: externalAgentId
+            ? args.preferToolEnabled !== false
+            : runtime === "claude" && args.preferToolEnabled !== false,
+        },
+        identity: { sessionId: teamCtx.runId, runId: teamCtx.runId },
+      })
+      channel = channelFromSpec(spec, environment)
+      void import("@/lib/telemetry/events/track-event")
+        .then(({ trackEvent }) =>
+          trackEvent("agent.execution.resolved", {
+            surface: "team",
+            runtime: spec.runtimeAdapter,
+            routeKind: spec.route.kind,
+            executionKind: spec.executionKind,
+            legacyMigrated: spec.legacyMigrated === true,
+          })
+        )
+        .catch(() => undefined)
+    }
+  }
+
+  // Degradation is a first-class, machine-readable outcome (ADR-0090 Phase 6):
+  // both notifier copies key off these derived reasons, and the winning reason
+  // rides the dispatch result so workflow events / plugin meta can surface it.
+  const wantsExternal = runtime !== "claude" || resolvedCaps.externalAgentPresetIds.length > 0
+  const sidecarDegraded =
+    channel === "text" && runtime === "claude" && args.preferToolEnabled !== false
+  const externalDegraded = wantsExternal && channel !== "external"
+  const degradedReason: DispatchTeammateResult["degradedReason"] = externalDegraded
+    ? "external-agent-unavailable"
+    : sidecarDegraded
+      ? "sidecar-unavailable"
+      : undefined
+  if (sidecarDegraded) {
+    // A tool-capable `claude` teammate could not get the desktop sidecar. On a
+    // desktop target this "should never happen"; when it does the teammate
+    // silently loses tools + sub-agent nesting, so surface it instead of
+    // degrading quietly. Excludes external, intentional text
+    // (preferToolEnabled === false), and non-claude runtimes.
     teamCtx.notifier.notify({
       level: "warn",
       title: "Teammate degraded to text channel",
@@ -512,10 +573,7 @@ export async function dispatchTeammate(
       dedupeKey: `text-fallback:${teamCtx.runId}:${teammate.id}`,
     })
   }
-  if (
-    (runtime !== "claude" || resolvedCaps.externalAgentPresetIds.length > 0) &&
-    channel !== "external"
-  ) {
+  if (externalDegraded) {
     // An external-CLI-backed teammate (e.g. runtime "codex"/"claude-code", or a
     // teammate carrying an external-agent preset) could not reach its external
     // agent — the browser/mobile shell has no external-agent host, or the CLI is
@@ -533,39 +591,6 @@ export async function dispatchTeammate(
       dedupeKey: `external-fallback:${teamCtx.runId}:${teammate.id}`,
     })
   }
-
-  // ADR-0090 Phase 0: shadow-record what the unified resolver would decide
-  // for this dispatch now that the legacy channel is final. Observation only.
-  void (async () => {
-    try {
-      const [{ resolveAgentExecutionSpec }, { recordShadowDecision }, { getAgentExecutionFlags }] =
-        await Promise.all([
-          import("@/lib/ai/agent/execution/resolve-agent-execution-spec"),
-          import("@/lib/ai/agent/execution/shadow-recorder"),
-          import("@/lib/ai/agent/execution/feature-flags"),
-        ])
-      const { isTauri } = await import("@/lib/tauri")
-      const environment = { isTauri: isTauri(), isHeadlessHost: false }
-      recordShadowDecision({
-        resolution: resolveAgentExecutionSpec({
-          surface: "team",
-          environment,
-          flags: getAgentExecutionFlags(),
-          legacy: {
-            runtime,
-            modelId: modelHint ?? teammate.config?.model,
-            toolsEnabled: args.preferToolEnabled !== false,
-            channel,
-          },
-          identity: { sessionId: teamCtx.runId, runId: teamCtx.runId },
-        }),
-        environment,
-        legacyChannel: channel,
-      })
-    } catch {
-      // Shadow instrumentation must never affect the dispatch.
-    }
-  })()
 
   // Live progress streaming → workspace activity panel. Built only when the
   // store exposes an `addEvent` sink (UI runs; eval/plan fixtures omit it).
@@ -846,5 +871,6 @@ export async function dispatchTeammate(
     teammateName: teammate.name,
     usage: turn.usage,
     channel,
+    ...(degradedReason ? { degradedReason } : {}),
   }
 }

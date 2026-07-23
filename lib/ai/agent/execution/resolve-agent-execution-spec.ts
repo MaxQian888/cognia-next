@@ -316,6 +316,41 @@ export function resolveAgentExecutionSpec(
 }
 
 /**
+ * Project a resolved spec onto the wire shape that rides
+ * `SendOptions.execution` (ADR-0090 Phase 3/6). Secret-free by construction;
+ * gateway specs carry endpoint+ticketId only when a ticket was actually
+ * minted (`ticketRef` + endpoint supplied by the caller).
+ */
+export function sendSpecFromResolved(
+  spec: ResolvedAgentExecutionSpec,
+  gateway?: { endpoint: string; ticketId: string }
+): import("@cognia/agent-config-types/agent-execution").AgentExecutionSendSpec {
+  return {
+    specVersion: 1,
+    executionFingerprint: spec.executionFingerprint,
+    runtimeAdapter: spec.runtimeAdapter,
+    executionKind: spec.executionKind,
+    route:
+      spec.route.kind === "gateway" && gateway
+        ? { kind: "gateway", endpoint: gateway.endpoint, ticketId: gateway.ticketId }
+        : {
+            kind: "direct",
+            ...(spec.route.kind === "direct" && spec.route.credentialProfileRef
+              ? { credentialProfileRef: spec.route.credentialProfileRef }
+              : {}),
+          },
+    modelBindings: spec.modelBindings,
+    capabilities: spec.capabilities,
+    identity: {
+      runId: spec.identity.runId,
+      attemptId: spec.identity.attemptId,
+      ...(spec.identity.parentRunId ? { parentRunId: spec.identity.parentRunId } : {}),
+    },
+    hostRef: spec.hostRef,
+  }
+}
+
+/**
  * The channel the resolved spec implies, in legacy vocabulary — used by the
  * shadow recorder to compare against what the old code actually picked.
  */

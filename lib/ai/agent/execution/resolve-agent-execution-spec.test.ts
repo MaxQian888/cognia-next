@@ -5,6 +5,7 @@ import {
   channelFromSpec,
   resolveAgentExecutionSpec,
   RUNTIME_CAPABILITIES,
+  sendSpecFromResolved,
   type AgentExecutionResolveInput,
 } from "./resolve-agent-execution-spec"
 
@@ -210,6 +211,55 @@ describe("channelFromSpec", () => {
       baseInput({ surface: "team", legacy: { runtime: "codex" } })
     )
     expect(channelFromSpec(external.spec, desktop)).toBe("external")
+  })
+})
+
+describe("sendSpecFromResolved", () => {
+  it("projects a direct spec onto the secret-free SendOptions wire shape", () => {
+    const { spec } = resolveAgentExecutionSpec(
+      baseInput({
+        legacy: { providerId: "anthropic", modelId: "claude-opus-4-8", toolsEnabled: true },
+        identity: { sessionId: "s-1" },
+      })
+    )
+    const sent = sendSpecFromResolved(spec)
+    expect(sent).toEqual(
+      expect.objectContaining({
+        specVersion: 1,
+        executionFingerprint: spec.executionFingerprint,
+        runtimeAdapter: "claude-agent-sdk",
+        executionKind: "agent",
+        route: { kind: "direct" },
+        modelBindings: spec.modelBindings,
+        hostRef: spec.hostRef,
+      })
+    )
+    expect(sent.identity).toEqual({ runId: "s-1", attemptId: "a1" })
+    expect(JSON.stringify(sent)).not.toMatch(/sk-|api[_-]?key|bearer|token/i)
+  })
+
+  it("carries endpoint+ticketId ONLY when the caller minted a ticket for a gateway route", () => {
+    const { spec } = resolveAgentExecutionSpec(
+      baseInput({
+        flags: { ...flagsOff, gatewayAgentRouteTickets: true },
+        legacy: { providerId: "anthropic", proxyMode: "always", toolsEnabled: true },
+      })
+    )
+    expect(spec.route.kind).toBe("gateway")
+
+    // No minted ticket ⇒ the wire shape degrades to a direct route (fail-safe:
+    // never emit a gateway route the sidecar cannot authenticate against).
+    expect(sendSpecFromResolved(spec).route).toEqual({ kind: "direct" })
+
+    const withTicket = sendSpecFromResolved(spec, {
+      endpoint: "http://127.0.0.1:18789",
+      ticketId: "rt-1",
+    })
+    expect(withTicket.route).toEqual({
+      kind: "gateway",
+      endpoint: "http://127.0.0.1:18789",
+      ticketId: "rt-1",
+    })
   })
 })
 

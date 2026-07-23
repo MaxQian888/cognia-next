@@ -94,11 +94,6 @@ jest.mock("./twin-context", () => ({
   applyTeammateTwinContext: (...a: unknown[]) => applyTeammateTwinContextMock(...a),
 }))
 
-const recordShadowDecisionMock = jest.fn()
-jest.mock("@/lib/ai/agent/execution/shadow-recorder", () => ({
-  recordShadowDecision: (...a: unknown[]) => recordShadowDecisionMock(...a),
-}))
-
 // ── Fixtures ────────────────────────────────────────────────────────────────
 function makeTeammate(overrides: Partial<AgentTeammate> = {}): AgentTeammate {
   return {
@@ -223,33 +218,29 @@ describe("dispatchTeammate — text-only fallback", () => {
     expect(JSON.stringify(mockTrackEvent.mock.calls)).not.toContain("private provider response")
   })
 
-  it("shadow-records the team surface with the final legacy channel (ADR-0090)", async () => {
+  it("reports degradedReason on the result when a tool-capable claude teammate degrades to text (ADR-0090)", async () => {
     executeAgentMock.mockResolvedValue({ text: "ok" })
     const { ctx } = makeCtx(makeTeammate())
 
-    await dispatchTeammate(ctx, { taskId: "t1", prompt: "do it" })
-    await new Promise((resolve) => setTimeout(resolve, 0))
-
-    expect(recordShadowDecisionMock).toHaveBeenCalledTimes(1)
-    const call = recordShadowDecisionMock.mock.calls[0][0] as {
-      resolution: { trace: { surface: string; legacy: Record<string, unknown> } }
-      legacyChannel: string
-    }
-    expect(call.resolution.trace.surface).toBe("team")
-    expect(call.legacyChannel).toBe("text")
-    expect(call.resolution.trace.legacy.runtime).toBe("claude")
+    const result = await dispatchTeammate(ctx, { taskId: "t1", prompt: "do it" })
+    expect(result.degradedReason).toBe("sidecar-unavailable")
   })
 
-  it("a throwing shadow recorder never affects the dispatch (ADR-0090)", async () => {
-    recordShadowDecisionMock.mockImplementationOnce(() => {
-      throw new Error("shadow down")
-    })
-    executeAgentMock.mockResolvedValue({ text: "still fine" })
-    const { ctx } = makeCtx(makeTeammate())
+  it("resolver flag on: the unified resolver picks the same text channel (parity)", async () => {
+    process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2 = "1"
+    try {
+      executeAgentMock.mockResolvedValue({ text: "ok" })
+      const { ctx, notifier } = makeCtx(makeTeammate())
 
-    const result = await dispatchTeammate(ctx, { taskId: "t1", prompt: "do it" })
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(result.text).toBe("still fine")
+      const result = await dispatchTeammate(ctx, { taskId: "t1", prompt: "do it" })
+      expect(result.channel).toBe("text")
+      expect(result.degradedReason).toBe("sidecar-unavailable")
+      expect(notifier.notify).toHaveBeenCalledWith(
+        expect.objectContaining({ dedupeKey: "text-fallback:run1:tm1" })
+      )
+    } finally {
+      delete process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2
+    }
   })
 
   it("forwards preferTeammateId to pool.claim (skill-aware assignment)", async () => {

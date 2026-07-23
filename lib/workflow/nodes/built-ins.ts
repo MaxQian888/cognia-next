@@ -3351,6 +3351,9 @@ registerNodeExecutor({
         teammateName: result.teammateName,
         tokenUsage: result.usage,
         attempt: 1,
+        // ADR-0090 Phase 6: surface a degraded dispatch (lesser rail than the
+        // teammate's configuration asked for) on the workflow event stream.
+        ...(result.degradedReason ? { degradedReason: result.degradedReason } : {}),
       },
     }
   },

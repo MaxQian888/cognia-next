@@ -160,52 +160,59 @@ export async function dispatchSubagent(
   const timeoutMs =
     typeof deadlineMs === "number" ? Math.max(0, deadlineMs - Date.now()) : undefined
 
-  const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
-  const result = await executeAgent(prompt, {
-    // An explicit empty list is a deny-all declaration. Force the executor's
-    // top-level tool switch off as well because downstream option synthesis
-    // intentionally omits empty allowlists.
-    toolsEnabled: def.tools?.length === 0 ? false : (options.toolsEnabled ?? true),
-    // Every run dispatched here is a subagent. Without a dispatchContext (leaf,
-    // allowNesting unset) build-options must WITHHOLD dispatch_agent — including
-    // the plan-mode force-offer — instead of treating the child as top-level.
-    isDispatchedSubagent: true,
-    ...(def.prompt ? { systemPrompt: def.prompt } : {}),
-    ...(def.model ? { model: def.model } : {}),
-    // Cross-provider subagent: route the run to the def's provider (with its own
-    // credentials) instead of the dispatching session's provider.
-    ...(def.provider ? { provider: def.provider } : {}),
-    ...(def.tools !== undefined ? { allowedTools: def.tools } : {}),
-    // Parent ceiling: clamp THIS child's resolved tool surface against the
-    // dispatching agent's ceiling (fail-closed). The child's own dispatchContext
-    // below is for its grandchildren; this is the ceiling that bounds the child.
-    ...(options._permissionCeiling ? { permissionCeiling: options._permissionCeiling } : {}),
-    ...(typeof def.maxTurns === "number" ? { maxSteps: def.maxTurns } : {}),
-    ...(options.cwd ? { cwd: options.cwd } : {}),
-    ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
-    ...(typeof timeoutMs === "number" ? { timeoutMs } : {}),
-    // Live progress: stream the child's tool-call/result events into the
-    // subagent runtime store so its card updates while the run is in flight.
-    ...(options._onEvent ? { onEvent: options._onEvent } : {}),
-    // Permission-ask routing: surface the child's asks in the PARENT chat
-    // session (instead of the legacy silent auto-deny against the unopened
-    // ephemeral session).
-    ...(options._approvalRoute ? { approvalRoute: options._approvalRoute } : {}),
-    // Only thread a dispatch context when this child is allowed to nest — that
-    // is what re-exposes `dispatch_agent` to it (gated by depth in build-options).
-    ...(def.allowNesting && typeof effectiveMaxDepth === "number"
-      ? {
-          dispatchContext: {
-            depth: childDepth,
-            maxDepth: effectiveMaxDepth,
-            parentChain: childChain,
-            selfRunId: runId,
-            ...(typeof deadlineMs === "number" ? { deadlineMs } : {}),
-            ...(options._budgetRootRunId ? { budgetRootRunId: options._budgetRootRunId } : {}),
-          },
-        }
-      : {}),
-  })
+  // ADR-0090 Phase 6: the unified authority resolves the child's frozen spec
+  // (surface "plugin") behind the resolver flag; legacy executeAgent otherwise.
+  const { executeAgentTurnFromRenderer } =
+    await import("@/lib/ai/agent/execution/agent-execution-service")
+  const result = await executeAgentTurnFromRenderer(
+    prompt,
+    {
+      // An explicit empty list is a deny-all declaration. Force the executor's
+      // top-level tool switch off as well because downstream option synthesis
+      // intentionally omits empty allowlists.
+      toolsEnabled: def.tools?.length === 0 ? false : (options.toolsEnabled ?? true),
+      // Every run dispatched here is a subagent. Without a dispatchContext (leaf,
+      // allowNesting unset) build-options must WITHHOLD dispatch_agent — including
+      // the plan-mode force-offer — instead of treating the child as top-level.
+      isDispatchedSubagent: true,
+      ...(def.prompt ? { systemPrompt: def.prompt } : {}),
+      ...(def.model ? { model: def.model } : {}),
+      // Cross-provider subagent: route the run to the def's provider (with its own
+      // credentials) instead of the dispatching session's provider.
+      ...(def.provider ? { provider: def.provider } : {}),
+      ...(def.tools !== undefined ? { allowedTools: def.tools } : {}),
+      // Parent ceiling: clamp THIS child's resolved tool surface against the
+      // dispatching agent's ceiling (fail-closed). The child's own dispatchContext
+      // below is for its grandchildren; this is the ceiling that bounds the child.
+      ...(options._permissionCeiling ? { permissionCeiling: options._permissionCeiling } : {}),
+      ...(typeof def.maxTurns === "number" ? { maxSteps: def.maxTurns } : {}),
+      ...(options.cwd ? { cwd: options.cwd } : {}),
+      ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
+      ...(typeof timeoutMs === "number" ? { timeoutMs } : {}),
+      // Live progress: stream the child's tool-call/result events into the
+      // subagent runtime store so its card updates while the run is in flight.
+      ...(options._onEvent ? { onEvent: options._onEvent } : {}),
+      // Permission-ask routing: surface the child's asks in the PARENT chat
+      // session (instead of the legacy silent auto-deny against the unopened
+      // ephemeral session).
+      ...(options._approvalRoute ? { approvalRoute: options._approvalRoute } : {}),
+      // Only thread a dispatch context when this child is allowed to nest — that
+      // is what re-exposes `dispatch_agent` to it (gated by depth in build-options).
+      ...(def.allowNesting && typeof effectiveMaxDepth === "number"
+        ? {
+            dispatchContext: {
+              depth: childDepth,
+              maxDepth: effectiveMaxDepth,
+              parentChain: childChain,
+              selfRunId: runId,
+              ...(typeof deadlineMs === "number" ? { deadlineMs } : {}),
+              ...(options._budgetRootRunId ? { budgetRootRunId: options._budgetRootRunId } : {}),
+            },
+          }
+        : {}),
+    },
+    { surface: "plugin" }
+  )
 
   // Draw the run's usage down the shared subtree budget (best-effort — the
   // root dispatch creates the guard with the real limit).
@@ -224,6 +231,9 @@ export async function dispatchSubagent(
     runId,
     ...(result.finishReason ? { finishReason: result.finishReason } : {}),
     ...(result.usage ? { usage: result.usage } : {}),
+    ...(result.runtime ? { runtime: result.runtime } : {}),
+    ...(result.routeKind ? { routeKind: result.routeKind } : {}),
+    ...(result.degradedReason ? { degradedReason: result.degradedReason } : {}),
   }
 }
 
