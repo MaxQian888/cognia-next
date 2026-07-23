@@ -35,8 +35,18 @@ import {
   Trash2,
 } from "lucide-react"
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
@@ -164,41 +174,42 @@ function AgentCard({
   const ecosystem = validity?.ecosystem ?? getExternalAgentEcosystemReadiness(config)
 
   return (
+    // One row per agent: name + status on the first line, endpoint on the
+    // second. The previous header+content card was ~5 lines tall, so a handful
+    // of agents pushed the sessions/diagnostics panels off-screen. The surface
+    // name moved out — it is already spelled out in Runtime Diagnostics.
     <Card
+      data-testid={`agent-card-${config.id}`}
       className={cn(
-        "cursor-pointer gap-2 py-3 transition-all hover:shadow-md",
+        "cursor-pointer gap-0 py-2 transition-all hover:shadow-md",
         isActive && "ring-2 ring-primary"
       )}
       onClick={onSelect}
     >
-      <CardHeader className="px-3">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1 space-y-1">
-            <div className="flex items-center gap-2">
-              <CardTitle className="truncate text-sm">{config.name}</CardTitle>
+      <CardContent className="px-3">
+        <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
+              <span className="truncate text-sm font-medium">{config.name}</span>
               {ecosystem?.supportTier && (
                 <Badge variant="outline" className="shrink-0 text-[10px]">
                   {ecosystem.supportTier}
                 </Badge>
               )}
+              <ConnectionStatusBadge
+                status={connectionStatus}
+                withIcon
+                className="ml-auto shrink-0"
+              />
             </div>
-            <CardDescription className="text-xs">
+            <p className="truncate text-[11px] text-muted-foreground">
               {tManager("protocolViaTransport", {
                 protocol: config.protocol.toUpperCase(),
                 transport: config.transport,
               })}
-            </CardDescription>
-            {ecosystem?.surfaceName && (
-              <p className="truncate text-[11px] text-muted-foreground">{ecosystem.surfaceName}</p>
-            )}
-          </div>
-          <ConnectionStatusBadge status={connectionStatus} withIcon className="shrink-0" />
-        </div>
-      </CardHeader>
-      <CardContent className="px-3">
-        <div className="flex items-center justify-between gap-2">
-          <div className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-            {config.process?.command || config.network?.endpoint || tManager("noEndpoint")}
+              {" · "}
+              {config.process?.command || config.network?.endpoint || tManager("noEndpoint")}
+            </p>
           </div>
           <div className="flex shrink-0 gap-1">
             <Tooltip>
@@ -248,7 +259,7 @@ function AgentCard({
           </div>
         </div>
         {executionBlockReason && (
-          <p className="mt-2 text-[11px] text-amber-600 dark:text-amber-400">
+          <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
             {executionBlockReason}
           </p>
         )}
@@ -894,6 +905,8 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
   const tCommon = useTranslations("common")
   const refreshSessionsFailedMessage = tManager("refreshSessionsFailed")
   const [addDialogOpen, setAddDialogOpen] = useState(false)
+  /** Agent queued for removal; drives the confirmation AlertDialog. */
+  const [removeConfirmId, setRemoveConfirmId] = useState<string | null>(null)
   const [sessionList, setSessionList] = useState<
     Array<{
       sessionId: string
@@ -1050,22 +1063,20 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
     [disconnect, tSettings, getErrorMessage]
   )
 
-  const handleRemove = useCallback(
-    async (agentId: string) => {
-      const confirmFn =
-        typeof window !== "undefined" && typeof window.confirm === "function"
-          ? window.confirm.bind(window)
-          : () => true
-      if (!confirmFn(tManager("removeAgentConfirm"))) return
-      try {
-        await removeAgent(agentId)
-        toast.success(tSettings("agentRemoved"))
-      } catch (err) {
-        toast.error(getErrorMessage(err, tManager("removeAgentFailed")))
-      }
-    },
-    [removeAgent, tManager, tSettings, getErrorMessage]
-  )
+  // Removal is confirmed through the app's own AlertDialog rather than the
+  // native `window.confirm` sheet, which broke out of the dialog's styling and
+  // could not be dismissed with the app's own keyboard handling.
+  const handleRemove = useCallback(async () => {
+    const agentId = removeConfirmId
+    if (!agentId) return
+    setRemoveConfirmId(null)
+    try {
+      await removeAgent(agentId)
+      toast.success(tSettings("agentRemoved"))
+    } catch (err) {
+      toast.error(getErrorMessage(err, tManager("removeAgentFailed")))
+    }
+  }, [removeConfirmId, removeAgent, tManager, tSettings, getErrorMessage])
 
   const handleCommandExecute = useCallback(
     async (command: string, args?: string) => {
@@ -1377,18 +1388,22 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
             </Button>
           </div>
         ) : (
-          <div className="grid gap-2 sm:grid-cols-2">
-            {agents.map((agent) => (
-              <AgentCard
-                key={agent.config.id}
-                agent={agent}
-                isActive={activeAgentId === agent.config.id}
-                onConnect={() => handleConnect(agent.config.id)}
-                onDisconnect={() => handleDisconnect(agent.config.id)}
-                onRemove={() => handleRemove(agent.config.id)}
-                onSelect={() => setActiveAgent(agent.config.id)}
-              />
-            ))}
+          // Cap the roster's height so a long agent list can never push the
+          // sessions / diagnostics / commands panels below the fold.
+          <div className="-mx-1 max-h-56 shrink-0 overflow-y-auto px-1">
+            <div className="grid gap-2 sm:grid-cols-2">
+              {agents.map((agent) => (
+                <AgentCard
+                  key={agent.config.id}
+                  agent={agent}
+                  isActive={activeAgentId === agent.config.id}
+                  onConnect={() => handleConnect(agent.config.id)}
+                  onDisconnect={() => handleDisconnect(agent.config.id)}
+                  onRemove={() => setRemoveConfirmId(agent.config.id)}
+                  onSelect={() => setActiveAgent(agent.config.id)}
+                />
+              ))}
+            </div>
           </div>
         )}
 
@@ -1725,6 +1740,28 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
 
       {/* Add Agent Dialog */}
       <AddAgentDialog open={addDialogOpen} onOpenChange={setAddDialogOpen} onAdd={handleAddAgent} />
+
+      {/* Remove confirmation */}
+      <AlertDialog
+        open={!!removeConfirmId}
+        onOpenChange={(open) => !open && setRemoveConfirmId(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{tSettings("deleteAgent")}</AlertDialogTitle>
+            <AlertDialogDescription>{tManager("removeAgentConfirm")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{tCommon("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleRemove}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {tCommon("remove")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* ACP Permission Dialog */}
       <ToolApprovalDialog

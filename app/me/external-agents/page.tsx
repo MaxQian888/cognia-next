@@ -164,37 +164,37 @@ function ExternalAgentsBody() {
                 <ItemMedia>
                   <PlugIcon className="size-4 text-muted-foreground" aria-hidden />
                 </ItemMedia>
-                <ItemContent>
+                <ItemContent className="min-w-0">
                   <ItemTitle className="text-xs">{agent.name}</ItemTitle>
                   <ItemDescription className="text-[11px]">
                     <span className="font-mono">{agent.protocol}</span> ·{" "}
                     <span className="font-mono">{agent.transport}</span>
                   </ItemDescription>
-                  <div className="mt-2">
-                    <Select
-                      value={currentMode}
-                      onValueChange={(v) =>
-                        void queueUpdate(agent, { defaultPermissionMode: v as AcpPermissionMode })
-                      }
-                    >
-                      <SelectTrigger
-                        className="h-8 text-xs"
-                        aria-label={t("permissionModeAria", { name: agent.name })}
-                        data-testid={`external-agent-mode-${agent.id}`}
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {modes.map((mode) => (
-                          <SelectItem key={mode} value={mode}>
-                            {t(PERMISSION_MODE_LABEL_KEY[mode])}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
                 </ItemContent>
-                <ItemActions>
+                {/* Mode picker sits beside the enable switch instead of on its
+                    own line below the title — one row per agent on a phone. */}
+                <ItemActions className="gap-2">
+                  <Select
+                    value={currentMode}
+                    onValueChange={(v) =>
+                      void queueUpdate(agent, { defaultPermissionMode: v as AcpPermissionMode })
+                    }
+                  >
+                    <SelectTrigger
+                      className="h-8 w-28 text-xs"
+                      aria-label={t("permissionModeAria", { name: agent.name })}
+                      data-testid={`external-agent-mode-${agent.id}`}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {modes.map((mode) => (
+                        <SelectItem key={mode} value={mode}>
+                          {t(PERMISSION_MODE_LABEL_KEY[mode])}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <Switch
                     checked={agent.enabled}
                     onCheckedChange={(next) => void queueUpdate(agent, { enabled: next })}

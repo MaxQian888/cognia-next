@@ -301,8 +301,77 @@ describe("probeExternalAgentEcosystemReadiness", () => {
     )
     expect(out?.prerequisites?.find((p) => p.id === "local-command")?.status).toBe("missing")
     expect(out?.recommendedActions).toEqual(
-      expect.arrayContaining([expect.stringMatching(/Install or expose "fake"/)])
+      expect.arrayContaining([expect.stringMatching(/Install "fake"/)])
     )
+  })
+
+  it("names the install command for a known agent CLI", async () => {
+    const out = await probeExternalAgentEcosystemReadiness(
+      {
+        metadata: { preset: "codex-app-server" },
+        transport: "stdio",
+        process: { command: "codex", args: ["app-server"] },
+      },
+      { runtimeIsTauri: true, checkCommandExists: async () => false }
+    )
+    expect(out?.recommendedActions).toEqual(
+      expect.arrayContaining([expect.stringMatching(/@openai\/codex/)])
+    )
+  })
+
+  it("probes the command for a hand-written stdio config with no ecosystem identity", async () => {
+    const out = await probeExternalAgentEcosystemReadiness(
+      {
+        metadata: {},
+        transport: "stdio",
+        process: { command: "codex", args: ["app-server"] },
+      },
+      { runtimeIsTauri: true, checkCommandExists: async () => false }
+    )
+    // Without this the missing binary slipped past the execution gate and only
+    // surfaced as a raw spawn "os error 2".
+    expect(out?.prerequisites?.find((p) => p.id === "local-command")?.status).toBe("missing")
+    expect(out?.prerequisiteStatus).toBe("action-required")
+  })
+
+  it("replaces a stale 'local-command' prerequisite instead of appending a second one", async () => {
+    const stale = await probeExternalAgentEcosystemReadiness(
+      {
+        metadata: { preset: "codex-app-server" },
+        transport: "stdio",
+        process: { command: "codex", args: [] },
+      },
+      { runtimeIsTauri: true, checkCommandExists: async () => true }
+    )
+    expect(stale?.prerequisites?.find((p) => p.id === "local-command")?.status).toBe("satisfied")
+
+    // Re-probe after the CLI was uninstalled, against the persisted snapshot.
+    const out = await probeExternalAgentEcosystemReadiness(
+      {
+        metadata: projectExternalAgentReadinessMetadata({ preset: "codex-app-server" }, stale!),
+        transport: "stdio",
+        process: { command: "codex", args: [] },
+      },
+      { runtimeIsTauri: true, checkCommandExists: async () => false }
+    )
+    const entries = out?.prerequisites?.filter((p) => p.id === "local-command") ?? []
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.status).toBe("missing")
+  })
+
+  it("blocks connect for a hand-written stdio config whose command is missing", async () => {
+    const probed = await probeExternalAgentEcosystemReadiness(
+      { metadata: {}, transport: "stdio", process: { command: "codex", args: [] } },
+      { runtimeIsTauri: true, checkCommandExists: async () => false }
+    )
+    const config = baseConfig({
+      transport: "stdio",
+      process: { command: "codex", args: [] },
+      metadata: projectExternalAgentReadinessMetadata({}, probed!),
+    })
+    const block = getExternalAgentExecutionBlock(config, true)
+    expect(block?.code).toBe("ecosystem_prerequisite_missing")
+    expect(block?.reason).toMatch(/codex/)
   })
 
   it("adds a Windows-specific recommendation for the codex acp-stdio surface", async () => {

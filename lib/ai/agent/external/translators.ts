@@ -741,8 +741,7 @@ export function eventsToSteps(events: ExternalAgentEvent[]): ExternalAgentStep[]
       case "message_delta":
         if (currentStep && currentStep.type === "message") {
           const existingText = currentStep.content?.find((c) => c.type === "text") as
-            | ExternalAgentTextContent
-            | undefined
+            ExternalAgentTextContent | undefined
           if (existingText) {
             existingText.text += event.delta.text
           } else {

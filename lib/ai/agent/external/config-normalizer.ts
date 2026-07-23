@@ -101,6 +101,38 @@ function isWindowsPlatform(platform?: string): boolean {
   return platform === "win32" || platform.includes("windows")
 }
 
+/** Insert `entry`, replacing any existing prerequisite with the same id. */
+function upsertPrerequisite(
+  prerequisites: ExternalAgentEcosystemPrerequisite[],
+  entry: ExternalAgentEcosystemPrerequisite
+): void {
+  const index = prerequisites.findIndex((item) => item.id === entry.id)
+  if (index >= 0) {
+    prerequisites[index] = entry
+    return
+  }
+  prerequisites.push(entry)
+}
+
+/**
+ * Install instruction for the agent CLIs Cognia ships a preset for, so a
+ * missing binary reports *how* to get it instead of only that it is absent.
+ */
+function installHintForCommand(command: string): string | undefined {
+  switch (command) {
+    case "codex":
+      return "Install the OpenAI Codex CLI: `npm install -g @openai/codex` (or `brew install codex`), then reconnect."
+    case "claude":
+      return "Install the Claude Code CLI: `npm install -g @anthropic-ai/claude-code`, then reconnect."
+    case "opencode":
+      return "Install the OpenCode CLI: `npm install -g opencode-ai`, then reconnect."
+    case "gemini":
+      return "Install the Gemini CLI: `npm install -g @google/gemini-cli`, then reconnect."
+    default:
+      return undefined
+  }
+}
+
 function resolvePrerequisiteStatus(
   supportTier: ExternalAgentEcosystemReadinessSnapshot["supportTier"],
   prerequisites: ExternalAgentEcosystemPrerequisite[]
@@ -160,7 +192,11 @@ export function getExternalAgentEcosystemReadiness(
       ? (metadata.ecosystemRecommendedActions as string[])
       : undefined
 
-  if (!adapterId && !surfaceId && !supportTier && !docsUrl && !limitationNote) {
+  // A config with no ecosystem identity still gets a snapshot once a probe has
+  // stored one — that is how the launch preflight (`local-command`) reaches the
+  // execution gate for hand-written stdio agents, which resolve no adapter or
+  // surface at all.
+  if (!adapterId && !surfaceId && !supportTier && !docsUrl && !limitationNote && !storedReadiness) {
     return undefined
   }
 
@@ -251,42 +287,48 @@ export async function probeExternalAgentEcosystemReadiness(
 ): Promise<ExternalAgentEcosystemReadinessSnapshot | undefined> {
   const runtimeIsTauri = options.runtimeIsTauri ?? supportsExternalAgents()
   const readiness = getExternalAgentEcosystemReadiness(config, runtimeIsTauri)
-  if (!readiness) {
+  const command = config.transport === "stdio" ? config.process?.command?.trim() : undefined
+  // The launch preflight applies to any stdio config that spawns a local
+  // binary — including hand-written ones that resolve no ecosystem surface.
+  // Without this a missing CLI slipped past the execution gate and surfaced as
+  // a raw "Failed to spawn process: No such file or directory (os error 2)".
+  const canProbeCommand = Boolean(command) && runtimeIsTauri && Boolean(options.checkCommandExists)
+  if (!readiness && !canProbeCommand) {
     return undefined
   }
 
-  const prerequisites = [...(readiness.prerequisites ?? [])]
-  const recommendedActions = [...(readiness.recommendedActions ?? [])]
+  const prerequisites = [...(readiness?.prerequisites ?? [])]
+  const recommendedActions = [...(readiness?.recommendedActions ?? [])]
   const runtimePlatform = resolveRuntimePlatform(options.platform)
 
-  if (
-    readiness.supportTier === "executable" &&
-    runtimeIsTauri &&
-    config.transport === "stdio" &&
-    config.process?.command &&
-    options.checkCommandExists
-  ) {
-    const command = config.process.command
-    const commandExists = await options.checkCommandExists(command)
+  if (command && canProbeCommand) {
+    const commandExists = await options.checkCommandExists!(command)
 
-    prerequisites.push({
+    // Replace rather than append: this probe re-runs on every connect, and a
+    // stale entry from an earlier run would keep a since-uninstalled CLI
+    // looking satisfied (and pile up duplicates in the UI list).
+    upsertPrerequisite(prerequisites, {
       id: "local-command",
       label: "Local command",
       status: commandExists ? "satisfied" : "missing",
       detail: commandExists
-        ? `Required command "${command}" is available on PATH.`
-        : `Required command "${command}" is not available on PATH for this ACP route.`,
+        ? `Required command "${command}" was found and is launchable.`
+        : `Required command "${command}" was not found on PATH or in the standard install locations (Homebrew, ~/.local/bin, npm/pnpm/bun/cargo global bins).`,
     })
 
     if (!commandExists) {
       recommendedActions.push(
-        `Install or expose "${command}" on PATH before connecting to this local ACP surface.`
+        `Install "${command}", or set an absolute path as this agent's command, before connecting.`
       )
+      const installHint = installHintForCommand(command)
+      if (installHint) {
+        recommendedActions.push(installHint)
+      }
     }
   }
 
   if (
-    readiness.adapterId === "codex" &&
+    readiness?.adapterId === "codex" &&
     readiness.surfaceId === "acp-stdio" &&
     isWindowsPlatform(runtimePlatform)
   ) {
@@ -298,7 +340,7 @@ export async function probeExternalAgentEcosystemReadiness(
   return {
     ...readiness,
     prerequisites,
-    prerequisiteStatus: resolvePrerequisiteStatus(readiness.supportTier, prerequisites),
+    prerequisiteStatus: resolvePrerequisiteStatus(readiness?.supportTier, prerequisites),
     recommendedActions: dedupeActions(recommendedActions),
   }
 }

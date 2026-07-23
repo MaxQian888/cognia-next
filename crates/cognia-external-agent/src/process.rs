@@ -256,17 +256,54 @@ impl ExternalAgentProcessManager {
             config.args
         );
 
-        // Build command. Resolve the program against PATH (× PATHEXT on
-        // Windows) first, so bare preset commands like `npx` / `opencode` that
-        // live as `.cmd` shims actually launch instead of failing with
-        // "program not found".
-        let program = super::command_resolver::resolve_command(&config.command);
+        // Preflight before the spawn: a bare `ENOENT` from `Command::spawn` is
+        // ambiguous — it means *either* the program was not found *or* `cwd`
+        // does not exist — and surfaces to the UI as the useless
+        // "No such file or directory (os error 2)". Both causes are
+        // user-fixable, so resolve them into distinct, actionable errors here.
+        let program = match super::command_resolver::resolve_command_path(&config.command) {
+            Some(path) => path.to_string_lossy().into_owned(),
+            None => {
+                let error = format!(
+                    "Command not found: \"{}\". Install it, or set an absolute path as the agent's command. Searched PATH and the standard install locations (Homebrew, ~/.local/bin, npm/pnpm/bun/cargo global bins).",
+                    config.command
+                );
+                log::error!("Failed to spawn external agent {}: {}", id, error);
+                return Err(error);
+            }
+        };
+        if let Some(cwd) = &config.cwd {
+            if !std::path::Path::new(cwd).is_dir() {
+                let error = format!(
+                    "Working directory does not exist: \"{}\". Pick an existing folder for this agent.",
+                    cwd
+                );
+                log::error!("Failed to spawn external agent {}: {}", id, error);
+                return Err(error);
+            }
+        }
+
+        // Launch the resolved absolute path (× PATHEXT on Windows), so bare
+        // preset commands like `npx` / `opencode` that live as `.cmd` shims —
+        // or a CLI in an install root the app's own PATH omits — actually
+        // launch instead of failing with "program not found".
         let mut cmd = Command::new(&program);
         cmd.args(&config.args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+
+        // Hand the child the same directories the resolver searched, unless the
+        // caller pinned its own PATH. Resolving the program to an absolute path
+        // only fixes *our* lookup — the agent CLI then shells out to `node`,
+        // `rg`, `git`, … through its own PATH, which under a Finder-launched
+        // bundle is just the bare launchd set.
+        if !config.env.contains_key("PATH") {
+            if let Ok(path) = std::env::join_paths(super::command_resolver::search_dirs()) {
+                cmd.env("PATH", path);
+            }
+        }
 
         // Set environment variables
         for (key, value) in &config.env {
@@ -594,6 +631,51 @@ mod tests {
             env: HashMap::new(),
             cwd: None,
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn spawn_reports_a_missing_command_instead_of_os_error_2() {
+        let mgr = ExternalAgentProcessManager::new();
+        let mut cfg = echo_config("missing-cmd");
+        cfg.command = "definitely-not-a-real-binary-xyz-123".to_string();
+
+        let error = mgr
+            .spawn(cfg, noop_sink())
+            .await
+            .expect_err("unresolvable command must not spawn");
+        assert!(error.contains("Command not found"), "{error}");
+        assert!(
+            error.contains("definitely-not-a-real-binary-xyz-123"),
+            "{error}"
+        );
+        // The ambiguous OS text must not leak — it is what made this
+        // unactionable in the UI.
+        assert!(!error.contains("os error 2"), "{error}");
+        // A failed preflight leaves nothing registered.
+        assert!(mgr.get("missing-cmd").await.is_none());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn spawn_reports_a_missing_working_directory_separately() {
+        let mgr = ExternalAgentProcessManager::new();
+        let mut cfg = echo_config("missing-cwd");
+        cfg.cwd = Some("/definitely/not/a/real/directory/xyz-123".to_string());
+
+        let error = mgr
+            .spawn(cfg, noop_sink())
+            .await
+            .expect_err("missing cwd must not spawn");
+        assert!(
+            error.contains("Working directory does not exist"),
+            "{error}"
+        );
+        assert!(
+            error.contains("/definitely/not/a/real/directory/xyz-123"),
+            "{error}"
+        );
+        assert!(mgr.get("missing-cwd").await.is_none());
     }
 
     #[cfg(unix)]

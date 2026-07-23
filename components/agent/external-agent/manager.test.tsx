@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import React from "react"
-import { render, screen, fireEvent, act } from "@testing-library/react"
+import { render, screen, fireEvent, act, within } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 
 import en from "@/i18n/messages/en.json"
@@ -449,14 +449,9 @@ describe("ExternalAgentManager", () => {
     expect(disconnect).toHaveBeenCalledWith("agent-1")
   })
 
-  it("removes an agent when the user confirms", async () => {
-    const removeAgent = jest.fn().mockResolvedValue(undefined)
-    const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(true)
-    const agent = makeAgent()
-    mockUseExternalAgent.mockReturnValue({ ...baseHookValue(), agents: [agent], removeAgent })
-    render(wrap(<ExternalAgentManager />))
-    const buttons = screen.getAllByRole("button")
-    const trashBtn = buttons.find((b) => {
+  /** Click the trash icon on the first agent card. */
+  const clickRemoveIcon = async () => {
+    const trashBtn = screen.getAllByRole("button").find((b) => {
       const svg = b.querySelector("svg")
       return (
         svg !== null &&
@@ -468,30 +463,34 @@ describe("ExternalAgentManager", () => {
     await act(async () => {
       fireEvent.click(trashBtn!)
     })
-    expect(removeAgent).toHaveBeenCalledWith("agent-1")
-    confirmSpy.mockRestore()
-  })
+  }
 
-  it("does not remove an agent when the user cancels the confirm dialog", async () => {
-    const removeAgent = jest.fn()
-    const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(false)
+  it("removes an agent when the user confirms the alert dialog", async () => {
+    const removeAgent = jest.fn().mockResolvedValue(undefined)
     const agent = makeAgent()
     mockUseExternalAgent.mockReturnValue({ ...baseHookValue(), agents: [agent], removeAgent })
     render(wrap(<ExternalAgentManager />))
-    const buttons = screen.getAllByRole("button")
-    const trashBtn = buttons.find((b) => {
-      const svg = b.querySelector("svg")
-      return (
-        svg !== null &&
-        svg.classList.contains("text-muted-foreground") &&
-        b.classList.contains("h-7")
-      )
-    })
+    await clickRemoveIcon()
+    // Removal now goes through the app's AlertDialog, not `window.confirm`.
+    const dialog = await screen.findByRole("alertdialog")
+    expect(removeAgent).not.toHaveBeenCalled()
     await act(async () => {
-      fireEvent.click(trashBtn!)
+      fireEvent.click(within(dialog).getByRole("button", { name: en.common.remove }))
+    })
+    expect(removeAgent).toHaveBeenCalledWith("agent-1")
+  })
+
+  it("does not remove an agent when the alert dialog is cancelled", async () => {
+    const removeAgent = jest.fn()
+    const agent = makeAgent()
+    mockUseExternalAgent.mockReturnValue({ ...baseHookValue(), agents: [agent], removeAgent })
+    render(wrap(<ExternalAgentManager />))
+    await clickRemoveIcon()
+    const dialog = await screen.findByRole("alertdialog")
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: en.common.cancel }))
     })
     expect(removeAgent).not.toHaveBeenCalled()
-    confirmSpy.mockRestore()
   })
 
   it("denies a permission when the deny button is clicked", async () => {

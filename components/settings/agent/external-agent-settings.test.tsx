@@ -374,6 +374,79 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     expect(connectMock).toHaveBeenCalledWith("agent-2")
   })
 
+  it("switches the detail pane between the general rail entries", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    // Landing view is the gallery; global settings and delegation are one click.
+    await act(async () => {
+      await user.click(screen.getByTestId("nav-global-settings"))
+    })
+    expect(screen.getByTestId("global-settings-card")).toBeInTheDocument()
+    expect(screen.queryByTestId("preset-gallery-card")).not.toBeInTheDocument()
+
+    await act(async () => {
+      await user.click(screen.getByTestId("nav-delegation"))
+    })
+    expect(screen.queryByTestId("global-settings-card")).not.toBeInTheDocument()
+    // Both the rail entry and the panel's own card title carry the label.
+    expect(screen.getAllByText(/delegation rules/i).length).toBeGreaterThan(1)
+  })
+
+  it("returns to the quick-start gallery after an agent has been selected", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("agent-row-agent-1"))
+    })
+    expect(await screen.findByTestId("agent-detail-agent-1")).toBeInTheDocument()
+    // Selecting an agent used to be a one-way door — the rail is the way back.
+    await act(async () => {
+      await user.click(screen.getByTestId("nav-quick-start"))
+    })
+    expect(screen.getByTestId("preset-gallery-card")).toBeInTheDocument()
+    expect(screen.queryByTestId("agent-detail-agent-1")).not.toBeInTheDocument()
+  })
+
+  it("connects and disconnects straight from a list row", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("agent-power-agent-2"))
+    })
+    expect(connectMock).toHaveBeenCalledWith("agent-2")
+    // agent-3 is the connected fixture → its row action disconnects instead.
+    await act(async () => {
+      await user.click(screen.getByTestId("agent-power-agent-3"))
+    })
+    expect(disconnectMock).toHaveBeenCalledWith("agent-3")
+  })
+
+  it("keeps the timeout & retry fields collapsed until the section is opened", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("preset-pick-codex"))
+    })
+    const section = await screen.findByTestId("retry-section")
+    expect(screen.queryByLabelText(/execution timeout/i)).not.toBeInTheDocument()
+    await act(async () => {
+      await user.click(within(section).getByText(/timeout & retry/i))
+    })
+    expect(screen.getByLabelText(/execution timeout/i)).toBeInTheDocument()
+  })
+
+  it("offers the Codex app-server protocol in the manual editor and pins its transport", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    // The app-server preset seeds protocol codex-app-server; the transport
+    // picker is then locked to stdio (the backend has no network transport).
+    await act(async () => {
+      await user.click(screen.getByTestId("preset-pick-codex-app-server"))
+    })
+    await screen.findByTestId("codex-options-section")
+    expect(screen.getByTestId("transport-select")).toBeDisabled()
+  })
+
   it("opens the delete confirmation from the detail pane", async () => {
     const user = userEvent.setup()
     render(<ExternalAgentSettings />)

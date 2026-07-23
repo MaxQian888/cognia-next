@@ -17,6 +17,15 @@
 //!
 //! [`check_command_exists`] (the readiness probe) is implemented on top of the
 //! same search so readiness and spawnability can never disagree.
+//!
+//! The search is **not** limited to `PATH`. A macOS app bundle launched from
+//! Finder/Dock inherits the launchd environment (`/usr/bin:/bin:/usr/sbin:/sbin`)
+//! rather than the user's login-shell `PATH`, so every agent CLI installed by
+//! Homebrew, npm/pnpm/bun or `cargo install` is invisible to a packaged Cognia
+//! even though it is on `PATH` in a terminal. [`search_dirs`] therefore appends
+//! the well-known per-user install roots after the real `PATH` entries — probing
+//! directories directly instead of shelling out to a login shell, which keeps
+//! the resolver synchronous, side-effect free and testable.
 
 use std::path::{Path, PathBuf};
 
@@ -58,14 +67,78 @@ pub fn resolve_command_path(command: &str) -> Option<PathBuf> {
         return None;
     }
 
-    let path_var = std::env::var_os("PATH")?;
-    let dirs: Vec<PathBuf> = std::env::split_paths(&path_var).collect();
-    resolve_in_dirs(trimmed, &dirs)
+    resolve_in_dirs(trimmed, &search_dirs())
 }
 
-/// Whether `command` is reachable on `PATH` (readiness probe).
+/// Whether `command` is reachable (readiness probe). Uses the exact same
+/// resolution as the spawn, including the fallback install roots.
 pub fn check_command_exists(command: &str) -> bool {
     resolve_command_path(command).is_some()
+}
+
+/// Every directory the resolver searches: the process `PATH`, then the
+/// well-known install roots a GUI-launched app does not inherit. Duplicates are
+/// dropped so the `PATH` ordering always wins.
+pub fn search_dirs() -> Vec<PathBuf> {
+    let path_dirs: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|value| std::env::split_paths(&value).collect())
+        .unwrap_or_default();
+    let mut dirs: Vec<PathBuf> = Vec::with_capacity(path_dirs.len());
+    // A real-world PATH repeats entries (shell profiles re-exporting Homebrew,
+    // …); deduping keeps the probe from stat-ing the same directory twice per
+    // command and makes the child's PATH we derive from this shorter.
+    for dir in path_dirs.into_iter().chain(fallback_install_dirs()) {
+        if !dirs.contains(&dir) {
+            dirs.push(dir);
+        }
+    }
+    dirs
+}
+
+/// Per-user / package-manager install roots that a Finder-launched macOS app
+/// never sees. Ordered most-specific first; non-existent entries are harmless
+/// because [`resolve_in_dirs`] only probes for a concrete file.
+fn fallback_install_dirs() -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    let mut push_env = |var: &str, suffix: Option<&str>| {
+        if let Some(value) = std::env::var_os(var) {
+            if value.is_empty() {
+                return;
+            }
+            let base = PathBuf::from(value);
+            dirs.push(match suffix {
+                Some(suffix) => base.join(suffix),
+                None => base,
+            });
+        }
+    };
+    // Explicit package-manager roots win over the guessed home-relative ones.
+    push_env("PNPM_HOME", None);
+    push_env("BUN_INSTALL", Some("bin"));
+    push_env("VOLTA_HOME", Some("bin"));
+    push_env("NVM_BIN", None);
+    push_env("CARGO_HOME", Some("bin"));
+
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        for relative in [
+            ".local/bin",
+            ".bun/bin",
+            ".cargo/bin",
+            ".volta/bin",
+            ".npm-global/bin",
+            ".deno/bin",
+            "Library/pnpm",
+            ".nix-profile/bin",
+        ] {
+            dirs.push(home.join(relative));
+        }
+    }
+
+    // System-wide roots that launchd omits from a GUI app's PATH.
+    for absolute in ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"] {
+        dirs.push(PathBuf::from(absolute));
+    }
+    dirs
 }
 
 /// Search `dirs` for `command`, honoring Windows executable extensions. Split
@@ -137,6 +210,40 @@ mod tests {
         assert!(!check_command_exists(""));
         // resolve_command echoes the (untrimmed) input back when unresolved.
         assert_eq!(resolve_command(""), "");
+    }
+
+    #[test]
+    fn search_dirs_starts_with_path_then_adds_fallback_roots() {
+        let dirs = search_dirs();
+        let path_dirs: Vec<PathBuf> = std::env::var_os("PATH")
+            .map(|value| std::env::split_paths(&value).collect())
+            .unwrap_or_default();
+        // Every PATH entry is preserved, in PATH order, ahead of the fallbacks.
+        let kept: Vec<&PathBuf> = dirs.iter().filter(|dir| path_dirs.contains(dir)).collect();
+        let mut expected: Vec<&PathBuf> = Vec::new();
+        for dir in &path_dirs {
+            if !expected.contains(&dir) {
+                expected.push(dir);
+            }
+        }
+        assert_eq!(kept, expected);
+        // No duplicates anywhere, PATH repeats included.
+        let mut seen = std::collections::HashSet::new();
+        assert!(dirs.iter().all(|dir| seen.insert(dir.clone())));
+        // The launchd-invisible roots are searched even when PATH omits them.
+        assert!(dirs.iter().any(|dir| dir == Path::new("/opt/homebrew/bin")));
+        assert!(dirs.iter().any(|dir| dir == Path::new("/usr/local/bin")));
+    }
+
+    #[test]
+    fn fallback_dirs_cover_per_user_package_manager_roots() {
+        let dirs = fallback_install_dirs();
+        if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+            assert!(dirs.contains(&home.join(".local/bin")));
+            assert!(dirs.contains(&home.join(".bun/bin")));
+            assert!(dirs.contains(&home.join("Library/pnpm")));
+        }
+        assert!(dirs.contains(&PathBuf::from("/opt/homebrew/bin")));
     }
 
     #[test]

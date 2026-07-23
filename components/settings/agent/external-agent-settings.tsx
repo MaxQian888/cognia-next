@@ -21,6 +21,10 @@ import {
   Terminal,
   Globe,
   FolderPlus,
+  ChevronDown,
+  Settings2,
+  Sparkles,
+  Route,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { pickDirectory } from "@/lib/files/file-bridge"
@@ -59,6 +63,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Empty, EmptyMedia, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import { useExternalAgent } from "@/hooks/agent/use-external-agent"
 import { DelegationRulesSection } from "./delegation-rules-section"
@@ -236,6 +241,54 @@ function ConnectionStatusIcon({ status }: { status: ExternalAgentConnectionStatu
       return <Plug className="h-4 w-4 text-muted-foreground" />
   }
 }
+
+/**
+ * Collapsible field group used to break the editor dialog's long single-column
+ * form into scannable sections. `data-testid` sits on the always-mounted root
+ * so tests can find a section even while its content is collapsed.
+ */
+function FormSection({
+  title,
+  summary,
+  defaultOpen = false,
+  dataTestId,
+  children,
+}: {
+  title: string
+  summary?: string
+  defaultOpen?: boolean
+  dataTestId?: string
+  children: React.ReactNode
+}) {
+  return (
+    <Collapsible defaultOpen={defaultOpen} className="rounded-lg border" data-testid={dataTestId}>
+      <CollapsibleTrigger className="group flex w-full items-center justify-between gap-2 px-3 py-2 text-left">
+        <span className="text-sm font-medium">{title}</span>
+        <span className="flex min-w-0 items-center gap-2">
+          {summary && <span className="truncate text-xs text-muted-foreground">{summary}</span>}
+          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+        </span>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="grid gap-3 border-t px-3 py-3">{children}</CollapsibleContent>
+    </Collapsible>
+  )
+}
+
+/**
+ * Protocols offered in the editor's manual picker. `codex-app-server` used to be
+ * reachable only through the preset gallery even though the form has a full
+ * options branch for it; the transport-less protocols round out the union so a
+ * hand-configured agent can target any supported backend.
+ */
+const PROTOCOL_OPTIONS: readonly { value: ExternalAgentProtocol; label: string }[] = [
+  // i18n-exempt: protocol identifiers (brand/technical), matching the manager dialog.
+  { value: "acp", label: "ACP (Agent Client Protocol)" },
+  { value: "codex-app-server", label: "Codex app-server (JSON-RPC)" },
+  { value: "opencode", label: "OpenCode (HTTP + SSE)" },
+  { value: "a2a", label: "A2A (Agent-to-Agent)" },
+  { value: "http", label: "HTTP" },
+  { value: "websocket", label: "WebSocket" },
+]
 
 // =============================================================================
 // Agent Editor Dialog
@@ -502,13 +555,13 @@ function AgentEditorDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-[500px]">
+      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-[560px]">
         <DialogHeader className="shrink-0">
           <DialogTitle>{editingAgentId ? t("editAgent") : t("addAgent")}</DialogTitle>
           <DialogDescription>{t("agentConfigDescription")}</DialogDescription>
         </DialogHeader>
 
-        <div className="-mx-1 grid min-h-0 flex-1 gap-4 overflow-y-auto px-1 py-4">
+        <div className="-mx-1 grid min-h-0 flex-1 content-start gap-3 overflow-y-auto px-1 py-3">
           {/* Quick start preset — only shown when creating, not when editing,
               to avoid silently overwriting hand-tuned fields. */}
           {!editingAgentId && (
@@ -552,54 +605,69 @@ function AgentEditorDialog({
             />
           </div>
 
-          {/* Protocol */}
-          <div className="grid gap-2">
-            <Label>{t("protocol")}</Label>
-            <Select
-              value={formData.protocol}
-              onValueChange={(v) =>
-                setFormData({ ...formData, protocol: v as AgentFormData["protocol"] })
-              }
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {/* i18n-exempt: protocol identifier (brand/technical) */}
-                <SelectItem value="acp">ACP (Agent Client Protocol)</SelectItem>
-                {/* i18n-exempt: protocol identifier (brand/technical) */}
-                <SelectItem value="opencode">OpenCode (HTTP + SSE)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          {/* Protocol + transport share a row — they are one decision in
+              practice, and pairing them halves the dialog's vertical budget.
+              OpenCode owns its transport (HTTP+SSE), so the picker is hidden
+              there instead of offering a choice the adapter ignores. */}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-2">
+              <Label>{t("protocol")}</Label>
+              <Select
+                value={formData.protocol}
+                onValueChange={(v) => {
+                  const protocol = v as AgentFormData["protocol"]
+                  setFormData({
+                    ...formData,
+                    protocol,
+                    // The Codex app-server is a locally spawned JSON-RPC process;
+                    // it has no network transport to fall back on.
+                    transport: protocol === "codex-app-server" ? "stdio" : formData.transport,
+                  })
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PROTOCOL_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-          {/* Transport */}
-          <div className="grid gap-2">
-            <Label>{t("transport")}</Label>
-            <Select
-              value={formData.transport}
-              onValueChange={(v) =>
-                setFormData({ ...formData, transport: v as AgentFormData["transport"] })
-              }
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="stdio">
-                  <div className="flex items-center gap-2">
-                    <Terminal className="h-4 w-4" />
-                    <span>{t("transportStdioLabel")}</span>
-                  </div>
-                </SelectItem>
-                <SelectItem value="http">
-                  <div className="flex items-center gap-2">
-                    <Globe className="h-4 w-4" />
-                    <span>{t("transportHttpLabel")}</span>
-                  </div>
-                </SelectItem>
-              </SelectContent>
-            </Select>
+            {formData.protocol !== "opencode" && (
+              <div className="grid gap-2">
+                <Label>{t("transport")}</Label>
+                <Select
+                  value={formData.transport}
+                  onValueChange={(v) =>
+                    setFormData({ ...formData, transport: v as AgentFormData["transport"] })
+                  }
+                  disabled={formData.protocol === "codex-app-server"}
+                >
+                  <SelectTrigger data-testid="transport-select">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="stdio">
+                      <div className="flex items-center gap-2">
+                        <Terminal className="h-4 w-4" />
+                        <span>{t("transportStdioLabel")}</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="http">
+                      <div className="flex items-center gap-2">
+                        <Globe className="h-4 w-4" />
+                        <span>{t("transportHttpLabel")}</span>
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
 
           {/* OpenCode server config — auto-spawn vs remote endpoint, plus the
@@ -607,12 +675,12 @@ function AgentEditorDialog({
               buildAuthHeaders / resolveModel). Mirrors the chat-side dialog in
               components/agent/external-agent/manager.tsx. */}
           {formData.protocol === "opencode" && (
-            <>
-              <Separator />
-              <div
-                className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 p-3"
-                data-testid="opencode-options-section"
-              >
+            <FormSection
+              title={t("sectionOpencodeServer")}
+              defaultOpen
+              dataTestId="opencode-options-section"
+            >
+              <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 p-3">
                 <div className="space-y-0.5">
                   <Label htmlFor="opencode-auto-spawn" className="cursor-pointer text-sm">
                     {tManager("autoSpawnServer")}
@@ -714,75 +782,100 @@ function AgentEditorDialog({
                 />
                 <p className="text-xs text-muted-foreground">{tManager("defaultModelHint")}</p>
               </div>
-            </>
+            </FormSection>
           )}
 
-          {/* Process Config (for stdio) */}
-          {formData.protocol !== "opencode" && formData.transport === "stdio" && (
-            <>
-              <Separator />
-              <div className="grid gap-2">
-                <Label htmlFor="command">{t("command")}</Label>
-                <Input
-                  id="command"
-                  value={formData.processCommand}
-                  onChange={(e) => setFormData({ ...formData, processCommand: e.target.value })}
-                  // i18n-exempt: example CLI command, not UI prose
-                  placeholder="npx @anthropics/claude-code"
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="args">{t("arguments")}</Label>
-                <Input
-                  id="args"
-                  value={formData.processArgs}
-                  onChange={(e) => setFormData({ ...formData, processArgs: e.target.value })}
-                  // i18n-exempt: example CLI arguments, not UI prose
-                  placeholder="--stdio --model claude-sonnet"
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="cwd">{t("workingDirectory")}</Label>
-                <Input
-                  id="cwd"
-                  value={formData.processCwd}
-                  onChange={(e) => setFormData({ ...formData, processCwd: e.target.value })}
-                  placeholder={t("cwdPlaceholder")}
-                />
-              </div>
-            </>
-          )}
-
-          {/* Network Config (for http/websocket) */}
-          {formData.protocol !== "opencode" && formData.transport !== "stdio" && (
-            <>
-              <Separator />
-              <div className="grid gap-2">
-                <Label htmlFor="endpoint">{t("endpoint")}</Label>
-                <Input
-                  id="endpoint"
-                  value={formData.networkEndpoint}
-                  onChange={(e) => setFormData({ ...formData, networkEndpoint: e.target.value })}
-                  placeholder="https://api.example.com/agent"
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="apiKey">{t("apiKey")}</Label>
-                <Input
-                  id="apiKey"
-                  type="password"
-                  value={formData.networkApiKey}
-                  onChange={(e) => setFormData({ ...formData, networkApiKey: e.target.value })}
-                  placeholder={t("apiKeyPlaceholder")}
-                />
-              </div>
-            </>
+          {/* Connection — stdio process args or the network endpoint, whichever
+              the chosen transport actually uses. */}
+          {formData.protocol !== "opencode" && (
+            <FormSection
+              title={t("sectionConnection")}
+              defaultOpen
+              dataTestId="connection-section"
+              summary={
+                formData.transport === "stdio"
+                  ? formData.processCommand || undefined
+                  : formData.networkEndpoint || undefined
+              }
+            >
+              {formData.transport === "stdio" ? (
+                <>
+                  <div className="grid gap-2">
+                    <Label htmlFor="command">{t("command")}</Label>
+                    <Input
+                      id="command"
+                      value={formData.processCommand}
+                      onChange={(e) => setFormData({ ...formData, processCommand: e.target.value })}
+                      // i18n-exempt: example CLI command, not UI prose
+                      placeholder="npx @anthropics/claude-code"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="args">{t("arguments")}</Label>
+                    <Input
+                      id="args"
+                      value={formData.processArgs}
+                      onChange={(e) => setFormData({ ...formData, processArgs: e.target.value })}
+                      // i18n-exempt: example CLI arguments, not UI prose
+                      placeholder="--stdio --model claude-sonnet"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="cwd">{t("workingDirectory")}</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="cwd"
+                        value={formData.processCwd}
+                        onChange={(e) => setFormData({ ...formData, processCwd: e.target.value })}
+                        placeholder={t("cwdPlaceholder")}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        aria-label={t("codexSkillRootsBrowse")}
+                        data-testid="cwd-browse"
+                        onClick={async () => {
+                          const dir = await pickDirectory()
+                          if (dir) setFormData((prev) => ({ ...prev, processCwd: dir }))
+                        }}
+                      >
+                        <FolderPlus className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="grid gap-2">
+                    <Label htmlFor="endpoint">{t("endpoint")}</Label>
+                    <Input
+                      id="endpoint"
+                      value={formData.networkEndpoint}
+                      onChange={(e) =>
+                        setFormData({ ...formData, networkEndpoint: e.target.value })
+                      }
+                      placeholder="https://api.example.com/agent"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="apiKey">{t("apiKey")}</Label>
+                    <Input
+                      id="apiKey"
+                      type="password"
+                      value={formData.networkApiKey}
+                      onChange={(e) => setFormData({ ...formData, networkApiKey: e.target.value })}
+                      placeholder={t("apiKeyPlaceholder")}
+                    />
+                  </div>
+                </>
+              )}
+            </FormSection>
           )}
 
           {/* Permission Mode — narrowed to the modes the chosen backend can
               enforce, and clamped for display so switching protocol never shows
               a mode the backend would silently downgrade. */}
-          <Separator />
           <div className="grid gap-2">
             <Label>{t("defaultPermissionMode")}</Label>
             <Select
@@ -808,9 +901,12 @@ function AgentEditorDialog({
               thread/start (sandbox) and turn/start (sandboxPolicy/effort/summary).
               Session-level overrides remain available via config options. */}
           {formData.protocol === "codex-app-server" && (
-            <>
-              <Separator />
-              <div className="grid gap-2" data-testid="codex-options-section">
+            <FormSection
+              title={t("sectionCodexOptions")}
+              defaultOpen
+              dataTestId="codex-options-section"
+            >
+              <div className="grid gap-2">
                 <Label>{t("codexSandboxMode")}</Label>
                 <p className="text-sm text-muted-foreground">{t("codexSandboxModeDesc")}</p>
                 <Select
@@ -937,60 +1033,68 @@ function AgentEditorDialog({
                   className="font-mono text-xs"
                 />
               </div>
-            </>
+            </FormSection>
           )}
 
-          <Separator />
-          <div className="grid gap-2">
-            <Label htmlFor="timeoutMs">{t("executionTimeoutMs")}</Label>
-            <Input
-              id="timeoutMs"
-              type="number"
-              min={1000}
-              step={1000}
-              value={formData.timeoutMs}
-              onChange={(e) => setFormData({ ...formData, timeoutMs: e.target.value })}
-              placeholder={DEFAULT_TIMEOUT_MS}
-            />
-          </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="grid gap-2">
-              <Label htmlFor="retryMaxRetries">{t("maxRetries")}</Label>
-              <Input
-                id="retryMaxRetries"
-                type="number"
-                min={0}
-                step={1}
-                value={formData.retryMaxRetries}
-                onChange={(e) => setFormData({ ...formData, retryMaxRetries: e.target.value })}
-                placeholder={DEFAULT_RETRY_MAX_RETRIES}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="retryDelayMs">{t("retryDelayMs")}</Label>
-              <Input
-                id="retryDelayMs"
-                type="number"
-                min={0}
-                step={100}
-                value={formData.retryDelayMs}
-                onChange={(e) => setFormData({ ...formData, retryDelayMs: e.target.value })}
-                placeholder={DEFAULT_RETRY_DELAY_MS}
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="grid gap-2">
-              <Label htmlFor="retryMaxDelayMs">{t("maxRetryDelayMs")}</Label>
-              <Input
-                id="retryMaxDelayMs"
-                type="number"
-                min={0}
-                step={100}
-                value={formData.retryMaxDelayMs}
-                onChange={(e) => setFormData({ ...formData, retryMaxDelayMs: e.target.value })}
-                placeholder={DEFAULT_RETRY_MAX_DELAY_MS}
-              />
+          {/* Timeout & retry — tuning knobs almost nobody changes, so they stay
+              folded away behind a summary of the values currently in effect. */}
+          <FormSection
+            title={t("sectionRetry")}
+            dataTestId="retry-section"
+            summary={t("sectionRetrySummary", {
+              timeout: Math.round((Number.parseInt(formData.timeoutMs, 10) || 0) / 1000),
+              retries: Number.parseInt(formData.retryMaxRetries, 10) || 0,
+            })}
+          >
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor="timeoutMs">{t("executionTimeoutMs")}</Label>
+                <Input
+                  id="timeoutMs"
+                  type="number"
+                  min={1000}
+                  step={1000}
+                  value={formData.timeoutMs}
+                  onChange={(e) => setFormData({ ...formData, timeoutMs: e.target.value })}
+                  placeholder={DEFAULT_TIMEOUT_MS}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="retryMaxRetries">{t("maxRetries")}</Label>
+                <Input
+                  id="retryMaxRetries"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={formData.retryMaxRetries}
+                  onChange={(e) => setFormData({ ...formData, retryMaxRetries: e.target.value })}
+                  placeholder={DEFAULT_RETRY_MAX_RETRIES}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="retryDelayMs">{t("retryDelayMs")}</Label>
+                <Input
+                  id="retryDelayMs"
+                  type="number"
+                  min={0}
+                  step={100}
+                  value={formData.retryDelayMs}
+                  onChange={(e) => setFormData({ ...formData, retryDelayMs: e.target.value })}
+                  placeholder={DEFAULT_RETRY_DELAY_MS}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="retryMaxDelayMs">{t("maxRetryDelayMs")}</Label>
+                <Input
+                  id="retryMaxDelayMs"
+                  type="number"
+                  min={0}
+                  step={100}
+                  value={formData.retryMaxDelayMs}
+                  onChange={(e) => setFormData({ ...formData, retryMaxDelayMs: e.target.value })}
+                  placeholder={DEFAULT_RETRY_MAX_DELAY_MS}
+                />
+              </div>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="retryExponentialBackoff">{t("backoffStrategy")}</Label>
@@ -1009,17 +1113,17 @@ function AgentEditorDialog({
                 </SelectContent>
               </Select>
             </div>
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="retryOnErrors">{t("retryErrorPatterns")}</Label>
-            <textarea
-              id="retryOnErrors"
-              className="min-h-20 rounded-md border border-input bg-transparent px-3 py-2 text-sm"
-              value={formData.retryOnErrors}
-              onChange={(e) => setFormData({ ...formData, retryOnErrors: e.target.value })}
-              placeholder={t("retryErrorPatternsPlaceholder")}
-            />
-          </div>
+            <div className="grid gap-2">
+              <Label htmlFor="retryOnErrors">{t("retryErrorPatterns")}</Label>
+              <Textarea
+                id="retryOnErrors"
+                rows={2}
+                value={formData.retryOnErrors}
+                onChange={(e) => setFormData({ ...formData, retryOnErrors: e.target.value })}
+                placeholder={t("retryErrorPatternsPlaceholder")}
+              />
+            </div>
+          </FormSection>
         </div>
 
         <DialogFooter className="shrink-0">
@@ -1228,6 +1332,9 @@ function AgentDetail({
               <p className="text-xs text-amber-600 dark:text-amber-400">{executionBlockedReason}</p>
             )}
           </div>
+          {/* Every action for this agent lives in one row next to its title —
+              previously Edit/Delete sat at the very bottom of the card, below
+              the status panels, which meant scrolling past them to rename. */}
           <div className="flex shrink-0 items-center gap-2">
             {isConnected ? (
               <Button variant="outline" size="sm" onClick={onDisconnect}>
@@ -1249,12 +1356,24 @@ function AgentDetail({
                 {t("connect")}
               </Button>
             )}
+            <Button variant="outline" size="icon" aria-label={tCommon("edit")} onClick={onEdit}>
+              <Edit className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label={tCommon("delete")}
+              className="text-destructive hover:text-destructive"
+              onClick={onDelete}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
           </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Agent Details */}
-        <div className="grid grid-cols-1 gap-4 text-sm @lg/agents-pane:grid-cols-2">
+        <div className="grid grid-cols-1 gap-x-6 gap-y-1.5 text-sm @lg/agents-pane:grid-cols-2">
           <div>
             <span className="text-muted-foreground">{t("transport")}:</span>
             <span className="ml-2">{agent.transport}</span>
@@ -1309,12 +1428,7 @@ function AgentDetail({
               <span className="ml-2">{ecosystem.surfaceName}</span>
             </div>
           )}
-          {supportTier && (
-            <div>
-              <span className="text-muted-foreground">{t("detailsSupportTier")}:</span>
-              <span className="ml-2">{supportTier}</span>
-            </div>
-          )}
+          {/* Support tier is already a badge in the header — not repeated here. */}
           {ecosystem?.prerequisiteStatus && (
             <div>
               <span className="text-muted-foreground">{t("detailsPrerequisiteStatus")}:</span>
@@ -1358,23 +1472,6 @@ function AgentDetail({
         {agent.protocol === "opencode" && (
           <OpencodeStatusCard agentId={agent.id} connected={isConnected} />
         )}
-
-        {/* Actions */}
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={onEdit}>
-            <Edit className="mr-1 h-4 w-4" />
-            {tCommon("edit")}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="text-destructive hover:text-destructive"
-            onClick={onDelete}
-          >
-            <Trash2 className="mr-1 h-4 w-4" />
-            {tCommon("delete")}
-          </Button>
-        </div>
       </CardContent>
     </Card>
   )
@@ -1383,6 +1480,41 @@ function AgentDetail({
 // =============================================================================
 // Main Settings Component
 // =============================================================================
+
+/** What the right-hand detail pane is currently showing. */
+type DetailView =
+  { kind: "gallery" } | { kind: "global" } | { kind: "delegation" } | { kind: "agent"; id: string }
+
+/** A single entry in the left navigation rail. */
+function RailItem({
+  icon: Icon,
+  label,
+  active,
+  onClick,
+  dataTestId,
+}: {
+  icon: typeof Settings2
+  label: string
+  active: boolean
+  onClick: () => void
+  dataTestId: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      data-testid={dataTestId}
+      className={cn(
+        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent/50",
+        active && "bg-accent font-medium text-accent-foreground"
+      )}
+    >
+      <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+      <span className="truncate">{label}</span>
+    </button>
+  )
+}
 
 export function ExternalAgentSettings() {
   const t = useTranslations("externalAgent.settings")
@@ -1425,9 +1557,10 @@ export function ExternalAgentSettings() {
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
-  // Master/detail selection: the agent whose config is shown in the right pane.
-  // `null` keeps the quick-start preset gallery in view.
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
+  // Master/detail selection. The rail can point at an agent or at one of the
+  // three non-agent panels; the quick-start gallery is the landing view.
+  const [view, setView] = useState<DetailView>({ kind: "gallery" })
+  const selectedAgentId = view.kind === "agent" ? view.id : null
   // Preset id seeded into the AgentEditorDialog when opening from the
   // quick-start gallery. Empty when the user opens the manual "Add agent"
   // button.
@@ -1545,212 +1678,169 @@ export function ExternalAgentSettings() {
         </div>
       </div>
 
-      {/* Scrolling body — owns the vertical scroll and declares the container so
-          the master/detail split responds to the panel's own width, not the
-          viewport. */}
-      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto pt-4 pr-0.5 @container/agents-pane">
-        {/* Global Settings */}
-        <Card>
-          <CardContent className="space-y-4 pt-6">
-            {/* Auto Connect */}
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>{t("autoConnect")}</Label>
-                <p className="text-sm text-muted-foreground">{t("autoConnectDesc")}</p>
-              </div>
-              <Switch
-                checked={autoConnectOnStartup}
-                onCheckedChange={setAutoConnectOnStartup}
-                disabled={!enabled}
+      {/* Two-pane body. The outer div only declares the container (an element
+          cannot query the container it declares); the inner div does the
+          responsive split. Global settings, delegation rules and the preset
+          gallery used to stack above the agent list in one long page scroll —
+          they are rail entries now, which also restores the (previously
+          missing) way back to the gallery once an agent has been selected. */}
+      <div className="min-h-0 flex-1 pt-3 @container/agents-pane">
+        <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto pr-0.5 @3xl/agents-pane:flex-row @3xl/agents-pane:overflow-hidden">
+          {/* Navigation rail */}
+          <aside className="shrink-0 space-y-4 @3xl/agents-pane:w-60 @3xl/agents-pane:overflow-y-auto @3xl/agents-pane:pr-1">
+            <nav className="space-y-1">
+              <p className="px-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                {t("navGeneral")}
+              </p>
+              <RailItem
+                icon={Settings2}
+                label={t("globalSettings")}
+                active={view.kind === "global"}
+                onClick={() => setView({ kind: "global" })}
+                dataTestId="nav-global-settings"
               />
-            </div>
-
-            {/* Notifications */}
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>{t("showNotifications")}</Label>
-                <p className="text-sm text-muted-foreground">{t("showNotificationsDesc")}</p>
-              </div>
-              <Switch
-                checked={showConnectionNotifications}
-                onCheckedChange={setShowConnectionNotifications}
-                disabled={!enabled}
+              <RailItem
+                icon={Route}
+                label={t("delegation.title")}
+                active={view.kind === "delegation"}
+                onClick={() => setView({ kind: "delegation" })}
+                dataTestId="nav-delegation"
               />
-            </div>
+              <RailItem
+                icon={Sparkles}
+                label={t("quickStartTitle")}
+                active={view.kind === "gallery"}
+                onClick={() => setView({ kind: "gallery" })}
+                dataTestId="nav-quick-start"
+              />
+            </nav>
 
-            <Separator />
-
-            {/* Default Permission Mode */}
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>{t("defaultPermissionMode")}</Label>
-                <p className="text-sm text-muted-foreground">{t("defaultPermissionModeDesc")}</p>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-2 px-2">
+                <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                  {t("configuredAgents")}
+                </p>
+                {agents.length > 0 && (
+                  <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+                    {agents.length}
+                  </Badge>
+                )}
               </div>
-              <Select
-                value={defaultPermissionMode}
-                onValueChange={(v) =>
-                  setDefaultPermissionMode(
-                    v as "default" | "acceptEdits" | "bypassPermissions" | "plan"
-                  )
-                }
-                disabled={!enabled}
-              >
-                <SelectTrigger className="w-full sm:w-[180px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="default">{t("permissionDefault")}</SelectItem>
-                  <SelectItem value="acceptEdits">{t("permissionAcceptEdits")}</SelectItem>
-                  <SelectItem value="bypassPermissions">{t("permissionBypass")}</SelectItem>
-                  <SelectItem value="plan">{t("permissionPlan")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+              {agents.length === 0 ? (
+                <Empty className="border-0 py-6">
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon">
+                      <ExternalLink className="h-6 w-6" />
+                    </EmptyMedia>
+                    <EmptyTitle>{t("noAgentsConfigured")}</EmptyTitle>
+                    <EmptyDescription>{t("addAgentToStart")}</EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              ) : (
+                <div className="space-y-1">
+                  {agents.map((agent) => {
+                    const status = getConnectionStatus(agent.id)
+                    const runtimeValidity = getAgentValidity(agent.id)
+                    const executionBlockedReason =
+                      (runtimeValidity?.executable === false
+                        ? runtimeValidity.blockingReason
+                        : null) ?? getExternalAgentExecutionBlockReason(agent)
+                    const fromPresetId = isFromPreset(agent)
+                    const fromPresetName = fromPresetId
+                      ? getPresetDisplayInfo(fromPresetId)?.name
+                      : null
+                    const isSelected = selectedAgentId === agent.id
+                    const connected = status === "connected"
 
-            <Separator />
-
-            {/* External Failure Policy */}
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>{t("chatFailurePolicy")}</Label>
-                <p className="text-sm text-muted-foreground">{t("chatFailurePolicyDesc")}</p>
-              </div>
-              <Select
-                value={chatFailurePolicy}
-                onValueChange={(value) => setChatFailurePolicy(value as "fallback" | "strict")}
-                disabled={!enabled}
-              >
-                <SelectTrigger className="w-full sm:w-[220px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="fallback">{t("chatFailurePolicyFallback")}</SelectItem>
-                  <SelectItem value="strict">{t("chatFailurePolicyStrict")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Rule-based delegation — route matching chat turns to an external
-            agent automatically (Thread B). */}
-        <DelegationRulesSection disabled={!enabled} />
-
-        {/* Master/detail split — the agent list is the master on the left; the
-            selected agent's full config (or the quick-start preset gallery when
-            nothing is selected) fills the detail pane on the right. Collapses to
-            a single stacked column below the @3xl container breakpoint. */}
-        <div className="flex flex-col gap-4 @3xl/agents-pane:flex-row @3xl/agents-pane:items-start">
-          {/* Master: agent list */}
-          <aside className="space-y-2 @3xl/agents-pane:sticky @3xl/agents-pane:top-0 @3xl/agents-pane:max-h-[calc(100dvh-14rem)] @3xl/agents-pane:w-72 @3xl/agents-pane:shrink-0 @3xl/agents-pane:self-start @3xl/agents-pane:overflow-y-auto @3xl/agents-pane:pr-1">
-            <div className="flex items-center justify-between gap-2 px-0.5">
-              <h3 className="text-sm font-medium">{t("configuredAgents")}</h3>
-              {agents.length > 0 && (
-                <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
-                  {agents.length}
-                </Badge>
-              )}
-            </div>
-            {agents.length === 0 ? (
-              <Empty className="border-0 py-8">
-                <EmptyHeader>
-                  <EmptyMedia variant="icon">
-                    <ExternalLink className="h-6 w-6" />
-                  </EmptyMedia>
-                  <EmptyTitle>{t("noAgentsConfigured")}</EmptyTitle>
-                  <EmptyDescription>{t("addAgentToStart")}</EmptyDescription>
-                </EmptyHeader>
-              </Empty>
-            ) : (
-              <div className="space-y-2">
-                {agents.map((agent) => {
-                  const status = getConnectionStatus(agent.id)
-                  const runtimeValidity = getAgentValidity(agent.id)
-                  const executionBlockedReason =
-                    (runtimeValidity?.executable === false
-                      ? runtimeValidity.blockingReason
-                      : null) ?? getExternalAgentExecutionBlockReason(agent)
-                  const ecosystem =
-                    runtimeValidity?.ecosystem ??
-                    agent.validitySnapshot?.ecosystem ??
-                    getExternalAgentEcosystemReadiness(agent)
-                  const supportTier = ecosystem?.supportTier
-                  const supportTierVariant =
-                    supportTier === "documented-only"
-                      ? "destructive"
-                      : supportTier === "guided"
-                        ? "secondary"
-                        : "outline"
-                  const fromPresetId = isFromPreset(agent)
-                  const fromPresetName = fromPresetId
-                    ? getPresetDisplayInfo(fromPresetId)?.name
-                    : null
-                  const isSelected = selectedAgentId === agent.id
-
-                  return (
-                    <button
-                      key={agent.id}
-                      type="button"
-                      data-testid={`agent-row-${agent.id}`}
-                      onClick={() => setSelectedAgentId(agent.id)}
-                      aria-pressed={isSelected}
-                      className={cn(
-                        "w-full rounded-lg border p-3 text-left transition-colors hover:bg-accent/50",
-                        isSelected && "border-primary bg-accent ring-1 ring-primary"
-                      )}
-                    >
-                      <div className="flex items-start gap-2">
-                        <ConnectionStatusIcon status={status} />
-                        <div className="min-w-0 flex-1 space-y-1">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="truncate text-sm font-medium">{agent.name}</span>
-                            <Badge variant="outline" className="text-[10px]">
-                              {agent.protocol.toUpperCase()}
-                            </Badge>
-                            <Badge variant="secondary" className="text-[10px]">
-                              {agent.transport}
-                            </Badge>
-                            {supportTier && (
-                              <Badge variant={supportTierVariant} className="text-[10px]">
-                                {supportTier}
-                              </Badge>
-                            )}
+                    return (
+                      // Row + quick power action are siblings: a nested button
+                      // inside the row button would be invalid HTML.
+                      <div
+                        key={agent.id}
+                        className={cn(
+                          "flex items-center gap-1 rounded-md pr-1 transition-colors hover:bg-accent/50",
+                          isSelected && "bg-accent"
+                        )}
+                      >
+                        <button
+                          type="button"
+                          data-testid={`agent-row-${agent.id}`}
+                          onClick={() => setView({ kind: "agent", id: agent.id })}
+                          aria-pressed={isSelected}
+                          className="min-w-0 flex-1 rounded-md px-2 py-1.5 text-left"
+                        >
+                          <div className="flex items-center gap-2">
+                            <ConnectionStatusIcon status={status} />
+                            <span
+                              className={cn(
+                                "truncate text-sm",
+                                isSelected && "font-medium text-accent-foreground"
+                              )}
+                            >
+                              {agent.name}
+                            </span>
                             {fromPresetName && (
                               <Badge
                                 variant="outline"
-                                className="text-[10px]"
+                                className="shrink-0 text-[10px]"
                                 data-testid={`agent-from-preset-${agent.id}`}
                               >
-                                {t("fromPreset", { name: fromPresetName })}
+                                {fromPresetName}
                               </Badge>
                             )}
                           </div>
-                          {executionBlockedReason && (
-                            <p className="text-[11px] text-amber-600 dark:text-amber-400">
-                              {executionBlockedReason}
-                            </p>
+                          <p className="truncate pl-6 text-[11px] text-muted-foreground">
+                            {executionBlockedReason ? (
+                              <span className="text-amber-600 dark:text-amber-400">
+                                {executionBlockedReason}
+                              </span>
+                            ) : (
+                              `${agent.protocol} · ${agent.transport}`
+                            )}
+                          </p>
+                        </button>
+                        {/* Connect without leaving the list — the most frequent
+                            action was previously two clicks deep. */}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 shrink-0"
+                          aria-label={
+                            connected
+                              ? t("quickDisconnect", { name: agent.name })
+                              : t("quickConnect", { name: agent.name })
+                          }
+                          data-testid={`agent-power-${agent.id}`}
+                          disabled={
+                            !enabled ||
+                            isConnecting(agent.id) ||
+                            (!connected && !!executionBlockedReason)
+                          }
+                          onClick={() =>
+                            connected ? handleDisconnect(agent.id) : handleConnect(agent.id)
+                          }
+                        >
+                          {isConnecting(agent.id) ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : connected ? (
+                            <PowerOff className="h-3.5 w-3.5" />
+                          ) : (
+                            <Power className="h-3.5 w-3.5" />
                           )}
-                        </div>
+                        </Button>
                       </div>
-                    </button>
-                  )
-                })}
-              </div>
-            )}
+                    )
+                  })}
+                </div>
+              )}
+            </div>
           </aside>
 
-          {/* Detail: the selected agent's config, or the quick-start gallery */}
-          <section className="min-w-0 flex-1">
-            {selectedAgent ? (
-              <AgentDetail
-                agent={selectedAgent}
-                isConnecting={isConnecting(selectedAgent.id)}
-                onConnect={() => handleConnect(selectedAgent.id)}
-                onDisconnect={() => handleDisconnect(selectedAgent.id)}
-                onEdit={() => handleEditAgent(selectedAgent.id)}
-                onDelete={() => setDeleteConfirmId(selectedAgent.id)}
-              />
-            ) : (
+          {/* Detail pane */}
+          <section className="min-w-0 flex-1 @3xl/agents-pane:overflow-y-auto @3xl/agents-pane:pr-1">
+            {view.kind === "delegation" && <DelegationRulesSection disabled={!enabled} />}
+
+            {view.kind === "gallery" && (
               <PresetGalleryCard
                 disabled={!enabled}
                 onPick={(presetId) => {
@@ -1759,6 +1849,110 @@ export function ExternalAgentSettings() {
                   setEditorOpen(true)
                 }}
               />
+            )}
+
+            {view.kind === "agent" &&
+              (selectedAgent ? (
+                <AgentDetail
+                  agent={selectedAgent}
+                  isConnecting={isConnecting(selectedAgent.id)}
+                  onConnect={() => handleConnect(selectedAgent.id)}
+                  onDisconnect={() => handleDisconnect(selectedAgent.id)}
+                  onEdit={() => handleEditAgent(selectedAgent.id)}
+                  onDelete={() => setDeleteConfirmId(selectedAgent.id)}
+                />
+              ) : null)}
+
+            {view.kind === "global" && (
+              <Card data-testid="global-settings-card">
+                <CardHeader>
+                  <CardTitle>{t("globalSettings")}</CardTitle>
+                  <CardDescription>{t("globalSettingsDesc")}</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {/* Auto Connect */}
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>{t("autoConnect")}</Label>
+                      <p className="text-sm text-muted-foreground">{t("autoConnectDesc")}</p>
+                    </div>
+                    <Switch
+                      checked={autoConnectOnStartup}
+                      onCheckedChange={setAutoConnectOnStartup}
+                      disabled={!enabled}
+                    />
+                  </div>
+
+                  {/* Notifications */}
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>{t("showNotifications")}</Label>
+                      <p className="text-sm text-muted-foreground">{t("showNotificationsDesc")}</p>
+                    </div>
+                    <Switch
+                      checked={showConnectionNotifications}
+                      onCheckedChange={setShowConnectionNotifications}
+                      disabled={!enabled}
+                    />
+                  </div>
+
+                  <Separator />
+
+                  {/* Default Permission Mode */}
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>{t("defaultPermissionMode")}</Label>
+                      <p className="text-sm text-muted-foreground">
+                        {t("defaultPermissionModeDesc")}
+                      </p>
+                    </div>
+                    <Select
+                      value={defaultPermissionMode}
+                      onValueChange={(v) =>
+                        setDefaultPermissionMode(
+                          v as "default" | "acceptEdits" | "bypassPermissions" | "plan"
+                        )
+                      }
+                      disabled={!enabled}
+                    >
+                      <SelectTrigger className="w-full sm:w-[180px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="default">{t("permissionDefault")}</SelectItem>
+                        <SelectItem value="acceptEdits">{t("permissionAcceptEdits")}</SelectItem>
+                        <SelectItem value="bypassPermissions">{t("permissionBypass")}</SelectItem>
+                        <SelectItem value="plan">{t("permissionPlan")}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <Separator />
+
+                  {/* External Failure Policy */}
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>{t("chatFailurePolicy")}</Label>
+                      <p className="text-sm text-muted-foreground">{t("chatFailurePolicyDesc")}</p>
+                    </div>
+                    <Select
+                      value={chatFailurePolicy}
+                      onValueChange={(value) =>
+                        setChatFailurePolicy(value as "fallback" | "strict")
+                      }
+                      disabled={!enabled}
+                    >
+                      <SelectTrigger className="w-full sm:w-[220px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="fallback">{t("chatFailurePolicyFallback")}</SelectItem>
+                        <SelectItem value="strict">{t("chatFailurePolicyStrict")}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </CardContent>
+              </Card>
             )}
           </section>
         </div>
