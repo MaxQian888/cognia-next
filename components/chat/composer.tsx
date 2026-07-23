@@ -20,15 +20,7 @@ import {
   usePromptInputController,
 } from "@/components/ai-elements/prompt-input"
 import type { ChatStatus as PromptStatus, UIMessage } from "ai"
-import {
-  ArrowUpIcon,
-  FileTextIcon,
-  FolderIcon,
-  Loader2Icon,
-  PaperclipIcon,
-  SquareIcon,
-  XIcon,
-} from "lucide-react"
+import { ArrowUpIcon, FileTextIcon, FolderIcon, Loader2Icon, SquareIcon, XIcon } from "lucide-react"
 import {
   ChangeEvent,
   ClipboardEvent as ReactClipboardEvent,
@@ -56,6 +48,7 @@ import {
 } from "@/lib/chat/attachments/dispatch"
 import { prepareComposerAttachments } from "@/lib/chat/attachments/prepare"
 import { buildLinkContextBlocks, mergeContextBlocks, removeHttpUrl } from "@/lib/chat/link-context"
+import { collectDroppedFiles, MAX_DROPPED_DIR_FILES } from "@/lib/chat/drop-entries"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -93,8 +86,7 @@ import { useApplyPreset } from "@/hooks/chat/use-apply-preset"
 import { useEffectiveCwd } from "@/hooks/chat/use-effective-cwd"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
 import { ContextChipBar } from "./composer/context-chip-bar"
-import { ComposerLinkButton } from "./composer/link-context"
-import { FolderPickerButton } from "./composer/folder-picker-button"
+import { ComposerAttachMenu } from "./composer/attach-menu"
 import { nextPermissionMode } from "./permission-mode-indicator"
 import { useResolvedConnectorMode } from "./use-resolved-connector-mode"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
@@ -174,7 +166,6 @@ import { LoopStatusPill } from "@/components/loop/loop-status-pill"
 import { CharCounter } from "./composer/char-counter"
 import { DragOverlay } from "./composer/drag-overlay"
 import { HelperHints } from "./composer/helper-hints"
-import { ScreenshotButton } from "./composer/screenshot-button"
 import { VoiceControls } from "./composer/voice-controls"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { InboxComposerActionsHost } from "@/components/inbox/inbox-composer-actions-host"
@@ -253,8 +244,10 @@ const COMPOSER_MAX_HEIGHT_PX = COMPOSER_MAX_HEIGHT_REM * 16
 // --- Helpers ---------------------------------------------------------------
 
 // Accept images plus every text/binary document type lib/document can extract
-// (pdf, docx, xlsx, pptx, csv, md, code, …). Folders are handled separately via
-// the @-mention / folder-picker reference path, not this attachment input.
+// (pdf, docx, xlsx, pptx, csv, md, code, …). A folder picked from the attach
+// menu takes the @-mention reference path instead (absolute path, read on
+// demand); only a *dropped* folder is flattened into this attachment input,
+// since a drop carries no absolute path.
 const ATTACHMENT_ACCEPT = ["image/*", ...getDocumentAcceptExtensions("chat")].join(",")
 
 const blobUrlToDataUrl = async (url: string): Promise<string | null> => {
@@ -1290,15 +1283,34 @@ function ComposerInner(props: InnerProps) {
     if (!e.dataTransfer?.types?.includes("Files")) return
     setDragDepth((d) => Math.max(0, d - 1))
   }, [])
+  // Drops are resolved generically: plain files and whole directories arrive
+  // through the same handler, and a dropped folder is flattened into its files
+  // rather than staging one junk zero-byte attachment. (A dropped directory
+  // carries no absolute path, so it cannot take the reference path the attach
+  // menu's native folder picker uses — see lib/chat/drop-entries.ts.)
   const onDrop = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
       setDragDepth(0)
-      const files = e.dataTransfer?.files
-      if (!files || files.length === 0) return
+      const dataTransfer = e.dataTransfer
+      const hasPayload =
+        (dataTransfer?.files?.length ?? 0) > 0 || (dataTransfer?.items?.length ?? 0) > 0
+      if (!dataTransfer || !hasPayload) return
       e.preventDefault()
-      void acceptFiles(files)
+      void collectDroppedFiles(dataTransfer)
+        .then((dropped) => {
+          if (dropped.truncated) {
+            toast.warning(tAttach("folderTruncated", { max: MAX_DROPPED_DIR_FILES }))
+          }
+          if (dropped.files.length > 0) return acceptFiles(dropped.files)
+          if (dropped.directories > 0) toast.warning(tAttach("folderEmpty"))
+        })
+        .catch((err: unknown) => {
+          loggers.chat.warn("drop resolution failed", {
+            err: err instanceof Error ? err.message : String(err),
+          })
+        })
     },
-    [acceptFiles]
+    [acceptFiles, tAttach]
   )
 
   const onFilePick = useCallback(
@@ -1312,16 +1324,6 @@ function ComposerInner(props: InnerProps) {
   const openFileDialog = useCallback(() => {
     fileInputRef.current?.click()
   }, [])
-
-  const addLink = useCallback(
-    (url: string) => {
-      const current = controller.textInput.value.trimEnd()
-      if (current.includes(url)) return
-      controller.textInput.setInput(current ? `${current}\n${url}` : url)
-      requestAnimationFrame(() => textareaRef.current?.focus())
-    },
-    [controller.textInput]
-  )
 
   const removeLink = useCallback(
     (url: string) => {
@@ -1654,34 +1656,14 @@ function ComposerInner(props: InnerProps) {
               onError={(_code, message) => toast.error(message)}
             />
           ) : (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  aria-label={t("ariaAttachImage")}
-                  className="size-9 text-muted-foreground hover:text-foreground"
-                  disabled={props.disabled}
-                  onClick={openFileDialog}
-                  size="icon"
-                  type="button"
-                  variant="ghost"
-                >
-                  <PaperclipIcon className="size-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("attachImageTooltip")}</TooltipContent>
-            </Tooltip>
+            // One paperclip for both attachment models: files inline, folders
+            // as references. Links need no button — typed or pasted URLs are
+            // recognised in the text and chipped by `ContextChipBar`.
+            <ComposerAttachMenu disabled={props.disabled} onPickFiles={openFileDialog} />
           )}
 
-          <FolderPickerButton disabled={props.disabled} />
-
-          <ComposerLinkButton
-            disabled={props.disabled || isPreparingAttachments}
-            onAdd={addLink}
-            className={isMobile ? "touch-target" : undefined}
-          />
-
-          {isDesktop ? <ScreenshotButton disabled={props.disabled} /> : null}
-
+          {/* Voice stays outside the menu: it's an input method (speech →
+              text), not a way to produce an attachment. */}
           <VoiceTranscriptionBridge disabled={props.disabled} />
           <ComposerAppendBridge />
         </div>

@@ -25,9 +25,6 @@ jest.mock("@/lib/shell/exec", () => ({
 jest.mock("@/lib/files/memory", () => ({
   appendMemory: jest.fn(),
 }))
-jest.mock("./composer/screenshot-button", () => ({
-  ScreenshotButton: () => null,
-}))
 jest.mock("./composer/voice-controls", () => ({
   VoiceControls: () => null,
 }))

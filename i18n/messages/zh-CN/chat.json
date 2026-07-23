@@ -142,11 +142,18 @@
     "ariaToggleWebSearch": "切换网络搜索",
     "ariaUploadImage": "上传文件",
     "attachImageTooltip": "添加文件",
+    "attachMenu": {
+      "file": "上传文件",
+      "folder": "添加文件夹",
+      "trigger": "添加附件"
+    },
     "attachments": {
       "countLimit": "最多只能附加 {max} 个附件。",
       "fallbackFile": "文件",
       "fallbackName": "附件",
       "fileSizeExceeded": "{count, plural, =1 {1 个文件超过} other {# 个文件超过}} {max}MB。",
+      "folderEmpty": "该文件夹中没有可添加的文件。",
+      "folderTruncated": "仅读取了拖入文件夹中的前 {max} 个文件。",
       "linkSkipped": "有 {count} 个链接无法读取，仍会发送原始网址。",
       "optimized": "添加前已优化 {count} 张大图。",
       "oversizeBody": "这些附件大约会增加 {tokens}k tokens 的上下文。仍要发送吗？",
@@ -185,7 +192,7 @@
       "title": "查看待处理草稿"
     },
     "dragOverlay": {
-      "dropToAttach": "松开以添加文件"
+      "dropToAttach": "松开以添加文件或文件夹"
     },
     "effort": {
       "aria": "思考等级",
@@ -219,12 +226,10 @@
       "trigger": "润色提示词"
     },
     "folder": {
-      "aria": "添加文件夹",
       "confirmAdd": "添加文件夹",
       "confirmBody": "“{name}”包含 {count}+ 个文件，agent 将按需读取。确认加入上下文？",
       "confirmCancel": "取消",
-      "confirmTitle": "添加大文件夹？",
-      "tooltip": "将文件夹加入上下文"
+      "confirmTitle": "添加大文件夹？"
     },
     "followUps": {
       "dismiss": "关闭建议",
@@ -234,16 +239,12 @@
     "ghostAcceptHint": "Tab",
     "ghostDismiss": "忽略建议",
     "helperHints": {
-      "dropImages": "拖拽 / 粘贴文件或链接",
+      "dropImages": "拖拽 / 粘贴文件、文件夹或链接",
       "send": "⏎ 发送 · ⇧⏎ 换行",
       "tryPrefix": "试试"
     },
     "links": {
-      "add": "添加链接",
-      "addAction": "附加链接",
-      "inputAria": "网页地址",
-      "inputPlaceholder": "https://example.com",
-      "invalid": "请输入有效的 HTTP(S) 链接。",
+      "limitNote": "共 {total} 个链接，仅读取前 {max} 个",
       "openAria": "打开 {host}",
       "removeAria": "移除 {host}"
     },

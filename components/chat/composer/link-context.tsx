@@ -1,15 +1,14 @@
 "use client"
 
-import { FormEvent, useState } from "react"
+// Links have no composer button: a URL typed or pasted into the textarea is
+// recognised by `extractHttpUrls`, chipped here, and dereferenced at send time
+// by `buildLinkContextBlocks`. The chip's "×" removes the URL from the text.
+
 import { Link2Icon, XIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ExternalLink } from "@/components/shared/external-link"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
-import { extractHttpUrls, normalizeHttpUrl } from "@/lib/chat/link-context"
-import { cn } from "@/lib/utils"
+import { extractHttpUrls, MAX_LINK_CONTEXTS } from "@/lib/chat/link-context"
 
 export interface ComposerLinkChipsProps {
   text: string
@@ -21,7 +20,11 @@ export function ComposerLinkChips({ text, onRemove }: ComposerLinkChipsProps) {
   const urls = extractHttpUrls(text)
   if (urls.length === 0) return null
 
-  return urls.map((url) => {
+  // Only the first MAX_LINK_CONTEXTS URLs are dereferenced. The rest still
+  // reach the model verbatim inside the prompt, but nothing else on screen
+  // would tell the user their page content wasn't read — so say it.
+  const total = extractHttpUrls(text, Number.POSITIVE_INFINITY).length
+  const chips = urls.map((url) => {
     const host = new URL(url).hostname
     return (
       <div
@@ -49,68 +52,13 @@ export function ComposerLinkChips({ text, onRemove }: ComposerLinkChipsProps) {
       </div>
     )
   })
-}
 
-export interface ComposerLinkButtonProps {
-  disabled?: boolean
-  onAdd: (url: string) => void
-  className?: string
-}
+  if (total <= MAX_LINK_CONTEXTS) return chips
 
-export function ComposerLinkButton({ disabled, onAdd, className }: ComposerLinkButtonProps) {
-  const t = useTranslations("chat.composer.links")
-  const [open, setOpen] = useState(false)
-  const [value, setValue] = useState("")
-  const [invalid, setInvalid] = useState(false)
-
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const normalized = normalizeHttpUrl(value)
-    if (!normalized) {
-      setInvalid(true)
-      return
-    }
-    onAdd(normalized)
-    setValue("")
-    setInvalid(false)
-    setOpen(false)
-  }
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          disabled={disabled}
-          aria-label={t("add")}
-          className={cn("size-9 text-muted-foreground hover:text-foreground", className)}
-        >
-          <Link2Icon />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-80 p-3">
-        <form onSubmit={submit} className="flex flex-col gap-2">
-          <Input
-            autoFocus
-            type="url"
-            value={value}
-            onChange={(event) => {
-              setValue(event.target.value)
-              if (invalid) setInvalid(false)
-            }}
-            aria-label={t("inputAria")}
-            aria-invalid={invalid}
-            placeholder={t("inputPlaceholder")}
-          />
-          {invalid ? <p className="text-xs text-destructive">{t("invalid")}</p> : null}
-          <Button type="submit" size="sm" disabled={!value.trim()}>
-            <Link2Icon data-icon="inline-start" />
-            {t("addAction")}
-          </Button>
-        </form>
-      </PopoverContent>
-    </Popover>
-  )
+  return [
+    ...chips,
+    <span key="link-limit" className="text-[11px] text-muted-foreground">
+      {t("limitNote", { max: MAX_LINK_CONTEXTS, total })}
+    </span>,
+  ]
 }

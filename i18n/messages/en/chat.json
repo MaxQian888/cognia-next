@@ -142,11 +142,18 @@
     "ariaToggleWebSearch": "Toggle web search",
     "ariaUploadImage": "Upload files",
     "attachImageTooltip": "Attach files",
+    "attachMenu": {
+      "file": "Upload files",
+      "folder": "Add folder",
+      "trigger": "Attach"
+    },
     "attachments": {
       "countLimit": "Only {max} attachments allowed.",
       "fallbackFile": "file",
       "fallbackName": "attachment",
       "fileSizeExceeded": "{count, plural, =1 {1 file exceeded} other {# files exceeded}} {max}MB.",
+      "folderEmpty": "That folder has no attachable files.",
+      "folderTruncated": "Only the first {max} files from the dropped folder were read.",
       "linkSkipped": "{count, plural, =1 {1 link couldn't be read} other {# links couldn't be read}}; the original URL will still be sent.",
       "optimized": "{count, plural, =1 {1 large image was optimized} other {# large images were optimized}} before attaching.",
       "oversizeBody": "These attachments add about {tokens}k tokens of context. Send anyway?",
@@ -185,7 +192,7 @@
       "title": "Review pending drafts"
     },
     "dragOverlay": {
-      "dropToAttach": "Drop files to attach"
+      "dropToAttach": "Drop files or folders to attach"
     },
     "effort": {
       "aria": "Thinking level",
@@ -219,12 +226,10 @@
       "trigger": "Enhance prompt"
     },
     "folder": {
-      "aria": "Add a folder",
       "confirmAdd": "Add folder",
       "confirmBody": "\"{name}\" contains {count}+ files. The agent will read them on demand. Add as context?",
       "confirmCancel": "Cancel",
-      "confirmTitle": "Add large folder?",
-      "tooltip": "Add folder as context"
+      "confirmTitle": "Add large folder?"
     },
     "followUps": {
       "dismiss": "Dismiss suggestions",
@@ -234,16 +239,12 @@
     "ghostAcceptHint": "Tab",
     "ghostDismiss": "Dismiss suggestion",
     "helperHints": {
-      "dropImages": "Drop / paste files or links",
+      "dropImages": "Drop / paste files, folders or links",
       "send": "⏎ Send · ⇧⏎ New line",
       "tryPrefix": "Try"
     },
     "links": {
-      "add": "Attach a link",
-      "addAction": "Attach link",
-      "inputAria": "Web address",
-      "inputPlaceholder": "https://example.com",
-      "invalid": "Enter a valid HTTP(S) link.",
+      "limitNote": "Reading the first {max} of {total} links",
       "openAria": "Open {host}",
       "removeAria": "Remove {host}"
     },

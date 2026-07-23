@@ -20,7 +20,10 @@ jest.mock("@/lib/search/search-service", () => ({
 }))
 jest.mock("@/lib/shell/exec", () => ({ executeShell: jest.fn(), formatShellResult: jest.fn() }))
 jest.mock("@/lib/files/memory", () => ({ appendMemory: jest.fn() }))
-jest.mock("./composer/screenshot-button", () => ({ ScreenshotButton: () => null }))
+// Stubbed for cost, not correctness: the attach menu is covered by its own
+// suite, and mounting its Radix subtree on every render here pushed the first
+// (cold) test past the 5s default timeout under parallel workers.
+jest.mock("./composer/attach-menu", () => ({ ComposerAttachMenu: () => null }))
 jest.mock("./composer/voice-controls", () => ({ VoiceControls: () => null }))
 jest.mock("@/hooks/use-platform", () => ({ usePlatform: jest.fn(() => "web") }))
 

@@ -1,17 +1,13 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { ComposerLinkButton, ComposerLinkChips } from "./link-context"
+import { ComposerLinkChips } from "./link-context"
 
 const messages = {
   chat: {
     composer: {
       links: {
-        add: "Add link",
-        addAction: "Attach link",
-        inputAria: "Web address",
-        inputPlaceholder: "https://example.com",
-        invalid: "Enter a valid HTTP(S) link.",
+        limitNote: "Reading the first {max} of {total} links",
         openAria: "Open {host}",
         removeAria: "Remove {host}",
       },
@@ -54,23 +50,29 @@ describe("composer link context", () => {
     expect(onRemove).toHaveBeenCalledWith("https://example.com/docs")
   })
 
-  it("validates and submits a web link from the toolbar popover", () => {
-    const onAdd = jest.fn()
+  it("says how many links are actually read once past the cap", () => {
     render(
       <Providers>
-        <ComposerLinkButton onAdd={onAdd} />
+        <ComposerLinkChips
+          text="https://a.dev https://b.dev https://c.dev https://d.dev https://e.dev"
+          onRemove={jest.fn()}
+        />
       </Providers>
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Attach a link" }))
-    const input = screen.getByRole("textbox", { name: "Web address" })
-    fireEvent.change(input, { target: { value: "file:///tmp/private" } })
-    fireEvent.click(screen.getByRole("button", { name: "Attach link" }))
-    expect(screen.getByText("Enter a valid HTTP(S) link.")).toBeInTheDocument()
-    expect(onAdd).not.toHaveBeenCalled()
+    // Only the first 3 are chipped and dereferenced; the note keeps that from
+    // being silent, since the other URLs still ship verbatim in the prompt.
+    expect(screen.getAllByRole("link")).toHaveLength(3)
+    expect(screen.getByText("Reading the first 3 of 5 links")).toBeInTheDocument()
+  })
 
-    fireEvent.change(input, { target: { value: "https://docs.example.com/start" } })
-    fireEvent.click(screen.getByRole("button", { name: "Attach link" }))
-    expect(onAdd).toHaveBeenCalledWith("https://docs.example.com/start")
+  it("stays quiet at or below the cap", () => {
+    render(
+      <Providers>
+        <ComposerLinkChips text="https://a.dev https://b.dev" onRemove={jest.fn()} />
+      </Providers>
+    )
+
+    expect(screen.queryByText(/Reading the first/)).toBeNull()
   })
 })

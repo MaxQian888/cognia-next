@@ -18,7 +18,10 @@ jest.mock("@/lib/shell/exec", () => ({
   formatShellResult: jest.fn(),
 }))
 jest.mock("@/lib/files/memory", () => ({ appendMemory: jest.fn() }))
-jest.mock("./composer/screenshot-button", () => ({ ScreenshotButton: () => null }))
+// Stubbed for cost, not correctness: the attach menu is covered by its own
+// suite, and mounting its Radix subtree on every render here pushed the first
+// (cold) test past the 5s default timeout under parallel workers.
+jest.mock("./composer/attach-menu", () => ({ ComposerAttachMenu: () => null }))
 jest.mock("./composer/voice-controls", () => ({ VoiceControls: () => null }))
 jest.mock("@/hooks/use-platform", () => ({ usePlatform: jest.fn(() => "web") }))
 jest.mock("@/lib/chat/attachments/dispatch", () => ({
@@ -273,5 +276,50 @@ describe("Composer — attachment send contract", () => {
     expect(ta.value).toBe("hi")
     expect(screen.getByAltText("shot.png")).toBeInTheDocument()
     expect(URL.revokeObjectURL).not.toHaveBeenCalledWith("blob:mock")
+  })
+
+  // A dropped folder carries no absolute path, so it can't take the attach
+  // menu's reference path — it is flattened into its files and gated exactly
+  // like any other drop instead of staging one junk zero-byte attachment.
+  it("flattens a dropped folder into attachments", async () => {
+    const onSend = jest.fn(async () => undefined)
+    renderComposer(onSend)
+
+    const dropZone = document.querySelector("[data-composer-layout]") as HTMLElement
+    const inner = new File(["x"], "a.png", { type: "image/png" })
+    const dirEntry = {
+      isFile: false,
+      isDirectory: true,
+      name: "shots",
+      createReader: () => {
+        let done = false
+        return {
+          readEntries: (ok: (batch: unknown[]) => void) => {
+            if (done) return ok([])
+            done = true
+            ok([
+              {
+                isFile: true,
+                isDirectory: false,
+                name: "a.png",
+                file: (cb: (f: File) => void) => cb(inner),
+              },
+            ])
+          },
+        }
+      },
+    }
+
+    await act(async () => {
+      fireEvent.drop(dropZone, {
+        dataTransfer: {
+          files: [],
+          items: [{ kind: "file", webkitGetAsEntry: () => dirEntry }],
+        },
+      })
+      await new Promise((r) => setTimeout(r, 50))
+    })
+
+    expect(screen.getByAltText("shots/a.png")).toBeInTheDocument()
   })
 })

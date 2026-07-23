@@ -71,9 +71,6 @@ jest.mock("@/lib/db/chat-drafts", () => ({
   getDraft: jest.fn(async () => undefined),
   setDraftDebounced: jest.fn(() => undefined),
 }))
-jest.mock("./composer/screenshot-button", () => ({
-  ScreenshotButton: () => null,
-}))
 jest.mock("./composer/voice-controls", () => ({
   VoiceControls: () => null,
 }))
