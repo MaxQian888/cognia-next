@@ -1432,11 +1432,7 @@ import type { AgentTeammate } from "@/types/agent/agent-team"
  */
 
 export type TeammateFailureKind =
-  | "ordinary"
-  | "rate_limited"
-  | "catastrophic"
-  | "empty_output"
-  | "refusal"
+  "ordinary" | "rate_limited" | "catastrophic" | "empty_output" | "refusal"
 
 export interface TeammatePool {
   claim(taskId: string): AgentTeammate | null
@@ -1853,10 +1849,7 @@ import type { ModelPreferenceController } from "@/lib/workflow/runtime/model-pre
 import type { SubAgentTokenUsage, TeamBudgetEscalationAction } from "@/types/agent/agent-team"
 
 export type BudgetEventName =
-  | "warning_crossed"
-  | "critical_crossed"
-  | "pause_for_review"
-  | "entered_background_mode"
+  "warning_crossed" | "critical_crossed" | "pause_for_review" | "entered_background_mode"
 
 export interface BudgetGuardOptions {
   runId: string

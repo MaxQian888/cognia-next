@@ -10907,6 +10907,75 @@ paths:
             content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
           }
 
+  /api/v1/_rpc/fleet_question_respond:
+    post:
+      operationId: rpcFleetQuestionRespond
+      tags: [rpc-fleet]
+      summary: Answer a parked AskUserQuestion on a fleet session (remote-control gated).
+      description: >
+        Selections are per-question option INDICES, in question order, so the
+        answer is immune to the display truncation the snapshot applies to
+        option labels. Answering races the agent's own hook timeout; a late
+        answer is rejected rather than applied.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, selections]
+              properties:
+                requestId: { type: string }
+                selections:
+                  type: array
+                  items: { type: array, items: { type: integer, minimum: 0 } }
+      responses:
+        "200":
+          description: Whether the answer reached a still-waiting request.
+          content: { application/json: { schema: { type: boolean } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/fleet_interrupt_session:
+    post:
+      operationId: rpcFleetInterruptSession
+      tags: [rpc-fleet]
+      summary: Interrupt a fleet session's current turn (remote-control gated).
+      description: >
+        Delivers a single SIGINT to the agent process — equivalent to pressing
+        Ctrl-C once in that terminal, which cancels the in-flight turn without
+        exiting. The pid is re-verified alive and identity-checked first, so a
+        recycled pid cannot be signalled. There is no acknowledgement channel:
+        a 200 means the signal was sent, not that the turn stopped. Unsupported
+        on Windows, where console control events cannot reach a process that
+        does not share our console.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agent, sessionId]
+              properties:
+                agent: { type: string }
+                sessionId: { type: string }
+      responses:
+        "200": { description: Signal sent (null body). }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          description: >
+            Refused or failed. `interrupt_unsupported`, `interrupt_not_running`
+            and `interrupt_identity_mismatch` are the structured refusal codes.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RpcError" }
+
 # ───────────────────────────────────────────────────────────────────────────
 # components
 # ───────────────────────────────────────────────────────────────────────────

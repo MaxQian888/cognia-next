@@ -50,6 +50,7 @@
     "0086-task-scoped-resource-workspaces",
     "0087-python-backed-plugin-contributions",
     "0088-pro-ide-code-server",
-    "0089-topic-scoped-connector-runtime"
+    "0089-topic-scoped-connector-runtime",
+    "0090-unified-agent-execution-and-gateway-compatibility"
   ]
 }
