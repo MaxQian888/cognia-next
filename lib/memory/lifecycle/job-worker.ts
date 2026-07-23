@@ -276,11 +276,36 @@ async function processVectorReconcile(): Promise<void> {
   const { tryBuildMemoryVectorSink } = await import("@/lib/memory/runtime/build-deps")
   const sink = await tryBuildMemoryVectorSink(config)
   if (!sink) throw new MemoryJobProcessingError("vector_backend_unavailable")
+
+  // Backend snapshot first (when the store can list) so both healing legs and
+  // the orphan sweep work off one consistent view.
+  const backendIds = sink.listIds ? new Set(await sink.listIds()) : undefined
+
   const rows = await listMemories({ status: "active" })
+  const activeDocIds = new Set<string>()
   for (const row of rows) {
-    if (row.vectorDocId || !hasNoLeakingPii(row.text)) continue
-    await sink.upsert(row.id, row.text)
-    await updateMemory(row.id, { vectorDocId: row.id })
+    // PII-bearing text must not live in the vector store; skipping the row
+    // also lets the orphan sweep below remove any legacy embedding of it.
+    if (!hasNoLeakingPii(row.text)) continue
+    if (!row.vectorDocId) {
+      // Never indexed (e.g. upsert failed at write time) — index it now.
+      await sink.upsert(row.id, row.text)
+      await updateMemory(row.id, { vectorDocId: row.id })
+      activeDocIds.add(row.id)
+    } else {
+      activeDocIds.add(row.vectorDocId)
+      // Indexed on our side but missing backend-side — re-upsert.
+      if (backendIds && !backendIds.has(row.vectorDocId)) {
+        await sink.upsert(row.vectorDocId, row.text)
+      }
+    }
+  }
+
+  // Orphans: backend docs no active memory points at (invalidated/hard-deleted
+  // rows whose vector cleanup failed). Only possible with a listing API.
+  if (backendIds) {
+    const orphans = [...backendIds].filter((id) => !activeDocIds.has(id))
+    if (orphans.length > 0) await sink.delete(orphans)
   }
 }
 

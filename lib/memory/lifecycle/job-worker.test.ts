@@ -193,6 +193,27 @@ describe("memory job worker", () => {
     expect(mockUpdateMemory).toHaveBeenCalledWith("safe", { vectorDocId: "safe" })
   })
 
+  it("vector-reconcile heals backend-missing docs and sweeps orphans when the sink can list", async () => {
+    const upsert = jest.fn(async () => undefined)
+    const del = jest.fn(async () => undefined)
+    // Backend holds: "done" (healthy), "orphan" (no active row points at it).
+    // It is missing "lost", which an active row claims to have indexed.
+    const listIds = jest.fn(async () => ["done", "orphan"])
+    mockTryBuildVectorSink.mockResolvedValue({ upsert, delete: del, listIds })
+    mockListMemories.mockResolvedValue([
+      { id: "done", text: "Already indexed", vectorDocId: "done" },
+      { id: "lost", text: "Backend lost me", vectorDocId: "lost" },
+      { id: "fresh", text: "Never indexed" },
+    ])
+    await processMemoryJob({ ...job("vector"), kind: "vector-reconcile" })
+    // "lost" re-upserted under its existing doc id; "fresh" indexed anew.
+    expect(upsert).toHaveBeenCalledWith("lost", "Backend lost me")
+    expect(upsert).toHaveBeenCalledWith("fresh", "Never indexed")
+    expect(mockUpdateMemory).toHaveBeenCalledWith("fresh", { vectorDocId: "fresh" })
+    // Only the orphan is swept.
+    expect(del).toHaveBeenCalledWith(["orphan"])
+  })
+
   it("backs off when the durable transcript checkpoint is unavailable", async () => {
     const d = deps([{ ...job("missing"), sessionId: "s1", dedupeKey: "invalid" }], processMemoryJob)
     await drainMemoryJobs({}, d)

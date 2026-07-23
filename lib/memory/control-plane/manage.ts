@@ -13,6 +13,7 @@ import {
   createMemoryEvidence,
   deleteMemoryEvidence,
 } from "@/lib/db/memory-governance"
+import { noteMemoryVectorFailure } from "@/lib/memory/lifecycle/enqueue-reconcile"
 import { tryBuildMemoryVectorSink } from "@/lib/memory/runtime/build-deps"
 import { storeMemoryCore } from "@/lib/memory/api/store-memory"
 import { resolveMemoryConfig, type MemoryScope, type MemoryType } from "@/types/memory/memory"
@@ -116,6 +117,7 @@ export async function manageMemory(command: ManageMemoryCommand): Promise<Manage
         await sink?.upsert(keep.vectorDocId ?? keep.id, redacted)
       } catch {
         // Canonical update remains BM25-searchable.
+        noteMemoryVectorFailure()
       }
       await createMemoryEvidence({
         memoryId: command.keepId,
@@ -159,6 +161,7 @@ export async function manageMemory(command: ManageMemoryCommand): Promise<Manage
           await sink?.delete([drop.vectorDocId])
         } catch {
           // Canonical invalidation is authoritative; vector cleanup is best-effort.
+          noteMemoryVectorFailure()
         }
       }
       await appendMemoryAuditEvent({
@@ -203,6 +206,7 @@ export async function manageMemory(command: ManageMemoryCommand): Promise<Manage
       await sink?.delete([existing.vectorDocId ?? existing.id])
     } catch {
       // Canonical deletion still proceeds; reconciliation removes stale vectors later.
+      noteMemoryVectorFailure()
     }
     await hardDeleteMemory(command.id)
     await deleteMemoryEvidence(command.id)
@@ -218,6 +222,7 @@ export async function manageMemory(command: ManageMemoryCommand): Promise<Manage
         await sink?.delete([existing.vectorDocId])
       } catch {
         // Canonical invalidation is authoritative; vector cleanup is best-effort.
+        noteMemoryVectorFailure()
       }
     }
     await appendMemoryAuditEvent({
@@ -247,6 +252,7 @@ export async function manageMemory(command: ManageMemoryCommand): Promise<Manage
       await sink?.upsert(existing.vectorDocId ?? existing.id, redactedText)
     } catch {
       // Canonical update remains BM25-searchable.
+      noteMemoryVectorFailure()
     }
   }
   await createMemoryEvidence({

@@ -193,6 +193,36 @@ describe("tryBuildMemoryVectorSink", () => {
     expect(deleteDocuments).toHaveBeenCalledWith(MEMORY_VECTOR_COLLECTION, ["m1"])
   })
 
+  it("exposes listIds paging over scrollDocuments, absent otherwise", async () => {
+    const addDocuments = jest.fn(async () => undefined)
+    // No scrollDocuments → no listIds (reconcile degrades to heal-only).
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding, addDocuments },
+      embedding: { provider: "transformersjs", model: "x", apiKey: "" },
+    })
+    expect((await tryBuildMemoryVectorSink(cfg()))!.listIds).toBeUndefined()
+
+    // With scrollDocuments → pages until hasMore is false.
+    const scrollDocuments = jest
+      .fn()
+      .mockResolvedValueOnce({ documents: [{ id: "a" }, { id: "b" }], hasMore: true })
+      .mockResolvedValueOnce({ documents: [{ id: "c" }], hasMore: false })
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding, addDocuments, scrollDocuments },
+      embedding: { provider: "transformersjs", model: "x", apiKey: "" },
+    })
+    const sink = await tryBuildMemoryVectorSink(cfg())
+    await expect(sink!.listIds!()).resolves.toEqual(["a", "b", "c"])
+    expect(scrollDocuments).toHaveBeenNthCalledWith(1, MEMORY_VECTOR_COLLECTION, {
+      offset: 0,
+      limit: 500,
+    })
+    expect(scrollDocuments).toHaveBeenNthCalledWith(2, MEMORY_VECTOR_COLLECTION, {
+      offset: 2,
+      limit: 500,
+    })
+  })
+
   it("returns undefined when hybridEnabled is off", async () => {
     mockTryBuildTwinDeps.mockResolvedValue({
       store: { searchByEmbedding: mockSearchByEmbedding, addDocuments: jest.fn() },

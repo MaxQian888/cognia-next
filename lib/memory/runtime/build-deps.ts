@@ -118,6 +118,12 @@ export interface MemoryVectorSink {
   upsert: (id: string, text: string) => Promise<void>
   /** Remove stale vector documents after forget/delete. */
   delete: (ids: string[]) => Promise<void>
+  /**
+   * Every doc id currently in the memory collection — powers vector-reconcile
+   * orphan cleanup. Absent when the backend has no listing API (reconcile then
+   * degrades to re-upserting missing docs only).
+   */
+  listIds?: () => Promise<string[]>
 }
 
 /**
@@ -135,9 +141,13 @@ export async function tryBuildMemoryVectorSink(
     const store = backend.store as unknown as {
       addDocuments?: (collection: string, docs: { id: string; content: string }[]) => Promise<void>
       deleteDocuments?: (collection: string, ids: string[]) => Promise<void>
+      scrollDocuments?: (
+        collection: string,
+        options?: { offset?: number; limit?: number }
+      ) => Promise<{ documents: Array<{ id: string }>; hasMore: boolean }>
     }
     if (typeof store.addDocuments !== "function") return undefined
-    return {
+    const sink: MemoryVectorSink = {
       upsert: async (id, text) => {
         await store.addDocuments!(MEMORY_VECTOR_COLLECTION, [{ id, content: text }])
       },
@@ -146,6 +156,21 @@ export async function tryBuildMemoryVectorSink(
         await store.deleteDocuments(MEMORY_VECTOR_COLLECTION, ids)
       },
     }
+    if (typeof store.scrollDocuments === "function") {
+      sink.listIds = async () => {
+        const ids: string[] = []
+        let offset = 0
+        const limit = 500
+        for (;;) {
+          const page = await store.scrollDocuments!(MEMORY_VECTOR_COLLECTION, { offset, limit })
+          for (const doc of page.documents) ids.push(doc.id)
+          if (!page.hasMore || page.documents.length === 0) break
+          offset += page.documents.length
+        }
+        return ids
+      }
+    }
+    return sink
   } catch {
     return undefined
   }

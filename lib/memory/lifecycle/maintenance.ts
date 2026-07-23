@@ -140,6 +140,11 @@ export function scheduleMemoryMaintenance(params: ScheduleMemoryMaintenanceParam
   if (assistantTurns < minTurns) return
 
   void (async () => {
+    // Piggyback the day-bucketed vector drift sweep on the same idle tick —
+    // the worker loop drains it; at most one sweep per day.
+    const { enqueueDailyVectorReconcile } = await import("./enqueue-reconcile")
+    void enqueueDailyVectorReconcile()
+
     const { enqueueMemoryJob } = await import("@/lib/db/memory-governance")
     const job = await enqueueMemoryJob(
       {

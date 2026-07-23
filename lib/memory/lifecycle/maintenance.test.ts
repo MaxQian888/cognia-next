@@ -315,4 +315,30 @@ describe("scheduleMemoryMaintenance", () => {
     await jest.runAllTimersAsync()
     expect(mockFailJob).toHaveBeenCalledWith("job-1", "dependencies_unavailable")
   })
+
+  it("enqueues, claims and completes the durable session-distill job", async () => {
+    scheduleMemoryMaintenance({ ...base, config: cfg() })
+    await jest.runAllTimersAsync()
+    expect(mockEnqueueJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "session-distill",
+        dedupeKey: expect.stringMatching(/^session-distill:s1:\d+$/),
+      }),
+      { reuseCompleted: true }
+    )
+    expect(mockClaimJob).toHaveBeenCalledWith("job-1", "renderer-memory-maintenance")
+    expect(mockCompleteJob).toHaveBeenCalledWith("job-1")
+  })
+
+  it("piggybacks a day-bucketed vector-reconcile enqueue on the maintenance tick", async () => {
+    scheduleMemoryMaintenance({ ...base, config: cfg() })
+    await jest.runAllTimersAsync()
+    expect(mockEnqueueJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "vector-reconcile",
+        dedupeKey: expect.stringMatching(/^vector-reconcile:\d{4}-\d{2}-\d{2}$/),
+      }),
+      { reuseCompleted: true }
+    )
+  })
 })

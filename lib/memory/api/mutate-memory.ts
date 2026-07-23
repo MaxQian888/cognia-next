@@ -95,6 +95,8 @@ export async function updateExternalMemory(
       await sink?.upsert(existing.vectorDocId, text)
     } catch {
       // ignore — keep the Dexie update
+      const { noteMemoryVectorFailure } = await import("@/lib/memory/lifecycle/enqueue-reconcile")
+      noteMemoryVectorFailure()
     }
   }
   return { ok: true }
@@ -121,6 +123,8 @@ export async function forgetExternalMemory(id: string): Promise<MutateExternalMe
       await sink?.delete([existing.vectorDocId])
     } catch {
       // Canonical invalidation is authoritative; vector cleanup is best-effort.
+      const { noteMemoryVectorFailure } = await import("@/lib/memory/lifecycle/enqueue-reconcile")
+      noteMemoryVectorFailure()
     }
   }
   const { appendMemoryAuditEvent } = await import("@/lib/db/memory-governance")
