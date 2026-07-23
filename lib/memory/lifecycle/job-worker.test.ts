@@ -214,6 +214,69 @@ describe("memory job worker", () => {
     expect(del).toHaveBeenCalledWith(["orphan"])
   })
 
+  it("completes (not fails) a job that dies with a terminal error", async () => {
+    // A turn job without a sessionId is terminally unprocessable — the drain
+    // loop completes it instead of retry-failing.
+    const d = deps([job("terminal")], processMemoryJob)
+    await expect(drainMemoryJobs({}, d)).resolves.toBe(1)
+    expect(d.complete).toHaveBeenCalledWith("terminal")
+    expect(d.fail).not.toHaveBeenCalled()
+  })
+
+  it("terminally denies recovery for a session whose policy forbids learning", async () => {
+    mockGetSettings.mockResolvedValue({ memory: { enabled: true, learnFromChats: false } })
+    await expect(processMemoryJob({ ...job("turn"), sessionId: "s1" })).rejects.toMatchObject({
+      message: expect.stringContaining("learning_denied"),
+    })
+    expect(mockAppendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "learn-denied", metadata: { recoveredJob: true } })
+    )
+  })
+
+  it("skips NOOP operations when recording recovered work", async () => {
+    mockListMessages.mockResolvedValue([
+      { id: "u1", role: "user", parts: [{ type: "text", text: "I always use pnpm" }] },
+      { id: "a1", role: "assistant", parts: [{ type: "text", text: "Noted." }] },
+    ])
+    mockRunExtraction.mockResolvedValue({
+      applied: [
+        { op: "NOOP", candidate: { type: "semantic", text: "dupe", importance: 5 } },
+        {
+          op: "UPDATE",
+          targetId: "m-upd",
+          candidate: { type: "semantic", text: "Uses pnpm", importance: 5 },
+        },
+      ],
+    })
+    await processMemoryJob({ ...job("turn"), sessionId: "s1" })
+    expect(mockUpdateMemory).toHaveBeenCalledTimes(1)
+    expect(mockUpdateMemory).toHaveBeenCalledWith(
+      "m-upd",
+      expect.objectContaining({ reviewStatus: "unreviewed" })
+    )
+  })
+
+  it("fails the turn job when the checkpoint window holds no completed pair", async () => {
+    // Assistant reply with no preceding user turn → lastCompletedPair bails.
+    mockListMessages.mockResolvedValue([
+      { id: "a1", role: "assistant", parts: [{ type: "text", text: "orphan reply" }] },
+      { id: "a2", role: "assistant", parts: [{ type: "text", text: "another" }] },
+    ])
+    await expect(processMemoryJob({ ...job("turn"), sessionId: "s1" })).rejects.toMatchObject({
+      message: expect.stringContaining("turn_pair_unavailable"),
+    })
+  })
+
+  it("fails the turn job when the window has no assistant text at all", async () => {
+    mockListMessages.mockResolvedValue([
+      { id: "u1", role: "user", parts: [{ type: "text", text: "hello" }] },
+      { id: "u2", role: "user", parts: [{ type: "text", text: "anyone?" }] },
+    ])
+    await expect(processMemoryJob({ ...job("turn"), sessionId: "s1" })).rejects.toMatchObject({
+      message: expect.stringContaining("turn_pair_unavailable"),
+    })
+  })
+
   it("backs off when the durable transcript checkpoint is unavailable", async () => {
     const d = deps([{ ...job("missing"), sessionId: "s1", dedupeKey: "invalid" }], processMemoryJob)
     await drainMemoryJobs({}, d)

@@ -252,6 +252,35 @@ describe("MemoryConsole — row & detail", () => {
     expect(screen.getByTestId("memory-detail-sheet")).toBeTruthy()
   })
 
+  it("clears the selection when the narrow-viewport sheet closes", async () => {
+    const user = userEvent.setup()
+    mockUseMediaQuery.mockReturnValue(false)
+    mockData = [mem({ id: "m1", text: "sheeted" })]
+    render(<MemoryConsole />)
+    fireEvent.click(screen.getByText("sheeted"))
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(screen.queryByTestId("memory-detail-sheet")).toBeNull())
+  })
+
+  it("saves a row's inline edit and toggles selection off again", async () => {
+    mockData = [mem({ id: "m1", text: "editable" })]
+    render(<MemoryConsole />)
+    const row = screen.getByTestId("memory-row")
+    // Inline edit through the console wiring.
+    fireEvent.click(within(row).getByRole("button", { name: /^edit$/i }))
+    fireEvent.change(within(row).getByRole("textbox"), { target: { value: "edited text" } })
+    fireEvent.click(within(row).getByRole("button", { name: /save/i }))
+    expect(mockManage).toHaveBeenCalledWith({
+      kind: "update",
+      id: "m1",
+      patch: { text: "edited text" },
+    })
+    // Select, then deselect (checkbox + select-all uncheck paths).
+    fireEvent.click(screen.getByTestId("memory-select"))
+    fireEvent.click(screen.getByTestId("memory-bulk-select-all"))
+    expect(screen.queryByTestId("memory-bulk-toolbar")).toBeNull()
+  })
+
   it("closes the detail pane on Escape", () => {
     mockData = [mem({ id: "m1", text: "closes" })]
     render(<MemoryConsole />)
@@ -379,6 +408,41 @@ describe("MemoryConsole — conflict flow", () => {
       dropId: "c2",
       mode: "keep",
     })
+  })
+})
+
+describe("MemoryConsole — keyboard navigation", () => {
+  it("steps the detail selection with arrows and closes with Escape", async () => {
+    mockData = [
+      mem({ id: "a", text: "first", updatedAt: 200 }),
+      mem({ id: "b", text: "second", updatedAt: 100 }),
+    ]
+    render(<MemoryConsole />)
+    fireEvent.click(screen.getByText("first"))
+    const panel = screen.getByTestId("memory-detail-panel")
+    expect(within(panel).getByTestId("memory-detail-text").textContent).toBe("first")
+
+    fireEvent.keyDown(window, { key: "ArrowDown" })
+    expect(
+      within(screen.getByTestId("memory-detail-panel")).getByTestId("memory-detail-text")
+        .textContent
+    ).toBe("second")
+    fireEvent.keyDown(window, { key: "ArrowUp" })
+    expect(
+      within(screen.getByTestId("memory-detail-panel")).getByTestId("memory-detail-text")
+        .textContent
+    ).toBe("first")
+    fireEvent.keyDown(window, { key: "Escape" })
+    expect(screen.queryByTestId("memory-detail-panel")).toBeNull()
+  })
+
+  it("ignores navigation keys while typing in an input", () => {
+    mockData = [mem({ id: "a", text: "first" }), mem({ id: "b", text: "second" })]
+    render(<MemoryConsole />)
+    fireEvent.click(screen.getByText("first"))
+    const search = screen.getByLabelText(/search memories/i)
+    fireEvent.keyDown(search, { key: "Escape" })
+    expect(screen.getByTestId("memory-detail-panel")).toBeInTheDocument()
   })
 })
 

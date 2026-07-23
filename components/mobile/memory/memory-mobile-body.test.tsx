@@ -47,7 +47,18 @@ jest.mock("@/lib/db/mobile-outbound-queue", () => ({
   enqueue: (...args: unknown[]) => enqueueMock(...args),
 }))
 jest.mock("@/components/interactions/pull-to-refresh", () => ({
-  PullToRefresh: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  PullToRefresh: ({
+    children,
+    onRefresh,
+  }: {
+    children: React.ReactNode
+    onRefresh: () => Promise<void> | void
+  }) => (
+    <div>
+      <button onClick={() => void onRefresh()}>refresh</button>
+      {children}
+    </div>
+  ),
 }))
 jest.mock("@/components/memory/memory-row", () => ({
   MemoryRow: ({
@@ -134,6 +145,19 @@ describe("<MemoryMobileBody />", () => {
     expect(pinMock).toHaveBeenCalledWith("m1", true)
     expect(updateMock).toHaveBeenCalledWith("m1", { text: "updated", bumpVersion: true })
     expect(invalidateMock).toHaveBeenCalledWith("m1")
+  })
+
+  it("pull-to-refresh syncs memories down and swallows sync failures", async () => {
+    const { runSyncDown } = jest.requireMock("@/lib/sync/companion-sync") as {
+      runSyncDown: jest.Mock
+    }
+    liveQuery.mockReturnValue([mem({ id: "m1" })])
+    render(<MemoryMobileBody />)
+    fireEvent.click(screen.getByText("refresh"))
+    await waitFor(() => expect(runSyncDown).toHaveBeenCalledWith({ only: ["memories"] }))
+    runSyncDown.mockRejectedValueOnce(new Error("offline"))
+    fireEvent.click(screen.getByText("refresh"))
+    await waitFor(() => expect(runSyncDown).toHaveBeenCalledTimes(2))
   })
 
   it("scrolls the deep-linked memory into view once", () => {

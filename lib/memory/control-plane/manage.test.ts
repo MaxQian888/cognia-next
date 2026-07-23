@@ -34,6 +34,10 @@ jest.mock("@/lib/memory/runtime/build-deps", () => ({
     delete: mockSinkDelete,
   })),
 }))
+const mockNoteVectorFailure = jest.fn()
+jest.mock("@/lib/memory/lifecycle/enqueue-reconcile", () => ({
+  noteMemoryVectorFailure: (...args: unknown[]) => mockNoteVectorFailure(...args),
+}))
 
 import { manageMemory } from "./manage"
 
@@ -190,6 +194,47 @@ describe("manageMemory", () => {
     ).toEqual({ ok: false, reason: "not_found" })
     expect(mockUpdate).not.toHaveBeenCalled()
     expect(mockInvalidate).not.toHaveBeenCalled()
+  })
+
+  it("swallows vector failures on delete/invalidate/update but notes them for reconcile", async () => {
+    mockGet.mockResolvedValue({ id: "m1", text: "old", version: 1, vectorDocId: "vec-1" })
+    mockSinkDelete.mockRejectedValue(new Error("backend down"))
+    mockSinkUpsert.mockRejectedValue(new Error("backend down"))
+
+    await expect(manageMemory({ kind: "delete", id: "m1" })).resolves.toEqual({
+      ok: true,
+      memoryId: "m1",
+    })
+    await expect(manageMemory({ kind: "invalidate", id: "m1" })).resolves.toEqual({
+      ok: true,
+      memoryId: "m1",
+    })
+    await expect(
+      manageMemory({ kind: "update", id: "m1", patch: { text: "new text" } })
+    ).resolves.toMatchObject({ ok: true })
+    expect(mockNoteVectorFailure).toHaveBeenCalledTimes(3)
+  })
+
+  it("resolve-conflict survives vector failures on merge and drop legs", async () => {
+    mockGet.mockImplementation(async (id: string) => ({
+      id,
+      text: id,
+      version: 1,
+      vectorDocId: `vec-${id}`,
+      conflictWithIds: [],
+    }))
+    mockSinkUpsert.mockRejectedValue(new Error("down"))
+    mockSinkDelete.mockRejectedValue(new Error("down"))
+    await expect(
+      manageMemory({
+        kind: "resolve-conflict",
+        keepId: "a",
+        dropId: "b",
+        mode: "merge",
+        mergedText: "merged fact",
+      })
+    ).resolves.toEqual({ ok: true, memoryId: "a" })
+    expect(mockNoteVectorFailure).toHaveBeenCalledTimes(2)
   })
 
   it("returns not_found without mutating", async () => {
