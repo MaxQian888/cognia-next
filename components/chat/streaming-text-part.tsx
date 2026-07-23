@@ -4,9 +4,8 @@
  * `<StreamingTextPart>` — narrow subtree owning Streamdown's `MessageResponse`
  * for the actively-streaming text branch of `MessageRenderer`. Extracted so:
  *
- *   1. `useDeferredValue(text)` lives at a tight boundary — React can yield
- *      to higher-priority work (scroll, keyboard input) when the markdown
- *      commit gets long, at the cost of at most one frame of token lag.
+ *   1. Streamdown's own transition remains at a tight boundary while its
+ *      block parser reuses the stable prefix of an append-only response.
  *   2. The outer `MessageRenderer` body (header, mentions, avatar, plugin
  *      slots, action bar) stays out of the per-token render path conceptually.
  *      The memo equality on (text, isStreaming) is a no-op when text changes
@@ -17,27 +16,46 @@
  * routes through `<MarkdownRenderer>` for the finalised message.
  */
 
-import { memo, useDeferredValue } from "react"
+import { memo, useState } from "react"
+import { Block, parseMarkdownIntoBlocks, type BlockProps } from "streamdown"
 import { MessageResponse } from "@/components/ai-elements/message"
 import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
 import { cn } from "@/lib/utils"
+import {
+  createIncrementalMarkdownBlockParser,
+  type MarkdownBlockParser,
+} from "./incremental-markdown-blocks"
 
 interface Props {
   text: string
   isStreaming: boolean
 }
 
+const ContainedStreamdownBlock = memo(function ContainedStreamdownBlock(props: BlockProps) {
+  return (
+    <div className="[content-visibility:auto] [contain-intrinsic-size:auto_160px]">
+      <Block {...props} />
+    </div>
+  )
+})
+
 function StreamingTextPartInner({ text }: Props) {
-  // Deferred so React can interrupt the markdown commit when a faster event
-  // (scroll, focus, key) arrives. Token visibility lags by ≤1 frame.
-  const deferred = useDeferredValue(text)
+  const [parser] = useState<MarkdownBlockParser>(() =>
+    createIncrementalMarkdownBlockParser(parseMarkdownIntoBlocks)
+  )
   // Reduced motion: a static (non-blinking) caret so we still signal "more is
   // coming" without an animation. `animate-pulse` is a guaranteed Tailwind
   // utility (no dependency on `animate-caret-blink`).
   const { reduce } = useFlowMotion()
   return (
     <>
-      <MessageResponse>{deferred}</MessageResponse>
+      <MessageResponse
+        BlockComponent={ContainedStreamdownBlock}
+        mode="streaming"
+        parseMarkdownIntoBlocksFn={parser}
+      >
+        {text}
+      </MessageResponse>
       <span
         aria-hidden
         data-testid="streaming-caret"

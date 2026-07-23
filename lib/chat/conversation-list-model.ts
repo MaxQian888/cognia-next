@@ -66,9 +66,21 @@ export interface ConversationListModel {
   orderedIds: string[]
 }
 
-/** Sort newest-first by `updatedAt`. */
+/**
+ * Sort newest-first with stable tie-breakers.
+ *
+ * Dexie's index order is not a display-order contract when several rows share
+ * the same millisecond `updatedAt`. Without a total ordering, a live-query
+ * refresh can hand us those equal rows in a different order, making the
+ * conversation list visibly swap them while the user is creating or switching
+ * chats.
+ */
 function byRecent(a: ChatSession, b: ChatSession): number {
-  return (b.updatedAt ?? 0) - (a.updatedAt ?? 0)
+  return (
+    (b.updatedAt ?? 0) - (a.updatedAt ?? 0) ||
+    (b.createdAt ?? 0) - (a.createdAt ?? 0) ||
+    a.id.localeCompare(b.id)
+  )
 }
 
 /**

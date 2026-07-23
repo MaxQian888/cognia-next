@@ -5,13 +5,18 @@
 // which row to highlight. Kept out of MessageList so typing here re-renders the
 // bar, not the conversation.
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
 import type { UIMessage } from "ai"
 import { useTranslations } from "next-intl"
 import { ChevronDownIcon, ChevronUpIcon, SearchIcon, XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { findMessageHits, stepHitIndex, type MessageSearchHit } from "@/lib/chat/message-search"
+import {
+  buildMessageSearchIndex,
+  findIndexedMessageHits,
+  stepHitIndex,
+  type MessageSearchHit,
+} from "@/lib/chat/message-search"
 
 interface Props {
   messages: UIMessage[]
@@ -33,7 +38,12 @@ export const MessageSearchBar = memo(function MessageSearchBar({
   const [cursor, setCursor] = useState(-1)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const hits = useMemo(() => findMessageHits(messages, query), [messages, query])
+  const searchIndex = useMemo(() => buildMessageSearchIndex(messages), [messages])
+  const deferredQuery = useDeferredValue(query)
+  const hits = useMemo(
+    () => findIndexedMessageHits(searchIndex, deferredQuery),
+    [searchIndex, deferredQuery]
+  )
 
   // Opening the bar should put the caret in it — otherwise the shortcut that
   // opened it would need a second click to be useful.

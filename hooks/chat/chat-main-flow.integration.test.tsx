@@ -109,6 +109,7 @@ jest.mock("@/lib/goal/judge-client", () => ({ buildGoalJudgeClient: jest.fn() })
 jest.mock("@/lib/db/messages", () => ({
   listMessages: jest.fn().mockResolvedValue([]),
   persistMessages: jest.fn().mockResolvedValue(undefined),
+  persistStreamingMessages: jest.fn().mockResolvedValue(undefined),
   truncateAfter: jest.fn().mockResolvedValue(undefined),
 }))
 jest.mock("@/lib/db/sessions", () => ({

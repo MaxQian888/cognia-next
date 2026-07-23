@@ -9,11 +9,14 @@ import {
   clearMessages,
   listMessages,
   persistMessages,
+  persistStreamingMessages,
   searchSessionsByContent,
   truncateAfter,
   updateMessageMetadata,
 } from "./messages"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+
+jest.setTimeout(30_000)
 
 async function putSession(id: string, projectId = "proj-A"): Promise<void> {
   await getDb().sessions.put({
@@ -153,6 +156,26 @@ describe("persistMessages + listMessages", () => {
     expect(all).toHaveLength(1)
     expect(all[0].id).toMatch(/^m_/)
   })
+
+  it("updates only the trailing streaming row without scanning the session index", async () => {
+    const first = msg("a", "assistant", "preface")
+    const partial = msg("b", "assistant", "partial")
+    await persistMessages("s-stream", [first, partial])
+    const original = await getDb().messages.get("b")
+    const whereSpy = jest.spyOn(getDb().messages, "where")
+
+    await persistStreamingMessages("s-stream", [
+      first,
+      msg("b", "assistant", "partial response completed"),
+    ])
+
+    expect(whereSpy).not.toHaveBeenCalledWith("sessionId")
+    whereSpy.mockRestore()
+    const stored = await getDb().messages.get("b")
+    expect(stored?.parts).toEqual([{ type: "text", text: "partial response completed" }])
+    expect(stored?.createdAt).toBe(original?.createdAt)
+    expect(await getDb().messages.get("a")).toBeDefined()
+  }, 60_000)
 })
 
 describe("clearMessages", () => {

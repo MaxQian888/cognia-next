@@ -86,6 +86,65 @@ describe("useTimelineScrollSync — virtualized fallback divisor", () => {
   })
 })
 
+describe("useTimelineScrollSync — virtualized scroll updates", () => {
+  let rafQueue: FrameRequestCallback[]
+
+  beforeEach(() => {
+    rafQueue = []
+    jest
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback: FrameRequestCallback) => {
+        rafQueue.push(callback)
+        return rafQueue.length
+      })
+    jest.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {})
+  })
+
+  afterEach(() => jest.restoreAllMocks())
+
+  it("reuses measured marker positions during plain scroll", () => {
+    const container = document.createElement("div")
+    Object.defineProperties(container, {
+      clientHeight: { value: 100, configurable: true },
+      scrollTop: { value: 0, writable: true, configurable: true },
+    })
+    const virtualizer = {
+      getTotalSize: () => 1_000,
+      measurementsCache: [{ start: 0 }, { start: 500 }],
+      getOffsetForIndex: () => undefined,
+      options: { count: 2 },
+    } as unknown as Virtualizer<HTMLDivElement, Element>
+    const turns = [turn("a", 0), turn("b", 1)]
+    const scrollRef = { current: container }
+    const { result } = renderHook(() =>
+      useTimelineScrollSync({
+        scrollRef,
+        virtualizer,
+        virtualize: true,
+        turns,
+      })
+    )
+    act(() => {
+      const queued = rafQueue
+      rafQueue = []
+      queued.forEach((callback) => callback(0))
+    })
+    const initialPositions = result.current.positions
+
+    act(() => {
+      container.scrollTop = 500
+      container.dispatchEvent(new Event("scroll"))
+      const queued = rafQueue
+      rafQueue = []
+      queued.forEach((callback) => callback(0))
+    })
+
+    expect(result.current.positions).toBe(initialPositions)
+    expect(result.current.viewportTop).toBeCloseTo(0.5)
+    expect(result.current.activeIndex).toBe(1)
+  })
+})
+
 describe("useTimelineScrollSync — document-flow measurement caching", () => {
   let rafQueue: FrameRequestCallback[]
   beforeEach(() => {

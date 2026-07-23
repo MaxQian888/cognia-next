@@ -87,6 +87,7 @@ import { notifyRemoteNeedsInput } from "@/lib/companion/needs-input-notifier"
 import {
   listMessages,
   persistMessages,
+  persistStreamingMessages,
   truncateAfter,
   updateMessageMetadata,
 } from "@/lib/db/messages"
@@ -720,8 +721,8 @@ export function useClaudeChat() {
           useChatStore.getState().syncToolTimestamps(sid, msgs)
         },
         onPersist: (sid, msgs) =>
-          void persistMessages(sid, msgs).catch((err) =>
-            console.error("debounced persistMessages failed", err)
+          void persistStreamingMessages(sid, msgs).catch((err) =>
+            console.error("debounced persistStreamingMessages failed", err)
           ),
         persistDelayMs: PERSIST_DEBOUNCE_MS,
       })

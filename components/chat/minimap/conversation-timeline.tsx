@@ -1,8 +1,8 @@
 "use client"
 
-import { memo, useCallback, useMemo, useState } from "react"
+import { memo, useCallback, useMemo, useRef, useState } from "react"
 import type { UIMessage } from "ai"
-import type { Virtualizer } from "@tanstack/react-virtual"
+import { useVirtualizer, type Virtualizer } from "@tanstack/react-virtual"
 import { useTranslations } from "next-intl"
 import { BookmarkIcon, ChevronLeftIcon, ChevronRightIcon, ListTreeIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -14,6 +14,7 @@ import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
 import { useTimelineTurns, type TimelineTurn } from "./use-timeline-turns"
 import { useTimelineScrollSync } from "./use-timeline-scroll-sync"
 import { formatTurnTime } from "./format-turn-time"
+import { buildTimelineMarkers } from "./timeline-markers"
 
 interface Props {
   messages: UIMessage[]
@@ -30,6 +31,9 @@ interface Props {
 
 /** Half the scrub card's height, in px — used to clamp it inside the rail. */
 const SCRUB_CARD_HALF = 22
+const MAX_COLLAPSED_MARKERS = 128
+const EXPANDED_VIRTUALIZE_THRESHOLD = 40
+const EXPANDED_ROW_ESTIMATE = 48
 
 /**
  * Pick the turn whose rail position is nearest the pointer fraction `frac`
@@ -41,16 +45,18 @@ export function nearestTurnIndex(frac: number, positions: number[], count: numbe
   if (count <= 0) return -1
   const f = !Number.isFinite(frac) ? 0 : frac < 0 ? 0 : frac > 1 ? 1 : frac
   if (positions.length === count) {
-    let best = 0
-    let bestDist = Infinity
-    for (let i = 0; i < count; i++) {
-      const d = Math.abs((positions[i] ?? 0) - f)
-      if (d < bestDist) {
-        bestDist = d
-        best = i
-      }
+    let low = 0
+    let high = count - 1
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2)
+      if ((positions[middle] ?? 0) < f) low = middle + 1
+      else high = middle
     }
-    return best
+    const right = low
+    const left = Math.max(0, right - 1)
+    return Math.abs((positions[left] ?? 0) - f) <= Math.abs((positions[right] ?? 0) - f)
+      ? left
+      : right
   }
   return count === 1 ? 0 : Math.round(f * (count - 1))
 }
@@ -99,11 +105,52 @@ export const ConversationTimeline = memo(function ConversationTimeline({
   )
 
   const geom = useTimelineScrollSync({ scrollRef, virtualizer, virtualize, turns })
+  const bookmarkedIndices = useMemo(() => {
+    const indices = new Set<number>()
+    for (let index = 0; index < turns.length; index++) {
+      const turn = turns[index]
+      if (turn && isTurnBookmarked(turn)) indices.add(index)
+    }
+    return indices
+  }, [turns, isTurnBookmarked])
+  const railMarkers = useMemo(
+    () =>
+      buildTimelineMarkers({
+        count: turns.length,
+        positions: geom.positions,
+        activeIndex: geom.activeIndex,
+        bookmarkedIndices,
+        maxMarkers: MAX_COLLAPSED_MARKERS,
+      }),
+    [turns.length, geom.positions, geom.activeIndex, bookmarkedIndices]
+  )
 
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
   const expanded = settings?.conversationTimeline?.expanded ?? false
   const [scrub, setScrub] = useState<ScrubState | null>(null)
+  const expandedScrollRef = useRef<HTMLDivElement>(null)
+  const virtualizeExpanded = expanded && turns.length > EXPANDED_VIRTUALIZE_THRESHOLD
+  const expandedVirtualizer = useVirtualizer({
+    count: virtualizeExpanded ? turns.length : 0,
+    getScrollElement: () => expandedScrollRef.current,
+    estimateSize: () => EXPANDED_ROW_ESTIMATE,
+    getItemKey: (index) => turns[index]?.id ?? index,
+    overscan: 5,
+    initialRect: { width: 256, height: 600 },
+  })
+  const measuredExpandedItems = expandedVirtualizer.getVirtualItems()
+  // The scroll element does not exist during SSR/the first client render. Keep
+  // that initial frame useful and bounded; the virtualizer replaces this small
+  // window as soon as it observes the real panel.
+  const expandedItems =
+    virtualizeExpanded && measuredExpandedItems.length === 0
+      ? Array.from({ length: Math.min(20, turns.length) }, (_, index) => ({
+          key: turns[index]?.id ?? index,
+          index,
+          start: index * EXPANDED_ROW_ESTIMATE,
+        }))
+      : measuredExpandedItems
 
   const yesterdayLabel = t("yesterday")
 
@@ -195,6 +242,54 @@ export const ConversationTimeline = memo(function ConversationTimeline({
   // still render the panel that owns the toggle.
   if (allTurns.length === 0) return null
 
+  const renderTurn = (turn: TimelineTurn, index: number) => {
+    const active = index === geom.activeIndex
+    const isBookmarked = isTurnBookmarked(turn)
+    const time = formatTurnTime(turn.time, { yesterdayLabel })
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={() => jumpTo(turn)}
+            aria-current={active ? "true" : undefined}
+            aria-label={t("jumpTo", { label: turn.label })}
+            className={cn(
+              "relative flex w-full items-start gap-2 py-1.5 pl-2.5 pr-2 text-left transition-colors hover:bg-accent",
+              active && "bg-accent/60"
+            )}
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "z-10 mt-1 size-2 shrink-0 rounded-full border-2 border-background",
+                isBookmarked ? "bg-yellow-500" : active ? "bg-primary" : "bg-muted-foreground/50"
+              )}
+            />
+            <span className="min-w-0 flex-1">
+              <span
+                className={cn(
+                  "block truncate text-xs",
+                  active ? "font-medium text-foreground" : "text-muted-foreground"
+                )}
+              >
+                {turn.label}
+              </span>
+              <span className="mt-0.5 block text-[10px] text-muted-foreground/70">
+                {time && <span>{time}</span>}
+                {time && turn.replyCount > 0 && <span> · </span>}
+                {turn.replyCount > 0 && <span>{t("replyCount", { count: turn.replyCount })}</span>}
+              </span>
+            </span>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="left" className="max-w-xs">
+          {turn.preview}
+        </TooltipContent>
+      </Tooltip>
+    )
+  }
+
   return (
     <div
       className="absolute right-0 top-0 bottom-0 z-20 hidden lg:flex"
@@ -232,7 +327,7 @@ export const ConversationTimeline = memo(function ConversationTimeline({
               </Button>
             </span>
           </div>
-          <div className="relative flex-1 overflow-y-auto py-1">
+          <div ref={expandedScrollRef} className="relative flex-1 overflow-y-auto py-1">
             {turns.length === 0 ? (
               <p className="px-3 py-6 text-center text-xs text-muted-foreground">
                 {t("noBookmarks")}
@@ -243,63 +338,35 @@ export const ConversationTimeline = memo(function ConversationTimeline({
               aria-hidden
               className="pointer-events-none absolute bottom-2 left-[14px] top-2 w-px bg-border"
             />
-            <ul className="flex flex-col">
-              {turns.map((turn, i) => {
-                const active = i === geom.activeIndex
-                const isBookmarked = isTurnBookmarked(turn)
-                const time = formatTurnTime(turn.time, { yesterdayLabel })
-                return (
-                  <li key={turn.id}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          onClick={() => jumpTo(turn)}
-                          aria-current={active ? "true" : undefined}
-                          aria-label={t("jumpTo", { label: turn.label })}
-                          className={cn(
-                            "relative flex w-full items-start gap-2 py-1.5 pl-2.5 pr-2 text-left transition-colors hover:bg-accent",
-                            active && "bg-accent/60"
-                          )}
-                        >
-                          <span
-                            aria-hidden
-                            className={cn(
-                              "z-10 mt-1 size-2 shrink-0 rounded-full border-2 border-background",
-                              isBookmarked
-                                ? "bg-yellow-500"
-                                : active
-                                  ? "bg-primary"
-                                  : "bg-muted-foreground/50"
-                            )}
-                          />
-                          <span className="min-w-0 flex-1">
-                            <span
-                              className={cn(
-                                "block truncate text-xs",
-                                active ? "font-medium text-foreground" : "text-muted-foreground"
-                              )}
-                            >
-                              {turn.label}
-                            </span>
-                            <span className="mt-0.5 block text-[10px] text-muted-foreground/70">
-                              {time && <span>{time}</span>}
-                              {time && turn.replyCount > 0 && <span> · </span>}
-                              {turn.replyCount > 0 && (
-                                <span>{t("replyCount", { count: turn.replyCount })}</span>
-                              )}
-                            </span>
-                          </span>
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="left" className="max-w-xs">
-                        {turn.preview}
-                      </TooltipContent>
-                    </Tooltip>
-                  </li>
-                )
-              })}
-            </ul>
+            {virtualizeExpanded ? (
+              <ul
+                className="relative"
+                style={{ height: expandedVirtualizer.getTotalSize() }}
+                data-testid="timeline-expanded-list"
+              >
+                {expandedItems.map((item) => {
+                  const turn = turns[item.index]
+                  if (!turn) return null
+                  return (
+                    <li
+                      key={item.key}
+                      ref={expandedVirtualizer.measureElement}
+                      data-index={item.index}
+                      className="absolute left-0 top-0 w-full"
+                      style={{ transform: `translateY(${item.start}px)` }}
+                    >
+                      {renderTurn(turn, item.index)}
+                    </li>
+                  )
+                })}
+              </ul>
+            ) : (
+              <ul className="flex flex-col">
+                {turns.map((turn, index) => (
+                  <li key={turn.id}>{renderTurn(turn, index)}</li>
+                ))}
+              </ul>
+            )}
           </div>
         </div>
       ) : (
@@ -352,24 +419,29 @@ export const ConversationTimeline = memo(function ConversationTimeline({
                 height: `${Math.max(geom.viewportHeight * 100, 4)}%`,
               }}
             />
-            {turns.map((turn, i) => {
-              const isScrub = scrub?.index === i
-              const isActive = i === geom.activeIndex
-              const isBookmarked = isTurnBookmarked(turn)
+            {railMarkers.map((marker, markerIndex) => {
+              const scrubMarkerIndex =
+                scrub == null || turns.length === 0
+                  ? -1
+                  : Math.min(
+                      railMarkers.length - 1,
+                      Math.floor((scrub.index * railMarkers.length) / turns.length)
+                    )
+              const isScrub = scrubMarkerIndex === markerIndex
               return (
                 <span
-                  key={turn.id}
+                  key={marker.key}
                   aria-hidden
                   className={cn(
                     "absolute right-1 -translate-y-1/2 rounded-full transition-all",
                     isScrub ? "size-2" : "size-1.5",
-                    isBookmarked
+                    marker.isBookmarked
                       ? "bg-yellow-500"
-                      : isScrub || isActive
+                      : isScrub || marker.isActive
                         ? "bg-primary"
                         : "bg-muted-foreground/40"
                   )}
-                  style={{ top: `${(geom.positions[i] ?? 0) * 100}%` }}
+                  style={{ top: `${marker.position * 100}%` }}
                 />
               )
             })}

@@ -125,6 +125,18 @@ describe("ConversationTimeline", () => {
     expect(screen.queryByLabelText("collapse")).not.toBeInTheDocument()
   })
 
+  it("keeps the collapsed rail DOM bounded for a very long conversation", () => {
+    renderTimeline({
+      messages: Array.from({ length: 2_000 }, (_, index) =>
+        msg(`u${index}`, "user", `Question ${index}`)
+      ),
+    })
+
+    const rail = screen.getByTestId("timeline-rail")
+    // One viewport slider plus at most 128 density markers.
+    expect(rail.querySelectorAll("span").length).toBeLessThanOrEqual(129)
+  })
+
   it("clicking the rail pins the timeline open (persists expanded=true)", () => {
     renderTimeline()
     fireEvent.click(screen.getByLabelText("expand"))
@@ -140,6 +152,19 @@ describe("ConversationTimeline", () => {
     expect(screen.getByText("Second follow up")).toBeInTheDocument()
     // Two user turns → two jump buttons.
     expect(screen.getAllByRole("button", { name: /^jumpTo:/ })).toHaveLength(2)
+  })
+
+  it("keeps the expanded panel DOM bounded for a very long conversation", () => {
+    mockSettings = { conversationTimeline: { expanded: true } }
+    renderTimeline({
+      messages: Array.from({ length: 2_000 }, (_, index) =>
+        msg(`u${index}`, "user", `Question ${index}`)
+      ),
+    })
+
+    const jumpButtons = screen.getAllByRole("button", { name: /^jumpTo:/ })
+    expect(jumpButtons.length).toBeGreaterThan(0)
+    expect(jumpButtons.length).toBeLessThanOrEqual(30)
   })
 
   it("collapse button unpins the timeline (persists expanded=false)", () => {
@@ -401,5 +426,19 @@ describe("nearestTurnIndex", () => {
     expect(nearestTurnIndex(-3, [], 4)).toBe(0)
     expect(nearestTurnIndex(5, [], 4)).toBe(3)
     expect(nearestTurnIndex(Number.NaN, [0, 0.5, 1], 3)).toBe(0)
+  })
+
+  it("finds a dense rail position without scanning every turn", () => {
+    let reads = 0
+    const source = Array.from({ length: 4_096 }, (_, index) => index / 4_095)
+    const positions = new Proxy(source, {
+      get(target, property, receiver) {
+        if (typeof property === "string" && /^\d+$/.test(property)) reads++
+        return Reflect.get(target, property, receiver)
+      },
+    })
+
+    expect(nearestTurnIndex(0.61, positions, positions.length)).toBeCloseTo(2_498, -1)
+    expect(reads).toBeLessThan(30)
   })
 })

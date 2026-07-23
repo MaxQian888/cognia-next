@@ -29,18 +29,71 @@ export function useCompactionToast(messages: UIMessage[]): void {
   const show = useSettingsStore((s) => s.settings?.compaction?.showCompressionNotification ?? true)
   const seen = useRef<Set<string>>(new Set())
   const primed = useRef(false)
+  const cursor = useRef<{
+    length: number
+    firstId?: string
+    lastId?: string
+    penultimateId?: string
+  } | null>(null)
 
   useEffect(() => {
-    const boundaries = messages.filter(isCompactBoundaryMessage)
+    const nextCursor = {
+      length: messages.length,
+      firstId: messages[0]?.id,
+      lastId: messages.at(-1)?.id,
+      penultimateId: messages.at(-2)?.id,
+    }
+    const previous = cursor.current
+    cursor.current = nextCursor
 
     // First pass: prime existing boundaries without toasting.
     if (!primed.current) {
-      for (const m of boundaries) seen.current.add(m.id)
+      for (const message of messages) {
+        if (isCompactBoundaryMessage(message)) seen.current.add(message.id)
+      }
       primed.current = true
       return
     }
 
-    for (const m of boundaries) {
+    // MessageList can survive a session switch. Prime the newly loaded history
+    // instead of replaying old compaction notifications from another session.
+    if (
+      previous &&
+      previous.length > 0 &&
+      messages.length > 0 &&
+      previous.firstId !== nextCursor.firstId
+    ) {
+      seen.current.clear()
+      for (const message of messages) {
+        if (isCompactBoundaryMessage(message)) seen.current.add(message.id)
+      }
+      return
+    }
+
+    let scanFrom = 0
+    if (
+      previous &&
+      previous.length === messages.length &&
+      previous.firstId === nextCursor.firstId &&
+      previous.lastId === nextCursor.lastId &&
+      previous.penultimateId === nextCursor.penultimateId
+    ) {
+      // The common streaming frame: only the trailing assistant object grew.
+      scanFrom = Math.max(0, messages.length - 1)
+    } else if (
+      previous &&
+      messages.length > previous.length &&
+      previous.firstId === nextCursor.firstId &&
+      messages[previous.length - 1]?.id === previous.lastId
+    ) {
+      // Append-only message boundary: only the new suffix can contain a new
+      // compaction marker.
+      scanFrom = previous.length
+    }
+
+    for (let index = scanFrom; index < messages.length; index++) {
+      const m = messages[index]
+      if (!m || !isCompactBoundaryMessage(m)) continue
       if (seen.current.has(m.id)) continue
       seen.current.add(m.id)
       if (!show) continue

@@ -25,6 +25,12 @@ export interface MessageSearchHit {
   count: number
 }
 
+export interface MessageSearchIndexEntry {
+  id: string
+  index: number
+  text: string
+}
+
 /** Occurrences of `needle` in `haystack`, both already lower-cased. */
 function countOccurrences(haystack: string, needle: string): number {
   let count = 0
@@ -44,18 +50,31 @@ function countOccurrences(haystack: string, needle: string): number {
  * Case-insensitive substring match; a blank/whitespace-only query matches
  * nothing (rather than everything, which would make "next hit" meaningless).
  */
-export function findMessageHits(messages: UIMessage[], query: string): MessageSearchHit[] {
+export function buildMessageSearchIndex(messages: UIMessage[]): MessageSearchIndexEntry[] {
+  return messages.map((message, index) => ({
+    id: message.id,
+    index,
+    text: extractPlainText(message.parts).toLowerCase(),
+  }))
+}
+
+export function findIndexedMessageHits(
+  index: MessageSearchIndexEntry[],
+  query: string
+): MessageSearchHit[] {
   const needle = query.trim().toLowerCase()
   if (!needle) return []
 
   const hits: MessageSearchHit[] = []
-  for (let index = 0; index < messages.length; index++) {
-    const message = messages[index]
-    const text = extractPlainText(message.parts).toLowerCase()
-    const count = countOccurrences(text, needle)
-    if (count > 0) hits.push({ id: message.id, index, count })
+  for (const entry of index) {
+    const count = countOccurrences(entry.text, needle)
+    if (count > 0) hits.push({ id: entry.id, index: entry.index, count })
   }
   return hits
+}
+
+export function findMessageHits(messages: UIMessage[], query: string): MessageSearchHit[] {
+  return findIndexedMessageHits(buildMessageSearchIndex(messages), query)
 }
 
 /**

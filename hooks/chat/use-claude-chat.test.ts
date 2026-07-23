@@ -140,6 +140,7 @@ const listMessagesMock = jest.fn().mockResolvedValue([])
 jest.mock("@/lib/db/messages", () => ({
   listMessages: (id: string) => listMessagesMock(id),
   persistMessages: (...a: unknown[]) => persistMessagesMock(...a),
+  persistStreamingMessages: (...a: unknown[]) => persistMessagesMock(...a),
   truncateAfter: (...a: unknown[]) => truncateAfterMock(...a),
 }))
 

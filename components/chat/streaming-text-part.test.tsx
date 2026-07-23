@@ -1,11 +1,27 @@
 import { render } from "@testing-library/react"
-import type { ReactNode } from "react"
+import { createElement, type ReactNode } from "react"
+
+const mockStreamdownParser = jest.fn((markdown: string) =>
+  markdown.split(/(\n\n+)/).filter((block) => block.length > 0)
+)
+jest.mock(
+  "streamdown",
+  () => ({
+    Block: ({ content }: { content: string }) => (
+      <div data-testid="streamdown-block">{content}</div>
+    ),
+    parseMarkdownIntoBlocks: (markdown: string) => mockStreamdownParser(markdown),
+  }),
+  { virtual: true }
+)
 
 // Stub MessageResponse so we can inspect what gets passed in.
+const mockMessageResponse = jest.fn()
 jest.mock("@/components/ai-elements/message", () => ({
-  MessageResponse: ({ children }: { children: ReactNode }) => (
-    <div data-testid="msg-response">{children}</div>
-  ),
+  MessageResponse: (props: { children: ReactNode }) => {
+    mockMessageResponse(props)
+    return <div data-testid="msg-response">{props.children}</div>
+  },
 }))
 
 // Control reduced-motion so we can assert the caret's blink toggles.
@@ -20,6 +36,8 @@ describe("StreamingTextPart", () => {
   beforeEach(() => {
     flowMotion.reduce = false
     flowMotion.speed = 1
+    mockMessageResponse.mockClear()
+    mockStreamdownParser.mockClear()
   })
   it("renders the supplied text via MessageResponse", () => {
     const { getByTestId } = render(<StreamingTextPart text="hello world" isStreaming={true} />)
@@ -67,5 +85,27 @@ describe("StreamingTextPart", () => {
     flowMotion.reduce = true
     const { getByTestId } = render(<StreamingTextPart text="hello" isStreaming={true} />)
     expect(getByTestId("streaming-caret")).not.toHaveClass("animate-pulse")
+  })
+
+  it("supplies incremental parsing and off-screen block containment to Streamdown", () => {
+    render(<StreamingTextPart text="hello" isStreaming={true} />)
+    const props = mockMessageResponse.mock.calls.at(-1)?.[0] as {
+      parseMarkdownIntoBlocksFn?: (markdown: string) => string[]
+      BlockComponent?: React.ComponentType<{ content: string }>
+    }
+    expect(props.parseMarkdownIntoBlocksFn).toEqual(expect.any(Function))
+    expect(props.BlockComponent).toBeDefined()
+
+    const initial = `${"stable\n\n".repeat(1_000)}active`
+    props.parseMarkdownIntoBlocksFn!(initial)
+    mockStreamdownParser.mockClear()
+    props.parseMarkdownIntoBlocksFn!(`${initial} tail`)
+    expect(mockStreamdownParser.mock.calls[0]?.[0].length).toBeLessThan(100)
+
+    const { getByTestId } = render(createElement(props.BlockComponent!, { content: "contained" }))
+    expect(getByTestId("streamdown-block").parentElement).toHaveClass(
+      "[content-visibility:auto]",
+      "[contain-intrinsic-size:auto_160px]"
+    )
   })
 })

@@ -330,6 +330,65 @@ export async function persistMessages(sessionId: string, messages: UIMessage[]):
 }
 
 /**
+ * Persist an append-only stream update without reconciling the full session.
+ *
+ * This is deliberately narrower than {@link persistMessages}: callers may use
+ * it only for mid-turn growth where the message set/order is unchanged and the
+ * trailing message is the sole mutation. A missing or incompatible snapshot
+ * falls back to the full reconciler, so the first chunk and every message
+ * boundary retain the normal insertion/deletion guarantees.
+ */
+export async function persistStreamingMessages(
+  sessionId: string,
+  messages: UIMessage[]
+): Promise<void> {
+  const last = messages.at(-1)
+  const snapshot = persistSnapshots.get(sessionId)
+  const lastEntry = last?.id ? snapshot?.get(last.id) : undefined
+  const first = messages[0]
+  const previous = messages.length > 1 ? messages[messages.length - 2] : undefined
+  const snapshotMatches =
+    last !== undefined &&
+    last.id.length > 0 &&
+    snapshot !== undefined &&
+    snapshot.size === messages.length &&
+    lastEntry !== undefined &&
+    (first === undefined || snapshot.has(first.id)) &&
+    (previous === undefined || snapshot.has(previous.id))
+
+  if (!snapshotMatches) {
+    await persistMessages(sessionId, messages)
+    return
+  }
+
+  const meta = (last as { metadata?: Record<string, unknown> }).metadata
+  const senderId = typeof meta?.senderId === "string" ? meta.senderId : undefined
+  const senderKindRaw = meta?.senderKind
+  const senderKind =
+    senderKindRaw === "user" || senderKindRaw === "assistant" || senderKindRaw === "system"
+      ? senderKindRaw
+      : undefined
+  const updated = await getDb().messages.update(last.id, {
+    role: last.role,
+    parts: last.parts,
+    senderId,
+    senderKind,
+    metadata: stripHoistedMeta(meta),
+  })
+
+  // An out-of-band delete can invalidate an otherwise compatible in-memory
+  // snapshot. Recover through the full path instead of silently dropping the
+  // streamed row.
+  if (updated === 0) {
+    invalidatePersistSnapshot(sessionId)
+    await persistMessages(sessionId, messages)
+    return
+  }
+
+  snapshot.set(last.id, { ref: last, createdAt: lastEntry.createdAt })
+}
+
+/**
  * Look up workflows subscribed to `trigger.chat.message` for the session's
  * character + session scope and invoke the orchestrator for each match.
  *

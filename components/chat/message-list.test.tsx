@@ -93,6 +93,11 @@ jest.mock("@/hooks/use-platform", () => ({
   usePlatform: jest.fn(() => "desktop"),
 }))
 
+let mockWideTimelineViewport = true
+jest.mock("@/hooks/ui", () => ({
+  useMediaQuery: () => mockWideTimelineViewport,
+}))
+
 jest.mock("@/components/interactions/long-press", () => ({
   LongPress: ({
     children,
@@ -1204,14 +1209,18 @@ describe("MessageList — timeline mount gating", () => {
   beforeEach(() => {
     useSettingsStore.setState({ settings: {} as never })
     ;(usePlatform as jest.Mock).mockReturnValue("desktop")
+    mockWideTimelineViewport = true
     timelineMock().mockClear()
   })
 
   // These cases drive the gates off shared module state (settings store +
   // platform mock), so hand them back at the defaults the later suites assume.
   afterEach(() => {
-    useSettingsStore.setState({ settings: {} as never })
+    act(() => {
+      useSettingsStore.setState({ settings: {} as never })
+    })
     ;(usePlatform as jest.Mock).mockReturnValue("desktop")
+    mockWideTimelineViewport = true
   })
 
   it("stays unmounted at or below TIMELINE_THRESHOLD", () => {
@@ -1226,6 +1235,12 @@ describe("MessageList — timeline mount gating", () => {
 
   it("stays unmounted on mobile regardless of length", () => {
     ;(usePlatform as jest.Mock).mockReturnValue("mobile")
+    renderWith(TIMELINE_THRESHOLD + 20)
+    expect(timelineMock()).not.toHaveBeenCalled()
+  })
+
+  it("stays unmounted below the timeline's lg viewport", () => {
+    mockWideTimelineViewport = false
     renderWith(TIMELINE_THRESHOLD + 20)
     expect(timelineMock()).not.toHaveBeenCalled()
   })

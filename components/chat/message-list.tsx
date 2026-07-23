@@ -23,6 +23,7 @@ import { MessageSearchBar } from "./message-search-bar"
 import type { MessageSearchHit } from "@/lib/chat/message-search"
 import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
 import { usePlatform } from "@/hooks/use-platform"
+import { useMediaQuery } from "@/hooks/ui"
 import { useTranslations } from "next-intl"
 import { InfoIcon } from "lucide-react"
 import { useCharacters } from "@/lib/data-hooks/context"
@@ -44,8 +45,9 @@ import { PerfBoundary } from "@/lib/perf"
 export const VIRTUALIZE_THRESHOLD = 40
 
 // Below this many messages the conversation is short enough to scan by
-// scrolling, so the right-edge timeline minimap stays unmounted. Wide-screen /
-// desktop gating happens in the component (it's `hidden lg:flex`).
+// scrolling, so the right-edge timeline minimap stays unmounted. The parent
+// also gates mounting on the real `lg` media query so a CSS-hidden timeline
+// cannot retain thousands of off-screen nodes.
 //
 // 8 messages is ~4 user turns — the point where the first turn has usually
 // scrolled out of view, so anchors start earning their keep. This was 20,
@@ -92,6 +94,7 @@ export function MessageList({
   const ownsShortcuts = paneSessionId == null || paneSessionId === sessionId
   const platform = usePlatform()
   const isMobile = platform === "mobile"
+  const isTimelineViewport = useMediaQuery("(min-width: 1024px)")
   const tActions = useTranslations("mobile.messageActions")
   // Long-press opens the action sheet on mobile, but there's no hover hint to
   // advertise it. Surface a one-line nudge early in the conversation; it
@@ -575,15 +578,18 @@ export function MessageList({
               </Button>
             )}
           </div>
-          {!isMobile && timelineEnabled !== false && messages.length > TIMELINE_THRESHOLD && (
-            <ConversationTimeline
-              messages={timelineMessages}
-              scrollRef={scrollParentRef}
-              virtualizer={rowVirtualizer}
-              virtualize={virtualize}
-              shortcutsEnabled={ownsShortcuts}
-            />
-          )}
+          {!isMobile &&
+            isTimelineViewport &&
+            timelineEnabled !== false &&
+            messages.length > TIMELINE_THRESHOLD && (
+              <ConversationTimeline
+                messages={timelineMessages}
+                scrollRef={scrollParentRef}
+                virtualizer={rowVirtualizer}
+                virtualize={virtualize}
+                shortcutsEnabled={ownsShortcuts}
+              />
+            )}
         </div>
 
         {isMobile ? (

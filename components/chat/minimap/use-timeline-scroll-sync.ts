@@ -41,26 +41,49 @@ export function computeTimelineGeometry(params: {
   starts: number[]
 }): TimelineGeometry {
   const { scrollTop, clientHeight, total, starts } = params
+  const positions = total <= 0 ? starts.map(() => 0) : starts.map((start) => clamp01(start / total))
+  return computeViewportGeometry({ scrollTop, clientHeight, total, starts, positions })
+}
+
+function findActiveIndex(starts: number[], probe: number): number {
+  if (starts.length === 0) return -1
+  let low = 0
+  let high = starts.length - 1
+  let found = 0
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2)
+    if ((starts[middle] ?? 0) <= probe) {
+      found = middle
+      low = middle + 1
+    } else {
+      high = middle - 1
+    }
+  }
+  return found
+}
+
+function computeViewportGeometry(params: {
+  scrollTop: number
+  clientHeight: number
+  total: number
+  starts: number[]
+  positions: number[]
+}): TimelineGeometry {
+  const { scrollTop, clientHeight, total, starts, positions } = params
   if (total <= 0) {
     return {
-      positions: starts.map(() => 0),
+      positions,
       viewportTop: 0,
       viewportHeight: 1,
       activeIndex: starts.length ? 0 : -1,
     }
   }
-  const positions = starts.map((s) => clamp01(s / total))
   const probe = scrollTop + Math.min(clientHeight * 0.3, 120)
-  let activeIndex = starts.length ? 0 : -1
-  for (let i = 0; i < starts.length; i++) {
-    if (starts[i] <= probe) activeIndex = i
-    else break
-  }
   return {
     positions,
     viewportTop: clamp01(scrollTop / total),
     viewportHeight: clamp01(clientHeight / total),
-    activeIndex,
+    activeIndex: findActiveIndex(starts, probe),
   }
 }
 
@@ -95,12 +118,12 @@ export function useTimelineScrollSync({
 }: UseScrollSyncArgs): TimelineGeometry {
   const [geom, setGeom] = useState<TimelineGeometry>(EMPTY_GEOMETRY)
   const rafRef = useRef<number | null>(null)
-  // Cached document-flow `starts` (absolute pixel offset of each turn). Measuring
-  // these calls getBoundingClientRect per turn — a forced synchronous reflow —
-  // so we keep the result and only remeasure when the turn set or size changes,
-  // never on plain scroll. Virtualized lists read the virtualizer's measurement
-  // cache instead (a cheap array lookup), so they don't use this.
+  // Cached absolute starts and normalized marker positions. Both document-flow
+  // DOM reads and virtualizer-cache walks are O(turns), so neither belongs on
+  // the scroll path. Resize/turn changes refresh them; plain scroll only updates
+  // the viewport window and binary-searches the cached starts.
   const startsRef = useRef<number[] | null>(null)
+  const positionsRef = useRef<number[] | null>(null)
   const needsRemeasureRef = useRef(true)
 
   const measureStarts = useCallback(
@@ -133,22 +156,19 @@ export function useTimelineScrollSync({
       const el = scrollRef.current
       if (!el) return EMPTY_GEOMETRY
       const total = virtualize && virtualizer ? virtualizer.getTotalSize() : el.scrollHeight
-      let starts: number[]
-      if (virtualize && virtualizer) {
-        // Virtualizer cache updates as rows are measured during scroll; reading
-        // it is cheap, so re-derive every frame to track newly-measured rows.
-        starts = measureStarts(el, total)
-      } else if (remeasure || startsRef.current == null) {
+      if (remeasure || startsRef.current == null || positionsRef.current == null) {
         startsRef.current = measureStarts(el, total)
-        starts = startsRef.current
-      } else {
-        starts = startsRef.current
+        positionsRef.current =
+          total <= 0
+            ? startsRef.current.map(() => 0)
+            : startsRef.current.map((start) => clamp01(start / total))
       }
-      return computeTimelineGeometry({
+      return computeViewportGeometry({
         scrollTop: el.scrollTop,
         clientHeight: el.clientHeight,
         total,
-        starts,
+        starts: startsRef.current,
+        positions: positionsRef.current,
       })
     },
     [scrollRef, virtualizer, virtualize, measureStarts]
@@ -183,6 +203,7 @@ export function useTimelineScrollSync({
     el.addEventListener("scroll", schedule, { passive: true })
     const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(scheduleRemeasure) : null
     ro?.observe(el)
+    if (el.firstElementChild) ro?.observe(el.firstElementChild)
     return () => {
       el.removeEventListener("scroll", schedule)
       ro?.disconnect()

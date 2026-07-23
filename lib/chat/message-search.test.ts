@@ -1,5 +1,10 @@
 import type { UIMessage } from "ai"
-import { findMessageHits, stepHitIndex } from "./message-search"
+import {
+  buildMessageSearchIndex,
+  findIndexedMessageHits,
+  findMessageHits,
+  stepHitIndex,
+} from "./message-search"
 
 const msg = (id: string, parts: unknown[]): UIMessage => ({ id, role: "user", parts }) as UIMessage
 const textMsg = (id: string, text: string) => msg(id, [{ type: "text", text }])
@@ -59,6 +64,22 @@ describe("findMessageHits", () => {
 
   it("returns nothing for an empty conversation", () => {
     expect(findMessageHits([], "x")).toEqual([])
+  })
+
+  it("reuses extracted text across successive queries", () => {
+    let partsReads = 0
+    const message = { id: "a", role: "user" } as UIMessage
+    Object.defineProperty(message, "parts", {
+      get: () => {
+        partsReads++
+        return [{ type: "text", text: "deploy the worker" }]
+      },
+    })
+
+    const index = buildMessageSearchIndex([message])
+    expect(findIndexedMessageHits(index, "deploy")).toHaveLength(1)
+    expect(findIndexedMessageHits(index, "worker")).toHaveLength(1)
+    expect(partsReads).toBe(1)
   })
 })
 

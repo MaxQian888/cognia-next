@@ -112,6 +112,23 @@ describe("buildConversationSections", () => {
     expect(today && today.sessions.map((s) => s.id)).toEqual(["b", "c", "a"])
   })
 
+  it("keeps an equal-recency bucket ordered across live-query refreshes", () => {
+    const a = session("a", { createdAt: NOW - 2_000, updatedAt: NOW })
+    const b = session("b", { createdAt: NOW - 1_000, updatedAt: NOW })
+    const orderFor = (sessions: ChatSession[]) => {
+      const section = buildConversationSections(sessions, [], opts()).sections.find(
+        (candidate) => candidate.kind === "date" && candidate.bucket === "today"
+      )
+      return section?.sessions.map((candidate) => candidate.id)
+    }
+
+    // Dexie may re-emit equivalent rows in a different order after the active
+    // conversation changes. Equal `updatedAt` values must not make the sidebar
+    // visually swap those rows back and forth.
+    expect(orderFor([a, b])).toEqual(["b", "a"])
+    expect(orderFor([b, a])).toEqual(["b", "a"])
+  })
+
   it("floats pinned to a dedicated top section, not duplicated in buckets", () => {
     const sessions = [
       session("pin", { pinned: true, updatedAt: NOW - 40 * DAY }),

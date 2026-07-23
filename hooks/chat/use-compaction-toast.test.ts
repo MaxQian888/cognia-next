@@ -79,4 +79,33 @@ describe("useCompactionToast", () => {
     rerender({ messages: [boundary("b1", 1, 2)] })
     expect(toastMock).not.toHaveBeenCalled()
   })
+
+  it("checks only the trailing message during same-length streaming growth", () => {
+    const reads = { count: 0 }
+    const countedMessage = (id: string): UIMessage => {
+      const message = {
+        id,
+        parts: [{ type: "text", text: "chunk" }],
+      } as unknown as UIMessage
+      Object.defineProperty(message, "role", {
+        get: () => {
+          reads.count++
+          return "assistant"
+        },
+      })
+      return message
+    }
+    const initial = Array.from({ length: 2_000 }, (_, index) => countedMessage(`m${index}`))
+    const { rerender } = renderHook(({ messages }) => useCompactionToast(messages), {
+      initialProps: { messages: initial },
+    })
+    reads.count = 0
+
+    rerender({
+      messages: [...initial.slice(0, -1), countedMessage("m1999")],
+    })
+
+    expect(reads.count).toBeLessThanOrEqual(2)
+    expect(toastMock).not.toHaveBeenCalled()
+  })
 })
