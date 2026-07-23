@@ -22,8 +22,8 @@ test.describe("workflow editor — JSON import / export", () => {
     await seedAndOpenWorkflow(page, "multi-step")
     await expect(page.getByTestId("workflow-canvas")).toBeVisible()
     const beforeNodeKinds = await page.evaluate(() =>
-      Array.from(document.querySelectorAll("[data-testid^='wf-node-']")).map(
-        (el) => el.getAttribute("data-testid")!
+      Array.from(document.querySelectorAll("[data-testid^='wf-node-']")).map((el) =>
+        el.getAttribute("data-testid")!
       )
     )
     expect(beforeNodeKinds.length).toBeGreaterThanOrEqual(5)

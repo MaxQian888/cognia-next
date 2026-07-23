@@ -122,8 +122,7 @@ async function defaultMicrovmSandboxFactory(opts: { apiKey?: string }): Promise<
     )
   }
   const SandboxCtor = mod?.Sandbox as
-    | { create?: (opts: unknown) => Promise<E2BSandboxFacade> }
-    | undefined
+    { create?: (opts: unknown) => Promise<E2BSandboxFacade> } | undefined
   if (!SandboxCtor || typeof SandboxCtor.create !== "function") {
     throw new Error("@e2b/sdk does not export `Sandbox.create` — incompatible SDK version")
   }

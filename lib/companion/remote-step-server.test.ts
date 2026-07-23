@@ -1,31 +1,25 @@
 /**
  * @jest-environment jsdom
  */
-const mockGetCurrentPosition = jest.fn(
-  async (..._a: unknown[]): Promise<unknown> => ({
-    kind: "ok",
-    value: { latitude: 1, longitude: 2, accuracy: 3, timestamp: 4 },
-  })
-)
+const mockGetCurrentPosition = jest.fn(async (..._a: unknown[]): Promise<unknown> => ({
+  kind: "ok",
+  value: { latitude: 1, longitude: 2, accuracy: 3, timestamp: 4 },
+}))
 jest.mock("@/lib/capacitor/geolocation", () => ({
   getCurrentPosition: (...a: unknown[]) => mockGetCurrentPosition(...a),
 }))
-const mockPickPhoto = jest.fn(
-  async (..._a: unknown[]): Promise<unknown> => ({
-    kind: "captured",
-    base64: "QUJD",
-    format: "jpeg",
-  })
-)
+const mockPickPhoto = jest.fn(async (..._a: unknown[]): Promise<unknown> => ({
+  kind: "captured",
+  base64: "QUJD",
+  format: "jpeg",
+}))
 jest.mock("@/lib/capacitor/camera", () => ({
   pickPhoto: (...a: unknown[]) => mockPickPhoto(...a),
 }))
-const mockScan = jest.fn(
-  async (..._a: unknown[]): Promise<unknown> => ({
-    kind: "scanned",
-    raw: "QR-VALUE",
-  })
-)
+const mockScan = jest.fn(async (..._a: unknown[]): Promise<unknown> => ({
+  kind: "scanned",
+  raw: "QR-VALUE",
+}))
 jest.mock("@/lib/capacitor/barcode", () => ({
   scan: (...a: unknown[]) => mockScan(...a),
 }))

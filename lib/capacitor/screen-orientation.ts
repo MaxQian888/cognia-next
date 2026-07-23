@@ -9,10 +9,7 @@ import { makeDefaultLoader, withPlugin, type SimpleOutcome, type ValueOutcome } 
  */
 
 export type OrientationType =
-  | "portrait-primary"
-  | "portrait-secondary"
-  | "landscape-primary"
-  | "landscape-secondary"
+  "portrait-primary" | "portrait-secondary" | "landscape-primary" | "landscape-secondary"
 
 export type OrientationLockType =
   | "any"

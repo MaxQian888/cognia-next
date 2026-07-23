@@ -16,8 +16,7 @@ export type CredentialMode = "app" | "pat"
 export type WorktreeMode = "local" | "e2b"
 
 export type PushTarget =
-  | { kind: "source-branch"; branchPrefix?: string }
-  | { kind: "fork"; ownerLogin: string }
+  { kind: "source-branch"; branchPrefix?: string } | { kind: "fork"; ownerLogin: string }
 
 export type TriggerMode = "webhook" | "polling"
 
@@ -62,9 +61,7 @@ export interface GhRepoEntry {
 // ============================================================================
 
 export type AllowedAuthors =
-  | { kind: "collaborators" }
-  | { kind: "members" }
-  | { kind: "explicit"; logins: string[] }
+  { kind: "collaborators" } | { kind: "members" } | { kind: "explicit"; logins: string[] }
 
 export interface QuietHoursWindow {
   /** "HH:MM" 24h. */
@@ -226,12 +223,7 @@ export interface GhAuditEntry {
 // ============================================================================
 
 export type WorkOrderStatus =
-  | "open"
-  | "in_progress"
-  | "pr_opened"
-  | "awaiting_review"
-  | "merged"
-  | "failed"
+  "open" | "in_progress" | "pr_opened" | "awaiting_review" | "merged" | "failed"
 
 export interface GhWorkOrder {
   id?: number

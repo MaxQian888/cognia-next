@@ -21,20 +21,11 @@ export interface StructuredLogEntry {
 
 /** Top-level OTel `gen_ai.operation.name`. */
 export type SpanOperationName =
-  | "invoke_agent"
-  | "execute_tool"
-  | "chat"
-  | "invoke_workflow"
-  | "retrieval"
+  "invoke_agent" | "execute_tool" | "chat" | "invoke_workflow" | "retrieval"
 
 /** OTel `gen_ai.provider.name` plus Cognia vendor extensions. */
 export type SpanProviderName =
-  | "anthropic"
-  | "openai"
-  | "cognia.plugin"
-  | "cognia.team"
-  | "cognia.connector"
-  | "cognia.workflow"
+  "anthropic" | "openai" | "cognia.plugin" | "cognia.team" | "cognia.connector" | "cognia.workflow"
 
 /** Surface that produced the span. */
 export type SpanSurface = "chat" | "agent-team" | "plugin-hook" | "connector" | "workflow"

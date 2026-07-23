@@ -38,14 +38,10 @@ export function isMobile(): boolean {
  * union but can re-use the `unsupported` and `error` branches verbatim.
  */
 export type SimpleOutcome =
-  | { kind: "ok" }
-  | { kind: "unsupported" }
-  | { kind: "error"; message: string }
+  { kind: "ok" } | { kind: "unsupported" } | { kind: "error"; message: string }
 
 export type ValueOutcome<T> =
-  | { kind: "ok"; value: T }
-  | { kind: "unsupported" }
-  | { kind: "error"; message: string }
+  { kind: "ok"; value: T } | { kind: "unsupported" } | { kind: "error"; message: string }
 
 /**
  * Resolve a plugin loader and execute the action. Returns:

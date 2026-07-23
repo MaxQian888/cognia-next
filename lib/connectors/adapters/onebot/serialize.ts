@@ -343,9 +343,7 @@ export function serializeGetForwardMsgV11(id: string): SerializedOneBotCall {
  * or the short chat key (`g:<id>` / `p:<id>`). Returns null when neither
  * form is recognised.
  */
-function parseForwardTarget(
-  target: string
-): { groupId: string } | { userId: string } | null {
+function parseForwardTarget(target: string): { groupId: string } | { userId: string } | null {
   // Full conversation key: onebot:<adapterId>:<chatType>:<chatId>
   const segs = target.split(":")
   if (segs.length === 4 && segs[0] === "onebot") {
@@ -369,7 +367,9 @@ function parseForwardTarget(
  * so the caller can surface a `validation` OutboundError (mirrors
  * {@link serializeOutboundV11} returning an empty array).
  */
-export function serializeSendForwardMsgV11(input: ForwardMessageInput): SerializedOneBotCall | null {
+export function serializeSendForwardMsgV11(
+  input: ForwardMessageInput
+): SerializedOneBotCall | null {
   const ids = input.messageIds ?? (input.messageId ? [input.messageId] : [])
   if (ids.length === 0) return null
 

@@ -68,9 +68,9 @@ describe("useLanScan", () => {
 
   it("requestPermission=denied blocks the scan and flags permissionDenied", async () => {
     const scan = scanStub()
-    const requestPermission = jest.fn(
-      async (): Promise<MdnsPermissionOutcome> => ({ kind: "denied" })
-    )
+    const requestPermission = jest.fn(async (): Promise<MdnsPermissionOutcome> => ({
+      kind: "denied",
+    }))
     const { result } = renderHook(() =>
       useLanScan({ scan: scan as never, requestPermission: requestPermission as never })
     )

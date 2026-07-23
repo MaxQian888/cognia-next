@@ -71,13 +71,7 @@ export type PlanStepParams =
  *   blocked     → an upstream dep failed and error policy is "stop"
  */
 export type PlanStepStatus =
-  | "pending"
-  | "ready"
-  | "in_progress"
-  | "completed"
-  | "failed"
-  | "skipped"
-  | "blocked"
+  "pending" | "ready" | "in_progress" | "completed" | "failed" | "skipped" | "blocked"
 
 export interface PlanStep {
   /** UUIDv4, stable across edits and re-renders. */

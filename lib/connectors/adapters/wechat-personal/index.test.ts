@@ -25,7 +25,11 @@ function makeCtx(opts: {
       ? opts.getUpdates()
       : (opts.sendMessage?.() ?? { ret: 0 })
     // A string body is passed through raw so tests can feed non-JSON.
-    return { status: 200, headers: {}, body: typeof body === "string" ? body : JSON.stringify(body) }
+    return {
+      status: 200,
+      headers: {},
+      body: typeof body === "string" ? body : JSON.stringify(body),
+    }
   })
   const warn = jest.fn()
   const abort = new AbortController()
@@ -347,9 +351,7 @@ describe("createWechatPersonalAdapter — poll failure classification", () => {
     })
     await a.start(ctx)
     for (let i = 0; i < 10 && http.mock.calls.length === 0; i++) await tick()
-    expect((http.mock.calls[0][0] as { url: string }).url).toBe(
-      "https://base/ilink/bot/getupdates"
-    )
+    expect((http.mock.calls[0][0] as { url: string }).url).toBe("https://base/ilink/bot/getupdates")
     await a.stop()
   })
 })

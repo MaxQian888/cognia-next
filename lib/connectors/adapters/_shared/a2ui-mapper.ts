@@ -65,8 +65,7 @@ export function walkA2UISurface(
       {
         id,
         component: (typeof node.component === "string" ? node.component : "Text") as
-          | A2UIComponentKind
-          | string,
+          A2UIComponentKind | string,
         raw: node,
         childIds,
       },

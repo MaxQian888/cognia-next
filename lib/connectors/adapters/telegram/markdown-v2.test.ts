@@ -35,9 +35,7 @@ describe("escapeMdV2", () => {
 
 describe("escapeMdV2Code", () => {
   it("escapes only backtick and backslash (code context)", () => {
-    expect(escapeMdV2Code("a.b() + x_y! `tick` \\slash")).toBe(
-      "a.b() + x_y! \\`tick\\` \\\\slash"
-    )
+    expect(escapeMdV2Code("a.b() + x_y! `tick` \\slash")).toBe("a.b() + x_y! \\`tick\\` \\\\slash")
   })
 
   it("leaves all other MarkdownV2 specials alone", () => {

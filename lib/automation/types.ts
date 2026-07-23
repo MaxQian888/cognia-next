@@ -132,8 +132,7 @@ export interface Screenshot {
 }
 
 export type ClickTarget =
-  | { kind: "element"; elementRef: ElementRef }
-  | { kind: "point"; x: number; y: number }
+  { kind: "element"; elementRef: ElementRef } | { kind: "point"; x: number; y: number }
 
 export type MouseButton = "left" | "right" | "middle"
 
@@ -187,8 +186,7 @@ export interface DragOpts {
  * over wheel events when available.
  */
 export type ScrollTarget =
-  | { kind: "point"; x: number; y: number }
-  | { kind: "element"; elementRef: ElementRef }
+  { kind: "point"; x: number; y: number } | { kind: "element"; elementRef: ElementRef }
 
 /**
  * Scroll deltas. Positive `dy` scrolls down; positive `dx` scrolls right.

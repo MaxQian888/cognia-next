@@ -63,12 +63,7 @@ export interface PluginWorkflowTemplateEdge {
 
 /** Category mirrors the editor's template-picker buckets. */
 export type PluginWorkflowTemplateCategory =
-  | "automation"
-  | "integration"
-  | "ai"
-  | "data"
-  | "github"
-  | "general"
+  "automation" | "integration" | "ai" | "data" | "github" | "general"
 
 /**
  * Plugin-contributed visual workflow template — a self-contained blueprint

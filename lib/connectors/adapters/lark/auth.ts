@@ -231,9 +231,15 @@ interface LarkUserInfoResponse {
  */
 function parseTokenV2Response(rawBody: string, context: string): LarkUserAccessTokenResult {
   const parsed = JSON.parse(rawBody) as LarkTokenV2Response
-  if ((parsed.code !== undefined && parsed.code !== 0) || !parsed.access_token || !parsed.refresh_token) {
+  if (
+    (parsed.code !== undefined && parsed.code !== 0) ||
+    !parsed.access_token ||
+    !parsed.refresh_token
+  ) {
     const detail =
-      parsed.error_description ?? parsed.error ?? (parsed.code !== undefined ? `code=${parsed.code}` : "unknown")
+      parsed.error_description ??
+      parsed.error ??
+      (parsed.code !== undefined ? `code=${parsed.code}` : "unknown")
     throw new Error(`Lark ${context} failed: ${detail}`)
   }
   return {

@@ -54,9 +54,8 @@ export function effortGaugeCells(index: number, last: number, cells: number): Ga
   if (last <= 0) return Array.from({ length: cells }, () => "marker")
   const clamped = Math.min(Math.max(index, 0), last)
   const pos = Math.round((clamped / last) * (cells - 1))
-  return Array.from(
-    { length: cells },
-    (_, i): GaugeCell => (i === pos ? "marker" : i < pos ? "filled" : "empty")
+  return Array.from({ length: cells }, (_, i): GaugeCell =>
+    i === pos ? "marker" : i < pos ? "filled" : "empty"
   )
 }
 

@@ -33,16 +33,14 @@ export const specCompletionProvider: TerminalCompletionProvider = {
     const prior = tokens.slice(1, at.index).map((t) => t.value)
     const candidates = resolveSpec(spec, prior, at.token.value)
 
-    return candidates.slice(0, MAX_SPEC_SUGGESTIONS).map(
-      (c, i): TerminalCompletionSuggestion => ({
-        text: context.input.slice(0, at.token.start) + c.name,
-        source: "spec",
-        providerId: "builtin:spec",
-        detail: c.kind,
-        description: c.description,
-        score: Math.max(0.1, 0.9 - i * 0.05),
-        replace: { from: at.token.start, insert: c.name },
-      })
-    )
+    return candidates.slice(0, MAX_SPEC_SUGGESTIONS).map((c, i): TerminalCompletionSuggestion => ({
+      text: context.input.slice(0, at.token.start) + c.name,
+      source: "spec",
+      providerId: "builtin:spec",
+      detail: c.kind,
+      description: c.description,
+      score: Math.max(0.1, 0.9 - i * 0.05),
+      replace: { from: at.token.start, insert: c.name },
+    }))
   },
 }

@@ -98,9 +98,7 @@ export interface TrayActionDeps {
  * lib stays i18n-free so it remains a pure unit.
  */
 export type TrayUpdateOutcome =
-  | { kind: "available"; version: string }
-  | { kind: "upToDate" }
-  | { kind: "error"; message: string }
+  { kind: "available"; version: string } | { kind: "upToDate" } | { kind: "error"; message: string }
 
 /** Reveal the app-data folder in the OS file explorer. */
 export async function openDataFolder(deps: TrayActionDeps = {}): Promise<void> {

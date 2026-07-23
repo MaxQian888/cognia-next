@@ -252,15 +252,23 @@ describe("parseDiscordDispatch", () => {
     }
 
     it("drops MESSAGE_CREATE authored by the bot itself", () => {
-      expect(parseDiscordDispatch(ADAPTER_ID, SELF_ID, makeSelfDispatch("MESSAGE_CREATE", SELF_ID))).toBeNull()
+      expect(
+        parseDiscordDispatch(ADAPTER_ID, SELF_ID, makeSelfDispatch("MESSAGE_CREATE", SELF_ID))
+      ).toBeNull()
     })
 
     it("drops MESSAGE_UPDATE authored by the bot itself", () => {
-      expect(parseDiscordDispatch(ADAPTER_ID, SELF_ID, makeSelfDispatch("MESSAGE_UPDATE", SELF_ID))).toBeNull()
+      expect(
+        parseDiscordDispatch(ADAPTER_ID, SELF_ID, makeSelfDispatch("MESSAGE_UPDATE", SELF_ID))
+      ).toBeNull()
     })
 
     it('does NOT drop when selfId is "" (pre-READY) even if author ids collide vacuously', () => {
-      const event = parseDiscordDispatch(ADAPTER_ID, "", makeSelfDispatch("MESSAGE_CREATE", SELF_ID))
+      const event = parseDiscordDispatch(
+        ADAPTER_ID,
+        "",
+        makeSelfDispatch("MESSAGE_CREATE", SELF_ID)
+      )
       expect(event).not.toBeNull()
       expect(event!.messageId).toBe("msg-self-1")
     })

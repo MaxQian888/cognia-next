@@ -33,14 +33,7 @@ export type PetEyes = "dot" | "sleepy" | "wide" | "wink" | "star" | "spiral"
 
 /** Cosmetic hats. `tinyduck` is legendary-only; `none` is the common default. */
 export type PetHat =
-  | "none"
-  | "crown"
-  | "tophat"
-  | "propeller"
-  | "halo"
-  | "wizard"
-  | "beanie"
-  | "tinyduck"
+  "none" | "crown" | "tophat" | "propeller" | "halo" | "wizard" | "beanie" | "tinyduck"
 
 /** Body silhouette — affects the skeleton proportions. */
 export type PetBodyType = "round" | "tall" | "wide"

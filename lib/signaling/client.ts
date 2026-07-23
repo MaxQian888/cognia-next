@@ -33,12 +33,7 @@ import {
 } from "./types"
 
 export type SignalingState =
-  | "idle"
-  | "connecting"
-  | "subscribed"
-  | "reconnecting"
-  | "rejected"
-  | "closed"
+  "idle" | "connecting" | "subscribed" | "reconnecting" | "rejected" | "closed"
 
 /**
  * Server error codes that are terminal for this connection: the room rejected

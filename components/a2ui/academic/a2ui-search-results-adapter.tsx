@@ -24,8 +24,7 @@ export function A2UISearchResultsAdapter({
   const isLoading = (dataModel?.isLoading as boolean) || false
   const hasMore = (dataModel?.hasMore as boolean) || false
   const providerResults = dataModel?.providerResults as
-    | Record<string, { count: number; success: boolean }>
-    | undefined
+    Record<string, { count: number; success: boolean }> | undefined
 
   return (
     <AcademicSearchResults

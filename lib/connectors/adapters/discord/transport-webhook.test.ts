@@ -47,10 +47,7 @@ describe("startWebhookTransport", () => {
     makeListen()
     const ctrl = new AbortController()
     await startWebhookTransport({ adapterId: "dc-1", selfId: "self", signal: ctrl.signal })
-    expect(mockListen).toHaveBeenCalledWith(
-      "connectors://webhook/dc-1",
-      expect.any(Function)
-    )
+    expect(mockListen).toHaveBeenCalledWith("connectors://webhook/dc-1", expect.any(Function))
   })
 
   it("dispatches a component interaction as a connector callback", async () => {

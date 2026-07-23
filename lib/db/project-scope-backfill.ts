@@ -89,8 +89,7 @@ async function resolveFallback(
   const settingsTable = tx.table("settings")
   const projects = (await projectsTable.toArray()) as Project[]
   const settings = (await settingsTable.get(SETTINGS_SINGLETON_ID)) as
-    | (Record<string, unknown> & { activeProjectId?: string })
-    | undefined
+    (Record<string, unknown> & { activeProjectId?: string }) | undefined
   const activeId = settings?.activeProjectId
 
   if (activeId && projects.some((p) => p.id === activeId)) {

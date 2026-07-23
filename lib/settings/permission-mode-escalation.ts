@@ -8,12 +8,7 @@
  */
 
 export type PermissionMode =
-  | "default"
-  | "acceptEdits"
-  | "bypassPermissions"
-  | "plan"
-  | "dontAsk"
-  | "auto"
+  "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk" | "auto"
 
 /**
  * Higher rank = more autonomous (fewer confirmations before the agent acts).

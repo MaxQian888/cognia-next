@@ -575,7 +575,10 @@ describe("startGatewayClient", () => {
     await collectorDone
 
     const attempts = statuses
-      .filter((s): s is Extract<GatewayStatusEvent, { kind: "connect_failed" }> => s.kind === "connect_failed")
+      .filter(
+        (s): s is Extract<GatewayStatusEvent, { kind: "connect_failed" }> =>
+          s.kind === "connect_failed"
+      )
       .map((s) => s.attempts)
     expect(attempts.length).toBeGreaterThanOrEqual(3)
     expect(attempts.slice(0, 3)).toEqual([1, 2, 3])

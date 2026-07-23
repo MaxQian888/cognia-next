@@ -12,10 +12,7 @@ export type RAGDegradeReason =
 export type RAGRetrievalOutcome = "success" | "empty" | "quality_filtered" | "degraded"
 
 export type RAGCollectionSource =
-  | "explicit"
-  | "scene-default"
-  | "runtime-default"
-  | "fallback-default"
+  "explicit" | "scene-default" | "runtime-default" | "fallback-default"
 
 export type RAGCollectionResolutionStatus = "resolved" | "empty" | "unavailable"
 

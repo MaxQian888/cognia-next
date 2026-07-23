@@ -244,12 +244,10 @@ describe("shared-memory-orchestrator", () => {
       name: "Fake",
       write: jest.fn(async () => {}),
       read: jest.fn(async () => undefined),
-      listChanges: jest.fn(
-        async (): Promise<SharedMemoryAdapterChangeSet> => ({
-          entries: [],
-          cursor: 0,
-        })
-      ),
+      listChanges: jest.fn(async (): Promise<SharedMemoryAdapterChangeSet> => ({
+        entries: [],
+        cursor: 0,
+      })),
       delete: jest.fn(async () => {}),
       ...over,
     })

@@ -25,31 +25,13 @@ export type RichOutputRequestCategory =
   | "emotional-support"
 
 export type RichOutputType =
-  | "svg"
-  | "html"
-  | "mermaid"
-  | "chart"
-  | "canvas"
-  | "plain-text"
-  | "code"
-  | "warm-text"
+  "svg" | "html" | "mermaid" | "chart" | "canvas" | "plain-text" | "code" | "warm-text"
 
 export type RichOutputTechnology =
-  | "svg"
-  | "html"
-  | "mermaid"
-  | "chartjs"
-  | "canvas"
-  | "threejs"
-  | "tonejs"
-  | "d3"
-  | "none"
+  "svg" | "html" | "mermaid" | "chartjs" | "canvas" | "threejs" | "tonejs" | "d3" | "none"
 
 export type RichOutputHostStrategy =
-  | "native"
-  | "artifact-preview"
-  | "sandboxed-html"
-  | "lazy-runtime"
+  "native" | "artifact-preview" | "sandboxed-html" | "lazy-runtime"
 
 export type RichOutputRolloutTier = "core" | "advanced"
 
@@ -75,9 +57,7 @@ export interface RichOutputRoutingOptions {
 }
 
 export type RichOutputRoutingReason =
-  | "feature-disabled"
-  | "prefer-simple-output"
-  | "rich-output-disabled"
+  "feature-disabled" | "prefer-simple-output" | "rich-output-disabled"
 
 export interface RichOutputRoutingResult {
   requestedProfile: RichOutputProfile

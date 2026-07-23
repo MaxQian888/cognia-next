@@ -1,10 +1,6 @@
 /** @jest-environment jsdom */
 
-import {
-  clearLarkOAuthPending,
-  getLarkOAuthPending,
-  setLarkOAuthPending,
-} from "./oauth-pending"
+import { clearLarkOAuthPending, getLarkOAuthPending, setLarkOAuthPending } from "./oauth-pending"
 
 const KEY = "lark-oauth-pending:lk-1"
 

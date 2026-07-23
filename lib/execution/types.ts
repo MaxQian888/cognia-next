@@ -21,13 +21,7 @@
  * broker emits when a leg settles.
  */
 export type ExecutionLegKind =
-  | "chat"
-  | "workflow-step"
-  | "scheduled"
-  | "connector"
-  | "subagent"
-  | "goal"
-  | "team"
+  "chat" | "workflow-step" | "scheduled" | "connector" | "subagent" | "goal" | "team"
 
 /**
  * The shared resource an admission competes for. Today every AI turn shares

@@ -12,13 +12,7 @@
 
 /** Coarse bucket a turn error falls into. Drives the hint + notification title. */
 export type ErrorCategory =
-  | "auth"
-  | "rateLimit"
-  | "network"
-  | "timeout"
-  | "sidecar"
-  | "permission"
-  | "generic"
+  "auth" | "rateLimit" | "network" | "timeout" | "sidecar" | "permission" | "generic"
 
 export interface ClassifiedError {
   category: ErrorCategory

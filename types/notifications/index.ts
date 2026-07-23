@@ -10,13 +10,7 @@
 
 /** Which subsystem emitted the notification. Extensible union. */
 export type NotificationSource =
-  | "scheduler"
-  | "agent-team"
-  | "plugin"
-  | "connector"
-  | "session"
-  | "workflow"
-  | "system"
+  "scheduler" | "agent-team" | "plugin" | "connector" | "session" | "workflow" | "system"
 
 /** Severity / obtrusiveness tier. `critical` bypasses DND + per-source mute. */
 export type NotificationLevel = "info" | "success" | "warning" | "error" | "critical"

@@ -14,14 +14,12 @@ import {
 
 function makePlugin(override?: Partial<CapacitorHttpPlugin>): CapacitorHttpPlugin {
   return {
-    request: jest.fn(
-      async (): Promise<CapacitorHttpResponse> => ({
-        data: "ok",
-        status: 200,
-        headers: {},
-        url: "https://example.com",
-      })
-    ),
+    request: jest.fn(async (): Promise<CapacitorHttpResponse> => ({
+      data: "ok",
+      status: 200,
+      headers: {},
+      url: "https://example.com",
+    })),
     ...override,
   }
 }

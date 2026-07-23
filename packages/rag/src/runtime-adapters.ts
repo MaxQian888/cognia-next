@@ -11,11 +11,7 @@ export type StorageBackendId =
 export type StorageBackendCategory = "browser-persistence" | "vector-provider" | "knowledge-store"
 
 export type StorageBackendReadinessState =
-  | "unconfigured"
-  | "configured"
-  | "reachable"
-  | "operational"
-  | "degraded"
+  "unconfigured" | "configured" | "reachable" | "operational" | "degraded"
 
 export interface StorageBackendDiagnostic {
   code: string

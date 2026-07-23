@@ -47,14 +47,7 @@ export interface Footnote {
 }
 
 export type AdmonitionType =
-  | "note"
-  | "tip"
-  | "warning"
-  | "caution"
-  | "important"
-  | "info"
-  | "danger"
-  | "abstract"
+  "note" | "tip" | "warning" | "caution" | "important" | "info" | "danger" | "abstract"
 
 export interface Admonition {
   type: AdmonitionType
@@ -71,8 +64,7 @@ function tryParseYaml(frontmatterStr: string): Record<string, unknown> | null {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const yamlModule = require("yaml")
       cachedYamlParser = (yamlModule.parse ?? yamlModule.default?.parse) as
-        | ((source: string) => unknown)
-        | null
+        ((source: string) => unknown) | null
     } catch (error) {
       log.warn("Failed to load YAML parser, falling back to lightweight parser", { error })
       cachedYamlParser = null

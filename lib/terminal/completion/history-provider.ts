@@ -76,14 +76,12 @@ export const historyProvider: TerminalCompletionProvider = {
       if (merged.length >= MAX_HISTORY_SUGGESTIONS + MAX_DURABLE_SUGGESTIONS) break
     }
 
-    return merged.map(
-      (cmd, i): TerminalCompletionSuggestion => ({
-        text: cmd,
-        source: "history",
-        providerId: historyProvider.id,
-        // Top match gets the top score, decaying with rank.
-        score: Math.max(0.1, 0.9 - i * 0.1),
-      })
-    )
+    return merged.map((cmd, i): TerminalCompletionSuggestion => ({
+      text: cmd,
+      source: "history",
+      providerId: historyProvider.id,
+      // Top match gets the top score, decaying with rank.
+      score: Math.max(0.1, 0.9 - i * 0.1),
+    }))
   },
 }

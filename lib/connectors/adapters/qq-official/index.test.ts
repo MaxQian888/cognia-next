@@ -152,7 +152,12 @@ describe("createQQOfficialAdapter", () => {
     mockInvoke.mockResolvedValue(httpResp(400, { message: "msg limit exceed", code: 22009 }))
     const res = await adapter().send(
       sendReq({
-        conversationRef: { platform: "qq-official", adapterId: "qq-1", scene: "group", sceneId: "GO" },
+        conversationRef: {
+          platform: "qq-official",
+          adapterId: "qq-1",
+          scene: "group",
+          sceneId: "GO",
+        },
       })
     )
     expect(res.error?.code).toBe("platform_4xx")

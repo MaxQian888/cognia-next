@@ -22,8 +22,7 @@ export interface ZipDeps {
 }
 
 export type ExtractZipResult =
-  | { ok: true; entries: ModelFileEntry[] }
-  | { ok: false; code: "zipFailed" }
+  { ok: true; entries: ModelFileEntry[] } | { ok: false; code: "zipFailed" }
 
 /**
  * Common single top-level folder shared by every path, or "" if none. Requires

@@ -370,8 +370,9 @@ describe("createDiscordAdapter", () => {
       ([cmd]: [string]) => cmd === "connectors_discord_upload"
     )
     expect(uploadCall).toBeDefined()
-    const uploadReq = (uploadCall![1] as { req: { channelId: string; files: Array<{ filename: string }> } })
-      .req
+    const uploadReq = (
+      uploadCall![1] as { req: { channelId: string; files: Array<{ filename: string }> } }
+    ).req
     expect(uploadReq.channelId).toBe("channel-abc")
     // image filename derives from the URL basename; file uses seg.name.
     expect(uploadReq.files.map((f) => f.filename)).toEqual(["pic.png", "report.pdf"])
@@ -574,7 +575,10 @@ describe("createDiscordAdapter", () => {
 
     const ackReq = mockInvoke.mock.calls
       .filter(([cmd]: [string]) => cmd === "connectors_http_request")
-      .map(([, a]: [string, unknown]) => (a as { req: { url: string; method: string; body?: string } }).req)
+      .map(
+        ([, a]: [string, unknown]) =>
+          (a as { req: { url: string; method: string; body?: string } }).req
+      )
       .find((r) => r.url.includes("/interactions/int-1/int-token/callback"))
     expect(ackReq).toBeDefined()
     expect(ackReq!.method).toBe("POST")
@@ -706,7 +710,10 @@ describe("createDiscordAdapter", () => {
 
     const identify = mockInvoke.mock.calls
       .filter(([cmd]: [string]) => cmd === "connectors_ws_send")
-      .map(([, a]: [string, unknown]) => JSON.parse((a as { data: string }).data) as { op: number; d?: { intents?: number } })
+      .map(
+        ([, a]: [string, unknown]) =>
+          JSON.parse((a as { data: string }).data) as { op: number; d?: { intents?: number } }
+      )
       .find((f) => f.op === 2)
     expect(identify?.d?.intents).toBe(4096)
   }, 10000)
@@ -808,7 +815,11 @@ describe("createDiscordAdapter", () => {
   })
 
   it("maps other 4xx to platform_4xx, not retryable (no more infinite 400 retries)", async () => {
-    mockInvoke.mockResolvedValue({ status: 400, headers: {}, body: '{"message":"Invalid Form Body"}' })
+    mockInvoke.mockResolvedValue({
+      status: 400,
+      headers: {},
+      body: '{"message":"Invalid Form Body"}',
+    })
 
     const adapter = makeAdapter()
     const result = await adapter.send(makeTextReq())
@@ -906,7 +917,10 @@ describe("createDiscordAdapter", () => {
   })
 
   it("fetchHistory keeps the bot's own messages (self-echo guard does not apply to history)", async () => {
-    const selfMsg = { ...makeHistMsg("55"), author: { id: "bot-self-id", username: "me", bot: true } }
+    const selfMsg = {
+      ...makeHistMsg("55"),
+      author: { id: "bot-self-id", username: "me", bot: true },
+    }
     let served = false
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd !== "connectors_http_request") return undefined

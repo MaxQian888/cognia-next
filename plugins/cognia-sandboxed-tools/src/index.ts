@@ -176,9 +176,7 @@ interface BashCallInputs {
 
 /** Tool names whose `policy_for` maps to a single-file write scope. */
 type FileToolName =
-  | typeof TOOL_SANDBOX_EDIT
-  | typeof TOOL_SANDBOX_WRITE
-  | typeof TOOL_SANDBOX_TEXT_EDITOR
+  typeof TOOL_SANDBOX_EDIT | typeof TOOL_SANDBOX_WRITE | typeof TOOL_SANDBOX_TEXT_EDITOR
 
 interface WriteCallInputs {
   path: string

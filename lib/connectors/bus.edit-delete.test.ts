@@ -286,9 +286,7 @@ describe("ConnectorBus.applySystemEvent — reaction / poke system kinds", () =>
     await bus.dispatchInboundFull(makeSystemEvent("teleport"))
     const audit = await getDb().connectorAudit.toArray()
     expect(
-      audit.some(
-        (r) => r.kind === "adapter.error" && r.reason === "unknown_system_kind:teleport"
-      )
+      audit.some((r) => r.kind === "adapter.error" && r.reason === "unknown_system_kind:teleport")
     ).toBe(true)
   })
 })

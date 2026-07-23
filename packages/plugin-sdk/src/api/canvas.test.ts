@@ -14,10 +14,7 @@ describe("plugin-sdk api/canvas", () => {
   it("re-exports canvas runtime API and document types", () => {
     const assertTypes = <
       _T extends
-        | PluginCanvasAPI
-        | PluginCanvasDocument
-        | CreateCanvasDocumentOptions
-        | CanvasSelection,
+        PluginCanvasAPI | PluginCanvasDocument | CreateCanvasDocumentOptions | CanvasSelection,
     >(): void => undefined
 
     expect(assertTypes).toBeDefined()

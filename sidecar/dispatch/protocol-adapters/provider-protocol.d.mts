@@ -8,10 +8,7 @@ export const OPENAI_HOST_PROVIDERS: ReadonlySet<string>
 export function isMisroutedToOpenAi(providerId: string, baseURL?: string): boolean
 export function isGenuineOpenAiEndpoint(baseURL?: string): boolean
 export function isResponsesOnlyEndpoint(baseURL?: string): boolean
-export function isOpenAiNativeSurface(input?: {
-  providerId?: string
-  baseURL?: string
-}): boolean
+export function isOpenAiNativeSurface(input?: { providerId?: string; baseURL?: string }): boolean
 export function decideOpenAiEndpointFlavor(input?: {
   apiFlavor?: string
   baseURL?: string

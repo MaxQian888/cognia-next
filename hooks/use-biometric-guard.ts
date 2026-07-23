@@ -40,8 +40,7 @@ export interface BiometricGate {
 }
 
 export type GuardOutcome<T> =
-  | { kind: "ok"; value: T }
-  | { kind: "blocked"; reason: VerifyOutcome["kind"] }
+  { kind: "ok"; value: T } | { kind: "blocked"; reason: VerifyOutcome["kind"] }
 
 export type BiometricGuard = <T>(
   gate: BiometricGate,

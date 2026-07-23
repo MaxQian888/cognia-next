@@ -28,15 +28,7 @@ export type ShellPlatform = "windows" | "macos" | "linux" | "other"
  * though the Rust integration layer treats a bare `sh` as `unknown`.
  */
 export type ShellKind =
-  | "bash"
-  | "zsh"
-  | "sh"
-  | "pwsh"
-  | "powershell"
-  | "cmd"
-  | "fish"
-  | "nu"
-  | "unknown"
+  "bash" | "zsh" | "sh" | "pwsh" | "powershell" | "cmd" | "fish" | "nu" | "unknown"
 
 /**
  * Classify a shell binary path into a `ShellKind`. Mirrors the Rust

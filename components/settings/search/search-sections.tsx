@@ -16,12 +16,7 @@ import { SearchUsagePanel } from "./search-usage-panel"
 export const SEARCH_SECTION_PARAM = "searchSection"
 
 export type SearchSectionId =
-  | "basics"
-  | "providers"
-  | "behavior"
-  | "safety"
-  | "performance"
-  | "diagnostics"
+  "basics" | "providers" | "behavior" | "safety" | "performance" | "diagnostics"
 
 const SECTION_IDS: SearchSectionId[] = [
   "basics",

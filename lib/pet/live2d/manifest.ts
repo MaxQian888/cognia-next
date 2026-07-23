@@ -7,8 +7,7 @@
 import type { Live2DManifest } from "./types"
 
 export type ManifestParseResult =
-  | { ok: true; manifest: Live2DManifest }
-  | { ok: false; code: "invalidJson" | "cubism2Unsupported" }
+  { ok: true; manifest: Live2DManifest } | { ok: false; code: "invalidJson" | "cubism2Unsupported" }
 
 /** Directory portion of a POSIX-style path ("a/b/c.json" → "a/b"). */
 function dirname(path: string): string {

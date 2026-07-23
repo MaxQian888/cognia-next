@@ -8,9 +8,9 @@ jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
 const getSettings = jest.fn(async () => ({ id: "singleton", cliBridge: { autoSync: true } }))
 jest.mock("@/lib/db/settings", () => ({ getSettings: () => getSettings() }))
 
-const maybeAutoPushToCli = jest.fn(
-  async (_s: unknown): Promise<{ home: string | null }> => ({ home: "/home/.cognia" })
-)
+const maybeAutoPushToCli = jest.fn(async (_s: unknown): Promise<{ home: string | null }> => ({
+  home: "/home/.cognia",
+}))
 jest.mock("@/lib/cli-bridge/auto-push", () => ({
   maybeAutoPushToCli: (settings: unknown) => maybeAutoPushToCli(settings),
 }))

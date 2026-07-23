@@ -69,8 +69,7 @@ describe("built-in plugin manifests", () => {
     "%s declares an explicit mobile runtime availability",
     (_plugin, manifest) => {
       const compat = manifest.json.runtimeCompatibility as
-        | Record<string, { availability?: string } | undefined>
-        | undefined
+        Record<string, { availability?: string } | undefined> | undefined
       if (!compat) return
       expect(compat.mobile).toBeDefined()
       expect(RUNTIME_AVAILABILITIES).toContain(compat.mobile?.availability as never)

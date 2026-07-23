@@ -129,9 +129,7 @@ export async function runChatMiddlewareChain(
 }
 
 type RaceResult<T> =
-  | { kind: "success"; value: T }
-  | { kind: "timeout" }
-  | { kind: "error"; message: string }
+  { kind: "success"; value: T } | { kind: "timeout" } | { kind: "error"; message: string }
 
 async function raceWithTimeout<T>(p: Promise<T>, timeoutMs: number): Promise<RaceResult<T>> {
   let timer: ReturnType<typeof setTimeout> | undefined

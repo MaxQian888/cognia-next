@@ -20,10 +20,7 @@ import type { TeamBudgetEscalationAction } from "@/types/agent/agent-team"
 import type { SubAgentTokenUsage } from "@/types/agent/sub-agent"
 
 export type BudgetEventName =
-  | "warning_crossed"
-  | "critical_crossed"
-  | "pause_for_review"
-  | "entered_background_mode"
+  "warning_crossed" | "critical_crossed" | "pause_for_review" | "entered_background_mode"
 
 export interface BudgetGuardOptions {
   runId: string

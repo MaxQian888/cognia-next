@@ -64,13 +64,7 @@ export interface TokenRefreshFrame {
 }
 
 export type BridgeFrame =
-  | HelloFrame
-  | HelloAckFrame
-  | EventFrame
-  | RespondFrame
-  | PingFrame
-  | PongFrame
-  | TokenRefreshFrame
+  HelloFrame | HelloAckFrame | EventFrame | RespondFrame | PingFrame | PongFrame | TokenRefreshFrame
 
 const FRAME_TYPES = new Set([
   "hello",

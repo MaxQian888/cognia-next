@@ -20,12 +20,7 @@ export type { BuiltInSkillCatalogEntry, BuiltInSkillResource }
  * no surface (e.g. ocr / web-research) is opt-in only — never auto-activated.
  */
 export type SurfaceId =
-  | "im-connector"
-  | "computer-use"
-  | "workflow-editor"
-  | "agent-team"
-  | "digital-twin"
-  | "goal-loop"
+  "im-connector" | "computer-use" | "workflow-editor" | "agent-team" | "digital-twin" | "goal-loop"
 
 /** Dexie row-id prefix for a seeded built-in skill (matches the legacy 5). */
 export const BUILTIN_SKILL_ID_PREFIX = "skill_builtin_"

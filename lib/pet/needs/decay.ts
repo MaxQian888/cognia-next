@@ -13,13 +13,7 @@ function clamp(value: number): number {
 
 /** Direct interaction kinds (drive the restore table + interaction one-shots). */
 export type PetInteractionKind =
-  | "fed"
-  | "played"
-  | "petted"
-  | "talked"
-  | "slept"
-  | "cleaned"
-  | "treated"
+  "fed" | "played" | "petted" | "talked" | "slept" | "cleaned" | "treated"
 
 /** How much each interaction restores (or costs). */
 export const INTERACTION_EFFECTS: Record<

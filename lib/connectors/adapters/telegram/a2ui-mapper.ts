@@ -32,12 +32,7 @@ import {
   walkA2UISurface,
   type A2UIWalkNode,
 } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
-import {
-  escapeMdV2,
-  escapeMdV2Code,
-  escapeMdV2Url,
-  TELEGRAM_CAPTION_LIMIT,
-} from "./markdown-v2"
+import { escapeMdV2, escapeMdV2Code, escapeMdV2Url, TELEGRAM_CAPTION_LIMIT } from "./markdown-v2"
 import type { SerializedTelegramCall } from "./serialize"
 
 export interface TelegramMapperInput {

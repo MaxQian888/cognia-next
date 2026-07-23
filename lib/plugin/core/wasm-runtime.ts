@@ -66,8 +66,7 @@ export interface WasmRuntimeInstance {
 
 /** Source bytes — either a base64 string or a binary buffer. */
 export type WasmSource =
-  | { kind: "base64"; data: string }
-  | { kind: "bytes"; data: ArrayBuffer | Uint8Array }
+  { kind: "base64"; data: string } | { kind: "bytes"; data: ArrayBuffer | Uint8Array }
 
 const disposedSentinel = "wasm runtime instance disposed"
 

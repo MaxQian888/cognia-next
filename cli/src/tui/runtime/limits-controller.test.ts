@@ -27,8 +27,7 @@ function deps(over: Partial<LimitsDeps> = {}): LimitsDeps & { actions: TuiAction
 
 function openedLimits(actions: TuiAction[]) {
   const a = actions.find((x) => x.type === "OVERLAY_OPEN") as
-    | Extract<TuiAction, { type: "OVERLAY_OPEN" }>
-    | undefined
+    Extract<TuiAction, { type: "OVERLAY_OPEN" }> | undefined
   return a && a.overlay.kind === "limits" ? a.overlay : null
 }
 

@@ -24,10 +24,7 @@ describe("plugin-sdk api/density-preset", () => {
   it("re-exports density contribution, registry, and appearance settings types", () => {
     const assertTypes = <
       _T extends
-        | PluginDensityPresetContribution
-        | RegisteredDensityPreset
-        | DensitySettings
-        | DensityLevel,
+        PluginDensityPresetContribution | RegisteredDensityPreset | DensitySettings | DensityLevel,
     >(): void => undefined
 
     expect(assertTypes).toBeDefined()

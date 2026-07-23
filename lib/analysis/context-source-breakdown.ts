@@ -13,11 +13,7 @@
 import type { UIMessage } from "ai"
 
 export type ContextSourceId =
-  | "userMessages"
-  | "mentionedFiles"
-  | "toolOutputs"
-  | "thinking"
-  | "taskCoordination"
+  "userMessages" | "mentionedFiles" | "toolOutputs" | "thinking" | "taskCoordination"
 
 /** Tools that are team/task coordination rather than real work. */
 const COORDINATION_TOOLS = new Set(["SendMessage", "TaskCreate", "TaskUpdate", "TeamCreate"])

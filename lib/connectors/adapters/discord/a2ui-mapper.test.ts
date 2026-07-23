@@ -160,7 +160,12 @@ describe("buildDiscordA2UIPayload", () => {
       required: true,
       placeholder: "ph",
     })
-    expect(rows[1].components[0]).toMatchObject({ type: 4, custom_id: "b", style: 2, required: false })
+    expect(rows[1].components[0]).toMatchObject({
+      type: 4,
+      custom_id: "b",
+      style: 2,
+      required: false,
+    })
   })
 
   it("link buttons set url + skip callback bindings persistence (but record still kept for parity)", async () => {

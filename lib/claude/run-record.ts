@@ -33,12 +33,7 @@ export interface RunToolEntry {
 
 /** Resolved status of a whole run, distinct from the live `RunStatus`. */
 export type RunRecordStatus =
-  | "running"
-  | "awaiting_approval"
-  | "done"
-  | "error"
-  | "interrupted"
-  | "idle"
+  "running" | "awaiting_approval" | "done" | "error" | "interrupted" | "idle"
 
 /** The in-memory aggregate the panel reads (and C snapshots into Dexie). */
 export interface RunRecordView {

@@ -82,5 +82,4 @@ export interface ValidatedModel {
 
 /** Result of `validateLive2dImport`. */
 export type ImportValidationResult =
-  | { ok: true; model: ValidatedModel }
-  | { ok: false; code: Live2dImportError; detail?: string }
+  { ok: true; model: ValidatedModel } | { ok: false; code: Live2dImportError; detail?: string }

@@ -419,14 +419,12 @@ describe("scanLan — paired tier and multi-port", () => {
     const mdns = makeMdns()
     const fetchMock = makeFetch(() => cogniaResp())
     const onFound = jest.fn()
-    const healthzFetcher = jest.fn(
-      async (): Promise<HealthzResult> => ({
-        version: "0.5.0",
-        fingerprint: "HEALTHZ-FP",
-        advertisedPort: 7890,
-        serverId: "0123456789abcdef0123456789abcdef",
-      })
-    )
+    const healthzFetcher = jest.fn(async (): Promise<HealthzResult> => ({
+      version: "0.5.0",
+      fingerprint: "HEALTHZ-FP",
+      advertisedPort: 7890,
+      serverId: "0123456789abcdef0123456789abcdef",
+    }))
     const result = await scanLan({
       signal: new AbortController().signal,
       onFound,
@@ -471,14 +469,12 @@ describe("scanLan — paired tier and multi-port", () => {
     // emit must not downgrade the paired tier.
     const mdns = makeMdns()
     const fetchMock = makeFetch(() => cogniaResp())
-    const healthzFetcher = jest.fn(
-      async (): Promise<HealthzResult> => ({
-        version: "0.5.0",
-        fingerprint: "HEALTHZ-FP",
-        advertisedPort: 7890,
-        serverId: "deadbeefdeadbeefdeadbeefdeadbeef",
-      })
-    )
+    const healthzFetcher = jest.fn(async (): Promise<HealthzResult> => ({
+      version: "0.5.0",
+      fingerprint: "HEALTHZ-FP",
+      advertisedPort: 7890,
+      serverId: "deadbeefdeadbeefdeadbeefdeadbeef",
+    }))
     const result = await scanLan({
       signal: new AbortController().signal,
       onFound: jest.fn(),

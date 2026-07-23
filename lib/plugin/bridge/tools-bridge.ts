@@ -196,8 +196,7 @@ export class PluginToolsBridge {
 
           // Add description if available
           const description = (propSchema as Record<string, unknown>).description as
-            | string
-            | undefined
+            string | undefined
           if (description) {
             propType = propType.describe(description)
           }

@@ -117,8 +117,7 @@ function adaptSession(input: AdaptInput): ShellChildProcess {
   const decoder = new TextDecoder("utf-8", { fatal: false })
 
   let resolveFinished:
-    | ((value: { exitCode: number | null; signal: string | null }) => void)
-    | null = null
+    ((value: { exitCode: number | null; signal: string | null }) => void) | null = null
   const finished = new Promise<{ exitCode: number | null; signal: string | null }>((resolve) => {
     resolveFinished = resolve
   })

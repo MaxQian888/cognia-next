@@ -58,8 +58,7 @@ export type CapabilityAuditWarningCode =
   | "missing-shared-memory-adapter"
 
 export type CapabilityAuditScope =
-  | { kind: "team"; teamId: string }
-  | { kind: "teammate"; teamId: string; teammateId: string }
+  { kind: "team"; teamId: string } | { kind: "teammate"; teamId: string; teammateId: string }
 
 /**
  * The location a stale id lives at. Either one of the 7 capability-bundle

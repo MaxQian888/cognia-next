@@ -55,12 +55,10 @@ describe("addHost", () => {
   })
 
   it("uses an explicit label and normalizes a trailing-slash baseUrl", () => {
-    const host = useRemoteHostStore
-      .getState()
-      .addHost({
-        label: "  Dev box  ",
-        config: makeConfig({ baseUrl: "https://box.example:27890/" }),
-      })
+    const host = useRemoteHostStore.getState().addHost({
+      label: "  Dev box  ",
+      config: makeConfig({ baseUrl: "https://box.example:27890/" }),
+    })
     expect(host.label).toBe("Dev box")
     expect(host.config.baseUrl).toBe("https://box.example:27890")
   })

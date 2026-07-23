@@ -21,11 +21,7 @@ describe("plugin-sdk api/view", () => {
   it("re-exports view contract types", () => {
     const assertTypes = <
       _T extends
-        | PluginViewDef
-        | ResolvedPluginView
-        | TreeDataProvider
-        | PluginTreeNode
-        | PluginViewProps,
+        PluginViewDef | ResolvedPluginView | TreeDataProvider | PluginTreeNode | PluginViewProps,
     >(): void => undefined
 
     expect(assertTypes).toBeDefined()

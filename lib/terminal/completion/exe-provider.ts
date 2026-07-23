@@ -80,15 +80,13 @@ export function createExeCompletionProvider(
 
       return merged
         .filter((name) => name !== prefix)
-        .map(
-          (name, i): TerminalCompletionSuggestion => ({
-            text: name,
-            source: "exe",
-            providerId: "builtin:exe",
-            score: Math.max(0.1, 0.85 - i * 0.05),
-            replace: { from: at.token.start, insert: name },
-          })
-        )
+        .map((name, i): TerminalCompletionSuggestion => ({
+          text: name,
+          source: "exe",
+          providerId: "builtin:exe",
+          score: Math.max(0.1, 0.85 - i * 0.05),
+          replace: { from: at.token.start, insert: name },
+        }))
     },
   }
 }

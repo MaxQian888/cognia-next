@@ -14,7 +14,11 @@
 
 import { connectorsHttpRequest, connectorsKeyringGet } from "@/lib/connectors/tauri/commands"
 import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
-import { QQ_API_BASE, getQQAccessToken, qqAuthHeaders } from "@/lib/connectors/adapters/qq-official/auth"
+import {
+  QQ_API_BASE,
+  getQQAccessToken,
+  qqAuthHeaders,
+} from "@/lib/connectors/adapters/qq-official/auth"
 
 export interface QQOfficialWhoamiResult {
   botName: string

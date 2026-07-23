@@ -211,13 +211,9 @@ describe("AdapterWhoamiPanel", () => {
     })
   })
 
-  it.each([
-    ["onebot"],
-    ["dingtalk"],
-    ["wechat-oa"],
-    ["wecom"],
-    ["wechat-personal"],
-  ] as Array<[AdapterInstanceRow["type"]]>)(
+  it.each([["onebot"], ["dingtalk"], ["wechat-oa"], ["wecom"], ["wechat-personal"]] as Array<
+    [AdapterInstanceRow["type"]]
+  >)(
     "hides the probe button and shows a no-probe reason for %s rows without a snapshot",
     async (platform) => {
       await seed(`${platform}-no-probe`, platform)

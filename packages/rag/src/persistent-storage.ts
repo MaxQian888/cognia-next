@@ -327,8 +327,7 @@ export class PersistentRAGStorage {
 
       getRequest.onsuccess = () => {
         const existing = getRequest.result as
-          | (StoredDocument & { collectionName: string })
-          | undefined
+          (StoredDocument & { collectionName: string }) | undefined
         if (!existing || existing.collectionName !== collectionName) {
           resolve(false)
           return

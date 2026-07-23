@@ -138,14 +138,7 @@ export function createApprovalResponses(
  * Tool category for organization
  */
 export type ToolCategory =
-  | "search"
-  | "data"
-  | "communication"
-  | "file"
-  | "code"
-  | "browser"
-  | "system"
-  | "custom"
+  "search" | "data" | "communication" | "file" | "code" | "browser" | "system" | "custom"
 
 /**
  * Tool metadata for registry

@@ -74,9 +74,7 @@ export interface UsageDiagnosticsBlock {
 }
 
 export type SystemMessageBlock =
-  | ContextDiagnosticsBlock
-  | CostDiagnosticsBlock
-  | UsageDiagnosticsBlock
+  ContextDiagnosticsBlock | CostDiagnosticsBlock | UsageDiagnosticsBlock
 
 /** Narrowing guard for the renderer's `data-diagnostics` part. */
 export function isSystemMessageBlock(value: unknown): value is SystemMessageBlock {

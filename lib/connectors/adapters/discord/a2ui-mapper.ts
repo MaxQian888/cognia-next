@@ -310,9 +310,7 @@ export async function buildDiscordA2UIPayload(
         type: 2, // Button
         style: 1, // Primary
         label:
-          stringValue(dialogNode?.raw.trigger) ||
-          stringValue(dialogNode?.raw.title) ||
-          "Open form",
+          stringValue(dialogNode?.raw.trigger) || stringValue(dialogNode?.raw.title) || "Open form",
         custom_id: wireId,
       })
     }

@@ -21,13 +21,7 @@ export interface PetBridgeBubble {
 
 /** Interaction kinds the overlay can send back to the main controller. */
 export type PetBridgeInteractionKind =
-  | "fed"
-  | "played"
-  | "petted"
-  | "talked"
-  | "slept"
-  | "cleaned"
-  | "treated"
+  "fed" | "played" | "petted" | "talked" | "slept" | "cleaned" | "treated"
 
 /** Discriminated union of every message that can cross the bridge. */
 export type PetBridgeMessage =

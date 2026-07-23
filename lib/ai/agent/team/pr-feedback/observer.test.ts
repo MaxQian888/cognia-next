@@ -190,15 +190,13 @@ describe("PrFeedbackController", () => {
   })
 
   it("runs the reviewer once per head commit and routes changes_requested", async () => {
-    const reviewer = jest.fn(
-      async (): Promise<NudgeIntent | null> => ({
-        key: "review:https://gh/acme/app/pull/5:ao:run-1",
-        sig: "s1",
-        message: "AO reviewer requests changes",
-        maxAttempts: 3,
-        category: "review",
-      })
-    )
+    const reviewer = jest.fn(async (): Promise<NudgeIntent | null> => ({
+      key: "review:https://gh/acme/app/pull/5:ao:run-1",
+      sig: "s1",
+      message: "AO reviewer requests changes",
+      maxAttempts: 3,
+      category: "review",
+    }))
     let call = 0
     const { controller, captured, tick } = makeController({
       reviewer,

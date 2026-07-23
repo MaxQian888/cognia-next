@@ -18,12 +18,7 @@ describe("plugin-sdk api/exporter", () => {
   it("re-exports custom exporter and export API contract types", () => {
     const assertTypes = <
       _T extends
-        | CustomExporter
-        | PluginExportAPI
-        | ExportFormat
-        | ExportOptions
-        | ExportData
-        | ExportResult,
+        CustomExporter | PluginExportAPI | ExportFormat | ExportOptions | ExportData | ExportResult,
     >(): void => undefined
 
     expect(assertTypes).toBeDefined()

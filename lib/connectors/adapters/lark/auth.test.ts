@@ -263,7 +263,12 @@ describe("exchangeCodeForUserAccessToken", () => {
       makeTokenV2Response({ code: 20050, error: "invalid_grant", errorDescription: "code expired" })
     )
     await expect(
-      exchangeCodeForUserAccessToken({ code: "stale", appId: "a", appSecret: "s", redirectUri: "r" })
+      exchangeCodeForUserAccessToken({
+        code: "stale",
+        appId: "a",
+        appSecret: "s",
+        redirectUri: "r",
+      })
     ).rejects.toThrow(/code expired/)
   })
 

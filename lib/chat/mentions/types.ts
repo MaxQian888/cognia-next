@@ -15,13 +15,7 @@
  */
 
 export type ContextRefKind =
-  | "file"
-  | "agent"
-  | "subagent"
-  | "skill"
-  | "preset"
-  | "wfNode"
-  | "wfEdge"
+  "file" | "agent" | "subagent" | "skill" | "preset" | "wfNode" | "wfEdge"
 
 export interface ContextRef {
   kind: ContextRefKind

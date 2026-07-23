@@ -136,14 +136,7 @@ export interface Footnote {
 }
 
 export type AdmonitionType =
-  | "note"
-  | "tip"
-  | "warning"
-  | "caution"
-  | "important"
-  | "info"
-  | "danger"
-  | "abstract"
+  "note" | "tip" | "warning" | "caution" | "important" | "info" | "danger" | "abstract"
 
 export interface Admonition {
   type: AdmonitionType

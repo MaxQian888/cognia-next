@@ -164,13 +164,11 @@ describe("runDrivenTurns", () => {
 
   it("ends with an error when a turn fails (send returns null)", async () => {
     const actions: TuiAction[] = []
-    const advance = jest.fn(
-      async (): Promise<DrivenAdvance> => ({
-        kind: "stop",
-        status: "done",
-        summary: "x",
-      })
-    )
+    const advance = jest.fn(async (): Promise<DrivenAdvance> => ({
+      kind: "stop",
+      status: "done",
+      summary: "x",
+    }))
     await runDrivenTurns({
       send: async () => null,
       firstPrompt: "first",

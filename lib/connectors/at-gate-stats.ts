@@ -18,11 +18,7 @@
 import type { ConnectorAuditRow } from "@/lib/db/connector-types"
 
 export type AtGateBlockReason =
-  | "chat_blocklist"
-  | "chat_allowlist"
-  | "at_mention_required"
-  | "at_direct_only"
-  | "other"
+  "chat_blocklist" | "chat_allowlist" | "at_mention_required" | "at_direct_only" | "other"
 
 export interface AtGateBlockReasonCount {
   reason: AtGateBlockReason

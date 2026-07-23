@@ -29,8 +29,7 @@ const setStored = (panel?: PartialSourceControlPanelPrefs) =>
 
 const lastSaved = () =>
   saveMock.mock.calls[saveMock.mock.calls.length - 1]?.[0] as
-    | { gitSettings?: { commitMessageAI?: GitCommitAiSettings; panel?: unknown } }
-    | undefined
+    { gitSettings?: { commitMessageAI?: GitCommitAiSettings; panel?: unknown } } | undefined
 
 beforeEach(() => {
   saveMock.mockClear()

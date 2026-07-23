@@ -407,9 +407,7 @@ export async function connectorsMediaUpload(req: ConnectorMediaUploadRequest): P
  * bytes as `multipart/form-data` to `/channels/{id}/messages`, returning the new
  * message id. Handles voice messages via the IS_VOICE_MESSAGE flag.
  */
-export async function connectorsDiscordUpload(
-  req: ConnectorDiscordUploadRequest
-): Promise<string> {
+export async function connectorsDiscordUpload(req: ConnectorDiscordUploadRequest): Promise<string> {
   return invoker<string>("connectors_discord_upload", { req })
 }
 

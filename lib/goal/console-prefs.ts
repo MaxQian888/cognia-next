@@ -27,12 +27,7 @@ import type { GoalSortKey, SortDir } from "@/lib/goal/history-filter"
  * single top-level segmented tab bar (mirrors `/performance`).
  */
 export type GoalConsoleTab =
-  | "overview"
-  | "history"
-  | "analytics"
-  | "templates"
-  | "defaults"
-  | "tracker"
+  "overview" | "history" | "analytics" | "templates" | "defaults" | "tracker"
 
 /** Canonical tab order — also the render order of the tab bar. */
 export const GOAL_CONSOLE_TABS: readonly GoalConsoleTab[] = [

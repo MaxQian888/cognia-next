@@ -180,11 +180,19 @@ describe("OverviewTab", () => {
     mockIsTauri.mockReturnValue(true)
     primeLiveQueries({
       adapters: [
-        { id: "lark1", displayName: "Lark Bot", type: "lark", enabled: true, transportMode: "gateway" },
+        {
+          id: "lark1",
+          displayName: "Lark Bot",
+          type: "lark",
+          enabled: true,
+          transportMode: "gateway",
+        },
       ],
     })
     render(<OverviewTab />)
-    expect(await screen.findByText(/not needed — every enabled adapter dials out/i)).toBeInTheDocument()
+    expect(
+      await screen.findByText(/not needed — every enabled adapter dials out/i)
+    ).toBeInTheDocument()
     expect(screen.queryByText(/^Stopped$/)).not.toBeInTheDocument()
     // The webhook registration count is meaningless here — hidden.
     expect(screen.queryByText(/adapters registered/i)).not.toBeInTheDocument()
@@ -206,7 +214,13 @@ describe("OverviewTab", () => {
     mockIsTauri.mockReturnValue(true)
     primeLiveQueries({
       adapters: [
-        { id: "lark1", displayName: "Lark Bot", type: "lark", enabled: true, transportMode: "gateway" },
+        {
+          id: "lark1",
+          displayName: "Lark Bot",
+          type: "lark",
+          enabled: true,
+          transportMode: "gateway",
+        },
       ],
       heartbeats: [
         {
@@ -229,7 +243,13 @@ describe("OverviewTab", () => {
     mockIsTauri.mockReturnValue(true)
     primeLiveQueries({
       adapters: [
-        { id: "lark1", displayName: "Lark Bot", type: "lark", enabled: true, transportMode: "gateway" },
+        {
+          id: "lark1",
+          displayName: "Lark Bot",
+          type: "lark",
+          enabled: true,
+          transportMode: "gateway",
+        },
       ],
     })
     render(<OverviewTab />)
@@ -242,7 +262,13 @@ describe("OverviewTab", () => {
     mockIsTauri.mockReturnValue(true)
     primeLiveQueries({
       adapters: [
-        { id: "lark1", displayName: "Lark Bot", type: "lark", enabled: true, transportMode: "gateway" },
+        {
+          id: "lark1",
+          displayName: "Lark Bot",
+          type: "lark",
+          enabled: true,
+          transportMode: "gateway",
+        },
       ],
       heartbeats: [
         {
@@ -280,7 +306,13 @@ describe("OverviewTab", () => {
     mockIsTauri.mockReturnValue(true)
     primeLiveQueries({
       adapters: [
-        { id: "lark1", displayName: "Lark Bot", type: "lark", enabled: true, transportMode: "gateway" },
+        {
+          id: "lark1",
+          displayName: "Lark Bot",
+          type: "lark",
+          enabled: true,
+          transportMode: "gateway",
+        },
       ],
       heartbeats: [
         {
@@ -308,11 +340,15 @@ describe("OverviewTab", () => {
     mockIsTauri.mockReturnValue(true)
     primeLiveQueries({
       adapters: [
-        { id: "lark1", displayName: "Lark Bot", type: "lark", enabled: true, transportMode: "gateway" },
+        {
+          id: "lark1",
+          displayName: "Lark Bot",
+          type: "lark",
+          enabled: true,
+          transportMode: "gateway",
+        },
       ],
-      heartbeats: [
-        { id: "hb1", adapterId: "lark1", kind: "adapter.heartbeat", at: Date.now() },
-      ],
+      heartbeats: [{ id: "hb1", adapterId: "lark1", kind: "adapter.heartbeat", at: Date.now() }],
     })
     render(<OverviewTab />)
     expect(await screen.findByText("1 of 1 enabled adapters running")).toBeInTheDocument()
@@ -322,7 +358,13 @@ describe("OverviewTab", () => {
     mockIsTauri.mockReturnValue(true)
     primeLiveQueries({
       adapters: [
-        { id: "t1", displayName: "Old Bot", type: "telegram", enabled: false, transportMode: "longpoll" },
+        {
+          id: "t1",
+          displayName: "Old Bot",
+          type: "telegram",
+          enabled: false,
+          transportMode: "longpoll",
+        },
       ],
     })
     render(<OverviewTab />)

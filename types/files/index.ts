@@ -9,14 +9,7 @@
 
 /** A file-system operation the permission layer can gate. */
 export type FileOperation =
-  | "read"
-  | "write"
-  | "delete"
-  | "copy"
-  | "move"
-  | "list"
-  | "stat"
-  | "mkdir"
+  "read" | "write" | "delete" | "copy" | "move" | "list" | "stat" | "mkdir"
 
 /**
  * Operations that mutate the filesystem. A read-only policy denies all of

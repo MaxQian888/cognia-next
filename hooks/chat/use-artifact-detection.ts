@@ -49,16 +49,14 @@ export function useArtifactDetection(
       minLines: 1,
     })
       .filter((artifact) => artifact.type === "math" || artifact.content.length >= minCodeLength)
-      .map(
-        (artifact): DetectedArtifact => ({
-          type: artifact.type,
-          language: artifact.language as ArtifactLanguage | undefined,
-          content: artifact.content,
-          title: artifact.title,
-          startIndex: artifact.startIndex,
-          endIndex: artifact.endIndex,
-        })
-      )
+      .map((artifact): DetectedArtifact => ({
+        type: artifact.type,
+        language: artifact.language as ArtifactLanguage | undefined,
+        content: artifact.content,
+        title: artifact.title,
+        startIndex: artifact.startIndex,
+        endIndex: artifact.endIndex,
+      }))
 
     const fallbackArtifacts: DetectedArtifact[] = extractCodeBlocks(content)
       .map((block): DetectedArtifact | null => {

@@ -314,11 +314,9 @@ export function createLlmClient(config: LlmConfig): LlmClient {
       // (`usage` is a PromiseLike without .catch — wrap before swallowing.)
       addUsage(
         (await Promise.resolve(result.usage).catch(() => undefined)) as
-          | Record<string, unknown>
-          | undefined,
+          Record<string, unknown> | undefined,
         (await Promise.resolve(result.providerMetadata).catch(() => undefined)) as
-          | Record<string, unknown>
-          | undefined
+          Record<string, unknown> | undefined
       )
     },
     getUsageSnapshot() {

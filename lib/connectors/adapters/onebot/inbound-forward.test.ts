@@ -15,7 +15,12 @@ function okResponse(data: unknown): OneBotRpcResponse {
 
 describe("resolveForwardContent", () => {
   it("fetches get_forward_msg and splices nodes into an unresolved forward segment", async () => {
-    const nodes = [{ type: "node", data: { nickname: "Bob", content: [{ type: "text", data: { text: "hi" } }] } }]
+    const nodes = [
+      {
+        type: "node",
+        data: { nickname: "Bob", content: [{ type: "text", data: { text: "hi" } }] },
+      },
+    ]
     const send = jest.fn().mockResolvedValue(okResponse({ messages: nodes }))
     const transport = makeTransport(send)
 
@@ -47,7 +52,9 @@ describe("resolveForwardContent", () => {
   })
 
   it("leaves the segment untouched on a non-ok response", async () => {
-    const send = jest.fn().mockResolvedValue({ status: "failed", retcode: 1, data: null, echo: "e" })
+    const send = jest
+      .fn()
+      .mockResolvedValue({ status: "failed", retcode: 1, data: null, echo: "e" })
     const event = { message: [{ type: "forward", data: { id: "fwd-4" } }] }
     const result = (await resolveForwardContent(event, makeTransport(send))) as typeof event
     expect((result.message[0] as { data: { content?: unknown } }).data.content).toBeUndefined()
@@ -72,7 +79,9 @@ describe("resolveForwardContent", () => {
 
   it("ignores CQ-code string messages and non-object events", async () => {
     const send = jest.fn()
-    expect(await resolveForwardContent({ message: "[CQ:forward,id=1]" }, makeTransport(send))).toEqual({
+    expect(
+      await resolveForwardContent({ message: "[CQ:forward,id=1]" }, makeTransport(send))
+    ).toEqual({
       message: "[CQ:forward,id=1]",
     })
     expect(await resolveForwardContent(null, makeTransport(send))).toBeNull()

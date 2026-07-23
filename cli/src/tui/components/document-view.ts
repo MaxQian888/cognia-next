@@ -10,8 +10,7 @@ import type { DocumentFormat } from "../state/types"
 
 /** Markdown bodies tokenize to structured lines; text bodies stay as strings. */
 export type PreparedLines =
-  | { kind: "markdown"; lines: MdLine[] }
-  | { kind: "text"; lines: string[] }
+  { kind: "markdown"; lines: MdLine[] } | { kind: "text"; lines: string[] }
 
 /**
  * Turn a raw document body into renderable lines. `markdown` runs the markdown

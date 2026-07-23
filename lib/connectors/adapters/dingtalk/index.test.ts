@@ -276,9 +276,7 @@ describe("send — sessionWebhook fallback (no staffId)", () => {
 
   it("returns a non-retryable validation error when the webhook is expired", async () => {
     const a = makeAdapter()
-    const res = await a.send(
-      req(unionRef({ sessionWebhookExpiredTime: Date.now() - 1000 }))
-    )
+    const res = await a.send(req(unionRef({ sessionWebhookExpiredTime: Date.now() - 1000 })))
     expect(res.ok).toBe(false)
     expect(res.error?.code).toBe("validation")
     expect(res.error?.retryable).toBe(false)

@@ -14,15 +14,13 @@ function fakeBreaker(canPass = true): FakeBreaker {
     recordFailure: jest.fn(),
     canPass: jest.fn(() => canPass),
     state: jest.fn(() => (canPass ? "closed" : "open")),
-    snapshot: jest.fn(
-      (): CircuitBreakerSnapshot => ({
-        state: canPass ? "closed" : "open",
-        openedAt: null,
-        halfOpenSuccesses: 0,
-        recentFailureRate: 0,
-        eventCount: 0,
-      })
-    ),
+    snapshot: jest.fn((): CircuitBreakerSnapshot => ({
+      state: canPass ? "closed" : "open",
+      openedAt: null,
+      halfOpenSuccesses: 0,
+      recentFailureRate: 0,
+      eventCount: 0,
+    })),
   }
 }
 

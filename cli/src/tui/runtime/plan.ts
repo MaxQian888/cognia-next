@@ -32,11 +32,7 @@ export const PLAN_BUILD_MODE = "acceptEdits" as const
  * Mirrors Claude Code's approval menu (execution mode is chosen at approval time).
  */
 export type PlanDecision =
-  | "approve-auto"
-  | "approve-confirm"
-  | "approve-new-session"
-  | "edit-then-approve"
-  | "keep"
+  "approve-auto" | "approve-confirm" | "approve-new-session" | "edit-then-approve" | "keep"
 
 /** The choices shown in the plan-approval overlay — the approve options (execute
  * in place, execute in a fresh session), edit-first, then keep planning. */

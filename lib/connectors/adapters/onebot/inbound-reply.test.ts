@@ -42,9 +42,7 @@ describe("resolveReplySnippet", () => {
   })
 
   it("parses a CQ-string get_msg body through the shared CQ parser", async () => {
-    const send = jest
-      .fn()
-      .mockResolvedValue(okResponse({ message: "hi [CQ:at,qq=1] a&amp;b" }))
+    const send = jest.fn().mockResolvedValue(okResponse({ message: "hi [CQ:at,qq=1] a&amp;b" }))
     const event = replyEvent({ id: "1" })
     const result = (await resolveReplySnippet(event, makeTransport(send))) as typeof event
     expect((result.message[0] as { data: Record<string, unknown> }).data.snippet).toBe("hi  a&b")
@@ -64,8 +62,7 @@ describe("resolveReplySnippet", () => {
       .mockResolvedValue(okResponse({ message: [{ type: "text", data: { text: long } }] }))
     const event = replyEvent({ id: "3" })
     const result = (await resolveReplySnippet(event, makeTransport(send))) as typeof event
-    const snippet = (result.message[0] as { data: Record<string, unknown> }).data
-      .snippet as string
+    const snippet = (result.message[0] as { data: Record<string, unknown> }).data.snippet as string
     expect(snippet).toHaveLength(REPLY_SNIPPET_MAX_CHARS + 1) // +1 for the ellipsis
     expect(snippet.endsWith("…")).toBe(true)
   })

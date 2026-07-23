@@ -20,12 +20,7 @@ import type { WorkflowRunRow, RunStatus } from "@/types/workflow/visual"
 import type { TaskExecution, TaskExecutionStatus } from "@/types/scheduler"
 
 export type UnifiedExecutionStatus =
-  | "queued"
-  | "running"
-  | "waiting"
-  | "done"
-  | "error"
-  | "cancelled"
+  "queued" | "running" | "waiting" | "done" | "error" | "cancelled"
 
 export type UnifiedExecutionSource = "broker" | "workflow" | "scheduled"
 

@@ -519,9 +519,7 @@ function SchemaConfigBody({
 }
 
 type CustomLoadState =
-  | { status: "loading" }
-  | { status: "ready"; Component: ConfigComponent }
-  | { status: "fallback" }
+  { status: "loading" } | { status: "ready"; Component: ConfigComponent } | { status: "fallback" }
 
 /**
  * Renders a plugin's `manifest.configComponent` (ADR-0026 §3 §B).

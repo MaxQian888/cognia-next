@@ -85,9 +85,11 @@ export function resolveSpec(
   }
 
   if (currentToken.startsWith("-")) {
-    const scoped = (node.options ?? []).map(
-      (o): SpecCandidate => ({ name: o.name, description: o.description, kind: "option" })
-    )
+    const scoped = (node.options ?? []).map((o): SpecCandidate => ({
+      name: o.name,
+      description: o.description,
+      kind: "option",
+    }))
     const globals = optionScopes
       .flat()
       .map((o): SpecCandidate => ({ name: o.name, description: o.description, kind: "option" }))
@@ -97,9 +99,11 @@ export function resolveSpec(
   }
 
   pushAll(
-    (node.subcommands ?? []).map(
-      (s): SpecCandidate => ({ name: s.name, description: s.description, kind: "subcommand" })
-    )
+    (node.subcommands ?? []).map((s): SpecCandidate => ({
+      name: s.name,
+      description: s.description,
+      kind: "subcommand",
+    }))
   )
   return out
 }

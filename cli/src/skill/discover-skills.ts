@@ -70,13 +70,7 @@ const defaultFs: SkillFs = {
  *   - `custom`         — a user-configured `config.skillDirs` entry
  */
 export type SkillSourceKind =
-  | "project"
-  | "global"
-  | "claude-project"
-  | "claude"
-  | "codex"
-  | "opencode"
-  | "custom"
+  "project" | "global" | "claude-project" | "claude" | "codex" | "opencode" | "custom"
 
 /** One skill directory to scan, tagged with where it came from. */
 export interface SkillScanDir {

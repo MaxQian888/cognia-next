@@ -133,8 +133,7 @@ export async function fetchGithubFile(ref: GithubPluginRef, path: string): Promi
   if (res.status === 404) return null
   if (!res.ok) throw new Error(`GitHub API ${res.status} for ${path}`)
   const json = (await res.json()) as
-    | { type?: string; content?: string; encoding?: string }
-    | unknown[]
+    { type?: string; content?: string; encoding?: string } | unknown[]
   if (Array.isArray(json) || json.type !== "file" || typeof json.content !== "string") {
     return null
   }

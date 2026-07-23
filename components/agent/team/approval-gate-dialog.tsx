@@ -25,12 +25,7 @@ import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 
 export type ApprovalGateType =
-  | "budget"
-  | "deadlock"
-  | "plan"
-  | "teammate_fix"
-  | "replan"
-  | "capability_audit"
+  "budget" | "deadlock" | "plan" | "teammate_fix" | "replan" | "capability_audit"
 
 /**
  * Maps a `gateType` to its i18n namespace under `agentTeam.approvalGate`.

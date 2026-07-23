@@ -73,8 +73,7 @@ async function resolveLangfuseCtor(): Promise<LangfuseCtor | null> {
     // package name. The dynamic import keeps the bundler from resolving it
     // when not installed, so the production bundle stays slim.
     const mod = (await import(/* webpackIgnore: true */ "langfuse")) as
-      | { Langfuse?: LangfuseCtor }
-      | LangfuseCtor
+      { Langfuse?: LangfuseCtor } | LangfuseCtor
     const Ctor: LangfuseCtor | undefined =
       typeof mod === "function"
         ? (mod as LangfuseCtor)

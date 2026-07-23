@@ -110,21 +110,19 @@ export const WithValidationWarning: Story = {
       trigger: { type: "cron", expression: "0 3 * * *", timezone: "UTC" },
       action: { type: "run_command", command: "/usr/bin/cleanup", args: ["--all"] },
     } satisfies Partial<CreateSystemTaskInput>,
-    onValidate: fn(
-      async (): Promise<ValidationResult> => ({
+    onValidate: fn(async (): Promise<ValidationResult> => ({
+      valid: true,
+      errors: [],
+      warnings: ["Administrator run level requires an elevated daemon."],
+      risk_level: "high",
+      requires_admin: true,
+      translation: {
         valid: true,
         errors: [],
         warnings: ["Administrator run level requires an elevated daemon."],
-        risk_level: "high",
-        requires_admin: true,
-        translation: {
-          valid: true,
-          errors: [],
-          warnings: ["Administrator run level requires an elevated daemon."],
-          native_representation: "0 3 * * * root /usr/bin/cleanup --all",
-        },
-      })
-    ),
+        native_representation: "0 3 * * * root /usr/bin/cleanup --all",
+      },
+    })),
   },
 }
 

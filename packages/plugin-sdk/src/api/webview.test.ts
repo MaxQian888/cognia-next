@@ -24,10 +24,7 @@ describe("plugin-sdk api/webview", () => {
   it("re-exports webview contract types", () => {
     const assertTypes = <
       _T extends
-        | PluginWebviewDef
-        | ResolvedPluginWebview
-        | PluginWebviewHandle
-        | PluginWebviewMessage,
+        PluginWebviewDef | ResolvedPluginWebview | PluginWebviewHandle | PluginWebviewMessage,
     >(): void => undefined
 
     expect(assertTypes).toBeDefined()

@@ -27,12 +27,7 @@ import { dispatchPluginError } from "@/lib/plugin/error-bus"
 // =============================================================================
 
 export type PreInstallStage =
-  | "conflict"
-  | "dependencies"
-  | "permission"
-  | "binary-requirements"
-  | "config"
-  | "install"
+  "conflict" | "dependencies" | "permission" | "binary-requirements" | "config" | "install"
 
 /** A required plugin dependency whose installed version conflicts. */
 export interface PreInstallDependencyConflict {

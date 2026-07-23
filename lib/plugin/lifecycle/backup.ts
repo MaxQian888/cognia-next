@@ -26,12 +26,7 @@ export interface PluginBackup {
 }
 
 export type BackupReason =
-  | "manual"
-  | "pre-update"
-  | "pre-uninstall"
-  | "scheduled"
-  | "migration"
-  | "auto"
+  "manual" | "pre-update" | "pre-uninstall" | "scheduled" | "migration" | "auto"
 
 export interface BackupConfig {
   maxBackupsPerPlugin: number

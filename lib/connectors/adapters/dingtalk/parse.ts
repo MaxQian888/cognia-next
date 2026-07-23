@@ -95,9 +95,7 @@ export function parseDingTalkBotMessage(
   const mentionedUsers = Array.isArray(msg.atUsers)
     ? msg.atUsers
         .map((u) => (u.staffId && u.staffId.length > 0 ? u.staffId : (u.dingtalkId ?? "")))
-        .filter(
-          (id) => id.length > 0 && id !== effectiveSelfId && id !== (msg.chatbotUserId ?? "")
-        )
+        .filter((id) => id.length > 0 && id !== effectiveSelfId && id !== (msg.chatbotUserId ?? ""))
     : []
 
   return {
