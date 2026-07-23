@@ -2,15 +2,16 @@
 
 /**
  * PerformanceDashboard — the Task-Manager-style master panel for the Rust
- * backend. Four tabs (Overview graphs · Processes · Hotspots · Async Runtime)
- * driven by the live `usePerfStream` sampler. Desktop-only: on web/mobile it
+ * backend. Six tabs (Overview graphs · Processes · Managed · Hotspots · Async
+ * Runtime · System) driven by the live `usePerfStream` sampler, except System,
+ * whose facts are static and fetched once. Desktop-only: on web/mobile it
  * renders an inert explainer instead of an empty shell.
  */
 
 import { useCallback } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { ActivityIcon, BoxesIcon, CpuIcon, GaugeIcon, LayersIcon } from "lucide-react"
+import { ActivityIcon, BoxesIcon, CpuIcon, GaugeIcon, LayersIcon, MonitorIcon } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { usePerfStream } from "@/hooks/perf/use-perf-stream"
@@ -22,6 +23,7 @@ import { PerfProcessTable } from "./perf-process-table"
 import { PerfManagedProcesses } from "./perf-managed-processes"
 import { PerfHotspotsTable } from "./perf-hotspots-table"
 import { PerfRuntimeTab } from "./perf-runtime-tab"
+import { PerfSystemTab } from "./perf-system-tab"
 
 export function PerformanceDashboard() {
   const t = useTranslations("performance")
@@ -94,6 +96,10 @@ export function PerformanceDashboard() {
             <GaugeIcon className="mr-1 size-4" />
             {t("tabs.runtime")}
           </TabsTrigger>
+          <TabsTrigger value="system" data-testid="perf-tab-system">
+            <MonitorIcon className="mr-1 size-4" />
+            {t("tabs.system")}
+          </TabsTrigger>
         </TabsList>
 
         <ScrollArea className="min-h-0 flex-1">
@@ -114,6 +120,9 @@ export function PerformanceDashboard() {
             </TabsContent>
             <TabsContent value="runtime" className="mt-0">
               <PerfRuntimeTab runtime={latest?.runtime ?? null} history={history} />
+            </TabsContent>
+            <TabsContent value="system" className="mt-0">
+              <PerfSystemTab />
             </TabsContent>
           </div>
         </ScrollArea>

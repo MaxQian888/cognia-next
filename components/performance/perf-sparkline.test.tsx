@@ -9,11 +9,20 @@ jest.mock("recharts", () => ({
   ResponsiveContainer: ({
     children,
     initialDimension,
+    minWidth,
+    minHeight,
   }: {
     children?: React.ReactNode
     initialDimension?: { width: number; height: number }
+    minWidth?: number
+    minHeight?: number
   }) => (
-    <div data-testid="spark-rc" data-initial-dimension={JSON.stringify(initialDimension)}>
+    <div
+      data-testid="spark-rc"
+      data-initial-dimension={JSON.stringify(initialDimension)}
+      data-min-width={minWidth}
+      data-min-height={minHeight}
+    >
       {children}
     </div>
   ),
@@ -72,5 +81,12 @@ describe("PerfSparkline", () => {
     expect(dim).not.toBeNull()
     expect(dim!.width).toBeGreaterThan(0)
     expect(dim!.height).toBeGreaterThan(0)
+  })
+
+  it("keeps a non-zero size during transient status-bar layout measurements", () => {
+    render(<PerfSparkline points={[1, 2]} color="#abc" />)
+    const container = screen.getByTestId("spark-rc")
+    expect(container).toHaveAttribute("data-min-width", "1")
+    expect(container).toHaveAttribute("data-min-height", "1")
   })
 })

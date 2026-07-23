@@ -3,7 +3,7 @@
  */
 
 import React from "react"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, within } from "@testing-library/react"
 import { PerfHotspotsTable } from "./perf-hotspots-table"
 import type { SpanSnapshot } from "@/lib/perf/backend/types"
 
@@ -47,7 +47,7 @@ describe("PerfHotspotsTable", () => {
     render(<PerfHotspotsTable spans={[span("a", 100), span("b", 25)]} />)
     let rows = screen.getAllByTestId(/perf-hot-row-/)
     expect(rows[0]).toHaveAttribute("data-testid", "perf-hot-row-a")
-    fireEvent.click(screen.getByTestId("perf-hot-th-totalMs"))
+    fireEvent.click(within(screen.getByTestId("perf-hot-th-totalMs")).getByRole("button"))
     rows = screen.getAllByTestId(/perf-hot-row-/)
     expect(rows[0]).toHaveAttribute("data-testid", "perf-hot-row-b")
   })
@@ -64,7 +64,7 @@ describe("PerfHotspotsTable", () => {
 
   it("sorts by name when requested", () => {
     render(<PerfHotspotsTable spans={[span("zeta", 100), span("alpha", 25)]} />)
-    fireEvent.click(screen.getByTestId("perf-hot-th-name"))
+    fireEvent.click(within(screen.getByTestId("perf-hot-th-name")).getByRole("button"))
     const rows = screen.getAllByTestId(/perf-hot-row-/)
     expect(rows[0]).toHaveAttribute("data-testid", "perf-hot-row-alpha")
   })

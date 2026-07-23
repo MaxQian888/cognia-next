@@ -16,7 +16,7 @@
       "total": "合计"
     },
     "empty": "尚未记录到热点。",
-    "hint": "执行一次操作（发送消息、运行 OCR、执行工作流）即可填充该表。"
+    "hint": "执行一次已埋点的操作（发送消息、运行 OCR、执行终端或 git 命令）即可填充该表。"
   },
   "managed": {
     "actions": {
@@ -52,8 +52,11 @@
       "chatSidecar": "聊天 sidecar",
       "codeServer": "Pro IDE（code-server）",
       "externalAgent": "外部 Agent",
+      "headlessTerminal": "无头 Shell",
       "integratedTerminal": "集成终端",
-      "mcpServer": "MCP 服务器"
+      "mcpServer": "MCP 服务器",
+      "pluginHost": "插件宿主",
+      "tunnel": "隧道"
     },
     "summary": {
       "managed": "托管进程",
@@ -139,12 +142,39 @@
     "workers": "工作线程"
   },
   "subtitle": "实时查看 Rust 后端的进程树、异步运行时与操作热点。",
+  "system": {
+    "build": {
+      "appVersion": "应用版本",
+      "features": "已启用特性",
+      "noFeatures": "未启用任何可选特性",
+      "profile": "构建配置",
+      "tauriVersion": "Tauri 版本",
+      "title": "构建"
+    },
+    "error": "无法读取系统信息。",
+    "hardware": {
+      "cores": "逻辑核心数",
+      "cpu": "处理器",
+      "title": "硬件",
+      "totalMemory": "已装内存",
+      "usedMemory": "已用内存"
+    },
+    "host": {
+      "arch": "架构",
+      "hostname": "主机名",
+      "kernel": "内核",
+      "os": "操作系统",
+      "title": "主机"
+    },
+    "loading": "正在读取系统信息…"
+  },
   "tabs": {
     "hotspots": "热点",
     "managed": "托管进程",
     "overview": "性能",
     "processes": "进程",
-    "runtime": "异步运行时"
+    "runtime": "异步运行时",
+    "system": "系统"
   },
   "title": "性能",
   "toolbar": {

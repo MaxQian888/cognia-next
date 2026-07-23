@@ -88,14 +88,21 @@ export function PerfProcessTable({ history }: PerfProcessTableProps) {
   )
 
   // Per-PID CPU history for the trend sparklines (oldest → newest).
+  //
+  // One pass over the window, not one `find` per (process × frame): the naive
+  // shape is O(processes² × window) and was recomputed on every 1 Hz frame —
+  // ~190k scans/sec on a 40-process tree, inside the panel meant to *diagnose*
+  // CPU cost. Frames where a PID is absent contribute 0 so every series stays
+  // the same length and lines up with the others.
   const cpuHistories = useMemo(() => {
     const map = new Map<number, number[]>()
-    for (const p of processes) {
-      map.set(
-        p.pid,
-        history.map((s) => s.processes.find((q) => q.pid === p.pid)?.cpuPct ?? 0)
-      )
-    }
+    for (const p of processes) map.set(p.pid, new Array<number>(history.length).fill(0))
+    history.forEach((sample, frame) => {
+      for (const proc of sample.processes) {
+        const series = map.get(proc.pid)
+        if (series) series[frame] = proc.cpuPct
+      }
+    })
     return map
   }, [history, processes])
 
@@ -144,14 +151,22 @@ export function PerfProcessTable({ history }: PerfProcessTableProps) {
     }
   }
 
+  // The sort control is a real <button> inside the <th>, not an onClick on the
+  // <th> itself — the latter is unreachable by keyboard and exposes no role.
   const header = (key: SortKey, label: string, numeric = false) => (
     <TableHead
-      className={cn("cursor-pointer select-none", numeric && "text-right")}
-      onClick={() => toggleSort(key)}
+      className={cn("select-none", numeric && "text-right")}
       data-testid={`perf-proc-th-${key}`}
       aria-sort={sortKey === key ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
     >
-      <span className={cn("inline-flex items-center gap-1", numeric && "flex-row-reverse")}>
+      <button
+        type="button"
+        onClick={() => toggleSort(key)}
+        className={cn(
+          "inline-flex items-center gap-1 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          numeric && "flex-row-reverse"
+        )}
+      >
         {label}
         {sortKey === key ? (
           sortDir === "asc" ? (
@@ -160,7 +175,7 @@ export function PerfProcessTable({ history }: PerfProcessTableProps) {
             <ArrowDownIcon className="size-3" />
           )
         ) : null}
-      </span>
+      </button>
     </TableHead>
   )
 
@@ -210,6 +225,7 @@ export function PerfProcessTable({ history }: PerfProcessTableProps) {
         <Input
           type="text"
           placeholder={t("searchPlaceholder")}
+          aria-label={t("searchPlaceholder")}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="h-8 pl-8 text-sm"

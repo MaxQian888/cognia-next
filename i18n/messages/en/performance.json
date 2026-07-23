@@ -16,7 +16,7 @@
       "total": "Total"
     },
     "empty": "No hotspots recorded yet.",
-    "hint": "Run an operation (send a message, run an OCR, execute a workflow) to populate the table."
+    "hint": "Run an instrumented operation (send a message, run an OCR, run a terminal or git command) to populate the table."
   },
   "managed": {
     "actions": {
@@ -52,8 +52,11 @@
       "chatSidecar": "Chat sidecar",
       "codeServer": "Pro IDE (code-server)",
       "externalAgent": "External agents",
+      "headlessTerminal": "Headless shells",
       "integratedTerminal": "Terminals",
-      "mcpServer": "MCP server"
+      "mcpServer": "MCP server",
+      "pluginHost": "Plugin hosts",
+      "tunnel": "Tunnel"
     },
     "summary": {
       "managed": "Managed",
@@ -139,12 +142,39 @@
     "workers": "Worker threads"
   },
   "subtitle": "Live view of the Rust backend's process tree, async runtime, and operation hotspots.",
+  "system": {
+    "build": {
+      "appVersion": "App version",
+      "features": "Enabled features",
+      "noFeatures": "No optional features enabled",
+      "profile": "Build profile",
+      "tauriVersion": "Tauri version",
+      "title": "Build"
+    },
+    "error": "Could not read system details.",
+    "hardware": {
+      "cores": "Logical cores",
+      "cpu": "Processor",
+      "title": "Hardware",
+      "totalMemory": "Installed memory",
+      "usedMemory": "Memory in use"
+    },
+    "host": {
+      "arch": "Architecture",
+      "hostname": "Host name",
+      "kernel": "Kernel",
+      "os": "Operating system",
+      "title": "Host"
+    },
+    "loading": "Reading system details…"
+  },
   "tabs": {
     "hotspots": "Hotspots",
     "managed": "Managed",
     "overview": "Performance",
     "processes": "Processes",
-    "runtime": "Async runtime"
+    "runtime": "Async runtime",
+    "system": "System"
   },
   "title": "Performance",
   "toolbar": {

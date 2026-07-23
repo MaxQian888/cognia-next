@@ -120,7 +120,7 @@ describe("PerfProcessTable", () => {
     const rowsDesc = screen.getAllByTestId(/perf-proc-row-/)
     expect(rowsDesc[0]).toHaveAttribute("data-testid", "perf-proc-row-2")
 
-    fireEvent.click(screen.getByTestId("perf-proc-th-cpuPct"))
+    fireEvent.click(within(screen.getByTestId("perf-proc-th-cpuPct")).getByRole("button"))
     const rowsAsc = screen.getAllByTestId(/perf-proc-row-/)
     expect(rowsAsc[0]).toHaveAttribute("data-testid", "perf-proc-row-1")
     expect(screen.getByTestId("perf-proc-th-cpuPct")).toHaveAttribute("aria-sort", "ascending")
@@ -135,7 +135,7 @@ describe("PerfProcessTable", () => {
         ])}
       />
     )
-    fireEvent.click(screen.getByTestId("perf-proc-th-runSecs"))
+    fireEvent.click(within(screen.getByTestId("perf-proc-th-runSecs")).getByRole("button"))
     // Descending by uptime: pid 2 (999s) first.
     expect(screen.getAllByTestId(/perf-proc-row-/)[0]).toHaveAttribute(
       "data-testid",
@@ -149,9 +149,43 @@ describe("PerfProcessTable", () => {
         history={hist([proc(1, "zeta", "main", 10), proc(2, "alpha", "child", 5)])}
       />
     )
-    fireEvent.click(screen.getByTestId("perf-proc-th-name"))
+    fireEvent.click(within(screen.getByTestId("perf-proc-th-name")).getByRole("button"))
     const rows = screen.getAllByTestId(/perf-proc-row-/)
     expect(rows[0]).toHaveAttribute("data-testid", "perf-proc-row-2")
+  })
+
+  it("exposes each sortable header as a keyboard-operable button", () => {
+    // Regression: the sort handler used to sit on the bare <th>, so the whole
+    // table could only be re-sorted with a mouse.
+    render(
+      <PerfProcessTable
+        history={hist([proc(1, "cognia", "main", 10), proc(2, "node", "sidecar", 30)])}
+      />
+    )
+    const sortButton = within(screen.getByTestId("perf-proc-th-name")).getByRole("button")
+    sortButton.focus()
+    expect(sortButton).toHaveFocus()
+
+    fireEvent.keyDown(sortButton, { key: "Enter" })
+    fireEvent.click(sortButton) // what the browser dispatches for Enter on a button
+    expect(screen.getByTestId("perf-proc-th-name")).toHaveAttribute("aria-sort", "ascending")
+  })
+
+  it("builds one CPU series per process across the whole window", () => {
+    // The series must stay window-length and zero-filled for frames where the
+    // PID is absent, so every sparkline lines up with the others.
+    const history: PerfSample[] = [
+      hist([proc(1, "cognia", "main", 10)])[0],
+      hist([proc(1, "cognia", "main", 20), proc(2, "node", "sidecar", 40)])[0],
+    ]
+    render(<PerfProcessTable history={history} />)
+    expect(screen.getByTestId("perf-proc-trend-1")).toBeInTheDocument()
+    expect(screen.getByTestId("perf-proc-trend-2")).toBeInTheDocument()
+  })
+
+  it("gives the search input an accessible name", () => {
+    render(<PerfProcessTable history={hist([proc(1, "cognia", "main", 10)])} />)
+    expect(screen.getByTestId("perf-proc-search")).toHaveAccessibleName()
   })
 
   it("renders a search input", () => {
