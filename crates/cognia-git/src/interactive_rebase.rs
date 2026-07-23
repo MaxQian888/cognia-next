@@ -27,8 +27,10 @@ fn to_record(commit: &git2::Commit<'_>) -> GitCommit {
     GitCommit {
         hash,
         short_hash,
-        summary: commit.summary().unwrap_or_default().to_string(),
-        body: commit.body().unwrap_or_default().trim().to_string(),
+        summary: String::from_utf8_lossy(commit.summary_bytes().unwrap_or_default()).into_owned(),
+        body: String::from_utf8_lossy(commit.body_bytes().unwrap_or_default())
+            .trim()
+            .to_string(),
         author_name: author.name().unwrap_or_default().to_string(),
         author_email: author.email().unwrap_or_default().to_string(),
         authored_at_ms: author.when().seconds().saturating_mul(1_000),

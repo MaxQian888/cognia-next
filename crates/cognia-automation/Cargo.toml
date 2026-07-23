@@ -47,7 +47,7 @@ tokio-tungstenite = { version = "0.24", default-features = false, features = ["r
 
 # Cross-platform screenshot (Computer Use). xcap re-exports `image`, so the
 # cluster uses `xcap::image` rather than a direct `image` dep.
-xcap = "0.0.12"
+xcap = "0.9.7"
 
 [dev-dependencies]
 tempfile = "3"

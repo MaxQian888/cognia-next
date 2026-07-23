@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "cognia-next — AI-powered desktop application built with Next.js 16 + Tauri 2"
 authors = ["AstroAir <astro_air@126.com>"]
 license = "AGPL-3.0-or-later"
+publish = false
 repository = "https://github.com/MaxQian888/cognia-next"
 edition = "2021"
 # 1.89.0 floor — driven by transitive deps in the workspace Cargo.lock
@@ -291,7 +292,7 @@ local-ip-address = "0.6"
 # `vendored-libgit2` ships libgit2's C source inside `libgit2-sys` so
 # developer machines don't need a system install — critical on Windows
 # where libgit2 isn't typically present.
-git2 = { version = "0.19", default-features = false, features = ["vendored-libgit2"] }
+git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
 
 # Companion TLS (Wave 1.4 / M2.8) — self-signed certificate generation +
 # SHA-256 SubjectPublicKeyInfo fingerprint computation. The mobile client
@@ -325,16 +326,14 @@ tempfile = "3"
 # the `cognia plugin build` CLI emits. Pure-Rust, no system zlib dep.
 zip = { version = "2", default-features = false, features = ["deflate", "bzip2"] }
 
-# WASM plugin runtime (ADR 0013) — wasmtime 26 with the component-model
+# WASM plugin runtime (ADR 0013) — Wasmtime 36 LTS with the component-model
 # feature on by default. `wasmtime-wasi` provides the WASI Preview 2
 # interfaces we host (clocks/random/io/cli/filesystem). `wasmparser` is used
 # to scan for the embedded `cognia:api-version` custom section before the
-# component is compiled. wasmtime 26 is the last release before the major
-# version churn around the Pulley interpreter; pinning to 26 keeps us on a
-# stable wit-bindgen surface (0.34) until we revisit ABI in v0.2.
-# Re-verified 2026-05-18: latest is 44.0.1 — ABI revisit per ADR-0013 still pending.
-wasmtime = { version = "26", default-features = false, features = ["runtime", "cranelift", "component-model", "async"] }
-wasmtime-wasi = "26"
+# component is compiled. Pin the patched 36.x LTS line: older 24/26 releases
+# are affected by sandbox-escape advisories that were fixed in 36.0.12.
+wasmtime = { version = "=36.0.12", default-features = false, features = ["runtime", "cranelift", "component-model", "async"] }
+wasmtime-wasi = "=36.0.12"
 wasmparser = "0.221"
 
 # CLI argument parsing for the cognia-server binary (Phase D follow-up).

@@ -122,7 +122,9 @@ pub fn snapshot(repo: &Repository) -> Result<Snapshot, String> {
         if st.is_conflicted() {
             continue;
         }
-        let Some(rel) = entry.path() else { continue };
+        let rel = entry
+            .path()
+            .map_err(|e| format!("git status path failed: {e}"))?;
         if is_filtered(rel) {
             continue;
         }

@@ -27,6 +27,8 @@ fn list_for(repo: &Repository) -> Result<Vec<GitTag>> {
             Ok(tag) => (
                 tag.target_id().to_string(),
                 tag.message()
+                    .ok()
+                    .flatten()
                     .map(|m| m.trim().to_string())
                     .filter(|m| !m.is_empty()),
                 true,

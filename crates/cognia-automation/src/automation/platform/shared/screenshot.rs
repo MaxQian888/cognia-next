@@ -32,12 +32,16 @@ pub fn capture_primary(opts: &ScreenshotOpts) -> Result<Screenshot> {
     let mon = opts
         .monitor_id
         .as_deref()
-        .and_then(|want| monitors.iter().find(|m| m.id().to_string() == want))
+        .and_then(|want| {
+            monitors
+                .iter()
+                .find(|m| m.id().is_ok_and(|id| id.to_string() == want))
+        })
         .cloned()
         .unwrap_or_else(|| {
             monitors
                 .iter()
-                .find(|m| m.is_primary())
+                .find(|m| m.is_primary().unwrap_or(false))
                 .cloned()
                 .unwrap_or_else(|| monitors[0].clone())
         });
@@ -83,15 +87,17 @@ pub fn list_monitors() -> Vec<MonitorInfo> {
     };
     monitors
         .iter()
-        .map(|m| MonitorInfo {
-            id: m.id().to_string(),
-            name: m.name().to_string(),
-            x: m.x(),
-            y: m.y(),
-            width: m.width(),
-            height: m.height(),
-            is_primary: m.is_primary(),
-            scale_factor: m.scale_factor(),
+        .filter_map(|m| {
+            Some(MonitorInfo {
+                id: m.id().ok()?.to_string(),
+                name: m.name().ok()?,
+                x: m.x().ok()?,
+                y: m.y().ok()?,
+                width: m.width().ok()?,
+                height: m.height().ok()?,
+                is_primary: m.is_primary().ok()?,
+                scale_factor: m.scale_factor().ok()?,
+            })
         })
         .collect()
 }

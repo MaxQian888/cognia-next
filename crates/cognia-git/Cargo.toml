@@ -25,7 +25,7 @@ tauri = { version = "=2.11.1" }
 tokio = { version = "1", features = ["process", "fs", "io-util", "sync", "time", "rt-multi-thread", "macros"] }
 # `default-features = false` (no https/ssh) — mutating/network ops shell out to
 # system `git`; git2 is read-only here. Matches the `src-tauri` build exactly.
-git2 = { version = "0.19", default-features = false, features = ["vendored-libgit2"] }
+git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
 notify = "6"
 ignore = "0.4"
 regex = "1"

@@ -24,7 +24,7 @@ pub fn open_repo(path: &str) -> Result<Repository> {
 pub fn head_branch(repo: &Repository) -> Option<String> {
     let head = repo.head().ok()?;
     if head.is_branch() {
-        head.shorthand().map(str::to_string)
+        head.shorthand().ok().map(str::to_string)
     } else {
         None
     }
@@ -38,7 +38,7 @@ pub fn is_detached(repo: &Repository) -> bool {
 /// Upstream tracking ref shorthand (e.g. `origin/main`) for the current branch.
 pub fn upstream_shorthand(repo: &Repository) -> Option<String> {
     let head = repo.head().ok()?;
-    let name = head.shorthand()?;
+    let name = head.shorthand().ok()?;
     let branch = repo.find_branch(name, git2::BranchType::Local).ok()?;
     let upstream = branch.upstream().ok()?;
     upstream.name().ok().flatten().map(str::to_string)
@@ -56,8 +56,8 @@ pub fn ahead_behind(repo: &Repository) -> (usize, usize) {
         None => return (0, 0),
     };
     let name = match head.shorthand() {
-        Some(n) => n,
-        None => return (0, 0),
+        Ok(n) => n,
+        Err(_) => return (0, 0),
     };
     let upstream = match repo
         .find_branch(name, git2::BranchType::Local)

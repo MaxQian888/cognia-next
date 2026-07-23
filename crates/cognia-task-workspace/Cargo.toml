@@ -14,7 +14,7 @@ path = "src/lib.rs"
 [dependencies]
 base64 = "0.22"
 flate2 = "1"
-git2 = { version = "0.19", default-features = false, features = ["vendored-libgit2"] }
+git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
 hex = "0.4"
 ignore = "0.4"
 notify = "6"

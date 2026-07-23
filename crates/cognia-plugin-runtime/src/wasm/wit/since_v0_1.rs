@@ -20,7 +20,7 @@
 //! `wit/mod.rs`, and add the matching arm in `host.rs::version_linker`.
 
 use wasmtime::component::Linker;
-use wasmtime_wasi::add_to_linker_async;
+use wasmtime_wasi::p2::add_to_linker_async;
 
 use super::super::capabilities::{ai, clipboard, logger, notification, process, secrets, workflow};
 use super::super::store::HostState;
@@ -31,14 +31,14 @@ wasmtime::component::bindgen!({
     // relative to its own manifest dir (ADR-0067 extraction).
     path: "../../src-tauri/wit/cognia-plugin.wit",
     world: "cognia-plugin",
-    async: true,
+    imports: { default: async },
+    exports: { default: async },
 });
 
 // =============================================================================
 // Logger
 // =============================================================================
 
-#[async_trait::async_trait]
 impl cognia::plugin::logger::Host for HostState {
     async fn log(
         &mut self,
@@ -61,7 +61,6 @@ impl cognia::plugin::logger::Host for HostState {
 // Notification
 // =============================================================================
 
-#[async_trait::async_trait]
 impl cognia::plugin::notification::Host for HostState {
     async fn notify(
         &mut self,
@@ -114,7 +113,6 @@ impl cognia::plugin::notification::Host for HostState {
 // (single OS-keyring master key) so plugin secrets don't add Keychain prompts.
 // =============================================================================
 
-#[async_trait::async_trait]
 impl cognia::plugin::secrets::Host for HostState {
     async fn get(&mut self, key: String) -> Result<Option<String>, String> {
         secrets::check_read(self)?;
@@ -139,7 +137,6 @@ impl cognia::plugin::secrets::Host for HostState {
 // Process — std::process::Command behind `process:spawn` / `shell:execute`.
 // =============================================================================
 
-#[async_trait::async_trait]
 impl cognia::plugin::process::Host for HostState {
     async fn exec(
         &mut self,
@@ -215,7 +212,6 @@ impl cognia::plugin::process::Host for HostState {
 // Clipboard — currently logs the intent; v0.2 wires `arboard`.
 // =============================================================================
 
-#[async_trait::async_trait]
 impl cognia::plugin::clipboard::Host for HostState {
     async fn read_text(&mut self) -> Result<String, String> {
         clipboard::check_read(self)?;
@@ -246,7 +242,6 @@ impl cognia::plugin::clipboard::Host for HostState {
 // AI — provider chain stub for v0.1. v0.2 routes to lib/ai/* via IPC.
 // =============================================================================
 
-#[async_trait::async_trait]
 impl cognia::plugin::ai::Host for HostState {
     async fn generate_text(
         &mut self,
@@ -281,7 +276,6 @@ impl cognia::plugin::ai::Host for HostState {
 // the responsibility of the workflow plugin layer in TS.
 // =============================================================================
 
-#[async_trait::async_trait]
 impl cognia::plugin::workflow::Host for HostState {
     async fn emit_event(
         &mut self,
@@ -314,7 +308,10 @@ pub fn build_linker() -> wasmtime::Result<Linker<HostState>> {
     // Standard WASI 0.2 — clocks, random, io, cli, filesystem, stdio.
     add_to_linker_async(&mut linker)?;
     // cognia-specific imports, each wired against the typed Host trait.
-    CogniaPlugin::add_to_linker(&mut linker, |s: &mut HostState| s)?;
+    CogniaPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(
+        &mut linker,
+        |s: &mut HostState| s,
+    )?;
     Ok(linker)
 }
 

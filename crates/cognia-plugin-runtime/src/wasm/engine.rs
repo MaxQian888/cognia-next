@@ -37,10 +37,6 @@ fn build_engine() -> wasmtime::Result<Engine> {
     cfg.wasm_component_model(true);
     cfg.async_support(true);
     cfg.epoch_interruption(true);
-    // Disable signal-based traps inside Tauri so a plugin SIGFPE doesn't
-    // get caught by the host process. wasmtime returns these as Errors
-    // instead.
-    cfg.signals_based_traps(false);
     Engine::new(&cfg)
 }
 

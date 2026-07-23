@@ -43,8 +43,8 @@ fn refs_for(repo: &Repository) -> Result<Vec<GitRef>> {
             continue;
         };
         let name = match reference.shorthand() {
-            Some(n) => n.to_string(),
-            None => continue,
+            Ok(n) => n.to_string(),
+            Err(_) => continue,
         };
         // Peel annotated tags / symbolic refs down to their commit.
         let target_hash = match reference.peel_to_commit() {
@@ -126,8 +126,10 @@ fn commit_touches_path(repo: &Repository, commit: &Commit<'_>, path: &str) -> Re
 fn to_record(commit: &Commit<'_>) -> GitCommit {
     let hash = commit.id().to_string();
     let short_hash = hash.chars().take(7).collect();
-    let summary = commit.summary().unwrap_or_default().to_string();
-    let body = commit.body().unwrap_or_default().trim().to_string();
+    let summary = String::from_utf8_lossy(commit.summary_bytes().unwrap_or_default()).into_owned();
+    let body = String::from_utf8_lossy(commit.body_bytes().unwrap_or_default())
+        .trim()
+        .to_string();
     let author = commit.author();
     GitCommit {
         hash,

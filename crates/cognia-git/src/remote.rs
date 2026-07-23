@@ -17,7 +17,11 @@ pub fn list_remotes(repo_path: &str) -> Result<Vec<GitRemote>> {
 
 fn list_for(repo: &Repository) -> Result<Vec<GitRemote>> {
     let mut out = Vec::new();
-    for name in repo.remotes()?.iter().flatten() {
+    for name in repo
+        .remotes()?
+        .iter()
+        .filter_map(|entry| entry.ok().flatten())
+    {
         let remote = match repo.find_remote(name) {
             Ok(r) => r,
             Err(_) => continue,
@@ -25,6 +29,8 @@ fn list_for(repo: &Repository) -> Result<Vec<GitRemote>> {
         let fetch_url = remote.url().map(exec::redact).unwrap_or_default();
         let push_url = remote
             .pushurl()
+            .ok()
+            .flatten()
             .map(exec::redact)
             .unwrap_or_else(|| fetch_url.clone());
         out.push(GitRemote {
@@ -85,7 +91,11 @@ pub async fn pull(
 /// present, otherwise the first alphabetically.
 fn resolve_default_remote(repo: &Repository) -> Option<String> {
     let remotes = repo.remotes().ok()?;
-    let mut names: Vec<String> = remotes.iter().flatten().map(str::to_string).collect();
+    let mut names: Vec<String> = remotes
+        .iter()
+        .filter_map(|entry| entry.ok().flatten())
+        .map(str::to_string)
+        .collect();
     if names.is_empty() {
         return None;
     }
@@ -137,8 +147,8 @@ fn has_upstream(repo_path: &str) -> Result<bool> {
     let repo = open_repo(repo_path)?;
     let name = match repo.head() {
         Ok(head) => match head.shorthand() {
-            Some(n) => n.to_string(),
-            None => return Ok(false),
+            Ok(n) => n.to_string(),
+            Err(_) => return Ok(false),
         },
         Err(_) => return Ok(false),
     };
