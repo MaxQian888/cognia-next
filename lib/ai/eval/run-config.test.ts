@@ -112,7 +112,16 @@ describe("runConfiguredEval", () => {
     ]
     const reports = await runConfiguredEval("d", { targets, scorerIds: [], k: 1 }, deps)
     expect(snapshot).toHaveBeenCalledTimes(1)
-    expect(saved).toHaveBeenCalledTimes(2)
+    // Two per target: the "running" claim written before the first case, then
+    // the settled report. The claim is what stops an interrupted run leaving
+    // orphan per-case rows behind an id no row owns.
+    expect(saved).toHaveBeenCalledTimes(4)
+    expect(saved.mock.calls.map((c) => (c[0] as { status?: string }).status)).toEqual([
+      "running",
+      "completed",
+      "running",
+      "completed",
+    ])
     expect(reports).toHaveLength(2)
     expect(reports[0].datasetVersionId).toBe("ver_1")
     expect(reports[0].config?.targetKind).toBe("chat")
@@ -233,7 +242,7 @@ describe("runConfiguredEval", () => {
       controller.signal
     )
     expect(reports[0].k).toBe(1)
-    expect(saved).toHaveBeenCalledTimes(1)
+    expect(saved).toHaveBeenCalledTimes(2) // running claim + settled report
     // Aborting before the run starts yields a report over zero cases, not a throw.
     const pre = new AbortController()
     pre.abort()
@@ -244,6 +253,8 @@ describe("runConfiguredEval", () => {
       pre.signal
     )
     expect(aborted[0].caseCount).toBe(0)
+    // A run stopped part-way must not read as a completed one.
+    expect(aborted[0].status).toBe("aborted")
   })
 
   it("writes the SAME verdict the report header uses (no second opinion)", async () => {

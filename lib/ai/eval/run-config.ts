@@ -15,7 +15,7 @@ import type { EvalDatasetVersion } from "@/types/eval/version"
 import type { EvalRunConfig, TargetSpec, CaseSubset } from "@/types/eval/run-config"
 import type { SaveCaseResultInput } from "@/lib/db/eval-run-cases"
 import { runDatasetEval } from "./index"
-import { repetitionVerdict } from "./report"
+import { repetitionVerdict, SCORING_VERSION } from "./report"
 import { selectScorers } from "./scorer-select"
 import type { EvalTarget } from "./runner"
 
@@ -75,6 +75,36 @@ export async function runConfiguredEval(
   for (const spec of config.targets) {
     const target = deps.buildTarget(spec)
     const runId = deps.newRunId()
+    const configSummary: EvalReport["config"] = {
+      targetKind: spec.kind,
+      scorerIds: config.scorerIds,
+      k,
+      ...(config.subset ? { subset: config.subset } : {}),
+    }
+    // Claim the run row BEFORE the first case. Per-case rows are written as
+    // they land, so a run that never wrote its parent left orphan
+    // `evalRunCaseResults` rows: unreachable from every view, and never
+    // reclaimed because deletion cascades from the run.
+    await deps.saveRun({
+      runId,
+      datasetId,
+      datasetVersion: dataset.version,
+      targetLabel: spec.label,
+      k,
+      caseCount: cases.length,
+      gradedCaseCount: 0,
+      ungradedCaseCount: 0,
+      scorers: {},
+      passAt1: 0,
+      passHatK: 0,
+      totalCostUsd: 0,
+      avgLatencyMs: 0,
+      createdAt: deps.now(),
+      scoringVersion: SCORING_VERSION,
+      status: "running",
+      datasetVersionId: version.id,
+      config: configSummary,
+    })
     const { report } = await runDatasetEval({
       dataset,
       cases,
@@ -116,18 +146,18 @@ export async function runConfiguredEval(
         })
       },
     })
+    // A run stopped mid-way reports rates over the cases that DID finish, so
+    // it must not look like a completed run — `aborted` withholds the gate.
+    const aborted = signal?.aborted === true || report.caseCount < cases.length
     const enriched: EvalReport = {
       ...report,
+      status: aborted ? "aborted" : "completed",
       datasetVersionId: version.id,
-      config: {
-        targetKind: spec.kind,
-        scorerIds: config.scorerIds,
-        k,
-        ...(config.subset ? { subset: config.subset } : {}),
-      },
+      config: configSummary,
     }
     await deps.saveRun(enriched)
     reports.push(enriched)
+    if (aborted) break
   }
   return reports
 }

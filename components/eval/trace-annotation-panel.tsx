@@ -22,18 +22,35 @@ import { buildFailureTaxonomy, saturationReached } from "@/lib/ai/eval/error-ana
 import type { TraceSummary } from "@/lib/ai/eval/trace-summary"
 import type { TraceAnnotationRow } from "@/lib/db/trace-annotations"
 
+interface DraftEdits {
+  note: string
+  mode: string
+}
+
 function TraceRow({
   trace,
   annotation,
   datasetId,
+  draft,
+  onEdit,
 }: {
   trace: TraceSummary
   annotation?: TraceAnnotationRow
   datasetId?: string
+  /** Unsaved edits, or `undefined` when the row is showing what is persisted. */
+  draft?: DraftEdits
+  onEdit: (traceId: string, next: DraftEdits) => void
 }) {
   const t = useTranslations("eval")
-  const [note, setNote] = useState(annotation?.firstFailureNote ?? "")
-  const [mode, setMode] = useState(annotation?.failureMode ?? "")
+  // DERIVED, not seeded into local state. `useRecentTraces` and
+  // `useTraceAnnotations` are independent async live queries: when the traces
+  // resolved first the rows mounted with empty fields, the annotations arrived
+  // afterwards and never reached them, so a previously saved note rendered
+  // blank — and pressing Save then overwrote it with "".
+  const note = draft?.note ?? annotation?.firstFailureNote ?? ""
+  const mode = draft?.mode ?? annotation?.failureMode ?? ""
+  const setNote = (v: string) => onEdit(trace.traceId, { note: v, mode })
+  const setMode = (v: string) => onEdit(trace.traceId, { note, mode: v })
   const [savedCase, setSavedCase] = useState(Boolean(annotation?.savedAsCaseId))
 
   const handleSave = useCallback(async () => {
@@ -103,6 +120,12 @@ export function TraceAnnotationPanel() {
   const annotations = useTraceAnnotations()
   const datasets = useEvalDatasets()
   const [datasetId, setDatasetId] = useState<string | undefined>(undefined)
+  /** Per-trace unsaved edits. Absent key = the row mirrors what is persisted. */
+  const [drafts, setDrafts] = useState<Record<string, DraftEdits>>({})
+  const handleEdit = useCallback(
+    (traceId: string, next: DraftEdits) => setDrafts((cur) => ({ ...cur, [traceId]: next })),
+    []
+  )
 
   const annotationByTrace = useMemo(() => {
     const map = new Map<string, TraceAnnotationRow>()
@@ -167,6 +190,8 @@ export function TraceAnnotationPanel() {
               trace={trace}
               annotation={annotationByTrace.get(trace.traceId)}
               datasetId={effectiveDataset}
+              {...(drafts[trace.traceId] ? { draft: drafts[trace.traceId] } : {})}
+              onEdit={handleEdit}
             />
           ))}
         </div>

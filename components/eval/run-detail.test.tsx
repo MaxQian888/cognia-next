@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vals?: Record<string, unknown>) =>
@@ -41,6 +41,13 @@ jest.mock("@/lib/db/eval-runs", () => ({
 import { useEvalRunCaseResults } from "@/hooks/eval/use-eval-data"
 import { getRun } from "@/lib/db/eval-runs"
 import { RunDetail } from "./run-detail"
+
+/**
+ * jsdom applies no CSS, so the `md:hidden` card list and the `hidden md:block`
+ * table BOTH render. Scope row assertions to one of them.
+ */
+const table = () => within(screen.getByRole("table"))
+const cards = () => within(screen.getByTestId("run-detail-cards"))
 
 const RUN = {
   runId: "r1",
@@ -85,15 +92,15 @@ describe("RunDetail", () => {
     expect(await screen.findByText("opus")).toBeInTheDocument()
     expect(screen.getByText("gateFailed")).toBeInTheDocument()
     expect(screen.getByRole("alert")).toHaveTextContent(/passAt1 0\.500 < 0\.9/)
-    expect(screen.getByText("first prompt")).toBeInTheDocument()
-    expect(screen.getByText("second prompt")).toBeInTheDocument()
+    expect(table().getByText("first prompt")).toBeInTheDocument()
+    expect(table().getByText("second prompt")).toBeInTheDocument()
     // scorer columns are the union of seen scorer ids, sorted
-    expect(screen.getByText("assertion")).toBeInTheDocument()
-    expect(screen.getByText("cost")).toBeInTheDocument()
+    expect(table().getByText("assertion")).toBeInTheDocument()
+    expect(table().getByText("cost")).toBeInTheDocument()
     // c1 has no "cost" score → dash cell
-    expect(screen.getByText("—")).toBeInTheDocument()
-    expect(screen.getByText("pass")).toBeInTheDocument()
-    expect(screen.getByText("fail")).toBeInTheDocument()
+    expect(table().getByText("—")).toBeInTheDocument()
+    expect(table().getByText("pass")).toBeInTheDocument()
+    expect(table().getByText("fail")).toBeInTheDocument()
     expect(screen.getByTestId("graded-count")).toHaveTextContent('{"graded":2,"ungraded":0}')
   })
 
@@ -105,7 +112,7 @@ describe("RunDetail", () => {
     render(<RunDetail runId="r1" gate={{ minPassAt1: 0.1 }} onBack={jest.fn()} />)
     expect(await screen.findByText("gatePassed")).toBeInTheDocument()
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
-    expect(screen.getByText("cX")).toBeInTheDocument() // no input → caseId label
+    expect(table().getByText("cX")).toBeInTheDocument() // no input → caseId label
   })
 
   it("renders an ungraded row as neutral rather than as a failure", async () => {
@@ -123,10 +130,11 @@ describe("RunDetail", () => {
       },
     ])
     render(<RunDetail runId="r1" onBack={jest.fn()} />)
-    expect(await screen.findByText("ungraded")).toBeInTheDocument()
+    await screen.findByRole("table")
+    expect(table().getByText("ungraded")).toBeInTheDocument()
     // Neither non-verdict cell renders a red 0.00 that reads as "model wrong".
-    expect(screen.queryByText("0.00")).not.toBeInTheDocument()
-    expect(screen.queryByText("fail")).not.toBeInTheDocument()
+    expect(table().queryByText("0.00")).not.toBeInTheDocument()
+    expect(table().queryByText("fail")).not.toBeInTheDocument()
   })
 
   it("raises an alert when a scorer failed on every case", async () => {
@@ -184,11 +192,14 @@ describe("RunDetail", () => {
       },
     ])
     render(<RunDetail runId="r1" onBack={jest.fn()} />)
-    expect(await screen.findByTestId("case-detail")).toBeInTheDocument()
-    expect(screen.getByTestId("case-output")).toHaveTextContent(
+    await screen.findByRole("table")
+    expect(table().getByTestId("case-detail")).toBeInTheDocument()
+    expect(table().getByTestId("case-output")).toHaveTextContent(
       "I am not sure how to work this out."
     )
-    expect(screen.getByText("the answer never states a total")).toBeInTheDocument()
+    expect(table().getByText("the answer never states a total")).toBeInTheDocument()
+    // …and the narrow-screen card list carries the same detail.
+    expect(cards().getByTestId("case-output")).toBeInTheDocument()
   })
 
   it("marks a truncated answer and surfaces a failed run", async () => {
@@ -206,8 +217,9 @@ describe("RunDetail", () => {
       },
     ])
     render(<RunDetail runId="r1" onBack={jest.fn()} />)
-    expect(await screen.findByTestId("case-output")).toHaveTextContent("outputTruncated")
-    expect(screen.getByRole("alert")).toHaveTextContent("sidecar unavailable")
+    await screen.findByRole("table")
+    expect(table().getByTestId("case-output")).toHaveTextContent("outputTruncated")
+    expect(table().getAllByRole("alert")[0]).toHaveTextContent("sidecar unavailable")
   })
 
   it("renders a plain label when a row carries no answer or reasoning", async () => {
@@ -222,8 +234,9 @@ describe("RunDetail", () => {
       },
     ])
     render(<RunDetail runId="r1" onBack={jest.fn()} />)
-    expect(await screen.findByText("first prompt")).toBeInTheDocument()
-    expect(screen.queryByTestId("case-detail")).not.toBeInTheDocument()
+    await screen.findByRole("table")
+    expect(table().getByText("first prompt")).toBeInTheDocument()
+    expect(table().queryByTestId("case-detail")).not.toBeInTheDocument()
   })
 
   it("calls onBack and renders without a gate", async () => {

@@ -23,6 +23,7 @@ const RUN = {
   avgLatencyMs: 100,
   createdAt: 1717400000000,
   scoringVersion: 2 as const,
+  status: "completed" as const,
 }
 
 jest.mock("@/hooks/eval/use-eval-data", () => ({
@@ -86,5 +87,27 @@ describe("RunsList", () => {
     ;(useEvalRuns as jest.Mock).mockReturnValueOnce([])
     render(<RunsList datasetId="d1" onOpenRun={jest.fn()} />)
     expect(screen.getByText("empty")).toBeInTheDocument()
+  })
+
+  it("badges a cancelled run and withholds its gate verdict", () => {
+    // A run stopped after 10 of 500 cases reports rates over those 10; gating
+    // on that grades the agent on an arbitrary prefix.
+    ;(useEvalRuns as jest.Mock).mockReturnValueOnce([{ ...RUN, status: "aborted" }])
+    render(<RunsList datasetId="d1" gate={{ minPassAt1: 0.5 }} onOpenRun={jest.fn()} />)
+    expect(screen.getByTestId("runs-list-status")).toHaveTextContent("status.aborted")
+    expect(screen.queryByText("gatePassed")).not.toBeInTheDocument()
+    expect(screen.queryByText("gateFailed")).not.toBeInTheDocument()
+  })
+
+  it("badges a run that is still going", () => {
+    ;(useEvalRuns as jest.Mock).mockReturnValueOnce([{ ...RUN, status: "running" }])
+    render(<RunsList datasetId="d1" onOpenRun={jest.fn()} />)
+    expect(screen.getByTestId("runs-list-status")).toHaveTextContent("status.running")
+  })
+
+  it("leaves a completed run unbadged and gated as usual", () => {
+    render(<RunsList datasetId="d1" gate={{ minPassAt1: 0.5 }} onOpenRun={jest.fn()} />)
+    expect(screen.queryByTestId("runs-list-status")).not.toBeInTheDocument()
+    expect(screen.getByText("gatePassed")).toBeInTheDocument()
   })
 })

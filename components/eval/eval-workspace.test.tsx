@@ -14,6 +14,9 @@ jest.mock("./trace-annotation-panel", () => ({ TraceAnnotationPanel: () => <div>
 jest.mock("./calibration-panel", () => ({ CalibrationPanel: () => <div>CALIBRATE</div> }))
 
 import { EvalWorkspace } from "./eval-workspace"
+import { useEvalRunStore } from "@/stores/eval/eval-run-store"
+
+afterEach(() => useEvalRunStore.setState({ active: null, controller: null }))
 
 describe("EvalWorkspace", () => {
   beforeEach(() => push.mockClear())
@@ -65,5 +68,41 @@ describe("EvalWorkspace", () => {
     // feature-shell toolbar so it stays legible against an image background.
     const header = screen.getByText("tabs.datasets").closest("div")
     expect(header).toHaveClass("bg-background/80", "backdrop-blur")
+  })
+
+  describe("run bar", () => {
+    it("stays hidden with nothing running", () => {
+      render(<EvalWorkspace />)
+      expect(screen.queryByTestId("eval-run-bar")).not.toBeInTheDocument()
+    })
+
+    it("shows an in-flight run from any tab and can cancel it there", () => {
+      // Progress used to live inside the run dialog, so switching tabs hid a
+      // run that was still spending tokens.
+      const controller = new AbortController()
+      useEvalRunStore.getState().start({ datasetId: "d1", label: "opus", controller })
+      render(<EvalWorkspace />)
+      fireEvent.click(screen.getByText("tabs.calibrate"))
+      const bar = screen.getByTestId("eval-run-bar")
+      expect(bar).toHaveTextContent("runBar.label")
+      // No progress tick yet — cancel must still be available.
+      expect(bar).toHaveTextContent("runConfig.starting")
+      fireEvent.click(screen.getByText("runConfig.cancelRun"))
+      expect(controller.signal.aborted).toBe(true)
+    })
+
+    it("reports progress and disables cancel once cancelling", () => {
+      useEvalRunStore.getState().start({
+        datasetId: "d1",
+        label: "opus",
+        controller: new AbortController(),
+      })
+      useEvalRunStore.getState().updateProgress({ done: 4, total: 10, passing: 3, ungraded: 1 })
+      const { rerender } = render(<EvalWorkspace />)
+      expect(screen.getByTestId("eval-run-bar")).toHaveTextContent("4/10")
+      useEvalRunStore.getState().cancel()
+      rerender(<EvalWorkspace />)
+      expect(screen.getByText("runConfig.cancelRun")).toBeDisabled()
+    })
   })
 })

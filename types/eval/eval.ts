@@ -227,6 +227,9 @@ export interface EvalCaseResult {
 /** Per-repetition verdict derived from its `scored` observations. */
 export type RepetitionVerdict = "pass" | "fail" | "ungraded"
 
+/** Lifecycle of a persisted run. See {@link EvalReport.status}. */
+export type EvalRunStatus = "running" | "completed" | "aborted" | "failed"
+
 /** Aggregate stats for one scorer across all case×rep pairs. */
 export interface ScorerAggregate {
   scorerId: string
@@ -287,6 +290,20 @@ export interface EvalReport {
    * withholds their gate verdict.
    */
   scoringVersion?: 2
+  /**
+   * How far the run got. Written as `"running"` BEFORE the first case, then
+   * overwritten when it settles.
+   *
+   * Two problems this fixes. A run cancelled after 10 of 500 cases used to be
+   * indistinguishable from a complete one — same row shape, a pass rate over
+   * the handful that finished, and a gate verdict computed from it. And because
+   * the parent row was only written at the very end, an interrupted run left
+   * `evalRunCaseResults` rows whose `runId` had no owner: invisible to every
+   * view and never reclaimed, since deletion cascades from the run.
+   *
+   * Absent on rows written before this existed; treat those as `"completed"`.
+   */
+  status?: EvalRunStatus
   /** Immutable dataset version snapshot this run executed against. */
   datasetVersionId?: string
   /** Compact echo of the run configuration that produced this report. */

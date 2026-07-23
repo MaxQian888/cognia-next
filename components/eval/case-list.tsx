@@ -53,7 +53,7 @@ export function CaseList({ datasetId }: { datasetId: string }) {
       ) : (
         <ul className="flex flex-col gap-1">
           {cases.map((c: EvalCase) => (
-            <li key={c.id} className="rounded-md border">
+            <li key={c.id} className="motion-safe:animate-in motion-safe:fade-in rounded-md border">
               {editing === c.id ? (
                 <CaseEditor
                   initial={c}

@@ -89,7 +89,13 @@ export function EvalDashboard() {
         </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 sm:gap-4 md:grid-cols-[320px_1fr]">
+      <div
+        className="grid min-h-0 flex-1 gap-3 sm:gap-4"
+        // Driven by the SAME source as showList/showDetail. A Tailwind `md:`
+        // rule disagrees with `useIsMobile()` on a native tablet shell, which
+        // left half the screen blank.
+        style={{ gridTemplateColumns: isMobile ? "1fr" : "320px 1fr" }}
+      >
         {showList && (
           <div className="flex min-h-0 flex-col gap-2 overflow-hidden rounded-lg border p-2">
             <div className="flex items-center justify-between gap-2">

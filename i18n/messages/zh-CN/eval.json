@@ -233,6 +233,9 @@
       "huggingface": "HuggingFace"
     }
   },
+  "runBar": {
+    "label": "正在运行 {label}"
+  },
   "runConfig": {
     "addTarget": "添加目标",
     "cancelRun": "取消运行",
@@ -257,6 +260,7 @@
     "running": "运行中…",
     "scorers": "评分器（{count}）",
     "split": "子集筛选",
+    "starting": "启动中…",
     "targetKind": "目标类型",
     "targetLabel": "标签",
     "targetRef": "模型 / 团队 / 工作流 ID",
@@ -276,15 +280,20 @@
     "loading": "正在加载运行…",
     "noCases": "该运行没有逐用例结果。",
     "outputTruncated": "（已截断）",
+    "partialHint": "这次运行在 {done} 条用例后停止；上方比率只覆盖这些用例，且不判定质量门。",
     "pass": "通过",
     "passAt1": "pass@1 {pct}%",
     "passHatK": "pass^{k} {pct}%",
     "sampleError": "这条用例执行失败：{error}",
     "scorersFailed": "以下评分器在每条用例上都失败、未产出任何判定：{scorers}。上方数字不可信 —— 请检查评审模型的服务状态后重跑。",
     "status": {
+      "aborted": "已取消",
+      "completed": "已完成",
       "errored": "评分器本身执行失败",
+      "failed": "已失败",
       "measurement": "仅测量 —— 不参与判定",
       "not-applicable": "不适用 —— 该用例没有这个评分器需要的参考值",
+      "running": "运行中",
       "scored": "已判定"
     },
     "ungraded": "无判定",
@@ -313,6 +322,12 @@
     "openRun": "打开运行 {label}",
     "passAt1": "pass@1 {pct}%",
     "passHatK": "pass^{k} {pct}%",
+    "status": {
+      "aborted": "已取消",
+      "completed": "已完成",
+      "failed": "已失败",
+      "running": "运行中"
+    },
     "ungraded": "{count} 条无判定"
   },
   "scorerCatalog": {

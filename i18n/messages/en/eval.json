@@ -233,6 +233,9 @@
       "huggingface": "HuggingFace"
     }
   },
+  "runBar": {
+    "label": "Running {label}"
+  },
   "runConfig": {
     "addTarget": "Add target",
     "cancelRun": "Cancel run",
@@ -257,6 +260,7 @@
     "running": "Running…",
     "scorers": "Scorers ({count})",
     "split": "Split filter",
+    "starting": "Starting…",
     "targetKind": "Target kind",
     "targetLabel": "Label",
     "targetRef": "Model / team / workflow id",
@@ -276,15 +280,20 @@
     "loading": "Loading run…",
     "noCases": "No per-case results recorded for this run.",
     "outputTruncated": "(truncated)",
+    "partialHint": "This run stopped after {done} case(s); its rates cover only those, and no quality gate is applied.",
     "pass": "Pass",
     "passAt1": "pass@1 {pct}%",
     "passHatK": "pass^{k} {pct}%",
     "sampleError": "This case failed to run: {error}",
     "scorersFailed": "These scorers failed on every case and graded nothing: {scorers}. The numbers above are not trustworthy — check the judge provider and re-run.",
     "status": {
+      "aborted": "Cancelled",
+      "completed": "Completed",
       "errored": "The scorer itself failed",
+      "failed": "Failed",
       "measurement": "Measurement only — decides nothing",
       "not-applicable": "Not applicable — this case carries no reference for this scorer",
+      "running": "Running",
       "scored": "Scored"
     },
     "ungraded": "Ungraded",
@@ -313,6 +322,12 @@
     "openRun": "Open run {label}",
     "passAt1": "pass@1 {pct}%",
     "passHatK": "pass^{k} {pct}%",
+    "status": {
+      "aborted": "Cancelled",
+      "completed": "Completed",
+      "failed": "Failed",
+      "running": "Running"
+    },
     "ungraded": "{count} ungraded"
   },
   "scorerCatalog": {

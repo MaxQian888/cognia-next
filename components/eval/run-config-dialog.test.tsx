@@ -7,7 +7,8 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vals?: Record<string, unknown>) =>
     vals ? `${key}:${JSON.stringify(vals)}` : key,
 }))
-jest.mock("next/navigation", () => ({ useRouter: () => ({ push: jest.fn() }) }))
+const push = jest.fn()
+jest.mock("next/navigation", () => ({ useRouter: () => ({ push }) }))
 // The dialog reads the dataset's runs (cost estimate) + cases (units) via
 // useLiveQuery; jsdom has no IndexedDB, so stub both. Mutable so the cost-guard
 // tests can supply a prior run to extrapolate from.
@@ -42,6 +43,9 @@ jest.mock("@/lib/ai/eval/service", () => ({
 }))
 
 import { RunConfigDialog } from "./run-config-dialog"
+import { useEvalRunStore } from "@/stores/eval/eval-run-store"
+
+afterEach(() => useEvalRunStore.setState({ active: null, controller: null }))
 
 beforeEach(() => {
   buildConfiguredRunDeps.mockClear()
@@ -156,6 +160,49 @@ describe("RunConfigDialog", () => {
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument())
   })
 
+  it("offers cancel from the first moment, before any progress tick", async () => {
+    // The button used to be gated on `progress`, which only exists after case 1
+    // completes — on a real target that is minutes with no way out.
+    let release: () => void = () => {}
+    let capturedSignal: AbortSignal | undefined
+    runEvalService.mockImplementationOnce(async ({ signal }: ServiceInput) => {
+      capturedSignal = signal
+      await new Promise<void>((r) => {
+        release = r
+      })
+      return { reports: [{ runId: "r1" }], deterministicOnly: false }
+    })
+    render(<RunConfigDialog datasetId="d" appSettings={null} onClose={jest.fn()} />)
+    fireEvent.click(screen.getByText("runConfig.run"))
+    expect(await screen.findByTestId("run-progress")).toHaveTextContent("runConfig.starting")
+    fireEvent.click(screen.getByText("runConfig.cancelRun"))
+    expect(capturedSignal?.aborted).toBe(true)
+    release()
+    await waitFor(() => expect(useEvalRunStore.getState().active).toBeNull())
+  })
+
+  it("keeps the run in the store so closing the dialog does not orphan it", async () => {
+    let release: () => void = () => {}
+    runEvalService.mockImplementationOnce(async () => {
+      await new Promise<void>((r) => {
+        release = r
+      })
+      return { reports: [{ runId: "r1" }], deterministicOnly: false }
+    })
+    const { unmount } = render(
+      <RunConfigDialog datasetId="d" appSettings={null} onClose={jest.fn()} />
+    )
+    fireEvent.click(screen.getByText("runConfig.run"))
+    await waitFor(() => expect(useEvalRunStore.getState().active).not.toBeNull())
+    // Closing the dialog used to drop the AbortController while the promise
+    // kept running and writing results.
+    unmount()
+    expect(useEvalRunStore.getState().controller).not.toBeNull()
+    useEvalRunStore.getState().cancel()
+    release()
+    await waitFor(() => expect(useEvalRunStore.getState().active).toBeNull())
+  })
+
   it("shows progress while running and supports cancel", async () => {
     let capturedSignal: AbortSignal | undefined
     let release: () => void = () => {}
@@ -221,6 +268,20 @@ describe("RunConfigDialog", () => {
       await waitFor(() => expect(runEvalService).toHaveBeenCalledTimes(1))
     })
 
+    it("re-arms the guard when the configuration changes after acknowledging", async () => {
+      // `costAck` used to latch forever, so acknowledging a small run also
+      // pre-approved the far bigger one you get after adding targets.
+      evalRuns.mockReturnValue([priorRun])
+      evalCases.mockReturnValue([{ id: "c1" }, { id: "c2" }])
+      render(<RunConfigDialog datasetId="d" appSettings={settings(0.1)} onClose={jest.fn()} />)
+      fireEvent.click(screen.getByText("runConfig.runAnyway"))
+      expect(screen.getByText("runConfig.run")).toBeInTheDocument()
+      // Raise k → the estimate changes → the acknowledgement no longer applies.
+      fireEvent.change(screen.getByLabelText("runConfig.k"), { target: { value: "5" } })
+      expect(screen.getByText("runConfig.runAnyway")).toBeInTheDocument()
+      expect(runEvalService).not.toHaveBeenCalled()
+    })
+
     it("does not warn when the estimate is within the guard", () => {
       evalRuns.mockReturnValue([priorRun])
       evalCases.mockReturnValue([{ id: "c1" }])
@@ -244,12 +305,54 @@ describe("RunConfigDialog", () => {
   })
 
   it("says so when no judge client resolves, instead of naming a model that will not run", () => {
-    buildConfiguredRunDeps.mockReturnValueOnce({
+    buildConfiguredRunDeps.mockReturnValue({
       deps: { sentinel: true },
       deterministicOnly: true,
     })
     render(<RunConfigDialog datasetId="d" appSettings={null} onClose={jest.fn()} />)
     expect(screen.getByText("judge.deterministic")).toBeInTheDocument()
     expect(screen.getByText("runConfig.deterministicOnly")).toBeInTheDocument()
+    buildConfiguredRunDeps.mockReturnValue({ deps: { sentinel: true }, deterministicOnly: false })
+  })
+
+  it("drops judge scorers from the selection when no judge will run", async () => {
+    // They used to render checked AND greyed out — claiming they would run
+    // while the picker said they could not.
+    buildConfiguredRunDeps.mockReturnValue({
+      deps: { sentinel: true },
+      deterministicOnly: true,
+    })
+    render(<RunConfigDialog datasetId="d" appSettings={null} onClose={jest.fn()} />)
+    const judge = screen.getByLabelText("scorerCatalog.judge-task-completion")
+    expect(judge).toBeDisabled()
+    expect(judge).not.toBeChecked()
+    fireEvent.click(screen.getByText("runConfig.run"))
+    await waitFor(() => expect(runEvalService).toHaveBeenCalled())
+    const sent = (runEvalService.mock.calls[0][0] as ServiceInput).config.scorerIds
+    expect(sent).not.toContain("judge-task-completion")
+    buildConfiguredRunDeps.mockReturnValue({ deps: { sentinel: true }, deterministicOnly: false })
+  })
+
+  it("selects a target's character back to the default", async () => {
+    render(
+      <RunConfigDialog
+        datasetId="d"
+        appSettings={{ defaultModel: "m1" } as never}
+        options={{ models: ["m1"], characters: [{ id: "char-1", name: "Ada" }] }}
+        onClose={jest.fn()}
+      />
+    )
+    const picker = screen.getByLabelText("runConfig.character")
+    fireEvent.change(picker, { target: { value: "char-1" } })
+    fireEvent.change(picker, { target: { value: "" } })
+    fireEvent.click(screen.getByText("runConfig.run"))
+    await waitFor(() => expect(runEvalService).toHaveBeenCalled())
+    expect(runEvalService.mock.calls[0][0].config.targets[0]).not.toHaveProperty("characterId")
+  })
+
+  it("deep-links to the eval settings section", () => {
+    render(<RunConfigDialog datasetId="d" appSettings={null} onClose={jest.fn()} />)
+    fireEvent.click(screen.getByText("judge.configure"))
+    expect(push).toHaveBeenCalledWith("/settings?section=eval")
   })
 })

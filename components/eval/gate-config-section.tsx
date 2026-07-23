@@ -14,7 +14,6 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { ShieldCheckIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { updateDataset } from "@/lib/db/eval-datasets"
@@ -68,10 +67,6 @@ export function GateConfigSection({ datasetId, gate }: GateConfigSectionProps) {
 
   return (
     <div className="flex flex-col gap-3" data-testid="gate-config-section">
-      <div className="flex items-center gap-2">
-        <ShieldCheckIcon className="size-4" />
-        <h3 className="text-sm font-medium">{t("heading")}</h3>
-      </div>
       <p className="text-muted-foreground text-xs">{t("hint")}</p>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         {FIELDS.map((f) => (

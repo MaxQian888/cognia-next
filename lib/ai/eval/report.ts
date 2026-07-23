@@ -51,6 +51,17 @@ export function isLegacyScoring(report: Pick<EvalReport, "scoringVersion">): boo
 }
 
 /**
+ * True when the run did not finish, so its rates cover only the cases that DID
+ * run. A partial run must never carry a gate verdict: "80% of the first 10 of
+ * 500 cases" is not a statement about the agent.
+ *
+ * Rows written before `status` existed are treated as complete.
+ */
+export function isPartialRun(report: Pick<EvalReport, "status">): boolean {
+  return report.status === "running" || report.status === "aborted" || report.status === "failed"
+}
+
+/**
  * Scorers that errored on every observation and graded nothing — a judge whose
  * provider was down, say. Their absence from the pass rate is silent, so the UI
  * raises this as an alert: the run's numbers were computed without them.

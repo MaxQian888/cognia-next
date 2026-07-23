@@ -160,4 +160,61 @@ describe("TraceAnnotationPanel", () => {
     expect(screen.getByText(/wrong-tool · 25/)).toBeInTheDocument()
     expect(screen.getByRole("status")).toHaveTextContent("annotate.saturation")
   })
+
+  it("shows a persisted annotation that arrives after the traces", () => {
+    // `useRecentTraces` and `useTraceAnnotations` are independent async live
+    // queries. When the traces resolved first, rows mounted with empty fields
+    // and the annotation never reached them — a saved note rendered blank, and
+    // pressing Save overwrote it with "".
+    traces = [trace("t1")]
+    annotations = []
+    datasets = []
+    const { rerender } = render(<TraceAnnotationPanel />)
+    expect(screen.getByLabelText("annotate.firstFailure")).toHaveValue("")
+
+    annotations = [
+      {
+        traceId: "t1",
+        sessionId: "s1",
+        firstFailureNote: "picked the wrong tool",
+        failureMode: "wrong-tool",
+        updatedAt: 2,
+      } as TraceAnnotationRow,
+    ]
+    rerender(<TraceAnnotationPanel />)
+    expect(screen.getByLabelText("annotate.firstFailure")).toHaveValue("picked the wrong tool")
+    expect(screen.getByLabelText("annotate.failureMode")).toHaveValue("wrong-tool")
+  })
+
+  it("does not overwrite a persisted note with an empty one on save", () => {
+    traces = [trace("t1")]
+    annotations = [
+      {
+        traceId: "t1",
+        sessionId: "s1",
+        firstFailureNote: "picked the wrong tool",
+        updatedAt: 2,
+      } as TraceAnnotationRow,
+    ]
+    datasets = []
+    upsertAnnotation.mockClear()
+    render(<TraceAnnotationPanel />)
+    fireEvent.click(screen.getByText("annotate.save"))
+    expect(upsertAnnotation).toHaveBeenCalledWith(
+      expect.objectContaining({ firstFailureNote: "picked the wrong tool" })
+    )
+  })
+
+  it("keeps unsaved edits per trace while the live query refreshes", () => {
+    traces = [trace("t1"), trace("t2")]
+    annotations = []
+    datasets = []
+    const { rerender } = render(<TraceAnnotationPanel />)
+    const [first] = screen.getAllByLabelText("annotate.firstFailure")
+    fireEvent.change(first, { target: { value: "in progress" } })
+    // An unrelated live-query tick must not discard what is being typed.
+    annotations = [{ traceId: "t2", sessionId: "s2", updatedAt: 3 } as TraceAnnotationRow]
+    rerender(<TraceAnnotationPanel />)
+    expect(screen.getAllByLabelText("annotate.firstFailure")[0]).toHaveValue("in progress")
+  })
 })

@@ -14,19 +14,22 @@
  * expensive matrix when the settings cost guard is set.
  */
 
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useRouter } from "next/navigation"
 import { PlusIcon, Trash2Icon, PlayIcon, Loader2Icon, ScaleIcon, SettingsIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Progress } from "@/components/ui/progress"
 import type { AppSettings } from "@cognia/agent-config-types"
 import { buildConfiguredRunDeps } from "@/lib/ai/eval/browser-deps"
-import { runEvalService, type EvalProgress } from "@/lib/ai/eval/service"
+import { runEvalService } from "@/lib/ai/eval/service"
 import { resolveEvalSettings } from "@/lib/ai/eval/settings"
 import { useEvalRuns, useEvalCases } from "@/hooks/eval/use-eval-data"
+import { useEvalRunStore } from "@/stores/eval/eval-run-store"
 import type { EvalRunConfig, TargetKind, TargetSpec } from "@/types/eval/run-config"
+import { SCORER_CATALOG } from "@/lib/ai/eval/scorers/catalog"
 import { ScorerPicker, expandScorerSelection, normalizeScorerSelection } from "./scorer-picker"
 
 interface NameId {
@@ -86,16 +89,24 @@ export function RunConfigDialog({
     { kind: "chat", label: "", ref: defaultModel },
   ])
   const [k, setK] = useState(evalSettings.defaultK)
+  // Judge scorers are dropped from the initial selection when no judge client
+  // resolved. They used to render checked AND greyed out, which claims they
+  // will run while the picker says they cannot.
   const [scorerIds, setScorerIds] = useState<string[]>(() =>
     expandScorerSelection(evalSettings.defaultScorerIds)
   )
   const [split, setSplit] = useState("")
   const [capabilities, setCapabilities] = useState("")
-  const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [progress, setProgress] = useState<EvalProgress | null>(null)
-  const [costAck, setCostAck] = useState(false)
-  const abortRef = useRef<AbortController | null>(null)
+  // Run state lives in the store, not here: closing this dialog used to drop
+  // the AbortController while the promise kept running and writing to Dexie.
+  const startRun = useEvalRunStore((st) => st.start)
+  const reportProgress = useEvalRunStore((st) => st.updateProgress)
+  const finishRun = useEvalRunStore((st) => st.finish)
+  const cancelRun = useEvalRunStore((st) => st.cancel)
+  const activeRun = useEvalRunStore((st) => st.active)
+  const running = activeRun !== null
+  const progress = activeRun?.progress ?? null
 
   const { deterministicOnly } = useMemo(
     () =>
@@ -129,6 +140,20 @@ export function RunConfigDialog({
   const overBudget =
     estimatedCost != null && costWarnUsd != null && costWarnUsd > 0 && estimatedCost > costWarnUsd
 
+  // The cost guard is per-configuration: acknowledging a $3 run must not also
+  // pre-approve the $30 one you get after adding two targets and raising k.
+  const configKey = useMemo(() => JSON.stringify([targets, k, scorerIds]), [targets, k, scorerIds])
+  const [ackedConfig, setAckedConfig] = useState<string | null>(null)
+  const costAck = ackedConfig === configKey
+
+  const selectableScorerIds = useMemo(
+    () =>
+      deterministicOnly
+        ? scorerIds.filter((id) => !SCORER_CATALOG.find((e) => e.id === id)?.requiresLlm)
+        : scorerIds,
+    [scorerIds, deterministicOnly]
+  )
+
   const setTarget = (i: number, patch: Partial<TargetDraft>) =>
     setTargets((cur) => cur.map((tg, idx) => (idx === i ? { ...tg, ...patch } : tg)))
 
@@ -141,16 +166,14 @@ export function RunConfigDialog({
   const handleRun = useCallback(async () => {
     // First click while over the cost guard: acknowledge, don't run yet.
     if (overBudget && !costAck) {
-      setCostAck(true)
+      setAckedConfig(configKey)
       return
     }
-    setRunning(true)
     setError(null)
-    setProgress(null)
     try {
       const config: EvalRunConfig = {
         targets: targets.filter((d) => d.ref.trim()).map(draftToSpec),
-        scorerIds: normalizeScorerSelection(scorerIds),
+        scorerIds: normalizeScorerSelection(selectableScorerIds),
         k: Math.max(1, k),
         ...(split.trim() || capabilities.trim()
           ? {
@@ -166,7 +189,11 @@ export function RunConfigDialog({
         return
       }
       const controller = new AbortController()
-      abortRef.current = controller
+      startRun({
+        datasetId,
+        label: config.targets.map((tg) => tg.label).join(", "),
+        controller,
+      })
       const { reports } = await runEvalService({
         datasetId,
         config,
@@ -174,21 +201,21 @@ export function RunConfigDialog({
         signal: controller.signal,
         ...(evalSettings.deterministicOnly ? { forceDeterministic: true } : {}),
         ...(evalSettings.judgeModel ? { judgeModel: evalSettings.judgeModel } : {}),
-        onProgress: (p) => setProgress(p),
+        onProgress: reportProgress,
       })
       onComplete?.(reports.length)
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
-      setRunning(false)
-      abortRef.current = null
+      finishRun()
     }
   }, [
     overBudget,
     costAck,
+    configKey,
     targets,
-    scorerIds,
+    selectableScorerIds,
     k,
     split,
     capabilities,
@@ -196,20 +223,16 @@ export function RunConfigDialog({
     datasetId,
     evalSettings.deterministicOnly,
     evalSettings.judgeModel,
+    startRun,
+    reportProgress,
+    finishRun,
     onClose,
     onComplete,
     t,
   ])
 
   return (
-    <div className="flex flex-col gap-3 rounded-md border p-3" data-testid="run-config-dialog">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium">{t("runConfig.heading")}</h3>
-        <Button size="sm" variant="ghost" onClick={onClose}>
-          {t("runConfig.close")}
-        </Button>
-      </div>
-
+    <div className="flex flex-col gap-3" data-testid="run-config-dialog">
       {/* Target matrix */}
       <div className="flex flex-col gap-2">
         <span className="text-sm font-medium">{t("runConfig.targets")}</span>
@@ -328,10 +351,10 @@ export function RunConfigDialog({
       {/* Scorer subset — grouped by dimension */}
       <div className="flex flex-col gap-1">
         <span className="text-sm font-medium">
-          {t("runConfig.scorers", { count: scorerIds.length })}
+          {t("runConfig.scorers", { count: selectableScorerIds.length })}
         </span>
         <ScorerPicker
-          value={scorerIds}
+          value={selectableScorerIds}
           onChange={setScorerIds}
           judgeAvailable={!deterministicOnly}
         />
@@ -350,23 +373,31 @@ export function RunConfigDialog({
         </p>
       )}
 
-      {running && progress && (
+      {running && (
         <div className="flex items-center gap-2" data-testid="run-progress">
-          <progress
-            className="h-2 min-w-0 flex-1"
-            value={progress.done}
-            max={progress.total}
+          <Progress
+            className="min-w-0 flex-1"
+            value={progress ? (progress.done / Math.max(1, progress.total)) * 100 : 0}
             aria-label={t("runConfig.progressLabel")}
           />
           <span className="text-muted-foreground text-xs tabular-nums">
-            {t("runConfig.progress", {
-              done: progress.done,
-              total: progress.total,
-              passing: progress.passing,
-              ungraded: progress.ungraded,
-            })}
+            {progress
+              ? t("runConfig.progress", {
+                  done: progress.done,
+                  total: progress.total,
+                  passing: progress.passing,
+                  ungraded: progress.ungraded,
+                })
+              : t("runConfig.starting")}
           </span>
-          <Button size="sm" variant="outline" onClick={() => abortRef.current?.abort()}>
+          {/* Gated on `running`, not on `progress`: the first case can take
+              minutes, and there used to be no way out during it. */}
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={activeRun?.cancelling === true}
+            onClick={cancelRun}
+          >
             {t("runConfig.cancelRun")}
           </Button>
         </div>

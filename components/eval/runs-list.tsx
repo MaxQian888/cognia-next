@@ -10,7 +10,7 @@ import { useTranslations } from "next-intl"
 import { Badge } from "@/components/ui/badge"
 import { useEvalRuns } from "@/hooks/eval/use-eval-data"
 import { evaluateGate } from "@/lib/ai/eval/gate"
-import { isLegacyScoring } from "@/lib/ai/eval/report"
+import { isLegacyScoring, isPartialRun } from "@/lib/ai/eval/report"
 import type { EvalRunRow } from "@/lib/db/eval-runs"
 import type { GateThresholds } from "@/types/eval/gate"
 
@@ -46,9 +46,10 @@ export function RunsListView({ runs, gate, onOpenRun }: RunsListViewProps) {
         // Legacy runs carry an inflated pass rate, so their gate verdict would
         // be equally wrong — badge them and withhold it.
         const legacy = isLegacyScoring(run)
-        const gateResult = gate && !legacy ? evaluateGate(run, gate) : undefined
+        const partial = isPartialRun(run)
+        const gateResult = gate && !legacy && !partial ? evaluateGate(run, gate) : undefined
         return (
-          <li key={run.runId}>
+          <li key={run.runId} className="motion-safe:animate-in motion-safe:fade-in">
             <button
               type="button"
               aria-label={t("openRun", { label: run.targetLabel })}
@@ -79,6 +80,11 @@ export function RunsListView({ runs, gate, onOpenRun }: RunsListViewProps) {
                 {legacy && (
                   <Badge variant="outline" data-testid="runs-list-legacy">
                     {t("legacyScoring")}
+                  </Badge>
+                )}
+                {partial && (
+                  <Badge variant="destructive" data-testid="runs-list-status">
+                    {t(`status.${run.status}` as never)}
                   </Badge>
                 )}
                 {gateResult && (

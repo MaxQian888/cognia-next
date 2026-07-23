@@ -76,4 +76,23 @@ describe("CaseList", () => {
       expect(updateCase).toHaveBeenCalledWith("c1", expect.objectContaining({ input: "edited" }))
     )
   })
+
+  it("closes the new-case editor on cancel", () => {
+    cases = []
+    render(<CaseList datasetId="d" />)
+    fireEvent.click(screen.getByText("case.add"))
+    fireEvent.click(screen.getByText("case.cancel"))
+    expect(screen.queryByTestId("case-editor")).not.toBeInTheDocument()
+    expect(screen.getByText("case.empty")).toBeInTheDocument()
+  })
+
+  it("closes the editor on cancel without writing", () => {
+    cases = [caseRow({ id: "c1", input: "first" })]
+    render(<CaseList datasetId="d" />)
+    fireEvent.click(screen.getByLabelText("case.edit"))
+    expect(screen.getByTestId("case-editor")).toBeInTheDocument()
+    fireEvent.click(screen.getByText("case.cancel"))
+    expect(screen.queryByTestId("case-editor")).not.toBeInTheDocument()
+    expect(updateCase).not.toHaveBeenCalled()
+  })
 })

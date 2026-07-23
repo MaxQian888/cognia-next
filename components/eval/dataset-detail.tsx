@@ -121,7 +121,10 @@ export function DatasetDetail({ dataset, appSettings, runOptions }: DatasetDetai
         ))}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div
+        key={segment}
+        className="motion-safe:animate-in motion-safe:fade-in min-h-0 flex-1 overflow-y-auto"
+      >
         {segment === "cases" ? (
           <CaseList datasetId={dataset.id} />
         ) : segment === "runs" ? (

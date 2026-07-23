@@ -111,7 +111,9 @@ export function ScorerPicker({
                     <input
                       type="checkbox"
                       aria-label={t(`scorerCatalog.${e.id}` as never)}
-                      checked={checked.has(e.id)}
+                      // Disabled scorers are never shown checked: "selected
+                      // but cannot run" is not a state the user can act on.
+                      checked={!disabled && checked.has(e.id)}
                       disabled={disabled}
                       onChange={() => toggle(e.id)}
                     />

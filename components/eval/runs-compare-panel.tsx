@@ -5,14 +5,20 @@
  * {@link RunComparisonView} A-vs-B grid over them.
  */
 
+import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { GitCompareIcon } from "lucide-react"
-import { useRecentRuns } from "@/hooks/eval/use-eval-data"
+import { useEvalCases, useRecentRuns } from "@/hooks/eval/use-eval-data"
 import { RunComparisonView } from "./run-comparison-view"
 
 export function RunsComparePanel() {
   const t = useTranslations("eval")
   const runs = useRecentRuns(50)
+  // The grid's row labels come from these. Without them every row read as a
+  // raw `evc_imp_…` id — the prop existed but only a Storybook story passed it.
+  const datasetId = runs[0]?.datasetId
+  const cases = useEvalCases(datasetId)
+  const inputsByCase = useMemo(() => Object.fromEntries(cases.map((c) => [c.id, c.input])), [cases])
 
   return (
     <div
@@ -29,7 +35,7 @@ export function RunsComparePanel() {
       {runs.length === 0 ? (
         <p className="text-muted-foreground text-sm">{t("runs.empty")}</p>
       ) : (
-        <RunComparisonView runs={runs} />
+        <RunComparisonView runs={runs} inputsByCase={inputsByCase} />
       )}
     </div>
   )

@@ -20,10 +20,11 @@ import { AlertTriangleIcon, ArrowLeftIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import { getRun, type EvalRunRow } from "@/lib/db/eval-runs"
 import { useEvalCases, useEvalRunCaseResults } from "@/hooks/eval/use-eval-data"
 import { evaluateGate } from "@/lib/ai/eval/gate"
-import { fullyErroredScorers, isLegacyScoring } from "@/lib/ai/eval/report"
+import { fullyErroredScorers, isLegacyScoring, isPartialRun } from "@/lib/ai/eval/report"
 import type { GateThresholds } from "@/types/eval/gate"
 import type { EvalRunCaseRow } from "@/lib/db/eval-run-cases"
 
@@ -122,8 +123,14 @@ export function RunDetail({ runId, gate, onBack }: RunDetailProps) {
   const legacy = run ? isLegacyScoring(run) : false
   // A legacy run's pass rate is inflated by the old scoring, so its gate
   // verdict would be equally wrong — withhold it rather than show a green tick.
+  const partial = run ? isPartialRun(run) : false
+  // A run that stopped early reports rates over the cases that finished —
+  // gating on that would grade the agent on an arbitrary prefix.
   const gateResult = useMemo(
-    () => (run && gate && !isLegacyScoring(run) ? evaluateGate(run, gate) : undefined),
+    () =>
+      run && gate && !isLegacyScoring(run) && !isPartialRun(run)
+        ? evaluateGate(run, gate)
+        : undefined,
     [run, gate]
   )
   const brokenScorers = useMemo(() => (run ? fullyErroredScorers(run) : []), [run])
@@ -133,7 +140,14 @@ export function RunDetail({ runId, gate, onBack }: RunDetailProps) {
     return [...ids].sort()
   }, [rows])
 
-  if (!run) return <p className="text-muted-foreground text-sm">{t("loading")}</p>
+  if (!run) {
+    return (
+      <div className="flex flex-col gap-2" role="status" aria-label={t("loading")}>
+        <Skeleton className="h-6 w-64" />
+        <Skeleton className="h-24 w-full" />
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-3" data-testid="run-detail">
@@ -162,6 +176,11 @@ export function RunDetail({ runId, gate, onBack }: RunDetailProps) {
             {t("legacyScoring")}
           </Badge>
         )}
+        {partial && (
+          <Badge variant="destructive" data-testid="run-status">
+            {t(`status.${run.status}` as never)}
+          </Badge>
+        )}
         {gateResult && (
           <Badge variant={gateResult.passed ? "secondary" : "destructive"}>
             {gateResult.passed ? t("gatePassed") : t("gateFailed")}
@@ -170,6 +189,11 @@ export function RunDetail({ runId, gate, onBack }: RunDetailProps) {
       </div>
 
       {legacy && <p className="text-muted-foreground text-xs">{t("legacyScoringHint")}</p>}
+      {partial && (
+        <p className="text-muted-foreground text-xs" data-testid="partial-hint">
+          {t("partialHint", { done: run.caseCount })}
+        </p>
+      )}
 
       {brokenScorers.length > 0 && (
         <p
@@ -199,74 +223,124 @@ export function RunDetail({ runId, gate, onBack }: RunDetailProps) {
       {rows.length === 0 ? (
         <p className="text-muted-foreground text-sm">{t("noCases")}</p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-sm">
-            <thead>
-              <tr>
-                <th className="border p-2 text-left">{t("caseColumn")}</th>
-                {scorerIds.map((id) => (
-                  <th key={id} className="border p-2 text-left text-xs">
-                    {id}
-                  </th>
-                ))}
-                <th className="border p-2 text-left">{t("verdict")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => {
-                const verdict = rowVerdict(row)
-                return (
-                  <tr key={row.id}>
-                    <td className="border p-2 align-top">
-                      <CaseCell
-                        label={inputByCase.get(row.caseId) ?? row.caseId}
-                        row={row}
-                        scorerIds={scorerIds}
-                      />
-                    </td>
-                    {scorerIds.map((id) => {
-                      const s = row.scores[id]
-                      // Only a real verdict gets a pass/fail colour. A
-                      // not-applicable / errored / measurement observation used
-                      // to render as a red 0.00, which read as "the model got
-                      // this wrong" when nothing had been graded at all.
-                      const scored = !s || s.status === undefined || s.status === "scored"
-                      return (
-                        <td
-                          key={id}
-                          title={
-                            s?.status && !scored ? t(`status.${s.status}` as never) : undefined
-                          }
-                          className={cn(
-                            "border p-2 text-center text-xs tabular-nums",
-                            s && scored && (s.passed ? "bg-emerald-500/15" : "bg-destructive/15"),
-                            s && !scored && "text-muted-foreground"
-                          )}
-                        >
-                          {!s ? "—" : scored ? s.value.toFixed(2) : "–"}
-                        </td>
-                      )
-                    })}
-                    <td
-                      className={cn(
-                        "border p-2 text-center",
-                        verdict === "pass" && "bg-emerald-500/15",
-                        verdict === "fail" && "bg-destructive/15",
-                        verdict === "ungraded" && "text-muted-foreground"
-                      )}
+        <>
+          {/* <md: per-case cards. The table below needs horizontal scrolling on a
+            phone; `run-comparison-view` already degrades this way and this view
+            was the odd one out. */}
+          <div className="flex flex-col gap-2 md:hidden" data-testid="run-detail-cards">
+            {rows.map((row) => {
+              const verdict = rowVerdict(row)
+              return (
+                <div
+                  key={row.id}
+                  className="motion-safe:animate-in motion-safe:fade-in rounded-md border p-2"
+                >
+                  <CaseCell
+                    label={inputByCase.get(row.caseId) ?? row.caseId}
+                    row={row}
+                    scorerIds={scorerIds}
+                  />
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    <Badge
+                      variant={
+                        verdict === "pass"
+                          ? "secondary"
+                          : verdict === "fail"
+                            ? "destructive"
+                            : "outline"
+                      }
+                      className="text-[10px]"
                     >
                       {verdict === "ungraded"
                         ? t("ungraded")
                         : verdict === "pass"
                           ? t("pass")
                           : t("fail")}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+                    </Badge>
+                    {scorerIds.map((id) => {
+                      const sc = row.scores[id]
+                      if (!sc) return null
+                      const scored = sc.status === undefined || sc.status === "scored"
+                      return (
+                        <Badge key={id} variant="outline" className="text-[10px] tabular-nums">
+                          {id} {scored ? sc.value.toFixed(2) : "–"}
+                        </Badge>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <div className="hidden overflow-x-auto md:block">
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr>
+                  <th className="border p-2 text-left">{t("caseColumn")}</th>
+                  {scorerIds.map((id) => (
+                    <th key={id} className="border p-2 text-left text-xs">
+                      {id}
+                    </th>
+                  ))}
+                  <th className="border p-2 text-left">{t("verdict")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => {
+                  const verdict = rowVerdict(row)
+                  return (
+                    <tr key={row.id} className="motion-safe:animate-in motion-safe:fade-in">
+                      <td className="border p-2 align-top">
+                        <CaseCell
+                          label={inputByCase.get(row.caseId) ?? row.caseId}
+                          row={row}
+                          scorerIds={scorerIds}
+                        />
+                      </td>
+                      {scorerIds.map((id) => {
+                        const s = row.scores[id]
+                        // Only a real verdict gets a pass/fail colour. A
+                        // not-applicable / errored / measurement observation used
+                        // to render as a red 0.00, which read as "the model got
+                        // this wrong" when nothing had been graded at all.
+                        const scored = !s || s.status === undefined || s.status === "scored"
+                        return (
+                          <td
+                            key={id}
+                            title={
+                              s?.status && !scored ? t(`status.${s.status}` as never) : undefined
+                            }
+                            className={cn(
+                              "border p-2 text-center text-xs tabular-nums",
+                              s && scored && (s.passed ? "bg-emerald-500/15" : "bg-destructive/15"),
+                              s && !scored && "text-muted-foreground"
+                            )}
+                          >
+                            {!s ? "—" : scored ? s.value.toFixed(2) : "–"}
+                          </td>
+                        )
+                      })}
+                      <td
+                        className={cn(
+                          "border p-2 text-center",
+                          verdict === "pass" && "bg-emerald-500/15",
+                          verdict === "fail" && "bg-destructive/15",
+                          verdict === "ungraded" && "text-muted-foreground"
+                        )}
+                      >
+                        {verdict === "ungraded"
+                          ? t("ungraded")
+                          : verdict === "pass"
+                            ? t("pass")
+                            : t("fail")}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   )
