@@ -47,7 +47,7 @@ describe("DesktopOnlyInitializers", () => {
     // Mirrors the count of gated children in the component — a guard against
     // silently dropping one when the list changes. (WindowShowInitializer +
     // WebviewHeartbeatInitializer moved up to WindowLivenessInitializers.)
-    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(14)
+    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(15)
   })
 
   it.each(["overlay", "popup"] as const)(

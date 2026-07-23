@@ -27,6 +27,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react"
+import { useSubscriptionNow } from "@/lib/subscription/core/now-ticker"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
@@ -200,13 +201,10 @@ export function SubscriptionUsageTab() {
   const setAllSections = (open: boolean) =>
     setFold(() => ({ mode, map: new Map(SECTION_IDS.map((id) => [id, open])) }))
 
-  // Tick once a minute so reset countdowns and range cutoffs stay fresh
-  // without reading `Date.now()` impurely during render.
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 60_000)
-    return () => clearInterval(id)
-  }, [])
+  // Shared clock: this page also renders the overview gauges and the quota
+  // panel, which used to run their own intervals at a different period, so the
+  // same window's countdown ticked at two different moments.
+  const now = useSubscriptionNow()
 
   const filteredSessionRows = useMemo(
     () => filterBySurface(filterByRange(sessionRows, rangeDays, now), surface),
@@ -834,7 +832,13 @@ function UtilizationTrendCard({
         </p>
       ) : (
         <div className="h-56" data-testid="usage-trend-chart">
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer
+            width="100%"
+            height="100%"
+            minWidth={1}
+            minHeight={1}
+            initialDimension={{ width: 320, height: 224 }}
+          >
             <AreaChart data={series} margin={CHART_MARGINS.compact}>
               <defs>
                 <linearGradient id="usage-trend-5h" x1="0" y1="0" x2="0" y2="1">
@@ -937,7 +941,13 @@ function ModelBreakdownCard({
       <div className="grid gap-4 lg:grid-cols-2">
         {donut.length > 0 && (
           <div className="relative h-56" data-testid="usage-model-donut">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer
+              width="100%"
+              height="100%"
+              minWidth={1}
+              minHeight={1}
+              initialDimension={{ width: 320, height: 224 }}
+            >
               <PieChart>
                 <Pie
                   data={donut}
@@ -1119,7 +1129,13 @@ function CostOverTimeCard({
         </p>
       ) : (
         <div className="h-48" data-testid="usage-cost-chart">
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer
+            width="100%"
+            height="100%"
+            minWidth={1}
+            minHeight={1}
+            initialDimension={{ width: 320, height: 192 }}
+          >
             <BarChart data={daily} margin={CHART_MARGINS.compact}>
               <XAxis dataKey="date" hide />
               <YAxis

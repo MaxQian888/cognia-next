@@ -31,7 +31,7 @@ import {
 import { useAccounts } from "@/lib/subscription/core/hooks"
 import type { AccountSummary, ProviderId } from "@/types/subscription"
 
-import { AccountUsageChips } from "./account-usage-chips"
+import { AccountUsageChips, useAccountUsageIndex } from "./account-usage-chips"
 import { AccountPresetSelector, providerSupportsPresets } from "./account-preset-selector"
 
 interface AccountListProps {
@@ -47,6 +47,8 @@ interface AccountListProps {
 export function AccountList({ provider, onAdd, secondaryAction }: AccountListProps) {
   const t = useTranslations("subscription.common.accountList")
   const { accounts, activeAccountId, loading, setActive, rename, remove } = useAccounts(provider)
+  // Queried once for the whole list — see `useAccountUsageIndex`.
+  const usageIndex = useAccountUsageIndex()
 
   const [renameTarget, setRenameTarget] = useState<AccountSummary | null>(null)
   const [removeTarget, setRemoveTarget] = useState<AccountSummary | null>(null)
@@ -99,7 +101,7 @@ export function AccountList({ provider, onAdd, secondaryAction }: AccountListPro
                   <div className="truncate text-[11px] text-muted-foreground">
                     {[account.email, account.plan].filter(Boolean).join(" · ")}
                   </div>
-                  <AccountUsageChips accountId={account.id} />
+                  <AccountUsageChips accountId={account.id} usage={usageIndex.get(account.id)} />
                   {providerSupportsPresets(provider) && (
                     <AccountPresetSelector provider={provider} accountId={account.id} />
                   )}

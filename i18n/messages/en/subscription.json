@@ -131,6 +131,7 @@
       "empty": "No accounts yet. Add one to start using this provider.",
       "inUseByCharacter": "Char: {name}",
       "inUseBySession": "Session: {name}",
+      "inUseMore": "+{count} more",
       "remove": "Remove",
       "removeConfirm": "Remove",
       "removeDialogBody": "The credential will be deleted from the OS keychain. You can sign in again at any time.",

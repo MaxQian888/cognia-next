@@ -13,7 +13,7 @@ const ACCOUNT_ID = "acc-story-anthropic-1"
 const meta = {
   title: "Settings/Subscription/AccountUsageChips",
   component: AccountUsageChips,
-  args: { accountId: ACCOUNT_ID },
+  args: { accountId: ACCOUNT_ID, usage: undefined },
   parameters: { layout: "padded" },
 } satisfies Meta<typeof AccountUsageChips>
 

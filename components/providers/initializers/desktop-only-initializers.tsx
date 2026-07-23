@@ -57,6 +57,13 @@ const CodexUsageSchedulerInitializer = dynamic(
   () => import("./codex-usage-scheduler-initializer").then((m) => m.CodexUsageSchedulerInitializer),
   { ssr: false }
 )
+const AnthropicUsageSchedulerInitializer = dynamic(
+  () =>
+    import("./anthropic-usage-scheduler-initializer").then(
+      (m) => m.AnthropicUsageSchedulerInitializer
+    ),
+  { ssr: false }
+)
 const CliSyncInitializer = dynamic(
   () => import("./cli-sync-initializer").then((m) => m.CliSyncInitializer),
   { ssr: false }
@@ -132,6 +139,7 @@ export function DesktopOnlyInitializers() {
   return (
     <>
       <CodexUsageSchedulerInitializer />
+      <AnthropicUsageSchedulerInitializer />
       <CliSyncInitializer />
       <ComputerUseKillSwitchInitializer />
       <TerminalBridgeInitializer />

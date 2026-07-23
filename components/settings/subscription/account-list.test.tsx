@@ -30,7 +30,12 @@ jest.mock("@/lib/subscription/core/hooks", () => ({
     remove: removeMock,
   }),
 }))
-jest.mock("./account-usage-chips", () => ({ AccountUsageChips: () => null }))
+jest.mock("./account-usage-chips", () => ({
+  AccountUsageChips: () => null,
+  // The chips query is hoisted to the list so it runs once instead of
+  // once per row.
+  useAccountUsageIndex: () => new Map(),
+}))
 jest.mock("./account-preset-selector", () => ({
   AccountPresetSelector: () => <div data-testid="preset-selector" />,
   providerSupportsPresets: () => presets.supported,

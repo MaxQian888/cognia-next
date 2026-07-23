@@ -131,6 +131,7 @@
       "empty": "暂无账号。先添加一个再使用此服务商。",
       "inUseByCharacter": "角色：{name}",
       "inUseBySession": "会话：{name}",
+      "inUseMore": "另有 {count} 项",
       "remove": "删除",
       "removeConfirm": "删除",
       "removeDialogBody": "凭证会从 OS 系统钥匙串中移除。随时可以重新登录。",

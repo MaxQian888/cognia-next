@@ -9,7 +9,8 @@
 // gauges out in a container-responsive grid. Signed-out → CTA that opens the
 // parent's add-account dialog; web mode → keychain-dependency banner.
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef } from "react"
+import { useSubscriptionNow } from "@/lib/subscription/core/now-ticker"
 import { useTranslations } from "next-intl"
 import {
   AlertTriangleIcon,
@@ -71,7 +72,7 @@ export function SubscriptionOverviewTab({
     activeAccountId ?? ""
   )
 
-  const now = useNowTick(30_000)
+  const now = useSubscriptionNow()
 
   const resolved = useMemo(
     () => resolveUsageWindows(snapshot, latest, { warnThresholdPct: settings.warnThresholdPct }),
@@ -206,16 +207,6 @@ export function SubscriptionOverviewTab({
       )}
     </div>
   )
-}
-
-/** Clock that re-renders on an interval so "updated …" and countdowns stay live. */
-function useNowTick(intervalMs: number): number {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const handle = setInterval(() => setNow(Date.now()), intervalMs)
-    return () => clearInterval(handle)
-  }, [intervalMs])
-  return now
 }
 
 /** Compact relative time ("3 minutes ago"), `null` when the input is absent. */

@@ -8,7 +8,8 @@
 // when the stored snapshot is missing or stale, mirroring the Anthropic
 // overview's behavior.
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef } from "react"
+import { useSubscriptionNow } from "@/lib/subscription/core/now-ticker"
 import { useTranslations } from "next-intl"
 
 import { BalanceCard } from "@/components/settings/subscription/balance-card"
@@ -39,13 +40,10 @@ export interface ProviderQuotaPanelProps {
  */
 export function ProviderQuotaPanel({ provider, now: nowProp }: ProviderQuotaPanelProps) {
   const t = useTranslations("subscription.limits.query")
-  const [internalNow, setInternalNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (nowProp != null) return
-    const id = setInterval(() => setInternalNow(Date.now()), 60_000)
-    return () => clearInterval(id)
-  }, [nowProp])
-  const now = nowProp ?? internalNow
+  // Shared clock so this panel stays in step with the overview gauges and the
+  // usage tab; `nowProp` still wins when a caller pins the time (tests).
+  const tickedNow = useSubscriptionNow()
+  const now = nowProp ?? tickedNow
 
   const { accounts, activeAccountId } = useAccounts(provider)
   const { snapshot, queryEnabled, setQueryEnabled, refresh } = useProviderLimits(
