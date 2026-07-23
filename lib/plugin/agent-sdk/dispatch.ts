@@ -224,6 +224,38 @@ export async function dispatchSubagent(
     })
   }
 
+  // ADR-0090 Phase 7: classify this dispatch's delegation mode at RUNTIME
+  // (not just in the editor preview). The parent baseline and the child spec
+  // implied by the def resolve through the same authority; a def that pins a
+  // different provider/runtime is an orchestrated child by construction —
+  // native delegation can never smuggle a route/provider/credential change.
+  let delegation:
+    import("@/lib/ai/agent/execution/delegation-mode").DelegationModeDecision | undefined
+  if (result.runtime) {
+    try {
+      const [{ decideDelegationMode }, { resolveAgentExecutionSpec }, { getAgentExecutionFlags }] =
+        await Promise.all([
+          import("@/lib/ai/agent/execution/delegation-mode"),
+          import("@/lib/ai/agent/execution/resolve-agent-execution-spec"),
+          import("@/lib/ai/agent/execution/feature-flags"),
+        ])
+      const { isTauri } = await import("@/lib/tauri")
+      const base = {
+        surface: "plugin" as const,
+        environment: { isTauri: isTauri(), isHeadlessHost: false },
+        flags: getAgentExecutionFlags(),
+      }
+      const parent = resolveAgentExecutionSpec({ ...base, legacy: { toolsEnabled: true } }).spec
+      const child = resolveAgentExecutionSpec({
+        ...base,
+        legacy: { toolsEnabled: true, providerId: def.provider },
+      }).spec
+      delegation = decideDelegationMode(parent, child)
+    } catch {
+      // Classification is observability — never fail a finished dispatch.
+    }
+  }
+
   return {
     text: result.text,
     channel: result.channel,
@@ -234,6 +266,9 @@ export async function dispatchSubagent(
     ...(result.runtime ? { runtime: result.runtime } : {}),
     ...(result.routeKind ? { routeKind: result.routeKind } : {}),
     ...(result.degradedReason ? { degradedReason: result.degradedReason } : {}),
+    ...(delegation
+      ? { delegationMode: delegation.mode, delegationReasons: delegation.reasons }
+      : {}),
   }
 }
 

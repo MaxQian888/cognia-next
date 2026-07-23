@@ -147,6 +147,31 @@ describe("dispatchSubagent", () => {
     expect(res).not.toHaveProperty("runtime")
     expect(res).not.toHaveProperty("routeKind")
     expect(res).not.toHaveProperty("degradedReason")
+    expect(res).not.toHaveProperty("delegationMode")
+  })
+
+  it("classifies the delegation mode at runtime under the resolver flag (ADR-0090 P7)", async () => {
+    process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2 = "1"
+    try {
+      mockRendererTurn.mockResolvedValue({
+        text: "ok",
+        channel: "sidecar",
+        toolsAvailable: true,
+        runtime: "claude-agent-sdk",
+        routeKind: "direct",
+      })
+      // Same-runtime def (no provider pin) → NATIVE, no reasons.
+      const native = await dispatchSubagent(subagent, "go")
+      expect(native.delegationMode).toBe("native")
+      expect(native.delegationReasons).toEqual([])
+
+      // A cross-provider def legacy-maps to the ai-sdk runtime → ORCHESTRATED.
+      const orchestrated = await dispatchSubagent({ ...subagent, provider: "openai" }, "go")
+      expect(orchestrated.delegationMode).toBe("orchestrated")
+      expect(orchestrated.delegationReasons).toContain("runtime-differs")
+    } finally {
+      delete process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2
+    }
   })
 
   it("omits provider when the def names none", async () => {

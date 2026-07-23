@@ -33,6 +33,7 @@ import { createLogger } from "@cognia/logging"
 import { OverviewSection } from "./settings/section-overview"
 import { PluginsSection } from "./settings/section-plugins"
 import { GovernanceSection } from "./settings/section-governance"
+import { ExecutionSection } from "./settings/section-execution"
 import { UltracodeSection } from "./settings/section-ultracode"
 import { WorktreesSection } from "./settings/section-worktrees"
 import { PrFeedbackSection } from "./settings/section-pr-feedback"
@@ -90,6 +91,15 @@ export function AgentTeamSettings({ team }: AgentTeamSettingsProps) {
           </AccordionTrigger>
           <AccordionContent className="pt-3">
             <GovernanceSection team={team} />
+          </AccordionContent>
+        </AccordionItem>
+
+        <AccordionItem value="execution" className="border-none">
+          <AccordionTrigger className="rounded-md bg-muted/40 px-3 text-sm font-medium">
+            {t("accordion.execution")}
+          </AccordionTrigger>
+          <AccordionContent className="pt-3">
+            <ExecutionSection team={team} />
           </AccordionContent>
         </AccordionItem>
 

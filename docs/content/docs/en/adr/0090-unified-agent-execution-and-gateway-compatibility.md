@@ -408,6 +408,12 @@ Anthropic-protocol server (`anthropic-server/`), scenario matrix, harness
 bundles emit from the same suite (`--emit-manifest`); rollback via
 `scripts/certify/rollback-bundle.mjs` restores the previous bundle pointer
 and reports installed-artifact version mismatches that must move with it.
+The contextual-materialization path has its own end-to-end case
+(`cases/session-materialize.test.mjs`, byte-pinned against the codec's
+replay prompt via a shared fixture), and crashed agent runs reconcile at
+bootstrap through the recovery planner
+(`lib/ai/agent/recovery/reconcile-crashed-runs.ts` — park or
+`recovery_required`, never a replay).
 
 ### R1 spike verdict (frozen)
 

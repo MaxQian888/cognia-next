@@ -630,6 +630,14 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
       void recoverPendingRunInterrupts().catch((error) => {
         console.error("[execution-run] pending interrupt recovery failed", error)
       })
+      // ADR-0090 Phase 8: stale-`running` agent runs lost their writer with
+      // the previous process — route them through the recovery planner
+      // (recovery_required or parked-paused; never an automatic replay).
+      void import("@/lib/ai/agent/recovery/reconcile-crashed-runs")
+        .then(({ reconcileCrashedAgentRuns }) => reconcileCrashedAgentRuns())
+        .catch((error) => {
+          console.error("[execution-run] crashed-run reconciliation failed", error)
+        })
     }
 
     // Credentials hot-reload: when Settings/Connections saves a form,

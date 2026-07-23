@@ -1,0 +1,15 @@
+{
+  "description": "ADR-0090 Phase 8 — canonical→claude-code CONTEXTUAL materialization. The replayPrompt is pinned byte-exact by lib/session-import/codec-types.test.ts (buildReplayPrompt output) and driven through the REAL sidecar by tests/conformance/cases/session-materialize.test.mjs.",
+  "sourceRuntime": "codex",
+  "title": "Port the parser",
+  "turns": [
+    { "turnId": "t1", "role": "user", "text": "How do I port the parser?" },
+    {
+      "turnId": "t2",
+      "role": "assistant",
+      "text": "Start with the lexer.",
+      "toolCalls": [{ "callId": "c1", "toolName": "Read" }]
+    }
+  ],
+  "replayPrompt": "This continues a previous conversation imported from codex (\"Port the parser\"). Transcript so far:\n\nuser: How do I port the parser?\nassistant: Start with the lexer. [tools: Read]\n\nContinue the conversation from this point."
+}

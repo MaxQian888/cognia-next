@@ -1,4 +1,12 @@
-import { validateCanonicalSession } from "@cognia/agent-config-types/canonical-session"
+import { readFileSync } from "node:fs"
+import path from "node:path"
+
+import {
+  computeSequenceDigest,
+  validateCanonicalSession,
+  type CanonicalSession,
+  type CanonicalTurn,
+} from "@cognia/agent-config-types/canonical-session"
 
 import type { ImportedConversation } from "@/lib/data/importers/types"
 import { buildReplayPrompt, conversationToCanonical } from "./codec-types"
@@ -208,5 +216,39 @@ describe("buildReplayPrompt", () => {
     expect(prompt).toContain("Continue the conversation from this point.")
     // No private JSONL / sdk ids leak into the replay prompt.
     expect(prompt).not.toContain("sdk-native-1")
+  })
+})
+
+describe("materialization fixture parity (conformance bridge)", () => {
+  it("pins the replay prompt BYTE-EXACT against the conformance fixture", () => {
+    const fixture = JSON.parse(
+      readFileSync(
+        path.join(process.cwd(), "tests/conformance/fixtures/session-materialize-replay.json"),
+        "utf8"
+      )
+    ) as {
+      sourceRuntime: string
+      title: string
+      turns: CanonicalTurn[]
+      replayPrompt: string
+    }
+    const session: CanonicalSession = {
+      header: {
+        canonicalVersion: 1,
+        canonicalSessionId: "canon:fixture:materialize",
+        sourceRuntime: fixture.sourceRuntime,
+        title: fixture.title,
+        createdAt: "2026-07-24T00:00:00.000Z",
+        updatedAt: "2026-07-24T00:00:00.000Z",
+        turnCount: fixture.turns.length,
+        importFidelity: "structured",
+        sequenceDigest: computeSequenceDigest(fixture.turns),
+      },
+      turns: fixture.turns,
+    }
+    expect(validateCanonicalSession(session)).toEqual([])
+    // The conformance case drives this exact string through the real sidecar;
+    // if buildReplayPrompt's format changes, BOTH sides fail together.
+    expect(buildReplayPrompt(session)).toBe(fixture.replayPrompt)
   })
 })

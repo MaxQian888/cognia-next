@@ -318,6 +318,10 @@ export interface PluginSubagentDispatchResult {
   routeKind?: "gateway" | "direct"
   /** Set when the child degraded to a lesser rail than requested (ADR-0090). */
   degradedReason?: string
+  /** How the resolver classified this delegation (ADR-0090; resolver flag on). */
+  delegationMode?: "native" | "orchestrated"
+  /** Machine-readable divergence reasons when orchestrated (empty when native). */
+  delegationReasons?: string[]
 }
 
 /** Options for {@link PluginAgentAPI.runTeam}. */

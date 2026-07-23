@@ -14,6 +14,16 @@
 // token budget. Smarter compression (per-message summarization, tool-
 // result elision) is a follow-up — the V1 cost is only paid once per
 // sidecar restart per session, not per send.
+//
+// ADR-0090 Phase 8 note: the R1 spike
+// (sidecar/dispatch/session-materialize.spike.live.test.mjs) confirmed this
+// replay-into-a-fresh-session approach as the ONLY sanctioned continuation
+// path when native resume is unavailable — there is no public API to
+// materialize an external transcript, and forging private JSONL is a tested
+// invariant violation. Cross-runtime imports use the canonical-session
+// variant (`lib/session-import/codec-types.ts:buildReplayPrompt`); this one
+// stays the per-message Dexie replay for stale SDK resumes. Two builders,
+// one verdict.
 
 import type { StoredMessage } from "@cognia/agent-config-types"
 

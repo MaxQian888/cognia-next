@@ -371,7 +371,11 @@ Phase 0–8 已在 `dev` 落地（契约 → 档案 → gateway → agent host �
 sidecar）与用例。先 `pnpm conformance:prepare` 再 `pnpm test:conformance`。
 认证 bundle 由同一套件产出（`--emit-manifest`）;回滚用
 `scripts/certify/rollback-bundle.mjs`,恢复上一 bundle 指针并报告需一并
-移动的已安装工件版本漂移。
+移动的已安装工件版本漂移。上下文物化路径有独立端到端用例
+（`cases/session-materialize.test.mjs`,经共享 fixture 与 codec 重放 prompt
+字节级互钉）;崩溃的 agent run 在启动时经恢复 planner 对账
+（`lib/ai/agent/recovery/reconcile-crashed-runs.ts`——停靠或
+`recovery_required`,绝不重放）。
 
 ### R1 spike 结论（冻结）
 

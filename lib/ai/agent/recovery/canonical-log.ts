@@ -81,6 +81,68 @@ export async function readCanonicalEnvelopes(runId: string): Promise<AgentEventE
     .map((payload) => payload.envelope)
 }
 
+/**
+ * Fold an envelope stream into a recovery CANDIDATE (ADR-0090 Phase 8).
+ * Each distinct `turnId` becomes one assistant turn (text deltas
+ * concatenated, tool calls collected). A tool call with NO matching result
+ * marks the candidate side-effect-ambiguous — the planner then refuses
+ * automatic recovery for it (replaying could double-fire the effect).
+ */
+export function candidateFromEnvelopes(
+  envelopes: readonly AgentEventEnvelope[]
+): import("./recovery-planner").RecoveryCandidate | undefined {
+  if (envelopes.length === 0) return undefined
+  const order: string[] = []
+  const byTurn = new Map<
+    string,
+    { text: string; toolCalls: { callId: string; toolName: string; resolved: boolean }[] }
+  >()
+  for (const envelope of envelopes) {
+    let turn = byTurn.get(envelope.turnId)
+    if (!turn) {
+      turn = { text: "", toolCalls: [] }
+      byTurn.set(envelope.turnId, turn)
+      order.push(envelope.turnId)
+    }
+    const event = envelope.event as { kind?: string } & Record<string, unknown>
+    if (event.kind === "text-delta" && typeof event.delta === "string") {
+      turn.text += event.delta
+    } else if (event.kind === "tool-call") {
+      turn.toolCalls.push({
+        callId: (event.toolCallId as string) ?? `call-${turn.toolCalls.length}`,
+        toolName: (event.toolName as string) ?? "tool",
+        resolved: false,
+      })
+    } else if (event.kind === "tool-result") {
+      const match = turn.toolCalls.find(
+        (call) =>
+          !call.resolved && (event.toolCallId === undefined || call.callId === event.toolCallId)
+      )
+      if (match) match.resolved = true
+    }
+  }
+  let ambiguous = false
+  const turns = order.map((turnId) => {
+    const turn = byTurn.get(turnId)!
+    if (turn.toolCalls.some((call) => !call.resolved)) ambiguous = true
+    return {
+      turnId,
+      role: "assistant" as const,
+      text: turn.text,
+      ...(turn.toolCalls.length > 0
+        ? { toolCalls: turn.toolCalls.map(({ callId, toolName }) => ({ callId, toolName })) }
+        : {}),
+    }
+  })
+  return {
+    id: `canonical-log:${envelopes[0].runId}`,
+    kind: "canonical-log",
+    fidelity: "structured",
+    turns,
+    ...(ambiguous ? { hasAmbiguousSideEffects: true } : {}),
+  }
+}
+
 export interface CanonicalLogHeader {
   runId: string
   sessionId?: string
