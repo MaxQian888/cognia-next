@@ -213,6 +213,13 @@ describe("getDb", () => {
     expect(db.connectorInboundJobs).toBeDefined()
   })
 
+  it("v122 indexes memories by sourceMessageId for chat memory chips", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(122)
+    expect(db.memories.schema.indexes.map((index) => index.name)).toContain("sourceMessageId")
+  })
+
   it("v121 opens the Provider Profile Store tables and seeds meta", async () => {
     const db = getDb()
     await db.open()

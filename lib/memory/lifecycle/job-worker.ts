@@ -102,7 +102,7 @@ async function loadJobContext(job: MemoryJob): Promise<{
   settings: AppSettings
   session: ChatSession
   config: MemoryConfig
-  transcript: Array<{ role: string; text: string; parts?: readonly unknown[] }>
+  transcript: Array<{ id?: string; role: string; text: string; parts?: readonly unknown[] }>
   contaminationState: "clean" | "external-context"
 }> {
   if (!job.sessionId) throw new MemoryJobTerminalError("session_missing")
@@ -114,6 +114,7 @@ async function loadJobContext(job: MemoryJob): Promise<{
   if (!settings || !session) throw new MemoryJobTerminalError("session_unavailable")
   const config = effectiveConfig(settings, session)
   const fullTranscript = messages.map((message) => ({
+    id: message.id,
     role: message.role,
     text: extractPlainText(message.parts),
     parts: message.parts,
@@ -157,8 +158,8 @@ function jobTranscriptCheckpoint(job: MemoryJob): number | undefined {
 }
 
 function lastCompletedPair(
-  transcript: Array<{ role: string; text: string }>
-): { userText: string; assistantText: string } | undefined {
+  transcript: Array<{ id?: string; role: string; text: string }>
+): { userText: string; assistantText: string; assistantMessageId?: string } | undefined {
   let assistantIndex = -1
   for (let index = transcript.length - 1; index >= 0; index -= 1) {
     if (transcript[index]?.role === "assistant" && transcript[index]?.text.trim()) {
@@ -170,7 +171,11 @@ function lastCompletedPair(
   for (let index = assistantIndex - 1; index >= 0; index -= 1) {
     const message = transcript[index]
     if (message?.role === "user" && message.text.trim()) {
-      return { userText: message.text, assistantText: transcript[assistantIndex]!.text }
+      return {
+        userText: message.text,
+        assistantText: transcript[assistantIndex]!.text,
+        assistantMessageId: transcript[assistantIndex]!.id,
+      }
     }
   }
   return undefined
@@ -226,13 +231,13 @@ async function processTurnExtraction(job: MemoryJob): Promise<void> {
   if (!deps) throw new MemoryJobProcessingError("dependencies_unavailable")
   const result = await runMemoryExtraction(
     {
-      newPair: pair,
+      newPair: { userText: pair.userText, assistantText: pair.assistantText },
       recentMessages: context.transcript.slice(-10),
       scope: job.scope,
       characterId: job.characterId,
       projectId: job.projectId,
       provenance: job.provenance,
-      source: { sessionId: job.sessionId },
+      source: { sessionId: job.sessionId, messageId: pair.assistantMessageId },
       config: context.config,
     },
     deps

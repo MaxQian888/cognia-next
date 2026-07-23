@@ -131,20 +131,23 @@ describe("memory job worker", () => {
 
   it("reconstructs and processes turn-extraction work after a restart", async () => {
     mockListMessages.mockResolvedValue([
-      { role: "user", parts: [{ type: "text", text: "I always use pnpm" }] },
-      { role: "assistant", parts: [{ type: "text", text: "Noted." }] },
-      { role: "user", parts: [{ type: "text", text: "My newer preference is npm" }] },
-      { role: "assistant", parts: [{ type: "text", text: "Updated." }] },
+      { id: "u1", role: "user", parts: [{ type: "text", text: "I always use pnpm" }] },
+      { id: "a1", role: "assistant", parts: [{ type: "text", text: "Noted." }] },
+      { id: "u2", role: "user", parts: [{ type: "text", text: "My newer preference is npm" }] },
+      { id: "a2", role: "assistant", parts: [{ type: "text", text: "Updated." }] },
     ])
     await processMemoryJob({ ...job("turn"), sessionId: "s1", projectId: "p1" })
     expect(mockRunExtraction).toHaveBeenCalledWith(
       expect.objectContaining({
         newPair: { userText: "I always use pnpm", assistantText: "Noted." },
         recentMessages: [
-          { role: "user", text: "I always use pnpm", parts: expect.any(Array) },
-          { role: "assistant", text: "Noted.", parts: expect.any(Array) },
+          { id: "u1", role: "user", text: "I always use pnpm", parts: expect.any(Array) },
+          { id: "a1", role: "assistant", text: "Noted.", parts: expect.any(Array) },
         ],
         projectId: "p1",
+        // Recovery must re-stamp the assistant message id so chat chips still
+        // attribute recovered learnings to the originating reply.
+        source: { sessionId: "s1", messageId: "a1" },
       }),
       expect.anything()
     )

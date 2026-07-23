@@ -47,6 +47,8 @@ export interface TurnMemoryInput {
   assistantText: string
   /** Rolling `{ role, text }` view of the conversation for recent-context + distillation. */
   transcript: TurnTranscriptEntry[]
+  /** Id of the turn's assistant message — stamped onto learned memories so chat chips can liveQuery them. */
+  assistantMessageId?: string
   /** Context sources used by this turn; external sources contaminate automatic learning. */
   externalContext?: MemoryExternalContextSource[]
 }
@@ -147,7 +149,7 @@ export async function runTurnMemory(sessionId: string, input: TurnMemoryInput): 
           characterId: sessionRow.characterId,
           projectId: sessionRow.projectId,
           provenance,
-          source: { sessionId },
+          source: { sessionId, messageId: input.assistantMessageId },
           config: effectiveConfig,
         },
         deps

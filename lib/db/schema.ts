@@ -2694,6 +2694,14 @@ export class CogniaDB extends Dexie {
         })
       })
 
+    // v122 — Memory chat-surface index. Adds `sourceMessageId` to the memories
+    // index string so per-message "learned from this reply" chips can liveQuery
+    // by originating assistant message. Index-only; no data reshaping.
+    this.version(122).stores({
+      memories:
+        "&id, scope, type, characterId, projectId, agentId, status, reviewStatus, lastAccessedAt, vectorDocId, sourceSessionId, sourceMessageId, pinned, [scope+type], [scope+status], [type+status], [projectId+status], [agentId+status]",
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {

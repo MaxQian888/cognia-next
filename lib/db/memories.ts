@@ -78,6 +78,17 @@ export async function getMemoriesByVectorDocIds(ids: string[]): Promise<Memory[]
   return getDb().memories.where("vectorDocId").anyOf(ids).toArray()
 }
 
+/**
+ * Memories learned from one assistant message (v122 index), newest first.
+ * Backs the per-message "learned" chip; includes invalidated rows so the chip
+ * can render an undone state after 撤销.
+ */
+export async function listMemoriesBySourceMessageId(messageId: string): Promise<Memory[]> {
+  if (!messageId) return []
+  const rows = await getDb().memories.where("sourceMessageId").equals(messageId).toArray()
+  return rows.sort((a, b) => b.createdAt - a.createdAt)
+}
+
 export interface MemoryUpdatePatch {
   text?: string
   key?: string

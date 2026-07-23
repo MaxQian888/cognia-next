@@ -100,7 +100,7 @@ describe("runTurnMemory", () => {
     expect(extractionInput.scope).toBe("global")
     expect(extractionInput.characterId).toBe("c1")
     expect(extractionInput.provenance).toBe("user")
-    expect(extractionInput.source).toEqual({ sessionId: "s1" })
+    expect(extractionInput.source).toEqual({ sessionId: "s1", messageId: undefined })
     expect(deps).toEqual({ extractor: {}, consolidator: {} })
 
     expect(mockSchedule).toHaveBeenCalledTimes(1)
@@ -113,6 +113,12 @@ describe("runTurnMemory", () => {
       { reuseCompleted: true }
     )
     expect(mockCompleteJob).toHaveBeenCalledWith("job-1")
+  })
+
+  it("forwards assistantMessageId as source.messageId for chip attribution", async () => {
+    await runTurnMemory("s1", { ...INPUT, assistantMessageId: "msg-42" })
+    const [extractionInput] = mockRunExtraction.mock.calls[0]
+    expect(extractionInput.source).toEqual({ sessionId: "s1", messageId: "msg-42" })
   })
 
   it("only keeps the last 10 transcript entries as recent context", async () => {

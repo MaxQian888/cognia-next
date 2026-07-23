@@ -14,6 +14,7 @@ import {
   listActiveForReader,
   listActiveProcedural,
   listMemories,
+  listMemoriesBySourceMessageId,
   setMemoriesPinned,
   setMemoryPinned,
   touchMemories,
@@ -112,6 +113,20 @@ describe("memories CRUD", () => {
     await createMemory(buildInput({ id: "m1" }))
     await invalidateMemory("m1")
     expect((await getMemory("m1"))?.supersededById).toBeUndefined()
+  })
+
+  it("listMemoriesBySourceMessageId returns that message's rows newest-first, incl. invalidated", async () => {
+    await createMemory(buildInput({ id: "m1", sourceMessageId: "msg-a", createdAt: 1000 }))
+    await createMemory(buildInput({ id: "m2", sourceMessageId: "msg-a", createdAt: 2000 }))
+    await createMemory(buildInput({ id: "m3", sourceMessageId: "msg-b" }))
+    await createMemory(buildInput({ id: "m4" }))
+    await invalidateMemory("m1")
+
+    const rows = await listMemoriesBySourceMessageId("msg-a")
+    expect(rows.map((m) => m.id)).toEqual(["m2", "m1"])
+    expect(rows[1].status).toBe("invalidated")
+    expect(await listMemoriesBySourceMessageId("")).toEqual([])
+    expect(await listMemoriesBySourceMessageId("missing")).toEqual([])
   })
 })
 
