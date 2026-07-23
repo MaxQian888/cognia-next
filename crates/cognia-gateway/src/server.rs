@@ -244,6 +244,10 @@ pub async fn spawn_server(
         .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES));
 
     let app = Router::new()
+        // R2 client-compat: Claude Code probes `GET/HEAD /` before trusting an
+        // ANTHROPIC_BASE_URL and treats a non-2xx as "model unavailable".
+        // Answer 200 with an empty JSON object (no state, no data exposure).
+        .route("/", get(root_probe).head(root_probe))
         .route("/healthz", get(healthz))
         // W3.4: real-relay upstream self-check (loopback-only). Probes each
         // resolved candidate through the actual resolve + upstream path.
@@ -291,6 +295,11 @@ pub async fn spawn_server(
         bound_port,
         shutdown: tx,
     })
+}
+
+/// Claude Code base-URL probe endpoint (see router comment). Stateless.
+async fn root_probe() -> Response {
+    (StatusCode::OK, Json(json!({}))).into_response()
 }
 
 async fn healthz() -> impl IntoResponse {

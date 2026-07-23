@@ -1,8 +1,8 @@
 // Legacy → policy mapping (ADR-0090 Phase 0, drives behavior in Phase 6).
 //
 // This is the single implementation of the frozen migration table from the
-// plan's §6.1. It must stay table-free of provider names: relay ids like
-// glm-anthropic map through the same generic rules as any other non-anthropic
+// plan's §6.1. It must stay table-free of provider names: vendor relay ids
+// map through the same generic rules as any other non-anthropic
 // provider id (R5 — `family: "anthropic-native"` is never compatibility
 // evidence).
 

@@ -443,12 +443,12 @@ mod tests {
         serde_json::from_value(serde_json::json!({
             "aliases": [],
             "providers": [
-                { "id": "glm-anthropic", "protocol": "anthropic",
+                { "id": "dep-primary", "protocol": "anthropic",
                   "baseUrl": "https://open.bigmodel.cn/api/anthropic",
-                  "apiKey": "sk-up-1", "enabled": true, "models": ["glm-4.6"],
-                  "deploymentId": "glm-anthropic" },
+                  "apiKey": "sk-up-1", "enabled": true, "models": ["model-alpha"],
+                  "deploymentId": "dep-primary" },
                 { "id": "backup", "protocol": "anthropic", "baseUrl": "https://b.example",
-                  "apiKey": "sk-up-2", "enabled": true, "models": ["glm-4.6"] }
+                  "apiKey": "sk-up-2", "enabled": true, "models": ["model-alpha"] }
             ],
             "generatedAtMs": 1,
             "profileVersion": 7,
@@ -466,10 +466,10 @@ mod tests {
             "sessionId": "s1",
             "executionFingerprint": "aexf1-abc",
             "candidates": [
-                { "deploymentId": "glm-anthropic", "modelId": "glm-4.6" },
-                { "deploymentId": "backup", "modelId": "glm-4.6" }
+                { "deploymentId": "dep-primary", "modelId": "model-alpha" },
+                { "deploymentId": "backup", "modelId": "model-alpha" }
             ],
-            "modelBindings": { "primary": "glm-4.6", "sonnet": "glm-4.6" },
+            "modelBindings": { "primary": "model-alpha", "sonnet": "model-alpha" },
             "credentialAffinity": "sticky-with-failover",
             "routePolicy": "gateway-required",
         }))
@@ -500,7 +500,7 @@ mod tests {
         let mut request = mint_request();
         request.candidates.push(TicketCandidate {
             deployment_id: "ghost".into(),
-            model_id: "glm-4.6".into(),
+            model_id: "model-alpha".into(),
         });
         assert!(matches!(
             reg.mint(request, Some(&snapshot()), 0),
@@ -562,7 +562,7 @@ mod tests {
         let mut wider = mint_request();
         wider.candidates.push(TicketCandidate {
             deployment_id: "backup".into(),
-            model_id: "glm-4.6".into(),
+            model_id: "model-alpha".into(),
         });
         // Duplicate of an existing candidate is fine; a NEW deployment isn't.
         wider.candidates[0].deployment_id = "backup".into();
@@ -571,7 +571,7 @@ mod tests {
         let mut changed_bindings = mint_request();
         changed_bindings
             .model_bindings
-            .insert("opus".into(), "glm-4.6".into());
+            .insert("opus".into(), "model-alpha".into());
         assert!(matches!(
             reg2.mint(changed_bindings, Some(&snapshot()), 20),
             Err(TicketError::WidenedRemint { .. })
@@ -594,14 +594,14 @@ mod tests {
         let reg = registry();
         let minted = reg.mint(mint_request(), Some(&snapshot()), 0).unwrap();
         let ticket = minted.ticket;
-        assert_eq!(ticket.resolve_model("primary").as_deref(), Some("glm-4.6"));
+        assert_eq!(ticket.resolve_model("primary").as_deref(), Some("model-alpha"));
         // Family selector embedded in a full model id.
         assert_eq!(
             ticket.resolve_model("claude-sonnet-5").as_deref(),
-            Some("glm-4.6")
+            Some("model-alpha")
         );
         // Verbatim candidate model.
-        assert_eq!(ticket.resolve_model("glm-4.6").as_deref(), Some("glm-4.6"));
+        assert_eq!(ticket.resolve_model("model-alpha").as_deref(), Some("model-alpha"));
         // Unmapped selector fails closed.
         assert_eq!(ticket.resolve_model("gpt-4o"), None);
     }

@@ -396,7 +396,7 @@ test("buildReasoningProviderOptions(openai): 'max' is folded to OpenAI's valid '
 })
 
 test("buildModel wraps every protocol with <think>-tag reasoning extraction", async () => {
-  // DeepSeek-R1 distills / QwQ / GLM stream chain-of-thought as a literal
+  // DeepSeek-R1 distills / QwQ-style models stream chain-of-thought as a literal
   // <think> block in the content; extractReasoningMiddleware must pull it into
   // a reasoning part instead of leaking it into the answer. The wrap is uniform
   // across protocols and preserves provider/modelId.

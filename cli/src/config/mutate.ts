@@ -114,6 +114,35 @@ export function setProviderModel(
 }
 
 /**
+ * ADR-0090 Phase 4 — toggle the EXPERIMENTAL "Claude Agent SDK through the
+ * built-in Gateway" opt-in for one provider/deployment id
+ * (`providers[providerId].experimentalAgentSdk`). Explicit opt-in only: this
+ * writes the execution POLICY, never a compatibility record. The caller
+ * prints the experimental warning; this stays a pure config write.
+ */
+export function setProviderExperimentalAgentSdk(
+  home: string,
+  providerId: string,
+  enabled: boolean,
+  fsx: ConfigMutateFs = realConfigMutateFs
+): string {
+  const current = readUserConfig(home, fsx)
+  const existing = current.providers?.[providerId] ?? {}
+  const nextProvider = { ...existing }
+  if (enabled) {
+    nextProvider.experimentalAgentSdk = true
+  } else {
+    delete nextProvider.experimentalAgentSdk
+  }
+  const providers = { ...current.providers, [providerId]: nextProvider }
+  const merged = cliConfigFileSchema.parse({ ...current, providers })
+  const target = userConfigPath(home)
+  fsx.mkdirp(path.dirname(target))
+  fsx.write(target, JSON.stringify(merged, null, 2) + "\n")
+  return target
+}
+
+/**
  * Set (or clear) a provider's base URL in `config.json`'s
  * `providers[providerId].baseURL` — the per-provider proxy/self-hosted/
  * regional endpoint override. Only `ANTHROPIC_BASE_URL`/`OPENAI_BASE_URL`

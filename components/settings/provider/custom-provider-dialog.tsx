@@ -8,6 +8,7 @@
 import { useState, useEffect, useMemo } from "react"
 
 import { TransportHeadersEditor } from "./transport-headers-editor"
+import { DeploymentAgentSdkCard } from "./deployment-agent-sdk-card"
 import { Plus, X, AlertCircle, Eye, EyeOff, Settings2, RefreshCw, Loader2 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
@@ -108,6 +109,8 @@ export function CustomProviderDialog({
   // ADR-0090 Phase 1 — static transport headers, validated by the shared
   // header policy inside the editor (blocked names never reach the store).
   const [customHeaders, setCustomHeaders] = useState<Record<string, string> | undefined>(undefined)
+  // ADR-0090 Phase 4 — explicit experimental Agent-SDK-via-Gateway opt-in.
+  const [experimentalAgentSdk, setExperimentalAgentSdk] = useState(false)
 
   const availableModels = useMemo(
     () =>
@@ -140,6 +143,7 @@ export function CustomProviderDialog({
         setDiscoveredModels(provider.discoveredModels || [])
         setDiscoveredModelsLastFetched(provider.discoveredModelsLastFetched)
         setCustomHeaders(provider.customHeaders)
+        setExperimentalAgentSdk(provider.experimentalAgentSdk === true)
       } else {
         // Reset for new provider
         setName("")
@@ -155,6 +159,7 @@ export function CustomProviderDialog({
         setDiscoveredModels([])
         setDiscoveredModelsLastFetched(undefined)
         setCustomHeaders(undefined)
+        setExperimentalAgentSdk(false)
       }
       resetTestResult()
       setShowDeleteConfirm(false)
@@ -269,6 +274,9 @@ export function CustomProviderDialog({
       discoveredModels,
       discoveredModelsLastFetched,
       customHeaders,
+      ...(experimentalAgentSdk && apiProtocol === "anthropic"
+        ? { experimentalAgentSdk: true }
+        : {}),
       defaultModel: defaultModel || availableModels[0]?.id || "",
       enabled: editingProviderId ? (customProviders[editingProviderId]?.enabled ?? true) : true,
     }
@@ -405,6 +413,14 @@ export function CustomProviderDialog({
 
           {/* Custom transport headers (ADR-0090 Phase 1) */}
           <TransportHeadersEditor value={customHeaders} onChange={setCustomHeaders} />
+
+          {/* Experimental Agent SDK via Gateway opt-in (ADR-0090 Phase 4) */}
+          <DeploymentAgentSdkCard
+            providerId={editingProviderId || "custom-provider-draft"}
+            protocol={apiProtocol}
+            enabled={experimentalAgentSdk}
+            onChange={setExperimentalAgentSdk}
+          />
 
           {/* API Key */}
           <div className="space-y-2">

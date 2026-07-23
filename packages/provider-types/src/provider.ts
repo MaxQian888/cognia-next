@@ -211,6 +211,14 @@ export interface UserProviderSettings {
    * the derived TransportProfile's `staticHeaders`.
    */
   customHeaders?: Record<string, string>
+  /**
+   * ADR-0090 Phase 4 — EXPLICIT experimental opt-in: run this Anthropic-
+   * protocol deployment through the Claude Agent SDK via the built-in
+   * Gateway. Policy only — never a compatibility record, never written by
+   * `auto`. Surfaced by the deployment-agent-sdk settings card behind the
+   * `experimentalAnthropicDeploymentAgentSdk` feature flag.
+   */
+  experimentalAgentSdk?: boolean
   /** Native Amazon Bedrock authentication and region settings. */
   bedrock?: BedrockConnectionSettings
   /**

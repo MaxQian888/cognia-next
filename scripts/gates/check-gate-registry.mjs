@@ -74,6 +74,8 @@ export const EXEMPTIONS = {
   "i18n:sort": "writer — the check half is i18n:sort:check",
 
   // --- deliberately unregistered checks ---
+  "test:conformance":
+    "ADR-0090 conformance suite — drives the REAL sidecar + Agent SDK + claude-code subprocess (minutes per case) and needs the cognia-server binary (`conformance:prepare`). Runs as its own CI job, not inside the fast gate matrix",
   "i18n:sort:check":
     "message files are not key-sorted yet; would always fail. Run `pnpm i18n:sort` once, then register it in check-all.mjs",
   "i18n:validate": "subsumed by the i18n:build:check gate, which runs it",

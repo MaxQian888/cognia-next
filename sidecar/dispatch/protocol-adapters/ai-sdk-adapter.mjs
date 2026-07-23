@@ -166,7 +166,7 @@ function mergeProviderOptions(base, extra) {
  * Wrap a model so inline `<think>…</think>` reasoning is extracted into proper
  * reasoning parts instead of leaking into the visible answer text. Many models
  * served over the OpenAI-compatible / chat protocols (DeepSeek-R1 distills,
- * QwQ, GLM, and other reasoning checkpoints without a dedicated reasoning
+ * QwQ-style and other reasoning checkpoints without a dedicated reasoning
  * channel) emit their chain-of-thought as a literal `<think>` block in the
  * content. `extractReasoningMiddleware` pulls it out so it renders as a
  * collapsible reasoning block, not as garbage in the answer. Harmless

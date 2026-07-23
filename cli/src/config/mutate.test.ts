@@ -17,6 +17,7 @@ import {
   setMascotConfig,
   setPluginToolsConfig,
   setProviderBaseURL,
+  setProviderExperimentalAgentSdk,
   setProviderModel,
   setRenderConfig,
   setStatusBarConfig,
@@ -758,5 +759,33 @@ describe("setLoggingConfig", () => {
   it("rejects a value the schema refuses (rotation size below the floor)", () => {
     const m = memFs()
     expect(() => setLoggingConfig(HOME, { mcpLogMaxKb: 1 }, m.fsx)).toThrow()
+  })
+})
+
+describe("setProviderExperimentalAgentSdk (ADR-0090 Phase 4)", () => {
+  it("writes the explicit opt-in flag for one provider and clears it on disable", () => {
+    const m = memFs()
+    const target = setProviderExperimentalAgentSdk(HOME, "my-relay", true, m.fsx)
+    let written = JSON.parse(m.files.get(target)!)
+    expect(written.providers["my-relay"].experimentalAgentSdk).toBe(true)
+
+    setProviderExperimentalAgentSdk(HOME, "my-relay", false, m.fsx)
+    written = JSON.parse(m.files.get(target)!)
+    expect("experimentalAgentSdk" in (written.providers["my-relay"] ?? {})).toBe(false)
+  })
+
+  it("preserves the provider's other fields", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({
+        providers: { "my-relay": { baseURL: "https://relay.example/v1", model: "m-1" } },
+      }),
+    })
+    setProviderExperimentalAgentSdk(HOME, "my-relay", true, m.fsx)
+    const written = JSON.parse(m.files.get(userConfigPath(HOME))!)
+    expect(written.providers["my-relay"]).toMatchObject({
+      baseURL: "https://relay.example/v1",
+      model: "m-1",
+      experimentalAgentSdk: true,
+    })
   })
 })

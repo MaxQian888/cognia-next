@@ -100,6 +100,9 @@ const REGISTRY = [
 
   // Repo-specific structural audits (see the ADRs each one cites).
   { script: "audit:slots", group: "audit" },
+  // ADR-0090: unified execution paths must stay vendor-neutral (no
+  // GLM/Kimi/provider-name branches in dispatch logic).
+  { script: "check:provider-name-branches", group: "audit" },
   { script: "audit:trusted-publishers", group: "audit" },
   { script: "audit:silent-flags", group: "audit" },
   { script: "audit:pii-boundaries", group: "audit" },

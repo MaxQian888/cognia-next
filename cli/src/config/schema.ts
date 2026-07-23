@@ -74,6 +74,9 @@ export const EFFORT_SLIDER_LEVELS = THINKING_LEVELS.filter(
 export const STATUS_SEGMENTS = [
   "model",
   "provider",
+  /** The hosting agent backend. Renders nothing on the built-in one, so it can
+   * sit in the default layout without changing the ordinary footer. */
+  "backend",
   "mode",
   "tokens",
   "ctx",
@@ -309,6 +312,7 @@ export function resolveNotices(notices: NoticesConfig | undefined): ResolvedNoti
 export const DEFAULT_STATUS_SEGMENTS: StatusSegment[] = [
   "model",
   "provider",
+  "backend",
   "mode",
   "tokens",
   "ctx",
@@ -517,6 +521,15 @@ export const providerConfigSchema = z
     protocol: z.enum(RESOLVER_PROTOCOLS).optional(),
     /** Per-provider default model id. */
     model: z.string().min(1).optional(),
+    /**
+     * ADR-0090 Phase 4 — EXPLICIT experimental opt-in: run this Anthropic-
+     * protocol deployment through the Claude Agent SDK via the built-in
+     * Gateway (`runtimePolicy: claude-agent-sdk` + `routePolicy:
+     * gateway-required`). Never implied, never written by `auto`, and never a
+     * compatibility record — certification is a separate, versioned artifact
+     * (Phase 5).
+     */
+    experimentalAgentSdk: z.boolean().optional(),
   })
   .strict()
 
