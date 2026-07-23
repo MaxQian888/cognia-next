@@ -1,25 +1,15 @@
 import type { ComponentType } from "react"
-import {
-  BlocksIcon,
-  BotIcon,
-  FileTextIcon,
-  HistoryIcon,
-  InfoIcon,
-  MessageSquareIcon,
-  PanelRightIcon,
-  PlayIcon,
-  SearchCodeIcon,
-  SettingsIcon,
-  WrenchIcon,
-} from "lucide-react"
 import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
-import { CONTEXT_RESOURCE_READ_PERMISSIONS } from "@/lib/plugin/api/context-panel-api"
+import { resolveContextPanelIcon } from "@/lib/context-workbench/panel-icons"
 import { recordPluginPointDiagnostic } from "@/lib/plugin/contracts/diagnostics-store"
 import { loggers } from "@/lib/plugin/core/logger"
 import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
-import type { ContextPanelRenderProps } from "@/types/context-workbench"
+import {
+  CONTEXT_RESOURCE_READ_PERMISSIONS,
+  type ContextPanelDefinition,
+  type ContextPanelRenderProps,
+} from "@/types/context-workbench"
 import type { PluginManifest } from "@/types/plugin/plugin"
-import type { PluginContextPanelIcon } from "@/types/plugin/plugin-context-panel"
 
 export interface ContextPanelBridgeError {
   pluginId: string
@@ -39,20 +29,6 @@ export interface ContextPanelBridgeOptions {
 
 const DEFAULT_IMPORTER: NonNullable<ContextPanelBridgeOptions["importer"]> = (entry) =>
   import(/* @vite-ignore */ /* webpackIgnore: true */ entry)
-
-const SAFE_ICONS: Record<PluginContextPanelIcon, ComponentType<{ className?: string }>> = {
-  blocks: BlocksIcon,
-  bot: BotIcon,
-  "file-text": FileTextIcon,
-  history: HistoryIcon,
-  info: InfoIcon,
-  "message-square": MessageSquareIcon,
-  "panel-right": PanelRightIcon,
-  play: PlayIcon,
-  "search-code": SearchCodeIcon,
-  settings: SettingsIcon,
-  wrench: WrenchIcon,
-}
 
 function requiredPermissions(manifest: PluginManifest, index: number): string[] {
   const panel = manifest.contextPanels?.[index]
@@ -92,21 +68,45 @@ export async function registerContextPanelsForPlugin(
       if (typeof exported !== "function") {
         throw new Error(`entry "${def.entry}" has no React export named "${def.export}"`)
       }
+      // A named export that is declared but missing is a manifest bug, not a
+      // reason to drop the whole panel — but it must not be swallowed either,
+      // or the author sees a panel that silently never fires its hook.
+      const optionalExport = (name: string | undefined, field: string) => {
+        if (!name) return undefined
+        const value = importedModule[name]
+        if (typeof value !== "function") {
+          throw new Error(`entry "${def.entry}" has no "${field}" export named "${name}"`)
+        }
+        return value
+      }
+      const onFirstActivate = optionalExport(def.onFirstActivateExport, "onFirstActivate") as
+        ContextPanelDefinition["onFirstActivate"] | undefined
+      const onRestore = optionalExport(def.onRestoreExport, "onRestore") as
+        ContextPanelDefinition["onRestore"] | undefined
+      const getBadge = optionalExport(def.getBadgeExport, "getBadge") as
+        ContextPanelDefinition["getBadge"] | undefined
       const permissions = requiredPermissions(manifest, index)
       contextPanelRegistry.register({
         id: `${manifest.id}:${def.id}`,
         activity: def.activity,
         labelKey: def.labelKey,
         label: def.label,
-        icon: def.icon ? SAFE_ICONS[def.icon] : undefined,
+        icon: resolveContextPanelIcon(def.icon),
         order: def.order,
         appliesTo: (resource) => def.resourceKinds.includes(resource.kind),
         requiredCapabilities: def.requiredCapabilities,
+        // Declared for diagnostics; the gate is the closure below, which is the
+        // only form that can see *this* plugin's grants.
+        requiredPermissions: permissions,
         hasRequiredPermissions: () =>
           permissions.every((permission) => options.hasPermission(permission)),
+        getBadge,
+        requiresChatScope: def.requiresChatScope,
         preferredMode: def.preferredMode,
         retention: def.retention ?? "stateful",
         renderer: exported as ComponentType<ContextPanelRenderProps>,
+        onFirstActivate,
+        onRestore,
         pluginId: manifest.id,
       })
       registered += 1

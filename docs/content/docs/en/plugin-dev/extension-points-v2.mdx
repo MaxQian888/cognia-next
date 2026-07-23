@@ -270,18 +270,37 @@ Trusted frontend plugins can contribute panels declaratively:
       "icon": "search-code",
       "requiredCapabilities": ["inspect"],
       "preferredMode": "wide",
-      "retention": "stateful"
+      "retention": "stateful",
+      // Optional behaviour hooks, resolved as named exports of the same
+      // `entry` module as the renderer.
+      "onFirstActivateExport": "onInsightsOpened",
+      "getBadgeExport": "insightsBadge"
     }
   ]
 }
 ```
 
 `activity` must be one of `ai`, `comments`, `inspect`, `review`,
-`preview-run`, or `templates`. The label is resolved through the plugin's
-existing i18n bundle; `label` is the deterministic fallback. Unsupported
-icons fall back to the host panel icon.
+`preview-run`, `templates`, or `workspace`.
 
-The imperative API uses the same namespaced registry:
+`resourceKinds` must be a non-empty subset of `canvas-document`,
+`project-file`, `artifact`, `workflow`, and `session`. **`session` is the
+chat right rail's fallback resource** — the dock shows it whenever no
+artifact is open, so a panel that omits it will not appear in the rail's
+default state.
+
+The label is resolved through the plugin's existing i18n bundle; `label` is
+the deterministic fallback. Unsupported icons fall back to the host panel
+icon.
+
+`retention` decides what happens to a panel the user switches away from:
+`stateful` (default) keeps it mounted behind React's `<Activity>` so its
+state and scroll position survive, while `ephemeral` unmounts it. Prefer
+`ephemeral` for panels holding something expensive, such as a live
+connection.
+
+The imperative API uses the same namespaced registry, and accepts the same
+fields inline instead of as export names:
 
 ```ts
 const dispose = ctx.contextPanels.register({
@@ -290,10 +309,13 @@ const dispose = ctx.contextPanels.register({
   labelKey: "context.liveInsights",
   label: "Live insights",
   resourceKinds: ["canvas-document"],
+  icon: "search-code",
+  getBadge: (resource) => unreadFor(resource),
+  onFirstActivate: (resource) => warmUp(resource),
   renderer: LiveInsightsPanel,
 })
 
-ctx.contextPanels.reveal("live-insights")
+ctx.contextPanels.reveal("live-insights", "wide")
 const context = ctx.contextPanels.getActiveContext()
 const unsubscribe = ctx.contextPanels.onDidChangeActiveContext((next) => {
   // Identity, revision, selection, and capabilities only; never resource content.
@@ -302,9 +324,57 @@ const unsubscribe = ctx.contextPanels.onDidChangeActiveContext((next) => {
 
 `reveal()` can target only the calling plugin's applicable panels. It
 respects user pinning, so a request can become pending instead of replacing
-the selected panel. Every panel requires `extension:ui` plus each declared
-resource permission: `project:read`, `canvas:read`, `artifact:read`, or
-`workflow:read`. Sandboxed Webview renderers are not supported.
+the selected panel. It also asks the host to bring its own container back on
+screen first, so revealing into a collapsed chat dock or a closed mobile
+sheet opens it rather than silently switching a panel the user cannot see.
+
+Every panel requires `extension:ui` plus each declared resource permission:
+`project:read`, `canvas:read`, `artifact:read`, `workflow:read`, or
+`session:read`. Registration fails closed when one is missing, and a panel
+already registered disappears from the rail the moment a permission is
+revoked. Sandboxed Webview renderers are not supported.
+
+### Driving the workbench
+
+Registration alone cannot tell a panel whether it is on screen, how wide the
+rail is, or push a count onto its activity icon. The same API covers all of
+it:
+
+```ts
+// Activity-rail badge. Added to whatever the definition's own `getBadge`
+// returns; 0 clears it.
+ctx.contextPanels.setBadge("live-insights", 3)
+
+// What the right rail is showing right now, or null when none is mounted.
+const state = ctx.contextPanels.getWorkbenchState()
+// { resource, mode, activePanelId, ownsActivePanel, userPinned, panelIds }
+
+// Fires for both halves: which resource is in front, and how it is laid out.
+const stop = ctx.contextPanels.onDidChangeWorkbenchState((next) => {
+  if (next?.ownsActivePanel) startExpensiveWork()
+  else stopExpensiveWork()
+})
+
+// Layout control, honoured only while this plugin owns the visible panel.
+ctx.contextPanels.setMode("focus") // "collapsed" | "narrow" | "wide" | "focus"
+ctx.contextPanels.setPinned(true) // queue automatic reveals as badges
+```
+
+`setMode()` / `setPinned()` return `false` when another contributor's — or a
+native — panel is the visible one, so a plugin can never full-screen the
+right rail out from under the user. `panelIds` lists only this plugin's own
+panels; the rest of the workbench stays invisible to it. Every method here
+also requires `extension:ui`, and `getWorkbenchState()` additionally requires
+the read permission for the resource kind in front.
+
+<Callout type="warn">
+  `setMode("narrow")` and `setMode("wide")` are host-dependent. Where the
+  workbench owns its own width — the editor and workflow side panels — they
+  resize it. In the **chat dock** the width belongs to the surrounding
+  resizable panel, so those two only update the recorded mode and nothing
+  moves on screen; `"focus"` and `"collapsed"` work everywhere. Treat the
+  narrow/wide pair as a hint, and don't build a layout that depends on it.
+</Callout>
 
 ## Status & reference plugins
 
@@ -320,12 +390,13 @@ the host renderer / consumer exists, not just the registry:
 | `configComponent`  | Rendered in the plugin settings panel (falls back to the schema form) | bridge unit tests (`config-component-bridge`) |
 | `modalMounts`      | Lazy declared-modal registry → `ctx.modal.openById`                   | bridge unit tests (`modal-mount-bridge`) |
 | `chatMiddlewares`  | `runAndCaptureAssistantReply` (default-off flag)                      | bridge unit tests (`chat-middleware-bridge`) |
+| `contextPanels`    | Context Workbench activity rail (chat dock, editor, workflow)        | `cognia-prompt-templates` (imperative)  |
 
 > **Builtin limitation.** Import-based fields (those with an `entry` /
 > `export` module — `ocrProviders`, `workspaceBackends`, `messageRenderers`,
-> `aiProviders`, `modalMounts`, `chatMiddlewares`, `configComponent`) resolve
-> their module only for **disk / marketplace-installed** plugins, where the
-> install path is a real fetchable directory. Built-in plugins
+> `aiProviders`, `modalMounts`, `chatMiddlewares`, `configComponent`,
+> `contextPanels`) resolve their module only for **disk / marketplace-installed**
+> plugins, where the install path is a real fetchable directory. Built-in plugins
 > (`builtin://…`) cannot fetch a separate entry file, so they must register
 > those surfaces imperatively via the `ctx.*` APIs instead. The
 > declarative-data fields (`themePacks`, `wallpapers`, `densityPresets`,

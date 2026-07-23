@@ -224,6 +224,7 @@ export type { PluginMessagePartAPI } from "@/lib/plugin/api/message-part-api"
 export type {
   PluginContextPanelAPI,
   PluginContextPanelRegistration,
+  PluginContextWorkbenchState,
 } from "@/lib/plugin/api/context-panel-api"
 
 export type FullPluginContext = Omit<

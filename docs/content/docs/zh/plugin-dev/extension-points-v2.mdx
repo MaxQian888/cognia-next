@@ -235,17 +235,31 @@ v2 复活两个之前 deprecated 的槽位：
       "icon": "search-code",
       "requiredCapabilities": ["inspect"],
       "preferredMode": "wide",
-      "retention": "stateful"
+      "retention": "stateful",
+      // 可选行为钩子，从与 renderer 相同的 `entry` 模块按具名导出解析。
+      "onFirstActivateExport": "onInsightsOpened",
+      "getBadgeExport": "insightsBadge"
     }
   ]
 }
 ```
 
-`activity` 只能是 `ai`、`comments`、`inspect`、`review`、`preview-run` 或
-`templates`。Host 通过插件现有 i18n bundle 解析标签，`label` 是确定性的
-fallback；不支持的 icon 回退为宿主面板 icon。
+`activity` 只能是 `ai`、`comments`、`inspect`、`review`、`preview-run`、
+`templates` 或 `workspace`。
 
-命令式 API 与声明式贡献共用同一个命名空间 registry：
+`resourceKinds` 必须是 `canvas-document`、`project-file`、`artifact`、`workflow`、
+`session` 的非空子集。**`session` 是聊天右栏的兜底资源** —— 没有打开产物时 dock
+显示的就是它，所以不声明它的面板不会出现在右栏的默认状态里。
+
+Host 通过插件现有 i18n bundle 解析标签，`label` 是确定性的 fallback；不支持的
+icon 回退为宿主面板 icon。
+
+`retention` 决定用户切走后面板的命运：`stateful`（默认）让它留在 React
+`<Activity>` 后面，状态与滚动位置得以保留；`ephemeral` 则卸载它。持有昂贵资源
+（例如一条实时连接）的面板应选 `ephemeral`。
+
+命令式 API 与声明式贡献共用同一个命名空间 registry，同样的字段以内联值而非导出名
+传入：
 
 ```ts
 const dispose = ctx.contextPanels.register({
@@ -254,10 +268,13 @@ const dispose = ctx.contextPanels.register({
   labelKey: "context.liveInsights",
   label: "实时洞察",
   resourceKinds: ["canvas-document"],
+  icon: "search-code",
+  getBadge: (resource) => unreadFor(resource),
+  onFirstActivate: (resource) => warmUp(resource),
   renderer: LiveInsightsPanel,
 })
 
-ctx.contextPanels.reveal("live-insights")
+ctx.contextPanels.reveal("live-insights", "wide")
 const context = ctx.contextPanels.getActiveContext()
 const unsubscribe = ctx.contextPanels.onDidChangeActiveContext((next) => {
   // 只有身份、revision、selection、capabilities；绝不包含资源内容。
@@ -265,9 +282,49 @@ const unsubscribe = ctx.contextPanels.onDidChangeActiveContext((next) => {
 ```
 
 `reveal()` 只能打开调用插件自己的适用面板，并遵守用户 pin，因此请求可能进入
-pending 而不替换当前面板。每个面板需要 `extension:ui`，以及声明资源对应的
-`project:read`、`canvas:read`、`artifact:read` 或 `workflow:read`。不支持 sandboxed
-Webview renderer。
+pending 而不替换当前面板。它还会先请求宿主把自己的容器带回屏幕上，所以对着折叠的
+聊天 dock 或关闭的移动端 Sheet 调用它会打开容器，而不是在用户看不见的地方静默切换
+面板。
+
+每个面板需要 `extension:ui`，以及声明资源对应的 `project:read`、`canvas:read`、
+`artifact:read`、`workflow:read` 或 `session:read`。缺任意一个时注册直接失败；已注册
+的面板在权限被撤销的瞬间从活动栏消失。不支持 sandboxed Webview renderer。
+
+### 驱动工作台
+
+只有注册无法让面板知道自己是否在屏幕上、右栏有多宽，也无法在活动图标上推送计数。
+同一套 API 覆盖了这些：
+
+```ts
+// 活动栏角标。与定义自带的 `getBadge` 相加；传 0 清除。
+ctx.contextPanels.setBadge("live-insights", 3)
+
+// 右栏当前状态；没有挂载的工作台时返回 null。
+const state = ctx.contextPanels.getWorkbenchState()
+// { resource, mode, activePanelId, ownsActivePanel, userPinned, panelIds }
+
+// 资源切换与布局变化两侧都会触发。
+const stop = ctx.contextPanels.onDidChangeWorkbenchState((next) => {
+  if (next?.ownsActivePanel) startExpensiveWork()
+  else stopExpensiveWork()
+})
+
+// 布局控制，仅在本插件的面板处于可见状态时生效。
+ctx.contextPanels.setMode("focus") // "collapsed" | "narrow" | "wide" | "focus"
+ctx.contextPanels.setPinned(true) // 让自动 reveal 变成角标排队
+```
+
+当可见的是其他插件或原生面板时，`setMode()` / `setPinned()` 返回 `false`，因此插件
+永远无法在用户眼皮底下把右栏全屏化。`panelIds` 只列出本插件自己的面板，工作台其余
+部分对它不可见。以上方法同样需要 `extension:ui`，其中 `getWorkbenchState()` 还需要
+当前资源类型对应的读权限。
+
+<Callout type="warn">
+  `setMode("narrow")` 与 `setMode("wide")` 依赖宿主。在工作台自己拥有宽度的地方
+  （编辑器与工作流侧栏）它们会真的改变宽度；而在**聊天 dock** 里宽度归外层可调整
+  面板所有，这两个值只会更新记录下来的模式，屏幕上不会有任何变化。`"focus"` 与
+  `"collapsed"` 在所有宿主都生效。把 narrow/wide 当作提示，不要让布局依赖它。
+</Callout>
 
 ## 状态与参考插件
 
@@ -282,10 +339,11 @@ Webview renderer。
 | `configComponent`  | 在插件设置面板渲染（失败回退到 schema 表单）                   | bridge 单测（`config-component-bridge`）  |
 | `modalMounts`      | 懒加载的声明式 modal 注册表 → `ctx.modal.openById`            | bridge 单测（`modal-mount-bridge`）       |
 | `chatMiddlewares`  | `runAndCaptureAssistantReply`（默认关闭开关）                  | bridge 单测（`chat-middleware-bridge`）   |
+| `contextPanels`    | Context Workbench 活动栏（聊天 dock / 编辑器 / 工作流）        | `cognia-prompt-templates`（命令式）       |
 
 > **Builtin 限制**：基于 import 的字段（带 `entry` / `export` 模块的——
 > `ocrProviders`、`workspaceBackends`、`messageRenderers`、`aiProviders`、
-> `modalMounts`、`chatMiddlewares`、`configComponent`）只有**磁盘 / 市场安装**
+> `modalMounts`、`chatMiddlewares`、`configComponent`、`contextPanels`）只有**磁盘 / 市场安装**
 > 的插件才能解析其模块（安装路径是真实可 fetch 的目录）。内置插件
 > （`builtin://…`）无法 fetch 单独的 entry 文件，必须改用 `ctx.*` API 命令式
 > 注册这些表面。声明式数据字段（`themePacks`、`wallpapers`、`densityPresets`、

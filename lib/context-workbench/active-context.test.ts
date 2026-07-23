@@ -1,10 +1,16 @@
+import { contextPanelRegistry } from "./panel-registry"
 import {
   getActiveContextResource,
   resetActiveContextForTesting,
+  revealPluginContextPanel,
   setActiveContextForHost,
 } from "./active-context"
+import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 
-afterEach(resetActiveContextForTesting)
+afterEach(() => {
+  resetActiveContextForTesting()
+  useContextWorkbenchStore.setState({ layouts: {} })
+})
 
 it("falls back to the newest remaining host and returns defensive copies", () => {
   const disposeCanvas = setActiveContextForHost("canvas", {
@@ -52,4 +58,61 @@ it("returns defensive copies for session resources without inventing a selection
   expect(getActiveContextResource()?.capabilities).toEqual(["inspect"])
   expect(getActiveContextResource()).not.toHaveProperty("selection")
   dispose()
+})
+
+describe("revealPluginContextPanel", () => {
+  const resource = {
+    kind: "session" as const,
+    sessionId: "session-1",
+    capabilities: [],
+  }
+
+  function registerPanel() {
+    return contextPanelRegistry.register({
+      id: "plugin-a:inbox",
+      pluginId: "plugin-a",
+      activity: "inspect",
+      labelKey: "plugin.inbox",
+      appliesTo: (candidate) => candidate.kind === "session",
+      renderer: () => null,
+    })
+  }
+
+  it("opens the host container before switching panels", () => {
+    // The dock stays mounted at zero width while collapsed, so the host is
+    // registered and the reveal "succeeds" — without this callback the panel
+    // changed behind a surface the user could not see.
+    const ensureVisible = jest.fn()
+    const disposePanel = registerPanel()
+    const disposeHost = setActiveContextForHost("dock", resource, { ensureVisible })
+
+    expect(revealPluginContextPanel("plugin-a", "inbox")).toBe(true)
+    expect(ensureVisible).toHaveBeenCalledTimes(1)
+    expect(useContextWorkbenchStore.getState().layouts["dock"]?.activePanelId).toBe(
+      "plugin-a:inbox"
+    )
+
+    disposeHost()
+    disposePanel()
+  })
+
+  it("leaves the container alone when the panel is not revealable", () => {
+    const ensureVisible = jest.fn()
+    const disposeHost = setActiveContextForHost("dock", resource, { ensureVisible })
+
+    expect(revealPluginContextPanel("plugin-a", "inbox")).toBe(false)
+    expect(ensureVisible).not.toHaveBeenCalled()
+
+    disposeHost()
+  })
+
+  it("still reveals for hosts that are always visible", () => {
+    const disposePanel = registerPanel()
+    const disposeHost = setActiveContextForHost("editor", resource)
+
+    expect(revealPluginContextPanel("plugin-a", "inbox")).toBe(true)
+
+    disposeHost()
+    disposePanel()
+  })
 })

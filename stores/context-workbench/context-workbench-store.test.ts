@@ -2,6 +2,8 @@ import {
   CONTEXT_WORKBENCH_LAYOUT_MAX_AGE_MS,
   createContextWorkbenchStoreForTesting,
   pruneContextWorkbenchLayouts,
+  useContextWorkbenchStore,
+  type ContextWorkbenchLayout,
 } from "./context-workbench-store"
 
 describe("context workbench layout store", () => {
@@ -115,6 +117,54 @@ describe("context workbench layout store", () => {
     expect(pruned.stale).toBeUndefined()
     expect(pruned["scope-0"]).toBeDefined()
     expect(pruned["scope-204"]).toBeUndefined()
+  })
+
+  it("never persists the focus takeover, in or out", () => {
+    const options = useContextWorkbenchStore.persist.getOptions()
+    const focused: Record<string, ContextWorkbenchLayout> = {
+      "window-a::canvas:doc-1": {
+        mode: "focus",
+        width: 360,
+        activePanelId: "comments",
+        userPinned: false,
+        activatedPanelIds: ["comments"],
+        pendingPanelIds: [],
+        lastUsedAt: Date.now(),
+      },
+    }
+
+    // Writing out: a reload must not come back covering the whole window —
+    // least of all when the user collapsed the dock on the way out.
+    const written = options.partialize?.({
+      ...useContextWorkbenchStore.getState(),
+      layouts: focused,
+    }) as { layouts: Record<string, ContextWorkbenchLayout> }
+    expect(written.layouts["window-a::canvas:doc-1"]).toMatchObject({
+      mode: "narrow",
+      activePanelId: "comments",
+    })
+
+    // Reading back: snapshots written before this rule still have to recover.
+    const merged = options.merge?.(
+      { layouts: focused, sessionOverrides: {} },
+      useContextWorkbenchStore.getState()
+    ) as { layouts: Record<string, ContextWorkbenchLayout> }
+    expect(merged.layouts["window-a::canvas:doc-1"]?.mode).toBe("narrow")
+    const migrated = options.migrate?.({ layouts: focused, sessionOverrides: {} }, 1) as {
+      layouts: Record<string, ContextWorkbenchLayout>
+    }
+    expect(migrated.layouts["window-a::canvas:doc-1"]?.mode).toBe("narrow")
+  })
+
+  it("keeps focus live in memory for as long as the user holds it", () => {
+    const store = createContextWorkbenchStoreForTesting()
+    const key = "window-a::canvas:doc-1"
+    store.getState().navigatePanel(key, "comments", "narrow")
+
+    store.getState().setMode(key, "focus")
+    expect(store.getState().layouts[key]?.mode).toBe("focus")
+    store.getState().setWidth(key, 500)
+    expect(store.getState().layouts[key]?.mode).toBe("focus")
   })
 
   it("persists and clears an explicit resource-session reassociation", () => {

@@ -43,15 +43,12 @@ it("loads and registers declarative panels through the namespaced registry", asy
 
   expect(result).toEqual({ registered: 1, errors: [] })
   expect(
-    contextPanelRegistry.resolve(
-      {
-        kind: "canvas-document",
-        documentId: "doc-1",
-        revision: "1",
-        capabilities: ["inspect"],
-      },
-      new Set()
-    )
+    contextPanelRegistry.resolve({
+      kind: "canvas-document",
+      documentId: "doc-1",
+      revision: "1",
+      capabilities: ["inspect"],
+    })
   ).toEqual([
     expect.objectContaining({
       id: "review-plugin:outline",
@@ -80,6 +77,67 @@ it("isolates missing exports without leaving a partial panel", async () => {
 
   expect(result.registered).toBe(0)
   expect(result.errors[0]?.message).toMatch(/OutlinePanel/)
+  expect(contextPanelRegistry.get("review-plugin:outline")).toBeUndefined()
+})
+
+it("resolves the behaviour hooks from the same entry module as the renderer", async () => {
+  // These reach parity with the imperative path, which had lifecycle callbacks
+  // from the start while manifest panels had none.
+  const onFirstActivate = jest.fn()
+  const onRestore = jest.fn()
+  const getBadge = jest.fn(() => 3)
+  const hooked = {
+    ...manifest,
+    contextPanels: [
+      {
+        ...manifest.contextPanels[0],
+        onFirstActivateExport: "panelActivated",
+        onRestoreExport: "panelRestored",
+        getBadgeExport: "panelBadge",
+        requiresChatScope: true,
+      },
+    ],
+  } satisfies PluginManifest
+
+  const result = await registerContextPanelsForPlugin(hooked, "/plugins/review", {
+    importer: async () => ({
+      OutlinePanel: () => null,
+      panelActivated: onFirstActivate,
+      panelRestored: onRestore,
+      panelBadge: getBadge,
+    }),
+    hasPermission: () => true,
+  })
+
+  expect(result).toEqual({ registered: 1, errors: [] })
+  const registered = contextPanelRegistry.get("review-plugin:outline")
+  expect(registered?.requiresChatScope).toBe(true)
+  const resource = {
+    kind: "canvas-document" as const,
+    documentId: "doc-1",
+    revision: "1",
+    capabilities: ["inspect" as const],
+  }
+  registered?.onFirstActivate?.(resource)
+  registered?.onRestore?.(resource)
+  expect(onFirstActivate).toHaveBeenCalledWith(resource)
+  expect(onRestore).toHaveBeenCalledWith(resource)
+  expect(registered?.getBadge?.(resource)).toBe(3)
+})
+
+it("reports a declared hook whose export is missing rather than registering it half-wired", async () => {
+  const hooked = {
+    ...manifest,
+    contextPanels: [{ ...manifest.contextPanels[0], getBadgeExport: "panelBadge" }],
+  } satisfies PluginManifest
+
+  const result = await registerContextPanelsForPlugin(hooked, "/plugins/review", {
+    importer: async () => ({ OutlinePanel: () => null }),
+    hasPermission: () => true,
+  })
+
+  expect(result.registered).toBe(0)
+  expect(result.errors[0]?.message).toMatch(/getBadge.*panelBadge/)
   expect(contextPanelRegistry.get("review-plugin:outline")).toBeUndefined()
 })
 

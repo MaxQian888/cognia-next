@@ -1,21 +1,26 @@
 /**
  * Prompt Templates — built-in plugin.
  *
- * Stores user-defined prompt templates inside the plugin's storage
- * namespace and exposes them as slash commands so the user can paste them
- * into the chat with a single keystroke. Reuses
+ * Stores user-defined prompt templates inside the plugin's storage namespace
+ * and surfaces them two ways: as slash commands, and as a Context Workbench
+ * panel on the chat right rail's `templates` activity. Reuses
  * `lib/slash-commands/registry` rather than rolling its own dispatch
  * surface so the templates show up in the same command palette as
  * built-in commands.
  *
+ * Neither surface inserts into the composer — no plugin API can write to it —
+ * so both hand the body back for the user to place: the command shows it, the
+ * panel copies it.
+ *
  * Slash commands:
- *   /template <name>            — insert the template body
+ *   /template <name>            — show the template body
  *   /template-add <name> <body> — store a new template
  *   /template-remove <name>     — delete a template
  *   /template-list              — list the available templates
  */
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
+import { createTemplatesPanel } from "./templates-panel"
 import manifestJson from "../plugin.json"
 
 const KEY_PREFIX = "template:"
@@ -59,6 +64,29 @@ const definition: PluginDefinition = {
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("prompt-templates activated")
 
+    // The chat right rail's `templates` activity has no native panel, so this
+    // is the surface a user browses their saved templates from. Registered on
+    // the `session` resource: that is the dock's fallback when no artifact is
+    // open, i.e. the rail's default state.
+    const disposePanel = ctx.contextPanels?.register?.({
+      id: "templates",
+      activity: "templates",
+      label: "Prompt Templates",
+      labelKey: "panel.templates",
+      resourceKinds: ["session"],
+      icon: "file-text",
+      order: 20,
+      retention: "stateful",
+      renderer: createTemplatesPanel(ctx),
+    })
+    // Pushed rather than declared via `getBadge`: the count only changes when a
+    // slash command writes storage, which happens outside any render. (The two
+    // are additive in the registry, so using both would double-count.)
+    const refreshBadge = async () => {
+      ctx.contextPanels?.setBadge?.("templates", (await listTemplates(ctx)).length)
+    }
+    await refreshBadge()
+
     // All four commands are DECLARED in plugin.json (`commands[]`) and handled
     // here — the supported shape per the author-SDK migration table. The
     // manager owns registration (namespaced ids, conflict detection, aliases,
@@ -84,6 +112,7 @@ const definition: PluginDefinition = {
             const parsed = parseAdd(args)
             if (!parsed) return say("Usage: /template-add <name> <body>")
             await storeTemplate(ctx, parsed.name, parsed.body)
+            await refreshBadge()
             return say(`Saved template "${parsed.name}".`)
           }
           case "template-remove": {
@@ -94,6 +123,7 @@ const definition: PluginDefinition = {
             const existing = await readTemplate(ctx, name)
             if (!existing) return say(`Template "${name}" not found.`)
             await deleteTemplate(ctx, name)
+            await refreshBadge()
             return say(`Removed template "${name}".`)
           }
           case "template-list": {
@@ -108,6 +138,7 @@ const definition: PluginDefinition = {
             return false
         }
       },
+      onDeactivate: () => disposePanel?.(),
     }
   },
 }

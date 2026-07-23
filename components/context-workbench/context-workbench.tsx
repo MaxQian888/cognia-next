@@ -114,12 +114,18 @@ export interface ContextWorkbenchProps {
   workbenchInstanceId: string
   resource: ContextResource
   panels?: ContextPanelDefinition[]
-  grantedPermissions?: ReadonlySet<string>
   placement?: ContextWorkbenchPlacement
   className?: string
   manageOwnWidth?: boolean
   onExitFocus?: () => void
   onCollapse?: () => void
+  /**
+   * Bring this host's container back on screen. The inverse of `onCollapse`,
+   * called when something outside the workbench (today: a plugin `reveal()`)
+   * asks for a panel while the surface is collapsed or closed. Hosts that are
+   * always visible omit it.
+   */
+  onEnsureVisible?: () => void
   /**
    * Called when the user picks a mode from the header. Hosts that own the
    * workbench width themselves (`manageOwnWidth={false}` — e.g. the chat dock,
@@ -203,12 +209,12 @@ export function ContextWorkbench({
   workbenchInstanceId,
   resource,
   panels = [],
-  grantedPermissions = new Set(),
   placement = "adjacent-editor",
   className,
   manageOwnWidth = true,
   onExitFocus,
   onCollapse,
+  onEnsureVisible,
   onModeWidthHint,
   headerLeading,
 }: ContextWorkbenchProps) {
@@ -231,7 +237,20 @@ export function ContextWorkbench({
   const setWidth = useContextWorkbenchStore((state) => state.setWidth)
   const setUserPinned = useContextWorkbenchStore((state) => state.setUserPinned)
 
-  useEffect(() => setActiveContextForHost(scopeKey, resource), [resource, scopeKey])
+  // Held in a ref so the host registration only churns on resource/scope
+  // changes: a host passing an inline arrow would otherwise re-register on
+  // every render, and one that memoised it would leave a stale closure behind.
+  const ensureVisibleRef = useRef(onEnsureVisible)
+  useEffect(() => {
+    ensureVisibleRef.current = onEnsureVisible
+  }, [onEnsureVisible])
+  useEffect(
+    () =>
+      setActiveContextForHost(scopeKey, resource, {
+        ensureVisible: () => ensureVisibleRef.current?.(),
+      }),
+    [resource, scopeKey]
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -318,7 +337,7 @@ export function ContextWorkbench({
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [layout.mode, scopeKey, setMode])
 
-  const registeredPanels = contextPanelRegistry.resolve(resource, grantedPermissions)
+  const registeredPanels = contextPanelRegistry.resolve(resource)
   const resolvedPanels = useMemo(
     () =>
       mergePanels(
@@ -329,12 +348,11 @@ export function ContextWorkbench({
               resource.capabilities.includes(capability)
             ) ??
               true) &&
-            (panel.requiredPermissions?.every((permission) => grantedPermissions.has(permission)) ??
-              true)
+            (panel.hasRequiredPermissions?.() ?? true)
         ),
         registeredPanels
       ),
-    [grantedPermissions, panels, registeredPanels, resource]
+    [panels, registeredPanels, resource]
   )
   const activityGroups = useMemo(() => {
     const groups = new Map<string, ContextPanelDefinition[]>()
@@ -519,6 +537,10 @@ export function ContextWorkbench({
         }
         data-mode={layout.mode}
         data-placement={placement}
+        // ContextWorkbench is the shared right-side panel host. Opt it into
+        // the same wallpaper scope as the app's navigation sidebars so image
+        // backgrounds, low-opacity scrims, and surface tonality stay aligned.
+        data-bg-target="sidebar"
         data-testid="context-workbench"
         onFocusCapture={() => touchActiveContextHost(scopeKey)}
         onPointerDownCapture={() => touchActiveContextHost(scopeKey)}
@@ -615,7 +637,20 @@ export function ContextWorkbench({
                     size="icon-sm"
                     variant="ghost"
                     aria-label={t("contextWorkbench.actions.collapse")}
-                    onClick={() => (onCollapse ? onCollapse() : setMode(scopeKey, "collapsed"))}
+                    onClick={() => {
+                      // Focus is a full-screen takeover that outlives the host's
+                      // own collapse (the dock shrinks to 0% underneath while the
+                      // fixed overlay stays on screen, and the mode persists — so
+                      // re-opening the dock came back full-screen). Drop out of it
+                      // first; hosts without their own collapse fall through to
+                      // the collapsed mode as before.
+                      if (onCollapse) {
+                        if (layout.mode === "focus") setMode(scopeKey, "narrow")
+                        onCollapse()
+                        return
+                      }
+                      setMode(scopeKey, "collapsed")
+                    }}
                   >
                     <PanelRightCloseIcon className="size-4" />
                   </Button>

@@ -81,6 +81,24 @@ export function pruneContextWorkbenchLayouts(
   )
 }
 
+/**
+ * Focus is a takeover, not a resting layout — the same contract a Dialog has.
+ * Persisting it meant a reload came back with the workbench covering the whole
+ * window (and, if the user had collapsed the dock on the way out, covering it
+ * with a surface they had already dismissed). Applied only at the persistence
+ * boundary; the live store keeps focus for as long as the user holds it.
+ */
+function withoutTakeoverModes(
+  layouts: Record<string, ContextWorkbenchLayout>
+): Record<string, ContextWorkbenchLayout> {
+  return Object.fromEntries(
+    Object.entries(layouts).map(([scopeKey, layout]) => [
+      scopeKey,
+      layout.mode === "focus" ? { ...layout, mode: "narrow" as const } : layout,
+    ])
+  )
+}
+
 function updateLayout(
   layouts: Record<string, ContextWorkbenchLayout>,
   scopeKey: string,
@@ -215,12 +233,12 @@ export const useContextWorkbenchStore = create<ContextWorkbenchState>()(
         ])
       )
       return {
-        layouts: pruneContextWorkbenchLayouts(layouts, now),
+        layouts: withoutTakeoverModes(pruneContextWorkbenchLayouts(layouts, now)),
         sessionOverrides: persistedState?.sessionOverrides ?? {},
       }
     },
     partialize: (state) => ({
-      layouts: pruneContextWorkbenchLayouts(state.layouts),
+      layouts: withoutTakeoverModes(pruneContextWorkbenchLayouts(state.layouts)),
       sessionOverrides: state.sessionOverrides,
     }),
     merge: (persisted, current) => {
@@ -228,7 +246,7 @@ export const useContextWorkbenchStore = create<ContextWorkbenchState>()(
       return {
         ...current,
         ...persistedState,
-        layouts: pruneContextWorkbenchLayouts(persistedState.layouts ?? {}),
+        layouts: withoutTakeoverModes(pruneContextWorkbenchLayouts(persistedState.layouts ?? {})),
         sessionOverrides: persistedState.sessionOverrides ?? {},
       }
     },

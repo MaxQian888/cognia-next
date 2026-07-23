@@ -18,6 +18,7 @@ pub(crate) const VALID_PERMISSIONS: &[&str] = &[
     "project:read",
     "canvas:read",
     "artifact:read",
+    "artifact:write",
     "workflow:read",
     "extension:ui",
     "media:image:read",

@@ -1,4 +1,5 @@
 import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
+import { CONTEXT_PANEL_ICONS } from "@/lib/context-workbench/panel-icons"
 import {
   resetActiveContextForTesting,
   setActiveContextForHost,
@@ -48,15 +49,12 @@ describe("plugin context panel API", () => {
     })
 
     expect(
-      contextPanelRegistry.resolve(
-        {
-          kind: "workflow",
-          workflowId: "wf-1",
-          editorRevision: "1",
-          capabilities: [],
-        },
-        new Set(["extension:ui", "workflow:read"])
-      )
+      contextPanelRegistry.resolve({
+        kind: "workflow",
+        workflowId: "wf-1",
+        editorRevision: "1",
+        capabilities: [],
+      })
     ).toEqual([expect.objectContaining({ id: "plugin-a:workflow-inspector" })])
     dispose()
   })
@@ -84,10 +82,7 @@ describe("plugin context panel API", () => {
       capabilities: ["inspect"],
     })
     expect(
-      contextPanelRegistry.resolve(
-        { kind: "session", sessionId: "s-1", capabilities: [] },
-        permissions
-      )
+      contextPanelRegistry.resolve({ kind: "session", sessionId: "s-1", capabilities: [] })
     ).toEqual([expect.objectContaining({ id: "plugin-a:session-inspector" })])
     disposeHost()
     disposePanel()
@@ -105,18 +100,48 @@ describe("plugin context panel API", () => {
       renderer: () => null,
     })
 
-    const panels = contextPanelRegistry.resolve(
-      {
-        kind: "canvas-document",
-        documentId: "doc-1",
-        revision: "1",
-        capabilities: [],
-      },
-      new Set(["extension:ui", "canvas:read"])
-    )
+    const panels = contextPanelRegistry.resolve({
+      kind: "canvas-document",
+      documentId: "doc-1",
+      revision: "1",
+      capabilities: [],
+    })
     expect(panels).toEqual([
       expect.objectContaining({ id: "plugin-a:outline", pluginId: "plugin-a" }),
     ])
+    dispose()
+  })
+
+  it("carries the rail icon, badge and chat-scope flag the manifest path already had", () => {
+    // Imperative registration used to drop all three, so every builtin plugin
+    // panel fell back to the host's generic glyph with no way to opt out.
+    const api = createContextPanelAPI("plugin-a", () => true)
+    const dispose = api.register({
+      id: "outline",
+      activity: "inspect",
+      label: "Outline",
+      labelKey: "plugin.outline",
+      resourceKinds: ["canvas-document"],
+      icon: "search-code",
+      getBadge: () => 4,
+      requiresChatScope: true,
+      renderer: () => null,
+    })
+
+    const resource = {
+      kind: "canvas-document" as const,
+      documentId: "doc-1",
+      revision: "1",
+      capabilities: [],
+    }
+    const registered = contextPanelRegistry.get("plugin-a:outline")
+    expect(registered?.icon).toBe(CONTEXT_PANEL_ICONS["search-code"])
+    expect(registered?.requiresChatScope).toBe(true)
+    expect(registered?.getBadge?.(resource)).toBe(4)
+
+    // The declared permissions are recorded for diagnostics even though the
+    // gate is the closure.
+    expect(registered?.requiredPermissions).toEqual(["extension:ui", "canvas:read"])
     dispose()
   })
 
@@ -191,6 +216,117 @@ describe("plugin context panel API", () => {
     expect(listener).toHaveBeenCalled()
     unsubscribe()
     disposeHost()
+  })
+
+  describe("workbench control", () => {
+    const scopeKey = "window:canvas::canvas:doc-1"
+    const resource = {
+      kind: "canvas-document" as const,
+      documentId: "doc-1",
+      revision: "2",
+      capabilities: [],
+    }
+
+    function mountPanel(hasPermission: (permission: string) => boolean = () => true) {
+      const api = createContextPanelAPI("plugin-a", hasPermission)
+      api.register({
+        id: "outline",
+        activity: "inspect",
+        label: "Outline",
+        labelKey: "outline.label",
+        resourceKinds: ["canvas-document"],
+        renderer: () => null,
+      })
+      return { api, disposeHost: setActiveContextForHost(scopeKey, resource) }
+    }
+
+    it("honours an explicit reveal mode over the panel's preferred one", () => {
+      const { api, disposeHost } = mountPanel()
+
+      expect(api.reveal("outline", "wide")).toBe(true)
+      expect(useContextWorkbenchStore.getState().layouts[scopeKey]).toMatchObject({
+        activePanelId: "plugin-a:outline",
+        mode: "wide",
+      })
+      disposeHost()
+    })
+
+    it("pushes and clears a badge on its own panel only", () => {
+      const { api, disposeHost } = mountPanel()
+
+      expect(api.setBadge("outline", 3)).toBe(true)
+      expect(contextPanelRegistry.get("plugin-a:outline")?.getBadge?.(resource)).toBe(3)
+      expect(api.setBadge("outline", 0)).toBe(true)
+      expect(contextPanelRegistry.get("plugin-a:outline")?.getBadge?.(resource)).toBe(0)
+      expect(api.setBadge("plugin-b:theirs", 1)).toBe(false)
+      expect(api.setBadge("never-registered", 1)).toBe(false)
+      disposeHost()
+    })
+
+    it("reports the workbench layout and gates it on the resource permission", () => {
+      const { api, disposeHost } = mountPanel()
+      api.reveal("outline")
+
+      expect(api.getWorkbenchState()).toMatchObject({
+        mode: "narrow",
+        activePanelId: "plugin-a:outline",
+        ownsActivePanel: true,
+        userPinned: false,
+        panelIds: ["plugin-a:outline"],
+      })
+
+      const blind = createContextPanelAPI("plugin-a", (p) => p === "extension:ui")
+      expect(blind.getWorkbenchState()).toBeNull()
+      disposeHost()
+    })
+
+    it("notifies on both context and layout changes", () => {
+      const { api, disposeHost } = mountPanel()
+      const listener = jest.fn()
+      const unsubscribe = api.onDidChangeWorkbenchState(listener)
+
+      api.reveal("outline")
+      expect(listener).toHaveBeenCalledWith(expect.objectContaining({ ownsActivePanel: true }))
+
+      unsubscribe()
+      listener.mockClear()
+      api.reveal("outline", "wide")
+      expect(listener).not.toHaveBeenCalled()
+      disposeHost()
+    })
+
+    it("only resizes or pins the workbench while its own panel is visible", () => {
+      const { api, disposeHost } = mountPanel()
+      useContextWorkbenchStore.getState().navigatePanel(scopeKey, "native-comments", "narrow")
+
+      expect(api.setMode("focus")).toBe(false)
+      expect(api.setPinned(true)).toBe(false)
+      expect(useContextWorkbenchStore.getState().layouts[scopeKey]?.mode).toBe("narrow")
+
+      api.reveal("outline")
+      expect(api.setMode("focus")).toBe(true)
+      expect(api.setPinned(true)).toBe(true)
+      expect(useContextWorkbenchStore.getState().layouts[scopeKey]).toMatchObject({
+        mode: "focus",
+        userPinned: true,
+      })
+      disposeHost()
+    })
+
+    it("fails closed on every control without extension:ui", () => {
+      const { disposeHost } = mountPanel()
+      const blind = createContextPanelAPI("plugin-a", () => false)
+
+      expect(blind.setBadge("outline", 2)).toBe(false)
+      expect(blind.setMode("wide")).toBe(false)
+      expect(blind.setPinned(true)).toBe(false)
+      disposeHost()
+    })
+
+    it("reports no workbench state until one is mounted", () => {
+      const api = createContextPanelAPI("plugin-a", () => true)
+      expect(api.getWorkbenchState()).toBeNull()
+    })
   })
 
   it("fails closed when reading active context without its resource permission", () => {

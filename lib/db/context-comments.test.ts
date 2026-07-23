@@ -104,6 +104,38 @@ describe("context-comments", () => {
     expect(await bulkImportContextComments([converted])).toBe(0)
   })
 
+  it("orders roots before replies when their timestamps are identical", async () => {
+    const createdAt = 123
+    await bulkImportContextComments([
+      {
+        id: "reply",
+        resourceKind: "artifact",
+        resourceId: "same-time",
+        anchor: { kind: "resource" },
+        parentId: "root",
+        authorId: "user-2",
+        authorName: "Sam",
+        content: "Reply",
+        createdAt,
+        reactions: [],
+      },
+      {
+        id: "root",
+        resourceKind: "artifact",
+        resourceId: "same-time",
+        anchor: { kind: "resource" },
+        authorId: "user-1",
+        authorName: "Maya",
+        content: "Root",
+        createdAt,
+        reactions: [],
+      },
+    ])
+
+    const comments = await listContextCommentsForResource("artifact", "same-time")
+    expect(comments.map((comment) => comment.id)).toEqual(["root", "reply"])
+  })
+
   it("rejects a reply whose parent no longer exists", async () => {
     await expect(
       replyToContextComment("missing", {

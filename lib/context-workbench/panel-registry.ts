@@ -5,10 +5,29 @@ export interface ContextPanelRegistry {
   unregister: (panelId: string) => void
   unregisterPlugin: (pluginId: string) => void
   get: (panelId: string) => ContextPanelDefinition | undefined
-  resolve: (
-    resource: ContextResource,
-    grantedPermissions: ReadonlySet<string>
-  ) => ContextPanelDefinition[]
+  /**
+   * Push a badge count onto an already-registered panel. `getBadge` is captured
+   * at registration time, so a contributor whose count changes later (an
+   * unread counter, a queued job) has no other way to surface it. Returns false
+   * when the panel is not registered. Counts are additive with any `getBadge`
+   * the definition brought itself.
+   */
+  setBadge: (panelId: string, count: number) => boolean
+  /**
+   * Panels that apply to `resource` and clear their capability and permission
+   * gates, in rail order.
+   *
+   * Permissions are *not* passed in. They used to be, as one flat
+   * `ReadonlySet<string>` supplied by the host — a shape that cannot express
+   * per-plugin grants (the real store is `Map<pluginId, Set<permission>>`), so
+   * every one of the eight mount sites correctly omitted it and any panel
+   * declaring `requiredPermissions` was silently filtered out forever. The
+   * registry can't read the permission store directly either: `permission-api`
+   * already imports this module to call `refresh()`. So the check is inverted —
+   * whoever registers the panel, and therefore already holds both its
+   * `pluginId` and `permission-api`, injects `hasRequiredPermissions`.
+   */
+  resolve: (resource: ContextResource) => ContextPanelDefinition[]
   subscribe: (listener: () => void) => () => void
   getRevision: () => number
   refresh: () => void
@@ -20,6 +39,7 @@ function hasEvery(values: readonly string[] | undefined, available: ReadonlySet<
 
 export function createContextPanelRegistry(): ContextPanelRegistry {
   const definitions = new Map<string, ContextPanelDefinition>()
+  const badges = new Map<string, number>()
   const listeners = new Set<() => void>()
   let revision = 0
 
@@ -29,6 +49,7 @@ export function createContextPanelRegistry(): ContextPanelRegistry {
   }
 
   const unregister = (panelId: string) => {
+    badges.delete(panelId)
     if (!definitions.delete(panelId)) return
     notify()
   }
@@ -38,7 +59,14 @@ export function createContextPanelRegistry(): ContextPanelRegistry {
       if (definitions.has(definition.id)) {
         throw new Error(`Context panel id already registered: ${definition.id}`)
       }
-      definitions.set(definition.id, definition)
+      // The workbench reads badges through the stored definition, so pushed
+      // counts have to ride on it rather than live in a second lookup the
+      // activity rail would have to know about.
+      definitions.set(definition.id, {
+        ...definition,
+        getBadge: (resource) =>
+          (definition.getBadge?.(resource) ?? 0) + (badges.get(definition.id) ?? 0),
+      })
       notify()
       return () => unregister(definition.id)
     },
@@ -48,18 +76,27 @@ export function createContextPanelRegistry(): ContextPanelRegistry {
       for (const [id, definition] of definitions) {
         if (definition.pluginId === pluginId) {
           definitions.delete(id)
+          badges.delete(id)
           changed = true
         }
       }
       if (changed) notify()
     },
     get: (panelId) => definitions.get(panelId),
-    resolve(resource, grantedPermissions) {
+    setBadge(panelId, count) {
+      if (!definitions.has(panelId)) return false
+      const next = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0
+      if ((badges.get(panelId) ?? 0) === next) return true
+      if (next === 0) badges.delete(panelId)
+      else badges.set(panelId, next)
+      notify()
+      return true
+    },
+    resolve(resource) {
       const capabilities = new Set(resource.capabilities)
       return [...definitions.values()]
         .filter((definition) => definition.appliesTo(resource))
         .filter((definition) => hasEvery(definition.requiredCapabilities, capabilities))
-        .filter((definition) => hasEvery(definition.requiredPermissions, grantedPermissions))
         .filter((definition) => definition.hasRequiredPermissions?.() ?? true)
         .sort((left, right) => {
           const order = (left.order ?? 100) - (right.order ?? 100)

@@ -29,6 +29,7 @@ VALID_PERMISSIONS = (
     "project:read",
     "canvas:read",
     "artifact:read",
+    "artifact:write",
     "workflow:read",
     "extension:ui",
     "media:image:read",

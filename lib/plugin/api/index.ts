@@ -167,4 +167,8 @@ export type {
 } from "./backup-api"
 export type { PluginAutomationAPI } from "./automation-api"
 export type { PluginCompanionAPI, CompanionServerStatus } from "./companion-api"
-export type { PluginContextPanelAPI, PluginContextPanelRegistration } from "./context-panel-api"
+export type {
+  PluginContextPanelAPI,
+  PluginContextPanelRegistration,
+  PluginContextWorkbenchState,
+} from "./context-panel-api"

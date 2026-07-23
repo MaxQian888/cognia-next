@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { useEffect } from "react"
 import { NextIntlClientProvider } from "next-intl"
@@ -60,12 +62,7 @@ const messages = {
 function renderWorkbench(panels: ContextPanelDefinition[]) {
   return render(
     <NextIntlClientProvider locale="en" messages={messages}>
-      <ContextWorkbench
-        workbenchInstanceId="window-a"
-        resource={resource}
-        panels={panels}
-        grantedPermissions={new Set()}
-      />
+      <ContextWorkbench workbenchInstanceId="window-a" resource={resource} panels={panels} />
     </NextIntlClientProvider>
   )
 }
@@ -405,12 +402,7 @@ describe("ContextWorkbench", () => {
     mockResourceSession = { id: "embedded-session" }
     view.rerender(
       <NextIntlClientProvider locale="en" messages={messages}>
-        <ContextWorkbench
-          workbenchInstanceId="window-a"
-          resource={resource}
-          panels={[panel]}
-          grantedPermissions={new Set()}
-        />
+        <ContextWorkbench workbenchInstanceId="window-a" resource={resource} panels={[panel]} />
       </NextIntlClientProvider>
     )
     expect(screen.getByText("scoped-ai-panel")).toBeInTheDocument()
@@ -473,7 +465,7 @@ describe("ContextWorkbench", () => {
     expect(onRestore).toHaveBeenCalledWith(resource)
   })
 
-  it("filters native panels by resource capabilities and granted permissions", () => {
+  it("filters native panels by resource capabilities and the injected permission gate", () => {
     renderWorkbench([
       {
         id: "missing-capability",
@@ -488,13 +480,28 @@ describe("ContextWorkbench", () => {
         activity: "review",
         labelKey: "contextWorkbench.panels.review",
         appliesTo: () => true,
+        // Declared for diagnostics; the gate is the closure. The host used to
+        // filter on a flat `grantedPermissions` set it was never actually
+        // passed, so this panel was hidden for the wrong reason.
         requiredPermissions: ["project:read"],
+        hasRequiredPermissions: () => false,
         renderer: () => <div>missing-permission</div>,
+      },
+      {
+        id: "declared-but-ungated",
+        activity: "templates",
+        labelKey: "contextWorkbench.panels.templates",
+        appliesTo: () => true,
+        requiredPermissions: ["project:read"],
+        renderer: () => <div>declared-but-ungated</div>,
       },
     ])
 
     expect(screen.queryByRole("button", { name: "contextWorkbench.panels.gated" })).toBeNull()
     expect(screen.queryByRole("button", { name: "contextWorkbench.panels.review" })).toBeNull()
+    expect(
+      screen.getByRole("button", { name: "contextWorkbench.panels.templates" })
+    ).toBeInTheDocument()
   })
 
   it("pauses stateful panel effects while hidden and restores them when visible", () => {
@@ -656,6 +663,46 @@ describe("ContextWorkbench", () => {
       expect(section).toHaveAttribute("data-mode", "focus")
       expect(section.className).toContain("zoom-in-95")
       expect(section.className).toContain("--motion-duration-scale")
+    })
+
+    it("leaves focus before handing collapse to the host", () => {
+      const onCollapse = jest.fn()
+      render(
+        <NextIntlClientProvider locale="en" messages={messages}>
+          <ContextWorkbench
+            workbenchInstanceId="window-a"
+            resource={resource}
+            panels={twoPanels}
+            manageOwnWidth={false}
+            onCollapse={onCollapse}
+          />
+        </NextIntlClientProvider>
+      )
+
+      fireEvent.click(screen.getByRole("button", { name: "Focus mode" }))
+      fireEvent.click(screen.getByRole("button", { name: "Collapse workbench" }))
+
+      expect(onCollapse).toHaveBeenCalledTimes(1)
+      // Without this the dock shrinks to 0% while the fixed overlay stays up,
+      // and the persisted mode re-opens the dock full-screen next time.
+      expect(useContextWorkbenchStore.getState().layouts["window-a::canvas:doc-1"]?.mode).toBe(
+        "narrow"
+      )
+    })
+
+    it("keeps the wallpaper hook from beating the focus takeover's position", () => {
+      // `data-bg-target` opts the workbench into the app wallpaper layer. That
+      // rule sets `position: relative`, and an UNLAYERED rule wins over every
+      // `@layer utilities` declaration regardless of specificity — so if it ever
+      // leaves `@layer base` again, focus mode silently degrades from a
+      // `fixed inset-0` takeover to a 100vw block clipped by the dock.
+      const css = readFileSync(join(process.cwd(), "app/globals.css"), "utf8")
+      const rule = css.indexOf("[data-bg-target] {")
+      expect(rule).toBeGreaterThan(-1)
+      const enclosingLayer = css.lastIndexOf("@layer base {", rule)
+      expect(enclosingLayer).toBeGreaterThan(-1)
+      // The rule must sit inside that block, not after it closed.
+      expect(css.slice(enclosingLayer, rule).lastIndexOf("\n}")).toBe(-1)
     })
 
     it("reports mode changes so a host that owns the width can resize itself", () => {

@@ -110,6 +110,17 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
   "cognia-sandboxed-tools": ["field_missing:tools"],
   "cognia-scheduling-demo": [],
   "cognia-share-watch": [],
+  // The raw JSON declares the capabilities while the built-in TypeScript
+  // overlay supplies the executable tools and typed contributions. Keeping
+  // handlers out of plugin.json is required because they are not serializable;
+  // src/index.test.ts verifies that the merged manifest carries every field.
+  "cognia-work-mode": [
+    "field_missing:tools",
+    "field_missing:modes",
+    "field_missing:skills",
+    "field_missing:subagent",
+    "field_missing:agent-team-template",
+  ],
   "computer-use": [
     "field_missing:tools",
     "field_missing:native-anthropic-tool",
@@ -128,7 +139,11 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
   "github-delivery": ["experimental:providers", "field_missing:tools", "field_missing:components"],
   ocr: ["field_missing:tools"],
   "playwright-mcp": ["field_missing:mcp-server-preset"],
-  "prompt-templates": [],
+  // Class 1: the panel is registered imperatively in `activate()`. It cannot
+  // use `manifest.contextPanels` — that field resolves a renderer from a
+  // separate `entry` module, and a `builtin://` plugin has no fetchable
+  // install path to import one from.
+  "prompt-templates": ["field_missing:context-panel"],
   "ripgrep-tools": [],
   // `commands` is DECLARED now (manifest.commands[] + hooks.onCommand), so the
   // `field_missing:commands` entry is gone. `tools` stays imperative —

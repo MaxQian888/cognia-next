@@ -107,6 +107,25 @@ export type ContextResource =
 
 export type ContextResourceKind = ContextResource["kind"]
 
+/**
+ * The read permission each resource kind is gated on, for both the imperative
+ * `ctx.contextPanels.register` path and the manifest validator.
+ *
+ * One runtime source for the same reason `CANONICAL_CONTEXT_ACTIVITIES` is one
+ * — and this pair drifted too: the validator carried a hand-copied literal that
+ * was missing `session`, so a manifest declaring the chat dock's *own* fallback
+ * resource kind passed tsc and then failed at install with `resourceKinds.invalid`.
+ * Typed as an exhaustive `Record` so a new kind is a compile error here rather
+ * than a silent gap at a call site.
+ */
+export const CONTEXT_RESOURCE_READ_PERMISSIONS: Record<ContextResourceKind, string> = {
+  "canvas-document": "canvas:read",
+  "project-file": "project:read",
+  artifact: "artifact:read",
+  workflow: "workflow:read",
+  session: "session:read",
+}
+
 export interface ContextPanelRenderProps {
   workbenchInstanceId: string
   resource: ContextResource
@@ -122,7 +141,17 @@ export interface ContextPanelDefinition {
   order?: number
   appliesTo: (resource: ContextResource) => boolean
   requiredCapabilities?: ContextCapability[]
+  /**
+   * The permissions this panel was registered against, kept for diagnostics and
+   * plugin-detail display. **Not** the gate — see `hasRequiredPermissions`.
+   */
   requiredPermissions?: string[]
+  /**
+   * The permission gate, injected by whoever registered the panel (which is the
+   * only layer holding both the `pluginId` and `permission-api`). Re-evaluated
+   * on every `resolve`, so grants and revocations take effect as soon as
+   * `permission-api` calls `contextPanelRegistry.refresh()`.
+   */
   hasRequiredPermissions?: () => boolean
   preferredMode?: ContextPanelMode
   retention?: ContextPanelRetention

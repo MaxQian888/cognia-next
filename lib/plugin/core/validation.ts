@@ -23,7 +23,11 @@ import {
   type PluginPointGovernanceMode,
 } from "@/lib/plugin/contracts/plugin-points"
 import { isValidPluginTableName, MAX_TABLES_PER_PLUGIN } from "@/lib/plugin/dexie/namespace"
-import { CANONICAL_CONTEXT_ACTIVITIES } from "@/types/context-workbench"
+import {
+  CANONICAL_CONTEXT_ACTIVITIES,
+  CONTEXT_RESOURCE_READ_PERMISSIONS,
+} from "@/types/context-workbench"
+import { PLUGIN_CONTEXT_PANEL_ICONS } from "@/types/plugin/plugin-context-panel"
 import { getPluginPathViolations, type PluginPathViolation } from "@/lib/plugin/core/plugin-path"
 import {
   AUTHOR_CAPABILITY_CONTRACTS,
@@ -1403,12 +1407,12 @@ export function validatePluginManifest(
     {
       field: "contextPanels",
       extra: (entry, _i, push) => {
-        const resourcePermissions: Record<string, string> = {
-          "project-file": "project:read",
-          "canvas-document": "canvas:read",
-          artifact: "artifact:read",
-          workflow: "workflow:read",
-        }
+        // Shares its source with the imperative API's gate for the same reason
+        // the activity list below does: this map used to be a hand-copied
+        // literal that omitted `session` — the chat dock's own fallback
+        // resource kind — so a declarative panel targeting the right rail's
+        // default state passed tsc and then failed to install.
+        const resourcePermissions = CONTEXT_RESOURCE_READ_PERMISSIONS
         const resourceKinds = entry.resourceKinds
         if (
           !Array.isArray(resourceKinds) ||
@@ -1431,19 +1435,7 @@ export function validatePluginManifest(
         if (typeof entry.labelKey !== "string" || entry.labelKey.length === 0) {
           push("error", "labelKey.missing", `contextPanels entry requires a "labelKey" string`)
         }
-        const icons = new Set([
-          "blocks",
-          "bot",
-          "file-text",
-          "history",
-          "info",
-          "message-square",
-          "panel-right",
-          "play",
-          "search-code",
-          "settings",
-          "wrench",
-        ])
+        const icons = new Set<string>(PLUGIN_CONTEXT_PANEL_ICONS)
         if (
           entry.icon !== undefined &&
           (typeof entry.icon !== "string" || !icons.has(entry.icon))
@@ -1463,6 +1455,26 @@ export function validatePluginManifest(
         ) {
           push("error", "retention.invalid", `contextPanels "retention" is invalid`)
         }
+        // Behaviour hooks are named exports of the same entry module, so the
+        // only thing checkable here is that a declared name is a usable one —
+        // the bridge reports a missing export at registration time.
+        for (const field of [
+          "onFirstActivateExport",
+          "onRestoreExport",
+          "getBadgeExport",
+        ] as const) {
+          const value = entry[field]
+          if (value !== undefined && (typeof value !== "string" || value.length === 0)) {
+            push("error", `${field}.invalid`, `contextPanels "${field}" must be a non-empty string`)
+          }
+        }
+        if (entry.requiresChatScope !== undefined && typeof entry.requiresChatScope !== "boolean") {
+          push(
+            "error",
+            "requiresChatScope.invalid",
+            `contextPanels "requiresChatScope" must be a boolean`
+          )
+        }
         const declaredPermissions = new Set(
           Array.isArray(m.permissions)
             ? m.permissions.filter(
@@ -1475,7 +1487,10 @@ export function validatePluginManifest(
           ...(Array.isArray(resourceKinds)
             ? resourceKinds
                 .filter((kind): kind is string => typeof kind === "string")
-                .map((kind) => resourcePermissions[kind])
+                // `kind` comes straight out of an untrusted manifest, so it is
+                // a plain string that may name no known resource. A miss is
+                // expected and dropped by the Boolean filter below.
+                .map((kind) => (resourcePermissions as Record<string, string | undefined>)[kind])
                 .filter((permission): permission is string => Boolean(permission))
             : []),
         ]

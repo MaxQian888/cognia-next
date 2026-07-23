@@ -97,10 +97,16 @@ export async function listContextCommentRowsForResource(
   resourceKind: ContextCommentResourceKind,
   resourceId: string
 ): Promise<ContextCommentRow[]> {
-  return getDb()
+  const rows = await getDb()
     .contextComments.where("[resourceKind+resourceId]")
     .equals([resourceKind, resourceId])
     .sortBy("createdAt")
+  return rows.sort((left, right) => {
+    const byCreatedAt = left.createdAt - right.createdAt
+    if (byCreatedAt !== 0) return byCreatedAt
+    if (Boolean(left.parentId) !== Boolean(right.parentId)) return left.parentId ? 1 : -1
+    return left.id.localeCompare(right.id)
+  })
 }
 
 export async function listContextCommentsForResource(

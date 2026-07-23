@@ -5,7 +5,11 @@
 import { validatePluginManifest, validatePluginConfig } from "./validation"
 import type { PluginConfigSchema } from "@/types/plugin"
 import type { PluginManifest } from "@/types/plugin"
-import { CANONICAL_CONTEXT_ACTIVITIES } from "@/types/context-workbench"
+import {
+  CANONICAL_CONTEXT_ACTIVITIES,
+  CONTEXT_RESOURCE_READ_PERMISSIONS,
+} from "@/types/context-workbench"
+import type { ContextResourceKind } from "@/types/context-workbench"
 
 describe("Plugin Validation", () => {
   describe("validatePluginManifest", () => {
@@ -245,6 +249,34 @@ describe("Plugin Validation", () => {
         )
       }
     )
+
+    it.each(
+      Object.entries(CONTEXT_RESOURCE_READ_PERMISSIONS) as Array<[ContextResourceKind, string]>
+    )("accepts a context panel targeting the %s resource kind", (kind, readPermission) => {
+      // Same drift, one field over: this map was hand-copied here without
+      // `session` — the chat dock's fallback resource — so a declarative panel
+      // aimed at the right rail's default state failed to install.
+      const manifest = createValidManifest()
+      manifest.capabilities = ["context-panel"] as PluginManifest["capabilities"]
+      manifest.permissions = ["extension:ui", readPermission] as PluginManifest["permissions"]
+      ;(manifest as unknown as Record<string, unknown>).contextPanels = [
+        {
+          id: "outline",
+          label: "Outline",
+          labelKey: "panels.outline",
+          entry: "panel.js",
+          export: "OutlinePanel",
+          resourceKinds: [kind],
+          activity: "inspect",
+        },
+      ]
+
+      const result = validatePluginManifest(manifest, { governanceMode: "warn" })
+
+      expect(result.diagnostics ?? []).not.toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: "resourceKinds.invalid" })])
+      )
+    })
 
     it("accepts declarative-only VS Code extensions without vscodeMain", () => {
       const manifest = createValidManifest() as unknown as Record<string, unknown>
