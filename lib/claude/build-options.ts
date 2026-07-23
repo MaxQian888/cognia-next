@@ -3326,6 +3326,38 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
   }
 
+  // ADR-0090 Phase 0: shadow-record the unified resolver's decision against
+  // the fully-resolved SendOptions (ground truth). Observation only — the
+  // stamped options are returned unchanged.
+  void (async () => {
+    try {
+      const [{ resolveAgentExecutionSpec }, { recordShadowDecision }, { getAgentExecutionFlags }] =
+        await Promise.all([
+          import("@/lib/ai/agent/execution/resolve-agent-execution-spec"),
+          import("@/lib/ai/agent/execution/shadow-recorder"),
+          import("@/lib/ai/agent/execution/feature-flags"),
+        ])
+      const { isTauri } = await import("@/lib/tauri")
+      const environment = { isTauri: isTauri(), isHeadlessHost: false }
+      recordShadowDecision({
+        resolution: resolveAgentExecutionSpec({
+          surface: "chat",
+          environment,
+          flags: getAgentExecutionFlags(),
+          // Chat sessions are agent sessions by definition; the legacy
+          // provider id still drives the runtime mapping.
+          policy: { executionKind: "agent" },
+          legacy: { providerId: opts.provider, modelId: opts.model },
+          identity: session?.id ? { sessionId: session.id } : undefined,
+        }),
+        environment,
+        legacyChannel: "sidecar",
+      })
+    } catch {
+      // Shadow instrumentation must never affect the send path.
+    }
+  })()
+
   return opts
 }
 

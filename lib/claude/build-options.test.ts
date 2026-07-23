@@ -63,6 +63,14 @@ jest.mock("@/lib/plugin/bridge/sidecar-tools-bridge", () => ({
   buildPluginToolsManifest: jest.fn(() => []),
 }))
 
+// ADR-0090 Phase 0 — the shadow recorder is fire-and-forget at the end of
+// resolveSendOptions; mocked so these tests can assert the wiring without
+// touching telemetry/Dexie.
+const mockRecordShadowDecision = jest.fn()
+jest.mock("@/lib/ai/agent/execution/shadow-recorder", () => ({
+  recordShadowDecision: (...args: unknown[]) => mockRecordShadowDecision(...(args as [])),
+}))
+
 jest.mock("@/lib/db/conversation-overrides", () => ({
   readForResolution: jest.fn(),
 }))
@@ -4371,5 +4379,35 @@ describe("resolveSendOptions — project knowledge base (project-scoped RAG)", (
       projectKnowledgeUserMessage: "hello",
     })
     expect(mApplyProjectKnowledge).not.toHaveBeenCalled()
+  })
+})
+
+describe("resolveSendOptions — ADR-0090 shadow recording", () => {
+  const flushShadow = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+  it("records the chat surface against the resolved provider/model (observation only)", async () => {
+    const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    await flushShadow()
+
+    expect(mockRecordShadowDecision).toHaveBeenCalled()
+    const call = mockRecordShadowDecision.mock.calls.at(-1)?.[0] as {
+      resolution: { trace: { surface: string; legacy: Record<string, unknown> } }
+      legacyChannel: string
+    }
+    expect(call.resolution.trace.surface).toBe("chat")
+    expect(call.legacyChannel).toBe("sidecar")
+    // Ground truth comes from the RESOLVED options, not re-derivation.
+    expect(call.resolution.trace.legacy.providerId).toBe(opts.provider)
+    // The stamped options themselves are untouched by the shadow path.
+    expect(opts.execution).toBeUndefined()
+  })
+
+  it("a throwing recorder never affects the resolved options", async () => {
+    mockRecordShadowDecision.mockImplementationOnce(() => {
+      throw new Error("shadow down")
+    })
+    const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    await flushShadow()
+    expect(opts).toBeTruthy()
   })
 })

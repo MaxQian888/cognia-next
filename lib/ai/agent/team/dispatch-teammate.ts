@@ -534,6 +534,39 @@ export async function dispatchTeammate(
     })
   }
 
+  // ADR-0090 Phase 0: shadow-record what the unified resolver would decide
+  // for this dispatch now that the legacy channel is final. Observation only.
+  void (async () => {
+    try {
+      const [{ resolveAgentExecutionSpec }, { recordShadowDecision }, { getAgentExecutionFlags }] =
+        await Promise.all([
+          import("@/lib/ai/agent/execution/resolve-agent-execution-spec"),
+          import("@/lib/ai/agent/execution/shadow-recorder"),
+          import("@/lib/ai/agent/execution/feature-flags"),
+        ])
+      const { isTauri } = await import("@/lib/tauri")
+      const environment = { isTauri: isTauri(), isHeadlessHost: false }
+      recordShadowDecision({
+        resolution: resolveAgentExecutionSpec({
+          surface: "team",
+          environment,
+          flags: getAgentExecutionFlags(),
+          legacy: {
+            runtime,
+            modelId: modelHint ?? teammate.config?.model,
+            toolsEnabled: args.preferToolEnabled !== false,
+            channel,
+          },
+          identity: { sessionId: teamCtx.runId, runId: teamCtx.runId },
+        }),
+        environment,
+        legacyChannel: channel,
+      })
+    } catch {
+      // Shadow instrumentation must never affect the dispatch.
+    }
+  })()
+
   // Live progress streaming → workspace activity panel. Built only when the
   // store exposes an `addEvent` sink (UI runs; eval/plan fixtures omit it).
   // `streamProgress !== false` (default ON) threads the sidecar capture stream

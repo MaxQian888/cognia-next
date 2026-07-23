@@ -32,6 +32,7 @@ import type {
   OpticalCompactionOptions,
   SessionCompressionOverrides,
 } from "./compression"
+import type { AgentExecutionSendSpec } from "./agent-execution"
 
 // ---- Outbound (UI → Tauri → sidecar) -------------------------------------
 
@@ -245,6 +246,15 @@ export interface SendOptions {
    * apart) and report as a spurious "ended with no assistant text".
    */
   turnId?: string
+  /**
+   * Frozen execution-spec projection (ADR-0090). Like `turnId`, this is a
+   * sidecar-protocol envelope field, not an SDK option: it rides through
+   * Rust's `SendOptions.extra` flatten and the sidecar dispatch reads
+   * `execution.runtimeAdapter` instead of re-deriving the runtime from
+   * `provider`. Absent ⇒ legacy provider-id dispatch. Secret-free by
+   * contract — ticket secrets / direct credentials ride `env`.
+   */
+  execution?: AgentExecutionSendSpec
   cwd?: string
   model?: string
   fallbackModel?: string

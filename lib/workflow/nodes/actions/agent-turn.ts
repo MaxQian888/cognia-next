@@ -60,6 +60,8 @@ export async function runAgentTurn(ctx: StepExecutionContext): Promise<StepExecu
   }
   const toolsEnabled = params.toolsEnabled !== false
 
+  recordAgentTurnShadowDecision(params, toolsEnabled)
+
   // requireTools is a hard precondition — check BEFORE spending a turn.
   if (toolsEnabled && params.requireTools) {
     const { isTauri } = await import("@/lib/tauri")
@@ -218,4 +220,43 @@ function nonRetryable(message: string): Error {
   const err = new Error(message)
   ;(err as Error & { retryable: boolean }).retryable = false
   return err
+}
+
+/**
+ * Shadow-record the ADR-0090 resolver decision for this node's legacy
+ * toolsEnabled/requireTools signals (Phase 0 — observation only).
+ */
+function recordAgentTurnShadowDecision(params: AgentTurnParams, toolsEnabled: boolean): void {
+  void (async () => {
+    try {
+      const [
+        { resolveAgentExecutionSpec },
+        { recordShadowDecision },
+        { getAgentExecutionFlags },
+        { isTauri },
+      ] = await Promise.all([
+        import("@/lib/ai/agent/execution/resolve-agent-execution-spec"),
+        import("@/lib/ai/agent/execution/shadow-recorder"),
+        import("@/lib/ai/agent/execution/feature-flags"),
+        import("@/lib/tauri"),
+      ])
+      const environment = { isTauri: isTauri(), isHeadlessHost: false }
+      recordShadowDecision({
+        resolution: resolveAgentExecutionSpec({
+          surface: "workflow-agent-turn",
+          environment,
+          flags: getAgentExecutionFlags(),
+          legacy: {
+            modelId: params.model,
+            toolsEnabled,
+            requireTools: params.requireTools,
+          },
+        }),
+        environment,
+        legacyChannel: toolsEnabled && environment.isTauri ? "sidecar" : "text",
+      })
+    } catch {
+      // Shadow instrumentation must never affect the step.
+    }
+  })()
 }

@@ -18,6 +18,11 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: () => mockIsTauri(),
 }))
 
+const mockRecordShadowDecision = jest.fn()
+jest.mock("@/lib/ai/agent/execution/shadow-recorder", () => ({
+  recordShadowDecision: (...args: unknown[]) => mockRecordShadowDecision(...(args as [])),
+}))
+
 jest.mock("@/lib/db/settings", () => ({
   getSettings: jest.fn().mockResolvedValue({
     defaultProvider: "openai",
@@ -251,6 +256,34 @@ describe("runAgentTurn", () => {
         "go",
         expect.not.objectContaining({ outputFormat: expect.anything() })
       )
+    })
+  })
+
+  describe("ADR-0090 shadow recording", () => {
+    const flushShadow = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+    it("records the workflow-agent-turn surface with the legacy tool signals", async () => {
+      mockIsTauri.mockReturnValue(false)
+      await runAgentTurn(makeCtx({ prompt: "go", requireTools: false }))
+      await flushShadow()
+
+      expect(mockRecordShadowDecision).toHaveBeenCalledTimes(1)
+      const call = mockRecordShadowDecision.mock.calls[0][0] as {
+        resolution: { trace: { surface: string; legacy: Record<string, unknown> } }
+        legacyChannel: string
+      }
+      expect(call.resolution.trace.surface).toBe("workflow-agent-turn")
+      expect(call.resolution.trace.legacy.toolsEnabled).toBe(true)
+      expect(call.legacyChannel).toBe("text") // isTauri mocked false
+    })
+
+    it("a throwing recorder never affects the step result", async () => {
+      mockRecordShadowDecision.mockImplementation(() => {
+        throw new Error("shadow down")
+      })
+      const result = await runAgentTurn(makeCtx({ prompt: "go" }))
+      await flushShadow()
+      expect((result.output as Record<string, unknown>).text).toBe("agent reply")
     })
   })
 })

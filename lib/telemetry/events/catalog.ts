@@ -46,6 +46,15 @@ export interface TelemetryEventCatalog {
     durationMs?: number
   }
   "telemetry.preference.changed": { enabled: boolean }
+  /** ADR-0090 Phase 0: shadow resolver disagreed with the legacy path. Ids/enums only. */
+  "agent.execution.shadow_divergence": {
+    surface: string
+    divergence: string
+    oldChannel: string
+    newRuntime: string
+    newRouteKind: string
+    legacyMigrated: boolean
+  }
 }
 
 export type TelemetryEventName = keyof TelemetryEventCatalog
@@ -70,4 +79,5 @@ export const TELEMETRY_EVENT_CATALOG: Readonly<
   "agent.teammate.completed": { category: "agentTeam" },
   "agent.teammate.failed": { category: "agentTeam" },
   "telemetry.preference.changed": { category: "system" },
+  "agent.execution.shadow_divergence": { category: "system" },
 }

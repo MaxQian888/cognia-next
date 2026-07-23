@@ -36,6 +36,11 @@ jest.mock("@/lib/db/settings", () => ({ getSettings: jest.fn() }))
 jest.mock("@/lib/claude/build-options", () => ({ resolveSendOptions: jest.fn() }))
 jest.mock("@/lib/claude/run-and-capture", () => ({ runAndCaptureAssistantReply: jest.fn() }))
 
+const mockRecordShadowDecision = jest.fn()
+jest.mock("@/lib/ai/agent/execution/shadow-recorder", () => ({
+  recordShadowDecision: (...args: unknown[]) => mockRecordShadowDecision(...(args as [])),
+}))
+
 const mockStreamText = streamText as jest.MockedFunction<typeof streamText>
 const mockResolveProvider = resolveFeatureProvider as jest.MockedFunction<
   typeof resolveFeatureProvider
@@ -457,6 +462,36 @@ describe("executeAgent", () => {
       expect(mockStreamText).toHaveBeenCalledWith(
         expect.objectContaining({ system: "BASE\n\nEXTRA" })
       )
+    })
+  })
+
+  describe("ADR-0090 shadow recording", () => {
+    const flushShadow = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+    it("records the agent-executor surface with the legacy channel the old path picked", async () => {
+      primeTextChannel(["x"])
+      await executeAgent("hi", { provider: "openai", model: "gpt-4o" })
+      await flushShadow()
+
+      expect(mockRecordShadowDecision).toHaveBeenCalledTimes(1)
+      const call = mockRecordShadowDecision.mock.calls[0][0] as {
+        resolution: { trace: { surface: string; legacy: Record<string, unknown> } }
+        legacyChannel: string
+      }
+      expect(call.resolution.trace.surface).toBe("agent-executor")
+      expect(call.resolution.trace.legacy.providerId).toBe("openai")
+      expect(call.legacyChannel).toBe("text")
+    })
+
+    it("a throwing recorder never affects the run result", async () => {
+      mockRecordShadowDecision.mockImplementation(() => {
+        throw new Error("shadow down")
+      })
+      primeTextChannel(["ok"])
+      const result = await executeAgent("hi")
+      await flushShadow()
+      expect(result.text).toBe("ok")
+      expect(result.channel).toBe("text")
     })
   })
 })

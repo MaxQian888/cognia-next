@@ -475,13 +475,49 @@ async function runToolEnabledStandalone(
   }
 }
 
+/**
+ * Shadow-record what the ADR-0090 resolver would decide for this call,
+ * without touching the executing path (Phase 0; authoritative in Phase 6).
+ */
+function recordExecutorShadowDecision(config: ExecuteAgentConfig, tauri: boolean): void {
+  void (async () => {
+    try {
+      const [{ resolveAgentExecutionSpec }, { recordShadowDecision }, { getAgentExecutionFlags }] =
+        await Promise.all([
+          import("@/lib/ai/agent/execution/resolve-agent-execution-spec"),
+          import("@/lib/ai/agent/execution/shadow-recorder"),
+          import("@/lib/ai/agent/execution/feature-flags"),
+        ])
+      const environment = { isTauri: tauri, isHeadlessHost: false }
+      recordShadowDecision({
+        resolution: resolveAgentExecutionSpec({
+          surface: "agent-executor",
+          environment,
+          flags: getAgentExecutionFlags(),
+          legacy: {
+            providerId: config.provider ?? config.defaultProvider,
+            modelId: config.model,
+            toolsEnabled: config.toolsEnabled,
+          },
+        }),
+        environment,
+        legacyChannel: config.toolsEnabled && tauri ? "sidecar" : "text",
+      })
+    } catch {
+      // Shadow instrumentation must never affect the run.
+    }
+  })()
+}
+
 export async function executeAgent(
   prompt: string,
   config: ExecuteAgentConfig = {}
 ): Promise<ExecuteAgentResult> {
+  const { isTauri } = await import("@/lib/tauri")
+  recordExecutorShadowDecision(config, isTauri())
+
   // Tool-enabled branch: route through the sidecar when requested and available.
   if (config.toolsEnabled) {
-    const { isTauri } = await import("@/lib/tauri")
     if (isTauri()) {
       const { text, usage } = await runToolEnabledStandalone(prompt, config)
       return {
