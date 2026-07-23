@@ -45,6 +45,7 @@ describe("UnredactDialog", () => {
   })
 
   it("emits onConfirm with every placeholder restored by default", async () => {
+    const user = userEvent.setup()
     const onConfirm = jest.fn()
     render(
       <UnredactDialog
@@ -54,7 +55,7 @@ describe("UnredactDialog", () => {
         onConfirm={onConfirm}
       />
     )
-    await userEvent.click(screen.getByTestId("twin-unredact-confirm"))
+    await user.click(screen.getByTestId("twin-unredact-confirm"))
     expect(onConfirm).toHaveBeenCalledTimes(1)
     const selection = onConfirm.mock.calls[0][0] as Array<{ keep: boolean }>
     expect(selection.every((s) => s.keep)).toBe(true)
@@ -62,6 +63,7 @@ describe("UnredactDialog", () => {
   })
 
   it("toggles individual placeholders via their checkbox", async () => {
+    const user = userEvent.setup()
     const onConfirm = jest.fn()
     render(
       <UnredactDialog
@@ -73,8 +75,8 @@ describe("UnredactDialog", () => {
     )
     // Untick the EMAIL row.
     const checkboxes = screen.getAllByRole("checkbox")
-    await userEvent.click(checkboxes[0])
-    await userEvent.click(screen.getByTestId("twin-unredact-confirm"))
+    await user.click(checkboxes[0])
+    await user.click(screen.getByTestId("twin-unredact-confirm"))
     const selection = onConfirm.mock.calls[0][0] as Array<{
       placeholder: string
       keep: boolean
@@ -86,6 +88,7 @@ describe("UnredactDialog", () => {
   })
 
   it("'Keep all' flips every checkbox off; 'Restore all' flips them back on", async () => {
+    const user = userEvent.setup()
     const onConfirm = jest.fn()
     render(
       <UnredactDialog
@@ -95,15 +98,15 @@ describe("UnredactDialog", () => {
         onConfirm={onConfirm}
       />
     )
-    await userEvent.click(screen.getByRole("button", { name: /Keep all/i }))
-    await userEvent.click(screen.getByTestId("twin-unredact-confirm"))
+    await user.click(screen.getByRole("button", { name: /Keep all/i }))
+    await user.click(screen.getByTestId("twin-unredact-confirm"))
     const firstCall = onConfirm.mock.calls[0][0] as Array<{ keep: boolean }>
     expect(firstCall.every((s) => !s.keep)).toBe(true)
 
     // Reset and try restore-all.
     onConfirm.mockClear()
-    await userEvent.click(screen.getByRole("button", { name: /Restore all/i }))
-    await userEvent.click(screen.getByTestId("twin-unredact-confirm"))
+    await user.click(screen.getByRole("button", { name: /Restore all/i }))
+    await user.click(screen.getByTestId("twin-unredact-confirm"))
     const secondCall = onConfirm.mock.calls[0][0] as Array<{ keep: boolean }>
     expect(secondCall.every((s) => s.keep)).toBe(true)
   })
@@ -128,6 +131,7 @@ describe("UnredactDialog", () => {
   })
 
   it("Cancel calls onOpenChange(false)", async () => {
+    const user = userEvent.setup()
     const onOpenChange = jest.fn()
     render(
       <UnredactDialog
@@ -137,7 +141,7 @@ describe("UnredactDialog", () => {
         onConfirm={jest.fn()}
       />
     )
-    await userEvent.click(screen.getByRole("button", { name: /Cancel/i }))
+    await user.click(screen.getByRole("button", { name: /Cancel/i }))
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 })

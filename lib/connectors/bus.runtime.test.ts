@@ -37,7 +37,7 @@ jest.mock("@cognia/redact", () => ({
   hasNoLeakingPii: () => true,
 }))
 
-const mockMaybeHandleLarkFollowUpControl = jest.fn(async () => false)
+const mockMaybeHandleLarkFollowUpControl = jest.fn(async (..._args: unknown[]) => false)
 jest.mock("./follow-up-control", () => ({
   ...jest.requireActual("./follow-up-control"),
   maybeHandleLarkFollowUpControl: (...args: unknown[]) =>

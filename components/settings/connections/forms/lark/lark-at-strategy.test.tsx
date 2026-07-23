@@ -109,7 +109,7 @@ describe("LarkAtStrategy", () => {
     const diagnostic = await screen.findByTestId("lark-runtime-diagnostics")
     expect(diagnostic).toHaveTextContent("Requested policy: mention_activates")
     expect(diagnostic).toHaveTextContent("Effective policy: mention_each")
-    expect(diagnostic).toHaveTextContent(/unmentioned delivery is not verified/i)
+    expect(diagnostic).toHaveTextContent(/delivery is unverified/i)
   })
 
   // ── Sibling-bot policy (W5 multi-bot same-group) ──

@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 import { transport } from "@/lib/tauri"
 
-const mockHasNoLeakingPiiDeep = jest.fn(() => true)
+const mockHasNoLeakingPiiDeep = jest.fn((..._args: unknown[]) => true)
 jest.mock("@cognia/redact", () => ({
   hasNoLeakingPiiDeep: (...args: unknown[]) => mockHasNoLeakingPiiDeep(...args),
 }))

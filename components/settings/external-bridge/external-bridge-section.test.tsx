@@ -221,8 +221,9 @@ describe("ExternalBridgeSection", () => {
     const clearButton = await screen.findByRole("button", { name: /Clear audit log/i })
     await user.click(clearButton)
     // Confirmation dialog renders.
-    expect(await screen.findByText(/Clear MCP audit log/i)).toBeInTheDocument()
-    const confirm = screen.getByRole("button", { name: /^Clear log$/i })
+    const dialog = await screen.findByRole("alertdialog")
+    expect(within(dialog).getByText(/Clear MCP audit log/i)).toBeInTheDocument()
+    const confirm = within(dialog).getByRole("button", { name: /^Clear log$/i })
     await user.click(confirm)
     await waitFor(() => {
       expect(screen.getByText(/No calls yet/i)).toBeInTheDocument()

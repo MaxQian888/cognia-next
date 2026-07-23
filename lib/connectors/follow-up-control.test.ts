@@ -1,4 +1,4 @@
-import type { AdapterInstanceRow } from "@/lib/db/connector-types"
+import type { AdapterInstanceRow, OutboundJobRow } from "@/lib/db/connector-types"
 import type { ExecutionRun, ExecutionRunBinding } from "@/types/execution/run"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import {
@@ -83,10 +83,12 @@ const run = {
   updatedAt: 400,
 } as ExecutionRun
 
+// Only the two fields the follow-up control path reads; the row has a dozen
+// more that this test has no opinion about.
 const adapter = {
   id: "lark-1",
   settings: { runOperatorUserIds: ["ou-operator"] },
-} as AdapterInstanceRow
+} as unknown as AdapterInstanceRow
 
 describe("Lark follow-up controls", () => {
   it("authorizes a clicked localized control against the latest run revision", async () => {
@@ -115,7 +117,7 @@ describe("Lark follow-up controls", () => {
   })
 
   it("renders status without invoking a state-changing control", async () => {
-    const enqueue = jest.fn(async () => undefined)
+    const enqueue = jest.fn(async () => undefined as unknown as OutboundJobRow)
     const execute = jest.fn()
     const handled = await maybeHandleLarkFollowUpControl(event("View status"), adapter, {
       now: () => 500,

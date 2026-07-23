@@ -87,12 +87,12 @@ function makeAdapter(transport: "socket-mode" | "events-api-webhook" = "socket-m
 }
 
 describe("runtime capabilities", () => {
-  it("degrades assistant presentation features unless Assistant Apps are enabled", () => {
+  it("gates assistant-only presentation features without disabling live steering", () => {
     const basic = makeAdapter()
     expect(basic.runPresentation).toBeUndefined()
     expect(basic.runtimeCapabilities).toEqual(
       expect.objectContaining({
-        liveSteer: false,
+        liveSteer: true,
         textStreaming: false,
         componentMutation: false,
         suggestedPrompts: false,
@@ -111,7 +111,7 @@ describe("runtime capabilities", () => {
     expect(assistant.runPresentation).toBeDefined()
     expect(assistant.runtimeCapabilities).toEqual(
       expect.objectContaining({
-        liveSteer: false,
+        liveSteer: true,
         textStreaming: true,
         componentMutation: true,
         suggestedPrompts: true,

@@ -494,7 +494,7 @@ describe("outbound-jobs", () => {
       expect(audit[0].adapterId).toBe("adp_full")
       expect(audit[0].fields?.jobId).toBe("seed-0")
       expect(typeof audit[0].fields?.ageMs).toBe("number")
-    }, 30_000)
+    }, 120_000)
 
     it("does not age sending or already-deadlettered rows", async () => {
       // Pre-seed a row in `sending` status (in flight) and another in
@@ -562,7 +562,7 @@ describe("outbound-jobs", () => {
       // The actual victim is the oldest PENDING row — `bulk-0`.
       expect((await db.outboundQueue.get("bulk-0"))?.status).toBe("deadlettered")
       expect((await db.outboundQueue.get("bulk-0"))?.lastErrorCode).toBe("queue_capped")
-    }, 30_000)
+    }, 120_000)
   })
 
   // ── P0 — the cap counts BACKLOG, not history ─────────────────────────

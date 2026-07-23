@@ -1,4 +1,5 @@
 import { transport } from "@/lib/tauri"
+import { __resetVaultChangeTrackerForTesting } from "@/lib/subscription/sync/change-tracker"
 
 import {
   deadlineMsFromResponse,
@@ -49,6 +50,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  __resetVaultChangeTrackerForTesting()
   jest.restoreAllMocks()
 })
 

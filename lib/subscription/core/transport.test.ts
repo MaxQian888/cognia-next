@@ -24,6 +24,7 @@ import {
   authedGet,
 } from "./transport"
 import type { Account, AnthropicCredentialData } from "@/types/subscription"
+import { __resetVaultChangeTrackerForTesting } from "@/lib/subscription/sync/change-tracker"
 
 jest.mock("@/lib/tauri", () => {
   return {
@@ -48,6 +49,7 @@ import { transport } from "@/lib/tauri"
 const mockedCall = transport.call as jest.MockedFunction<typeof transport.call>
 
 afterEach(() => {
+  __resetVaultChangeTrackerForTesting()
   mockedCall.mockReset()
   mockAccountStoreState.unlockedAccountId = "local_acct_a"
 })

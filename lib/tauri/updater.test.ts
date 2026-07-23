@@ -36,7 +36,7 @@ jest.mock("@tauri-apps/plugin-process", () => ({ relaunch: () => relaunchMock() 
   virtual: true,
 })
 
-const saveWindowStateMock = jest.fn(async () => {})
+const saveWindowStateMock = jest.fn(async (_flags?: number) => {})
 jest.mock(
   "@tauri-apps/plugin-window-state",
   () => ({

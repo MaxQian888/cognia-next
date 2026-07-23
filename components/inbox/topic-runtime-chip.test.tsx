@@ -12,15 +12,15 @@ jest.mock("@/components/ui/tooltip")
 const mockGetDb = jest.fn()
 jest.mock("@/lib/db/schema", () => ({ getDb: () => mockGetDb() }))
 
-const mockResolveInboundActivationPolicy = jest.fn(() => "mention_activates")
-const mockResolveDeliveryReadiness = jest.fn(() => "all_messages_verified")
+const mockResolveInboundActivationPolicy = jest.fn((..._args: unknown[]) => "mention_activates")
+const mockResolveDeliveryReadiness = jest.fn((..._args: unknown[]) => "all_messages_verified")
 jest.mock("@/lib/connectors/conversation-admission", () => ({
   resolveInboundActivationPolicy: (...args: unknown[]) =>
     mockResolveInboundActivationPolicy(...args),
   resolveDeliveryReadiness: (...args: unknown[]) => mockResolveDeliveryReadiness(...args),
 }))
 
-const mockCapabilitiesForScope = jest.fn(() => ({
+const mockCapabilitiesForScope = jest.fn((..._args: unknown[]) => ({
   topicIsolation: "native",
   textStreaming: true,
   componentMutation: true,
@@ -79,9 +79,9 @@ describe("TopicRuntimeChip", () => {
     })
     render(<TopicRuntimeChip adapterId="lk-1" conversationKey="opaque" />)
     expect(screen.getByTestId("topic-runtime-chip")).toHaveTextContent("mention_each · steer")
-    expect(screen.getByText(/Requested policy: mention_activates/)).toBeInTheDocument()
+    expect(screen.getByText(/Requested: mention_activates/)).toBeInTheDocument()
     expect(screen.getByText(/Queue depth: 3/)).toBeInTheDocument()
-    expect(screen.getByText(/unmentioned delivery is not verified/i)).toBeInTheDocument()
+    expect(screen.getByText(/delivery is unverified/i)).toBeInTheDocument()
   })
 
   it("resolves topic presentation features with thread scope", async () => {

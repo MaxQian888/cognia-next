@@ -37,7 +37,7 @@ jest.mock("@/lib/claude/ipc", () => ({
   steerSession: (...args: unknown[]) => mockSteerSession(...args),
 }))
 
-const mockIsPiiSafeSendContent = jest.fn(() => true)
+const mockIsPiiSafeSendContent = jest.fn((..._args: unknown[]) => true)
 jest.mock("@/lib/connectors/ai-loop/safe-send-prompt", () => ({
   safeSendPrompt: jest.fn(),
   isPiiSafeSendContent: (...args: unknown[]) => mockIsPiiSafeSendContent(...args),
