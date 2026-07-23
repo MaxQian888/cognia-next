@@ -34,7 +34,17 @@ export type SessionImportState =
   | { status: "scanning" }
   | { status: "list"; summaries: SessionSummary[]; warnings?: SessionScanError[] }
   | { status: "importing"; phase: ImportPhase; done: number; total: number }
-  | { status: "done"; sessionsAdded: number; messagesAdded: number; cancelled?: boolean }
+  | {
+      status: "done"
+      sessionsAdded: number
+      messagesAdded: number
+      cancelled?: boolean
+      /** Per-source conversion fidelity of this import (ADR-0090 Phase 8). */
+      lossBySource?: Record<
+        string,
+        import("@cognia/agent-config-types/canonical-session").SessionLossReport
+      >
+    }
   | { status: "error"; message: string }
 
 /** Stable key for a summary (source + on-disk locator). */
@@ -172,6 +182,9 @@ export function useSessionImport(deps: UseSessionImportDeps = {}) {
           status: "done",
           sessionsAdded: counts.sessions,
           messagesAdded: counts.messages,
+          ...(counts.lossBySource && Object.keys(counts.lossBySource).length > 0
+            ? { lossBySource: counts.lossBySource }
+            : {}),
           ...(controller.signal.aborted ? { cancelled: true } : {}),
         })
       } catch (err) {

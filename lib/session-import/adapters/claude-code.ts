@@ -538,7 +538,10 @@ function toConversation(parsed: ParsedSession, projectId?: string): ImportedConv
   }
 }
 
+import { claudeCodeCodec } from "@/lib/session-import/codecs/claude-code-codec"
+
 export const claudeCodeSessionSource: AgentSessionSourceAdapter = {
+  codec: claudeCodeCodec,
   id: "claude-code",
   displayName: "Claude Code",
   labelKey: "claude-code",

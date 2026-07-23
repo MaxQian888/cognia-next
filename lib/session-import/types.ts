@@ -120,6 +120,13 @@ export interface AgentSessionSourceAdapter {
    * single SQLite DB) leave this undefined and keep their own `listSessions`.
    */
   summarizeFile?(content: string, locator: string): SessionSummary | null
+  /**
+   * OPTIONAL bidirectional codec (ADR-0090 Phase 8): converts this source's
+   * parsed conversations into the runtime-neutral `CanonicalSession` (with an
+   * honest loss report), and MAY declare a `materialize` capability for the
+   * reverse direction. Absent = honest import-only source.
+   */
+  codec?: import("./codec-types").SessionCodec
 }
 
 /** Phase of an in-flight import, for progress reporting. */

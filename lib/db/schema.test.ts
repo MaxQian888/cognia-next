@@ -230,6 +230,16 @@ describe("getDb", () => {
     )
   })
 
+  it("v124 opens the canonical-session header projection table", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(124)
+    expect(db.agentCanonicalSessions.schema.primKey.name).toBe("canonicalSessionId")
+    expect(db.agentCanonicalSessions.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["sourceRuntime", "nativeSessionId", "updatedAt"])
+    )
+  })
+
   it("v121 opens the Provider Profile Store tables and seeds meta", async () => {
     const db = getDb()
     await db.open()

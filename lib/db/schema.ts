@@ -329,6 +329,12 @@ export class CogniaDB extends Dexie {
   connectorInboundJobs!: Table<ConnectorInboundJobRow, string>
   // v123 — Certification projection (ADR-0090 Phase 5). See `lib/db/agent-compatibility.ts`.
   agentCompatibilityRecords!: Table<AgentCompatibilityRecordRow, string>
+  // v124 — Canonical-session header projection (ADR-0090 Phase 8). See
+  // `lib/db/agent-canonical-sessions.ts`.
+  agentCanonicalSessions!: Table<
+    import("./agent-canonical-sessions").AgentCanonicalSessionRow,
+    string
+  >
   // v121 — Provider Profile Store (ADR-0090 Phase 1). See `lib/db/provider-profiles.ts`.
   providerProfiles!: Table<ProviderProfile, string>
   deploymentProfiles!: Table<DeploymentProfile, string>
@@ -2710,6 +2716,14 @@ export class CogniaDB extends Dexie {
     // via `rebuildCompatibilityProjection`, so no upgrade backfill.
     this.version(123).stores({
       agentCompatibilityRecords: "&keyId, bundleId, deploymentRef",
+    })
+
+    // v124 — Canonical-session HEADER projection (ADR-0090 Phase 8). The
+    // authority is the canonical envelope stream on the workflow event-log
+    // (lib/ai/agent/recovery/canonical-log.ts) plus codec conversions; this
+    // table is a rebuildable index for listing/lookup only — no backfill.
+    this.version(124).stores({
+      agentCanonicalSessions: "&canonicalSessionId, sourceRuntime, nativeSessionId, updatedAt",
     })
 
     // First full-chain construction under Jest: cache the merged spec so every

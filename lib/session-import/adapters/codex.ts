@@ -459,7 +459,10 @@ function toConversation(parsed: ParsedSession, projectId?: string): ImportedConv
   return { session, messages: parsed.messages }
 }
 
+import { codexCodec } from "@/lib/session-import/codecs/codex-codec"
+
 export const codexSessionSource: AgentSessionSourceAdapter = {
+  codec: codexCodec,
   id: "codex",
   displayName: "Codex CLI",
   labelKey: "codex",

@@ -23,6 +23,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Switch } from "@/components/ui/switch"
+import { FidelityReport } from "@/components/session-import/fidelity-report"
 import { isTauri } from "@/lib/tauri"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSessionImport, summaryKey } from "@/hooks/session-import/use-session-import"
@@ -176,6 +177,16 @@ export function SessionImportDialog({ trigger }: SessionImportDialogProps) {
             <p className="text-xs text-muted-foreground">
               {t("doneBody", { sessions: state.sessionsAdded, messages: state.messagesAdded })}
             </p>
+            {state.lossBySource && (
+              <div className="w-full space-y-3 pt-2 text-left">
+                {Object.entries(state.lossBySource).map(([sourceId, loss]) => (
+                  <div key={sourceId} className="rounded-md border p-2">
+                    <p className="pb-1 text-xs font-medium">{sourceLabel(sourceId)}</p>
+                    <FidelityReport loss={loss} />
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

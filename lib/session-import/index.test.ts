@@ -85,7 +85,7 @@ describe("session-import runner", () => {
 
     const counts = await importSessions(refs, input, "proj-9")
     expect(applyImportedMock).toHaveBeenCalledTimes(1)
-    expect(counts).toEqual({ sessions: 1, messages: 3 })
+    expect(counts).toEqual({ sessions: 1, messages: 3, lossBySource: {} })
   })
 
   it("scanAllSources collects per-source failures instead of swallowing them", async () => {
@@ -171,7 +171,7 @@ describe("session-import runner", () => {
     const counts = await importSessions(manyRefs(5), input, undefined, { chunkSize: 2 })
     // 5 refs @ chunk 2 → flushes at 2, 4, and final 5 = 3 writes.
     expect(applyImportedMock).toHaveBeenCalledTimes(3)
-    expect(counts).toEqual({ sessions: 3, messages: 9 }) // 3 × mock {1,3}
+    expect(counts).toEqual({ sessions: 3, messages: 9, lossBySource: {} }) // 3 × mock {1,3}
   })
 
   it("reports parsing then writing progress", async () => {
@@ -202,7 +202,41 @@ describe("session-import runner", () => {
     expect(seen).toBe(3) // parsing halted after the 3rd ref
     // The 3 buffered conversations are still flushed once on the way out.
     expect(applyImportedMock).toHaveBeenCalledTimes(1)
-    expect(counts).toEqual({ sessions: 1, messages: 3 })
+    expect(counts).toEqual({ sessions: 1, messages: 3, lossBySource: {} })
+  })
+
+  it("projects canonical headers + per-source loss for codec-declaring sources (ADR-0090 P8)", async () => {
+    const putHeader = jest.fn()
+    jest.doMock("@/lib/db/agent-canonical-sessions", () => ({
+      putCanonicalSessionHeader: (...a: unknown[]) => putHeader(...a),
+      headerRowFromCanonical: jest.requireActual("@/lib/db/agent-canonical-sessions")
+        .headerRowFromCanonical,
+    }))
+    const { conversationToCanonical } = jest.requireActual("./codec-types")
+    const withCodec: AgentSessionSourceAdapter = {
+      ...source("codecful", 1),
+      codec: {
+        importFidelity: "structured",
+        toCanonical: (conversation: never) =>
+          conversationToCanonical(conversation, {
+            sourceRuntime: "codecful",
+            importFidelity: "structured",
+          }),
+      } as never,
+    }
+    registerSessionSource(withCodec)
+    const counts = await importSessions(
+      [{ sourceId: "codecful", originalSessionId: "codecful-0", locator: "codecful-0" }],
+      input
+    )
+    expect(counts.lossBySource.codecful).toMatchObject({ fidelity: "structured" })
+    expect(putHeader).toHaveBeenCalledWith(
+      expect.objectContaining({
+        canonicalSessionId: "canon:codecful:codecful-0",
+        sourceRuntime: "codecful",
+        importFidelity: "structured",
+      })
+    )
   })
 
   it("persists nothing when aborted before the first ref", async () => {
@@ -213,6 +247,6 @@ describe("session-import runner", () => {
       signal: controller.signal,
     })
     expect(applyImportedMock).not.toHaveBeenCalled()
-    expect(counts).toEqual({ sessions: 0, messages: 0 })
+    expect(counts).toEqual({ sessions: 0, messages: 0, lossBySource: {} })
   })
 })

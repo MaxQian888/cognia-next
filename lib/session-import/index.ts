@@ -148,12 +148,46 @@ export async function parseSessions(
  * between refs and before each flush — aborting keeps the work already persisted
  * (ids are idempotent + merge-guarded). Returns the total counts written.
  */
+/**
+ * Best-effort canonical projection (ADR-0090 Phase 8): convert the imported
+ * conversation through the source's codec, persist the HEADER row, and fold
+ * the loss report into the per-source aggregate. Never fails the import.
+ */
+async function projectCanonical(
+  codec: NonNullable<import("./codec-types").SessionCodec>,
+  conversation: ImportedConversation,
+  aggregate: Record<
+    string,
+    import("@cognia/agent-config-types/canonical-session").SessionLossReport
+  >,
+  sourceId: string
+): Promise<void> {
+  try {
+    const { session, loss } = codec.toCanonical(conversation)
+    const bucket = (aggregate[sourceId] ??= { fidelity: loss.fidelity, losses: [] })
+    bucket.losses.push(...loss.losses)
+    const { headerRowFromCanonical, putCanonicalSessionHeader } =
+      await import("@/lib/db/agent-canonical-sessions")
+    await putCanonicalSessionHeader(headerRowFromCanonical(session, loss))
+  } catch {
+    // Projection is an index over the import — never the import itself.
+  }
+}
+
 export async function importSessions(
   refs: SessionRef[],
   input: SessionScanInput,
   projectId?: string,
   opts: ImportOptions = {}
-): Promise<{ sessions: number; messages: number }> {
+): Promise<{
+  sessions: number
+  messages: number
+  /** Per-source conversion fidelity of THIS import (codec-declaring sources only). */
+  lossBySource: Record<
+    string,
+    import("@cognia/agent-config-types/canonical-session").SessionLossReport
+  >
+}> {
   const { signal, onProgress, chunkSize = DEFAULT_IMPORT_CHUNK } = opts
   const total = refs.length
   const size = Math.max(1, chunkSize)
@@ -163,6 +197,10 @@ export async function importSessions(
   let buffer: ImportedConversation[] = []
   let parsed = 0
   let flushed = 0
+  const lossBySource: Record<
+    string,
+    import("@cognia/agent-config-types/canonical-session").SessionLossReport
+  > = {}
 
   const flush = async () => {
     if (buffer.length === 0) return
@@ -176,7 +214,14 @@ export async function importSessions(
 
   for (const ref of refs) {
     if (signal?.aborted) break
-    buffer.push(...(await parseRefConversations(ref, input, projectId)))
+    const conversations = await parseRefConversations(ref, input, projectId)
+    buffer.push(...conversations)
+    // Canonical header projection (top-level conversation only; nested
+    // subagent transcripts are the parent's loss entry, not headers).
+    const codec = getSessionSource(ref.sourceId)?.codec
+    if (codec && conversations[0]) {
+      await projectCanonical(codec, conversations[0], lossBySource, ref.sourceId)
+    }
     parsed += 1
     onProgress?.({ phase: "parsing", done: parsed, total })
     // Chunk by refs (not conversations) so a session with many nested subagents
@@ -185,5 +230,5 @@ export async function importSessions(
   }
   // Persist whatever is buffered — including partial work when aborted.
   await flush()
-  return { sessions, messages }
+  return { sessions, messages, lossBySource }
 }

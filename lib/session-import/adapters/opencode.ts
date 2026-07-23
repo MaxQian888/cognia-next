@@ -340,7 +340,10 @@ async function collectSessions(input: SessionScanInput): Promise<OpencodeSession
   return promise
 }
 
+import { opencodeCodec } from "@/lib/session-import/codecs/opencode-codec"
+
 export const opencodeSessionSource: AgentSessionSourceAdapter = {
+  codec: opencodeCodec,
   id: "opencode",
   displayName: "OpenCode",
   labelKey: "opencode",
