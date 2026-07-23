@@ -296,7 +296,9 @@ const sentIds: string[] = []
 // 5. Send text → platformMessageId feedback (the fix under test).
 let textMsgId = ""
 await step("send text → platformMessageId", async () => {
-  const res = await adapter.send(mkReq([{ type: "text", text: "[smoke] hello from cognia live harness" }]))
+  const res = await adapter.send(
+    mkReq([{ type: "text", text: "[smoke] hello from cognia live harness" }])
+  )
   if (!res.ok) throw new Error(res.error?.message ?? "send failed")
   if (!res.platformMessageId?.startsWith("om_")) {
     throw new Error(`platformMessageId not surfaced: ${JSON.stringify(res)}`)
@@ -387,7 +389,12 @@ if (cardMsgId) {
   await step("edit card (PATCH)", async () => {
     const surface = {
       components: {
-        root: { id: "root", component: "Card", title: "Cognia smoke card (updated)", children: ["t1"] },
+        root: {
+          id: "root",
+          component: "Card",
+          title: "Cognia smoke card (updated)",
+          children: ["t1"],
+        },
         t1: { id: "t1", component: "Text", text: "Card updated via PATCH — edit path OK." },
       },
       dataModel: {},

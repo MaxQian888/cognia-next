@@ -18,7 +18,7 @@
  *
  * ## Entry shape
  *
- *   { script, group, runtime = "node", blocking = true }
+ *   { script, group, runtime = "node", blocking = true, resource? }
  *
  *   script   — a package.json script name, invoked as `pnpm run <script>`.
  *   group    — the parallel CI job this gate belongs to. Groups exist so one
@@ -28,6 +28,8 @@
  *              with `--runtime node` to skip the heavy ones.
  *   blocking — false marks an advisory gate: it runs and reports, but never
  *              fails the build.
+ *   resource — optional local mutex for gates that write the same generated
+ *              outputs (for example package builds or Cargo's target dir).
  *
  * ## Deliberate omissions
  *
@@ -45,38 +47,52 @@
  * `dist/` directories. None of them mutate tracked source files.
  *
  * Usage:
- *   pnpm check:all                       # every gate, every runtime
+ *   pnpm check:all                       # every gate, up to 4 groups in parallel
  *   pnpm check:all -- --runtime node     # skip the python/rust gates
  *   pnpm check:all -- --group audit      # one CI group
+ *   pnpm check:all -- --jobs 2           # override local concurrency
  *   pnpm check:all -- --bail             # stop at the first failure
  *   node scripts/gates/check-all.mjs --list-groups --json
  */
 
-import { spawnSync } from "node:child_process"
+import { spawn } from "node:child_process"
 import { appendFileSync } from "node:fs"
+import { availableParallelism } from "node:os"
 
 /** Toolchains a gate can require. CI provisions these per group. */
 export const RUNTIMES = ["node", "python", "rust"]
+
+/** Keep enough parallelism for speed without launching every heavy gate at once. */
+export function defaultJobCount(parallelism = availableParallelism()) {
+  return Math.min(4, Math.max(1, parallelism))
+}
+
+/** Resolve requested concurrency against the work that can actually overlap. */
+export function effectiveJobCount(gates, requestedJobs, bail) {
+  if (bail) return 1
+  const groupCount = new Set(gates.map((gate) => gate.group)).size
+  return Math.max(1, Math.min(requestedJobs, groupCount))
+}
 
 /**
  * The registry. Order is meaningful: it is the order `check:all` runs them
  * in, cheapest and most-likely-to-fail first.
  *
- * @type {Array<{ script: string, group: string, runtime?: string, blocking?: boolean }>}
+ * @type {Array<{ script: string, group: string, runtime?: string, blocking?: boolean, resource?: string }>}
  */
 const REGISTRY = [
   // Fast feedback first — these catch the majority of everyday breakage.
   { script: "lint", group: "lint" },
-  { script: "format:check", group: "lint" },
+  { script: "format:check", group: "format" },
 
-  { script: "typecheck", group: "types" },
-  { script: "knip", group: "types" },
+  { script: "typecheck", group: "types", resource: "package-build" },
+  { script: "knip", group: "types", resource: "package-build" },
 
   { script: "lint:i18n", group: "i18n" },
   { script: "i18n:build:check", group: "i18n" },
 
   // Generated / derived artifacts must be in sync with their sources.
-  { script: "build:packages", group: "artifacts" },
+  { script: "build:packages", group: "artifacts", resource: "package-build" },
   { script: "skills:check", group: "artifacts" },
   { script: "plugin-node:check", group: "artifacts" },
   { script: "plugin-convert:check", group: "artifacts" },
@@ -90,17 +106,10 @@ const REGISTRY = [
   { script: "audit:command-parity", group: "audit" },
   { script: "audit:e2e-governance", group: "audit" },
   { script: "audit:colocated-tests", group: "audit" },
+  { script: "audit:unreachable-components", group: "audit" },
   { script: "lint:static-export", group: "audit" },
   { script: "lint:plugin-sdk-wit", group: "audit" },
-  // Advisory for now. The gate is correct — it reports 11 real drifts (nine
-  // "Lives in" paths that moved to crates/ during the ADR-0067 Tier-A
-  // decomposition, an unreferenced newest ADR, and a Dexie ceiling CLAUDE.md
-  // never caught up with). Updating the Subsystem Map is a separate, larger
-  // change; blocking on it now would leave the `audit` group permanently red
-  // for reasons unrelated to whatever a contributor is actually shipping,
-  // which is how gates get switched off. Promote to blocking once the map is
-  // corrected.
-  { script: "lint:claude-md", group: "audit", blocking: false },
+  { script: "lint:claude-md", group: "audit" },
   { script: "plugin:author-imports", group: "audit" },
 
   // Mirrored config / version files must agree across the tree.
@@ -117,25 +126,29 @@ const REGISTRY = [
   { script: "scripts:test:i18n", group: "gate-tests" },
   { script: "scripts:test:plugin", group: "gate-tests" },
   { script: "scripts:test:ci", group: "gate-tests" },
+  { script: "test:coverage:runner:test", group: "gate-tests" },
 
   // The plugin SDK's cross-language contract surface.
-  { script: "sdk:ts:build", group: "plugin-sdk" },
+  { script: "sdk:ts:build", group: "plugin-sdk", resource: "package-build" },
   { script: "sdk:ts:pack:test", group: "plugin-sdk" },
   { script: "sdk:scaffold:test", group: "plugin-sdk" },
   { script: "sdk:python:test", group: "plugin-sdk", runtime: "python" },
-  { script: "sdk:rust:test", group: "plugin-sdk", runtime: "rust" },
+  { script: "sdk:rust:test", group: "plugin-sdk", runtime: "rust", resource: "cargo" },
 
   // Rust quality. The workspace had never been linted or format-checked —
   // only the two standalone services under services/ ran clippy at all.
   { script: "rust:fmt:check", group: "rust", runtime: "rust" },
-  { script: "rust:clippy", group: "rust", runtime: "rust" },
+  { script: "rust:clippy", group: "rust", runtime: "rust", resource: "cargo" },
 
-  // Advisory only: dependency health is informational, not a merge blocker.
-  // `rust:deny` also lands here because cargo-deny is not installed by
-  // default — locally it reports as advisory rather than failing every
-  // `check:all`, while CI installs the binary so the scan really runs.
-  { script: "audit:deps", group: "supply-chain", blocking: false },
-  { script: "rust:deny", group: "supply-chain", runtime: "rust", blocking: false },
+  // Supply-chain checks are blocking. Missing scanners must fail locally too;
+  // otherwise check:all can report success without performing the audit.
+  { script: "audit:deps", group: "supply-chain" },
+  {
+    script: "rust:deny",
+    group: "supply-chain",
+    runtime: "rust",
+    resource: "cargo",
+  },
 ]
 
 /** The registry with defaults applied, so consumers never handle undefined. */
@@ -190,6 +203,85 @@ export function selectGates(filter = {}) {
     throw new Error(`Unknown runtime: ${runtime}. Known: ${RUNTIMES.join(", ")}`)
   }
   return GATES.filter((g) => (!group || g.group === group) && (!runtime || g.runtime === runtime))
+}
+
+/**
+ * Run each gate group as one ordered lane while allowing independent groups
+ * to make progress concurrently. Results are returned in registry order so
+ * the summary remains deterministic regardless of completion order.
+ *
+ * @param {typeof GATES} gates
+ * @param {{ jobs: number, bail?: boolean, executeGate: (gate: (typeof GATES)[number]) => Promise<boolean> }} options
+ */
+export async function runGatePlan(gates, { jobs, bail = false, executeGate }) {
+  if (!Number.isInteger(jobs) || jobs < 1) throw new Error("jobs must be a positive integer")
+
+  if (bail) {
+    const results = []
+    for (let i = 0; i < gates.length; i += 1) {
+      const gate = gates[i]
+      const ok = await executeGate(gate)
+      results.push({ name: gate.script, ok, blocking: gate.blocking })
+      if (!ok && gate.blocking) {
+        for (const rest of gates.slice(i + 1)) {
+          results.push({ name: rest.script, ok: false, skipped: true, blocking: rest.blocking })
+        }
+        break
+      }
+    }
+    return results
+  }
+
+  const lanes = []
+  const lanesByGroup = new Map()
+  for (const gate of gates) {
+    let lane = lanesByGroup.get(gate.group)
+    if (!lane) {
+      lane = []
+      lanesByGroup.set(gate.group, lane)
+      lanes.push(lane)
+    }
+    lane.push(gate)
+  }
+
+  const laneStates = lanes.map((lane) => ({ gates: lane, next: 0, running: false }))
+  const results = new Map()
+  const activeResources = new Set()
+  const activeTasks = new Set()
+
+  while (results.size < gates.length) {
+    for (const lane of laneStates) {
+      if (activeTasks.size >= jobs) break
+      if (lane.running || lane.next >= lane.gates.length) continue
+
+      const gate = lane.gates[lane.next]
+      if (gate.resource && activeResources.has(gate.resource)) continue
+
+      lane.running = true
+      if (gate.resource) activeResources.add(gate.resource)
+
+      let task
+      task = (async () => {
+        try {
+          const ok = await executeGate(gate)
+          results.set(gate.script, { name: gate.script, ok, blocking: gate.blocking })
+          lane.next += 1
+        } finally {
+          lane.running = false
+          if (gate.resource) activeResources.delete(gate.resource)
+          activeTasks.delete(task)
+        }
+      })()
+      activeTasks.add(task)
+    }
+
+    if (activeTasks.size === 0) {
+      throw new Error("gate plan deadlocked: no runnable gate remains")
+    }
+    await Promise.race(activeTasks)
+  }
+
+  return gates.map((gate) => results.get(gate.script))
 }
 
 /**
@@ -250,10 +342,15 @@ export function renderSummaryMarkdown(results, group) {
 /**
  * Parse the CLI surface. Pure.
  * @param {string[]} argv
- * @returns {{ group?: string, runtime?: string, listGroups: boolean, json: boolean, bail: boolean }}
+ * @returns {{ group?: string, runtime?: string, jobs?: number, listGroups: boolean, json: boolean, bail: boolean }}
  */
 export function parseArgs(argv) {
-  const args = { listGroups: false, json: false, bail: argv.includes("--bail") }
+  const args = {
+    listGroups: false,
+    json: false,
+    bail: argv.includes("--bail"),
+    jobs: undefined,
+  }
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
     if (arg === "--group") {
@@ -264,6 +361,13 @@ export function parseArgs(argv) {
       const value = argv[++i]
       if (!value) throw new Error("--runtime requires a runtime name")
       args.runtime = value
+    } else if (arg === "--jobs") {
+      const value = argv[++i]
+      const jobs = Number(value)
+      if (!value || !Number.isInteger(jobs) || jobs < 1) {
+        throw new Error("--jobs requires a positive integer")
+      }
+      args.jobs = jobs
     } else if (arg === "--list-groups") args.listGroups = true
     else if (arg === "--json") args.json = true
     else if (arg === "--bail") continue
@@ -275,14 +379,31 @@ export function parseArgs(argv) {
   return args
 }
 
-/** Run a single pnpm script, inheriting stdio so its output streams live. */
-function runGate(name) {
-  // `pnpm` resolves to pnpm.cmd on Windows; shell:true lets the .cmd shim run.
-  const res = spawnSync("pnpm", ["run", name], { stdio: "inherit", shell: true })
-  return res.status === 0
+/** Run one pnpm script and retain its output as one readable log block. */
+export function runGate(name) {
+  return new Promise((resolve) => {
+    const command = process.platform === "win32" ? "pnpm.cmd" : "pnpm"
+    const child = spawn(command, ["run", name], { stdio: ["ignore", "pipe", "pipe"] })
+    const chunks = []
+    let settled = false
+
+    child.stdout.on("data", (chunk) => chunks.push(chunk))
+    child.stderr.on("data", (chunk) => chunks.push(chunk))
+    child.on("error", (error) => {
+      if (settled) return
+      settled = true
+      chunks.push(Buffer.from(`[check:all] could not start ${name}: ${error.message}\n`))
+      resolve({ ok: false, output: Buffer.concat(chunks).toString("utf8") })
+    })
+    child.on("close", (code) => {
+      if (settled) return
+      settled = true
+      resolve({ ok: code === 0, output: Buffer.concat(chunks).toString("utf8") })
+    })
+  })
 }
 
-export function main(argv) {
+export async function main(argv) {
   const args = parseArgs(argv)
 
   if (args.listGroups) {
@@ -294,19 +415,27 @@ export function main(argv) {
   }
 
   const selected = selectGates({ group: args.group, runtime: args.runtime })
-  const results = []
-  for (const gate of selected) {
-    process.stdout.write(`\n=== ${gate.script} (${gate.group}) ===\n`)
-    const ok = runGate(gate.script)
-    results.push({ name: gate.script, ok, blocking: gate.blocking })
-    if (!ok && gate.blocking && args.bail) {
-      // Mark the rest as skipped so the summary is honest about what ran.
-      for (const rest of selected.slice(selected.indexOf(gate) + 1)) {
-        results.push({ name: rest.script, ok: false, skipped: true, blocking: rest.blocking })
-      }
-      break
-    }
-  }
+  const jobs = effectiveJobCount(selected, args.jobs ?? defaultJobCount(), args.bail)
+  process.stdout.write(
+    `check:all — ${selected.length} gate(s), ${jobs} concurrent group lane(s)` +
+      `${args.bail ? " (--bail: sequential)" : ""}\n`
+  )
+
+  const results = await runGatePlan(selected, {
+    jobs,
+    bail: args.bail,
+    executeGate: async (gate) => {
+      const startedAt = Date.now()
+      process.stdout.write(`\n=== ${gate.script} (${gate.group}) [started] ===\n`)
+      const { ok, output } = await runGate(gate.script)
+      const seconds = ((Date.now() - startedAt) / 1000).toFixed(1)
+      process.stdout.write(
+        `\n=== ${gate.script} (${gate.group}) [${ok ? "passed" : "FAILED"} in ${seconds}s] ===\n`
+      )
+      if (output) process.stdout.write(output.endsWith("\n") ? output : `${output}\n`)
+      return ok
+    },
+  })
   const { exitCode, summary } = summarize(results)
   process.stdout.write(`\n${summary}\n`)
 
@@ -326,5 +455,12 @@ export function main(argv) {
 
 // Only auto-run when invoked directly (not when imported by the test).
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("check-all.mjs")) {
-  process.exit(main(process.argv.slice(2)))
+  main(process.argv.slice(2))
+    .then((exitCode) => {
+      process.exitCode = exitCode
+    })
+    .catch((error) => {
+      process.stderr.write(`[check:all] ${error.stack ?? error.message}\n`)
+      process.exitCode = 1
+    })
 }

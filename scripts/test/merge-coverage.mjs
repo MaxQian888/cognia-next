@@ -32,7 +32,9 @@ import libReport from "istanbul-lib-report"
 import reports from "istanbul-reports"
 
 const THRESHOLDS_URL = new URL("./coverage-thresholds.json", import.meta.url)
+const COVERAGE_SOURCES_URL = new URL("./coverage-sources.json", import.meta.url)
 const METRICS = ["statements", "branches", "lines", "functions"]
+const COVERAGE_SOURCES = JSON.parse(readFileSync(COVERAGE_SOURCES_URL, "utf8"))
 
 /** Merge istanbul coverage-final.json files into one CoverageMap. */
 export function mergeCoverageFiles(files) {
@@ -40,6 +42,31 @@ export function mergeCoverageFiles(files) {
   for (const file of files) {
     map.merge(JSON.parse(readFileSync(file, "utf8")))
   }
+  return map
+}
+
+/**
+ * Raw V8 shard maps also contain executed test/config modules. Filter against
+ * the exact Jest source globs and ignore patterns so the standalone merger
+ * neither invents coverage obligations nor drops a production source.
+ */
+export function filterCollectedSources(map, { cwd = process.cwd() } = {}) {
+  const positives = COVERAGE_SOURCES.collectCoverageFrom.filter(
+    (pattern) => !pattern.startsWith("!")
+  )
+  const configuredNegatives = COVERAGE_SOURCES.collectCoverageFrom
+    .filter((pattern) => pattern.startsWith("!"))
+    .map((pattern) => pattern.slice(1))
+  // Jest also excludes matched test files independently of collectCoverageFrom.
+  const negatives = [...configuredNegatives, "**/__tests__/**", "**/*.{test,spec}.{js,jsx,ts,tsx}"]
+  const globOptions = { cwd, absolute: true, nodir: true, windowsPathsNoEscape: true }
+  const allowed = new Set(globSync(positives, globOptions).map((file) => path.resolve(file)))
+  for (const file of globSync(negatives, globOptions)) allowed.delete(path.resolve(file))
+
+  const ignored = COVERAGE_SOURCES.coveragePathIgnorePatterns.map((pattern) => new RegExp(pattern))
+  map.filter(
+    (file) => allowed.has(path.resolve(file)) && !ignored.some((pattern) => pattern.test(file))
+  )
   return map
 }
 
@@ -191,7 +218,11 @@ function main() {
     throw new Error(`Coverage input(s) not found: ${missing.join(", ")}`)
   }
   const map = mergeCoverageFiles(files)
-  console.log(`[merge-coverage] merged ${files.length} shard map(s), ${map.files().length} files`)
+  const rawFileCount = map.files().length
+  filterCollectedSources(map)
+  console.log(
+    `[merge-coverage] merged ${files.length} shard map(s), ${map.files().length} collected source files (${rawFileCount - map.files().length} test/config files removed)`
+  )
   writeReports(map, args.out)
   if (args.check) {
     const thresholds = JSON.parse(readFileSync(THRESHOLDS_URL, "utf8"))

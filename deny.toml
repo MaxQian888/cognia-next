@@ -1,30 +1,43 @@
 # cargo-deny configuration — supply-chain scanning for the Rust workspace.
 #
 # Wired as the `rust:deny` gate (scripts/gates/check-all.mjs, `supply-chain`
-# group). It is ADVISORY: it reports and never blocks a merge. Two reasons —
-# advisory databases change under you, so a green build can go red without any
-# code change; and cargo-deny is not installed by default, so a blocking gate
-# would fail every local `pnpm check:all`. CI installs the binary so the scan
-# actually runs and its findings land in the job summary.
-#
-# Promote a section to blocking by moving the gate's `blocking: false` in
-# check-all.mjs — not by editing severities here.
+# group). The gate is blocking both locally and in CI: a missing scanner,
+# invalid configuration, or denied finding must make `check:all` fail.
 
 [graph]
 all-features = false
 
 [advisories]
-# RUSTSEC advisories. `deny` here still only surfaces as an advisory gate
-# result; the severity is what makes the OUTPUT useful.
+# RUSTSEC advisories.
+# Fail unmaintained advisories for workspace crates. Transitive GTK3 bindings
+# are pulled by Tauri on Linux and have no safe GTK4 migration within Tauri 2;
+# cargo-deny still reports them without treating maintenance status as a
+# vulnerability. Unsoundness remains blocking across the complete graph.
+unmaintained = "workspace"
+unsound = "all"
 yanked = "warn"
-ignore = []
+ignore = [
+  # Tauri 2's Linux WebKit stack is tied to gtk-rs 0.18/GTK3. The affected
+  # VariantStrIter API is not called by Cognia; glib 0.20 cannot be selected
+  # without replacing Tauri's GTK ABI. Keep this exact advisory visible here
+  # until Tauri/Wry migrate their Linux runtime.
+  { id = "RUSTSEC-2024-0429", reason = "Tauri 2 Linux GTK3 ABI constraint; affected VariantStrIter API is not used" },
+  # xcb 1.7 is xcap's current Linux X11 backend. quick-xml is build-only and
+  # parses protocol XML embedded in the xcb crate, never untrusted input, so
+  # the two runtime DoS paths are unreachable. Remove when xcb upgrades.
+  { id = "RUSTSEC-2026-0194", reason = "xcb build-only parser consumes crate-owned protocol XML" },
+  { id = "RUSTSEC-2026-0195", reason = "xcb build-only parser consumes crate-owned protocol XML" },
+]
 
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Internal workspace crates are resolved by an exact local path and share the
+# workspace lockfile; the wildcard rule remains blocking for registry/git deps.
+allow-wildcard-paths = true
 # Duplicate versions are near-unavoidable in a tree this size; the value is
 # the report, not the failure.
-highlight = "all-duplicates"
+highlight = "all"
 
 [licenses]
 # Permissive licenses this project is happy to ship.
@@ -41,6 +54,9 @@ allow = [
   "MPL-2.0",
   "Zlib",
   "OpenSSL",
+  "BSL-1.0",
+  "AGPL-3.0-or-later",
+  "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.8
 

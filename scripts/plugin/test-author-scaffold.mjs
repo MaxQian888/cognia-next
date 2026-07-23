@@ -91,7 +91,7 @@ try {
   }
   writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`)
 
-  run("pnpm", ["install", "--no-frozen-lockfile"], pluginDir)
+  run("pnpm", ["install", "--no-frozen-lockfile", "--prefer-offline"], pluginDir)
   run("pnpm", ["exec", "tsc", "--noEmit"], pluginDir)
   run("pnpm", ["exec", "jest", "--runInBand"], pluginDir)
   run("pnpm", ["build"], pluginDir)

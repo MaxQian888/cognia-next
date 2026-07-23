@@ -20,12 +20,15 @@ import { dirname, join } from "node:path"
 import {
   GATES,
   RUNTIMES,
+  defaultJobCount,
+  effectiveJobCount,
   gatesInGroup,
   groupManifest,
   hasGate,
   listGroups,
   parseArgs,
   renderSummaryMarkdown,
+  runGatePlan,
   selectGates,
   summarize,
 } from "./check-all.mjs"
@@ -62,9 +65,25 @@ test("registry picks up the gates that were previously wired to nothing", () => 
     "plugin-node:check",
     "plugin-convert:check",
     "lint:claude-md",
+    "test:coverage:runner:test",
   ]) {
     assert.ok(hasGate(script), `${script} should be registered`)
   }
+})
+
+test("TypeScript graph analysis never competes with declaration builds", () => {
+  for (const script of ["typecheck", "knip", "build:packages", "sdk:ts:build"]) {
+    assert.equal(
+      GATES.find((gate) => gate.script === script)?.resource,
+      "package-build",
+      `${script} must share the package-build resource lock`
+    )
+  }
+})
+
+test("lint and formatting occupy independent lanes", () => {
+  assert.equal(GATES.find((gate) => gate.script === "lint")?.group, "lint")
+  assert.equal(GATES.find((gate) => gate.script === "format:check")?.group, "format")
 })
 
 test("every registry entry names a real package.json script", () => {
@@ -80,6 +99,14 @@ test("entries are normalized with runtime/blocking defaults", () => {
     assert.equal(typeof gate.group, "string")
     assert.ok(gate.group.length > 0)
   }
+})
+
+test("every registered quality gate is blocking", () => {
+  assert.equal(
+    GATES.filter((gate) => !gate.blocking).length,
+    0,
+    "check:all must not silently tolerate failed quality gates"
+  )
 })
 
 test("listGroups is de-duplicated and preserves first-seen order", () => {
@@ -127,10 +154,16 @@ test("selectGates filters by group and runtime, and rejects unknown values", () 
 })
 
 test("parseArgs reads the CLI surface and rejects junk", () => {
-  assert.deepEqual(parseArgs([]), { listGroups: false, json: false, bail: false })
+  assert.deepEqual(parseArgs([]), {
+    listGroups: false,
+    json: false,
+    bail: false,
+    jobs: undefined,
+  })
   assert.equal(parseArgs(["--group", "audit"]).group, "audit")
   assert.equal(parseArgs(["--runtime", "rust"]).runtime, "rust")
   assert.equal(parseArgs(["--bail"]).bail, true)
+  assert.equal(parseArgs(["--jobs", "3"]).jobs, 3)
 
   const listing = parseArgs(["--list-groups", "--json"])
   assert.equal(listing.listGroups, true)
@@ -138,7 +171,27 @@ test("parseArgs reads the CLI surface and rejects junk", () => {
 
   assert.throws(() => parseArgs(["--group"]), /--group requires/)
   assert.throws(() => parseArgs(["--runtime"]), /--runtime requires/)
+  assert.throws(() => parseArgs(["--jobs", "0"]), /positive integer/)
+  assert.throws(() => parseArgs(["--jobs", "1.5"]), /positive integer/)
   assert.throws(() => parseArgs(["--nope"]), /Unknown argument/)
+})
+
+test("defaultJobCount uses available CPUs without oversubscribing local builds", () => {
+  assert.equal(defaultJobCount(1), 1)
+  assert.equal(defaultJobCount(2), 2)
+  assert.equal(defaultJobCount(8), 4)
+  assert.equal(defaultJobCount(64), 4)
+})
+
+test("effectiveJobCount never exceeds the selected group count and makes bail sequential", () => {
+  const gates = [
+    { script: "lint", group: "lint" },
+    { script: "format:check", group: "lint" },
+    { script: "typecheck", group: "types" },
+  ]
+  assert.equal(effectiveJobCount(gates, 4, false), 2)
+  assert.equal(effectiveJobCount(gates.slice(0, 2), 4, false), 1)
+  assert.equal(effectiveJobCount(gates, 4, true), 1)
 })
 
 test("summarize → exit 0 and pass header when every gate is green", () => {
@@ -200,4 +253,87 @@ test("renderSummaryMarkdown emits a titled table with one row per gate", () => {
 test("renderSummaryMarkdown falls back to a generic title without a group", () => {
   const md = renderSummaryMarkdown([{ name: "lint", ok: true, blocking: true }])
   assert.match(md, /^### Gates\n/)
+})
+
+test("runGatePlan runs groups concurrently while preserving order within each group", async () => {
+  const gates = [
+    { script: "lint", group: "lint", blocking: true },
+    { script: "format:check", group: "lint", blocking: true },
+    { script: "typecheck", group: "types", blocking: true },
+  ]
+  const started = []
+  const finish = new Map()
+  const executeGate = (gate) => {
+    started.push(gate.script)
+    return new Promise((resolve) => finish.set(gate.script, resolve))
+  }
+
+  const run = runGatePlan(gates, { jobs: 2, executeGate })
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.deepEqual(started, ["lint", "typecheck"])
+  assert.ok(!started.includes("format:check"), "a group must never overlap its own gates")
+
+  finish.get("typecheck")(true)
+  finish.get("lint")(true)
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.deepEqual(started, ["lint", "typecheck", "format:check"])
+
+  finish.get("format:check")(true)
+  assert.deepEqual(await run, [
+    { name: "lint", ok: true, blocking: true },
+    { name: "format:check", ok: true, blocking: true },
+    { name: "typecheck", ok: true, blocking: true },
+  ])
+})
+
+test("runGatePlan keeps --bail sequential and marks every remaining gate skipped", async () => {
+  const gates = [
+    { script: "lint", group: "lint", blocking: true },
+    { script: "format:check", group: "lint", blocking: true },
+    { script: "typecheck", group: "types", blocking: true },
+  ]
+  const started = []
+  const results = await runGatePlan(gates, {
+    jobs: 4,
+    bail: true,
+    executeGate: async (gate) => {
+      started.push(gate.script)
+      return gate.script !== "lint"
+    },
+  })
+
+  assert.deepEqual(started, ["lint"])
+  assert.deepEqual(results, [
+    { name: "lint", ok: false, blocking: true },
+    { name: "format:check", ok: false, skipped: true, blocking: true },
+    { name: "typecheck", ok: false, skipped: true, blocking: true },
+  ])
+})
+
+test("runGatePlan never overlaps gates that claim the same local resource", async () => {
+  const gates = [
+    { script: "build:packages", group: "artifacts", blocking: true, resource: "packages" },
+    { script: "sdk:ts:build", group: "plugin-sdk", blocking: true, resource: "packages" },
+    { script: "typecheck", group: "types", blocking: true },
+  ]
+  const started = []
+  const finish = new Map()
+  const run = runGatePlan(gates, {
+    jobs: 3,
+    executeGate: (gate) => {
+      started.push(gate.script)
+      return new Promise((resolve) => finish.set(gate.script, resolve))
+    },
+  })
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.deepEqual(started, ["build:packages", "typecheck"])
+  finish.get("build:packages")(true)
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.deepEqual(started, ["build:packages", "typecheck", "sdk:ts:build"])
+
+  finish.get("typecheck")(true)
+  finish.get("sdk:ts:build")(true)
+  await run
 })

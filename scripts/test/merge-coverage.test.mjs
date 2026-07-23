@@ -7,7 +7,7 @@
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs"
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -17,6 +17,7 @@ import {
   parseArgs,
   resolveInput,
   mergeCoverageFiles,
+  filterCollectedSources,
   checkGroup,
   classifyFiles,
   checkThresholds,
@@ -115,6 +116,51 @@ test("mergeCoverageFiles unions files and sums hit counts", () => {
   const summary = map.fileCoverageFor(join(root, "lib", "util.ts")).toSummary()
   assert.equal(summary.statements.pct, 100) // union: shard 2 covered everything
   rmSync(root, { recursive: true, force: true })
+})
+
+test("filterCollectedSources applies Jest source globs and path ignores exactly", () => {
+  const root = makeRepo()
+  mkdirSync(join(root, "scripts"), { recursive: true })
+  mkdirSync(join(root, "components", "ui"), { recursive: true })
+  mkdirSync(join(root, "lib", "wiki"), { recursive: true })
+  writeFileSync(join(root, "lib", "util.test.ts"), "")
+  writeFileSync(join(root, "lib", "wiki", "types.ts"), "")
+  writeFileSync(join(root, "scripts", "build.ts"), "")
+  writeFileSync(join(root, "components", "ui", "button.tsx"), "")
+  const map = libCoverage.createCoverageMap({
+    ...fileCov(join(root, "lib", "util.ts"), 1, 1),
+    ...fileCov(join(root, "lib", "util.test.ts"), 1, 1),
+    ...fileCov(join(root, "lib", "wiki", "types.ts"), 1, 1),
+    ...fileCov(join(root, "scripts", "build.ts"), 1, 1),
+    ...fileCov(join(root, "components", "ui", "button.tsx"), 1, 1),
+  })
+  filterCollectedSources(map, { cwd: root })
+  assert.deepEqual(map.files(), [join(root, "lib", "util.ts")])
+  rmSync(root, { recursive: true, force: true })
+})
+
+test("coverage source manifest stays synchronized with Jest", () => {
+  const jestConfig = readFileSync(new URL("../../jest.config.ts", import.meta.url), "utf8")
+  const manifest = JSON.parse(
+    readFileSync(new URL("./coverage-sources.json", import.meta.url), "utf8")
+  )
+  const collectionStart = jestConfig.indexOf("  collectCoverageFrom: [")
+  const collectionEnd = jestConfig.indexOf("\n  ],\n\n  // The directory", collectionStart)
+  const collectionBlock = jestConfig.slice(collectionStart, collectionEnd)
+  const configuredSources = Array.from(
+    collectionBlock.matchAll(/^\s+"([^"]+)"(?:,|$)/gm),
+    (match) => match[1]
+  )
+  assert.deepEqual(manifest.collectCoverageFrom, configuredSources)
+
+  const ignoreStart = jestConfig.indexOf("  coveragePathIgnorePatterns: [")
+  const ignoreEnd = jestConfig.indexOf("\n  ],", ignoreStart)
+  const ignoreBlock = jestConfig.slice(ignoreStart, ignoreEnd)
+  const configuredIgnores = Array.from(
+    ignoreBlock.matchAll(/^\s+"([^"]+)"(?:,|$)/gm),
+    (match) => match[1]
+  )
+  assert.deepEqual(manifest.coveragePathIgnorePatterns, configuredIgnores)
 })
 
 test("checkGroup enforces percent and negative (max-uncovered) thresholds", () => {

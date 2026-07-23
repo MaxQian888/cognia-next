@@ -7,7 +7,7 @@ test("scaffold acceptance covers generation, install, typecheck, test, build, li
   for (const expected of [
     '"plugin:create"',
     "COGNIA_PLUGIN_CLI",
-    '"install", "--no-frozen-lockfile"',
+    '"install", "--no-frozen-lockfile", "--prefer-offline"',
     '"@cognia/provider-core"',
     '"@cognia/provider-routing"',
     '"@cognia/provider-types"',
