@@ -44,6 +44,19 @@ export type ManageMemoryCommand =
    * `invalidated`, history preserved; mirrors `forgetExternalMemory`.
    */
   | { kind: "invalidate"; id: string; supersededById?: string }
+  /**
+   * One-shot conflict disposition from the comparison card. `keep` verifies
+   * `keepId` and soft-invalidates `dropId` (superseded link); `keep-both`
+   * verifies both and clears the conflict edges; `merge` writes `mergedText`
+   * onto `keepId` (PII-gated) and soft-invalidates `dropId`.
+   */
+  | {
+      kind: "resolve-conflict"
+      keepId: string
+      dropId: string
+      mode: "keep" | "keep-both" | "merge"
+      mergedText?: string
+    }
   | { kind: "clear" }
 
 export type ManageMemoryResult =
@@ -75,6 +88,86 @@ export async function manageMemory(command: ManageMemoryCommand): Promise<Manage
     const rows = await listMemories()
     for (const row of rows) await manageMemory({ kind: "delete", id: row.id })
     return { ok: true }
+  }
+
+  if (command.kind === "resolve-conflict") {
+    const [keep, drop] = await Promise.all([getMemory(command.keepId), getMemory(command.dropId)])
+    if (!keep || !drop) return { ok: false, reason: "not_found" }
+    const settings = await getSettings().catch(() => undefined)
+    const config = resolveMemoryConfig(settings?.memory)
+
+    let piiRedacted = false
+    if (command.mode === "merge") {
+      const raw = command.mergedText?.trim()
+      if (!raw) throw new Error("resolve-conflict merge requires non-empty mergedText")
+      const redacted = redactText(raw).redacted
+      if (!hasNoLeakingPii(redacted)) return { ok: false, reason: "pii_blocked" }
+      piiRedacted = redacted !== raw
+      await updateMemory(command.keepId, {
+        text: redacted,
+        bumpVersion: true,
+        reviewStatus: "verified",
+        conflictWithIds: (keep.conflictWithIds ?? []).filter((id) => id !== command.dropId),
+        evidenceState: "supported",
+        contaminationState: "clean",
+      })
+      try {
+        const sink = await tryBuildMemoryVectorSink(config)
+        await sink?.upsert(keep.vectorDocId ?? keep.id, redacted)
+      } catch {
+        // Canonical update remains BM25-searchable.
+      }
+      await createMemoryEvidence({
+        memoryId: command.keepId,
+        kind: "manual",
+        sourceId: `conflict-merge:${command.keepId}:${command.dropId}`,
+        contaminationState: "clean",
+        reviewed: true,
+      })
+      await appendMemoryAuditEvent({
+        action: "revised",
+        memoryId: command.keepId,
+        reason: "conflict_merge",
+      })
+    } else {
+      await updateMemory(command.keepId, {
+        reviewStatus: "verified",
+        conflictWithIds: (keep.conflictWithIds ?? []).filter((id) => id !== command.dropId),
+      })
+      await appendMemoryAuditEvent({
+        action: "promoted",
+        memoryId: command.keepId,
+        reason: "conflict_resolved",
+      })
+    }
+
+    if (command.mode === "keep-both") {
+      await updateMemory(command.dropId, {
+        reviewStatus: "verified",
+        conflictWithIds: (drop.conflictWithIds ?? []).filter((id) => id !== command.keepId),
+      })
+      await appendMemoryAuditEvent({
+        action: "promoted",
+        memoryId: command.dropId,
+        reason: "conflict_resolved",
+      })
+    } else {
+      await invalidateMemory(command.dropId, command.keepId)
+      if (drop.vectorDocId) {
+        try {
+          const sink = await tryBuildMemoryVectorSink(config)
+          await sink?.delete([drop.vectorDocId])
+        } catch {
+          // Canonical invalidation is authoritative; vector cleanup is best-effort.
+        }
+      }
+      await appendMemoryAuditEvent({
+        action: "invalidated",
+        memoryId: command.dropId,
+        reason: "conflict_resolved",
+      })
+    }
+    return { ok: true, memoryId: command.keepId, ...(piiRedacted ? { piiRedacted } : {}) }
   }
 
   const existing = await getMemory(command.id)

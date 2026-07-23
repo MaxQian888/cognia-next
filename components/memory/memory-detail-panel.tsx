@@ -13,6 +13,7 @@ import {
   XIcon,
   CheckIcon,
   ArrowUpRightIcon,
+  TriangleAlertIcon,
 } from "lucide-react"
 import type { Memory } from "@/types/memory/memory"
 import type { MemoryAuditEvent, MemoryEvidence } from "@/types/memory/governance"
@@ -49,6 +50,8 @@ export interface MemoryDetailPanelProps {
   navPosition?: { index: number; total: number }
   /** Jump the panel to another memory (superseded-chain link). */
   onSelectMemory?: (id: string) => void
+  /** Open the guided conflict-disposition card for this memory's conflict pair. */
+  onOpenResolver?: () => void
   className?: string
 }
 
@@ -81,10 +84,12 @@ export function MemoryDetailPanel({
   onNavigate,
   navPosition,
   onSelectMemory,
+  onOpenResolver,
   className,
 }: MemoryDetailPanelProps) {
   const t = useTranslations("memory.detail")
   const tPanel = useTranslations("memory.panel")
+  const tConflicts = useTranslations("memory.conflicts")
   const tGovernance = useTranslations("memory.governance")
   const tTypes = useTranslations("memory.types")
   const tScopes = useTranslations("memory.scopes")
@@ -367,6 +372,18 @@ export function MemoryDetailPanel({
                   </span>
                 )
               })}
+              {onOpenResolver && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="mt-1 w-fit"
+                  onClick={onOpenResolver}
+                  data-testid="memory-detail-open-resolver"
+                >
+                  <TriangleAlertIcon className="size-3.5 text-red-500" />
+                  {tConflicts("openResolver")}
+                </Button>
+              )}
             </div>
           )}
 

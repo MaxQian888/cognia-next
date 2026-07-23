@@ -10,6 +10,7 @@ import {
   NotebookPenIcon,
   ListChecksIcon,
   PlusIcon,
+  TriangleAlertIcon,
   XIcon,
 } from "lucide-react"
 import type { Memory, MemoryProvenance, MemoryScope, MemoryType } from "@/types/memory/memory"
@@ -44,6 +45,7 @@ import {
   SheetDescription,
 } from "@/components/ui/sheet"
 import { MemoryRow } from "./memory-row"
+import { MemoryConflictResolver } from "./memory-conflict-resolver"
 import { MemoryDetailPanel, type MemoryDetailPatch } from "./memory-detail-panel"
 import { AddMemoryDialog, type AddMemoryInput } from "./add-memory-dialog"
 import { MemoryBulkToolbar } from "./memory-bulk-toolbar"
@@ -65,6 +67,7 @@ export function MemoryConsole() {
   const tTypes = useTranslations("memory.types")
   const tScopes = useTranslations("memory.scopes")
   const tProv = useTranslations("memory.provenance")
+  const tConflicts = useTranslations("memory.conflicts")
   const all = useLiveQuery(() => listMemories({}), [], [] as Memory[])
 
   const [query, setQuery] = useState("")
@@ -77,6 +80,9 @@ export function MemoryConsole() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [addOpen, setAddOpen] = useState(false)
+  /** "待处理" preset: restrict the list to reviewStatus=conflict rows. */
+  const [conflictPreset, setConflictPreset] = useState(false)
+  const [resolverOpen, setResolverOpen] = useState(false)
 
   const deferredQuery = useDeferredValue(query)
   const isDesktopViewport = useMediaQuery("(min-width: 1024px)")
@@ -98,9 +104,20 @@ export function MemoryConsole() {
         provenances: provenanceFilter === "all" ? undefined : [provenanceFilter],
         tags: [...activeTags],
         status: showAll ? "all" : "active",
+        reviewStatus: conflictPreset ? "conflict" : undefined,
         sort,
       }),
-    [all, deferredQuery, types, scopeFilter, provenanceFilter, activeTags, showAll, sort]
+    [
+      all,
+      deferredQuery,
+      types,
+      scopeFilter,
+      provenanceFilter,
+      activeTags,
+      showAll,
+      sort,
+      conflictPreset,
+    ]
   )
 
   const hasActiveFilters =
@@ -108,7 +125,8 @@ export function MemoryConsole() {
     types.size > 0 ||
     scopeFilter !== "all" ||
     provenanceFilter !== "all" ||
-    activeTags.size > 0
+    activeTags.size > 0 ||
+    conflictPreset
 
   const selectedMemory = selectedId ? memoryById.get(selectedId) : undefined
   const selectedEvidence = useLiveQuery(
@@ -192,6 +210,7 @@ export function MemoryConsole() {
     setScopeFilter("all")
     setProvenanceFilter("all")
     setActiveTags(new Set())
+    setConflictPreset(false)
   }
 
   // Row-level handlers — stable so the memoized rows don't re-render on
@@ -285,6 +304,7 @@ export function MemoryConsole() {
           selectedIndex >= 0 ? { index: selectedIndex + 1, total: rows.length } : undefined
         }
         onSelectMemory={setSelectedId}
+        onOpenResolver={() => setResolverOpen(true)}
         className={className}
       />
     ) : null
@@ -360,7 +380,7 @@ export function MemoryConsole() {
 
         <TabsContent value="app" className="flex min-h-0 flex-1 flex-col gap-4">
           {/* Stats */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
             <StatCard
               label={t("stats.active")}
               value={stats.active}
@@ -390,6 +410,24 @@ export function MemoryConsole() {
               accentGradient="from-amber-500 to-orange-400"
               iconBgClassName="bg-amber-500/15 text-amber-500"
             />
+            {/* "待处理" — clickable preset filtering to unresolved conflicts. */}
+            <button
+              type="button"
+              className="text-left"
+              aria-pressed={conflictPreset}
+              aria-label={tConflicts("pending")}
+              onClick={() => setConflictPreset((v) => !v)}
+              data-testid="memory-stat-conflicts"
+            >
+              <StatCard
+                label={tConflicts("pending")}
+                value={stats.conflicts}
+                icon={<TriangleAlertIcon className="size-4" />}
+                accentGradient="from-red-500 to-rose-400"
+                iconBgClassName="bg-red-500/15 text-red-500"
+                className={cn("h-full", conflictPreset && "ring-1 ring-red-500/60")}
+              />
+            </button>
           </div>
 
           {/* Filters */}
@@ -575,6 +613,17 @@ export function MemoryConsole() {
       )}
 
       <AddMemoryDialog open={addOpen} onOpenChange={setAddOpen} onCreate={handleCreate} />
+
+      {/* Conflict disposition card — only mountable while a conflict row is open. */}
+      {selectedMemory?.reviewStatus === "conflict" && (
+        <MemoryConflictResolver
+          open={resolverOpen}
+          onOpenChange={setResolverOpen}
+          memory={selectedMemory}
+          resolveMemory={resolveMemory}
+          onResolved={(keptId) => setSelectedId(keptId)}
+        />
+      )}
     </div>
   )
 }

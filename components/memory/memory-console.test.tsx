@@ -288,6 +288,48 @@ describe("MemoryConsole — add & bulk", () => {
   })
 })
 
+describe("MemoryConsole — conflict flow", () => {
+  const conflictPair = () => [
+    mem({ id: "c1", text: "uses npm", reviewStatus: "conflict", conflictWithIds: ["c2"] }),
+    mem({ id: "c2", text: "uses pnpm", reviewStatus: "conflict", conflictWithIds: ["c1"] }),
+    mem({ id: "ok", text: "unrelated fact" }),
+  ]
+
+  it("counts pending conflicts and toggles the preset filter", () => {
+    mockData = conflictPair()
+    render(<MemoryConsole />)
+    const card = screen.getByTestId("memory-stat-conflicts")
+    expect(within(card).getByText("2")).toBeTruthy()
+    fireEvent.click(card)
+    expect(screen.getAllByTestId("memory-row")).toHaveLength(2)
+    fireEvent.click(card)
+    expect(screen.getAllByTestId("memory-row")).toHaveLength(3)
+  })
+
+  it("opens the resolver from the detail panel and resolves keep-this", async () => {
+    const user = userEvent.setup()
+    mockData = conflictPair()
+    render(<MemoryConsole />)
+    // Open the conflicting row's detail, then the guided resolver.
+    await user.click(within(screen.getAllByTestId("memory-row")[0]).getByText("uses npm"))
+    await user.click(await screen.findByTestId("memory-detail-open-resolver"))
+    const dialog = await screen.findByTestId("memory-conflict-resolver")
+    expect(within(dialog).getByText("uses npm")).toBeTruthy()
+    expect(within(dialog).getByText("uses pnpm")).toBeTruthy()
+    await user.click(
+      within(within(dialog).getByTestId("conflict-side-c1")).getByRole("button", {
+        name: "Keep this one",
+      })
+    )
+    expect(mockManage).toHaveBeenCalledWith({
+      kind: "resolve-conflict",
+      keepId: "c1",
+      dropId: "c2",
+      mode: "keep",
+    })
+  })
+})
+
 describe("MemoryConsole — tabs", () => {
   it("exposes the external agent memory tab", async () => {
     mockData = []

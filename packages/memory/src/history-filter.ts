@@ -20,6 +20,11 @@ export interface MemoryFilter {
   tags?: string[]
   /** `active` (default) shows only active; `all` includes invalidated. */
   status?: "active" | "all"
+  /**
+   * Restrict to a review state — the "待处理" conflict preset passes
+   * `"conflict"`. Undefined = no review gate.
+   */
+  reviewStatus?: "unreviewed" | "verified" | "conflict"
   sort?: MemorySortKey
 }
 
@@ -44,6 +49,7 @@ export function filterAndSortMemories(memories: Memory[], filter: MemoryFilter =
 
   const filtered = memories.filter((m) => {
     if (status === "active" && m.status !== "active") return false
+    if (filter.reviewStatus && m.reviewStatus !== filter.reviewStatus) return false
     if (allowType && !allowType.has(m.type)) return false
     if (allowScope && !allowScope.has(m.scope)) return false
     if (allowProvenance && !allowProvenance.has(m.provenance)) return false
@@ -78,6 +84,8 @@ export interface MemoryStats {
   active: number
   /** Active + pinned rows (exempt from decay). */
   pinned: number
+  /** Active rows stuck in `reviewStatus: "conflict"` (excluded from recall). */
+  conflicts: number
   byType: Record<MemoryType, number>
 }
 
@@ -85,12 +93,14 @@ export function computeMemoryStats(memories: Memory[]): MemoryStats {
   const byType: Record<MemoryType, number> = { semantic: 0, episodic: 0, procedural: 0 }
   let active = 0
   let pinned = 0
+  let conflicts = 0
   for (const m of memories) {
     if (m.status === "active") {
       active++
       byType[m.type]++
       if (m.pinned) pinned++
+      if (m.reviewStatus === "conflict") conflicts++
     }
   }
-  return { total: memories.length, active, pinned, byType }
+  return { total: memories.length, active, pinned, conflicts, byType }
 }

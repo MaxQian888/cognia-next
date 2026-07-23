@@ -232,6 +232,18 @@ describe("MemoryDetailPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "conflicting fact" }))
     expect(onSelectMemory).toHaveBeenCalledWith("m2")
   })
+
+  it("exposes the guided resolver entry for conflict rows", () => {
+    const onOpenResolver = jest.fn()
+    setup({ id: "m1", reviewStatus: "conflict", conflictWithIds: ["m2"] }, { onOpenResolver })
+    fireEvent.click(screen.getByTestId("memory-detail-open-resolver"))
+    expect(onOpenResolver).toHaveBeenCalled()
+  })
+
+  it("hides the resolver entry when the row has no conflicts", () => {
+    setup({ id: "m1" }, { onOpenResolver: jest.fn() })
+    expect(screen.queryByTestId("memory-detail-open-resolver")).toBeNull()
+  })
 })
 
 // Helper for the disabled-ends test that needs to re-render with new props.

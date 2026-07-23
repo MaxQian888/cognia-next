@@ -32,6 +32,22 @@
     "selected": "已选 {count} 条",
     "unpin": "取消置顶"
   },
+  "conflicts": {
+    "clearStaleConflict": "标记为已验证",
+    "counterpartMissing": "冲突对端记忆已不存在。清除失效的冲突标记后，这条记忆将重新参与召回。",
+    "description": "这两条记忆互相矛盾，解决之前都不会被召回。",
+    "keepBoth": "两条都保留",
+    "keepThis": "保留这条",
+    "merge": "手写合并…",
+    "mergeAria": "合并后的记忆文本",
+    "mergeCancel": "取消合并",
+    "mergeConfirm": "保存合并",
+    "mergePlaceholder": "写下调和后的事实…",
+    "openResolver": "处置冲突…",
+    "pending": "待处理",
+    "resolvedToast": "冲突已解决",
+    "title": "处置冲突记忆"
+  },
   "detail": {
     "auditTitle": "审计历史",
     "cancel": "取消",
@@ -73,6 +89,12 @@
     "tagsPlaceholder": "用逗号分隔的标签",
     "textLabel": "内容",
     "yes": "是"
+  },
+  "errors": {
+    "disabled": "记忆功能已在设置中关闭",
+    "not_found": "这条记忆已不存在",
+    "pii_blocked": "已拦截：文本包含个人隐私信息",
+    "temporary": "记忆当前处于临时模式"
   },
   "panel": {
     "accessedRelative": "{time}使用",

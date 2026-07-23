@@ -149,4 +149,32 @@ describe("computeMemoryStats", () => {
     ]
     expect(computeMemoryStats(rows).pinned).toBe(2)
   })
+
+  it("counts active conflicts only", () => {
+    const rows = [
+      mem({ reviewStatus: "conflict" }),
+      mem({ reviewStatus: "conflict", status: "invalidated" }), // resolved → excluded
+      mem({ reviewStatus: "verified" }),
+      mem(),
+    ]
+    expect(computeMemoryStats(rows).conflicts).toBe(1)
+  })
+})
+
+describe("filterAndSortMemories — reviewStatus preset", () => {
+  it("restricts to the requested review state", () => {
+    const rows = [
+      mem({ id: "c1", reviewStatus: "conflict" }),
+      mem({ id: "v1", reviewStatus: "verified" }),
+      mem({ id: "u1" }),
+    ]
+    expect(filterAndSortMemories(rows, { reviewStatus: "conflict" }).map((m) => m.id)).toEqual([
+      "c1",
+    ])
+    expect(
+      filterAndSortMemories(rows, {})
+        .map((m) => m.id)
+        .sort()
+    ).toEqual(["c1", "u1", "v1"])
+  })
 })

@@ -32,6 +32,22 @@
     "selected": "{count} selected",
     "unpin": "Unpin"
   },
+  "conflicts": {
+    "clearStaleConflict": "Mark as verified",
+    "counterpartMissing": "The conflicting memory no longer exists. Clear the stale conflict flag so this memory rejoins recall.",
+    "description": "These two memories contradict each other and are both excluded from recall until resolved.",
+    "keepBoth": "Keep both",
+    "keepThis": "Keep this one",
+    "merge": "Merge by hand…",
+    "mergeAria": "Merged memory text",
+    "mergeCancel": "Cancel merge",
+    "mergeConfirm": "Save merge",
+    "mergePlaceholder": "Write the reconciled fact…",
+    "openResolver": "Resolve conflict…",
+    "pending": "Pending review",
+    "resolvedToast": "Conflict resolved",
+    "title": "Resolve conflicting memories"
+  },
   "detail": {
     "auditTitle": "Audit history",
     "cancel": "Cancel",
@@ -73,6 +89,12 @@
     "tagsPlaceholder": "comma, separated, tags",
     "textLabel": "Text",
     "yes": "Yes"
+  },
+  "errors": {
+    "disabled": "Memory is disabled in settings",
+    "not_found": "This memory no longer exists",
+    "pii_blocked": "Blocked: the text contains personal information",
+    "temporary": "Memory is in temporary mode"
   },
   "panel": {
     "accessedRelative": "used {time}",

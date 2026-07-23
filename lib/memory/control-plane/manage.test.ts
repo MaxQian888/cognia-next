@@ -113,6 +113,85 @@ describe("manageMemory", () => {
     expect(mockSinkDelete).not.toHaveBeenCalled()
   })
 
+  it("resolve-conflict keep verifies the winner and supersedes the loser", async () => {
+    mockGet.mockImplementation(async (id: string) => ({
+      id,
+      text: id,
+      version: 1,
+      vectorDocId: `vec-${id}`,
+      conflictWithIds: id === "a" ? ["b"] : ["a"],
+    }))
+    const result = await manageMemory({
+      kind: "resolve-conflict",
+      keepId: "a",
+      dropId: "b",
+      mode: "keep",
+    })
+    expect(mockUpdate).toHaveBeenCalledWith("a", { reviewStatus: "verified", conflictWithIds: [] })
+    expect(mockInvalidate).toHaveBeenCalledWith("b", "a")
+    expect(mockSinkDelete).toHaveBeenCalledWith(["vec-b"])
+    expect(mockAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "promoted", memoryId: "a", reason: "conflict_resolved" })
+    )
+    expect(mockAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "invalidated", memoryId: "b" })
+    )
+    expect(result).toEqual({ ok: true, memoryId: "a" })
+  })
+
+  it("resolve-conflict keep-both verifies both sides and drops nothing", async () => {
+    mockGet.mockImplementation(async (id: string) => ({
+      id,
+      text: id,
+      version: 1,
+      conflictWithIds: id === "a" ? ["b"] : ["a"],
+    }))
+    await manageMemory({ kind: "resolve-conflict", keepId: "a", dropId: "b", mode: "keep-both" })
+    expect(mockUpdate).toHaveBeenCalledWith("a", { reviewStatus: "verified", conflictWithIds: [] })
+    expect(mockUpdate).toHaveBeenCalledWith("b", { reviewStatus: "verified", conflictWithIds: [] })
+    expect(mockInvalidate).not.toHaveBeenCalled()
+  })
+
+  it("resolve-conflict merge writes the PII-gated text and reindexes", async () => {
+    mockGet.mockImplementation(async (id: string) => ({
+      id,
+      text: id,
+      version: 1,
+      vectorDocId: `vec-${id}`,
+      conflictWithIds: [],
+    }))
+    const result = await manageMemory({
+      kind: "resolve-conflict",
+      keepId: "a",
+      dropId: "b",
+      mode: "merge",
+      mergedText: "User migrated from npm to pnpm in 2026",
+    })
+    expect(mockUpdate).toHaveBeenCalledWith(
+      "a",
+      expect.objectContaining({
+        text: "User migrated from npm to pnpm in 2026",
+        bumpVersion: true,
+        reviewStatus: "verified",
+      })
+    )
+    expect(mockSinkUpsert).toHaveBeenCalledWith("vec-a", "User migrated from npm to pnpm in 2026")
+    expect(mockEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({ memoryId: "a", sourceId: "conflict-merge:a:b" })
+    )
+    expect(mockInvalidate).toHaveBeenCalledWith("b", "a")
+    expect(result).toEqual({ ok: true, memoryId: "a" })
+  })
+
+  it("resolve-conflict returns not_found when either side is missing", async () => {
+    mockGet.mockImplementation(async (id: string) => (id === "a" ? { id, version: 1 } : undefined))
+    expect(
+      await manageMemory({ kind: "resolve-conflict", keepId: "a", dropId: "gone", mode: "keep" })
+    ).toEqual({ ok: false, reason: "not_found" })
+    expect(mockUpdate).not.toHaveBeenCalled()
+    expect(mockInvalidate).not.toHaveBeenCalled()
+  })
+
   it("returns not_found without mutating", async () => {
     mockGet.mockResolvedValue(undefined)
     expect(await manageMemory({ kind: "delete", id: "missing" })).toEqual({
