@@ -7,12 +7,14 @@
 export {}
 
 const mockConfig = jest.fn()
+const mockInit = jest.fn()
 const mockIsTauri = jest.fn(() => false)
 
 jest.mock("@monaco-editor/react", () => ({
   __esModule: true,
   loader: {
     config: (...args: unknown[]) => mockConfig(...args),
+    init: (...args: unknown[]) => mockInit(...args),
   },
 }))
 
@@ -72,5 +74,20 @@ describe("configureMonacoLoader", () => {
     } finally {
       global.process = originalProcess
     }
+  })
+})
+
+describe("loadConfiguredMonaco", () => {
+  it("configures local Tauri assets before initializing Monaco", async () => {
+    const monaco = { languages: {}, editor: {} }
+    mockIsTauri.mockReturnValue(true)
+    mockInit.mockResolvedValue(monaco)
+    const { loadConfiguredMonaco } = await import("./monaco-loader")
+
+    await expect(loadConfiguredMonaco()).resolves.toBe(monaco)
+    expect(mockConfig).toHaveBeenCalledWith({ paths: { vs: "/monaco/vs" } })
+    expect(mockConfig.mock.invocationCallOrder[0]).toBeLessThan(
+      mockInit.mock.invocationCallOrder[0]
+    )
   })
 })

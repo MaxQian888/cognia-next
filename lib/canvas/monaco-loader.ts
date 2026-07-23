@@ -43,3 +43,13 @@ export function configureMonacoLoader(): void {
     loader.config({ paths: { vs: override } })
   }
 }
+
+/**
+ * Return the same Monaco instance used by `@monaco-editor/react` after applying
+ * Cognia's local-asset configuration. This keeps Monaco's ESM source tree out
+ * of the application bundle while still exposing the API needed by bridges.
+ */
+export async function loadConfiguredMonaco() {
+  configureMonacoLoader()
+  return loader.init()
+}

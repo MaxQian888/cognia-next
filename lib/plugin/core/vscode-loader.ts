@@ -26,6 +26,7 @@ import {
 } from "@/lib/plugin/vscode-shim/rpc-dispatcher"
 import { installVscodeRpcHandlers } from "@/lib/plugin/vscode-shim/setup-handlers"
 import { configureLmHandler } from "@/lib/plugin/vscode-shim/lm-handler"
+import { loadConfiguredMonaco } from "@/lib/canvas/monaco-loader"
 
 const vscodeLoaderLogger = loggers.plugin.child("vscode-loader")
 
@@ -77,11 +78,11 @@ export async function ensureDispatcherConfigured(): Promise<void> {
   })
   installVscodeRpcHandlers()
 
-  // Wire the monaco-bridge to the real Monaco API + the renderer→sidecar
-  // request channel. Lazy-imported so non-Tauri code paths never pull
-  // monaco-editor (the asset bundle is ~3 MB).
+  // Wire the monaco-bridge to the Monaco instance already managed by
+  // @monaco-editor/react. Loading its prebuilt AMD assets avoids bundling and
+  // compiling the full monaco-editor ESM source graph during every dev start.
   try {
-    const monaco = await import("monaco-editor")
+    const monaco = await loadConfiguredMonaco()
     const { configureMonacoBridge } = await import("@/lib/plugin/vscode-shim/monaco-bridge")
     configureMonacoBridge({
       // The bridge's `MonacoApi` interface is structurally compatible with
@@ -117,7 +118,7 @@ export async function ensureDispatcherConfigured(): Promise<void> {
     })
   } catch (error) {
     vscodeLoaderLogger.warn(
-      "configureMonacoBridge skipped — monaco-editor failed to load; LSP providers will be dormant",
+      "configureMonacoBridge skipped — configured Monaco assets failed to load; LSP providers will be dormant",
       { error: error instanceof Error ? error.message : String(error) }
     )
   }

@@ -136,6 +136,16 @@ describe("vscode-loader — Tauri mode", () => {
     jest.doMock("@tauri-apps/api/event", () => ({
       listen: jest.fn(async () => () => {}),
     }))
+    jest.doMock("@/lib/canvas/monaco-loader", () => ({
+      loadConfiguredMonaco: jest.fn().mockResolvedValue({
+        languages: {
+          register: jest.fn(),
+          registerCompletionItemProvider: jest.fn(),
+          setLanguageConfiguration: jest.fn(),
+        },
+        editor: { setModelMarkers: jest.fn() },
+      }),
+    }))
   })
 
   afterAll(() => {
@@ -285,7 +295,7 @@ describe("vscode-loader — Tauri mode", () => {
     await expect(unloadVscodeExtension("cognia.test-ext")).resolves.toBeUndefined()
   })
 
-  it("bootstraps configureMonacoBridge with monaco-editor + dispatchRpc on first load", async () => {
+  it("bootstraps configureMonacoBridge with the configured Monaco instance", async () => {
     // `Promise<unknown>` widens the return so `mockResolvedValueOnce` can
     // surface the JSON string the rpc dispatch path returns later in the
     // test without re-inferring the activate-response shape.
@@ -304,9 +314,11 @@ describe("vscode-loader — Tauri mode", () => {
 
     const fakeLanguages = { registerCompletionItemProvider: jest.fn() }
     const fakeSetModelMarkers = jest.fn()
-    jest.doMock("monaco-editor", () => ({
-      languages: fakeLanguages,
-      editor: { setModelMarkers: fakeSetModelMarkers },
+    jest.doMock("@/lib/canvas/monaco-loader", () => ({
+      loadConfiguredMonaco: jest.fn().mockResolvedValue({
+        languages: fakeLanguages,
+        editor: { setModelMarkers: fakeSetModelMarkers },
+      }),
     }))
 
     const configureMonacoBridge = jest.fn()
@@ -331,7 +343,7 @@ describe("vscode-loader — Tauri mode", () => {
     expect(out).toEqual({ ok: true })
   })
 
-  it("survives monaco-editor failing to load (logs warn + continues activation)", async () => {
+  it("survives configured Monaco failing to load (logs warn + continues activation)", async () => {
     const invoke = jest.fn(async (cmd: string) => {
       if (cmd === "plugin_load_vscode") return undefined
       if (cmd === "plugin_activate_vscode")
@@ -344,11 +356,10 @@ describe("vscode-loader — Tauri mode", () => {
       return undefined
     })
     jest.doMock("@tauri-apps/api/core", () => ({ invoke }))
-    // Simulate an environment where the lazy import throws (e.g. monaco
-    // assets are missing in CI).
-    jest.doMock("monaco-editor", () => {
-      throw new Error("monaco unavailable")
-    })
+    // Simulate an environment where the configured runtime assets are missing.
+    jest.doMock("@/lib/canvas/monaco-loader", () => ({
+      loadConfiguredMonaco: jest.fn().mockRejectedValue(new Error("monaco unavailable")),
+    }))
 
     const configureMonacoBridge = jest.fn()
     jest.doMock("@/lib/plugin/vscode-shim/monaco-bridge", () => ({
@@ -372,7 +383,7 @@ describe("vscode-loader — headless brain mode", () => {
   afterEach(() => {
     delete (globalThis as Record<string, unknown>).__COGNIA_HEADLESS__
     jest.dontMock("@/lib/tauri/transport-instance")
-    jest.dontMock("monaco-editor")
+    jest.dontMock("@/lib/canvas/monaco-loader")
   })
 
   it("runs lifecycle and bidirectional sidecar RPC over the service transport", async () => {
@@ -396,9 +407,11 @@ describe("vscode-loader — headless brain mode", () => {
     jest.doMock("@/lib/tauri/transport-instance", () => ({
       transport: { call, subscribe },
     }))
-    jest.doMock("monaco-editor", () => {
-      throw new Error("monaco unavailable in headless runtime")
-    })
+    jest.doMock("@/lib/canvas/monaco-loader", () => ({
+      loadConfiguredMonaco: jest
+        .fn()
+        .mockRejectedValue(new Error("monaco unavailable in headless runtime")),
+    }))
 
     const { loadVscodeDefinition } = await import("./vscode-loader")
     const definition = await loadVscodeDefinition(baseManifest, "/data/.cognia/plugins/demo")
