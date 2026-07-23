@@ -2639,6 +2639,7 @@
     "deleteConfirmTitle": "Delete Artifact",
     "noArtifacts": "No artifacts yet",
     "noArtifactsDesc": "Code snippets and content will appear here",
+    "noMatches": "No artifacts match these filters",
     "open": "Open",
     "types": {
       "chart": "Chart",
@@ -2693,17 +2694,14 @@
       "svgGraphic": "SVG Graphic",
       "untitled": "Untitled"
     },
-    "designerUnsupportedDescription": "The designer subsystem isn't included in this build of cognia-next. Artifact \"{title}\" is read-only here.",
-    "designerUnsupportedTitle": "Designer is unavailable",
     "dock": {
       "artifactMode": "Artifact",
+      "browseArtifacts": "Browse artifacts",
       "closeTab": "Close {title}",
       "collapse": "Collapse panel",
-      "hideHistory": "Hide artifact history",
       "openArtifacts": "Open artifacts",
       "openInNewTab": "Open in new tab",
       "saveToProject": "Save to project…",
-      "showHistory": "Show artifact history",
       "splitView": "Split",
       "title": "Artifacts",
       "toggleHint": "Toggle panel (Ctrl/Cmd+J)",
@@ -2773,6 +2771,11 @@
       "unsupported": "Unsupported"
     },
     "saveVersion": "Save Version",
+    "scopeLabel": "Scope",
+    "scopes": {
+      "recent": "Recent",
+      "session": "This chat"
+    },
     "search": "Search artifacts...",
     "sheetTitle": "Artifact Panel",
     "title": "Artifacts",
@@ -4064,11 +4067,18 @@
       "ariaToggleWebSearch": "Toggle web search",
       "ariaUploadImage": "Upload files",
       "attachImageTooltip": "Attach files",
+      "attachMenu": {
+        "file": "Upload files",
+        "folder": "Add folder",
+        "trigger": "Attach"
+      },
       "attachments": {
         "countLimit": "Only {max} attachments allowed.",
         "fallbackFile": "file",
         "fallbackName": "attachment",
         "fileSizeExceeded": "{count, plural, =1 {1 file exceeded} other {# files exceeded}} {max}MB.",
+        "folderEmpty": "That folder has no attachable files.",
+        "folderTruncated": "Only the first {max} files from the dropped folder were read.",
         "linkSkipped": "{count, plural, =1 {1 link couldn't be read} other {# links couldn't be read}}; the original URL will still be sent.",
         "optimized": "{count, plural, =1 {1 large image was optimized} other {# large images were optimized}} before attaching.",
         "oversizeBody": "These attachments add about {tokens}k tokens of context. Send anyway?",
@@ -4107,7 +4117,7 @@
         "title": "Review pending drafts"
       },
       "dragOverlay": {
-        "dropToAttach": "Drop files to attach"
+        "dropToAttach": "Drop files or folders to attach"
       },
       "effort": {
         "aria": "Thinking level",
@@ -4141,12 +4151,10 @@
         "trigger": "Enhance prompt"
       },
       "folder": {
-        "aria": "Add a folder",
         "confirmAdd": "Add folder",
         "confirmBody": "\"{name}\" contains {count}+ files. The agent will read them on demand. Add as context?",
         "confirmCancel": "Cancel",
-        "confirmTitle": "Add large folder?",
-        "tooltip": "Add folder as context"
+        "confirmTitle": "Add large folder?"
       },
       "followUps": {
         "dismiss": "Dismiss suggestions",
@@ -4156,16 +4164,12 @@
       "ghostAcceptHint": "Tab",
       "ghostDismiss": "Dismiss suggestion",
       "helperHints": {
-        "dropImages": "Drop / paste files or links",
+        "dropImages": "Drop / paste files, folders or links",
         "send": "⏎ Send · ⇧⏎ New line",
         "tryPrefix": "Try"
       },
       "links": {
-        "add": "Attach a link",
-        "addAction": "Attach link",
-        "inputAria": "Web address",
-        "inputPlaceholder": "https://example.com",
-        "invalid": "Enter a valid HTTP(S) link.",
+        "limitNote": "Reading the first {max} of {total} links",
         "openAria": "Open {host}",
         "removeAria": "Remove {host}"
       },
@@ -7036,9 +7040,12 @@
       "endpointRequired": "Endpoint URL is required for HTTP transport",
       "executionTimeoutMs": "Execution Timeout (ms)",
       "fromPreset": "From preset: {name}",
+      "globalSettings": "Global settings",
+      "globalSettingsDesc": "Defaults that apply to every external agent",
       "maxRetries": "Max Retries",
       "maxRetryDelayMs": "Max Retry Delay (ms)",
       "nameRequired": "Agent name is required",
+      "navGeneral": "General",
       "noAgentsConfigured": "No external agents configured",
       "opencode": {
         "agents": "Agents",
@@ -7066,6 +7073,8 @@
       "permissionPlan": "Plan Mode (No execution)",
       "presetGalleryEmpty": "No presets available.",
       "protocol": "Protocol",
+      "quickConnect": "Connect {name}",
+      "quickDisconnect": "Disconnect {name}",
       "quickStartDescription": "Pick a preset to instantiate an external agent with sensible defaults. You can customize fields after.",
       "quickStartPreset": "Quick start preset",
       "quickStartTitle": "Quick start from preset",
@@ -7073,6 +7082,11 @@
       "retryDelayMs": "Retry Delay (ms)",
       "retryErrorPatterns": "Retry Error Patterns (comma/newline separated)",
       "retryErrorPatternsPlaceholder": "timeout, connection reset",
+      "sectionCodexOptions": "Codex options",
+      "sectionConnection": "Connection",
+      "sectionOpencodeServer": "OpenCode server",
+      "sectionRetry": "Timeout & retry",
+      "sectionRetrySummary": "{timeout}s · {retries} retries",
       "selectPresetOrCustom": "Select a preset or configure manually",
       "showExperimental": "Show experimental",
       "showNotifications": "Show Connection Notifications",
@@ -7180,6 +7194,16 @@
         "turn": "Turn failed"
       },
       "focusTerminal": "Focus terminal",
+      "interrupt": {
+        "error": {
+          "interrupt_identity_mismatch": "That process is no longer the agent — nothing was sent.",
+          "interrupt_not_running": "That session is no longer reachable.",
+          "interrupt_unsupported": "Interrupting isn't supported on this platform.",
+          "unknown": "Could not send the interrupt."
+        },
+        "hint": "Sends one Ctrl-C to the agent, cancelling the current turn. The session keeps running.",
+        "label": "Interrupt this turn"
+      },
       "meta": {
         "model": "Model: {model}",
         "permissionMode": "Permission mode: {mode}"
@@ -8031,7 +8055,7 @@
       "dismiss": "Dismiss",
       "message": "Message {id}: {reason}",
       "retryFromStart": "Retry from start",
-      "retryWarning": "Retrying from the start will re-process the message. Continue?",
+      "retryWarning": "Retrying from the start will re-process the message and may repeat external side effects. Continue?",
       "title": "Inbound recovery",
       "unknown": "Unknown reason"
     },
@@ -8075,6 +8099,7 @@
       "retry": "Retry",
       "status": {
         "deadlettered": "Dead-lettered",
+        "delivery_unknown": "Delivery unknown",
         "failed": "Failed",
         "pending": "Queued",
         "sending": "Sending",
@@ -10067,6 +10092,14 @@
         "failed": "Couldn't send — try again.",
         "request": "Permission: {tool}",
         "requestGeneric": "Permission requested"
+      },
+      "question": {
+        "answered": "Answered.",
+        "controlLost": "Remote control was revoked.",
+        "countdown": "{seconds}s left",
+        "expired": "The answer window closed — answer in the terminal.",
+        "failed": "Could not send the answer.",
+        "submit": "Submit"
       },
       "reply": {
         "failed": "Couldn't send — try again.",
@@ -12151,7 +12184,7 @@
         "total": "Total"
       },
       "empty": "No hotspots recorded yet.",
-      "hint": "Run an operation (send a message, run an OCR, execute a workflow) to populate the table."
+      "hint": "Run an instrumented operation (send a message, run an OCR, run a terminal or git command) to populate the table."
     },
     "managed": {
       "actions": {
@@ -12187,8 +12220,11 @@
         "chatSidecar": "Chat sidecar",
         "codeServer": "Pro IDE (code-server)",
         "externalAgent": "External agents",
+        "headlessTerminal": "Headless shells",
         "integratedTerminal": "Terminals",
-        "mcpServer": "MCP server"
+        "mcpServer": "MCP server",
+        "pluginHost": "Plugin hosts",
+        "tunnel": "Tunnel"
       },
       "summary": {
         "managed": "Managed",
@@ -12274,12 +12310,39 @@
       "workers": "Worker threads"
     },
     "subtitle": "Live view of the Rust backend's process tree, async runtime, and operation hotspots.",
+    "system": {
+      "build": {
+        "appVersion": "App version",
+        "features": "Enabled features",
+        "noFeatures": "No optional features enabled",
+        "profile": "Build profile",
+        "tauriVersion": "Tauri version",
+        "title": "Build"
+      },
+      "error": "Could not read system details.",
+      "hardware": {
+        "cores": "Logical cores",
+        "cpu": "Processor",
+        "title": "Hardware",
+        "totalMemory": "Installed memory",
+        "usedMemory": "Memory in use"
+      },
+      "host": {
+        "arch": "Architecture",
+        "hostname": "Host name",
+        "kernel": "Kernel",
+        "os": "Operating system",
+        "title": "Host"
+      },
+      "loading": "Reading system details…"
+    },
     "tabs": {
       "hotspots": "Hotspots",
       "managed": "Managed",
       "overview": "Performance",
       "processes": "Processes",
-      "runtime": "Async runtime"
+      "runtime": "Async runtime",
+      "system": "System"
     },
     "title": "Performance",
     "toolbar": {
@@ -14125,6 +14188,9 @@
       "empty": "This view container has no views yet.",
       "unavailable": "This view container is no longer available — its plugin may be disabled."
     },
+    "vscodeWebviews": {
+      "empty": "No VS Code extensions registered any webviews yet."
+    },
     "vsixInstall": {
       "cancel": "Cancel",
       "choose": "Choose .vsix file",
@@ -14971,6 +15037,9 @@
     "customProviderModelsManaged": "Custom-provider models are managed inside the provider editor.",
     "customProviders": "Custom Providers",
     "customProvidersDescription": "Add custom API providers with OpenAI, Anthropic, or Gemini protocol.",
+    "customTestError": "Connection failed",
+    "customTestLimited": "Reachable, limited",
+    "customTestSuccess": "Connection successful",
     "dashboard": "Dashboard",
     "deepseek": "DeepSeek",
     "deepseekDescription": "DeepSeek Chat, DeepSeek Reasoner",
@@ -14980,6 +15049,8 @@
     "delete": "Delete",
     "deleteModel": "Delete Model",
     "deleteModelConfirm": "Are you sure you want to delete {model}? This action cannot be undone.",
+    "deleteProviderConfirm": "\"{name}\" and its saved credentials will be removed. This action cannot be undone.",
+    "deleteProviderTitle": "Delete this custom provider?",
     "deleteUnsupported": "Deleting models is not supported for this provider.",
     "detailPanel": {
       "advancedPlaceholder": "Advanced placeholder",
@@ -15332,21 +15403,6 @@
     "popularModels": "Popular Models",
     "port": "Port",
     "presets": "Presets",
-    "presetsView": {
-      "autoRoutingNote": "Preset-based auto-routing is on the roadmap. For now, manually switch providers for different use cases.",
-      "balanced": "Balanced",
-      "balancedDesc": "Weighted blend of speed, cost, and reliability. A good default for most use cases.",
-      "cheapest": "Cheapest",
-      "cheapestDesc": "Optimize for cost. Routes to the provider with lowest per-token pricing for the selected model.",
-      "comingSoon": "Coming Soon",
-      "currentConfig": "Current Configuration",
-      "fastest": "Fastest",
-      "fastestDesc": "Optimize for lowest latency. Routes to the provider with the fastest average response time.",
-      "mostReliable": "Most Reliable",
-      "mostReliableDesc": "Optimize for uptime. Routes to the provider with the best availability record.",
-      "select": "Select",
-      "usingProvider": "Currently using {provider} as the sole chat provider."
-    },
     "pricing": "Pricing",
     "pricingPerMillion": "Pricing (per 1M tokens)",
     "pricingVaries": "Pricing varies",
@@ -15616,11 +15672,14 @@
     },
     "sidebar": {
       "addButton": "Add",
+      "clearFilters": "Clear filters",
       "modelCompare": "Model Compare",
+      "noMatches": "No providers match these filters.",
       "reasonConnected": "Connection verified",
       "reasonError": "Last connection test failed — open to review the error",
       "reasonLimited": "Verified with caveats — could not be fully confirmed in this runtime",
       "reasonUnconfigured": "Add an API key to start using this provider",
+      "reasonUntested": "Credentials saved, but no connection test has run yet.",
       "reasonWarning": "Configured but not verified — open to test the connection",
       "searchPlaceholder": "Search providers...",
       "stats": "{total} providers · {active} connected",
@@ -15630,6 +15689,7 @@
       "statusLabel": "Filter by status",
       "statusLimited": "Limited",
       "statusUnconfigured": "Unconfigured",
+      "statusUntested": "Not tested",
       "statusWarning": "Warning"
     },
     "skip": "Skip",
@@ -15681,7 +15741,6 @@
       "health": "Health",
       "models": "Models",
       "parameters": "Parameters",
-      "presets": "Presets",
       "routing": "Routing"
     },
     "test": "Test",
@@ -21531,12 +21590,25 @@
       },
       "island": {
         "desc": "Dynamic-Island-style always-on-top strip showing live agent sessions near the notch.",
+        "diagnostics": {
+          "copied": "Island diagnostics copied to the clipboard.",
+          "copy": "Copy",
+          "copyFailed": "Could not write to the clipboard.",
+          "desc": "Copy every input the island uses to place itself. Sample it once on a normal Space, once with an app full-screen, and once on an external display.",
+          "label": "Placement diagnostics",
+          "unavailable": "Island diagnostics are only available in the desktop app."
+        },
         "label": "Island overlay",
         "monitor": {
           "label": "Show on display",
           "option": "{name} ({width}×{height})",
           "primary": "Primary display"
         }
+      },
+      "liveness": {
+        "dropping": "Events dropped",
+        "live": "Active · {ago} ago",
+        "silent": "No events yet"
       },
       "monitor": {
         "desc": "Local event ingress for external agent hooks. Runs on the companion server, loopback only.",
@@ -25437,6 +25509,7 @@
         "empty": "No accounts yet. Add one to start using this provider.",
         "inUseByCharacter": "Char: {name}",
         "inUseBySession": "Session: {name}",
+        "inUseMore": "+{count} more",
         "remove": "Remove",
         "removeConfirm": "Remove",
         "removeDialogBody": "The credential will be deleted from the OS keychain. You can sign in again at any time.",
@@ -27681,6 +27754,107 @@
           "hint": "JS expression returning the next accumulator. acc, item, index in scope.",
           "label": "Reducer expression (JS)",
           "placeholder": "acc + item.value"
+        }
+      },
+      "aiBrowserModel": {
+        "cacheEnabled": {
+          "label": "Cache model"
+        },
+        "candidateLabels": {
+          "label": "Candidate labels",
+          "placeholder": "positive, negative"
+        },
+        "device": {
+          "label": "Device"
+        },
+        "dtype": {
+          "label": "Data type"
+        },
+        "hypothesisTemplate": {
+          "label": "Hypothesis template",
+          "placeholder": "This example is '{}'."
+        },
+        "input": {
+          "label": "Input"
+        },
+        "inputJson": {
+          "label": "Input JSON",
+          "placeholder": "Optional structured model input"
+        },
+        "language": {
+          "label": "Language",
+          "placeholder": "en"
+        },
+        "maxCachedModels": {
+          "label": "Cached models"
+        },
+        "maxLength": {
+          "label": "Maximum length"
+        },
+        "maxNewTokens": {
+          "label": "Maximum new tokens"
+        },
+        "modelId": {
+          "label": "Model ID",
+          "placeholder": "Xenova/model-name"
+        },
+        "operation": {
+          "disposeAll": "Dispose all models",
+          "disposeModel": "Dispose model",
+          "infer": "Run inference",
+          "label": "Operation",
+          "preload": "Preload model",
+          "status": "Runtime status"
+        },
+        "preset": {
+          "label": "Model preset",
+          "placeholder": "Select a curated model"
+        },
+        "returnTimestamps": {
+          "label": "Return timestamps",
+          "none": "None",
+          "segment": "Segments",
+          "word": "Words"
+        },
+        "runtime": {
+          "available": "Runtime available",
+          "unavailable": "Runtime unavailable",
+          "wasm": "WASM",
+          "webgpu": "WebGPU"
+        },
+        "task": {
+          "label": "Task"
+        },
+        "tasks": {
+          "audio-classification": "Audio classification",
+          "automatic-speech-recognition": "Automatic speech recognition",
+          "depth-estimation": "Depth estimation",
+          "feature-extraction": "Feature extraction",
+          "fill-mask": "Fill mask",
+          "image-classification": "Image classification",
+          "image-segmentation": "Image segmentation",
+          "image-to-text": "Image to text",
+          "object-detection": "Object detection",
+          "question-answering": "Question answering",
+          "sentence-similarity": "Sentence similarity",
+          "summarization": "Summarization",
+          "text-classification": "Text classification",
+          "text-generation": "Text generation",
+          "text-to-speech": "Text to speech",
+          "text2text-generation": "Text-to-text generation",
+          "token-classification": "Token classification",
+          "translation": "Translation",
+          "zero-shot-classification": "Zero-shot classification",
+          "zero-shot-image-classification": "Zero-shot image classification"
+        },
+        "temperature": {
+          "label": "Temperature"
+        },
+        "timeoutMs": {
+          "label": "Timeout (ms)"
+        },
+        "topK": {
+          "label": "Top K"
         }
       },
       "aiClassify": {
@@ -31427,6 +31601,10 @@
         }
       },
       "ai": {
+        "browserModel": {
+          "description": "Run an explicitly selected Transformers.js model locally in the browser.",
+          "label": "Browser model"
+        },
         "classify": {
           "description": "LLM-based classification into one of N labels.",
           "label": "Classify"

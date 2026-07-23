@@ -2639,6 +2639,7 @@
     "deleteConfirmTitle": "删除 Artifact",
     "noArtifacts": "暂无 Artifact",
     "noArtifactsDesc": "代码片段与生成内容会显示在这里",
+    "noMatches": "没有符合当前筛选的产物",
     "open": "打开",
     "types": {
       "chart": "图表",
@@ -2693,17 +2694,14 @@
       "svgGraphic": "SVG 图形",
       "untitled": "未命名"
     },
-    "designerUnsupportedDescription": "本版本 cognia-next 未集成设计器。Artifact「{title}」在此处为只读。",
-    "designerUnsupportedTitle": "设计器不可用",
     "dock": {
       "artifactMode": "产物",
+      "browseArtifacts": "浏览产物",
       "closeTab": "关闭 {title}",
       "collapse": "折叠面板",
-      "hideHistory": "隐藏产物历史",
       "openArtifacts": "已打开的产物",
       "openInNewTab": "在新标签页打开",
       "saveToProject": "保存到项目…",
-      "showHistory": "显示产物历史",
       "splitView": "分屏",
       "title": "产物",
       "toggleHint": "切换面板 (Ctrl/Cmd+J)",
@@ -2773,6 +2771,11 @@
       "unsupported": "不支持"
     },
     "saveVersion": "保存版本",
+    "scopeLabel": "范围",
+    "scopes": {
+      "recent": "最近",
+      "session": "本会话"
+    },
     "search": "搜索作品...",
     "sheetTitle": "Artifact 面板",
     "title": "作品",
@@ -4064,11 +4067,18 @@
       "ariaToggleWebSearch": "切换网络搜索",
       "ariaUploadImage": "上传文件",
       "attachImageTooltip": "添加文件",
+      "attachMenu": {
+        "file": "上传文件",
+        "folder": "添加文件夹",
+        "trigger": "添加附件"
+      },
       "attachments": {
         "countLimit": "最多只能附加 {max} 个附件。",
         "fallbackFile": "文件",
         "fallbackName": "附件",
         "fileSizeExceeded": "{count, plural, =1 {1 个文件超过} other {# 个文件超过}} {max}MB。",
+        "folderEmpty": "该文件夹中没有可添加的文件。",
+        "folderTruncated": "仅读取了拖入文件夹中的前 {max} 个文件。",
         "linkSkipped": "有 {count} 个链接无法读取，仍会发送原始网址。",
         "optimized": "添加前已优化 {count} 张大图。",
         "oversizeBody": "这些附件大约会增加 {tokens}k tokens 的上下文。仍要发送吗？",
@@ -4107,7 +4117,7 @@
         "title": "查看待处理草稿"
       },
       "dragOverlay": {
-        "dropToAttach": "松开以添加文件"
+        "dropToAttach": "松开以添加文件或文件夹"
       },
       "effort": {
         "aria": "思考等级",
@@ -4141,12 +4151,10 @@
         "trigger": "润色提示词"
       },
       "folder": {
-        "aria": "添加文件夹",
         "confirmAdd": "添加文件夹",
         "confirmBody": "“{name}”包含 {count}+ 个文件，agent 将按需读取。确认加入上下文？",
         "confirmCancel": "取消",
-        "confirmTitle": "添加大文件夹？",
-        "tooltip": "将文件夹加入上下文"
+        "confirmTitle": "添加大文件夹？"
       },
       "followUps": {
         "dismiss": "关闭建议",
@@ -4156,16 +4164,12 @@
       "ghostAcceptHint": "Tab",
       "ghostDismiss": "忽略建议",
       "helperHints": {
-        "dropImages": "拖拽 / 粘贴文件或链接",
+        "dropImages": "拖拽 / 粘贴文件、文件夹或链接",
         "send": "⏎ 发送 · ⇧⏎ 换行",
         "tryPrefix": "试试"
       },
       "links": {
-        "add": "添加链接",
-        "addAction": "附加链接",
-        "inputAria": "网页地址",
-        "inputPlaceholder": "https://example.com",
-        "invalid": "请输入有效的 HTTP(S) 链接。",
+        "limitNote": "共 {total} 个链接，仅读取前 {max} 个",
         "openAria": "打开 {host}",
         "removeAria": "移除 {host}"
       },
@@ -7036,9 +7040,12 @@
       "endpointRequired": "HTTP 传输需要填写 Endpoint URL",
       "executionTimeoutMs": "执行超时（毫秒）",
       "fromPreset": "来自预设：{name}",
+      "globalSettings": "全局设置",
+      "globalSettingsDesc": "对所有外部代理生效的默认行为",
       "maxRetries": "最大重试次数",
       "maxRetryDelayMs": "最大重试间隔（毫秒）",
       "nameRequired": "代理名称不能为空",
+      "navGeneral": "通用",
       "noAgentsConfigured": "尚未配置任何外部代理",
       "opencode": {
         "agents": "智能体",
@@ -7066,6 +7073,8 @@
       "permissionPlan": "计划模式（不执行）",
       "presetGalleryEmpty": "暂无可用预设。",
       "protocol": "协议",
+      "quickConnect": "连接 {name}",
+      "quickDisconnect": "断开 {name}",
       "quickStartDescription": "选择一个预设即可基于合理的默认值创建外部代理，之后可继续自定义。",
       "quickStartPreset": "快速预设",
       "quickStartTitle": "从预设快速创建",
@@ -7073,6 +7082,11 @@
       "retryDelayMs": "重试间隔（毫秒）",
       "retryErrorPatterns": "重试错误模式（逗号或换行分隔）",
       "retryErrorPatternsPlaceholder": "timeout, connection reset",
+      "sectionCodexOptions": "Codex 选项",
+      "sectionConnection": "连接",
+      "sectionOpencodeServer": "OpenCode 服务器",
+      "sectionRetry": "超时与重试",
+      "sectionRetrySummary": "{timeout} 秒 · 重试 {retries} 次",
       "selectPresetOrCustom": "选择预设或手动配置",
       "showExperimental": "显示实验性预设",
       "showNotifications": "显示连接通知",
@@ -7180,6 +7194,16 @@
         "turn": "本轮失败"
       },
       "focusTerminal": "聚焦终端",
+      "interrupt": {
+        "error": {
+          "interrupt_identity_mismatch": "该进程已不是这个 Agent，未发送任何信号。",
+          "interrupt_not_running": "该会话已不可达。",
+          "interrupt_unsupported": "当前平台不支持中断。",
+          "unknown": "中断信号发送失败。"
+        },
+        "hint": "向 Agent 发送一次 Ctrl-C，取消当前回合。会话本身继续运行。",
+        "label": "中断本回合"
+      },
       "meta": {
         "model": "模型：{model}",
         "permissionMode": "权限模式：{mode}"
@@ -8031,7 +8055,7 @@
       "dismiss": "忽略",
       "message": "消息 {id}：{reason}",
       "retryFromStart": "从头重试",
-      "retryWarning": "从头重试会重新处理该消息，是否继续？",
+      "retryWarning": "从头重试会重新处理该消息，并可能重复触发外部副作用。是否继续？",
       "title": "入站恢复",
       "unknown": "未知原因"
     },
@@ -8075,6 +8099,7 @@
       "retry": "重试",
       "status": {
         "deadlettered": "已死信",
+        "delivery_unknown": "投递状态未知",
         "failed": "失败",
         "pending": "排队中",
         "sending": "发送中",
@@ -10067,6 +10092,14 @@
         "failed": "发送失败——请重试。",
         "request": "权限请求：{tool}",
         "requestGeneric": "收到权限请求"
+      },
+      "question": {
+        "answered": "已回答。",
+        "controlLost": "远程控制权限已被撤销。",
+        "countdown": "剩余 {seconds} 秒",
+        "expired": "回答窗口已关闭，请在终端里回答。",
+        "failed": "回答发送失败。",
+        "submit": "提交"
       },
       "reply": {
         "failed": "发送失败——请重试。",
@@ -12151,7 +12184,7 @@
         "total": "合计"
       },
       "empty": "尚未记录到热点。",
-      "hint": "执行一次操作（发送消息、运行 OCR、执行工作流）即可填充该表。"
+      "hint": "执行一次已埋点的操作（发送消息、运行 OCR、执行终端或 git 命令）即可填充该表。"
     },
     "managed": {
       "actions": {
@@ -12187,8 +12220,11 @@
         "chatSidecar": "聊天 sidecar",
         "codeServer": "Pro IDE（code-server）",
         "externalAgent": "外部 Agent",
+        "headlessTerminal": "无头 Shell",
         "integratedTerminal": "集成终端",
-        "mcpServer": "MCP 服务器"
+        "mcpServer": "MCP 服务器",
+        "pluginHost": "插件宿主",
+        "tunnel": "隧道"
       },
       "summary": {
         "managed": "托管进程",
@@ -12274,12 +12310,39 @@
       "workers": "工作线程"
     },
     "subtitle": "实时查看 Rust 后端的进程树、异步运行时与操作热点。",
+    "system": {
+      "build": {
+        "appVersion": "应用版本",
+        "features": "已启用特性",
+        "noFeatures": "未启用任何可选特性",
+        "profile": "构建配置",
+        "tauriVersion": "Tauri 版本",
+        "title": "构建"
+      },
+      "error": "无法读取系统信息。",
+      "hardware": {
+        "cores": "逻辑核心数",
+        "cpu": "处理器",
+        "title": "硬件",
+        "totalMemory": "已装内存",
+        "usedMemory": "已用内存"
+      },
+      "host": {
+        "arch": "架构",
+        "hostname": "主机名",
+        "kernel": "内核",
+        "os": "操作系统",
+        "title": "主机"
+      },
+      "loading": "正在读取系统信息…"
+    },
     "tabs": {
       "hotspots": "热点",
       "managed": "托管进程",
       "overview": "性能",
       "processes": "进程",
-      "runtime": "异步运行时"
+      "runtime": "异步运行时",
+      "system": "系统"
     },
     "title": "性能",
     "toolbar": {
@@ -14125,6 +14188,9 @@
       "empty": "此视图容器还没有任何视图。",
       "unavailable": "此视图容器已不可用——其插件可能已被禁用。"
     },
+    "vscodeWebviews": {
+      "empty": "还没有 VS Code 扩展注册任何 Webview。"
+    },
     "vsixInstall": {
       "cancel": "取消",
       "choose": "选择 .vsix 文件",
@@ -14971,6 +15037,9 @@
     "customProviderModelsManaged": "自定义服务商的模型在服务商编辑器中管理。",
     "customProviders": "自定义服务商",
     "customProvidersDescription": "添加支持 OpenAI、Anthropic 或 Gemini 协议的自定义 API 服务商。",
+    "customTestError": "连接失败",
+    "customTestLimited": "可连接，功能受限",
+    "customTestSuccess": "连接成功",
     "dashboard": "控制台",
     "deepseek": "DeepSeek",
     "deepseekDescription": "DeepSeek Chat、DeepSeek Reasoner",
@@ -14980,6 +15049,8 @@
     "delete": "删除",
     "deleteModel": "删除模型",
     "deleteModelConfirm": "确定要删除 {model} 吗？此操作无法撤销。",
+    "deleteProviderConfirm": "将移除“{name}”及其已保存的凭据。此操作无法撤销。",
+    "deleteProviderTitle": "删除这个自定义提供商？",
     "deleteUnsupported": "该 provider 不支持删除模型。",
     "detailPanel": {
       "advancedPlaceholder": "高级占位",
@@ -15332,21 +15403,6 @@
     "popularModels": "热门模型",
     "port": "端口",
     "presets": "预设",
-    "presetsView": {
-      "autoRoutingNote": "基于预设的自动路由功能正在开发中。目前请根据场景手动切换服务商。",
-      "balanced": "均衡模式",
-      "balancedDesc": "速度、成本和可靠性的加权混合。适合大多数场景的默认选择。",
-      "cheapest": "最低成本",
-      "cheapestDesc": "优化成本。路由到所选模型每 Token 定价最低的服务商。",
-      "comingSoon": "即将推出",
-      "currentConfig": "当前配置",
-      "fastest": "最快速度",
-      "fastestDesc": "优化最低延迟。路由到平均响应速度最快的服务商。",
-      "mostReliable": "最可靠",
-      "mostReliableDesc": "优化可用性。路由到可用性记录最好的服务商。",
-      "select": "选择",
-      "usingProvider": "当前使用 {provider} 作为唯一对话服务商。"
-    },
     "pricing": "定价",
     "pricingPerMillion": "定价（每百万 Token）",
     "pricingVaries": "价格不等",
@@ -15616,11 +15672,14 @@
     },
     "sidebar": {
       "addButton": "添加",
+      "clearFilters": "清除筛选",
       "modelCompare": "模型对比",
+      "noMatches": "没有提供商符合当前筛选条件。",
       "reasonConnected": "连接已验证",
       "reasonError": "上次连接测试失败 — 打开查看错误详情",
       "reasonLimited": "已验证但存在局限 — 无法在当前运行环境中完全确认",
       "reasonUnconfigured": "添加 API 密钥以开始使用该提供商",
+      "reasonUntested": "凭据已保存，但尚未运行连接测试。",
       "reasonWarning": "已配置但未验证 — 打开以测试连接",
       "searchPlaceholder": "搜索提供商...",
       "stats": "{total} 个提供商 · {active} 已连接",
@@ -15630,6 +15689,7 @@
       "statusLabel": "按状态筛选",
       "statusLimited": "受限",
       "statusUnconfigured": "未配置",
+      "statusUntested": "未测试",
       "statusWarning": "警告"
     },
     "skip": "跳过",
@@ -15681,7 +15741,6 @@
       "health": "健康",
       "models": "模型管理",
       "parameters": "参数",
-      "presets": "预设",
       "routing": "路由"
     },
     "test": "测试",
@@ -21531,12 +21590,25 @@
       },
       "island": {
         "desc": "刘海附近的置顶状态条，实时显示各 Agent 会话。",
+        "diagnostics": {
+          "copied": "灵动岛诊断信息已复制到剪贴板。",
+          "copy": "复制",
+          "copyFailed": "无法写入剪贴板。",
+          "desc": "复制灵动岛定位所依赖的全部输入。请分别在普通桌面、有 App 全屏时、以及外接显示器上各取一次。",
+          "label": "定位诊断",
+          "unavailable": "灵动岛诊断信息仅在桌面端可用。"
+        },
         "label": "灵动岛悬浮层",
         "monitor": {
           "label": "显示在哪个屏幕",
           "option": "{name}（{width}×{height}）",
           "primary": "主显示器"
         }
+      },
+      "liveness": {
+        "dropping": "事件被丢弃",
+        "live": "活跃 · {ago}前",
+        "silent": "尚未收到事件"
       },
       "monitor": {
         "desc": "外部 Agent hook 的本地事件入口。运行在 companion 服务器上，仅监听回环地址。",
@@ -25437,6 +25509,7 @@
         "empty": "暂无账号。先添加一个再使用此服务商。",
         "inUseByCharacter": "角色：{name}",
         "inUseBySession": "会话：{name}",
+        "inUseMore": "另有 {count} 项",
         "remove": "删除",
         "removeConfirm": "删除",
         "removeDialogBody": "凭证会从 OS 系统钥匙串中移除。随时可以重新登录。",
@@ -27681,6 +27754,107 @@
           "hint": "返回新累加器的 JS 表达式。作用域内有 acc、item、index。",
           "label": "归约表达式 (JS)",
           "placeholder": "acc + item.value"
+        }
+      },
+      "aiBrowserModel": {
+        "cacheEnabled": {
+          "label": "缓存模型"
+        },
+        "candidateLabels": {
+          "label": "候选标签",
+          "placeholder": "正向, 负向"
+        },
+        "device": {
+          "label": "设备"
+        },
+        "dtype": {
+          "label": "数据类型"
+        },
+        "hypothesisTemplate": {
+          "label": "假设模板",
+          "placeholder": "这个示例是 '{}'。"
+        },
+        "input": {
+          "label": "输入"
+        },
+        "inputJson": {
+          "label": "输入 JSON",
+          "placeholder": "可选的结构化模型输入"
+        },
+        "language": {
+          "label": "语言",
+          "placeholder": "zh"
+        },
+        "maxCachedModels": {
+          "label": "缓存模型数"
+        },
+        "maxLength": {
+          "label": "最大长度"
+        },
+        "maxNewTokens": {
+          "label": "最大新令牌数"
+        },
+        "modelId": {
+          "label": "模型 ID",
+          "placeholder": "Xenova/model-name"
+        },
+        "operation": {
+          "disposeAll": "释放所有模型",
+          "disposeModel": "释放模型",
+          "infer": "运行推理",
+          "label": "操作",
+          "preload": "预加载模型",
+          "status": "运行时状态"
+        },
+        "preset": {
+          "label": "模型预设",
+          "placeholder": "选择精选模型"
+        },
+        "returnTimestamps": {
+          "label": "返回时间戳",
+          "none": "不返回",
+          "segment": "分段",
+          "word": "逐词"
+        },
+        "runtime": {
+          "available": "运行时可用",
+          "unavailable": "运行时不可用",
+          "wasm": "WASM",
+          "webgpu": "WebGPU"
+        },
+        "task": {
+          "label": "任务"
+        },
+        "tasks": {
+          "audio-classification": "音频分类",
+          "automatic-speech-recognition": "自动语音识别",
+          "depth-estimation": "深度估计",
+          "feature-extraction": "特征提取",
+          "fill-mask": "掩码填充",
+          "image-classification": "图像分类",
+          "image-segmentation": "图像分割",
+          "image-to-text": "图像转文本",
+          "object-detection": "目标检测",
+          "question-answering": "问答",
+          "sentence-similarity": "句子相似度",
+          "summarization": "摘要",
+          "text-classification": "文本分类",
+          "text-generation": "文本生成",
+          "text-to-speech": "文本转语音",
+          "text2text-generation": "文本到文本生成",
+          "token-classification": "词元分类",
+          "translation": "翻译",
+          "zero-shot-classification": "零样本分类",
+          "zero-shot-image-classification": "零样本图像分类"
+        },
+        "temperature": {
+          "label": "温度"
+        },
+        "timeoutMs": {
+          "label": "超时（毫秒）"
+        },
+        "topK": {
+          "label": "Top K"
         }
       },
       "aiClassify": {
@@ -31427,6 +31601,10 @@
         }
       },
       "ai": {
+        "browserModel": {
+          "description": "在浏览器中本地运行明确选择的 Transformers.js 模型。",
+          "label": "浏览器模型"
+        },
         "classify": {
           "description": "基于 LLM 把输入分到 N 个标签之一。",
           "label": "分类"
