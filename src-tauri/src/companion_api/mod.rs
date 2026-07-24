@@ -45,6 +45,7 @@ pub mod event_bus;
 pub mod healthz;
 pub mod idempotency;
 pub mod jwt;
+pub mod lark_entry;
 pub mod mdns;
 pub mod metrics;
 pub mod middleware;

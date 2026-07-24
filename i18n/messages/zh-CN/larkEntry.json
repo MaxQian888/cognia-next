@@ -1,0 +1,15 @@
+{
+  "errors": {
+    "entry_consumed": "该链接已被使用，请在飞书中重新获取。",
+    "entry_expired": "该链接已过期，请在飞书中重新获取。",
+    "entry_missing": "链接不完整，请从飞书重新打开。",
+    "forbidden": "你没有访问该会话的权限。",
+    "resolve_failed": "链接校验失败，请重试。",
+    "timeout": "校验超时，请重试。",
+    "unbound": "你的飞书账号尚未关联 Cognia，请联系管理员完成绑定。"
+  },
+  "loginRedirect": "正在跳转到飞书登录…",
+  "openWorkbench": "打开工作台",
+  "resolving": "正在校验链接…",
+  "title": "Cognia 入口"
+}

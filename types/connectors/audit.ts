@@ -114,6 +114,12 @@ export type AuditKind =
   // executes; its growth curve is the gray-release signal for enforcing.
   | "callback.forbidden"
   | "callback.authorization_would_deny"
+  // ── Lark entry surfaces (plan 2026-07-24 Phase 3) ────────────────────
+  // Entry-token lifecycle as observed by the brain: `entry.consumed` mirrors
+  // the companion's single-use redemption into the durable ledger;
+  // `entry.denied` records surface-resolve rejections (membership denied).
+  | "entry.consumed"
+  | "entry.denied"
   // ── Feishu unified identity (plan 2026-07-24 Phase 1) ────────────────
   // Principal registry outcomes. `principal.unbound` fields carry
   // {tenantKey?, appId?, openIdHash, reason} — the raw open_id never lands

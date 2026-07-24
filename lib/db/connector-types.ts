@@ -1050,6 +1050,86 @@ export interface FeishuPrincipalRow {
   version: number
 }
 
+// ─── Lark entry surfaces (plan 2026-07-24, Phases 3-5; Dexie v126) ──────────
+
+/**
+ * Brain-side ledger of issued personal entry tokens (jti-keyed). The Rust
+ * companion enforces single-use via its in-process LRU; this ledger is the
+ * durable audit/ops view (issued → consumed) that survives restarts.
+ */
+export interface LarkEntryContextRow {
+  /** Token jti. */
+  id: string
+  adapterId: string
+  principalId: string
+  accountId: string
+  entryType: string
+  conversationKey: string
+  sessionId?: string
+  issuedAt: number
+  expiresAt: number
+  consumedAt?: number
+}
+
+export type LarkChatSurfaceType = "chat_tab" | "group_menu"
+
+export type LarkChatSurfaceStatus = "pending" | "synced" | "error" | "rebuild_required" | "removed"
+
+/** Reconcile state for one platform-side chat surface (Chat Tab / 群菜单). */
+export interface LarkChatSurfaceRow {
+  adapterId: string
+  chatId: string
+  surfaceType: LarkChatSurfaceType
+  tenantKey?: string
+  appId?: string
+  /** Platform-side id of the created tab / menu, when known. */
+  platformSurfaceId?: string
+  urlVersion: number
+  desiredUrl?: string
+  status: LarkChatSurfaceStatus
+  attempt: number
+  nextAttemptAt?: number
+  lastSyncAt?: number
+  lastError?: string
+  createdAt: number
+  updatedAt: number
+}
+
+/** Idempotency + provenance record for one message-shortcut import. */
+export interface LarkMessageImportRow {
+  id: string
+  /** sha256(adapterId + chatId + sorted messageIds) — replay returns the row. */
+  sourceHash: string
+  adapterId: string
+  chatId: string
+  conversationKey: string
+  sessionId: string
+  messageIds: string[]
+  /** Per-message skip reasons (recalled, unsupported, fetch_failed …). */
+  skipped?: Array<{ messageId: string; reason: string }>
+  createdAt: number
+}
+
+/**
+ * Ledger of web SSO sessions the brain has SEEN (via entry resolves /
+ * intents). Enforcement lives in the token TTL; this row enables a future
+ * revocation UI and the audit trail. Keyed by a hash of the session jti —
+ * the raw token never lands in Dexie.
+ */
+export interface LarkWebSessionRow {
+  /** sha256 hash (first 12) of the session jti. */
+  id: string
+  adapterId: string
+  principalId?: string
+  openIdHash: string
+  tenantKey: string
+  appId: string
+  issuedAt: number
+  expiresAt: number
+  lastSeenAt: number
+  revokedAt?: number
+}
+
 export type FeishuBindRequestStatus = "pending" | "approved" | "rejected" | "expired"
 
 /**

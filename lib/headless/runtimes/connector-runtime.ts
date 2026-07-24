@@ -26,6 +26,7 @@ import {
 } from "@/lib/connectors/tauri/commands"
 import { setConnectorListen, type ConnectorListenFn } from "@/lib/connectors/events"
 import { installConnectorRuntime } from "@/lib/connectors/bootstrap/install-connector-runtime"
+import { installLarkIntentHandler } from "@/lib/connectors/entry/consumed-handler"
 
 import { registerHeadlessRuntime } from "../registry"
 
@@ -81,7 +82,12 @@ registerHeadlessRuntime({
       skipHostGate: true,
       log: (level, message) => ctx.log(level, message),
     })
+    // Lark entry surface intents (plan 2026-07-24 P3): the companion front
+    // door parks surface resolves / consumption reports on the event bus;
+    // this brain-side handler answers them (membership checks + ledger).
+    const disposeLarkIntents = installLarkIntentHandler(headlessConnectorListen)
     return () => {
+      disposeLarkIntents()
       dispose()
       setConnectorCommandInvoker(prevInvoker)
       setConnectorListen(prevListen)

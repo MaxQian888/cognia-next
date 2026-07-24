@@ -20,6 +20,41 @@ static RPC_ERRORS_TOTAL: AtomicU64 = AtomicU64::new(0);
 static AUTH_FAILURES_TOTAL: AtomicU64 = AtomicU64::new(0);
 static WS_CLIENTS_ACTIVE: AtomicI64 = AtomicI64::new(0);
 
+// ── Lark dual-entry counters (plan 2026-07-24 P6.2) ─────────────────────────
+// Bumped by the `/integrations/lark/*` handlers directly and by the brain via
+// the `lark_metrics_record` RPC arm (hardcoded name allowlist below — the
+// brain cannot mint arbitrary series).
+static LARK_SSO_LOGINS_TOTAL: AtomicU64 = AtomicU64::new(0);
+static LARK_SSO_FAILURES_TOTAL: AtomicU64 = AtomicU64::new(0);
+static LARK_ENTRY_RESOLVE_OK_TOTAL: AtomicU64 = AtomicU64::new(0);
+static LARK_ENTRY_RESOLVE_DENIED_TOTAL: AtomicU64 = AtomicU64::new(0);
+static LARK_PRINCIPAL_UNBOUND_TOTAL: AtomicU64 = AtomicU64::new(0);
+static LARK_CALLBACK_AUTH_DENIED_TOTAL: AtomicU64 = AtomicU64::new(0);
+static LARK_CHAT_TAB_SYNC_FAILURES_TOTAL: AtomicU64 = AtomicU64::new(0);
+static LARK_NATIVE_SLASH_TOTAL: AtomicU64 = AtomicU64::new(0);
+static LARK_MESSAGE_IMPORTS_TOTAL: AtomicU64 = AtomicU64::new(0);
+static LARK_MESSAGE_IMPORT_DENIED_TOTAL: AtomicU64 = AtomicU64::new(0);
+
+/// Bump one Lark counter by its exposition name (without the `cognia_`
+/// prefix). Returns `false` for unknown names so the RPC arm can reject them.
+pub fn record_lark_counter(name: &str) -> bool {
+    let counter = match name {
+        "lark_sso_logins_total" => &LARK_SSO_LOGINS_TOTAL,
+        "lark_sso_failures_total" => &LARK_SSO_FAILURES_TOTAL,
+        "lark_entry_resolve_ok_total" => &LARK_ENTRY_RESOLVE_OK_TOTAL,
+        "lark_entry_resolve_denied_total" => &LARK_ENTRY_RESOLVE_DENIED_TOTAL,
+        "lark_principal_unbound_total" => &LARK_PRINCIPAL_UNBOUND_TOTAL,
+        "lark_callback_auth_denied_total" => &LARK_CALLBACK_AUTH_DENIED_TOTAL,
+        "lark_chat_tab_sync_failures_total" => &LARK_CHAT_TAB_SYNC_FAILURES_TOTAL,
+        "lark_native_slash_total" => &LARK_NATIVE_SLASH_TOTAL,
+        "lark_message_imports_total" => &LARK_MESSAGE_IMPORTS_TOTAL,
+        "lark_message_import_denied_total" => &LARK_MESSAGE_IMPORT_DENIED_TOTAL,
+        _ => return false,
+    };
+    counter.fetch_add(1, Ordering::Relaxed);
+    true
+}
+
 /// Force `STARTED_AT` early so uptime measures boot, not first scrape.
 pub fn init() {
     Lazy::force(&STARTED_AT);
@@ -95,6 +130,63 @@ pub fn render_prometheus() -> String {
         "Open /ws/v1/events client connections.",
         WS_CLIENTS_ACTIVE.load(Ordering::Relaxed).max(0),
     );
+
+    // Lark dual-entry counters (plan 2026-07-24 P6.2).
+    let lark_series: &[(&str, &AtomicU64, &str)] = &[
+        (
+            "cognia_lark_sso_logins_total",
+            &LARK_SSO_LOGINS_TOTAL,
+            "Successful Lark web SSO callbacks (session issued).",
+        ),
+        (
+            "cognia_lark_sso_failures_total",
+            &LARK_SSO_FAILURES_TOTAL,
+            "Lark web SSO failures (invalid state, exchange errors).",
+        ),
+        (
+            "cognia_lark_entry_resolve_ok_total",
+            &LARK_ENTRY_RESOLVE_OK_TOTAL,
+            "Entry-context tokens resolved successfully.",
+        ),
+        (
+            "cognia_lark_entry_resolve_denied_total",
+            &LARK_ENTRY_RESOLVE_DENIED_TOTAL,
+            "Entry-context resolutions denied (expired/replayed/forbidden).",
+        ),
+        (
+            "cognia_lark_principal_unbound_total",
+            &LARK_PRINCIPAL_UNBOUND_TOTAL,
+            "Inbound Lark events rejected because the sender is unbound.",
+        ),
+        (
+            "cognia_lark_callback_auth_denied_total",
+            &LARK_CALLBACK_AUTH_DENIED_TOTAL,
+            "Connector callbacks denied by the authorization guard.",
+        ),
+        (
+            "cognia_lark_chat_tab_sync_failures_total",
+            &LARK_CHAT_TAB_SYNC_FAILURES_TOTAL,
+            "Chat Tab reconcile attempts that ended in error.",
+        ),
+        (
+            "cognia_lark_native_slash_total",
+            &LARK_NATIVE_SLASH_TOTAL,
+            "Native Lark slash-command events dispatched.",
+        ),
+        (
+            "cognia_lark_message_imports_total",
+            &LARK_MESSAGE_IMPORTS_TOTAL,
+            "Message-shortcut imports completed.",
+        ),
+        (
+            "cognia_lark_message_import_denied_total",
+            &LARK_MESSAGE_IMPORT_DENIED_TOTAL,
+            "Message-shortcut imports denied (permission/limit).",
+        ),
+    ];
+    for (name, counter, help) in lark_series {
+        push_metric(&mut out, name, "counter", help, counter.load(Ordering::Relaxed));
+    }
 
     // Supervision blocks (headless installs only; 0/absent on desktop).
     if let Some(status) = crate::headless::brain::brain_status() {
@@ -176,5 +268,30 @@ mod tests {
         assert!(value(&after, "cognia_rpc_errors_total") >= 1);
         assert!(value(&after, "cognia_auth_failures_total") >= 1);
         ws_client_disconnected();
+    }
+
+    #[test]
+    fn lark_counters_are_allowlisted_and_exposed() {
+        // Unknown names are rejected — the brain cannot mint new series.
+        assert!(!record_lark_counter("lark_made_up_total"));
+        assert!(!record_lark_counter("rpc_calls_total"));
+
+        assert!(record_lark_counter("lark_sso_logins_total"));
+        assert!(record_lark_counter("lark_entry_resolve_denied_total"));
+        let text = render_prometheus();
+        for name in [
+            "cognia_lark_sso_logins_total",
+            "cognia_lark_sso_failures_total",
+            "cognia_lark_entry_resolve_ok_total",
+            "cognia_lark_entry_resolve_denied_total",
+            "cognia_lark_principal_unbound_total",
+            "cognia_lark_callback_auth_denied_total",
+            "cognia_lark_chat_tab_sync_failures_total",
+            "cognia_lark_native_slash_total",
+            "cognia_lark_message_imports_total",
+            "cognia_lark_message_import_denied_total",
+        ] {
+            assert!(text.contains(name), "missing series {name}");
+        }
     }
 }

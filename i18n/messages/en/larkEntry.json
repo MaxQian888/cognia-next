@@ -1,0 +1,15 @@
+{
+  "errors": {
+    "entry_consumed": "This link was already used. Ask the bot for a fresh link.",
+    "entry_expired": "This link has expired. Ask the bot for a fresh link.",
+    "entry_missing": "This link is incomplete — open it again from Feishu.",
+    "forbidden": "You don't have access to this conversation.",
+    "resolve_failed": "Could not verify this link. Please try again.",
+    "timeout": "Verification timed out. Please try again.",
+    "unbound": "Your Feishu account is not linked to Cognia yet. Ask your administrator to complete the binding."
+  },
+  "loginRedirect": "Redirecting to Feishu sign-in…",
+  "openWorkbench": "Open workbench",
+  "resolving": "Verifying your link…",
+  "title": "Cognia entry"
+}

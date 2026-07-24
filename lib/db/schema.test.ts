@@ -240,6 +240,16 @@ describe("getDb", () => {
     )
   })
 
+  it("v126 opens the Lark entry-surface tables", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(126)
+    expect(db.larkEntryContexts.schema.primKey.name).toBe("id")
+    expect(db.larkChatSurfaces.schema.primKey.name).toBe("[adapterId+chatId+surfaceType]")
+    expect(db.larkMessageImports.schema.indexes.map((index) => index.name)).toContain("sourceHash")
+    expect(db.larkWebSessions.schema.primKey.name).toBe("id")
+  })
+
   it("v125 opens the Feishu unified identity registry tables", async () => {
     const db = getDb()
     await db.open()

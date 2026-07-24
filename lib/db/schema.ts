@@ -76,6 +76,10 @@ import type {
   FeishuTenantRow,
   FeishuPrincipalRow,
   FeishuPrincipalBindRequestRow,
+  LarkEntryContextRow,
+  LarkChatSurfaceRow,
+  LarkMessageImportRow,
+  LarkWebSessionRow,
 } from "./connector-types"
 import type {
   ConversationLabelRow,
@@ -337,6 +341,15 @@ export class CogniaDB extends Dexie {
   feishuTenants!: Table<FeishuTenantRow, string>
   feishuPrincipals!: Table<FeishuPrincipalRow, string>
   feishuPrincipalBindRequests!: Table<FeishuPrincipalBindRequestRow, string>
+  // v126 — Lark entry surfaces (plan 2026-07-24 Phases 3-5): entry-token
+  // ledger, Chat Tab / group-menu reconcile state, message-shortcut import
+  // idempotency, and the web-session audit ledger. CRUD in
+  // `lib/db/lark-entry.ts`, `lib/db/lark-chat-surfaces.ts`,
+  // `lib/db/lark-message-imports.ts`.
+  larkEntryContexts!: Table<LarkEntryContextRow, string>
+  larkChatSurfaces!: Table<LarkChatSurfaceRow, [string, string, string]>
+  larkMessageImports!: Table<LarkMessageImportRow, string>
+  larkWebSessions!: Table<LarkWebSessionRow, string>
   // v123 — Certification projection (ADR-0090 Phase 5). See `lib/db/agent-compatibility.ts`.
   agentCompatibilityRecords!: Table<AgentCompatibilityRecordRow, string>
   // v124 — Canonical-session header projection (ADR-0090 Phase 8). See
@@ -2747,6 +2760,17 @@ export class CogniaDB extends Dexie {
       feishuPrincipals:
         "&id, &[tenantKey+appId+openId], [tenantKey+appId], cogniaUserId, platformIdentityId, status, updatedAt",
       feishuPrincipalBindRequests: "&id, openId, adapterId, status, requestedAt, expiresAt",
+    })
+
+    // v126 — Lark entry surfaces (plan 2026-07-24 Phases 3-5). Pure
+    // additions: token ledger (jti-keyed), chat-surface reconcile state
+    // (compound primary key — one row per adapter/chat/surface), shortcut
+    // import idempotency (unique sourceHash), web-session audit ledger.
+    this.version(126).stores({
+      larkEntryContexts: "&id, adapterId, principalId, accountId, entryType, expiresAt",
+      larkChatSurfaces: "&[adapterId+chatId+surfaceType], adapterId, status, nextAttemptAt",
+      larkMessageImports: "&id, &sourceHash, [adapterId+chatId], sessionId, createdAt",
+      larkWebSessions: "&id, adapterId, principalId, expiresAt",
     })
 
     // First full-chain construction under Jest: cache the merged spec so every

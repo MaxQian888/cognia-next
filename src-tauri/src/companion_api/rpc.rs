@@ -620,6 +620,11 @@ const KNOWN_COMMANDS: &[&str] = &[
     "browser_set_zoom",
     "browser_find",
     "browser_find_clear",
+    // Lark dual-entry (plan 2026-07-24) — brain-only token minting, intent
+    // completion, and allowlisted metric bumps. All SERVICE_ONLY.
+    "lark_entry_issue",
+    "lark_result_complete",
+    "lark_metrics_record",
 ];
 
 /// Public read-only accessor for the dispatch allowlist. Used by the
@@ -1103,6 +1108,12 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "provider_profiles_list",
     "provider_profiles_import",
     "provider_profiles_version",
+    // Lark dual-entry (plan 2026-07-24): token minting binds principals to
+    // accounts, intent completion feeds browser-visible results, and metric
+    // names are allowlisted — none of it is a paired-device capability.
+    "lark_entry_issue",
+    "lark_result_complete",
+    "lark_metrics_record",
 ];
 
 static SERVICE_ONLY_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
@@ -4909,6 +4920,17 @@ pub(super) async fn dispatch(
                 .await
                 .map(|()| Value::Null)
                 .map_err(RpcError::internal)
+        }
+
+        // ── Lark dual-entry (plan 2026-07-24, service scope) ─────────────────
+        "lark_entry_issue" => {
+            super::lark_entry::rpc_entry_issue(state, &args).map_err(RpcError::internal)
+        }
+        "lark_result_complete" => {
+            super::lark_entry::rpc_result_complete(&args).map_err(RpcError::internal)
+        }
+        "lark_metrics_record" => {
+            super::lark_entry::rpc_metrics_record(&args).map_err(RpcError::internal)
         }
 
         unknown => Err(RpcError::unknown_command(unknown)),

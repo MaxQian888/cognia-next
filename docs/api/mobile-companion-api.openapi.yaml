@@ -11088,6 +11088,103 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/RpcError" }
 
+  /api/v1/_rpc/lark_entry_issue:
+    post:
+      operationId: rpcLarkEntryIssue
+      tags: [rpc-lark]
+      summary: Mint a Lark entry-context or surface token (service scope).
+      description: >
+        Headless-brain-only (service JWT). `kind: "entry"` mints a 300-second
+        single-use personal entry token binding a resolved principal + verified
+        platform identity to a conversation; `kind: "surface"` mints a
+        long-lived integrity-only descriptor baked into Chat Tab / group-menu
+        URLs. Tokens are HS256 over the companion secret and are consumed by
+        `POST /integrations/lark/entry/resolve`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind]
+              properties:
+                kind: { type: string, enum: [entry, surface] }
+                principalId: { type: string }
+                accountId: { type: string }
+                openId: { type: string }
+                tenantKey: { type: string }
+                appId: { type: string }
+                adapterId: { type: string }
+                entryType: { type: string }
+                conversationKey: { type: string }
+                sessionId: { type: string }
+                chatId: { type: string }
+                surface: { type: string, enum: [chat_tab, group_menu] }
+                urlVersion: { type: integer }
+      responses:
+        "200":
+          description: Token minted. Entry kind also returns jti + expiresAt.
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { description: Requires the headless service token. }
+        "500":
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RpcError" }
+
+  /api/v1/_rpc/lark_result_complete:
+    post:
+      operationId: rpcLarkResultComplete
+      tags: [rpc-lark]
+      summary: Complete an async Lark intent (service scope).
+      description: >
+        The headless brain posts the outcome of an intent registered by the
+        Lark entry surface (surface resolves, message-shortcut imports,
+        plus-menu creates). Browsers observe it via
+        `GET /integrations/lark/intent/{requestId}`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId]
+              properties:
+                requestId: { type: string }
+                result: { description: Arbitrary JSON result on success. }
+                error: { type: string }
+      responses:
+        "200": { description: "`{accepted}` — false when the id is unknown." }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { description: Requires the headless service token. }
+
+  /api/v1/_rpc/lark_metrics_record:
+    post:
+      operationId: rpcLarkMetricsRecord
+      tags: [rpc-lark]
+      summary: Bump an allowlisted Lark counter (service scope).
+      description: >
+        Fire-and-forget metric bump from the headless brain. Names are
+        hardcoded in `metrics.rs::record_lark_counter` — unknown names are
+        rejected, so the brain cannot mint arbitrary Prometheus series.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        "200": { description: Counter bumped. }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { description: Requires the headless service token. }
+        "500":
+          description: Unknown metric name.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RpcError" }
+
 # ───────────────────────────────────────────────────────────────────────────
 # components
 # ───────────────────────────────────────────────────────────────────────────

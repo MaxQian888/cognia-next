@@ -281,6 +281,10 @@ pub fn build_router(state: SharedState) -> Router {
             middleware::require_device_jwt,
         ));
 
+    // Lark dual-entry public surface (plan 2026-07-24) — cloned handle so the
+    // headless-only nest below can outlive the `with_state` move.
+    let lark_entry_state = state.clone();
+
     let mut router = Router::new()
         .merge(metered_pre_auth_routes)
         .merge(unmetered_public_routes)
@@ -318,6 +322,15 @@ pub fn build_router(state: SharedState) -> Router {
             crate::connectors::axum_app::build_router(services.connectors.clone(), emitter)
                 .layer(from_fn(middleware::pre_auth_rate_limit));
         router = router.nest("/connectors", connectors_router);
+
+        // Lark dual-entry surface (plan 2026-07-24 P3): web SSO, entry-token
+        // resolution, and intent polling. Public by design (SSO happens before
+        // any token exists) but headless-only and rate-limited; tokens are
+        // HS256 over the companion secret, and the app secret never leaves
+        // the Rust process (code exchange happens in `lark_entry.rs`).
+        let lark_router = crate::companion_api::lark_entry::router(lark_entry_state)
+            .layer(from_fn(middleware::pre_auth_rate_limit));
+        router = router.nest("/integrations/lark", lark_router);
     }
 
     // Body-size limit applied to all routes (incl. the ingress — Lark/Slack
