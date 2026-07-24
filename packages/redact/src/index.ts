@@ -12,6 +12,7 @@
  *   • Emails        — RFC-5322 simplified
  *   • Phone numbers — Mainland China mobile (11 digits) + intl E.164 + US
  *   • CN national ID (18 digits, optional X check char)
+ *   • US SSN       — dashed 9-digit form, excluding unassigned area/group/serial ranges
  *   • Bank cards    — 13–19 digits, contiguous OR single space/dash separated
  *                     (the human-written `4111 1111 1111 1111` form), Luhn-checked
  *   • Names         — only the names passed in `nameHints` (chat speakers, email
@@ -49,6 +50,7 @@ export const PII_KINDS = [
   "EMAIL",
   "PHONE",
   "CN_ID",
+  "SSN",
   "BANK_CARD",
   "NAME",
   "IP_ADDR",
@@ -91,6 +93,10 @@ const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g
 const PHONE_RE = /\b(?:\+\d{1,3}[\s-]?)?(?:1\d{10}|\d{3}[\s-]?\d{3,4}[\s-]?\d{4}|\d{10,11})\b/g
 // CN national ID: 17 digits + (digit | X | x).
 const CN_ID_RE = /\b\d{17}[\dXx]\b/g
+// US Social Security number in its unambiguous dashed form. Bare 9-digit
+// strings are intentionally excluded to avoid treating timestamps and ids as
+// SSNs. Area 000/666/900-999, group 00, and serial 0000 are unassigned.
+const SSN_RE = /\b\d{3}-\d{2}-\d{4}\b/g
 // Bank cards: 13–19 digits, contiguous OR with a single space/dash between each
 // digit (the human-written `4111 1111 1111 1111` / `4111-1111-1111-1111` form).
 // The `\b…\b` anchors keep it from grabbing a slice of a longer digit run. The
@@ -178,6 +184,11 @@ function luhn(digits: string): boolean {
   return sum % 10 === 0
 }
 
+function isValidUsSsn(value: string): boolean {
+  const [area, group, serial] = value.split("-").map((part) => Number.parseInt(part, 10))
+  return area > 0 && area !== 666 && area < 900 && group > 0 && serial > 0
+}
+
 function pad(n: number): string {
   return String(n).padStart(3, "0")
 }
@@ -257,6 +268,7 @@ export function redactText(text: string, nameHints: Iterable<string> = []): Reda
     luhn(m.replace(/[ -]/g, "")) ? tokenize(state, "BANK_CARD", m) : m
   )
   out = out.replace(CN_ID_RE, (m) => tokenize(state, "CN_ID", m))
+  out = out.replace(SSN_RE, (m) => (isValidUsSsn(m) ? tokenize(state, "SSN", m) : m))
   // Passport before phone: phones don't have leading letters, but passport
   // numbers often share digit lengths. Run passport first to claim them.
   out = out.replace(PASSPORT_RE, (m) => tokenize(state, "PASSPORT", m))
@@ -398,6 +410,9 @@ export function hasNoLeakingPii(text: string): boolean {
   // shared global's `lastIndex`.
   if (EMAIL_DETECT.test(text)) return false
   if (CN_ID_DETECT.test(text)) return false
+  for (const match of text.matchAll(SSN_RE)) {
+    if (isValidUsSsn(match[0])) return false
+  }
   if (API_KEY_DETECT.test(text)) return false
   if (API_KEY_HINT_DETECT.test(text)) return false
   if (JWT_DETECT.test(text)) return false

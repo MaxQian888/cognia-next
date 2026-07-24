@@ -34,6 +34,17 @@ describe("redactText", () => {
     expect(unredactText(redacted, map)).toBe(original)
   })
 
+  it("redacts valid dashed US SSNs and leaves unassigned ranges unchanged", () => {
+    const original = "SSN 123-45-6789; invalid 000-45-6789 and 900-12-3456."
+    const { redacted, map } = redactText(original)
+    expect(redacted).toContain("<SSN_001>")
+    expect(redacted).toContain("000-45-6789")
+    expect(redacted).toContain("900-12-3456")
+    expect(unredactText(redacted, map)).toBe(original)
+    expect(hasNoLeakingPii(original)).toBe(false)
+    expect(hasNoLeakingPii(redacted)).toBe(true)
+  })
+
   it("redacts Luhn-valid bank-card numbers but leaves random 16-digit non-cards alone", () => {
     // 4111111111111111 is the well-known Visa test card (Luhn-valid).
     // 1234567890123456 fails Luhn.
@@ -450,6 +461,7 @@ describe("placeholder pattern single-source (PII_KINDS)", () => {
       EMAIL: "mail alice@example.com",
       PHONE: "call 13812345678 now",
       CN_ID: "ID 11010519900101111X",
+      SSN: "SSN 123-45-6789",
       BANK_CARD: "Card: 4111111111111111",
       NAME: "Bob said hi", // via nameHints
       IP_ADDR: "server 8.8.8.8",
@@ -465,7 +477,7 @@ describe("placeholder pattern single-source (PII_KINDS)", () => {
       expect(kinds).toContain(kind)
       expect(PII_KINDS).toContain(kind as (typeof PII_KINDS)[number])
     }
-    expect(PII_KINDS).toHaveLength(11)
+    expect(PII_KINDS).toHaveLength(12)
   })
 
   it("PII_PLACEHOLDER_SOURCE matches every kind including JWT and PEM_KEY", () => {
