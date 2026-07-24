@@ -12,6 +12,7 @@ import { collectDoctorFacts, type DoctorDeps } from "./doctor-controller"
 import { contextPercent, contextTokens } from "../format/usage"
 import { readGitBranch } from "../format/status-bar"
 import { backendIdentity } from "./backend-identity"
+import { buildCogniaParityReport } from "./cognia-parity-report"
 import {
   BACKEND_FEATURE_LABELS,
   blockedFeatures,
@@ -20,6 +21,11 @@ import {
 import type { StatusReport, TuiAction, UsageInfo } from "../state/types"
 
 export interface StatusDeps extends DoctorDeps {
+  /** The chat session id, so the panel can read that session's live Cognia
+   * parity facts instead of describing the preset in the abstract. */
+  sessionId?: string
+  /** Injected in tests; defaults to the live tool-host registry. */
+  readParity?: typeof buildCogniaParityReport
   /** What the active backend supports, for the blocked-feature summary. */
   capabilities?: BackendCapabilities
   /** Latest turn usage (drives the context gauge). */
@@ -38,9 +44,13 @@ export function collectStatusReport(deps: StatusDeps): StatusReport {
     deps.contextWindow && deps.contextWindow > 0 ? deps.contextWindow : getModelContextWindow(model)
   // Same preset the banner names, so the panel can never disagree with it.
   const identity = backendIdentity(deps.config, deps.capabilities?.presetId)
+  const parity = deps.sessionId
+    ? (deps.readParity ?? buildCogniaParityReport)(deps.sessionId)
+    : undefined
   return {
     version: facts.version,
     agentBackend: facts.agentBackend,
+    ...(parity ? { cogniaParity: parity } : {}),
     ...(deps.capabilities
       ? {
           blockedFeatures: blockedFeatures(deps.capabilities).map(

@@ -50,6 +50,23 @@ export function StatusPanel({ report, onClose }: { report: StatusReport; onClose
     },
   ]
 
+  // What the external backend can actually call. Stated as counts rather than a
+  // ✓/✗ because "supported" is not the useful fact — "how many tools does the
+  // CURRENT policy expose to this agent" is.
+  if (report.cogniaParity) {
+    const parity = report.cogniaParity
+    rows.push({
+      label: "Cognia tools",
+      value: parity.running
+        ? `${parity.builtinToolCount} built-in · ${parity.hostToolCount} host · ${parity.userMcpCount} user MCP`
+        : parity.attachable
+          ? "bridge not started"
+          : "unavailable on this agent",
+      ...(parity.running ? {} : { color: theme.warning }),
+    })
+    rows.push({ label: "Context ver", value: parity.contextVersion })
+  }
+
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={theme.border} paddingX={1}>
       <Text bold color={theme.accent}>

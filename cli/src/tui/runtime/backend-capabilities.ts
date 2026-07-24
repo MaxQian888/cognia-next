@@ -45,6 +45,7 @@ export type BackendFeature =
   | "mcpLogs"
   | "hooks"
   | "subagentModels"
+  | "modelPicker"
 
 export const BACKEND_FEATURES: readonly BackendFeature[] = [
   "mcp",
@@ -57,6 +58,7 @@ export const BACKEND_FEATURES: readonly BackendFeature[] = [
   "mcpLogs",
   "hooks",
   "subagentModels",
+  "modelPicker",
 ]
 
 /** Human labels, used by `/settings`, the command palette and `/status`. */
@@ -71,6 +73,7 @@ export const BACKEND_FEATURE_LABELS: Record<BackendFeature, string> = {
   mcpLogs: "MCP logs",
   hooks: "Lifecycle hooks",
   subagentModels: "Subagent models",
+  modelPicker: "Model selection",
 }
 
 export interface FeatureSupport {
@@ -96,9 +99,11 @@ const SUPPORTED: FeatureSupport = { supported: true }
 /** Reasons, written once so every surface phrases a gap identically. */
 const REASON = {
   sidecarOnly: "only the built-in agent reports this",
-  notForwarded: "not forwarded to an external agent yet",
   noProtocolSlot: "the agent protocol has no equivalent",
   agentOwned: "the external agent runs these itself",
+  noToolHost: "this agent cannot attach Cognia's tool bridge",
+  noManifest: "the current policy resolved no tools of this kind",
+  restartRequired: "changing this restarts the agent's context",
 } as const
 
 /**
@@ -115,6 +120,21 @@ export function usesCodexOptions(presetId: string | undefined): boolean {
   return !!presetId && CODEX_PRESETS.has(presetId)
 }
 
+/**
+ * Presets that can enumerate their own models (`model/list`).
+ *
+ * Narrower than {@link usesCodexOptions} on purpose: only the NATIVE app-server
+ * speaks that method. The `codex` preset is the `@zed-industries/codex-acp`
+ * shim, and ACP has no model-list call — so a picker there would either show the
+ * built-in provider's catalog (the fabrication this whole area is fixing) or an
+ * empty list. It reports unsupported with a reason instead.
+ */
+const MODEL_LISTING_PRESETS = new Set(["codex-app-server"])
+
+export function supportsModelListing(presetId: string | undefined): boolean {
+  return !!presetId && MODEL_LISTING_PRESETS.has(presetId)
+}
+
 /** Everything the built-in sidecar supports — i.e. everything. */
 export function builtinCapabilities(): BackendCapabilities {
   return {
@@ -127,6 +147,29 @@ export function builtinCapabilities(): BackendCapabilities {
   }
 }
 
+/**
+ * What the Cognia tool host actually managed to do for this backend.
+ *
+ * The capability model used to answer from static backend assumptions ("plugins
+ * are not forwarded", "skills are Codex-only"). Now that Cognia's tools really
+ * are projected, those answers have to come from the projection: the protocol
+ * has to accept an MCP server, the host has to start, and the effective policy
+ * has to have produced at least one tool. Anything less and the feature is
+ * genuinely unavailable — saying otherwise is the same silent lie in a new place.
+ */
+export interface ToolHostStatus {
+  /** The protocol can carry an MCP server at `session/new`. */
+  attachable: boolean
+  /** The broker started and the bridge entries were attached. */
+  running: boolean
+  /** Effective `cognia-tools` count under the current policy. */
+  builtinToolCount: number
+  /** Effective `cognia-plugin-tools` count under the current policy. */
+  hostToolCount: number
+  /** True when `dispatch_agent` is among the projected host tools. */
+  subagentDispatch: boolean
+}
+
 export interface ExternalCapabilityInput {
   /** The backend id the user selected (`codex`, `claude-code`, …). */
   backend: string
@@ -136,6 +179,24 @@ export interface ExternalCapabilityInput {
    * far. Absent means "not negotiated yet"; a negotiated feature then reads as
    * unsupported rather than being optimistically assumed. */
   negotiated?: AcpCapabilities
+  /** The Cognia tool host's real state. Absent ⇒ not started yet. */
+  toolHost?: ToolHostStatus
+}
+
+/**
+ * Can this backend host Cognia's tools at all?
+ *
+ * Under the default parity contract an agent that cannot attach the bridge is
+ * INCOMPATIBLE, not "ready with fewer tools" — every Cognia tool the user can
+ * see in `/tools` would be uncallable. The connect flow uses this to fail before
+ * the composer opens rather than after the first tool call.
+ */
+export function canHostCogniaTools(negotiated: AcpCapabilities | undefined): boolean {
+  // Absent capabilities mean the handshake never reported them; ACP agents that
+  // accept `session/new` MCP servers advertise `mcpTools`. Treat an explicit
+  // `false` as a refusal and an omission as "assume the protocol slot exists",
+  // which is what every shipped preset does.
+  return negotiated?.mcpTools !== false
 }
 
 /**
@@ -150,23 +211,45 @@ export interface ExternalCapabilityInput {
 export function externalCapabilities(input: ExternalCapabilityInput): BackendCapabilities {
   const codexChannel = usesCodexOptions(input.presetId ?? input.backend)
   const unsupported = (reason: string): FeatureSupport => ({ supported: false, reason })
+  const host = input.toolHost
+  const attachable = host ? host.attachable : canHostCogniaTools(input.negotiated)
+  /** A Cognia-projected feature is available only when something real backs it. */
+  const projected = (count: number): FeatureSupport => {
+    if (!attachable) return unsupported(REASON.noToolHost)
+    if (host && !host.running) return unsupported(REASON.noToolHost)
+    return count > 0 ? SUPPORTED : unsupported(REASON.noManifest)
+  }
   return {
     backend: input.backend,
     ...(input.presetId ? { presetId: input.presetId } : {}),
     builtin: false,
     features: {
-      // Forwarded per turn, so a `/mcp` toggle lands on the next message.
+      // Forwarded at session/new, so a `/mcp` toggle restarts the agent context.
       mcp: SUPPORTED,
       // Read when the agent is registered, so a change needs a reconnect.
       thinking: codexChannel ? SUPPORTED : unsupported(REASON.noProtocolSlot),
-      skills: codexChannel ? SUPPORTED : unsupported(REASON.noProtocolSlot),
-      plugins: unsupported(REASON.notForwarded),
+      // Skills now ride the CANONICAL system prompt (catalog + `load_skill`),
+      // which every external backend receives — this was Codex-only back when
+      // the only channel was Codex's native skill-root scan.
+      skills: attachable ? SUPPORTED : unsupported(REASON.noToolHost),
+      // Plugin/web/`ask_user`/`load_skill` reach the agent through the Cognia
+      // host bridge, so the honest answer is whatever the bridge produced.
+      plugins: projected(host?.hostToolCount ?? 0),
       compact: unsupported(REASON.noProtocolSlot),
       resume: input.negotiated?.multiTurn ? SUPPORTED : unsupported(REASON.noProtocolSlot),
       rateLimits: unsupported(REASON.sidecarOnly),
       mcpLogs: unsupported(REASON.agentOwned),
       hooks: unsupported(REASON.sidecarOnly),
-      subagentModels: unsupported(REASON.notForwarded),
+      // `dispatch_agent` is a host tool, so subagent models apply exactly when
+      // the dispatch tool was actually projected — a bridge that never started
+      // has no dispatch tool no matter what the manifest said it would carry.
+      subagentModels: projected(host?.subagentDispatch ? 1 : 0),
+      // Only the native Codex app-server can enumerate its own models. On any
+      // other agent `/model` would be listing the built-in provider's catalog,
+      // which is not what that agent runs.
+      modelPicker: supportsModelListing(input.presetId ?? input.backend)
+        ? SUPPORTED
+        : unsupported(REASON.noProtocolSlot),
     },
   }
 }

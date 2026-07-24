@@ -33,7 +33,11 @@ import {
   sandboxSupportsPlatform,
 } from "../../runtime/external/sandbox-launcher"
 import type { ResolvedConfig } from "../../config/schema"
-import { externalCapabilities, type BackendCapabilities } from "./backend-capabilities"
+import {
+  canHostCogniaTools,
+  externalCapabilities,
+  type BackendCapabilities,
+} from "./backend-capabilities"
 import { buildCodexOptions } from "./backend-bridge"
 
 /**
@@ -258,6 +262,20 @@ export async function connectBackend(deps: BackendConnectDeps): Promise<BackendC
     }
 
     const negotiated = host.getAgentCapabilities(agentId)
+    // Under the default parity contract, an agent that cannot host Cognia's tool
+    // bridge is INCOMPATIBLE — not "ready with fewer tools". Every Cognia tool
+    // the user can see in `/tools` would be uncallable, so fail here rather than
+    // let them discover it one silent tool call at a time, after the composer
+    // opened and they had already typed a request.
+    if (!canHostCogniaTools(negotiated)) {
+      await host.removeAgent(agentId).catch(() => undefined)
+      return fail({
+        kind: "handshake",
+        stage: "launch",
+        message: `${presetId} does not accept MCP servers, so Cognia cannot give it any of its own tools.`,
+        hint: "Pick a different agent, or run /backend builtin to use Cognia's own.",
+      })
+    }
     return {
       ok: true,
       connection: {

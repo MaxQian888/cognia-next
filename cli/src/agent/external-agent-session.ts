@@ -48,6 +48,13 @@ import { readToolApprovals } from "./tool-approvals"
 import { startToolHostBroker, type ToolHostBroker } from "./tool-host/broker"
 import { createHostToolExecutor } from "./tool-host/host-tools"
 import { buildToolHostMcpServers, isCogniaProjectedTool } from "./tool-host/spawn"
+import {
+  clearToolHostStatus,
+  publishToolHostStatus,
+  type ToolHostSnapshot,
+} from "./tool-host/status"
+import { visibleBuiltinTools, visibleHostTools } from "./tool-host/policy"
+import { canHostCogniaTools } from "../tui/runtime/backend-capabilities"
 import { CONTEXT_RESTART_NOTICE } from "../tui/runtime/context-lifecycle"
 import {
   externalPromptText,
@@ -148,7 +155,16 @@ export interface ExternalAgentSessionParams {
    * the controller registered this agent, so the controller removes it — the
    * session only cancels its own in-flight turn on close.
    */
-  connection?: { agentId: string; presetId: string }
+  connection?: {
+    agentId: string
+    presetId: string
+    /** What the agent advertised at `initialize`, so parity reporting can say
+     * whether the protocol can carry Cognia's bridge at all. */
+    capabilities?: {
+      features?: unknown
+      negotiated?: import("@/types/agent/external-agent").AcpCapabilities
+    }
+  }
   /**
    * The MCP servers to hand the agent's `session/new`. Defaults to the CLI's own
    * resolved set — `.mcp.json` from the cwd + home, minus the `/mcp` disable
@@ -356,6 +372,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
     ((broker: ToolHostBroker) =>
       buildToolHostMcpServers({ endpoint: broker.endpoint, token: broker.token }))
   const toolHostEnabled = params.disableToolHost !== true
+  const negotiated = params.connection?.capabilities?.negotiated
 
   // The ONE Cognia resolver. Attachments are built with vision OFF because the
   // external transport carries a single text prompt: images and PDFs then take
@@ -455,7 +472,10 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
     session: ResolvedCliSessionContext,
     opts: SendTurnOptions
   ): Promise<AcpMcpServerConfig[]> => {
-    if (!toolHostEnabled) return []
+    if (!toolHostEnabled) {
+      publish(session, false)
+      return []
+    }
     if (broker && !broker.isClosed()) return buildToolHostServers(broker)
     brokerAttempt += 1
     const execHostTool = createHostToolExecutor({ sessionId })
@@ -488,7 +508,25 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
         "session_error"
       )
     }
+    publish(session, true)
     return buildToolHostServers(broker)
+  }
+
+  /** Publish what /status and /doctor should report about Cognia parity. */
+  const publish = (session: ResolvedCliSessionContext, running: boolean): void => {
+    const hostTools = visibleHostTools(session.sendOptions)
+    const snapshot: ToolHostSnapshot = {
+      backend,
+      contextVersion: session.contextVersion,
+      attachable: toolHostEnabled && canHostCogniaTools(negotiated),
+      running: toolHostEnabled && running,
+      builtinToolCount: visibleBuiltinTools(session.sendOptions).length,
+      hostToolCount: hostTools.length,
+      subagentDispatch: hostTools.includes("dispatch_agent"),
+      userMcpCount: session.mcpServers.filter((server) => server.enabled !== false).length,
+      connections: broker?.connections() ?? 0,
+    }
+    publishToolHostStatus(sessionId, snapshot)
   }
 
   /**
@@ -796,6 +834,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       // bridge → remove the agent. Doing it in any other order can leave a
       // bridge executing against a session that is already gone.
       clearCliSubagentContext(sessionId)
+      clearToolHostStatus(sessionId)
       await stopToolHost()
       if (!initialized) return
       if (externalSessionId) {

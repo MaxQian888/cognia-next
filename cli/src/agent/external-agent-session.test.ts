@@ -914,6 +914,46 @@ describe("external-agent turn bounds", () => {
   })
 
   it("resumes the recorded agent session instead of starting an empty one", async () => {
+    // Resolve the version this config produces, then seed a link carrying it —
+    // resume is only safe when the recorded context still matches.
+    const probe = memoryTranscript()
+    const probeManager = fakeManager()
+    const probeSession = createExternalAgentSession({
+      disableToolHost: true,
+      config: baseConfig,
+      sessionId: "cli-1",
+      home: "/home/.cognia",
+      manager: probeManager.manager,
+      transcriptFs: probe.fs,
+    })
+    await probeSession.send("first", { gate: async () => ({ decision: "allow" }) })
+    const recorded = probe.written["/home/.cognia/sessions/cli-1.external.json"]!
+
+    const transcript = memoryTranscript({
+      "/home/.cognia/sessions/cli-1.external.json": JSON.stringify({
+        ...(JSON.parse(recorded) as Record<string, unknown>),
+        externalSessionId: "acp-earlier",
+      }),
+    })
+    const { manager, getExecuteOptions } = fakeManager()
+    const session = createExternalAgentSession({
+      disableToolHost: true,
+      config: baseConfig,
+      sessionId: "cli-1",
+      home: "/home/.cognia",
+      manager,
+      transcriptFs: transcript.fs,
+    })
+
+    await session.send("continue", { gate: async () => ({ decision: "allow" }) })
+
+    // Without this the transcript came back but the agent remembered nothing.
+    expect(getExecuteOptions()?.sessionId).toBe("acp-earlier")
+  })
+
+  it("refuses to resume a link recorded before context versions existed", async () => {
+    // Silently continuing it would hand the agent a conversation whose settings
+    // Cognia can no longer vouch for.
     const transcript = memoryTranscript({
       "/home/.cognia/sessions/cli-1.external.json": JSON.stringify({
         backend: "claude-code",
@@ -932,8 +972,7 @@ describe("external-agent turn bounds", () => {
 
     await session.send("continue", { gate: async () => ({ decision: "allow" }) })
 
-    // Without this the transcript came back but the agent remembered nothing.
-    expect(getExecuteOptions()?.sessionId).toBe("acp-earlier")
+    expect(getExecuteOptions()?.sessionId).toBeUndefined()
   })
 
   it("ignores a link recorded on a different backend", async () => {

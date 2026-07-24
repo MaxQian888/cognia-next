@@ -381,3 +381,24 @@ describe("backend identity helpers", () => {
     ).toBe("Couldn't start codex — failed while checking sandbox.")
   })
 })
+
+describe("connectBackend — Cognia tool-host compatibility", () => {
+  it("fails before the composer opens when the agent cannot host Cognia's bridge", async () => {
+    const host = fakeHost({ getAgentCapabilities: () => ({ mcpTools: false }) })
+    const result = await connectBackend(deps({ host }))
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.failure.message).toMatch(/does not accept MCP servers/)
+      expect(result.failure.hint).toMatch(/backend builtin/)
+    }
+    // Nothing half-registered is left behind for a retry to inherit.
+    expect(host.removeAgent).toHaveBeenCalledWith("cli-external-1")
+  })
+
+  it("connects normally when the agent simply did not report the capability", async () => {
+    const host = fakeHost({ getAgentCapabilities: () => ({ multiTurn: true }) })
+    const result = await connectBackend(deps({ host }))
+    expect(result.ok).toBe(true)
+  })
+})

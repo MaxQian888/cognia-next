@@ -2,6 +2,7 @@
  * @jest-environment node
  */
 import {
+  canHostCogniaTools,
   BACKEND_FEATURES,
   blockedFeatures,
   builtinCapabilities,
@@ -41,16 +42,43 @@ describe("externalCapabilities", () => {
     }
   })
 
-  it("supports the Codex-only channels on Codex and explains their absence elsewhere", () => {
+  it("keeps reasoning effort on the Codex metadata channel only", () => {
     const codex = externalCapabilities({ backend: "codex", presetId: "codex-app-server" })
     const acp = externalCapabilities({ backend: "claude-code" })
 
-    // Reasoning effort + extra skill roots ride Codex's metadata channel; ACP
-    // has no counterpart, so claiming either there would be a lie.
+    // Reasoning effort rides Codex's metadata channel; ACP has no counterpart,
+    // so claiming it there would be a lie.
     expect(supportsFeature(codex, "thinking")).toBe(true)
-    expect(supportsFeature(codex, "skills")).toBe(true)
     expect(featureBlockedReason(acp, "thinking")).toMatch(/no equivalent/)
-    expect(featureBlockedReason(acp, "skills")).toMatch(/no equivalent/)
+  })
+
+  it("reports skills on every backend that can host the Cognia bridge", () => {
+    // Skills used to be Codex-only, back when the only channel was Codex's own
+    // skill-root scan. They now ride the canonical system prompt (catalog +
+    // `load_skill`), which every external backend receives.
+    expect(supportsFeature(externalCapabilities({ backend: "claude-code" }), "skills")).toBe(true)
+    expect(
+      featureBlockedReason(
+        externalCapabilities({ backend: "claude-code", negotiated: { mcpTools: false } }),
+        "skills"
+      )
+    ).toMatch(/tool bridge/)
+  })
+
+  it("offers model selection only where the agent can enumerate its own models", () => {
+    // `model/list` is native-app-server only. The `codex` preset is the ACP
+    // shim, and ACP has no model-list call — a picker there could only show the
+    // built-in provider's catalog, which is not what that agent runs.
+    const native = externalCapabilities({ backend: "codex", presetId: "codex-app-server" })
+    const shim = externalCapabilities({ backend: "codex", presetId: "codex" })
+    const acp = externalCapabilities({ backend: "claude-code" })
+
+    expect(supportsFeature(native, "modelPicker")).toBe(true)
+    expect(featureBlockedReason(shim, "modelPicker")).toMatch(/no equivalent/)
+    expect(featureBlockedReason(acp, "modelPicker")).toMatch(/no equivalent/)
+    // Narrower than the metadata channel on purpose — the shim still forwards
+    // reasoning effort, it just cannot list models.
+    expect(supportsFeature(shim, "thinking")).toBe(true)
   })
 
   it("reads session resume off what the agent negotiated", () => {
@@ -113,5 +141,58 @@ describe("unsupportedFeatureMessage", () => {
 
   it("degrades to a bare statement when there is no capability set", () => {
     expect(unsupportedFeatureMessage(undefined, "mcp")).toBe("MCP servers is unavailable.")
+  })
+})
+
+describe("canHostCogniaTools", () => {
+  it("treats an omitted capability as a present protocol slot", () => {
+    expect(canHostCogniaTools(undefined)).toBe(true)
+    expect(canHostCogniaTools({})).toBe(true)
+  })
+
+  it("treats an explicit refusal as incompatible", () => {
+    expect(canHostCogniaTools({ mcpTools: false })).toBe(false)
+  })
+})
+
+describe("externalCapabilities — Cognia tool projection", () => {
+  const host = {
+    attachable: true,
+    running: true,
+    builtinToolCount: 12,
+    hostToolCount: 3,
+    subagentDispatch: true,
+  }
+
+  it("reports plugins as supported once the bridge really projected some", () => {
+    const caps = externalCapabilities({ backend: "claude-code", toolHost: host })
+    expect(supportsFeature(caps, "plugins")).toBe(true)
+    expect(supportsFeature(caps, "subagentModels")).toBe(true)
+  })
+
+  it("says the policy resolved nothing rather than claiming support", () => {
+    const caps = externalCapabilities({
+      backend: "claude-code",
+      toolHost: { ...host, hostToolCount: 0, subagentDispatch: false },
+    })
+    expect(featureBlockedReason(caps, "plugins")).toMatch(/resolved no tools/)
+  })
+
+  it("blames the bridge when the host could not start", () => {
+    const caps = externalCapabilities({
+      backend: "claude-code",
+      toolHost: { ...host, running: false },
+    })
+    expect(featureBlockedReason(caps, "plugins")).toMatch(/tool bridge/)
+    expect(featureBlockedReason(caps, "subagentModels")).toMatch(/tool bridge/)
+  })
+
+  it("blames the protocol when it cannot carry an MCP server at all", () => {
+    const caps = externalCapabilities({
+      backend: "claude-code",
+      toolHost: { ...host, attachable: false },
+    })
+    expect(featureBlockedReason(caps, "plugins")).toMatch(/tool bridge/)
+    expect(featureBlockedReason(caps, "skills")).toMatch(/tool bridge/)
   })
 })

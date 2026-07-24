@@ -35,8 +35,10 @@ import type {
   ThinkingLevel,
   LayoutMode,
   MouseMode,
+  SelectionMode,
 } from "../../config/schema"
 import type { ProviderOption } from "../commands/provider-options"
+import type { CredentialKind } from "../../config/credentials"
 import type { ConfigMenuRow } from "../commands/config-menu"
 import type { ModelMeta } from "../runtime/model-meta"
 import type { FormOverlayState } from "./form"
@@ -347,6 +349,32 @@ export interface StatusReport {
   contextTokens: number
   contextWindow: number
   dbSnapshotExists: boolean
+  /** Cognia parity on an external backend; absent on the built-in agent. */
+  cogniaParity?: CogniaParityReport
+}
+
+/**
+ * Cognia-parity facts for an external backend, shown by `/status` and `/doctor`.
+ *
+ * Every field answers a question the user could otherwise only resolve by
+ * watching a tool call fail: is the bridge attachable at all, did it start, how
+ * many Cognia tools does the CURRENT policy actually expose, and which context
+ * version is live.
+ */
+export interface CogniaParityReport {
+  backend: string
+  contextVersion: string
+  /** The protocol can carry Cognia's MCP bridge. */
+  attachable: boolean
+  /** The bridge is up. */
+  running: boolean
+  builtinToolCount: number
+  hostToolCount: number
+  userMcpCount: number
+  /** Bridges currently connected to the broker. */
+  connections: number
+  /** Settings whose change restarts the agent's context, for the panel footer. */
+  restartRequired: string[]
 }
 
 /** One crash report on disk, summarized for the `/doctor` panel. */
@@ -391,6 +419,8 @@ export interface DoctorReport {
   crashReportCount: number
   latestCrash?: CrashReportItem
   logDirBytes: number
+  /** Cognia parity on an external backend; absent on the built-in agent. */
+  cogniaParity?: CogniaParityReport
 }
 
 /** A row in the generic {@link Overlay} `select` list. */
@@ -440,6 +470,36 @@ export interface McpLogEntry {
   message: string
 }
 
+/** Which subsystem a unified log line came from. `mcp` rows are projected from
+ *  `state.mcpLogs` at read time — the `/mcp logs` panel keeps owning that buffer,
+ *  so nothing is stored twice. */
+export type LogChannel = "mcp" | "agent" | "sidecar" | "system"
+
+/**
+ * One line in the unified log buffer (`state.logs`), shown by the `/logs` panel.
+ *
+ * Deliberately FLAT rather than a discriminated union: the panel's filter is a
+ * hot loop over up to {@link LOG_HIGH_WATER} rows and plain field compares beat
+ * a narrowing switch. Reuses {@link McpLogLevel} so the whole severity taxonomy
+ * (`levelToken` / `levelLabel` / `coerceLevel`) applies unchanged.
+ */
+export interface LogEntry {
+  /** Stable id (also the row key) — monotonic, from `state.seq`. */
+  id: string
+  /** Epoch ms the line was captured. Stamped at the ingest site, never in the
+   *  reducer (which must stay clock-free to remain deterministic). */
+  ts: number
+  level: McpLogLevel
+  channel: LogChannel
+  /** Sub-origin within the channel: the `McpLogSource` for `mcp`, the external
+   *  agent id for `agent`, the error category for `system`. */
+  origin?: string
+  message: string
+}
+
+/** A log line before the reducer stamps its id — the shape every producer emits. */
+export type LogInput = Omit<LogEntry, "id">
+
 /** `/agent-stats` overview overlay (named so `agentStatsDetail.back` can reuse it). */
 export interface AgentStatsOverlay {
   kind: "agentStats"
@@ -466,7 +526,25 @@ export type Overlay =
   // `thinkingLevel` via `deriveEffortSliderState`; the live state during editing
   // lives in the `EffortSlider` component, not here.
   | { kind: "effortSlider"; off: boolean; index: number }
-  | { kind: "provider"; options: ProviderOption[]; index: number }
+  // `/provider` switcher. `query` is the live typeahead filter (the shared
+  // catalog runs to dozens of ids), and `index` points into the FILTERED view —
+  // same contract as `model`, so navigation always tracks what's on screen.
+  | { kind: "provider"; options: ProviderOption[]; index: number; query?: string }
+  // Inline API-key prompt shown when a key-required provider is picked with no
+  // stored credential (Working "prompt for a key" flow). `value` is the typed
+  // secret (masked unless `reveal`); on submit it lands in credentials.json and
+  // the picked provider is activated. `model` is the default model to switch to.
+  | {
+      kind: "providerKey"
+      providerId: string
+      providerName: string
+      credentialKind: CredentialKind
+      value: string
+      reveal: boolean
+      model?: string
+      keyUrl?: string
+      error?: string
+    }
   | { kind: "config"; rows: ConfigMenuRow[]; index: number }
   | { kind: "sessions"; items: SessionSummary[]; index: number; query?: string }
   | { kind: "usage" }
@@ -566,6 +644,12 @@ export type Overlay =
   // `statusSummary` is a snapshot of each server's status (from the warmed probe
   // cache) shown under the title.
   | { kind: "mcpLogs"; statusSummary?: string }
+  // Unified log panel (`/logs`) over every captured channel — external agents,
+  // the sidecar, turn errors, plus a read-time projection of `state.mcpLogs`.
+  // Like the panels above, the component owns its view controls (query,
+  // level/channel filter cycle, follow-tail, scroll cursor) as local state, so
+  // a keystroke never round-trips through the reducer.
+  | { kind: "logs" }
   // Interactive Skills panel (`/skill`). One browsable row per skill with the
   // rich metadata the old flat list hid (origin · category · usage · validation
   // warnings) and an enabled badge. Space toggles for the session, Enter opens
@@ -824,6 +908,13 @@ export interface TuiState {
    * panel. Survives `/clear` (backend diagnostics aren't conversation state);
    * `MCP_LOG_CLEAR` empties it. */
   mcpLogs: McpLogEntry[]
+  /** Unified log buffer (newest last) across external agents, the sidecar, and
+   * turn errors — everything the MCP-only `mcpLogs` stream doesn't cover.
+   * Rendered by the `/logs` panel, which merges these with a read-time
+   * projection of `mcpLogs` (so MCP lines are never stored twice). Appended in
+   * COALESCED batches, so the copy is O(batch) rather than O(buffer) per line.
+   * Survives `/clear`; `LOG_CLEAR` empties it. */
+  logs: LogEntry[]
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
@@ -969,6 +1060,16 @@ export type TuiAction =
   | { type: "SET_MODE"; mode: PermissionMode }
   | { type: "SET_THINKING"; level: ThinkingLevel; pluginTools?: boolean }
   | { type: "SET_PROVIDER"; provider: string }
+  // Merge a freshly-entered credential into the in-memory config so the very
+  // next turn authenticates with it (the on-disk write to credentials.json is a
+  // separate side effect). Keyed to the provider + credential kind so saving an
+  // api key never clobbers a stored subscription token, and vice versa.
+  | {
+      type: "SET_PROVIDER_CREDENTIAL"
+      providerId: string
+      credentialKind: CredentialKind
+      secret: string
+    }
   | { type: "SET_STATUS_BAR"; statusBar: StatusBarConfig }
   | { type: "SET_MASCOT"; mascot: MascotConfig }
   | { type: "SET_EDITOR"; editor: EditorConfig }
@@ -977,6 +1078,7 @@ export type TuiAction =
   | { type: "SET_AGENT_MODE"; modeId: string }
   | { type: "SET_LAYOUT"; layout: LayoutMode }
   | { type: "SET_MOUSE"; mode: MouseMode }
+  | { type: "SET_SELECTION"; mode: SelectionMode }
   // Generic live merge of resolved-config fields. Backs the settings panel's
   // inline toggles for knobs without a dedicated action (builtinTools, webTools,
   // skillTool, builtinHookOverrides, …) so they reflect immediately in the panel
@@ -997,9 +1099,17 @@ export type TuiAction =
   // is open). Resets the highlight to the top of the freshly-filtered list.
   | { type: "OVERLAY_MODEL_QUERY"; query: string }
   // Set the typeahead filter on a generic searchable overlay (`select`,
-  // `sessions`, `inspect`, `quickActions`). Resets the highlight to the top of
-  // the freshly-filtered list; no-op for any other overlay kind.
+  // `sessions`, `inspect`, `quickActions`, `provider`). Resets the highlight to
+  // the top of the freshly-filtered list; no-op for any other overlay kind.
   | { type: "OVERLAY_QUERY"; query: string }
+  // Edit the inline provider key prompt (no-op unless the `providerKey` overlay
+  // is open). Typing clears any prior validation error.
+  | { type: "OVERLAY_PROVIDER_KEY_INPUT"; value: string }
+  // Toggle masked/plain display of the typed key (Ctrl+R in the prompt).
+  | { type: "OVERLAY_PROVIDER_KEY_REVEAL" }
+  // Surface a validation/persistence error on the key prompt (empty key, or a
+  // failed write to credentials.json) without closing it.
+  | { type: "OVERLAY_PROVIDER_KEY_ERROR"; error: string }
   // Live-patch one marketplace entry (by installRef) in an open `marketplace`
   // overlay — used for in-place enable/disable so the badge updates without
   // closing the browser (no-op if a different overlay is open).
@@ -1021,6 +1131,14 @@ export type TuiAction =
   | { type: "MCP_LOG_APPEND"; entry: Omit<McpLogEntry, "id"> }
   // Empty the captured MCP log buffer (the `/mcp logs` panel's `c` action).
   | { type: "MCP_LOG_CLEAR" }
+  // Append a COALESCED batch of unified log lines. Always a batch, never one
+  // line per dispatch: `runtime/log-buffer.ts` accumulates arrivals in a fixed
+  // window so a 500-line burst costs a handful of renders instead of 500 (and
+  // one buffer copy instead of 500). `id` is stamped per entry from `seq`.
+  | { type: "LOG_APPEND_BATCH"; entries: LogInput[] }
+  // Empty the unified log buffer (the `/logs` panel's clear action). Does NOT
+  // touch `state.mcpLogs` — that has its own `MCP_LOG_CLEAR`.
+  | { type: "LOG_CLEAR" }
   // Flip one skill row's enabled badge in an open `skills` overlay (the panel's
   // space toggle). Persistence to `skill-state.json` is done by the caller; this
   // just keeps the visible badge in sync (no-op if a different overlay is open).

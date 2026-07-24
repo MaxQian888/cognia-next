@@ -165,6 +165,50 @@ export function DoctorPanel({
         </Text>
       </Box>
 
+      {/* Cognia parity — what this backend can actually call. Only external
+          backends have anything to say here; the built-in agent IS Cognia. */}
+      {report.cogniaParity && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text bold color={theme.muted}>
+            Cognia parity
+          </Text>
+          <Text>
+            <Text color={theme.muted}>{"Context".padEnd(13)}</Text>
+            {report.cogniaParity.contextVersion}
+          </Text>
+          <Text>
+            <Text color={theme.muted}>{"Tool bridge".padEnd(13)}</Text>
+            <Text
+              color={
+                report.cogniaParity.running
+                  ? undefined
+                  : report.cogniaParity.attachable
+                    ? theme.warning
+                    : theme.danger
+              }
+            >
+              {report.cogniaParity.running
+                ? `running · ${report.cogniaParity.connections} connected`
+                : report.cogniaParity.attachable
+                  ? "not started"
+                  : "unsupported by this agent"}
+            </Text>
+          </Text>
+          <Text>
+            <Text color={theme.muted}>{"Cognia tools".padEnd(13)}</Text>
+            {`${report.cogniaParity.builtinToolCount} built-in · ${report.cogniaParity.hostToolCount} host`}
+          </Text>
+          <Text>
+            <Text color={theme.muted}>{"User MCP".padEnd(13)}</Text>
+            {report.cogniaParity.userMcpCount}
+          </Text>
+          <Text>
+            <Text color={theme.muted}>{"Restarts on".padEnd(13)}</Text>
+            <Text color={theme.muted}>{report.cogniaParity.restartRequired.join(", ")}</Text>
+          </Text>
+        </Box>
+      )}
+
       {/* Crash & Logs */}
       <Box flexDirection="column" marginTop={1}>
         <Text bold color={theme.muted}>

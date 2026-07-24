@@ -13,6 +13,7 @@ import { inflightSubagentRows } from "../format/subagent"
 import { agentModeList } from "./agent-mode-controller"
 import { buildAgentsRunDispatch } from "../../agent/agents-run-dispatch"
 import { goalList, goalPause, goalResume, goalStart, goalStatus, goalStop } from "./goal-controller"
+import { logsPanel } from "./log-controller"
 import {
   mcpAdd,
   mcpAuth,
@@ -178,6 +179,7 @@ export interface RuntimeImpl {
   mcpPresets: typeof mcpPresets
   mcpPanel: typeof mcpPanel
   mcpLogsPanel: typeof mcpLogsPanel
+  logsPanel: typeof logsPanel
   mcpReconnect: typeof mcpReconnect
   mcpRemove: typeof mcpRemove
   skillList: typeof skillList
@@ -277,6 +279,7 @@ const REAL: RuntimeImpl = {
   mcpPresets,
   mcpPanel,
   mcpLogsPanel,
+  logsPanel,
   mcpReconnect,
   mcpRemove,
   skillList,
@@ -445,6 +448,10 @@ export async function runRuntimeRequest(
       if (req.action === "logs") return impl.mcpLogsPanel(mc)
       return impl.mcpPanel(mc)
     }
+    case "logs":
+      // The unified panel renders straight off the live buffers and derives its
+      // own header summary, so opening it needs no resolution step.
+      return impl.logsPanel({ dispatch })
     case "skill": {
       const sk = {
         dispatch,
@@ -529,6 +536,9 @@ export async function runRuntimeRequest(
         config,
         home: deps.home,
         version: deps.version,
+        // Lets the report read THIS session's live Cognia parity facts rather
+        // than describing the preset in the abstract.
+        sessionId,
         os: { platform: () => process.platform, homedir: os.homedir },
         env: process.env,
       })
@@ -553,6 +563,7 @@ export async function runRuntimeRequest(
         config,
         home: deps.home,
         version: deps.version,
+        sessionId,
         usage: deps.usage,
         contextWindow: deps.contextWindow,
         capabilities: deps.capabilities,

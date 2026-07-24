@@ -24,6 +24,7 @@ import {
 } from "../../runtime/external/sandbox-launcher"
 import type { ResolvedConfig } from "../../config/schema"
 import type { CrashReportItem, DoctorReport, TuiAction } from "../state/types"
+import { buildCogniaParityReport } from "./cognia-parity-report"
 import {
   listCrashReports,
   resolveCrashLogDirs,
@@ -87,6 +88,11 @@ export interface DoctorReportDeps extends DoctorDeps {
   findLauncher?: () => string | undefined
   /** Whether this platform can host external agents (injected in tests). */
   platformSupportsSandbox?: (platform: NodeJS.Platform) => boolean
+  /** The chat session id, so the report can read that session's live Cognia
+   * parity facts rather than describing the preset in the abstract. */
+  sessionId?: string
+  /** Injected in tests; defaults to the live tool-host registry. */
+  readParity?: typeof buildCogniaParityReport
 }
 
 /**
@@ -155,9 +161,16 @@ const nodeCrashLogFs: CrashLogFs = {
 export function collectDoctorReport(deps: DoctorReportDeps): DoctorReport {
   const facts = collectDoctorFacts(deps)
   const crashLogFacts = collectCrashLogFacts(deps)
+  // What Cognia actually managed to project into this backend. Reported here
+  // because "the binary is on PATH" says nothing about whether the agent can
+  // call a single Cognia tool.
+  const parity = deps.sessionId
+    ? (deps.readParity ?? buildCogniaParityReport)(deps.sessionId)
+    : undefined
   return {
     ...facts,
     ...crashLogFacts,
+    ...(parity ? { cogniaParity: parity } : {}),
   }
 }
 
