@@ -141,7 +141,10 @@ describe("external chat integration", () => {
           })
         )
         const turn = runTurn({ session, prompt: "edit", dispatch, gate: gate.responder })
-        for (let attempt = 0; attempt < 20 && state.overlay?.kind !== "permission"; attempt += 1) {
+        // The turn now resolves the whole Cognia context and starts the tool
+        // host before it reaches the agent, so wait for the overlay rather than
+        // counting a fixed handful of ticks.
+        for (let attempt = 0; attempt < 400 && state.overlay?.kind !== "permission"; attempt += 1) {
           await new Promise((resolve) => setImmediate(resolve))
         }
         expect(mockInvoke.mock.calls.map(([command]) => command)).toEqual(

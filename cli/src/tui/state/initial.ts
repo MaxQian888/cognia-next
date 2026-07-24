@@ -62,7 +62,9 @@ export function createInitialState(
     exit: false,
     seq: 0,
     streamSeq: 0,
+    streamEpoch: 0,
     toasts: [],
     mcpLogs: [],
+    logs: [],
   }
 }

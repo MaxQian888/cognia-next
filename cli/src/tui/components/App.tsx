@@ -1089,10 +1089,10 @@ export function App({
         failure = result.failure
         return null
       },
-      disconnect: async (connection) => {
-        const { disconnectBackend: drop } = await import("../runtime/backend-controller")
-        await drop(connection)
-      },
+      // The statically-imported reclaim, not a dynamic one: teardown must reach
+      // the process synchronously enough that an unmount cannot outrun it, and
+      // `disconnectBackend` is already in this module's graph anyway.
+      disconnect: (connection) => disconnectBackend(connection),
     })
     lifecycleRef.current = lifecycle
     void lifecycle.start().then(async (connection) => {

@@ -50,7 +50,16 @@ export interface BackendLifecycle<C extends LifecycleConnection> {
    * result has already been disconnected rather than merely ignored.
    */
   start(): Promise<C | null>
-  /** Supersede the in-flight attempt. A late result will be reclaimed. */
+  /**
+   * Supersede the in-flight ATTEMPT. A result that lands afterwards is
+   * reclaimed rather than installed.
+   *
+   * Deliberately leaves an already-installed connection alone: reaching a live
+   * connection is how a connect SUCCEEDS, and the caller (a phase transition
+   * into chat) must not have its own agent torn out from under it. Reclaiming a
+   * live connection is `dispose`'s job, or `start`'s when a new attempt
+   * supersedes it.
+   */
   cancel(): void
   /** Full teardown: close the session, reclaim the process, refuse new starts. */
   dispose(): Promise<void>
@@ -88,9 +97,6 @@ export function createBackendLifecycle<C extends LifecycleConnection>(
       // Bumping the attempt is what makes cancellation authoritative: the
       // settling connect below sees a mismatch and reclaims its own result.
       attempt += 1
-      const previous = connection
-      connection = null
-      if (previous) void reclaim(previous)
     },
     async start() {
       if (disposed) return null

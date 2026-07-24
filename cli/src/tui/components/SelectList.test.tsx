@@ -235,3 +235,65 @@ describe("SelectList", () => {
     expect(text).not.toContain("Item 0") // scrolled out of view
   })
 })
+
+describe("SelectList — wrapped-row viewport", () => {
+  const longLabels = Array.from({ length: 8 }, (_, i) => `option-${i} ${"x".repeat(60)}`)
+
+  it("shows fewer items when the labels wrap, so the row cap is never exceeded", () => {
+    const narrow = render(
+      <SelectList
+        items={longLabels.map((label) => ({ label }))}
+        index={0}
+        maxRows={4}
+        width={30}
+        onMove={() => {}}
+        onSelect={() => {}}
+      />
+    )
+    const wide = render(
+      <SelectList
+        items={longLabels.map((label) => ({ label }))}
+        index={0}
+        maxRows={4}
+        width={200}
+        onMove={() => {}}
+        onSelect={() => {}}
+      />
+    )
+    const count = (frame: string) => longLabels.filter((l) => frame.includes(l.slice(0, 9))).length
+    expect(count(narrow.container.textContent ?? "")).toBeLessThan(
+      count(wide.container.textContent ?? "")
+    )
+  })
+
+  it("keeps the highlighted row on screen at a narrow width", () => {
+    const { container } = render(
+      <SelectList
+        items={longLabels.map((label) => ({ label }))}
+        index={7}
+        maxRows={4}
+        width={30}
+        onMove={() => {}}
+        onSelect={() => {}}
+      />
+    )
+    expect(container.textContent).toContain("option-7")
+  })
+
+  it("still shows the whole short list when nothing wraps", () => {
+    const { container } = render(
+      <SelectList
+        items={[{ label: "one" }, { label: "two" }, { label: "three" }]}
+        index={0}
+        maxRows={6}
+        width={40}
+        onMove={() => {}}
+        onSelect={() => {}}
+      />
+    )
+    const frame = container.textContent ?? ""
+    expect(frame).toContain("one")
+    expect(frame).toContain("two")
+    expect(frame).toContain("three")
+  })
+})

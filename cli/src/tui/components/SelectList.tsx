@@ -9,8 +9,12 @@ import { Box, Text, useInput, type DOMElement } from "ink"
 
 import { useTheme } from "../theme/context"
 import { windowList } from "./list-window"
+import { windowByWrappedRows } from "./overlay-layout"
 import { OverlayFooter } from "./OverlayFooter"
 import { usePanelClick } from "../input/use-panel-click"
+
+/** Row prefix drawn before every label ("❯ " / "  "), stolen from the wrap width. */
+const LIST_ROW_CHROME = 2
 
 export interface SelectItem {
   label: string
@@ -72,7 +76,29 @@ export function SelectList({
   const theme = useTheme()
   const boxRef = useRef<DOMElement | null>(null)
 
-  const win = windowList(items.length, index, maxRows ?? items.length)
+  // Measure the viewport in WRAPPED ROWS, not items. `maxRows` is a row budget,
+  // but a long tool name, executable path or install command wraps — so on a
+  // narrow terminal a "10 item" window drew more rows than existed and pushed
+  // the highlighted row off screen, the exact clipping this cap exists to
+  // prevent. Falls back to the item-count window when the width is unknown.
+  const rowWidth = typeof width === "number" ? Math.max(1, width - LIST_ROW_CHROME) : 0
+  const win =
+    maxRows !== undefined && rowWidth > 0
+      ? (() => {
+          const wrapped = windowByWrappedRows(
+            items.map((item) => (item.hint ? `${item.label}  ${item.hint}` : item.label)),
+            index,
+            maxRows,
+            rowWidth
+          )
+          return {
+            start: wrapped.start,
+            end: wrapped.start + wrapped.count,
+            above: wrapped.above,
+            below: wrapped.below,
+          }
+        })()
+      : windowList(items.length, index, maxRows ?? items.length)
   const visible = items.slice(win.start, win.end)
 
   // Mouse (fullscreen `scroll` mode only): a click on a row both highlights and

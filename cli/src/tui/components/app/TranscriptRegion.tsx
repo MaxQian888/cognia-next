@@ -7,6 +7,8 @@ import { Transcript } from "../Transcript"
 import { Inflight } from "../Inflight"
 import { WorkflowRunPanel } from "../WorkflowRunPanel"
 import { contextPercent } from "../../format/usage"
+import { externalWithoutKnownWindow } from "../../format/status-bar"
+import type { BackendIdentity } from "../../runtime/backend-identity"
 import { VERSION } from "../../../version"
 import type { TuiState } from "../../state/types"
 import type { ScrollController } from "../../hooks/useScroll"
@@ -19,7 +21,12 @@ export interface TranscriptRegionProps {
   fullscreen: boolean
   /** Memoized welcome banner — the scrollback transcript header. */
   banner: React.ReactNode
-  /** Active model id (catalog-resolved), for the fullscreen status banner. */
+  /** Who is actually answering. The fullscreen banner pins this line on screen
+   * for the whole session, so it must be the same resolved identity the
+   * scrollback banner and the footer use — never the raw built-in config. */
+  identity: BackendIdentity
+  /** Active model id (catalog-resolved). Only used to price the built-in
+   * context gauge; the displayed model comes from {@link identity}. */
   activeModel: string | undefined
   /** Fullscreen scroll controller (no-op in scrollback mode). */
   scroll: ScrollController
@@ -42,6 +49,7 @@ export function TranscriptRegion({
   state,
   fullscreen,
   banner,
+  identity,
   activeModel,
   scroll,
   scrollContentRef,
@@ -57,12 +65,25 @@ export function TranscriptRegion({
             stays on screen for the whole session. */}
         <Banner
           version={VERSION}
-          provider={state.config.provider}
-          model={activeModel}
+          provider={identity.provider}
+          {...(identity.model ? { model: identity.model } : {})}
           cwd={state.config.cwd}
           status={{
             mode: state.config.permissionMode,
-            contextPct: contextPercent(state.usage, activeModel, state.modelMeta?.contextWindow),
+            // Dropped when an external agent answers and no one has told us its
+            // context window: the percentage would be derived from the built-in
+            // provider's catalog window, which says nothing about that agent.
+            // Same rule (and same helper) as the footer's `ctx` segment — this
+            // fixed header was the last surface still inventing one.
+            ...(externalWithoutKnownWindow(state.config, state.modelMeta?.contextWindow)
+              ? {}
+              : {
+                  contextPct: contextPercent(
+                    state.usage,
+                    activeModel,
+                    state.modelMeta?.contextWindow
+                  ),
+                }),
             sessionTokens: state.sessionTotals.inputTokens + state.sessionTotals.outputTokens,
           }}
         />
@@ -80,7 +101,7 @@ export function TranscriptRegion({
             }
             onCellHeight={cursor.reportCellHeight}
           />
-          <Inflight inflight={state.inflight} verbose={state.verbose} />
+          <Inflight inflight={state.inflight} verbose={state.verbose} epoch={state.streamEpoch} />
           <WorkflowRunPanel run={state.workflowRun} />
         </ScrollView>
         {/* "Scrolled up" hint — only while the view isn't pinned to the bottom,
@@ -105,7 +126,7 @@ export function TranscriptRegion({
         epoch={state.renderEpoch}
         focusedCellId={state.backtrack ? (state.cells[state.backtrack.index]?.id ?? null) : null}
       />
-      <Inflight inflight={state.inflight} verbose={state.verbose} />
+      <Inflight inflight={state.inflight} verbose={state.verbose} epoch={state.streamEpoch} />
       <WorkflowRunPanel run={state.workflowRun} />
     </>
   )

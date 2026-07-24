@@ -360,6 +360,10 @@ describe("App — external backend startup", () => {
     await settle()
     ;(disconnectBackend as jest.Mock).mockClear()
     unmount()
+    // Teardown now runs through the lifecycle owner, which first waits out any
+    // connect still settling — so the reclaim lands on the next tick rather
+    // than synchronously. It still lands.
+    await settle()
 
     // The controller owns the process it started, so teardown must remove it.
     expect(disconnectBackend).toHaveBeenCalledWith(

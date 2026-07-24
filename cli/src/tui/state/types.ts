@@ -885,6 +885,15 @@ export interface TuiState {
    * thinking / tool / usage delta). The App watches it to timestamp "last
    * activity" and surface the stall hint when the stream goes silent. */
   streamSeq: number
+  /**
+   * Monotonic TURN identity for the live region.
+   *
+   * The paced reveal only ever knew "how many characters have been shown", so a
+   * SHORTER second turn inherited the previous turn's count and appeared whole
+   * instantly. Keying the reveal by this epoch makes each turn's animation start
+   * from zero, without the reveal having to guess from the text itself.
+   */
+  streamEpoch: number
   /** Active backtrack-to-edit selection: the index in `cells` of the user
    * message currently highlighted for editing. Absent when not selecting. */
   backtrack?: { index: number }

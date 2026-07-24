@@ -13,6 +13,7 @@ import { emptyInputState } from "./initial"
 import { filterByQuery } from "../components/select-list-state"
 import {
   filterInspectItems,
+  filterProviderOptions,
   filterQuickActions,
   filterSelectItems,
   filterSessionItems,
@@ -26,7 +27,7 @@ import {
   emptySessionTotals,
   turnCostUsd,
 } from "../format/usage"
-import { resolveActiveModel } from "../../config/active-model"
+import { resolveActiveModel, resolveBackendModel } from "../../config/active-model"
 import {
   builtinCapabilities as capabilitiesForBuiltin,
   isBuiltinBackend,
@@ -44,6 +45,7 @@ import type {
   Inflight,
   InputBuffer,
   InputEditOp,
+  LogEntry,
   McpLogEntry,
   Overlay,
   ToolCell,
@@ -80,6 +82,14 @@ const MAX_TOASTS = 3
 
 /** Max captured MCP log lines kept in the session ring buffer (oldest drop). */
 const MAX_MCP_LOGS = 1000
+/**
+ * Unified log buffer sizing. The buffer is allowed to grow to
+ * {@link LOG_HIGH_WATER} before a trim cuts it back to {@link LOG_TRIM_TO} —
+ * amortizing the trim's O(n) slice over ~1000 lines instead of paying it on
+ * every single append (which is what `MCP_LOG_APPEND` above still does).
+ */
+const LOG_HIGH_WATER = 2000
+const LOG_TRIM_TO = 1000
 
 /** Append a toast, keeping only the most recent {@link MAX_TOASTS}. Pure. */
 function pushToast(list: Toast[], toast: Toast): Toast[] {
@@ -271,8 +281,11 @@ function overlayLength(overlay: Overlay): number | null {
       // range over hidden rows and the highlight could land off-screen).
       return filterByQuery(overlay.options, overlay.query).length
     case "mode":
-    case "provider":
       return overlay.options.length
+    case "provider":
+      // The `/provider` picker navigates the FILTERED view (same reason as
+      // `model`), so the length must reflect the active typeahead query.
+      return filterProviderOptions(overlay.options, overlay.query ?? "").length
     case "config":
       return overlay.rows.length
     case "subagentModels":
@@ -641,6 +654,9 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         cells,
         seq: state.seq + 1,
         inflight: { text: "", thinking: "", tools: [] },
+        // A new turn's reveal must start from zero rather than inherit the
+        // previous turn's character count.
+        streamEpoch: state.streamEpoch + 1,
         turnStatus: "streaming",
         usageSeenThisTurn: false,
         planCapturedThisTurn: false,
@@ -1076,22 +1092,43 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
       }
 
     // ── Config switches ──────────────────────────────────────────────────────────
-    case "SET_MODEL":
+    case "SET_MODEL": {
       // Remember the model for the ACTIVE provider (per-provider memory) and
       // mirror it onto the top-level `model` the displays read. Keying it to the
       // provider is what stops the pick from bleeding onto other providers.
+      //
+      // On an external backend the pick belongs to THAT agent, not to the
+      // built-in chat provider: writing it into `providers[provider]` would make
+      // choosing a Codex model silently rewrite the model the built-in sidecar
+      // runs with. It goes to the per-backend namespace instead, keyed by the
+      // resolved preset id.
+      const externalKey = isBuiltinBackend(state.config.agentBackend)
+        ? undefined
+        : (state.backendCapabilities?.presetId ?? state.config.agentBackend)
       return {
         ...state,
         config: {
           ...state.config,
           model: action.model,
-          providers: {
-            ...state.config.providers,
-            [state.config.provider]: {
-              ...state.config.providers[state.config.provider],
-              model: action.model,
-            },
-          },
+          ...(externalKey
+            ? {
+                agentBackends: {
+                  ...state.config.agentBackends,
+                  [externalKey]: {
+                    ...state.config.agentBackends?.[externalKey],
+                    model: action.model,
+                  },
+                },
+              }
+            : {
+                providers: {
+                  ...state.config.providers,
+                  [state.config.provider]: {
+                    ...state.config.providers[state.config.provider],
+                    model: action.model,
+                  },
+                },
+              }),
         },
         // Discard the per-model context window + pricing from the PREVIOUS model
         // — the App's useEffect will fire resolveMeta for the new model and land
@@ -1101,6 +1138,7 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         modelMeta: undefined,
         overlay: { kind: "none" },
       }
+    }
     case "SET_MODE":
       return {
         ...state,
@@ -1124,16 +1162,40 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
       // remembered model (or its catalog default) so a previous provider's model
       // never lingers on screen. `resolveActiveModel` ignores the stale top-level
       // pin for a known provider, so no Claude-id bleed.
+      // Backend-aware: while an external agent is answering, the built-in
+      // provider's model is not what runs, so switching provider must not
+      // re-point `config.model` at it — that would undo the honest "no model"
+      // and start sending the built-in id to the external agent again.
       const nextConfig = { ...state.config, provider: action.provider }
       return {
         ...state,
-        config: { ...nextConfig, model: resolveActiveModel(nextConfig) },
+        config: {
+          ...nextConfig,
+          model: resolveBackendModel(nextConfig, state.backendCapabilities?.presetId),
+        },
         // Discard the per-model context window from the previous provider's model
         // — same reasoning as SET_MODEL above.
         modelMeta: undefined,
         overlay: { kind: "none" },
       }
     }
+    case "SET_PROVIDER_CREDENTIAL":
+      // Merge the secret into the provider's config entry so the next session
+      // authenticates with it. Leaves the overlay untouched — the caller drives
+      // the switch/close (usually via a following SET_PROVIDER).
+      return {
+        ...state,
+        config: {
+          ...state.config,
+          providers: {
+            ...state.config.providers,
+            [action.providerId]: {
+              ...state.config.providers[action.providerId],
+              [action.credentialKind]: action.secret,
+            },
+          },
+        },
+      }
     case "SET_STATUS_BAR":
       return {
         ...state,
@@ -1189,6 +1251,12 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
       return {
         ...state,
         config: { ...state.config, mouse: action.mode },
+        overlay: { kind: "none" },
+      }
+    case "SET_SELECTION":
+      return {
+        ...state,
+        config: { ...state.config, selection: action.mode },
         overlay: { kind: "none" },
       }
     case "SET_CONFIG_PATCH":
@@ -1282,9 +1350,28 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
       // Generic typeahead for the searchable reducer-owned overlays. Reset the
       // highlight to the top of the freshly-filtered list (best match first).
       const k = state.overlay.kind
-      if (k !== "select" && k !== "sessions" && k !== "inspect" && k !== "quickActions")
+      if (
+        k !== "select" &&
+        k !== "sessions" &&
+        k !== "inspect" &&
+        k !== "quickActions" &&
+        k !== "provider"
+      )
         return state
       return { ...state, overlay: { ...state.overlay, query: action.query, index: 0 } }
+    }
+    case "OVERLAY_PROVIDER_KEY_INPUT": {
+      if (state.overlay.kind !== "providerKey") return state
+      // Typing clears any prior validation error so the hint isn't stale.
+      return { ...state, overlay: { ...state.overlay, value: action.value, error: undefined } }
+    }
+    case "OVERLAY_PROVIDER_KEY_REVEAL": {
+      if (state.overlay.kind !== "providerKey") return state
+      return { ...state, overlay: { ...state.overlay, reveal: !state.overlay.reveal } }
+    }
+    case "OVERLAY_PROVIDER_KEY_ERROR": {
+      if (state.overlay.kind !== "providerKey") return state
+      return { ...state, overlay: { ...state.overlay, error: action.error } }
     }
     case "MARKETPLACE_PATCH_ENTRY": {
       // Live status from an in-place plugin action (enable/disable) — only applies
@@ -1329,6 +1416,24 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
 
     case "MCP_LOG_CLEAR":
       return state.mcpLogs.length === 0 ? state : { ...state, mcpLogs: [] }
+
+    case "LOG_APPEND_BATCH": {
+      // One dispatch per coalescer flush window. Ids come from the same
+      // monotonic `seq` as cells (no Date.now/Math.random here — the reducer
+      // stays deterministic), ticked once PER ENTRY so a batch can't mint
+      // duplicate row keys.
+      if (action.entries.length === 0) return state
+      let seq = state.seq
+      const appended: LogEntry[] = action.entries.map((entry) => ({ id: makeId(++seq), ...entry }))
+      // ONE buffer copy per flush, and the O(n) trim only once the high-water
+      // mark is crossed — not on every line.
+      const grown = state.logs.concat(appended)
+      const logs = grown.length > LOG_HIGH_WATER ? grown.slice(grown.length - LOG_TRIM_TO) : grown
+      return { ...state, seq, logs }
+    }
+
+    case "LOG_CLEAR":
+      return state.logs.length === 0 ? state : { ...state, logs: [] }
 
     case "SKILL_ROW_TOGGLE": {
       if (state.overlay.kind !== "skills") return state
@@ -1456,7 +1561,20 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         backendInstallError: _installErr,
         ...rest
       } = state
-      return { ...rest, phase: "chat", backendCapabilities: action.capabilities }
+      // The launched preset is only known now (`codex` probes for the native CLI
+      // and resolves to `codex-app-server`), and the per-backend model memory is
+      // keyed by that resolved id. Without this re-resolve a model the user chose
+      // for `codex-app-server` would never be found again: mount only knows the
+      // alias the user typed, so it would silently fall back to "no model".
+      return {
+        ...rest,
+        phase: "chat",
+        backendCapabilities: action.capabilities,
+        config: {
+          ...state.config,
+          model: resolveBackendModel(state.config, action.capabilities.presetId),
+        },
+      }
     }
     case "BACKEND_CONNECT_FAIL": {
       const {

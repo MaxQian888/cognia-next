@@ -86,7 +86,10 @@ describe("createBackendLifecycle", () => {
     expect(d.disconnected).toEqual(["agent-1"])
   })
 
-  it("cancels a live connection, reclaiming its process", async () => {
+  it("leaves an already-installed connection alone — reaching one IS success", async () => {
+    // The connect effect's cleanup runs on the very transition that a successful
+    // connect causes (connecting → chat). Reclaiming there would kill the agent
+    // the user just started.
     const d = deferredConnects()
     const lifecycle = createBackendLifecycle<Conn>(d)
     const started = lifecycle.start()
@@ -94,7 +97,18 @@ describe("createBackendLifecycle", () => {
     await started
     lifecycle.cancel()
     await flush()
-    expect(lifecycle.current()).toBeNull()
+    expect(lifecycle.current()).toEqual({ agentId: "agent-1" })
+    expect(d.disconnected).toEqual([])
+  })
+
+  it("still reclaims that connection on dispose", async () => {
+    const d = deferredConnects()
+    const lifecycle = createBackendLifecycle<Conn>(d)
+    const started = lifecycle.start()
+    d.settle(0, "agent-1")
+    await started
+    lifecycle.cancel()
+    await lifecycle.dispose()
     expect(d.disconnected).toEqual(["agent-1"])
   })
 

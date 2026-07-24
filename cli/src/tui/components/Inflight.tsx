@@ -21,10 +21,14 @@ import { CellView } from "./CellView"
 export function Inflight({
   inflight,
   verbose = false,
+  epoch,
 }: {
   inflight: InflightState
   /** Detail mode (Ctrl+O): when on, the live reasoning text is shown in full. */
   verbose?: boolean
+  /** Turn identity — restarts the paced reveal so a SHORT turn after a long one
+   * animates from zero instead of inheriting the previous character count. */
+  epoch?: number
 }) {
   const theme = useTheme()
   // Paced "typing" reveal of the live answer — only on an interactive TTY, and
@@ -32,7 +36,11 @@ export function Inflight({
   // stable. When disabled the hook returns the full text unchanged.
   const prefs = useRenderPrefs()
   const revealEnabled = prefs.streamReveal && Boolean(process.stdout.isTTY)
-  const revealedText = usePacedReveal(inflight.text, revealEnabled)
+  const revealedText = usePacedReveal(
+    inflight.text,
+    revealEnabled,
+    epoch === undefined ? {} : { epoch }
+  )
   const hasThinking = inflight.thinking.length > 0
   const hasText = inflight.text.length > 0
   const hasTools = inflight.tools.length > 0
