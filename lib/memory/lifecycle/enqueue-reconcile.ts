@@ -28,7 +28,13 @@ export function __resetVectorFailureCount(): void {
 async function enqueueReconcile(dedupeKey: string): Promise<void> {
   try {
     await enqueueMemoryJob(
-      { dedupeKey, kind: "vector-reconcile", evidenceIds: [] },
+      {
+        dedupeKey,
+        kind: "vector-reconcile",
+        scope: "global",
+        provenance: "system",
+        evidenceIds: [],
+      },
       { reuseCompleted: true }
     )
   } catch {

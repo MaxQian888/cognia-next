@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/nextjs"
 
-import { MemoryMobileBody } from "./memory-mobile-body"
+import { MemoryMobileBody, type MemoryMobileBodyProps } from "./memory-mobile-body"
 import { seedDb } from "@/lib/storybook/seed-db"
 
 // Mobile long-term Memory view. Reads `memories` live from Dexie with a text
@@ -10,6 +10,7 @@ import { seedDb } from "@/lib/storybook/seed-db"
 const meta = {
   title: "Mobile/Memory/MemoryMobileBody",
   component: MemoryMobileBody,
+  args: { initialSelectedId: undefined },
   parameters: { layout: "fullscreen" },
   beforeEach: async () => {
     await seedDb(async () => {})
@@ -24,7 +25,7 @@ const meta = {
 } satisfies Meta<typeof MemoryMobileBody>
 
 export default meta
-type Story = StoryObj<typeof meta>
+type Story = StoryObj<MemoryMobileBodyProps>
 
 /** No memories synced — search header over an empty state. */
 export const Empty: Story = {}

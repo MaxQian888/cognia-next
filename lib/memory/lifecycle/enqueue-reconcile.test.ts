@@ -19,7 +19,13 @@ describe("enqueueDailyVectorReconcile", () => {
   it("enqueues with a day-bucketed dedupe key and reuseCompleted", async () => {
     await enqueueDailyVectorReconcile(Date.UTC(2026, 6, 23, 15, 30))
     expect(mockEnqueue).toHaveBeenCalledWith(
-      { dedupeKey: "vector-reconcile:2026-07-23", kind: "vector-reconcile", evidenceIds: [] },
+      {
+        dedupeKey: "vector-reconcile:2026-07-23",
+        kind: "vector-reconcile",
+        scope: "global",
+        provenance: "system",
+        evidenceIds: [],
+      },
       { reuseCompleted: true }
     )
   })

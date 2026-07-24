@@ -4,6 +4,7 @@
 import { render, screen, fireEvent, within, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { Memory } from "@/types/memory/memory"
+import type { ManageMemoryResult } from "@/lib/memory/control-plane/manage"
 
 let mockData: Memory[] = []
 jest.mock("dexie-react-hooks", () => ({
@@ -51,7 +52,9 @@ jest.mock("@/hooks/ui", () => {
 jest.mock("@/lib/db/memories", () => ({
   listMemories: jest.fn(),
 }))
-const mockManage = jest.fn(async (..._args: unknown[]) => ({ ok: true }))
+const mockManage = jest.fn<Promise<ManageMemoryResult>, unknown[]>(async (..._args) => ({
+  ok: true,
+}))
 jest.mock("@/lib/memory/control-plane/manage", () => ({
   manageMemory: (...args: unknown[]) => mockManage(...args),
 }))

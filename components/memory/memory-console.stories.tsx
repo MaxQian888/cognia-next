@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/nextjs"
 
-import { MemoryConsole } from "./memory-console"
+import { MemoryConsole, type MemoryConsoleProps } from "./memory-console"
 import { seedDb } from "@/lib/storybook/seed-db"
 import { makeMemorySet } from "@/lib/storybook/fixtures/memory"
 
@@ -10,6 +10,7 @@ import { makeMemorySet } from "@/lib/storybook/fixtures/memory"
 const meta = {
   title: "Memory/MemoryConsole",
   component: MemoryConsole,
+  args: { initialSelectedId: undefined },
   parameters: { layout: "fullscreen" },
   decorators: [
     (Story) => (
@@ -21,7 +22,7 @@ const meta = {
 } satisfies Meta<typeof MemoryConsole>
 
 export default meta
-type Story = StoryObj<typeof meta>
+type Story = StoryObj<MemoryConsoleProps>
 
 export const Populated: Story = {
   beforeEach: async () => {
