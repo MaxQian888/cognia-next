@@ -606,26 +606,58 @@ describe("parseLarkBotMenuEvent — application.bot.menu_v6", () => {
       menuEnvelope("agenda", "ou_user_001"),
       QUICK_COMMANDS
     )
-    expect(r).not.toBeNull()
-    expect(r!.kind).toBe("create")
-    expect(r!.plainText).toBe("/agenda today")
-    expect(r!.segments).toEqual([{ type: "text", text: "/agenda today" }])
-    expect(r!.channel.kind).toBe("private")
+    expect(r?.kind).toBe("mapped")
+    if (r?.kind !== "mapped") throw new Error("expected mapped outcome")
+    expect(r.event.kind).toBe("create")
+    expect(r.event.plainText).toBe("/agenda today")
+    expect(r.event.segments).toEqual([{ type: "text", text: "/agenda today" }])
+    expect(r.event.channel.kind).toBe("private")
     // Reply must address the operator p2p by open_id (ou_ prefix sniff).
-    expect(r!.conversationRef.channelId).toBe("ou_user_001")
-    expect(r!.conversationKey).toBe(`lark:${ADAPTER_ID}:ou_user_001`)
-    expect(r!.messageId).toBe("lark.menu:evt_menu_1")
+    expect(r.event.conversationRef.channelId).toBe("ou_user_001")
+    expect(r.event.conversationKey).toBe(`lark:${ADAPTER_ID}:ou_user_001`)
+    expect(r.event.messageId).toBe("lark.menu:evt_menu_1")
   })
 
-  it("falls back to the raw event_key when unmapped (never silently dropped)", () => {
+  it("classifies an unmapped event_key as unknown — it must never become model input", () => {
     const r = parseLarkBotMenuEvent(
       ADAPTER_ID,
       SELF_BOT_OPEN_ID,
       menuEnvelope("unknown_key", "ou_user_001"),
       QUICK_COMMANDS
     )
-    expect(r).not.toBeNull()
-    expect(r!.plainText).toBe("unknown_key")
+    expect(r).toEqual({
+      kind: "unknown",
+      openId: "ou_user_001",
+      eventKey: "unknown_key",
+      eventId: "evt_menu_1",
+    })
+  })
+
+  it("classifies a link-action command as a link outcome (terminal at the adapter)", () => {
+    const r = parseLarkBotMenuEvent(
+      ADAPTER_ID,
+      SELF_BOT_OPEN_ID,
+      menuEnvelope("cognia.open_workbench", "ou_user_001"),
+      QUICK_COMMANDS
+    )
+    expect(r?.kind).toBe("link")
+    if (r?.kind !== "link") throw new Error("expected link outcome")
+    // Reserved built-in resolved behind the adapter-configured list.
+    expect(r.command.action).toEqual({ type: "link", value: "/" })
+    expect(r.openId).toBe("ou_user_001")
+    expect(r.eventId).toBe("evt_menu_1")
+  })
+
+  it("resolves reserved cognia.* built-ins to mapped slash outcomes", () => {
+    const r = parseLarkBotMenuEvent(
+      ADAPTER_ID,
+      SELF_BOT_OPEN_ID,
+      menuEnvelope("cognia.new_task", "ou_user_001"),
+      QUICK_COMMANDS
+    )
+    expect(r?.kind).toBe("mapped")
+    if (r?.kind !== "mapped") throw new Error("expected mapped outcome")
+    expect(r.event.plainText).toBe("/new")
   })
 
   it("returns null for non-menu events", () => {
@@ -812,7 +844,17 @@ describe("identityScope stamping (plan 2026-07-24 Phase 1)", () => {
       },
       event: { operator: { operator_id: { open_id: "ou_menu" } }, event_key: "k" },
     } as unknown as LarkEventEnvelope
-    const r = parseLarkBotMenuEvent(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope, undefined)
-    expect(r!.channelData?.identityScope).toEqual({ tenantKey: "tk_menu", appId: "cli_app" })
+    const mapped = parseLarkBotMenuEvent(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope, [
+      { triggerKey: "k", action: { type: "prompt", value: "hi" } },
+    ])
+    if (mapped?.kind !== "mapped") throw new Error("expected mapped outcome")
+    expect(mapped.event.channelData?.identityScope).toEqual({
+      tenantKey: "tk_menu",
+      appId: "cli_app",
+    })
+    // Terminal outcomes carry the scope too (audit fields need the tenant).
+    const unknown = parseLarkBotMenuEvent(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope, undefined)
+    if (unknown?.kind !== "unknown") throw new Error("expected unknown outcome")
+    expect(unknown.identityScope).toEqual({ tenantKey: "tk_menu", appId: "cli_app" })
   })
 })

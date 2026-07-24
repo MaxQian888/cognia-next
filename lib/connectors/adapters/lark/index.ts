@@ -35,6 +35,11 @@ import {
   parseLarkInteractiveCallback,
 } from "./parse"
 import { applyTenantKeyBackfill } from "./tenant-key-backfill"
+import { handleMenuLink, handleMenuUnknownKey } from "./menu-actions"
+import { reconcileChatTabSurface } from "./chat-tabs"
+import { reconcileGroupMenuSurface } from "./group-menu"
+import { sweepLarkChatSurfaces } from "./surface-sweep"
+import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import { getBus } from "@/lib/connectors/bus"
 import type { LarkEventEnvelope } from "./parse"
 import type { LarkQuickCommand } from "./quick-commands"
@@ -381,6 +386,18 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       transport: opts.transport,
     })
 
+    // Start-time chat-surface sweep (plan 2026-07-24 P4.1/P4.3): reconcile
+    // pending / backoff-elapsed / stale Cognia Chat Tabs + group menus.
+    // Flag-gated inside the sweep; fire-and-forget so a platform outage
+    // can never delay transport startup.
+    void sweepLarkChatSurfaces({ adapterId: opts.id, resolveCreds: resolveCredentials }).catch(
+      (err) =>
+        loggers.network.warn("[lark] chat-surface sweep failed", {
+          id: opts.id,
+          error: err instanceof Error ? err.message : String(err),
+        })
+    )
+
     /**
      * Shared envelope dispatcher — handles both the long-connection and
      * webhook paths. Interactive-card callbacks (G3.4) go through the
@@ -412,21 +429,52 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
         }
         return
       }
-      // Bot-menu (快捷指令) clicks — map event_key → action, then run the
-      // same gate → bus → ai-run path as a regular message.
+      // Bot-menu (快捷指令) clicks — mapped keys run the same gate → bus →
+      // ai-run path as a regular message; link / unknown outcomes are
+      // terminal at the adapter (URL reply / bilingual notice + audit) and
+      // never reach the model (plan 2026-07-24 P4.2).
       if (envelope.header?.event_type === "application.bot.menu_v6") {
-        const menuEvent = parseLarkBotMenuEvent(
+        const outcome = parseLarkBotMenuEvent(
           opts.id,
           opts.selfBotOpenId,
           envelope,
           opts.quickCommands
         )
-        if (menuEvent) {
-          if (!(await gateInboundEvent(opts.id, menuEvent))) return
-          lastActivityAt = Date.now()
-          await ctx.emit(menuEvent)
+        if (!outcome) return
+        lastActivityAt = Date.now()
+        if (outcome.kind === "mapped") {
+          if (!(await gateInboundEvent(opts.id, outcome.event))) return
+          await ctx.emit(outcome.event)
+          return
+        }
+        // Row read is per-click so web-entry-base / flag edits apply without
+        // an adapter restart; lookup failure degrades to the global defaults.
+        const adapterRow = await getAdapterInstance(opts.id).catch(() => undefined)
+        if (outcome.kind === "link") {
+          await handleMenuLink(opts.id, adapterRow ?? undefined, outcome)
+        } else {
+          await handleMenuUnknownKey(opts.id, outcome)
         }
         return
+      }
+      // Bot newly added to a chat → seed/reconcile its Cognia surfaces
+      // (flag-gated inside the reconcilers; failures audit + back off).
+      // Falls through — the member_added system event still parses below.
+      if (envelope.header?.event_type === "im.chat.member.bot.added_v1") {
+        const addedChatId = (envelope.event as { chat_id?: string } | undefined)?.chat_id
+        if (addedChatId) {
+          const surfaceCtx = { adapterId: opts.id, resolveCreds: resolveCredentials }
+          const logSurfaceError = (surface: string) => (err: unknown) =>
+            loggers.network.warn("[lark] chat-surface reconcile failed", {
+              id: opts.id,
+              surface,
+              error: err instanceof Error ? err.message : String(err),
+            })
+          void reconcileChatTabSurface(surfaceCtx, addedChatId).catch(logSurfaceError("chat_tab"))
+          void reconcileGroupMenuSurface(surfaceCtx, addedChatId).catch(
+            logSurfaceError("group_menu")
+          )
+        }
       }
       const event = parseLarkEventEnvelope(opts.id, opts.selfBotOpenId, envelope)
       if (!event) {

@@ -22,6 +22,7 @@ export type LarkBooleanFeatureFlag =
   | "larkPrincipalRegistry"
   | "larkWebSso"
   | "larkChatTab"
+  | "larkGroupMenu"
   | "larkNativeSlash"
   | "larkMessageShortcut"
   | "larkPlusMenu"
@@ -34,6 +35,7 @@ const BOOLEAN_FLAG_ENV: Record<LarkBooleanFeatureFlag, string> = {
   larkPrincipalRegistry: "COGNIA_LARK_PRINCIPAL_REGISTRY",
   larkWebSso: "COGNIA_LARK_WEB_SSO",
   larkChatTab: "COGNIA_LARK_CHAT_TAB",
+  larkGroupMenu: "COGNIA_LARK_GROUP_MENU",
   larkNativeSlash: "COGNIA_LARK_NATIVE_SLASH",
   larkMessageShortcut: "COGNIA_LARK_MESSAGE_SHORTCUT",
   larkPlusMenu: "COGNIA_LARK_PLUS_MENU",
@@ -45,6 +47,7 @@ const DEFAULT_BOOLEAN_FLAGS: Record<LarkBooleanFeatureFlag, boolean> = {
   larkPrincipalRegistry: false,
   larkWebSso: false,
   larkChatTab: false,
+  larkGroupMenu: false,
   larkNativeSlash: false,
   larkMessageShortcut: false,
   larkPlusMenu: false,

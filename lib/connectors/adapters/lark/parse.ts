@@ -723,18 +723,39 @@ export interface LarkBotMenuEvent {
 }
 
 /**
+ * Discriminated result of a bot-menu click (plan 2026-07-24 P4.2).
+ *
+ * `mapped` carries a synthetic `create` inbound event for the normal
+ * gate → bus → ai-run pipeline; `link` and `unknown` are terminal at the
+ * adapter (URL reply / fixed bilingual notice + audit) and MUST NOT reach
+ * the model — an unmapped `event_key` used to fall back to a model prompt,
+ * which let anyone with the menu drive arbitrary AI turns.
+ */
+export type LarkBotMenuOutcome =
+  | { kind: "mapped"; event: NormalizedInboundEvent }
+  | {
+      kind: "link"
+      command: LarkQuickCommand
+      openId: string
+      eventId: string
+      identityScope?: { tenantKey?: string; appId?: string }
+    }
+  | {
+      kind: "unknown"
+      openId: string
+      eventKey: string
+      eventId: string
+      identityScope?: { tenantKey?: string; appId?: string }
+    }
+
+/**
  * Project an `application.bot.menu_v6` envelope (a bot-menu / 快捷指令 click)
- * into a synthetic `create` inbound event so it flows through the normal
- * gate → bus → ai-run pipeline.
+ * into a `LarkBotMenuOutcome`.
  *
- * The menu event carries the operator's `open_id` but no `chat_id`, so the
- * reply targets the operator's p2p chat: `conversationRef.channelId` is set to
- * the `ou_…` open_id, which `serialize.ts:serializeOutboundAsync` resolves to
- * `receive_id_type=open_id`.
- *
- * The `event_key` is mapped to an action via `quickCommands`. A configured
- * mapping supplies the prompt / slash-command text; an unmapped key falls back
- * to its label or the raw key so the click is never silently dropped.
+ * The menu event carries the operator's `open_id` but no `chat_id`, so
+ * replies target the operator's p2p chat: `conversationRef.channelId` is set
+ * to the `ou_…` open_id, which `serialize.ts:serializeOutboundAsync` resolves
+ * to `receive_id_type=open_id`.
  *
  * Returns null for non-menu events or when operator / event_key are absent.
  */
@@ -743,43 +764,65 @@ export function parseLarkBotMenuEvent(
   selfBotOpenId: string,
   envelope: LarkEventEnvelope,
   quickCommands: LarkQuickCommand[] | undefined
-): NormalizedInboundEvent | null {
+): LarkBotMenuOutcome | null {
   if (envelope.header?.event_type !== "application.bot.menu_v6") return null
   const event = envelope.event as unknown as LarkBotMenuEvent
   const openId = event.operator?.operator_id?.open_id
   const eventKey = event.event_key
   if (!openId || !eventKey) return null
 
-  const mapped = resolveQuickCommand(quickCommands, eventKey)
-  const text = mapped?.action.value ?? mapped?.label ?? eventKey
-
-  const conversationKey = buildConversationKey("lark", adapterId, openId)
+  const eventId = envelope.header.event_id ?? ""
   const identityScope = identityScopeOf(envelope)
+  const mapped = resolveQuickCommand(quickCommands, eventKey)
+  if (!mapped) {
+    return {
+      kind: "unknown",
+      openId,
+      eventKey,
+      eventId,
+      ...(identityScope ? { identityScope } : {}),
+    }
+  }
+  if (mapped.action.type === "link") {
+    return {
+      kind: "link",
+      command: mapped,
+      openId,
+      eventId,
+      ...(identityScope ? { identityScope } : {}),
+    }
+  }
+
+  const text = mapped.action.value
+  const conversationKey = buildConversationKey("lark", adapterId, openId)
 
   return {
-    platform: "lark",
-    adapterId,
-    selfId: selfBotOpenId,
-    messageId: `lark.menu:${envelope.header.event_id}`,
-    conversationRef: {
+    kind: "mapped",
+    event: {
       platform: "lark",
       adapterId,
-      channelId: openId,
+      selfId: selfBotOpenId,
+      messageId: `lark.menu:${eventId}`,
+      conversationRef: {
+        platform: "lark",
+        adapterId,
+        channelId: openId,
+      },
+      conversationKey,
+      sender: buildPlatformIdentity(adapterId, openId),
+      channel: {
+        id: conversationKey,
+        kind: "private",
+        platformChannelId: openId,
+      },
+      segments: [{ type: "text", text }],
+      plainText: text,
+      mentions: { selfMentioned: false, users: [] },
+      timestamp: Date.now(),
+      raw: envelope,
+      kind: "create",
+      ...(identityScope ? { channelData: { identityScope } } : {}),
     },
-    conversationKey,
-    sender: buildPlatformIdentity(adapterId, openId),
-    channel: {
-      id: conversationKey,
-      kind: "private",
-      platformChannelId: openId,
-    },
-    segments: [{ type: "text", text }],
-    plainText: text,
-    mentions: { selfMentioned: false, users: [] },
-    timestamp: Date.now(),
-    raw: envelope,
-    kind: "create",
-    ...(identityScope ? { channelData: { identityScope } } : {}),
   }
 }
 

@@ -120,6 +120,15 @@ export type AuditKind =
   // `entry.denied` records surface-resolve rejections (membership denied).
   | "entry.consumed"
   | "entry.denied"
+  // ── Lark chat surfaces + menus (plan 2026-07-24 Phase 4) ─────────────
+  // `menu.unknown_key` — a bot-menu click whose event_key resolves to no
+  // configured or reserved quick command; the click is answered with a fixed
+  // bilingual notice and NEVER forwarded to the model. `chat_tab.synced` /
+  // `chat_tab.sync_failed` trace the Chat Tab / group-menu reconciler per
+  // chat surface (fields: {chatId, surfaceType, urlVersion?, attempt?}).
+  | "menu.unknown_key"
+  | "chat_tab.synced"
+  | "chat_tab.sync_failed"
   // ── Feishu unified identity (plan 2026-07-24 Phase 1) ────────────────
   // Principal registry outcomes. `principal.unbound` fields carry
   // {tenantKey?, appId?, openIdHash, reason} — the raw open_id never lands

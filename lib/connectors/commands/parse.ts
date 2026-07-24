@@ -13,56 +13,20 @@
  * its original case (model ids / session titles are case-sensitive).
  */
 
-/** Every recognised control command. */
-export type ControlCommandName =
-  | "help"
-  | "commands"
-  | "status"
-  | "sessions"
-  | "dir"
-  | "new"
-  | "switch"
-  | "resume"
-  | "mode"
-  | "model"
-  | "reasoning"
-  | "character"
-  | "team"
-  | "workflow"
-  | "agent"
-  | "goal"
+import { CONTROL_COMMAND_SPECS, type ControlCommandName } from "./registry"
+
+export type { ControlCommandName } from "./registry"
 
 /**
  * Commands anyone may run regardless of the permission gate. `help` is here so
  * the dispatcher recognises it (then defers to the existing rich help-card
  * dispatcher), and `commands` lists the control commands as plain text.
  */
-export const READONLY_COMMANDS: ReadonlySet<ControlCommandName> = new Set([
-  "help",
-  "commands",
-  "status",
-  "sessions",
-  "dir",
-])
+export const READONLY_COMMANDS: ReadonlySet<ControlCommandName> = new Set(
+  CONTROL_COMMAND_SPECS.filter((spec) => spec.readonly).map((spec) => spec.name)
+)
 
-const KNOWN_COMMANDS: ReadonlySet<string> = new Set<ControlCommandName>([
-  "help",
-  "commands",
-  "status",
-  "sessions",
-  "dir",
-  "new",
-  "switch",
-  "resume",
-  "mode",
-  "model",
-  "reasoning",
-  "character",
-  "team",
-  "workflow",
-  "agent",
-  "goal",
-])
+const KNOWN_COMMANDS: ReadonlySet<string> = new Set(CONTROL_COMMAND_SPECS.map((spec) => spec.name))
 
 export interface KnownControlCommand {
   kind: "known"

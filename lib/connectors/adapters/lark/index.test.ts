@@ -14,6 +14,11 @@ const mockListen = listen as jest.Mock
 // (inbound-media.test.ts). Here we only assert the adapter WIRES it into the
 // dispatch path — mock it to a no-op spy so no real download is attempted.
 const mockEnrich = jest.fn(async (..._args: unknown[]) => undefined)
+jest.mock("./menu-actions", () => ({
+  handleMenuUnknownKey: jest.fn(async () => undefined),
+  handleMenuLink: jest.fn(async () => undefined),
+}))
+
 jest.mock("./inbound-media", () => ({
   __esModule: true,
   enrichLarkInboundMedia: (...args: unknown[]) => mockEnrich(...args),
@@ -480,6 +485,51 @@ describe("createLarkAdapter", () => {
     expect(emitted.length).toBeGreaterThanOrEqual(1)
     expect(emitted[0].plainText).toBe("/agenda today")
     expect(emitted[0].conversationRef.channelId).toBe("ou_user_777")
+  }, 15000)
+
+  it("routes an unmapped bot-menu click to the terminal unknown handler, not the bus", async () => {
+    const menuActions = jest.requireMock("./menu-actions") as {
+      handleMenuUnknownKey: jest.Mock
+      handleMenuLink: jest.Mock
+    }
+    menuActions.handleMenuUnknownKey.mockClear()
+    const session = createFakeLongConnSession()
+    mockListen.mockImplementation(session.listenImpl)
+
+    const adapter = createLarkAdapter({
+      id: "lark-menu-unknown",
+      displayName: "Menu Test Bot",
+      appId: async () => "cli_menu",
+      appSecret: async () => "secret-menu",
+      verificationToken: async () => "token-menu",
+      selfBotOpenId: "ou_bot_menu",
+      quickCommands: [{ triggerKey: "agenda", action: { type: "slash", value: "/agenda today" } }],
+      transport: "long-connection",
+    })
+
+    const { ctx, emitted } = makeCtx()
+    await adapter.start(ctx)
+    await session.waitForListeners()
+
+    session.push({
+      schema: "2.0",
+      header: { event_id: "evt_menu_2", event_type: "application.bot.menu_v6" },
+      event: {
+        operator: { operator_id: { open_id: "ou_user_777" } },
+        event_key: "never_configured",
+      },
+    })
+
+    await new Promise((r) => setTimeout(r, 30))
+    await adapter.stop()
+
+    expect(emitted).toHaveLength(0)
+    expect(menuActions.handleMenuUnknownKey).toHaveBeenCalledTimes(1)
+    expect(menuActions.handleMenuUnknownKey.mock.calls[0][1]).toMatchObject({
+      kind: "unknown",
+      eventKey: "never_configured",
+      openId: "ou_user_777",
+    })
   }, 15000)
 
   it("send() acquires TAT and calls Lark API", async () => {
