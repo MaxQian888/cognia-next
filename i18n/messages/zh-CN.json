@@ -20509,6 +20509,15 @@
         "toAria": "勿扰时段结束",
         "toLabel": "结束（HH:MM）"
       },
+      "runOperators": {
+        "countLabel": "{count, plural, =0 {无操作员} other {# 位操作员}}",
+        "empty": "未配置操作员——只有运行的发起人本人可以操作。",
+        "help": "允许审批、取消或干预非本人发起运行的平台用户 ID。当工作流审批卡片没有已知的发起人时，也会回退到这份名单——留空则这类卡片永远无法被处理。",
+        "hint": "以逗号分隔的平台用户 ID（飞书 open_id、Telegram 数字 ID、Discord snowflake……），须与平台在入站事件中上报的一致。",
+        "label": "操作员用户 ID",
+        "placeholder": "ou_abc123, ou_def456",
+        "title": "运行操作员"
+      },
       "sendTest": {
         "bodyLabel": "内容",
         "chatIdHelp": {

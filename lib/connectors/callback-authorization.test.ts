@@ -318,3 +318,59 @@ describe("notifyCallbackDenied", () => {
     expect(input.request.conversationRef.threadTs).toBe("omt_5")
   })
 })
+
+/**
+ * Structural guard over the binding WRITERS, not the reader.
+ *
+ * `legacyActorScope` exists for rows written before this guard shipped and
+ * returns `{mode:"conversation"}` for most kinds — which the guard has already
+ * satisfied by the time it runs, i.e. a no-op. That is correct for the old
+ * rows it was written for, and wrong for anything new: a high-privilege
+ * binding that forgets `actorScope` silently degrades to "anyone who can see
+ * the card". This pins every consume-once writer to an explicit scope so the
+ * degradation cannot come back by omission.
+ */
+describe("high-privilege binding writers", () => {
+  const CONSUME_ONCE_SOURCES: Array<{ kind: string; file: string }> = [
+    { kind: "tool_approve", file: "lib/connectors/hitl/tool-approval.ts" },
+    { kind: "skill_invoke", file: "lib/skills/built-in/dispatcher.ts" },
+    { kind: "wf_approve", file: "plugins/workflow-ai/src/tools/run-by-name-tools.ts" },
+    { kind: "wf_cancel", file: "plugins/workflow-ai/src/tools/run-by-name-tools.ts" },
+    { kind: "wf_fanout_approve", file: "plugins/workflow-ai/src/tools/run-by-name-tools.ts" },
+    { kind: "wf_fanout_cancel", file: "plugins/workflow-ai/src/tools/run-by-name-tools.ts" },
+  ]
+
+  it.each(CONSUME_ONCE_SOURCES)(
+    "$kind is recorded with an explicit actorScope",
+    async ({ kind, file }) => {
+      const fs = await import("node:fs/promises")
+      const path = await import("node:path")
+      const source = await fs.readFile(path.join(process.cwd(), file), "utf8")
+
+      // The `kind: "…"` literal and an `actorScope` must both appear in the
+      // same binding-record argument object. Call sites spell the function
+      // either directly or through an injected `recordBinding` dep.
+      const kindIndex = source.indexOf(`kind: "${kind}"`)
+      expect(kindIndex).toBeGreaterThan(-1)
+      const objectEnd = source.indexOf("})", kindIndex)
+      const objectStart = Math.max(
+        source.lastIndexOf("recordCallbackBinding({", kindIndex),
+        source.lastIndexOf("recordBinding({", kindIndex)
+      )
+      expect(objectStart).toBeGreaterThan(-1)
+      expect(source.slice(objectStart, objectEnd)).toContain("actorScope")
+    }
+  )
+
+  it("the guard's consume-once set matches the kinds those writers produce", async () => {
+    const fs = await import("node:fs/promises")
+    const path = await import("node:path")
+    const guard = await fs.readFile(
+      path.join(process.cwd(), "lib/connectors/callback-authorization.ts"),
+      "utf8"
+    )
+    for (const { kind } of CONSUME_ONCE_SOURCES) {
+      expect(guard).toContain(`"${kind}"`)
+    }
+  })
+})

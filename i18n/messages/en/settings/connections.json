@@ -1101,6 +1101,15 @@
     "toAria": "Quiet hours to",
     "toLabel": "To (HH:MM)"
   },
+  "runOperators": {
+    "title": "Run operators",
+    "help": "Platform user ids allowed to approve, cancel or steer runs they did not start. Also the fallback approver when a workflow approval card has no known requester — leave it empty and those cards can never be actioned.",
+    "label": "Operator user ids",
+    "placeholder": "ou_abc123, ou_def456",
+    "hint": "Comma-separated platform user ids (Lark open_id, Telegram numeric id, Discord snowflake…), as the platform reports them on inbound events.",
+    "empty": "No operators configured — only a run's own requester can act on it.",
+    "countLabel": "{count, plural, =0 {no operators} =1 {1 operator} other {# operators}}"
+  },
   "sendTest": {
     "bodyLabel": "Body",
     "chatIdHelp": {

@@ -42,6 +42,7 @@ import { LarkAtStrategy } from "../../forms/lark/lark-at-strategy"
 import { LarkWhitelistEditor } from "../../forms/lark/lark-whitelist-editor"
 import { LarkEntrySurfaces } from "../../forms/lark/lark-entry-surfaces"
 import { LarkPrincipals } from "../../forms/lark/lark-principals"
+import { RunOperators } from "../../forms/run-operators"
 import { HelpAndWelcome } from "../../forms/help-and-welcome"
 import { ControlCommands } from "../../forms/control-commands"
 import { AiBindingDefaults } from "../../forms/ai-binding-defaults"
@@ -135,6 +136,11 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
        * closed, so this card is what makes `larkPrincipalRegistry` operable
        * at all. */}
       {row.type === "lark" && <LarkPrincipals adapterId={row.id} />}
+
+      {/* Who may act on a run they did not start. Read by the callback
+       * authorization guard, the run-control gate, and follow-up control on
+       * every platform, so it mounts unconditionally. */}
+      <RunOperators adapterId={row.id} />
 
       {/* Cross-provider help / welcome card settings. Self-managing, so a
        * single mount here covers every platform. */}
