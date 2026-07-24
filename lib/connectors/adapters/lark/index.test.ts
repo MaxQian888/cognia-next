@@ -25,6 +25,22 @@ jest.mock("./inbound-media", () => ({
   enrichLarkInboundMedia: (...args: unknown[]) => mockEnrich(...args),
 }))
 
+// Registry seeding runs at adapter start. Its own behavior lives in
+// principal/bootstrap.test.ts; here we only prove the adapter CALLS it, since
+// an unwired bootstrap is exactly the failure this seam exists to prevent.
+const mockBootstrap = jest.fn(async () => ({ status: "skipped", reason: "flag_off" }) as const)
+jest.mock("@/lib/connectors/principal/bootstrap", () => ({
+  __esModule: true,
+  bootstrapFeishuRegistry: (...args: unknown[]) => mockBootstrap(...(args as [])),
+}))
+
+const mockGetAdapterInstance = jest.fn(async (_id: string) => undefined as unknown)
+jest.mock("@/lib/db/adapter-instances", () => ({
+  __esModule: true,
+  getAdapterInstance: (id: string) => mockGetAdapterInstance(id),
+  patchAdapterInstanceSettings: jest.fn(async () => undefined),
+}))
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -134,6 +150,9 @@ describe("createLarkAdapter", () => {
     mockInvoke.mockReset()
     mockListen.mockReset()
     mockEnrich.mockClear()
+    mockBootstrap.mockClear()
+    mockGetAdapterInstance.mockReset()
+    mockGetAdapterInstance.mockResolvedValue(undefined)
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "connectors_lark_ws_open") return "lark-ws-handle"
       if (cmd === "connectors_lark_ws_close") return undefined
@@ -187,6 +206,38 @@ describe("createLarkAdapter", () => {
     await adapter.start(ctx)
     expect(adapter.health().state).toBe("starting")
     expect(adapter.health().reason).toBeUndefined()
+    await adapter.stop()
+  })
+
+  it("seeds the Feishu principal registry at start with the adapter's own row", async () => {
+    const row = {
+      id: "lark-1",
+      settings: { larkPrincipalRegistry: true },
+      lastWhoamiResult: { botName: "b", appId: "cli_app_001", openId: "ou_bot", tenantKey: "tk_a" },
+    }
+    // Not `…Once`: the chat-surface sweep fires first and reads the same row.
+    mockGetAdapterInstance.mockResolvedValue(row)
+    const adapter = makeAdapter()
+    const { ctx } = makeCtx()
+
+    await adapter.start(ctx)
+    // The call is fire-and-forget behind an async adapter-row read; let the
+    // task queue drain rather than guessing a microtask count.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(mockBootstrap).toHaveBeenCalledWith({ adapterId: "lark-1", adapterRow: row })
+    await adapter.stop()
+  })
+
+  it("skips registry seeding when the adapter row is missing", async () => {
+    mockGetAdapterInstance.mockResolvedValue(undefined)
+    const adapter = makeAdapter()
+    const { ctx } = makeCtx()
+
+    await adapter.start(ctx)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(mockBootstrap).not.toHaveBeenCalled()
     await adapter.stop()
   })
 

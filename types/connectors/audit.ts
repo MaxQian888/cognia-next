@@ -147,6 +147,17 @@ export type AuditKind =
   | "principal.rejected"
   | "principal.bind_requested"
   | "principal.bound"
+  // Operator-driven registry mutations (settings card / `cognia lark` CLI).
+  // `bind_rejected` closes a request without minting a principal;
+  // `status_changed` carries {principalId, from, to}; `rebound` carries
+  // {principalId, version, changed} — the field NAMES that moved, never the
+  // values. `tenant.*` mirror the same shape for the tenant row and carry
+  // {tenantKey, appId} (both are configuration identifiers, not user data).
+  | "principal.bind_rejected"
+  | "principal.status_changed"
+  | "principal.rebound"
+  | "tenant.registered"
+  | "tenant.status_changed"
   // ── Built-in skills tier (ADR-0026 / schema v43) ─────────────────────
   // The dispatcher emits one of these on every `runBuiltInSkill` call.
   // `reason` carries the gate that fired (`pii_blocked`,

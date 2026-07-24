@@ -35,10 +35,15 @@ export const BOOLEAN_FLAGS = new Set([
   // `chat --continue` — resume the most recent session at launch (never takes a
   // value; `--resume [id]` is the value-taking variant).
   "continue",
+  // Launch with every approval gate disarmed (`permissionMode:
+  // bypassPermissions`). `--dangerously-skip-permissions` is the Claude Code
+  // spelling of the same switch; both are accepted so muscle memory works.
+  "bypass",
+  "dangerously-skip-permissions",
 ])
 
 /** Commands whose first extra positional is a subcommand, not free content. */
-export const GROUPED_COMMANDS = new Set(["auth", "config", "logto"])
+export const GROUPED_COMMANDS = new Set(["auth", "config", "logto", "lark"])
 
 const SHORT_ALIAS: Record<string, string> = {
   h: "help",

@@ -20131,6 +20131,39 @@
         "openConsole": "Open Lark console",
         "openConsoleAria": "Open Lark Open Platform → Event subscriptions for this app",
         "openConsoleSecurityAria": "Open Lark Open Platform → Security settings for this app",
+        "principals": {
+          "actionFailed": "Action failed: {reason}",
+          "help": "Maps tenant + app + open_id to this Cognia account. With the principal registry flag on, only bound people can run anything — everyone else is parked with a bind code.",
+          "principalDisable": "Disable",
+          "principalEnable": "Enable",
+          "principalStatus": {
+            "active": "Active",
+            "disabled": "Disabled",
+            "unlinked": "Unlinked"
+          },
+          "principalStatusAria": "Principal status",
+          "principalUnlink": "Unlink",
+          "principalsEmpty": "No principals bound yet.",
+          "principalsLabel": "Bound principals",
+          "requestApprove": "Approve",
+          "requestApproveAria": "Approve bind request {code}",
+          "requestReject": "Reject",
+          "requestRejectAria": "Reject bind request {code}",
+          "requestsEmpty": "No pending bind requests.",
+          "requestsLabel": "Pending bind requests",
+          "seeded": "Registry seeded from existing contacts.",
+          "tenantDisable": "Disable tenant",
+          "tenantEnable": "Enable tenant",
+          "tenantLabel": "Tenant",
+          "tenantRegister": "Register tenant",
+          "tenantStatus": {
+            "active": "Active",
+            "disabled": "Disabled"
+          },
+          "tenantUnknown": "Tenant unknown — run the bot identity probe and wait for one inbound event so the tenant key is known.",
+          "tenantUnregistered": "Not registered yet. Registering admits this tenant and binds it to the current account.",
+          "title": "Feishu identity registry"
+        },
         "quickCommands": {
           "help": "Configure the menu in the Lark console (Bot → Bot menu) with an event_key, subscribe application.bot.menu_v6, then map each event_key to an action here. Feishu has no API to create menus — registration is console-only."
         },

@@ -44,7 +44,7 @@ use axum_server::tls_rustls::RustlsConfig;
 use tokio::sync::watch;
 use tower_http::limit::RequestBodyLimitLayer;
 
-use super::{auth, middleware, SharedState};
+use super::{auth, lark_entry, middleware, SharedState};
 
 /// 64 KiB — pair request bodies are tiny; the generous limit leaves room for
 /// future endpoints (e.g., push-token registration in M4.6).
@@ -276,6 +276,15 @@ pub fn build_router(state: SharedState) -> Router {
         // cognia over JSON-RPC. Same baseline-chat trust model as ACP: reaches
         // `claude_*` arms through `rpc::dispatch`, so a device JWT suffices.
         .route("/a2a", post(a2a::a2a_rpc_handler))
+        // Feishu principal-registry admin (`cognia lark …`). Deliberately here
+        // rather than in the public `/integrations/lark` nest: this tier
+        // already accepts the headless brain's loopback-only service token,
+        // which is exactly the trust level an operator channel needs.
+        .route("/api/v1/lark/admin", post(lark_entry::admin_handler))
+        .route(
+            "/api/v1/lark/admin/{request_id}",
+            get(lark_entry::admin_poll_handler),
+        )
         .layer(from_fn_with_state(
             state.clone(),
             middleware::require_device_jwt,

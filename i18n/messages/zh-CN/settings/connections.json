@@ -723,6 +723,39 @@
     "openConsole": "打开飞书控制台",
     "openConsoleAria": "在飞书开放平台打开当前应用的事件订阅页",
     "openConsoleSecurityAria": "在飞书开放平台打开当前应用的安全设置页",
+    "principals": {
+      "title": "飞书身份注册表",
+      "help": "把 租户 + 应用 + open_id 映射到当前 Cognia 账号。启用主体注册表后，只有已绑定的人才能触发执行，其他人一律被挂起并收到一个绑定码。",
+      "tenantLabel": "租户",
+      "tenantUnknown": "租户未知——请先运行机器人身份探测，并等待一条入站事件带回 tenant key。",
+      "tenantUnregistered": "尚未注册。注册即表示接纳该租户，并把它绑定到当前账号。",
+      "tenantRegister": "注册租户",
+      "tenantDisable": "停用租户",
+      "tenantEnable": "启用租户",
+      "tenantStatus": {
+        "active": "已启用",
+        "disabled": "已停用"
+      },
+      "requestsLabel": "待审批绑定申请",
+      "requestsEmpty": "暂无待审批的绑定申请。",
+      "requestApprove": "通过",
+      "requestReject": "拒绝",
+      "requestApproveAria": "通过绑定申请 {code}",
+      "requestRejectAria": "拒绝绑定申请 {code}",
+      "principalsLabel": "已绑定主体",
+      "principalsEmpty": "尚未绑定任何主体。",
+      "principalDisable": "停用",
+      "principalEnable": "启用",
+      "principalUnlink": "解绑",
+      "principalStatus": {
+        "active": "已启用",
+        "disabled": "已停用",
+        "unlinked": "已解绑"
+      },
+      "principalStatusAria": "主体状态",
+      "actionFailed": "操作失败：{reason}",
+      "seeded": "已从既有联系人播种注册表。"
+    },
     "quickCommands": {
       "help": "在飞书开发者后台（机器人 → 机器人菜单）配置菜单并设置 event_key，订阅 application.bot.menu_v6 事件，然后在此把每个 event_key 映射到一个动作。飞书没有创建菜单的 API——只能在后台配置。"
     },

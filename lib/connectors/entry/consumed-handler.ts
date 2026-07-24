@@ -18,6 +18,10 @@
  *                          with the produced sessionId/conversationKey.
  *   - `plus_create`      — `+`-menu new-task intent (plan P5.2): delegate to
  *                          `adapters/lark/plus-create.ts`.
+ *   - `principal_admin`  — operator registry mutation from `cognia lark …`
+ *                          (plan P1.1). Authenticated at the Rust front door
+ *                          by the device/service JWT tier; the brain owns the
+ *                          account database, so it performs the write.
  *
  * Registered by the headless connector runtime; a desktop install without a
  * companion listener simply never receives these frames.
@@ -31,6 +35,7 @@ import { appendAudit } from "@/lib/connectors/audit"
 import { larkTenantRequest, type LarkCredentials } from "@/lib/connectors/adapters/lark/http"
 import { importLarkMessages } from "@/lib/connectors/adapters/lark/message-import"
 import { handlePlusCreate } from "@/lib/connectors/adapters/lark/plus-create"
+import { runPrincipalAdminIntent } from "@/lib/connectors/principal/admin-intent"
 
 export const LARK_INTENT_TOPIC = "connectors://lark-intent"
 
@@ -48,6 +53,12 @@ export interface LarkIntentFrame {
   messageIds?: string[]
   triggerId?: string
   verifiedIdentity?: { openId?: string; tenantKey?: string; appId?: string }
+  /** `principal_admin` only. */
+  op?: string
+  code?: string
+  principalId?: string
+  status?: string
+  cogniaUserId?: string
 }
 
 export interface LarkIntentDependencies {
@@ -58,6 +69,7 @@ export interface LarkIntentDependencies {
   audit: typeof appendAudit
   importMessages: typeof importLarkMessages
   plusCreate: typeof handlePlusCreate
+  runAdmin: typeof runPrincipalAdminIntent
 }
 
 async function credsFor(
@@ -164,6 +176,34 @@ export async function handleLarkIntentFrame(
     return
   }
 
+  if (frame.kind === "principal_admin") {
+    const { requestId, adapterId, op } = frame
+    if (!requestId) return
+    if (!adapterId || !op) {
+      await deps.call("lark_result_complete", { requestId, error: "intent_malformed" })
+      return
+    }
+    try {
+      const outcome = await deps.runAdmin({
+        adapterId,
+        op,
+        code: frame.code,
+        principalId: frame.principalId,
+        status: frame.status,
+        cogniaUserId: frame.cogniaUserId,
+      })
+      await deps.call(
+        "lark_result_complete",
+        outcome.ok ? { requestId, result: outcome.result } : { requestId, error: outcome.error }
+      )
+    } catch {
+      await deps
+        .call("lark_result_complete", { requestId, error: "intent_failed" })
+        .catch(() => undefined)
+    }
+    return
+  }
+
   if (frame.kind === "import_messages" || frame.kind === "plus_create") {
     const { requestId, adapterId } = frame
     const openId = frame.verifiedIdentity?.openId
@@ -262,6 +302,7 @@ export function installLarkIntentHandler(
     audit: appendAudit,
     importMessages: importLarkMessages,
     plusCreate: handlePlusCreate,
+    runAdmin: runPrincipalAdminIntent,
     ...overrides,
   }
   let disposed = false

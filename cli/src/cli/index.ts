@@ -11,6 +11,7 @@ import { configCommand as defaultConfig } from "./config-command"
 import { handoffCommand as defaultHandoff, resumeCommand as defaultResume } from "./handoff-cmd"
 import { chatCommand as defaultChat } from "./chat"
 import { logtoCommand as defaultLogto } from "./logto-command"
+import { larkCommand as defaultLark } from "./lark-command"
 import { serveCommand as defaultServe } from "../serve/serve-command"
 import { realOutput, type OutputSink } from "./output"
 import { VERSION } from "../version"
@@ -22,7 +23,7 @@ export const HELP = `cognia-agent — standalone Cognia coding agent
 Usage:
   cognia-agent chat [--continue | --resume [id]]       interactive terminal agent
                     [--backend builtin|codex|claude-code|<preset>]
-                    [--plugin-tools] [--dev-plugins]
+                    [--plugin-tools] [--dev-plugins] [--bypass]
   cognia-agent -p "<prompt>"                            headless one-shot (alias of run)
   cognia-agent run "<prompt>" [--model m] [--provider p] [--cwd dir]
                               [--system s] [--allow a,b] [--yes] [--max-turns n]
@@ -35,6 +36,11 @@ Usage:
   cognia-agent logto <login|status|logout>          cloud OIDC (Logto) session
                      [--issuer u] [--client-id id] [--resource api] [--scope a,b] [--org id]
   cognia-agent config <get|set|path>
+  cognia-agent lark <list|approve|reject|disable|enable|unlink|tenant|sweep>
+                     [--adapter id] [--user id] [--server-url u] [--json]
+                     Feishu identity registry admin for headless installs
+                     (COGNIA_SERVICE_TOKEN / COGNIA_SERVER_URL /
+                      COGNIA_LARK_ADAPTER_ID via env)
   cognia-agent serve [--server-url u] [--account id] [--home dir]
                      [--flush-debounce ms]           headless brain for cognia-server
                      (COGNIA_SERVER_URL / COGNIA_SERVICE_TOKEN / COGNIA_BRIDGE_URL /
@@ -54,6 +60,10 @@ Flags:
       --max-turns n     cap the agentic loop for this run
       --plugin-tools    expose in-tree first-party plugin tools to the agent
       --dev-plugins     also load the repo's plugins/<id> as live dev plugins
+      --bypass          start with every approval gate disarmed (alias:
+                        --dangerously-skip-permissions). Session-only — it is
+                        never written to config.json. The hosted external agent
+                        gets the same mode and sandbox; chat asks to confirm once
   -h, --help            show this help
   -v, --version         print the version
 `
@@ -68,6 +78,7 @@ const KNOWN_COMMANDS = new Set([
   "chat",
   "serve",
   "logto",
+  "lark",
 ])
 
 export interface MainDeps {
@@ -79,6 +90,7 @@ export interface MainDeps {
   chat?: typeof defaultChat
   logto?: typeof defaultLogto
   serve?: typeof defaultServe
+  lark?: typeof defaultLark
   out?: OutputSink
 }
 
@@ -112,6 +124,15 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
   }
 
   switch (args.command) {
+    // `help` / `version` subcommands mirror the `-h` / `-v` flags and exit 0.
+    // Placed after the `-p` shorthand above so `cognia-agent -p help` still
+    // treats "help" as the prompt rather than printing usage.
+    case "help":
+      out.write(HELP)
+      return 0
+    case "version":
+      out.write(`${VERSION}\n`)
+      return 0
     case "run":
       return (deps.run ?? defaultRun)(args, { out })
     case "auth":
@@ -128,6 +149,8 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
       return (deps.logto ?? defaultLogto)(args, { out })
     case "serve":
       return (deps.serve ?? defaultServe)(args, { out })
+    case "lark":
+      return (deps.lark ?? defaultLark)(args, { out })
     default:
       out.error(`unknown command "${args.command}"\n\n${HELP}`)
       return 2

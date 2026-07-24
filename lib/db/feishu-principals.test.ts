@@ -10,8 +10,10 @@ import {
   getBindRequest,
   getFeishuPrincipal,
   getFeishuTenant,
+  listBindRequests,
   listFeishuPrincipalsByTenant,
   rebindFeishuPrincipal,
+  rejectBindRequest,
   setFeishuPrincipalStatus,
   setFeishuTenantStatus,
   touchFeishuPrincipalVerification,
@@ -184,6 +186,35 @@ describe("feishu-principals", () => {
           now: T0 + 1,
         })
       ).rejects.toThrow(/lacks tenant scope/)
+    })
+
+    it("rejects a pending request and refuses to resolve it twice", async () => {
+      const request = await createBindRequest({ openId: "ou_r", adapterId: "lk-1", now: T0 })
+      await rejectBindRequest(request.id, T0 + 5)
+      const stored = await getBindRequest(request.id)
+      expect(stored?.status).toBe("rejected")
+      expect(stored?.resolvedAt).toBe(T0 + 5)
+      await expect(rejectBindRequest(request.id, T0 + 6)).rejects.toThrow(/is rejected/)
+      await expect(rejectBindRequest("fb_missing")).rejects.toThrow(/not found/)
+    })
+
+    it("lists requests newest-first, filtered by adapter and status", async () => {
+      const a = await createBindRequest({ openId: "ou_a", adapterId: "lk-1", now: T0 })
+      await createBindRequest({ openId: "ou_b", adapterId: "lk-1", now: T0 + 10 })
+      await createBindRequest({ openId: "ou_c", adapterId: "lk-2", now: T0 + 20 })
+      await rejectBindRequest(a.id, T0 + 30)
+
+      expect((await listBindRequests()).map((r) => r.openId)).toEqual(["ou_c", "ou_b", "ou_a"])
+      expect((await listBindRequests({ adapterId: "lk-1" })).map((r) => r.openId)).toEqual([
+        "ou_b",
+        "ou_a",
+      ])
+      expect(
+        (await listBindRequests({ adapterId: "lk-1", status: "pending" })).map((r) => r.openId)
+      ).toEqual(["ou_b"])
+      expect((await listBindRequests({ status: "rejected" })).map((r) => r.openId)).toEqual([
+        "ou_a",
+      ])
     })
   })
 })

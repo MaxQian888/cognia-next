@@ -723,6 +723,39 @@
     "openConsole": "Open Lark console",
     "openConsoleAria": "Open Lark Open Platform → Event subscriptions for this app",
     "openConsoleSecurityAria": "Open Lark Open Platform → Security settings for this app",
+    "principals": {
+      "title": "Feishu identity registry",
+      "help": "Maps tenant + app + open_id to this Cognia account. With the principal registry flag on, only bound people can run anything — everyone else is parked with a bind code.",
+      "tenantLabel": "Tenant",
+      "tenantUnknown": "Tenant unknown — run the bot identity probe and wait for one inbound event so the tenant key is known.",
+      "tenantUnregistered": "Not registered yet. Registering admits this tenant and binds it to the current account.",
+      "tenantRegister": "Register tenant",
+      "tenantDisable": "Disable tenant",
+      "tenantEnable": "Enable tenant",
+      "tenantStatus": {
+        "active": "Active",
+        "disabled": "Disabled"
+      },
+      "requestsLabel": "Pending bind requests",
+      "requestsEmpty": "No pending bind requests.",
+      "requestApprove": "Approve",
+      "requestReject": "Reject",
+      "requestApproveAria": "Approve bind request {code}",
+      "requestRejectAria": "Reject bind request {code}",
+      "principalsLabel": "Bound principals",
+      "principalsEmpty": "No principals bound yet.",
+      "principalDisable": "Disable",
+      "principalEnable": "Enable",
+      "principalUnlink": "Unlink",
+      "principalStatus": {
+        "active": "Active",
+        "disabled": "Disabled",
+        "unlinked": "Unlinked"
+      },
+      "principalStatusAria": "Principal status",
+      "actionFailed": "Action failed: {reason}",
+      "seeded": "Registry seeded from existing contacts."
+    },
     "quickCommands": {
       "help": "Configure the menu in the Lark console (Bot → Bot menu) with an event_key, subscribe application.bot.menu_v6, then map each event_key to an action here. Feishu has no API to create menus — registration is console-only."
     },

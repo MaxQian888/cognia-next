@@ -41,6 +41,7 @@ import { SendTestMessageSection } from "../../forms/shared/send-test-message-sec
 import { LarkAtStrategy } from "../../forms/lark/lark-at-strategy"
 import { LarkWhitelistEditor } from "../../forms/lark/lark-whitelist-editor"
 import { LarkEntrySurfaces } from "../../forms/lark/lark-entry-surfaces"
+import { LarkPrincipals } from "../../forms/lark/lark-principals"
 import { HelpAndWelcome } from "../../forms/help-and-welcome"
 import { ControlCommands } from "../../forms/control-commands"
 import { AiBindingDefaults } from "../../forms/ai-binding-defaults"
@@ -128,6 +129,12 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
        * authorization mode, and the Chat Tab / group-menu surface list
        * (plan 2026-07-24 dual-entry epic). */}
       {row.type === "lark" && <LarkEntrySurfaces adapterId={row.id} />}
+
+      {/* Lark-only: the identity registry admin loop (tenant admission, bind
+       * request approval, principal enable/disable). The registry fails
+       * closed, so this card is what makes `larkPrincipalRegistry` operable
+       * at all. */}
+      {row.type === "lark" && <LarkPrincipals adapterId={row.id} />}
 
       {/* Cross-provider help / welcome card settings. Self-managing, so a
        * single mount here covers every platform. */}

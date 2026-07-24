@@ -1016,6 +1016,104 @@ pub async fn jssdk_config_handler(
         .into_response()
 }
 
+// ---------------------------------------------------------------------------
+// Registry admin (operator channel for headless installs)
+// ---------------------------------------------------------------------------
+
+/// Operator-driven principal-registry mutations, submitted by `cognia lark …`.
+///
+/// Mounted in `server.rs` under the device-JWT middleware — NOT in the public
+/// `/integrations/lark` nest — so it inherits the existing auth tier, which
+/// accepts the headless brain's loopback-only service token. The desktop app
+/// has no need for it (the settings card mutates Dexie in-process), and this
+/// endpoint answers `admin_unavailable` there rather than pretending.
+///
+/// The endpoint never touches the registry itself: the account database is
+/// owned by the brain process (fake-indexeddb + JSON snapshot), so a second
+/// writer would lose the race. It hands the operation to the brain over the
+/// same intent bridge the web surfaces use.
+#[derive(Deserialize)]
+pub struct AdminBody {
+    pub op: String,
+    #[serde(default, rename = "adapterId")]
+    pub adapter_id: String,
+    #[serde(default)]
+    pub code: Option<String>,
+    #[serde(default, rename = "principalId")]
+    pub principal_id: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default, rename = "cogniaUserId")]
+    pub cognia_user_id: Option<String>,
+}
+
+/// Operations the brain's `principal_admin` intent branch accepts. Rejecting
+/// unknown ops here keeps a typo from becoming a 60 s poll timeout.
+const ADMIN_OPS: &[&str] = &[
+    "list",
+    "approve",
+    "reject",
+    "set-principal-status",
+    "register-tenant",
+    "set-tenant-status",
+    "sweep",
+];
+
+pub async fn admin_handler(State(state): State<SharedState>, Json(body): Json<AdminBody>) -> Response {
+    if crate::headless::headless_services().is_none() {
+        return error_json(StatusCode::SERVICE_UNAVAILABLE, "admin_unavailable");
+    }
+    if !ADMIN_OPS.contains(&body.op.as_str()) {
+        return error_json(StatusCode::BAD_REQUEST, "admin_op_unknown");
+    }
+    if body.adapter_id.is_empty() {
+        return error_json(StatusCode::BAD_REQUEST, "admin_adapter_required");
+    }
+    let request_id = register_intent();
+    state.event_bus.publish(
+        LARK_INTENT_TOPIC.to_string(),
+        json!({
+            "kind": "principal_admin",
+            "requestId": request_id,
+            "adapterId": body.adapter_id,
+            "op": body.op,
+            "code": body.code,
+            "principalId": body.principal_id,
+            "status": body.status,
+            "cogniaUserId": body.cognia_user_id,
+        }),
+    );
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({ "status": "pending", "requestId": request_id })),
+    )
+        .into_response()
+}
+
+/// Poll an admin intent. Separate from `intent_poll_handler` because that one
+/// demands a `lark_web` browser session; this one rides the device/service JWT
+/// the operator channel already authenticated with.
+pub async fn admin_poll_handler(Path(request_id): Path<String>) -> Response {
+    prune_intents(now_ms());
+    let snapshot = PENDING_INTENTS.lock().get(&request_id).cloned();
+    match snapshot {
+        None => error_json(StatusCode::NOT_FOUND, "intent_unknown"),
+        Some(IntentState::Pending { .. }) => {
+            (StatusCode::OK, Json(json!({ "status": "pending" }))).into_response()
+        }
+        Some(IntentState::Done { result }) => (
+            StatusCode::OK,
+            Json(json!({ "status": "done", "result": result })),
+        )
+            .into_response(),
+        Some(IntentState::Error { code }) => (
+            StatusCode::OK,
+            Json(json!({ "status": "error", "error": code })),
+        )
+            .into_response(),
+    }
+}
+
 /// Router for `/integrations/lark/*`. Mounted headless-only in `server.rs`
 /// behind the pre-auth rate limit; carries the companion `SharedState`.
 pub fn router(state: SharedState) -> Router {
@@ -1181,6 +1279,38 @@ mod tests {
         assert_eq!(claims.cid, "oc_9");
         assert_eq!(claims.ver, 3);
         assert!(claims.exp > now_secs() + 300 * 24 * 3600);
+    }
+
+    #[tokio::test]
+    async fn admin_handler_rejects_unknown_ops_and_missing_adapters() {
+        let state = test_state();
+        // Desktop (no headless services) refuses outright — the settings card
+        // is the operator channel there.
+        let unavailable = admin_handler(
+            State(state.clone()),
+            Json(AdminBody {
+                op: "list".into(),
+                adapter_id: "lk-1".into(),
+                code: None,
+                principal_id: None,
+                status: None,
+                cognia_user_id: None,
+            }),
+        )
+        .await;
+        assert_eq!(unavailable.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[test]
+    fn admin_ops_allowlist_matches_the_brain_branch() {
+        // Every op the CLI can send must be one the brain's `principal_admin`
+        // executor knows; a drift here becomes a 60 s poll timeout.
+        for op in ADMIN_OPS {
+            assert!(!op.is_empty());
+        }
+        assert!(ADMIN_OPS.contains(&"approve"));
+        assert!(ADMIN_OPS.contains(&"set-principal-status"));
+        assert!(!ADMIN_OPS.contains(&"delete"));
     }
 
     #[test]

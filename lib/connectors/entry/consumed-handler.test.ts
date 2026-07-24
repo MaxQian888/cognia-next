@@ -31,6 +31,7 @@ function makeDeps(overrides: Partial<LarkIntentDependencies> = {}) {
       conversationKey: "lark:lk-1:oc_1",
       sessionId: "sess_p",
     })),
+    runAdmin: jest.fn(async () => ({ ok: true as const, result: { expired: 0 } })),
     ...overrides,
   } as LarkIntentDependencies & {
     call: jest.Mock
@@ -40,6 +41,7 @@ function makeDeps(overrides: Partial<LarkIntentDependencies> = {}) {
     audit: jest.Mock
     importMessages: jest.Mock
     plusCreate: jest.Mock
+    runAdmin: jest.Mock
   }
 }
 
@@ -288,6 +290,79 @@ describe("isChatMember", () => {
 })
 
 describe("installLarkIntentHandler", () => {
+  it("routes principal_admin to the registry executor and answers the intent", async () => {
+    const deps = makeDeps()
+    await handleLarkIntentFrame(
+      {
+        kind: "principal_admin",
+        requestId: "req_1",
+        adapterId: "lk-1",
+        op: "approve",
+        code: "fb_1",
+        cogniaUserId: "u7",
+      },
+      deps
+    )
+    expect(deps.runAdmin).toHaveBeenCalledWith({
+      adapterId: "lk-1",
+      op: "approve",
+      code: "fb_1",
+      principalId: undefined,
+      status: undefined,
+      cogniaUserId: "u7",
+    })
+    expect(deps.call).toHaveBeenCalledWith("lark_result_complete", {
+      requestId: "req_1",
+      result: { expired: 0 },
+    })
+  })
+
+  it("passes an admin failure through as the intent error", async () => {
+    const deps = makeDeps({
+      runAdmin: jest.fn(async () => ({ ok: false as const, error: "code_required" })),
+    })
+    await handleLarkIntentFrame(
+      { kind: "principal_admin", requestId: "req_2", adapterId: "lk-1", op: "approve" },
+      deps
+    )
+    expect(deps.call).toHaveBeenCalledWith("lark_result_complete", {
+      requestId: "req_2",
+      error: "code_required",
+    })
+  })
+
+  it("answers intent_malformed when principal_admin lacks an adapter or op", async () => {
+    const deps = makeDeps()
+    await handleLarkIntentFrame({ kind: "principal_admin", requestId: "req_3", op: "list" }, deps)
+    expect(deps.call).toHaveBeenCalledWith("lark_result_complete", {
+      requestId: "req_3",
+      error: "intent_malformed",
+    })
+    expect(deps.runAdmin).not.toHaveBeenCalled()
+  })
+
+  it("never answers a principal_admin frame with no requestId", async () => {
+    const deps = makeDeps()
+    await handleLarkIntentFrame({ kind: "principal_admin", adapterId: "lk-1", op: "list" }, deps)
+    expect(deps.call).not.toHaveBeenCalled()
+  })
+
+  it("converts an executor throw into intent_failed", async () => {
+    const deps = makeDeps({
+      runAdmin: jest.fn(async () => {
+        throw new Error("boom")
+      }),
+    })
+    await handleLarkIntentFrame(
+      { kind: "principal_admin", requestId: "req_4", adapterId: "lk-1", op: "list" },
+      deps
+    )
+    expect(deps.call).toHaveBeenCalledWith("lark_result_complete", {
+      requestId: "req_4",
+      error: "intent_failed",
+    })
+  })
+
   it("subscribes to the intent topic and disposes cleanly", async () => {
     const unlisten = jest.fn()
     let captured: ((event: { payload: unknown }) => void) | undefined

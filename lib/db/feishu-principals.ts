@@ -10,6 +10,7 @@
  */
 
 import type {
+  FeishuBindRequestStatus,
   FeishuPrincipalBindRequestRow,
   FeishuPrincipalRow,
   FeishuPrincipalStatus,
@@ -265,6 +266,40 @@ export async function getBindRequest(
   code: string
 ): Promise<FeishuPrincipalBindRequestRow | undefined> {
   return getDb().feishuPrincipalBindRequests.get(code)
+}
+
+export interface ListBindRequestsFilter {
+  adapterId?: string
+  status?: FeishuBindRequestStatus
+}
+
+/** Newest-first bind requests, optionally narrowed to one adapter/status. */
+export async function listBindRequests(
+  filter: ListBindRequestsFilter = {}
+): Promise<FeishuPrincipalBindRequestRow[]> {
+  const table = getDb().feishuPrincipalBindRequests
+  const rows = filter.status
+    ? await table.where("status").equals(filter.status).toArray()
+    : await table.toArray()
+  return rows
+    .filter((row) => !filter.adapterId || row.adapterId === filter.adapterId)
+    .sort((a, b) => b.requestedAt - a.requestedAt)
+}
+
+/**
+ * Close a pending request without minting a principal. Throws on unknown or
+ * already-resolved codes so operator tooling reports the real state instead
+ * of silently succeeding on a stale code.
+ */
+export async function rejectBindRequest(code: string, now?: number): Promise<void> {
+  const db = getDb()
+  const at = now ?? Date.now()
+  const request = await db.feishuPrincipalBindRequests.get(code)
+  if (!request) throw new Error(`feishu-principals: bind request "${code}" not found`)
+  if (request.status !== "pending") {
+    throw new Error(`feishu-principals: bind request "${code}" is ${request.status}`)
+  }
+  await db.feishuPrincipalBindRequests.update(code, { status: "rejected", resolvedAt: at })
 }
 
 export interface ApproveBindRequestInput {

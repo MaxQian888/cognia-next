@@ -41,6 +41,7 @@ import { handleMenuDisabledKey, handleMenuLink, handleMenuUnknownKey } from "./m
 import { reconcileChatTabSurface } from "./chat-tabs"
 import { reconcileGroupMenuSurface } from "./group-menu"
 import { sweepLarkChatSurfaces } from "./surface-sweep"
+import { bootstrapFeishuRegistry } from "@/lib/connectors/principal/bootstrap"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import { getBus } from "@/lib/connectors/bus"
 import type { LarkEventEnvelope } from "./parse"
@@ -398,6 +399,28 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
           id: opts.id,
           error: err instanceof Error ? err.message : String(err),
         })
+    )
+
+    // Registry seeding (plan 2026-07-24 P1.1). Runs before the first inbound
+    // event so an existing workspace never sees a "not linked yet" reply for
+    // people it has already been talking to. Flag-gated and once-per-tenant
+    // inside the bootstrap; fire-and-forget for the same reason as the sweep.
+    void (async () => {
+      const row = await getAdapterInstance(opts.id)
+      if (!row) return
+      const result = await bootstrapFeishuRegistry({ adapterId: opts.id, adapterRow: row })
+      if (result.status === "seeded") {
+        loggers.network.info("[lark] principal registry seeded", {
+          id: opts.id,
+          seeded: result.seeded,
+          skipped: result.skipped,
+        })
+      }
+    })().catch((err) =>
+      loggers.network.warn("[lark] principal registry bootstrap failed", {
+        id: opts.id,
+        error: err instanceof Error ? err.message : String(err),
+      })
     )
 
     /**
