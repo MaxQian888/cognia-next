@@ -27,3 +27,50 @@ describe("auditKindLabel", () => {
     expect(auditKindLabel(t, "adapter.heartbeat")).toBe("adapter.heartbeat")
   })
 })
+
+describe("audit kind coverage for the lark dual-entry kinds", () => {
+  it("has a translated label for every kind this epic emits", async () => {
+    const en = (await import("@/i18n/messages/en.json")).default as Record<string, unknown>
+    const zh = (await import("@/i18n/messages/zh-CN.json")).default as Record<string, unknown>
+    const read = (bundle: Record<string, unknown>, path: string): unknown =>
+      path
+        .split(".")
+        .reduce<unknown>(
+          (node, key) =>
+            node && typeof node === "object" ? (node as Record<string, unknown>)[key] : undefined,
+          bundle
+        )
+
+    // The Audit tab filter is how the runbook decides whether callback
+    // enforcement is safe to widen; raw enum strings there make that unusable.
+    const kinds = [
+      "principal.unbound",
+      "principal.rejected",
+      "principal.bind_requested",
+      "principal.bound",
+      "principal.bind_rejected",
+      "principal.status_changed",
+      "principal.rebound",
+      "tenant.registered",
+      "tenant.status_changed",
+      "callback.forbidden",
+      "callback.authorization_would_deny",
+      "menu.unknown_key",
+      "chat_tab.synced",
+      "chat_tab.sync_failed",
+      "chat_tab.removed",
+      "shortcut.import",
+      "shortcut.import_denied",
+      "plus.create",
+      "plus.create_denied",
+      "sso.session_seen",
+      "entry.consumed",
+      "entry.denied",
+    ]
+    for (const kind of kinds) {
+      const path = `settings.connections.audit.kind.${kind}`
+      expect(typeof read(en, path)).toBe("string")
+      expect(typeof read(zh, path)).toBe("string")
+    }
+  })
+})

@@ -126,6 +126,10 @@ const mockStartOutboundRetentionSweep = jest
   .mockImplementation(() => ({ dispose: mockRetentionDispose, runNow: jest.fn() }))
 jest.mock("@/lib/connectors/daily-schedule", () => ({
   startOutboundRetentionSweep: (...args: unknown[]) => mockStartOutboundRetentionSweep(...args),
+  // The Lark surface + bind-request sweeps build on the generic scheduler, so
+  // a partial mock of this module leaves them calling `undefined` and takes
+  // the whole runtime boot down with it.
+  startDailySchedule: () => ({ dispose: jest.fn(), runNow: jest.fn(async () => undefined) }),
 }))
 
 // ── Mock the immediate per-boot heartbeat (writes to Dexie; jsdom has no IDB) ─

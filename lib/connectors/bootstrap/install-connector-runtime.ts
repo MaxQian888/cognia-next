@@ -90,6 +90,10 @@ import {
   startOutboundRetentionSweep,
   type DailyScheduleHandle,
 } from "@/lib/connectors/daily-schedule"
+import {
+  startBindRequestExpirySweep,
+  startLarkSurfaceSweep,
+} from "@/lib/connectors/adapters/lark/surface-schedule"
 import { startWorkflowExecutionBridge } from "@/lib/execution/workflow-bridge"
 import { startExecutionRunPresentationRunner } from "@/lib/connectors/run-presentation/runner"
 import { installExecutionRunControlHandlers } from "@/lib/execution/control-handlers"
@@ -246,6 +250,8 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
   const serverAdapterIds = new Set<string>()
   let cleanupHandle: CallbackBindingCleanupHandle | null = null
   let outboundRetentionSweep: DailyScheduleHandle | null = null
+  let larkSurfaceSweep: DailyScheduleHandle | null = null
+  let larkBindRequestSweep: DailyScheduleHandle | null = null
   let heartbeatSweep: HeartbeatSweepHandle | null = null
   let resumeReconnect: ResumeReconnectHandle | null = null
   let stopWorkflowExecutionBridge: (() => void) | null = null
@@ -603,6 +609,17 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
       heartbeatSweep = startHeartbeatSweep()
     }
 
+    // The Lark chat-surface backoff had no driver: `listDueChatSurfaces`
+    // selects rows whose retry is due, but only adapter start, a live
+    // `bot.added`, and the settings button ever called it — so a surface that
+    // failed once stayed failed until a restart. The bind-request sweep
+    // likewise: without it an expired code stayed `pending` and kept being
+    // offered to operators that `approveBindRequest` would then reject.
+    if (!cancelled) {
+      larkSurfaceSweep = startLarkSurfaceSweep()
+      larkBindRequestSweep = startBindRequestExpirySweep()
+    }
+
     // Resume-reconnect (G3): the single owner of the OS/browser wake signals.
     // After sleep or a network drop the gateway sockets go half-open and
     // nothing else re-dials them (the gateway clients ignore heartbeat ACKs,
@@ -780,6 +797,10 @@ export function installConnectorRuntime(opts: InstallConnectorRuntimeOptions = {
     cleanupHandle = null
     outboundRetentionSweep?.dispose()
     outboundRetentionSweep = null
+    larkSurfaceSweep?.dispose()
+    larkSurfaceSweep = null
+    larkBindRequestSweep?.dispose()
+    larkBindRequestSweep = null
     heartbeatSweep?.dispose()
     heartbeatSweep = null
     resumeReconnect?.dispose()

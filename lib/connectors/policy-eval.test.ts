@@ -7,7 +7,7 @@
 
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import type { TriggerPolicy } from "@/types/connectors/policy"
-import { evaluatePolicy, type PolicyEvalState } from "./policy-eval"
+import { evaluatePolicy, type PolicyEvalState, rateBucketKey } from "./policy-eval"
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -236,7 +236,8 @@ describe("evaluatePolicy — blockers", () => {
 
   it("rate-limit blocks when user bucket >= perUserPerMin", () => {
     const NOW = 1_000_000
-    const bucketKey = "u_alice:ch_group"
+    // Buckets are tenant-scoped now; platforms with no tenant use "-".
+    const bucketKey = "-|u_alice:ch_group"
     // 3 recent timestamps within last 60s
     const state: PolicyEvalState = {
       recentBotReplyAtByConversation: {},
@@ -257,7 +258,8 @@ describe("evaluatePolicy — blockers", () => {
 
   it("rate-limit does NOT block when bucket is under limit", () => {
     const NOW = 1_000_000
-    const bucketKey = "u_alice:ch_group"
+    // Buckets are tenant-scoped now; platforms with no tenant use "-".
+    const bucketKey = "-|u_alice:ch_group"
     const state: PolicyEvalState = {
       recentBotReplyAtByConversation: {},
       recentByUserAndChannel: {
@@ -276,7 +278,8 @@ describe("evaluatePolicy — blockers", () => {
 
   it("rate-limit ignores timestamps older than 60s", () => {
     const NOW = 1_000_000
-    const bucketKey = "u_alice:ch_group"
+    // Buckets are tenant-scoped now; platforms with no tenant use "-".
+    const bucketKey = "-|u_alice:ch_group"
     // All older than 60s — should be ignored
     const state: PolicyEvalState = {
       recentBotReplyAtByConversation: {},
@@ -345,5 +348,102 @@ describe("evaluatePolicy — combined semantics", () => {
     const result = evaluatePolicy(policy, baseEvent(), emptyState())
     expect(result.matched).toBe(true)
     expect(result.blocked).toBe(true)
+  })
+})
+
+describe("rate-limit tenant bucket", () => {
+  const now = 1_700_000_000_000
+
+  function larkEvent(
+    senderId: string,
+    channelId: string,
+    tenantKey?: string
+  ): NormalizedInboundEvent {
+    return {
+      platform: "lark",
+      adapterId: "lk-1",
+      selfId: "ou_bot",
+      messageId: `m_${senderId}_${channelId}`,
+      conversationRef: { platform: "lark", adapterId: "lk-1", channelId },
+      conversationKey: `lark:lk-1:${channelId}`,
+      sender: { id: senderId, platform: "lark", adapterId: "lk-1", remoteUserId: senderId },
+      channel: { id: channelId, kind: "group", platformChannelId: channelId },
+      segments: [],
+      plainText: "hi",
+      mentions: { selfMentioned: true, users: [] },
+      timestamp: now,
+      raw: {},
+      ...(tenantKey ? { channelData: { identityScope: { tenantKey } } } : {}),
+    } as unknown as NormalizedInboundEvent
+  }
+
+  function stateWith(entries: Record<string, number[]>) {
+    return { recentBotReplyAtByConversation: {}, recentByUserAndChannel: entries }
+  }
+
+  it("keys buckets by tenant so two tenants do not share a limit", () => {
+    expect(rateBucketKey(larkEvent("u1", "c1", "tk_a"))).toBe("tk_a|u1:c1")
+    expect(rateBucketKey(larkEvent("u1", "c1", "tk_b"))).toBe("tk_b|u1:c1")
+    // Platforms without a tenant concept keep one shared scope.
+    expect(rateBucketKey(larkEvent("u1", "c1"))).toBe("-|u1:c1")
+  })
+
+  it("trips the tenant bucket on traffic spread across users and chats", () => {
+    // Neither the per-user nor the per-channel bucket sees more than 2 events;
+    // only the tenant ceiling catches a workspace-wide flood.
+    const state = stateWith({
+      "tk_a|u1:c1": [now - 1, now - 2],
+      "tk_a|u2:c2": [now - 3, now - 4],
+      "tk_a|u3:c3": [now - 5, now - 6],
+    })
+    const policy = {
+      rules: [{ kind: "self-mention" as const }],
+      blockers: [
+        {
+          kind: "rate-limit" as const,
+          perUserPerMin: 10,
+          perChannelPerMin: 10,
+          perTenantPerMin: 6,
+        },
+      ],
+      storeUnmatchedInDraftMode: false,
+    }
+
+    const result = evaluatePolicy(policy, larkEvent("u4", "c4", "tk_a"), state, now)
+    expect(result.blocked).toBe(true)
+    expect(result.reason).toContain("tenant bucket")
+  })
+
+  it("does not let one tenant's traffic block another", () => {
+    const state = stateWith({
+      "tk_a|u1:c1": [now - 1, now - 2, now - 3, now - 4, now - 5, now - 6],
+    })
+    const policy = {
+      rules: [{ kind: "self-mention" as const }],
+      blockers: [
+        {
+          kind: "rate-limit" as const,
+          perUserPerMin: 10,
+          perChannelPerMin: 10,
+          perTenantPerMin: 6,
+        },
+      ],
+      storeUnmatchedInDraftMode: false,
+    }
+
+    expect(evaluatePolicy(policy, larkEvent("u9", "c9", "tk_b"), state, now).blocked).toBe(false)
+  })
+
+  it("is inert when no tenant ceiling is configured", () => {
+    const state = stateWith({
+      "tk_a|u1:c1": Array.from({ length: 50 }, (_, i) => now - i),
+    })
+    const policy = {
+      rules: [{ kind: "self-mention" as const }],
+      blockers: [{ kind: "rate-limit" as const, perUserPerMin: 100, perChannelPerMin: 100 }],
+      storeUnmatchedInDraftMode: false,
+    }
+
+    expect(evaluatePolicy(policy, larkEvent("u2", "c2", "tk_a"), state, now).blocked).toBe(false)
   })
 })

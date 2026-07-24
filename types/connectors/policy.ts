@@ -11,7 +11,19 @@ export type TriggerBlocker =
   | { kind: "user-blocklist"; userIds: string[] }
   | { kind: "channel-blocklist"; channelIds: string[] }
   | { kind: "keyword-blocklist"; words: string[] }
-  | { kind: "rate-limit"; perUserPerMin: number; perChannelPerMin: number }
+  | {
+      kind: "rate-limit"
+      perUserPerMin: number
+      perChannelPerMin: number
+      /**
+       * Ceiling across every sender and chat sharing one platform tenant.
+       * The per-user and per-channel buckets bound one PERSON and one ROOM;
+       * neither bounds a whole workspace, so a multi-tenant deployment had no
+       * limit that a single tenant could hit. Omitted ⇒ no tenant ceiling
+       * (single-tenant installs keep today's behavior exactly).
+       */
+      perTenantPerMin?: number
+    }
   | { kind: "cooldown-after-bot-reply"; secs: number }
 
 export interface TriggerPolicy {

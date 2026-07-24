@@ -19631,11 +19631,18 @@
           "builtin_skill_hitl_rejected": "Skill rejected",
           "builtin_skill_invoked": "Skill invoked",
           "callback": {
+            "authorization_would_deny": "Callback would be refused",
             "binding_expired": "Button expired",
             "deduped": "Duplicate callback dropped",
+            "forbidden": "Callback refused",
             "handler_failed": "Callback handler failed",
             "received": "Callback received",
             "unbound": "Unbound callback"
+          },
+          "chat_tab": {
+            "removed": "Chat surface removed",
+            "sync_failed": "Chat surface sync failed",
+            "synced": "Chat surface synced"
           },
           "circuit": {
             "closed": "Circuit closed",
@@ -19655,6 +19662,10 @@
             "downgraded": "Downgraded to text",
             "error": "Delivery failed",
             "success": "Delivered"
+          },
+          "entry": {
+            "consumed": "Entry link consumed",
+            "denied": "Entry link denied"
           },
           "goal": {
             "blocked": {
@@ -19681,6 +19692,9 @@
             "signature_failed": "Signature check failed",
             "welcome_sent": "Welcome card sent"
           },
+          "menu": {
+            "unknown_key": "Unknown menu key"
+          },
           "notify": {
             "im_pii_blocked": "Notification blocked (PII)",
             "im_pushed": "Notification pushed",
@@ -19706,11 +19720,35 @@
             "rate_blocked": "Plugin rate limited",
             "transform_pii_blocked": "Plugin transform blocked (PII)"
           },
+          "plus": {
+            "create": "Task created from + menu",
+            "create_denied": "+ menu create denied"
+          },
+          "principal": {
+            "bind_rejected": "Bind request rejected",
+            "bind_requested": "Bind code issued",
+            "bound": "Principal bound",
+            "rebound": "Principal relinked",
+            "rejected": "Sender rejected",
+            "status_changed": "Principal status changed",
+            "unbound": "Sender not linked"
+          },
           "rate_limit": {
             "tripped": "Rate limit tripped"
           },
+          "shortcut": {
+            "import": "Messages imported",
+            "import_denied": "Message import denied"
+          },
+          "sso": {
+            "session_seen": "Web SSO session seen"
+          },
           "team": {
             "dispatched": "Team dispatched"
+          },
+          "tenant": {
+            "registered": "Tenant registered",
+            "status_changed": "Tenant status changed"
           },
           "tool_approve": {
             "denied": "Tool approval denied",

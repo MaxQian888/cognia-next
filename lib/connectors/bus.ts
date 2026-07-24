@@ -47,7 +47,7 @@ import { recordAndCheckInbound, isRecordedInbound } from "./dedup"
 import { resolveCallbackBinding } from "./adapters/_shared/a2ui-mapper"
 import { appendAudit } from "./audit"
 import { runInboundOcr, hasOcrableInboundImage } from "./inbound-ocr"
-import { evaluatePolicy, type PolicyEvalState } from "./policy-eval"
+import { evaluatePolicy, rateBucketKey, type PolicyEvalState } from "./policy-eval"
 import { resolveBinding, type ResolvedBinding } from "./policy-resolve"
 import { routeInbound, type RouteDecision } from "./mode-router"
 import { dispatchTrigger } from "@/lib/workflow/runtime/trigger-bridge"
@@ -732,7 +732,7 @@ export class ConnectorBus {
       // `rate-limit` blocker evaluates (mirrors recordBotReply's prune-on-write)
       // so the map cannot grow without bound across long-lived sessions.
       const map = this.policyState.recentByUserAndChannel
-      const bucketKey = `${event.sender.id}:${event.channel.id}`
+      const bucketKey = rateBucketKey(event)
       const cutoff = now - RATE_BUCKET_WINDOW_MS
       map[bucketKey] = [...(map[bucketKey] ?? []).filter((t) => t > cutoff), now]
       for (const key in map) {
@@ -745,6 +745,13 @@ export class ConnectorBus {
 
     // ── Step 9: audit ─────────────────────────────────────────────────────────
     if (evalResult.blocked) {
+      // Rate-limit trips get their own series. Outbound has had
+      // `rate_limit.tripped` since the beginning; inbound only ever wrote an
+      // audit row, so "one tenant is flooding us" was invisible on the
+      // dashboard the runbook points at.
+      if (evalResult.reason?.startsWith("rate-limit")) {
+        recordConnectorMetric("lark_inbound_rate_limited_total")
+      }
       await appendAudit({
         adapterId: event.adapterId,
         kind: "inbound.policy_blocked",

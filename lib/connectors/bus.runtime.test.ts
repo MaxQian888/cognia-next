@@ -578,17 +578,19 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
     const bus = getBus()
     const state = bus.__getPolicyStateForTesting()
     // Seed a stale foreign bucket and stale entries in the event's own bucket.
-    state.recentByUserAndChannel["ghost:ch_gone"] = [Date.now() - 120_000]
-    state.recentByUserAndChannel["u_alice:ch_private"] = [Date.now() - 120_000]
+    // Keys are tenant-scoped (`${tenant}|${user}:${channel}`); this fixture
+    // has no tenant, so both use the "-" scope.
+    state.recentByUserAndChannel["-|ghost:ch_gone"] = [Date.now() - 120_000]
+    state.recentByUserAndChannel["-|u_alice:ch_private"] = [Date.now() - 120_000]
 
     await bus.dispatchInboundFull(privateEvent(autoAdapterId, "msg_prune_1"))
     await bus.flushInboundTurns()
 
     const map = bus.__getPolicyStateForTesting().recentByUserAndChannel
     // Stale foreign bucket deleted entirely; own bucket keeps only the fresh stamp.
-    expect(map["ghost:ch_gone"]).toBeUndefined()
-    expect(map["u_alice:ch_private"]).toHaveLength(1)
-    expect(map["u_alice:ch_private"][0]).toBeGreaterThan(Date.now() - 5_000)
+    expect(map["-|ghost:ch_gone"]).toBeUndefined()
+    expect(map["-|u_alice:ch_private"]).toHaveLength(1)
+    expect(map["-|u_alice:ch_private"][0]).toBeGreaterThan(Date.now() - 5_000)
   })
 
   it("scenario 3: group message no @-mention in auto mode → drop, no inbound.received audit", async () => {

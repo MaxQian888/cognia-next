@@ -35,6 +35,10 @@ export const CONNECTOR_METRIC_NAMES = [
   // shadow mode the guard ships in has no aggregate signal at all, and the
   // runbook's "flip to enforce once this is quiet" step has nothing to read.
   "lark_callback_auth_would_deny_total",
+  // Inbound rate-limit trips. Outbound has had `rate_limit.tripped` from the
+  // start; inbound only wrote an audit row, so a flooding tenant was invisible
+  // on the dashboard the runbook's alert thresholds point at.
+  "lark_inbound_rate_limited_total",
 ] as const
 
 export type ConnectorMetricName = (typeof CONNECTOR_METRIC_NAMES)[number]

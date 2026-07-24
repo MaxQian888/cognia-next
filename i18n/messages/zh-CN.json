@@ -19631,11 +19631,18 @@
           "builtin_skill_hitl_rejected": "技能已驳回",
           "builtin_skill_invoked": "技能已调用",
           "callback": {
+            "authorization_would_deny": "回调将被拒绝（审计）",
             "binding_expired": "按钮已过期",
             "deduped": "丢弃重复回调",
+            "forbidden": "回调被拒绝",
             "handler_failed": "回调处理失败",
             "received": "已接收回调",
             "unbound": "未绑定回调"
+          },
+          "chat_tab": {
+            "removed": "会话入口已移除",
+            "sync_failed": "会话入口同步失败",
+            "synced": "会话入口已同步"
           },
           "circuit": {
             "closed": "熔断器关闭",
@@ -19655,6 +19662,10 @@
             "downgraded": "降级为文本",
             "error": "送达失败",
             "success": "已送达"
+          },
+          "entry": {
+            "consumed": "入口链接已使用",
+            "denied": "入口链接被拒绝"
           },
           "goal": {
             "blocked": {
@@ -19681,6 +19692,9 @@
             "signature_failed": "签名校验失败",
             "welcome_sent": "已发送欢迎卡片"
           },
+          "menu": {
+            "unknown_key": "未知菜单键"
+          },
           "notify": {
             "im_pii_blocked": "通知被拦截（PII）",
             "im_pushed": "通知已推送",
@@ -19706,11 +19720,35 @@
             "rate_blocked": "插件限流",
             "transform_pii_blocked": "插件改写被拦截（PII）"
           },
+          "plus": {
+            "create": "通过「+」菜单创建任务",
+            "create_denied": "「+」菜单创建被拒绝"
+          },
+          "principal": {
+            "bind_rejected": "绑定申请被拒绝",
+            "bind_requested": "已下发绑定码",
+            "bound": "主体已绑定",
+            "rebound": "主体重新关联",
+            "rejected": "发送者被拒绝",
+            "status_changed": "主体状态变更",
+            "unbound": "发送者未绑定"
+          },
           "rate_limit": {
             "tripped": "触发限流"
           },
+          "shortcut": {
+            "import": "已导入消息",
+            "import_denied": "消息导入被拒绝"
+          },
+          "sso": {
+            "session_seen": "已识别 Web SSO 会话"
+          },
           "team": {
             "dispatched": "团队已派发"
+          },
+          "tenant": {
+            "registered": "租户已注册",
+            "status_changed": "租户状态变更"
           },
           "tool_approve": {
             "denied": "工具审批拒绝",
