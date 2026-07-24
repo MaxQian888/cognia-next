@@ -76,6 +76,7 @@ function fakeManager(result?: Partial<ExternalAgentResult>) {
       }
     }),
     setSessionMode: jest.fn(async () => undefined),
+    setSessionModel: jest.fn(async () => undefined),
     cancel: jest.fn(async () => undefined),
     removeAgent: jest.fn(async () => undefined),
   }
@@ -211,6 +212,7 @@ describe("createExternalAgentSession", () => {
       }
     })
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "claude-code" },
       manager,
       transcriptFs: memoryTranscript().fs,
@@ -230,7 +232,11 @@ describe("createExternalAgentSession", () => {
     )
 
     const turn = runTurn({ session, prompt: "edit", dispatch, gate: gate.responder })
-    await new Promise((resolve) => setImmediate(resolve))
+    // The turn now resolves the whole Cognia context before it reaches the
+    // agent, so wait for the overlay rather than counting ticks.
+    for (let i = 0; i < 200 && state.overlay.kind !== "permission"; i++) {
+      await new Promise((resolve) => setImmediate(resolve))
+    }
     expect(state.overlay).toMatchObject({
       kind: "permission",
       req: { toolName: "edit", input: { path: "a.ts" } },
@@ -246,6 +252,7 @@ describe("createExternalAgentSession", () => {
     const { manager } = fakeManager()
     const transcript = memoryTranscript()
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config: {
         ...DEFAULT_RESOLVED_CONFIG,
         cwd: "/work",
@@ -313,6 +320,7 @@ describe("createExternalAgentSession", () => {
   it("feeds ACP permission requests through the existing gate", async () => {
     const { manager, getExecuteOptions } = fakeManager()
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "claude-code" },
       manager,
       transcriptFs: memoryTranscript().fs,
@@ -341,6 +349,7 @@ describe("createExternalAgentSession", () => {
   it("falls back to CaptureStreamEvent output for the readline chat", async () => {
     const { manager } = fakeManager()
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "claude-code" },
       manager,
       transcriptFs: memoryTranscript().fs,
@@ -356,6 +365,7 @@ describe("createExternalAgentSession", () => {
   it("cancels the live external session, switches mode, and removes the agent on close", async () => {
     const { manager } = fakeManager()
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "claude-code" },
       sessionId: "cli-session",
       manager,
@@ -375,9 +385,51 @@ describe("createExternalAgentSession", () => {
     expect(manager.removeAgent).toHaveBeenCalledTimes(1)
   })
 
+  describe("setModel", () => {
+    const newSession = (manager: ReturnType<typeof fakeManager>["manager"]) =>
+      createExternalAgentSession({
+        disableToolHost: true,
+        config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "claude-code" },
+        sessionId: "cli-session",
+        manager,
+        transcriptFs: memoryTranscript().fs,
+      })
+
+    it("switches the LIVE session in place so the thread survives a /model pick", async () => {
+      const { manager } = fakeManager()
+      const session = newSession(manager)
+      await session.send("go", { gate: async () => ({ decision: "allow" }) })
+
+      await expect(session.setModel?.("gpt-5.6-sol")).resolves.toBe(true)
+      expect(manager.setSessionModel).toHaveBeenCalledWith(
+        "cli-external-cli-session",
+        "acp-session-1",
+        "gpt-5.6-sol"
+      )
+    })
+
+    it("reports no live switch before the first turn (nothing to switch yet)", async () => {
+      const { manager } = fakeManager()
+      // The model still applies on the next turn — `execute` reads config each
+      // time — so the caller treats false as "deferred", not as a failure.
+      await expect(newSession(manager).setModel?.("gpt-5.6-sol")).resolves.toBe(false)
+      expect(manager.setSessionModel).not.toHaveBeenCalled()
+    })
+
+    it("never throws when the agent rejects the model", async () => {
+      const { manager } = fakeManager()
+      ;(manager.setSessionModel as jest.Mock).mockRejectedValueOnce(new Error("unknown model"))
+      const session = newSession(manager)
+      await session.send("go", { gate: async () => ({ decision: "allow" }) })
+      // A rejected model must not take the turn — or the TUI — down.
+      await expect(session.setModel?.("nope")).resolves.toBe(false)
+    })
+  })
+
   it("rejects builtin/unknown backends and unsuccessful external results", async () => {
     expect(() =>
       createExternalAgentSession({
+        disableToolHost: true,
         config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "builtin" },
         manager: fakeManager().manager,
       })
@@ -385,6 +437,7 @@ describe("createExternalAgentSession", () => {
 
     const { manager } = fakeManager({ success: false, error: "failed" })
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "claude-code" },
       manager,
       transcriptFs: memoryTranscript().fs,
@@ -500,6 +553,7 @@ describe("external-agent turn bounds", () => {
         return new Promise<ExternalAgentResult>(() => {})
       }),
       setSessionMode: jest.fn(async () => undefined),
+      setSessionModel: jest.fn(async () => undefined),
       cancel: jest.fn(async () => undefined),
       removeAgent: jest.fn(async () => undefined),
     }
@@ -509,6 +563,7 @@ describe("external-agent turn bounds", () => {
   it("hands the manager an explicit, effectively unbounded per-turn wall clock", async () => {
     const { manager, getExecuteOptions } = fakeManager()
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config: baseConfig,
       manager,
       transcriptFs: memoryTranscript().fs,
@@ -523,6 +578,7 @@ describe("external-agent turn bounds", () => {
   it("still honours an explicit caller timeout", async () => {
     const { manager, getExecuteOptions } = fakeManager()
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config: baseConfig,
       manager,
       transcriptFs: memoryTranscript().fs,
@@ -536,6 +592,7 @@ describe("external-agent turn bounds", () => {
   it("does not make startup stricter when the stream watchdog is disabled", async () => {
     const { manager } = fakeManager()
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config: { ...baseConfig, streamIdleTimeoutMs: 0 },
       manager,
       transcriptFs: memoryTranscript().fs,
@@ -553,6 +610,7 @@ describe("external-agent turn bounds", () => {
   it("fails a silent turn as recoverable and cancels without discarding the session", async () => {
     const manager = hangingManager()
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config: { ...baseConfig, streamIdleTimeoutMs: 20 },
       manager,
       transcriptFs: memoryTranscript().fs,
@@ -575,10 +633,12 @@ describe("external-agent turn bounds", () => {
         throw new Error("provider returned 500")
       }),
       setSessionMode: jest.fn(async () => undefined),
+      setSessionModel: jest.fn(async () => undefined),
       cancel: jest.fn(async () => undefined),
       removeAgent: jest.fn(async () => undefined),
     }
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config: baseConfig,
       manager,
       transcriptFs: memoryTranscript().fs,
@@ -599,10 +659,12 @@ describe("external-agent turn bounds", () => {
         throw cause
       }),
       setSessionMode: jest.fn(async () => undefined),
+      setSessionModel: jest.fn(async () => undefined),
       cancel: jest.fn(async () => undefined),
       removeAgent: jest.fn(async () => undefined),
     }
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config: baseConfig,
       manager,
       transcriptFs: memoryTranscript().fs,
@@ -620,6 +682,7 @@ describe("external-agent turn bounds", () => {
       errorCode: "spawn_failed",
     })
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config: baseConfig,
       manager,
       transcriptFs: memoryTranscript().fs,
@@ -637,6 +700,7 @@ describe("external-agent turn bounds", () => {
     const config = { ...baseConfig }
     delete (config as { streamIdleTimeoutMs?: number }).streamIdleTimeoutMs
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config,
       manager,
       transcriptFs: memoryTranscript().fs,
@@ -692,10 +756,12 @@ describe("external-agent turn bounds", () => {
         }
       }),
       setSessionMode: jest.fn(async () => undefined),
+      setSessionModel: jest.fn(async () => undefined),
       cancel: jest.fn(async () => undefined),
       removeAgent: jest.fn(async () => undefined),
     }
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config: baseConfig,
       manager,
       transcriptFs: memoryTranscript().fs,
@@ -715,6 +781,7 @@ describe("external-agent turn bounds", () => {
     const { manager, getExecuteOptions } = fakeManager()
     const controller = new AbortController()
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config: {
         ...baseConfig,
         model: "gpt-5-codex",
@@ -743,6 +810,7 @@ describe("external-agent turn bounds", () => {
   it("reuses an agent the backend controller already connected", async () => {
     const { manager } = fakeManager()
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config: baseConfig,
       manager,
       transcriptFs: memoryTranscript().fs,
@@ -766,6 +834,7 @@ describe("external-agent turn bounds", () => {
   it("forwards the user's MCP servers into session/new", async () => {
     const { manager, getExecuteOptions } = fakeManager()
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config: baseConfig,
       manager,
       transcriptFs: memoryTranscript().fs,
@@ -794,6 +863,7 @@ describe("external-agent turn bounds", () => {
     let servers: unknown[] = []
     const { manager, getExecuteOptions } = fakeManager()
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config: baseConfig,
       manager,
       transcriptFs: memoryTranscript().fs,
@@ -824,6 +894,7 @@ describe("external-agent turn bounds", () => {
     const transcript = memoryTranscript()
     const { manager } = fakeManager()
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config: baseConfig,
       sessionId: "cli-1",
       home: "/home/.cognia",
@@ -833,9 +904,13 @@ describe("external-agent turn bounds", () => {
 
     await session.send("go", { gate: async () => ({ decision: "allow" }) })
 
-    expect(transcript.written["/home/.cognia/sessions/cli-1.external.json"]).toBe(
-      JSON.stringify({ backend: "claude-code", externalSessionId: "acp-session-1" })
-    )
+    const link = JSON.parse(
+      transcript.written["/home/.cognia/sessions/cli-1.external.json"]!
+    ) as Record<string, unknown>
+    expect(link).toMatchObject({ backend: "claude-code", externalSessionId: "acp-session-1" })
+    // The context version rides along so a later resume can refuse a session
+    // created under settings that have since changed.
+    expect(typeof link.contextVersion).toBe("string")
   })
 
   it("resumes the recorded agent session instead of starting an empty one", async () => {
@@ -847,6 +922,7 @@ describe("external-agent turn bounds", () => {
     })
     const { manager, getExecuteOptions } = fakeManager()
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config: baseConfig,
       sessionId: "cli-1",
       home: "/home/.cognia",
@@ -869,6 +945,7 @@ describe("external-agent turn bounds", () => {
     })
     const { manager, getExecuteOptions } = fakeManager()
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config: baseConfig,
       sessionId: "cli-1",
       home: "/home/.cognia",
@@ -885,6 +962,7 @@ describe("external-agent turn bounds", () => {
   it("names the backend it does not recognise", () => {
     expect(() =>
       createExternalAgentSession({
+        disableToolHost: true,
         config: { ...baseConfig, agentBackend: "cdoex" },
         manager: fakeManager().manager,
       })
@@ -902,6 +980,7 @@ describe("external-agent turn bounds", () => {
       },
     })
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config: { ...baseConfig, permissionMode: "auto" },
       manager,
       transcriptFs: memoryTranscript().fs,
@@ -917,6 +996,7 @@ describe("external-agent turn bounds", () => {
   it("tracks liveness and tolerates a close before any turn", async () => {
     const { manager } = fakeManager()
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config: baseConfig,
       manager,
       transcriptFs: memoryTranscript().fs,
@@ -935,6 +1015,7 @@ describe("external-agent turn bounds", () => {
     const { manager } = fakeManager()
     ;(manager.cancel as jest.Mock).mockRejectedValueOnce(new Error("already gone"))
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config: baseConfig,
       manager,
       transcriptFs: memoryTranscript().fs,
@@ -950,6 +1031,7 @@ describe("external-agent turn bounds", () => {
   it("describes a failure that carried no message, and a non-Error throw", async () => {
     const { manager: silent } = fakeManager({ success: false, error: undefined })
     const quiet = createExternalAgentSession({
+      disableToolHost: true,
       config: baseConfig,
       manager: silent,
       transcriptFs: memoryTranscript().fs,
@@ -964,10 +1046,12 @@ describe("external-agent turn bounds", () => {
         throw "just a string"
       }),
       setSessionMode: jest.fn(async () => undefined),
+      setSessionModel: jest.fn(async () => undefined),
       cancel: jest.fn(async () => undefined),
       removeAgent: jest.fn(async () => undefined),
     }
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config: baseConfig,
       manager,
       transcriptFs: memoryTranscript().fs,
@@ -980,6 +1064,7 @@ describe("external-agent turn bounds", () => {
   it("resolves the preferred codex executable preset lazily", async () => {
     const { manager } = fakeManager()
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config: { ...baseConfig, agentBackend: "codex" },
       manager,
       transcriptFs: memoryTranscript().fs,
@@ -995,6 +1080,7 @@ describe("external-agent turn bounds", () => {
   it("builds its own manager when none is injected", () => {
     expect(() =>
       createExternalAgentSession({
+        disableToolHost: true,
         config: baseConfig,
         transcriptFs: memoryTranscript().fs,
       })
@@ -1004,6 +1090,7 @@ describe("external-agent turn bounds", () => {
   it("pauses the watchdog while a permission prompt awaits the user", async () => {
     const manager = hangingManager({ onPermission: true })
     const session = createExternalAgentSession({
+      disableToolHost: true,
       config: { ...baseConfig, streamIdleTimeoutMs: 30 },
       manager,
       transcriptFs: memoryTranscript().fs,

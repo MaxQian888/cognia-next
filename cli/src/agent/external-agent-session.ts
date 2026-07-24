@@ -26,7 +26,7 @@ import type { AcpMcpServerConfig } from "@/types/agent/external-agent"
 
 import { resolveHome } from "../config/load"
 import { loadMcpServers } from "../mcp/load-mcp-config"
-import { applyDisabled, readDisabled } from "../mcp/mcp-state"
+import { applyDisabled, readDisabled, readDisabledTools } from "../mcp/mcp-state"
 import { toAcpMcpServers } from "../tui/runtime/backend-bridge"
 import type { ResolvedConfig } from "../config/schema"
 import { externalAgentEventToActions } from "../runtime/external/external-event-mapper"
@@ -36,6 +36,26 @@ import { isResumableLink, readExternalLink, writeExternalLink } from "./external
 import { mintSessionId } from "./run"
 import type { AgentSession, SendTurnOptions } from "./session-runner"
 import { appendTranscript, type TranscriptFs } from "./transcript"
+import {
+  createCliContextAssembler,
+  prependTextBlock,
+  twinContextBlock,
+  type CliContextAssembler,
+  type ResolvedCliSessionContext,
+} from "./session-context"
+import { registerTurnSubagentContext } from "./turn-dispatch"
+import { readToolApprovals } from "./tool-approvals"
+import { startToolHostBroker, type ToolHostBroker } from "./tool-host/broker"
+import { createHostToolExecutor } from "./tool-host/host-tools"
+import { buildToolHostMcpServers, isCogniaProjectedTool } from "./tool-host/spawn"
+import {
+  externalPromptText,
+  unsupportedAttachmentMessage,
+  type ExternalPromptResult,
+} from "./external-prompt"
+import { buildAttachmentContent } from "./attachments/build"
+import { clearCliSubagentContext } from "./subagent-dispatch"
+import type { PermissionResponder } from "./permission-gate"
 
 /**
  * The wall-clock budget handed to the shared manager for one turn.
@@ -105,6 +125,10 @@ export interface ExternalAgentSessionManager {
     options?: ExternalAgentExecutionOptions
   ): Promise<ExternalAgentResult>
   setSessionMode(agentId: string, sessionId: string, mode: AcpPermissionMode): Promise<void>
+  /** Switch the model of a LIVE session in place, so a `/model` pick does not
+   * have to discard the thread. Throws when the adapter has no model selection;
+   * the caller treats that as "applies on the next turn" rather than an error. */
+  setSessionModel(agentId: string, sessionId: string, modelId: string): Promise<void>
   cancel(agentId: string, sessionId: string): Promise<void>
   removeAgent(agentId: string): Promise<void>
 }
@@ -131,6 +155,39 @@ export interface ExternalAgentSessionParams {
    * user enabled reaches whichever agent is answering. Injected in tests.
    */
   resolveMcpServers?: () => McpServer[]
+  /**
+   * The shared Cognia context assembler. Defaults to one built from `config`,
+   * which is what makes an external turn mean the same thing as a built-in one.
+   * Injected in tests.
+   */
+  assembler?: CliContextAssembler
+  /**
+   * Start the Cognia tool host for a resolved session. Defaults to
+   * {@link startToolHostBroker}; injected in tests (and set to a failing stub to
+   * exercise the "backend cannot host Cognia tools" path).
+   */
+  startToolHost?: (params: {
+    session: ResolvedCliSessionContext
+    attempt: number
+    gate?: PermissionResponder
+    execHostTool: (name: string, args: unknown) => Promise<{ result?: unknown; error?: string }>
+    onToolCall?: (event: { name: string; input: unknown; callKey: string }) => void
+    onToolResult?: (event: { callKey: string; name: string; ok: boolean; summary?: string }) => void
+  }) => Promise<ToolHostBroker>
+  /** Project a live broker into `session/new` MCP entries. Injected in tests. */
+  buildToolHostServers?: (broker: ToolHostBroker) => AcpMcpServerConfig[]
+  /**
+   * Disable the Cognia tool host entirely.
+   *
+   * The default parity contract REQUIRES it: an external session with no Cognia
+   * tools is a different product, not a smaller one. This exists for the
+   * explicitly-labelled raw mode and for tests.
+   */
+  disableToolHost?: boolean
+  /** Resolve the per-tool MCP disable overlay for the turn dispatch context. */
+  resolveDisabledMcpTools?: () => Set<string>
+  /** Resolve the user's persisted "Allow always" tool names. */
+  resolveApprovedTools?: () => Set<string>
 }
 
 export function acpPermissionRequestToCli(
@@ -255,7 +312,16 @@ function actionToCaptureEvent(action: TuiAction): CaptureStreamEvent | undefined
   }
 }
 
-/** Create a persistent external-agent session with the same interface as the built-in sidecar. */
+/**
+ * Create a persistent external-agent session with the same interface — and the
+ * same Cognia meaning — as the built-in sidecar.
+ *
+ * The session resolves its context through the SHARED assembler, so project
+ * instructions, output style, agent mode, skills, tool policy, attachments and
+ * twin grounding are identical to the built-in backend; only the transport
+ * differs. Cognia's own tools ride an authenticated MCP bridge attached beside
+ * the user's MCP servers, with Cognia — not the agent — deciding what may run.
+ */
 export function createExternalAgentSession(params: ExternalAgentSessionParams): AgentSession {
   const backend = params.config.agentBackend ?? "builtin"
   if (backend === "builtin" || !getPresetConfig(backend)) {
@@ -281,6 +347,39 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
   const resolveMcpServers =
     params.resolveMcpServers ??
     (() => applyDisabled(loadMcpServers([params.config.cwd, home]), readDisabled(home)))
+  const resolveApprovedTools = params.resolveApprovedTools ?? (() => readToolApprovals(home))
+  const resolveDisabledMcpTools = params.resolveDisabledMcpTools ?? (() => readDisabledTools(home))
+  const startToolHost = params.startToolHost ?? startToolHostBroker
+  const buildToolHostServers =
+    params.buildToolHostServers ??
+    ((broker: ToolHostBroker) =>
+      buildToolHostMcpServers({ endpoint: broker.endpoint, token: broker.token }))
+  const toolHostEnabled = params.disableToolHost !== true
+
+  // The ONE Cognia resolver. Attachments are built with vision OFF because the
+  // external transport carries a single text prompt: images and PDFs then take
+  // Cognia's established OCR / text-extraction fallback instead of becoming
+  // blocks the wire cannot represent.
+  const assembler =
+    params.assembler ??
+    createCliContextAssembler({
+      config: params.config,
+      sessionId,
+      home,
+      now,
+      resolveMcpServers,
+      resolveApprovedTools,
+      resolveDisabledMcpTools,
+      buildContent: (prompt, cwd) =>
+        buildAttachmentContent(prompt, cwd, {
+          provider: params.config.provider ?? "external",
+          model: "",
+          isAnthropic: false,
+          anthropicKey: () =>
+            params.config.providers["anthropic"]?.apiKey ?? process.env.ANTHROPIC_API_KEY ?? null,
+        }),
+    })
+
   // Re-resolved lazily so a `/mcp` toggle reaches the NEXT turn's `session/new`
   // without tearing the agent down; `invalidateOptions` drops the cache.
   let mcpServers: AcpMcpServerConfig[] | undefined
@@ -294,6 +393,19 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
     ? recordedLink.externalSessionId
     : undefined
   let permissionMode = normalizePermissionMode(params.config.permissionMode)
+  // The tool host for the CURRENT protocol session. Torn down and rebuilt when
+  // the context version changes, so a bridge can never outlive the context it
+  // was minted for.
+  let broker: ToolHostBroker | null = null
+  let brokerAttempt = 0
+  let skillsAnnounced = false
+  let databaseErrorShown = false
+  // Context version the live external protocol session was created under. A
+  // mismatch means the agent is running with instructions Cognia no longer
+  // considers current, so the session is recreated rather than continued.
+  let sessionContextVersion: string | null = isResumableLink(recordedLink, backend)
+    ? (recordedLink.contextVersion ?? null)
+    : null
 
   const ensureAgent = async (): Promise<void> => {
     if (initialized) return
@@ -320,11 +432,138 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
     initialized = true
   }
 
+  /** Tear down the current tool host, if any. Safe to call repeatedly. */
+  const stopToolHost = async (): Promise<void> => {
+    if (!broker) return
+    const current = broker
+    broker = null
+    // Reject anything still in flight BEFORE closing, so a bridge waiting on an
+    // authorize gets a refusal rather than a dropped socket.
+    current.cancelInFlight("the Cognia session context changed")
+    await current.close().catch(() => undefined)
+  }
+
+  /**
+   * (Re)start the tool host for `session` and return the MCP entries to attach.
+   *
+   * Under the default parity contract a tool host that cannot start is fatal:
+   * an external session silently running without Cognia's tools is exactly the
+   * "ready with fewer tools" lie this work removes.
+   */
+  const ensureToolHost = async (
+    session: ResolvedCliSessionContext,
+    opts: SendTurnOptions
+  ): Promise<AcpMcpServerConfig[]> => {
+    if (!toolHostEnabled) return []
+    if (broker && !broker.isClosed()) return buildToolHostServers(broker)
+    brokerAttempt += 1
+    const execHostTool = createHostToolExecutor({ sessionId })
+    try {
+      broker = await startToolHost({
+        session,
+        attempt: brokerAttempt,
+        gate: opts.gate,
+        execHostTool,
+        onToolCall: (event) =>
+          opts.onAction?.({
+            type: "TOOL_CALL",
+            callKey: event.callKey,
+            toolName: event.name,
+            input: (event.input ?? {}) as Record<string, unknown>,
+          }),
+        onToolResult: (event) =>
+          opts.onAction?.({
+            type: "TOOL_RESULT",
+            callKey: event.callKey,
+            toolName: event.name,
+            result: event.summary ?? "",
+            ...(event.ok ? {} : { isError: true }),
+          }),
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      throw new RunAndCaptureError(
+        `Cognia could not host its tools for ${backend}: ${message}`,
+        "session_error"
+      )
+    }
+    return buildToolHostServers(broker)
+  }
+
+  /**
+   * Resolve the session context and reconcile the live protocol session with it.
+   *
+   * Returns the context plus whether the external conversation had to be
+   * restarted, so the caller can tell the user rather than let the agent lose
+   * its history silently.
+   */
+  const reconcile = async (
+    opts: SendTurnOptions
+  ): Promise<{ session: ResolvedCliSessionContext; restarted: boolean }> => {
+    const session = await assembler.resolveSession()
+    let restarted = false
+    if (sessionContextVersion !== null && sessionContextVersion !== session.contextVersion) {
+      // Everything `session/new` baked in has changed. Appending a second system
+      // prompt to the live session would leave the agent with two conflicting
+      // instruction sets and make resume non-deterministic, so start a new
+      // protocol session instead — the TUI transcript is unaffected.
+      if (externalSessionId) {
+        await manager.cancel(agentId, externalSessionId).catch(() => undefined)
+      }
+      externalSessionId = undefined
+      await stopToolHost()
+      mcpServers = undefined
+      restarted = true
+    }
+    sessionContextVersion = session.contextVersion
+    return { session, restarted }
+  }
+
   return {
     sessionId,
     async send(prompt: string, opts: SendTurnOptions) {
       if (closed) throw new Error("agent session is closed")
       await ensureAgent()
+      const { session, restarted } = await reconcile(opts)
+      if (restarted) {
+        opts.onAction?.({
+          type: "NOTICE",
+          message:
+            "Session settings changed — restarting the external agent's context. Your transcript is kept; the agent starts this turn fresh.",
+        })
+      }
+      if (!skillsAnnounced && session.activeSkillIds.length > 0) {
+        skillsAnnounced = true
+        opts.onActiveSkills?.(session.activeSkillIds)
+      }
+      if (session.databaseError && !databaseErrorShown) {
+        databaseErrorShown = true
+        opts.onDatabaseError?.(session.databaseError)
+      }
+      const turn = await assembler.resolveTurn(prompt, session)
+      if (turn.twinNotice) opts.onTwinNotice?.(turn.twinNotice)
+      if (turn.attachments) opts.onAttachments?.(turn.attachments)
+
+      // `session/new` already happened with the base prompt, so the twin persona
+      // rides this turn's content (once) alongside the per-turn recall.
+      let content = turn.content
+      if (turn.dynamicTwinContext) {
+        content = prependTextBlock(content, twinContextBlock(turn.dynamicTwinContext))
+      }
+      if (turn.stableTwinContext) {
+        content = prependTextBlock(content, twinContextBlock(turn.stableTwinContext))
+      }
+      const flattened: ExternalPromptResult = externalPromptText(content)
+      if (flattened.unsupported.length > 0) {
+        // Fail BEFORE sending: dropping the attachment and answering anyway
+        // would look like the agent read something it never received.
+        throw new RunAndCaptureError(
+          unsupportedAttachmentMessage(backend, flattened.unsupported),
+          "session_error"
+        )
+      }
+      const cogniaServers = await ensureToolHost(session, opts)
+
       appendTranscript(
         home,
         sessionId,
@@ -332,6 +571,17 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
         params.transcriptFs,
         now()
       )
+      // Publish this turn's dispatch context so a `dispatch_agent` call arriving
+      // over the tool-host bridge runs with THIS turn's gate and signal.
+      const clearDispatch = registerTurnSubagentContext({
+        session,
+        config: params.config,
+        home,
+        gate: opts.gate,
+        ...(opts.signal ? { signal: opts.signal } : {}),
+        approvedTools: resolveApprovedTools(),
+        disabledMcpTools: resolveDisabledMcpTools(),
+      })
 
       // Bound the turn by silence, not by wall clock. `watchdog` arms on the
       // first streamed event and pauses while a permission prompt is on screen,
@@ -343,22 +593,49 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       let observedSessionId = externalSessionId
       let result: ExternalAgentResult
       try {
-        const execution = manager.execute(agentId, prompt, {
+        const execution = manager.execute(agentId, flattened.text, {
           ...(externalSessionId ? { sessionId: externalSessionId } : {}),
+          // The model stays `config.model` — the contract there is "the model the
+          // user explicitly asked this BACKEND for", an agent-owned id. The
+          // resolved `sendOptions.model` is Cognia's provider catalog talking, and
+          // substituting it would silently rewrite which model Codex/Claude Code
+          // actually runs.
           ...(params.config.model ? { model: params.config.model } : {}),
-          ...(params.config.systemPrompt ? { systemPrompt: params.config.systemPrompt } : {}),
+          // The CANONICAL prompt, not `config.systemPrompt` — this is what makes
+          // project instructions, output style, the active mode and the skill
+          // catalog reach an external agent at all.
+          ...(session.sendOptions.systemPrompt
+            ? { systemPrompt: session.sendOptions.systemPrompt }
+            : {}),
           permissionMode,
-          ...(params.config.allowedTools ? { allowedTools: params.config.allowedTools } : {}),
-          // The user's own MCP servers, projected into the ACP shape. This was
-          // a hardcoded empty array, so a server enabled in `/mcp` silently did
-          // nothing on an external backend while the panel showed it as on.
-          context: {
-            custom: {
-              mcpServers: (mcpServers ??= toAcpMcpServers(resolveMcpServers())),
-              additionalDirectories: params.config.additionalRoots ?? [],
+          // The agent's OWN tool pre-approval list, so it stays in the agent's
+          // native tool vocabulary. Cognia's resolved tool policy is expressed in
+          // `mcp__cognia-*__` names the agent cannot act on; it governs Cognia's
+          // projected tools at the broker instead.
+          ...(params.config.allowedTools?.length
+            ? { allowedTools: params.config.allowedTools }
+            : {}),
+          instructionEnvelope: {
+            hash: session.contextVersion,
+            developerInstructions: session.sendOptions.systemPrompt ?? "",
+            sourceFlags: {
+              hasSkills: session.activeSkillIds.length > 0,
+              hasCogniaTools: cogniaServers.length > 0,
+              hasAdditionalRoots: session.additionalDirectories.length > 0,
             },
           },
-          workingDirectory: params.config.cwd,
+          context: {
+            custom: {
+              // Cognia's own tools first, then the user's — both additive, and
+              // both namespaced, so the agent's native tools stay untouched.
+              mcpServers: [
+                ...cogniaServers,
+                ...(mcpServers ??= toAcpMcpServers(session.mcpServers)),
+              ],
+              additionalDirectories: session.additionalDirectories,
+            },
+          },
+          workingDirectory: session.cwd,
           ...(opts.signal ? { signal: opts.signal } : {}),
           // Always explicit: an omitted budget makes the manager fall back to the
           // agent config's `timeout`, which is the CONNECT budget and would cap
@@ -366,6 +643,14 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
           timeout:
             opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : EXTERNAL_TURN_WALL_CLOCK_MS,
           onPermissionRequest: async (request) => {
+            // A Cognia-projected tool is gated by the broker, which shows the
+            // real prompt and owns the persisted rules. Acknowledging the
+            // agent's generic ask here is what keeps ONE Cognia call from
+            // producing TWO user prompts. Native agent tools fall through to
+            // Cognia's overlay as before.
+            if (isCogniaProjectedTool(request.toolInfo?.name)) {
+              return captureDecisionToAcp(request, { decision: "allow" })
+            }
             watchdog.pause()
             try {
               const decision = await opts.gate(acpPermissionRequestToCli(request, sessionId))
@@ -402,6 +687,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
           // The stream went silent. Cancel the in-flight turn but KEEP the
           // session: the process is alive and its context is still intact, so
           // the next message continues the conversation.
+          broker?.cancelInFlight("the turn was interrupted")
           if (observedSessionId) {
             await manager.cancel(agentId, observedSessionId).catch(() => undefined)
           }
@@ -419,16 +705,22 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
         result = outcome.value
       } finally {
         watchdog.stop()
+        clearDispatch()
       }
 
       if (result.sessionId && result.sessionId !== externalSessionId) {
         externalSessionId = result.sessionId
         // Record it as soon as the agent names it, so even a session that later
-        // fails can be resumed rather than lost.
+        // fails can be resumed rather than lost. The context version rides along
+        // so a later `/resume` refuses a session created under other settings.
         writeExternalLink(
           home,
           sessionId,
-          { backend, externalSessionId: result.sessionId },
+          {
+            backend,
+            externalSessionId: result.sessionId,
+            contextVersion: session.contextVersion,
+          },
           params.transcriptFs
         )
       }
@@ -462,16 +754,36 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       }
     },
     invalidateOptions() {
-      // Only the per-turn payload can be re-resolved in place. Connect-time
-      // facts (reasoning effort, skill roots) ride the agent registration and
-      // need a `/backend` reconnect — which is why the capability gate describes
-      // them that way rather than pretending a toggle takes effect here.
+      // Re-resolve the whole Cognia context. Whether that merely changes the
+      // next turn's payload or forces a protocol-session restart is decided by
+      // the context version in `reconcile`, so `/mcp`, `/mode`, `/skill` and a
+      // system-prompt edit all land in the right layer without special cases.
+      assembler.invalidate()
       mcpServers = undefined
+      skillsAnnounced = false
     },
     async setPermissionMode(mode) {
       permissionMode = normalizePermissionMode(mode)
       if (initialized && externalSessionId) {
         await manager.setSessionMode(agentId, externalSessionId, permissionMode)
+      }
+    },
+    /**
+     * Apply a `/model` pick to the live session so the thread survives it.
+     *
+     * Returns whether the switch actually landed on a live session. `false` is
+     * the ordinary case before the first turn (no session exists yet) or when
+     * the adapter has no model selection; in both, the new model still takes
+     * effect on the next turn. Never throws: a rejected model must not take the
+     * turn (or the TUI) down.
+     */
+    async setModel(model) {
+      if (!initialized || !externalSessionId) return false
+      try {
+        await manager.setSessionModel(agentId, externalSessionId, model)
+        return true
+      } catch {
+        return false
       }
     },
     isLive() {
@@ -480,6 +792,12 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
     async close() {
       if (closed) return
       closed = true
+      // Shutdown order: stop accepting tool calls → reject pending broker calls
+      // → cancel the external turn → close the protocol session → drop the
+      // bridge → remove the agent. Doing it in any other order can leave a
+      // bridge executing against a session that is already gone.
+      clearCliSubagentContext(sessionId)
+      await stopToolHost()
       if (!initialized) return
       if (externalSessionId) {
         try {

@@ -24,6 +24,16 @@ export interface ExternalSessionLink {
   backend: string
   /** The agent's own session id, to hand back to `session/load`. */
   externalSessionId: string
+  /**
+   * Fingerprint of the Cognia context the agent's session was created under.
+   *
+   * Resuming across a context change would silently continue a conversation
+   * whose instructions, roots, model or tool surface no longer match what Cognia
+   * would now send — the agent would keep obeying settings the TUI shows as
+   * changed. Absent on links written before this was recorded, which read as
+   * "unknown" and therefore not resumable under a known version.
+   */
+  contextVersion?: string
 }
 
 export function externalLinkPath(home: string, sessionId: string): string {
@@ -58,9 +68,13 @@ export function readExternalLink(
     if (!raw) return undefined
     const parsed: unknown = JSON.parse(raw)
     if (!parsed || typeof parsed !== "object") return undefined
-    const { backend, externalSessionId } = parsed as Partial<ExternalSessionLink>
+    const { backend, externalSessionId, contextVersion } = parsed as Partial<ExternalSessionLink>
     if (typeof backend !== "string" || typeof externalSessionId !== "string") return undefined
-    return { backend, externalSessionId }
+    return {
+      backend,
+      externalSessionId,
+      ...(typeof contextVersion === "string" ? { contextVersion } : {}),
+    }
   } catch {
     return undefined
   }
