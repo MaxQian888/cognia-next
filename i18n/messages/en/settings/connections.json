@@ -680,6 +680,44 @@
     "encryptionEnabledAria": "Toggle event encryption",
     "encryptionEnabledHelp": "Turn on when Lark App → Event subscriptions → Encrypt Key is configured.",
     "encryptionEnabledLabel": "Encrypted events",
+    "entrySurfaces": {
+      "title": "Web entry & Lark surfaces",
+      "webBaseLabel": "Web entry base URL",
+      "webBaseHelp": "Public https URL of the Cognia web app reachable from inside Lark clients. Chat Tab / menu links and SSO bounces are built on it; leave empty to keep external links disabled.",
+      "webBasePlaceholder": "https://cognia.example.com",
+      "flagsLabel": "Entry feature flags (this adapter)",
+      "flagsHelp": "Per-adapter overrides for the gray release. Unset flags fall back to environment / global defaults (all off).",
+      "flag": {
+        "larkPrincipalRegistry": "Principal registry (unified identity)",
+        "larkWebSso": "Web SSO login",
+        "larkChatTab": "Chat Tab sync",
+        "larkGroupMenu": "Group menu sync",
+        "larkNativeSlash": "Command menu batch",
+        "larkMessageShortcut": "Message shortcut import",
+        "larkPlusMenu": "Plus-menu new task"
+      },
+      "strictAuthLabel": "Callback authorization mode",
+      "strictAuthHelp": "audit runs every check and records would-deny decisions without blocking; enforce blocks them. Flip to enforce only after the audit stream is quiet (see the runbook).",
+      "strictAuth": {
+        "off": "Off",
+        "audit": "Audit",
+        "enforce": "Enforce"
+      },
+      "surfacesLabel": "Chat surfaces",
+      "surfacesEmpty": "No chat surfaces recorded yet — they appear when the bot is added to chats with Chat Tab / group menu enabled.",
+      "resync": "Resync surfaces",
+      "resyncing": "Resyncing…",
+      "resyncDone": "Resync finished: {synced} synced, {errors} failed, {skipped} skipped.",
+      "resyncFailed": "Resync failed. Check the adapter credentials and try again.",
+      "statusAria": "Surface status",
+      "status": {
+        "pending": "Pending",
+        "synced": "Synced",
+        "error": "Error",
+        "rebuild_required": "Rebuild required",
+        "removed": "Removed"
+      }
+    },
     "openCompanion": "Open Companion settings",
     "openCompanionAria": "Open Mobile Companion → Tunnel",
     "openConsole": "Open Lark console",

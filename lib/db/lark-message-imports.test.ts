@@ -51,3 +51,17 @@ describe("lark-message-imports", () => {
     expect(await getDb().larkMessageImports.count()).toBe(1)
   })
 })
+
+describe("default clock arm", () => {
+  it("recordMessageImport stamps createdAt without an explicit now", async () => {
+    const row = await recordMessageImport({
+      sourceHash: "hash_now",
+      adapterId: "lk-1",
+      chatId: "oc_1",
+      conversationKey: "lark:lk-1:oc_1",
+      sessionId: "sess_now",
+      messageIds: ["om_1"],
+    })
+    expect(row.createdAt).toBeGreaterThan(0)
+  })
+})

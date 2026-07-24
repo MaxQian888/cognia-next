@@ -145,4 +145,41 @@ describe("reconcileGroupMenuSurface", () => {
     const stored = await getChatSurface(ADAPTER_ID, CHAT_ID, "group_menu")
     expect(stored?.lastError).toContain("menu boom")
   })
+
+  it("fails closed before tenant identity is known", async () => {
+    const row = adapterRow()
+    delete (row.lastWhoamiResult as { tenantKey?: string }).tenantKey
+    const d = deps({ getAdapter: jest.fn(async () => row) })
+    expect(await reconcileGroupMenuSurface(ctx, CHAT_ID, d)).toBe("error")
+    const stored = await getChatSurface(ADAPTER_ID, CHAT_ID, "group_menu")
+    expect(stored?.lastError).toBe("identity_unknown")
+    expect((d as { request: jest.Mock }).request).not.toHaveBeenCalled()
+  })
+
+  it("records web_entry_unconfigured when no surface URL can be built", async () => {
+    const d = deps({ buildUrl: jest.fn(async () => null) })
+    expect(await reconcileGroupMenuSurface(ctx, CHAT_ID, d)).toBe("error")
+    const stored = await getChatSurface(ADAPTER_ID, CHAT_ID, "group_menu")
+    expect(stored?.lastError).toBe("web_entry_unconfigured")
+  })
+
+  it("writes nothing when the menu already points at the desired URL", async () => {
+    const request = jest.fn(async () => ({
+      data: {
+        menu_tree: {
+          chat_menu_top_levels: [
+            {
+              chat_menu_top_level_id: "menu_ok",
+              chat_menu_item: { name: "Cognia", redirect_link: { common_url: URL } },
+            },
+          ],
+        },
+      },
+    }))
+    const d = deps({ request })
+    expect(await reconcileGroupMenuSurface(ctx, CHAT_ID, d)).toBe("synced")
+    expect(request).toHaveBeenCalledTimes(1)
+    const stored = await getChatSurface(ADAPTER_ID, CHAT_ID, "group_menu")
+    expect(stored?.platformSurfaceId).toBe("menu_ok")
+  })
 })

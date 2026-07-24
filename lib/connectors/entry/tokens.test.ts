@@ -1,6 +1,12 @@
 /** @jest-environment jsdom */
 
 import "fake-indexeddb/auto"
+
+jest.mock("@/lib/tauri", () => ({
+  transport: { call: jest.fn(async () => ({ token: "tok.default", jti: "j_d", expiresAt: 1 })) },
+}))
+
+import { transport } from "@/lib/tauri"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import { issueEntryToken, issueSurfaceToken } from "./tokens"
 
@@ -75,5 +81,21 @@ describe("entry token issuance", () => {
     const [, args] = (call as jest.Mock).mock.calls[0]
     expect(args).toMatchObject({ kind: "surface", chatId: "oc_9", urlVersion: 2 })
     expect(await getDb().larkEntryContexts.count()).toBe(0)
+  })
+})
+
+describe("default transport arm", () => {
+  it("falls back to transport.call when no override is provided", async () => {
+    await issueEntryToken(INPUT)
+    await issueSurfaceToken({
+      adapterId: "lk-1",
+      tenantKey: "tk_a",
+      appId: "cli_1",
+      chatId: "oc_1",
+      urlVersion: 1,
+      surface: "chat_tab",
+    })
+    const names = (transport.call as jest.Mock).mock.calls.map((c) => c[0])
+    expect(names).toEqual(["lark_entry_issue", "lark_entry_issue"])
   })
 })

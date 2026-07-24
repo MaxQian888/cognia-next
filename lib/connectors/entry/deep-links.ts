@@ -51,8 +51,10 @@ export interface AuthorizedConversationLinkInput extends IssueEntryTokenInput {
 
 /**
  * Personal, single-use link into one conversation. Returns null when no web
- * base is configured; falls back to the bare workbench URL when minting
- * fails (a broken link beats a leaking one).
+ * base is configured or web SSO is off for the adapter (resolving a personal
+ * token REQUIRES an SSO session, so minting without it would only produce
+ * dead links); falls back to the bare workbench URL when minting fails
+ * (a broken link beats a leaking one).
  */
 export async function buildAuthorizedConversationLink(
   input: AuthorizedConversationLinkInput,
@@ -60,6 +62,7 @@ export async function buildAuthorizedConversationLink(
 ): Promise<string | null> {
   const base = resolveWebEntryBase(input.adapterRow)
   if (!base) return null
+  if (!isLarkFeatureEnabled("larkWebSso", input.adapterRow)) return null
   try {
     const issued = await issueEntryToken(input, overrides)
     return `${base}/lark/entry?entry=${encodeURIComponent(issued.token)}`

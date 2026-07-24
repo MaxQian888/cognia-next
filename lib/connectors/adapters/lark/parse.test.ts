@@ -608,6 +608,8 @@ describe("parseLarkBotMenuEvent — application.bot.menu_v6", () => {
     )
     expect(r?.kind).toBe("mapped")
     if (r?.kind !== "mapped") throw new Error("expected mapped outcome")
+    expect(r.builtIn).toBe(false)
+    expect(r.eventKey).toBe("agenda")
     expect(r.event.kind).toBe("create")
     expect(r.event.plainText).toBe("/agenda today")
     expect(r.event.segments).toEqual([{ type: "text", text: "/agenda today" }])
@@ -643,6 +645,8 @@ describe("parseLarkBotMenuEvent — application.bot.menu_v6", () => {
     expect(r?.kind).toBe("link")
     if (r?.kind !== "link") throw new Error("expected link outcome")
     // Reserved built-in resolved behind the adapter-configured list.
+    expect(r.builtIn).toBe(true)
+    expect(r.eventKey).toBe("cognia.open_workbench")
     expect(r.command.action).toEqual({ type: "link", value: "/" })
     expect(r.openId).toBe("ou_user_001")
     expect(r.eventId).toBe("evt_menu_1")
@@ -657,6 +661,7 @@ describe("parseLarkBotMenuEvent — application.bot.menu_v6", () => {
     )
     expect(r?.kind).toBe("mapped")
     if (r?.kind !== "mapped") throw new Error("expected mapped outcome")
+    expect(r.builtIn).toBe(true)
     expect(r.event.plainText).toBe("/new")
   })
 

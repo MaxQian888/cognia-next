@@ -35,6 +35,8 @@ import {
   parseLarkInteractiveCallback,
 } from "./parse"
 import { applyTenantKeyBackfill } from "./tenant-key-backfill"
+import { isLarkFeatureEnabled } from "@/lib/connectors/feature-flags"
+import { recordConnectorMetric } from "@/lib/connectors/metrics"
 import { handleMenuLink, handleMenuUnknownKey } from "./menu-actions"
 import { reconcileChatTabSurface } from "./chat-tabs"
 import { reconcileGroupMenuSurface } from "./group-menu"
@@ -442,14 +444,37 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
         )
         if (!outcome) return
         lastActivityAt = Date.now()
+        // Row read is per-click so web-entry-base / flag edits apply without
+        // an adapter restart; lookup failure degrades to the global defaults.
+        // Configured mapped commands skip the read entirely (hot path).
+        const needsAdapterRow = outcome.kind !== "mapped" || outcome.builtIn
+        const adapterRow = needsAdapterRow
+          ? await getAdapterInstance(opts.id).catch(() => undefined)
+          : undefined
+        // Reserved cognia.* built-ins are the "command menu batch" — gated
+        // per adapter (larkNativeSlash). Adapter-configured rows are never
+        // gated. Gated-off clicks get the same terminal notice as unknown
+        // keys so a menu published ahead of the gray flip stays explainable.
+        if (
+          outcome.kind !== "unknown" &&
+          outcome.builtIn &&
+          !isLarkFeatureEnabled("larkNativeSlash", adapterRow)
+        ) {
+          await handleMenuUnknownKey(opts.id, {
+            kind: "unknown",
+            openId: outcome.openId,
+            eventKey: outcome.eventKey,
+            eventId: outcome.eventId,
+            ...(outcome.identityScope ? { identityScope: outcome.identityScope } : {}),
+          })
+          return
+        }
         if (outcome.kind === "mapped") {
           if (!(await gateInboundEvent(opts.id, outcome.event))) return
+          if (outcome.builtIn) recordConnectorMetric("lark_native_slash_total")
           await ctx.emit(outcome.event)
           return
         }
-        // Row read is per-click so web-entry-base / flag edits apply without
-        // an adapter restart; lookup failure degrades to the global defaults.
-        const adapterRow = await getAdapterInstance(opts.id).catch(() => undefined)
         if (outcome.kind === "link") {
           await handleMenuLink(opts.id, adapterRow ?? undefined, outcome)
         } else {

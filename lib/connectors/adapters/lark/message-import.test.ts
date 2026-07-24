@@ -200,6 +200,72 @@ describe("importLarkMessages", () => {
   })
 })
 
+describe("importLarkMessages failure arms", () => {
+  beforeEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+  })
+  afterEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+  })
+
+  it("skips messages whose platform fetch throws", async () => {
+    const deps = makeDeps({
+      tenantRequest: jest.fn(async (_c: unknown, _m: string, path: string) => {
+        if (path.endsWith("om_boom")) throw new Error("api down")
+        const id = decodeURIComponent(path.split("/").pop() ?? "")
+        return { data: { items: [rawMessage(id)] } }
+      }),
+    })
+    const outcome = await importLarkMessages(
+      {
+        adapterId: ADAPTER_ID,
+        chatId: CHAT_ID,
+        messageIds: ["om_ok", "om_boom"],
+        verifiedIdentity: IDENTITY,
+      },
+      deps
+    )
+    if (!outcome.ok) throw new Error("expected ok")
+    expect(outcome.skipped).toEqual([{ messageId: "om_boom", reason: "fetch_failed" }])
+  })
+
+  it("denies with membership_check_failed when the member API throws", async () => {
+    const deps = makeDeps({
+      isMember: jest.fn(async () => {
+        throw new Error("members api down")
+      }),
+    })
+    expect(
+      await importLarkMessages(
+        {
+          adapterId: ADAPTER_ID,
+          chatId: CHAT_ID,
+          messageIds: ["om_1"],
+          verifiedIdentity: IDENTITY,
+        },
+        deps
+      )
+    ).toEqual({ ok: false, error: "membership_check_failed" })
+  })
+
+  it("denies with credentials_unavailable when the keyring is empty", async () => {
+    const deps = makeDeps({ keyringGet: jest.fn(async () => null) })
+    expect(
+      await importLarkMessages(
+        {
+          adapterId: ADAPTER_ID,
+          chatId: CHAT_ID,
+          messageIds: ["om_1"],
+          verifiedIdentity: IDENTITY,
+        },
+        deps
+      )
+    ).toEqual({ ok: false, error: "credentials_unavailable" })
+  })
+})
+
 describe("buildImportedContextBlock", () => {
   it("wraps sender-attributed lines in explicit delimiters", () => {
     const block = buildImportedContextBlock(

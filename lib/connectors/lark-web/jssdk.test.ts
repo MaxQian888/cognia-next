@@ -1,6 +1,12 @@
 /** @jest-environment jsdom */
 
-import { configureLarkJsSdk, getLarkTriggerDetail, isInsideLarkWebview } from "./jssdk"
+import {
+  configureLarkJsSdk,
+  getLarkTriggerDetail,
+  isInsideLarkWebview,
+  loadLarkJsSdkScript,
+  LARK_JSSDK_SCRIPT_URL,
+} from "./jssdk"
 import { LARK_WEB_SESSION_STORAGE_KEY } from "./session"
 
 function fakeJwt(payload: Record<string, unknown>): string {
@@ -75,5 +81,31 @@ describe("getLarkTriggerDetail", () => {
       },
     }
     await expect(getLarkTriggerDetail("t9")).resolves.toEqual({ chat_id: "oc_1" })
+  })
+})
+
+describe("loadLarkJsSdkScript", () => {
+  afterEach(() => {
+    document.querySelectorAll("script").forEach((s) => s.remove())
+  })
+
+  it("resolves immediately when the SDK is pre-injected", async () => {
+    ;(globalThis as SdkGlobals).tt = {}
+    await expect(loadLarkJsSdkScript(50)).resolves.toBeUndefined()
+    expect(document.querySelector("script")).toBeNull()
+  })
+
+  it("injects the script once and resolves on load / rejects on error", async () => {
+    const loading = loadLarkJsSdkScript(1000)
+    const script = document.querySelector(`script[src="${LARK_JSSDK_SCRIPT_URL}"]`)
+    expect(script).not.toBeNull()
+    script!.dispatchEvent(new Event("load"))
+    await expect(loading).resolves.toBeUndefined()
+
+    // A second call reuses the existing tag instead of double-injecting.
+    const again = loadLarkJsSdkScript(1000)
+    expect(document.querySelectorAll("script")).toHaveLength(1)
+    script!.dispatchEvent(new Event("error"))
+    await expect(again).rejects.toThrow("failed to load")
   })
 })

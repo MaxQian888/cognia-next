@@ -732,11 +732,22 @@ export interface LarkBotMenuEvent {
  * which let anyone with the menu drive arbitrary AI turns.
  */
 export type LarkBotMenuOutcome =
-  | { kind: "mapped"; event: NormalizedInboundEvent }
+  | {
+      kind: "mapped"
+      event: NormalizedInboundEvent
+      /** Resolved from the reserved cognia.* built-ins, not an adapter row. */
+      builtIn: boolean
+      openId: string
+      eventKey: string
+      eventId: string
+      identityScope?: { tenantKey?: string; appId?: string }
+    }
   | {
       kind: "link"
       command: LarkQuickCommand
+      builtIn: boolean
       openId: string
+      eventKey: string
       eventId: string
       identityScope?: { tenantKey?: string; appId?: string }
     }
@@ -773,7 +784,13 @@ export function parseLarkBotMenuEvent(
 
   const eventId = envelope.header.event_id ?? ""
   const identityScope = identityScopeOf(envelope)
-  const mapped = resolveQuickCommand(quickCommands, eventKey)
+  // Adapter-configured rows first; the reserved cognia.* built-ins fill in
+  // behind them. Which source matched is part of the outcome — the dispatch
+  // site gates built-ins on the `larkNativeSlash` batch flag, while
+  // configured rows are never gated (pre-epic behavior).
+  const configured = quickCommands?.find((command) => command.triggerKey === eventKey)
+  const mapped = configured ?? resolveQuickCommand(undefined, eventKey)
+  const builtIn = !configured && mapped !== undefined
   if (!mapped) {
     return {
       kind: "unknown",
@@ -787,7 +804,9 @@ export function parseLarkBotMenuEvent(
     return {
       kind: "link",
       command: mapped,
+      builtIn,
       openId,
+      eventKey,
       eventId,
       ...(identityScope ? { identityScope } : {}),
     }
@@ -798,6 +817,11 @@ export function parseLarkBotMenuEvent(
 
   return {
     kind: "mapped",
+    builtIn,
+    openId,
+    eventKey,
+    eventId,
+    ...(identityScope ? { identityScope } : {}),
     event: {
       platform: "lark",
       adapterId,

@@ -89,3 +89,33 @@ describe("lark-entry ledgers", () => {
     expect((await getWebSession("abc123"))?.revokedAt).toBe(T0 + 9000)
   })
 })
+
+describe("default clock arms", () => {
+  it("every accessor works without an explicit now", async () => {
+    await recordEntryContext({
+      jti: "jti_now",
+      adapterId: "lk-1",
+      principalId: "fp_1",
+      accountId: "acct_a",
+      entryType: "bot_menu",
+      conversationKey: "lark:lk-1:oc_1",
+      expiresAt: Date.now() + 60_000,
+    })
+    await markEntryContextConsumed("jti_now")
+    expect((await getEntryContext("jti_now"))?.consumedAt).toBeGreaterThan(0)
+    // Unknown jti no-ops on the same default-arm path.
+    await markEntryContextConsumed("jti_missing")
+    expect(await pruneExpiredEntryContexts()).toBe(0)
+    await touchWebSession({
+      jtiHash: "ws_now",
+      adapterId: "lk-1",
+      openIdHash: "hash",
+      tenantKey: "tk_a",
+      appId: "cli_1",
+      issuedAt: Date.now(),
+      expiresAt: Date.now() + 60_000,
+    })
+    await revokeWebSession("ws_now")
+    await revokeWebSession("ws_missing")
+  })
+})

@@ -54,6 +54,13 @@ describe("authorized deep links", () => {
     expect(call).not.toHaveBeenCalled()
   })
 
+  it("returns null when web SSO is off — personal links need a session to resolve", async () => {
+    process.env.COGNIA_LARK_WEB_BASE = "https://cognia.example"
+    const call = jest.fn() as never
+    expect(await buildAuthorizedConversationLink(ENTRY_INPUT, { call })).toBeNull()
+    expect(call).not.toHaveBeenCalled()
+  })
+
   it("wraps the minted entry token and never embeds the conversationKey", async () => {
     process.env.COGNIA_LARK_WEB_BASE = "https://cognia.example"
     const call = jest.fn(async () => ({
@@ -61,7 +68,10 @@ describe("authorized deep links", () => {
       jti: "j1",
       expiresAt: 1,
     })) as never
-    const url = await buildAuthorizedConversationLink(ENTRY_INPUT, { call })
+    const url = await buildAuthorizedConversationLink(
+      { ...ENTRY_INPUT, adapterRow: { settings: { larkWebSso: true } } },
+      { call }
+    )
     expect(url).toBe("https://cognia.example/lark/entry?entry=tok.abc")
     expect(url).not.toContain("oc_1")
   })
@@ -71,9 +81,12 @@ describe("authorized deep links", () => {
     const call = jest.fn(async () => {
       throw new Error("companion down")
     }) as never
-    expect(await buildAuthorizedConversationLink(ENTRY_INPUT, { call })).toBe(
-      "https://cognia.example"
-    )
+    expect(
+      await buildAuthorizedConversationLink(
+        { ...ENTRY_INPUT, adapterRow: { settings: { larkWebSso: true } } },
+        { call }
+      )
+    ).toBe("https://cognia.example")
   })
 
   it("builds chat-tab surface URLs only when the flag is on", async () => {

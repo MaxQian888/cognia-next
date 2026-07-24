@@ -680,6 +680,44 @@
     "encryptionEnabledAria": "切换事件加密",
     "encryptionEnabledHelp": "若飞书应用 → 事件订阅 → Encrypt Key 已配置则开启此项。",
     "encryptionEnabledLabel": "事件加密",
+    "entrySurfaces": {
+      "title": "Web 入口与飞书表面",
+      "webBaseLabel": "Web 入口基础 URL",
+      "webBaseHelp": "飞书客户端内可访问的 Cognia Web 应用公网 https 地址。Chat Tab / 菜单链接与 SSO 跳转都基于它构建；留空则外部链接保持关闭。",
+      "webBasePlaceholder": "https://cognia.example.com",
+      "flagsLabel": "入口功能开关（本适配器）",
+      "flagsHelp": "灰度发布的按适配器覆盖。未设置的开关回退到环境变量 / 全局默认（全部关闭）。",
+      "flag": {
+        "larkPrincipalRegistry": "主体注册表（统一身份）",
+        "larkWebSso": "Web SSO 登录",
+        "larkChatTab": "Chat Tab 同步",
+        "larkGroupMenu": "群菜单同步",
+        "larkNativeSlash": "命令菜单批次",
+        "larkMessageShortcut": "消息快捷导入",
+        "larkPlusMenu": "加号菜单新任务"
+      },
+      "strictAuthLabel": "回调授权模式",
+      "strictAuthHelp": "audit 运行全部校验并记录本应拒绝的决策但不拦截；enforce 会拦截。仅在审计流安静后切到 enforce（见运维手册）。",
+      "strictAuth": {
+        "off": "关闭",
+        "audit": "审计",
+        "enforce": "强制"
+      },
+      "surfacesLabel": "会话表面",
+      "surfacesEmpty": "尚无会话表面记录——机器人加入开启 Chat Tab / 群菜单的会话后会出现在这里。",
+      "resync": "重新同步表面",
+      "resyncing": "同步中…",
+      "resyncDone": "同步完成：成功 {synced}，失败 {errors}，跳过 {skipped}。",
+      "resyncFailed": "同步失败。请检查适配器凭证后重试。",
+      "statusAria": "表面状态",
+      "status": {
+        "pending": "待同步",
+        "synced": "已同步",
+        "error": "错误",
+        "rebuild_required": "需重建",
+        "removed": "已移除"
+      }
+    },
     "openCompanion": "打开伴侣设置",
     "openCompanionAria": "打开 移动端伴侣 → Tunnel",
     "openConsole": "打开飞书控制台",

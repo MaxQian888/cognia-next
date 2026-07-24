@@ -161,7 +161,11 @@ describe("connector-runtime (headless)", () => {
 
   it("teardown restores the default Tauri seams", async () => {
     const { stop } = await bootConnectorRuntime()
+    // Boot registers the brain-side Lark intent bridge over the headless
+    // seam (plan 2026-07-24 P3) — the one subscribe expected before stop.
+    expect(mockSubscribe).toHaveBeenCalledWith("connectors://lark-intent", expect.any(Function))
     await stop()
+    mockSubscribe.mockClear()
 
     // Commands route back to Tauri invoke...
     mockTauriInvoke.mockResolvedValue(undefined)

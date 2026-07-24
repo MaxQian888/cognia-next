@@ -173,4 +173,49 @@ describe("resolveLarkEntry", () => {
       })
     ).toEqual({ kind: "error", code: "forbidden" })
   })
+
+  it("fails resolve_failed when the token payload carries no adapter id", async () => {
+    // No session → login bounce needs adapter_id from the token; junk payload
+    // cannot supply one.
+    expect(
+      await resolveLarkEntry({ search: "?entry=junk.token.sig", returnTo: "/r", apiBase: "" })
+    ).toEqual({ kind: "error", code: "resolve_failed" })
+
+    // Session rejected (401) with an undecodable token hits the same arm.
+    seedSession()
+    const rejecting = jest.fn(async () => jsonResponse(401, {})) as unknown as typeof fetch
+    expect(
+      await resolveLarkEntry({
+        search: "?entry=junk.token.sig",
+        returnTo: "/r",
+        apiBase: "",
+        fetchFn: rejecting,
+      })
+    ).toEqual({ kind: "error", code: "resolve_failed" })
+  })
+
+  it("keeps polling across network errors until the budget runs out", async () => {
+    seedSession()
+    const surface = fakeJwt({ scope: "lark_surface", adapter_id: "lk-1" })
+    let polls = 0
+    const flaky = jest.fn(async (url: string) => {
+      if (url.includes("/entry/resolve")) {
+        return jsonResponse(202, { status: "pending", requestId: "req_n" })
+      }
+      polls += 1
+      if (polls === 1) throw new Error("network blip")
+      return jsonResponse(200, { status: "done", result: { conversationKey: "lark:lk-1:oc_2" } })
+    }) as unknown as typeof fetch
+    expect(
+      await resolveLarkEntry({
+        search: `?surface=${surface}`,
+        returnTo: "/r",
+        apiBase: "",
+        fetchFn: flaky,
+        pollIntervalMs: 1,
+        pollBudgetMs: 10,
+        sleep: async () => undefined,
+      })
+    ).toEqual({ kind: "navigate", conversationKey: "lark:lk-1:oc_2" })
+  })
 })

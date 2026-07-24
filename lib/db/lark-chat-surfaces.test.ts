@@ -130,3 +130,24 @@ describe("lark-chat-surfaces", () => {
     expect(await listDueChatSurfaces("lk-1", T0 + 48 * 60 * 60 * 1000)).toHaveLength(0)
   })
 })
+
+describe("default clock arms", () => {
+  it("ensure/synced/error/status/listDue work without an explicit now", async () => {
+    const row = await ensureChatSurface({
+      adapterId: "lk-now",
+      chatId: "oc_now",
+      surfaceType: "chat_tab",
+      urlVersion: 1,
+    })
+    expect(row.status).toBe("pending")
+    await markChatSurfaceSynced("lk-now", "oc_now", "chat_tab")
+    await markChatSurfaceError("lk-now", "oc_now", "chat_tab", "boom")
+    await setChatSurfaceStatus("lk-now", "oc_now", "chat_tab", "pending")
+    const due = await listDueChatSurfaces("lk-now")
+    expect(due.map((r) => r.chatId)).toContain("oc_now")
+    // Missing-row guards on the same default arms.
+    await markChatSurfaceSynced("lk-now", "oc_missing", "chat_tab")
+    expect(await markChatSurfaceError("lk-now", "oc_missing", "chat_tab", "x")).toBeUndefined()
+    await setChatSurfaceStatus("lk-now", "oc_missing", "chat_tab", "pending")
+  })
+})

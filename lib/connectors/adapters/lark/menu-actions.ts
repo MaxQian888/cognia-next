@@ -11,19 +11,32 @@
 
 import type { LarkFlagAdapterSettings } from "@/lib/connectors/feature-flags"
 import { appendAudit } from "@/lib/connectors/audit"
-import { resolveWebEntryBase } from "@/lib/connectors/entry/deep-links"
-import { hashOpenId } from "@/lib/connectors/principal/resolve"
+import {
+  buildAuthorizedConversationLink,
+  resolveWebEntryBase,
+} from "@/lib/connectors/entry/deep-links"
+import { hashOpenId, resolveConnectorPrincipal } from "@/lib/connectors/principal/resolve"
+import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
 import type { LarkBotMenuOutcome } from "./parse"
 
 export interface MenuActionDependencies {
   enqueue: typeof enqueueOutbound
   audit: typeof appendAudit
+  resolvePrincipal: typeof resolveConnectorPrincipal
+  buildConversationLink: typeof buildAuthorizedConversationLink
   now: () => number
 }
 
 function withDefaults(overrides: Partial<MenuActionDependencies>): MenuActionDependencies {
-  return { enqueue: enqueueOutbound, audit: appendAudit, now: Date.now, ...overrides }
+  return {
+    enqueue: enqueueOutbound,
+    audit: appendAudit,
+    resolvePrincipal: resolveConnectorPrincipal,
+    buildConversationLink: buildAuthorizedConversationLink,
+    now: Date.now,
+    ...overrides,
+  }
 }
 
 /** Bilingual IM literals (follow-up-control convention — not next-intl). */
@@ -87,11 +100,12 @@ export async function handleMenuUnknownKey(
 }
 
 /**
- * Link command → reply with the app URL under the configured web entry base.
- * The reserved batch links only to app paths (workbench), which carry no
- * key material — conversation-targeted links go through the authorized
- * entry-token builders instead. No base configured → explanatory notice
- * (never a raw internal URL).
+ * Link command → reply with a URL under the configured web entry base.
+ * When the principal registry + web SSO are on, the reply carries a
+ * personal single-use entry link into the operator's own conversation
+ * (mint failure inside the builder falls back to the bare base — never a
+ * raw key); otherwise it degrades to the plain app URL. No base
+ * configured → explanatory notice (never a raw internal URL).
  */
 export async function handleMenuLink(
   adapterId: string,
@@ -102,8 +116,41 @@ export async function handleMenuLink(
   const deps = withDefaults(overrides)
   const base = resolveWebEntryBase(adapterRow)
   const path = outcome.command.action.value
-  const text = base
-    ? `${outcome.command.label ?? path}\n${base}${path === "/" ? "" : path}`
-    : LINK_BASE_MISSING_REPLY
+  if (!base) {
+    await deps.enqueue(
+      p2pReply(adapterId, outcome.openId, outcome.eventId, "menu-link", LINK_BASE_MISSING_REPLY)
+    )
+    return
+  }
+
+  let url: string | null = null
+  const resolution = await deps
+    .resolvePrincipal({
+      platform: "lark",
+      adapterRow: {
+        settings: adapterRow?.settings ?? {},
+        lastWhoamiResult: (adapterRow as Partial<AdapterInstanceRow> | undefined)?.lastWhoamiResult,
+      },
+      remoteUserId: outcome.openId,
+      identityScope: outcome.identityScope,
+    })
+    .catch(() => ({ status: "legacy" as const }))
+  if (resolution.status === "resolved") {
+    url = await deps
+      .buildConversationLink({
+        adapterRow,
+        adapterId,
+        principalId: resolution.principal.id,
+        accountId: resolution.accountId,
+        openId: outcome.openId,
+        tenantKey: resolution.principal.tenantKey,
+        appId: resolution.principal.appId,
+        entryType: "bot_menu",
+        conversationKey: `lark:${adapterId}:${outcome.openId}`,
+      })
+      .catch(() => null)
+  }
+  url ??= `${base}${path === "/" ? "" : path}`
+  const text = `${outcome.command.label ?? path}\n${url}`
   await deps.enqueue(p2pReply(adapterId, outcome.openId, outcome.eventId, "menu-link", text))
 }

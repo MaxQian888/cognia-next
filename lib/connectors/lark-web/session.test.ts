@@ -58,4 +58,29 @@ describe("lark web session", () => {
       "https://api.example/integrations/lark/web/login?adapter_id=lk-1&return_to=%2Flark%2Fentry%3Fentry%3Dx"
     )
   })
+
+  it("survives storage failures and treats exp-less tokens as expired", () => {
+    // No fragment at all → null capture.
+    expect(captureLarkSessionFromLocation()).toBeNull()
+
+    // Quota/private-mode storage failure: capture still returns the token.
+    const token = fakeJwt({ exp: Math.floor(Date.now() / 1000) + 3600 })
+    window.location.hash = `#lark_session=${token}`
+    const setSpy = jest.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("quota")
+    })
+    expect(captureLarkSessionFromLocation()).toBe(token)
+    setSpy.mockRestore()
+
+    // Stored token without an exp claim reads as expired → dropped.
+    window.sessionStorage.setItem(LARK_WEB_SESSION_STORAGE_KEY, fakeJwt({ scope: "lark_web" }))
+    expect(getLarkWebSession()).toBeNull()
+
+    // Storage read failure → null, not a crash.
+    const getSpy = jest.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("blocked")
+    })
+    expect(getLarkWebSession()).toBeNull()
+    getSpy.mockRestore()
+  })
 })

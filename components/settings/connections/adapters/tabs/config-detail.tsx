@@ -40,6 +40,7 @@ import { SendTestMessageSection } from "../../forms/shared/send-test-message-sec
 // historical naming artefact left in place to avoid file churn.
 import { LarkAtStrategy } from "../../forms/lark/lark-at-strategy"
 import { LarkWhitelistEditor } from "../../forms/lark/lark-whitelist-editor"
+import { LarkEntrySurfaces } from "../../forms/lark/lark-entry-surfaces"
 import { HelpAndWelcome } from "../../forms/help-and-welcome"
 import { ControlCommands } from "../../forms/control-commands"
 import { AiBindingDefaults } from "../../forms/ai-binding-defaults"
@@ -122,6 +123,11 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
        * platform-neutral. */}
       <LarkAtStrategy adapterId={row.id} />
       <LarkWhitelistEditor adapterId={row.id} />
+
+      {/* Lark-only: web entry base, entry feature-flag overrides, callback
+       * authorization mode, and the Chat Tab / group-menu surface list
+       * (plan 2026-07-24 dual-entry epic). */}
+      {row.type === "lark" && <LarkEntrySurfaces adapterId={row.id} />}
 
       {/* Cross-provider help / welcome card settings. Self-managing, so a
        * single mount here covers every platform. */}

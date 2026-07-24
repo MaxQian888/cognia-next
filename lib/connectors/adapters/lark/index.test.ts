@@ -532,6 +532,68 @@ describe("createLarkAdapter", () => {
     })
   }, 15000)
 
+  it("gates reserved cognia.* built-ins on the larkNativeSlash batch flag", async () => {
+    const menuActions = jest.requireMock("./menu-actions") as {
+      handleMenuUnknownKey: jest.Mock
+    }
+    const reservedClick = {
+      schema: "2.0",
+      header: { event_id: "evt_menu_3", event_type: "application.bot.menu_v6" },
+      event: {
+        operator: { operator_id: { open_id: "ou_user_777" } },
+        event_key: "cognia.new_task",
+      },
+    }
+    const makeAdapter = (id: string) =>
+      createLarkAdapter({
+        id,
+        displayName: "Menu Test Bot",
+        appId: async () => "cli_menu",
+        appSecret: async () => "secret-menu",
+        verificationToken: async () => "token-menu",
+        selfBotOpenId: "ou_bot_menu",
+        transport: "long-connection",
+      })
+
+    // Flag off (default): the reserved click terminates as unknown.
+    menuActions.handleMenuUnknownKey.mockClear()
+    let session = createFakeLongConnSession()
+    mockListen.mockImplementation(session.listenImpl)
+    let adapter = makeAdapter("lark-menu-batch-off")
+    let { ctx, emitted } = makeCtx()
+    await adapter.start(ctx)
+    await session.waitForListeners()
+    session.push(reservedClick)
+    await new Promise((r) => setTimeout(r, 30))
+    await adapter.stop()
+    expect(emitted).toHaveLength(0)
+    expect(menuActions.handleMenuUnknownKey).toHaveBeenCalledTimes(1)
+    expect(menuActions.handleMenuUnknownKey.mock.calls[0][1]).toMatchObject({
+      kind: "unknown",
+      eventKey: "cognia.new_task",
+    })
+
+    // Flag on (env layer): the reserved slash runs through the normal path.
+    process.env.COGNIA_LARK_NATIVE_SLASH = "1"
+    try {
+      menuActions.handleMenuUnknownKey.mockClear()
+      session = createFakeLongConnSession()
+      mockListen.mockImplementation(session.listenImpl)
+      adapter = makeAdapter("lark-menu-batch-on")
+      ;({ ctx, emitted } = makeCtx())
+      await adapter.start(ctx)
+      await session.waitForListeners()
+      session.push(reservedClick)
+      await new Promise((r) => setTimeout(r, 30))
+      await adapter.stop()
+      expect(menuActions.handleMenuUnknownKey).not.toHaveBeenCalled()
+      expect(emitted.length).toBeGreaterThanOrEqual(1)
+      expect(emitted[0].plainText).toBe("/new")
+    } finally {
+      delete process.env.COGNIA_LARK_NATIVE_SLASH
+    }
+  }, 15000)
+
   it("send() acquires TAT and calls Lark API", async () => {
     // Use fresh appId/appSecret so the cache won't already have a token
     const adapter = createLarkAdapter({

@@ -80,4 +80,31 @@ describe("handlePlusCreate", () => {
     expect(again.sessionId).not.toBe(outcome.sessionId)
     expect(await getDb().sessions.count()).toBe(2)
   })
+
+  it("fails closed on unbound principals when the registry flag is on", async () => {
+    const deps = makeDeps({
+      getAdapter: jest.fn(async () =>
+        adapterRow({ larkPlusMenu: true, larkPrincipalRegistry: true })
+      ),
+    })
+    const outcome = await handlePlusCreate(
+      { adapterId: ADAPTER_ID, chatId: CHAT_ID, verifiedIdentity: IDENTITY },
+      deps
+    )
+    expect(outcome).toEqual({ ok: false, error: "principal_unbound" })
+  })
+
+  it("maps membership API failures onto membership_check_failed", async () => {
+    const deps = makeDeps({
+      isMember: jest.fn(async () => {
+        throw new Error("members down")
+      }),
+    })
+    expect(
+      await handlePlusCreate(
+        { adapterId: ADAPTER_ID, chatId: CHAT_ID, verifiedIdentity: IDENTITY },
+        deps
+      )
+    ).toEqual({ ok: false, error: "membership_check_failed" })
+  })
 })

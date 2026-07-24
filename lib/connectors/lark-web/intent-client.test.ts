@@ -220,4 +220,35 @@ describe("runShortcutImportFlow", () => {
       })
     ).toEqual({ kind: "error", code: "no_messages_selected" })
   })
+
+  it("passes login bounces through and rejects done results without a key", async () => {
+    window.sessionStorage.clear()
+    const bounced = await runShortcutImportFlow({
+      search: "?__trigger_id__=t1&adapter_id=lk-1",
+      returnTo: "/lark/shortcut",
+      getTriggerDetail: async () => ({ chat_id: "oc_1", messages: [{ message_id: "om_1" }] }),
+      apiBase: "https://api.example",
+    })
+    expect(bounced.kind).toBe("login")
+
+    seedSession()
+    const fetchFn = jest.fn(async (url: string) => {
+      if (url.includes("/shortcut/import")) {
+        return jsonResponse(202, { status: "pending", requestId: "req_bad" })
+      }
+      return jsonResponse(200, { status: "done", result: { unexpected: true } })
+    }) as unknown as typeof fetch
+    expect(
+      await runShortcutImportFlow({
+        search: "?__trigger_id__=t1&adapter_id=lk-1",
+        returnTo: "/r",
+        getTriggerDetail: async () => ({ chat_id: "oc_1", messages: [{ message_id: "om_1" }] }),
+        apiBase: "",
+        fetchFn,
+        pollIntervalMs: 1,
+        pollBudgetMs: 5,
+        sleep: async () => undefined,
+      })
+    ).toEqual({ kind: "error", code: "intent_failed" })
+  })
 })

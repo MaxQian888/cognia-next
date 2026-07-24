@@ -220,6 +220,48 @@ describe("handleLarkIntentFrame", () => {
   })
 })
 
+describe("intent frame hardening", () => {
+  it("rejects import frames without chat or message ids", async () => {
+    const deps = makeDeps()
+    await handleLarkIntentFrame(
+      {
+        kind: "import_messages",
+        requestId: "req_m1",
+        adapterId: "lk-1",
+        verifiedIdentity: { openId: "ou_a" },
+      },
+      deps
+    )
+    expect(deps.call).toHaveBeenCalledWith("lark_result_complete", {
+      requestId: "req_m1",
+      error: "intent_malformed",
+    })
+    expect(deps.importMessages).not.toHaveBeenCalled()
+  })
+
+  it("maps handler crashes onto intent_failed", async () => {
+    const deps = makeDeps({
+      plusCreate: jest.fn(async () => {
+        throw new Error("boom")
+      }) as never,
+    })
+    await handleLarkIntentFrame(
+      {
+        kind: "plus_create",
+        requestId: "req_c1",
+        adapterId: "lk-1",
+        chatId: "oc_1",
+        verifiedIdentity: { openId: "ou_a" },
+      },
+      deps
+    )
+    expect(deps.call).toHaveBeenCalledWith("lark_result_complete", {
+      requestId: "req_c1",
+      error: "intent_failed",
+    })
+  })
+})
+
 describe("isChatMember", () => {
   it("pages through the member list until a hit", async () => {
     const pages = [
