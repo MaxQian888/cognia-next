@@ -44,8 +44,10 @@ describe("lark connector feature flags", () => {
     expect(isLarkFeatureEnabled("larkPlusMenu")).toBe(false)
   })
 
-  it("defaults strict callback authorization to audit (shadow) mode", () => {
-    expect(getLarkStrictCallbackAuthorizationMode()).toBe("audit")
+  it("defaults strict callback authorization to enforce", () => {
+    // Audit is not a safe resting state: in it `consumedAt` is never written,
+    // so a stale re-click of an approval card can still re-grant a bypass.
+    expect(getLarkStrictCallbackAuthorizationMode()).toBe("enforce")
   })
 
   it("reads boolean flags from the environment first", () => {
@@ -78,7 +80,7 @@ describe("lark connector feature flags", () => {
     window.localStorage.setItem(LARK_FEATURE_FLAGS_STORAGE_KEY, "{not json")
     expect(isLarkFeatureEnabled("larkWebSso")).toBe(false)
     window.localStorage.setItem(LARK_FEATURE_FLAGS_STORAGE_KEY, JSON.stringify("nope"))
-    expect(getLarkStrictCallbackAuthorizationMode()).toBe("audit")
+    expect(getLarkStrictCallbackAuthorizationMode()).toBe("enforce")
   })
 
   it("parses every strict-auth mode spelling", () => {
@@ -92,8 +94,10 @@ describe("lark connector feature flags", () => {
     expect(getLarkStrictCallbackAuthorizationMode()).toBe("off")
     process.env.COGNIA_LARK_STRICT_CALLBACK_AUTH = "0"
     expect(getLarkStrictCallbackAuthorizationMode()).toBe("off")
+    // Unrecognized spellings fall through to the default rather than
+    // silently weakening the mode.
     process.env.COGNIA_LARK_STRICT_CALLBACK_AUTH = "garbage"
-    expect(getLarkStrictCallbackAuthorizationMode()).toBe("audit")
+    expect(getLarkStrictCallbackAuthorizationMode()).toBe("enforce")
   })
 
   it("prefers settings over storage for strict-auth mode", () => {

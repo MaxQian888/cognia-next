@@ -10,12 +10,13 @@
  *   3. localStorage (browser only) — `cognia-connector-feature-flags-v1`.
  *   4. Default.
  *
- * Defaults: every entry-surface flag is OFF (gray-release opt-in).
- * `larkStrictCallbackAuthorization` defaults to "audit" (shadow mode: all
- * authorization checks run and would-deny outcomes are audited, nothing is
- * blocked). Flipping the default to "enforce" is a deliberate post-gray
- * release step recorded in the rollout runbook — the flag exists for
- * migration and emergency downgrade to "audit", never as a long-term bypass.
+ * `larkStrictCallbackAuthorization` defaults to "enforce": denials block. The
+ * epic shipped it as "audit" so an existing fleet could watch the would-deny
+ * stream before committing, but audit mode is not a safe resting state — in it
+ * `consumedAt` is never written, so a stale re-click of an approval card can
+ * still re-grant a session bypass, which is the very gap the guard exists to
+ * close. "audit" and "off" remain available per adapter for migration and
+ * emergency downgrade; neither is a long-term bypass.
  */
 
 export type LarkBooleanFeatureFlag =
@@ -53,7 +54,7 @@ const DEFAULT_BOOLEAN_FLAGS: Record<LarkBooleanFeatureFlag, boolean> = {
   larkPlusMenu: false,
 }
 
-const DEFAULT_STRICT_AUTH_MODE: LarkStrictCallbackAuthorizationMode = "audit"
+const DEFAULT_STRICT_AUTH_MODE: LarkStrictCallbackAuthorizationMode = "enforce"
 
 /** Structural subset of AdapterInstanceRow accepted by every helper. */
 export interface LarkFlagAdapterSettings {

@@ -293,20 +293,71 @@ export async function authorizeConnectorCallback(
 }
 
 /**
- * Throttled bilingual denial notice for actor_forbidden in enforce mode —
- * the clicker gets one explanation instead of a silently dead button, and
- * the outbound idempotency key caps redelivery storms to one notice.
+ * Bilingual explanation for every terminal deny reason.
+ *
+ * Only `actor_forbidden` used to get one, so the other ten reasons produced a
+ * button that did nothing at all — indistinguishable from a broken bot. An
+ * expired or already-used card is a normal, explainable outcome and says so.
+ */
+const DENY_NOTICE: Record<CallbackDenyReason, string> = {
+  actor_forbidden: [
+    "You are not authorized to act on this card — only the requester or a configured operator can.",
+    "你没有权限操作此卡片——仅发起人或已配置的操作员可以。",
+  ].join("\n"),
+  binding_consumed: [
+    "This action was already taken — a card button works only once.",
+    "该操作已执行过——卡片按钮仅可使用一次。",
+  ].join("\n"),
+  binding_expired: [
+    "This card has expired. Ask the assistant to send a fresh one.",
+    "此卡片已过期，请让助手重新发送。",
+  ].join("\n"),
+  action_not_allowed: ["That action isn't available on this card.", "此卡片不支持该操作。"].join(
+    "\n"
+  ),
+  conversation_mismatch: [
+    "This card belongs to another conversation and can't be used here.",
+    "此卡片属于其他会话，无法在这里使用。",
+  ].join("\n"),
+  run_conversation_mismatch: [
+    "This card belongs to another conversation and can't be used here.",
+    "此卡片属于其他会话，无法在这里使用。",
+  ].join("\n"),
+  adapter_mismatch: [
+    "This card belongs to another bot and can't be used here.",
+    "此卡片属于其他机器人，无法在这里使用。",
+  ].join("\n"),
+  principal_unbound: [
+    "Your Feishu account is not linked to Cognia yet. Ask your administrator to complete the binding.",
+    "你的飞书账号尚未关联 Cognia，请联系管理员完成绑定。",
+  ].join("\n"),
+  principal_disabled: [
+    "Your Cognia access has been disabled. Contact your administrator.",
+    "你的 Cognia 访问权限已被停用，请联系管理员。",
+  ].join("\n"),
+  tenant_disabled: [
+    "Cognia is disabled for this workspace. Contact your administrator.",
+    "当前工作区的 Cognia 已停用，请联系管理员。",
+  ].join("\n"),
+  cross_account: [
+    "This workspace is served by a different Cognia account. Contact your administrator.",
+    "该工作区由另一个 Cognia 账号服务，请联系管理员。",
+  ].join("\n"),
+}
+
+/**
+ * Throttled bilingual denial notice for enforce mode — the clicker gets one
+ * explanation instead of a silently dead button, and the outbound idempotency
+ * key caps redelivery storms to one notice.
  */
 export async function notifyCallbackDenied(
   event: ConnectorCallbackEvent,
   conversationKey: string,
+  reason: CallbackDenyReason = "actor_forbidden",
   overrides: { enqueue?: typeof enqueueOutbound } = {}
 ): Promise<void> {
   const enqueue = overrides.enqueue ?? enqueueOutbound
-  const text = [
-    "You are not authorized to act on this card — only the requester or a configured operator can.",
-    "你没有权限操作此卡片——仅发起人或已配置的操作员可以。",
-  ].join("\n")
+  const text = DENY_NOTICE[reason] ?? DENY_NOTICE.actor_forbidden
   const parsed = tryParseKey(conversationKey)
   await enqueue({
     adapterId: event.adapterId,

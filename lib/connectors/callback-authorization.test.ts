@@ -306,7 +306,9 @@ describe("normalizeRequestedAction", () => {
 describe("notifyCallbackDenied", () => {
   it("enqueues one bilingual notice keyed to the trigger", async () => {
     const enqueue = jest.fn(async (_input: unknown) => ({}) as never)
-    await notifyCallbackDenied(callbackEvent(), "lark:lk-1:oc_1:omt_5", { enqueue })
+    await notifyCallbackDenied(callbackEvent(), "lark:lk-1:oc_1:omt_5", "actor_forbidden", {
+      enqueue,
+    })
     const input = enqueue.mock.calls[0][0] as {
       request: {
         conversationRef: { channelId: string; threadTs?: string }
@@ -316,6 +318,35 @@ describe("notifyCallbackDenied", () => {
     expect(input.request.metadata.idempotencyKey).toBe("cb-denied:act_1")
     expect(input.request.conversationRef.channelId).toBe("oc_1")
     expect(input.request.conversationRef.threadTs).toBe("omt_5")
+  })
+
+  it("explains each terminal reason instead of leaving a dead button", async () => {
+    // Only actor_forbidden used to get a notice; the other ten reasons left
+    // the clicker with a button that did nothing at all.
+    const cases: Array<[Parameters<typeof notifyCallbackDenied>[2], string]> = [
+      ["binding_consumed", "only once"],
+      ["binding_expired", "expired"],
+      ["principal_unbound", "not linked"],
+      ["tenant_disabled", "workspace"],
+      ["conversation_mismatch", "another conversation"],
+    ]
+    for (const [reason, needle] of cases) {
+      const enqueue = jest.fn(async (_input: unknown) => ({}) as never)
+      await notifyCallbackDenied(callbackEvent(), "lark:lk-1:oc_1", reason, { enqueue })
+      const input = enqueue.mock.calls[0][0] as {
+        request: { segments: Array<{ text: string }> }
+      }
+      expect(input.request.segments[0].text).toContain(needle)
+    }
+  })
+
+  it("falls back to the actor notice for an unrecognized reason", async () => {
+    const enqueue = jest.fn(async (_input: unknown) => ({}) as never)
+    await notifyCallbackDenied(callbackEvent(), "lark:lk-1:oc_1", "not_a_reason" as never, {
+      enqueue,
+    })
+    const input = enqueue.mock.calls[0][0] as { request: { segments: Array<{ text: string }> } }
+    expect(input.request.segments[0].text).toContain("not authorized")
   })
 })
 

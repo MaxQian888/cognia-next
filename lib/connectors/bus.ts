@@ -1868,12 +1868,16 @@ export class ConnectorBus {
       }).catch(() => undefined)
       if (authDecision.mode === "enforce") {
         recordConnectorMetric("lark_callback_auth_denied_total")
-        if (authDecision.reason === "actor_forbidden" && resolvedConversationKey) {
-          await notifyCallbackDenied(event, resolvedConversationKey)
+        if (resolvedConversationKey) {
+          await notifyCallbackDenied(event, resolvedConversationKey, authDecision.reason)
         }
         return true
       }
-      // audit (shadow) mode: fall through and execute exactly as before.
+      // Audit (shadow) mode: fall through and execute exactly as before, but
+      // COUNT it. Without this series the shadow mode has only individual
+      // audit rows, and the runbook's "flip to enforce once would-deny is
+      // quiet" step has no aggregate to watch.
+      recordConnectorMetric("lark_callback_auth_would_deny_total")
     }
     if (authDecision.allowed && authDecision.consume) {
       await authDecision.consume()

@@ -57,6 +57,29 @@ function makeEvent(overrides: Partial<ConnectorCallbackEvent> = {}): ConnectorCa
 
 // 30s hook budget: the first cold open of the full schema (100+ Dexie
 // versions) can exceed jest's default 5s under parallel suite load.
+
+/**
+ * Seed the adapter row these plumbing tests dispatch against, with callback
+ * authorization OFF. They assert dedup / field resolution / routing, and use
+ * deliberately inconsistent fixtures (a binding whose conversationKey differs
+ * from the event's, a run control with no run binding) that the guard is
+ * SUPPOSED to deny once it evaluates. The guard's own decision matrix is
+ * covered in callback-authorization.test.ts and, end-to-end, below.
+ */
+async function seedUnguardedAdapter(): Promise<void> {
+  await getDb().adapterInstances.put({
+    id: "adp_tg",
+    type: "telegram",
+    displayName: "Plumbing Bot",
+    enabled: true,
+    transportMode: "stub",
+    settings: { larkStrictCallbackAuthorization: "off" },
+    credentialsRef: { keyringService: "test", accounts: [] },
+    trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
+    defaultMode: "auto",
+  } as never)
+}
+
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
@@ -99,6 +122,7 @@ describe("ConnectorBus.dispatchConnectorCallback", () => {
   })
 
   it("resolves surfaceId/componentId/conversationKey from connectorCallbackBindings when present", async () => {
+    await seedUnguardedAdapter()
     await recordCallbackBinding({
       adapterId: "adp_tg",
       actionId: "trig_with_binding",
@@ -146,6 +170,7 @@ describe("ConnectorBus.dispatchConnectorCallback", () => {
   })
 
   it("routes a self-describing execution-run control before generic A2UI handling", async () => {
+    await seedUnguardedAdapter()
     await createExecutionRun({
       id: "run-control-1",
       kind: "agent-turn",
@@ -232,6 +257,7 @@ describe("ConnectorBus.dispatchConnectorCallback", () => {
   })
 
   it("audits an unparsable help_quick_command conversationKey instead of silently dropping", async () => {
+    await seedUnguardedAdapter()
     await recordCallbackBinding({
       adapterId: "adp_tg",
       actionId: "trig_bad_key",
@@ -653,12 +679,24 @@ describe("callback authorization guard (plan 2026-07-24 Phase 2)", () => {
     expect(startMock).not.toHaveBeenCalled()
   })
 
-  it("audit (default) mode: would-deny is audited but the callback still executes", async () => {
+  it("audit mode: would-deny is audited and counted, but the callback still executes", async () => {
     const { startWorkflowFromIM } = await import("@/lib/workflow/runtime/start-from-im")
     const startMock = startWorkflowFromIM as jest.Mock
     startMock.mockClear()
 
-    // No adapter row → global default mode ("audit").
+    // Audit is opt-in now that enforce is the default, so the adapter asks
+    // for shadow mode explicitly.
+    await getDb().adapterInstances.put({
+      id: "adp_tg",
+      type: "telegram",
+      displayName: "Shadow Bot",
+      enabled: true,
+      transportMode: "stub",
+      settings: { larkStrictCallbackAuthorization: "audit" },
+      credentialsRef: { keyringService: "test", accounts: [] },
+      trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
+      defaultMode: "auto",
+    } as never)
     const { createWorkflow } = await import("@/lib/db/workflows")
     const wf = await createWorkflow({ name: "Shadow Flow" })
     const actionId = "wfapp:shadow_1"
@@ -711,5 +749,102 @@ describe("callback authorization guard (plan 2026-07-24 Phase 2)", () => {
     const audit = await getDb().connectorAudit.toArray()
     expect(audit.some((r) => r.kind === "callback.forbidden")).toBe(false)
     expect(audit.some((r) => r.kind === "callback.authorization_would_deny")).toBe(false)
+  })
+
+  it("default mode blocks a non-initiator approval with no adapter row at all", async () => {
+    // The shipped default is `enforce`, so a workspace that never configured
+    // anything is still protected — this is the property the epic's audit
+    // default did not have.
+    const { startWorkflowFromIM } = await import("@/lib/workflow/runtime/start-from-im")
+    const startMock = startWorkflowFromIM as jest.Mock
+    startMock.mockClear()
+
+    const { createWorkflow } = await import("@/lib/db/workflows")
+    const wf = await createWorkflow({ name: "Default Guarded" })
+    const actionId = "wfapp:default_1"
+    await recordCallbackBinding({
+      adapterId: "adp_tg",
+      actionId,
+      kind: "wf_approve",
+      surfaceId: "wfsurf:default",
+      componentId: "approve",
+      conversationKey: CONVERSATION,
+      payload: {
+        workflowId: wf.id,
+        workflowName: wf.name,
+        runParams: {},
+        triggeredFrom: {
+          source: "im",
+          adapterId: "adp_tg",
+          conversationKey: CONVERSATION,
+          sessionId: "s1",
+        },
+      },
+      actorScope: { mode: "initiator", allowedUserIds: ["someone_else"] },
+    })
+
+    const bus = getBus()
+    await bus.dispatchConnectorCallback(
+      makeEvent({ triggerId: actionId, conversationKey: CONVERSATION, value: "approve" })
+    )
+
+    expect(startMock).not.toHaveBeenCalled()
+    const audit = await getDb().connectorAudit.toArray()
+    expect(audit.some((r) => r.kind === "callback.forbidden")).toBe(true)
+    // The clicker gets an explanation rather than a dead button.
+    const outbound = await getDb().outboundQueue.toArray()
+    expect(
+      outbound.some((job) => job.request.metadata?.idempotencyKey?.startsWith("cb-denied:"))
+    ).toBe(true)
+  })
+
+  it("a replayed approval click cannot start the workflow twice", async () => {
+    // In audit mode `consume` was never minted, so a stale re-click could
+    // re-grant an approval. Under the enforce default the first click retires
+    // the binding, so the redelivered click is terminal.
+    const { startWorkflowFromIM } = await import("@/lib/workflow/runtime/start-from-im")
+    const startMock = startWorkflowFromIM as jest.Mock
+    startMock.mockClear()
+    const { createWorkflow } = await import("@/lib/db/workflows")
+    const wf = await createWorkflow({ name: "Consume Once" })
+    const actionId = "wfapp:consume_1"
+    await recordCallbackBinding({
+      adapterId: "adp_tg",
+      actionId,
+      kind: "wf_approve",
+      surfaceId: "wfsurf:consume",
+      componentId: "approve",
+      conversationKey: CONVERSATION,
+      payload: {
+        workflowId: wf.id,
+        workflowName: wf.name,
+        runParams: {},
+        triggeredFrom: {
+          source: "im",
+          adapterId: "adp_tg",
+          conversationKey: CONVERSATION,
+          sessionId: "s1",
+        },
+      },
+      actorScope: { mode: "anyone" },
+    })
+
+    const bus = getBus()
+    const click = () =>
+      bus.dispatchConnectorCallback(
+        makeEvent({
+          // A distinct triggerId per click, so the inbound dedup ledger is not
+          // what stops the second one — the binding state has to.
+          triggerId: actionId,
+          conversationKey: CONVERSATION,
+          value: "approve",
+        })
+      )
+
+    await click()
+    expect(startMock).toHaveBeenCalledTimes(1)
+
+    await click()
+    expect(startMock).toHaveBeenCalledTimes(1)
   })
 })
