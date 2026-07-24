@@ -304,7 +304,7 @@ export function WebRtcCard() {
       twilioAccountSid: kind === "twilio" ? form.turnProviderSid.trim() || undefined : undefined,
       // Use the freshly-entered token if present (test before save); else
       // fall back to the already-stored keyring secret.
-      secretRef: token ? "kr:__test__" : form.turnProviderSecretRef || undefined,
+      secretRef: token ? undefined : form.turnProviderSecretRef || undefined,
     }
     setBusy(true)
     try {

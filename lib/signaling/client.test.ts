@@ -98,7 +98,9 @@ describe("SignalingClient", () => {
   it("sends subscribe on open and transitions to subscribed on ack", async () => {
     const client = makeClient()
     const events: string[] = []
+    const snapshots: unknown[] = []
     client.on("state", (s) => events.push(s))
+    client.on("subscribed", (snapshot) => snapshots.push(snapshot))
     client.connect()
 
     expect(events).toEqual(["connecting"])
@@ -110,9 +112,27 @@ describe("SignalingClient", () => {
       role: "mobile",
     })
 
-    ws.push({ kind: "subscribed", rendezvousId: "room-1", peers: [] })
+    ws.push({
+      kind: "subscribed",
+      rendezvousId: "room-1",
+      peers: [{ role: "desktop", joinedAtMs: 123 }],
+    })
     expect(client.getState()).toBe("subscribed")
     expect(events).toEqual(["connecting", "subscribed"])
+    expect(snapshots).toEqual([{ peers: [{ role: "desktop", joinedAtMs: 123 }] }])
+  })
+
+  it("emits an empty peer snapshot for an older server without peers", () => {
+    const client = makeClient()
+    const snapshots: unknown[] = []
+    client.on("subscribed", (snapshot) => snapshots.push(snapshot))
+    client.connect()
+    const ws = instances[0]
+    ws.open()
+
+    ws.push({ kind: "subscribed", rendezvousId: "room-1" } as ServerFrame)
+
+    expect(snapshots).toEqual([{ peers: [] }])
   })
 
   it("enters rejected and stops reconnecting on a terminal room_full error", async () => {

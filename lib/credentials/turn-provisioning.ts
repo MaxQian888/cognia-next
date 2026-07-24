@@ -11,11 +11,15 @@
  * peers using different ephemeral creds against the same TURN server relay
  * to each other normally.
  *
- * Both provider endpoints are public HTTPS, so a plain `fetch` works in the
- * Tauri webview and the Capacitor WebView alike — no `CapacitorHttp` needed.
- * The provider API secret lives in the OS keyring (`keyring-store.ts`,
- * namespace `webrtc-turn-provider`), never in Dexie, and is never included
- * in any thrown error message.
+ * Transport: on the Tauri desktop the fetch is routed through the native
+ * `turn_provision` Rust command — the WebView's `connect-src` CSP does NOT
+ * allowlist `rtc.live.cloudflare.com` / `api.twilio.com`, so a renderer
+ * `fetch()` is blocked there (this bit both the "Test" button and the
+ * background rotation loop). The Capacitor WebView and plain browser shells
+ * still fetch directly. The provider API secret lives in the OS keyring
+ * (`keyring-store.ts`, namespace `webrtc-turn-provider`), never in Dexie, and
+ * is never included in any thrown error message; on the Tauri path Rust reads
+ * it from the keyring so the saved secret never enters the renderer at all.
  *
  * Verified API contracts (2026-06):
  *   - Cloudflare Realtime/Calls TURN — `POST
@@ -28,6 +32,7 @@
  */
 
 import type { TurnProviderConfig } from "@cognia/agent-config-types"
+import { isTauri, transport } from "@/lib/tauri"
 import { createKeyringStore, type KeyringStore } from "./keyring-store"
 import { keyIdOfSentinel } from "./turn-credentials"
 
@@ -146,13 +151,23 @@ export async function provisionIceServers(
   if (provider.kind === "none") {
     throw new TurnProvisionError("provider-none")
   }
+  // Tauri desktop: the WebView CSP blocks a direct fetch to the provider
+  // hosts, so route through the native command (which also keeps the saved
+  // secret in the keyring, out of the renderer). Tests inject `opts.fetchImpl`
+  // and stay on the fetch path below regardless of host. ADR-0021.
+  if (isTauri() && !opts.fetchImpl) {
+    return provisionViaTauri(provider, opts)
+  }
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch.bind(globalThis)
   const now = opts.nowMs ?? Date.now
   const loadSecret = opts.loadSecret ?? loadProviderSecret
 
   const keyId = provider.secretRef ? keyIdOfSentinel(provider.secretRef) : null
-  if (!keyId) throw new TurnProvisionError("missing-secret")
-  const secret = await loadSecret(keyId)
+  const secret = keyId
+    ? await loadSecret(keyId)
+    : opts.loadSecret
+      ? await opts.loadSecret("__inline__")
+      : null
   if (!secret) throw new TurnProvisionError("missing-secret")
 
   const ttl = clampTtl(provider.ttlSeconds)
@@ -199,4 +214,60 @@ export async function provisionIceServers(
   const respTtl = typeof body.ttl !== "undefined" ? Number(body.ttl) : ttl
   const effectiveTtl = Number.isFinite(respTtl) && respTtl > 0 ? respTtl : ttl
   return { iceServers, expiresAt: now() + effectiveTtl * 1000 }
+}
+
+// ---------------------------------------------------------------------------
+// Tauri native path (ADR-0021 — CSP bypass)
+// ---------------------------------------------------------------------------
+
+interface TurnProvisionCommandResult {
+  iceServers: RTCIceServer[]
+  expiresAtMs: number
+}
+
+/**
+ * Provision via the native `turn_provision` command. Rust reads the saved
+ * secret from the keyring (`secretRef` → keyId); a freshly-typed token (the
+ * "Test before save" path, surfaced through `opts.loadSecret`) is passed
+ * inline so the flow works before the secret is persisted. The command throws
+ * a `"turn provisioning failed: <reason>"` string on error, which we re-wrap in
+ * a {@link TurnProvisionError} so callers see a consistent shape.
+ */
+async function provisionViaTauri(
+  provider: TurnProviderConfig,
+  opts: ProvisionOptions
+): Promise<ProvisionResult> {
+  if (provider.kind === "none") throw new TurnProvisionError("provider-none")
+  const keyId = provider.secretRef ? keyIdOfSentinel(provider.secretRef) : null
+  // Test-before-save: pull the just-typed token out of the injected loader.
+  let inlineToken: string | undefined
+  if (!keyId && opts.loadSecret) {
+    const secret = await opts.loadSecret("__inline__")
+    if (secret) {
+      inlineToken =
+        (secret as { apiToken?: string }).apiToken ?? (secret as { authToken?: string }).authToken
+    }
+  }
+  if (!keyId && !inlineToken) throw new TurnProvisionError("missing-secret")
+  try {
+    const result = await transport.call<TurnProvisionCommandResult>("turn_provision", {
+      input: {
+        kind: provider.kind,
+        cloudflareKeyId: provider.cloudflareKeyId,
+        twilioAccountSid: provider.twilioAccountSid,
+        ttlSeconds: provider.ttlSeconds,
+        secretKeyId: keyId ?? undefined,
+        inlineToken,
+      },
+    })
+    return {
+      iceServers: Array.isArray(result.iceServers) ? result.iceServers : [],
+      expiresAt: result.expiresAtMs,
+    }
+  } catch (err) {
+    // Surface the stable reason the Rust command emits (never the secret).
+    const message = err instanceof Error ? err.message : String(err)
+    const reason = message.replace(/^turn provisioning failed:\s*/, "")
+    throw new TurnProvisionError(reason || "tauri-command-error")
+  }
 }

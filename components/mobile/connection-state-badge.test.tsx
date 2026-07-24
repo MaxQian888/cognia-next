@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { ConnectionStateBadge } from "./connection-state-badge"
@@ -37,6 +37,7 @@ jest.mock("next-intl", () => ({
       "sync.hoursAgo": `${vars?.n ?? 0}h`,
       "sync.daysAgo": `${vars?.n ?? 0}d`,
       "aria.menu": `${vars?.label ?? ""} — open menu`,
+      "toasts.reconnectBusy": "Reconnect already in progress",
     }
     return map[key] ?? key
   },
@@ -111,5 +112,25 @@ describe("ConnectionStateBadge", () => {
     await user.click(screen.getByTestId("connection-state-badge"))
     expect(await screen.findByText("Sync status")).toBeInTheDocument()
     expect(await screen.findByTestId("connection-sync-row-sessions")).toBeInTheDocument()
+  })
+
+  it("surfaces the busy outcome when a reconnect is already in progress", async () => {
+    const { transport } = jest.requireMock("@/lib/tauri") as {
+      transport: { reconnectRtc: jest.Mock }
+    }
+    const { toast } = jest.requireMock("sonner") as { toast: { info: jest.Mock } }
+    transport.reconnectRtc.mockReturnValueOnce("busy")
+    mockedUse.mockReturnValue("reconnecting")
+    render(<ConnectionStateBadge />)
+
+    fireEvent.pointerDown(screen.getByTestId("connection-state-badge"), {
+      button: 0,
+      ctrlKey: false,
+    })
+    fireEvent.click(screen.getByText("Reconnect now"))
+
+    await waitFor(() =>
+      expect(toast.info).toHaveBeenCalledWith("Reconnect already in progress")
+    )
   })
 })

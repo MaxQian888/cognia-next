@@ -1150,40 +1150,63 @@ describe("reconnectRtc()", () => {
     expect(transport.reconnectRtc()).toBe("no-tier")
   })
 
-  it("returns 'ok' when TransportRtc.reconnectNow fires", async () => {
+  const fakeRtcReturning = (outcome: "started" | "busy" | "throttled") => ({
+    getState: () => "open" as const,
+    onStateChange: () => () => undefined,
+    connect: async () => undefined,
+    close: () => undefined,
+    reconnectNow: () => outcome,
+    getSelectedCandidateKind: async () => "host" as const,
+    call: async () => undefined,
+    subscribe: () => () => undefined,
+    getSeqCursor: () => ({}),
+  })
+
+  it("maps TransportRtc 'started' to 'ok'", async () => {
     await setConfig()
     transport = new CompanionTransport()
-    const fakeRtc = {
-      getState: () => "open" as const,
-      onStateChange: () => () => undefined,
-      connect: async () => undefined,
-      close: () => undefined,
-      reconnectNow: () => true,
-      getSelectedCandidateKind: async () => "host" as const,
-      call: async () => undefined,
-      subscribe: () => () => undefined,
-      getSeqCursor: () => ({}),
-    }
-    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtcReturning("started")
     expect(transport.reconnectRtc()).toBe("ok")
   })
 
-  it("returns 'throttled' when TransportRtc.reconnectNow is suppressed", async () => {
+  it("passes through TransportRtc 'busy' (ADR-0021 F3)", async () => {
     await setConfig()
     transport = new CompanionTransport()
-    const fakeRtc = {
-      getState: () => "open" as const,
-      onStateChange: () => () => undefined,
-      connect: async () => undefined,
-      close: () => undefined,
-      reconnectNow: () => false,
-      getSelectedCandidateKind: async () => "host" as const,
-      call: async () => undefined,
-      subscribe: () => () => undefined,
-      getSeqCursor: () => ({}),
-    }
-    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtcReturning("busy")
+    expect(transport.reconnectRtc()).toBe("busy")
+  })
+
+  it("passes through TransportRtc 'throttled'", async () => {
+    await setConfig()
+    transport = new CompanionTransport()
+    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtcReturning("throttled")
     expect(transport.reconnectRtc()).toBe("throttled")
+  })
+
+  it("re-establishes the tier from cached options after it dropped (ADR-0021 F2)", async () => {
+    await setConfig()
+    transport = new CompanionTransport()
+    // Simulate: the tier was enabled once (options cached) but has since
+    // dropped to failed/closed, nulling `this.rtc`. The button must NOT report
+    // no-tier — it must rebuild from the cached options.
+    let enableCalls = 0
+    ;(transport as unknown as { lastEnableOptions: unknown }).lastEnableOptions = {
+      signalingUrl: "wss://signaling.test/v1/signaling",
+    }
+    ;(
+      transport as unknown as { enableWebRtcTier: (o: unknown) => Promise<void> }
+    ).enableWebRtcTier = async () => {
+      enableCalls += 1
+    }
+    expect((transport as unknown as { rtc: unknown }).rtc).toBeNull()
+    expect(transport.reconnectRtc()).toBe("ok")
+    expect(enableCalls).toBe(1)
+  })
+
+  it("returns 'no-tier' when there is neither a live instance nor cached options", () => {
+    transport = new CompanionTransport()
+    expect((transport as unknown as { lastEnableOptions: unknown }).lastEnableOptions).toBeNull()
+    expect(transport.reconnectRtc()).toBe("no-tier")
   })
 })
 

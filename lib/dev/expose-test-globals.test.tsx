@@ -19,6 +19,8 @@ const cleanWindowKeys: Array<keyof Window> = [
   "__cogniaSaveCompanionConfig",
   "__cogniaClearCompanionConfig",
   "__cogniaSetSettings",
+  "__cogniaE2EWebRtc",
+  "__cogniaE2EWebRtcEvents",
   "__cogniaTestGlobalsReady",
 ] as Array<keyof Window>
 
@@ -75,6 +77,22 @@ describe("ExposeTestGlobals", () => {
     expect(typeof window.__cogniaSaveCompanionConfig).toBe("function")
     expect(typeof window.__cogniaClearCompanionConfig).toBe("function")
     expect(typeof window.__cogniaSetSettings).toBe("function")
+    // ADR-0021 real-pair harness seam.
+    expect(typeof window.__cogniaE2EWebRtc?.connect).toBe("function")
+    expect(typeof window.__cogniaE2EWebRtc?.reconnectNow).toBe("function")
+    expect(window.__cogniaE2EWebRtcEvents).toEqual({})
+  })
+
+  it("__cogniaE2EWebRtc.getState returns 'idle' before connect and reconnectNow returns 'no-instance'", async () => {
+    process.env.NEXT_PUBLIC_E2E = "1"
+    render(<ExposeTestGlobals />)
+    await waitFor(() => {
+      expect(window.__cogniaTestGlobalsReady).toBe(true)
+    })
+    // No handshake started yet — the seam reports a benign default rather than
+    // throwing, so the driver can poll state before connect().
+    expect(window.__cogniaE2EWebRtc!.getState()).toBe("idle")
+    expect(window.__cogniaE2EWebRtc!.reconnectNow()).toBe("no-instance")
   })
 
   it("seeds a sendable connector draft with canonical segments and preview", async () => {

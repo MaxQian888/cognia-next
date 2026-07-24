@@ -82,22 +82,35 @@ pub fn spawn(
     peer: Arc<PeerSession>,
     inbound_data: mpsc::UnboundedReceiver<Vec<u8>>,
     state: SharedState,
-    app: tauri::AppHandle,
     device_id: String,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(run(peer, inbound_data, state, app, device_id))
+    tokio::spawn(run(peer, inbound_data, state, device_id))
 }
 
 async fn run(
     peer: Arc<PeerSession>,
     mut inbound_data: mpsc::UnboundedReceiver<Vec<u8>>,
     state: SharedState,
-    app: tauri::AppHandle,
     device_id: String,
 ) {
-    // The WebRTC controller only runs inside the desktop WebView shell, so
-    // this path is always Tauri-hosted (ADR-0059 R5).
-    let host = crate::companion_api::dispatch_host::DispatchHost::Tauri(app);
+    // Resolve the host the same way the HTTP RPC path does (ADR-0059 R5):
+    // the desktop `AppHandle` when the WebView shell is up, else the headless
+    // services registry `cognia-server` installs at boot. This used to be
+    // hard-wired to `DispatchHost::Tauri(app)`, which made the whole WebRTC
+    // tier unreachable from a headless install even though every other
+    // companion transport already supported it.
+    //
+    // `None` (neither a WebView nor a headless registry — bare test states and
+    // the `cognia-webrtc-peer` harness) is NOT a reason to drop frames: the
+    // event-forwarding half below needs no host at all, and inbound RPCs get
+    // the same structured `service_unavailable` the HTTP path returns.
+    let host = crate::companion_api::dispatch_host::DispatchHost::from_state(&state);
+    if host.is_none() {
+        log::warn!(
+            "signaling::dispatch: no dispatch host for device {device_id}; \
+             events still forward, inbound RPCs answer service_unavailable"
+        );
+    }
     // Subscribe to EventBus with since=None → start at high-water mark
     // (matches the existing WS subscription default behaviour).
     use crate::companion_api::event_bus::SubscribeResult;
@@ -127,7 +140,7 @@ async fn run(
                     &peer,
                     bytes,
                     &state,
-                    &host,
+                    host.as_ref(),
                     &device_id,
                 )
                 .await
@@ -170,11 +183,16 @@ async fn handle_inbound(
     peer: &PeerSession,
     bytes: Vec<u8>,
     state: &SharedState,
-    host: &crate::companion_api::dispatch_host::DispatchHost,
+    host: Option<&crate::companion_api::dispatch_host::DispatchHost>,
     device_id: &str,
 ) -> Result<(), String> {
+    log::debug!(
+        "signaling::dispatch: inbound {} bytes for device {device_id}",
+        bytes.len()
+    );
     let rpc: InboundRpc =
         serde_json::from_slice(&bytes).map_err(|e| format!("malformed inbound rpc: {e}"))?;
+    log::debug!("signaling::dispatch: inbound rpc method={}", rpc.method);
 
     let request_id = rpc.id.clone();
 
@@ -203,6 +221,23 @@ async fn handle_inbound(
                 .map_err(|e| e.to_string());
         }
     }
+
+    // No host resolved (bare test state / harness peer). Mirror the HTTP
+    // path's contract verbatim — `rpc::rpc_handler` maps the same condition to
+    // `service_unavailable("app_handle not available (test mode)")` — so a
+    // client sees one behaviour regardless of which transport it used.
+    let Some(host) = host else {
+        let frame = OutboundFrame::Response(ResponseFrame {
+            id: request_id,
+            ok: false,
+            result: None,
+            error: Some(ErrorBody {
+                code: "service_unavailable".into(),
+                message: "app_handle not available (test mode)".into(),
+            }),
+        });
+        return send_outbound(peer, &frame).await.map_err(|e| e.to_string());
+    };
 
     // Route through the existing dispatch table. `scope: None` — the
     // DataChannel is always device-scoped, so service-only (RCE-grade)

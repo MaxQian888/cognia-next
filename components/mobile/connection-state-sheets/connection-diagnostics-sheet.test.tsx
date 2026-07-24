@@ -68,6 +68,7 @@ jest.mock("next-intl", () => ({
       "toasts.syncFailed": `Sync failed: ${(vars?.message as string) ?? ""}`,
       "toasts.reconnectStarted": "Reconnect started",
       "toasts.reconnectThrottled": "Reconnect throttled",
+      "toasts.reconnectBusy": "Reconnect already in progress",
     }
     return map[key] ?? key
   },
@@ -87,6 +88,10 @@ beforeEach(() => {
   currentTier = "offline"
   runSyncDownMock.mockClear()
   snapshotSyncStatesMock.mockClear()
+  const { transport } = jest.requireMock("@/lib/tauri") as {
+    transport: { reconnectRtc: jest.Mock }
+  }
+  transport.reconnectRtc.mockReset().mockReturnValue("no-tier")
 })
 
 describe("ConnectionDiagnosticsSheet", () => {
@@ -157,5 +162,19 @@ describe("ConnectionDiagnosticsSheet", () => {
     // reconnectRtc returns "no-tier" by default mock — Sheet calls toast.message
     const { toast } = await import("sonner")
     expect((toast.message as jest.Mock).mock.calls.length).toBeGreaterThan(0)
+  })
+
+  it("surfaces the busy outcome when a reconnect is already in progress", async () => {
+    const { transport } = jest.requireMock("@/lib/tauri") as {
+      transport: { reconnectRtc: jest.Mock }
+    }
+    transport.reconnectRtc.mockReturnValueOnce("busy")
+    const user = userEvent.setup()
+    render(<ConnectionDiagnosticsSheet open onOpenChange={() => {}} />)
+
+    await user.click(await screen.findByTestId("diagnostics-reconnect"))
+
+    const { toast } = await import("sonner")
+    expect(toast.info).toHaveBeenCalledWith("Reconnect already in progress")
   })
 })

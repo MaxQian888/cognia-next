@@ -112,11 +112,13 @@ export function ConnectionDiagnosticsSheet({
 
   const onReconnect = useCallback(async () => {
     const tx = transport as unknown as {
-      reconnectRtc?: () => "ok" | "no-tier" | "throttled"
+      reconnectRtc?: () => "ok" | "busy" | "no-tier" | "throttled"
     }
     const outcome = tx.reconnectRtc?.() ?? "no-tier"
     if (outcome === "throttled") {
       toast.info(tShared("toasts.reconnectThrottled"))
+    } else if (outcome === "busy") {
+      toast.info(tShared("toasts.reconnectBusy"))
     } else if (outcome === "ok") {
       toast.success(tShared("toasts.reconnectStarted"))
     } else {

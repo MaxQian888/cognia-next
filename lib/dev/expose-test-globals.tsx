@@ -108,6 +108,38 @@ declare global {
      * `biometricRequiredFor` that have no dedicated onboarding UI hook.
      */
     __cogniaSetSettings?: (patch: Record<string, unknown>) => Promise<void>
+    /**
+     * ADR-0021 real-pair harness seam. Constructs a REAL `TransportRtc`
+     * (real `RTCPeerConnection` + real `SignalingClient`, no mock factories)
+     * so `pnpm webrtc:pair` can drive the browser offerer against a live
+     * `cognia-webrtc-peer` answerer through a live signaling server. Only the
+     * mobile (offerer) role is exercised here — the desktop answerer is the
+     * Rust harness binary. All methods are page-context callable via
+     * `page.evaluate`; received events accumulate in
+     * {@link __cogniaE2EWebRtcEvents} for the driver to poll.
+     */
+    __cogniaE2EWebRtc?: {
+      connect(opts: {
+        signalingUrl: string
+        rendezvousId: string
+        rendezvousSecret: string
+        deviceId: string
+        /** Loopback harness → host candidates suffice; default no STUN. */
+        iceServers?: RTCIceServer[]
+        /** Short peer-wait / negotiation windows keep the harness snappy. */
+        peerWaitTimeoutMs?: number
+        negotiationTimeoutMs?: number
+      }): Promise<void>
+      getState(): string
+      getSelectedCandidateKind(): Promise<string>
+      call(method: string, params?: Record<string, unknown>): Promise<unknown>
+      /** Begin collecting `event` frames into `__cogniaE2EWebRtcEvents`. */
+      subscribe(event: string): void
+      reconnectNow(): "started" | "busy" | "throttled" | "no-instance"
+      close(): void
+    }
+    /** Per-channel event log populated by `__cogniaE2EWebRtc.subscribe`. */
+    __cogniaE2EWebRtcEvents?: Record<string, Array<{ seq: number; payload: unknown; at: number }>>
     __cogniaTestGlobalsReady?: boolean
   }
 }
@@ -386,6 +418,60 @@ export function ExposeTestGlobals(): null {
         }
       }
 
+      // ADR-0021 — real-pair WebRTC harness seam. Holds ONE live TransportRtc
+      // per page; the driver (`scripts/smoke/webrtc-pair-smoke.mjs`) creates it
+      // with real factories so the whole SDP/ICE/DTLS/SCTP path runs for real.
+      {
+        const { TransportRtc } = await import("@/lib/tauri/transport-rtc")
+        let rtc: InstanceType<typeof TransportRtc> | null = null
+        window.__cogniaE2EWebRtcEvents = {}
+        window.__cogniaE2EWebRtc = {
+          async connect(opts) {
+            // A fresh instance per connect() — the harness drives one handshake
+            // at a time, and reusing a torn-down instance would leak state.
+            rtc?.close()
+            rtc = new TransportRtc({
+              signalingUrl: opts.signalingUrl,
+              rendezvousId: opts.rendezvousId,
+              rendezvousSecret: opts.rendezvousSecret,
+              deviceId: opts.deviceId,
+              role: "mobile",
+              rtcConfiguration: { iceServers: opts.iceServers ?? [] },
+              peerWaitTimeoutMs: opts.peerWaitTimeoutMs,
+              negotiationTimeoutMs: opts.negotiationTimeoutMs,
+            })
+            await rtc.connect()
+          },
+          getState() {
+            return rtc?.getState() ?? "idle"
+          },
+          async getSelectedCandidateKind() {
+            return rtc ? rtc.getSelectedCandidateKind() : "unknown"
+          },
+          async call(method, params) {
+            if (!rtc) throw new Error("__cogniaE2EWebRtc: not connected")
+            return rtc.call(method, params)
+          },
+          subscribe(event) {
+            if (!rtc) throw new Error("__cogniaE2EWebRtc: not connected")
+            const log = (window.__cogniaE2EWebRtcEvents![event] ??= [])
+            rtc.subscribe(event, (payload) => {
+              // `getSeqCursor()` reflects the seq the transport just recorded
+              // for this channel, so the driver can assert monotonicity.
+              const seq = rtc?.getSeqCursor()[event] ?? 0
+              log.push({ seq, payload, at: Date.now() })
+            })
+          },
+          reconnectNow() {
+            return rtc ? rtc.reconnectNow() : "no-instance"
+          },
+          close() {
+            rtc?.close()
+            rtc = null
+          },
+        }
+      }
+
       // Rehydrate any previously-set mock base URLs so a navigation that
       // re-mounts the bridge doesn't drop the configuration.
       try {
@@ -422,6 +508,9 @@ export function ExposeTestGlobals(): null {
       delete window.__cogniaResetSubscriptionState
       delete window.__cogniaE2ECodexDiscovery
       delete window.__cogniaE2EOcrMock
+      window.__cogniaE2EWebRtc?.close()
+      delete window.__cogniaE2EWebRtc
+      delete window.__cogniaE2EWebRtcEvents
       window.__cogniaTestGlobalsReady = false
     }
   }, [])

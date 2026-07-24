@@ -62,9 +62,9 @@ pub struct ClientConfig {
 /// Spawn a signaling client task. The returned watch-sender allows the
 /// caller to cancel the task by sending `true`; the corresponding watch-
 /// receiver is observed at every `select!` poll.
-pub fn spawn(config: ClientConfig, state: SharedState, app: tauri::AppHandle) -> ClientHandle {
+pub fn spawn(config: ClientConfig, state: SharedState) -> ClientHandle {
     let (cancel_tx, cancel_rx) = watch::channel(false);
-    let join = tokio::spawn(run_with_reconnect(config.clone(), state, app, cancel_rx));
+    let join = tokio::spawn(run_with_reconnect(config.clone(), state, cancel_rx));
     ClientHandle {
         config,
         cancel_tx,
@@ -74,8 +74,9 @@ pub fn spawn(config: ClientConfig, state: SharedState, app: tauri::AppHandle) ->
 
 /// Handle to a running signaling client. Drop the handle to keep the task
 /// running; call [`shutdown`] (or simply drop after sending `true`) to
-/// stop it. The task self-aborts when its `tauri::AppHandle` becomes
-/// invalid (app quit).
+/// stop it. The dispatch host is resolved per-message from the shared
+/// `SharedState` (see `signaling::dispatch`), so the task outlives any one
+/// host and works in the desktop, headless, and harness processes alike.
 pub struct ClientHandle {
     pub config: ClientConfig,
     cancel_tx: watch::Sender<bool>,
@@ -96,7 +97,6 @@ impl ClientHandle {
 async fn run_with_reconnect(
     config: ClientConfig,
     state: SharedState,
-    app: tauri::AppHandle,
     mut cancel_rx: watch::Receiver<bool>,
 ) {
     if let Err(e) = decode_secret(&config.rendezvous_secret) {
@@ -127,7 +127,7 @@ async fn run_with_reconnect(
         // Each attempt begins from `Offline` — the moment the WSS connection
         // is `subscribed` we'll bump to `Awaiting`.
         config.tier_writer.set(DeviceTier::Offline);
-        match run_one_session(&config, state.clone(), app.clone(), cancel_rx.clone()).await {
+        match run_one_session(&config, state.clone(), cancel_rx.clone()).await {
             Ok(()) => {
                 log::info!("signaling::client[{label}]: session ended cleanly");
                 attempt = 0;
@@ -194,7 +194,6 @@ impl std::fmt::Display for SessionError {
 async fn run_one_session(
     config: &ClientConfig,
     state: SharedState,
-    app: tauri::AppHandle,
     mut cancel_rx: watch::Receiver<bool>,
 ) -> Result<(), SessionError> {
     // Append the room id as `?rid=` so the Cloudflare Worker can route the
@@ -382,7 +381,6 @@ async fn run_one_session(
                                     &payload,
                                     config,
                                     &state,
-                                    &app,
                                     &out_tx,
                                     &mut next_seq,
                                     &mut replay,
@@ -473,7 +471,6 @@ async fn handle_relay(
     payload_b64: &str,
     config: &ClientConfig,
     state: &SharedState,
-    app: &tauri::AppHandle,
     out_tx: &mpsc::Sender<String>,
     next_seq: &mut u64,
     replay: &mut ReplayWindow,
@@ -601,7 +598,6 @@ async fn handle_relay(
                     Arc::clone(&new_peer),
                     data_rx_take,
                     state.clone(),
-                    app.clone(),
                     config.device_id.clone(),
                 );
                 *dispatcher = Some(handle);

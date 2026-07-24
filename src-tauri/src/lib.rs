@@ -117,6 +117,8 @@ pub use cognia_terminal as terminal;
 // ADR-0067 follow-up — extracted to `crates/cognia-tts`; re-aliased so
 // `crate::tts::…` (generate_handler!) resolves unchanged.
 pub use cognia_tts as tts;
+// ADR-0021 — native ephemeral-TURN provisioning (CSP-bypassing).
+mod turn_provision;
 mod twin;
 // ADR-0067 Phase 4 — extracted to `crates/cognia-vector`; re-aliased so
 // `crate::vector::{VectorState, VectorRegistry, commands::…}` resolve.
@@ -796,6 +798,7 @@ pub fn run() {
             keyring_secrets::keyring_secret_get,
             keyring_secrets::keyring_secret_set,
             keyring_secrets::keyring_secret_clear,
+            turn_provision::turn_provision,
             telemetry::telemetry_secret_set,
             telemetry::telemetry_secret_has,
             telemetry::telemetry_secret_clear,
@@ -1201,6 +1204,9 @@ pub fn run() {
             codeserver::commands::codeserver_disk_usage,
             codeserver::commands::codeserver_uninstall,
             codeserver::commands::codeserver_open_file,
+            codeserver::commands::codeserver_agent_open,
+            codeserver::commands::codeserver_agent_apply_edit,
+            codeserver::commands::codeserver_agent_read_active,
             codeserver::commands::codeserver_local_vscode_available,
             codeserver::commands::codeserver_open_in_local_vscode,
             codeserver::commands::codeserver_read_user_settings,

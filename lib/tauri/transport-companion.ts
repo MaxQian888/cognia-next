@@ -286,6 +286,15 @@ export class CompanionTransport implements Transport {
   private rtcConnecting: Promise<void> | null = null
   /** Unsubscribe handle for the rtc state listener. */
   private rtcDetach: (() => void) | null = null
+  /**
+   * Last options passed to `enableWebRtcTier`, retained so `reconnectRtc()`
+   * can re-establish the tier after it dropped to `failed`/`closed` (which
+   * nulls `this.rtc`). Without this the "Reconnect" button was a dead no-op
+   * at exactly the moment the user reaches for it — see ADR-0021 F2. Cleared
+   * by `disableWebRtcTier()` (an explicit teardown is not a candidate for
+   * silent re-establishment).
+   */
+  private lastEnableOptions: Parameters<CompanionTransport["enableWebRtcTier"]>[0] | null = null
 
   // ── Transport-tier cache (ADR-0021 follow-up) ──────────────────────────────
   /**
@@ -457,6 +466,10 @@ export class CompanionTransport implements Transport {
       configOverride?: CompanionConfig
     }
   ): Promise<void> {
+    // Retain the options for `reconnectRtc()`'s re-establish path even when
+    // this particular call short-circuits — the tier may already be open, but
+    // a future failure still needs the config to rebuild.
+    this.lastEnableOptions = options
     if (this.rtc) return // Already open or about to be.
     if (this.rtcConnecting) return this.rtcConnecting
     const config = options.configOverride ?? this.config()
@@ -527,19 +540,33 @@ export class CompanionTransport implements Transport {
    * Force a fresh WebRTC handshake. Wired to the "Reconnect WebRTC" button
    * on the mobile settings panel.
    *
-   * - `"ok"`         — handshake is being torn down + restarted.
-   * - `"no-tier"`    — no active RTC; user must re-enable via settings.
+   * - `"ok"`         — handshake is being torn down + restarted, OR (when the
+   *                    tier had dropped to `failed`/`closed` and `this.rtc` is
+   *                    null) a fresh upgrade is being re-established from the
+   *                    cached options. This is the ADR-0021 F2 path: the
+   *                    button now works at exactly the moment a user reaches
+   *                    for it — after a failure — instead of returning
+   *                    `no-tier`.
+   * - `"busy"`       — an action (connect / negotiate / await-peer / closing)
+   *                    is already in flight; the click was acknowledged but is
+   *                    a no-op. Distinct from `throttled` so the UI can say
+   *                    "already reconnecting" rather than "slow down".
+   * - `"no-tier"`    — never enabled this session; user must configure it.
    * - `"throttled"`  — called within 5 s of the previous successful call;
-   *                    defends against an XSS-driven flood. The UI maps
-   *                    this to a localised warning toast instead of an
-   *                    error toast so the user knows the action wasn't
-   *                    a real failure.
+   *                    defends against an XSS-driven flood.
    */
-  public reconnectRtc(): "ok" | "no-tier" | "throttled" {
-    if (!this.rtc) {
-      return "no-tier"
+  public reconnectRtc(): "ok" | "busy" | "no-tier" | "throttled" {
+    if (this.rtc) {
+      const outcome = this.rtc.reconnectNow()
+      return outcome === "started" ? "ok" : outcome
     }
-    return this.rtc.reconnectNow() ? "ok" : "throttled"
+    // No live instance, but we know how to build one — re-establish rather
+    // than reporting a dead tier.
+    if (this.lastEnableOptions) {
+      void this.enableWebRtcTier(this.lastEnableOptions)
+      return "ok"
+    }
+    return "no-tier"
   }
 
   /** Tear down the WebRTC tier explicitly. Called from `destroy()`. */
@@ -558,6 +585,11 @@ export class CompanionTransport implements Transport {
     }
     this.rtcConnecting = null
     this.rtcCandidateKind = "unknown"
+    // An explicit teardown (settings toggle off, LAN reachable, destroy) is
+    // NOT a candidate for `reconnectRtc()`'s silent re-establish — drop the
+    // cached options so a later reconnect returns `no-tier` rather than
+    // resurrecting a tier the caller deliberately disabled.
+    this.lastEnableOptions = null
     // Falling back to the WS tier — recompute so subscribers see the
     // change immediately rather than on the next setConnectionState.
     void this.recomputeTier()

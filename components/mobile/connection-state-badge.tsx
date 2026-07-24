@@ -126,15 +126,17 @@ export function ConnectionStateBadge({ className }: { className?: string }) {
     // Re-run the WebRTC handshake when an RTC tier is active. If no tier
     // is wired (or we got throttled by the 5s defense), the sync kick
     // below still re-establishes the chat list so the UI feels responsive.
-    let outcome: "ok" | "no-tier" | "throttled" = "no-tier"
+    let outcome: "ok" | "busy" | "no-tier" | "throttled" = "no-tier"
     const txWithRtc = transport as unknown as {
-      reconnectRtc?: () => "ok" | "no-tier" | "throttled"
+      reconnectRtc?: () => "ok" | "busy" | "no-tier" | "throttled"
     }
     if (typeof txWithRtc.reconnectRtc === "function") {
       outcome = txWithRtc.reconnectRtc()
     }
     if (outcome === "throttled") {
       toast.info(t("toasts.reconnectThrottled"))
+    } else if (outcome === "busy") {
+      toast.info(t("toasts.reconnectBusy"))
     } else if (outcome === "ok") {
       toast.success(t("toasts.reconnectStarted"))
     } else {

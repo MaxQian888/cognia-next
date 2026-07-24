@@ -54,6 +54,16 @@ name = "cognia-vdd-setup"
 path = "src/bin/cognia-vdd-setup.rs"
 required-features = []
 
+# ADR-0021 — WebRTC pair-test harness (`pnpm webrtc:pair`). A headless desktop
+# answerer that drives the PRODUCTION signaling client + webrtc-rs peer against
+# a real browser `RTCPeerConnection` through a real signaling server. Gated
+# behind the `webrtc-harness` feature so normal desktop/release builds never
+# compile it.
+[[bin]]
+name = "cognia-webrtc-peer"
+path = "src/bin/cognia-webrtc-peer.rs"
+required-features = ["webrtc-harness"]
+
 [build-dependencies]
 tauri-build = { version = "2.5.0", features = [] }
 
@@ -513,6 +523,9 @@ urlencoding = "2"
 # feature flag links a real binding for one platform.
 [features]
 default = []
+# ADR-0021 — compiles the `cognia-webrtc-peer` harness binary. Off by default
+# so the extra bin never enters normal builds; enabled only by `pnpm webrtc:pair`.
+webrtc-harness = []
 # ADR-0073 — native OTLP trace/metric export is deliberately opt-in so the
 # OpenTelemetry dependency graph does not slow normal desktop development.
 otel-export = [

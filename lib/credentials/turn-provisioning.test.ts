@@ -1,3 +1,10 @@
+const mockIsTauri = jest.fn().mockReturnValue(false)
+const mockTransportCall = jest.fn()
+jest.mock("@/lib/tauri", () => ({
+  isTauri: () => mockIsTauri(),
+  transport: { call: (...args: unknown[]) => mockTransportCall(...args) },
+}))
+
 import {
   TurnProvisionError,
   __setProviderSecretStore,
@@ -33,6 +40,11 @@ function fakeFetch(status: number, body: unknown): { impl: typeof fetch; reqs: C
 }
 
 const NOW = 1_000_000
+
+beforeEach(() => {
+  mockIsTauri.mockReset().mockReturnValue(false)
+  mockTransportCall.mockReset()
+})
 
 describe("clampTtl", () => {
   it("defaults to 86400 when unset", () => {
@@ -165,12 +177,25 @@ describe("provisionIceServers — guards", () => {
   it("throws missing-secret when no secretRef is set, without fetching", async () => {
     const { impl, reqs } = fakeFetch(201, {})
     await expect(
-      provisionIceServers(
-        { kind: "cloudflare-calls", cloudflareKeyId: "k" },
-        { fetchImpl: impl, loadSecret: async () => ({ apiToken: "t" }) }
-      )
+      provisionIceServers({ kind: "cloudflare-calls", cloudflareKeyId: "k" }, { fetchImpl: impl })
     ).rejects.toMatchObject({ name: "TurnProvisionError", reason: "missing-secret" })
     expect(reqs).toHaveLength(0)
+  })
+
+  it("uses an explicitly injected inline secret before it is saved in a browser shell", async () => {
+    const { impl, reqs } = fakeFetch(201, { iceServers: [] })
+    const loadSecret = jest.fn(async () => ({ apiToken: "fresh-token" }))
+
+    await provisionIceServers(
+      { kind: "cloudflare-calls", cloudflareKeyId: "key-1" },
+      { fetchImpl: impl, loadSecret }
+    )
+
+    expect(loadSecret).toHaveBeenCalledWith("__inline__")
+    expect(reqs).toHaveLength(1)
+    expect((reqs[0].init.headers as Record<string, string>).Authorization).toBe(
+      "Bearer fresh-token"
+    )
   })
 
   it("throws missing-secret when the keyring entry is gone", async () => {
@@ -187,6 +212,78 @@ describe("provisionIceServers — guards", () => {
     await expect(
       provisionIceServers({ kind: "none" }, { loadSecret: async () => ({ apiToken: "t" }) })
     ).rejects.toBeInstanceOf(TurnProvisionError)
+  })
+})
+
+describe("provisionIceServers — Tauri native path", () => {
+  it("uses the saved key id without loading the secret into the renderer", async () => {
+    mockIsTauri.mockReturnValue(true)
+    mockTransportCall.mockResolvedValue({
+      iceServers: [{ urls: "turn:native.example:3478", username: "u", credential: "c" }],
+      expiresAtMs: 123_000,
+    })
+    const loadSecret = jest.fn()
+
+    const result = await provisionIceServers(
+      {
+        kind: "cloudflare-calls",
+        cloudflareKeyId: "cf-key",
+        secretRef: "kr:saved-provider-token",
+        ttlSeconds: 3_600,
+      },
+      { loadSecret }
+    )
+
+    expect(loadSecret).not.toHaveBeenCalled()
+    expect(mockTransportCall).toHaveBeenCalledWith("turn_provision", {
+      input: {
+        kind: "cloudflare-calls",
+        cloudflareKeyId: "cf-key",
+        twilioAccountSid: undefined,
+        ttlSeconds: 3_600,
+        secretKeyId: "saved-provider-token",
+        inlineToken: undefined,
+      },
+    })
+    expect(result).toEqual({
+      iceServers: [{ urls: "turn:native.example:3478", username: "u", credential: "c" }],
+      expiresAt: 123_000,
+    })
+  })
+
+  it("passes a freshly typed token inline before it is saved", async () => {
+    mockIsTauri.mockReturnValue(true)
+    mockTransportCall.mockResolvedValue({ iceServers: [], expiresAtMs: 456_000 })
+
+    await provisionIceServers(
+      { kind: "twilio", twilioAccountSid: "AC123" },
+      { loadSecret: async () => ({ authToken: "fresh-auth-token" }) }
+    )
+
+    expect(mockTransportCall).toHaveBeenCalledWith(
+      "turn_provision",
+      expect.objectContaining({
+        input: expect.objectContaining({
+          kind: "twilio",
+          secretKeyId: undefined,
+          inlineToken: "fresh-auth-token",
+        }),
+      })
+    )
+  })
+
+  it("normalizes native command failures into TurnProvisionError", async () => {
+    mockIsTauri.mockReturnValue(true)
+    mockTransportCall.mockRejectedValue(
+      new Error("turn provisioning failed: twilio-http-error (status 403)")
+    )
+
+    await expect(
+      provisionIceServers({ kind: "twilio", twilioAccountSid: "AC123", secretRef: "kr:saved" }, {})
+    ).rejects.toMatchObject({
+      name: "TurnProvisionError",
+      reason: "twilio-http-error (status 403)",
+    })
   })
 })
 

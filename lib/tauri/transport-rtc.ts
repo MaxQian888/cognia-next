@@ -47,6 +47,15 @@ import {
 export type RtcState =
   | "idle"
   | "signaling-connecting"
+  /**
+   * WSS subscribed, but the opposite peer is not yet in the rendezvous room.
+   * We hold here — WITHOUT arming the negotiation timeout — until a
+   * `peerJoined` (or a `subscribed` that already lists the peer) arrives.
+   * Before ADR-0021 F1 the mobile side sent its offer unconditionally on
+   * `subscribed`, which the server silently dropped into an empty room and
+   * stalled the whole cold-start until the 8 s negotiation timer expired.
+   */
+  | "awaiting-peer"
   | "negotiating"
   | "open"
   | "reconnecting"
@@ -127,12 +136,21 @@ export interface TransportRtcOptions {
    */
   rtcConfiguration?: RTCConfiguration
   /**
-   * Hard timeout for the SDP exchange + ICE gathering, in ms. If the
-   * DataChannel hasn't opened by then we tear down and surface `failed`
-   * so the caller can fall through to the cloudflared tunnel tier.
-   * Default 8000.
+   * Hard timeout for the SDP exchange + ICE gathering, in ms. Armed only
+   * once the opposite peer is present and we actually start negotiating
+   * (offer sent) — NOT while we sit in `awaiting-peer`. If the DataChannel
+   * hasn't opened by then we tear down and surface `failed` so the caller
+   * can fall through to the cloudflared tunnel tier. Default 8000.
    */
   negotiationTimeoutMs?: number
+  /**
+   * How long (ms) to sit in `awaiting-peer` waiting for the opposite peer to
+   * join the rendezvous before giving up and surfacing `failed` (so the
+   * caller falls back to HTTPS+WS). Covers the cold-start case where the
+   * mobile subscribes to an empty room before the desktop's signaling client
+   * has connected. Default 20000. ADR-0021 F1.
+   */
+  peerWaitTimeoutMs?: number
   /**
    * Override for the reconnection backoff schedule (ms). Tests pass a
    * short schedule (e.g. `[5, 10]`) to exercise exhaustion without
@@ -195,6 +213,20 @@ export class TransportRtc {
   private dc: RTCDataChannel | null = null
   private state: RtcState = "idle"
   private negotiationTimer: ReturnType<typeof setTimeout> | null = null
+  /** Timer for the `awaiting-peer` phase (opposite peer not yet in room). */
+  private peerWaitTimer: ReturnType<typeof setTimeout> | null = null
+  /**
+   * Detaches this connect() attempt's signaling listeners and clears the
+   * peer-wait / negotiation timers. Set while a negotiation is in flight,
+   * invoked exactly once on the first settle (open or fail). Null otherwise.
+   */
+  private negotiationCleanup: (() => void) | null = null
+  /**
+   * Synchronous guard so a `subscribed`-with-peer and a racing `peerJoined`
+   * can't both kick off a negotiation before `this.pc` is assigned (the
+   * assignment sits behind an `await` in `startNegotiation`).
+   */
+  private negotiationKickedOff = false
   private negotiationSettled = false
   private nextRpcId = 1
   private pending: Map<string, Pending> = new Map()
@@ -228,6 +260,7 @@ export class TransportRtc {
       role: opts.role ?? "mobile",
       rtcConfiguration: opts.rtcConfiguration,
       negotiationTimeoutMs: opts.negotiationTimeoutMs ?? 8000,
+      peerWaitTimeoutMs: opts.peerWaitTimeoutMs ?? 20000,
       reconnectBackoffMs: opts.reconnectBackoffMs ?? RECONNECT_BACKOFF_MS,
       iceRestartTimeoutMs: opts.iceRestartTimeoutMs ?? 8000,
       iceRestartMaxAttempts: opts.iceRestartMaxAttempts ?? 2,
@@ -268,7 +301,20 @@ export class TransportRtc {
     // Entry from reconnect timer leaves resources cleared by
     // `teardownPeer()`; from idle/closed/failed they're already null.
     this.negotiationSettled = false
+    this.negotiationKickedOff = false
     this.setState("signaling-connecting")
+
+    // Arm the peer-wait timer up front so the whole pre-negotiation phase —
+    // WSS connect, subscribe, AND `awaiting-peer` — is bounded. Without this a
+    // rendezvous whose server is unreachable (SignalingClient retries
+    // forever) or that never gains the opposite peer would hang connect()
+    // indefinitely; `beginNegotiation` swaps it for the negotiation timeout.
+    this.peerWaitTimer = setTimeout(() => {
+      this.peerWaitTimer = null
+      this.settleNegotiationFailure(
+        new Error("no peer joined the rendezvous within the wait window")
+      )
+    }, this.opts.peerWaitTimeoutMs)
 
     const signaling = this.opts.signalingClientFactory({
       url: this.opts.signalingUrl,
@@ -279,13 +325,41 @@ export class TransportRtc {
     this.signaling = signaling
 
     const opened = new Promise<void>((resolve, reject) => {
-      const detachState = signaling.on("state", async (next) => {
-        if (next === "subscribed" && !this.pc) {
-          try {
-            await this.startNegotiation()
-          } catch (err) {
-            reject(err instanceof Error ? err : new Error(String(err)))
-          }
+      // ADR-0021 F1 — the room may already hold the opposite peer (it
+      // subscribed first), or it may arrive later via `peerJoined`. Only kick
+      // off the offer once the peer is actually present; otherwise sit in
+      // `awaiting-peer` (see `enterAwaitingPeer`) rather than firing an offer
+      // into an empty room that the server silently drops.
+      const detachSubscribed = signaling.on("subscribed", ({ peers }) => {
+        if (this.pc || this.negotiationKickedOff) return
+        // Only act while still in the pre-negotiation phase. A `subscribed`
+        // that lands after close()/fail() (e.g. a microtask queued by
+        // signaling.connect() before teardown) must not revive the transport.
+        if (this.state !== "signaling-connecting" && this.state !== "awaiting-peer") return
+        if (peers.some((p) => p.role === this.peerRole())) {
+          void this.beginNegotiation()
+        } else {
+          this.enterAwaitingPeer()
+        }
+      })
+
+      const detachJoined = signaling.on("peerJoined", (role) => {
+        if (role !== this.peerRole()) return
+        if (this.pc || this.negotiationKickedOff) return
+        if (this.state !== "awaiting-peer" && this.state !== "signaling-connecting") return
+        void this.beginNegotiation()
+      })
+
+      const detachLeft = signaling.on("peerLeft", (role) => {
+        if (role !== this.peerRole()) return
+        if (this.state === "open") {
+          // Peer restarted mid-session — tear down + reconnect instead of
+          // waiting out an ICE timeout (ADR-0021 F7).
+          this.handleMidSessionDisconnect()
+        } else {
+          this.settleNegotiationFailure(
+            new Error("peer left the rendezvous before the channel opened")
+          )
         }
       })
 
@@ -302,63 +376,102 @@ export class TransportRtc {
         // rate_limited, malformed_frame, binary_not_supported, not_subscribed
         // (see services/signaling-server/src/ws.rs) — means a critical handshake frame
         // (offer / answer / ICE) was dropped, so the negotiation cannot
-        // complete. Fail fast instead of stalling until the negotiation timer
-        // fires; the caller falls back to HTTPS+WS immediately and the
-        // mobile-controller re-attempts the upgrade on the next
-        // network/resume trigger.
-        if (this.negotiationSettled) return
-        this.negotiationSettled = true
+        // complete. Fail fast instead of stalling until a timer fires; the
+        // caller falls back to HTTPS+WS immediately and the mobile-controller
+        // re-attempts the upgrade on the next network/resume trigger.
+        this.settleNegotiationFailure(
+          new Error(`signaling error during negotiation: ${code} ${message}`)
+        )
+      })
+
+      // One-shot cleanup for this attempt: detach every listener and clear
+      // both phase timers. Invoked by the resolvers below on first settle.
+      this.negotiationCleanup = () => {
+        detachSubscribed()
+        detachJoined()
+        detachLeft()
+        detachEnv()
+        detachErr()
         if (this.negotiationTimer) {
           clearTimeout(this.negotiationTimer)
           this.negotiationTimer = null
         }
-        detachState()
-        detachEnv()
-        detachErr()
-        const err = new Error(`signaling error during negotiation: ${code} ${message}`)
-        this.fail(err)
-        reject(err)
-      })
-
-      this.negotiationTimer = setTimeout(() => {
-        if (this.negotiationSettled) return
-        this.negotiationSettled = true
-        detachState()
-        detachEnv()
-        detachErr()
-        this.fail(new Error("WebRTC negotiation timed out"))
-        reject(new Error("WebRTC negotiation timed out"))
-      }, this.opts.negotiationTimeoutMs)
+        if (this.peerWaitTimer) {
+          clearTimeout(this.peerWaitTimer)
+          this.peerWaitTimer = null
+        }
+        this.negotiationCleanup = null
+      }
 
       // Bridge: when the DataChannel opens, we resolve the connect promise.
       this.onDcOpenResolvers.push(() => {
         if (this.negotiationSettled) return
         this.negotiationSettled = true
-        if (this.negotiationTimer) {
-          clearTimeout(this.negotiationTimer)
-          this.negotiationTimer = null
-        }
-        detachState()
-        detachEnv()
-        detachErr()
+        this.negotiationCleanup?.()
         resolve()
       })
       this.onDcFailResolvers.push((err) => {
         if (this.negotiationSettled) return
         this.negotiationSettled = true
-        if (this.negotiationTimer) {
-          clearTimeout(this.negotiationTimer)
-          this.negotiationTimer = null
-        }
-        detachState()
-        detachEnv()
-        detachErr()
+        this.negotiationCleanup?.()
         reject(err)
       })
     })
 
     signaling.connect()
     return opened
+  }
+
+  /** The role we expect on the other end of the rendezvous. */
+  private peerRole(): PeerRole {
+    return this.opts.role === "mobile" ? "desktop" : "mobile"
+  }
+
+  /**
+   * Enter the `awaiting-peer` hold: subscribed, but the opposite peer is not
+   * yet in the room. The peer-wait timer armed in `connect()` already bounds
+   * this phase, so this only flips the observable state (so the tier / UI can
+   * reflect "waiting for the desktop" distinctly from "connecting").
+   */
+  private enterAwaitingPeer(): void {
+    if (this.state === "awaiting-peer") return
+    this.setState("awaiting-peer")
+  }
+
+  /**
+   * Begin the SDP/ICE handshake now that the peer is present: swap the
+   * peer-wait timer for the negotiation timeout and run `startNegotiation`.
+   * Idempotent within one connect() attempt via `negotiationKickedOff`.
+   */
+  private async beginNegotiation(): Promise<void> {
+    if (this.negotiationKickedOff) return
+    if (this.state !== "signaling-connecting" && this.state !== "awaiting-peer") return
+    this.negotiationKickedOff = true
+    if (this.peerWaitTimer) {
+      clearTimeout(this.peerWaitTimer)
+      this.peerWaitTimer = null
+    }
+    if (!this.negotiationTimer) {
+      this.negotiationTimer = setTimeout(() => {
+        this.negotiationTimer = null
+        this.settleNegotiationFailure(new Error("WebRTC negotiation timed out"))
+      }, this.opts.negotiationTimeoutMs)
+    }
+    try {
+      await this.startNegotiation()
+    } catch (err) {
+      this.settleNegotiationFailure(err instanceof Error ? err : new Error(String(err)))
+    }
+  }
+
+  /**
+   * Fail the in-flight negotiation once. Routes through `fail()`, whose
+   * `onDcFailResolvers` run the cleanup + reject the connect() promise. A
+   * second call after settle is a no-op.
+   */
+  private settleNegotiationFailure(err: Error): void {
+    if (this.negotiationSettled) return
+    this.fail(err)
   }
 
   /**
@@ -376,14 +489,28 @@ export class TransportRtc {
    * - From `signaling-connecting` / `negotiating` / `closing`: no-op; an
    *   action is already in flight.
    */
-  reconnectNow(): boolean {
+  reconnectNow(): "started" | "busy" | "throttled" {
+    // An action already in flight can't be accelerated — report `busy`
+    // WITHOUT consuming the throttle window, so this early return never
+    // blocks a genuine reconnect the user attempts moments later. (Before
+    // ADR-0021 F3 this returned `true` here, so the UI toasted "reconnect
+    // started" for a no-op and burned the 5 s window on the way out.)
+    if (
+      this.state === "signaling-connecting" ||
+      this.state === "awaiting-peer" ||
+      this.state === "negotiating" ||
+      this.state === "closing"
+    ) {
+      return "busy"
+    }
+
     // Throttle: defend against XSS or runaway UI loops calling this in a
     // tight cycle. Genuine user double-taps land within ~300 ms so the
     // 5 s window doesn't block them on the first click; subsequent
     // accidental clicks are silently dropped.
     const now = Date.now()
     if (now - this.lastManualReconnectMs < RECONNECT_NOW_MIN_SPACING_MS) {
-      return false
+      return "throttled"
     }
     this.lastManualReconnectMs = now
 
@@ -397,19 +524,13 @@ export class TransportRtc {
       this.teardownPeer()
       this.setState("reconnecting")
       // Fall through to the connect() below.
-    } else if (
-      this.state === "signaling-connecting" ||
-      this.state === "negotiating" ||
-      this.state === "closing"
-    ) {
-      return true
     }
 
     void this.connect().catch((err) => {
       // Surface via state transitions; nothing else to do here.
       console.warn("TransportRtc.reconnectNow: connect rejected", err)
     })
-    return true
+    return "started"
   }
 
   /** Send an RPC; resolves with the result payload. */
@@ -508,6 +629,11 @@ export class TransportRtc {
       clearTimeout(this.negotiationTimer)
       this.negotiationTimer = null
     }
+    if (this.peerWaitTimer) {
+      clearTimeout(this.peerWaitTimer)
+      this.peerWaitTimer = null
+    }
+    this.negotiationCleanup = null
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
@@ -709,6 +835,13 @@ export class TransportRtc {
       clearTimeout(this.negotiationTimer)
       this.negotiationTimer = null
     }
+    if (this.peerWaitTimer) {
+      clearTimeout(this.peerWaitTimer)
+      this.peerWaitTimer = null
+    }
+    // A fresh connect() installs a new cleanup + kickoff guard.
+    this.negotiationCleanup = null
+    this.negotiationKickedOff = false
     for (const p of this.pending.values()) {
       if (p.timer) clearTimeout(p.timer)
       p.reject(new Error("TransportRtc: connection reset"))

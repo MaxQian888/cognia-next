@@ -101,7 +101,6 @@ struct HubInner {
 #[derive(Clone)]
 struct Binding {
     state: SharedState,
-    app: tauri::AppHandle,
 }
 
 impl SignalingHub {
@@ -120,18 +119,21 @@ impl SignalingHub {
         })
     }
 
-    /// Wire the hub to the live companion state + Tauri app handle. Called
-    /// once at server start; subsequent restarts reuse the same hub
-    /// instance via `tauri::Manager::state`. The first bind also reapplies
-    /// any pending device registrations the renderer pushed before the
-    /// server was up.
-    pub fn bind(&self, state: SharedState, app: tauri::AppHandle) {
+    /// Wire the hub to the live companion state. Called once at server start;
+    /// subsequent restarts reuse the same hub instance (via
+    /// `tauri::Manager::state` on desktop, or the process-global handle in
+    /// `cognia-server`). The first bind also reapplies any pending device
+    /// registrations the renderer pushed before the server was up.
+    ///
+    /// The dispatch host is NOT captured here — `signaling::dispatch` resolves
+    /// it per message from `state` (`DispatchHost::from_state`), so the same
+    /// hub drives the desktop, headless, and harness processes.
+    pub fn bind(&self, state: SharedState) {
         let pending: Vec<DeviceRegistration>;
         {
             let mut inner = self.inner.lock();
             inner.bound = Some(Binding {
                 state: state.clone(),
-                app: app.clone(),
             });
             // Take ownership of any registrations the renderer queued
             // before the server was up so `sync_devices` runs through the
@@ -255,7 +257,7 @@ impl SignalingHub {
             ice_servers,
             tier_writer,
         };
-        let handle = spawn_client(config, binding.state.clone(), binding.app.clone());
+        let handle = spawn_client(config, binding.state.clone());
         let mut inner = self.inner.lock();
         inner.clients.insert(rendezvous_id, handle);
     }

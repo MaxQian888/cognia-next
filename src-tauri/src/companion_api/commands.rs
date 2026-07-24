@@ -126,7 +126,7 @@ pub async fn companion_server_start(
         use tauri::Manager as _;
         let app = shared.app_handle.as_ref().expect("app_handle present");
         if let Some(hub) = app.try_state::<std::sync::Arc<super::signaling::SignalingHub>>() {
-            hub.bind(Arc::clone(&shared), app.clone());
+            hub.bind(Arc::clone(&shared));
         }
     }
 

@@ -761,33 +761,30 @@ describe("WebRtcCard — TURN provider UI", () => {
 
   it("Test button provisions and toasts success when the provider responds", async () => {
     const { toast } = await import("sonner")
-    const g = globalThis as Record<string, unknown>
-    const realFetch = g.fetch
-    const fetchMock = jest.fn(async () => ({
-      ok: true,
-      status: 201,
-      json: async () => ({ iceServers: [{ urls: ["turn:a"] }] }),
-    })) as unknown as typeof fetch
-    g.fetch = fetchMock
-    try {
-      const user = userEvent.setup({ delay: null })
-      renderCard()
-      await waitForHydrate()
-      const select = await screen.findByTestId("webrtc-turn-provider-kind")
-      await user.selectOptions(select, "cloudflare-calls")
-      await user.type(screen.getByTestId("webrtc-turn-cf-keyid"), "key-1")
-      await user.type(screen.getByTestId("webrtc-turn-token"), "tok")
-      await user.click(screen.getByTestId("webrtc-turn-test"))
-      await waitFor(() => {
-        expect(toast.success).toHaveBeenCalled()
-      })
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining("generate-ice-servers"),
-        expect.objectContaining({ method: "POST" })
-      )
-    } finally {
-      if (realFetch === undefined) delete g.fetch
-      else g.fetch = realFetch
-    }
+    mockTransportCall.mockResolvedValue({
+      iceServers: [{ urls: ["turn:a"] }],
+      expiresAtMs: Date.now() + 60_000,
+    })
+    const user = userEvent.setup({ delay: null })
+    renderCard()
+    await waitForHydrate()
+    const select = await screen.findByTestId("webrtc-turn-provider-kind")
+    await user.selectOptions(select, "cloudflare-calls")
+    await user.type(screen.getByTestId("webrtc-turn-cf-keyid"), "key-1")
+    await user.type(screen.getByTestId("webrtc-turn-token"), "tok")
+    await user.click(screen.getByTestId("webrtc-turn-test"))
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalled()
+    })
+    expect(mockTransportCall).toHaveBeenCalledWith("turn_provision", {
+      input: {
+        kind: "cloudflare-calls",
+        cloudflareKeyId: "key-1",
+        twilioAccountSid: undefined,
+        ttlSeconds: undefined,
+        secretKeyId: undefined,
+        inlineToken: "tok",
+      },
+    })
   }, 20000)
 })

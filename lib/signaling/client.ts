@@ -29,6 +29,7 @@ import {
   type Envelope,
   type EnvelopeKind,
   type PeerRole,
+  type PeerSnapshot,
   type ServerFrame,
 } from "./types"
 
@@ -45,6 +46,14 @@ const TERMINAL_ERROR_CODES = new Set(["room_full", "role_taken"])
 
 export interface SignalingEventMap {
   state: SignalingState
+  /**
+   * Fired on every `Subscribed` server frame, carrying the peers that were
+   * ALREADY in the room at subscribe time. Distinct from the `state` event so
+   * consumers can learn whether the opposite peer is present without racing a
+   * separate `peerJoined` — the room may already hold it (ADR-0021 F1). On a
+   * mid-session WSS reconnect this fires again with the current occupancy.
+   */
+  subscribed: { peers: PeerSnapshot[] }
   envelope: {
     fromRole: PeerRole
     envelope: Envelope
@@ -105,6 +114,7 @@ export class SignalingClient {
     [K in keyof SignalingEventMap]: Set<SignalingListener<K>>
   } = {
     state: new Set(),
+    subscribed: new Set(),
     envelope: new Set(),
     peerJoined: new Set(),
     peerLeft: new Set(),
@@ -241,6 +251,11 @@ export class SignalingClient {
       case "subscribed":
         this.reconnectAttempt = 0
         this.setState("subscribed")
+        // Surface the room occupancy AFTER the state flip so a consumer that
+        // reacts to `subscribed` (peers) sees a client already in the
+        // `subscribed` state. `peers ?? []` guards against an older server
+        // build that omits the field.
+        this.emit("subscribed", { peers: frame.peers ?? [] })
         break
       case "peerJoined":
         this.emit("peerJoined", frame.role)

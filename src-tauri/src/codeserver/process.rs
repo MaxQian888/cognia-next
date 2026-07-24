@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
+use serde_json::{json, Value};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
@@ -146,7 +147,25 @@ impl CodeServerState {
         let port = pick_free_loopback_port()?;
         let args = code_server_args(&canonical, port, &user_data_dir, &extensions_dir);
 
-        let child = spawn_child(&info.binary_path, &args)?;
+        // Register this instance with the agent control channel BEFORE spawn so the
+        // WS port + per-instance token can be injected into the child's env — the
+        // companion extension reads them on activate to dial back. Any failure after
+        // this point must deregister so a leaked token can't address a dead editor.
+        let (agent_ws_port, agent_token) = super::agent_channel::global()
+            .register_instance(&canonical)
+            .await?;
+        let agent_envs = [
+            ("COGNIA_CS_AGENT_WS", agent_ws_port.to_string()),
+            ("COGNIA_CS_AGENT_TOKEN", agent_token),
+        ];
+
+        let child = match spawn_child(&info.binary_path, &args, &agent_envs) {
+            Ok(child) => child,
+            Err(e) => {
+                super::agent_channel::global().deregister(&canonical);
+                return Err(e);
+            }
+        };
         // Track it immediately so kill_on_drop / stop cover a child that never
         // becomes healthy.
         {
@@ -235,6 +254,7 @@ impl CodeServerState {
         let mut map = self.instances.lock().await;
         if let Some(mut inst) = map.remove(&canonical) {
             inst.retire();
+            super::agent_channel::global().deregister(&canonical);
             true
         } else {
             false
@@ -244,9 +264,55 @@ impl CodeServerState {
     /// Kill every running instance (app teardown / kill-switch).
     pub async fn stop_all(&self) {
         let mut map = self.instances.lock().await;
-        for (_, mut inst) in map.drain() {
+        for (root, mut inst) in map.drain() {
             inst.retire();
+            super::agent_channel::global().deregister(&root);
         }
+    }
+
+    /// Open + reveal an absolute file in this root's live code-server through the
+    /// companion extension (Pro IDE Phase 2). Errors when no extension is connected
+    /// so the caller can fall back to the CLI `open_file`.
+    pub async fn agent_open(
+        &self,
+        root: &str,
+        path: &str,
+        line: Option<u32>,
+        column: Option<u32>,
+    ) -> Result<(), String> {
+        let canonical = canonicalize_root(root)?;
+        let params = json!({ "path": path, "line": line, "column": column });
+        super::agent_channel::global()
+            .send(&canonical, "openFile", params)
+            .await
+            .map(|_| ())
+    }
+
+    /// Reflect an agent's on-disk write as an undo-able edit in the live editor.
+    /// The extension reconciles from disk (source of truth), so only the path (plus
+    /// an optional reveal position) crosses the channel.
+    pub async fn agent_apply_edit(
+        &self,
+        root: &str,
+        path: &str,
+        line: Option<u32>,
+        column: Option<u32>,
+    ) -> Result<(), String> {
+        let canonical = canonicalize_root(root)?;
+        let params = json!({ "path": path, "line": line, "column": column });
+        super::agent_channel::global()
+            .send(&canonical, "applyEdit", params)
+            .await
+            .map(|_| ())
+    }
+
+    /// Read the live active-editor context back from code-server. The raw payload
+    /// is returned to the renderer, which PII-gates it before it reaches the model.
+    pub async fn agent_read_active(&self, root: &str) -> Result<Value, String> {
+        let canonical = canonicalize_root(root)?;
+        super::agent_channel::global()
+            .send(&canonical, "readActive", json!({}))
+            .await
     }
 
     /// Open and reveal a project-relative file in this root's existing browser
@@ -452,13 +518,16 @@ fn pick_free_loopback_port() -> Result<u16, String> {
     Ok(port)
 }
 
-fn spawn_child(binary: &str, args: &[String]) -> Result<Child, String> {
+fn spawn_child(binary: &str, args: &[String], envs: &[(&str, String)]) -> Result<Child, String> {
     let mut cmd = Command::new(binary);
     cmd.args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    for (key, value) in envs {
+        cmd.env(key, value);
+    }
     // Prevent a console window on Windows (defensive; the feature is gated off
     // there because there's no standalone binary, but keep spawn parity).
     #[cfg(target_os = "windows")]

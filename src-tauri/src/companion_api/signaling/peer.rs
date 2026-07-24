@@ -194,14 +194,25 @@ impl PeerSession {
         self.pc.add_ice_candidate(candidate).await
     }
 
-    /// Send a binary payload to the mobile peer over the data channel. The
+    /// Send a JSON envelope to the mobile peer over the data channel. The
     /// dispatcher uses this to deliver RPC responses and event frames.
+    ///
+    /// Sends as a **text** DataChannel message when the payload is valid UTF-8
+    /// (it always is — the dispatcher serializes JSON). This matters: the peer
+    /// (`lib/tauri/transport-rtc.ts:handleDataChannelMessage`) reads inbound
+    /// frames as `String(event.data)`, which cannot decode a binary
+    /// (`ArrayBuffer`/`Blob`) message — so a binary send was silently dropped
+    /// on the receiver, breaking every desktop→peer response and event. The
+    /// mobile→desktop direction already sends text; this makes the two
+    /// symmetric. Non-UTF-8 payloads (should never occur) fall back to binary.
     pub async fn send_bytes(&self, bytes: Vec<u8>) -> Result<(), PeerSendError> {
         let dc = self.dc.read().await;
         let channel = dc.as_ref().ok_or(PeerSendError::ChannelClosed)?;
-        channel
-            .send(&Bytes::from(bytes))
-            .await
+        let result = match String::from_utf8(bytes) {
+            Ok(text) => channel.send_text(text).await,
+            Err(err) => channel.send(&Bytes::from(err.into_bytes())).await,
+        };
+        result
             .map(|_| ())
             .map_err(|e| PeerSendError::Webrtc(e.to_string()))
     }
@@ -443,11 +454,33 @@ mod tests {
             .expect("recv None");
         assert_eq!(received, payload);
 
-        // Reverse direction.
+        // Reverse direction — and ASSERT the mobile actually receives it, AS
+        // TEXT. This pins the ADR-0021 fix: `send_bytes` must deliver a text
+        // DataChannel message, because the TS/mobile receiver reads frames via
+        // `String(event.data)` and silently drops a binary (ArrayBuffer/Blob)
+        // message. The real-pair harness (`pnpm webrtc:pair`) caught this when
+        // every desktop→peer RPC response timed out; this test locks it down.
+        let (mobile_msg_tx, mut mobile_msg_rx) =
+            tokio::sync::mpsc::channel::<(Vec<u8>, bool)>(1);
+        mobile_dc.on_message(Box::new(move |msg: DataChannelMessage| {
+            let tx = mobile_msg_tx.clone();
+            Box::pin(async move {
+                let _ = tx.send((msg.data.to_vec(), msg.is_string)).await;
+            })
+        }));
         desktop
             .send_bytes(b"hello mobile".to_vec())
             .await
             .expect("desktop send");
+        let (mobile_received, is_string) = tokio::time::timeout(timeout, mobile_msg_rx.recv())
+            .await
+            .expect("mobile recv timed out — desktop→mobile frame was dropped")
+            .expect("mobile recv None");
+        assert_eq!(mobile_received, b"hello mobile");
+        assert!(
+            is_string,
+            "desktop→mobile frame must be a TEXT message; a binary message is silently dropped by the TS receiver"
+        );
 
         // Teardown
         desktop.close().await;

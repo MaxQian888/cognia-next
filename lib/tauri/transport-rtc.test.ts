@@ -12,6 +12,7 @@ import {
 import type {
   Envelope,
   PeerRole,
+  PeerSnapshot,
   RtcAnswerBody,
   RtcIceBody,
   SignalingClient,
@@ -25,22 +26,34 @@ const SECRET = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
 
 type Listeners = {
   state: Set<(s: string) => void>
+  subscribed: Set<(p: { peers: PeerSnapshot[] }) => void>
   envelope: Set<(p: { fromRole: PeerRole; envelope: Envelope }) => void>
   error: Set<(p: { code: string; message: string }) => void>
   peerJoined: Set<(r: PeerRole) => void>
   peerLeft: Set<(r: PeerRole) => void>
 }
 
+const DESKTOP_PRESENT: PeerSnapshot[] = [{ role: "desktop", joinedAtMs: 0 }]
+
 class FakeSignaling {
   readonly sent: Array<{ kind: string; body: unknown }> = []
   readonly listeners: Listeners = {
     state: new Set(),
+    subscribed: new Set(),
     envelope: new Set(),
     error: new Set(),
     peerJoined: new Set(),
     peerLeft: new Set(),
   }
   closed = false
+
+  /**
+   * Peers reported in the synthetic `subscribed` frame on connect(). Defaults
+   * to a desktop already in the room, mirroring the common case (desktop
+   * signaling client subscribes at boot). Cold-start-race tests set `[]` and
+   * then drive `emitPeerJoined("desktop")` to prove the F1 wait behaviour.
+   */
+  peersOnSubscribe: PeerSnapshot[] = DESKTOP_PRESENT
 
   on<K extends keyof Listeners>(
     event: K,
@@ -52,9 +65,11 @@ class FakeSignaling {
     }
   }
   connect(): void {
-    // Synthetic "subscribed" once connect() is called.
+    // Synthetic subscribe once connect() is called: flip the WSS state AND
+    // surface the room occupancy the way the real client does.
     queueMicrotask(() => {
       for (const l of this.listeners.state) l("subscribed")
+      for (const l of this.listeners.subscribed) l({ peers: this.peersOnSubscribe })
     })
   }
   async send(kind: string, body: unknown): Promise<void> {
@@ -68,6 +83,12 @@ class FakeSignaling {
   }
   emitError(code: string, message = ""): void {
     for (const l of this.listeners.error) l({ code, message })
+  }
+  emitPeerJoined(role: PeerRole = "desktop"): void {
+    for (const l of this.listeners.peerJoined) l(role)
+  }
+  emitPeerLeft(role: PeerRole = "desktop"): void {
+    for (const l of this.listeners.peerLeft) l(role)
   }
 }
 
@@ -173,7 +194,14 @@ function envelope(kind: Envelope["kind"], body: unknown, seq = 1): Envelope {
   }
 }
 
-function makeRtc() {
+function makeRtc(
+  overrides: Partial<
+    Pick<
+      ConstructorParameters<typeof TransportRtc>[0],
+      "peerWaitTimeoutMs" | "negotiationTimeoutMs"
+    >
+  > = {}
+) {
   const sig = new FakeSignaling()
   const pcs: FakePeerConnection[] = []
   const rtc = new TransportRtc({
@@ -188,6 +216,7 @@ function makeRtc() {
       return pc as unknown as RTCPeerConnection
     },
     signalingClientFactory: () => sig as unknown as SignalingClient,
+    ...overrides,
   })
   return { rtc, sig, pcs }
 }
@@ -217,6 +246,89 @@ describe("TransportRtc", () => {
     pcs[0].channels[0].open()
     await connect
     expect(rtc.getState()).toBe("open")
+  })
+
+  // ADR-0021 F1 — cold-start race. Before the fix, the mobile sent its offer
+  // the instant it subscribed; when the desktop hadn't joined the rendezvous
+  // yet, the signaling server dropped the offer into an empty room and the
+  // whole cold-start stalled until the 8 s negotiation timer fired.
+  describe("cold-start peer wait (F1)", () => {
+    it("holds in 'awaiting-peer' — no offer — when the room is empty on subscribe", async () => {
+      const { rtc, sig, pcs } = makeRtc()
+      sig.peersOnSubscribe = [] // desktop not in the rendezvous yet
+      void rtc.connect()
+      await new Promise((r) => setTimeout(r, 5))
+
+      expect(rtc.getState()).toBe("awaiting-peer")
+      // Critically: NO offer was fired into the empty room, and no peer
+      // connection was even constructed.
+      expect(sig.sent.some((m) => m.kind === "rtc:offer")).toBe(false)
+      expect(pcs.length).toBe(0)
+      rtc.close()
+    })
+
+    it("starts negotiating the moment the desktop peer joins", async () => {
+      const { rtc, sig, pcs } = makeRtc()
+      sig.peersOnSubscribe = []
+      const connect = rtc.connect()
+      await new Promise((r) => setTimeout(r, 5))
+      expect(rtc.getState()).toBe("awaiting-peer")
+
+      // Desktop's signaling client subscribes → server relays peerJoined.
+      sig.emitPeerJoined("desktop")
+      await new Promise((r) => setTimeout(r, 5))
+      expect(rtc.getState()).toBe("negotiating")
+      expect(pcs.length).toBe(1)
+      expect(sig.sent.some((m) => m.kind === "rtc:offer")).toBe(true)
+
+      // Handshake completes normally.
+      sig.emitEnvelope(envelope("rtc:answer", { sdp: "v=0\r\nmock-answer" } as RtcAnswerBody))
+      pcs[0].channels[0].open()
+      await connect
+      expect(rtc.getState()).toBe("open")
+    })
+
+    it("negotiates immediately when the desktop is already in the room on subscribe", async () => {
+      const { rtc, sig } = makeRtc()
+      // Default peersOnSubscribe already lists the desktop.
+      void rtc.connect()
+      await new Promise((r) => setTimeout(r, 5))
+      expect(rtc.getState()).toBe("negotiating")
+      expect(sig.sent.some((m) => m.kind === "rtc:offer")).toBe(true)
+      rtc.close()
+    })
+
+    it("does NOT arm the negotiation timeout while awaiting a peer; fails only after the peer-wait window", async () => {
+      // Real timers with short windows: the negotiation timeout (30ms) is
+      // SHORTER than the peer-wait window (150ms). If the negotiation timer
+      // were (wrongly) armed at subscribe time, we'd fail at ~30ms; instead we
+      // must stay in `awaiting-peer` until the peer-wait window elapses.
+      const { rtc, sig } = makeRtc({ negotiationTimeoutMs: 30, peerWaitTimeoutMs: 150 })
+      sig.peersOnSubscribe = []
+      const connect = rtc.connect()
+      connect.catch(() => undefined)
+      await new Promise((r) => setTimeout(r, 5))
+      expect(rtc.getState()).toBe("awaiting-peer")
+
+      // Past the negotiation timeout, well before the peer-wait window.
+      await new Promise((r) => setTimeout(r, 60))
+      expect(rtc.getState()).toBe("awaiting-peer")
+
+      // Past the peer-wait window → fails over so the caller can drop to WS.
+      await new Promise((r) => setTimeout(r, 120))
+      expect(rtc.getState()).toBe("failed")
+    })
+
+    it("peerLeft before the channel opens fails fast (F7)", async () => {
+      const { rtc, sig } = makeRtc()
+      const connect = rtc.connect()
+      await new Promise((r) => setTimeout(r, 5))
+      expect(rtc.getState()).toBe("negotiating")
+      // Desktop drops mid-handshake — don't wait out the negotiation timer.
+      sig.emitPeerLeft("desktop")
+      await expect(connect).rejects.toThrow(/peer left the rendezvous/i)
+      expect(rtc.getState()).toBe("failed")
+    })
   })
 
   it("forwards local ICE candidates through signaling", async () => {
@@ -590,7 +702,7 @@ describe("TransportRtc", () => {
       await drivePeerOpen(sigs, pcs)
       await connect
 
-      expect(rtc.reconnectNow()).toBe(true)
+      expect(rtc.reconnectNow()).toBe("started")
       // Should NOT wait the 10s backoff; new peer is created immediately.
       await new Promise((r) => setTimeout(r, 5))
       expect(pcs.length).toBe(2)
@@ -606,7 +718,7 @@ describe("TransportRtc", () => {
       pcs[0].channels[0].close()
       expect(rtc.getState()).toBe("reconnecting")
 
-      expect(rtc.reconnectNow()).toBe(true)
+      expect(rtc.reconnectNow()).toBe("started")
       // Cycle 2 should start without waiting the 10s backoff.
       await new Promise((r) => setTimeout(r, 5))
       expect(pcs.length).toBe(2)
@@ -621,27 +733,44 @@ describe("TransportRtc", () => {
       pcs[0].channels[0].close()
       expect(rtc.getState()).toBe("failed")
 
-      expect(rtc.reconnectNow()).toBe(true)
+      expect(rtc.reconnectNow()).toBe("started")
       await new Promise((r) => setTimeout(r, 5))
       expect(pcs.length).toBe(2)
       expect(sigs.length).toBe(2)
     })
 
-    it("reconnectNow() during in-flight negotiation is a no-op", async () => {
+    it("reconnectNow() during in-flight negotiation returns 'busy' without a no-op restart (F3)", async () => {
       const { rtc, sigs, pcs } = makeReconnectable()
       void rtc.connect()
       // Wait just past queueMicrotask so state=negotiating.
       await new Promise((r) => setTimeout(r, 5))
+      expect(rtc.getState()).toBe("negotiating")
       const pcsBefore = pcs.length
       const sigsBefore = sigs.length
-      // First call: throttle was empty, returns true but state guard
-      // keeps the existing cycle alive.
-      expect(rtc.reconnectNow()).toBe(true)
+      // ADR-0021 F3: an action is already in flight, so this reports 'busy'
+      // (NOT the old 'true' that lied "reconnect started") and — crucially —
+      // does not consume the throttle window.
+      expect(rtc.reconnectNow()).toBe("busy")
       await new Promise((r) => setTimeout(r, 5))
       // No fresh peer/signaling were created — the existing in-flight
       // attempt is allowed to settle.
       expect(pcs.length).toBe(pcsBefore)
       expect(sigs.length).toBe(sigsBefore)
+    })
+
+    it("reconnectNow() 'busy' does not burn the throttle window (F3)", async () => {
+      const { rtc, sigs, pcs } = makeReconnectable([10_000])
+      void rtc.connect()
+      await new Promise((r) => setTimeout(r, 5))
+      expect(rtc.getState()).toBe("negotiating")
+      // Click during negotiation → busy, throttle NOT consumed.
+      expect(rtc.reconnectNow()).toBe("busy")
+      // Let the handshake open.
+      await drivePeerOpen(sigs, pcs)
+      // A genuine reconnect from 'open' immediately after must still fire —
+      // the earlier 'busy' must not have started the 5s throttle clock.
+      expect(rtc.reconnectNow()).toBe("started")
+      rtc.close()
     })
 
     it("reconnectNow() throttles repeated calls within the 5s window", async () => {
@@ -650,15 +779,20 @@ describe("TransportRtc", () => {
       await drivePeerOpen(sigs, pcs)
       await connect
 
-      // First call fires.
-      expect(rtc.reconnectNow()).toBe(true)
-      // Second call within the spacing window is rejected — no new peer
-      // beyond the one the first reconnect created.
-      expect(rtc.reconnectNow()).toBe(false)
+      // First call fires and consumes the throttle window.
+      expect(rtc.reconnectNow()).toBe("started")
+      // Drive the fresh cycle back to 'open' so the SECOND call is evaluated
+      // from a settled state — otherwise the in-flight handshake would report
+      // 'busy' (which, by design, doesn't consume the throttle) and we'd never
+      // reach the throttle branch.
+      await drivePeerOpen(sigs, pcs)
+      expect(rtc.getState()).toBe("open")
+      // Second call within the 5s spacing window from a settled state → throttled.
+      expect(rtc.reconnectNow()).toBe("throttled")
       await new Promise((r) => setTimeout(r, 10))
-      // The first reconnect produced cycle 2; the throttled call must
-      // not have started cycle 3.
-      expect(pcs.length).toBeLessThanOrEqual(2)
+      // The throttled call must not have started cycle 3.
+      expect(pcs.length).toBe(2)
+      rtc.close()
     })
 
     it("ICE failure mid-session triggers reconnect, not failed", async () => {

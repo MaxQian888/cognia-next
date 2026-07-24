@@ -114,6 +114,46 @@ pub async fn codeserver_open_file(
     state.open_file(&root, &path, line, column).await
 }
 
+/// Ask the companion extension (Pro IDE Phase 2) to open + reveal an absolute
+/// path in the live VS Code, over the loopback agent channel. Preferred over the
+/// CLI `codeserver_open_file` when the extension is connected; the frontend
+/// degrades to the CLI path on error.
+#[tauri::command]
+pub async fn codeserver_agent_open(
+    state: State<'_, CodeServerState>,
+    root: String,
+    path: String,
+    line: Option<u32>,
+    column: Option<u32>,
+) -> Result<(), String> {
+    state.agent_open(&root, &path, line, column).await
+}
+
+/// Ask the companion extension to reflect an agent's on-disk write as an
+/// undo-able `WorkspaceEdit` (live diff) rather than a bare external reload.
+/// Disk stays the source of truth — the extension reconciles from it.
+#[tauri::command]
+pub async fn codeserver_agent_apply_edit(
+    state: State<'_, CodeServerState>,
+    root: String,
+    path: String,
+    line: Option<u32>,
+    column: Option<u32>,
+) -> Result<(), String> {
+    state.agent_apply_edit(&root, &path, line, column).await
+}
+
+/// Read the live VS Code active-editor context (path / selection / selected text
+/// / diagnostics / open editors) back to the agent. The renderer PII-gates the
+/// payload before it reaches the model.
+#[tauri::command]
+pub async fn codeserver_agent_read_active(
+    state: State<'_, CodeServerState>,
+    root: String,
+) -> Result<serde_json::Value, String> {
+    state.agent_read_active(&root).await
+}
+
 /// Current contents of code-server's `settings.json`, or an empty string when
 /// it does not exist yet. The renderer owns the merge (it has the JSONC parser
 /// the VS Code theme importer already ships).

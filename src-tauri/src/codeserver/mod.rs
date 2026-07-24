@@ -11,6 +11,7 @@
 //! prebuilt binary (Windows, exotic arch); the frontend gates the toggle via
 //! `codeserver_supported`.
 
+pub mod agent_channel;
 pub mod commands;
 pub mod download;
 pub mod process;
