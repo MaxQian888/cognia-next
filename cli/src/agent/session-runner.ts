@@ -13,10 +13,7 @@
 
 import os from "node:os"
 
-import {
-  resolveSendOptions as defaultResolveSendOptions,
-  type BuildOptionsContext,
-} from "@/lib/claude/build-options"
+import { type BuildOptionsContext } from "@/lib/claude/build-options"
 import {
   runAndCaptureAssistantReply as defaultCapture,
   type RunAndCaptureResult,
@@ -30,18 +27,14 @@ type PermissionModeValue = NonNullable<SendOptions["permissionMode"]>
 
 import type { McpServer } from "@cognia/agent-config-types"
 
-import { buildAttachmentContent, type BuiltAttachmentContent } from "./attachments/build"
+import { type BuiltAttachmentContent } from "./attachments/build"
 import { resolveHome } from "../config/load"
 import { type ResolvedConfig } from "../config/schema"
 import type { TuiAction } from "../tui/state/types"
-import { toBuildContext } from "../config/to-build-context"
 import { loadMcpServers } from "../mcp/load-mcp-config"
 import { applyDisabled, readDisabled, readDisabledTools } from "../mcp/mcp-state"
-import { readEnabled } from "../skill/skill-state"
 import { bootstrapSidecar, type SidecarBootstrap } from "../runtime/bootstrap"
-import { ensureCliDb, CliDbSnapshotError } from "../db/bootstrap"
-import { ensurePluginRuntime } from "../plugin/plugin-runtime"
-import { resolveDevPluginsDir } from "../plugin/dev-plugins"
+import { CliDbSnapshotError } from "../db/bootstrap"
 import { subscribePluginToolDispatch } from "../plugin/plugin-tool-dispatch"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 import { mintSessionId } from "./run"
@@ -54,21 +47,20 @@ import {
   withCliAutoApprovedTools,
   withCliDisabledMcpTools,
 } from "./tool-suppression"
-import {
-  applySubagentModelOverrides,
-  discoverDispatchableAgents,
-  type AgentSummary,
-} from "./discover-agents"
-import { withBuiltinAgents } from "./builtin-agents"
-import { discoverCustomAgentModes, resolveAgentMode as selectAgentMode } from "../config/agent-mode"
+import { type AgentSummary } from "./discover-agents"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
+import { clearCliSubagentContext, makeCliPluginToolHandle } from "./subagent-dispatch"
+import { type LoadableSkill } from "./skill-load-tool"
 import {
-  buildCliSubagentToolManifest,
-  clearCliSubagentContext,
-  makeCliPluginToolHandle,
-  registerCliSubagentContext,
-} from "./subagent-dispatch"
-import { buildLoadSkillManifestEntry, type LoadableSkill } from "./skill-load-tool"
+  createCliContextAssembler,
+  prependTextBlock,
+  twinContextBlock,
+  type AttachmentSummary,
+  type CliContextAssembler,
+} from "./session-context"
+import { registerTurnSubagentContext } from "./turn-dispatch"
+
+export type { AttachmentSummary }
 
 // Re-exported from `./tool-suppression` so existing
 // `import { … } from "./session-runner"` call sites (and tests) stay unchanged.
@@ -151,22 +143,6 @@ export interface AgentSessionParams {
   now?: () => number
 }
 
-/** What the attachment builder did with this turn's `@<path>` references. */
-export interface AttachmentSummary {
-  /** Images encoded as native blocks. */
-  imageCount: number
-  /** PDFs sent as native document blocks. */
-  documentCount: number
-  /** Refs whose extracted text was folded into the prompt. */
-  injectedFiles: string[]
-  /** Refs that went through OCR (a subset of `injectedFiles`). */
-  ocr: string[]
-  /** Refs that could not be read/extracted. */
-  failed: string[]
-  /** `@refs` with an unknown/binary extension — left literal. */
-  skipped: string[]
-}
-
 export interface SendTurnOptions {
   gate: PermissionResponder
   onEvent?: (event: CaptureStreamEvent) => void
@@ -210,318 +186,141 @@ export interface AgentSession {
    * live session the sidecar knows by `sessionId`, so a manual `/compact` can
    * target it. Optional so lightweight test doubles need not implement it. */
   isLive?(): boolean
+  /**
+   * Apply a `/model` pick to the live session in place, preserving the thread.
+   * Resolves `true` when it landed on a live session, `false` when there was
+   * nothing live to switch or the agent has no model selection — the caller
+   * then relies on the next turn picking the model up from config. Only the
+   * external path implements this; the built-in sidecar bakes the model into
+   * resolved SendOptions and recreates the session instead.
+   */
+  setModel?(model: string): Promise<boolean>
   close(): Promise<void>
 }
 
 /**
- * Create a persistent agent session. Lazy: the sidecar spawns + options resolve
- * on the first `send`. Subsequent sends reuse both.
+ * Create a persistent agent session. Lazy: the sidecar spawns + context
+ * resolves on the first `send`. Subsequent sends reuse both.
+ *
+ * The session's MEANING (prompt, tools, policy, attachments, twin grounding)
+ * comes from the shared {@link createCliContextAssembler}; this module owns only
+ * the sidecar transport mapping — spawning it, keeping the plugin-tool executor
+ * subscribed, and streaming the turn through `runAndCaptureAssistantReply`.
  */
 export function createAgentSession(params: AgentSessionParams): AgentSession {
   const now = params.now ?? Date.now
   const sessionId = params.sessionId ?? mintSessionId(now())
   const home = params.home ?? resolveHome(process.env, os.homedir())
-  const resolveOptions = params.resolveOptions ?? defaultResolveSendOptions
   const capture = params.capture ?? defaultCapture
   const bootstrap =
     params.bootstrap ?? ((cwd: string) => bootstrapSidecar({ cwd, env: process.env }))
+  const resolveApprovedTools = params.resolveApprovedTools ?? (() => readToolApprovals(home))
+  const resolveDisabledMcpTools = params.resolveDisabledMcpTools ?? (() => readDisabledTools(home))
   const resolveMcpServers =
     params.resolveMcpServers ??
-    (() => {
-      const roots = [params.config.cwd, home]
-      return applyDisabled(loadMcpServers(roots), readDisabled(home))
-    })
-  const resolveSkillIds = params.resolveSkillIds ?? (() => [...readEnabled(home)])
-  const skillLoadMode = params.config.skillLoadMode ?? "name"
-  const resolveLoadableSkills =
-    params.resolveLoadableSkills ??
-    (async (ids: string[]): Promise<LoadableSkill[]> => {
-      // Read the enabled skills' metadata from the CLI-local Dexie (already
-      // opened when skills are enabled) so the load tool advertises the catalog.
-      const { listEnabledSkillsByIds } = await import("@/lib/db/skills")
-      const rows = await listEnabledSkillsByIds(ids)
-      return rows.map((s) => ({ id: s.id, name: s.name, description: s.description }))
-    })
-  const resolveDisabledMcpTools = params.resolveDisabledMcpTools ?? (() => readDisabledTools(home))
-  const ensureDb = params.ensureDb ?? (() => ensureCliDb())
-  const resolveApprovedTools = params.resolveApprovedTools ?? (() => readToolApprovals(home))
-  // Dev plugins imply the plugin runtime (they ride the same manifest path). The
-  // repo `plugins/` dir is resolved once and threaded into the runtime bootstrap.
-  const devPluginsEnabled = params.config.devPlugins === true
-  const pluginToolsEnabled = params.config.pluginTools === true || devPluginsEnabled
-  const devPluginsDir = devPluginsEnabled
-    ? (resolveDevPluginsDir(params.config.devPluginsDir, params.config.cwd) ?? undefined)
-    : undefined
-  const loadPluginRuntime =
-    params.loadPluginRuntime ?? (() => ensurePluginRuntime({ devPluginsDir }))
+    (() => applyDisabled(loadMcpServers([params.config.cwd, home]), readDisabled(home)))
   const subscribePluginTools =
     params.subscribePluginTools ??
     (() => subscribePluginToolDispatch({ handle: makeCliPluginToolHandle() }))
-  const resolveAgents =
-    params.resolveAgents ??
-    (async () =>
-      applySubagentModelOverrides(
-        withBuiltinAgents(await discoverDispatchableAgents([params.config.cwd, home])),
-        params.config.subagentModels
-      ))
-  const resolveAgentMode =
-    params.resolveAgentMode ??
-    (async () =>
-      selectAgentMode(
-        params.config.agentMode,
-        await discoverCustomAgentModes([params.config.cwd, home])
-      ) ?? null)
   const setSessionMode = params.setSessionMode ?? defaultSetSessionMode
-  // The default builder needs the per-send resolved provider/model, so it is
-  // invoked inside `send` (not bound here). Only the test override is captured.
-  const buildContentOverride = params.buildContent
+
+  const assembler: CliContextAssembler = createCliContextAssembler({
+    config: params.config,
+    sessionId,
+    home,
+    now,
+    ...(params.sessionKind ? { sessionKind: params.sessionKind } : {}),
+    ...(params.resolveOptions ? { resolveOptions: params.resolveOptions } : {}),
+    ...(params.buildContent ? { buildContent: params.buildContent } : {}),
+    resolveMcpServers,
+    ...(params.resolveSkillIds ? { resolveSkillIds: params.resolveSkillIds } : {}),
+    ...(params.resolveLoadableSkills
+      ? { resolveLoadableSkills: params.resolveLoadableSkills }
+      : {}),
+    resolveDisabledMcpTools,
+    ...(params.ensureDb ? { ensureDb: params.ensureDb } : {}),
+    resolveApprovedTools,
+    ...(params.loadPluginRuntime ? { loadPluginRuntime: params.loadPluginRuntime } : {}),
+    ...(params.resolveAgents ? { resolveAgents: params.resolveAgents } : {}),
+    ...(params.resolveAgentMode ? { resolveAgentMode: params.resolveAgentMode } : {}),
+    ...(params.fetchTwin ? { fetchTwin: params.fetchTwin } : {}),
+  })
 
   let boot: SidecarBootstrap | null = null
-  let options: SendOptions | null = null
   let pluginUnsub: UnlistenFn | null = null
   let closed = false
-  // Discovered dispatchable subagents (`.cognia/agents/*.md`) — resolved once
-  // with the options. Drives the `dispatch_agent` tool surfaced below and the
-  // per-turn dispatch context the tool's handler reads.
-  let agents: AgentSummary[] = []
-  // True when the `dispatch_agent` (Task) plugin tool was surfaced this session
-  // (non-Anthropic provider + ≥1 subagent). Forces the plugin-tool executor to
-  // subscribe even when plugin/web tools are otherwise off, so the model's
-  // `dispatch_agent` call round-trips back to {@link handleCliDispatchAgent}.
-  let subagentToolEnabled = false
-  // The skill ids that resolved into the prompt (≤ once-resolved, since options
-  // are cached). Surfaced to the UI via `onActiveSkills` on the first send.
-  let activeSkillIds: string[] = []
   let skillsAnnounced = false
-  // Digital-twin grounding state. The stable segment (persona/identity) is
-  // appended to the cached SendOptions once per options lifetime; the dynamic
-  // segment (per-turn RAG + style) rides each user message as a
-  // <twin-context> block, because the interactive channel caches its options
-  // at ensureReady and cannot re-resolve the system prompt per turn. One
-  // English notice per session when the desktop is unreachable.
-  const fetchTwin = params.fetchTwin ?? defaultFetchTwinContext
-  const twinEnabled = params.config.twin?.enabled === true && !!params.config.twin.characterId
-  let twinStableInjected = false
-  let twinNoticeShown = false
-  // Set when the db refused to open because its snapshot was unsafe; reported to
-  // the UI on the next send, once. Distinct from a transient open failure, which
-  // stays silent.
-  let databaseError: CliDbSnapshotError | null = null
   let databaseErrorShown = false
+  // Twin persona: the assembler emits it once per resolved context; the sidecar
+  // path folds it into the cached system prompt (the interactive channel caches
+  // its SendOptions and cannot re-resolve the prompt per turn).
+  let sendOptionsOverrideMode: PermissionModeValue | null = null
 
-  async function ensureReady(): Promise<SendOptions> {
+  async function ensureReady() {
     if (closed) throw new Error("agent session is closed")
-    if (!options) {
-      // Hydrate the in-tree plugin runtime BEFORE resolving options so
-      // `buildPluginToolsManifest` (inside `resolveSendOptions`) sees the
-      // plugins. Graceful: a failure leaves the manifest empty, chat unaffected.
-      if (pluginToolsEnabled) await loadPluginRuntime()
-      let ephemeralSkillIds = resolveSkillIds()
-      // The desktop build-options pipeline reads enabled skills from Dexie via
-      // `getDb()`, which throws "getDb() called on the server" unless the
-      // CLI-local db (and its `window` + IndexedDB shims) is open. Plain chat
-      // touches no Dexie table, so open it lazily — only when a skill is enabled
-      // (commonly carried over from a prior session's `/skill` state file).
-      // Mirrors the goal/memory/tasks controllers, which open the db first too.
-      if (ephemeralSkillIds.length > 0) {
-        try {
-          await ensureDb()
-        } catch (err) {
-          // Opening the CLI-local db failed (locked file, missing shim, …).
-          // Degrade gracefully: resolve options WITHOUT skills rather than let
-          // the build-options Dexie read crash the whole turn. Chat still works;
-          // the skills just don't attach this session.
-          // An unsafe snapshot is different in kind: the user's data was moved
-          // aside, so degrading silently would read as it having vanished.
-          if (err instanceof CliDbSnapshotError) databaseError = err
-          ephemeralSkillIds = []
-        }
-      }
-      activeSkillIds = ephemeralSkillIds
-      // Resolve the active agent mode (best-effort — a bad mode never breaks the
-      // turn) so its prompt/tools/model/permission flow through the shared
-      // resolver, identical to the desktop.
-      const agentMode = await resolveAgentMode().catch(() => null)
-      const ctx = toBuildContext({
-        sessionId,
-        config: params.config,
-        mcpServers: resolveMcpServers(),
-        ephemeralSkillIds,
-        ...(params.sessionKind ? { sessionKind: params.sessionKind } : {}),
-        ...(agentMode ? { agentMode } : {}),
-        // Live TUI turn: request token-level partials so the deltas keep feeding
-        // the idle watchdog through a long single generation (large file write),
-        // preventing a spurious "stream idle for 60000ms" interrupt.
-        interactive: true,
-        now: now(),
-      })
-      options = withCliDisabledMcpTools(
-        withCliAutoApprovedTools(await resolveOptions(ctx), resolveApprovedTools()),
-        resolveDisabledMcpTools()
-      )
-      // Surface the `dispatch_agent` (Task) tool so the model can launch a
-      // subagent. The CLI's dispatch is ALWAYS its own: a model call round-trips
-      // (`plugin_tool_exec` → the CLI handle → `runCliSubagent`) and runs over
-      // THIS host's sidecar/provider. So advertise the provider-agnostic
-      // plugin-tool unconditionally — the Anthropic path consumes `pluginTools`
-      // (a `cognia-plugin-tools` MCP server) exactly like the ai-sdk path, so the
-      // tool reaches the model on BOTH channels.
-      //
-      // We must NOT lean on the SDK-native Task tool driven by `options.agents`:
-      // `resolveSendOptions` now populates that in direct chat (the desktop's
-      // workflow-*/plugin/template subagents), but (a) those are wired to the
-      // desktop's Dexie-backed `executeAgent`, absent here, and (b) on the ai-sdk
-      // channel `options.agents` only drives the `@agent` identity overlay, never
-      // a dispatch tool — so the model saw NO way to delegate there. A non-empty
-      // `options.agents` also used to SUPPRESS this very tool (the removed
-      // `nativeAgentsPresent` guard), the regression that left dispatch dormant.
-      // So drop the desktop agent map and make the CLI plugin tool the single
-      // dispatch path. `withBuiltinAgents` guarantees ≥1 agent (general-purpose)
-      // even on discovery failure, so the manifest is non-null even with no
-      // `.cognia/agents/*.md`. The CLI sets no `options.agent` (see
-      // `toBuildContext`), so dropping the map can't strand an `@agent` reference.
-      agents = await resolveAgents().catch(() => withBuiltinAgents([]))
-      delete options.agents
-      const manifest = buildCliSubagentToolManifest(agents)
-      if (manifest) {
-        options.pluginTools = [...(options.pluginTools ?? []), manifest]
-        subagentToolEnabled = true
-      }
-      // Name-only skill loading (progressive disclosure): when skills are enabled
-      // AND the load mode is "name", the prompt carries only the catalog, so the
-      // model needs the `load_skill` tool to pull a skill's full body on demand.
-      // The plugin-tool executor is subscribed unconditionally below (for
-      // `ask_user`), so the tool round-trips back to the CLI handle without a
-      // separate gate. Best-effort metadata read enriches the advertised list; a
-      // failure still surfaces a generic (functional) tool.
-      if (skillLoadMode === "name" && ephemeralSkillIds.length > 0) {
-        const loadable = await resolveLoadableSkills(ephemeralSkillIds).catch(
-          (): LoadableSkill[] => []
-        )
-        options.pluginTools = [
-          ...(options.pluginTools ?? []),
-          buildLoadSkillManifestEntry(loadable),
-        ]
-      }
-    }
+    const session = await assembler.resolveSession()
     if (!boot) {
       boot = await bootstrap(params.config.cwd)
       // The transport is now live — subscribe the plugin-tool executor so the
       // model's plugin tool calls round-trip back here for execution. This MUST
       // be unconditional: `resolveSendOptions` always appends the `ask_user`
-      // elicitation tool to `options.pluginTools` (it's a core, side-effect-free
-      // capability, advertised on every send regardless of the plugin/web/skill
-      // flags), AND its manifest disables the 120s relay timeout. So if the model
-      // calls `ask_user` while no executor is subscribed, the `plugin_tool_exec`
-      // event has no handler, the response never comes, and the turn hangs
-      // forever. Web tools, plugin tools, and `dispatch_agent` all ride the same
-      // wire, so a single subscription serves them too. Idempotent: guarded by
-      // `pluginUnsub`, and a subscribe failure degrades to no plugin tools.
+      // elicitation tool to `options.pluginTools` AND its manifest disables the
+      // 120s relay timeout, so an unsubscribed `ask_user` call hangs the turn
+      // forever. Web tools, plugin tools, and `dispatch_agent` ride the same
+      // wire, so a single subscription serves them too.
       if (!pluginUnsub) {
         pluginUnsub = await subscribePluginTools().catch(() => null)
       }
     }
-    return options
+    // A `/mode` switch applied to the LIVE sidecar session must survive a later
+    // local read of the cached options.
+    if (sendOptionsOverrideMode) session.sendOptions.permissionMode = sendOptionsOverrideMode
+    return session
   }
 
   return {
     sessionId,
     async send(prompt, opts) {
-      const sendOptions = await ensureReady()
+      const session = await ensureReady()
+      const sendOptions = session.sendOptions
       // Non-Anthropic (ai-sdk) channel agentic step budget. The sidecar's
       // `dispatchAiSdk` runs a manual agent loop and continues across tool-call
       // legs up to this many steps; without it the channel silently stopped after
-      // a single 16-step leg. Sourced from resolved config (default 256) so it
-      // applies to every interactive/headless turn. An explicit `maxTurns`
-      // (subagents / `/goal`) still wins inside the dispatcher.
+      // a single 16-step leg.
       if (sendOptions.aiSdkMaxSteps === undefined && params.config.aiSdkMaxSteps !== undefined) {
         sendOptions.aiSdkMaxSteps = params.config.aiSdkMaxSteps
       }
       // Per-tool execution deadline for read-only built-ins on the ai-sdk
-      // channel. Without it a file-walk tool (content_search / grep / glob) that
-      // hangs on a huge tree keeps the stream-idle watchdog paused, so the turn
-      // only dies at the 5-minute wall-clock ("session … did not end within
-      // 300000ms"). Sourced from resolved config (default 120000; `0` disables).
+      // channel. Without it a file-walk tool that hangs on a huge tree keeps the
+      // stream-idle watchdog paused, so the turn only dies at the wall clock.
       if (
         sendOptions.toolExecutionTimeoutMs === undefined &&
         params.config.toolExecutionTimeoutMs !== undefined
       ) {
         sendOptions.toolExecutionTimeoutMs = params.config.toolExecutionTimeoutMs
       }
-      // Announce the active skills exactly once per session, so the user sees
-      // which skills attached to their chat. After `invalidateOptions` (e.g. a
-      // `/skill` toggle) the set re-resolves and re-announces.
-      if (!skillsAnnounced && activeSkillIds.length > 0) {
+      // Announce the active skills exactly once per session. After
+      // `invalidateOptions` the set re-resolves and re-announces.
+      if (!skillsAnnounced && session.activeSkillIds.length > 0) {
         skillsAnnounced = true
-        opts.onActiveSkills?.(activeSkillIds)
+        opts.onActiveSkills?.(session.activeSkillIds)
       }
-      // Report an unsafe snapshot exactly once per session. `ensureReady` caches,
-      // so the failure is detected on one turn only — but the user must hear
-      // about it even though the turn itself succeeds.
-      if (databaseError && !databaseErrorShown) {
+      // Report an unsafe snapshot exactly once per session: the turn succeeds,
+      // but the user must hear that their data was moved aside.
+      if (session.databaseError && !databaseErrorShown) {
         databaseErrorShown = true
-        opts.onDatabaseError?.(databaseError)
+        opts.onDatabaseError?.(session.databaseError)
       }
-      // Digital-twin grounding (opt-in): REDACTED context from the running
-      // desktop. Stable segment appends to the cached system prompt once;
-      // the dynamic segment (per-turn RAG) is prepended to this turn's user
-      // content below. Unreachable desktop → one notice, turn ungrounded.
-      let twinDynamic: string | undefined
-      if (twinEnabled) {
-        const twin = await fetchTwin({
-          characterId: params.config.twin!.characterId!,
-          message: prompt,
-          sessionId,
-        })
-        if (!twin) {
-          if (!twinNoticeShown) {
-            twinNoticeShown = true
-            opts.onTwinNotice?.(
-              "Twin context unavailable — the Cognia desktop app is not reachable; continuing without it."
-            )
-          }
-        } else if (twin.applied) {
-          const stable = twin.applied.stable ?? twin.applied.systemPrompt
-          if (!twinStableInjected && stable) {
-            twinStableInjected = true
-            sendOptions.systemPrompt = sendOptions.systemPrompt
-              ? `${sendOptions.systemPrompt}\n\n${stable}`
-              : stable
-          }
-          twinDynamic = twin.applied.dynamic
-        }
+      const turn = await assembler.resolveTurn(prompt, session)
+      if (turn.twinNotice) opts.onTwinNotice?.(turn.twinNotice)
+      // The twin persona is session-stable, so it appends to the cached system
+      // prompt rather than riding every message.
+      if (turn.stableTwinContext) {
+        sendOptions.systemPrompt = sendOptions.systemPrompt
+          ? `${sendOptions.systemPrompt}\n\n${turn.stableTwinContext}`
+          : turn.stableTwinContext
       }
-      // Assemble multimodal content: encode `@image` refs, inject text/rich-doc
-      // content, and resolve `@*.pdf` per the active model (native block vs
-      // OCR). The transcript keeps the typed text; only the wire payload carries
-      // the encoded attachments.
-      const activeProvider = sendOptions.provider ?? params.config.provider ?? "anthropic"
-      const built = await (buildContentOverride
-        ? buildContentOverride(prompt, params.config.cwd)
-        : buildAttachmentContent(prompt, params.config.cwd, {
-            provider: activeProvider,
-            model: sendOptions.model ?? "",
-            isAnthropic: activeProvider === "anthropic",
-            anthropicKey: () =>
-              params.config.providers["anthropic"]?.apiKey ?? process.env.ANTHROPIC_API_KEY ?? null,
-          }))
-      if (
-        built.imageCount > 0 ||
-        built.documentCount > 0 ||
-        built.injectedFiles.length > 0 ||
-        built.ocr.length > 0 ||
-        built.failed.length > 0 ||
-        built.skipped.length > 0
-      ) {
-        opts.onAttachments?.({
-          imageCount: built.imageCount,
-          documentCount: built.documentCount,
-          injectedFiles: built.injectedFiles,
-          ocr: built.ocr,
-          failed: built.failed,
-          skipped: built.skipped,
-        })
-      }
+      if (turn.attachments) opts.onAttachments?.(turn.attachments)
       appendTranscript(
         home,
         sessionId,
@@ -530,46 +329,38 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
         now()
       )
       // Publish this turn's dispatch context so a model-driven `dispatch_agent`
-      // call (round-tripping through `plugin_tool_exec` → the CLI handle) can
-      // launch a subagent over the live sidecar with THIS turn's gate, signal,
-      // and resolved provider/MCP context. Cleared in `finally` so a later turn
-      // (or a stale tool-call after the turn ended) never reuses it.
-      if (subagentToolEnabled && agents.length > 0) {
-        registerCliSubagentContext(sessionId, {
-          agents,
-          config: params.config,
-          home,
-          cwd: params.config.cwd,
-          gate: opts.gate,
-          ...(opts.signal ? { signal: opts.signal } : {}),
-          mcpServers: resolveMcpServers(),
-          approvedTools: resolveApprovedTools(),
-          disabledMcpTools: resolveDisabledMcpTools(),
-        })
-      }
-      let result: RunAndCaptureResult
+      // call can launch a subagent over the live sidecar with THIS turn's gate,
+      // signal, and resolved provider/MCP context.
+      const clearDispatch = registerTurnSubagentContext({
+        session,
+        config: params.config,
+        home,
+        gate: opts.gate,
+        ...(opts.signal ? { signal: opts.signal } : {}),
+        approvedTools: resolveApprovedTools(),
+        disabledMcpTools: resolveDisabledMcpTools(),
+      })
       // Per-turn twin RAG rides the user content as a <twin-context> block —
       // the cached SendOptions can't carry a fresh system prompt each turn.
-      let turnContent = built.content
-      if (twinDynamic) {
-        const block = `<twin-context>\n${twinDynamic}\n</twin-context>`
-        turnContent =
-          typeof turnContent === "string"
-            ? `${block}\n\n${turnContent}`
-            : [{ type: "text" as const, text: block }, ...turnContent]
-      }
+      const turnContent = turn.dynamicTwinContext
+        ? prependTextBlock(turn.content, twinContextBlock(turn.dynamicTwinContext))
+        : turn.content
+      let result: RunAndCaptureResult
       try {
         result = await capture(sessionId, turnContent, sendOptions, {
           signal: opts.signal,
           timeoutMs: opts.timeoutMs,
           // Idle (read) watchdog: interrupt a turn whose provider stream stalls
-          // mid-flight. Sourced from resolved config (default 60s) so it applies
-          // to every interactive/headless turn without per-call plumbing.
+          // mid-flight.
           idleTimeoutMs: params.config.streamIdleTimeoutMs,
           onPermissionRequest: opts.gate,
           onEvent: opts.onEvent,
         })
       } finally {
+        clearDispatch()
+        // Defensive: `registerTurnSubagentContext` is a no-op when the tool was
+        // never surfaced, so clear unconditionally in case a nested run left an
+        // entry behind.
         clearCliSubagentContext(sessionId)
       }
       appendTranscript(
@@ -590,23 +381,24 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
       return result
     },
     invalidateOptions() {
-      options = null
-      // Re-resolve skills next turn and re-announce them (the user may have
-      // just toggled a skill via `/skill`).
+      assembler.invalidate()
+      // Re-resolve skills next turn and re-announce them (the user may have just
+      // toggled a skill via `/skill`). The rebuilt options also lose the appended
+      // twin persona, which the assembler re-emits on the next grounded turn.
       skillsAnnounced = false
-      // The rebuilt options lose the appended twin stable segment — inject it
-      // again on the next twin-grounded turn.
-      twinStableInjected = false
+      sendOptionsOverrideMode = null
     },
     async setPermissionMode(mode) {
       // Before the sidecar has spawned there is no live session to mutate — the
       // mode is already in `params.config` and folds into the first
-      // `startSession` via `resolveOptions`. Do nothing (and never respawn).
+      // `startSession` via the resolver. Do nothing (and never respawn).
       if (closed || boot === null) return
       await setSessionMode(sessionId, mode)
-      // Keep the cached options coherent so a later `invalidateOptions` +
-      // re-resolve (or any local read) reflects the live mode.
-      if (options) options = { ...options, permissionMode: mode }
+      // Keep the cached options coherent so a later local read reflects the
+      // live mode.
+      sendOptionsOverrideMode = mode
+      const cached = assembler.peek()
+      if (cached) cached.sendOptions.permissionMode = mode
     },
     isLive() {
       return boot !== null && !closed
