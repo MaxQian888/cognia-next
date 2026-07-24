@@ -42,7 +42,11 @@ function fakeScheduler() {
 
 describe("sweepAllLarkSurfaces", () => {
   it("sweeps every enabled lark adapter and skips the rest", async () => {
-    const sweep = jest.fn(async () => ({ synced: 1, errors: 0, skipped: 0 }))
+    const sweep = jest.fn(async (_ctx: { adapterId: string }) => ({
+      synced: 1,
+      errors: 0,
+      skipped: 0,
+    }))
     const totals = await sweepAllLarkSurfaces({
       listAdapters: async () => [
         adapter({ id: "lk-1" }),

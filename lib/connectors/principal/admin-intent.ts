@@ -22,6 +22,7 @@ import {
   approveFeishuBind,
   listFeishuBindRequests,
   listFeishuPrincipals,
+  rebindFeishuPrincipalIdentity,
   registerFeishuTenant,
   rejectFeishuBind,
   setFeishuPrincipalEnabled,
@@ -132,6 +133,24 @@ export async function runPrincipalAdminIntent(
           status: intent.status,
         })
         return { ok: true, result: { principalId: principal.id, status: principal.status } }
+      }
+
+      case "rebind": {
+        if (!intent.principalId) return { ok: false, error: "principal_required" }
+        if (!intent.cogniaUserId) return { ok: false, error: "user_required" }
+        const principal = await rebindFeishuPrincipalIdentity({
+          adapterId,
+          principalId: intent.principalId,
+          patch: { cogniaUserId: intent.cogniaUserId },
+        })
+        return {
+          ok: true,
+          result: {
+            principalId: principal.id,
+            cogniaUserId: principal.cogniaUserId,
+            version: principal.version,
+          },
+        }
       }
 
       case "register-tenant": {

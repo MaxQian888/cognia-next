@@ -157,7 +157,7 @@ await getDb().adapterInstances.put({
 } as never)
 
 await step("whoami probe resolves the bot identity", async () => {
-  const probe = await probeBotIdentity(ADAPTER_ID, async () => creds)
+  const probe = await probeBotIdentity(ADAPTER_ID)
   const row = await getDb().adapterInstances.get(ADAPTER_ID)
   const tenantKey = row?.lastWhoamiResult?.tenantKey
   return `app ${probe.appId}${tenantKey ? `, tenant ${tenantKey}` : ", tenant UNKNOWN"}`
@@ -193,7 +193,10 @@ if (!tenantKey) {
     await approveFeishuBind({ code: request.id })
     const resolution = await resolveConnectorPrincipal({
       platform: "lark",
-      adapterRow: { settings: { larkPrincipalRegistry: true }, lastWhoamiResult: { appId: APP_ID } },
+      adapterRow: {
+        settings: { larkPrincipalRegistry: true },
+        lastWhoamiResult: { botName: "verify", appId: APP_ID, openId: "ou_bot", tenantKey },
+      },
       remoteUserId: openId,
       identityScope: { tenantKey, appId: APP_ID },
     })

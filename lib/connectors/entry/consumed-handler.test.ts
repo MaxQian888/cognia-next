@@ -391,7 +391,10 @@ describe("installLarkIntentHandler", () => {
     // Chat membership says "you are in this room" — it says nothing about
     // whether Cognia still serves you.
     const deps = makeDeps({
-      resolvePrincipal: jest.fn(async () => ({ status: "principal_disabled" as const })),
+      resolvePrincipal: jest.fn(async () => ({
+        status: "principal_disabled" as const,
+        principal: { id: "fp_1", status: "disabled" },
+      })) as never,
       tenantRequest: jest.fn(async () => {
         throw new Error("membership must not be consulted")
       }),
@@ -426,7 +429,7 @@ describe("installLarkIntentHandler", () => {
       resolvePrincipal: jest.fn(async () => ({
         status: "cross_account" as const,
         declaredAccountId: "acct_b",
-      })),
+      })) as never,
     })
 
     await handleLarkIntentFrame(

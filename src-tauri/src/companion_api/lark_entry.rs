@@ -1094,6 +1094,7 @@ const ADMIN_OPS: &[&str] = &[
     "approve",
     "reject",
     "set-principal-status",
+    "rebind",
     "register-tenant",
     "set-tenant-status",
     "sweep",

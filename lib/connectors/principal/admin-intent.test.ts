@@ -199,4 +199,38 @@ describe("runPrincipalAdminIntent", () => {
     if (outcome.ok) return
     expect(outcome.error).toContain("not found")
   })
+
+  it("rebinds a principal to another account-local user", async () => {
+    await upsertFeishuTenant({ tenantKey: "tk_a", appId: "cli_1", cogniaAccountId: "acct_a" })
+    const principal = await createFeishuPrincipal({
+      tenantKey: "tk_a",
+      appId: "cli_1",
+      openId: "ou_1",
+      cogniaAccountId: "acct_a",
+      cogniaUserId: "acct_a",
+    })
+
+    const outcome = await runPrincipalAdminIntent(
+      { adapterId: "lark-1", op: "rebind", principalId: principal.id, cogniaUserId: "user_7" },
+      deps()
+    )
+
+    expect(outcome).toEqual({
+      ok: true,
+      result: { principalId: principal.id, cogniaUserId: "user_7", version: 2 },
+    })
+  })
+
+  it("requires both a principal and a target user to rebind", async () => {
+    expect(await runPrincipalAdminIntent({ adapterId: "lark-1", op: "rebind" }, deps())).toEqual({
+      ok: false,
+      error: "principal_required",
+    })
+    expect(
+      await runPrincipalAdminIntent(
+        { adapterId: "lark-1", op: "rebind", principalId: "fp_1" },
+        deps()
+      )
+    ).toEqual({ ok: false, error: "user_required" })
+  })
 })

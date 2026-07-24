@@ -30,6 +30,9 @@ Usage:
   cognia-agent lark disable <principalId>       stop a principal from executing
   cognia-agent lark enable <principalId>        re-activate a principal
   cognia-agent lark unlink <principalId>        detach a principal's Cognia linkage
+  cognia-agent lark rebind <principalId> --user <id>
+                                                point a principal at another
+                                                account-local Cognia user
   cognia-agent lark tenant register             admit this adapter's tenant scope
   cognia-agent lark tenant disable|enable       flip the tenant's admission
   cognia-agent lark sweep                       expire stale bind requests
@@ -95,6 +98,12 @@ function buildRequest(args: ParsedArgs, adapterId: string): AdminRequest | { err
     case "reject":
       if (!first) return { error: "lark reject: missing <code>" }
       return { op: "reject", adapterId, code: first }
+    case "rebind": {
+      if (!first) return { error: "lark rebind: missing <principalId>" }
+      const user = stringFlag(args, "user")
+      if (!user) return { error: "lark rebind: missing --user <id>" }
+      return { op: "rebind", adapterId, principalId: first, cogniaUserId: user }
+    }
     case "disable":
     case "enable":
     case "unlink": {

@@ -133,6 +133,10 @@ describe("larkCommand", () => {
           status: "unlinked",
         },
       ],
+      [
+        ["lark", "rebind", "fp_1", "--user", "u7"],
+        { op: "rebind", adapterId: "lark-1", principalId: "fp_1", cogniaUserId: "u7" },
+      ],
       [["lark", "tenant", "register"], { op: "register-tenant", adapterId: "lark-1" }],
       [
         ["lark", "tenant", "disable"],
@@ -153,6 +157,20 @@ describe("larkCommand", () => {
       expect(code).toBe(0)
       expect(JSON.parse(String(calls[0].init?.body))).toEqual(expected)
     }
+  })
+
+  it("refuses a rebind with no target user", async () => {
+    const { out, stderr } = sink()
+    const doFetch = jest.fn()
+    const code = await larkCommand(parseArgv(["lark", "rebind", "fp_1"]), {
+      out,
+      env: ENV,
+      fetch: doFetch as unknown as typeof fetch,
+      sleep,
+    })
+    expect(code).toBe(2)
+    expect(stderr.join("")).toContain("--user")
+    expect(doFetch).not.toHaveBeenCalled()
   })
 
   it("rejects a verb that needs an argument it did not get", async () => {
