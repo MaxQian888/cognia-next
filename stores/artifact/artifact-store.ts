@@ -495,6 +495,12 @@ interface ArtifactActions {
    */
   closeArtifact: (id: string) => void
   /**
+   * Move an open tab to a new position (drag-reorder in the tab strip).
+   * Only touches `openArtifactIds` — NOT `artifactWorkspace.recentArtifactIds`,
+   * which is MRU history, not tab order.
+   */
+  reorderOpenArtifact: (id: string, toIndex: number) => void
+  /**
    * Drop every artifact + canvas document owned by a workspace. Called by
    * `deleteProjectCascade` when a project is deleted (Workspace isolation).
    */
@@ -849,6 +855,19 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           const closedIndex = state.openArtifactIds.indexOf(id)
           const neighbour = openArtifactIds[closedIndex] ?? openArtifactIds[closedIndex - 1] ?? null
           return { openArtifactIds, activeArtifactId: neighbour }
+        })
+      },
+
+      reorderOpenArtifact: (id, toIndex) => {
+        set((state) => {
+          const fromIndex = state.openArtifactIds.indexOf(id)
+          if (fromIndex === -1) return state
+          const clamped = Math.max(0, Math.min(state.openArtifactIds.length - 1, toIndex))
+          if (clamped === fromIndex) return state
+          const openArtifactIds = [...state.openArtifactIds]
+          openArtifactIds.splice(fromIndex, 1)
+          openArtifactIds.splice(clamped, 0, id)
+          return { openArtifactIds }
         })
       },
 

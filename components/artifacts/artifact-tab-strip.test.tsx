@@ -106,6 +106,44 @@ describe("ArtifactTabStrip", () => {
     expect(useArtifactStore.getState().activeArtifactId).toBe(second.id)
   })
 
+  it("middle-click closes a tab (browser/editor convention)", () => {
+    const [first, second] = seed(["First", "Second"])
+    render(<ArtifactTabStrip />)
+
+    fireEvent(
+      screen.getByTestId(`artifact-tab-${first.id}`),
+      new MouseEvent("auxclick", { bubbles: true, button: 1 })
+    )
+
+    expect(useArtifactStore.getState().openArtifactIds).toEqual([second.id])
+  })
+
+  it("non-middle aux clicks leave the tab alone", () => {
+    const [first, second] = seed(["First", "Second"])
+    render(<ArtifactTabStrip />)
+
+    fireEvent(
+      screen.getByTestId(`artifact-tab-${first.id}`),
+      new MouseEvent("auxclick", { bubbles: true, button: 2 })
+    )
+
+    expect(useArtifactStore.getState().openArtifactIds).toEqual([first.id, second.id])
+  })
+
+  it("drag-reorders tabs without touching the MRU recents list", () => {
+    const [first, second, third] = seed(["First", "Second", "Third"])
+    const recentsBefore = useArtifactStore.getState().artifactWorkspace.recentArtifactIds
+    render(<ArtifactTabStrip />)
+
+    fireEvent.dragStart(screen.getByTestId(`artifact-tab-item-${first.id}`), {
+      dataTransfer: { effectAllowed: "" },
+    })
+    fireEvent.drop(screen.getByTestId(`artifact-tab-item-${third.id}`))
+
+    expect(useArtifactStore.getState().openArtifactIds).toEqual([second.id, third.id, first.id])
+    expect(useArtifactStore.getState().artifactWorkspace.recentArtifactIds).toEqual(recentsBefore)
+  })
+
   it("ignores ids whose artifact no longer exists", () => {
     const [first, second] = seed(["First", "Second"])
     // The persist layer evicts artifacts under an LRU cap while the tab id list

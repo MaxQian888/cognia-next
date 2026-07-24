@@ -88,8 +88,14 @@ jest.mock("@/components/ui/resizable", () => {
         </div>
       )
     },
-    ResizableHandle: ({ className }: { className?: string }) => (
-      <div data-testid="resizable-handle" className={className} />
+    ResizableHandle: ({
+      className,
+      onDoubleClick,
+    }: {
+      className?: string
+      onDoubleClick?: () => void
+    }) => (
+      <div data-testid="resizable-handle" className={className} onDoubleClick={onDoubleClick} />
     ),
   }
 })
@@ -229,6 +235,31 @@ describe("ArtifactWorkspaceDock", () => {
 
     act(() => screen.getByTestId("resize-dock").click())
     expect(useArtifactDockLayoutStore.getState().dockSize).toBe(42)
+  })
+
+  it("double-clicking the divider restores the profile's preset width, animated", () => {
+    act(() => {
+      useArtifactDockLayoutStore.getState().setDockCollapsed(false)
+      useArtifactDockLayoutStore.getState().setDockSize(48)
+    })
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+    const before = useArtifactDockLayoutStore.getState().dockSizeRequest
+
+    act(() => {
+      screen
+        .getByTestId("resizable-handle")
+        .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))
+    })
+
+    const state = useArtifactDockLayoutStore.getState()
+    // Compact profile preset (ARTIFACT_DOCK_BOUNDS.default); routed through
+    // the request token so it animates like the narrow/wide buttons.
+    expect(state.dockSize).toBe(34)
+    expect(state.dockSizeRequest).toBe(before + 1)
   })
 
   it("animates collapse/expand via a motion-speed-scaled inline transition", async () => {

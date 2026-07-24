@@ -108,6 +108,30 @@ describe("openArtifactIds (the dock's tab strip)", () => {
     expect(open.at(-1)).toBe(created.at(-1)!.id)
   })
 
+  it("reorders an open tab in place, clamped and MRU-untouched", () => {
+    const a = make("A")
+    const b = make("B")
+    const c = make("C")
+    const recentsBefore = useArtifactStore.getState().artifactWorkspace.recentArtifactIds
+
+    useArtifactStore.getState().reorderOpenArtifact(a.id, 2)
+    expect(useArtifactStore.getState().openArtifactIds).toEqual([b.id, c.id, a.id])
+
+    // Out-of-range targets clamp instead of dropping the id.
+    useArtifactStore.getState().reorderOpenArtifact(a.id, -5)
+    expect(useArtifactStore.getState().openArtifactIds).toEqual([a.id, b.id, c.id])
+    useArtifactStore.getState().reorderOpenArtifact(a.id, 99)
+    expect(useArtifactStore.getState().openArtifactIds).toEqual([b.id, c.id, a.id])
+
+    // Unknown id and same-position moves are no-ops.
+    const before = useArtifactStore.getState().openArtifactIds
+    useArtifactStore.getState().reorderOpenArtifact("nope", 0)
+    useArtifactStore.getState().reorderOpenArtifact(a.id, 2)
+    expect(useArtifactStore.getState().openArtifactIds).toBe(before)
+
+    expect(useArtifactStore.getState().artifactWorkspace.recentArtifactIds).toEqual(recentsBefore)
+  })
+
   it("ignores closing an id that is not open", () => {
     const a = make("A")
     make("B")

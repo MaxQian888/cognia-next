@@ -13,6 +13,7 @@
  * the panels need more.
  */
 
+import { useState } from "react"
 import { XIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
@@ -44,7 +45,9 @@ export function ArtifactTabStrip({ className }: { className?: string }) {
   const activeArtifactId = useArtifactStore((state) => state.activeArtifactId)
   const setActiveArtifact = useArtifactStore((state) => state.setActiveArtifact)
   const closeArtifact = useArtifactStore((state) => state.closeArtifact)
+  const reorderOpenArtifact = useArtifactStore((state) => state.reorderOpenArtifact)
   const tabs = useOpenArtifactTabs()
+  const [draggedId, setDraggedId] = useState<string | null>(null)
 
   if (tabs.length === 0) return null
 
@@ -55,15 +58,32 @@ export function ArtifactTabStrip({ className }: { className?: string }) {
       data-testid="artifact-tab-strip"
       className={cn("flex min-w-0 items-center gap-0.5 overflow-x-auto", className)}
     >
-      {tabs.map((id) => {
+      {tabs.map((id, index) => {
         const artifact = artifacts[id]
         const active = id === activeArtifactId
         return (
           <div
             key={id}
+            draggable
+            data-testid={`artifact-tab-item-${id}`}
+            onDragStart={(event) => {
+              setDraggedId(id)
+              event.dataTransfer.effectAllowed = "move"
+            }}
+            onDragEnd={() => setDraggedId(null)}
+            onDragOver={(event) => {
+              // Required, or the browser refuses the drop.
+              if (draggedId && draggedId !== id) event.preventDefault()
+            }}
+            onDrop={(event) => {
+              event.preventDefault()
+              if (draggedId && draggedId !== id) reorderOpenArtifact(draggedId, index)
+              setDraggedId(null)
+            }}
             className={cn(
               "group flex min-w-0 shrink items-center gap-1 rounded-md pr-0.5 pl-1.5",
-              active ? "bg-secondary" : "hover:bg-accent/50"
+              active ? "bg-secondary" : "hover:bg-accent/50",
+              draggedId === id && "opacity-50"
             )}
           >
             <button
@@ -73,6 +93,10 @@ export function ArtifactTabStrip({ className }: { className?: string }) {
               data-testid={`artifact-tab-${id}`}
               className="flex min-w-0 items-center gap-1.5 py-1 text-xs"
               onClick={() => setActiveArtifact(id)}
+              // Browser/editor convention: middle-click closes the tab.
+              onAuxClick={(event) => {
+                if (event.button === 1) closeArtifact(id)
+              }}
             >
               <span className="shrink-0 text-muted-foreground">
                 {getArtifactTypeIcon(artifact.type)}
@@ -85,7 +109,9 @@ export function ArtifactTabStrip({ className }: { className?: string }) {
               size="icon"
               aria-label={t("dock.closeTab", { title: artifact.title })}
               data-testid={`artifact-tab-close-${id}`}
-              className="size-5 shrink-0 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+              // Hover-revealed on mouse; always visible on coarse pointers,
+              // where there is no hover to reveal it.
+              className="size-5 shrink-0 opacity-0 focus-visible:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100"
               onClick={() => closeArtifact(id)}
             >
               <XIcon className="size-3" />

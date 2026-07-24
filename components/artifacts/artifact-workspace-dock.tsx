@@ -26,6 +26,7 @@ import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import {
   ARTIFACT_DOCK_BOUNDS,
   CHAT_MIN_PERCENT,
+  DOCK_MODE_WIDTH_PERCENT,
   WORKSPACE_DOCK_BOUNDS,
   useArtifactDockLayoutStore,
 } from "@/stores/artifact/artifact-dock-layout-store"
@@ -133,6 +134,7 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
   const layoutVersion = useArtifactDockLayoutStore((s) => s.layoutVersion)
   const dockSizeRequest = useArtifactDockLayoutStore((s) => s.dockSizeRequest)
   const setDockSize = useArtifactDockLayoutStore((s) => s.setDockSize)
+  const requestDockSize = useArtifactDockLayoutStore((s) => s.requestDockSize)
   const notifyNewArtifact = useArtifactDockLayoutStore((s) => s.notifyNewArtifact)
   const dockPanelRef = useRef<PanelImperativeHandle | null>(null)
   const dockPanelElementRef = useRef<HTMLDivElement | null>(null)
@@ -235,6 +237,13 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
             dockCollapsed && "w-0 opacity-0 [&>div]:opacity-0"
           )}
           disabled={dockCollapsed}
+          // Editor-splitter convention: double-click restores the current
+          // profile's preset width. Routed through the request token so the
+          // change animates like the narrow/wide buttons instead of snapping.
+          onDoubleClick={() => {
+            if (dockCollapsed) return
+            requestDockSize(DOCK_MODE_WIDTH_PERCENT[dockProfile].narrow)
+          }}
         />
 
         <ResizablePanel
