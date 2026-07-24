@@ -35,6 +35,8 @@ import {
 } from "../runtime/backend-capabilities"
 import { defaultBackendModelHost, type ExternalModelOption } from "../runtime/backend-models"
 import { disconnectBackend } from "../runtime/backend-controller"
+import { LaunchShell } from "./LaunchShell"
+import { LAUNCH_LIST_CHROME_ROWS, launchListRows, launchShellLayout } from "./launch-shell-layout"
 import { createBackendLifecycle, type BackendLifecycle } from "../runtime/backend-lifecycle"
 import type {
   connectBackend,
@@ -91,6 +93,8 @@ import { shouldAutoCompact } from "../../agent/auto-compact"
 import { ensureCliDb } from "../../db/bootstrap"
 import { formSubmit } from "../state/form"
 import { createInitialState } from "../state/initial"
+import { requiresAcknowledgement } from "../state/permission-mode-meta"
+import { startupBypassConfirmOverlay } from "../runtime/permission-mode-switch"
 import { tuiReducer } from "../state/reducer"
 import { isBusy } from "../state/selectors"
 import { transcriptToCells } from "../format/transcript"
@@ -1511,6 +1515,25 @@ export function App({
     runCommandLine(initialCommand)
   }, [initialCommand, state.phase, runCommandLine])
 
+  // Startup acknowledgement for a session that OPENS with no guardrails —
+  // `--bypass` on the command line, or a `permissionMode` persisted in config.
+  // A launch flag is an intent, not informed consent: the composer must not
+  // accept its first message while every approval gate is silently disarmed.
+  // Runs once, after the trust gate has cleared (same reason as the launch
+  // command above), and declining de-escalates the session rather than leaving
+  // it armed — see `startupBypassConfirmOverlay`.
+  const bypassGateShownRef = useRef(false)
+  useEffect(() => {
+    if (bypassGateShownRef.current) return
+    if (state.phase !== "chat" || state.bypassAcknowledged) return
+    if (!requiresAcknowledgement(state.config.permissionMode)) return
+    bypassGateShownRef.current = true
+    dispatch({
+      type: "OVERLAY_OPEN",
+      overlay: startupBypassConfirmOverlay(state.config.permissionMode),
+    })
+  }, [state.phase, state.bypassAcknowledged, state.config.permissionMode])
+
   // Resolve `@skill:` / `@agent:` mentions in a submitted line before it is sent:
   // enable + persist mentioned skills, synchronously dispatch mentioned agents and
   // fold their output into the prompt, and strip the tokens. Reuses the same
@@ -2011,7 +2034,6 @@ export function App({
     copyClipboard,
     runCommandLine,
     openModelPicker,
-    persist,
     pasteClipboardImage,
     scrollReset,
     disarmBacktrack,
@@ -2091,82 +2113,84 @@ export function App({
     return () => clearTimeout(t)
   }, [isStreaming, state.streamSeq])
 
-  // Startup phase: welcome banner + the "do you trust this folder?" gate only —
-  // no transcript/composer/footer until the user proceeds.
+  // Every pre-chat phase draws in the SAME shell (see LaunchShell): a fixed
+  // banner region, a bounded body, and a hint line the body can never push off.
+  // Before this they each replaced the whole layout tree, so in fullscreen the
+  // frame collapsed and repainted on every transition, and a long install log or
+  // failure message could hide the very rows the user had to act on.
+  const launchShell = (body: React.ReactNode, hint?: string) => (
+    <ThemeProvider palette={themePalette}>
+      <RenderPrefsProvider prefs={renderPrefs}>
+        <LaunchShell
+          banner={banner}
+          {...(hint ? { hint } : {})}
+          columns={columns}
+          rows={rows}
+          fullscreen={fullscreen}
+        >
+          {body}
+        </LaunchShell>
+      </RenderPrefsProvider>
+    </ThemeProvider>
+  )
+  const launchBodyRows = launchShellLayout(rows, true).bodyRows
+
+  // Startup phase: the "do you trust this folder?" gate only — no transcript,
+  // composer or footer until the user proceeds.
   if (state.phase === "startup") {
-    return (
-      <ThemeProvider palette={themePalette}>
-        <RenderPrefsProvider prefs={renderPrefs}>
-          <Box flexDirection="column" width={columns}>
-            {banner}
-            <StartupGate
-              cwd={state.config.cwd}
-              onTrust={trustCwd}
-              onChangeCwd={changeCwd}
-              listDirs={listDirs}
-              width={columns}
-              maxRows={overlayRows}
-            />
-          </Box>
-        </RenderPrefsProvider>
-      </ThemeProvider>
+    return launchShell(
+      <StartupGate
+        cwd={state.config.cwd}
+        onTrust={trustCwd}
+        onChangeCwd={changeCwd}
+        listDirs={listDirs}
+        width={columns}
+        maxRows={launchListRows(launchBodyRows, LAUNCH_LIST_CHROME_ROWS)}
+      />
     )
   }
 
   // The external agent is coming up. The composer stays closed so a message
   // cannot be typed into a backend that may still fail to start.
   if (state.phase === "connecting") {
-    return (
-      <ThemeProvider palette={themePalette}>
-        <RenderPrefsProvider prefs={renderPrefs}>
-          <Box flexDirection="column" width={columns}>
-            {banner}
-            <BackendConnect
-              backend={state.backendConnect?.backend ?? state.config.agentBackend ?? "builtin"}
-              stage={state.backendConnect?.stage ?? "preset"}
-              width={columns}
-            />
-          </Box>
-        </RenderPrefsProvider>
-      </ThemeProvider>
+    return launchShell(
+      <BackendConnect
+        backend={state.backendConnect?.backend ?? state.config.agentBackend ?? "builtin"}
+        stage={state.backendConnect?.stage ?? "preset"}
+        width={columns}
+      />,
+      // The shell owns the cancellation hint, so it stays visible even when the
+      // progress line wraps on a narrow terminal.
+      "Esc to cancel"
     )
   }
 
   // The agent's CLI is being installed from the failure page. Like connecting,
   // the composer stays closed — there is nothing to type into yet.
   if (state.phase === "installing" && state.backendInstall) {
-    return (
-      <ThemeProvider palette={themePalette}>
-        <RenderPrefsProvider prefs={renderPrefs}>
-          <Box flexDirection="column" width={columns}>
-            {banner}
-            <BackendInstall install={state.backendInstall} width={columns} maxRows={overlayRows} />
-          </Box>
-        </RenderPrefsProvider>
-      </ThemeProvider>
+    return launchShell(
+      <BackendInstall
+        install={state.backendInstall}
+        width={columns}
+        maxRows={launchListRows(launchBodyRows, LAUNCH_LIST_CHROME_ROWS)}
+      />,
+      "Esc to cancel"
     )
   }
 
   if (state.phase === "connect-failed" && state.backendFailure) {
-    return (
-      <ThemeProvider palette={themePalette}>
-        <RenderPrefsProvider prefs={renderPrefs}>
-          <Box flexDirection="column" width={columns}>
-            {banner}
-            <BackendFailure
-              backend={state.config.agentBackend ?? "builtin"}
-              failure={state.backendFailure}
-              installOption={state.backendInstallOption}
-              installError={state.backendInstallError}
-              index={failureIndex}
-              onIndexChange={setFailureIndex}
-              onSelect={onBackendFailureAction}
-              width={columns}
-              maxRows={overlayRows}
-            />
-          </Box>
-        </RenderPrefsProvider>
-      </ThemeProvider>
+    return launchShell(
+      <BackendFailure
+        backend={state.config.agentBackend ?? "builtin"}
+        failure={state.backendFailure}
+        installOption={state.backendInstallOption}
+        installError={state.backendInstallError}
+        index={failureIndex}
+        onIndexChange={setFailureIndex}
+        onSelect={onBackendFailureAction}
+        width={columns}
+        maxRows={launchListRows(launchBodyRows, LAUNCH_LIST_CHROME_ROWS)}
+      />
     )
   }
 
