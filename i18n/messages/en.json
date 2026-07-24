@@ -20088,6 +20088,44 @@
         "encryptionEnabledAria": "Toggle event encryption",
         "encryptionEnabledHelp": "Turn on when Lark App → Event subscriptions → Encrypt Key is configured.",
         "encryptionEnabledLabel": "Encrypted events",
+        "entrySurfaces": {
+          "flag": {
+            "larkChatTab": "Chat Tab sync",
+            "larkGroupMenu": "Group menu sync",
+            "larkMessageShortcut": "Message shortcut import",
+            "larkNativeSlash": "Command menu batch",
+            "larkPlusMenu": "Plus-menu new task",
+            "larkPrincipalRegistry": "Principal registry (unified identity)",
+            "larkWebSso": "Web SSO login"
+          },
+          "flagsHelp": "Per-adapter overrides for the gray release. Unset flags fall back to environment / global defaults (all off).",
+          "flagsLabel": "Entry feature flags (this adapter)",
+          "resync": "Resync surfaces",
+          "resyncDone": "Resync finished: {synced} synced, {errors} failed, {skipped} skipped.",
+          "resyncFailed": "Resync failed. Check the adapter credentials and try again.",
+          "resyncing": "Resyncing…",
+          "status": {
+            "error": "Error",
+            "pending": "Pending",
+            "rebuild_required": "Rebuild required",
+            "removed": "Removed",
+            "synced": "Synced"
+          },
+          "statusAria": "Surface status",
+          "strictAuth": {
+            "audit": "Audit",
+            "enforce": "Enforce",
+            "off": "Off"
+          },
+          "strictAuthHelp": "audit runs every check and records would-deny decisions without blocking; enforce blocks them. Flip to enforce only after the audit stream is quiet (see the runbook).",
+          "strictAuthLabel": "Callback authorization mode",
+          "surfacesEmpty": "No chat surfaces recorded yet — they appear when the bot is added to chats with Chat Tab / group menu enabled.",
+          "surfacesLabel": "Chat surfaces",
+          "title": "Web entry & Lark surfaces",
+          "webBaseHelp": "Public https URL of the Cognia web app reachable from inside Lark clients. Chat Tab / menu links and SSO bounces are built on it; leave empty to keep external links disabled.",
+          "webBaseLabel": "Web entry base URL",
+          "webBasePlaceholder": "https://cognia.example.com"
+        },
         "openCompanion": "Open Companion settings",
         "openCompanionAria": "Open Mobile Companion → Tunnel",
         "openConsole": "Open Lark console",

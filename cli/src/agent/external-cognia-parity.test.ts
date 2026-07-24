@@ -437,3 +437,156 @@ describe("turn content", () => {
     expect(skills).toEqual([["skill-a"]])
   })
 })
+
+describe("tool-host rendering", () => {
+  /** A broker double that drives the render callbacks it is handed. */
+  function renderingHost() {
+    let captured: {
+      onToolCall?: (e: { name: string; input: unknown; callKey: string }) => void
+      onToolResult?: (e: { callKey: string; name: string; ok: boolean; summary?: string }) => void
+    } = {}
+    return {
+      fire: () => {
+        captured.onToolCall?.({ name: "read", input: { path: "a.ts" }, callKey: "k1" })
+        captured.onToolResult?.({ callKey: "k1", name: "read", ok: true, summary: "42 lines" })
+        captured.onToolResult?.({ callKey: "k2", name: "write", ok: false, summary: "denied" })
+      },
+      start: async (p: typeof captured) => {
+        captured = p
+        return {
+          endpoint: "/tmp/x.sock",
+          token: "t",
+          attempt: 1,
+          connections: () => 1,
+          isClosed: () => false,
+          cancelInFlight: () => undefined,
+          close: async () => undefined,
+        } as unknown as ToolHostBroker
+      },
+    }
+  }
+
+  it("renders a projected tool call and its result as ordinary tool cells", async () => {
+    const config = cfg()
+    const { manager } = fakeManager()
+    const host = renderingHost()
+    const actions: TuiAction[] = []
+    const session = createExternalAgentSession({
+      config,
+      manager,
+      home: HOME,
+      sessionId: "s1",
+      transcriptFs: memoryFs(),
+      assembler: createCliContextAssembler(sharedSeams(config)),
+      startToolHost: host.start as never,
+      buildToolHostServers: () => [] as never,
+    })
+    await session.send("hi", { gate, onAction: (a) => actions.push(a) })
+    host.fire()
+    expect(actions.filter((a) => a.type === "TOOL_CALL")).toEqual([
+      { type: "TOOL_CALL", callKey: "k1", toolName: "read", input: { path: "a.ts" } },
+    ])
+    expect(actions.filter((a) => a.type === "TOOL_RESULT")).toEqual([
+      { type: "TOOL_RESULT", callKey: "k1", toolName: "read", result: "42 lines" },
+      { type: "TOOL_RESULT", callKey: "k2", toolName: "write", result: "denied", isError: true },
+    ])
+  })
+
+  it("builds attachments through the default (vision-off) content builder", async () => {
+    // No `assembler` override, so the session's own builder — and its Anthropic
+    // key closure — is exercised.
+    const { manager, prompt } = fakeManager()
+    const host = renderingHost()
+    const session = createExternalAgentSession({
+      config: cfg({ providers: {} }),
+      manager,
+      home: HOME,
+      sessionId: "s1",
+      transcriptFs: memoryFs(),
+      startToolHost: host.start as never,
+      buildToolHostServers: () => [] as never,
+    })
+    await session.send("plain question with no attachments", { gate })
+    expect(prompt()).toContain("plain question with no attachments")
+  })
+
+  it("reports a twin outage and an attachment summary through the shared callbacks", async () => {
+    const config = cfg({ twin: { enabled: true, characterId: "c1" } })
+    const { manager } = fakeManager()
+    const host = renderingHost()
+    const notices: string[] = []
+    const attachments: unknown[] = []
+    const session = createExternalAgentSession({
+      config,
+      manager,
+      home: HOME,
+      sessionId: "s1",
+      transcriptFs: memoryFs(),
+      assembler: createCliContextAssembler({
+        ...sharedSeams(config),
+        fetchTwin: async () => null,
+        buildContent: (p: string) => ({
+          content: p,
+          imageCount: 0,
+          documentCount: 0,
+          injectedFiles: ["a.txt"],
+          ocr: [],
+          failed: [],
+          skipped: [],
+        }),
+      }),
+      startToolHost: host.start as never,
+      buildToolHostServers: () => [] as never,
+    })
+    await session.send("hi @a.txt", {
+      gate,
+      onTwinNotice: (m) => notices.push(m),
+      onAttachments: (s) => attachments.push(s),
+    })
+    expect(notices[0]).toMatch(/not reachable/)
+    expect(attachments).toHaveLength(1)
+  })
+
+  it("cancels in-flight broker calls when the stream goes idle", async () => {
+    const config = cfg({ streamIdleTimeoutMs: 5 })
+    const cancels: string[] = []
+    const manager: ExternalAgentSessionManager = {
+      addAgent: jest.fn(async () => undefined),
+      // Emits one event and then never settles, so the idle watchdog fires.
+      execute: jest.fn((_id, _prompt, options) => {
+        options?.onEvent?.({
+          type: "message_delta",
+          sessionId: "acp-1",
+          timestamp: new Date(),
+          delta: { type: "text", text: "working" },
+        })
+        return new Promise<ExternalAgentResult>(() => {})
+      }),
+      setSessionMode: jest.fn(async () => undefined),
+      setSessionModel: jest.fn(async () => undefined),
+      cancel: jest.fn(async () => undefined),
+      removeAgent: jest.fn(async () => undefined),
+    }
+    const session = createExternalAgentSession({
+      config,
+      manager,
+      home: HOME,
+      sessionId: "s1",
+      transcriptFs: memoryFs(),
+      assembler: createCliContextAssembler(sharedSeams(config)),
+      startToolHost: async () =>
+        ({
+          endpoint: "/tmp/x.sock",
+          token: "t",
+          attempt: 1,
+          connections: () => 0,
+          isClosed: () => false,
+          cancelInFlight: (reason: string) => cancels.push(reason),
+          close: async () => undefined,
+        }) as unknown as ToolHostBroker,
+      buildToolHostServers: () => [] as never,
+    })
+    await expect(session.send("hi", { gate })).rejects.toThrow(/stream idle/)
+    expect(cancels).toEqual(["the turn was interrupted"])
+  })
+})

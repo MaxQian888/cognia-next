@@ -192,7 +192,8 @@ export async function startToolHostBroker(params: ToolHostBrokerParams): Promise
       return { allow: false, reason: `"${p.name}" is not available in this session` }
     }
     const confined = checkConfinement(roots, session.cwd, p.args)
-    if (!confined.allowed) return { allow: false, reason: confined.reason ?? "refused" }
+    // `checkConfinement` always explains a denial, so the reason is never absent.
+    if (!confined.allowed) return { allow: false, reason: String(confined.reason) }
     const full = namespacedFor(server, p.name)
     if (!needsApproval(session.sendOptions, full)) return { allow: true }
     if (!params.gate) {

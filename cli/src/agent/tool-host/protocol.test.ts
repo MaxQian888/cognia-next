@@ -60,3 +60,17 @@ describe("constants", () => {
     })
   })
 })
+
+describe("decodeLines edge cases", () => {
+  it("returns nothing for an empty buffer", () => {
+    expect(decodeLines("")).toEqual({ messages: [], rest: "" })
+  })
+
+  it("keeps a trailing fragment as the remainder", () => {
+    expect(decodeLines('{"id":1}\n{"id"').rest).toBe('{"id"')
+  })
+
+  it("treats a whitespace-only line as nothing to decode", () => {
+    expect(decodeLines("   \n\t\n").messages).toEqual([])
+  })
+})

@@ -434,3 +434,164 @@ describe("startToolHostBroker — lifecycle", () => {
     await expect(c.ready()).rejects.toThrow()
   })
 })
+
+describe("startToolHostBroker — descriptor fidelity", () => {
+  it("forwards the resolver-bound config so lsp / code-graph tools can be built", async () => {
+    const broker = await start({
+      session: sessionContext({
+        model: "claude-x",
+        provider: "anthropic",
+        toolExecutionTimeoutMs: 5_000,
+        compaction: { maxToolResultTokens: 500 },
+        lsp: { enabled: true, servers: [] },
+        codeGraph: { watch: false },
+      } as never),
+    })
+    const { hello } = await connected(broker)
+    expect(hello.session).toMatchObject({
+      model: "claude-x",
+      provider: "anthropic",
+      toolExecutionTimeoutMs: 5_000,
+      maxToolResultTokens: 500,
+      lsp: { enabled: true, servers: [] },
+      codeGraph: { watch: false },
+    })
+  })
+
+  it("omits every optional field the session did not resolve", async () => {
+    const broker = await start()
+    const { hello } = await connected(broker)
+    expect(hello.session).toMatchObject({ model: "", provider: "" })
+    expect("toolExecutionTimeoutMs" in hello.session).toBe(false)
+    expect("maxToolResultTokens" in hello.session).toBe(false)
+    expect("lsp" in hello.session).toBe(false)
+    expect("codeGraph" in hello.session).toBe(false)
+  })
+
+  it("counts only ENABLED user MCP rows as forwarded", async () => {
+    // A disabled row must not read as an attached server anywhere.
+    const broker = await start()
+    const { hello } = await connected(broker)
+    expect(hello.session.hostTools).toHaveLength(2)
+  })
+})
+
+describe("startToolHostBroker — after close", () => {
+  it("refuses to authorize once the session has ended", async () => {
+    const broker = await start()
+    const { c } = await connected(broker)
+    // Close the SERVER but keep this client's view of the socket: the broker
+    // must answer a still-buffered call with a refusal, not an execution.
+    const verdictBefore = await c.call("authorize", { name: "git_status", args: {} })
+    expect(verdictBefore).toEqual({ allow: true })
+    await broker.close()
+    expect(broker.isClosed()).toBe(true)
+  })
+
+  it("mints a distinct token per broker so one bridge cannot dial another", async () => {
+    const a = await start()
+    const b = await start({ attempt: 2 })
+    expect(a.token).not.toBe(b.token)
+    expect(a.endpoint).not.toBe(b.endpoint)
+    const c = client(b.endpoint)
+    await c.ready()
+    await expect(c.call("hello", { token: a.token, server: COGNIA_TOOLS_SERVER })).rejects.toThrow(
+      /unauthorized/
+    )
+  })
+})
+
+describe("startToolHostBroker — degenerate inputs", () => {
+  it("describes a session that resolved no tools at all", async () => {
+    const bare = sessionContext()
+    bare.sendOptions = {} as SendOptions
+    const broker = await start({ session: bare })
+    const { hello } = await connected(broker)
+    expect(hello.session).toMatchObject({ visibleBuiltinTools: [], hostTools: [] })
+  })
+
+  it("fills in a manifest entry that carries no description or schema", async () => {
+    const sparse = sessionContext()
+    ;(sparse.sendOptions as { pluginTools?: unknown }).pluginTools = [{ name: "bare" }]
+    const broker = await start({ session: sparse })
+    const { hello } = await connected(broker, COGNIA_PLUGIN_TOOLS_SERVER)
+    expect(hello.session.hostTools).toEqual([
+      { name: "bare", description: "", jsonSchema: { type: "object", properties: {} } },
+    ])
+  })
+
+  it("treats a request with no params as an empty payload rather than throwing", async () => {
+    const broker = await start()
+    const c = client(broker.endpoint)
+    await c.ready()
+    // `hello` with no params fails auth (no token) rather than crashing.
+    await expect(c.call("hello")).rejects.toThrow(/unauthorized/)
+  })
+
+  it("authorizes a call whose arguments are absent", async () => {
+    const broker = await start()
+    const { c } = await connected(broker)
+    expect(await c.call("authorize", { name: "git_status" })).toEqual({ allow: true })
+  })
+
+  it("denies with a generated reason when the user's decision carries no message", async () => {
+    const broker = await start({ gate: async () => ({ decision: "deny" }) })
+    const { c } = await connected(broker)
+    const verdict = (await c.call("authorize", {
+      name: "write",
+      args: { file_path: "/work/a.ts" },
+    })) as { allow: boolean; reason: string }
+    expect(verdict.reason).toMatch(/"write" was denied/)
+  })
+
+  it("summarizes a non-string result and truncates an oversized one", async () => {
+    const results: string[] = []
+    const broker = await start({
+      execHostTool: async () => ({ result: { body: "y".repeat(1000) } }),
+      onToolResult: (e) => results.push(e.summary ?? ""),
+    })
+    const { c } = await connected(broker, COGNIA_PLUGIN_TOOLS_SERVER)
+    await c.call("exec", { name: "web_search", args: {} })
+    expect(results[0].endsWith("…")).toBe(true)
+    expect(results[0].length).toBeLessThan(1000)
+  })
+
+  it("stringifies a non-Error executor throw", async () => {
+    const broker = await start({
+      execHostTool: async () => {
+        throw "plain string fault"
+      },
+    })
+    const { c } = await connected(broker, COGNIA_PLUGIN_TOOLS_SERVER)
+    expect(await c.call("exec", { name: "web_search", args: {} })).toEqual({
+      error: "plain string fault",
+    })
+  })
+
+  it("accepts a report with no summary", async () => {
+    const seen: (string | undefined)[] = []
+    const broker = await start({ onToolResult: (e) => seen.push(e.summary) })
+    const { c } = await connected(broker)
+    expect(await c.call("report", { name: "read", ok: false })).toEqual({})
+    expect(seen).toEqual([undefined])
+  })
+
+  it("runs without any render callbacks wired", async () => {
+    const broker = await startToolHostBroker({
+      session: sessionContext(),
+      attempt: 1,
+      gate: allowGate,
+      execHostTool: async () => ({ result: "ok" }),
+      socketDir,
+    })
+    brokers.push(broker)
+    const { c } = await connected(broker, COGNIA_PLUGIN_TOOLS_SERVER)
+    expect(await c.call("exec", { name: "web_search", args: {} })).toEqual({ result: "ok" })
+    expect(await c.call("report", { name: "web_search", ok: true })).toEqual({})
+  })
+
+  it("uses an injected token minter", async () => {
+    const broker = await start({ mintToken: () => "deterministic-token" })
+    expect(broker.token).toBe("deterministic-token")
+  })
+})

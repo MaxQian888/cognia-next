@@ -104,3 +104,13 @@ describe("createHostToolExecutor", () => {
     expect(new Set(ids).size).toBe(2)
   })
 })
+
+describe("createHostToolExecutor — default handle", () => {
+  it("routes through the real CLI plugin handle when none is injected", async () => {
+    // `dispatch_agent` with no registered turn context is the deterministic
+    // no-side-effect path through the shared handle.
+    const exec = createHostToolExecutor({ sessionId: "no-such-session" })
+    const outcome = await exec("dispatch_agent", { subagent_type: "explorer", prompt: "hi" })
+    expect(outcome.error).toMatch(/no active subagent context/)
+  })
+})

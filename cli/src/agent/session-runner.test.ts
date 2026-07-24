@@ -1174,3 +1174,50 @@ describe("createAgentSession — twin grounding", () => {
     expect(fetchTwin).not.toHaveBeenCalled()
   })
 })
+
+describe("createAgentSession — liveness and defaults", () => {
+  it("reports liveness only between the first send and close", async () => {
+    const session = createAgentSession({
+      config: cfg(),
+      home: HOME,
+      bootstrap: async () => ({ transport: {}, shutdown: async () => {} }) as SidecarBootstrap,
+      resolveOptions: async () => ({}) as SendOptions,
+      capture: async () => result("ok"),
+      transcriptFs: memFs().fsx,
+      resolveMcpServers: () => [],
+      resolveSkillIds: () => [],
+      ensureDb: async () => undefined,
+      loadPluginRuntime: async () => undefined,
+      subscribePluginTools: async () => () => undefined,
+      resolveAgents: async () => [],
+      resolveAgentMode: async () => null,
+    })
+    expect(session.isLive?.()).toBe(false)
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    expect(session.isLive?.()).toBe(true)
+    await session.close()
+    expect(session.isLive?.()).toBe(false)
+  })
+
+  it("tolerates a plugin-executor detach that throws on close", async () => {
+    const session = createAgentSession({
+      config: cfg(),
+      home: HOME,
+      bootstrap: async () => ({ transport: {}, shutdown: async () => {} }) as SidecarBootstrap,
+      resolveOptions: async () => ({}) as SendOptions,
+      capture: async () => result("ok"),
+      transcriptFs: memFs().fsx,
+      resolveMcpServers: () => [],
+      resolveSkillIds: () => [],
+      ensureDb: async () => undefined,
+      loadPluginRuntime: async () => undefined,
+      subscribePluginTools: async () => () => {
+        throw new Error("already detached")
+      },
+      resolveAgents: async () => [],
+      resolveAgentMode: async () => null,
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    await expect(session.close()).resolves.toBeUndefined()
+  })
+})

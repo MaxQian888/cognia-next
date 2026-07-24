@@ -536,9 +536,10 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
    * restarted, so the caller can tell the user rather than let the agent lose
    * its history silently.
    */
-  const reconcile = async (
-    opts: SendTurnOptions
-  ): Promise<{ session: ResolvedCliSessionContext; restarted: boolean }> => {
+  const reconcile = async (): Promise<{
+    session: ResolvedCliSessionContext
+    restarted: boolean
+  }> => {
     const session = await assembler.resolveSession()
     let restarted = false
     // Only a session that actually exists can be stale. `sessionContextVersion`
@@ -565,7 +566,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
     async send(prompt: string, opts: SendTurnOptions) {
       if (closed) throw new Error("agent session is closed")
       await ensureAgent()
-      const { session, restarted } = await reconcile(opts)
+      const { session, restarted } = await reconcile()
       if (restarted) {
         opts.onAction?.({ type: "NOTICE", message: CONTEXT_RESTART_NOTICE })
       }

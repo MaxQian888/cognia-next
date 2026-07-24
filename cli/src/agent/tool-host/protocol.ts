@@ -132,8 +132,10 @@ export function decodeLines(buffer: string): {
   messages: (unknown | null)[]
   rest: string
 } {
+  // `split` always yields at least one element, so the trailing fragment is
+  // never absent — even for an empty buffer.
   const parts = buffer.split("\n")
-  const rest = parts.pop() ?? ""
+  const rest = parts.pop() as string
   const messages = parts
     .filter((line) => line.trim().length > 0)
     .map((line) => {

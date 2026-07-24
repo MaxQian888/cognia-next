@@ -222,3 +222,18 @@ describe("createBackendLifecycle", () => {
     expect(d.disconnected).toEqual(["agent-late"])
   })
 })
+
+describe("attempt id", () => {
+  it("advances on every start and cancel, so a stale result can be recognised", async () => {
+    const d = deferredConnects()
+    const lifecycle = createBackendLifecycle<Conn>(d)
+    expect(lifecycle.attempt).toBe(0)
+    void lifecycle.start()
+    expect(lifecycle.attempt).toBe(1)
+    lifecycle.cancel()
+    expect(lifecycle.attempt).toBe(2)
+    d.settle(0, "agent-1")
+    await flush()
+    expect(d.disconnected).toEqual(["agent-1"])
+  })
+})
