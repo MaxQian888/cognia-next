@@ -46,7 +46,7 @@ describe("sweepLarkChatSurfaces", () => {
   it("returns immediately without scanning when both surface flags are off", async () => {
     const listDue = jest.fn(async () => [])
     const counts = await sweepLarkChatSurfaces(ctx, {
-      getAdapter: jest.fn(async () => adapterRow({})),
+      getAdapter: jest.fn(async () => adapterRow({ larkChatTab: false, larkGroupMenu: false })),
       listDue,
     } as never)
     expect(counts).toEqual({ synced: 0, errors: 0, skipped: 0 })
@@ -72,7 +72,7 @@ describe("sweepLarkChatSurfaces", () => {
     const reconcileTab = jest.fn(async () => "synced" as const)
     const reconcileMenu = jest.fn(async () => "synced" as const)
     const counts = await sweepLarkChatSurfaces(ctx, {
-      getAdapter: jest.fn(async () => adapterRow({ larkChatTab: true })),
+      getAdapter: jest.fn(async () => adapterRow({ larkChatTab: true, larkGroupMenu: false })),
       reconcileTab,
       reconcileMenu,
     } as never)
@@ -113,7 +113,7 @@ describe("sweepLarkChatSurfaces", () => {
     const reconcileTab = jest.fn(async () => "synced" as const)
 
     const counts = await sweepLarkChatSurfaces(ctx, {
-      getAdapter: async () => adapterRow({ larkChatTab: true }),
+      getAdapter: async () => adapterRow({ larkChatTab: true, larkGroupMenu: false }),
       seed,
       reconcileTab,
     })
@@ -128,7 +128,7 @@ describe("sweepLarkChatSurfaces", () => {
     const reconcileTab = jest.fn(async () => "synced" as const)
 
     const counts = await sweepLarkChatSurfaces(ctx, {
-      getAdapter: async () => adapterRow({ larkChatTab: true }),
+      getAdapter: async () => adapterRow({ larkChatTab: true, larkGroupMenu: false }),
       seed: jest.fn(async () => {
         throw new Error("missing im:chat:readonly")
       }),
@@ -142,7 +142,7 @@ describe("sweepLarkChatSurfaces", () => {
   it("counts a blocked reconcile as an error rather than a skip", async () => {
     await seedPending()
     const counts = await sweepLarkChatSurfaces(ctx, {
-      getAdapter: async () => adapterRow({ larkChatTab: true }),
+      getAdapter: async () => adapterRow({ larkChatTab: true, larkGroupMenu: false }),
       seed: jest.fn(async () => ({ chats: 0, seeded: 0 })),
       reconcileTab: jest.fn(async () => "blocked" as const),
     })

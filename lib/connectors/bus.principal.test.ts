@@ -126,7 +126,7 @@ beforeEach(async () => {
 
 describe("bus inbound Step 2.5 — principal resolution", () => {
   it("flag off: dispatches without touching the registry", async () => {
-    const adapterId = await seedAdapter()
+    const adapterId = await seedAdapter({ larkPrincipalRegistry: false })
     const handled: NormalizedInboundEvent[] = []
     getBus().routeHandler = async (event) => {
       handled.push(event)

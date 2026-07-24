@@ -57,7 +57,11 @@ describe("authorized deep links", () => {
   it("returns null when web SSO is off — personal links need a session to resolve", async () => {
     process.env.COGNIA_LARK_WEB_BASE = "https://cognia.example"
     const call = jest.fn() as never
-    expect(await buildAuthorizedConversationLink(ENTRY_INPUT, { call })).toBeNull()
+    const ssoOff = {
+      ...ENTRY_INPUT,
+      adapterRow: { settings: { larkWebSso: false } },
+    } as typeof ENTRY_INPUT
+    expect(await buildAuthorizedConversationLink(ssoOff, { call })).toBeNull()
     expect(call).not.toHaveBeenCalled()
   })
 
@@ -99,7 +103,8 @@ describe("authorized deep links", () => {
       chatId: "oc_9",
       surface: "chat_tab" as const,
     }
-    expect(await buildSurfaceUrl(input, { call })).toBeNull()
+    const unflagged = { ...input, adapterRow: { settings: { larkChatTab: false } } }
+    expect(await buildSurfaceUrl(unflagged, { call })).toBeNull()
 
     const flagged = { ...input, adapterRow: { settings: { larkChatTab: true } } }
     const url = await buildSurfaceUrl(flagged, { call })

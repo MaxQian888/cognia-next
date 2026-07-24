@@ -9,8 +9,11 @@ const ADAPTER_ID = "lark-plus-1"
 const CHAT_ID = "oc_plus_1"
 const IDENTITY = { openId: "ou_alice", tenantKey: "tk_a", appId: "cli_1" }
 
-function adapterRow(settings: Record<string, unknown> = { larkPlusMenu: true }) {
-  return { id: ADAPTER_ID, platform: "lark", settings } as unknown as AdapterInstanceRow
+function adapterRow(settings: Record<string, unknown> = {}) {
+  // The registry gate has its own coverage in principal/resolve.test.ts; these
+  // cases exercise the flag + membership arms, so they opt out of it.
+  const merged = { larkPlusMenu: true, larkPrincipalRegistry: false, ...settings }
+  return { id: ADAPTER_ID, platform: "lark", settings: merged } as unknown as AdapterInstanceRow
 }
 
 function makeDeps(overrides: Partial<Record<string, unknown>> = {}) {
@@ -34,7 +37,7 @@ describe("handlePlusCreate", () => {
   })
 
   it("denies when the larkPlusMenu flag is off", async () => {
-    const deps = makeDeps({ getAdapter: jest.fn(async () => adapterRow({})) })
+    const deps = makeDeps({ getAdapter: jest.fn(async () => adapterRow({ larkPlusMenu: false })) })
     expect(
       await handlePlusCreate(
         { adapterId: ADAPTER_ID, chatId: CHAT_ID, verifiedIdentity: IDENTITY },
@@ -137,7 +140,7 @@ describe("handlePlusCreate", () => {
   it("audits every denial so a silently refusing + menu is visible", async () => {
     const cases: Array<[Partial<Record<string, unknown>>, Record<string, unknown>, string]> = [
       [
-        { getAdapter: jest.fn(async () => adapterRow({})) },
+        { getAdapter: jest.fn(async () => adapterRow({ larkPlusMenu: false })) },
         { chatId: CHAT_ID },
         "feature_disabled",
       ],

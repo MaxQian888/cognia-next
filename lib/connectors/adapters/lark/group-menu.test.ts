@@ -53,7 +53,9 @@ describe("reconcileGroupMenuSurface", () => {
   })
 
   it("skips when larkGroupMenu is off (chat-tab flag does not leak over)", async () => {
-    const d = deps({ getAdapter: jest.fn(async () => adapterRow({ larkChatTab: true })) })
+    const d = deps({
+      getAdapter: jest.fn(async () => adapterRow({ larkChatTab: true, larkGroupMenu: false })),
+    })
     expect(await reconcileGroupMenuSurface(ctx, CHAT_ID, d)).toBe("skipped")
     expect((d as { request: jest.Mock }).request).not.toHaveBeenCalled()
   })

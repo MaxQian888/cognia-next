@@ -14,8 +14,11 @@ const ADAPTER_ID = "lark-import-1"
 const CHAT_ID = "oc_import_1"
 const IDENTITY = { openId: "ou_alice", tenantKey: "tk_a", appId: "cli_1" }
 
-function adapterRow(settings: Record<string, unknown> = { larkMessageShortcut: true }) {
-  return { id: ADAPTER_ID, platform: "lark", settings } as unknown as AdapterInstanceRow
+function adapterRow(settings: Record<string, unknown> = {}) {
+  // The registry gate has its own coverage in principal/resolve.test.ts; these
+  // cases exercise the flag, membership and per-message arms.
+  const merged = { larkMessageShortcut: true, larkPrincipalRegistry: false, ...settings }
+  return { id: ADAPTER_ID, platform: "lark", settings: merged } as unknown as AdapterInstanceRow
 }
 
 function rawMessage(id: string, overrides: Record<string, unknown> = {}) {
@@ -65,7 +68,9 @@ describe("importLarkMessages", () => {
   })
 
   it("denies when the larkMessageShortcut flag is off", async () => {
-    const deps = makeDeps({ getAdapter: jest.fn(async () => adapterRow({})) })
+    const deps = makeDeps({
+      getAdapter: jest.fn(async () => adapterRow({ larkMessageShortcut: false })),
+    })
     const outcome = await importLarkMessages(
       { adapterId: ADAPTER_ID, chatId: CHAT_ID, messageIds: ["om_1"], verifiedIdentity: IDENTITY },
       deps

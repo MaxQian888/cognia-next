@@ -125,7 +125,9 @@ describe("removeDisabledLarkSurfaces", () => {
   it("withdraws only the surfaces whose flag is now off", async () => {
     await seed("oc_1", "chat_tab", "tab_1")
     await seed("oc_1", "group_menu", "menu_1")
-    const deps = makeDeps({ getAdapter: async () => adapterRow({ larkChatTab: true }) })
+    const deps = makeDeps({
+      getAdapter: async () => adapterRow({ larkChatTab: true, larkGroupMenu: false }),
+    })
 
     const result = await removeDisabledLarkSurfaces(ctx, deps)
 
@@ -140,7 +142,9 @@ describe("removeDisabledLarkSurfaces", () => {
       ...(await getChatSurface(ADAPTER_ID, "oc_1", "chat_tab"))!,
       status: "removed",
     })
-    const deps = makeDeps({ getAdapter: async () => adapterRow({}) })
+    const deps = makeDeps({
+      getAdapter: async () => adapterRow({ larkChatTab: false, larkGroupMenu: false }),
+    })
 
     expect(await removeDisabledLarkSurfaces(ctx, deps)).toEqual({ removed: 0, failed: 0 })
     expect((deps as never as { request: jest.Mock }).request).not.toHaveBeenCalled()
@@ -149,7 +153,7 @@ describe("removeDisabledLarkSurfaces", () => {
   it("counts a failed platform delete separately", async () => {
     await seed("oc_1", "chat_tab", "tab_1")
     const deps = makeDeps({
-      getAdapter: async () => adapterRow({}),
+      getAdapter: async () => adapterRow({ larkChatTab: false, larkGroupMenu: false }),
       request: jest.fn(async () => {
         throw new Error("gone")
       }),

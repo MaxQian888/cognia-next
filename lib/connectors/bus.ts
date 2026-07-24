@@ -90,6 +90,7 @@ import {
   resolveConnectorPrincipal,
 } from "./principal/resolve"
 import { handleUnresolvedPrincipal } from "./principal/unbound"
+import { bootstrapFeishuRegistry } from "./principal/bootstrap"
 import { recordConnectorMetric } from "./metrics"
 import { authorizeConnectorCallback, notifyCallbackDenied } from "./callback-authorization"
 
@@ -539,13 +540,30 @@ export class ConnectorBus {
     // Recovery replays re-enter this pipeline, so recovered jobs re-resolve
     // against the current registry state (a principal disabled between crash
     // and replay is rejected here).
-    const principalResolution = await resolveConnectorPrincipal({
+    const resolveInput = {
       platform: event.platform,
       adapterRow,
       remoteUserId: event.sender.remoteUserId,
       identityScope: readIdentityScope(event.channelData),
       activeAccountId: getActiveRuntimeAccountId(),
-    })
+    }
+    let principalResolution = await resolveConnectorPrincipal(resolveInput)
+    // Self-heal the one ordering hazard in registry seeding: the adapter's
+    // tenant_key is only learnable from inbound traffic, so an adapter that has
+    // never received an event boots with no tenant scope and the start-up
+    // bootstrap can only skip. The first event both reveals the tenant and
+    // arrives BEFORE anything seeded the registry, which would park an entire
+    // existing workspace on the very message that could have seeded it. The
+    // bootstrap is idempotent and no-ops once the tenant row exists.
+    if (principalResolution.status === "unbound") {
+      const seeded = await bootstrapFeishuRegistry({
+        adapterId: event.adapterId,
+        adapterRow,
+      }).catch(() => ({ status: "skipped" as const, reason: "flag_off" as const }))
+      if (seeded.status === "seeded") {
+        principalResolution = await resolveConnectorPrincipal(resolveInput)
+      }
+    }
     if (principalResolution.status !== "legacy" && principalResolution.status !== "resolved") {
       await handleUnresolvedPrincipal(event, adapterRow, principalResolution, inboundJob.id)
       return

@@ -608,7 +608,9 @@ describe("createLarkAdapter", () => {
         transport: "long-connection",
       })
 
-    // Flag off (default): the recognized reserved click terminates as disabled.
+    // Flag OFF (explicit — the batch ships on now): the recognized reserved
+    // click terminates as disabled rather than reaching the dispatcher.
+    process.env.COGNIA_LARK_NATIVE_SLASH = "0"
     menuActions.handleMenuUnknownKey.mockClear()
     menuActions.handleMenuDisabledKey.mockClear()
     let session = createFakeLongConnSession()

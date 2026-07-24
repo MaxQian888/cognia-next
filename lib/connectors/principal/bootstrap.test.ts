@@ -63,7 +63,10 @@ describe("bootstrapFeishuRegistry", () => {
   it("does nothing when the registry flag is off", async () => {
     const { overrides } = deps([identity({})])
     const result = await bootstrapFeishuRegistry(
-      { adapterId: "lark-1", adapterRow: { settings: {}, lastWhoamiResult: whoami } },
+      {
+        adapterId: "lark-1",
+        adapterRow: { settings: { larkPrincipalRegistry: false }, lastWhoamiResult: whoami },
+      },
       overrides
     )
     expect(result).toEqual({ status: "skipped", reason: "flag_off" })

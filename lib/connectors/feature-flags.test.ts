@@ -35,13 +35,13 @@ describe("lark connector feature flags", () => {
     }
   })
 
-  it("defaults every entry-surface flag to off", () => {
-    expect(isLarkFeatureEnabled("larkPrincipalRegistry")).toBe(false)
-    expect(isLarkFeatureEnabled("larkWebSso")).toBe(false)
-    expect(isLarkFeatureEnabled("larkChatTab")).toBe(false)
-    expect(isLarkFeatureEnabled("larkNativeSlash")).toBe(false)
-    expect(isLarkFeatureEnabled("larkMessageShortcut")).toBe(false)
-    expect(isLarkFeatureEnabled("larkPlusMenu")).toBe(false)
+  it("defaults every entry-surface flag to on", () => {
+    expect(isLarkFeatureEnabled("larkPrincipalRegistry")).toBe(true)
+    expect(isLarkFeatureEnabled("larkWebSso")).toBe(true)
+    expect(isLarkFeatureEnabled("larkChatTab")).toBe(true)
+    expect(isLarkFeatureEnabled("larkNativeSlash")).toBe(true)
+    expect(isLarkFeatureEnabled("larkMessageShortcut")).toBe(true)
+    expect(isLarkFeatureEnabled("larkPlusMenu")).toBe(true)
   })
 
   it("defaults strict callback authorization to enforce", () => {
@@ -62,9 +62,11 @@ describe("lark connector feature flags", () => {
   it("falls back to the per-adapter settings override", () => {
     expect(isLarkFeatureEnabled("larkChatTab", { settings: { larkChatTab: true } })).toBe(true)
     expect(isLarkFeatureEnabled("larkChatTab", { settings: { larkChatTab: "on" } })).toBe(true)
+    expect(isLarkFeatureEnabled("larkChatTab", { settings: { larkChatTab: false } })).toBe(false)
     expect(isLarkFeatureEnabled("larkChatTab", { settings: { larkChatTab: "off" } })).toBe(false)
-    // Unrecognized values fall through rather than turning the flag on.
-    expect(isLarkFeatureEnabled("larkChatTab", { settings: { larkChatTab: "yes" } })).toBe(false)
+    // Unrecognized values fall through to the default rather than reading as
+    // an intentional flip in either direction.
+    expect(isLarkFeatureEnabled("larkChatTab", { settings: { larkChatTab: "yes" } })).toBe(true)
   })
 
   it("falls back to localStorage in the browser", () => {
@@ -78,7 +80,7 @@ describe("lark connector feature flags", () => {
 
   it("survives corrupt localStorage payloads", () => {
     window.localStorage.setItem(LARK_FEATURE_FLAGS_STORAGE_KEY, "{not json")
-    expect(isLarkFeatureEnabled("larkWebSso")).toBe(false)
+    expect(isLarkFeatureEnabled("larkWebSso")).toBe(true)
     window.localStorage.setItem(LARK_FEATURE_FLAGS_STORAGE_KEY, JSON.stringify("nope"))
     expect(getLarkStrictCallbackAuthorizationMode()).toBe("enforce")
   })

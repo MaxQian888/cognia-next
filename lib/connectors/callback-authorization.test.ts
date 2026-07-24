@@ -26,7 +26,13 @@ function adapterRow(settings: Record<string, unknown> = {}): AdapterInstanceRow 
     displayName: "Bot",
     enabled: true,
     transportMode: "stub",
-    settings: { larkStrictCallbackAuthorization: "enforce", ...settings },
+    // The registry check has its own case below; the rest of the matrix keeps
+    // it off so a deny here always names the check under test.
+    settings: {
+      larkStrictCallbackAuthorization: "enforce",
+      larkPrincipalRegistry: false,
+      ...settings,
+    },
     credentialsRef: { keyringService: "test", accounts: [] },
     trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
     defaultMode: "auto",

@@ -62,7 +62,9 @@ describe("reconcileChatTabSurface", () => {
   })
 
   it("skips without touching the platform when the flag is off", async () => {
-    const d = deps({ getAdapter: jest.fn(async () => adapterRow({ settings: {} })) })
+    const d = deps({
+      getAdapter: jest.fn(async () => adapterRow({ settings: { larkChatTab: false } })),
+    })
     expect(await reconcileChatTabSurface(ctx, CHAT_ID, d)).toBe("skipped")
     expect((d as { request: jest.Mock }).request).not.toHaveBeenCalled()
   })

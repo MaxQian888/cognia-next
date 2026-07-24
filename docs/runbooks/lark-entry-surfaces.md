@@ -65,6 +65,12 @@ client ≥ V7.22) posting the literal command text:
 
 `/new` · `/status` · `/help` · `/sessions` · `/switch`
 
+Generate the exact list rather than transcribing it:
+
+```bash
+cognia-agent lark menu-manifest          # or --json
+```
+
 (Source of truth: `lib/connectors/commands/registry.ts` — items marked
 `nativeExposed`.)
 
@@ -109,19 +115,39 @@ Record the observed `+`-menu / shortcut launch-query params (2.6) and the
 JSSDK detail payload shape; `extractMessageRefs` scans tolerantly but pinning
 the real shape tightens it.
 
-## 4. Gray-release order
+## 4. Rollout — the flags ship ON
 
-Flags are per-adapter (settings card) → env → default off. Widen in this
-order, one step per observation window:
+Resolution order is **env → per-adapter (settings card) → localStorage →
+default**, and every entry flag now defaults **on**. Note the order: an env
+var wins over the settings card, so a fleet-wide `COGNIA_LARK_*` silently
+overrides what an operator toggles in the UI.
 
-1. `larkPrincipalRegistry` **on one pilot adapter** after binding pilot
-   principals — watch `principal.unbound` audits for false rejections.
-2. `larkWebSso` + personal entry links (bot-menu workbench link).
-3. `larkChatTab` on pilot chats → `larkGroupMenu`.
-4. `larkMessageShortcut` → `larkPlusMenu`.
-5. `larkStrictCallbackAuthorization`: keep **audit** until
-   `callback.authorization_would_deny` is quiet for a full window (§6), then
-   set **enforce** per adapter.
+Each surface is inert until its platform-side half exists — an unpublished
+Chat Tab has no URL to reconcile, a shortcut nobody added in the console is
+never opened — so "on" means "works once you complete §2", not "starts doing
+something you did not ask for".
+
+The one flag with immediate effect is `larkPrincipalRegistry`: unbound
+senders fail closed. It is safe on because the registry seeds itself from the
+Feishu identities this workspace has already conversed with (and re-tries on
+the first inbound event, since `tenant_key` is only learnable from traffic).
+What to watch on first deploy:
+
+1. `principal.unbound` audits / `cognia_lark_principal_unbound_total` — a
+   spike means seeding did not cover someone. Approve them: settings card →
+   _Feishu identity registry_, or `cognia-agent lark list` then
+   `cognia-agent lark approve <code>`.
+2. `cognia_lark_callback_auth_denied_total` — enforcement is the default now
+   (§6). Any denial is a real refusal; check whether it needs an operator
+   entry in _Run operators_ rather than a mode downgrade.
+3. `cognia_lark_chat_tab_sync_failures_total` /
+   `cognia_lark_group_menu_sync_failures_total` — separate series, because
+   `im:chat.tabs` and `im:chat.menu_tree` are granted separately. A `blocked`
+   row in the settings card names the missing scope and stops retrying.
+
+To stage more slowly, turn a surface **off** per adapter and re-enable after
+its console configuration lands. Turning a Chat Tab / group-menu flag off
+also withdraws what was already published.
 
 ## 5. Alert thresholds (companion `/metrics`)
 
@@ -134,28 +160,45 @@ order, one step per observation window:
 | `cognia_lark_chat_tab_sync_failures_total` | > 0 persistent → scope missing or bot not in chat    |
 | `cognia_lark_message_import_denied_total`  | spike → membership probes or flag misconfig          |
 
-## 6. Enforce flip (callback authorization)
+## 6. Callback authorization (enforce by default)
 
-1. Confirm 7 quiet days of `callback.authorization_would_deny` (audit log,
-   filter per adapter).
-2. Settings card → _Callback authorization mode_ → **Enforce** (or
-   `COGNIA_LARK_STRICT_CALLBACK_AUTH=enforce` fleet-wide).
-3. Watch `cognia_lark_callback_auth_denied_total` + user reports for one
-   window.
+Denials block. Audit mode still exists for migration, but it is not a resting
+state: in audit `consumedAt` is never written, so a stale re-click of an
+approval card can still re-grant a session bypass.
+
+**Before widening a bot to a large group**, if you want a look-first window:
+
+1. Settings card → _Callback authorization mode_ → **Audit** on that adapter.
+2. Watch `cognia_lark_callback_auth_would_deny_total` and the
+   `callback.authorization_would_deny` audit rows (filter per adapter; the
+   Audit tab labels every kind now).
+3. Quiet for a window → set the mode back to **Enforce**.
+
+**If enforcement refuses something legitimate**, the fix is usually an
+operator entry, not a downgrade: settings card → _Run operators_ takes the
+platform user ids allowed to act on runs they did not start. That list is also
+the fallback approver when a workflow approval card has no known requester —
+empty, those cards cannot be actioned by anyone.
 
 ## 7. Rollback
 
 Every lever is independent and hot (settings reads are per-event):
 
 - **Any entry surface misbehaving** → flip its flag off on the adapter; the
-  legacy path is untouched by design. Chat Tab / menu rows stay in
-  `larkChatSurfaces` (status only); platform-side tabs can be removed
-  manually if needed (`delete_tabs` / `menu_tree` DELETE).
-- **Callback enforcement breaking flows** → set mode back to **audit**
+  legacy path is untouched by design. Flipping a Chat Tab / group-menu flag
+  off now also withdraws the published tab/menu (`delete_tabs` /
+  `menu_tree` DELETE) and retires the row as `removed`, so no dangling public
+  URL is left behind. A delete that could not land is audited
+  `chat_tab.removed` with reason `platform_delete_failed` — those need a
+  manual sweep.
+- **Callback enforcement breaking flows** → add the blocked people to _Run
+  operators_ first; only if that is not enough, set the mode to **audit**
   (emergency: `off`). Denied clicks were terminal, not corrupted — users
   simply re-click after the downgrade.
-- **Principal registry rejecting legitimate users** → flag off (legacy
-  identity), fix bindings, re-enable. Parked `history_only` jobs remain
-  auditable; they are not auto-replayed.
+- **Principal registry rejecting legitimate users** → approve them
+  (settings card, or `cognia-agent lark approve <code>`); flag off only as a
+  blunt instrument, since that restores pre-registry identity handling for
+  the whole adapter. Parked `history_only` jobs remain auditable; they are not
+  auto-replayed.
 - **SSO incident** → rotate the companion secret: invalidates every
   `lark_web` session and outstanding entry token at once (by design).

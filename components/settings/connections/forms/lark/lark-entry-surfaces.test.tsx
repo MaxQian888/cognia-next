@@ -21,6 +21,12 @@ jest.mock("@/lib/connectors/adapters/lark/surface-sweep", () => ({
   resyncLarkChatSurfaces: jest.fn(async () => ({ synced: 2, errors: 1, skipped: 0 })),
 }))
 
+// Flipping a surface flag OFF withdraws the published tab/menu; stubbed so the
+// card tests never reach the platform.
+jest.mock("@/lib/connectors/adapters/lark/surface-removal", () => ({
+  removeDisabledLarkSurfaces: jest.fn(async () => ({ removed: 0, failed: 0 })),
+}))
+
 import { getDb, __resetDbForTesting } from "@/lib/db/schema"
 import { ensureChatSurface, markChatSurfaceError } from "@/lib/db/lark-chat-surfaces"
 import { resyncLarkChatSurfaces } from "@/lib/connectors/adapters/lark/surface-sweep"
@@ -64,6 +70,14 @@ describe("LarkEntrySurfaces", () => {
       expect(row?.settings?.webEntryBaseUrl).toBe("https://cognia.example")
     })
 
+    // Surface flags ship ON, so the first click is a turn-OFF; the second
+    // brings it back. Both directions must reach settings.
+    await user.click(screen.getByTestId("lark-flag-larkChatTab"))
+    await waitFor(async () => {
+      const row = await getDb().adapterInstances.get(ADAPTER_ID)
+      expect(row?.settings?.larkChatTab).toBe(false)
+    })
+
     await user.click(screen.getByTestId("lark-flag-larkChatTab"))
     await waitFor(async () => {
       const row = await getDb().adapterInstances.get(ADAPTER_ID)
@@ -89,9 +103,12 @@ describe("LarkEntrySurfaces", () => {
       user.click(screen.getByTestId("lark-flag-larkWebSso")),
     ])
 
+    // Both start ON, so two concurrent clicks must land two independent
+    // turn-OFFs — the point of the test is that neither write clobbers the
+    // other, not which direction they moved.
     await waitFor(async () => {
       const row = await getDb().adapterInstances.get(ADAPTER_ID)
-      expect(row?.settings).toMatchObject({ larkChatTab: true, larkWebSso: true })
+      expect(row?.settings).toMatchObject({ larkChatTab: false, larkWebSso: false })
     })
   })
 

@@ -58,7 +58,10 @@ describe("resolveConnectorPrincipal", () => {
   it("returns legacy when the registry flag is off", async () => {
     const result = await resolveConnectorPrincipal({
       platform: "lark",
-      adapterRow: { settings: {}, lastWhoamiResult: adapterRow.lastWhoamiResult },
+      adapterRow: {
+        settings: { larkPrincipalRegistry: false },
+        lastWhoamiResult: adapterRow.lastWhoamiResult,
+      },
       remoteUserId: "ou_1",
       identityScope: scope,
       activeAccountId: "acct_a",

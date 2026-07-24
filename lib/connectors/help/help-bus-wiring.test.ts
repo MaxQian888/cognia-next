@@ -93,6 +93,9 @@ async function seedAdapter(over: Record<string, unknown> = {}): Promise<string> 
     transportMode: "gateway",
     settings: {
       quickCommands: [{ triggerKey: "agenda", action: { type: "prompt", value: "列出待办" } }],
+      // This suite covers help/welcome routing, not identity: without opting
+      // out, the on-by-default registry parks every event as unbound.
+      larkPrincipalRegistry: false,
     },
     credentialsRef: { keyringService: "test", accounts: [] },
     trigger: AUTO_TRIGGER,

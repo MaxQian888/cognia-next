@@ -74,7 +74,7 @@ describe("seedLarkChatSurfaces", () => {
     const { request } = pagedRequest([[{ chat_id: "oc_1" }]])
     const result = await seedLarkChatSurfaces(seedInput(), {
       request: request as never,
-      getAdapter: async () => adapterRow({}),
+      getAdapter: async () => adapterRow({ larkChatTab: false, larkGroupMenu: false }),
     })
     expect(result).toEqual({ chats: 0, seeded: 0 })
     expect(request).not.toHaveBeenCalled()
@@ -85,7 +85,10 @@ describe("seedLarkChatSurfaces", () => {
     const result = await seedLarkChatSurfaces(seedInput(), {
       request: request as never,
       getAdapter: async () =>
-        adapterRow({ larkChatTab: true }, { botName: "b", appId: "cli_1", openId: "ou_bot" }),
+        adapterRow(
+          { larkChatTab: true, larkGroupMenu: false },
+          { botName: "b", appId: "cli_1", openId: "ou_bot" }
+        ),
     })
     expect(result).toEqual({ chats: 0, seeded: 0 })
     expect(request).not.toHaveBeenCalled()
@@ -95,7 +98,7 @@ describe("seedLarkChatSurfaces", () => {
     const { request } = pagedRequest([[{ chat_id: "oc_1" }, { chat_id: "oc_2" }]])
     const result = await seedLarkChatSurfaces(seedInput(), {
       request: request as never,
-      getAdapter: async () => adapterRow({ larkChatTab: true }),
+      getAdapter: async () => adapterRow({ larkChatTab: true, larkGroupMenu: false }),
     })
 
     expect(result).toEqual({ chats: 2, seeded: 2 })
@@ -129,7 +132,7 @@ describe("seedLarkChatSurfaces", () => {
     const { request } = pagedRequest([[{ chat_id: "oc_1" }]])
     await seedLarkChatSurfaces(seedInput(), {
       request: request as never,
-      getAdapter: async () => adapterRow({ larkGroupMenu: true }),
+      getAdapter: async () => adapterRow({ larkGroupMenu: true, larkChatTab: false }),
     })
     expect(await getChatSurface("lk-1", "oc_1", "group_menu")).toBeDefined()
   })
@@ -138,7 +141,7 @@ describe("seedLarkChatSurfaces", () => {
     const { request } = pagedRequest([[{ chat_mode: "group" }, { chat_id: "oc_1" }]])
     const result = await seedLarkChatSurfaces(seedInput(), {
       request: request as never,
-      getAdapter: async () => adapterRow({ larkChatTab: true }),
+      getAdapter: async () => adapterRow({ larkChatTab: true, larkGroupMenu: false }),
     })
     expect(result).toEqual({ chats: 2, seeded: 1 })
   })
@@ -147,7 +150,7 @@ describe("seedLarkChatSurfaces", () => {
     const { request } = pagedRequest([[{ chat_id: "oc_1" }]])
     const deps = {
       request: request as never,
-      getAdapter: async () => adapterRow({ larkChatTab: true }),
+      getAdapter: async () => adapterRow({ larkChatTab: true, larkGroupMenu: false }),
     }
     await seedLarkChatSurfaces(seedInput(), deps)
 
@@ -163,7 +166,7 @@ describe("seedLarkChatSurfaces", () => {
     const { request } = pagedRequest([[{ chat_id: "oc_1" }]])
     const deps = {
       request: request as never,
-      getAdapter: async () => adapterRow({ larkChatTab: true }),
+      getAdapter: async () => adapterRow({ larkChatTab: true, larkGroupMenu: false }),
     }
     await seedLarkChatSurfaces(seedInput(), deps)
 

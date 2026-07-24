@@ -44,14 +44,27 @@ const BOOLEAN_FLAG_ENV: Record<LarkBooleanFeatureFlag, string> = {
 
 const STRICT_AUTH_ENV = "COGNIA_LARK_STRICT_CALLBACK_AUTH"
 
+/**
+ * All on. Each surface is inert until its platform-side half is configured
+ * (an unpublished Chat Tab has no URL to reconcile, a shortcut nobody added
+ * in the console is never opened), so "on" means "works once you configure
+ * it" rather than "starts doing something you did not ask for".
+ *
+ * `larkPrincipalRegistry` is the one with real consequences — it makes
+ * unbound senders fail closed. It is safe on by default only because the
+ * registry seeds itself from the identities a workspace has already talked
+ * to (`principal/bootstrap.ts`, re-tried on the first inbound event once the
+ * tenant becomes known). A genuinely new sender still gets a bind code, which
+ * an operator can now actually approve.
+ */
 const DEFAULT_BOOLEAN_FLAGS: Record<LarkBooleanFeatureFlag, boolean> = {
-  larkPrincipalRegistry: false,
-  larkWebSso: false,
-  larkChatTab: false,
-  larkGroupMenu: false,
-  larkNativeSlash: false,
-  larkMessageShortcut: false,
-  larkPlusMenu: false,
+  larkPrincipalRegistry: true,
+  larkWebSso: true,
+  larkChatTab: true,
+  larkGroupMenu: true,
+  larkNativeSlash: true,
+  larkMessageShortcut: true,
+  larkPlusMenu: true,
 }
 
 const DEFAULT_STRICT_AUTH_MODE: LarkStrictCallbackAuthorizationMode = "enforce"
