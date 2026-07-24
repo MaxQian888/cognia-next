@@ -102,13 +102,25 @@ export interface ToolHostBroker {
   close(): Promise<void>
 }
 
+/**
+ * Longest session-id fragment allowed in a socket file name.
+ *
+ * A unix socket path must fit `sun_path` (~104 bytes), and the macOS temp dir is
+ * already ~48 of them. A long session id would push the whole path over and
+ * `listen` fails with EINVAL — a failure that reads as "the tool host is broken"
+ * rather than "the name was too long". Uniqueness still comes from the attempt
+ * and pid, so truncating the id costs nothing.
+ */
+const MAX_ENDPOINT_SESSION_CHARS = 16
+
 /** A pipe name on Windows; a short socket path under the temp dir elsewhere. */
 export function toolHostEndpoint(sessionId: string, attempt: number, dir?: string): string {
-  const token = `${sessionId.replace(/[^A-Za-z0-9_-]/g, "")}-${attempt}`
+  const safeId = sessionId.replace(/[^A-Za-z0-9_-]/g, "").slice(-MAX_ENDPOINT_SESSION_CHARS)
+  const token = `${safeId}-${attempt}`
   if (process.platform === "win32") {
+    // Named pipes have no such limit, so the full (sanitised) id stays.
     return `\\\\.\\pipe\\cognia-toolhost-${token}-${process.pid}`
   }
-  // Keep well under the ~104-byte sun_path limit: the temp dir plus a short name.
   return path.join(dir ?? os.tmpdir(), `cognia-th-${token}-${process.pid}.sock`)
 }
 

@@ -595,3 +595,22 @@ describe("startToolHostBroker — degenerate inputs", () => {
     expect(broker.token).toBe("deterministic-token")
   })
 })
+
+describe("toolHostEndpoint — path length", () => {
+  it("truncates a long session id so the socket path fits sun_path", () => {
+    // No dir override: the DEFAULT temp dir is what production uses, and on
+    // macOS it already eats ~48 of the available bytes.
+    const endpoint = toolHostEndpoint("a".repeat(200), 1)
+    if (process.platform !== "win32") {
+      // A path over ~104 bytes makes `listen` fail with EINVAL, which reads as
+      // "the tool host is broken" rather than "the name was too long".
+      expect(Buffer.byteLength(endpoint)).toBeLessThan(104)
+    }
+    expect(endpoint).toContain(String(process.pid))
+  })
+
+  it("still separates two attempts of the same long-id session", () => {
+    const long = "session-".repeat(20)
+    expect(toolHostEndpoint(long, 1, socketDir)).not.toBe(toolHostEndpoint(long, 2, socketDir))
+  })
+})
