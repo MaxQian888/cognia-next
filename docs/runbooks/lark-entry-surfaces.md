@@ -96,7 +96,21 @@ oldest fleet version during 3.x.
 
 ## 3. Real-client verification matrix
 
-Run per platform (PC / iOS / Android) before widening any flag:
+Run the automated half first — it drives the real adapter code against the
+real Feishu API and tells you which console permissions actually landed:
+
+```bash
+LARK_APP_ID=cli_… LARK_APP_SECRET=… pnpm lark:verify-entry
+# optional: LARK_TEST_CHAT_ID=oc_…  LARK_WEB_BASE=https://…  LARK_VERIFY_KEEP=1
+```
+
+It covers tenant admission, bind approval → principal resolution, chat
+enumeration, Chat Tab and group-menu create/update/withdraw plus their
+idempotency, prints the console menu manifest, and then lists the steps below
+with the audit kind and metric each should produce.
+
+The rest needs a human in a Feishu client. Run per platform (PC / iOS /
+Android) before widening any flag:
 
 | #    | Check                                       | Expect                                                                        |
 | ---- | ------------------------------------------- | ----------------------------------------------------------------------------- |

@@ -151,6 +151,7 @@
     "sidecar:start": "node sidecar/claude-host.mjs",
     "sidecar:smoke": "node sidecar/claude-host.mjs --smoke",
     "sidecar:test": "pnpm run sidecar:test:builtin && pnpm run sidecar:test:dispatch && pnpm run sidecar:test:lsp",
+    "lark:verify-entry": "tsx scripts/lark-entry-verify.mts",
     "sidecar:test:builtin": "node --test sidecar/builtin-tools/__tests__/*.test.mjs sidecar/builtin-tools/shared/*.test.mjs sidecar/builtin-tools/core/*.test.mjs sidecar/builtin-tools/file-ops/*.test.mjs sidecar/builtin-tools/process/*.test.mjs sidecar/builtin-tools/git/*.test.mjs sidecar/builtin-tools/code/*.test.mjs sidecar/builtin-tools/code/languages/*.test.mjs",
     "sidecar:test:dispatch": "node --test sidecar/claude-host.test.mjs sidecar/dispatch/*.test.mjs sidecar/dispatch/protocol-adapters/*.test.mjs",
     "sidecar:test:lsp": "node --test sidecar/lsp/*.test.mjs",
@@ -184,7 +185,8 @@
     "test:conformance": "node --test tests/conformance/anthropic-server/server.test.mjs tests/conformance/suite-manifest.test.mjs tests/conformance/cases/*.test.mjs",
     "conformance:prepare": "cargo build --manifest-path src-tauri/Cargo.toml --bin cognia-server",
     "check:provider-name-branches": "node scripts/gates/check-provider-name-branches.mjs",
-    "check:runtime-versions": "node scripts/gates/check-runtime-versions.mjs"
+    "check:runtime-versions": "node scripts/gates/check-runtime-versions.mjs",
+    "smoke:external-parity": "node scripts/smoke/build-and-run-smoke.mjs"
   },
   "dependencies": {
     "@ai-sdk/amazon-bedrock": "4.0.123",
