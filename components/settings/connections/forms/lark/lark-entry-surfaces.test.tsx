@@ -56,29 +56,50 @@ describe("LarkEntrySurfaces", () => {
     __resetDbForTesting()
   })
 
-  it("persists the web entry base on blur and flag toggles into settings", async () => {
+  it("persists the web entry base on blur", async () => {
     await seedAdapter()
-    const user = userEvent.setup()
+    // `delay: null` — the default inter-event delay plus liveQuery re-render
+    // round-trips push a multi-interaction test past the 5 s budget on a
+    // loaded runner.
+    const user = userEvent.setup({ delay: null })
     render(<LarkEntrySurfaces adapterId={ADAPTER_ID} />)
 
     const input = await screen.findByTestId("lark-web-base-input")
     await waitFor(() => expect(input).toBeEnabled())
     await user.type(input, "https://cognia.example")
     await user.tab()
+
     await waitFor(async () => {
       const row = await getDb().adapterInstances.get(ADAPTER_ID)
       expect(row?.settings?.webEntryBaseUrl).toBe("https://cognia.example")
     })
+  })
 
-    // Surface flags ship ON, so the first click is a turn-OFF; the second
-    // brings it back. Both directions must reach settings.
-    await user.click(screen.getByTestId("lark-flag-larkChatTab"))
+  it("turns a surface flag off — they ship on", async () => {
+    await seedAdapter()
+    const user = userEvent.setup({ delay: null })
+    render(<LarkEntrySurfaces adapterId={ADAPTER_ID} />)
+
+    await user.click(await screen.findByTestId("lark-flag-larkChatTab"))
+
     await waitFor(async () => {
       const row = await getDb().adapterInstances.get(ADAPTER_ID)
       expect(row?.settings?.larkChatTab).toBe(false)
     })
+  })
 
-    await user.click(screen.getByTestId("lark-flag-larkChatTab"))
+  it("turns a surface flag back on", async () => {
+    await seedAdapter({ larkChatTab: false })
+    const user = userEvent.setup({ delay: null })
+    render(<LarkEntrySurfaces adapterId={ADAPTER_ID} />)
+
+    // The adapter row arrives via liveQuery, so the switch shows the ON
+    // default for a frame first. Clicking before the stored `false` lands
+    // would toggle the wrong way.
+    const toggle = await screen.findByTestId("lark-flag-larkChatTab")
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "false"))
+    await user.click(toggle)
+
     await waitFor(async () => {
       const row = await getDb().adapterInstances.get(ADAPTER_ID)
       expect(row?.settings?.larkChatTab).toBe(true)
