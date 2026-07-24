@@ -147,6 +147,21 @@ export function extractTenantKey(envelope: LarkEventEnvelope): string | undefine
   )
 }
 
+/**
+ * Tenancy scope of a verified envelope, stamped onto produced events as
+ * `channelData.identityScope` (inbound) / `identityScope` (callbacks) so the
+ * principal registry can resolve `tenantKey + appId + openId` without
+ * re-touching raw payloads (plan 2026-07-24 Phase 1).
+ */
+export function identityScopeOf(
+  envelope: LarkEventEnvelope
+): { tenantKey?: string; appId?: string } | undefined {
+  const tenantKey = extractTenantKey(envelope)
+  const appId = envelope.header?.app_id
+  if (!tenantKey && !appId) return undefined
+  return { tenantKey, appId }
+}
+
 // ---------------------------------------------------------------------------
 // Parser helpers
 // ---------------------------------------------------------------------------
@@ -652,6 +667,7 @@ export function parseLarkEventEnvelope(
     threadId !== undefined ? "thread" : message.chat_type === "p2p" ? "private" : "group"
 
   const createTimeMs = message.create_time ? parseInt(message.create_time, 10) : Date.now()
+  const identityScope = identityScopeOf(envelope)
 
   return {
     platform: "lark",
@@ -692,6 +708,7 @@ export function parseLarkEventEnvelope(
     mentions: { selfMentioned, users },
     timestamp: createTimeMs,
     raw: envelope,
+    ...(identityScope ? { channelData: { identityScope } } : {}),
   }
 }
 
@@ -737,6 +754,7 @@ export function parseLarkBotMenuEvent(
   const text = mapped?.action.value ?? mapped?.label ?? eventKey
 
   const conversationKey = buildConversationKey("lark", adapterId, openId)
+  const identityScope = identityScopeOf(envelope)
 
   return {
     platform: "lark",
@@ -761,6 +779,7 @@ export function parseLarkBotMenuEvent(
     timestamp: Date.now(),
     raw: envelope,
     kind: "create",
+    ...(identityScope ? { channelData: { identityScope } } : {}),
   }
 }
 
@@ -912,6 +931,15 @@ export function parseLarkInteractiveCallback(
     originatingMessageId,
     conversationKey,
     user,
+    // Card callbacks nest tenant_key on the event body rather than the
+    // header on some generations — prefer the body, fall back to the header.
+    identityScope:
+      event.tenant_key || envelope.header?.tenant_key || envelope.header?.app_id
+        ? {
+            tenantKey: event.tenant_key ?? envelope.header?.tenant_key,
+            appId: envelope.header?.app_id,
+          }
+        : undefined,
     timestamp: envelope.header.create_time ? parseInt(envelope.header.create_time, 10) : Date.now(),
     raw: envelope,
   }

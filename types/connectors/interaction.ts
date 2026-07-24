@@ -110,6 +110,13 @@ export interface ConnectorCallbackEvent {
    * the assistant so policies (per-user allowlist / blocklist) can apply.
    */
   user: PlatformIdentity
+  /**
+   * Platform tenancy of the VERIFIED callback envelope (Lark: header
+   * tenant_key / app_id). Consumed by the callback authorization guard to
+   * resolve the clicking principal (plan 2026-07-24 Phase 2). Optional:
+   * absent on platforms without tenant scoping and on legacy envelopes.
+   */
+  identityScope?: { tenantKey?: string; appId?: string }
   /** Wall-clock at which the platform fired the event. */
   timestamp: number
   /**

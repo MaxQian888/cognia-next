@@ -112,6 +112,13 @@ export interface ExecutionRunInitiator {
   platformIdentityId?: string
   remoteUserId?: string
   displayName?: string
+  /**
+   * Authoritative identity stamp (Lark unified identity, plan 2026-07-24
+   * P1.4): the resolved FeishuPrincipalRow id and its Cognia account. Absent
+   * on legacy runs and whenever the principal registry flag is off.
+   */
+  principalId?: string
+  accountId?: string
 }
 
 export interface ExecutionRun {

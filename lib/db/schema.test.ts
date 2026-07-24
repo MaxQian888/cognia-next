@@ -240,6 +240,20 @@ describe("getDb", () => {
     )
   })
 
+  it("v125 opens the Feishu unified identity registry tables", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(125)
+    expect(db.feishuTenants.schema.primKey.name).toBe("id")
+    expect(db.feishuTenants.schema.indexes.map((index) => index.name)).toContain(
+      "[tenantKey+appId]"
+    )
+    expect(db.feishuPrincipals.schema.indexes.map((index) => index.name)).toContain(
+      "[tenantKey+appId+openId]"
+    )
+    expect(db.feishuPrincipalBindRequests.schema.primKey.name).toBe("id")
+  })
+
   it("v121 opens the Provider Profile Store tables and seeds meta", async () => {
     const db = getDb()
     await db.open()

@@ -74,12 +74,22 @@ import {
   markConnectorInboundJobHistoryOnly,
   markConnectorInboundJobRecoveryRequired,
   recoverStaleConnectorInboundJobs,
+  stampConnectorInboundJobPrincipal,
   updateConnectorInboundJobPayload,
 } from "@/lib/db/connector-inbound-jobs"
 import { admitConversationEvent } from "./conversation-admission"
 import { observeUnmentionedDeliveryProbe } from "./at-gate"
 import { deliveryTargetFromEvent } from "@/types/connectors/event"
-import { refreshConnectorConversationDeliveryTarget } from "@/lib/db/connector-conversation-state"
+import {
+  refreshConnectorConversationDeliveryTarget,
+  stampConnectorConversationPrincipal,
+} from "@/lib/db/connector-conversation-state"
+import {
+  getActiveRuntimeAccountId,
+  readIdentityScope,
+  resolveConnectorPrincipal,
+} from "./principal/resolve"
+import { handleUnresolvedPrincipal } from "./principal/unbound"
 
 export interface BusInboundHandler {
   (event: NormalizedInboundEvent): Promise<void>
@@ -516,6 +526,46 @@ export class ConnectorBus {
     if (await observeUnmentionedDeliveryProbe(event.adapterId, event, adapterRow)) {
       await markConnectorInboundJobHistoryOnly(inboundJob.id, "delivery_probe_observed", { now })
       return
+    }
+
+    // ── Step 2.5: principal resolution (Lark unified identity, plan 2026-07-24)
+    // Runs after the durable insert (a rejected event stays auditable) and
+    // before ANY downstream work — admission, session, control commands,
+    // route handler, workflow fan-out. Fail closed: with the registry flag on,
+    // a sender that does not positively resolve to the active account never
+    // creates an agent turn and never falls back to the default local account.
+    // Recovery replays re-enter this pipeline, so recovered jobs re-resolve
+    // against the current registry state (a principal disabled between crash
+    // and replay is rejected here).
+    const principalResolution = await resolveConnectorPrincipal({
+      platform: event.platform,
+      adapterRow,
+      remoteUserId: event.sender.remoteUserId,
+      identityScope: readIdentityScope(event.channelData),
+      activeAccountId: getActiveRuntimeAccountId(),
+    })
+    if (principalResolution.status !== "legacy" && principalResolution.status !== "resolved") {
+      await handleUnresolvedPrincipal(event, adapterRow, principalResolution, inboundJob.id)
+      return
+    }
+    if (principalResolution.status === "resolved") {
+      await stampConnectorInboundJobPrincipal(inboundJob.id, {
+        accountId: principalResolution.accountId,
+        principalId: principalResolution.principal.id,
+      })
+      await stampConnectorConversationPrincipal(event.conversationKey, {
+        accountId: principalResolution.accountId,
+        principalId: principalResolution.principal.id,
+      }).catch(() => undefined)
+      // In-memory stamp for downstream run-initiator attribution (recovery
+      // replays re-enter this pipeline and re-stamp, so this never goes stale).
+      event.channelData = {
+        ...event.channelData,
+        resolvedPrincipal: {
+          principalId: principalResolution.principal.id,
+          accountId: principalResolution.accountId,
+        },
+      }
     }
 
     // ── Step 3: conversation override lookup ──────────────────────────────────

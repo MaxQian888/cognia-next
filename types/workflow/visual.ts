@@ -802,6 +802,9 @@ export interface WorkflowTriggeredFrom {
     platformIdentityId?: string
     remoteUserId?: string
     displayName?: string
+    /** Resolved principal/account stamp — see `ExecutionRunInitiator`. */
+    principalId?: string
+    accountId?: string
   }
   /**
    * Paired-device id of the companion caller (ADR-0060). Stamped server-side

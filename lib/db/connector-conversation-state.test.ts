@@ -7,6 +7,7 @@ import {
   closeConnectorConversation,
   getConnectorConversationState,
   refreshConnectorConversationDeliveryTarget,
+  stampConnectorConversationPrincipal,
   touchConnectorConversation,
 } from "./connector-conversation-state"
 import type { ConversationDeliveryTarget } from "@/types/connectors/event"
@@ -106,5 +107,28 @@ describe("connector conversation state", () => {
       })
     )
     expect(refreshed.deliveryTarget.sourceMessageId).toBe("om-2")
+  })
+
+  it("stamps account/principal on existing rows and no-ops on missing rows", async () => {
+    // Missing row: silently no-op (the delivery-target refresh owns creation).
+    await stampConnectorConversationPrincipal(TARGET.address.conversationKey, {
+      accountId: "acct_a",
+      principalId: "fp_1",
+    })
+    expect(await getConnectorConversationState(TARGET.address.conversationKey)).toBeUndefined()
+
+    await activateConnectorConversation(TARGET, {
+      activatedBy: "ou-1",
+      expiresAt: 86_401_000,
+      now: 1_000,
+    })
+    await stampConnectorConversationPrincipal(
+      TARGET.address.conversationKey,
+      { accountId: "acct_a", principalId: "fp_1" },
+      { now: 2_000 }
+    )
+    expect(await getConnectorConversationState(TARGET.address.conversationKey)).toEqual(
+      expect.objectContaining({ accountId: "acct_a", lastPrincipalId: "fp_1", updatedAt: 2_000 })
+    )
   })
 })

@@ -737,3 +737,82 @@ describe("extractTenantKey", () => {
     expect(extractTenantKey(env)).toBeUndefined()
   })
 })
+
+describe("identityScope stamping (plan 2026-07-24 Phase 1)", () => {
+  it("stamps channelData.identityScope from the message envelope header", () => {
+    const envelope: LarkEventEnvelope = {
+      schema: "2.0",
+      header: {
+        event_id: "evt_scope",
+        event_type: "im.message.receive_v1",
+        app_id: "cli_app",
+        tenant_key: "tk_hdr",
+      },
+      event: {
+        sender: { sender_id: { open_id: "ou_scope" } },
+        message: {
+          message_id: "om_scope",
+          chat_id: "oc_scope",
+          chat_type: "p2p",
+          message_type: "text",
+          content: JSON.stringify({ text: "hi" }),
+        },
+      },
+    }
+    const r = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope)
+    expect(r!.channelData?.identityScope).toEqual({ tenantKey: "tk_hdr", appId: "cli_app" })
+  })
+
+  it("falls back to the sender tenant_key when the header lacks one", () => {
+    const envelope: LarkEventEnvelope = {
+      schema: "2.0",
+      header: { event_id: "evt_scope2", event_type: "im.message.receive_v1" },
+      event: {
+        sender: { sender_id: { open_id: "ou_scope" }, tenant_key: "tk_sender" },
+        message: {
+          message_id: "om_scope2",
+          chat_id: "oc_scope",
+          chat_type: "p2p",
+          message_type: "text",
+          content: JSON.stringify({ text: "hi" }),
+        },
+      },
+    }
+    const r = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope)
+    expect(r!.channelData?.identityScope).toEqual({ tenantKey: "tk_sender", appId: undefined })
+  })
+
+  it("omits channelData entirely when the envelope has no tenancy signal", () => {
+    const envelope: LarkEventEnvelope = {
+      schema: "2.0",
+      header: { event_id: "evt_scope3", event_type: "im.message.receive_v1" },
+      event: {
+        sender: { sender_id: { open_id: "ou_scope" } },
+        message: {
+          message_id: "om_scope3",
+          chat_id: "oc_scope",
+          chat_type: "p2p",
+          message_type: "text",
+          content: JSON.stringify({ text: "hi" }),
+        },
+      },
+    }
+    const r = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope)
+    expect(r!.channelData).toBeUndefined()
+  })
+
+  it("stamps bot-menu synthetic events the same way", () => {
+    const envelope = {
+      schema: "2.0",
+      header: {
+        event_id: "evt_menu_scope",
+        event_type: "application.bot.menu_v6",
+        app_id: "cli_app",
+        tenant_key: "tk_menu",
+      },
+      event: { operator: { operator_id: { open_id: "ou_menu" } }, event_key: "k" },
+    } as unknown as LarkEventEnvelope
+    const r = parseLarkBotMenuEvent(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope, undefined)
+    expect(r!.channelData?.identityScope).toEqual({ tenantKey: "tk_menu", appId: "cli_app" })
+  })
+})

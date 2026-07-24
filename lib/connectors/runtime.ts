@@ -49,6 +49,7 @@ import { resolveSendOptions } from "@/lib/claude/build-options"
 import { endSpan } from "@cognia/agent-trace/emitter"
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
 import { generateEmbedding } from "@cognia/provider-embedding/embedding"
+import { readResolvedPrincipal } from "./principal/resolve"
 import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
 import { resolveMemoryConfig } from "@/types/memory/memory"
 import { assistantReplyToSegments } from "@/lib/connectors/a2ui-bridge/a2ui-to-segments"
@@ -882,6 +883,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
                 platformIdentityId: event.sender.id,
                 remoteUserId: event.sender.remoteUserId,
                 displayName: event.sender.displayName,
+                ...(readResolvedPrincipal(event.channelData) ?? {}),
               },
             },
           })
@@ -1020,6 +1022,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             platformIdentityId: event.sender.id,
             remoteUserId: event.sender.remoteUserId,
             displayName: event.sender.displayName,
+            ...(readResolvedPrincipal(event.channelData) ?? {}),
           },
           currentRevision: 0,
           startedAt: Date.now(),

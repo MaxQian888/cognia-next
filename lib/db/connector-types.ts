@@ -873,6 +873,14 @@ export interface ConnectorConversationStateRow {
     afterTimestamp?: number
     pageToken?: string
   }
+  /**
+   * Cognia account this conversation last resolved to (Lark unified identity,
+   * plan 2026-07-24 P1.4). Optional: absent on legacy rows and whenever the
+   * principal registry flag is off.
+   */
+  accountId?: string
+  /** FeishuPrincipalRow id of the most recent resolved sender. */
+  lastPrincipalId?: string
   createdAt: number
   updatedAt: number
 }
@@ -905,6 +913,15 @@ export interface ConnectorInboundJobRow {
   executionRunId?: string
   recoveryReason?: string
   lastError?: string
+  /**
+   * Cognia account/principal the event resolved to (Lark unified identity,
+   * plan 2026-07-24 P1.4). Stamped by the bus principal-resolution step;
+   * absent on legacy rows and whenever the principal registry flag is off.
+   * Recovery replays re-run resolution, so these are advisory denorms — the
+   * registry stays the authority.
+   */
+  accountId?: string
+  principalId?: string
   receivedAt: number
   createdAt: number
   updatedAt: number
@@ -981,3 +998,75 @@ export interface ConnectorAttachmentRow {
 
 /** Borrowed-shape: same ConversationReference as types/connectors/event.ts. */
 export type ConversationReferenceRow = ConversationReference
+
+// ─── Feishu unified identity registry (plan 2026-07-24, Phase 1) ────────────
+//
+// Server-authoritative mapping `tenantKey + appId + openId → Cognia
+// account/user`. These tables are the AUTHENTICATION authority for Lark
+// inbound events and callbacks when `larkPrincipalRegistry` is on;
+// `platformIdentities` above stays a display/contact directory only and never
+// authorizes anything. Uniqueness is enforced by compound Dexie indexes:
+// feishuTenants `&[tenantKey+appId]`, feishuPrincipals
+// `&[tenantKey+appId+openId]` — the same openId text under another tenant or
+// app is a DIFFERENT principal by construction.
+
+export type FeishuTenantStatus = "active" | "disabled"
+
+/** One row per (tenantKey, appId) pair an operator has admitted. */
+export interface FeishuTenantRow {
+  id: string
+  tenantKey: string
+  appId: string
+  /** Cognia account this tenant's traffic belongs to. */
+  cogniaAccountId: string
+  status: FeishuTenantStatus
+  configuredAt: number
+  disabledAt?: number
+  updatedAt: number
+}
+
+export type FeishuPrincipalStatus = "active" | "disabled" | "unlinked"
+
+/** One row per verified Feishu user identity within a tenant/app scope. */
+export interface FeishuPrincipalRow {
+  id: string
+  tenantKey: string
+  appId: string
+  openId: string
+  unionId?: string
+  cogniaAccountId: string
+  /** Account-local user id; equals the account id for single-user accounts. */
+  cogniaUserId: string
+  /** Web SSO linkage (P1.3): populated once the same person logs in via OIDC. */
+  logtoSubject?: string
+  logtoOrganizationId?: string
+  /** Display-identity reference into `platformIdentities` (directory only). */
+  platformIdentityId?: string
+  status: FeishuPrincipalStatus
+  linkedAt: number
+  lastVerifiedAt?: number
+  updatedAt: number
+  /** Optimistic revision, bumped on every mutation for audit/rebind flows. */
+  version: number
+}
+
+export type FeishuBindRequestStatus = "pending" | "approved" | "rejected" | "expired"
+
+/**
+ * Pending admin-bind request for an unbound Feishu sender. The row id doubles
+ * as the short unguessable code shown to the user in the "not linked yet"
+ * reply, so an operator can approve it from the admin side.
+ */
+export interface FeishuPrincipalBindRequestRow {
+  id: string
+  openId: string
+  adapterId: string
+  tenantKey?: string
+  appId?: string
+  conversationKey?: string
+  status: FeishuBindRequestStatus
+  requestedAt: number
+  resolvedAt?: number
+  resolvedPrincipalId?: string
+  expiresAt: number
+}

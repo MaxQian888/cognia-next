@@ -106,6 +106,23 @@ export type AuditKind =
   | "callback.deduped"
   | "callback.unbound"
   | "callback.handler_failed"
+  // ── Callback authorization guard (plan 2026-07-24 Phase 2) ───────────
+  // `callback.forbidden` — strict mode denied the callback; `reason` is the
+  // CallbackDenyReason and `fields` carries {actorHash, kindClass,
+  // bindingId?} — never raw payloads or tokens. `authorization_would_deny`
+  // is the same decision in audit (shadow) mode, where the callback still
+  // executes; its growth curve is the gray-release signal for enforcing.
+  | "callback.forbidden"
+  | "callback.authorization_would_deny"
+  // ── Feishu unified identity (plan 2026-07-24 Phase 1) ────────────────
+  // Principal registry outcomes. `principal.unbound` fields carry
+  // {tenantKey?, appId?, openIdHash, reason} — the raw open_id never lands
+  // in the audit log. `principal.rejected` covers disabled/cross-account
+  // rejections; bind_requested/bound trace the admin bind flow.
+  | "principal.unbound"
+  | "principal.rejected"
+  | "principal.bind_requested"
+  | "principal.bound"
   // ── Built-in skills tier (ADR-0026 / schema v43) ─────────────────────
   // The dispatcher emits one of these on every `runBuiltInSkill` call.
   // `reason` carries the gate that fired (`pii_blocked`,

@@ -563,3 +563,38 @@ describe("segmentsToLarkBodyAsync — resolved media in combined cards", () => {
     expect(parsed.elements.some((e) => e.tag === "img")).toBe(false)
   })
 })
+
+describe("parseLarkInteractiveCallback identityScope (plan 2026-07-24 Phase 2)", () => {
+  it("carries tenant_key/app_id from the verified envelope", () => {
+    const envelope: LarkEventEnvelope = {
+      schema: "2.0",
+      header: {
+        event_id: "evt_scope",
+        event_type: "card.action.trigger",
+        app_id: "cli_app",
+      },
+      event: {
+        operator: { open_id: "ou_clicker" },
+        tenant_key: "tk_body",
+        context: { open_chat_id: "oc_chat", open_message_id: "om_msg" },
+        action: { tag: "button", value: { actionId: "a2ui:s:c:go", surfaceId: "s" } },
+      } as unknown as LarkEventEnvelope["event"],
+    }
+    const cb = parseLarkInteractiveCallback("adp_lk", "BOT", envelope)
+    expect(cb!.identityScope).toEqual({ tenantKey: "tk_body", appId: "cli_app" })
+  })
+
+  it("leaves identityScope undefined when the envelope has no tenancy signal", () => {
+    const envelope: LarkEventEnvelope = {
+      schema: "2.0",
+      header: { event_id: "evt_ns", event_type: "card.action.trigger" },
+      event: {
+        operator: { open_id: "ou_clicker" },
+        context: { open_chat_id: "oc_chat" },
+        action: { tag: "button", value: { actionId: "a2ui:s:c:go", surfaceId: "s" } },
+      } as unknown as LarkEventEnvelope["event"],
+    }
+    const cb = parseLarkInteractiveCallback("adp_lk", "BOT", envelope)
+    expect(cb!.identityScope).toBeUndefined()
+  })
+})

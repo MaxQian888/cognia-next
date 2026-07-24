@@ -15,6 +15,7 @@ import {
   listPendingConnectorInboundJobs,
   markConnectorInboundJobHistoryOnly,
   markConnectorInboundJobRecoveryRequired,
+  stampConnectorInboundJobPrincipal,
   recoverStaleConnectorInboundJobs,
   retryConnectorInboundJobFromStart,
   updateConnectorInboundJobPayload,
@@ -221,6 +222,18 @@ describe("connector inbound jobs", () => {
 
     expect(await getDb().connectorInboundJobs.get(job.id)).toEqual(
       expect.objectContaining({ status: "completed", executionRunId: "execution:run-1" })
+    )
+  })
+
+  it("stamps the resolved account/principal onto the job row", async () => {
+    const job = await enqueueConnectorInboundJob(event("om-principal", 10), "queue", { now: 100 })
+    await stampConnectorInboundJobPrincipal(
+      job.id,
+      { accountId: "acct_a", principalId: "fp_1" },
+      { now: 200 }
+    )
+    expect(await getDb().connectorInboundJobs.get(job.id)).toEqual(
+      expect.objectContaining({ accountId: "acct_a", principalId: "fp_1", updatedAt: 200 })
     )
   })
 })

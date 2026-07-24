@@ -73,6 +73,9 @@ import type {
   ConnectorConversationStateRow,
   ConnectorInboundJobRow,
   WorkflowFanoutSubscriptionRow,
+  FeishuTenantRow,
+  FeishuPrincipalRow,
+  FeishuPrincipalBindRequestRow,
 } from "./connector-types"
 import type {
   ConversationLabelRow,
@@ -327,6 +330,13 @@ export class CogniaDB extends Dexie {
   // v120 — topic-scoped activation/delivery state and durable inbound execution jobs.
   connectorConversationStates!: Table<ConnectorConversationStateRow, string>
   connectorInboundJobs!: Table<ConnectorInboundJobRow, string>
+  // v125 — Feishu unified identity registry (plan 2026-07-24 Phase 1). The
+  // authentication authority for Lark events when `larkPrincipalRegistry` is
+  // on; `platformIdentities` stays a display directory. CRUD in
+  // `lib/db/feishu-principals.ts`.
+  feishuTenants!: Table<FeishuTenantRow, string>
+  feishuPrincipals!: Table<FeishuPrincipalRow, string>
+  feishuPrincipalBindRequests!: Table<FeishuPrincipalBindRequestRow, string>
   // v123 — Certification projection (ADR-0090 Phase 5). See `lib/db/agent-compatibility.ts`.
   agentCompatibilityRecords!: Table<AgentCompatibilityRecordRow, string>
   // v124 — Canonical-session header projection (ADR-0090 Phase 8). See
@@ -2724,6 +2734,19 @@ export class CogniaDB extends Dexie {
     // table is a rebuildable index for listing/lookup only — no backfill.
     this.version(124).stores({
       agentCanonicalSessions: "&canonicalSessionId, sourceRuntime, nativeSessionId, updatedAt",
+    })
+
+    // v125 — Feishu unified identity registry (plan 2026-07-24 Phase 1).
+    // Pure additions, no upgrade callback. Compound UNIQUE indexes carry the
+    // identity model's constraints: one tenant row per (tenantKey, appId),
+    // one principal per (tenantKey, appId, openId) — the same openId text in
+    // another tenant/app never merges. Bind requests are keyed by the short
+    // code shown to unbound users.
+    this.version(125).stores({
+      feishuTenants: "&id, &[tenantKey+appId], status, updatedAt",
+      feishuPrincipals:
+        "&id, &[tenantKey+appId+openId], [tenantKey+appId], cogniaUserId, platformIdentityId, status, updatedAt",
+      feishuPrincipalBindRequests: "&id, openId, adapterId, status, requestedAt, expiresAt",
     })
 
     // First full-chain construction under Jest: cache the merged spec so every

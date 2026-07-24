@@ -189,6 +189,24 @@ export async function bindConnectorInboundJobExecutionRun(
   })
 }
 
+/**
+ * Durably record which Cognia account/principal the job's event resolved to
+ * (Lark unified identity, plan 2026-07-24 P1.4). Called by the bus principal
+ * step after a positive resolution; downstream consumers (Execution Run
+ * initiator stamping) read the fields off the job row instead of re-resolving.
+ */
+export async function stampConnectorInboundJobPrincipal(
+  id: string,
+  stamp: { accountId: string; principalId: string },
+  options: { now?: number } = {}
+): Promise<void> {
+  await getDb().connectorInboundJobs.update(id, {
+    accountId: stamp.accountId,
+    principalId: stamp.principalId,
+    updatedAt: options.now ?? Date.now(),
+  })
+}
+
 export async function markConnectorInboundJobHistoryOnly(
   id: string,
   reason: string,

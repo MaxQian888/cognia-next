@@ -111,3 +111,22 @@ export async function closeConnectorConversation(
   await getDb().connectorConversationStates.put(row)
   return row
 }
+
+/**
+ * Best-effort account/principal denorm on the conversation state row (Lark
+ * unified identity, plan 2026-07-24 P1.4). No-op when the row does not exist
+ * yet — the delivery-target refresh owns row creation.
+ */
+export async function stampConnectorConversationPrincipal(
+  conversationKey: string,
+  stamp: { accountId: string; principalId: string },
+  options: { now?: number } = {}
+): Promise<void> {
+  const existing = await getConnectorConversationState(conversationKey)
+  if (!existing) return
+  await getDb().connectorConversationStates.update(conversationKey, {
+    accountId: stamp.accountId,
+    lastPrincipalId: stamp.principalId,
+    updatedAt: options.now ?? Date.now(),
+  })
+}
