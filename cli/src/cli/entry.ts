@@ -14,10 +14,20 @@
 import { selectRole } from "./role"
 
 async function boot(): Promise<number> {
-  if (selectRole(process.env) === "sidecar") {
+  const role = selectRole(process.env)
+  if (role === "sidecar") {
     const { runSidecarRole } = await import("../runtime/sidecar-role")
     await runSidecarRole()
     // The sidecar's readline loop keeps the process alive; this return is nominal.
+    return 0
+  }
+  if (role === "tool-bridge") {
+    // An external agent spawned us as its Cognia tool-host MCP server. Like the
+    // sidecar role this must NOT load the CLI's IndexedDB preamble: the bridge
+    // touches no Dexie table, and its stdout is the MCP wire.
+    const { runToolBridgeRole } = await import("../runtime/tool-bridge-role")
+    await runToolBridgeRole()
+    // The MCP stdin loop keeps the process alive; this return is nominal.
     return 0
   }
 

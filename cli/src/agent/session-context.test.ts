@@ -11,6 +11,7 @@ import type { AgentSummary } from "./discover-agents"
 import { DISPATCH_AGENT_TOOL_NAME } from "@/lib/claude/agents/dispatch-agent-tool"
 import { LOAD_SKILL_TOOL_NAME } from "./skill-load-tool"
 import type { BuiltAttachmentContent } from "./attachments/build"
+import type { TwinContextResult } from "../twin/context-client"
 
 const HOME = "/home/u/.cognia"
 
@@ -30,6 +31,15 @@ const subagent = (id: string): AgentSummary => ({
   name: id,
   description: `${id} agent`,
   def: { id, name: id, description: `${id} agent`, prompt: `p-${id}` },
+})
+
+/** A minimal successful twin response. */
+const twin = (applied: { stable?: string; dynamic?: string }): TwinContextResult => ({
+  ok: true,
+  applied: { systemPrompt: applied.stable ?? "", ...applied },
+  degraded: false,
+  sources: [],
+  styleSampleCount: 0,
 })
 
 const emptyContent = (prompt: string): BuiltAttachmentContent => ({
@@ -145,7 +155,7 @@ describe("createCliContextAssembler — session context", () => {
   })
 
   it("degrades to no skills — and records the snapshot error — when the db is unsafe", async () => {
-    const err = new CliDbSnapshotError("corrupt", "/tmp/preserved")
+    const err = new CliDbSnapshotError("corrupt", "/tmp/snapshot", "/tmp/preserved")
     const ctx = await makeAssembler({
       resolveSkillIds: () => ["skill-a"],
       ensureDb: async () => {
@@ -240,9 +250,7 @@ describe("createCliContextAssembler — turn context", () => {
   it("emits the twin persona once and the dynamic recall every turn", async () => {
     const assembler = makeAssembler(
       {
-        fetchTwin: async () => ({
-          applied: { stable: "PERSONA", dynamic: "RECALL" },
-        }),
+        fetchTwin: async () => twin({ stable: "PERSONA", dynamic: "RECALL" }),
       },
       cfg({ twin: { enabled: true, characterId: "c1" } })
     )
@@ -257,7 +265,7 @@ describe("createCliContextAssembler — turn context", () => {
 
   it("re-emits the persona after invalidate (the rebuilt prompt lost it)", async () => {
     const assembler = makeAssembler(
-      { fetchTwin: async () => ({ applied: { stable: "PERSONA" } }) },
+      { fetchTwin: async () => twin({ stable: "PERSONA" }) },
       cfg({ twin: { enabled: true, characterId: "c1" } })
     )
     const session = await assembler.resolveSession()

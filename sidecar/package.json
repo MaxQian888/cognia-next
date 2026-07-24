@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node agent-host.mjs",
     "smoke": "node agent-host.mjs --smoke",
-    "test": "node --test telemetry.test.mjs agent-host.test.mjs claude-host.test.mjs dispatch/*.test.mjs dispatch/optical/*.test.mjs a2ui-tools/*.test.mjs builtin-tools/*.test.mjs builtin-tools/shared/*.test.mjs builtin-tools/core/*.test.mjs builtin-tools/file-ops/*.test.mjs builtin-tools/process/*.test.mjs builtin-tools/git/*.test.mjs builtin-tools/code/*.test.mjs builtin-tools/code/languages/*.test.mjs builtin-tools/ast-grep/*.test.mjs builtin-tools/clonedeps/*.test.mjs builtin-tools/webclone/*.test.mjs lsp/*.test.mjs mcp-oauth-helper.test.mjs"
+    "test": "node --test telemetry.test.mjs agent-host.test.mjs claude-host.test.mjs cognia-tool-bridge.test.mjs dispatch/*.test.mjs dispatch/optical/*.test.mjs a2ui-tools/*.test.mjs builtin-tools/*.test.mjs builtin-tools/shared/*.test.mjs builtin-tools/core/*.test.mjs builtin-tools/file-ops/*.test.mjs builtin-tools/process/*.test.mjs builtin-tools/git/*.test.mjs builtin-tools/code/*.test.mjs builtin-tools/code/languages/*.test.mjs builtin-tools/ast-grep/*.test.mjs builtin-tools/clonedeps/*.test.mjs builtin-tools/webclone/*.test.mjs lsp/*.test.mjs mcp-oauth-helper.test.mjs"
   },
   "dependencies": {
     "@ai-sdk/amazon-bedrock": "4.0.123",

@@ -37,6 +37,11 @@ import { createCliExternalAgentAliasPlugin } from "./cli-external-agent-aliases.
 const root = path.dirname(fileURLToPath(import.meta.url)) + "/../.."
 const cliEntry = path.join(root, "cli/src/cli/entry.ts")
 const sidecarEntry = path.join(root, "sidecar/claude-host.mjs")
+// The Cognia tool-host MCP bridge an EXTERNAL agent spawns. It lives in the
+// sidecar bundle because that is where the real built-in tool definitions and
+// handlers are, and it ships beside claude-host.mjs so the packaged binary can
+// self-exec it with COGNIA_ROLE=tool-bridge.
+const toolBridgeEntry = path.join(root, "sidecar/cognia-tool-bridge.mjs")
 const mcpSidecarEntry = path.join(root, "lib/external-bridge/mcp-server/standalone-entry.ts")
 const mcpBridgeRuntime = path.join(root, "scripts/build/mcp-bridge-runtime.ts")
 const sidecarNodeModules = path.join(root, "sidecar/node_modules")
@@ -296,6 +301,20 @@ await esbuild.build({
   logLevel: "info",
 })
 console.log(`build-cli-binary: wrote ${path.relative(root, path.join(sidecarOutDir, "claude-host.mjs"))}`)
+
+await esbuild.build({
+  entryPoints: [toolBridgeEntry],
+  outfile: path.join(sidecarOutDir, "cognia-tool-bridge.mjs"),
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  target: "node26",
+  external: SIDECAR_EXTERNALS,
+  banner: { js: CREATE_REQUIRE_BANNER },
+  loader: ASSET_LOADERS,
+  logLevel: "info",
+})
+console.log(`build-cli-binary: wrote ${path.relative(root, path.join(sidecarOutDir, "cognia-tool-bridge.mjs"))}`)
 
 // The embedded External Bridge MCP server is a separate stdio sidecar owned
 // by the Rust HTTP proxy. Bundle its canonical TypeScript implementation into
