@@ -211,11 +211,6 @@ impl AgentChannel {
         }
     }
 
-    /// Whether an extension is currently connected for `root`.
-    pub fn is_connected(&self, root: &str) -> bool {
-        self.lock_registry().conns.contains_key(root)
-    }
-
     // ── internals ────────────────────────────────────────────────────────────
 
     /// Bind the loopback WS server once and return its port. Subsequent calls
@@ -397,6 +392,10 @@ mod tests {
     use serde_json::json;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
+    fn is_connected(channel: &AgentChannel, root: &str) -> bool {
+        channel.lock_registry().conns.contains_key(root)
+    }
+
     #[test]
     fn hello_frame_parses() {
         let frame: InboundFrame =
@@ -486,11 +485,11 @@ mod tests {
         // Attach a fake connection for /work/a.
         let (tx, _rx) = mpsc::channel::<String>(1);
         channel.attach_conn("/work/a", tx);
-        assert!(channel.is_connected("/work/a"));
+        assert!(is_connected(&channel, "/work/a"));
 
         channel.deregister("/work/a");
         assert_eq!(channel.root_for_token("tok-a"), None);
-        assert!(!channel.is_connected("/work/a"));
+        assert!(!is_connected(&channel, "/work/a"));
         // Unrelated root untouched.
         assert_eq!(channel.root_for_token("tok-b").as_deref(), Some("/work/b"));
     }
@@ -507,11 +506,11 @@ mod tests {
 
         // The stale first connection closing must NOT evict the live second one.
         channel.detach_conn("/work/a", first);
-        assert!(channel.is_connected("/work/a"));
+        assert!(is_connected(&channel, "/work/a"));
 
         // The current connection closing does evict.
         channel.detach_conn("/work/a", second);
-        assert!(!channel.is_connected("/work/a"));
+        assert!(!is_connected(&channel, "/work/a"));
     }
 
     #[test]
