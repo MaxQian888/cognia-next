@@ -9,6 +9,7 @@
     "sendToAi": "发送给 AI"
   },
   "comments": "评论",
+  "webviewPanelPending": "该面板的 webview 尚未加载。",
   "commentsPanel": {
     "add": "添加评论",
     "cancel": "取消",

@@ -9,6 +9,7 @@
     "sendToAi": "Send to AI"
   },
   "comments": "Comments",
+  "webviewPanelPending": "This panel's webview has not loaded yet.",
   "commentsPanel": {
     "add": "Add comment",
     "cancel": "Cancel",

@@ -36,5 +36,31 @@
   "title": "Import agent sessions",
   "unrecognized": "These files weren't recognized as a supported agent session.",
   "webHint": "Auto-scan and live sync are desktop-only. On iOS and the web, choose exported session files manually.",
-  "writingProgress": "Saving {done}/{total}…"
+  "writingProgress": "Saving {done}/{total}…",
+  "fidelityReport": {
+    "title": "Conversion fidelity",
+    "rebuilt": "Reconstructed",
+    "rebuiltHint": "This record was rebuilt from trusted artifacts — it is provenance-marked and does not claim to be the original transcript.",
+    "noLosses": "Converted without loss.",
+    "lossCount": "{count, plural, one {# item was not carried over} other {# items were not carried over}}",
+    "lossKinds": {
+      "dropped": "Dropped",
+      "approximated": "Approximated",
+      "summarized": "Summarized"
+    },
+    "fidelity": {
+      "native-exact": "Native (exact)",
+      "structured": "Structured",
+      "contextual": "Contextual",
+      "summary-only": "Summary only",
+      "unsupported": "Unsupported"
+    },
+    "fidelityHint": {
+      "native-exact": "The runtime resumes this session exactly as its own.",
+      "structured": "Text and tool history carry over; runtime-private state does not.",
+      "contextual": "A new session is seeded with a replay of the transcript.",
+      "summary-only": "Only a summary of the conversation carries over.",
+      "unsupported": "This direction is not supported for this source."
+    }
+  }
 }

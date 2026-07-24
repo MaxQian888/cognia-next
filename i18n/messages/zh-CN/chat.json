@@ -149,21 +149,45 @@
     },
     "attachments": {
       "countLimit": "最多只能附加 {max} 个附件。",
+      "extracting": "读取中…",
       "fallbackFile": "文件",
       "fallbackName": "附件",
       "fileSizeExceeded": "{count, plural, =1 {1 个文件超过} other {# 个文件超过}} {max}MB。",
       "folderEmpty": "该文件夹中没有可添加的文件。",
       "folderTruncated": "仅读取了拖入文件夹中的前 {max} 个文件。",
       "linkSkipped": "有 {count} 个链接无法读取，仍会发送原始网址。",
+      "openPreviewAria": "预览 {filename}",
       "optimized": "添加前已优化 {count} 张大图。",
       "oversizeBody": "这些附件大约会增加 {tokens}k tokens 的上下文。仍要发送吗？",
       "oversizeCancel": "取消",
       "oversizeConfirm": "仍然发送",
       "oversizeTitle": "附件较大",
       "preparing": "正在处理附件…",
+      "preview": {
+        "empty": "未能从此文件中提取到内容。",
+        "fileTab": "文件",
+        "fullSize": "查看原图",
+        "imageHint": "发送前会将长边压缩到 {maxEdge}px 以内。",
+        "modelHint": "这就是模型将收到的完整内容。",
+        "modelTab": "模型视角",
+        "ocrDetail": "查看逐页结果",
+        "ocrRun": "运行 OCR",
+        "ocrRunning": "OCR 识别中…",
+        "ocrToggle": "同时发送 OCR 文本",
+        "ocrToInput": "把文本加进输入框",
+        "redactedNote": "高亮部分在发送前已被脱敏。",
+        "tokens": "{tokens} tokens"
+      },
+      "rejectReason": {
+        "empty": "未找到可读文本",
+        "notDataUrl": "无法读取此文件",
+        "parseFailed": "无法解析此文件",
+        "unsupportedType": "不支持的文件类型"
+      },
       "removeAria": "移除 {filename}",
-      "removeFallback": "移除附件",
+      "reorderAria": "拖动排序 {filename}",
       "skipped": "{count, plural, =1 {1 个附件已被} other {# 个附件已被}}跳过（不支持的文件类型）。",
+      "tokenBadge": "{tokens} tok",
       "unsupported": "有 {count} 个文件不受支持。"
     },
     "camera": {
@@ -511,6 +535,7 @@
     "title": "今天想完成点什么？"
   },
   "filePreview": {
+    "extractedChars": "已提取 {count} 字符",
     "loading": "正在加载 {name}…",
     "pdfFallback": "无法预览此 PDF。"
   },
@@ -735,6 +760,31 @@
   },
   "mcpContent": {
     "embeddedResource": "嵌入资源：{uri}"
+  },
+  "memoryChips": {
+    "budgetLine": "上下文预算：{used}/{limit} tokens",
+    "cancel": "取消",
+    "degradedNotice": "本轮记忆检索降级（仅关键词匹配）。",
+    "deletedFallback": "已从记忆库删除",
+    "details": "在记忆控制台打开",
+    "edit": "编辑记忆",
+    "editAria": "编辑记忆内容",
+    "errors": {
+      "disabled": "记忆功能已在设置中关闭",
+      "not_found": "这条记忆已不存在",
+      "pii_blocked": "已拦截：新文本包含个人隐私信息",
+      "temporary": "记忆当前处于临时模式"
+    },
+    "learnedAria": "本条回复学到的记忆",
+    "learnedLabel": "{count, plural, other {记住了 # 条}}",
+    "learnedTitle": "从这条回复学到",
+    "recalledAria": "本条回复引用的记忆",
+    "recalledLabel": "{count, plural, =0 {未引用记忆} other {引用了 # 条记忆}}",
+    "recalledTitle": "本条回复引用的记忆",
+    "save": "保存",
+    "truncated": "已截断",
+    "undo": "撤销——忘掉这条记忆",
+    "undone": "已撤销"
   },
   "message": {
     "attachmentAlt": "附件",

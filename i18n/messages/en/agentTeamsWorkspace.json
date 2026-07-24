@@ -160,6 +160,7 @@
   "cancelRename": "Cancel rename",
   "chat": {
     "composer": {
+      "attachmentsNotSupported": "Attachments aren't supported in team chat yet.",
       "imageNotSupported": "Image attachments aren't supported in team chat yet.",
       "mentionTitle": "Mention an agent",
       "missingMention": "Start your message with @'<agent-name>' to dispatch it.",
@@ -420,7 +421,8 @@
       "plugins": "Plugins & capabilities",
       "prFeedback": "PR feedback",
       "ultracode": "Ultracode",
-      "worktrees": "Worktree isolation"
+      "worktrees": "Worktree isolation",
+      "execution": "Execution"
     },
     "autoShutdown": "Auto-shutdown on completion",
     "awaitingExternalPickup": "Awaiting external pickup",
@@ -689,6 +691,12 @@
         }
       },
       "title": "Worktree isolation"
+    },
+    "execution": {
+      "title": "Execution",
+      "description": "Team-level execution defaults (ADR-0090): the binding every inheriting teammate resolves to, and the team-to-team delegation depth cap.",
+      "maxDelegationDepth": "Max team delegation depth",
+      "maxDelegationDepthHint": "Team-to-team delegations only (default 2). A team at the cap has its further delegations refused. Distinct from native subagent nesting depth."
     }
   },
   "stats": {

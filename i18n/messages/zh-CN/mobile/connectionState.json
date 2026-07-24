@@ -67,6 +67,7 @@
   },
   "toasts": {
     "noTier": "当前没有 WebRTC 链路，仍走 HTTPS+WS。",
+    "reconnectBusy": "正在重连中…",
     "reconnectStarted": "重新握手中…",
     "reconnectThrottled": "请稍等几秒再点重连。",
     "syncFailed": "同步失败（{message}）。",

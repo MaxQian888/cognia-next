@@ -160,6 +160,7 @@
   "cancelRename": "取消重命名",
   "chat": {
     "composer": {
+      "attachmentsNotSupported": "团队对话暂不支持附件。",
       "imageNotSupported": "团队对话暂不支持图片附件。",
       "mentionTitle": "提及一个智能体",
       "missingMention": "请用 @<智能体名> 开头的方式发送消息。",
@@ -420,7 +421,8 @@
       "plugins": "插件与能力",
       "prFeedback": "PR 反馈",
       "ultracode": "Ultracode",
-      "worktrees": "工作树隔离"
+      "worktrees": "工作树隔离",
+      "execution": "执行"
     },
     "autoShutdown": "完成后自动关闭",
     "awaitingExternalPickup": "等待外部认领",
@@ -689,6 +691,12 @@
         }
       },
       "title": "工作树隔离"
+    },
+    "execution": {
+      "title": "执行",
+      "description": "团队级执行默认值（ADR-0090）：继承模式成员解析到的绑定，以及团队间委派深度上限。",
+      "maxDelegationDepth": "团队委派最大深度",
+      "maxDelegationDepthHint": "仅计团队间委派（默认 2）。达到上限的团队再委派会被拒绝。与原生 subagent 嵌套深度相互独立。"
     }
   },
   "stats": {

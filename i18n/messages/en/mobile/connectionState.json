@@ -67,6 +67,7 @@
   },
   "toasts": {
     "noTier": "No WebRTC tier active — using HTTPS+WS.",
+    "reconnectBusy": "Already reconnecting…",
     "reconnectStarted": "Re-handshaking…",
     "reconnectThrottled": "Slow down — wait a few seconds between reconnects.",
     "syncFailed": "Sync failed ({message}).",

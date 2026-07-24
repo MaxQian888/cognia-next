@@ -1957,6 +1957,7 @@
     "cancelRename": "取消重命名",
     "chat": {
       "composer": {
+        "attachmentsNotSupported": "团队对话暂不支持附件。",
         "imageNotSupported": "团队对话暂不支持图片附件。",
         "mentionTitle": "提及一个智能体",
         "missingMention": "请用 @<智能体名> 开头的方式发送消息。",
@@ -2211,6 +2212,7 @@
     "searchTeams": "搜索团队...",
     "settings": {
       "accordion": {
+        "execution": "执行",
         "governance": "治理",
         "memory": "共享内存",
         "overview": "概览",
@@ -2249,6 +2251,12 @@
       "description": "描述",
       "dispatchDecisionLabel": "调度决策",
       "enableMessaging": "智能体间消息",
+      "execution": {
+        "description": "团队级执行默认值（ADR-0090）：继承模式成员解析到的绑定，以及团队间委派深度上限。",
+        "maxDelegationDepth": "团队委派最大深度",
+        "maxDelegationDepthHint": "仅计团队间委派（默认 2）。达到上限的团队再委派会被拒绝。与原生 subagent 嵌套深度相互独立。",
+        "title": "执行"
+      },
       "executionMode": "执行模式",
       "executionModeOption": {
         "autonomous": "自主",
@@ -4101,21 +4109,45 @@
       },
       "attachments": {
         "countLimit": "最多只能附加 {max} 个附件。",
+        "extracting": "读取中…",
         "fallbackFile": "文件",
         "fallbackName": "附件",
         "fileSizeExceeded": "{count, plural, =1 {1 个文件超过} other {# 个文件超过}} {max}MB。",
         "folderEmpty": "该文件夹中没有可添加的文件。",
         "folderTruncated": "仅读取了拖入文件夹中的前 {max} 个文件。",
         "linkSkipped": "有 {count} 个链接无法读取，仍会发送原始网址。",
+        "openPreviewAria": "预览 {filename}",
         "optimized": "添加前已优化 {count} 张大图。",
         "oversizeBody": "这些附件大约会增加 {tokens}k tokens 的上下文。仍要发送吗？",
         "oversizeCancel": "取消",
         "oversizeConfirm": "仍然发送",
         "oversizeTitle": "附件较大",
         "preparing": "正在处理附件…",
+        "preview": {
+          "empty": "未能从此文件中提取到内容。",
+          "fileTab": "文件",
+          "fullSize": "查看原图",
+          "imageHint": "发送前会将长边压缩到 {maxEdge}px 以内。",
+          "modelHint": "这就是模型将收到的完整内容。",
+          "modelTab": "模型视角",
+          "ocrDetail": "查看逐页结果",
+          "ocrRun": "运行 OCR",
+          "ocrRunning": "OCR 识别中…",
+          "ocrToInput": "把文本加进输入框",
+          "ocrToggle": "同时发送 OCR 文本",
+          "redactedNote": "高亮部分在发送前已被脱敏。",
+          "tokens": "{tokens} tokens"
+        },
+        "rejectReason": {
+          "empty": "未找到可读文本",
+          "notDataUrl": "无法读取此文件",
+          "parseFailed": "无法解析此文件",
+          "unsupportedType": "不支持的文件类型"
+        },
         "removeAria": "移除 {filename}",
-        "removeFallback": "移除附件",
+        "reorderAria": "拖动排序 {filename}",
         "skipped": "{count, plural, =1 {1 个附件已被} other {# 个附件已被}}跳过（不支持的文件类型）。",
+        "tokenBadge": "{tokens} tok",
         "unsupported": "有 {count} 个文件不受支持。"
       },
       "camera": {
@@ -4463,6 +4495,7 @@
       "title": "今天想完成点什么？"
     },
     "filePreview": {
+      "extractedChars": "已提取 {count} 字符",
       "loading": "正在加载 {name}…",
       "pdfFallback": "无法预览此 PDF。"
     },
@@ -4687,6 +4720,31 @@
     },
     "mcpContent": {
       "embeddedResource": "嵌入资源：{uri}"
+    },
+    "memoryChips": {
+      "budgetLine": "上下文预算：{used}/{limit} tokens",
+      "cancel": "取消",
+      "degradedNotice": "本轮记忆检索降级（仅关键词匹配）。",
+      "deletedFallback": "已从记忆库删除",
+      "details": "在记忆控制台打开",
+      "edit": "编辑记忆",
+      "editAria": "编辑记忆内容",
+      "errors": {
+        "disabled": "记忆功能已在设置中关闭",
+        "not_found": "这条记忆已不存在",
+        "pii_blocked": "已拦截：新文本包含个人隐私信息",
+        "temporary": "记忆当前处于临时模式"
+      },
+      "learnedAria": "本条回复学到的记忆",
+      "learnedLabel": "{count, plural, other {记住了 # 条}}",
+      "learnedTitle": "从这条回复学到",
+      "recalledAria": "本条回复引用的记忆",
+      "recalledLabel": "{count, plural, =0 {未引用记忆} other {引用了 # 条记忆}}",
+      "recalledTitle": "本条回复引用的记忆",
+      "save": "保存",
+      "truncated": "已截断",
+      "undo": "撤销——忘掉这条记忆",
+      "undone": "已撤销"
     },
     "message": {
       "attachmentAlt": "附件",
@@ -5324,7 +5382,8 @@
         "description": "文件系统工作区工具需要受支持的桌面端或沙箱后端。",
         "title": "工作区暂不可用"
       }
-    }
+    },
+    "webviewPanelPending": "该面板的 webview 尚未加载。"
   },
   "crashDialog": {
     "description": "{time} 开始的会话（版本 {version}）因崩溃而结束。已保存包含详细信息的崩溃报告。",
@@ -6381,7 +6440,10 @@
       "firstFailure": "首个失败",
       "firstFailurePlaceholder": "这条轨迹里最先出错的是什么？",
       "heading": "轨迹分析",
+      "nextPage": "下一页",
+      "pageOf": "第 {page} / {pages} 页",
       "pickDataset": "选择评测集",
+      "prevPage": "上一页",
       "saturation": "已达饱和——可以停止阅读了。",
       "save": "保存标注",
       "saveAsCase": "存为评测用例",
@@ -6394,8 +6456,10 @@
     "calibration": {
       "add": "添加",
       "addItem": "添加标注样本",
+      "cancel": "取消",
       "createSet": "创建集合",
       "criterion": "评判标准",
+      "criterionMismatch": "这个集合里的用例指向了不同的评审器。一个集合只校准一个评审器 —— 以最早那条（{criterion}）为准，其余不可比。",
       "criterionPlaceholder": "例如 任务完成度",
       "delete": "删除样本",
       "disagreement": {
@@ -6411,7 +6475,8 @@
       "goldPass": "通过",
       "heading": "评委校准",
       "history": {
-        "heading": "κ 历史趋势"
+        "heading": "κ 历史趋势",
+        "hint": "从旧到新。改动 rubric 或评审模型后 κ 下降，说明评审器与你的人工标注更不一致了。"
       },
       "input": "用户请求",
       "inputPlaceholder": "评委要评判的请求",
@@ -6474,6 +6539,7 @@
     "compare": {
       "case": "用例",
       "fail": "失败",
+      "loading": "正在加载逐例结果…",
       "mixedScoring": "你正在对比评分修复前后的运行。旧运行把纯测量类评分器算作通过，因此跨越这条分界线的下降是修复生效，而不是能力退化。",
       "noCases": "所选运行没有记录逐用例结果。",
       "pass": "通过",
@@ -6481,6 +6547,9 @@
       "selectRun": "选择运行 {label}",
       "subtitle": "选择两个或更多运行，逐用例对比。",
       "title": "运行与对比"
+    },
+    "cost": {
+      "confirm": "这次运行超出你设置的成本护栏。再点一次以确认运行。"
     },
     "datasets": {
       "back": "返回评测集列表",
@@ -6503,6 +6572,7 @@
       "gate": "门限",
       "gateConfigured": "已设门限",
       "import": "导入",
+      "moreActions": "更多数据集操作",
       "run": "运行",
       "segments": {
         "cases": "用例",
@@ -6643,6 +6713,18 @@
     "runDetail": {
       "agentOutput": "模型回答",
       "back": "返回",
+      "calibration": {
+        "cancel": "取消",
+        "done": "已添加 {count} 条校准项",
+        "hint": "把本次运行中已判定的用例转成校准项，并用评审模型自己的判定预填金标，供你确认或推翻。",
+        "newSet": "新建集合…",
+        "newSetName": "新集合名称",
+        "open": "送去评审校准",
+        "preview": "将添加 {count} 条用例，跳过 {skipped} 条",
+        "scorer": "评审器",
+        "seed": "添加 {count} 条",
+        "set": "校准集"
+      },
       "caseColumn": "用例",
       "fail": "失败",
       "gateFailed": "门限未过",
@@ -6772,7 +6854,17 @@
     "versions": {
       "applyTag": "应用",
       "cases": "{count} 条用例",
+      "closeDiff": "关闭",
+      "compare": "对比",
+      "compareWith": "对比对象",
+      "diffCounts": "新增 {added} · 移除 {removed} · 变更 {changed} · 未变 {unchanged}",
+      "diffHeading": "从 {from} 到 {to} 的变化",
+      "diffNone": "两个快照包含的用例相同。",
       "empty": "暂无版本快照。每次运行会冻结一个快照。",
+      "restore": "回滚",
+      "restoreConfirm": "回滚会删除该快照之后新增的 {deleted} 条用例。再点一次以确认。",
+      "restoreDone": "已回滚：删除 {deleted} 条，恢复 {readded} 条",
+      "restoreMissing": "该快照中有 {count} 条用例已被删除且无法恢复 —— 这个快照只存了 id。",
       "tag": "打标签",
       "tagPlaceholder": "标签（如 prod）",
       "version": "v{version}"
@@ -10110,6 +10202,7 @@
       },
       "toasts": {
         "noTier": "当前没有 WebRTC 链路，仍走 HTTPS+WS。",
+        "reconnectBusy": "正在重连中…",
         "reconnectStarted": "重新握手中…",
         "reconnectThrottled": "请稍等几秒再点重连。",
         "syncFailed": "同步失败（{message}）。",
@@ -17178,6 +17271,32 @@
     "empty": "未找到会话。",
     "emptyHint": "磁盘上没有找到内容。可尝试手动选择会话文件。",
     "errorTitle": "导入失败",
+    "fidelityReport": {
+      "fidelity": {
+        "contextual": "上下文重放",
+        "native-exact": "原生（精确）",
+        "structured": "结构化",
+        "summary-only": "仅摘要",
+        "unsupported": "不支持"
+      },
+      "fidelityHint": {
+        "contextual": "以转录重放为种子创建新会话继续。",
+        "native-exact": "运行时可将该会话作为其自身会话精确恢复。",
+        "structured": "文本与工具历史可携带；运行时私有状态不可携带。",
+        "summary-only": "仅携带会话摘要。",
+        "unsupported": "该来源不支持此方向的转换。"
+      },
+      "lossCount": "{count} 项未能携带",
+      "lossKinds": {
+        "approximated": "已近似",
+        "dropped": "已丢弃",
+        "summarized": "已摘要"
+      },
+      "noLosses": "转换无损。",
+      "rebuilt": "重建",
+      "rebuiltHint": "该记录由可信工件重建，带有溯源标记，不冒充原始转录。",
+      "title": "转换保真度"
+    },
     "importSelected": "导入选中的 {count} 项",
     "importing": "正在导入…",
     "liveSync": "实时同步",
