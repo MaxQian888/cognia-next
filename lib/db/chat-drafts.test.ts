@@ -1,7 +1,14 @@
 /** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
-import { clearDraft, getDraft, setDraft, setDraftDebounced } from "./chat-drafts"
+import {
+  clearDraft,
+  DRAFT_ATTACHMENT_QUOTA_BYTES,
+  enforceDraftAttachmentQuota,
+  getDraft,
+  setDraft,
+  setDraftDebounced,
+} from "./chat-drafts"
 
 beforeEach(async () => {
   await getDb().delete()
@@ -173,5 +180,87 @@ describe("chat-drafts", () => {
     } finally {
       jest.useRealTimers()
     }
+  })
+})
+
+describe("draft attachment binaries + quota", () => {
+  // A token payload. `size` is what the quota accounting reads (deliberately —
+  // see `rowBytes`), so a test can declare a huge attachment without allocating
+  // one; the jest structuredClone polyfill is JSON-based and cannot survive a
+  // multi-megabyte typed array.
+  const bytesOf = () => new Uint8Array([1, 2, 3, 4])
+
+  it("round-trips the binary and the cached extraction", async () => {
+    await setDraft("ses_a", "note", [
+      {
+        name: "a.png",
+        mediaType: "image/png",
+        size: 64,
+        bytes: bytesOf(),
+        extractedText: "body",
+        tokens: 7,
+      },
+    ])
+    const row = await getDraft("ses_a")
+    const att = row!.attachments![0]!
+    expect(att.bytes).toBeDefined()
+    expect(att.size).toBe(64)
+    expect(att.extractedText).toBe("body")
+    expect(att.tokens).toBe(7)
+  })
+
+  it("leaves everything alone while under the quota", async () => {
+    await setDraft("ses_a", "x", [
+      { name: "a.png", mediaType: "image/png", size: 8, bytes: bytesOf() },
+    ])
+    await enforceDraftAttachmentQuota()
+    expect((await getDraft("ses_a"))!.attachments![0]!.bytes).toBeDefined()
+  })
+
+  it("evicts the oldest session's binaries first, keeping its metadata", async () => {
+    const big = Math.ceil(DRAFT_ATTACHMENT_QUOTA_BYTES * 0.6)
+    await setDraft("ses_old", "old", [
+      { name: "old.png", mediaType: "image/png", size: big, bytes: bytesOf() },
+    ])
+    // Force a strictly later `updatedAt` so ordering is unambiguous.
+    await getDb().chatDrafts.update("ses_old", { updatedAt: 1 })
+    await setDraft("ses_new", "new", [
+      { name: "new.png", mediaType: "image/png", size: big, bytes: bytesOf() },
+    ])
+
+    await enforceDraftAttachmentQuota()
+
+    const oldRow = await getDraft("ses_old")
+    const newRow = await getDraft("ses_new")
+    // Oldest loses its binary but degrades to a reminder chip, not deletion.
+    expect(oldRow!.attachments![0]!.bytes).toBeUndefined()
+    expect(oldRow!.attachments![0]!.name).toBe("old.png")
+    expect(oldRow!.attachments![0]!.size).toBe(big)
+    expect(newRow!.attachments![0]!.bytes).toBeDefined()
+  })
+
+  it("never evicts the session that was just written", async () => {
+    const big = Math.ceil(DRAFT_ATTACHMENT_QUOTA_BYTES * 0.6)
+    await setDraft("ses_a", "a", [
+      { name: "a.png", mediaType: "image/png", size: big, bytes: bytesOf() },
+    ])
+    await getDb().chatDrafts.update("ses_a", { updatedAt: 1 })
+    // `setDraft` enforces the quota itself, protecting the row it just wrote.
+    await setDraft("ses_b", "b", [
+      { name: "b.png", mediaType: "image/png", size: big, bytes: bytesOf() },
+    ])
+    expect((await getDraft("ses_b"))!.attachments![0]!.bytes).toBeDefined()
+    expect((await getDraft("ses_a"))!.attachments![0]!.bytes).toBeUndefined()
+  })
+
+  it("skips rows that carry no binary when freeing space", async () => {
+    await setDraft("ses_meta", "meta-only", [{ name: "m.txt", mediaType: "text/plain", size: 3 }])
+    const big = DRAFT_ATTACHMENT_QUOTA_BYTES + 1
+    await setDraft("ses_big", "big", [
+      { name: "b.png", mediaType: "image/png", size: big, bytes: bytesOf() },
+    ])
+    await enforceDraftAttachmentQuota()
+    // The metadata-only row is untouched — there was nothing to reclaim.
+    expect((await getDraft("ses_meta"))!.attachments![0]!.name).toBe("m.txt")
   })
 })

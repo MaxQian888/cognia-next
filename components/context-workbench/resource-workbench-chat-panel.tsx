@@ -4,6 +4,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import type { SendContent } from "@cognia/agent-config-types"
+import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { useChatScope } from "@/components/chat/chat-scope-provider"
 import { useClaudeChat } from "@/hooks/chat/use-claude-chat"
 import { getDb } from "@/lib/db/schema"
@@ -94,10 +95,14 @@ export function ResourceWorkbenchChatPanel({
   )
 
   const send = useCallback(
-    async (content: SendContent) =>
+    async (content: SendContent, manifest?: readonly AttachmentManifestEntry[]) =>
       withArtifactTarget(async () => {
         const resourceContext = await resolveResourceContext()
-        return claude.send(content, undefined, { sessionId, resourceContext })
+        return claude.send(content, undefined, {
+          sessionId,
+          resourceContext,
+          attachmentManifest: manifest,
+        })
       }),
     [claude, resolveResourceContext, sessionId, withArtifactTarget]
   )

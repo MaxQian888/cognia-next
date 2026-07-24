@@ -61,6 +61,7 @@ jest.mock("@/lib/chat/attachments/dispatch", () => ({
     content: text,
     rejected: [],
     tokens: 1,
+    manifest: [],
   })),
   INLINE_TOKEN_CEILING: 1_000_000,
 }))

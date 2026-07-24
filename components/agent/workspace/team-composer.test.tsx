@@ -2,6 +2,14 @@ import { fireEvent, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import { TeamComposer } from "./team-composer"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
+import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
+
+const toastWarning = jest.fn()
+jest.mock("sonner", () => ({ toast: { warning: (...args: unknown[]) => toastWarning(...args) } }))
+
+const attachmentManifest: readonly AttachmentManifestEntry[] = [
+  { filename: "notes.txt", mediaType: "text/plain", kind: "document" },
+]
 
 // The full Composer is heavy — mock it so the test exercises only TeamComposer's wrapper logic.
 jest.mock("@/components/chat/composer", () => {
@@ -46,6 +54,20 @@ jest.mock("@/components/chat/composer", () => {
             >
               send-empty
             </button>
+            <button
+              type="button"
+              data-testid="mock-send-attachment"
+              onClick={() =>
+                (
+                  props.onSend as (
+                    content: unknown,
+                    manifest: readonly AttachmentManifestEntry[]
+                  ) => Promise<void>
+                )("@alice review this", attachmentManifest)
+              }
+            >
+              send-attachment
+            </button>
           </div>
         )
       }
@@ -60,6 +82,7 @@ const messages = {
       composer: {
         placeholder: "Type @ to mention an agent — try @claude or @codex",
         imageNotSupported: "Image attachments aren't supported yet",
+        attachmentsNotSupported: "Attachments aren't supported in team chat yet",
         stop: "Stop",
       },
     },
@@ -85,6 +108,10 @@ function renderComposer(onSend: jest.Mock) {
 }
 
 describe("TeamComposer", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+  })
+
   it("forwards mentionMode + mentionables + placeholder to the underlying Composer", () => {
     renderComposer(jest.fn())
     const mock = screen.getByTestId("mock-composer")
@@ -119,6 +146,15 @@ describe("TeamComposer", () => {
     fireEvent.click(screen.getByTestId("mock-send-empty"))
     await Promise.resolve()
     expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it("rejects attachment turns instead of silently dropping their provenance", async () => {
+    const onSend = jest.fn()
+    renderComposer(onSend)
+    fireEvent.click(screen.getByTestId("mock-send-attachment"))
+    await Promise.resolve()
+    expect(onSend).not.toHaveBeenCalled()
+    expect(toastWarning).toHaveBeenCalledWith("Attachments aren't supported in team chat yet.")
   })
 
   it("renders the streaming banner with a stop button when isStreaming is true", () => {

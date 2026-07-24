@@ -16,8 +16,10 @@ import {
   buildAttachmentBlocks,
   buildSendContent,
   estimateDocumentTokens,
+  extractAttachment,
   formatDocumentText,
   IMAGE_MAX_LONG_EDGE,
+  withImageOcrText,
   type SubmittedFile,
 } from "./dispatch"
 
@@ -52,6 +54,34 @@ describe("buildAttachmentBlocks — images", () => {
   it("falls back to the decoded mime when mediaType is missing", async () => {
     const { blocks } = await buildAttachmentBlocks([{ url: PNG_1PX, filename: "a.png" }])
     expect(blocks[0]).toMatchObject({ type: "image", source: { media_type: "image/png" } })
+  })
+
+  it("sends explicitly opted-in OCR text beside the image through the precomputed path", async () => {
+    const file: SubmittedFile = {
+      url: PNG_1PX,
+      mediaType: "image/png",
+      filename: "receipt.png",
+      id: "image-with-ocr",
+    }
+    const staged = withImageOcrText(
+      await extractAttachment(file),
+      "receipt.png",
+      "Email alice@example.com"
+    )
+
+    const { blocks, manifest, tokens } = await buildAttachmentBlocks([file], {
+      precomputed: new Map([[file.id!, staged]]),
+    })
+
+    expect(blocks.map((block) => block.type)).toEqual(["image", "text"])
+    expect((blocks[1] as { text: string }).text).toContain("OCR text from")
+    expect((blocks[1] as { text: string }).text).toContain("<EMAIL_001>")
+    expect((blocks[1] as { text: string }).text).not.toContain("alice@example.com")
+    expect(manifest).toEqual([
+      { filename: "receipt.png", mediaType: "image/png", kind: "image" },
+      { filename: "receipt.png", mediaType: "image/png", kind: "image" },
+    ])
+    expect(tokens).toBeGreaterThan(0)
   })
 })
 
@@ -247,13 +277,139 @@ describe("buildAttachmentBlocks — token accounting", () => {
 })
 
 describe("buildAttachmentBlocks — ordering", () => {
-  it("emits images before extracted-document blocks", async () => {
+  // The composer lets the user drag attachment chips around, so "compare the
+  // first image with that spreadsheet" only works if the order the user sees is
+  // the order the model receives. Blocks therefore follow the INPUT order —
+  // they are deliberately NOT grouped images-first.
+  it("preserves the input order across mixed images and documents", async () => {
     processMock.mockResolvedValue({ embeddableContent: "doc", content: "doc" })
     const { blocks } = await buildAttachmentBlocks([
       { url: dataUrl("text/plain", "doc"), filename: "a.txt" },
       { url: PNG_1PX, mediaType: "image/png", filename: "b.png" },
     ])
+    expect(blocks.map((b) => b.type)).toEqual(["text", "image"])
+  })
+
+  it("keeps the reverse order too", async () => {
+    processMock.mockResolvedValue({ embeddableContent: "doc", content: "doc" })
+    const { blocks } = await buildAttachmentBlocks([
+      { url: PNG_1PX, mediaType: "image/png", filename: "b.png" },
+      { url: dataUrl("text/plain", "doc"), filename: "a.txt" },
+    ])
     expect(blocks.map((b) => b.type)).toEqual(["image", "text"])
+  })
+})
+
+describe("extractAttachment / precomputed reuse", () => {
+  it("extracts one document into a reusable result carrying its model-visible text", async () => {
+    processMock.mockResolvedValue({ embeddableContent: "body text", content: "body text" })
+    const result = await extractAttachment({
+      url: dataUrl("text/plain", "body text"),
+      filename: "notes.txt",
+      id: "a1",
+    })
+    expect(result.kind).toBe("document")
+    expect(result.rejectReason).toBeUndefined()
+    expect(result.text).toContain('Attached file "notes.txt"')
+    expect(result.text).toContain("body text")
+    expect(result.tokens).toBeGreaterThan(0)
+    // `text` is verbatim what the model receives — the preview panel shows it.
+    expect(result.block).toEqual({ type: "text", text: result.text })
+  })
+
+  it("reports the decoded (not base64-inflated) byte size for images", async () => {
+    const result = await extractAttachment({ url: PNG_1PX, mediaType: "image/png", id: "i1" })
+    expect(result.kind).toBe("image")
+    expect(result.tokens).toBe(0)
+    expect(result.image?.mediaType).toBe("image/png")
+    expect(result.image?.bytes).toBeGreaterThan(0)
+    // Decoded size must be smaller than the base64 payload it came from.
+    const base64Len = PNG_1PX.slice(PNG_1PX.indexOf(",") + 1).length
+    expect(result.image!.bytes).toBeLessThan(base64Len)
+  })
+
+  it("surfaces the rejection reason instead of throwing", async () => {
+    const result = await extractAttachment({ url: "blob:x", filename: "a.png", id: "r1" })
+    expect(result.block).toBeNull()
+    expect(result.rejectReason).toBe("not-data-url")
+  })
+
+  it("does NOT re-parse a document whose id is in the precomputed map", async () => {
+    processMock.mockResolvedValue({ embeddableContent: "staged", content: "staged" })
+    const file: SubmittedFile = {
+      url: dataUrl("text/plain", "staged"),
+      filename: "notes.txt",
+      id: "cached-1",
+    }
+    const staged = await extractAttachment(file)
+    expect(processMock).toHaveBeenCalledTimes(1)
+
+    processMock.mockClear()
+    const { blocks, tokens } = await buildAttachmentBlocks([file], {
+      precomputed: new Map([["cached-1", staged]]),
+    })
+    expect(processMock).not.toHaveBeenCalled()
+    expect(blocks).toEqual([staged.block])
+    expect(tokens).toBe(staged.tokens)
+  })
+
+  it("carries a precomputed rejection into the rejected list without re-parsing", async () => {
+    const staged = await extractAttachment({ url: "blob:x", filename: "bad.bin", id: "cached-2" })
+    processMock.mockClear()
+    const { blocks, rejected } = await buildAttachmentBlocks(
+      [{ url: "blob:x", filename: "bad.bin", id: "cached-2" }],
+      { precomputed: new Map([["cached-2", staged]]) }
+    )
+    expect(processMock).not.toHaveBeenCalled()
+    expect(blocks).toEqual([])
+    expect(rejected).toEqual([{ filename: "bad.bin", reason: "not-data-url" }])
+  })
+
+  it("revalidates cached document text at the final outbound boundary", async () => {
+    const cached = {
+      kind: "document" as const,
+      block: { type: "text" as const, text: "SSN 123-45-6789" },
+      text: "SSN 123-45-6789",
+      tokens: 1,
+    }
+    const { blocks } = await buildAttachmentBlocks(
+      [{ id: "cached-pii", filename: "private.txt", mediaType: "text/plain" }],
+      { precomputed: new Map([["cached-pii", cached]]) }
+    )
+
+    expect((blocks[0] as { text: string }).text).not.toContain("123-45-6789")
+    expect((blocks[0] as { text: string }).text).toContain("<SSN_")
+  })
+
+  it("revalidates cached OCR text before appending it beside an image", async () => {
+    const image = await extractAttachment({
+      id: "cached-ocr",
+      url: PNG_1PX,
+      filename: "receipt.png",
+      mediaType: "image/png",
+    })
+    const cached = {
+      ...image,
+      ocr: { text: "Email alice@example.com", tokens: 1 },
+      tokens: 1,
+    }
+    const { blocks } = await buildAttachmentBlocks(
+      [{ id: "cached-ocr", filename: "receipt.png", mediaType: "image/png" }],
+      { precomputed: new Map([["cached-ocr", cached]]) }
+    )
+
+    expect((blocks[1] as { text: string }).text).not.toContain("alice@example.com")
+    expect((blocks[1] as { text: string }).text).toContain("<EMAIL_")
+  })
+
+  it("falls back to live extraction for a file whose id is not in the map", async () => {
+    processMock.mockResolvedValue({ embeddableContent: "fresh", content: "fresh" })
+    const { blocks } = await buildAttachmentBlocks(
+      [{ url: dataUrl("text/plain", "fresh"), filename: "new.txt", id: "not-cached" }],
+      { precomputed: new Map() }
+    )
+    expect(processMock).toHaveBeenCalledTimes(1)
+    expect((blocks[0] as { text: string }).text).toContain("fresh")
   })
 })
 

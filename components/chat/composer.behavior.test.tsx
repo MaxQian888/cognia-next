@@ -36,6 +36,7 @@ jest.mock("@/lib/chat/attachments/dispatch", () => ({
     content: text,
     rejected: [],
     tokens: 1,
+    manifest: [],
   })),
 }))
 
@@ -129,7 +130,7 @@ describe("composerBehavior — sendOnEnter", () => {
     fireEvent.change(ta, { target: { value: "hello" } })
     const notPrevented = fireEvent.keyDown(ta, { key: "Enter" })
     expect(notPrevented).toBe(false) // preventDefault was called
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith("hello"))
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("hello", []))
     await waitFor(() => expect(ta.value).toBe(""))
   })
 
@@ -145,7 +146,7 @@ describe("composerBehavior — sendOnEnter", () => {
 
     const metaEnter = fireEvent.keyDown(ta, { key: "Enter", metaKey: true })
     expect(metaEnter).toBe(false) // prevented → submit
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith("hello"))
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("hello", []))
   })
 })
 
@@ -155,7 +156,7 @@ describe("composerBehavior — clearAfterSend", () => {
     const { ta, onSend } = renderComposer(mkSession())
     fireEvent.change(ta, { target: { value: "keep me" } })
     fireEvent.keyDown(ta, { key: "Enter" })
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith("keep me"))
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("keep me", []))
     // Give the post-send clear path a chance to (not) run.
     await new Promise((r) => setTimeout(r, 20))
     expect(ta.value).toBe("keep me")

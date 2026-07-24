@@ -4,6 +4,11 @@
 import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
+import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
+
+const attachmentManifest: readonly AttachmentManifestEntry[] = [
+  { filename: "workflow.md", mediaType: "text/markdown", kind: "document" },
+]
 
 // ── Mocks ───────────────────────────────────────────────────────────────
 // ChatPane is exercised by its own suite — here we stub it to surface the
@@ -14,6 +19,7 @@ jest.mock("@/components/chat/chat-view", () => ({
     activeSession: { id: string } | null
     onCreate: () => void
     onUseSample: (text: string) => void
+    onSend: (content: string, manifest?: readonly AttachmentManifestEntry[]) => void | Promise<void>
   }) => (
     <div data-testid="chatpane" data-session-id={props.activeSession?.id ?? "none"}>
       <button type="button" data-testid="chatpane-create" onClick={() => props.onCreate()}>
@@ -25,6 +31,13 @@ jest.mock("@/components/chat/chat-view", () => ({
         onClick={() => props.onUseSample("add a webhook trigger")}
       >
         use sample
+      </button>
+      <button
+        type="button"
+        data-testid="chatpane-send"
+        onClick={() => void props.onSend("review the workflow", attachmentManifest)}
+      >
+        send
       </button>
     </div>
   ),
@@ -207,6 +220,19 @@ describe("WorkflowEditorChatTab session wiring", () => {
     await waitFor(() =>
       expect(claudeSend).toHaveBeenCalledWith("add a webhook trigger", undefined, {
         sessionId: "workflow:wf_a",
+        attachmentManifest: undefined,
+      })
+    )
+  })
+
+  it("preserves attachment provenance through workflow mention expansion", async () => {
+    const user = userEvent.setup()
+    harness()
+    await user.click(screen.getByTestId("chatpane-send"))
+    await waitFor(() =>
+      expect(claudeSend).toHaveBeenCalledWith("review the workflow", undefined, {
+        sessionId: "workflow:wf_a",
+        attachmentManifest,
       })
     )
   })

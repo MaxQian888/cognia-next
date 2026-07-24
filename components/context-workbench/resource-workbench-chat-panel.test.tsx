@@ -3,12 +3,16 @@ import userEvent from "@testing-library/user-event"
 import { ResourceWorkbenchChatPanel } from "./resource-workbench-chat-panel"
 import { useChatStore } from "@/stores/chat"
 import { listMessages } from "@/lib/db/messages"
+import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 
 const send = jest.fn().mockResolvedValue(undefined)
 const stop = jest.fn()
 const regenerate = jest.fn()
 const editAndResend = jest.fn()
 const exportRun = jest.fn()
+const attachmentManifest: readonly AttachmentManifestEntry[] = [
+  { filename: "report.txt", mediaType: "text/plain", kind: "document" },
+]
 let mockResource: Record<string, unknown> = { kind: "project-file", relPath: "src/a.ts" }
 
 jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
@@ -58,7 +62,7 @@ jest.mock("@/components/chat/chat-view", () => ({
     onCreate,
     onOpenSettings,
   }: {
-    onSend: (content: string) => Promise<unknown>
+    onSend: (content: string, manifest?: readonly AttachmentManifestEntry[]) => Promise<unknown>
     onStop: () => void
     onRegenerate: () => void
     onEditResend: (messageId: string, content: string) => void
@@ -67,7 +71,10 @@ jest.mock("@/components/chat/chat-view", () => ({
     onOpenSettings: () => void
   }) => (
     <div>
-      <button type="button" onClick={() => void onSend("hello").catch(() => undefined)}>
+      <button
+        type="button"
+        onClick={() => void onSend("hello", attachmentManifest).catch(() => undefined)}
+      >
         send
       </button>
       <button type="button" onClick={onStop}>
@@ -107,6 +114,7 @@ describe("ResourceWorkbenchChatPanel", () => {
     expect(send).toHaveBeenCalledWith("hello", undefined, {
       sessionId: "resource-session",
       resourceContext: "",
+      attachmentManifest,
     })
   })
 
@@ -121,6 +129,7 @@ describe("ResourceWorkbenchChatPanel", () => {
     expect(send).toHaveBeenCalledWith("hello", undefined, {
       sessionId: "resource-session",
       resourceContext: expect.stringContaining('"start":2'),
+      attachmentManifest,
     })
   })
 
@@ -183,6 +192,7 @@ describe("ResourceWorkbenchChatPanel", () => {
     expect(send).toHaveBeenCalledWith("hello", undefined, {
       sessionId: "resource-session",
       resourceContext: "artifact body",
+      attachmentManifest,
     })
   })
 

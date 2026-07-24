@@ -43,6 +43,7 @@ import type { ChatSession, SendContent, SendContentBlock } from "@cognia/agent-c
 import type { EditorStore } from "@/lib/workflow/editor/store"
 import { useMentionableWorkflowElements } from "@/lib/workflow/editor/use-mentionable-workflow-elements"
 import type { WorkflowElementRef } from "@/stores/chat/chat-store"
+import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import {
   WorkflowEditorProvider,
   type WorkflowEditorContextValue,
@@ -177,7 +178,7 @@ export function WorkflowEditorChatTab({
   }, [workflowId, workflowName, t])
 
   const handleSend = useCallback(
-    async (content: SendContent) => {
+    async (content: SendContent, manifest?: readonly AttachmentManifestEntry[]) => {
       try {
         // Fold the staged reference chips into the message as `@node:`/`@edge:`
         // tokens, then expand every `@node:<id>` / `@edge:<id>` (typed or
@@ -187,7 +188,10 @@ export function WorkflowEditorChatTab({
         const refs = useChatStore.getState().referencedWorkflowElements
         const withRefs = refs.length > 0 ? prependWorkflowRefs(content, refs) : content
         const expanded = applyWorkflowMentionExpansion(withRefs, useStore)
-        await claude.send(expanded, undefined, { sessionId: effectiveSessionId ?? undefined })
+        await claude.send(expanded, undefined, {
+          sessionId: effectiveSessionId ?? undefined,
+          attachmentManifest: manifest,
+        })
         if (refs.length > 0) {
           useChatStore.getState().clearReferencedWorkflowElements()
           useStore.getState().setReferencedNodes([])

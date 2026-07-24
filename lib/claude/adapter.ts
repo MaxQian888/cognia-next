@@ -23,6 +23,7 @@ import type {
   SourcesPart,
   SourcesPartItem,
 } from "./parts-extensions"
+import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import type { HookNoticePartData } from "./hooks"
 import { registerUndoSnapshot } from "./compaction-undo"
 import { persistOpticalArchive, type OpticalBoundaryMeta } from "./optical-archive-persist"
@@ -937,10 +938,26 @@ export function extractUsage(result: SDKResultMessage): UsageInfo | null {
  * Helper for pushing a freshly-typed user prompt into the UI history.
  *
  * Accepts either plain text (the common case) or an array of multimodal
- * content blocks (text + image). Image blocks become `file` parts in the
- * UIMessage so AI SDK Elements render thumbnails.
+ * content blocks. Image blocks become `file` parts so the transcript renders
+ * thumbnails.
+ *
+ * `manifest` (from `buildSendContent`) describes `content[i]` for the leading
+ * attachment blocks. With it, two long-standing transcript defects go away:
+ *
+ *  - Images kept no `filename`, so the gallery and lightbox showed a generic
+ *    "attachment" label for every picture the user sent.
+ *  - A document was flattened to a `text` block for the model, and that same
+ *    block was rendered verbatim in the USER'S OWN bubble — attaching a 50-page
+ *    PDF dumped its entire extracted text into the conversation. Those blocks
+ *    now become url-less `file` parts carrying the text, which the renderer
+ *    shows as a collapsed "📎 report.pdf" card. Nothing extra is persisted: the
+ *    text was already being stored, just without its provenance.
  */
-export function makeUserMessage(content: SendContent, id?: string): UIMessage {
+export function makeUserMessage(
+  content: SendContent,
+  id?: string,
+  manifest?: readonly AttachmentManifestEntry[]
+): UIMessage {
   const messageId = id ?? `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
   if (typeof content === "string") {
@@ -952,8 +969,23 @@ export function makeUserMessage(content: SendContent, id?: string): UIMessage {
   }
 
   const parts: Parts = []
-  for (const block of content) {
+  content.forEach((block, index) => {
+    const entry = manifest?.[index]
     if (block.type === "text") {
+      // Only a block the manifest claims is an attachment becomes a file card;
+      // the user's own prose (and merged link context) stays a text part.
+      if (entry?.kind === "document") {
+        parts.push({
+          type: "file",
+          mediaType: entry.mediaType || "text/plain",
+          filename: entry.filename,
+          // No `url`: the original binary is deliberately NOT persisted (it
+          // would balloon every message row). The extracted text is what the
+          // model saw and what the card shows.
+          text: block.text,
+        } as unknown as Part)
+        return
+      }
       parts.push({
         type: "text",
         text: block.text,
@@ -965,9 +997,10 @@ export function makeUserMessage(content: SendContent, id?: string): UIMessage {
         type: "file",
         url: dataUrl,
         mediaType: block.source.media_type,
+        ...(entry?.filename ? { filename: entry.filename } : {}),
       } as unknown as Part)
     }
-  }
+  })
   return {
     id: messageId,
     role: "user",
@@ -1064,13 +1097,20 @@ export function mergeTwinSourcesIntoLastAssistant(
 function appendSourcesToLastAssistant(
   messages: UIMessage[],
   additions: SourcesPartItem[],
-  opts?: { twinDegraded?: boolean }
+  opts?: {
+    twinDegraded?: boolean
+    memoryBudget?: SourcesPart["memoryBudget"]
+    memoryDegraded?: boolean
+  }
 ): UIMessage[] {
   const wantDegraded = opts?.twinDegraded
-  // A degraded twin turn must still annotate the message even with zero
+  const wantMemoryDegraded = opts?.memoryDegraded
+  // A degraded twin/memory turn must still annotate the message even with zero
   // additions — that's the whole point of the warning. Only short-circuit when
   // there is genuinely nothing to do.
-  if (additions.length === 0 && !wantDegraded) return messages
+  if (additions.length === 0 && !wantDegraded && !wantMemoryDegraded && !opts?.memoryBudget) {
+    return messages
+  }
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
     if (msg.role !== "assistant") continue
@@ -1086,18 +1126,36 @@ function appendSourcesToLastAssistant(
       wantDegraded === undefined
         ? existingPart?.twinDegraded
         : wantDegraded || existingPart?.twinDegraded
+    // Memory annotations mirror the twin flag's stickiness: only the memory
+    // merge writes them (twin passes no memory opts → preserve what's there).
+    const nextMemoryDegraded =
+      wantMemoryDegraded === undefined
+        ? existingPart?.memoryDegraded
+        : wantMemoryDegraded || existingPart?.memoryDegraded
+    const nextMemoryBudget = opts?.memoryBudget ?? existingPart?.memoryBudget
     const sourcesUnchanged =
       merged.length === existingSources.length &&
       merged.every((s, idx) => s.id === existingSources[idx]?.id)
     const degradedUnchanged = Boolean(existingPart?.twinDegraded) === Boolean(nextDegraded)
-    // Idempotent guard — nothing to change in either sources or the flag.
-    if (sourcesUnchanged && degradedUnchanged) {
+    const budgetUnchanged =
+      existingPart?.memoryBudget === nextMemoryBudget ||
+      (existingPart?.memoryBudget !== undefined &&
+        nextMemoryBudget !== undefined &&
+        existingPart.memoryBudget.limit === nextMemoryBudget.limit &&
+        existingPart.memoryBudget.used === nextMemoryBudget.used &&
+        existingPart.memoryBudget.truncated === nextMemoryBudget.truncated)
+    const memoryAnnotationsUnchanged =
+      Boolean(existingPart?.memoryDegraded) === Boolean(nextMemoryDegraded) && budgetUnchanged
+    // Idempotent guard — nothing to change in sources or any annotation.
+    if (sourcesUnchanged && degradedUnchanged && memoryAnnotationsUnchanged) {
       return messages
     }
     const nextPart: SourcesPart = {
       type: "sources",
       sources: merged,
       ...(nextDegraded ? { twinDegraded: true } : {}),
+      ...(nextMemoryDegraded ? { memoryDegraded: true } : {}),
+      ...(nextMemoryBudget ? { memoryBudget: nextMemoryBudget } : {}),
     }
     const nextParts =
       sourcesIdx >= 0
@@ -1118,18 +1176,24 @@ function appendSourcesToLastAssistant(
 /** Recalled-memory context stashed on `SendOptions.memoryContext`. */
 export interface MemorySourcesContext {
   retrievedMemories: Array<{ id: string; type: string; text: string; score: number }>
+  /** Recall token budget of the injection pass (shown by the recalled chip). */
+  budget?: { limit: number; used: number; truncated: boolean }
+  /** True when retrieval degraded (BM25-only fallback or retrieval failure). */
+  degraded?: boolean
 }
 
 /**
  * Merge recalled long-term memories onto the last assistant message's
- * SourcesPart as `origin: "memory"` items. Mirrors
- * `mergeTwinSourcesIntoLastAssistant`; shares the idempotent fold helper.
+ * SourcesPart as `origin: "memory"` items, plus the pass's budget/degraded
+ * annotations. Mirrors `mergeTwinSourcesIntoLastAssistant`; shares the
+ * idempotent fold helper.
  */
 export function mergeMemorySourcesIntoLastAssistant(
   messages: UIMessage[],
   memoryContext: MemorySourcesContext | undefined | null
 ): UIMessage[] {
-  if (!memoryContext || memoryContext.retrievedMemories.length === 0) return messages
+  if (!memoryContext) return messages
+  if (memoryContext.retrievedMemories.length === 0 && !memoryContext.degraded) return messages
   const memorySources: SourcesPartItem[] = memoryContext.retrievedMemories.map((m) => ({
     id: `memory-${m.id}`,
     title: m.text.length > 80 ? m.text.slice(0, 79).trimEnd() + "…" : m.text,
@@ -1137,5 +1201,8 @@ export function mergeMemorySourcesIntoLastAssistant(
     origin: "memory",
     score: m.score,
   }))
-  return appendSourcesToLastAssistant(messages, memorySources)
+  return appendSourcesToLastAssistant(messages, memorySources, {
+    memoryBudget: memorySources.length > 0 ? memoryContext.budget : undefined,
+    memoryDegraded: memoryContext.degraded,
+  })
 }

@@ -71,6 +71,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import type { ComposerHandle } from "@/components/chat/composer"
+import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
 import { useCredentialStatus } from "@/hooks/chat/use-credential-status"
 import { useTeamMembers } from "@/hooks/use-team-members"
@@ -228,22 +229,25 @@ export function AppShellMobile() {
   )
   const headerSubject = isTeamSession ? (activeTeam ?? null) : activeCharacter
 
-  const send = isTeamSession ? teamChat.send : directChat.send
   const stop = isTeamSession ? teamChat.stop : directChat.stop
   // Tactile confirmation for the primary chat action: a light impact once the
   // turn dispatches, an error notification if it throws. Both no-op off-mobile
   // (the haptics wrapper resolves `unsupported`), so wrapping is harmless.
   const handleSend = useCallback(
-    async (content: SendContent) => {
+    async (content: SendContent, manifest?: readonly AttachmentManifestEntry[]) => {
       try {
-        await send(content)
+        if (isTeamSession) {
+          await teamChat.send(content, { attachmentManifest: manifest })
+        } else {
+          await directChat.send(content, undefined, { attachmentManifest: manifest })
+        }
         void impact("light")
       } catch (err) {
         void notify("error")
         throw err
       }
     },
-    [send]
+    [directChat, isTeamSession, teamChat]
   )
   // Resume the turn after a plan is approved in the mobile PlanApprovalDock.
   // Mirrors `desktop-chat-workspace.resumeAfterPlanApproval`: set the store
@@ -571,7 +575,7 @@ export function AppShellMobile() {
               // never rendered.
               onResumeAfterPlanApproval={isTeamSession ? undefined : resumeAfterPlanApproval}
               onCreate={handleNewDirect}
-              onUseSample={(text) => void send(text)}
+              onUseSample={(text) => void handleSend(text)}
               onOpenSettings={openSettings}
               recentSessions={isSectionHidden("recents") ? undefined : recentSessions}
               onResumeSession={handleSwitchToSession}

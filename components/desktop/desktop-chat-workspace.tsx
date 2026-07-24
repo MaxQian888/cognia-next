@@ -32,6 +32,7 @@ import { OnboardingDialog } from "@/components/shell/onboarding-dialog"
 import { shouldShowOnboarding } from "@/lib/onboarding/should-show"
 import { WorkspaceTrustGate } from "@/components/chat/workspace-trust-gate"
 import type { ComposerHandle } from "@/components/chat/composer"
+import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import type {
   ApprovalDecision,
   Character,
@@ -266,11 +267,14 @@ export function DesktopChatWorkspace() {
   // explicit session id so a background pane sends / stops / regenerates
   // against itself. Trust-prompting wraps the send for the targeted pane.
   const paneSend = useCallback(
-    (content: SendContent, sid: string) => {
+    (content: SendContent, sid: string, manifest?: readonly AttachmentManifestEntry[]) => {
       setTrustPromptNonce((n) => n + 1)
       return isTeamSessionId(sid)
-        ? teamChat.send(content, { sessionId: sid })
-        : directChat.send(content, undefined, { sessionId: sid })
+        ? teamChat.send(content, { sessionId: sid, attachmentManifest: manifest })
+        : directChat.send(content, undefined, {
+            sessionId: sid,
+            attachmentManifest: manifest,
+          })
     },
     [directChat, teamChat, isTeamSessionId]
   )

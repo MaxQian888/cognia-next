@@ -31,8 +31,17 @@ jest.mock("@/lib/claude/ipc", () => ({
 jest.mock("@/lib/claude/adapter", () => ({
   applySdkEvent: jest.fn(() => ({ messages: [], turnComplete: false })),
   contentPreview: (c: unknown) => (typeof c === "string" ? c : "preview"),
-  makeUserMessage: (c: unknown) => ({ id: "u1", role: "user", parts: [{ type: "text", text: c }] }),
+  makeUserMessage: jest.fn((c: unknown) => ({
+    id: "u1",
+    role: "user",
+    parts: [{ type: "text", text: c }],
+  })),
   mergeMemorySourcesIntoLastAssistant: jest.fn((msgs: unknown[]) => msgs),
+}))
+
+const runTurnMemoryMock = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/memory/run-turn-memory", () => ({
+  runTurnMemory: (...args: unknown[]) => runTurnMemoryMock(...args),
 }))
 
 jest.mock("@/lib/db/session-usage", () => ({
@@ -281,6 +290,7 @@ beforeEach(() => {
   listCharactersByIdsMock.mockReset().mockResolvedValue([])
   getTeamMock.mockReset()
   resolveSendOptionsMock.mockReset().mockResolvedValue({ model: "sonnet", systemPrompt: "sys" })
+  runTurnMemoryMock.mockReset().mockResolvedValue(undefined)
   ;(jest.requireMock("@cognia/provider-embedding/embedding").generateEmbedding as jest.Mock)
     .mockReset()
     .mockResolvedValue({ embedding: [0.1, 0.2, 0.3], tokens: 1 })
@@ -737,6 +747,23 @@ function makeLinearTeam(members: Array<{ id: string; name: string }>) {
 }
 
 describe("useTeamChat — send coverage", () => {
+  it("preserves attachment provenance on the optimistic team user message", async () => {
+    const { makeUserMessage } = jest.requireMock("@/lib/claude/adapter") as {
+      makeUserMessage: jest.Mock
+    }
+    const manifest = [{ filename: "notes.txt", mediaType: "text/plain", kind: "document" as const }]
+    makeAutoResolveSetup()
+    makeLinearTeam([])
+
+    const { result } = renderHook(() => useTeamChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello", { attachmentManifest: manifest })
+    })
+
+    expect(makeUserMessage).toHaveBeenCalledWith("hello", undefined, manifest)
+  })
+
   it("updates session title when title is 'New conversation'", async () => {
     makeAutoResolveSetup()
     getSessionMock.mockResolvedValueOnce({
@@ -1258,6 +1285,9 @@ describe("useTeamChat — event handler coverage", () => {
   })
 
   it("folds the member's recalled memories into the sealed reply (team↔direct parity)", async () => {
+    chatState.replaceMessages.mockImplementation((messages: unknown[]) => {
+      chatState.messages = messages
+    })
     const { applySdkEvent: applySdkEventMock, mergeMemorySourcesIntoLastAssistant: mergeMock } =
       jest.requireMock("@/lib/claude/adapter")
     const memoryContext = {
@@ -1308,6 +1338,11 @@ describe("useTeamChat — event handler coverage", () => {
     )
     // …and persisted the merged list.
     expect(persistMessagesMock).toHaveBeenCalled()
+    expect(runTurnMemoryMock).toHaveBeenCalledWith(
+      "team-1",
+      expect.objectContaining({ assistantMessageId: "a-alice" })
+    )
+    chatState.replaceMessages.mockReset()
   })
 
   it("event type: bumps unread for inactive sessions with new assistant message", async () => {

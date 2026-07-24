@@ -94,6 +94,22 @@ jest.mock("@/components/chat/renderers/message-image-gallery", () => ({
     }),
 }))
 
+jest.mock("@/components/chat/message-parts/attachment-text-card", () => ({
+  AttachmentTextCard: ({ filename, text }: { filename: string; text: string }) =>
+    ReactForMocks.createElement(
+      "div",
+      { "data-testid": "attachment-text-card" },
+      `${filename}:${text}`
+    ),
+}))
+
+jest.mock("@/components/chat/memory-chips", () => ({
+  MemoryLearnedChip: ({ messageId }: { messageId: string }) =>
+    ReactForMocks.createElement("div", { "data-testid": "memory-learned-chip" }, messageId),
+  MemoryRecalledChip: () =>
+    ReactForMocks.createElement("div", { "data-testid": "memory-recalled-chip" }),
+}))
+
 jest.mock("@/components/chat/message-parts/a2ui-part", () => ({
   A2UIPart: () => ReactForMocks.createElement("div", { "data-test": "a2ui-part" }),
 }))
@@ -295,6 +311,30 @@ describe("reasoning parts", () => {
   })
 })
 
+describe("memory transparency chips", () => {
+  it("mounts learned and recalled chips for a completed assistant turn", () => {
+    const msg = {
+      id: "memory-1",
+      role: "assistant",
+      parts: [
+        { type: "text", text: "answer" },
+        { type: "sources", sources: [{ type: "memory", id: "m1" }] },
+      ],
+    } as unknown as UIMessage
+
+    render(<MessageRenderer message={msg} isStreaming={false} />)
+
+    expect(screen.getByTestId("memory-learned-chip")).toHaveTextContent("memory-1")
+    expect(screen.getByTestId("memory-recalled-chip")).toBeInTheDocument()
+  })
+
+  it("does not mount memory chips while the assistant is streaming", () => {
+    render(<MessageRenderer message={assistantMsg("memory-stream", "answer")} isStreaming />)
+    expect(screen.queryByTestId("memory-learned-chip")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("memory-recalled-chip")).not.toBeInTheDocument()
+  })
+})
+
 // ── file parts ────────────────────────────────────────────────────────────────
 
 describe("file parts", () => {
@@ -370,6 +410,25 @@ describe("file parts", () => {
     // No link and no img rendered
     expect(container.querySelector("a")).toBeNull()
     expect(container.querySelector("img")).toBeNull()
+  })
+
+  it("renders an attached document's extracted text as a collapsed file card", () => {
+    const msg = {
+      id: "f-text",
+      role: "user",
+      parts: [
+        {
+          type: "file",
+          mediaType: "text/plain",
+          filename: "report.txt",
+          text: "extracted payload",
+        },
+      ],
+    } as unknown as UIMessage
+    render(<MessageRenderer message={msg} />)
+    expect(screen.getByTestId("attachment-text-card")).toHaveTextContent(
+      "report.txt:extracted payload"
+    )
   })
 
   it("copies an image-only message as rich clipboard content", async () => {

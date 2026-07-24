@@ -16,6 +16,7 @@ import { ChatPane } from "./chat-view"
 import { ToolApprovalDialog } from "./tool-approval-dialog"
 import type { ComposerHandle } from "./composer"
 import type { RecentSessionEntry } from "./empty-state"
+import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { useChatStore, useSessionPendingApprovals } from "@/stores/chat"
 import type {
   ApprovalDecision,
@@ -28,7 +29,11 @@ export interface ChatPaneGroupProps {
   /** All sessions (for resolving tab titles / character ids). */
   sessions: readonly ChatSession[]
   /** Per-session send — the workspace wraps trust-prompting around it. */
-  send: (content: SendContent, sessionId: string) => Promise<void> | void
+  send: (
+    content: SendContent,
+    sessionId: string,
+    manifest?: readonly AttachmentManifestEntry[]
+  ) => Promise<void> | void
   stop: (sessionId: string) => Promise<void> | void
   /** Interrupt the running turn and immediately replay the queued steer. */
   steerNow: (sessionId: string) => Promise<void> | void
@@ -153,7 +158,9 @@ export function ChatPaneGroup({
       <ChatPane
         sessionId={sessionId ?? undefined}
         activeSession={session}
-        onSend={(content) => Promise.resolve(sessionId ? send(content, sessionId) : undefined)}
+        onSend={(content, manifest) =>
+          Promise.resolve(sessionId ? send(content, sessionId, manifest) : undefined)
+        }
         onStop={() => Promise.resolve(sessionId ? stop(sessionId) : undefined)}
         onSteerNow={() => Promise.resolve(sessionId ? steerNow(sessionId) : undefined)}
         onSteerFlush={() => Promise.resolve(sessionId ? steerFlush(sessionId) : undefined)}

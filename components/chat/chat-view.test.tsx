@@ -4,11 +4,16 @@
 
 import * as ReactForMocks from "react"
 
+const mockComposerProps: Array<Record<string, unknown>> = []
 jest.mock("./composer", () => {
   const react = jest.requireActual<typeof import("react")>("react")
   return {
     // forwardRef so the callback ref ChatPane now attaches doesn't warn.
-    Composer: react.forwardRef(function Composer(_props: unknown, ref: React.Ref<unknown>) {
+    Composer: react.forwardRef(function Composer(
+      props: Record<string, unknown>,
+      ref: React.Ref<unknown>
+    ) {
+      mockComposerProps.push(props)
       react.useImperativeHandle(ref, () => ({ insertMention: () => {}, focus: () => {} }), [])
       return react.createElement("div", { "data-testid": "composer" })
     }),
@@ -98,7 +103,7 @@ jest.mock("@/hooks/chat/use-effective-cwd", () => ({
   useEffectiveCwd: () => "/repo",
 }))
 
-import { render, screen } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
 import { SparklesIcon } from "lucide-react"
 import { ChatPane } from "./chat-view"
 import { MessageList } from "./message-list"
@@ -122,6 +127,22 @@ function makeProps() {
 }
 
 describe("ChatPane", () => {
+  it("forwards the attachment manifest from Composer to the workspace sender", async () => {
+    const props = makeProps()
+    render(<ChatPane {...props} />)
+    const onSend = mockComposerProps.at(-1)?.onSend as (
+      content: SendContent,
+      manifest: readonly unknown[]
+    ) => Promise<void>
+    const manifest = [{ filename: "report.txt", mediaType: "text/plain", kind: "document" }]
+
+    await act(async () => {
+      await onSend("summarize", manifest)
+    })
+
+    expect(props.onSend).toHaveBeenCalledWith("summarize", manifest)
+  })
+
   it("passes the effective session cwd to the message list", () => {
     render(<ChatPane {...makeProps()} />)
     expect(MessageList).toHaveBeenCalledWith(

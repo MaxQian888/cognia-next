@@ -942,6 +942,84 @@ describe("makeUserMessage", () => {
     expect(msg.parts).toHaveLength(1)
     expect((msg.parts[0] as { text: string }).text).toBe("alpha")
   })
+
+  describe("with an attachment manifest", () => {
+    // Without the manifest the transcript had no idea what a block came from:
+    // images lost their filename and a document's extracted text was rendered
+    // verbatim in the user's own bubble.
+    it("labels an image part with its original filename", () => {
+      const msg = makeUserMessage(
+        [{ type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } }],
+        "id-4",
+        [{ filename: "screenshot.png", mediaType: "image/png", kind: "image" }]
+      )
+      const file = msg.parts[0] as { type: string; filename?: string; url: string }
+      expect(file.type).toBe("file")
+      expect(file.filename).toBe("screenshot.png")
+      expect(file.url).toBe("data:image/png;base64,AAAA")
+    })
+
+    it("turns a document's extracted text into a url-less file part", () => {
+      const extracted = 'Attached file "report.pdf":\n\nbody text'
+      const msg = makeUserMessage([{ type: "text", text: extracted }], "id-5", [
+        { filename: "report.pdf", mediaType: "application/pdf", kind: "document" },
+      ])
+      const part = msg.parts[0] as {
+        type: string
+        filename?: string
+        mediaType?: string
+        url?: string
+        text?: string
+      }
+      expect(part.type).toBe("file")
+      expect(part.filename).toBe("report.pdf")
+      expect(part.mediaType).toBe("application/pdf")
+      // The original binary is deliberately not persisted.
+      expect(part.url).toBeUndefined()
+      // …but the text the model saw rides along, so regenerate can rebuild it.
+      expect(part.text).toBe(extracted)
+    })
+
+    it("leaves the user's own prose a text part", () => {
+      const msg = makeUserMessage(
+        [
+          { type: "text", text: 'Attached file "a.txt":\n\ndoc' },
+          { type: "text", text: "what do you think?" },
+        ],
+        "id-6",
+        [{ filename: "a.txt", mediaType: "text/plain", kind: "document" }]
+      )
+      expect((msg.parts[0] as { type: string }).type).toBe("file")
+      // Index 1 has no manifest entry → it is the user's message, not a file.
+      expect(msg.parts[1] as { type: string; text: string }).toMatchObject({
+        type: "text",
+        text: "what do you think?",
+      })
+    })
+
+    it("keeps manifest alignment when images and documents are interleaved", () => {
+      const msg = makeUserMessage(
+        [
+          { type: "text", text: "doc one" },
+          { type: "image", source: { type: "base64", media_type: "image/png", data: "BBBB" } },
+          { type: "text", text: "trailing prose" },
+        ],
+        "id-7",
+        [
+          { filename: "one.txt", mediaType: "text/plain", kind: "document" },
+          { filename: "two.png", mediaType: "image/png", kind: "image" },
+        ]
+      )
+      expect(msg.parts.map((p) => (p as { type: string }).type)).toEqual(["file", "file", "text"])
+      expect((msg.parts[0] as { filename?: string }).filename).toBe("one.txt")
+      expect((msg.parts[1] as { filename?: string }).filename).toBe("two.png")
+    })
+
+    it("falls back to the old shape when no manifest is supplied", () => {
+      const msg = makeUserMessage([{ type: "text", text: "plain" }], "id-8")
+      expect((msg.parts[0] as { type: string }).type).toBe("text")
+    })
+  })
 })
 
 describe("contentPreview", () => {
@@ -1203,6 +1281,67 @@ describe("mergeMemorySourcesIntoLastAssistant", () => {
       retrievedMemories: [{ id: "m1", type: "semantic", text: "fact", score: 0.5 }],
     })
     expect(next).toBe(userOnly)
+  })
+
+  it("stamps budget and degraded annotations onto the SourcesPart", () => {
+    const next = mergeMemorySourcesIntoLastAssistant(baseMessages, {
+      retrievedMemories: [{ id: "m1", type: "semantic", text: "fact", score: 0.5 }],
+      budget: { limit: 900, used: 321, truncated: true },
+      degraded: true,
+    })
+    const sources = next[1].parts.find(
+      (p) => (p as { type?: string }).type === "sources"
+    ) as unknown as SourcesPart
+    expect(sources.memoryBudget).toEqual({ limit: 900, used: 321, truncated: true })
+    expect(sources.memoryDegraded).toBe(true)
+  })
+
+  it("annotates a degraded turn even with zero recalled memories", () => {
+    const next = mergeMemorySourcesIntoLastAssistant(baseMessages, {
+      retrievedMemories: [],
+      degraded: true,
+    })
+    expect(next).not.toBe(baseMessages)
+    const sources = next[1].parts.find(
+      (p) => (p as { type?: string }).type === "sources"
+    ) as unknown as SourcesPart
+    expect(sources.sources).toHaveLength(0)
+    expect(sources.memoryDegraded).toBe(true)
+    expect(sources.memoryBudget).toBeUndefined()
+  })
+
+  it("preserves memory annotations across a later twin merge (stickiness)", () => {
+    const withMemory = mergeMemorySourcesIntoLastAssistant(baseMessages, {
+      retrievedMemories: [{ id: "m1", type: "semantic", text: "fact", score: 0.5 }],
+      budget: { limit: 900, used: 100, truncated: false },
+    })
+    const thenTwin = mergeTwinSourcesIntoLastAssistant(withMemory, {
+      twinId: "twin_a",
+      retrievedChunks: [
+        {
+          chunk: { vectorDocId: "v1", content: "doc", sourceId: "src1" },
+          score: 0.5,
+          sourceTitle: "doc.md",
+        },
+      ],
+      selectedStyleSamples: [],
+    })
+    const sources = thenTwin[1].parts.find(
+      (p) => (p as { type?: string }).type === "sources"
+    ) as unknown as SourcesPart
+    expect(sources.memoryBudget).toEqual({ limit: 900, used: 100, truncated: false })
+    expect(sources.sources.some((s) => s.origin === "twin-rag")).toBe(true)
+  })
+
+  it("is idempotent with annotations present", () => {
+    const ctx = {
+      retrievedMemories: [{ id: "m1", type: "semantic", text: "fact", score: 0.5 }],
+      budget: { limit: 900, used: 100, truncated: false },
+      degraded: false,
+    }
+    const once = mergeMemorySourcesIntoLastAssistant(baseMessages, ctx)
+    const twice = mergeMemorySourcesIntoLastAssistant(once, ctx)
+    expect(twice).toBe(once)
   })
 })
 

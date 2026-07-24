@@ -69,9 +69,18 @@ jest.mock("@/lib/context-workbench/provider-payload", () => ({
 jest.mock("@/lib/claude/adapter", () => ({
   applySdkEvent: jest.fn(() => ({ messages: [], turnComplete: false })),
   contentPreview: (c: unknown) => (typeof c === "string" ? c : "preview"),
-  makeUserMessage: (c: unknown) => ({ id: "u1", role: "user", parts: [{ type: "text", text: c }] }),
+  makeUserMessage: jest.fn((c: unknown) => ({
+    id: "u1",
+    role: "user",
+    parts: [{ type: "text", text: c }],
+  })),
   extractUsage: jest.fn(() => null),
   mergeTwinSourcesIntoLastAssistant: (msgs: unknown) => msgs,
+}))
+
+const runTurnMemoryMock = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/memory/run-turn-memory", () => ({
+  runTurnMemory: (...args: unknown[]) => runTurnMemoryMock(...args),
 }))
 
 const applySdkSubagentBridgeMock = jest.fn()
@@ -450,6 +459,7 @@ beforeEach(() => {
   standaloneFlag.value = false
   runStandaloneTurnMock.mockReset().mockResolvedValue(undefined)
   gateWorkbenchProviderPayloadMock.mockClear()
+  runTurnMemoryMock.mockReset().mockResolvedValue(undefined)
   closeSessionIpcMock.mockReset().mockResolvedValue(undefined)
   approveToolMock.mockReset().mockResolvedValue(undefined)
   persistMessagesMock.mockReset().mockResolvedValue(undefined)
@@ -576,6 +586,19 @@ describe("useClaudeChat — actions", () => {
     // Plugin bus: the committed send announces MESSAGE_SENT + AGENT_STARTED.
     expect(busEmitMock).toHaveBeenCalledWith(BusEvents.MESSAGE_SENT, { sessionId: "sess-1" })
     expect(busEmitMock).toHaveBeenCalledWith(BusEvents.AGENT_STARTED, { sessionId: "sess-1" })
+  })
+
+  it("preserves attachment provenance on the optimistic user message", async () => {
+    const { makeUserMessage } = jest.requireMock("@/lib/claude/adapter") as {
+      makeUserMessage: jest.Mock
+    }
+    const manifest = [{ filename: "notes.txt", mediaType: "text/plain", kind: "document" as const }]
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello", undefined, { attachmentManifest: manifest })
+    })
+    expect(makeUserMessage).toHaveBeenCalledWith("hello", undefined, manifest)
   })
 
   it("send() routes through the standalone engine (not the sidecar) in BYOK mode", async () => {
@@ -1510,6 +1533,20 @@ describe("useClaudeChat — goal loop wiring (ADR-0019)", () => {
     expect(
       mockTrackEvent.mock.calls.filter(([name]) => name === "chat.turn.completed")
     ).toHaveLength(1)
+  })
+
+  it("passes the sealed assistant message id to long-term memory extraction", async () => {
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("remember this")
+    })
+    await driveTurnComplete()
+
+    expect(runTurnMemoryMock).toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({ assistantMessageId: "a1" })
+    )
   })
 
   it("send pauses an active goal on a fresh user message", async () => {

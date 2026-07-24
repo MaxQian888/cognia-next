@@ -113,9 +113,20 @@ describe("ChatPaneGroup", () => {
     await (paneA.onSend as (c: unknown) => Promise<void>)("hi-a")
     await (paneB.onSend as (c: unknown) => Promise<void>)("hi-b")
     await (paneB.onStop as () => Promise<void>)()
-    expect(send).toHaveBeenCalledWith("hi-a", "a")
-    expect(send).toHaveBeenCalledWith("hi-b", "b")
+    // The third argument is the attachment manifest, forwarded verbatim from
+    // the composer — undefined here because these panes send bare text.
+    expect(send).toHaveBeenCalledWith("hi-a", "a", undefined)
+    expect(send).toHaveBeenCalledWith("hi-b", "b", undefined)
     expect(stop).toHaveBeenCalledWith("b")
+  })
+
+  it("forwards the composer's attachment manifest through to the pane's session", async () => {
+    const send = jest.fn()
+    render(<ChatPaneGroup {...makeProps({ send })} />)
+    const pane = paneRenders.find((p) => p.sessionId === "a")!
+    const manifest = [{ filename: "a.pdf", mediaType: "application/pdf", kind: "document" }]
+    await (pane.onSend as (c: unknown, m: unknown) => Promise<void>)("hi", manifest)
+    expect(send).toHaveBeenCalledWith("hi", "a", manifest)
   })
 
   it("wires regenerate + editResend per session", async () => {

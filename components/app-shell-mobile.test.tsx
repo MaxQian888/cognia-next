@@ -60,6 +60,7 @@ const create = jest.fn()
 const remove = jest.fn().mockResolvedValue(undefined)
 const rename = jest.fn()
 const directSend = jest.fn().mockResolvedValue(undefined)
+const teamSend = jest.fn().mockResolvedValue(undefined)
 let activeSessionId: string | null = null
 jest.mock("@/hooks/chat", () => ({
   useSessions: () => ({
@@ -78,7 +79,7 @@ jest.mock("@/hooks/chat", () => ({
     respondToApproval: jest.fn(),
   }),
   useTeamChat: () => ({
-    send: jest.fn(),
+    send: teamSend,
     stop: jest.fn(),
     regenerate: jest.fn(),
     editAndResend: jest.fn(),
@@ -176,7 +177,10 @@ jest.mock("@/components/chat/chat-view", () => ({
     onResumeAfterPlanApproval,
   }: {
     showHeader?: boolean
-    onSend?: (content: unknown) => Promise<void>
+    onSend?: (
+      content: unknown,
+      manifest?: readonly [{ filename: string; mediaType: string; kind: "document" }]
+    ) => Promise<void>
     onResumeAfterPlanApproval?: (prompt: string, mode: string) => void | Promise<void>
   }) => (
     <div
@@ -187,7 +191,9 @@ jest.mock("@/components/chat/chat-view", () => ({
       <button
         data-testid="chat-send-stub"
         onClick={() => {
-          void onSend?.("hi").catch(() => {})
+          void onSend?.("hi", [
+            { filename: "report.txt", mediaType: "text/plain", kind: "document" },
+          ]).catch(() => {})
         }}
       />
       <button
@@ -305,6 +311,7 @@ beforeEach(() => {
   remove.mockReset().mockResolvedValue(undefined)
   rename.mockReset()
   directSend.mockReset().mockResolvedValue(undefined)
+  teamSend.mockReset().mockResolvedValue(undefined)
   setPermissionMode.mockReset()
   updateSession.mockReset().mockResolvedValue(undefined)
   hapterImpact.mockReset()
@@ -666,9 +673,36 @@ describe("<AppShellMobile />", () => {
     const user = userEvent.setup()
     render(<AppShellMobile />)
     await user.click(screen.getByTestId("chat-send-stub"))
-    await waitFor(() => expect(directSend).toHaveBeenCalledWith("hi"))
+    await waitFor(() =>
+      expect(directSend).toHaveBeenCalledWith("hi", undefined, {
+        attachmentManifest: [{ filename: "report.txt", mediaType: "text/plain", kind: "document" }],
+      })
+    )
     await waitFor(() => expect(hapterImpact).toHaveBeenCalledWith("light"))
     expect(hapterNotify).not.toHaveBeenCalled()
+  })
+
+  it("uses the team send signature without dropping attachment provenance", async () => {
+    sessionsRef.current = [
+      {
+        id: "team-session",
+        title: "Team",
+        kind: "team",
+        teamId: "t-1",
+        createdAt: 0,
+        updatedAt: 0,
+      } as unknown as ChatSession,
+    ]
+    activeSessionId = "team-session"
+    const user = userEvent.setup()
+    render(<AppShellMobile />)
+    await user.click(screen.getByTestId("chat-send-stub"))
+    await waitFor(() =>
+      expect(teamSend).toHaveBeenCalledWith("hi", {
+        attachmentManifest: [{ filename: "report.txt", mediaType: "text/plain", kind: "document" }],
+      })
+    )
+    expect(directSend).not.toHaveBeenCalled()
   })
 
   it("fires an error haptic when a send throws", async () => {

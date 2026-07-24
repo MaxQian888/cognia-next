@@ -4,6 +4,7 @@ import { useCallback, useRef, type ReactNode, type Ref } from "react"
 import { useTranslations } from "next-intl"
 import { AlertTriangle, Loader2 } from "lucide-react"
 import { Composer, type ComposerHandle, type ComposerWorkflowMention } from "./composer"
+import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { ChatHeader } from "./chat-header"
 import { CharacterMissingBanner } from "./character-missing-banner"
 import {
@@ -65,7 +66,7 @@ interface ChatPaneProps {
    * projection.
    */
   sessionId?: string
-  onSend: (content: SendContent) => Promise<void>
+  onSend: (content: SendContent, manifest?: readonly AttachmentManifestEntry[]) => Promise<void>
   onStop: () => Promise<void>
   /** Interrupt the running turn and immediately replay the queued steer. */
   onSteerNow?: () => Promise<void> | void
@@ -234,8 +235,8 @@ export function ChatPane({
   })
 
   const handleSend = useCallback(
-    async (content: SendContent) => {
-      await onSend(content)
+    async (content: SendContent, manifest?: readonly AttachmentManifestEntry[]) => {
+      await onSend(content, manifest)
     },
     [onSend]
   )

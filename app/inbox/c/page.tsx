@@ -28,6 +28,7 @@ import { useResolvedConnectorMode } from "@/components/chat/use-resolved-connect
 import { useActiveConversationStore } from "@/stores/inbox/active-conversation-store"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
+import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 
 function ConversationInner() {
   const conversationKey = useSearchParams().get("key") ?? ""
@@ -99,6 +100,13 @@ function ConversationDetail({ conversationKey }: { conversationKey: string }) {
   const currentMode = resolvedMode ?? "auto"
 
   const send = isTeamSession ? teamChat.send : directChat.send
+  const handleSend = (
+    content: Parameters<typeof send>[0],
+    manifest?: readonly AttachmentManifestEntry[]
+  ) =>
+    isTeamSession
+      ? teamChat.send(content, { attachmentManifest: manifest })
+      : directChat.send(content, undefined, { attachmentManifest: manifest })
   const stop = isTeamSession ? teamChat.stop : directChat.stop
   const regenerate = isTeamSession ? teamChat.regenerate : directChat.regenerate
   const editAndResend = isTeamSession ? teamChat.editAndResend : directChat.editAndResend
@@ -126,7 +134,7 @@ function ConversationDetail({ conversationKey }: { conversationKey: string }) {
           <ChatPane
             showHeader={false}
             activeSession={session}
-            onSend={send}
+            onSend={handleSend}
             onStop={stop}
             onRegenerate={regenerate}
             onEditResend={editAndResend}

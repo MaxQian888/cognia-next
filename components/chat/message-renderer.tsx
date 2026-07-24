@@ -28,6 +28,7 @@ import {
 } from "@/components/chat/message-parts/mcp-tool-card"
 import { CanvasInlinePart } from "@/components/chat/message-parts/canvas-inline-part"
 import { FilePartPreview } from "@/components/chat/message-parts/file-part-preview"
+import { AttachmentTextCard } from "@/components/chat/message-parts/attachment-text-card"
 import {
   MessageImageGallery,
   type MessageImageGalleryProps,
@@ -62,6 +63,8 @@ import { parseTodoInput } from "@/lib/chat/todos"
 import type { AgentFlowMode } from "@/types/appearance"
 import { BranchNavigator } from "@/components/chat/branch-navigator"
 import { TriggerBadge } from "@/components/chat/trigger-badge"
+import { MemoryLearnedChip, MemoryRecalledChip } from "@/components/chat/memory-chips"
+import { isSourcesPart } from "@/lib/claude/parts-extensions"
 import type {
   A2UIPart as A2UIPartType,
   AgentTeamDispatchPart as AgentTeamDispatchPartType,
@@ -529,6 +532,19 @@ function MessageRendererInner({
           if (!sessionId) return null
           return <TriggerBadge sessionId={sessionId} messageId={message.id} />
         })()}
+
+        {/* Memory transparency chips — "learned N" + "recalled N" for completed */}
+        {/* assistant turns. Mounted only when not streaming so the liveQuery */}
+        {/* inside the chips never runs in the token-delta hot path. */}
+        {message.role === "assistant" && !isStreaming && (
+          <div className="mt-1 flex flex-wrap items-center gap-1 empty:hidden">
+            <MemoryLearnedChip messageId={message.id} />
+            {(() => {
+              const sourcesPart = (message.parts as unknown[]).find(isSourcesPart)
+              return sourcesPart ? <MemoryRecalledChip part={sourcesPart} /> : null
+            })()}
+          </div>
+        )}
 
         {/* ADR-0026 §5 §A — revived hover-action slot. Distinct from the */}
         {/* footer below: this slot is visible above the message body on hover, */}
@@ -1048,6 +1064,22 @@ function renderPart(
               filename,
             },
           ]}
+        />
+      )
+    }
+
+    // A document the user attached: the model got its extracted text, and that
+    // text rides along on the part (there is no `url` — the original binary is
+    // deliberately not persisted). Render it as a collapsed file card instead
+    // of spilling the whole document into the bubble.
+    const attachedText = (part as { text?: string }).text
+    if (!url && attachedText) {
+      return (
+        <AttachmentTextCard
+          key={key}
+          filename={filename ?? t("attachmentAlt")}
+          mediaType={mediaType}
+          text={attachedText}
         />
       )
     }

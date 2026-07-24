@@ -552,7 +552,7 @@ test("pane callbacks dispatch by session kind (team → useTeamChat, direct → 
     render(<DesktopChatWorkspace />)
   })
   const props = paneGroupPropsLog[paneGroupPropsLog.length - 1] as {
-    send: (content: unknown, sid: string) => unknown
+    send: (content: unknown, sid: string, manifest?: readonly unknown[]) => unknown
     stop: (sid: string) => unknown
     steerNow: (sid: string) => unknown
     steerFlush: (sid: string) => unknown
@@ -562,8 +562,9 @@ test("pane callbacks dispatch by session kind (team → useTeamChat, direct → 
     respondToApproval: (approval: unknown, decision: string) => unknown
   }
 
+  const manifest = [{ filename: "report.txt", mediaType: "text/plain", kind: "document" }]
   await act(async () => {
-    props.send("hi", "t-1")
+    props.send("hi", "t-1", manifest)
     props.stop("t-1")
     props.steerNow("t-1")
     props.steerFlush("t-1")
@@ -571,7 +572,10 @@ test("pane callbacks dispatch by session kind (team → useTeamChat, direct → 
     props.editResend("m1", "edited", "t-1")
     props.closePane("t-1")
   })
-  expect(teamChatMock.send).toHaveBeenCalledWith("hi", { sessionId: "t-1" })
+  expect(teamChatMock.send).toHaveBeenCalledWith("hi", {
+    sessionId: "t-1",
+    attachmentManifest: manifest,
+  })
   expect(teamChatMock.stop).toHaveBeenCalledWith("t-1")
   expect(teamChatMock.interruptAndSteer).toHaveBeenCalledWith("t-1")
   expect(teamChatMock.flushSteer).toHaveBeenCalledWith("t-1")
@@ -583,7 +587,7 @@ test("pane callbacks dispatch by session kind (team → useTeamChat, direct → 
   expect(directChatMock.close).not.toHaveBeenCalled()
 
   await act(async () => {
-    props.send("hi", "d-1")
+    props.send("hi", "d-1", manifest)
     props.stop("d-1")
     props.steerNow("d-1")
     props.steerFlush("d-1")
@@ -591,7 +595,10 @@ test("pane callbacks dispatch by session kind (team → useTeamChat, direct → 
     props.editResend("m2", "edited", "d-1")
     props.closePane("d-1")
   })
-  expect(directChatMock.send).toHaveBeenCalledWith("hi", undefined, { sessionId: "d-1" })
+  expect(directChatMock.send).toHaveBeenCalledWith("hi", undefined, {
+    sessionId: "d-1",
+    attachmentManifest: manifest,
+  })
   expect(directChatMock.stop).toHaveBeenCalledWith("d-1")
   expect(directChatMock.interruptAndSteer).toHaveBeenCalledWith("d-1")
   expect(directChatMock.flushSteer).toHaveBeenCalledWith("d-1")

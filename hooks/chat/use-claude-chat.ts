@@ -11,6 +11,7 @@ import {
   mergeMemorySourcesIntoLastAssistant,
   mergeTwinSourcesIntoLastAssistant,
 } from "@/lib/claude/adapter"
+import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { getGoalRuntime } from "@/lib/goal/runtime"
 import { handleTurnComplete } from "@/lib/goal/turn-driver"
 import { defaultLifecycleFirer } from "@/lib/claude/hooks/lifecycle-firer"
@@ -405,6 +406,7 @@ function runMemoryTasks(sessionId: string, messages: UIMessage[]): void {
   void runTurnMemory(sessionId, {
     userText: extractPlainText(lastUser),
     assistantText: extractAssistantText(lastAssistant),
+    assistantMessageId: lastAssistant?.id,
     transcript: messages.map((m) => ({
       role: m.role,
       text: extractPlainText(m),
@@ -819,6 +821,10 @@ export function useClaudeChat() {
         /** Private Context Workbench snapshot/selection. This is never exposed
          *  to plugin prompt hooks or persisted as visible message content. */
         resourceContext?: string
+        /** Provenance for the leading attachment blocks, from
+         *  `buildSendContent`. Lets the optimistic user message render file
+         *  cards (with filenames) instead of raw extracted text. */
+        attachmentManifest?: readonly AttachmentManifestEntry[]
       }
     ) => {
       const sessionId = callOptions?.sessionId ?? useChatStore.getState().activeSessionId
@@ -1066,7 +1072,7 @@ export function useClaudeChat() {
       // existing user anchor stays the single source of truth for that turn.
       // Base off this session's own slice — never the focused projection.
       const previousMessages = store.getState().sessions[sessionId]?.messages ?? []
-      const userMsg = makeUserMessage(effectiveContent)
+      const userMsg = makeUserMessage(effectiveContent, undefined, callOptions?.attachmentManifest)
       // Structured mention capture: persist the message's inline `@…` tokens
       // as `metadata.mentions: ContextRef[]` so mentions are queryable without
       // regex re-parsing. Known subagent handles resolve to their kind; other

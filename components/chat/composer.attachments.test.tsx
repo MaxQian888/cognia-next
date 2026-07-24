@@ -150,11 +150,13 @@ describe("Composer — attachment send contract", () => {
       content: "Read https://example.com/docs",
       rejected: [],
       tokens: 0,
+      manifest: [],
     })
     buildLinkContextBlocksMock.mockResolvedValue({
       blocks: [{ type: "text", text: "Linked page context" }],
       rejected: [],
       tokens: 4,
+      manifest: [],
     })
     const onSend = jest.fn(async () => undefined)
     const ta = renderComposer(onSend)
@@ -162,20 +164,23 @@ describe("Composer — attachment send contract", () => {
     await typeAndEnter(ta, "Read https://example.com/docs")
 
     expect(buildLinkContextBlocksMock).toHaveBeenCalledWith("Read https://example.com/docs")
-    expect(onSend).toHaveBeenCalledWith([
-      { type: "text", text: "Read https://example.com/docs" },
-      { type: "text", text: "Linked page context" },
-    ])
+    expect(onSend).toHaveBeenCalledWith(
+      [
+        { type: "text", text: "Read https://example.com/docs" },
+        { type: "text", text: "Linked page context" },
+      ],
+      []
+    )
   })
 
   it("sends a normal turn and clears the input", async () => {
-    buildSendContentMock.mockResolvedValue({ content: "hi", rejected: [], tokens: 0 })
+    buildSendContentMock.mockResolvedValue({ content: "hi", rejected: [], tokens: 0, manifest: [] })
     const onSend = jest.fn(async () => undefined)
     const ta = renderComposer(onSend)
 
     await typeAndEnter(ta, "hi")
 
-    expect(onSend).toHaveBeenCalledWith("hi")
+    expect(onSend).toHaveBeenCalledWith("hi", [])
     expect(dialogOpen()).toBe(false)
     expect(ta.value).toBe("")
   })
@@ -185,6 +190,7 @@ describe("Composer — attachment send contract", () => {
       content: [{ type: "text", text: "big" }],
       rejected: [],
       tokens: 20_000,
+      manifest: [],
     })
     const onSend = jest.fn(async () => undefined)
     const ta = renderComposer(onSend)
@@ -194,7 +200,7 @@ describe("Composer — attachment send contract", () => {
     expect(onSend).not.toHaveBeenCalled()
 
     await clickButton("Send anyway")
-    expect(onSend).toHaveBeenCalledWith([{ type: "text", text: "big" }])
+    expect(onSend).toHaveBeenCalledWith([{ type: "text", text: "big" }], [])
   })
 
   it("keeps the draft when the user cancels the oversize dialog", async () => {
@@ -202,6 +208,7 @@ describe("Composer — attachment send contract", () => {
       content: [{ type: "text", text: "big" }],
       rejected: [],
       tokens: 20_000,
+      manifest: [],
     })
     const onSend = jest.fn(async () => undefined)
     const ta = renderComposer(onSend)
@@ -223,6 +230,7 @@ describe("Composer — attachment send contract", () => {
       content: [{ type: "text", text: "big" }],
       rejected: [],
       tokens: 20_000,
+      manifest: [],
     })
     const onSend = jest.fn(async () => undefined)
     const ta = renderComposer(onSend)
@@ -242,7 +250,7 @@ describe("Composer — attachment send contract", () => {
   })
 
   it("clears a staged attachment only after a confirmed successful send", async () => {
-    buildSendContentMock.mockResolvedValue({ content: "hi", rejected: [], tokens: 0 })
+    buildSendContentMock.mockResolvedValue({ content: "hi", rejected: [], tokens: 0, manifest: [] })
     const onSend = jest.fn(async () => undefined)
     const ta = renderComposer(onSend)
 
@@ -263,7 +271,7 @@ describe("Composer — attachment send contract", () => {
     useSettingsStore.setState({
       settings: { composerBehavior: { clearAfterSend: false } } as never,
     })
-    buildSendContentMock.mockResolvedValue({ content: "hi", rejected: [], tokens: 0 })
+    buildSendContentMock.mockResolvedValue({ content: "hi", rejected: [], tokens: 0, manifest: [] })
     const onSend = jest.fn(async () => undefined)
     const ta = renderComposer(onSend)
 

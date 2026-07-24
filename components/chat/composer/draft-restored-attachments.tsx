@@ -2,8 +2,12 @@
 
 /**
  * Renders the "you had attachments staged" reminder chips above the composer
- * after a draft is restored on session switch / reload. The binary isn't
- * persisted (light drafts), so these are informational: they tell the user
+ * after a draft is restored on session switch / reload.
+ *
+ * A draft now persists its attachment binaries, so most restored attachments
+ * come back as real, sendable chips. This is the fallback for the ones that
+ * could not: binaries evicted by the global draft quota, and drafts written
+ * before binaries were saved at all. Informational only — it tells the user
  * which files to re-attach. Dismissable as a whole.
  */
 

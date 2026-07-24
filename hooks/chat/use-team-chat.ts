@@ -4,7 +4,14 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 import type { UIMessage } from "ai"
-import { applySdkEvent, contentPreview, makeUserMessage } from "@/lib/claude/adapter"
+import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
+import {
+  applySdkEvent,
+  contentPreview,
+  makeUserMessage,
+  mergeMemorySourcesIntoLastAssistant,
+  type MemorySourcesContext,
+} from "@/lib/claude/adapter"
 import {
   runTitleTask,
   shouldGenerateTitle,
@@ -68,6 +75,8 @@ const MAX_SUPERVISOR_ROUNDS = 2
  * to the active session); `skipPersistUserTurn` marks an internal re-issue
  * (regenerate) whose user message is already on disk. */
 export interface TeamSendOptions {
+  /** Attachment provenance for the optimistic user message. */
+  attachmentManifest?: readonly AttachmentManifestEntry[]
   sessionId?: string
   skipPersistUserTurn?: boolean
 }
@@ -137,6 +146,7 @@ export function useTeamChat() {
   }, [])
 
   const resolvers = useRef<ResolverMap>(new Map())
+  const eventQueuesRef = useRef<Map<string, Promise<void>>>(new Map())
   // Team sessions whose in-flight turn was interrupted (stop / broker cancel).
   // Per-session so stopping one team pane never aborts a sibling team turn.
   const interruptedRef = useRef<Set<string>>(new Set())
@@ -179,6 +189,36 @@ export function useTeamChat() {
   // it without losing attachments to the text-only round-trip.
   const lastUserContentRef = useRef<Map<string, SendContent>>(new Map())
 
+  // Serialize events per member sub-session. A result event performs async
+  // persistence before `session_ended` resolves the member turn; without this
+  // queue the orchestration could start final memory extraction while the
+  // sealed assistant reply was still absent from the team transcript.
+  const enqueueTeamEvent = useCallback(
+    (evt: ClaudeEvent) => {
+      const key =
+        typeof (evt as { sessionId?: unknown }).sessionId === "string"
+          ? (evt as { sessionId: string }).sessionId
+          : "__nosession__"
+      const queues = eventQueuesRef.current
+      const tail = (queues.get(key) ?? Promise.resolve())
+        .catch(() => {})
+        .then(() =>
+          handleTeamEvent(evt, allowListRef, resolvers.current, {
+            mirror: streamMirrorRef.current,
+            registry: coalescing,
+          })
+        )
+        .catch((err) => {
+          console.error("team handleEvent failed", err)
+        })
+      queues.set(key, tail)
+      void tail.finally(() => {
+        if (queues.get(key) === tail) queues.delete(key)
+      })
+    },
+    [coalescing]
+  )
+
   // Subscribe to sidecar events; only react to sub-session-tagged ones.
   // Same event sources as direct chat: Tauri events on desktop, the mirrored
   // companion WebSocket on Capacitor / web-companion. Plain web has none.
@@ -187,14 +227,7 @@ export function useTeamChat() {
     let unlisten: UnlistenFn | null = null
     let cancelled = false
 
-    onClaudeMessage((evt) => {
-      void handleTeamEvent(evt, allowListRef, resolvers.current, {
-        mirror: streamMirrorRef.current,
-        registry: coalescing,
-      }).catch((err) => {
-        console.error("team handleEvent failed", err)
-      })
-    })
+    onClaudeMessage((evt) => enqueueTeamEvent(evt))
       .then((u) => {
         if (cancelled) u()
         else unlisten = u
@@ -207,7 +240,7 @@ export function useTeamChat() {
       cancelled = true
       unlisten?.()
     }
-  }, [coalescing])
+  }, [enqueueTeamEvent])
 
   // Self-reference for the steer drain in `send`'s finally (replay = fresh send).
   const sendRef = useRef<TeamSendFn | null>(null)
@@ -316,9 +349,12 @@ export function useTeamChat() {
       // fall back to Dexie when no pane has materialised the slice yet.
       let instantPreviewTitle: string | undefined
       if (!opts?.skipPersistUserTurn) {
-        const userMsg = withMetadata(makeUserMessage(content), {
-          senderKind: "user",
-        })
+        const userMsg = withMetadata(
+          makeUserMessage(content, undefined, opts?.attachmentManifest),
+          {
+            senderKind: "user",
+          }
+        )
         const before =
           useChatStore.getState().sessions[sessionId]?.messages ?? (await listMessages(sessionId))
         const after = [...before, userMsg]
@@ -425,6 +461,7 @@ export function useTeamChat() {
         void runTurnMemory(sessionId, {
           userText,
           assistantText: lastAssistant ? textFromParts(lastAssistant.parts) : "",
+          assistantMessageId: lastAssistant?.id,
           transcript: finalMessages.map((m) => ({
             role: m.role,
             text: textFromParts(m.parts),
@@ -975,6 +1012,10 @@ async function runMemberSubSession(args: RunMemberArgs): Promise<void> {
     model: opts.model,
     extraMetadata: messageMetadata,
     postProcessText,
+    // Recalled-memory transparency: direct chat folds this into the assistant
+    // message's SourcesPart at turnComplete; the team path seals per member in
+    // `handleTeamEvent`, so thread the context through the resolver ctx.
+    memoryContext: baseOpts.memoryContext,
   }
   subResolverCtx.set(sub, ctx)
 
@@ -1003,6 +1044,8 @@ interface SubResolverCtx {
   model?: string
   extraMetadata?: Record<string, unknown>
   postProcessText?: (text: string) => string
+  /** Recalled long-term memories for this member's turn (SourcesPart merge). */
+  memoryContext?: MemorySourcesContext
 }
 const subResolverCtx = new Map<string, SubResolverCtx>()
 
@@ -1184,9 +1227,12 @@ async function handleTeamEvent(
         if (sdkResult) {
           // Member turn boundary: drop pending coalesced work and write the
           // final tagged list synchronously (parity with direct chat's
-          // turnComplete seal — flush would replay pre-tag args).
+          // turnComplete seal — flush would replay pre-tag args). Fold the
+          // member's recalled memories onto its reply first (team↔direct
+          // transparency parity — previously dropped on the team path).
           coalesce.commit.cancel()
           coalesce.persist.cancel()
+          tagged = mergeMemorySourcesIntoLastAssistant(tagged, ctx?.memoryContext)
           await persistMessages(teamSessionId, tagged)
           if (isOpen) {
             useChatStore.getState().replaceSessionMessages(teamSessionId, tagged)

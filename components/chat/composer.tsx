@@ -44,9 +44,13 @@ import type { SendContent, ChatSession, Character } from "@cognia/agent-config-t
 import {
   buildSendContent,
   INLINE_TOKEN_CEILING,
+  type AttachmentManifestEntry,
+  type ExtractedAttachment,
   type SubmittedFile,
 } from "@/lib/chat/attachments/dispatch"
 import { prepareComposerAttachments } from "@/lib/chat/attachments/prepare"
+import { applyOrder } from "@/lib/chat/attachments/reorder"
+import { StagedAttachmentsProvider, useStagedAttachments } from "./composer/staged-attachment-store"
 import { buildLinkContextBlocks, mergeContextBlocks, removeHttpUrl } from "@/lib/chat/link-context"
 import { collectDroppedFiles, MAX_DROPPED_DIR_FILES } from "@/lib/chat/drop-entries"
 import {
@@ -175,7 +179,14 @@ interface Props {
   session?: ChatSession | null
   onStartNewSession: () => void | Promise<void>
   onOpenSettings: (tab: SettingsTab) => void
-  onSend: (content: SendContent) => void | Promise<void>
+  /**
+   * Dispatch the turn. `manifest` describes the leading attachment blocks so the
+   * transcript can render file cards instead of raw extracted text.
+   */
+  onSend: (
+    content: SendContent,
+    manifest?: readonly AttachmentManifestEntry[]
+  ) => void | Promise<void>
   onStop: () => void | Promise<void>
   disabled?: boolean
   /**
@@ -275,8 +286,17 @@ interface InnerProps {
    * Submit a turn. Resolves `true` when the turn was handled (the input should
    * be cleared) and `false` when the user cancelled (e.g. declined the oversize
    * confirmation) so the composer keeps the draft + attachments intact.
+   *
+   * `precomputed` carries the staging-time extraction results (see
+   * `staged-attachment-store`). It is threaded through the callback rather than
+   * read from a hook because `handleSubmit` lives OUTSIDE `PromptInputProvider`
+   * and so cannot reach the store.
    */
-  onSubmit: (text: string, files: SubmittedFile[]) => boolean | Promise<boolean>
+  onSubmit: (
+    text: string,
+    files: SubmittedFile[],
+    precomputed?: ReadonlyMap<string, ExtractedAttachment>
+  ) => boolean | Promise<boolean>
   onStop: () => void | Promise<void>
   onCommand: (cmd: SlashCommand, args: string) => Promise<boolean>
   onSubmitMemory: (scope: MemoryScope, text: string) => Promise<boolean>
@@ -316,18 +336,21 @@ function ComposerInner(props: InnerProps) {
   const persistDrafts = composerBehavior?.persistDrafts !== false
   const controller = usePromptInputController()
   const attachments = usePromptInputAttachments()
+  // Extraction results / chip order / OCR opt-in for the staged attachments.
+  const staged = useStagedAttachments()
   const ocr = useOcr(() => buildOcrDeps())
   const [ocrBubbleOpen, setOcrBubbleOpen] = useState(false)
   const [ocrBubbleResult, setOcrBubbleResult] = useState<OcrResult | null>(null)
   const [ocrBubbleImageSrc, setOcrBubbleImageSrc] = useState<string | null>(null)
 
-  // Composer attachment OCR: an image/PDF attachment's hover menu offers
-  // "extract text to input" (appends plain text to the draft) or "view result"
-  // (opens the per-page sheet). The attachment already holds a blob URL, so we
-  // resolve it to a Blob and hand a `blob` source straight to `extract()` — no
-  // attachment-id resolver needed.
-  const handleOcrSelect = useCallback(
-    async (action: "extract-to-input" | "view-result", attachmentId: string) => {
+  // Composer attachment OCR. It used to live on a hover menu on the chip and
+  // append text straight into the draft — which silently doubled the payload,
+  // because the image itself stayed attached and both went to the model. OCR is
+  // now one layer of the attachment preview panel's "model view": the text is
+  // stored ON the staged attachment with an explicit opt-in, so the token badge
+  // reflects the real cost before the user commits to it.
+  const runComposerOcr = useCallback(
+    async (attachmentId: string, action: "extract-to-input" | "view-result") => {
       const file = attachments.files.find((f) => f.id === attachmentId)
       if (!file?.url) return
       let blob: Blob
@@ -344,15 +367,27 @@ function ComposerInner(props: InnerProps) {
         getInput: () => controller.textInput.value,
         setInput: (value) => controller.textInput.setInput(value),
         showResult: (result) => {
+          // Panel gets the flat text (that is what would be sent); the per-page
+          // result stays available behind the panel's "details" action so the
+          // richer Live-Text sheet doesn't become unreachable.
+          staged.setOcrText(attachmentId, result.combinedText)
           setOcrBubbleResult(result)
           setOcrBubbleImageSrc(
             (file.mediaType ?? "").startsWith("image/") ? (file.url ?? null) : null
           )
-          setOcrBubbleOpen(true)
         },
       })
     },
-    [attachments, ocr, controller.textInput]
+    [attachments, ocr, controller.textInput, staged]
+  )
+  const handleRunOcrForPanel = useCallback(
+    (attachmentId: string) => runComposerOcr(attachmentId, "view-result"),
+    [runComposerOcr]
+  )
+  /** Second OCR route, kept from the old chip menu: text straight into the draft. */
+  const handleExtractOcrToInput = useCallback(
+    (attachmentId: string) => runComposerOcr(attachmentId, "extract-to-input"),
+    [runComposerOcr]
   )
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -396,9 +431,11 @@ function ComposerInner(props: InnerProps) {
     tokenEnd: number
   } | null>(null)
   const [isComposing, setIsComposing] = useState(false)
-  // Attachment metadata restored from a draft (declared here so `handleSend`'s
-  // clear path can reset it). The binary isn't persisted — these surface as
-  // "re-attach" reminder chips above the input.
+  // Restored draft attachments whose binary did NOT survive (evicted by the
+  // draft quota, or saved before binaries were persisted at all). Declared here
+  // so `handleSend`'s clear path can reset it. Everything else is re-staged as
+  // a real attachment; these are the leftovers that surface as "re-attach"
+  // reminder chips above the input.
   const [restoredAttachments, setRestoredAttachments] = useState<DraftAttachmentMeta[]>([])
   const [dragDepth, setDragDepth] = useState(0)
   // Oversized text pastes are folded into a `[Pasted N lines #id]` placeholder
@@ -788,9 +825,13 @@ function ComposerInner(props: InnerProps) {
     }
 
     // Snapshot the attachments BEFORE the optimistic clear so the actual send
-    // still has them (and so a failed send can restore the composer).
-    const snapshotFiles = [...attachments.files]
-    const snapshotAttachmentInputs = snapshotFiles.map(({ id: _id, ...item }) => item)
+    // still has them (and so a failed send can restore the composer). The chip
+    // order is the user's (drag-reordered) order, and the model must receive
+    // them in exactly that order — see `buildAttachmentBlocks`.
+    const snapshotFiles = applyOrder([...attachments.files], staged.order)
+    // `id` is RETAINED here (unlike before): it is the key `buildSendContent`
+    // uses to look each file up in the staging-time extraction cache.
+    const snapshotAttachmentInputs = snapshotFiles.map((item) => ({ ...item }))
     // Snapshot the folded-paste bodies too: the optimistic clear wipes them, so
     // the send (and a restore-on-failure) reads from this stable map.
     const pasteMap = pastedBlocks
@@ -834,8 +875,16 @@ function ComposerInner(props: InnerProps) {
     clearInputOptimistically()
 
     try {
+      // Let any in-flight staging extraction land first, so the send reuses it
+      // instead of re-parsing the same document. Resolves synchronously when
+      // nothing is pending, which is the overwhelmingly common case.
+      await staged.whenSettled()
+      const precomputed = staged.precomputed
       const filesToSend: SubmittedFile[] = await Promise.all(
         snapshotAttachmentInputs.map(async (item) => {
+          // A file whose extraction is cached never needs its bytes again —
+          // skip the blob→data-URL round trip entirely.
+          if (precomputed.has(item.id)) return item
           if (item.url?.startsWith("blob:")) {
             const dataUrl = await blobUrlToDataUrl(item.url)
             return { ...item, url: dataUrl ?? item.url }
@@ -877,7 +926,11 @@ function ComposerInner(props: InnerProps) {
         // today's "action command clears the input, no turn" behavior.
         let sent = true
         if (outgoingText.length > 0 || filesToSend.length > 0) {
-          sent = await props.onSubmit(expandPastes(outgoingText, pasteMap), filesToSend)
+          sent = await props.onSubmit(
+            expandPastes(outgoingText, pasteMap),
+            filesToSend,
+            precomputed
+          )
         } else if (!ranAction) {
           // Defensive: no prose, no files, no action — nothing was dispatched,
           // so restore the optimistically-cleared input rather than lose it.
@@ -892,7 +945,7 @@ function ComposerInner(props: InnerProps) {
         return
       }
 
-      const sent = await props.onSubmit(expandPastes(text, pasteMap), filesToSend)
+      const sent = await props.onSubmit(expandPastes(text, pasteMap), filesToSend, precomputed)
       if (sent) finalizeSend()
       else {
         restoreInputAfterFailure()
@@ -916,6 +969,7 @@ function ComposerInner(props: InnerProps) {
   }, [
     controller.textInput,
     attachments,
+    staged,
     props,
     sessionId,
     commandMap,
@@ -1355,8 +1409,7 @@ function ComposerInner(props: InnerProps) {
 
   // ── Per-session draft persistence (Phase 3.2) ─────────────────────────
   const [draftHydratedFor, setDraftHydratedFor] = useState<string | null>(null)
-  // Attachment metadata restored from a draft. The binary isn't persisted, so
-  // these surface as "re-attach" reminder chips above the input.
+  // See `restoredAttachments` above: only the ones we could not bring back.
   const tDraft = useTranslations("chat.composer.draftRestore")
   // The next-intl translator isn't a stable reference, so we read it through a
   // ref instead of listing it as an effect dependency — depending on it would
@@ -1395,12 +1448,43 @@ function ComposerInner(props: InnerProps) {
         if (row?.text) {
           controller.textInput.setInput(row.text)
         }
-        // Reset (or populate) the reminder chips for the session we just
-        // switched to — a session with no staged attachments clears them.
+        // Attachments whose binary survived are re-staged for real: the file
+        // comes back, ready to send. Seed the store with its cached extraction
+        // first so re-staging doesn't re-parse a document we already read.
+        // Anything whose blob was evicted (quota) still degrades to a chip.
         const restored = row?.attachments ?? []
-        setRestoredAttachments(restored)
-        if (restored.length > 0) {
-          toast.info(tDraftRef.current("toast", { count: restored.length }))
+        const revivable = restored.filter((a) => a.bytes)
+        if (revivable.length > 0) {
+          staged.seedIncoming(
+            revivable.map((a) => ({
+              filename: a.name,
+              sizeBytes: a.size,
+              state: {
+                status: "ready" as const,
+                sizeBytes: a.size,
+                bytes: a.bytes,
+                ...(a.extractedText
+                  ? {
+                      extracted: {
+                        kind: "document" as const,
+                        block: { type: "text" as const, text: a.extractedText },
+                        tokens: a.tokens ?? 0,
+                        text: a.extractedText,
+                      },
+                    }
+                  : {}),
+              },
+            }))
+          )
+          attachments.add(
+            revivable.map((a) => new File([a.bytes as BlobPart], a.name, { type: a.mediaType }))
+          )
+        }
+        // Reminder chips are now only for the ones we could NOT bring back.
+        const reminders = restored.filter((a) => !a.bytes)
+        setRestoredAttachments(reminders)
+        if (reminders.length > 0) {
+          toast.info(tDraftRef.current("toast", { count: reminders.length }))
         }
         setDraftHydratedFor(sessionId)
       })
@@ -1412,14 +1496,15 @@ function ComposerInner(props: InnerProps) {
     return () => {
       cancelled = true
     }
-  }, [persistDrafts, sessionId, draftHydratedFor, controller.textInput, attachments])
+  }, [persistDrafts, sessionId, draftHydratedFor, controller.textInput, attachments, staged])
 
-  // Serialising staged attachments to draft rows walks every base64 data-URL, so
-  // memoise it on `attachments.files`. Otherwise the persist effect below — which
-  // also depends on the text value — re-does that work on every keystroke.
+  // Memoised on the file list + staged state so the persist effect below — which
+  // also depends on the text value — doesn't rebuild these rows on every
+  // keystroke. The blobs come from `staged`, which already holds the bytes it
+  // fetched for extraction, so persisting a draft costs no extra reads.
   const draftAttachments = useMemo(
-    () => draftAttachmentsFromFiles(attachments.files),
-    [attachments.files]
+    () => draftAttachmentsFromFiles(attachments.files, staged.byId),
+    [attachments.files, staged.byId]
   )
   useEffect(() => {
     if (!persistDrafts) return
@@ -1503,94 +1588,104 @@ function ComposerInner(props: InnerProps) {
 
   return (
     <div ref={setContainerEl}>
-      <ContextChipBar
-        onOcrSelect={handleOcrSelect}
-        ocrBusy={ocr.status === "running"}
-        text={controller.textInput.value}
-        onRemoveLink={removeLink}
-      />
-      <DraftRestoredAttachments
-        items={restoredAttachments}
-        onDismiss={() => setRestoredAttachments([])}
-      />
-      <OcrResultBubble
-        open={ocrBubbleOpen}
-        onOpenChange={setOcrBubbleOpen}
-        result={ocrBubbleResult}
-        imageSrc={ocrBubbleImageSrc ?? undefined}
-        onCopy={(text) => void navigator.clipboard?.writeText(text)}
-        onCopyPage={(_page, text) => void navigator.clipboard?.writeText(text)}
-      />
-      <PluginExtensionSlot point="chat.input.above" className="px-1 empty:hidden" />
-      <Collapse>
-        <SkillChipRow
-          ids={ephemeralSkillIds}
-          onRemove={toggleEphemeralSkill}
-          disabledIds={props.session?.disabledSkillIds}
+      {/* Every band stacked above the textarea shares one scroll container with
+          a height cap. Six attachments plus an active goal, an open loop and the
+          plan-mode banner could otherwise push the input off the bottom of the
+          screen. Each band still animates its own height inside it. */}
+      <div className="max-h-[40vh] overflow-y-auto overscroll-contain">
+        <ContextChipBar
+          onRunOcr={handleRunOcrForPanel}
+          ocrBusy={ocr.status === "running"}
+          onExtractOcrToInput={handleExtractOcrToInput}
+          onViewOcrDetail={ocrBubbleResult ? () => setOcrBubbleOpen(true) : undefined}
+          text={controller.textInput.value}
+          onRemoveLink={removeLink}
         />
-      </Collapse>
-      {/* Folded large-paste chips — only those whose placeholder is still in the
+        <Collapse>
+          <DraftRestoredAttachments
+            items={restoredAttachments}
+            onDismiss={() => setRestoredAttachments([])}
+          />
+        </Collapse>
+        <OcrResultBubble
+          open={ocrBubbleOpen}
+          onOpenChange={setOcrBubbleOpen}
+          result={ocrBubbleResult}
+          imageSrc={ocrBubbleImageSrc ?? undefined}
+          onCopy={(text) => void navigator.clipboard?.writeText(text)}
+          onCopyPage={(_page, text) => void navigator.clipboard?.writeText(text)}
+        />
+        <PluginExtensionSlot point="chat.input.above" className="px-1 empty:hidden" />
+        <Collapse>
+          <SkillChipRow
+            ids={ephemeralSkillIds}
+            onRemove={toggleEphemeralSkill}
+            disabledIds={props.session?.disabledSkillIds}
+          />
+        </Collapse>
+        {/* Folded large-paste chips — only those whose placeholder is still in the
           text (manual deletion drops the chip too). */}
-      <Collapse>
-        {(() => {
-          const chips = Object.entries(pastedBlocks).filter(([ph]) =>
-            controller.textInput.value.includes(ph)
-          )
-          if (chips.length === 0) return null
-          return (
-            <div className="flex flex-wrap gap-1 px-1 pb-1" data-testid="composer-pasted-chips">
-              {chips.map(([ph, body]) => (
-                <span
-                  key={ph}
-                  className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground"
-                >
-                  <FileTextIcon className="size-3 shrink-0" aria-hidden />
-                  {t("pastedChip", { count: body.split("\n").length })}
-                  <button
-                    type="button"
-                    onClick={() => removePastedBlock(ph)}
-                    aria-label={t("removePastedChip")}
-                    className="text-muted-foreground/60 hover:text-foreground"
+        <Collapse>
+          {(() => {
+            const chips = Object.entries(pastedBlocks).filter(([ph]) =>
+              controller.textInput.value.includes(ph)
+            )
+            if (chips.length === 0) return null
+            return (
+              <div className="flex flex-wrap gap-1 px-1 pb-1" data-testid="composer-pasted-chips">
+                {chips.map(([ph, body]) => (
+                  <span
+                    key={ph}
+                    className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground"
                   >
-                    <XIcon className="size-3" aria-hidden />
-                  </button>
-                </span>
-              ))}
-            </div>
-          )
-        })()}
-      </Collapse>
-      {/* Re-paste reminder: a restored draft can carry `[Pasted …]` placeholders
+                    <FileTextIcon className="size-3 shrink-0" aria-hidden />
+                    {t("pastedChip", { count: body.split("\n").length })}
+                    <button
+                      type="button"
+                      onClick={() => removePastedBlock(ph)}
+                      aria-label={t("removePastedChip")}
+                      className="text-muted-foreground/60 hover:text-foreground"
+                    >
+                      <XIcon className="size-3" aria-hidden />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )
+          })()}
+        </Collapse>
+        {/* Re-paste reminder: a restored draft can carry `[Pasted …]` placeholders
           whose bodies weren't persisted. Nudge the user to re-paste (the
           placeholder text stays visible so they see exactly where). */}
-      <Collapse>
-        {(() => {
-          const orphans = findPastePlaceholders(controller.textInput.value).filter(
-            (ph) => !(ph in pastedBlocks)
-          )
-          if (orphans.length === 0) return null
-          return (
-            <div
-              className="px-1 pb-1 text-[11px] text-amber-600 dark:text-amber-500"
-              data-testid="composer-paste-reminder"
-            >
-              {t("pasteReminder", { count: orphans.length })}
-            </div>
-          )
-        })()}
-      </Collapse>
-      {/* ADR-0019 — active/paused goal status + controls; self-hides when none. */}
-      <Collapse>
-        <GoalStatusPill sessionId={sessionId} />
-      </Collapse>
-      {/* /loop status + controls; self-hides when no open loop. */}
-      <Collapse>
-        <LoopStatusPill sessionId={sessionId} />
-      </Collapse>
-      {/* Plan-mode state banner; self-hides outside plan mode. */}
-      <Collapse>
-        <PlanModeBanner />
-      </Collapse>
+        <Collapse>
+          {(() => {
+            const orphans = findPastePlaceholders(controller.textInput.value).filter(
+              (ph) => !(ph in pastedBlocks)
+            )
+            if (orphans.length === 0) return null
+            return (
+              <div
+                className="px-1 pb-1 text-[11px] text-amber-600 dark:text-amber-500"
+                data-testid="composer-paste-reminder"
+              >
+                {t("pasteReminder", { count: orphans.length })}
+              </div>
+            )
+          })()}
+        </Collapse>
+        {/* ADR-0019 — active/paused goal status + controls; self-hides when none. */}
+        <Collapse>
+          <GoalStatusPill sessionId={sessionId} />
+        </Collapse>
+        {/* /loop status + controls; self-hides when no open loop. */}
+        <Collapse>
+          <LoopStatusPill sessionId={sessionId} />
+        </Collapse>
+        {/* Plan-mode state banner; self-hides outside plan mode. */}
+        <Collapse>
+          <PlanModeBanner />
+        </Collapse>
+      </div>
       <div
         className={cn(
           // Claude-style stack on every platform when the container is narrow:
@@ -2127,7 +2222,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   )
 
   const handleSubmit = useCallback(
-    async (text: string, files: SubmittedFile[]) => {
+    async (
+      text: string,
+      files: SubmittedFile[],
+      precomputed?: ReadonlyMap<string, ExtractedAttachment>
+    ) => {
       const trimmed = text.trim()
       if (trimmed.startsWith("!")) {
         await handleBashSubmit(trimmed.slice(1))
@@ -2245,7 +2344,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       }
 
       const linkContext = await buildLinkContextBlocks(text)
-      const attachmentResult = await buildSendContent(augmented, files)
+      // `precomputed` makes this a map lookup for anything already extracted at
+      // staging time; files it doesn't cover still extract inline here.
+      const attachmentResult = await buildSendContent(augmented, files, { precomputed })
       const content = mergeContextBlocks(attachmentResult.content, linkContext.blocks)
       const rejected = attachmentResult.rejected
       const tokens = attachmentResult.tokens + linkContext.tokens
@@ -2269,7 +2370,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         setOversizeConfirm(null)
         if (!ok) return false
       }
-      await onSend(content)
+      await onSend(content, attachmentResult.manifest)
       clearReferencedPaths()
       clearArtifactSelections()
       return true
@@ -2332,28 +2433,33 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       data-tonality="glass"
     >
       <PromptInputProvider>
-        <ComposerInner
-          session={session}
-          status={promptStatus}
-          disabled={disabled}
-          onSubmit={handleSubmit}
-          onStop={onStop}
-          onCommand={handleSlashCommand}
-          onSubmitMemory={handleMemorySubmit}
-          handleRef={ref}
-          pendingDraftCount={pendingDrafts.length}
-          mentionMode={mentionMode}
-          mentionables={mentionables}
-          placeholder={placeholder}
-          mobileMentionMembers={mobileMentionMembers}
-          workflowMention={workflowMention}
-          compactLayout={compactLayout}
-          toolbar={
-            compactLayout ? <BottomToolbar session={session ?? null} variant="embedded" /> : null
-          }
-        />
-        {compactLayout ? null : <BottomToolbar session={session ?? null} />}
-        <HelperHints />
+        {/* Owns per-attachment extraction / order / OCR opt-in. Must sit INSIDE
+            the prompt-input provider: it derives everything from that
+            provider's file list. */}
+        <StagedAttachmentsProvider>
+          <ComposerInner
+            session={session}
+            status={promptStatus}
+            disabled={disabled}
+            onSubmit={handleSubmit}
+            onStop={onStop}
+            onCommand={handleSlashCommand}
+            onSubmitMemory={handleMemorySubmit}
+            handleRef={ref}
+            pendingDraftCount={pendingDrafts.length}
+            mentionMode={mentionMode}
+            mentionables={mentionables}
+            placeholder={placeholder}
+            mobileMentionMembers={mobileMentionMembers}
+            workflowMention={workflowMention}
+            compactLayout={compactLayout}
+            toolbar={
+              compactLayout ? <BottomToolbar session={session ?? null} variant="embedded" /> : null
+            }
+          />
+          {compactLayout ? null : <BottomToolbar session={session ?? null} />}
+          <HelperHints />
+        </StagedAttachmentsProvider>
       </PromptInputProvider>
 
       {/* Draft review dialog — shown when the session has pending connector drafts */}
