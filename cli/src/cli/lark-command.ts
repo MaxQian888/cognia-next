@@ -17,6 +17,7 @@
  * the host serving the API, exactly like the brain it talks to.
  */
 
+import { larkMenuManifest } from "@/lib/connectors/commands/registry"
 import { type ParsedArgs } from "./args"
 import { realOutput, type OutputSink } from "./output"
 
@@ -32,6 +33,8 @@ Usage:
   cognia-agent lark tenant register             admit this adapter's tenant scope
   cognia-agent lark tenant disable|enable       flip the tenant's admission
   cognia-agent lark sweep                       expire stale bind requests
+  cognia-agent lark menu-manifest               bot-menu items to configure in
+                                                the Feishu developer console
 
 Flags:
   --adapter <id>   Lark adapter id (or COGNIA_LARK_ADAPTER_ID)
@@ -151,6 +154,19 @@ export async function larkCommand(args: ParsedArgs, deps: LarkCommandDeps = {}):
   if (args.help || !args.subcommand) {
     out.write(LARK_HELP)
     return args.subcommand ? 0 : 2
+  }
+
+  // Local, offline, and brain-independent: the manifest is derived purely from
+  // the command registry, so it works before anything is deployed.
+  if (args.subcommand === "menu-manifest") {
+    const manifest = larkMenuManifest()
+    if (args.flags.json) {
+      out.json(manifest)
+      return 0
+    }
+    out.write("Feishu console → Bot → Bot menu (action: 发送文字消息, client V7.22+)\n")
+    for (const item of manifest) out.write(`  ${item.name}\t${item.text}\n`)
+    return 0
   }
 
   const serverUrl = stringFlag(args, "server-url") ?? env.COGNIA_SERVER_URL

@@ -22,9 +22,19 @@ export const CONNECTOR_METRIC_NAMES = [
   "lark_principal_unbound_total",
   "lark_callback_auth_denied_total",
   "lark_chat_tab_sync_failures_total",
+  // Group-menu reconcile failures were folded into the chat-tab counter, which
+  // made a missing `im:chat.menu_tree` scope indistinguishable from a missing
+  // `im:chat.tabs` one — the two are granted separately.
+  "lark_group_menu_sync_failures_total",
   "lark_native_slash_total",
   "lark_message_imports_total",
   "lark_message_import_denied_total",
+  "lark_plus_create_total",
+  "lark_plus_create_denied_total",
+  // Audit-mode counterpart of `lark_callback_auth_denied_total`. Without it the
+  // shadow mode the guard ships in has no aggregate signal at all, and the
+  // runbook's "flip to enforce once this is quiet" step has nothing to read.
+  "lark_callback_auth_would_deny_total",
 ] as const
 
 export type ConnectorMetricName = (typeof CONNECTOR_METRIC_NAMES)[number]

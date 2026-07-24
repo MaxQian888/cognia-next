@@ -246,4 +246,35 @@ describe("larkCommand", () => {
     expect(code).toBe(0)
     expect(jsonOut).toEqual([{ expired: 3 }])
   })
+
+  it("prints the console menu manifest offline, with no API call", async () => {
+    const { out, stdout } = sink()
+    const doFetch = jest.fn()
+    const code = await larkCommand(parseArgv(["lark", "menu-manifest"]), {
+      out,
+      env: {},
+      fetch: doFetch as unknown as typeof fetch,
+    })
+
+    expect(code).toBe(0)
+    expect(doFetch).not.toHaveBeenCalled()
+    const printed = stdout.join("")
+    for (const command of ["/help", "/status", "/sessions", "/new", "/switch"]) {
+      expect(printed).toContain(command)
+    }
+    // Commands deliberately not exposed must not leak into the manifest.
+    expect(printed).not.toContain("/model")
+  })
+
+  it("emits the manifest as JSON under --json", async () => {
+    const { out, jsonOut } = sink()
+    const code = await larkCommand(parseArgv(["lark", "menu-manifest", "--json"]), {
+      out,
+      env: {},
+    })
+    expect(code).toBe(0)
+    expect(jsonOut[0]).toEqual(
+      expect.arrayContaining([{ name: "/new", actionType: "SEND_MESSAGE", text: "/new" }])
+    )
+  })
 })

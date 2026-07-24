@@ -26,6 +26,7 @@ import type { AdapterInstanceRow, LarkChatSurfaceType } from "@/lib/db/connector
 import {
   ensureChatSurface,
   getChatSurface,
+  markChatSurfaceBlocked,
   markChatSurfaceError,
   markChatSurfaceSynced,
 } from "@/lib/db/lark-chat-surfaces"
@@ -45,6 +46,7 @@ export interface SurfaceReconcileDependencies {
   ensure: typeof ensureChatSurface
   markSynced: typeof markChatSurfaceSynced
   markError: typeof markChatSurfaceError
+  markBlocked: typeof markChatSurfaceBlocked
   audit: typeof appendAudit
   buildUrl: typeof buildSurfaceUrl
   now: () => number
@@ -59,6 +61,7 @@ export function withSurfaceDefaults(
     ensure: ensureChatSurface,
     markSynced: markChatSurfaceSynced,
     markError: markChatSurfaceError,
+    markBlocked: markChatSurfaceBlocked,
     audit: appendAudit,
     buildUrl: buildSurfaceUrl,
     now: Date.now,
@@ -99,7 +102,26 @@ export function runSurfaceLocked(
   return promise
 }
 
-export type SurfaceReconcileResult = "synced" | "skipped" | "error"
+export type SurfaceReconcileResult = "synced" | "skipped" | "error" | "blocked"
+
+/**
+ * Lark refusals that no amount of retrying fixes:
+ *
+ *  - the app was never granted the write scope, and
+ *  - `menu_tree` is group-only, so a p2p chat is refused forever.
+ *
+ * Both used to enter the 2^n·30 s backoff and re-fail every hour until the
+ * process restarted, burning tenant-token quota and drowning the audit tab.
+ */
+export function isTerminalSurfaceRefusal(err: unknown, requiredScope: string): boolean {
+  if (classifyScopeError(err, requiredScope)) return true
+  const message = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase()
+  return (
+    message.includes("p2p") ||
+    message.includes("not support") ||
+    message.includes("unsupported chat")
+  )
+}
 
 interface LarkChatTabRecord {
   tab_id?: string
@@ -139,17 +161,24 @@ export async function reconcileChatTabSurface(
     const storedRow = await getChatSurface(ctx.adapterId, chatId, "chat_tab")
     const identity = resolveSurfaceIdentity(adapterRow, storedRow ?? {})
 
-    const fail = async (reason: string): Promise<SurfaceReconcileResult> => {
-      const row = await deps.markError(ctx.adapterId, chatId, "chat_tab", reason, deps.now())
+    const fail = async (reason: string, terminal = false): Promise<SurfaceReconcileResult> => {
+      const row = terminal
+        ? await deps.markBlocked(ctx.adapterId, chatId, "chat_tab", reason, deps.now())
+        : await deps.markError(ctx.adapterId, chatId, "chat_tab", reason, deps.now())
       recordConnectorMetric("lark_chat_tab_sync_failures_total")
       await deps.audit({
         adapterId: ctx.adapterId,
         kind: "chat_tab.sync_failed",
         at: deps.now(),
         reason,
-        fields: { chatId, surfaceType: "chat_tab", attempt: row?.attempt },
+        fields: {
+          chatId,
+          surfaceType: "chat_tab",
+          attempt: row?.attempt,
+          ...(terminal ? { terminal: true } : {}),
+        },
       })
-      return "error"
+      return terminal ? "blocked" : "error"
     }
 
     if (!identity) {
@@ -245,7 +274,10 @@ export async function reconcileChatTabSurface(
       return "synced"
     } catch (err) {
       const classified = classifyScopeError(err, CHAT_TAB_WRITE_SCOPE) ?? err
-      return fail(classified instanceof Error ? classified.message : String(classified))
+      return fail(
+        classified instanceof Error ? classified.message : String(classified),
+        isTerminalSurfaceRefusal(err, CHAT_TAB_WRITE_SCOPE)
+      )
     }
   })
 }

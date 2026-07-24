@@ -1,4 +1,4 @@
-import { CONTROL_COMMAND_SPECS, nativeExposedCommands } from "./registry"
+import { CONTROL_COMMAND_SPECS, larkMenuManifest, nativeExposedCommands } from "./registry"
 import { READONLY_COMMANDS, parseControlCommand } from "./parse"
 
 describe("control command registry", () => {
@@ -61,5 +61,28 @@ describe("control command registry", () => {
       kind: "unknown",
       name: "definitely-not-a-command",
     })
+  })
+})
+
+describe("larkMenuManifest", () => {
+  it("derives one SEND_MESSAGE item per natively exposed command", () => {
+    const manifest = larkMenuManifest()
+    expect(manifest.map((item) => item.name)).toEqual(
+      nativeExposedCommands().map((spec) => `/${spec.name}`)
+    )
+    expect(manifest.every((item) => item.actionType === "SEND_MESSAGE")).toBe(true)
+  })
+
+  it("posts the bare command word, never the usage placeholders", () => {
+    // `/switch <n|session-id>` as menu text would literally send the angle
+    // brackets into the chat.
+    const item = larkMenuManifest().find((entry) => entry.name === "/switch")
+    expect(item?.text).toBe("/switch")
+  })
+
+  it("excludes commands whose nativeExposed flag is off", () => {
+    const names = larkMenuManifest().map((item) => item.name)
+    expect(names).not.toContain("/model")
+    expect(names).not.toContain("/goal")
   })
 })

@@ -1073,7 +1073,15 @@ export interface LarkEntryContextRow {
 
 export type LarkChatSurfaceType = "chat_tab" | "group_menu"
 
-export type LarkChatSurfaceStatus = "pending" | "synced" | "error" | "rebuild_required" | "removed"
+/**
+ * `blocked` is terminal-until-reconfigured: the platform refused for a reason
+ * retrying cannot fix (scope not granted, or a p2p chat for a group-only
+ * surface). Retrying those on the exponential backoff produced a permanent
+ * error-log drip and burned tenant-token quota, so they park instead and are
+ * re-armed only by an explicit resync or a changed desired URL.
+ */
+export type LarkChatSurfaceStatus =
+  "pending" | "synced" | "error" | "blocked" | "rebuild_required" | "removed"
 
 /** Reconcile state for one platform-side chat surface (Chat Tab / 群菜单). */
 export interface LarkChatSurfaceRow {

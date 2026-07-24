@@ -129,6 +129,11 @@ export type AuditKind =
   | "menu.unknown_key"
   | "chat_tab.synced"
   | "chat_tab.sync_failed"
+  // A published surface was withdrawn (flag flipped off, or an explicit
+  // remove). `reason: "platform_delete_failed"` means the local row was
+  // retired but the platform-side delete did not land — the tab may still be
+  // visible in the chat and needs a manual sweep.
+  | "chat_tab.removed"
   // ── Lark message shortcuts + plus menu (plan 2026-07-24 Phase 5) ─────
   // `shortcut.import` fields carry {chatId, openIdHash, imported, skipped,
   // sessionId} — message CONTENT never lands in the audit log.
@@ -137,6 +142,9 @@ export type AuditKind =
   | "shortcut.import"
   | "shortcut.import_denied"
   | "plus.create"
+  // Mirrors `shortcut.import_denied`. Without it a `+`-menu entry that refused
+  // every tap (flag off, unbound principal, non-member) left no operator trace.
+  | "plus.create_denied"
   | "sso.session_seen"
   // ── Feishu unified identity (plan 2026-07-24 Phase 1) ────────────────
   // Principal registry outcomes. `principal.unbound` fields carry

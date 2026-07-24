@@ -711,11 +711,12 @@
       "resyncFailed": "同步失败。请检查适配器凭证后重试。",
       "statusAria": "表面状态",
       "status": {
-        "pending": "待同步",
-        "synced": "已同步",
+        "blocked": "已阻断",
         "error": "错误",
+        "pending": "待同步",
         "rebuild_required": "需重建",
-        "removed": "已移除"
+        "removed": "已移除",
+        "synced": "已同步"
       }
     },
     "openCompanion": "打开伴侣设置",

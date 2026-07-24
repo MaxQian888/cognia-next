@@ -4,7 +4,13 @@ import "fake-indexeddb/auto"
 import { getDb, __resetDbForTesting } from "@/lib/db/schema"
 import { getChatSurface } from "@/lib/db/lark-chat-surfaces"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
-import { reconcileChatTabSurface, runSurfaceLocked } from "./chat-tabs"
+import {
+  CHAT_TAB_WRITE_SCOPE,
+  isTerminalSurfaceRefusal,
+  reconcileChatTabSurface,
+  runSurfaceLocked,
+} from "./chat-tabs"
+import { LarkApiError } from "./auth-retry"
 
 const ADAPTER_ID = "lark-tabs-1"
 const CHAT_ID = "oc_chat_1"
@@ -162,5 +168,27 @@ describe("reconcileChatTabSurface", () => {
     })
     expect(await Promise.all([first, second])).toEqual(["synced", "synced"])
     expect(runs).toBe(1)
+  })
+})
+
+describe("isTerminalSurfaceRefusal", () => {
+  it("treats a missing write scope as terminal", () => {
+    const err = new LarkApiError({ status: 403, code: null, message: "permission denied" })
+    expect(isTerminalSurfaceRefusal(err, CHAT_TAB_WRITE_SCOPE)).toBe(true)
+  })
+
+  it("treats a group-only refusal as terminal so p2p chats stop retrying", () => {
+    expect(isTerminalSurfaceRefusal(new Error("p2p chat is not supported"), "s")).toBe(true)
+    expect(isTerminalSurfaceRefusal(new Error("unsupported chat type"), "s")).toBe(true)
+  })
+
+  it("leaves transient failures retryable", () => {
+    expect(isTerminalSurfaceRefusal(new Error("network timeout"), "s")).toBe(false)
+    expect(
+      isTerminalSurfaceRefusal(
+        new LarkApiError({ status: 500, code: null, message: "server error" }),
+        "s"
+      )
+    ).toBe(false)
   })
 })

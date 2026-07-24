@@ -7,6 +7,11 @@
  *   - the Settings resync button (`resyncLarkChatSurfaces`),
  *   - urlVersion bumps (ensureChatSurface re-arms rows → next sweep).
  *
+ * Both the start sweep and the resync SEED first (`seedLarkChatSurfaces`):
+ * selection below only sees rows that already exist, so without seeding a
+ * chat the bot was already in when the flag flipped would never get a
+ * surface at all.
+ *
  * Selection (pending / backoff-elapsed errors / >24 h-stale synced) lives in
  * `listDueChatSurfaces`; per-surface locking lives in the reconcilers.
  */
@@ -20,6 +25,7 @@ import {
 } from "@/lib/db/lark-chat-surfaces"
 import { reconcileChatTabSurface } from "./chat-tabs"
 import { reconcileGroupMenuSurface } from "./group-menu"
+import { seedLarkChatSurfaces } from "./chat-seed"
 import type { SurfaceReconcileContext, SurfaceReconcileDependencies } from "./chat-tabs"
 
 export interface SurfaceSweepDependencies {
@@ -27,6 +33,7 @@ export interface SurfaceSweepDependencies {
   listDue: typeof listDueChatSurfaces
   reconcileTab: typeof reconcileChatTabSurface
   reconcileMenu: typeof reconcileGroupMenuSurface
+  seed: typeof seedLarkChatSurfaces
 }
 
 function sweepDeps(overrides: Partial<SurfaceSweepDependencies>): SurfaceSweepDependencies {
@@ -35,6 +42,7 @@ function sweepDeps(overrides: Partial<SurfaceSweepDependencies>): SurfaceSweepDe
     listDue: listDueChatSurfaces,
     reconcileTab: reconcileChatTabSurface,
     reconcileMenu: reconcileGroupMenuSurface,
+    seed: seedLarkChatSurfaces,
     ...overrides,
   }
 }
@@ -56,6 +64,13 @@ export async function sweepLarkChatSurfaces(
   const counts = { synced: 0, errors: 0, skipped: 0 }
   if (!tabsOn && !menusOn) return counts
 
+  // Discover chats that have no desired-state row yet. Never fatal: a missing
+  // `im:chat:readonly` scope must not stop the rows we already know about
+  // from reconciling.
+  await deps
+    .seed({ adapterId: ctx.adapterId, resolveCreds: ctx.resolveCreds })
+    .catch(() => undefined)
+
   const due = await deps.listDue(ctx.adapterId)
   for (const row of due) {
     const result =
@@ -67,7 +82,7 @@ export async function sweepLarkChatSurfaces(
           ? await deps.reconcileMenu(ctx, row.chatId, reconcileOverrides)
           : "skipped"
     if (result === "synced") counts.synced += 1
-    else if (result === "error") counts.errors += 1
+    else if (result === "error" || result === "blocked") counts.errors += 1
     else counts.skipped += 1
   }
   return counts

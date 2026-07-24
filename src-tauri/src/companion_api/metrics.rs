@@ -34,6 +34,10 @@ static LARK_CHAT_TAB_SYNC_FAILURES_TOTAL: AtomicU64 = AtomicU64::new(0);
 static LARK_NATIVE_SLASH_TOTAL: AtomicU64 = AtomicU64::new(0);
 static LARK_MESSAGE_IMPORTS_TOTAL: AtomicU64 = AtomicU64::new(0);
 static LARK_MESSAGE_IMPORT_DENIED_TOTAL: AtomicU64 = AtomicU64::new(0);
+static LARK_GROUP_MENU_SYNC_FAILURES_TOTAL: AtomicU64 = AtomicU64::new(0);
+static LARK_PLUS_CREATE_TOTAL: AtomicU64 = AtomicU64::new(0);
+static LARK_PLUS_CREATE_DENIED_TOTAL: AtomicU64 = AtomicU64::new(0);
+static LARK_CALLBACK_AUTH_WOULD_DENY_TOTAL: AtomicU64 = AtomicU64::new(0);
 
 /// Bump one Lark counter by its exposition name (without the `cognia_`
 /// prefix). Returns `false` for unknown names so the RPC arm can reject them.
@@ -49,6 +53,10 @@ pub fn record_lark_counter(name: &str) -> bool {
         "lark_native_slash_total" => &LARK_NATIVE_SLASH_TOTAL,
         "lark_message_imports_total" => &LARK_MESSAGE_IMPORTS_TOTAL,
         "lark_message_import_denied_total" => &LARK_MESSAGE_IMPORT_DENIED_TOTAL,
+        "lark_group_menu_sync_failures_total" => &LARK_GROUP_MENU_SYNC_FAILURES_TOTAL,
+        "lark_plus_create_total" => &LARK_PLUS_CREATE_TOTAL,
+        "lark_plus_create_denied_total" => &LARK_PLUS_CREATE_DENIED_TOTAL,
+        "lark_callback_auth_would_deny_total" => &LARK_CALLBACK_AUTH_WOULD_DENY_TOTAL,
         _ => return false,
     };
     counter.fetch_add(1, Ordering::Relaxed);
@@ -182,6 +190,26 @@ pub fn render_prometheus() -> String {
             "cognia_lark_message_import_denied_total",
             &LARK_MESSAGE_IMPORT_DENIED_TOTAL,
             "Message-shortcut imports denied (permission/limit).",
+        ),
+        (
+            "cognia_lark_group_menu_sync_failures_total",
+            &LARK_GROUP_MENU_SYNC_FAILURES_TOTAL,
+            "Group-menu reconcile attempts that ended in error.",
+        ),
+        (
+            "cognia_lark_plus_create_total",
+            &LARK_PLUS_CREATE_TOTAL,
+            "Sessions created from the chat input-box `+` menu.",
+        ),
+        (
+            "cognia_lark_plus_create_denied_total",
+            &LARK_PLUS_CREATE_DENIED_TOTAL,
+            "`+`-menu create intents denied (flag/principal/membership).",
+        ),
+        (
+            "cognia_lark_callback_auth_would_deny_total",
+            &LARK_CALLBACK_AUTH_WOULD_DENY_TOTAL,
+            "Callbacks the guard WOULD deny in audit mode (gray-release signal).",
         ),
     ];
     for (name, counter, help) in lark_series {

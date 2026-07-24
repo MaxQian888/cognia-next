@@ -96,4 +96,58 @@ describe("sweepLarkChatSurfaces", () => {
     const rearmed = await getChatSurface(ADAPTER_ID, "oc_a", "chat_tab")
     expect(rearmed?.status).toBe("pending")
   })
+
+  it("seeds before selecting, so a chat with no row yet still gets reconciled", async () => {
+    // The regression this guards: `listDueChatSurfaces` only sees rows that
+    // already exist, so without a seed pass a chat the bot was already in when
+    // the flag flipped would never get a surface.
+    const seed = jest.fn(async () => {
+      await ensureChatSurface({
+        adapterId: ADAPTER_ID,
+        chatId: "oc_discovered",
+        surfaceType: "chat_tab",
+        urlVersion: 1,
+      })
+      return { chats: 1, seeded: 1 }
+    })
+    const reconcileTab = jest.fn(async () => "synced" as const)
+
+    const counts = await sweepLarkChatSurfaces(ctx, {
+      getAdapter: async () => adapterRow({ larkChatTab: true }),
+      seed,
+      reconcileTab,
+    })
+
+    expect(seed).toHaveBeenCalledWith({ adapterId: ADAPTER_ID, resolveCreds: ctx.resolveCreds })
+    expect(reconcileTab).toHaveBeenCalledWith(ctx, "oc_discovered", {})
+    expect(counts.synced).toBe(1)
+  })
+
+  it("keeps reconciling known rows when seeding fails", async () => {
+    await seedPending()
+    const reconcileTab = jest.fn(async () => "synced" as const)
+
+    const counts = await sweepLarkChatSurfaces(ctx, {
+      getAdapter: async () => adapterRow({ larkChatTab: true }),
+      seed: jest.fn(async () => {
+        throw new Error("missing im:chat:readonly")
+      }),
+      reconcileTab,
+    })
+
+    expect(reconcileTab).toHaveBeenCalledWith(ctx, "oc_a", {})
+    expect(counts.synced).toBe(1)
+  })
+
+  it("counts a blocked reconcile as an error rather than a skip", async () => {
+    await seedPending()
+    const counts = await sweepLarkChatSurfaces(ctx, {
+      getAdapter: async () => adapterRow({ larkChatTab: true }),
+      seed: jest.fn(async () => ({ chats: 0, seeded: 0 })),
+      reconcileTab: jest.fn(async () => "blocked" as const),
+    })
+    // The seeded group_menu row is skipped (its flag is off); the chat_tab row
+    // is blocked, which must land in `errors` so the settings card reports it.
+    expect(counts).toEqual({ synced: 0, errors: 1, skipped: 1 })
+  })
 })

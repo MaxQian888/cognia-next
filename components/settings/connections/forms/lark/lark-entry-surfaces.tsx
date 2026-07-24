@@ -26,6 +26,7 @@ import { getDb } from "@/lib/db/schema"
 import { patchAdapterInstanceSettings } from "@/lib/db/adapter-instances"
 import { connectorsKeyringGet } from "@/lib/connectors/tauri/commands"
 import { resyncLarkChatSurfaces } from "@/lib/connectors/adapters/lark/surface-sweep"
+import { removeDisabledLarkSurfaces } from "@/lib/connectors/adapters/lark/surface-removal"
 import {
   isLarkFeatureEnabled,
   type LarkBooleanFeatureFlag,
@@ -54,6 +55,9 @@ const STATUS_BADGE_VARIANT: Record<
   pending: "secondary",
   rebuild_required: "secondary",
   error: "destructive",
+  // Terminal until reconfigured — destructive so a missing scope is not
+  // mistaken for a transient error that will clear itself.
+  blocked: "destructive",
   removed: "outline",
 }
 
@@ -97,23 +101,36 @@ export function LarkEntrySurfaces({ adapterId }: LarkEntrySurfacesProps) {
 
   const strictMode = getLarkStrictCallbackAuthorizationMode(row ?? undefined)
 
+  const surfaceCtx = {
+    adapterId,
+    resolveCreds: async () => {
+      const [appId, appSecret] = await Promise.all([
+        connectorsKeyringGet(adapterId, "appId"),
+        connectorsKeyringGet(adapterId, "appSecret"),
+      ])
+      return { appId: appId ?? "", appSecret: appSecret ?? "" }
+    },
+  }
+
   const runResync = async () => {
     setResyncState({ phase: "running" })
     try {
-      const counts = await resyncLarkChatSurfaces({
-        adapterId,
-        resolveCreds: async () => {
-          const [appId, appSecret] = await Promise.all([
-            connectorsKeyringGet(adapterId, "appId"),
-            connectorsKeyringGet(adapterId, "appSecret"),
-          ])
-          return { appId: appId ?? "", appSecret: appSecret ?? "" }
-        },
-      })
+      const counts = await resyncLarkChatSurfaces(surfaceCtx)
       setResyncState({ phase: "done", ...counts })
     } catch {
       setResyncState({ phase: "failed" })
     }
+  }
+
+  /**
+   * Turning a surface flag off must also take the published tab / menu down.
+   * Leaving it up would keep a public entry point live in every chat after the
+   * operator decided to withdraw it — the flag only stops us re-syncing it.
+   */
+  const patchSurfaceFlag = async (flag: LarkBooleanFeatureFlag, checked: boolean) => {
+    await patchSettings({ [flag]: checked })
+    if (checked) return
+    await removeDisabledLarkSurfaces(surfaceCtx).catch(() => undefined)
   }
 
   return (
@@ -165,7 +182,11 @@ export function LarkEntrySurfaces({ adapterId }: LarkEntrySurfacesProps) {
                 <span className="text-xs">{t(`flag.${flag}`)}</span>
                 <Switch
                   checked={isLarkFeatureEnabled(flag, row ?? undefined)}
-                  onCheckedChange={(checked) => void patchSettings({ [flag]: checked })}
+                  onCheckedChange={(checked) =>
+                    flag === "larkChatTab" || flag === "larkGroupMenu"
+                      ? void patchSurfaceFlag(flag, checked)
+                      : void patchSettings({ [flag]: checked })
+                  }
                   aria-label={t(`flag.${flag}`)}
                   data-testid={`lark-flag-${flag}`}
                 />

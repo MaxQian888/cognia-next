@@ -24,6 +24,7 @@ import { getChatSurface } from "@/lib/db/lark-chat-surfaces"
 import { classifyScopeError, type LarkCredentials } from "./http"
 import {
   COGNIA_TAB_NAME,
+  isTerminalSurfaceRefusal,
   resolveSurfaceIdentity,
   runSurfaceLocked,
   withSurfaceDefaults,
@@ -84,17 +85,27 @@ export async function reconcileGroupMenuSurface(
     const storedRow = await getChatSurface(ctx.adapterId, chatId, "group_menu")
     const identity = resolveSurfaceIdentity(adapterRow, storedRow ?? {})
 
-    const fail = async (reason: string): Promise<SurfaceReconcileResult> => {
-      const row = await deps.markError(ctx.adapterId, chatId, "group_menu", reason, deps.now())
-      recordConnectorMetric("lark_chat_tab_sync_failures_total")
+    const fail = async (reason: string, terminal = false): Promise<SurfaceReconcileResult> => {
+      const row = terminal
+        ? await deps.markBlocked(ctx.adapterId, chatId, "group_menu", reason, deps.now())
+        : await deps.markError(ctx.adapterId, chatId, "group_menu", reason, deps.now())
+      // Its own series: `im:chat.tabs` and `im:chat.menu_tree` are granted
+      // separately, so a missing menu scope must be distinguishable from a
+      // missing tab scope in the alerting.
+      recordConnectorMetric("lark_group_menu_sync_failures_total")
       await deps.audit({
         adapterId: ctx.adapterId,
         kind: "chat_tab.sync_failed",
         at: deps.now(),
         reason,
-        fields: { chatId, surfaceType: "group_menu", attempt: row?.attempt },
+        fields: {
+          chatId,
+          surfaceType: "group_menu",
+          attempt: row?.attempt,
+          ...(terminal ? { terminal: true } : {}),
+        },
       })
-      return "error"
+      return terminal ? "blocked" : "error"
     }
 
     const ensure = (desiredUrl?: string) =>
@@ -176,7 +187,12 @@ export async function reconcileGroupMenuSurface(
       return "synced"
     } catch (err) {
       const classified = classifyScopeError(err, GROUP_MENU_WRITE_SCOPE) ?? err
-      return fail(classified instanceof Error ? classified.message : String(classified))
+      // `menu_tree` is group-only. A p2p chat that reached this reconciler is
+      // refused forever, so it parks instead of re-failing every hour.
+      return fail(
+        classified instanceof Error ? classified.message : String(classified),
+        isTerminalSurfaceRefusal(err, GROUP_MENU_WRITE_SCOPE)
+      )
     }
   })
 }

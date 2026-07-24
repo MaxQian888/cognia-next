@@ -14,7 +14,7 @@ import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { parseShortcutLaunch, runShortcutImportFlow } from "@/lib/connectors/lark-web/intent-client"
+import { parseShortcutLaunch, runLarkEntryFlow } from "@/lib/connectors/lark-web/intent-client"
 import {
   configureLarkJsSdk,
   getLarkTriggerDetail,
@@ -31,11 +31,14 @@ const KNOWN_ERROR_CODES = new Set([
   "forbidden",
   "unbound",
   "timeout",
+  // `+`-menu branch: the launch query carried no chat context.
+  "chat_missing",
 ])
 
 type ViewState =
   | { phase: "preparing" }
   | { phase: "importing" }
+  | { phase: "creating" }
   | { phase: "login" }
   | { phase: "done" }
   | { phase: "error"; code: string }
@@ -67,8 +70,11 @@ function LarkShortcutInner() {
       } catch {
         // Continue — getLarkTriggerDetail reports the actionable failure.
       }
-      setState({ phase: "importing" })
-      const outcome = await runShortcutImportFlow({
+      // Both the message shortcut and the `+` menu open this page; only the
+      // shortcut carries a trigger code, so the flow is chosen from the
+      // launch query rather than from two separate routes.
+      setState({ phase: launch.triggerId ? "importing" : "creating" })
+      const outcome = await runLarkEntryFlow({
         search,
         returnTo,
         getTriggerDetail: getLarkTriggerDetail,
@@ -110,6 +116,7 @@ function LarkShortcutInner() {
             <Loader2 className="size-4 animate-spin" aria-hidden />
             {state.phase === "preparing" && t("shortcut.preparing")}
             {state.phase === "importing" && t("shortcut.importing")}
+            {state.phase === "creating" && t("shortcut.creating")}
             {state.phase === "done" && t("shortcut.done")}
             {state.phase === "login" && t("loginRedirect")}
           </p>

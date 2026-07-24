@@ -16,7 +16,7 @@ jest.mock("next-intl", () => ({
 
 jest.mock("@/lib/connectors/lark-web/intent-client", () => ({
   parseShortcutLaunch: jest.fn(() => ({ triggerId: "t1", adapterId: "lk-1" })),
-  runShortcutImportFlow: jest.fn(),
+  runLarkEntryFlow: jest.fn(),
 }))
 
 jest.mock("@/lib/connectors/lark-web/jssdk", () => ({
@@ -25,16 +25,18 @@ jest.mock("@/lib/connectors/lark-web/jssdk", () => ({
   getLarkTriggerDetail: jest.fn(async () => ({})),
 }))
 
-import { runShortcutImportFlow } from "@/lib/connectors/lark-web/intent-client"
+import { parseShortcutLaunch, runLarkEntryFlow } from "@/lib/connectors/lark-web/intent-client"
 import { configureLarkJsSdk } from "@/lib/connectors/lark-web/jssdk"
 import LarkShortcutPage from "./page"
 
-const flowMock = runShortcutImportFlow as jest.MockedFunction<typeof runShortcutImportFlow>
+const flowMock = runLarkEntryFlow as jest.MockedFunction<typeof runLarkEntryFlow>
+const launchMock = parseShortcutLaunch as jest.MockedFunction<typeof parseShortcutLaunch>
 
 describe("LarkShortcutPage (/lark/shortcut)", () => {
   beforeEach(() => {
     mockReplace.mockClear()
     flowMock.mockReset()
+    launchMock.mockReturnValue({ triggerId: "t1", adapterId: "lk-1" })
     ;(configureLarkJsSdk as jest.Mock).mockClear()
     window.history.replaceState(null, "", "/lark/shortcut?__trigger_id__=t1&adapter_id=lk-1")
   })
@@ -77,5 +79,29 @@ describe("LarkShortcutPage (/lark/shortcut)", () => {
     render(<LarkShortcutPage />)
     expect(await screen.findByText("loginRedirect")).toBeInTheDocument()
     consoleError.mockRestore()
+  })
+
+  it("shows the create phase and no chat error when the + menu opens it", async () => {
+    // No trigger code — the `+`-menu branch. The page must NOT report
+    // trigger_missing; that was the whole reason the entry was unreachable.
+    launchMock.mockReturnValue({ adapterId: "lk-1", chatId: "oc_1" })
+    window.history.replaceState(null, "", "/lark/shortcut?adapter_id=lk-1&chat_id=oc_1")
+    flowMock.mockResolvedValue({ kind: "navigate", conversationKey: "lark:lk-1:oc_1" })
+
+    render(<LarkShortcutPage />)
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith("/inbox/c?key=lark%3Alk-1%3Aoc_1"))
+    expect(flowMock).toHaveBeenCalledWith(
+      expect.objectContaining({ search: "?adapter_id=lk-1&chat_id=oc_1" })
+    )
+  })
+
+  it("renders chat_missing when the + menu passed no chat context", async () => {
+    launchMock.mockReturnValue({ adapterId: "lk-1" })
+    flowMock.mockResolvedValue({ kind: "error", code: "chat_missing" })
+
+    render(<LarkShortcutPage />)
+
+    expect(await screen.findByText("errors.chat_missing")).toBeInTheDocument()
   })
 })

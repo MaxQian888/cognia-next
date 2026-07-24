@@ -8411,6 +8411,7 @@
   "larkEntry": {
     "errors": {
       "adapter_missing": "This page is missing its bot context — open it from the Feishu shortcut again.",
+      "chat_missing": "This page didn't receive a chat to work in — open it from the Feishu + menu inside a conversation.",
       "entry_consumed": "This link was already used. Ask the bot for a fresh link.",
       "entry_expired": "This link has expired. Ask the bot for a fresh link.",
       "entry_missing": "This link is incomplete — open it again from Feishu.",
@@ -8429,6 +8430,7 @@
     "openWorkbench": "Open workbench",
     "resolving": "Verifying your link…",
     "shortcut": {
+      "creating": "Starting a task for this chat…",
       "done": "Imported — opening the conversation…",
       "importing": "Importing the selected messages…",
       "preparing": "Preparing the import…",
@@ -20105,6 +20107,7 @@
           "resyncFailed": "Resync failed. Check the adapter credentials and try again.",
           "resyncing": "Resyncing…",
           "status": {
+            "blocked": "Blocked",
             "error": "Error",
             "pending": "Pending",
             "rebuild_required": "Rebuild required",

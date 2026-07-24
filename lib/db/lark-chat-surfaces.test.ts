@@ -6,6 +6,7 @@ import {
   ensureChatSurface,
   getChatSurface,
   listDueChatSurfaces,
+  markChatSurfaceBlocked,
   markChatSurfaceError,
   markChatSurfaceSynced,
   setChatSurfaceStatus,
@@ -149,5 +150,74 @@ describe("default clock arms", () => {
     await markChatSurfaceSynced("lk-now", "oc_missing", "chat_tab")
     expect(await markChatSurfaceError("lk-now", "oc_missing", "chat_tab", "x")).toBeUndefined()
     await setChatSurfaceStatus("lk-now", "oc_missing", "chat_tab", "pending")
+  })
+
+  describe("blocked (terminal until reconfigured)", () => {
+    it("parks with no nextAttemptAt and is never due", async () => {
+      await ensureChatSurface({
+        adapterId: "lk-1",
+        chatId: "oc_1",
+        surfaceType: "chat_tab",
+        urlVersion: 1,
+        desiredUrl: "https://a/x",
+      })
+      const row = await markChatSurfaceBlocked("lk-1", "oc_1", "chat_tab", "missing scope")
+
+      expect(row?.status).toBe("blocked")
+      expect(row?.nextAttemptAt).toBeUndefined()
+      expect(row?.lastError).toBe("missing scope")
+      expect(await listDueChatSurfaces("lk-1")).toHaveLength(0)
+    })
+
+    it("stays blocked when the desired target has not changed", async () => {
+      const input = {
+        adapterId: "lk-1",
+        chatId: "oc_1",
+        surfaceType: "chat_tab" as const,
+        urlVersion: 1,
+        desiredUrl: "https://a/x",
+      }
+      await ensureChatSurface(input)
+      await markChatSurfaceBlocked("lk-1", "oc_1", "chat_tab", "missing scope")
+
+      await ensureChatSurface(input)
+      expect((await getChatSurface("lk-1", "oc_1", "chat_tab"))?.status).toBe("blocked")
+    })
+
+    it("re-arms when the url version or desired url changes", async () => {
+      const base = {
+        adapterId: "lk-1",
+        chatId: "oc_1",
+        surfaceType: "chat_tab" as const,
+        urlVersion: 1,
+        desiredUrl: "https://a/x",
+      }
+      await ensureChatSurface(base)
+      await markChatSurfaceBlocked("lk-1", "oc_1", "chat_tab", "missing scope")
+
+      await ensureChatSurface({ ...base, urlVersion: 2 })
+      expect((await getChatSurface("lk-1", "oc_1", "chat_tab"))?.status).toBe("pending")
+
+      await markChatSurfaceBlocked("lk-1", "oc_1", "chat_tab", "missing scope")
+      await ensureChatSurface({ ...base, urlVersion: 2, desiredUrl: "https://a/y" })
+      expect((await getChatSurface("lk-1", "oc_1", "chat_tab"))?.status).toBe("pending")
+    })
+
+    it("is cleared by an explicit status reset (the settings resync path)", async () => {
+      await ensureChatSurface({
+        adapterId: "lk-1",
+        chatId: "oc_1",
+        surfaceType: "chat_tab",
+        urlVersion: 1,
+      })
+      await markChatSurfaceBlocked("lk-1", "oc_1", "chat_tab", "missing scope")
+
+      await setChatSurfaceStatus("lk-1", "oc_1", "chat_tab", "pending")
+      expect(await listDueChatSurfaces("lk-1")).toHaveLength(1)
+    })
+
+    it("returns undefined for an unknown surface", async () => {
+      expect(await markChatSurfaceBlocked("lk-1", "oc_ghost", "chat_tab", "x")).toBeUndefined()
+    })
   })
 })

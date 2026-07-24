@@ -1,6 +1,7 @@
 {
   "errors": {
     "adapter_missing": "This page is missing its bot context — open it from the Feishu shortcut again.",
+    "chat_missing": "This page didn't receive a chat to work in — open it from the Feishu + menu inside a conversation.",
     "entry_consumed": "This link was already used. Ask the bot for a fresh link.",
     "entry_expired": "This link has expired. Ask the bot for a fresh link.",
     "entry_missing": "This link is incomplete — open it again from Feishu.",
@@ -22,7 +23,8 @@
     "title": "Import messages",
     "preparing": "Preparing the import…",
     "importing": "Importing the selected messages…",
-    "done": "Imported — opening the conversation…"
+    "done": "Imported — opening the conversation…",
+    "creating": "Starting a task for this chat…"
   },
   "title": "Cognia entry"
 }

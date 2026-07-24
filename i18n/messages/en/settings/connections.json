@@ -711,11 +711,12 @@
       "resyncFailed": "Resync failed. Check the adapter credentials and try again.",
       "statusAria": "Surface status",
       "status": {
-        "pending": "Pending",
-        "synced": "Synced",
+        "blocked": "Blocked",
         "error": "Error",
+        "pending": "Pending",
         "rebuild_required": "Rebuild required",
-        "removed": "Removed"
+        "removed": "Removed",
+        "synced": "Synced"
       }
     },
     "openCompanion": "Open Companion settings",

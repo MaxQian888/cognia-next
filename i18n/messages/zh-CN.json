@@ -8411,6 +8411,7 @@
   "larkEntry": {
     "errors": {
       "adapter_missing": "页面缺少机器人上下文，请从飞书快捷操作重新打开。",
+      "chat_missing": "此页面没有接收到所属会话——请在飞书会话中通过「+」菜单打开。",
       "entry_consumed": "该链接已被使用，请在飞书中重新获取。",
       "entry_expired": "该链接已过期，请在飞书中重新获取。",
       "entry_missing": "链接不完整，请从飞书重新打开。",
@@ -8429,6 +8430,7 @@
     "openWorkbench": "打开工作台",
     "resolving": "正在校验链接…",
     "shortcut": {
+      "creating": "正在为该会话创建任务……",
       "done": "导入完成，正在打开会话…",
       "importing": "正在导入所选消息…",
       "preparing": "正在准备导入…",
@@ -20105,6 +20107,7 @@
           "resyncFailed": "同步失败。请检查适配器凭证后重试。",
           "resyncing": "同步中…",
           "status": {
+            "blocked": "已阻断",
             "error": "错误",
             "pending": "待同步",
             "rebuild_required": "需重建",

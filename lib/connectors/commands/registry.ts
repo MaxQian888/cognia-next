@@ -65,3 +65,30 @@ export const CONTROL_COMMAND_SPECS: readonly ControlCommandSpec[] = [
 export function nativeExposedCommands(): readonly ControlCommandSpec[] {
   return CONTROL_COMMAND_SPECS.filter((spec) => spec.nativeExposed)
 }
+
+export interface LarkMenuManifestItem {
+  /** Menu label shown in the Feishu client. */
+  name: string
+  /** 发送文字消息 — the literal text the item posts into the chat. */
+  actionType: "SEND_MESSAGE"
+  text: string
+}
+
+/**
+ * The bot-menu manifest an operator transcribes into the Feishu developer
+ * console. Generated rather than hand-copied: the runbook used to list the
+ * batch in prose next to a pointer at this file, so the two drifted the
+ * moment a command's `nativeExposed` flag changed.
+ *
+ * `SEND_MESSAGE` items require client V7.22+; the reserved `cognia.*`
+ * push-event items are a separate list (see `quick-commands/built-ins.ts`).
+ */
+export function larkMenuManifest(): LarkMenuManifestItem[] {
+  return nativeExposedCommands().map((spec) => ({
+    name: `/${spec.name}`,
+    actionType: "SEND_MESSAGE",
+    // The command word only — arguments are typed by the user afterwards, so
+    // posting the usage string verbatim would send a literal "<n|session-id>".
+    text: `/${spec.name}`,
+  }))
+}

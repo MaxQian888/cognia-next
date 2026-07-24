@@ -3,7 +3,7 @@
 import "fake-indexeddb/auto"
 import { getDb, __resetDbForTesting } from "@/lib/db/schema"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
-import { handlePlusCreate, type PlusCreateDependencies } from "./plus-create"
+import { handlePlusCreate, sessionSeed, type PlusCreateDependencies } from "./plus-create"
 
 const ADAPTER_ID = "lark-plus-1"
 const CHAT_ID = "oc_plus_1"
@@ -106,5 +106,67 @@ describe("handlePlusCreate", () => {
         deps
       )
     ).toEqual({ ok: false, error: "membership_check_failed" })
+  })
+
+  it("attributes the seed to the verified clicker, not the chat", async () => {
+    // The seed used to set `sender.remoteUserId = chatId`, which left the run
+    // with no actor to authorize against and mis-attributed the audit trail.
+    const seed = sessionSeed(ADAPTER_ID, CHAT_ID, IDENTITY.openId)
+
+    expect(seed.sender.remoteUserId).toBe(IDENTITY.openId)
+    expect(seed.sender.id).toBe(`lark:${IDENTITY.openId}`)
+    // The conversation still binds to the chat — only the actor changed.
+    expect(seed.conversationRef.channelId).toBe(CHAT_ID)
+    expect(seed.conversationKey).toBe(`lark:${ADAPTER_ID}:${CHAT_ID}`)
+  })
+
+  it("writes the plus.create audit on success", async () => {
+    const deps = makeDeps()
+    const outcome = await handlePlusCreate(
+      { adapterId: ADAPTER_ID, chatId: CHAT_ID, verifiedIdentity: IDENTITY },
+      deps
+    )
+    expect(outcome.ok).toBe(true)
+    const created = deps.audit.mock.calls.find(
+      (call) => (call[0] as { kind: string }).kind === "plus.create"
+    )
+    expect(created).toBeDefined()
+    expect(JSON.stringify(created?.[0])).not.toContain(IDENTITY.openId)
+  })
+
+  it("audits every denial so a silently refusing + menu is visible", async () => {
+    const cases: Array<[Partial<Record<string, unknown>>, Record<string, unknown>, string]> = [
+      [
+        { getAdapter: jest.fn(async () => adapterRow({})) },
+        { chatId: CHAT_ID },
+        "feature_disabled",
+      ],
+      [{}, {}, "chat_missing"],
+      [{ isMember: jest.fn(async () => false) }, { chatId: CHAT_ID }, "membership_denied"],
+      [
+        {
+          isMember: jest.fn(async () => {
+            throw new Error("api down")
+          }),
+        },
+        { chatId: CHAT_ID },
+        "membership_check_failed",
+      ],
+    ]
+
+    for (const [overrides, input, expected] of cases) {
+      const deps = makeDeps(overrides)
+      const outcome = await handlePlusCreate(
+        { adapterId: ADAPTER_ID, verifiedIdentity: IDENTITY, ...input },
+        deps
+      )
+      expect(outcome).toEqual({ ok: false, error: expected })
+      const denied = deps.audit.mock.calls.find(
+        (call) => (call[0] as { kind: string }).kind === "plus.create_denied"
+      )
+      expect(denied?.[0]).toMatchObject({ reason: expected })
+      // The raw open_id never lands in the audit log.
+      expect(JSON.stringify(denied?.[0])).not.toContain(IDENTITY.openId)
+    }
   })
 })

@@ -70,18 +70,29 @@ describe("LarkPrincipals", () => {
     })
   })
 
-  it("disables and re-enables a registered tenant", async () => {
+  it("disables a registered tenant", async () => {
     await seedAdapter()
     await upsertFeishuTenant({ tenantKey: "tk_a", appId: "cli_1", cogniaAccountId: "acct_a" })
     const user = userEvent.setup({ delay: null })
     render(<LarkPrincipals adapterId={ADAPTER_ID} />)
 
     await user.click(await screen.findByTestId("lark-tenant-toggle"))
+
     await waitFor(async () => {
       expect((await getFeishuTenant("tk_a", "cli_1"))?.status).toBe("disabled")
     })
+  })
+
+  it("re-enables a disabled tenant", async () => {
+    await seedAdapter()
+    await upsertFeishuTenant({ tenantKey: "tk_a", appId: "cli_1", cogniaAccountId: "acct_a" })
+    const tenant = await getFeishuTenant("tk_a", "cli_1")
+    await getDb().feishuTenants.put({ ...tenant!, status: "disabled" })
+    const user = userEvent.setup({ delay: null })
+    render(<LarkPrincipals adapterId={ADAPTER_ID} />)
 
     await user.click(await screen.findByTestId("lark-tenant-toggle"))
+
     await waitFor(async () => {
       expect((await getFeishuTenant("tk_a", "cli_1"))?.status).toBe("active")
     })

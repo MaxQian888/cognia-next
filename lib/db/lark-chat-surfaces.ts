@@ -45,6 +45,13 @@ export interface EnsureChatSurfaceInput {
   now?: number
 }
 
+function unchangedTarget(existing: LarkChatSurfaceRow, input: EnsureChatSurfaceInput): boolean {
+  return (
+    existing.urlVersion === input.urlVersion &&
+    existing.desiredUrl === (input.desiredUrl ?? existing.desiredUrl)
+  )
+}
+
 /** Create-or-refresh the desired state for one surface (status → pending). */
 export async function ensureChatSurface(
   input: EnsureChatSurfaceInput
@@ -58,13 +65,15 @@ export async function ensureChatSurface(
         desiredUrl: input.desiredUrl ?? existing.desiredUrl,
         tenantKey: input.tenantKey ?? existing.tenantKey,
         appId: input.appId ?? existing.appId,
-        // A changed layout version or URL re-arms the reconcile loop.
-        status:
-          existing.status === "synced" &&
-          existing.urlVersion === input.urlVersion &&
-          existing.desiredUrl === (input.desiredUrl ?? existing.desiredUrl)
-            ? "synced"
-            : "pending",
+        // A changed layout version or URL re-arms the reconcile loop. A
+        // `blocked` row does NOT re-arm on an unchanged target: the platform
+        // refusal (missing scope, group-only surface in a p2p chat) survives
+        // every retry, so only a new URL — or an explicit resync — clears it.
+        status: unchangedTarget(existing, input)
+          ? existing.status === "synced" || existing.status === "blocked"
+            ? existing.status
+            : "pending"
+          : "pending",
         updatedAt: now,
       }
     : {
@@ -130,6 +139,32 @@ export async function markChatSurfaceError(
   return row
 }
 
+/**
+ * Park a surface the platform will keep refusing. Unlike `markChatSurfaceError`
+ * this sets no `nextAttemptAt`, so the sweep skips it until an operator resyncs
+ * or the desired URL changes.
+ */
+export async function markChatSurfaceBlocked(
+  adapterId: string,
+  chatId: string,
+  surfaceType: LarkChatSurfaceType,
+  reason: string,
+  now?: number
+): Promise<LarkChatSurfaceRow | undefined> {
+  const at = now ?? Date.now()
+  const existing = await getChatSurface(adapterId, chatId, surfaceType)
+  if (!existing) return undefined
+  const row: LarkChatSurfaceRow = {
+    ...existing,
+    status: "blocked",
+    nextAttemptAt: undefined,
+    lastError: reason,
+    updatedAt: at,
+  }
+  await getDb().larkChatSurfaces.put(row)
+  return row
+}
+
 export async function setChatSurfaceStatus(
   adapterId: string,
   chatId: string,
@@ -165,6 +200,9 @@ export async function listDueChatSurfaces(
         return row.nextAttemptAt === undefined || row.nextAttemptAt <= at
       case "synced":
         return (row.lastSyncAt ?? 0) < at - 24 * 60 * 60 * 1000
+      // Terminal until an operator acts: retrying either changes nothing
+      // (blocked) or would re-create something deliberately taken down.
+      case "blocked":
       case "removed":
         return false
     }

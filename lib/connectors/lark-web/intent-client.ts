@@ -44,13 +44,19 @@ export function parseShortcutLaunch(search: string): ShortcutLaunch {
     chatId: params.get("chat_id") ?? undefined,
   }
   const blob = params.get("bdp_launch_query")
-  if (blob && !launch.triggerId) {
+  // The `+` menu carries no trigger code — only chat context — so the blob is
+  // scanned for BOTH, and each field only when the direct param was absent.
+  if (blob && (!launch.triggerId || !launch.chatId)) {
+    const readNested = (get: (key: string) => string | undefined): void => {
+      launch.triggerId = launch.triggerId ?? get("__trigger_id__")
+      launch.chatId = launch.chatId ?? get("chat_id") ?? get("open_chat_id") ?? get("openChatId")
+    }
     try {
       const parsed = JSON.parse(blob) as Record<string, unknown>
-      if (typeof parsed.__trigger_id__ === "string") launch.triggerId = parsed.__trigger_id__
+      readNested((key) => (typeof parsed[key] === "string" ? (parsed[key] as string) : undefined))
     } catch {
       const nested = new URLSearchParams(blob)
-      launch.triggerId = nested.get("__trigger_id__") ?? launch.triggerId
+      readNested((key) => nested.get(key) ?? undefined)
     }
   }
   return launch
@@ -211,37 +217,25 @@ export interface ShortcutFlowOptions {
   sleep?: (ms: number) => Promise<void>
 }
 
-/** Full message-shortcut flow: launch query → JSSDK → submit → poll. */
-export async function runShortcutImportFlow(
-  options: ShortcutFlowOptions
-): Promise<ShortcutFlowOutcome> {
-  const launch = parseShortcutLaunch(options.search)
+/** Adapter id from the launch query, else from the SSO session's own claim. */
+function resolveLaunchAdapterId(launch: ShortcutLaunch): string | undefined {
   const sessionAdapterId = decodeJwtPayload(getLarkWebSession() ?? "")?.adapter_id
-  const adapterId =
-    launch.adapterId ?? (typeof sessionAdapterId === "string" ? sessionAdapterId : undefined)
-  if (!adapterId) return { kind: "error", code: "adapter_missing" }
-  if (!launch.triggerId) return { kind: "error", code: "trigger_missing" }
+  return launch.adapterId ?? (typeof sessionAdapterId === "string" ? sessionAdapterId : undefined)
+}
 
-  let detail: unknown
-  try {
-    detail = await options.getTriggerDetail(launch.triggerId)
-  } catch {
-    return { kind: "error", code: "trigger_detail_failed" }
-  }
-  const refs = extractMessageRefs(detail)
-  const chatId = refs.chatId ?? launch.chatId
-  if (!chatId || refs.messageIds.length === 0) {
-    return { kind: "error", code: "no_messages_selected" }
-  }
-
+/** Submit one intent and wait for the brain's answer. Shared by both flows. */
+async function submitAndPoll(
+  path: string,
+  body: Record<string, unknown>,
+  adapterId: string,
+  options: Pick<
+    ShortcutFlowOptions,
+    "returnTo" | "apiBase" | "fetchFn" | "pollIntervalMs" | "pollBudgetMs" | "sleep"
+  >
+): Promise<ShortcutFlowOutcome> {
   const submitted = await submitLarkIntent({
-    path: "/shortcut/import",
-    body: {
-      adapterId,
-      chatId,
-      messageIds: refs.messageIds,
-      triggerId: launch.triggerId,
-    },
+    path,
+    body,
     adapterId,
     returnTo: options.returnTo,
     apiBase: options.apiBase,
@@ -268,4 +262,60 @@ export async function runShortcutImportFlow(
     sessionId: typeof result.result.sessionId === "string" ? result.result.sessionId : undefined,
     imported: typeof result.result.imported === "number" ? result.result.imported : undefined,
   }
+}
+
+/**
+ * `+`-menu flow (plan 2026-07-24 P5.2): no trigger code and no message
+ * selection — just "start a task bound to this chat". The chat id is the only
+ * thing the launch query has to carry, and it is a REQUEST: the brain
+ * re-verifies flag, principal and membership before binding anything.
+ */
+export async function runPlusCreateFlow(
+  options: Omit<ShortcutFlowOptions, "getTriggerDetail">
+): Promise<ShortcutFlowOutcome> {
+  const launch = parseShortcutLaunch(options.search)
+  const adapterId = resolveLaunchAdapterId(launch)
+  if (!adapterId) return { kind: "error", code: "adapter_missing" }
+  if (!launch.chatId) return { kind: "error", code: "chat_missing" }
+
+  return submitAndPoll("/plus/create", { adapterId, chatId: launch.chatId }, adapterId, options)
+}
+
+/**
+ * Route one `/lark/shortcut` open to the flow its launch query describes.
+ * The console points BOTH the message shortcut and the `+` menu at this page,
+ * and only the shortcut carries a trigger code.
+ */
+export async function runLarkEntryFlow(options: ShortcutFlowOptions): Promise<ShortcutFlowOutcome> {
+  const launch = parseShortcutLaunch(options.search)
+  return launch.triggerId ? runShortcutImportFlow(options) : runPlusCreateFlow(options)
+}
+
+/** Full message-shortcut flow: launch query → JSSDK → submit → poll. */
+export async function runShortcutImportFlow(
+  options: ShortcutFlowOptions
+): Promise<ShortcutFlowOutcome> {
+  const launch = parseShortcutLaunch(options.search)
+  const adapterId = resolveLaunchAdapterId(launch)
+  if (!adapterId) return { kind: "error", code: "adapter_missing" }
+  if (!launch.triggerId) return { kind: "error", code: "trigger_missing" }
+
+  let detail: unknown
+  try {
+    detail = await options.getTriggerDetail(launch.triggerId)
+  } catch {
+    return { kind: "error", code: "trigger_detail_failed" }
+  }
+  const refs = extractMessageRefs(detail)
+  const chatId = refs.chatId ?? launch.chatId
+  if (!chatId || refs.messageIds.length === 0) {
+    return { kind: "error", code: "no_messages_selected" }
+  }
+
+  return submitAndPoll(
+    "/shortcut/import",
+    { adapterId, chatId, messageIds: refs.messageIds, triggerId: launch.triggerId },
+    adapterId,
+    options
+  )
 }

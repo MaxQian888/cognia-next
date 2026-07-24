@@ -4,6 +4,8 @@ import {
   extractMessageRefs,
   parseShortcutLaunch,
   pollLarkIntent,
+  runLarkEntryFlow,
+  runPlusCreateFlow,
   runShortcutImportFlow,
   submitLarkIntent,
 } from "./intent-client"
@@ -250,5 +252,124 @@ describe("runShortcutImportFlow", () => {
         sleep: async () => undefined,
       })
     ).toEqual({ kind: "error", code: "intent_failed" })
+  })
+})
+
+describe("runPlusCreateFlow", () => {
+  const flow = (search: string, fetchFn: typeof fetch) =>
+    runPlusCreateFlow({
+      search,
+      returnTo: "/lark/shortcut",
+      apiBase: "https://api.example",
+      fetchFn,
+      pollIntervalMs: 1,
+      pollBudgetMs: 10,
+      sleep: async () => undefined,
+    })
+
+  it("submits the chat id and navigates to the bound conversation", async () => {
+    seedSession()
+    const fetchFn = jest.fn(async (url: string | URL | Request) =>
+      String(url).endsWith("/plus/create")
+        ? jsonResponse(202, { requestId: "req-1" })
+        : jsonResponse(200, {
+            status: "done",
+            result: { conversationKey: "lark:lk-1:oc_1", sessionId: "sess_1" },
+          })
+    ) as unknown as typeof fetch
+
+    const outcome = await flow("?adapter_id=lk-1&chat_id=oc_1", fetchFn)
+
+    expect(outcome).toEqual({
+      kind: "navigate",
+      conversationKey: "lark:lk-1:oc_1",
+      sessionId: "sess_1",
+      imported: undefined,
+    })
+    const submit = (fetchFn as unknown as jest.Mock).mock.calls[0]
+    expect(String(submit[0])).toBe("https://api.example/integrations/lark/plus/create")
+    expect(JSON.parse(String(submit[1].body))).toEqual({ adapterId: "lk-1", chatId: "oc_1" })
+  })
+
+  it("falls back to the session's adapter id", async () => {
+    seedSession()
+    const fetchFn = jest.fn(async (url: string | URL | Request) =>
+      String(url).endsWith("/plus/create")
+        ? jsonResponse(202, { requestId: "req-1" })
+        : jsonResponse(200, { status: "done", result: { conversationKey: "lark:lk-1:oc_2" } })
+    ) as unknown as typeof fetch
+
+    const outcome = await flow("?chat_id=oc_2", fetchFn)
+
+    expect(outcome.kind).toBe("navigate")
+    const submit = (fetchFn as unknown as jest.Mock).mock.calls[0]
+    expect(JSON.parse(String(submit[1].body)).adapterId).toBe("lk-1")
+  })
+
+  it("reports chat_missing without calling the API", async () => {
+    seedSession()
+    const fetchFn = jest.fn() as unknown as typeof fetch
+    expect(await flow("?adapter_id=lk-1", fetchFn)).toEqual({
+      kind: "error",
+      code: "chat_missing",
+    })
+    expect(fetchFn).not.toHaveBeenCalled()
+  })
+
+  it("reads the chat id out of bdp_launch_query in both encodings", async () => {
+    const json = encodeURIComponent(JSON.stringify({ chat_id: "oc_json" }))
+    expect(parseShortcutLaunch(`?bdp_launch_query=${json}`).chatId).toBe("oc_json")
+    const nested = encodeURIComponent("open_chat_id=oc_nested")
+    expect(parseShortcutLaunch(`?bdp_launch_query=${nested}`).chatId).toBe("oc_nested")
+  })
+})
+
+describe("runLarkEntryFlow", () => {
+  it("routes to the plus-create branch when there is no trigger code", async () => {
+    seedSession()
+    const fetchFn = jest.fn(async (url: string | URL | Request) =>
+      String(url).endsWith("/plus/create")
+        ? jsonResponse(202, { requestId: "req-1" })
+        : jsonResponse(200, { status: "done", result: { conversationKey: "lark:lk-1:oc_1" } })
+    ) as unknown as typeof fetch
+
+    const outcome = await runLarkEntryFlow({
+      search: "?adapter_id=lk-1&chat_id=oc_1",
+      returnTo: "/lark/shortcut",
+      apiBase: "https://api.example",
+      fetchFn,
+      getTriggerDetail: async () => {
+        throw new Error("the + menu must never reach the JSSDK")
+      },
+      pollIntervalMs: 1,
+      pollBudgetMs: 10,
+      sleep: async () => undefined,
+    })
+
+    expect(outcome.kind).toBe("navigate")
+    expect(String((fetchFn as unknown as jest.Mock).mock.calls[0][0])).toContain("/plus/create")
+  })
+
+  it("routes to the import branch when a trigger code is present", async () => {
+    seedSession()
+    const fetchFn = jest.fn(async (url: string | URL | Request) =>
+      String(url).endsWith("/shortcut/import")
+        ? jsonResponse(202, { requestId: "req-1" })
+        : jsonResponse(200, { status: "done", result: { conversationKey: "lark:lk-1:oc_1" } })
+    ) as unknown as typeof fetch
+
+    const outcome = await runLarkEntryFlow({
+      search: "?adapter_id=lk-1&__trigger_id__=t1",
+      returnTo: "/lark/shortcut",
+      apiBase: "https://api.example",
+      fetchFn,
+      getTriggerDetail: async () => ({ chat_id: "oc_1", message_id: "om_1" }),
+      pollIntervalMs: 1,
+      pollBudgetMs: 10,
+      sleep: async () => undefined,
+    })
+
+    expect(outcome.kind).toBe("navigate")
+    expect(String((fetchFn as unknown as jest.Mock).mock.calls[0][0])).toContain("/shortcut/import")
   })
 })
