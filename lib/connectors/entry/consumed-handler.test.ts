@@ -32,6 +32,8 @@ function makeDeps(overrides: Partial<LarkIntentDependencies> = {}) {
       sessionId: "sess_p",
     })),
     runAdmin: jest.fn(async () => ({ ok: true as const, result: { expired: 0 } })),
+    resolvePrincipal: jest.fn(async () => ({ status: "legacy" as const })),
+    getAdapter: jest.fn(async () => undefined),
     ...overrides,
   } as LarkIntentDependencies & {
     call: jest.Mock
@@ -42,6 +44,8 @@ function makeDeps(overrides: Partial<LarkIntentDependencies> = {}) {
     importMessages: jest.Mock
     plusCreate: jest.Mock
     runAdmin: jest.Mock
+    resolvePrincipal: jest.Mock
+    getAdapter: jest.Mock
   }
 }
 
@@ -381,5 +385,87 @@ describe("installLarkIntentHandler", () => {
 
     dispose()
     expect(unlisten).toHaveBeenCalled()
+  })
+
+  it("refuses a surface resolve for a disabled principal before checking membership", async () => {
+    // Chat membership says "you are in this room" — it says nothing about
+    // whether Cognia still serves you.
+    const deps = makeDeps({
+      resolvePrincipal: jest.fn(async () => ({ status: "principal_disabled" as const })),
+      tenantRequest: jest.fn(async () => {
+        throw new Error("membership must not be consulted")
+      }),
+    })
+
+    await handleLarkIntentFrame(
+      {
+        kind: "resolve_surface",
+        requestId: "req_p",
+        adapterId: "lk-1",
+        chatId: "oc_1",
+        surface: "chat_tab",
+        verifiedIdentity: { openId: "ou_1", tenantKey: "tk_a", appId: "cli_1" },
+      },
+      deps
+    )
+
+    expect(deps.call).toHaveBeenCalledWith("lark_result_complete", {
+      requestId: "req_p",
+      error: "principal_principal_disabled",
+    })
+    expect(deps.tenantRequest).not.toHaveBeenCalled()
+    expect(
+      deps.audit.mock.calls.some(
+        (call) => (call[0] as { kind: string; reason?: string }).kind === "entry.denied"
+      )
+    ).toBe(true)
+  })
+
+  it("refuses a cross-account surface resolve", async () => {
+    const deps = makeDeps({
+      resolvePrincipal: jest.fn(async () => ({
+        status: "cross_account" as const,
+        declaredAccountId: "acct_b",
+      })),
+    })
+
+    await handleLarkIntentFrame(
+      {
+        kind: "resolve_surface",
+        requestId: "req_x",
+        adapterId: "lk-1",
+        chatId: "oc_1",
+        verifiedIdentity: { openId: "ou_1" },
+      },
+      deps
+    )
+
+    expect(deps.call).toHaveBeenCalledWith("lark_result_complete", {
+      requestId: "req_x",
+      error: "principal_cross_account",
+    })
+  })
+
+  it("still resolves when the registry is off (legacy) and the user is a member", async () => {
+    const deps = makeDeps({
+      tenantRequest: jest.fn(async () => ({ data: { items: [{ member_id: "ou_1" }] } })),
+    })
+
+    await handleLarkIntentFrame(
+      {
+        kind: "resolve_surface",
+        requestId: "req_ok",
+        adapterId: "lk-1",
+        chatId: "oc_1",
+        surface: "chat_tab",
+        verifiedIdentity: { openId: "ou_1" },
+      },
+      deps
+    )
+
+    expect(deps.call).toHaveBeenCalledWith("lark_result_complete", {
+      requestId: "req_ok",
+      result: { conversationKey: "lark:lk-1:oc_1", surface: "chat_tab" },
+    })
   })
 })

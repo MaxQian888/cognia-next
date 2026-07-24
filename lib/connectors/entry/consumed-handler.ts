@@ -36,6 +36,8 @@ import { larkTenantRequest, type LarkCredentials } from "@/lib/connectors/adapte
 import { importLarkMessages } from "@/lib/connectors/adapters/lark/message-import"
 import { handlePlusCreate } from "@/lib/connectors/adapters/lark/plus-create"
 import { runPrincipalAdminIntent } from "@/lib/connectors/principal/admin-intent"
+import { resolveConnectorPrincipal } from "@/lib/connectors/principal/resolve"
+import { getAdapterInstance } from "@/lib/db/adapter-instances"
 
 export const LARK_INTENT_TOPIC = "connectors://lark-intent"
 
@@ -70,6 +72,8 @@ export interface LarkIntentDependencies {
   importMessages: typeof importLarkMessages
   plusCreate: typeof handlePlusCreate
   runAdmin: typeof runPrincipalAdminIntent
+  resolvePrincipal: typeof resolveConnectorPrincipal
+  getAdapter: typeof getAdapterInstance
 }
 
 async function credsFor(
@@ -149,6 +153,38 @@ export async function handleLarkIntentFrame(
       return
     }
     try {
+      // Principal BEFORE membership. Chat membership says "you are in this
+      // room"; it says nothing about whether Cognia still serves you. Without
+      // this a disabled or unlinked principal — or one belonging to another
+      // account entirely — could still open a Chat Tab and land in the
+      // conversation, because the import and `+` paths were the only ones
+      // that resolved the principal.
+      const resolution = await deps.resolvePrincipal({
+        platform: "lark",
+        adapterRow: (await deps.getAdapter(adapterId).catch(() => undefined)) ?? { settings: {} },
+        remoteUserId: openId,
+        identityScope: {
+          tenantKey: frame.verifiedIdentity?.tenantKey,
+          appId: frame.verifiedIdentity?.appId,
+        },
+      })
+      if (resolution.status !== "resolved" && resolution.status !== "legacy") {
+        await deps
+          .audit({
+            adapterId,
+            kind: "entry.denied",
+            at: Date.now(),
+            reason: `principal_${resolution.status}`,
+            fields: { chatId, surface: frame.surface },
+          })
+          .catch(() => undefined)
+        await deps.call("lark_result_complete", {
+          requestId,
+          error: `principal_${resolution.status}`,
+        })
+        return
+      }
+
       const member = await isChatMember(deps, adapterId, chatId, openId)
       if (!member) {
         await deps
@@ -303,6 +339,8 @@ export function installLarkIntentHandler(
     importMessages: importLarkMessages,
     plusCreate: handlePlusCreate,
     runAdmin: runPrincipalAdminIntent,
+    resolvePrincipal: resolveConnectorPrincipal,
+    getAdapter: getAdapterInstance,
     ...overrides,
   }
   let disposed = false

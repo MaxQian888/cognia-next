@@ -16,10 +16,12 @@
  *
  * Modes (`larkStrictCallbackAuthorization` flag):
  *   - "off"     → legacy bit-for-bit behavior, decision is always allow.
- *   - "audit"   → all checks run; would-deny outcomes are AUDITED by the
- *                 caller but the callback still executes (shadow mode, the
- *                 default — its growth curve is the gray-release signal).
- *   - "enforce" → denials block execution and consume-once is enforced.
+ *   - "audit"   → all checks run; would-deny outcomes are audited and counted
+ *                 by the caller but the callback still executes. A migration
+ *                 aid, not a resting state: `consume` is never minted here, so
+ *                 stale re-clicks still re-grant.
+ *   - "enforce" → denials block execution and consume-once is enforced. The
+ *                 default.
  */
 
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"

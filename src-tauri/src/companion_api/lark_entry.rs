@@ -276,32 +276,66 @@ static SSO_PENDING: Lazy<Mutex<HashMap<String, SsoPending>>> =
 #[derive(Clone)]
 enum IntentState {
     Pending { created_at_ms: i64 },
-    Done { result: Value },
-    Error { code: String },
+    Done { result: Value, settled_at_ms: i64 },
+    Error { code: String, settled_at_ms: i64 },
+}
+
+impl IntentState {
+    /// The stamp `prune_intents` ages each state against.
+    fn stamp(&self) -> i64 {
+        match self {
+            IntentState::Pending { created_at_ms } => *created_at_ms,
+            IntentState::Done { settled_at_ms, .. } | IntentState::Error { settled_at_ms, .. } => {
+                *settled_at_ms
+            }
+        }
+    }
 }
 
 /// requestId → async brain-answered intent (60 s TTL while pending).
 static PENDING_INTENTS: Lazy<Mutex<HashMap<String, IntentState>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
+/// Upper bound on in-flight SSO states. `/web/login` is unauthenticated, so
+/// without a cap anyone who can reach the companion can grow this map between
+/// TTL sweeps. Oldest-first eviction: a login older than the rest is the one
+/// least likely to still be completed.
+const SSO_PENDING_MAX: usize = 4_096;
+
+/// Terminal intents linger so a slow poller still collects its answer. The
+/// previous `_ => true` arm meant they lingered forever, and the 10k valve
+/// then cleared the whole map — dropping results browsers were still waiting
+/// on. Both are bounded properly now.
+const INTENT_TERMINAL_TTL_MS: i64 = 5 * INTENT_TTL_MS;
+const PENDING_INTENTS_MAX: usize = 10_000;
+
+/// Drop the oldest entries until `map` fits `max`.
+fn evict_oldest<V>(map: &mut HashMap<String, V>, max: usize, stamp: impl Fn(&V) -> i64) {
+    if map.len() <= max {
+        return;
+    }
+    let mut stamped: Vec<(String, i64)> = map.iter().map(|(k, v)| (k.clone(), stamp(v))).collect();
+    stamped.sort_by_key(|(_, at)| *at);
+    for (key, _) in stamped.into_iter().take(map.len() - max) {
+        map.remove(&key);
+    }
+}
+
 fn prune_sso(now: i64) {
-    SSO_PENDING
-        .lock()
-        .retain(|_, p| now - p.created_at_ms < SSO_STATE_TTL_MS);
+    let mut map = SSO_PENDING.lock();
+    map.retain(|_, p| now - p.created_at_ms < SSO_STATE_TTL_MS);
+    evict_oldest(&mut map, SSO_PENDING_MAX, |p| p.created_at_ms);
 }
 
 fn prune_intents(now: i64) {
-    PENDING_INTENTS.lock().retain(|_, state| match state {
-        IntentState::Pending { created_at_ms } => now - *created_at_ms < INTENT_TTL_MS,
-        // Terminal results linger a bit longer so a slow poller still sees
-        // them; 5× the pending TTL is plenty.
-        _ => true,
-    });
-    // Cap terminal entries: drop the map entirely past a pathological size.
     let mut map = PENDING_INTENTS.lock();
-    if map.len() > 10_000 {
-        map.clear();
-    }
+    map.retain(|_, state| match state {
+        IntentState::Pending { created_at_ms } => now - *created_at_ms < INTENT_TTL_MS,
+        // Terminal results linger so a slow poller still sees them, then age
+        // out like everything else.
+        _ => now - state.stamp() < INTENT_TERMINAL_TTL_MS,
+    });
+    evict_oldest(&mut map, PENDING_INTENTS_MAX, |state| state.stamp());
 }
 
 /// Register a fresh pending intent and return its id.
@@ -326,8 +360,14 @@ pub fn complete_intent(request_id: &str, result: Result<Value, String>) -> bool 
     map.insert(
         request_id.to_string(),
         match result {
-            Ok(value) => IntentState::Done { result: value },
-            Err(code) => IntentState::Error { code },
+            Ok(value) => IntentState::Done {
+                result: value,
+                settled_at_ms: now_ms(),
+            },
+            Err(code) => IntentState::Error {
+                code,
+                settled_at_ms: now_ms(),
+            },
         },
     );
     true
@@ -757,12 +797,12 @@ pub async fn intent_poll_handler(
         Some(IntentState::Pending { .. }) => {
             (StatusCode::OK, Json(json!({ "status": "pending" }))).into_response()
         }
-        Some(IntentState::Done { result }) => (
+        Some(IntentState::Done { result, .. }) => (
             StatusCode::OK,
             Json(json!({ "status": "done", "result": result })),
         )
             .into_response(),
-        Some(IntentState::Error { code }) => (
+        Some(IntentState::Error { code, .. }) => (
             StatusCode::OK,
             Json(json!({ "status": "error", "error": code })),
         )
@@ -1101,12 +1141,12 @@ pub async fn admin_poll_handler(Path(request_id): Path<String>) -> Response {
         Some(IntentState::Pending { .. }) => {
             (StatusCode::OK, Json(json!({ "status": "pending" }))).into_response()
         }
-        Some(IntentState::Done { result }) => (
+        Some(IntentState::Done { result, .. }) => (
             StatusCode::OK,
             Json(json!({ "status": "done", "result": result })),
         )
             .into_response(),
-        Some(IntentState::Error { code }) => (
+        Some(IntentState::Error { code, .. }) => (
             StatusCode::OK,
             Json(json!({ "status": "error", "error": code })),
         )
@@ -1696,5 +1736,58 @@ mod tests {
         assert!(url.contains("code_challenge=chal%2Blenge%2F%3D"), "{url}");
         assert!(url.contains("state=state-1"), "{url}");
         assert!(url.ends_with("&code_challenge_method=S256"), "{url}");
+    }
+
+    #[test]
+    fn terminal_intents_age_out_instead_of_lingering_forever() {
+        let id = register_intent();
+        assert!(complete_intent(&id, Ok(json!({ "ok": true }))));
+        // Still collectable by a slow poller.
+        prune_intents(now_ms());
+        assert!(PENDING_INTENTS.lock().contains_key(&id));
+        // Past the terminal TTL it is gone; the old `_ => true` arm kept every
+        // settled intent for the life of the process.
+        prune_intents(now_ms() + INTENT_TERMINAL_TTL_MS + 1);
+        assert!(!PENDING_INTENTS.lock().contains_key(&id));
+    }
+
+    #[test]
+    fn evict_oldest_drops_the_oldest_entries_only() {
+        let mut map: HashMap<String, i64> = HashMap::new();
+        for i in 0..10i64 {
+            map.insert(format!("k{i}"), i);
+        }
+        evict_oldest(&mut map, 4, |v| *v);
+        assert_eq!(map.len(), 4);
+        // The four newest survive — a size valve must not drop results a
+        // browser is still polling for, which `map.clear()` did.
+        for i in 6..10i64 {
+            assert!(map.contains_key(&format!("k{i}")), "k{i} should survive");
+        }
+        for i in 0..6i64 {
+            assert!(!map.contains_key(&format!("k{i}")));
+        }
+    }
+
+    #[test]
+    fn sso_pending_is_size_capped() {
+        {
+            let mut map = SSO_PENDING.lock();
+            map.clear();
+            for i in 0..(SSO_PENDING_MAX + 32) {
+                map.insert(
+                    format!("state{i}"),
+                    SsoPending {
+                        adapter_id: "lk-1".into(),
+                        verifier: "v".into(),
+                        return_to: "/".into(),
+                        created_at_ms: now_ms() + i as i64,
+                    },
+                );
+            }
+        }
+        prune_sso(now_ms());
+        assert!(SSO_PENDING.lock().len() <= SSO_PENDING_MAX);
+        SSO_PENDING.lock().clear();
     }
 }
