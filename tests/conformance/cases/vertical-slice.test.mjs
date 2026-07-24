@@ -15,12 +15,7 @@ import assert from "node:assert/strict"
 import { createConformanceServer } from "../anthropic-server/server.mjs"
 import { SCENARIOS } from "../anthropic-server/scenarios/index.mjs"
 import { spawnSidecar, assistantText } from "../harness/sidecar-process.mjs"
-import {
-  binaryAvailable,
-  startGatewayLeg,
-  UPSTREAM_KEY,
-  UPSTREAM_KEY_ENV,
-} from "../harness/gateway-process.mjs"
+import { binaryAvailable, startGatewayLeg, UPSTREAM_KEY } from "../harness/gateway-process.mjs"
 
 const HAS_BINARY = binaryAvailable()
 const RUN_GATEWAY_LEG = HAS_BINARY || process.env.CI === "true"

@@ -34,7 +34,8 @@ fn sample_cmd(argv: Vec<&str>, cwd: &str) -> SandboxCommand {
     }
 }
 
-/// True when the backend can actually run a trivial `exit 0` under the
+/// True when the backend can actually run the same shell/output shape exercised
+/// by the integration test under the
 /// generated profile on THIS host. Lets the active-probe tests skip on
 /// environments whose kernel rejects the restrictive profile (the probe logic
 /// is independently covered by the mock unit tests) instead of reporting a
@@ -49,8 +50,15 @@ async fn backend_can_run_trivially(backend: &impl SandboxedExec) -> bool {
         max_memory_mb: 0,
     };
     matches!(
-        backend.run(sample_cmd(vec!["sh", "-c", "exit 0"], "/tmp"), policy).await,
-        Ok(r) if r.exit_code == 0 && !r.timed_out
+        backend
+            .run(
+                sample_cmd(vec!["bash", "-c", "echo sandbox-probe"], "/tmp"),
+                policy
+            )
+            .await,
+        Ok(r) if r.exit_code == 0
+            && !r.timed_out
+            && r.stdout.contains("sandbox-probe")
     )
 }
 
@@ -161,6 +169,12 @@ mod macos {
         let backend = MacOsSandboxBackend::new();
         if !backend.is_available() {
             eprintln!("skipping — /usr/bin/sandbox-exec missing");
+            return;
+        }
+        if !backend_can_run_trivially(&backend).await {
+            eprintln!(
+                "skipping — sandbox-exec cannot run the echo command shape in this environment"
+            );
             return;
         }
         let cmd = sample_cmd(vec!["bash", "-c", "echo hello-from-sandbox"], "/tmp");

@@ -1130,7 +1130,10 @@ describe("outbound-runner — per-bot outbound tuning", () => {
 
     const { promise, stop } = createRunner(adapters)
     const jobs = await waitForJobs(
-      (rows) => rows.length === 2 && rows.every((j) => j.status !== "pending")
+      (rows) =>
+        rows.length === 2 &&
+        rows.some((j) => j.status === "sent") &&
+        rows.some((j) => j.lastErrorCode === "rate_limited")
     )
     stop()
     await promise

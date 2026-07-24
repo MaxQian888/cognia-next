@@ -120,6 +120,11 @@ const baseTestPathIgnorePatterns = [
   // the CUA TypeScript libs whose tests target Vitest. Never run under Jest.
   "/tmp/",
   "/tests/e2e/", // Playwright E2E tests — run via `pnpx playwright test`, not Jest
+  // Conformance cases use Node's built-in `node:test` runner and native ESM.
+  // Jest would transform their dynamic imports to CJS and then report both
+  // empty Jest suites and invalid top-level-await syntax. Run via
+  // `pnpm test:conformance`.
+  "/tests/conformance/.*\\.test\\.mjs$",
   // scripts/*.test.mjs use Node's built-in `node --test` runner (ESM with
   // `import.meta.url` / `__dirname = dirname(fileURLToPath(...))`) which
   // collides with Jest's Babel/CJS transform. They are exercised by

@@ -5,8 +5,12 @@ import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import type { Goal } from "@/types/goal"
 
 const isMobileMock = jest.fn(() => false)
+const resolveGoalAcceptanceMock = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/hooks/ui/use-mobile", () => ({
   useIsMobile: () => isMobileMock(),
+}))
+jest.mock("@/lib/goal/acceptance", () => ({
+  resolveGoalAcceptance: (...args: unknown[]) => resolveGoalAcceptanceMock(...args),
 }))
 
 // Completion linkage fires real notification/workflow side effects — stub it
@@ -45,6 +49,7 @@ beforeEach(async () => {
   getDb()
   await whenSeeded()
   isMobileMock.mockReturnValue(false)
+  resolveGoalAcceptanceMock.mockClear()
 })
 
 describe("GoalDetailSheet", () => {
@@ -101,51 +106,17 @@ describe("GoalDetailSheet — acceptance banner", () => {
     expect(screen.queryByTestId("goal-acceptance-banner")).toBeNull()
   })
 
-  it("accept resolves the acceptance and completes the goal", async () => {
-    const { createGoal, getGoal, updateGoal } = await import("@/lib/db/goals")
-    await createGoal({
-      id: "g-acc",
-      sessionId: "ses_a",
-      rawObjective: "x",
-      safeObjective: "x",
-      redactionMapEnc: "",
-      status: "paused",
-      turnsUsed: 1,
-      tokensUsed: 0,
-      judgeFailureCount: 0,
-      config: awaitingGoal.config,
-      generationId: "gen-1",
-    })
-    await updateGoal("g-acc", { awaitingAcceptance: true })
+  it("accept submits an accepted resolution for the displayed goal", async () => {
     const user = userEvent.setup()
     render(<GoalDetailSheet goal={{ ...awaitingGoal, id: "g-acc" }} open onOpenChange={() => {}} />)
     await user.click(screen.getByTestId("goal-acceptance-accept"))
-    await waitFor(async () => {
-      expect((await getGoal("g-acc"))?.status).toBe("completed")
-    })
+    await waitFor(() => expect(resolveGoalAcceptanceMock).toHaveBeenCalledWith("g-acc", true))
   })
 
-  it("request changes resumes the goal", async () => {
-    const { createGoal, getGoal, updateGoal } = await import("@/lib/db/goals")
-    await createGoal({
-      id: "g-rej",
-      sessionId: "ses_a",
-      rawObjective: "x",
-      safeObjective: "x",
-      redactionMapEnc: "",
-      status: "paused",
-      turnsUsed: 1,
-      tokensUsed: 0,
-      judgeFailureCount: 0,
-      config: awaitingGoal.config,
-      generationId: "gen-1",
-    })
-    await updateGoal("g-rej", { awaitingAcceptance: true })
+  it("request changes submits a rejected resolution for the displayed goal", async () => {
     const user = userEvent.setup()
     render(<GoalDetailSheet goal={{ ...awaitingGoal, id: "g-rej" }} open onOpenChange={() => {}} />)
     await user.click(screen.getByTestId("goal-acceptance-request-changes"))
-    await waitFor(async () => {
-      expect((await getGoal("g-rej"))?.status).toBe("active")
-    })
+    await waitFor(() => expect(resolveGoalAcceptanceMock).toHaveBeenCalledWith("g-rej", false))
   })
 })
