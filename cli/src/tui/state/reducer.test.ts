@@ -1917,6 +1917,128 @@ describe("tuiReducer — backend lifecycle", () => {
     const switched = reduce(external("codex"), { type: "SET_BACKEND", backend: "builtin" })
     expect(switched.backendCapabilities?.builtin).toBe(true)
   })
+
+  const installOption = {
+    command: "copilot",
+    name: "GitHub Copilot CLI",
+    method: {
+      kind: "npm" as const,
+      label: "npm",
+      display: "npm install -g @github/copilot",
+      command: "npm",
+      args: ["install", "-g", "@github/copilot"],
+      requires: ["npm"],
+    },
+  }
+  const cmdFailure = {
+    kind: "command" as const,
+    stage: "command" as const,
+    message: "\"copilot\" isn't installed or isn't on PATH.",
+    command: "copilot",
+  }
+
+  it("carries an install option onto the failure page and drives the install phase", () => {
+    const failed = reduce(external("copilot-cli"), {
+      type: "BACKEND_CONNECT_FAIL",
+      failure: cmdFailure,
+      installOption,
+    })
+    expect(failed.backendInstallOption).toEqual(installOption)
+
+    const installing = reduce(failed, {
+      type: "BACKEND_INSTALL_START",
+      name: installOption.name,
+      display: installOption.method.display,
+    })
+    expect(installing.phase).toBe("installing")
+    expect(installing.backendInstall).toEqual({
+      name: installOption.name,
+      display: installOption.method.display,
+      output: "",
+      status: "running",
+    })
+    // The failure + option survive so a failed install returns a full page.
+    expect(installing.backendFailure).toBe(cmdFailure)
+    expect(installing.backendInstallOption).toEqual(installOption)
+
+    const streamed = reduce(
+      reduce(installing, {
+        type: "BACKEND_INSTALL_OUTPUT",
+        chunk: "added 1 package\n",
+      }),
+      { type: "BACKEND_INSTALL_OUTPUT", chunk: "done\n" }
+    )
+    expect(streamed.backendInstall?.output).toBe("added 1 package\ndone\n")
+  })
+
+  it("ignores install output once the install phase is gone", () => {
+    const failed = reduce(external("copilot-cli"), {
+      type: "BACKEND_CONNECT_FAIL",
+      failure: cmdFailure,
+      installOption,
+    })
+    // No backendInstall yet → the late line is a no-op, not a crash.
+    expect(reduce(failed, { type: "BACKEND_INSTALL_OUTPUT", chunk: "x" })).toBe(failed)
+  })
+
+  it("returns to the failure page with an inline error when the install fails", () => {
+    const installing = reduce(
+      reduce(external("copilot-cli"), {
+        type: "BACKEND_CONNECT_FAIL",
+        failure: cmdFailure,
+        installOption,
+      }),
+      {
+        type: "BACKEND_INSTALL_START",
+        name: installOption.name,
+        display: installOption.method.display,
+      }
+    )
+    const failed = reduce(installing, {
+      type: "BACKEND_INSTALL_FAIL",
+      message: "Couldn't install X",
+    })
+    expect(failed.phase).toBe("connect-failed")
+    expect(failed.backendInstall).toBeUndefined()
+    expect(failed.backendInstallError).toBe("Couldn't install X")
+    // The option is still there so the user can retry the install.
+    expect(failed.backendInstallOption).toEqual(installOption)
+  })
+
+  it("clears the install option and error on a fresh failure, retry, and success", () => {
+    const failed = reduce(external("copilot-cli"), {
+      type: "BACKEND_CONNECT_FAIL",
+      failure: cmdFailure,
+      installOption,
+    })
+    // A later failure with no installable fix drops the stale option.
+    const noFix = reduce(failed, {
+      type: "BACKEND_CONNECT_FAIL",
+      failure: { kind: "handshake", stage: "launch", message: "not logged in" },
+    })
+    expect(noFix.backendInstallOption).toBeUndefined()
+
+    // Retry and success both clear every install remnant.
+    const withError = reduce(
+      reduce(failed, {
+        type: "BACKEND_INSTALL_START",
+        name: installOption.name,
+        display: installOption.method.display,
+      }),
+      { type: "BACKEND_INSTALL_FAIL", message: "boom" }
+    )
+    const retried = reduce(withError, { type: "BACKEND_CONNECT_RETRY", backend: "copilot-cli" })
+    expect(retried.backendInstallOption).toBeUndefined()
+    expect(retried.backendInstallError).toBeUndefined()
+
+    const live = reduce(withError, {
+      type: "BACKEND_CONNECT_OK",
+      capabilities: externalCapabilities({ backend: "copilot-cli" }),
+    })
+    expect(live.backendInstallOption).toBeUndefined()
+    expect(live.backendInstallError).toBeUndefined()
+    expect(live.backendInstall).toBeUndefined()
+  })
 })
 
 describe("tuiReducer — INPUT_EDIT", () => {
