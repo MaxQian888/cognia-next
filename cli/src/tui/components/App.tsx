@@ -8,6 +8,7 @@
  */
 import fs from "node:fs"
 import os from "node:os"
+import nodePath from "node:path"
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react"
 import { Box, useApp, useStdout, type DOMElement } from "ink"
 
@@ -27,8 +28,14 @@ import { BackendFailure, type BackendFailureAction } from "./BackendFailure"
 import { BackendInstall } from "./BackendInstall"
 import type { BackendInstallOption } from "../state/types"
 import { createAgentSession, type AgentSession } from "../../agent/session-runner"
-import { isBuiltinBackend } from "../runtime/backend-capabilities"
+import {
+  isBuiltinBackend,
+  supportsFeature,
+  unsupportedFeatureMessage,
+} from "../runtime/backend-capabilities"
+import { defaultBackendModelHost, type ExternalModelOption } from "../runtime/backend-models"
 import { disconnectBackend } from "../runtime/backend-controller"
+import { createBackendLifecycle, type BackendLifecycle } from "../runtime/backend-lifecycle"
 import type {
   connectBackend,
   BackendConnection,
@@ -93,20 +100,23 @@ import {
   countInterruptedCliBackgroundRuns,
   countRunningCliBackgroundRuns,
 } from "../../agent/subagent-background-tasks"
-import { copyToClipboard, type CopyResult } from "../clipboard"
+import { copyToClipboard, clipboardFailureMessage, type CopyResult } from "../clipboard"
 import { readClipboardImage as defaultReadClipboardImage } from "../clipboard-image"
 import { searchHistory } from "../input/history-search"
 import { bufferText, insertText } from "../input/buffer"
 import { appendHistory } from "../input/history-store"
 import { useAgentSession, type CreateSession } from "../hooks/useAgentSession"
+import { useLogIngest } from "../hooks/use-log-ingest"
 import { useTerminalSize } from "../hooks/useTerminalSize"
 import { addToolApproval, readToolApprovals } from "../../agent/tool-approvals"
 import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import { mintSessionId } from "../../agent/run"
 import { readTranscript, type TranscriptFs } from "../../agent/transcript"
 import { resolveHome } from "../../config/load"
+import { setCredential, type CredentialKind } from "../../config/credentials"
 import {
   setConfigValue,
+  setAgentBackendModel,
   setProviderModel,
   setStatusBarConfig,
   setMascotConfig,
@@ -126,6 +136,7 @@ import { openInEditor, detectEditor } from "../runtime/editor"
 import { resolveKeybindings } from "../input/keybindings"
 import {
   DEFAULT_MOUSE_MODE,
+  DEFAULT_SELECTION_MODE,
   resolveGitWorkflowConfig,
   resolveRenderConfig,
   resolveNotices,
@@ -156,6 +167,8 @@ import { useBashShellout } from "./app/use-bash-shellout"
 import { useBacktrack } from "./app/use-backtrack"
 import { useSteerQueue } from "./app/use-steer-queue"
 import { useTerminalChrome } from "./app/use-terminal-chrome"
+import { useTextSelection } from "../hooks/use-text-selection"
+import type { FrameBuffer } from "../selection/frame-buffer"
 import { TranscriptRegion } from "./app/TranscriptRegion"
 import { AppOverlays } from "./app/AppOverlays"
 import { BottomRegion } from "./app/BottomRegion"
@@ -265,6 +278,17 @@ export interface AppProps {
    * notice without throwing.
    */
   persistProviderModel?: (providerId: string, modelId: string) => boolean
+  /** Test seam for the per-backend model writer (`agentBackends[presetId]`). */
+  persistBackendModel?: (presetId: string, modelId: string) => boolean
+  /** Test seam for the external agent's own model catalog (`model/list`). */
+  listExternalModels?: (agentId: string) => Promise<ExternalModelOption[]>
+  /**
+   * Persist a freshly-entered provider credential to
+   * `~/.cognia/credentials.json` (0600) when the `/provider` key prompt is
+   * submitted; defaults to the real {@link setCredential} writer. Returns false
+   * on failure (read-only home) so the prompt can surface the error inline.
+   */
+  persistCredential?: (providerId: string, secret: string, kind: CredentialKind) => boolean
   /**
    * Flush the CLI-local Dexie after a runtime feature writes to it; defaults to
    * scheduling a debounced snapshot. Injected as a no-op by tests so they never
@@ -355,6 +379,10 @@ export interface AppProps {
   /** Sink for the alternate-screen enter/exit escapes; defaults to the Ink
    * stdout. Injected by tests to assert the lifecycle. */
   screenOut?: ScreenStream
+  /** Tap on Ink's committed frames, created by `mount.tsx` and handed to
+   * `render()` as the stdout. In-app drag-to-select reads the on-screen text
+   * from it; absent (tests, embedders) the feature simply never engages. */
+  frames?: FrameBuffer
   /** True when `mount.tsx` already entered + cleared the alternate screen BEFORE
    * Ink's first paint (the production fullscreen path). The App's alt-screen
    * effect then skips the redundant enter/clear that would otherwise wipe Ink's
@@ -395,6 +423,9 @@ export function App({
     }),
   persistConfig,
   persistProviderModel,
+  persistBackendModel,
+  listExternalModels,
+  persistCredential,
   clearScreen = clearTerminal,
   persistDb = () => {
     void ensureCliDb()
@@ -439,6 +470,7 @@ export function App({
   readClipboardImage = defaultReadClipboardImage,
   layoutCapability,
   screenOut,
+  frames,
   altScreenPreEntered,
   titleOut,
   titleEnv,
@@ -447,9 +479,13 @@ export function App({
   const [state, dispatch] = useReducer(tuiReducer, undefined, () =>
     createInitialState(config, sessionId, trusted, initialHistory)
   )
-  // The live external connection, if any. A ref (not state) because it is read
-  // when a session is lazily created, never rendered.
+  // One owner for the external backend's connect attempt, process, and
+  // teardown. A ref (not state) because it is read when a session is lazily
+  // created, never rendered. Cancellation here is AUTHORITATIVE: a process that
+  // finishes registering after a cancel is reclaimed rather than merely ignored,
+  // which is what the old local `cancelled` flag could not do.
   const connectionRef = useRef<BackendConnection | null>(null)
+  const lifecycleRef = useRef<BackendLifecycle<BackendConnection> | null>(null)
   // The install option resolved for the current failure (a ref so the failure
   // page's "install" handler reads the latest without recreating the callback).
   const installOptionRef = useRef<BackendInstallOption | null>(null)
@@ -479,9 +515,14 @@ export function App({
     },
     [activeBackend, createSession, createExternalSession]
   )
+  // Mounted ONCE for the app's lifetime (never per turn): the external-agent
+  // emitter has the default 10-listener cap, and a MaxListenersExceededWarning
+  // would print to stderr straight through the Ink frame.
+  const { pushLog } = useLogIngest({ dispatch })
   const agent = useAgentSession({
     config: state.config,
     dispatch,
+    onLog: pushLog,
     // Bind the chat session to the live app id so its transcript lands under the
     // id `/export`/`/handoff`/`/resume` read (it tracks `/clear` + `/resume`).
     sessionId: state.sessionId,
@@ -701,6 +742,9 @@ export function App({
   // Fullscreen mouse model (default = native click-drag selection). Drives the
   // alt-screen mouse escapes below and whether the wheel scrolls the transcript.
   const mouseMode = state.config.mouse ?? DEFAULT_MOUSE_MODE
+  // In-app drag-to-select. Only engages in fullscreen (the layout that owns the
+  // mouse) and only once a frame buffer is available to select over.
+  const selectionMode = state.config.selection ?? DEFAULT_SELECTION_MODE
 
   const { stdout } = useStdout()
   // Sink for the alt-screen enter/exit + mouse escapes (also re-applied live by
@@ -723,6 +767,9 @@ export function App({
     fullscreen,
     screen,
     mouseMode,
+    // Button-event tracking (`?1002h`) is what makes a drag visible to the TUI,
+    // so it is seeded with the alt screen whenever selection is on.
+    mouseDrag: selectionMode !== "off",
     altScreenPreEntered,
     stdout,
     clearScreen,
@@ -737,6 +784,19 @@ export function App({
     notifyEnabled,
     desktopNotifyEnabled,
     lastCompletion: state.lastCompletion,
+    now,
+  })
+
+  // In-app drag-to-select over the captured frame. Held in a ref (never in
+  // state) so a drag repaints the highlight without re-rendering the tree —
+  // see `selection/selection-controller`. Only mounted in fullscreen, since the
+  // frame the selection reads is the alt-screen frame.
+  const selectionRef = useTextSelection({
+    frames: fullscreen ? frames : undefined,
+    mode: selectionMode,
+    copy: copyClipboard,
+    notify: (message) => dispatch({ type: "NOTICE", message }),
+    failureMessage: (reason) => clipboardFailureMessage(reason, notices),
     now,
   })
 
@@ -830,14 +890,56 @@ export function App({
   // Open the `/model` switcher instantly with whatever models are cached, then
   // live-refresh once the dynamic catalog sync resolves.
   const openModelPicker = useCallback(() => {
+    // While an external agent hosts, the built-in provider's catalog is the
+    // wrong list — those are not models that agent can run, and picking one used
+    // to send the id straight into its session. Ask the agent instead, and say
+    // so plainly when it cannot enumerate its own models.
+    const caps = state.backendCapabilities
+    if (caps && !caps.builtin) {
+      if (!supportsFeature(caps, "modelPicker")) {
+        dispatch({ type: "NOTICE", message: unsupportedFeatureMessage(caps, "modelPicker") })
+        return
+      }
+      const agentId = connectionRef.current?.agentId
+      if (!agentId) {
+        dispatch({ type: "NOTICE", message: "The agent is not connected yet." })
+        return
+      }
+      const list = listExternalModels ?? defaultBackendModelHost().listExternalModels
+      void list(agentId).then((models) => {
+        if (models.length === 0) {
+          dispatch({ type: "NOTICE", message: `${caps.backend} did not report any models.` })
+          return
+        }
+        dispatch({
+          type: "OVERLAY_OPEN",
+          overlay: {
+            kind: "model",
+            options: models.map((m) => m.id),
+            index: 0,
+            query: "",
+          },
+        })
+      })
+      return
+    }
     const options = collectModelOptions(state.config)
     if (options.length === 0) {
-      dispatch({ type: "NOTICE", message: "No models configured." })
+      dispatch({
+        type: "NOTICE",
+        message: "No models configured. Set one with `cognia-agent config set model <id>`.",
+      })
       return
     }
     dispatch({ type: "OVERLAY_OPEN", overlay: { kind: "model", options, index: 0, query: "" } })
     syncAndRefreshModelOverlay()
-  }, [state.config, dispatch, syncAndRefreshModelOverlay])
+  }, [
+    state.config,
+    state.backendCapabilities,
+    dispatch,
+    syncAndRefreshModelOverlay,
+    listExternalModels,
+  ])
 
   // When a plan-mode turn proposes a plan (the reducer captured it as
   // `lastPlan`), persist it to `~/.cognia/plans` and open the approval prompt —
@@ -963,29 +1065,46 @@ export function App({
   useEffect(() => {
     if (state.phase !== "connecting") return
     const backend = liveConfigRef.current.agentBackend ?? "builtin"
-    let cancelled = false
-    // Loaded on demand: the external protocol stack is ~200KB of manager + ACP
-    // client that a built-in session must never pay to parse.
-    const connect = async () => {
-      const run = connectBackendFn ?? (await import("../runtime/backend-controller")).connectBackend
-      const { commandExists } = await import("../../runtime/external/node-backend")
-      return run({
-        backend,
-        config: liveConfigRef.current,
-        agentId: `cli-backend-${sessionId}`,
-        commandExists,
-        onStage: (stage) => {
-          if (!cancelled) dispatch({ type: "BACKEND_CONNECT_STAGE", backend, stage })
-        },
-      })
-    }
-    void connect().then(async (result) => {
-      if (cancelled) return
-      if (result.ok) {
-        connectionRef.current = result.connection
-        dispatch({ type: "BACKEND_CONNECT_OK", capabilities: result.connection.capabilities })
+    let failure: BackendConnectFailure | null = null
+    const lifecycle = createBackendLifecycle<BackendConnection>({
+      // Loaded on demand: the external protocol stack is ~200KB of manager + ACP
+      // client that a built-in session must never pay to parse.
+      connect: async (attempt) => {
+        const run =
+          connectBackendFn ?? (await import("../runtime/backend-controller")).connectBackend
+        const { commandExists } = await import("../../runtime/external/node-backend")
+        const result = await run({
+          backend,
+          config: liveConfigRef.current,
+          agentId: `cli-backend-${sessionId}`,
+          commandExists,
+          onStage: (stage) => {
+            // A superseded attempt must not repaint the progress line.
+            if (attempt === lifecycle.attempt && !lifecycle.isDisposed()) {
+              dispatch({ type: "BACKEND_CONNECT_STAGE", backend, stage })
+            }
+          },
+        })
+        if (result.ok) return result.connection
+        failure = result.failure
+        return null
+      },
+      disconnect: async (connection) => {
+        const { disconnectBackend: drop } = await import("../runtime/backend-controller")
+        await drop(connection)
+      },
+    })
+    lifecycleRef.current = lifecycle
+    void lifecycle.start().then(async (connection) => {
+      if (connection) {
+        connectionRef.current = connection
+        dispatch({ type: "BACKEND_CONNECT_OK", capabilities: connection.capabilities })
         return
       }
+      // Superseded/cancelled attempts have already reclaimed themselves and
+      // carry no failure to report.
+      if (!failure) return
+      const result = { ok: false as const, failure }
       // Reset the recovery cursor here rather than when the connect starts:
       // a synchronous set inside the effect body would cascade a render.
       setFailureIndex(0)
@@ -1001,7 +1120,7 @@ export function App({
       // so the failure page can offer to run it in place.
       const resolveInstallOption = resolveInstallOptionFn ?? defaultResolveInstallOption
       const installOption = await resolveInstallOption(result.failure)
-      if (cancelled) return
+      if (lifecycle.isDisposed()) return
       installOptionRef.current = installOption
       dispatch({
         type: "BACKEND_CONNECT_FAIL",
@@ -1010,7 +1129,9 @@ export function App({
       })
     })
     return () => {
-      cancelled = true
+      // Leaving the connecting phase supersedes the attempt. A result that lands
+      // afterwards is reclaimed by the lifecycle rather than left registered.
+      lifecycle.cancel()
     }
     // The config is read through `liveConfigRef`, deliberately keeping it out of
     // the deps: the effect must fire once per ENTRY into the connecting phase,
@@ -1023,6 +1144,10 @@ export function App({
   // route to the recovery page. Leaving the connecting phase runs the effect's
   // cleanup, which flips its `cancelled` flag so the settling connect is a no-op.
   const cancelBackendConnect = useCallback(() => {
+    // The lifecycle reclaims a process that registers after this point; the
+    // by-id removal stays as a belt-and-braces for a connect that never
+    // reported (no lifecycle yet, e.g. cancelled before the effect ran).
+    lifecycleRef.current?.cancel()
     void disconnectBackend({ agentId: `cli-backend-${sessionId}` })
     connectionRef.current = null
     installOptionRef.current = null
@@ -1038,7 +1163,12 @@ export function App({
   // spawned agent (and its sandboxed child). Runs once, on teardown.
   useEffect(() => {
     return () => {
-      void disconnectBackend(connectionRef.current)
+      // Dispose, not disconnect: teardown must also wait out a connect that is
+      // still settling, or its process outlives the TUI.
+      const lifecycle = lifecycleRef.current
+      if (lifecycle) void lifecycle.dispose()
+      else void disconnectBackend(connectionRef.current)
+      connectionRef.current = null
     }
   }, [])
 
@@ -1047,6 +1177,7 @@ export function App({
   // external → external switch does NOT call this — its reconnect re-registers
   // under the same id and reclaims the old process itself.
   const reclaimBackend = useCallback(() => {
+    lifecycleRef.current?.cancel()
     void disconnectBackend(connectionRef.current)
     connectionRef.current = null
   }, [])
@@ -1081,6 +1212,40 @@ export function App({
       }
     },
     [home, persistProviderModel]
+  )
+
+  // Persist a model under the EXTERNAL BACKEND that is hosting, keyed by the
+  // launched preset. Separate from the provider writer above because an external
+  // agent is not a chat provider — sharing that record would make a Claude Code
+  // pick rewrite the built-in Anthropic model. Same swallow-on-failure contract.
+  const persistBackendModelFn = useCallback(
+    (presetId: string, modelId: string): boolean => {
+      try {
+        if (persistBackendModel) return persistBackendModel(presetId, modelId)
+        setAgentBackendModel(home, presetId, modelId)
+        return true
+      } catch {
+        return false
+      }
+    },
+    [home, persistBackendModel]
+  )
+
+  // Write a provider credential (api key / subscription token) to
+  // `~/.cognia/credentials.json` when the `/provider` key prompt is submitted.
+  // Failures (read-only home) return false so the prompt surfaces the error
+  // inline instead of the App throwing.
+  const persistCredentialFn = useCallback(
+    (providerId: string, secret: string, kind: CredentialKind): boolean => {
+      try {
+        if (persistCredential) return persistCredential(providerId, secret, kind)
+        setCredential(home, providerId, secret, undefined, { kind })
+        return true
+      } catch {
+        return false
+      }
+    },
+    [home, persistCredential]
   )
 
   // Resolve a plan-approval choice (Claude Code parity — the execution mode is
@@ -1211,6 +1376,7 @@ export function App({
     notices,
     pushHandoff,
     openSessions,
+    openModelPicker,
     resumeMostRecent,
     resumeSession,
     runBash,
@@ -1226,6 +1392,7 @@ export function App({
     persistDb,
     fullscreen,
     screen,
+    selectionRef,
     startGoalRun,
     startLoopRun,
     startFixRun,
@@ -1238,6 +1405,35 @@ export function App({
     getRuntimeAbort,
     mcpProbeCache,
   })
+
+  // Ctrl+click "smart action at point" needs two capabilities the resolver
+  // deliberately doesn't own: whether a path-shaped token is a real file, and
+  // how to open it. Both route through the existing editor plumbing, so a click
+  // and `/open` behave identically.
+  const fileExists = useCallback(
+    (candidate: string) => {
+      try {
+        const abs = nodePath.isAbsolute(candidate)
+          ? candidate
+          : nodePath.resolve(state.config.cwd, candidate)
+        return fs.statSync(abs).isFile()
+      } catch {
+        return false
+      }
+    },
+    [state.config.cwd]
+  )
+  const openFileAt = useCallback(
+    (file: string, line?: number, col?: number) => {
+      applyEffect({
+        kind: "openFile",
+        file,
+        ...(line === undefined ? {} : { line }),
+        ...(col === undefined ? {} : { col }),
+      })
+    },
+    [applyEffect]
+  )
 
   const runCommandLine = useCallback(
     (line: string) => {
@@ -1625,7 +1821,7 @@ export function App({
         type: "OVERLAY_OPEN",
         overlay: {
           kind: "settings",
-          sections: settingsSections({ ...cfg, ...patch }),
+          sections: settingsSections({ ...cfg, ...patch }, state.backendCapabilities),
           section,
           index,
         },
@@ -1639,7 +1835,7 @@ export function App({
         dispatch({ type: "REPAINT" })
       }
     },
-    [state.config, state.overlay, home, agent, clearScreen, fullscreen]
+    [state.config, state.overlay, state.backendCapabilities, home, agent, clearScreen, fullscreen]
   )
 
   // Enter on a delegate/form settings row: delegate rows run the existing slash
@@ -1795,6 +1991,11 @@ export function App({
     busy,
     fullscreen,
     mouseMode,
+    selectionMode,
+    selection: selectionRef,
+    screenRows: () => frames?.plain() ?? [],
+    fileExists,
+    openFileAt,
     notices,
     keybindings,
     renderPrefs,
@@ -1836,14 +2037,18 @@ export function App({
   )
   const banner = useMemo(
     () => (
+      // No `?? activeModel` fallback: `identity.model` is absent exactly when we
+      // never told the agent which model to use, and substituting the built-in
+      // provider's catalog default there is the fabrication `backendIdentity`
+      // exists to prevent. Absent renders as no model at all, which is honest.
       <Banner
         version={VERSION}
         provider={identity.provider}
-        model={identity.model ?? activeModel}
+        {...(identity.model ? { model: identity.model } : {})}
         cwd={state.config.cwd}
       />
     ),
-    [activeModel, identity, state.config.cwd]
+    [identity, state.config.cwd]
   )
   const lastPlanRaw = state.lastPlan?.raw
   const footerPlanTitle = useMemo(
@@ -1973,6 +2178,7 @@ export function App({
             state={state}
             fullscreen={fullscreen}
             banner={banner}
+            identity={identity}
             activeModel={activeModel}
             scroll={scroll}
             scrollContentRef={scrollContentRef}
@@ -1990,6 +2196,8 @@ export function App({
             resolvePermission={resolvePermission}
             persist={persist}
             persistProviderModelFn={persistProviderModelFn}
+            persistBackendModelFn={persistBackendModelFn}
+            persistCredentialFn={persistCredentialFn}
             persistPluginTools={persistPluginTools}
             openModelPicker={openModelPicker}
             applySettings={applySettings}
