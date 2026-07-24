@@ -16,9 +16,13 @@ import { MarketplaceBrowser } from "../MarketplaceBrowser"
 import { McpPanel } from "../McpPanel"
 import { McpToolsPanel } from "../McpToolsPanel"
 import { McpLogPanel } from "../McpLogPanel"
+import { LogPanel } from "../LogPanel"
+import { logInjectionActions, mergeLogSources, nextLogPasteSeq } from "../../runtime/log-model"
 import { copyToClipboard } from "../../clipboard"
 import { SkillPanel } from "../SkillPanel"
 import { EffortSlider } from "../EffortSlider"
+import { isBuiltinBackend } from "../../runtime/backend-capabilities"
+import { requiresReconnect } from "../../runtime/context-lifecycle"
 import { PermissionOverlay } from "../overlays/PermissionOverlay"
 import { Help } from "../overlays/Help"
 import { HistorySearch } from "../overlays/HistorySearch"
@@ -37,6 +41,7 @@ import { ConfirmOverlay } from "../overlays/ConfirmOverlay"
 import { PlanApprovalOverlay } from "../overlays/PlanApprovalOverlay"
 import { AskUserDialog } from "../overlays/AskUserDialog"
 import { FormOverlay } from "../overlays/FormOverlay"
+import { ProviderKeyOverlay } from "../overlays/ProviderKeyOverlay"
 import { SettingsOverlay } from "../overlays/SettingsOverlay"
 import { cycleSubagentModel, cycleSubagentProvider } from "../../runtime/subagent-models-model"
 import { catalogModelIds } from "@/lib/ai/model-options"
@@ -45,11 +50,12 @@ import { filterByQuery } from "../select-list-state"
 import {
   SEARCHABLE_MIN,
   filterInspectItems,
+  filterProviderOptions,
   filterQuickActions,
   filterSelectItems,
   filterSessionItems,
 } from "../../state/overlay-search"
-import { collectProviderOptions } from "../../commands/provider-options"
+import { collectProviderOptions, type ProviderOption } from "../../commands/provider-options"
 import {
   readCrashReportText,
   resolveCrashLogDirs,
@@ -97,6 +103,11 @@ export interface AppOverlaysProps {
   resolvePermission: (decision: CapturePermissionDecision) => void
   persist: (key: string, value: string) => boolean
   persistProviderModelFn: (providerId: string, modelId: string) => boolean
+  /** Persist a model under the hosting external backend (`agentBackends`). */
+  persistBackendModelFn: (presetId: string, modelId: string) => boolean
+  /** Write a freshly-entered provider credential to `~/.cognia/credentials.json`;
+   * returns false on failure (read-only home) so the key prompt can surface it. */
+  persistCredentialFn: (providerId: string, secret: string, kind: "apiKey" | "authToken") => boolean
   persistPluginTools: (home: string, enabled: boolean) => void
   openModelPicker: () => void
   applySettings: (target: SettingsApplyTarget, value: string | boolean) => void
@@ -123,6 +134,8 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
     resolvePermission,
     persist,
     persistProviderModelFn,
+    persistBackendModelFn,
+    persistCredentialFn,
     persistPluginTools,
     openModelPicker,
     applySettings,
@@ -136,6 +149,16 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
     askUser,
     mcpPanelDeps,
   } = props
+
+  // MCP rows are projected into the unified view at READ time rather than being
+  // mirrored into `state.logs` at ingest, so nothing is stored twice and the
+  // `/mcp logs` panel keeps sole ownership of its buffer. Memoized, and the
+  // component only mounts while an overlay is open, so a closed panel costs
+  // nothing at all.
+  const mergedLogs = React.useMemo(
+    () => mergeLogSources(state.logs, state.mcpLogs),
+    [state.logs, state.mcpLogs]
+  )
 
   // Live refresher for the open agents panel: re-merge the live-output store +
   // background registry over the journal-backed snapshot the panel opened with,
@@ -188,9 +211,18 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
               onSelect={(i) => {
                 const m = filtered[i]
                 if (!m) return
-                // Remember the pick under the ACTIVE provider, not as a global pin —
-                // so it survives a provider switch and never bleeds onto others.
-                persistProviderModelFn(state.config.provider, m)
+                // Where the pick is remembered follows WHO will run it. On an
+                // external backend it belongs to that agent (keyed by the
+                // launched preset); writing it under the chat provider would
+                // make choosing a Codex model rewrite the built-in one.
+                const caps = state.backendCapabilities
+                if (caps && !caps.builtin) {
+                  persistBackendModelFn(caps.presetId ?? caps.backend, m)
+                } else {
+                  // Remember the pick under the ACTIVE provider, not as a global pin —
+                  // so it survives a provider switch and never bleeds onto others.
+                  persistProviderModelFn(state.config.provider, m)
+                }
                 void agent.switchModel(m)
               }}
               onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
@@ -237,6 +269,20 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
             // switchThinking dispatches SET_THINKING (with pluginTools) AND
             // drops the session so the new effort + gate apply next turn.
             void agent.switchThinking(lvl, pluginTools)
+            // Codex reads reasoning effort when the AGENT is registered, not per
+            // turn, so dropping the session is not enough on an external backend
+            // — the process would keep running at the old effort while the
+            // footer showed the new one. Re-enter the connect flow to
+            // re-register it. (See CONTEXT_FIELD_LIFECYCLE: "connect" layer.)
+            if (
+              requiresReconnect("Thinking level") &&
+              !isBuiltinBackend(state.config.agentBackend)
+            ) {
+              dispatch({
+                type: "BACKEND_CONNECT_RETRY",
+                backend: state.config.agentBackend ?? "builtin",
+              })
+            }
             // Warn (but still save) when the active model won't honour effort —
             // the preference re-applies once a reasoning-capable model is active.
             if (lvl !== "off" && !modelSupportsEffort(state.config.provider, activeModel)) {
@@ -249,40 +295,128 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
         />
       )}
-      {state.overlay.kind === "provider" && (
-        <SelectList
-          title="Switch provider"
-          items={state.overlay.options.map((p) => ({
-            label: p.name,
-            hint: `${p.id} · ${p.configured ? p.auth : "not configured"}`,
-          }))}
-          index={state.overlay.index}
-          width={columns}
-          maxRows={overlayRows}
-          onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
-          onSelect={(i) => {
-            const picked = (state.overlay as { options: { id: string; configured: boolean }[] })
-              .options[i]
-            // Reset to the new provider's default model so the active model is
-            // always valid for the provider: the provider's own configured model
-            // wins, else its curated catalog default (shared model catalog).
-            const defaultModel =
-              state.config.providers[picked.id]?.model ?? catalogModelIds(picked.id)[0]
-            persist("provider", picked.id)
-            // Do NOT pin a top-level model on switch — the provider's own
-            // remembered model (or its catalog default) drives the display via
-            // resolveActiveModel, so switching never strands another provider's id.
-            void agent.switchProvider(picked.id, defaultModel)
-            if (!picked.configured) {
-              dispatch({
-                type: "NOTICE",
-                message: `No credential for "${picked.id}" — run: cognia-agent auth login --provider ${picked.id} --api-key <key>`,
-              })
-            }
-          }}
-          onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
-        />
-      )}
+      {state.overlay.kind === "provider" &&
+        (() => {
+          const providerOverlay = state.overlay
+          const query = providerOverlay.query ?? ""
+          // Same filtered-view contract as `/model`: the shared catalog runs to
+          // dozens of ids, so the picker filters by a typeahead query, and
+          // `index` points into `filtered` (not `options`) — navigation and
+          // selection always track what's on screen. The search row appears once
+          // the list is long enough, or the moment the user starts typing.
+          const filtered = filterProviderOptions(providerOverlay.options, query)
+          const searchable = providerOverlay.options.length >= SEARCHABLE_MIN || query.length > 0
+          // Activate a provider: reset to its remembered/default model so a stale
+          // id from the previous provider is never sent to one that won't serve
+          // it (shared model catalog). No top-level model pin on switch —
+          // resolveActiveModel drives the display from the provider's own slot.
+          const activate = (p: ProviderOption) => {
+            const defaultModel = state.config.providers[p.id]?.model ?? catalogModelIds(p.id)[0]
+            persist("provider", p.id)
+            void agent.switchProvider(p.id, defaultModel)
+          }
+          return (
+            <SelectList
+              title="Switch provider"
+              items={filtered.map((p) => ({
+                label: p.name,
+                hint: `${p.id} · ${p.configured ? p.auth : "not configured"}`,
+              }))}
+              index={providerOverlay.index}
+              width={columns}
+              maxRows={overlayRows}
+              query={query}
+              searchRowVisible={searchable}
+              searchPlaceholder="type to filter providers"
+              emptyHint="no providers match"
+              onQueryChange={(q) => dispatch({ type: "OVERLAY_QUERY", query: q })}
+              onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
+              onSelect={(i) => {
+                const picked = filtered[i]
+                if (!picked) return
+                // Already-credentialed providers, and those that authenticate
+                // without a metered key (local runtimes, OAuth/subscription),
+                // just switch. Only a key-required provider with no credential
+                // opens the inline key prompt — so the session never lands on a
+                // provider it can't authenticate to.
+                if (picked.configured || !picked.requiresKey) {
+                  activate(picked)
+                  return
+                }
+                const defaultModel =
+                  state.config.providers[picked.id]?.model ?? catalogModelIds(picked.id)[0]
+                dispatch({
+                  type: "OVERLAY_OPEN",
+                  overlay: {
+                    kind: "providerKey",
+                    providerId: picked.id,
+                    providerName: picked.name,
+                    credentialKind: "apiKey",
+                    value: "",
+                    reveal: false,
+                    ...(defaultModel ? { model: defaultModel } : {}),
+                    ...(picked.keyUrl ? { keyUrl: picked.keyUrl } : {}),
+                  },
+                })
+              }}
+              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+            />
+          )
+        })()}
+      {state.overlay.kind === "providerKey" &&
+        (() => {
+          const keyOverlay = state.overlay
+          return (
+            <ProviderKeyOverlay
+              providerName={keyOverlay.providerName}
+              credentialKind={keyOverlay.credentialKind}
+              value={keyOverlay.value}
+              reveal={keyOverlay.reveal}
+              {...(keyOverlay.keyUrl ? { keyUrl: keyOverlay.keyUrl } : {})}
+              {...(keyOverlay.error ? { error: keyOverlay.error } : {})}
+              onInput={(value) => dispatch({ type: "OVERLAY_PROVIDER_KEY_INPUT", value })}
+              onToggleReveal={() => dispatch({ type: "OVERLAY_PROVIDER_KEY_REVEAL" })}
+              onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
+              onSubmit={() => {
+                const secret = keyOverlay.value.trim()
+                if (!secret) {
+                  dispatch({
+                    type: "OVERLAY_PROVIDER_KEY_ERROR",
+                    error: "Enter a key, or press Esc to cancel.",
+                  })
+                  return
+                }
+                const saved = persistCredentialFn(
+                  keyOverlay.providerId,
+                  secret,
+                  keyOverlay.credentialKind
+                )
+                if (!saved) {
+                  dispatch({
+                    type: "OVERLAY_PROVIDER_KEY_ERROR",
+                    error: "Couldn't save the key — is ~/.cognia writable?",
+                  })
+                  return
+                }
+                // Reflect the credential in-memory (next turn authenticates with
+                // it), then activate the provider — SET_PROVIDER inside
+                // switchProvider closes the overlay.
+                dispatch({
+                  type: "SET_PROVIDER_CREDENTIAL",
+                  providerId: keyOverlay.providerId,
+                  credentialKind: keyOverlay.credentialKind,
+                  secret,
+                })
+                persist("provider", keyOverlay.providerId)
+                void agent.switchProvider(keyOverlay.providerId, keyOverlay.model)
+                dispatch({
+                  type: "NOTICE",
+                  message: `Saved ${keyOverlay.credentialKind === "authToken" ? "token" : "API key"} and switched to "${keyOverlay.providerName}".`,
+                })
+              }}
+            />
+          )
+        })()}
       {state.overlay.kind === "config" && (
         <SelectList
           title="Settings"
@@ -591,6 +725,43 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
                   : "Couldn't copy MCP logs to the clipboard.",
               })
             )
+          }}
+          onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
+        />
+      )}
+      {state.overlay.kind === "logs" && (
+        <LogPanel
+          entries={mergedLogs}
+          width={columns}
+          maxRows={overlayRows}
+          onClear={() => dispatch({ type: "LOG_CLEAR" })}
+          onCopy={(text) => {
+            if (!text) return
+            void copyToClipboard(text).then((res) =>
+              dispatch({
+                type: "NOTICE",
+                message: res.ok
+                  ? "Copied logs to the clipboard."
+                  : "Couldn't copy logs to the clipboard.",
+              })
+            )
+          }}
+          onInject={(rows, scope) => {
+            // The caret that matters is the one OVERLAY_CLOSE is about to
+            // restore, not the live one.
+            const caret = state.input.savedCursor ?? {
+              row: state.input.buffer.cursorRow,
+              col: state.input.buffer.cursorCol,
+            }
+            const beforeCaret = (state.input.buffer.lines[caret.row] ?? "").slice(0, caret.col)
+            for (const action of logInjectionActions({
+              rows,
+              scope,
+              beforeCaret,
+              pasteSeq: nextLogPasteSeq(state.input.pastes),
+            })) {
+              dispatch(action)
+            }
           }}
           onClose={() => dispatch({ type: "OVERLAY_CLOSE" })}
         />

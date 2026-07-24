@@ -134,3 +134,66 @@ describe("isResumableLink", () => {
     expect(isResumableLink(link, undefined)).toBe(false)
   })
 })
+
+describe("isResumableLink — context version", () => {
+  const versioned = { backend: "codex", externalSessionId: "acp-7", contextVersion: "v1" }
+
+  it("accepts a link recorded under the SAME context", () => {
+    expect(isResumableLink(versioned, "codex", "v1")).toBe(true)
+  })
+
+  it("refuses a link recorded under a different context", () => {
+    expect(isResumableLink(versioned, "codex", "v2")).toBe(false)
+  })
+
+  it("refuses a link that predates context versions — unknown is not a match", () => {
+    expect(isResumableLink({ backend: "codex", externalSessionId: "acp-7" }, "codex", "v1")).toBe(
+      false
+    )
+  })
+
+  it("ignores the version when the caller does not care (backend-only resume check)", () => {
+    expect(isResumableLink(versioned, "codex")).toBe(true)
+  })
+})
+
+describe("readExternalLink — context version", () => {
+  it("round-trips the recorded context version", () => {
+    const home = "/home/u/.cognia"
+    const store: Record<string, string> = {}
+    const fsx = {
+      append: () => undefined,
+      read: (p: string) => store[p] ?? null,
+      mkdirp: () => undefined,
+      write: (p: string, content: string) => {
+        store[p] = content
+      },
+    }
+    writeExternalLink(
+      home,
+      "s1",
+      { backend: "codex", externalSessionId: "acp-7", contextVersion: "v1" },
+      fsx
+    )
+    expect(readExternalLink(home, "s1", fsx)).toEqual({
+      backend: "codex",
+      externalSessionId: "acp-7",
+      contextVersion: "v1",
+    })
+  })
+
+  it("omits the field entirely when the stored link carries a non-string version", () => {
+    const home = "/home/u/.cognia"
+    const raw = JSON.stringify({ backend: "codex", externalSessionId: "acp-7", contextVersion: 7 })
+    const fsx = {
+      append: () => undefined,
+      read: () => raw,
+      mkdirp: () => undefined,
+      write: () => undefined,
+    }
+    expect(readExternalLink(home, "s1", fsx)).toEqual({
+      backend: "codex",
+      externalSessionId: "acp-7",
+    })
+  })
+})

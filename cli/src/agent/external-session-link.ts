@@ -86,12 +86,22 @@ export function readExternalLink(
  * A link from a different backend is useless — an agent cannot load another
  * agent's session — and saying so is what keeps a cross-backend resume from
  * looking like it worked.
+ *
+ * When `contextVersion` is supplied, a link recorded under a DIFFERENT Cognia
+ * context is refused too. Resuming across a context change would hand the agent
+ * back a conversation whose instructions, roots, model or tool surface no longer
+ * match what Cognia would now send, so it would keep obeying settings the TUI
+ * already shows as changed. A link recorded before versions existed carries none
+ * and is treated the same way — unknown is not a match.
  */
 export function isResumableLink(
   link: ExternalSessionLink | undefined,
-  backend: string | undefined
+  backend: string | undefined,
+  contextVersion?: string
 ): link is ExternalSessionLink {
-  return !!link && !!backend && link.backend === backend
+  if (!link || !backend || link.backend !== backend) return false
+  if (contextVersion === undefined) return true
+  return link.contextVersion === contextVersion
 }
 
 /**

@@ -48,6 +48,7 @@ import { readToolApprovals } from "./tool-approvals"
 import { startToolHostBroker, type ToolHostBroker } from "./tool-host/broker"
 import { createHostToolExecutor } from "./tool-host/host-tools"
 import { buildToolHostMcpServers, isCogniaProjectedTool } from "./tool-host/spawn"
+import { CONTEXT_RESTART_NOTICE } from "../tui/runtime/context-lifecycle"
 import {
   externalPromptText,
   unsupportedAttachmentMessage,
@@ -502,14 +503,16 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
   ): Promise<{ session: ResolvedCliSessionContext; restarted: boolean }> => {
     const session = await assembler.resolveSession()
     let restarted = false
-    if (sessionContextVersion !== null && sessionContextVersion !== session.contextVersion) {
+    // Only a session that actually exists can be stale. `sessionContextVersion`
+    // is null for a link recorded before versions existed, and null never equals
+    // a hash — so an unknown-context resume is refused exactly like a changed
+    // one rather than silently continuing.
+    if (externalSessionId && sessionContextVersion !== session.contextVersion) {
       // Everything `session/new` baked in has changed. Appending a second system
       // prompt to the live session would leave the agent with two conflicting
       // instruction sets and make resume non-deterministic, so start a new
       // protocol session instead — the TUI transcript is unaffected.
-      if (externalSessionId) {
-        await manager.cancel(agentId, externalSessionId).catch(() => undefined)
-      }
+      await manager.cancel(agentId, externalSessionId).catch(() => undefined)
       externalSessionId = undefined
       await stopToolHost()
       mcpServers = undefined
@@ -526,11 +529,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       await ensureAgent()
       const { session, restarted } = await reconcile(opts)
       if (restarted) {
-        opts.onAction?.({
-          type: "NOTICE",
-          message:
-            "Session settings changed — restarting the external agent's context. Your transcript is kept; the agent starts this turn fresh.",
-        })
+        opts.onAction?.({ type: "NOTICE", message: CONTEXT_RESTART_NOTICE })
       }
       if (!skillsAnnounced && session.activeSkillIds.length > 0) {
         skillsAnnounced = true
