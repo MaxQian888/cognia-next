@@ -1,15 +1,28 @@
 {
   "errors": {
+    "adapter_missing": "This page is missing its bot context — open it from the Feishu shortcut again.",
     "entry_consumed": "This link was already used. Ask the bot for a fresh link.",
     "entry_expired": "This link has expired. Ask the bot for a fresh link.",
     "entry_missing": "This link is incomplete — open it again from Feishu.",
+    "feature_disabled": "Message import is not enabled for this workspace.",
     "forbidden": "You don't have access to this conversation.",
+    "import_failed": "The import failed. Please try again.",
+    "membership_denied": "You are not a member of that chat.",
+    "no_messages_selected": "No importable messages were selected.",
     "resolve_failed": "Could not verify this link. Please try again.",
     "timeout": "Verification timed out. Please try again.",
+    "trigger_detail_failed": "Couldn't read the selected messages from Feishu. Try the shortcut again.",
+    "trigger_missing": "No message selection was passed in — open this page via the Feishu message shortcut.",
     "unbound": "Your Feishu account is not linked to Cognia yet. Ask your administrator to complete the binding."
   },
   "loginRedirect": "Redirecting to Feishu sign-in…",
   "openWorkbench": "Open workbench",
   "resolving": "Verifying your link…",
+  "shortcut": {
+    "title": "Import messages",
+    "preparing": "Preparing the import…",
+    "importing": "Importing the selected messages…",
+    "done": "Imported — opening the conversation…"
+  },
   "title": "Cognia entry"
 }

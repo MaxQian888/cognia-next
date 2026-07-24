@@ -12,6 +12,12 @@
  *                          verify the logged-in user is a MEMBER of the chat
  *                          via the Lark members API, then answer the pending
  *                          intent with the conversationKey (or a deny code).
+ *   - `import_messages`  — message-shortcut import (plan P5.1): delegate to
+ *                          `adapters/lark/message-import.ts` (flag + principal
+ *                          + membership + per-message verification) and answer
+ *                          with the produced sessionId/conversationKey.
+ *   - `plus_create`      — `+`-menu new-task intent (plan P5.2): delegate to
+ *                          `adapters/lark/plus-create.ts`.
  *
  * Registered by the headless connector runtime; a desktop install without a
  * companion listener simply never receives these frames.
@@ -23,6 +29,8 @@ import { connectorsKeyringGet } from "@/lib/connectors/tauri/commands"
 import { markEntryContextConsumed } from "@/lib/db/lark-entry"
 import { appendAudit } from "@/lib/connectors/audit"
 import { larkTenantRequest, type LarkCredentials } from "@/lib/connectors/adapters/lark/http"
+import { importLarkMessages } from "@/lib/connectors/adapters/lark/message-import"
+import { handlePlusCreate } from "@/lib/connectors/adapters/lark/plus-create"
 
 export const LARK_INTENT_TOPIC = "connectors://lark-intent"
 
@@ -37,6 +45,8 @@ export interface LarkIntentFrame {
   jti?: string
   entryType?: string
   surface?: string
+  messageIds?: string[]
+  triggerId?: string
   verifiedIdentity?: { openId?: string; tenantKey?: string; appId?: string }
 }
 
@@ -46,6 +56,8 @@ export interface LarkIntentDependencies {
   tenantRequest: typeof larkTenantRequest
   markConsumed: typeof markEntryContextConsumed
   audit: typeof appendAudit
+  importMessages: typeof importLarkMessages
+  plusCreate: typeof handlePlusCreate
 }
 
 async function credsFor(
@@ -149,6 +161,83 @@ export async function handleLarkIntentFrame(
         .call("lark_result_complete", { requestId, error: "membership_check_failed" })
         .catch(() => undefined)
     }
+    return
+  }
+
+  if (frame.kind === "import_messages" || frame.kind === "plus_create") {
+    const { requestId, adapterId } = frame
+    const openId = frame.verifiedIdentity?.openId
+    if (!requestId) return
+    if (!adapterId || !openId) {
+      await deps.call("lark_result_complete", { requestId, error: "intent_malformed" })
+      return
+    }
+    const verifiedIdentity = {
+      openId,
+      tenantKey: frame.verifiedIdentity?.tenantKey,
+      appId: frame.verifiedIdentity?.appId,
+    }
+    await deps
+      .audit({
+        adapterId,
+        kind: "sso.session_seen",
+        at: Date.now(),
+        fields: { tenantKey: verifiedIdentity.tenantKey, intent: frame.kind },
+      })
+      .catch(() => undefined)
+    const isMember = (memberAdapterId: string, chatId: string, memberOpenId: string) =>
+      isChatMember(deps, memberAdapterId, chatId, memberOpenId)
+    try {
+      if (frame.kind === "import_messages") {
+        if (!frame.chatId || !Array.isArray(frame.messageIds)) {
+          await deps.call("lark_result_complete", { requestId, error: "intent_malformed" })
+          return
+        }
+        const outcome = await deps.importMessages(
+          {
+            adapterId,
+            chatId: frame.chatId,
+            messageIds: frame.messageIds,
+            verifiedIdentity,
+            triggerId: frame.triggerId,
+          },
+          { isMember, keyringGet: deps.keyringGet, tenantRequest: deps.tenantRequest }
+        )
+        await deps.call(
+          "lark_result_complete",
+          outcome.ok
+            ? {
+                requestId,
+                result: {
+                  conversationKey: outcome.conversationKey,
+                  sessionId: outcome.sessionId,
+                  imported: outcome.imported,
+                  skipped: outcome.skipped,
+                  replay: outcome.replay,
+                },
+              }
+            : { requestId, error: outcome.error }
+        )
+        return
+      }
+      const outcome = await deps.plusCreate(
+        { adapterId, chatId: frame.chatId, verifiedIdentity },
+        { isMember }
+      )
+      await deps.call(
+        "lark_result_complete",
+        outcome.ok
+          ? {
+              requestId,
+              result: { conversationKey: outcome.conversationKey, sessionId: outcome.sessionId },
+            }
+          : { requestId, error: outcome.error }
+      )
+    } catch {
+      await deps
+        .call("lark_result_complete", { requestId, error: "intent_failed" })
+        .catch(() => undefined)
+    }
   }
 }
 
@@ -171,6 +260,8 @@ export function installLarkIntentHandler(
     tenantRequest: larkTenantRequest,
     markConsumed: markEntryContextConsumed,
     audit: appendAudit,
+    importMessages: importLarkMessages,
+    plusCreate: handlePlusCreate,
     ...overrides,
   }
   let disposed = false

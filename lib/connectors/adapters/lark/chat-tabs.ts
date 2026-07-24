@@ -19,6 +19,7 @@
 
 import { isLarkFeatureEnabled } from "@/lib/connectors/feature-flags"
 import { appendAudit } from "@/lib/connectors/audit"
+import { recordConnectorMetric } from "@/lib/connectors/metrics"
 import { buildSurfaceUrl, CHAT_TAB_URL_VERSION } from "@/lib/connectors/entry/deep-links"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import type { AdapterInstanceRow, LarkChatSurfaceType } from "@/lib/db/connector-types"
@@ -140,6 +141,7 @@ export async function reconcileChatTabSurface(
 
     const fail = async (reason: string): Promise<SurfaceReconcileResult> => {
       const row = await deps.markError(ctx.adapterId, chatId, "chat_tab", reason, deps.now())
+      recordConnectorMetric("lark_chat_tab_sync_failures_total")
       await deps.audit({
         adapterId: ctx.adapterId,
         kind: "chat_tab.sync_failed",

@@ -129,6 +129,15 @@ export type AuditKind =
   | "menu.unknown_key"
   | "chat_tab.synced"
   | "chat_tab.sync_failed"
+  // ── Lark message shortcuts + plus menu (plan 2026-07-24 Phase 5) ─────
+  // `shortcut.import` fields carry {chatId, openIdHash, imported, skipped,
+  // sessionId} — message CONTENT never lands in the audit log.
+  // `sso.session_seen` records a verified web-SSO identity driving an
+  // intent (openIdHash + tenantKey only).
+  | "shortcut.import"
+  | "shortcut.import_denied"
+  | "plus.create"
+  | "sso.session_seen"
   // ── Feishu unified identity (plan 2026-07-24 Phase 1) ────────────────
   // Principal registry outcomes. `principal.unbound` fields carry
   // {tenantKey?, appId?, openIdHash, reason} — the raw open_id never lands

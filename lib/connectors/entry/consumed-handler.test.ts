@@ -18,6 +18,19 @@ function makeDeps(overrides: Partial<LarkIntentDependencies> = {}) {
     tenantRequest: jest.fn(async () => ({ data: { items: [] } })),
     markConsumed: jest.fn(async () => undefined),
     audit: jest.fn(async (_e: unknown) => ({}) as never),
+    importMessages: jest.fn(async () => ({
+      ok: true as const,
+      sessionId: "sess_i",
+      conversationKey: "lark:lk-1:oc_1",
+      imported: 2,
+      skipped: [],
+      replay: false,
+    })),
+    plusCreate: jest.fn(async () => ({
+      ok: true as const,
+      conversationKey: "lark:lk-1:oc_1",
+      sessionId: "sess_p",
+    })),
     ...overrides,
   } as LarkIntentDependencies & {
     call: jest.Mock
@@ -25,6 +38,8 @@ function makeDeps(overrides: Partial<LarkIntentDependencies> = {}) {
     tenantRequest: jest.Mock
     markConsumed: jest.Mock
     audit: jest.Mock
+    importMessages: jest.Mock
+    plusCreate: jest.Mock
   }
 }
 
@@ -116,6 +131,92 @@ describe("handleLarkIntentFrame", () => {
       requestId: "req_4",
       error: "membership_check_failed",
     })
+  })
+
+  it("routes import_messages to the importer and answers with its result", async () => {
+    const deps = makeDeps()
+    await handleLarkIntentFrame(
+      {
+        kind: "import_messages",
+        requestId: "req_i",
+        adapterId: "lk-1",
+        chatId: "oc_1",
+        messageIds: ["om_1", "om_2"],
+        triggerId: "trig_1",
+        verifiedIdentity: { openId: "ou_alice", tenantKey: "tk_a", appId: "cli_1" },
+      },
+      deps
+    )
+    expect(deps.importMessages).toHaveBeenCalledWith(
+      expect.objectContaining({
+        adapterId: "lk-1",
+        chatId: "oc_1",
+        messageIds: ["om_1", "om_2"],
+        triggerId: "trig_1",
+        verifiedIdentity: { openId: "ou_alice", tenantKey: "tk_a", appId: "cli_1" },
+      }),
+      expect.objectContaining({ isMember: expect.any(Function) })
+    )
+    expect(deps.call).toHaveBeenCalledWith("lark_result_complete", {
+      requestId: "req_i",
+      result: expect.objectContaining({ sessionId: "sess_i", imported: 2 }),
+    })
+    const auditKinds = deps.audit.mock.calls.map((c) => (c[0] as { kind: string }).kind)
+    expect(auditKinds).toContain("sso.session_seen")
+  })
+
+  it("maps importer denials onto intent errors", async () => {
+    const deps = makeDeps({
+      importMessages: jest.fn(async () => ({
+        ok: false as const,
+        error: "membership_denied",
+      })) as never,
+    })
+    await handleLarkIntentFrame(
+      {
+        kind: "import_messages",
+        requestId: "req_id",
+        adapterId: "lk-1",
+        chatId: "oc_1",
+        messageIds: ["om_1"],
+        verifiedIdentity: { openId: "ou_mallory" },
+      },
+      deps
+    )
+    expect(deps.call).toHaveBeenCalledWith("lark_result_complete", {
+      requestId: "req_id",
+      error: "membership_denied",
+    })
+  })
+
+  it("routes plus_create and rejects frames without identity", async () => {
+    const deps = makeDeps()
+    await handleLarkIntentFrame(
+      {
+        kind: "plus_create",
+        requestId: "req_p",
+        adapterId: "lk-1",
+        chatId: "oc_2",
+        verifiedIdentity: { openId: "ou_alice" },
+      },
+      deps
+    )
+    expect(deps.plusCreate).toHaveBeenCalled()
+    expect(deps.call).toHaveBeenCalledWith("lark_result_complete", {
+      requestId: "req_p",
+      result: { conversationKey: "lark:lk-1:oc_1", sessionId: "sess_p" },
+    })
+
+    const anonymous = makeDeps()
+    await handleLarkIntentFrame(
+      { kind: "plus_create", requestId: "req_q", adapterId: "lk-1", verifiedIdentity: {} },
+      anonymous
+    )
+    expect(anonymous.call).toHaveBeenCalledWith("lark_result_complete", {
+      requestId: "req_q",
+      error: "intent_malformed",
+    })
+    expect(anonymous.plusCreate).not.toHaveBeenCalled()
   })
 })
 

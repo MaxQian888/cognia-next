@@ -90,6 +90,7 @@ import {
   resolveConnectorPrincipal,
 } from "./principal/resolve"
 import { handleUnresolvedPrincipal } from "./principal/unbound"
+import { recordConnectorMetric } from "./metrics"
 import { authorizeConnectorCallback, notifyCallbackDenied } from "./callback-authorization"
 
 export interface BusInboundHandler {
@@ -1866,6 +1867,7 @@ export class ConnectorBus {
         fields: authDecision.auditFields,
       }).catch(() => undefined)
       if (authDecision.mode === "enforce") {
+        recordConnectorMetric("lark_callback_auth_denied_total")
         if (authDecision.reason === "actor_forbidden" && resolvedConversationKey) {
           await notifyCallbackDenied(event, resolvedConversationKey)
         }

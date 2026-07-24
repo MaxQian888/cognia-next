@@ -13,6 +13,7 @@
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import { appendAudit } from "@/lib/connectors/audit"
+import { recordConnectorMetric } from "@/lib/connectors/metrics"
 import { createBindRequest } from "@/lib/db/feishu-principals"
 import { markConnectorInboundJobHistoryOnly } from "@/lib/db/connector-inbound-jobs"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
@@ -65,6 +66,7 @@ export async function handleUnresolvedPrincipal(
       : await hashOpenId(event.sender.remoteUserId)
 
   await deps.markHistoryOnly(inboundJobId, `principal_${resolution.status}`, { now })
+  recordConnectorMetric("lark_principal_unbound_total")
 
   if (resolution.status === "unbound") {
     const request = await deps.bindRequest({

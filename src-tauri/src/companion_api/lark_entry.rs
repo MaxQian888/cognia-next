@@ -743,6 +743,251 @@ pub async fn intent_poll_handler(
     }
 }
 
+/// Verify the Bearer lark_web session on an intent-submitting request.
+fn require_web_session(
+    state: &SharedState,
+    headers: &axum::http::HeaderMap,
+) -> Result<WebSessionClaims, Response> {
+    let secret = state.secret.read().clone();
+    let Some(session_token) = bearer_token(headers) else {
+        return Err(error_json(StatusCode::UNAUTHORIZED, "session_required"));
+    };
+    let session: WebSessionClaims = verify_claims(&secret, &session_token)
+        .map_err(|_| error_json(StatusCode::UNAUTHORIZED, "session_invalid"))?;
+    if expect_scope(&session.scope, SCOPE_WEB).is_err() {
+        return Err(error_json(StatusCode::UNAUTHORIZED, "session_invalid"));
+    }
+    Ok(session)
+}
+
+/// Max messages one shortcut import may carry — Lark's own message-shortcut
+/// cap (消息条数不能超过20条), enforced again brain-side.
+const SHORTCUT_IMPORT_MAX_MESSAGES: usize = 20;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShortcutImportBody {
+    pub adapter_id: String,
+    pub chat_id: String,
+    pub message_ids: Vec<String>,
+    /// Lark JSSDK trigger code (`__trigger_id__`) — forwarded for audit only.
+    #[serde(default)]
+    pub trigger_id: Option<String>,
+}
+
+/// `POST /integrations/lark/shortcut/import` — message-shortcut import
+/// intent. The browser supplies chat/message ids AS A REQUEST; the brain
+/// re-verifies each against the platform (bot membership + per-message
+/// chat_id) before anything is imported. Answered async via the intent
+/// poll endpoint.
+pub async fn shortcut_import_handler(
+    State(state): State<SharedState>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<ShortcutImportBody>,
+) -> Response {
+    let session = match require_web_session(&state, &headers) {
+        Ok(session) => session,
+        Err(response) => {
+            super::metrics::record_lark_counter("lark_message_import_denied_total");
+            return response;
+        }
+    };
+    if body.adapter_id.is_empty() || body.chat_id.is_empty() {
+        super::metrics::record_lark_counter("lark_message_import_denied_total");
+        return error_json(StatusCode::BAD_REQUEST, "import_request_invalid");
+    }
+    if body.message_ids.is_empty() || body.message_ids.len() > SHORTCUT_IMPORT_MAX_MESSAGES {
+        super::metrics::record_lark_counter("lark_message_import_denied_total");
+        return error_json(StatusCode::BAD_REQUEST, "import_message_count_invalid");
+    }
+    let request_id = register_intent();
+    state.event_bus.publish(
+        LARK_INTENT_TOPIC.to_string(),
+        json!({
+            "kind": "import_messages",
+            "requestId": request_id,
+            "adapterId": body.adapter_id,
+            "chatId": body.chat_id,
+            "messageIds": body.message_ids,
+            "triggerId": body.trigger_id,
+            "verifiedIdentity": {
+                "openId": session.oid,
+                "tenantKey": session.tk,
+                "appId": session.app,
+            },
+        }),
+    );
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({ "status": "pending", "requestId": request_id })),
+    )
+        .into_response()
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlusCreateBody {
+    pub adapter_id: String,
+    /// Chat the `+` menu was opened from, when the client passes it through.
+    #[serde(default)]
+    pub chat_id: Option<String>,
+}
+
+/// `POST /integrations/lark/plus/create` — `+`-menu "new task" intent. The
+/// brain binds/creates the conversation session; chat_id (when present) is
+/// re-verified brain-side exactly like shortcut imports.
+pub async fn plus_create_handler(
+    State(state): State<SharedState>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<PlusCreateBody>,
+) -> Response {
+    let session = match require_web_session(&state, &headers) {
+        Ok(session) => session,
+        Err(response) => return response,
+    };
+    if body.adapter_id.is_empty() {
+        return error_json(StatusCode::BAD_REQUEST, "plus_request_invalid");
+    }
+    let request_id = register_intent();
+    state.event_bus.publish(
+        LARK_INTENT_TOPIC.to_string(),
+        json!({
+            "kind": "plus_create",
+            "requestId": request_id,
+            "adapterId": body.adapter_id,
+            "chatId": body.chat_id,
+            "verifiedIdentity": {
+                "openId": session.oid,
+                "tenantKey": session.tk,
+                "appId": session.app,
+            },
+        }),
+    );
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({ "status": "pending", "requestId": request_id })),
+    )
+        .into_response()
+}
+
+// ---------------------------------------------------------------------------
+// Lark JSSDK signature (H5 `h5sdk.config`)
+// ---------------------------------------------------------------------------
+
+const LARK_TENANT_TOKEN_URL: &str =
+    "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal";
+const LARK_JSSDK_TICKET_URL: &str = "https://open.feishu.cn/open-apis/jssdk/ticket/get";
+/// Tickets are valid 2 h platform-side; refresh comfortably early.
+const JSSDK_TICKET_TTL_MS: i64 = 90 * 60 * 1000;
+
+/// adapter_id → (ticket, fetched_at_ms).
+static JSSDK_TICKET_CACHE: Lazy<Mutex<HashMap<String, (String, i64)>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+async fn fetch_jssdk_ticket(app_id: &str, app_secret: &str) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let token_resp: Value = client
+        .post(LARK_TENANT_TOKEN_URL)
+        .json(&json!({ "app_id": app_id, "app_secret": app_secret }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+    let tenant_token = token_resp
+        .get("tenant_access_token")
+        .and_then(Value::as_str)
+        .ok_or("tenant token missing")?;
+    let ticket_resp: Value = client
+        .post(LARK_JSSDK_TICKET_URL)
+        .bearer_auth(tenant_token)
+        .json(&json!({}))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+    ticket_resp
+        .get("data")
+        .and_then(|data| data.get("ticket"))
+        .and_then(Value::as_str)
+        .map(|ticket| ticket.to_string())
+        .ok_or_else(|| "jssdk ticket missing".to_string())
+}
+
+/// SHA-1 hex of the JSSDK verify string — Lark's documented signature input.
+pub fn jssdk_signature(ticket: &str, nonce: &str, timestamp_ms: i64, url: &str) -> String {
+    use sha1::{Digest, Sha1};
+    let verify = format!("jsapi_ticket={ticket}&noncestr={nonce}&timestamp={timestamp_ms}&url={url}");
+    let digest = Sha1::digest(verify.as_bytes());
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+#[derive(Deserialize)]
+pub struct JssdkConfigQuery {
+    pub adapter_id: String,
+    /// Full page URL WITHOUT the fragment — the signature covers it.
+    pub url: String,
+}
+
+/// `GET /integrations/lark/jssdk/config` — parameters for `h5sdk.config`
+/// so `/lark/shortcut` can call `tt.getBlockActionSourceDetail` inside the
+/// Lark webview. Session-authed: only a logged-in SSO user can mint one.
+pub async fn jssdk_config_handler(
+    State(state): State<SharedState>,
+    headers: axum::http::HeaderMap,
+    Query(query): Query<JssdkConfigQuery>,
+) -> Response {
+    if let Err(response) = require_web_session(&state, &headers) {
+        return response;
+    }
+    if query.adapter_id.is_empty() || query.url.is_empty() {
+        return error_json(StatusCode::BAD_REQUEST, "jssdk_request_invalid");
+    }
+    let app_id = match crate::connectors::keyring::get(&query.adapter_id, "appId") {
+        Ok(Some(value)) if !value.is_empty() => value,
+        _ => return error_json(StatusCode::NOT_FOUND, "jssdk_adapter_unconfigured"),
+    };
+    let app_secret = match crate::connectors::keyring::get(&query.adapter_id, "appSecret") {
+        Ok(Some(value)) if !value.is_empty() => value,
+        _ => return error_json(StatusCode::NOT_FOUND, "jssdk_adapter_unconfigured"),
+    };
+
+    let now = now_ms();
+    let cached = JSSDK_TICKET_CACHE
+        .lock()
+        .get(&query.adapter_id)
+        .filter(|(_, fetched)| now - fetched < JSSDK_TICKET_TTL_MS)
+        .map(|(ticket, _)| ticket.clone());
+    let ticket = match cached {
+        Some(ticket) => ticket,
+        None => match fetch_jssdk_ticket(&app_id, &app_secret).await {
+            Ok(ticket) => {
+                JSSDK_TICKET_CACHE
+                    .lock()
+                    .insert(query.adapter_id.clone(), (ticket.clone(), now));
+                ticket
+            }
+            Err(_) => return error_json(StatusCode::BAD_GATEWAY, "jssdk_ticket_failed"),
+        },
+    };
+
+    let nonce = Uuid::new_v4().to_string();
+    let signature = jssdk_signature(&ticket, &nonce, now, &query.url);
+    (
+        StatusCode::OK,
+        Json(json!({
+            "appId": app_id,
+            "timestamp": now,
+            "nonceStr": nonce,
+            "signature": signature,
+        })),
+    )
+        .into_response()
+}
+
 /// Router for `/integrations/lark/*`. Mounted headless-only in `server.rs`
 /// behind the pre-auth rate limit; carries the companion `SharedState`.
 pub fn router(state: SharedState) -> Router {
@@ -751,6 +996,9 @@ pub fn router(state: SharedState) -> Router {
         .route("/web/callback", get(callback_handler))
         .route("/entry/resolve", post(resolve_handler))
         .route("/intent/{request_id}", get(intent_poll_handler))
+        .route("/shortcut/import", post(shortcut_import_handler))
+        .route("/plus/create", post(plus_create_handler))
+        .route("/jssdk/config", get(jssdk_config_handler))
         .with_state(state)
 }
 
@@ -1132,6 +1380,112 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), StatusCode::ACCEPTED);
+    }
+
+    #[tokio::test]
+    async fn shortcut_import_validates_and_registers_an_intent() {
+        let state = test_state();
+        let secret = SECRET.to_vec();
+        let session =
+            issue_web_session(&secret, "lk-1", "ou_x", "tk_a", "cli_1", None).expect("mint");
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            format!("Bearer {session}").parse().unwrap(),
+        );
+
+        // No session → 401 before anything else.
+        let denied = shortcut_import_handler(
+            State(state.clone()),
+            axum::http::HeaderMap::new(),
+            Json(ShortcutImportBody {
+                adapter_id: "lk-1".into(),
+                chat_id: "oc_1".into(),
+                message_ids: vec!["om_1".into()],
+                trigger_id: None,
+            }),
+        )
+        .await;
+        assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+
+        // Over the Lark 20-message cap → 400.
+        let too_many = shortcut_import_handler(
+            State(state.clone()),
+            headers.clone(),
+            Json(ShortcutImportBody {
+                adapter_id: "lk-1".into(),
+                chat_id: "oc_1".into(),
+                message_ids: (0..21).map(|i| format!("om_{i}")).collect(),
+                trigger_id: None,
+            }),
+        )
+        .await;
+        assert_eq!(too_many.status(), StatusCode::BAD_REQUEST);
+
+        // Valid → 202 with a pending intent id.
+        let accepted = shortcut_import_handler(
+            State(state),
+            headers,
+            Json(ShortcutImportBody {
+                adapter_id: "lk-1".into(),
+                chat_id: "oc_1".into(),
+                message_ids: vec!["om_1".into(), "om_2".into()],
+                trigger_id: Some("trig_1".into()),
+            }),
+        )
+        .await;
+        assert_eq!(accepted.status(), StatusCode::ACCEPTED);
+    }
+
+    #[tokio::test]
+    async fn plus_create_requires_session_and_adapter() {
+        let state = test_state();
+        let secret = SECRET.to_vec();
+        let session =
+            issue_web_session(&secret, "lk-1", "ou_x", "tk_a", "cli_1", None).expect("mint");
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            format!("Bearer {session}").parse().unwrap(),
+        );
+
+        let bad = plus_create_handler(
+            State(state.clone()),
+            headers.clone(),
+            Json(PlusCreateBody {
+                adapter_id: "".into(),
+                chat_id: None,
+            }),
+        )
+        .await;
+        assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
+
+        let accepted = plus_create_handler(
+            State(state),
+            headers,
+            Json(PlusCreateBody {
+                adapter_id: "lk-1".into(),
+                chat_id: Some("oc_1".into()),
+            }),
+        )
+        .await;
+        assert_eq!(accepted.status(), StatusCode::ACCEPTED);
+    }
+
+    #[test]
+    fn jssdk_signature_is_deterministic_sha1_hex() {
+        let sig = jssdk_signature("ticket_x", "nonce_y", 1_700_000_000_000, "https://a.example/p");
+        assert_eq!(sig.len(), 40);
+        assert!(sig.chars().all(|c| c.is_ascii_hexdigit()));
+        // Same inputs → same signature; any field change → different.
+        assert_eq!(
+            sig,
+            jssdk_signature("ticket_x", "nonce_y", 1_700_000_000_000, "https://a.example/p")
+        );
+        assert_ne!(
+            sig,
+            jssdk_signature("ticket_x", "nonce_y", 1_700_000_000_001, "https://a.example/p")
+        );
     }
 
     #[test]

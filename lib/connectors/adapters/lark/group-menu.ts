@@ -18,6 +18,7 @@
  */
 
 import { isLarkFeatureEnabled } from "@/lib/connectors/feature-flags"
+import { recordConnectorMetric } from "@/lib/connectors/metrics"
 import { CHAT_TAB_URL_VERSION } from "@/lib/connectors/entry/deep-links"
 import { getChatSurface } from "@/lib/db/lark-chat-surfaces"
 import { classifyScopeError, type LarkCredentials } from "./http"
@@ -85,6 +86,7 @@ export async function reconcileGroupMenuSurface(
 
     const fail = async (reason: string): Promise<SurfaceReconcileResult> => {
       const row = await deps.markError(ctx.adapterId, chatId, "group_menu", reason, deps.now())
+      recordConnectorMetric("lark_chat_tab_sync_failures_total")
       await deps.audit({
         adapterId: ctx.adapterId,
         kind: "chat_tab.sync_failed",
