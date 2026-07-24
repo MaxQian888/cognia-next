@@ -14,4 +14,17 @@ describe("plugin-sdk api/context-panel", () => {
 
     expect(panel).toEqual(expect.objectContaining({ id: "repository-inspector" }))
   })
+
+  it("accepts a webview-backed panel without entry/export", () => {
+    const panel = defineContextPanel({
+      id: "inspector",
+      webview: "inspector",
+      resourceKinds: ["session"],
+      activity: "inspect",
+      labelKey: "panels.inspector",
+      label: "Inspector",
+    })
+
+    expect(panel).toEqual(expect.objectContaining({ webview: "inspector" }))
+  })
 })

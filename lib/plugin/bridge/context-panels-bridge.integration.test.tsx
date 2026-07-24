@@ -15,12 +15,22 @@
  * resource, without anyone noticing.
  */
 
-import { render, screen } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import { validatePluginManifest } from "@/lib/plugin/core/validation"
 import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
 import { ContextWorkbench } from "@/components/context-workbench/context-workbench"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
+import {
+  CONTEXT_PANEL_WEBVIEW_CHANNEL,
+  contextPanelWebviewEvent,
+} from "@/lib/plugin/bridge/context-panel-webview-protocol"
+import { registerWebviewsForPlugin } from "@/lib/plugin/bridge/plugin-webview-bridge"
+import {
+  __resetWebviewsForTesting,
+  attachWebviewPoster,
+  dispatchWebviewMessage,
+} from "@/lib/plugin/registries/webview-registry"
 import type { ContextResource } from "@/types/context-workbench"
 import type { PluginManifest } from "@/types/plugin"
 import {
@@ -87,6 +97,7 @@ const messages = {
     panelErrorDescription: "The panel crashed.",
     activityRailLabel: "Activities",
     aiLoading: "Loading",
+    webviewPanelPending: "This panel's webview has not loaded yet.",
   },
 }
 
@@ -176,5 +187,154 @@ describe("declarative context panels, manifest to rendered panel", () => {
     expect(contextPanelRegistry.resolve(sessionResource)).toEqual([])
     renderWorkbench()
     expect(screen.queryByRole("button", { name: "Session Notes" })).toBeNull()
+  })
+})
+
+describe("declarative webview-backed panels, manifest to iframe", () => {
+  const WV_PLUGIN_ID = "webview-notes"
+  const FULL_WEBVIEW_ID = `${WV_PLUGIN_ID}:notes-view`
+
+  function webviewManifest(): PluginManifest {
+    return {
+      id: WV_PLUGIN_ID,
+      name: "Webview Notes",
+      description: "Webview-backed notes panel.",
+      version: "1.0.0",
+      type: "frontend",
+      main: "dist/index.js",
+      permissions: ["extension:ui", "session:read"],
+      capabilities: ["context-panel", "webview"],
+      webviews: [{ id: "notes-view", html: "<main>notes-webview-body</main>" }],
+      contextPanels: [
+        {
+          id: "notes",
+          webview: "notes-view",
+          resourceKinds: ["session"],
+          activity: "inspect",
+          labelKey: "panels.notes",
+          label: "Webview Notes",
+          icon: "search-code",
+        },
+      ],
+    } as unknown as PluginManifest
+  }
+
+  afterEach(() => {
+    unregisterContextPanelsForPlugin(WV_PLUGIN_ID)
+    __resetWebviewsForTesting()
+  })
+
+  it("validates, registers panel-before-webview, and swaps the placeholder for the iframe", async () => {
+    const manifest = webviewManifest()
+    expect(validatePluginManifest(manifest, { governanceMode: "warn" }).errors).toEqual([])
+
+    // Panel BEFORE webview — the module-bridge map runs the capabilities in
+    // exactly this order, so the renderer must resolve its srcDoc lazily.
+    expect(
+      await registerContextPanelsForPlugin(manifest, "/plugins/webview-notes", {
+        hasPermission: () => true,
+      })
+    ).toEqual({ registered: 1, errors: [] })
+
+    const { container } = renderWorkbench()
+    expect(screen.getByText("This panel's webview has not loaded yet.")).toBeInTheDocument()
+
+    await act(async () => {
+      await registerWebviewsForPlugin(manifest, "/plugins/webview-notes")
+    })
+    expect(
+      container.querySelector(`iframe[data-plugin-webview="${FULL_WEBVIEW_ID}"]`)
+    ).not.toBeNull()
+  })
+
+  it("round-trips a setBadge request from the frame and answers it", async () => {
+    const manifest = webviewManifest()
+    await registerContextPanelsForPlugin(manifest, "/plugins/webview-notes", {
+      hasPermission: () => true,
+    })
+    await act(async () => {
+      await registerWebviewsForPlugin(manifest, "/plugins/webview-notes")
+    })
+    renderWorkbench()
+
+    const outbound: unknown[] = []
+    const detach = attachWebviewPoster(FULL_WEBVIEW_ID, (data) => {
+      outbound.push(data)
+      return true
+    })
+
+    act(() => {
+      dispatchWebviewMessage(FULL_WEBVIEW_ID, {
+        data: {
+          channel: CONTEXT_PANEL_WEBVIEW_CHANNEL,
+          kind: "request",
+          id: 1,
+          method: "setBadge",
+          params: ["notes", 4],
+        },
+      })
+    })
+
+    expect(contextPanelRegistry.get(`${WV_PLUGIN_ID}:notes`)?.getBadge?.(sessionResource)).toBe(4)
+    expect(outbound).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "response", id: 1, ok: true, result: true }),
+      ])
+    )
+    detach()
+  })
+
+  it("pushes visibility:false into the frame when another panel takes over", async () => {
+    const manifest = webviewManifest()
+    await registerContextPanelsForPlugin(manifest, "/plugins/webview-notes", {
+      hasPermission: () => true,
+    })
+    await act(async () => {
+      await registerWebviewsForPlugin(manifest, "/plugins/webview-notes")
+    })
+    const disposeNative = contextPanelRegistry.register({
+      id: "native-other",
+      activity: "inspect",
+      labelKey: "panels.other",
+      label: "Other",
+      // Sort AFTER the webview panel so the webview panel is the default
+      // active one — stateful panels mount on first activation, so an
+      // inactive-from-birth panel has no iframe to observe.
+      order: 200,
+      appliesTo: (candidate) => candidate.kind === "session",
+      renderer: () => <div>other-panel</div>,
+    })
+
+    const { container } = renderWorkbench()
+    const iframe = container.querySelector(
+      `iframe[data-plugin-webview="${FULL_WEBVIEW_ID}"]`
+    ) as HTMLIFrameElement
+    const postSpy = jest.spyOn(iframe.contentWindow as Window, "postMessage")
+
+    act(() => {
+      const scopeKey = Object.keys(useContextWorkbenchStore.getState().layouts)[0]
+      useContextWorkbenchStore.getState().navigatePanel(scopeKey, "native-other", "narrow")
+    })
+
+    expect(postSpy).toHaveBeenCalledWith(
+      {
+        __cogniaWebview: "host",
+        data: contextPanelWebviewEvent("visibility", { visible: false }),
+      },
+      "*"
+    )
+    disposeNative()
+  })
+
+  it("rejects a def declaring both webview and entry at validation time", () => {
+    const manifest = webviewManifest()
+    const panels = (manifest as unknown as { contextPanels: Record<string, unknown>[] })
+      .contextPanels
+    panels[0] = { ...panels[0], entry: "dist/panels.js", export: "NotesPanel" }
+
+    const validation = validatePluginManifest(manifest, { governanceMode: "warn" })
+    expect((validation.diagnostics ?? []).some((d) => d.code.endsWith("webview.conflict"))).toBe(
+      true
+    )
   })
 })

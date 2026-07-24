@@ -33,10 +33,8 @@ export const PLUGIN_CONTEXT_PANEL_ICONS = [
 
 export type PluginContextPanelIcon = (typeof PLUGIN_CONTEXT_PANEL_ICONS)[number]
 
-export interface PluginContextPanelDef {
+interface PluginContextPanelDefBase {
   id: string
-  entry: string
-  export: string
   resourceKinds: ContextResourceKind[]
   activity: CanonicalContextActivity
   labelKey: string
@@ -47,6 +45,17 @@ export interface PluginContextPanelDef {
   preferredMode?: ContextPanelMode
   retention?: ContextPanelRetention
   /**
+   * Mount the panel inside the resource's chat scope. Costs a provisioned
+   * session, so only declare it when the panel renders a conversation.
+   */
+  requiresChatScope?: boolean
+}
+
+/** Panel backed by a JS module: `entry`'s `export` is the React renderer. */
+export interface PluginModuleContextPanelDef extends PluginContextPanelDefBase {
+  entry: string
+  export: string
+  /**
    * Named exports resolved from the same `entry` module as the renderer, so a
    * declarative panel can reach the lifecycle and badge hooks the imperative
    * path already had. Behaviour, not data, which is why they are export names
@@ -55,11 +64,25 @@ export interface PluginContextPanelDef {
   onFirstActivateExport?: string
   onRestoreExport?: string
   getBadgeExport?: string
-  /**
-   * Mount the panel inside the resource's chat scope. Costs a provisioned
-   * session, so only declare it when the panel renders a conversation.
-   */
-  requiresChatScope?: boolean
+  webview?: never
 }
+
+/**
+ * Panel backed by a sandboxed webview: `webview` names an entry of the same
+ * manifest's `webviews[]`. The host renders that webview's iframe as the panel
+ * body and mirrors the context-panel API into it over postMessage
+ * (`acquireCogniaContextPanelApi()`), so there is no module to resolve
+ * lifecycle exports from — hence the `never` fields.
+ */
+export interface PluginWebviewContextPanelDef extends PluginContextPanelDefBase {
+  webview: string
+  entry?: never
+  export?: never
+  onFirstActivateExport?: never
+  onRestoreExport?: never
+  getBadgeExport?: never
+}
+
+export type PluginContextPanelDef = PluginModuleContextPanelDef | PluginWebviewContextPanelDef
 
 export type PluginContextPanelRenderer = ComponentType<ContextPanelRenderProps>

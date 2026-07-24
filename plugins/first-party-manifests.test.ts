@@ -127,6 +127,11 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
     "field_missing:subagent",
     "field_missing:agent-team-template",
   ],
+  // `webviews[]`/`contextPanels[]` ride the module-manifest overlay (the
+  // webview body is an inline HTML string that has no sane home in raw JSON);
+  // the merged manifest is what validates at enable — pinned by the plugin's
+  // own index.test.ts.
+  "context-inspector": ["field_missing:context-panel", "field_missing:webview"],
   "deep-research": ["field_missing:tools", "field_missing:skills"],
   "e2b-sandbox": ["field_missing:mcp-server-preset"],
   eval: ["field_missing:tools"],

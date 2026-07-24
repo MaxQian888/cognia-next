@@ -555,15 +555,21 @@ class ContextProviderDef:
 
 @dataclass(frozen=True)
 class ContextPanelDef:
-    """A renderer-side Context Workbench panel contribution."""
+    """A renderer-side Context Workbench panel contribution.
+
+    Backed either by a JS module (``entry`` + ``export``) or by a sandboxed
+    webview (``webview`` naming an entry of the manifest's ``webviews[]``);
+    exactly one of the two backings must be provided.
+    """
 
     id: str
-    entry: str
-    export: str
     resource_kinds: List[str]
     activity: str
     label_key: str
     label: str
+    entry: Optional[str] = None
+    export: Optional[str] = None
+    webview: Optional[str] = None
     icon: Optional[str] = None
     order: Optional[int] = None
     required_capabilities: Optional[List[str]] = None
@@ -573,13 +579,17 @@ class ContextPanelDef:
     def to_dict(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {
             "id": self.id,
-            "entry": self.entry,
-            "export": self.export,
             "resourceKinds": list(self.resource_kinds),
             "activity": self.activity,
             "labelKey": self.label_key,
             "label": self.label,
         }
+        if self.entry is not None:
+            out["entry"] = self.entry
+        if self.export is not None:
+            out["export"] = self.export
+        if self.webview is not None:
+            out["webview"] = self.webview
         if self.icon is not None:
             out["icon"] = self.icon
         if self.order is not None:

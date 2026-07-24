@@ -177,7 +177,8 @@ describe("ContextWorkbench", () => {
     )
 
     expect(screen.getByText("99+")).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.panels.comments" }))
+    // `comments` is the default active panel — its group tabs render without a
+    // rail click (which would now toggle-collapse the workbench).
     const groupTabs = screen
       .getByTestId("context-workbench")
       .querySelectorAll("header button[data-workbench-group-tab]")
@@ -224,7 +225,7 @@ describe("ContextWorkbench", () => {
       },
     ])
 
-    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.panels.crash" }))
+    // The crash panel is the default active one; no rail click needed.
     expect(screen.getByText(/Panel (failed|unavailable)/)).toBeInTheDocument()
     consoleError.mockRestore()
   })
@@ -287,6 +288,86 @@ describe("ContextWorkbench", () => {
     // would still answer to Up/Down and skip two entries per press.
     fireEvent.keyDown(second, { key: "ArrowDown" })
     expect(document.activeElement).toBe(second)
+  })
+
+  it("toggle-collapses when the active activity is clicked again, from the rail only", () => {
+    const onCollapse = jest.fn()
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ContextWorkbench
+          workbenchInstanceId="toggle-a"
+          resource={resource}
+          onCollapse={onCollapse}
+          panels={[
+            {
+              id: "comments",
+              activity: "comments",
+              labelKey: "contextWorkbench.panels.comments",
+              appliesTo: () => true,
+              renderer: () => <div>first-panel</div>,
+            },
+            {
+              id: "comments-two",
+              activity: "comments",
+              labelKey: "contextWorkbench.panels.commentsTwo",
+              appliesTo: () => true,
+              renderer: () => <div>second-panel</div>,
+            },
+            {
+              id: "review",
+              activity: "review",
+              labelKey: "contextWorkbench.panels.review",
+              appliesTo: () => true,
+              renderer: () => <div>review-panel</div>,
+            },
+          ]}
+        />
+      </NextIntlClientProvider>
+    )
+
+    // Re-clicking the CURRENT group tab stays inert (no collapse).
+    fireEvent.click(screen.getByRole("tab", { name: "contextWorkbench.panels.comments" }))
+    expect(onCollapse).not.toHaveBeenCalled()
+
+    // Clicking a DIFFERENT activity switches, no collapse.
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.panels.review" }))
+    expect(onCollapse).not.toHaveBeenCalled()
+    expect(screen.getByText("review-panel")).toBeInTheDocument()
+
+    // Clicking the ACTIVE activity on the rail toggles the surface closed.
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.panels.review" }))
+    expect(onCollapse).toHaveBeenCalledTimes(1)
+  })
+
+  it("double-clicking the resize handle restores the default width", () => {
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ContextWorkbench
+          workbenchInstanceId="dblclick-a"
+          resource={resource}
+          panels={[
+            {
+              id: "comments",
+              activity: "comments",
+              labelKey: "contextWorkbench.panels.comments",
+              appliesTo: () => true,
+              renderer: () => <div>panel</div>,
+            },
+          ]}
+        />
+      </NextIntlClientProvider>
+    )
+
+    const handle = screen.getByRole("separator", { name: "Resize workbench" })
+    fireEvent(handle, new MouseEvent("pointerdown", { bubbles: true, clientX: 500 }))
+    act(() => {
+      window.dispatchEvent(new MouseEvent("pointermove", { clientX: 300 }))
+      window.dispatchEvent(new MouseEvent("pointerup"))
+    })
+    expect(screen.getByTestId("context-workbench")).toHaveStyle({ width: "560px" })
+
+    fireEvent.dblClick(handle)
+    expect(screen.getByTestId("context-workbench")).toHaveStyle({ width: "360px" })
   })
 
   it("explains what pinning does instead of leaving a bare pin glyph", async () => {
@@ -376,7 +457,6 @@ describe("ContextWorkbench", () => {
     )
     const editor = screen.getByRole("button", { name: "Editor" })
     editor.focus()
-    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.panels.comments" }))
     fireEvent.click(screen.getByRole("button", { name: /Focus/ }))
     expect(editor).toHaveAttribute("inert")
     expect(screen.getByRole("dialog")).toHaveAttribute("aria-modal", "true")
@@ -396,7 +476,6 @@ describe("ContextWorkbench", () => {
       renderer: () => <div>scoped-ai-panel</div>,
     }
     const view = renderWorkbench([panel])
-    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.panels.ai" }))
     expect(screen.queryByText("scoped-ai-panel")).not.toBeInTheDocument()
 
     mockResourceSession = { id: "embedded-session" }
@@ -427,7 +506,7 @@ describe("ContextWorkbench", () => {
       },
     ])
 
-    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.panels.ai" }))
+    // `ai-actions` (no chat scope) is the default active panel.
     expect(mockUseResourceWorkbenchSession).toHaveBeenLastCalledWith(resource, false, "window-a")
 
     fireEvent.click(screen.getByRole("tab", { name: "contextWorkbench.panels.gated" }))

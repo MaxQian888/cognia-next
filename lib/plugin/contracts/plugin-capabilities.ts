@@ -1375,14 +1375,18 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     support: "supported",
     manifestFields: ["contextPanels"],
     runtimeBinding:
-      "manifest.contextPanels → context-panels module bridge → Context Workbench panel registry; ctx.contextPanels.* → context-panel-api → panel registry + workbench layout store",
+      "manifest.contextPanels → context-panels module bridge → Context Workbench panel registry (module-backed defs import entry/export; webview-backed defs render the referenced manifest webview via plugin-context-panel-webview + a per-webview RPC server mirroring the API into the iframe); ctx.contextPanels.* → context-panel-api → panel registry + workbench layout store",
     hostBindings: [
       "lib/plugin/bridge/context-panels-bridge.ts",
+      "lib/plugin/bridge/context-panel-webview-protocol.ts",
+      "lib/plugin/bridge/context-panel-webview-rpc.ts",
       "lib/plugin/api/context-panel-api.ts",
+      "lib/plugin/security/webview-csp.ts",
       "lib/context-workbench/panel-registry.ts",
       "lib/context-workbench/panel-icons.ts",
       "lib/context-workbench/active-context.ts",
       "components/context-workbench/context-workbench.tsx",
+      "components/plugins/plugin-context-panel-webview.tsx",
       "lib/plugin/contracts/module-bridge-map.ts",
     ],
     typescriptSdk: [
@@ -1394,15 +1398,18 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#context-workbench-panels",
     requiredTests: [
       "lib/plugin/bridge/context-panels-bridge.test.ts",
-      // The declarative path end to end. No in-tree plugin can cover it —
-      // `contextPanels` resolves its renderer from a separate `entry` module,
-      // which `builtin://` plugins have no fetchable install path for — so
-      // this is the only thing standing behind it.
+      // The declarative module path end to end. `entry`-module panels have no
+      // in-tree consumer — `builtin://` plugins can't fetch a separate entry
+      // module — so this is the only thing standing behind that arm. The
+      // webview arm is exercised for real by plugins/context-inspector.
       "lib/plugin/bridge/context-panels-bridge.integration.test.tsx",
+      "lib/plugin/bridge/context-panel-webview-protocol.test.ts",
+      "lib/plugin/bridge/context-panel-webview-rpc.test.ts",
       "lib/plugin/api/context-panel-api.test.ts",
       "lib/context-workbench/panel-registry.test.ts",
       "lib/context-workbench/panel-icons.test.ts",
       "lib/context-workbench/active-context.test.ts",
+      "components/plugins/plugin-context-panel-webview.test.tsx",
       "packages/plugin-sdk/src/define/define-context-panel.test.ts",
     ],
   },

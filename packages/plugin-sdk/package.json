@@ -51,6 +51,12 @@
       "require": "./dist/context-panel.cjs",
       "default": "./dist/context-panel.js"
     },
+    "./api/webview": {
+      "types": "./dist/webview.d.ts",
+      "import": "./dist/webview.js",
+      "require": "./dist/webview.cjs",
+      "default": "./dist/webview.js"
+    },
     "./events": {
       "types": "./dist/events.d.ts",
       "import": "./dist/events.js",
@@ -85,7 +91,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "NODE_OPTIONS=--max-old-space-size=8192 tsup",
+    "build": "NODE_OPTIONS=--max-old-space-size=12288 tsup",
     "typecheck": "node ../../scripts/plugin/test-sdk-package.mjs",
     "pack:test": "pnpm --dir ../provider-types build && node ../../scripts/plugin/test-sdk-package.mjs"
   },

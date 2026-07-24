@@ -1,5 +1,7 @@
 import type { ComponentType } from "react"
+import { createContextPanelWebviewRenderer } from "@/components/plugins/plugin-context-panel-webview"
 import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
+import { attachContextPanelWebviewRpc } from "@/lib/plugin/bridge/context-panel-webview-rpc"
 import { resolveContextPanelIcon } from "@/lib/context-workbench/panel-icons"
 import { recordPluginPointDiagnostic } from "@/lib/plugin/contracts/diagnostics-store"
 import { loggers } from "@/lib/plugin/core/logger"
@@ -30,6 +32,19 @@ export interface ContextPanelBridgeOptions {
 const DEFAULT_IMPORTER: NonNullable<ContextPanelBridgeOptions["importer"]> = (entry) =>
   import(/* @vite-ignore */ /* webpackIgnore: true */ entry)
 
+/**
+ * RPC servers attached for webview-backed panels, torn down on unregister so a
+ * disabled plugin's frames stop reaching the context-panel API.
+ */
+const webviewRpcDisposers = new Map<string, Array<() => void>>()
+
+function disposeWebviewRpc(pluginId: string): void {
+  const disposers = webviewRpcDisposers.get(pluginId)
+  if (!disposers) return
+  webviewRpcDisposers.delete(pluginId)
+  for (const dispose of disposers) dispose()
+}
+
 function requiredPermissions(manifest: PluginManifest, index: number): string[] {
   const panel = manifest.contextPanels?.[index]
   if (!panel) return []
@@ -51,6 +66,7 @@ export async function registerContextPanelsForPlugin(
   if (defs.length === 0) return { registered: 0, errors: [] }
 
   contextPanelRegistry.unregisterPlugin(manifest.id)
+  disposeWebviewRpc(manifest.id)
   const importer = options.importer ?? DEFAULT_IMPORTER
   const errors: ContextPanelBridgeError[] = []
   let registered = 0
@@ -62,29 +78,50 @@ export async function registerContextPanelsForPlugin(
       )
       if (denied) throw new Error(`Permission denied: ${denied} is required`)
 
-      const entry = resolvePluginPath(installRoot, def.entry)
-      const importedModule = await importer(entry)
-      const exported = importedModule[def.export]
-      if (typeof exported !== "function") {
-        throw new Error(`entry "${def.entry}" has no React export named "${def.export}"`)
-      }
-      // A named export that is declared but missing is a manifest bug, not a
-      // reason to drop the whole panel — but it must not be swallowed either,
-      // or the author sees a panel that silently never fires its hook.
-      const optionalExport = (name: string | undefined, field: string) => {
-        if (!name) return undefined
-        const value = importedModule[name]
-        if (typeof value !== "function") {
-          throw new Error(`entry "${def.entry}" has no "${field}" export named "${name}"`)
+      let exported: ComponentType<ContextPanelRenderProps>
+      let onFirstActivate: ContextPanelDefinition["onFirstActivate"]
+      let onRestore: ContextPanelDefinition["onRestore"]
+      let getBadge: ContextPanelDefinition["getBadge"]
+      if (def.webview) {
+        // Webview-backed: no module to import — the body is the referenced
+        // webview's iframe, resolved lazily from the registry at render time
+        // (the webview bridge runs AFTER this one in the module-bridge map).
+        exported = createContextPanelWebviewRenderer(manifest.id, def.webview, def.label)
+        const release = attachContextPanelWebviewRpc(manifest.id, def.webview, {
+          hasPermission: options.hasPermission,
+        })
+        const disposers = webviewRpcDisposers.get(manifest.id) ?? []
+        disposers.push(release)
+        webviewRpcDisposers.set(manifest.id, disposers)
+      } else {
+        if (!def.entry || !def.export) {
+          throw new Error("React context panels require both entry and export")
         }
-        return value
+        const entry = resolvePluginPath(installRoot, def.entry)
+        const importedModule = await importer(entry)
+        const moduleExport = importedModule[def.export]
+        if (typeof moduleExport !== "function") {
+          throw new Error(`entry "${def.entry}" has no React export named "${def.export}"`)
+        }
+        exported = moduleExport as ComponentType<ContextPanelRenderProps>
+        // A named export that is declared but missing is a manifest bug, not a
+        // reason to drop the whole panel — but it must not be swallowed either,
+        // or the author sees a panel that silently never fires its hook.
+        const optionalExport = (name: string | undefined, field: string) => {
+          if (!name) return undefined
+          const value = importedModule[name]
+          if (typeof value !== "function") {
+            throw new Error(`entry "${def.entry}" has no "${field}" export named "${name}"`)
+          }
+          return value
+        }
+        onFirstActivate = optionalExport(def.onFirstActivateExport, "onFirstActivate") as
+          ContextPanelDefinition["onFirstActivate"] | undefined
+        onRestore = optionalExport(def.onRestoreExport, "onRestore") as
+          ContextPanelDefinition["onRestore"] | undefined
+        getBadge = optionalExport(def.getBadgeExport, "getBadge") as
+          ContextPanelDefinition["getBadge"] | undefined
       }
-      const onFirstActivate = optionalExport(def.onFirstActivateExport, "onFirstActivate") as
-        ContextPanelDefinition["onFirstActivate"] | undefined
-      const onRestore = optionalExport(def.onRestoreExport, "onRestore") as
-        ContextPanelDefinition["onRestore"] | undefined
-      const getBadge = optionalExport(def.getBadgeExport, "getBadge") as
-        ContextPanelDefinition["getBadge"] | undefined
       const permissions = requiredPermissions(manifest, index)
       contextPanelRegistry.register({
         id: `${manifest.id}:${def.id}`,
@@ -104,7 +141,7 @@ export async function registerContextPanelsForPlugin(
         requiresChatScope: def.requiresChatScope,
         preferredMode: def.preferredMode,
         retention: def.retention ?? "stateful",
-        renderer: exported as ComponentType<ContextPanelRenderProps>,
+        renderer: exported,
         onFirstActivate,
         onRestore,
         pluginId: manifest.id,
@@ -133,4 +170,5 @@ export async function registerContextPanelsForPlugin(
 
 export function unregisterContextPanelsForPlugin(pluginId: string): void {
   contextPanelRegistry.unregisterPlugin(pluginId)
+  disposeWebviewRpc(pluginId)
 }

@@ -327,6 +327,42 @@ describe("plugin context panel API", () => {
       const api = createContextPanelAPI("plugin-a", () => true)
       expect(api.getWorkbenchState()).toBeNull()
     })
+
+    it("notifies visibility changes only on transitions", () => {
+      const { api, disposeHost } = mountPanel()
+      const seen: boolean[] = []
+      const unsubscribe = api.onDidChangeVisibility("outline", (visible) => seen.push(visible))
+
+      api.reveal("outline")
+      expect(seen).toEqual([true])
+
+      // Another panel takes over — the stateful panel stays mounted but is no
+      // longer the one on screen.
+      useContextWorkbenchStore.getState().navigatePanel(scopeKey, "native-comments", "narrow")
+      expect(seen).toEqual([true, false])
+
+      api.reveal("outline")
+      useContextWorkbenchStore.getState().setMode(scopeKey, "collapsed")
+      expect(seen).toEqual([true, false, true, false])
+
+      unsubscribe()
+      api.reveal("outline")
+      expect(seen).toEqual([true, false, true, false])
+      disposeHost()
+    })
+
+    it("visibility fails closed without extension:ui", () => {
+      const { api, disposeHost } = mountPanel()
+      api.reveal("outline")
+
+      const blind = createContextPanelAPI("plugin-a", () => false)
+      const seen: boolean[] = []
+      const unsubscribe = blind.onDidChangeVisibility("outline", (visible) => seen.push(visible))
+      useContextWorkbenchStore.getState().setMode(scopeKey, "wide")
+      expect(seen).toEqual([])
+      unsubscribe()
+      disposeHost()
+    })
   })
 
   it("fails closed when reading active context without its resource permission", () => {

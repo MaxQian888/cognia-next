@@ -51,6 +51,7 @@ import {
 } from "@/lib/context-workbench/active-context"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import {
+  CONTEXT_WORKBENCH_DEFAULT_WIDTH,
   useContextWorkbenchStore,
   type ContextWorkbenchLayout,
 } from "@/stores/context-workbench/context-workbench-store"
@@ -421,9 +422,29 @@ export function ContextWorkbench({
     scopeKey,
   ])
 
-  const handleActivate = (panel: ContextPanelDefinition) => {
+  const handleCollapse = () => {
+    // Focus is a full-screen takeover that outlives the host's own collapse
+    // (the dock shrinks to 0% underneath while the fixed overlay stays on
+    // screen, and the mode persists — so re-opening the dock came back
+    // full-screen). Drop out of it first; hosts without their own collapse
+    // fall through to the collapsed mode as before.
+    if (onCollapse) {
+      if (layout.mode === "focus") setMode(scopeKey, "narrow")
+      onCollapse()
+      return
+    }
+    setMode(scopeKey, "collapsed")
+  }
+
+  const handleActivate = (panel: ContextPanelDefinition, source: "rail" | "tab" = "tab") => {
     touchActiveContextHost(scopeKey)
-    if (layout.activePanelId === panel.id && layout.mode !== "collapsed") return
+    if (layout.activePanelId === panel.id && layout.mode !== "collapsed") {
+      // Activity-bar convention (VS Code): clicking the ALREADY-ACTIVE
+      // activity toggles the surface closed. Only for the rail — re-clicking
+      // the current header/group tab must stay inert.
+      if (source === "rail") handleCollapse()
+      return
+    }
     let seen = lifecyclePanelsRef.current.get(scopeKey)
     if (!seen) {
       seen = new Set(persistedLayout?.activatedPanelIds ?? [])
@@ -478,6 +499,9 @@ export function ContextWorkbench({
             ? (currentIndex + 1) % buttons.length
             : (currentIndex - 1 + buttons.length) % buttons.length
     event.preventDefault()
+    // A single-activity rail wraps onto itself; clicking would toggle-collapse
+    // the dock out from under the arrow key.
+    if (nextIndex === currentIndex) return
     buttons[nextIndex]?.focus()
     buttons[nextIndex]?.click()
   }
@@ -555,6 +579,8 @@ export function ContextWorkbench({
             aria-label={t("contextWorkbench.actions.resize")}
             className="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize touch-none"
             onPointerDown={handleResizeStart}
+            // Editor-splitter convention: double-click restores the default width.
+            onDoubleClick={() => setWidth(scopeKey, CONTEXT_WORKBENCH_DEFAULT_WIDTH)}
           />
         ) : null}
         <TooltipProvider delayDuration={300}>
@@ -590,7 +616,7 @@ export function ContextWorkbench({
                       aria-label={label}
                       aria-pressed={activePanel?.activity === activity}
                       data-workbench-activity-button
-                      onClick={() => handleActivate(panel)}
+                      onClick={() => handleActivate(panel, "rail")}
                       className="relative"
                     >
                       {Icon ? <Icon className="size-4" /> : <Rows3Icon className="size-4" />}
@@ -637,20 +663,7 @@ export function ContextWorkbench({
                     size="icon-sm"
                     variant="ghost"
                     aria-label={t("contextWorkbench.actions.collapse")}
-                    onClick={() => {
-                      // Focus is a full-screen takeover that outlives the host's
-                      // own collapse (the dock shrinks to 0% underneath while the
-                      // fixed overlay stays on screen, and the mode persists — so
-                      // re-opening the dock came back full-screen). Drop out of it
-                      // first; hosts without their own collapse fall through to
-                      // the collapsed mode as before.
-                      if (onCollapse) {
-                        if (layout.mode === "focus") setMode(scopeKey, "narrow")
-                        onCollapse()
-                        return
-                      }
-                      setMode(scopeKey, "collapsed")
-                    }}
+                    onClick={handleCollapse}
                   >
                     <PanelRightCloseIcon className="size-4" />
                   </Button>

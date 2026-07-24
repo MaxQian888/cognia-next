@@ -16,6 +16,7 @@ it("builds standalone ESM, CJS, and declaration entrypoints", async () => {
       events: "src/events/index.ts",
       extensions: "src/extensions/index.ts",
       "context-panel": "src/api/context-panel.ts",
+      webview: "src/api/webview.ts",
     })
   )
   expect(declarations.dts).toEqual({ only: true })
@@ -25,4 +26,5 @@ it("builds standalone ESM, CJS, and declaration entrypoints", async () => {
       entry.startsWith("context")
     )
   ).toEqual(["context", "context-panel"])
+  expect(runtime.entry).toEqual(expect.objectContaining({ webview: "src/api/webview.ts" }))
 })

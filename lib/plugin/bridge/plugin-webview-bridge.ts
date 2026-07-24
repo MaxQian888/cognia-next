@@ -57,7 +57,22 @@ export async function registerWebviewsForPlugin(
 
   for (const def of defs) {
     try {
-      const resolved = await resolveWebview(def, pluginId, installRoot, allowedDomains, importer)
+      // A webview referenced by a context panel gets the mirrored panel API
+      // injected. The capability check covers webviews that only BECOME panel
+      // bodies later, via an RPC `register({ webview })` — their srcDoc is
+      // wrapped once, at enable, so waiting for the reference would be too
+      // late. Plugins without the capability keep the minimal surface.
+      const contextPanelApi =
+        (manifest.contextPanels?.some((panel) => panel.webview === def.id) ?? false) ||
+        (manifest.capabilities?.includes("context-panel") ?? false)
+      const resolved = await resolveWebview(
+        def,
+        pluginId,
+        installRoot,
+        allowedDomains,
+        importer,
+        contextPanelApi
+      )
       registerWebview(resolved)
       registered++
     } catch (err) {
@@ -78,7 +93,8 @@ async function resolveWebview(
   pluginId: string,
   installRoot: string,
   allowedDomains: string[] | undefined,
-  importer: NonNullable<WebviewBridgeOptions["importer"]>
+  importer: NonNullable<WebviewBridgeOptions["importer"]>,
+  contextPanelApi: boolean
 ): Promise<ResolvedPluginWebview> {
   let body: string
   if (typeof def.html === "string") {
@@ -98,11 +114,11 @@ async function resolveWebview(
     )
   }
 
-  const srcDoc = wrapWebviewHtml(body, { allowedDomains })
+  const srcDoc = wrapWebviewHtml(body, { allowedDomains, contextPanelApi })
   return {
     pluginId,
     viewId: def.id,
-    containerId: `${pluginId}:${def.containerId}`,
+    containerId: def.containerId ? `${pluginId}:${def.containerId}` : undefined,
     title: def.title,
     when: def.when,
     surface: def.surface ?? "panel",

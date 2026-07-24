@@ -1,6 +1,7 @@
 import { contextPanelRegistry } from "./panel-registry"
 import {
   getActiveContextResource,
+  isPluginContextPanelVisible,
   resetActiveContextForTesting,
   revealPluginContextPanel,
   setActiveContextForHost,
@@ -114,5 +115,30 @@ describe("revealPluginContextPanel", () => {
 
     disposeHost()
     disposePanel()
+  })
+})
+
+describe("isPluginContextPanelVisible", () => {
+  const resource = {
+    kind: "session" as const,
+    sessionId: "session-1",
+    capabilities: [],
+  }
+
+  it("is true only while the plugin's panel is in front of a non-collapsed workbench", () => {
+    const disposeHost = setActiveContextForHost("dock", resource)
+    expect(isPluginContextPanelVisible("plugin-a", "inbox")).toBe(false)
+
+    useContextWorkbenchStore.getState().navigatePanel("dock", "plugin-a:inbox", "narrow")
+    expect(isPluginContextPanelVisible("plugin-a", "inbox")).toBe(true)
+    // Accepts the qualified spelling too — same normalisation as reveal.
+    expect(isPluginContextPanelVisible("plugin-a", "plugin-a:inbox")).toBe(true)
+    expect(isPluginContextPanelVisible("plugin-b", "inbox")).toBe(false)
+
+    useContextWorkbenchStore.getState().setMode("dock", "collapsed")
+    expect(isPluginContextPanelVisible("plugin-a", "inbox")).toBe(false)
+
+    disposeHost()
+    expect(isPluginContextPanelVisible("plugin-a", "inbox")).toBe(false)
   })
 })

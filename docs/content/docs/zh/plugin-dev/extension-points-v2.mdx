@@ -288,7 +288,83 @@ pending 而不替换当前面板。它还会先请求宿主把自己的容器带
 
 每个面板需要 `extension:ui`，以及声明资源对应的 `project:read`、`canvas:read`、
 `artifact:read`、`workflow:read` 或 `session:read`。缺任意一个时注册直接失败；已注册
-的面板在权限被撤销的瞬间从活动栏消失。不支持 sandboxed Webview renderer。
+的面板在权限被撤销的瞬间从活动栏消失。
+
+### Webview 面板（沙箱）
+
+面板不必是受信 React 组件：`webview` 字段引用同一 manifest `webviews[]` 里的一项，
+宿主会把该 webview 的沙箱 iframe（`sandbox="allow-scripts"`、不透明 origin、CSP 按
+插件 `networkAccess` 收紧）渲染成面板主体。`webview` 与 `entry`/`export` 及各
+lifecycle-export 字段互斥——没有模块可供解析。
+
+```jsonc
+{
+  "permissions": ["extension:ui", "session:read"],
+  "capabilities": ["context-panel", "webview"],
+  "webviews": [{ "id": "inspector", "html": "<main>…</main>" }],
+  "contextPanels": [
+    {
+      "id": "inspector",
+      "webview": "inspector", // ← 取代 entry/export
+      "resourceKinds": ["session"],
+      "activity": "inspect",
+      "labelKey": "panel.inspector",
+      "label": "Context Inspector"
+    }
+  ]
+}
+```
+
+内联 `html` 的 webview 完全不经过模块 importer，所以这是唯一对**内置插件**也生效的
+声明式 `contextPanels` 形态——树内参考实现是 `cognia-context-inspector`。
+
+iframe 内部由宿主注入 `acquireCogniaContextPanelApi()`：完整面板 API 经 postMessage
+镜像。每个方法返回 Promise（5 秒超时），且每次调用都在宿主侧重新过权限门：
+
+```js
+const api = window.acquireCogniaContextPanelApi()
+
+await api.setBadge("inspector", 3)
+await api.reveal("inspector", "wide")
+const context = await api.getActiveContext()
+const state = await api.getWorkbenchState()
+await api.setMode("focus")
+await api.setPinned(true)
+// 动态注册另一个面板——由另一个已声明 webview 渲染（React renderer 无法跨
+// postMessage）。返回 registration id，供 api.dispose(id) 使用。
+const registrationId = await api.register({
+  id: "extra",
+  webview: "extra-view",
+  label: "Extra",
+  labelKey: "panel.extra",
+  resourceKinds: ["session"],
+  activity: "inspect",
+})
+
+api.onDidChangeActiveContext((context) => {})
+api.onDidChangeWorkbenchState((state) => {})
+// 本 iframe 实例的显示状态——false 时应暂停轮询/动画。
+api.onDidChangeVisibility(({ visible }) => {})
+```
+
+宿主会把 `activeContext` / `workbenchState` 变化推进 iframe，并在客户端接入时回放
+一份快照，因此脚本随时订阅都不会漏状态。`visibility` 是按 iframe 实例的：桌面 dock
+与移动端 Sheet 可能各挂着同一 webview 的活 iframe，各自只会听到自己实例的状态。
+
+<Callout type="warn">
+  `stateful` webview 面板在隐藏期间保留 iframe（及全部帧内状态），但**折叠工作台或
+  切换资源会整个卸载 iframe**。需要跨卸载存活的状态请用
+  `acquireCogniaWebviewApi().setState(...)`：宿主会暂存并在下一个 iframe 加载时回放，
+  acquire 之后 `getState()` 即可拿到上一帧最后一次保存（迟到的回放可用
+  `onDidChangeState` 订阅）。这仅在运行期有效——插件禁用或应用重启后即失效；
+  需要持久化的内容仍应经插件逻辑侧（`ctx.storage`）。
+</Callout>
+
+### 宿主侧可见性
+
+命令式 API 有同样的信号且无需 webview：
+`ctx.contextPanels.onDidChangeVisibility(panelId, listener)` 在面板成为 / 不再是
+活动工作台的前台面板时以 `true`/`false` 触发（折叠视为隐藏），仅在跳变时触发。
 
 ### 驱动工作台
 
@@ -339,7 +415,7 @@ ctx.contextPanels.setPinned(true) // 让自动 reveal 变成角标排队
 | `configComponent`  | 在插件设置面板渲染（失败回退到 schema 表单）                   | bridge 单测（`config-component-bridge`）  |
 | `modalMounts`      | 懒加载的声明式 modal 注册表 → `ctx.modal.openById`            | bridge 单测（`modal-mount-bridge`）       |
 | `chatMiddlewares`  | `runAndCaptureAssistantReply`（默认关闭开关）                  | bridge 单测（`chat-middleware-bridge`）   |
-| `contextPanels`    | Context Workbench 活动栏（聊天 dock / 编辑器 / 工作流）        | `cognia-prompt-templates`（命令式）       |
+| `contextPanels`    | Context Workbench 活动栏（聊天 dock / 编辑器 / 工作流）        | `cognia-context-inspector`（声明式 webview）、`cognia-prompt-templates`（命令式） |
 
 > **Builtin 限制**：基于 import 的字段（带 `entry` / `export` 模块的——
 > `ocrProviders`、`workspaceBackends`、`messageRenderers`、`aiProviders`、
@@ -348,7 +424,9 @@ ctx.contextPanels.setPinned(true) // 让自动 reveal 变成角标排队
 > （`builtin://…`）无法 fetch 单独的 entry 文件，必须改用 `ctx.*` API 命令式
 > 注册这些表面。声明式数据字段（`themePacks`、`wallpapers`、`densityPresets`、
 > `scheduledTasks`、`modes`）对内置插件同样有效——这也是上面的参考 demo 都是
-> 内置插件的原因。
+> 内置插件的原因。**例外**：`contextPanels` 里以内联 `html` webview 为后端的条目
+> 不涉及模块 import，因此该声明式形态对内置插件同样可用（见
+> `cognia-context-inspector`）。
 
 ## 迁移速查表
 

@@ -9,6 +9,8 @@ import {
   postMessageToWebview,
   dispatchWebviewMessage,
   onWebviewMessage,
+  getWebviewState,
+  setWebviewState,
   __resetWebviewsForTesting,
 } from "./webview-registry"
 import type { ResolvedPluginWebview } from "@/types/plugin/plugin-webview"
@@ -94,6 +96,61 @@ describe("webview-registry", () => {
         throw new Error("boom")
       })
       expect(postMessageToWebview("p:dash", {})).toBe(false)
+    })
+
+    it("fans a message out to every attached poster", () => {
+      // The mobile sheet force-mounts a second workbench, so the same webview
+      // can have two live iframes; both must receive pushes.
+      registerWebview(wv())
+      const first: unknown[] = []
+      const second: unknown[] = []
+      const detachFirst = attachWebviewPoster("p:dash", (data) => {
+        first.push(data)
+        return true
+      })
+      attachWebviewPoster("p:dash", (data) => {
+        second.push(data)
+        return true
+      })
+
+      expect(postMessageToWebview("p:dash", { n: 1 })).toBe(true)
+      expect(first).toEqual([{ n: 1 }])
+      expect(second).toEqual([{ n: 1 }])
+
+      detachFirst()
+      expect(postMessageToWebview("p:dash", { n: 2 })).toBe(true)
+      expect(first).toEqual([{ n: 1 }])
+      expect(second).toEqual([{ n: 1 }, { n: 2 }])
+    })
+
+    it("keeps set-state across frame remounts but drops it with the plugin", () => {
+      const dispose = registerWebview(wv())
+      setWebviewState("p:dash", { draft: "hello" })
+      // Posters/frames come and go; state survives them (it lives here, not on
+      // the frame) …
+      expect(getWebviewState("p:dash")).toEqual({ draft: "hello" })
+      // … but not past the webview itself.
+      dispose()
+      expect(getWebviewState("p:dash")).toBeUndefined()
+
+      registerWebview(wv())
+      setWebviewState("p:dash", 1)
+      unregisterWebviewsByPlugin("p")
+      expect(getWebviewState("p:dash")).toBeUndefined()
+    })
+
+    it("one throwing poster does not starve the others", () => {
+      registerWebview(wv())
+      attachWebviewPoster("p:dash", () => {
+        throw new Error("boom")
+      })
+      const received: unknown[] = []
+      attachWebviewPoster("p:dash", (data) => {
+        received.push(data)
+        return true
+      })
+      expect(postMessageToWebview("p:dash", { ok: true })).toBe(true)
+      expect(received).toEqual([{ ok: true }])
     })
   })
 })

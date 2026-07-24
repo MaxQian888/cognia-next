@@ -20,6 +20,7 @@ describe("plugin-sdk package exports", () => {
     "./extensions",
     "./api/tool",
     "./api/context-panel",
+    "./api/webview",
   ])("publishes a built ESM/CJS/types surface for %s", (subpath) => {
     const entry = exportsMap[subpath]
     expect(typeof entry).toBe("object")
@@ -51,6 +52,7 @@ describe("plugin-sdk package exports", () => {
     expect(exportsMap["./api/not-real"]).toBeUndefined()
     expect(exportsMap["./api/native-anthropic-tool"]).toBeDefined()
     expect(exportsMap["./api/context-panel"]).toBeDefined()
+    expect(exportsMap["./api/webview"]).toBeDefined()
   })
 
   it("packs only built/public artifacts", () => {

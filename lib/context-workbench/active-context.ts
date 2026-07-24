@@ -209,6 +209,21 @@ export function setActiveWorkbenchMode(pluginId: string, mode: ContextWorkbenchM
   return true
 }
 
+/**
+ * Whether a plugin's panel is the one in front of the ACTIVE workbench. This
+ * is the host-side notion of visibility — coarser than the per-iframe
+ * `visibility` event the webview renderer pushes, which knows exactly which
+ * frame instance is displayed.
+ */
+export function isPluginContextPanelVisible(pluginId: string, requestedPanelId: string): boolean {
+  const active = getActiveWorkbench()
+  if (!active) return false
+  return (
+    active.layout.activePanelId === qualifyPluginPanelId(pluginId, requestedPanelId) &&
+    active.layout.mode !== "collapsed"
+  )
+}
+
 export function setActiveWorkbenchPinned(pluginId: string, pinned: boolean): boolean {
   const active = ownedActiveWorkbench(pluginId)
   if (!active) return false

@@ -11,8 +11,12 @@ export type PluginWebviewSurface = "panel" | "window"
 export interface PluginWebviewDef {
   /** Stable id, namespaced to the plugin at registration (`<pluginId>:<id>`). */
   id: string
-  /** Which view container (B1) this webview mounts into — the container's local id. */
-  containerId: string
+  /**
+   * Which view container (B1) this webview mounts into — the container's local
+   * id. Required only for container-mounted webviews; a webview referenced by a
+   * `contextPanels[].webview` renders as a workbench panel and needs none.
+   */
+  containerId?: string
   /** Optional section title shown above the webview. */
   title?: string
   /** Inline HTML body. Mutually exclusive with `entry`/`export`. */
@@ -31,7 +35,8 @@ export interface PluginWebviewDef {
 export interface ResolvedPluginWebview {
   pluginId: string
   viewId: string
-  containerId: string
+  /** Namespaced container id; absent for panel-only (context-panel) webviews. */
+  containerId?: string
   title?: string
   when?: string
   surface: PluginWebviewSurface

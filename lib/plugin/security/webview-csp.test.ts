@@ -1,4 +1,9 @@
-import { buildWebviewCsp, wrapWebviewHtml, acquireCogniaWebviewApiSource } from "./webview-csp"
+import {
+  acquireCogniaContextPanelApiSource,
+  acquireCogniaWebviewApiSource,
+  buildWebviewCsp,
+  wrapWebviewHtml,
+} from "./webview-csp"
 
 describe("buildWebviewCsp", () => {
   it("denies connect-src when no domains are declared (fail-closed, egress-consistent)", () => {
@@ -47,6 +52,42 @@ describe("wrapWebviewHtml", () => {
     expect(html).toContain("<h1>Hi</h1>")
     expect(html).toMatch(/^<!doctype html>/)
   })
+
+  it("injects the context-panel client only when asked", () => {
+    const plain = wrapWebviewHtml("<main></main>", { allowedDomains: [] })
+    expect(plain).not.toContain("acquireCogniaContextPanelApi")
+
+    const panelBacked = wrapWebviewHtml("<main></main>", {
+      allowedDomains: [],
+      contextPanelApi: true,
+    })
+    expect(panelBacked).toContain("acquireCogniaContextPanelApi")
+  })
+})
+
+describe("acquireCogniaContextPanelApiSource", () => {
+  it("emits a once-guarded RPC client covering every mirrored method and event", () => {
+    const src = acquireCogniaContextPanelApiSource()
+    expect(src).toContain("can only be called once")
+    expect(src).toContain('"cognia.contextPanel"')
+    for (const method of [
+      "reveal",
+      "setBadge",
+      "getActiveContext",
+      "getWorkbenchState",
+      "setMode",
+      "setPinned",
+      "register",
+      "dispose",
+      "onDidChangeActiveContext",
+      "onDidChangeWorkbenchState",
+      "onDidChangeVisibility",
+    ]) {
+      expect(src).toContain(method)
+    }
+    // The ready marker is what makes the host replay missed state.
+    expect(src).toContain('kind: "ready"')
+  })
 })
 
 describe("acquireCogniaWebviewApiSource", () => {
@@ -56,5 +97,16 @@ describe("acquireCogniaWebviewApiSource", () => {
     expect(src).toContain("__cogniaWebview")
     expect(src).toContain("postMessage")
     expect(src).toContain("setState")
+  })
+
+  it("listens for the host's restore-state seed and exposes onDidChangeState", () => {
+    const src = acquireCogniaWebviewApiSource()
+    // The listener must attach at script eval (outside the acquire guard) so a
+    // restore posted on iframe load is never missed.
+    expect(src).toContain('"restore-state"')
+    expect(src).toContain("onDidChangeState")
+    expect(src.indexOf("addEventListener")).toBeLessThan(
+      src.indexOf("window.acquireCogniaWebviewApi = function")
+    )
   })
 })

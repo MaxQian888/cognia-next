@@ -5,6 +5,7 @@ import type { PluginContextPanelIcon } from "@/types/plugin/plugin-context-panel
 import {
   getActiveContextResource,
   getActiveWorkbench,
+  isPluginContextPanelVisible,
   revealPluginContextPanel,
   setActiveWorkbenchMode,
   setActiveWorkbenchPinned,
@@ -92,6 +93,13 @@ export interface PluginContextPanelAPI {
   setMode: (mode: ContextWorkbenchMode) => boolean
   /** Pin the workbench so automatic reveals queue as badges instead of switching panels. */
   setPinned: (pinned: boolean) => boolean
+  /**
+   * Observe whether one of this plugin's panels is the one in front of the
+   * active workbench — the signal for pausing polling/animation while hidden.
+   * Stateful panels stay mounted when another panel takes over, so without
+   * this a panel cannot tell it left the screen. Fires only on changes.
+   */
+  onDidChangeVisibility: (panelId: string, listener: (visible: boolean) => void) => () => void
 }
 
 /**
@@ -187,5 +195,16 @@ export function createContextPanelAPI(
     setMode: (mode) => hasPermission("extension:ui") && setActiveWorkbenchMode(pluginId, mode),
     setPinned: (pinned) =>
       hasPermission("extension:ui") && setActiveWorkbenchPinned(pluginId, pinned),
+    onDidChangeVisibility(panelId, listener) {
+      const compute = () =>
+        hasPermission("extension:ui") && isPluginContextPanelVisible(pluginId, panelId)
+      let last = compute()
+      return subscribeActiveWorkbench(() => {
+        const next = compute()
+        if (next === last) return
+        last = next
+        listener(next)
+      })
+    },
   }
 }

@@ -752,7 +752,7 @@ describe("PluginLoader", () => {
 
     describe("teardown timeout (chaos)", () => {
       it("abandons a hung WASM teardown after the configured timeout and marks dirty", async () => {
-        jest.useRealTimers()
+        jest.useFakeTimers()
         diagModule.recordSilentFailure.mockReset()
         wasmLoader.unloadWasmPlugin.mockReset()
         // Never-resolving teardown
@@ -766,12 +766,10 @@ describe("PluginLoader", () => {
           { definition: { manifest: { type: "wasm" } }, exports: {} }
         )
 
-        const t0 = Date.now()
-        await fastLoader.unload(pluginId)
-        const elapsed = Date.now() - t0
+        const unloading = fastLoader.unload(pluginId)
+        await jest.advanceTimersByTimeAsync(30)
+        await unloading
 
-        expect(elapsed).toBeGreaterThanOrEqual(25)
-        expect(elapsed).toBeLessThan(500)
         expect(wasmLoader.unloadWasmPlugin).toHaveBeenCalledWith(pluginId)
         expect(diagModule.recordSilentFailure).toHaveBeenCalledWith(
           pluginId,

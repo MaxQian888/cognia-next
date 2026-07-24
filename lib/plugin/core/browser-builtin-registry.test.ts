@@ -23,6 +23,7 @@ describe("browser-builtin-registry", () => {
       "cognia-clipboard-history",
       "cognia-clipboard-tools",
       "cognia-computer-use",
+      "cognia-context-inspector",
       "cognia-deep-research",
       "cognia-e2b-sandbox",
       "cognia-eval",

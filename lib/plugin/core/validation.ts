@@ -280,6 +280,13 @@ interface LazyFactoryFieldOptions {
     index: number,
     push: (severity: "error" | "warning", code: string, message: string) => void
   ) => void
+  /**
+   * When it returns true for an entry, `entry`/`export` stop being required —
+   * the contribution is backed by something other than a JS module (e.g. a
+   * `contextPanels[].webview` reference). The `extra` callback owns validating
+   * that alternative backing.
+   */
+  moduleOptional?: (entry: Record<string, unknown>) => boolean
 }
 
 function validateLazyFactoryArray(
@@ -290,7 +297,7 @@ function validateLazyFactoryArray(
   /** Owning plugin's `type` — decides the default contribution backend. */
   pluginType?: unknown
 ): void {
-  const { field, requireLabel = true, extra } = options
+  const { field, requireLabel = true, extra, moduleOptional } = options
   if (raw === undefined) return
 
   if (!Array.isArray(raw)) {
@@ -341,7 +348,22 @@ function validateLazyFactoryArray(
     // `entry`/`export` name a JS module + symbol, so they are required only
     // when this contribution actually executes in JS. A python-backed entry
     // resolves through the plugin_python_call seam and declares neither —
-    // same rule as `effectiveContributionBackend` above.
+    // same rule as `effectiveContributionBackend` above. A contribution the
+    // field's `moduleOptional` claims (e.g. a webview-backed context panel)
+    // likewise has no module; its alternative backing is validated in `extra`.
+    if (moduleOptional?.(entry as Record<string, unknown>)) {
+      if (extra) {
+        extra(entry as Record<string, unknown>, i, (severity, code, message) => {
+          const fullCode = `manifest.${field}.${code}`
+          if (severity === "error") {
+            pushError(path, fullCode, message)
+          } else {
+            pushWarning(path, fullCode, message)
+          }
+        })
+      }
+      continue
+    }
     const entryBackend =
       typeof entry.backend === "string"
         ? entry.backend
@@ -1406,7 +1428,57 @@ export function validatePluginManifest(
     m.contextPanels,
     {
       field: "contextPanels",
+      // A `webview`-backed panel has no JS module: its body is a sandboxed
+      // iframe resolved from `manifest.webviews[]` at render time.
+      moduleOptional: (entry) => typeof entry.webview === "string" && entry.webview.length > 0,
       extra: (entry, _i, push) => {
+        if (entry.webview !== undefined) {
+          if (typeof entry.webview !== "string" || entry.webview.length === 0) {
+            push(
+              "error",
+              "webview.invalid",
+              `contextPanels "webview" must be a non-empty webview id string`
+            )
+          } else {
+            const conflicting = (
+              [
+                "entry",
+                "export",
+                "onFirstActivateExport",
+                "onRestoreExport",
+                "getBadgeExport",
+              ] as const
+            ).filter((field) => entry[field] !== undefined)
+            if (conflicting.length > 0) {
+              push(
+                "error",
+                "webview.conflict",
+                `contextPanels "webview" is mutually exclusive with ${conflicting.join(", ")}`
+              )
+            }
+            if (Array.isArray(m.webviews)) {
+              const known = m.webviews.some(
+                (candidate) => isPlainObject(candidate) && candidate.id === entry.webview
+              )
+              if (!known) {
+                push(
+                  "error",
+                  "webview.unknown",
+                  `contextPanels "webview" references "${entry.webview}", which is not in "webviews"`
+                )
+              }
+            } else {
+              // First-party plugins carry contributions on the module-manifest
+              // overlay, so the raw JSON may legitimately lack `webviews[]` —
+              // the merged manifest is what the manager validates at enable.
+              push(
+                "warning",
+                "webview.unresolved",
+                `contextPanels "webview" references "${entry.webview}" but "webviews" is not declared here; the merged manifest must provide it`
+              )
+            }
+          }
+        }
         // Shares its source with the imperative API's gate for the same reason
         // the activity list below does: this map used to be a hand-copied
         // literal that omitted `session` — the chat dock's own fallback

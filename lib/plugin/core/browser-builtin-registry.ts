@@ -37,6 +37,7 @@ import skillRecorderManifest from "@/plugins/skill-recorder/plugin.json"
 import browserToolsManifest from "@/plugins/browser-tools/plugin.json"
 import petDailyQuestsManifest from "@/plugins/pet-daily-quests/plugin.json"
 import strixSecurityManifest from "@/plugins/strix-security/plugin.json"
+import contextInspectorManifest from "@/plugins/context-inspector/plugin.json"
 
 // Static imports for built-in plugin modules
 import clipboardToolsModule from "@/plugins/clipboard-tools/src/index"
@@ -76,6 +77,7 @@ import skillRecorderModule from "@/plugins/skill-recorder/src/index"
 import browserToolsModule from "@/plugins/browser-tools/src/index"
 import petDailyQuestsModule from "@/plugins/pet-daily-quests/src/index"
 import strixSecurityModule from "@/plugins/strix-security/src/index"
+import contextInspectorModule from "@/plugins/context-inspector/src/index"
 
 export interface BrowserBuiltinRegistryEntry {
   manifest: PluginManifest
@@ -171,6 +173,15 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     path: "builtin://cognia-prompt-templates",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(promptTemplatesModule),
+  },
+  {
+    // Reference consumer for declarative webview-backed context panels: the
+    // module manifest carries `webviews[]` + `contextPanels[]`, so enabling it
+    // exercises the whole declarative chain end to end.
+    manifest: builtinManifest(contextInspectorManifest, contextInspectorModule),
+    path: "builtin://cognia-context-inspector",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(contextInspectorModule),
   },
   {
     manifest: builtinManifest(clipboardHistoryManifest, clipboardHistoryModule),

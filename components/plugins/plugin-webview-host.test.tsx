@@ -2,9 +2,10 @@
  * @jest-environment jsdom
  */
 
-import { render, act } from "@testing-library/react"
+import { render, act, fireEvent } from "@testing-library/react"
 import { PluginWebviewHost } from "./plugin-webview-host"
 import {
+  getWebviewState,
   postMessageToWebview,
   onWebviewMessage,
   __resetWebviewsForTesting,
@@ -66,5 +67,39 @@ describe("PluginWebviewHost", () => {
     expect(postMessageToWebview("p:dash", {})).toBe(true)
     unmount()
     expect(postMessageToWebview("p:dash", {})).toBe(false)
+  })
+
+  it("stores set-state host-side and seeds the next frame on load", () => {
+    // The frame dies with every panel unmount, so `setState` only means
+    // something if it lands host-side — this used to be silently dropped.
+    const first = render(<PluginWebviewHost fullId="p:dash" srcDoc="x" />)
+    const firstFrame = first.container.querySelector("iframe")!
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: { __cogniaWebview: "set-state", state: { count: 3 } },
+          source: firstFrame.contentWindow,
+        })
+      )
+    })
+    expect(getWebviewState("p:dash")).toEqual({ count: 3 })
+    first.unmount()
+
+    const second = render(<PluginWebviewHost fullId="p:dash" srcDoc="x" />)
+    const secondFrame = second.container.querySelector("iframe") as HTMLIFrameElement
+    const postSpy = jest.spyOn(secondFrame.contentWindow as Window, "postMessage")
+    fireEvent.load(secondFrame)
+    expect(postSpy).toHaveBeenCalledWith(
+      { __cogniaWebview: "restore-state", state: { count: 3 } },
+      "*"
+    )
+  })
+
+  it("does not post a restore when no state was ever saved", () => {
+    const { container } = render(<PluginWebviewHost fullId="p:dash" srcDoc="x" />)
+    const iframe = container.querySelector("iframe") as HTMLIFrameElement
+    const postSpy = jest.spyOn(iframe.contentWindow as Window, "postMessage")
+    fireEvent.load(iframe)
+    expect(postSpy).not.toHaveBeenCalled()
   })
 })

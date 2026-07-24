@@ -1,4 +1,9 @@
 import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
+import { CONTEXT_PANEL_WEBVIEW_CHANNEL } from "@/lib/plugin/bridge/context-panel-webview-protocol"
+import {
+  attachWebviewPoster,
+  dispatchWebviewMessage,
+} from "@/lib/plugin/registries/webview-registry"
 import type { PluginManifest } from "@/types/plugin"
 import {
   registerContextPanelsForPlugin,
@@ -80,6 +85,29 @@ it("isolates missing exports without leaving a partial panel", async () => {
   expect(contextPanelRegistry.get("review-plugin:outline")).toBeUndefined()
 })
 
+it("rejects a React panel that bypasses validation without entry/export", async () => {
+  const invalidManifest = {
+    ...manifest,
+    contextPanels: [
+      {
+        ...manifest.contextPanels[0],
+        entry: undefined,
+        export: undefined,
+      },
+    ],
+  } as unknown as PluginManifest
+  const importer = jest.fn(async () => ({ OutlinePanel: () => null }))
+
+  const result = await registerContextPanelsForPlugin(invalidManifest, "/plugins/review", {
+    importer,
+    hasPermission: () => true,
+  })
+
+  expect(result.registered).toBe(0)
+  expect(result.errors[0]?.message).toMatch(/require both entry and export/)
+  expect(importer).not.toHaveBeenCalled()
+})
+
 it("resolves the behaviour hooks from the same entry module as the renderer", async () => {
   // These reach parity with the imperative path, which had lifecycle callbacks
   // from the start while manifest panels had none.
@@ -139,6 +167,80 @@ it("reports a declared hook whose export is missing rather than registering it h
   expect(result.registered).toBe(0)
   expect(result.errors[0]?.message).toMatch(/getBadge.*panelBadge/)
   expect(contextPanelRegistry.get("review-plugin:outline")).toBeUndefined()
+})
+
+it("registers a webview-backed panel without touching the module importer", async () => {
+  const importer = jest.fn(async () => ({}))
+  const webviewManifest = {
+    ...manifest,
+    permissions: ["extension:ui", "session:read"],
+    webviews: [{ id: "inspector", html: "<main></main>" }],
+    contextPanels: [
+      {
+        id: "inspector",
+        webview: "inspector",
+        resourceKinds: ["session"],
+        activity: "inspect",
+        labelKey: "panels.inspector",
+        label: "Inspector",
+      },
+    ],
+  } satisfies PluginManifest
+
+  const result = await registerContextPanelsForPlugin(webviewManifest, "/plugins/review", {
+    importer,
+    hasPermission: () => true,
+  })
+
+  expect(result).toEqual({ registered: 1, errors: [] })
+  expect(importer).not.toHaveBeenCalled()
+  const registered = contextPanelRegistry.get("review-plugin:inspector")
+  expect(registered?.renderer).toBeDefined()
+  expect(registered?.retention).toBe("stateful")
+})
+
+it("tears the webview RPC server down on unregister", async () => {
+  const webviewManifest = {
+    ...manifest,
+    permissions: ["extension:ui", "session:read"],
+    webviews: [{ id: "inspector", html: "<main></main>" }],
+    contextPanels: [
+      {
+        id: "inspector",
+        webview: "inspector",
+        resourceKinds: ["session"],
+        activity: "inspect",
+        labelKey: "panels.inspector",
+        label: "Inspector",
+      },
+    ],
+  } satisfies PluginManifest
+  await registerContextPanelsForPlugin(webviewManifest, "/plugins/review", {
+    hasPermission: () => true,
+  })
+
+  const outbound: unknown[] = []
+  const detach = attachWebviewPoster("review-plugin:inspector", (data) => {
+    outbound.push(data)
+    return true
+  })
+  const sendRequest = (id: number) =>
+    dispatchWebviewMessage("review-plugin:inspector", {
+      data: {
+        channel: CONTEXT_PANEL_WEBVIEW_CHANNEL,
+        kind: "request",
+        id,
+        method: "getActiveContext",
+      },
+    })
+
+  sendRequest(1)
+  expect(outbound).toHaveLength(1)
+
+  unregisterContextPanelsForPlugin(webviewManifest.id)
+  sendRequest(2)
+  expect(outbound).toHaveLength(1)
+  detach()
 })
 
 it("rejects an unsafe entry even when runtime registration bypasses manifest validation", async () => {

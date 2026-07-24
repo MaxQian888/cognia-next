@@ -278,6 +278,149 @@ describe("Plugin Validation", () => {
       )
     })
 
+    it("accepts a webview-backed context panel without entry/export", () => {
+      const manifest = createValidManifest()
+      manifest.capabilities = ["context-panel", "webview"] as PluginManifest["capabilities"]
+      manifest.permissions = ["extension:ui", "session:read"]
+      ;(manifest as unknown as Record<string, unknown>).webviews = [
+        { id: "inspector", html: "<main></main>" },
+      ]
+      ;(manifest as unknown as Record<string, unknown>).contextPanels = [
+        {
+          id: "inspector",
+          label: "Inspector",
+          labelKey: "panels.inspector",
+          webview: "inspector",
+          resourceKinds: ["session"],
+          activity: "inspect",
+        },
+      ]
+
+      const result = validatePluginManifest(manifest, { governanceMode: "warn" })
+
+      expect(result.diagnostics ?? []).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: expect.stringContaining("contextPanels") }),
+        ])
+      )
+    })
+
+    it("rejects a context panel declaring both webview and entry/export", () => {
+      const manifest = createValidManifest()
+      manifest.capabilities = ["context-panel", "webview"] as PluginManifest["capabilities"]
+      manifest.permissions = ["extension:ui", "session:read"]
+      ;(manifest as unknown as Record<string, unknown>).webviews = [
+        { id: "inspector", html: "<main></main>" },
+      ]
+      ;(manifest as unknown as Record<string, unknown>).contextPanels = [
+        {
+          id: "inspector",
+          label: "Inspector",
+          labelKey: "panels.inspector",
+          webview: "inspector",
+          entry: "panel.js",
+          export: "Panel",
+          resourceKinds: ["session"],
+          activity: "inspect",
+        },
+      ]
+
+      expect(validatePluginManifest(manifest, { governanceMode: "warn" }).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "manifest.contextPanels.webview.conflict",
+            severity: "error",
+          }),
+        ])
+      )
+    })
+
+    it("rejects a context panel referencing a webview id that is not declared", () => {
+      const manifest = createValidManifest()
+      manifest.capabilities = ["context-panel", "webview"] as PluginManifest["capabilities"]
+      manifest.permissions = ["extension:ui", "session:read"]
+      ;(manifest as unknown as Record<string, unknown>).webviews = [
+        { id: "other", html: "<main></main>" },
+      ]
+      ;(manifest as unknown as Record<string, unknown>).contextPanels = [
+        {
+          id: "inspector",
+          label: "Inspector",
+          labelKey: "panels.inspector",
+          webview: "inspector",
+          resourceKinds: ["session"],
+          activity: "inspect",
+        },
+      ]
+
+      expect(validatePluginManifest(manifest, { governanceMode: "warn" }).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "manifest.contextPanels.webview.unknown",
+            severity: "error",
+          }),
+        ])
+      )
+    })
+
+    it("downgrades a webview reference to a warning when webviews[] is absent", () => {
+      // First-party plugins carry contributions on the module-manifest overlay,
+      // so the raw JSON may lack `webviews[]`; the merged manifest is what the
+      // manager validates at enable.
+      const manifest = createValidManifest()
+      manifest.capabilities = ["context-panel", "webview"] as PluginManifest["capabilities"]
+      manifest.permissions = ["extension:ui", "session:read"]
+      ;(manifest as unknown as Record<string, unknown>).contextPanels = [
+        {
+          id: "inspector",
+          label: "Inspector",
+          labelKey: "panels.inspector",
+          webview: "inspector",
+          resourceKinds: ["session"],
+          activity: "inspect",
+        },
+      ]
+
+      const diagnostics = validatePluginManifest(manifest, { governanceMode: "warn" }).diagnostics
+
+      expect(diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "manifest.contextPanels.webview.unresolved",
+            severity: "warning",
+          }),
+        ])
+      )
+      expect(diagnostics).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ code: "manifest.contextPanels.entry.missing" }),
+        ])
+      )
+    })
+
+    it("still requires entry/export when webview is an empty string", () => {
+      const manifest = createValidManifest()
+      manifest.capabilities = ["context-panel"] as PluginManifest["capabilities"]
+      manifest.permissions = ["extension:ui", "session:read"]
+      ;(manifest as unknown as Record<string, unknown>).contextPanels = [
+        {
+          id: "inspector",
+          label: "Inspector",
+          labelKey: "panels.inspector",
+          webview: "",
+          resourceKinds: ["session"],
+          activity: "inspect",
+        },
+      ]
+
+      expect(validatePluginManifest(manifest, { governanceMode: "warn" }).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ code: "manifest.contextPanels.webview.invalid" }),
+          expect.objectContaining({ code: "manifest.contextPanels.entry.missing" }),
+        ])
+      )
+    })
+
     it("accepts declarative-only VS Code extensions without vscodeMain", () => {
       const manifest = createValidManifest() as unknown as Record<string, unknown>
       manifest.type = "vscode-extension"

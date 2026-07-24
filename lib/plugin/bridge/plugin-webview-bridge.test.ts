@@ -79,6 +79,44 @@ describe("plugin-webview-bridge", () => {
     expect(getWebviewSnapshot()[0].srcDoc).not.toContain("connect-src *")
   })
 
+  it("injects the context-panel client for panel-referenced webviews only", async () => {
+    const plain = await registerWebviewsForPlugin(
+      manifest([{ id: "dash", containerId: "explorer", html: "<h1>Hi</h1>" }]),
+      "/root"
+    )
+    expect(plain.registered).toBe(1)
+    expect(getWebviewSnapshot()[0].srcDoc).not.toContain("acquireCogniaContextPanelApi")
+    __resetWebviewsForTesting()
+
+    const referenced = {
+      ...manifest([{ id: "inspector", html: "<main></main>" }]),
+      contextPanels: [
+        {
+          id: "inspector",
+          webview: "inspector",
+          resourceKinds: ["session"],
+          activity: "inspect",
+          labelKey: "panels.inspector",
+          label: "Inspector",
+        },
+      ],
+    } as PluginManifest
+    await registerWebviewsForPlugin(referenced, "/root")
+    expect(getWebviewSnapshot()[0].srcDoc).toContain("acquireCogniaContextPanelApi")
+  })
+
+  it("injects the client for ALL webviews of a context-panel-capable plugin", async () => {
+    // A webview may only become a panel body later, via an RPC
+    // `register({ webview })` — its srcDoc is wrapped once at enable, so the
+    // capability declaration is the injection signal, not the reference.
+    const capable = {
+      ...manifest([{ id: "extra-view", containerId: "explorer", html: "<main></main>" }]),
+      capabilities: ["webview", "context-panel"],
+    } as PluginManifest
+    await registerWebviewsForPlugin(capable, "/root")
+    expect(getWebviewSnapshot()[0].srcDoc).toContain("acquireCogniaContextPanelApi")
+  })
+
   it("no-ops without webviews", async () => {
     const result = await registerWebviewsForPlugin(manifest(undefined), "/root")
     expect(result).toEqual({ registered: 0, errors: [] })

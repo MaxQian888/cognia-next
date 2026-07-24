@@ -332,7 +332,93 @@ Every panel requires `extension:ui` plus each declared resource permission:
 `project:read`, `canvas:read`, `artifact:read`, `workflow:read`, or
 `session:read`. Registration fails closed when one is missing, and a panel
 already registered disappears from the rail the moment a permission is
-revoked. Sandboxed Webview renderers are not supported.
+revoked.
+
+### Webview-backed panels (sandboxed)
+
+A panel does not have to be a trusted React component: `webview` names an
+entry of the same manifest's `webviews[]`, and the host renders that
+webview's sandboxed iframe (`sandbox="allow-scripts"`, opaque origin, CSP
+clamped to the plugin's `networkAccess`) as the panel body. `webview` is
+mutually exclusive with `entry`/`export` and the lifecycle-export fields —
+there is no module to resolve them from.
+
+```jsonc
+{
+  "permissions": ["extension:ui", "session:read"],
+  "capabilities": ["context-panel", "webview"],
+  "webviews": [{ "id": "inspector", "html": "<main>…</main>" }],
+  "contextPanels": [
+    {
+      "id": "inspector",
+      "webview": "inspector", // ← instead of entry/export
+      "resourceKinds": ["session"],
+      "activity": "inspect",
+      "labelKey": "panel.inspector",
+      "label": "Context Inspector"
+    }
+  ]
+}
+```
+
+Because an inline-`html` webview never touches the module importer, this is
+the one declarative `contextPanels` shape that also works for **built-in**
+plugins — `cognia-context-inspector` is the in-tree reference.
+
+Inside the iframe, the host injects `acquireCogniaContextPanelApi()`: the
+full panel API mirrored over postMessage. Every method returns a Promise
+(5s timeout) and re-runs the host-side permission gates per call:
+
+```js
+const api = window.acquireCogniaContextPanelApi()
+
+await api.setBadge("inspector", 3)
+await api.reveal("inspector", "wide")
+const context = await api.getActiveContext()
+const state = await api.getWorkbenchState()
+await api.setMode("focus")
+await api.setPinned(true)
+// Register ANOTHER panel dynamically — rendered by another declared webview
+// (a React renderer cannot cross postMessage). Returns a registration id
+// accepted by api.dispose(id).
+const registrationId = await api.register({
+  id: "extra",
+  webview: "extra-view",
+  label: "Extra",
+  labelKey: "panel.extra",
+  resourceKinds: ["session"],
+  activity: "inspect",
+})
+
+api.onDidChangeActiveContext((context) => {})
+api.onDidChangeWorkbenchState((state) => {})
+// THIS iframe instance's display state — pause polling/animation on false.
+api.onDidChangeVisibility(({ visible }) => {})
+```
+
+The host pushes `activeContext` / `workbenchState` changes into the frame,
+and replays a snapshot of both when the client attaches, so the script can
+subscribe at any point without missing state. `visibility` is per-frame: the
+desktop dock and the mobile sheet can each host a live iframe of the same
+webview, and each hears only about its own instance.
+
+<Callout type="warn">
+  A `stateful` webview panel keeps its iframe (and all in-frame state) while
+  hidden, but **collapsing the workbench or switching resources unmounts the
+  iframe entirely**. Use `acquireCogniaWebviewApi().setState(...)` for state
+  that must survive that: the host stores it and replays it into the next
+  frame, so `getState()` after acquire returns the previous frame's last save
+  (subscribe with `onDidChangeState` for late restores). This is runtime-only —
+  it does not survive plugin disable or app restart; anything durable belongs
+  in your plugin's logic side (`ctx.storage`).
+</Callout>
+
+### Host-side visibility
+
+The imperative API has the same signal without a webview:
+`ctx.contextPanels.onDidChangeVisibility(panelId, listener)` fires with
+`true`/`false` as the panel becomes / stops being the one in front of the
+active workbench (collapse counts as hidden). Fires only on transitions.
 
 ### Driving the workbench
 
@@ -390,7 +476,7 @@ the host renderer / consumer exists, not just the registry:
 | `configComponent`  | Rendered in the plugin settings panel (falls back to the schema form) | bridge unit tests (`config-component-bridge`) |
 | `modalMounts`      | Lazy declared-modal registry → `ctx.modal.openById`                   | bridge unit tests (`modal-mount-bridge`) |
 | `chatMiddlewares`  | `runAndCaptureAssistantReply` (default-off flag)                      | bridge unit tests (`chat-middleware-bridge`) |
-| `contextPanels`    | Context Workbench activity rail (chat dock, editor, workflow)        | `cognia-prompt-templates` (imperative)  |
+| `contextPanels`    | Context Workbench activity rail (chat dock, editor, workflow)        | `cognia-context-inspector` (declarative webview), `cognia-prompt-templates` (imperative) |
 
 > **Builtin limitation.** Import-based fields (those with an `entry` /
 > `export` module — `ocrProviders`, `workspaceBackends`, `messageRenderers`,
@@ -401,7 +487,9 @@ the host renderer / consumer exists, not just the registry:
 > those surfaces imperatively via the `ctx.*` APIs instead. The
 > declarative-data fields (`themePacks`, `wallpapers`, `densityPresets`,
 > `scheduledTasks`, `modes`) work for builtins too — that is why the
-> reference demos above are builtins.
+> reference demos above are builtins. **Exception:** a `contextPanels` entry
+> backed by an inline-`html` `webview` involves no module import, so that
+> declarative shape works for builtins as well (see `cognia-context-inspector`).
 
 ## Migration cheat-sheet
 
