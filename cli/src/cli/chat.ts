@@ -93,6 +93,7 @@ export interface ChatDeps {
   renderTui?: (deps: {
     config: ReturnType<typeof defaultLoadConfig>
     createSession: typeof createAgentSession
+    createExternalSession: typeof createExternalAgentSession
     pushHandoff: (sessionId: string) => void | Promise<void>
     initialCommand?: string
   }) => Promise<number>
@@ -131,9 +132,13 @@ export async function chatCommand(args: ParsedArgs, deps: ChatDeps = {}): Promis
   const initialCommand = launchCommandFromFlags(args)
   if (isTty() && !deps.readLine) {
     const renderTui = deps.renderTui ?? (await import("../tui/mount")).renderTui
+    // The TUI picks the backend itself — `/backend` can switch it mid-session —
+    // so it gets BOTH factories rather than the one chosen here. The readline
+    // fallback below has no such control and keeps the launch-time choice.
     return renderTui({
       config,
-      createSession,
+      createSession: builtinCreateSession,
+      createExternalSession: externalCreateSession,
       pushHandoff: (sessionId: string) => {
         void pushHandoff(sessionId, undefined, { out })
       },

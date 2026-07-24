@@ -1,10 +1,18 @@
 /** @jest-environment node */
+import fs from "node:fs"
+import os from "node:os"
 import path from "node:path"
 
 import {
   buildSandboxLauncherArgs,
   bundledLauncherCandidates,
+  defaultSandboxRuntime,
+  findSandboxLauncher,
+  isDevCheckout,
+  launcherName,
   resolveSandboxedExternalAgentLaunch,
+  sandboxLauncherUnavailableMessage,
+  sandboxSupportsPlatform,
 } from "./sandbox-launcher"
 
 describe("external-agent sandbox launcher", () => {
@@ -152,5 +160,101 @@ describe("external-agent sandbox launcher", () => {
         }
       )
     ).rejects.toThrow(/not available on win32/)
+  })
+})
+
+describe("sandbox readiness reporting", () => {
+  it("reports the first executable candidate, or nothing", () => {
+    expect(
+      findSandboxLauncher({
+        candidates: ["/a", "/b"],
+        isExecutable: (candidate) => candidate === "/b",
+      })
+    ).toBe("/b")
+    expect(findSandboxLauncher({ candidates: ["/a"], isExecutable: () => false })).toBeUndefined()
+  })
+
+  it.each([
+    ["darwin", true],
+    ["linux", true],
+    ["win32", false],
+  ] as const)("gates hosting on %s", (platform, supported) => {
+    expect(sandboxSupportsPlatform(platform)).toBe(supported)
+  })
+
+  it("keeps the maintainer build command out of an installed CLI's error", () => {
+    const installed = sandboxLauncherUnavailableMessage("codex", false)
+    expect(installed).toContain("sandbox launcher is unavailable")
+    expect(installed).toContain("COGNIA_EXTERNAL_AGENT_LAUNCHER")
+    expect(installed).not.toContain("pnpm")
+
+    expect(sandboxLauncherUnavailableMessage("codex", true)).toContain(
+      "pnpm cli:external-host:build"
+    )
+  })
+
+  it("detects a repo checkout by the presence of cli/package.json", () => {
+    const existsSync = jest.spyOn(fs, "existsSync")
+    try {
+      existsSync.mockReturnValue(true)
+      expect(isDevCheckout()).toBe(true)
+      existsSync.mockReturnValue(false)
+      expect(isDevCheckout()).toBe(false)
+      existsSync.mockImplementation(() => {
+        throw new Error("EACCES")
+      })
+      expect(isDevCheckout()).toBe(false)
+    } finally {
+      existsSync.mockRestore()
+    }
+  })
+
+  it("spells the launcher per platform", () => {
+    expect(launcherName("darwin")).toBe("cognia-external-agent-launcher")
+    expect(launcherName("win32")).toBe("cognia-external-agent-launcher.exe")
+  })
+
+  it("refuses to build args without a workspace to sandbox", () => {
+    expect(() => buildSandboxLauncherArgs({ id: "a", command: "codex" }, "/home/user")).toThrow(
+      /requires a working directory/
+    )
+  })
+
+  it("tolerates an npx invocation with no arguments", () => {
+    expect(
+      buildSandboxLauncherArgs({ id: "a", command: "npx", cwd: "/work" }, "/home/user")
+    ).toEqual(expect.arrayContaining(["--writable", "/home/user/.npm"]))
+  })
+
+  it("creates real state roots through the host runtime's fs shims", () => {
+    const runtime = defaultSandboxRuntime()
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-sandbox-"))
+    try {
+      const dir = path.join(root, "state")
+      const file = path.join(root, "state.json")
+      runtime.ensureDir?.(dir)
+      runtime.ensureFile?.(file)
+      expect(fs.statSync(dir).isDirectory()).toBe(true)
+      expect(fs.statSync(file).isFile()).toBe(true)
+      expect(runtime.candidates.length).toBeGreaterThan(0)
+      expect(runtime.isExecutable(path.join(root, "nope"))).toBe(false)
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it("names the agent it could not launch", async () => {
+    await expect(
+      resolveSandboxedExternalAgentLaunch(
+        { id: "a", command: "codex", cwd: "/work/repo" },
+        {
+          platform: "linux",
+          homedir: "/home/user",
+          candidates: [],
+          isExecutable: () => false,
+          isDevCheckout: () => false,
+        }
+      )
+    ).rejects.toThrow(/Can't launch "codex"/)
   })
 })

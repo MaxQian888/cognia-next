@@ -136,6 +136,9 @@ export type CommandEffect =
   /** Persist + live-apply a TUI layout change (`/layout`). The App enters/exits
    * the alternate screen buffer and re-renders the fixed vs scrollback tree. */
   | { kind: "layout"; mode: LayoutMode }
+  /** Switch the hosting agent backend: drop the live session and reconnect
+   * through the staged startup flow. */
+  | { kind: "backend"; backend: string }
   /** Persist + live-apply a fullscreen mouse-mode change (`/mouse`). The App
    * re-applies the terminal mouse tracking/alternate-scroll escapes in place. */
   | { kind: "mouse"; mode: MouseMode }

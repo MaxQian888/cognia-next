@@ -32,6 +32,9 @@ describe("resolveSegments", () => {
     expect(resolveSegments(base)).toEqual([
       "model",
       "provider",
+      // Present by default but renders nothing on the built-in backend, so the
+      // ordinary footer is unchanged.
+      "backend",
       "mode",
       "tokens",
       "ctx",
@@ -60,6 +63,35 @@ describe("buildStatusBar", () => {
     expect(byId.ctx.text).toContain("% ctx")
     expect(byId.cost.text).toBe("$0.500")
     expect(byId.cwd.text).toBe("/work")
+    // The backend segment ships in the default layout but stays silent here.
+    expect(byId.backend).toBeUndefined()
+  })
+
+  it("names the hosting agent once one is active", () => {
+    const segs = buildStatusBar({ config: { ...base, agentBackend: "codex" }, usage })
+    expect(Object.fromEntries(segs.map((s) => [s.id, s])).backend.text).toBe("codex")
+  })
+
+  it("hides the gauge and cost rather than pricing an external agent with the wrong model", () => {
+    const external = { ...base, agentBackend: "codex" }
+    const byId = Object.fromEntries(
+      buildStatusBar({ config: external, usage }).map((s) => [s.id, s])
+    )
+    // Both would otherwise come from the built-in provider's catalog window and
+    // rate card, neither of which describes what actually ran.
+    expect(byId.ctx).toBeUndefined()
+    expect(byId.cost).toBeUndefined()
+  })
+
+  it("shows the gauge again once a real context window is known for the backend", () => {
+    const byId = Object.fromEntries(
+      buildStatusBar({
+        config: { ...base, agentBackend: "codex" },
+        usage,
+        contextWindow: 200_000,
+      }).map((s) => [s.id, s])
+    )
+    expect(byId.ctx.text).toContain("% ctx")
   })
 
   it("shows the active provider's resolved model, not a stale top-level pin", () => {

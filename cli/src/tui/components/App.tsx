@@ -22,6 +22,20 @@ import { ThemeProvider } from "../theme/context"
 import { RenderPrefsProvider } from "../render/context"
 import { resolveTheme } from "../theme/resolve"
 import { StartupGate } from "./StartupGate"
+import { BackendConnect } from "./BackendConnect"
+import { BackendFailure, type BackendFailureAction } from "./BackendFailure"
+import { BackendInstall } from "./BackendInstall"
+import type { BackendInstallOption } from "../state/types"
+import { createAgentSession, type AgentSession } from "../../agent/session-runner"
+import { isBuiltinBackend } from "../runtime/backend-capabilities"
+import { disconnectBackend } from "../runtime/backend-controller"
+import type {
+  connectBackend,
+  BackendConnection,
+  BackendConnectFailure,
+} from "../runtime/backend-controller"
+import type { RunInstallResult, InstallMethod } from "../runtime/backend-install"
+import { backendIdentity } from "../runtime/backend-identity"
 import type { ListDirs } from "./FolderPicker"
 import { trustFolder as defaultTrustFolder } from "../../config/trusted-folders"
 import { listSessions, type ReadDir } from "./sessions-list"
@@ -153,10 +167,70 @@ import { useApplyEffect } from "./app/use-apply-effect"
 // on top of the core catalog. Idempotent — safe at module load.
 registerFeatureCommands()
 
+export type InstallOptionResolver = (
+  failure: BackendConnectFailure
+) => Promise<BackendInstallOption | null>
+
+export type InstallRunner = (deps: {
+  method: InstallMethod
+  onLine: (line: string) => void
+}) => Promise<RunInstallResult>
+
+/**
+ * Resolve the installable fix for a failed connect, or `null`. Only a missing
+ * binary (`command` failure) has one, and only when an officially-supported
+ * method's prerequisites are present here — so a curl installer is never offered
+ * without `curl`, nor an npm install without `npm`. Lazy-imports the install
+ * stack so a built-in session never parses it.
+ */
+async function defaultResolveInstallOption(
+  failure: BackendConnectFailure
+): Promise<BackendInstallOption | null> {
+  if (failure.kind !== "command" || !failure.command) return null
+  const [{ resolveInstallPlan, pickInstallMethod }, { commandExists }] = await Promise.all([
+    import("../runtime/backend-install"),
+    import("../../runtime/external/node-backend"),
+  ])
+  const plan = resolveInstallPlan(failure.command)
+  if (!plan) return null
+  const method = await pickInstallMethod(plan, commandExists)
+  if (!method) return null
+  return { command: failure.command, name: plan.name, method }
+}
+
+/** Run an install method, streaming its output. Lazy-imported so only the
+ * install path pays for it. Injected in tests so nothing is spawned. */
+async function defaultRunInstall(deps: {
+  method: InstallMethod
+  onLine: (line: string) => void
+}): Promise<RunInstallResult> {
+  const { runInstall } = await import("../runtime/backend-install")
+  return runInstall(deps)
+}
+
 export interface AppProps {
   config: ResolvedConfig
   sessionId: string
   createSession?: CreateSession
+  /**
+   * Factory for a session that runs on an external agent. Kept separate from
+   * `createSession` because the active backend is now switchable at runtime
+   * (`/backend`), so the App — not the launcher — has to pick between them, and
+   * has to hand the external one the connection made during startup so the turn
+   * reuses that process instead of spawning a second.
+   */
+  createExternalSession?: (params: {
+    config: ResolvedConfig
+    sessionId?: string
+    connection?: { agentId: string; presetId: string }
+  }) => AgentSession
+  /** Bring the external backend up. Injected so tests never spawn a process. */
+  connectBackendFn?: typeof connectBackend
+  /** Resolve the installable fix for a missing-command failure. Injected so
+   * tests never probe the real filesystem for package managers. */
+  resolveInstallOptionFn?: InstallOptionResolver
+  /** Run the chosen install method. Injected so tests never spawn an installer. */
+  runInstallFn?: InstallRunner
   pushHandoff?: (sessionId: string) => void | Promise<void>
   /** Override the exit + clock for tests. */
   onExit?: () => void
@@ -300,6 +374,10 @@ export function App({
   config,
   sessionId,
   createSession,
+  createExternalSession,
+  connectBackendFn,
+  resolveInstallOptionFn,
+  runInstallFn,
   pushHandoff,
   onExit,
   now = Date.now,
@@ -369,13 +447,46 @@ export function App({
   const [state, dispatch] = useReducer(tuiReducer, undefined, () =>
     createInitialState(config, sessionId, trusted, initialHistory)
   )
+  // The live external connection, if any. A ref (not state) because it is read
+  // when a session is lazily created, never rendered.
+  const connectionRef = useRef<BackendConnection | null>(null)
+  // The install option resolved for the current failure (a ref so the failure
+  // page's "install" handler reads the latest without recreating the callback).
+  const installOptionRef = useRef<BackendInstallOption | null>(null)
+  const activeBackend = state.config.agentBackend
+  // Route session creation to the backend the user has selected RIGHT NOW.
+  // `/backend` drops the live session, so a changed identity here always lands
+  // on a fresh session rather than being ignored by the existing one.
+  const activeCreateSession = useCallback<CreateSession>(
+    (params) => {
+      if (isBuiltinBackend(activeBackend)) {
+        return (createSession ?? createAgentSession)(params)
+      }
+      if (!createExternalSession) {
+        // Refuse rather than quietly answering on the built-in agent — the whole
+        // point of the backend selection is that the user knows who replied.
+        // `send` catches this and renders it as a turn error.
+        throw new Error(`No external-agent session factory is available for "${activeBackend}".`)
+      }
+      const connection = connectionRef.current
+      return createExternalSession({
+        ...params,
+        config: { ...params.config, agentBackend: activeBackend },
+        ...(connection
+          ? { connection: { agentId: connection.agentId, presetId: connection.presetId } }
+          : {}),
+      })
+    },
+    [activeBackend, createSession, createExternalSession]
+  )
   const agent = useAgentSession({
     config: state.config,
     dispatch,
     // Bind the chat session to the live app id so its transcript lands under the
     // id `/export`/`/handoff`/`/resume` read (it tracks `/clear` + `/resume`).
     sessionId: state.sessionId,
-    createSession,
+    createSession: activeCreateSession,
+    ...(state.backendCapabilities ? { capabilities: state.backendCapabilities } : {}),
     getCellCount: () => state.cells.length,
     // Seed the live auto-approve set from THIS app's home (not the OS home) so
     // it matches `persistToolApproval`'s store and stays hermetic under test.
@@ -839,6 +950,107 @@ export function App({
     [agent, home, trustFolderFn]
   )
 
+  // Bring the external backend up while the composer is still closed. Runs on
+  // every entry into the `"connecting"` phase — first launch after the trust
+  // gate, a retry from the failure page, and a `/backend` switch all land here.
+  // The config is read from a ref so the effect's identity depends only on the
+  // phase, which is what makes "one connect per entry" true.
+  const liveConfigRef = useRef(state.config)
+  useEffect(() => {
+    liveConfigRef.current = state.config
+  }, [state.config])
+  const [failureIndex, setFailureIndex] = useState(0)
+  useEffect(() => {
+    if (state.phase !== "connecting") return
+    const backend = liveConfigRef.current.agentBackend ?? "builtin"
+    let cancelled = false
+    // Loaded on demand: the external protocol stack is ~200KB of manager + ACP
+    // client that a built-in session must never pay to parse.
+    const connect = async () => {
+      const run = connectBackendFn ?? (await import("../runtime/backend-controller")).connectBackend
+      const { commandExists } = await import("../../runtime/external/node-backend")
+      return run({
+        backend,
+        config: liveConfigRef.current,
+        agentId: `cli-backend-${sessionId}`,
+        commandExists,
+        onStage: (stage) => {
+          if (!cancelled) dispatch({ type: "BACKEND_CONNECT_STAGE", backend, stage })
+        },
+      })
+    }
+    void connect().then(async (result) => {
+      if (cancelled) return
+      if (result.ok) {
+        connectionRef.current = result.connection
+        dispatch({ type: "BACKEND_CONNECT_OK", capabilities: result.connection.capabilities })
+        return
+      }
+      // Reset the recovery cursor here rather than when the connect starts:
+      // a synchronous set inside the effect body would cascade a render.
+      setFailureIndex(0)
+      installOptionRef.current = null
+      // Only a missing binary can be fixed by installing something; every other
+      // failure (platform, launcher, handshake) goes straight to the page. This
+      // branch also stays synchronous so it never shifts the failure-page timing.
+      if (result.failure.kind !== "command" || !result.failure.command) {
+        dispatch({ type: "BACKEND_CONNECT_FAIL", failure: result.failure })
+        return
+      }
+      // Resolve the first official install method whose prerequisites are present
+      // so the failure page can offer to run it in place.
+      const resolveInstallOption = resolveInstallOptionFn ?? defaultResolveInstallOption
+      const installOption = await resolveInstallOption(result.failure)
+      if (cancelled) return
+      installOptionRef.current = installOption
+      dispatch({
+        type: "BACKEND_CONNECT_FAIL",
+        failure: result.failure,
+        ...(installOption ? { installOption } : {}),
+      })
+    })
+    return () => {
+      cancelled = true
+    }
+    // The config is read through `liveConfigRef`, deliberately keeping it out of
+    // the deps: the effect must fire once per ENTRY into the connecting phase,
+    // not on every unrelated config change while a connect is in flight.
+  }, [state.phase, connectBackendFn, resolveInstallOptionFn, sessionId])
+
+  // Esc during the connect: reclaim whatever the in-flight connect may have
+  // registered under the stable id (the connect writes `connectionRef` only on
+  // success, so at cancel time it's still null — remove by the known id), then
+  // route to the recovery page. Leaving the connecting phase runs the effect's
+  // cleanup, which flips its `cancelled` flag so the settling connect is a no-op.
+  const cancelBackendConnect = useCallback(() => {
+    void disconnectBackend({ agentId: `cli-backend-${sessionId}` })
+    connectionRef.current = null
+    installOptionRef.current = null
+    setFailureIndex(0)
+    dispatch({
+      type: "BACKEND_CONNECT_FAIL",
+      failure: { kind: "handshake", stage: "launch", message: "Connection cancelled." },
+    })
+  }, [sessionId])
+
+  // Reclaim the external agent process on unmount. The controller — not the
+  // session — owns the process it started, so exiting without this orphans the
+  // spawned agent (and its sandboxed child). Runs once, on teardown.
+  useEffect(() => {
+    return () => {
+      void disconnectBackend(connectionRef.current)
+    }
+  }, [])
+
+  // Reclaim the live external process when `/backend` switches to the built-in
+  // agent (no reconnect follows, so it would otherwise leak until exit). An
+  // external → external switch does NOT call this — its reconnect re-registers
+  // under the same id and reclaims the old process itself.
+  const reclaimBackend = useCallback(() => {
+    void disconnectBackend(connectionRef.current)
+    connectionRef.current = null
+  }, [])
+
   // Best-effort write of a changed setting to `~/.cognia/config.json` so a
   // `/config`-panel switch survives the next launch. A failure (read-only home,
   // bad value) surfaces as a notice rather than throwing.
@@ -1021,6 +1233,7 @@ export function App({
     takeSteer,
     doExit,
     changeCwd,
+    reclaimBackend,
     setRuntimeAbort,
     getRuntimeAbort,
     mcpProbeCache,
@@ -1033,6 +1246,62 @@ export function App({
       )
     },
     [applyEffect, state]
+  )
+
+  // Recovery actions on the connect-failure page. Defined after `runCommandLine`
+  // so the `/doctor` route can reuse the normal command path.
+  const onBackendFailureAction = useCallback(
+    (action: BackendFailureAction) => {
+      const backend = liveConfigRef.current.agentBackend ?? "builtin"
+      if (action === "install") {
+        const option = installOptionRef.current
+        // Belt-and-braces: the choice only exists when an option is present, but
+        // a stale keypress must never spawn nothing.
+        if (!option) return
+        dispatch({
+          type: "BACKEND_INSTALL_START",
+          name: option.name,
+          display: option.method.display,
+        })
+        const run = runInstallFn ?? defaultRunInstall
+        void run({
+          method: option.method,
+          onLine: (line) => dispatch({ type: "BACKEND_INSTALL_OUTPUT", chunk: `${line}\n` }),
+        }).then((result) => {
+          if (result.ok) {
+            // The binary is now on PATH — re-enter the connect flow, which
+            // re-probes and proceeds to the handshake.
+            dispatch({ type: "BACKEND_CONNECT_RETRY", backend })
+          } else {
+            const exit = result.exitCode === null ? "" : ` (exit ${result.exitCode})`
+            dispatch({
+              type: "BACKEND_INSTALL_FAIL",
+              message: `Couldn't install ${option.name}${exit} — try \`${option.method.display}\` manually.`,
+            })
+          }
+        })
+        return
+      }
+      if (action === "retry") {
+        dispatch({ type: "BACKEND_CONNECT_RETRY", backend })
+        return
+      }
+      if (action === "quit") {
+        doExit()
+        return
+      }
+      // Both remaining routes land in the chat on the built-in agent. Falling
+      // back is stated outright rather than applied quietly — a user who is not
+      // told would keep believing the agent they asked for is answering.
+      dispatch({ type: "SET_BACKEND", backend: "builtin" })
+      dispatch({ type: "STARTUP_TRUST" })
+      dispatch({
+        type: "NOTICE",
+        message: `Switched to the built-in agent — ${backend} could not start.`,
+      })
+      if (action === "doctor") runCommandLine("/doctor")
+    },
+    [doExit, runCommandLine, runInstallFn]
   )
 
   // Launch-flag command (`--continue` / `--resume [id]`): run exactly once, and
@@ -1531,6 +1800,7 @@ export function App({
     renderPrefs,
     now,
     doExit,
+    cancelBackendConnect,
     agent,
     abortRuntime,
     askUser,
@@ -1557,16 +1827,23 @@ export function App({
     backtrackArmedRef,
   })
 
+  // Identity line: on an external backend the built-in provider/model would be
+  // an outright lie — that agent is not what answers — so the backend and the
+  // model it reported take their place.
+  const identity = useMemo(
+    () => backendIdentity(state.config, state.backendCapabilities?.presetId),
+    [state.config, state.backendCapabilities]
+  )
   const banner = useMemo(
     () => (
       <Banner
         version={VERSION}
-        provider={state.config.provider}
-        model={activeModel}
+        provider={identity.provider}
+        model={identity.model ?? activeModel}
         cwd={state.config.cwd}
       />
     ),
-    [activeModel, state.config.cwd, state.config.provider]
+    [activeModel, identity, state.config.cwd]
   )
   const lastPlanRaw = state.lastPlan?.raw
   const footerPlanTitle = useMemo(
@@ -1622,6 +1899,63 @@ export function App({
               onTrust={trustCwd}
               onChangeCwd={changeCwd}
               listDirs={listDirs}
+              width={columns}
+              maxRows={overlayRows}
+            />
+          </Box>
+        </RenderPrefsProvider>
+      </ThemeProvider>
+    )
+  }
+
+  // The external agent is coming up. The composer stays closed so a message
+  // cannot be typed into a backend that may still fail to start.
+  if (state.phase === "connecting") {
+    return (
+      <ThemeProvider palette={themePalette}>
+        <RenderPrefsProvider prefs={renderPrefs}>
+          <Box flexDirection="column" width={columns}>
+            {banner}
+            <BackendConnect
+              backend={state.backendConnect?.backend ?? state.config.agentBackend ?? "builtin"}
+              stage={state.backendConnect?.stage ?? "preset"}
+              width={columns}
+            />
+          </Box>
+        </RenderPrefsProvider>
+      </ThemeProvider>
+    )
+  }
+
+  // The agent's CLI is being installed from the failure page. Like connecting,
+  // the composer stays closed — there is nothing to type into yet.
+  if (state.phase === "installing" && state.backendInstall) {
+    return (
+      <ThemeProvider palette={themePalette}>
+        <RenderPrefsProvider prefs={renderPrefs}>
+          <Box flexDirection="column" width={columns}>
+            {banner}
+            <BackendInstall install={state.backendInstall} width={columns} maxRows={overlayRows} />
+          </Box>
+        </RenderPrefsProvider>
+      </ThemeProvider>
+    )
+  }
+
+  if (state.phase === "connect-failed" && state.backendFailure) {
+    return (
+      <ThemeProvider palette={themePalette}>
+        <RenderPrefsProvider prefs={renderPrefs}>
+          <Box flexDirection="column" width={columns}>
+            {banner}
+            <BackendFailure
+              backend={state.config.agentBackend ?? "builtin"}
+              failure={state.backendFailure}
+              installOption={state.backendInstallOption}
+              installError={state.backendInstallError}
+              index={failureIndex}
+              onIndexChange={setFailureIndex}
+              onSelect={onBackendFailureAction}
               width={columns}
               maxRows={overlayRows}
             />

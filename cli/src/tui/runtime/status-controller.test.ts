@@ -4,6 +4,7 @@
 import { collectStatusReport, runStatus, type StatusDeps } from "./status-controller"
 import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "../../config/schema"
 import type { TuiAction } from "../state/types"
+import { builtinCapabilities, externalCapabilities } from "./backend-capabilities"
 
 const config: ResolvedConfig = {
   ...DEFAULT_RESOLVED_CONFIG,
@@ -69,6 +70,39 @@ describe("collectStatusReport", () => {
     // "claude-x" matches no pattern → 128k default → 78%.
     expect(report.contextWindow).toBe(128_000)
     expect(report.contextPct).toBe(78)
+  })
+})
+
+describe("collectStatusReport — backend", () => {
+  it("reports the built-in backend and claims no blocked features", () => {
+    const report = collectStatusReport(deps())
+    // The field was collected but dropped before, so `/status` showed the
+    // built-in provider while an external agent was answering.
+    expect(report.agentBackend).toBe("builtin")
+    expect(report.provider).toBe("anthropic")
+    expect(report.blockedFeatures).toBeUndefined()
+  })
+
+  it("names the external agent and what it cannot do", () => {
+    const report = collectStatusReport(
+      deps({
+        config: { ...config, agentBackend: "codex" },
+        capabilities: externalCapabilities({ backend: "codex", presetId: "codex-app-server" }),
+      })
+    )
+    expect(report.agentBackend).toBe("codex")
+    expect(report.provider).toBe("codex (codex-app-server)")
+    expect(report.blockedFeatures).toEqual(
+      expect.arrayContaining(["Context compaction", "Rate limits", "Lifecycle hooks"])
+    )
+    // …and the bridged ones are NOT listed as blocked.
+    expect(report.blockedFeatures).not.toContain("MCP servers")
+    expect(report.blockedFeatures).not.toContain("Thinking level")
+  })
+
+  it("lists nothing as blocked on the built-in capability set", () => {
+    const report = collectStatusReport(deps({ capabilities: builtinCapabilities() }))
+    expect(report.blockedFeatures).toEqual([])
   })
 })
 

@@ -7,9 +7,27 @@
       "@/lib/ai/agent/external/agent-transport": ["cli/src/runtime/external/host-branch.ts"],
       "@/lib/ai/agent/external/agent-hooks": ["cli/src/runtime/external/agent-hooks-shim.ts"],
       "@/*": ["./*"],
-      // The CLI reaches memory types through `@/types/memory/memory`, which is now
-      // a shim re-exporting `@cognia/memory/types/memory`. A child `paths` REPLACES
-      // the root's, so the target must be re-listed here (relative to baseUrl "..").
+      // A child `paths` REPLACES the root's — it does NOT merge — so every
+      // `@cognia/*` workspace package the CLI's own files import must be
+      // re-listed here, or IDEs and single-file `tsx` runs (which resolve cli/
+      // files against THIS tsconfig) can't resolve it: there is no
+      // `node_modules/@cognia` symlink, these packages are source-only, resolved
+      // solely through tsconfig `paths`. Keep in sync with the root tsconfig
+      // (relative to baseUrl ".."). `agent-config-types` was the ADR-0090
+      // addition that first exposed the gap. NB: `pnpm cli:dev` no longer runs
+      // through tsx — it bundles via esbuild (root tsconfig) — because tsx's
+      // per-file CJS/ESM split can't re-export ESM `@cognia/*` packages through
+      // the CommonJS `lib/` + `types/` boundary shims; see scripts/build/dev-cli.mjs.
+      "@cognia/provider-types": ["packages/provider-types/src/index.ts"],
+      "@cognia/provider-types/*": ["packages/provider-types/src/*"],
+      "@cognia/provider-core": ["packages/provider-core/src/index.ts"],
+      "@cognia/provider-core/*": ["packages/provider-core/src/*"],
+      "@cognia/provider-routing": ["packages/provider-routing/src/index.ts"],
+      "@cognia/provider-routing/*": ["packages/provider-routing/src/*"],
+      "@cognia/document": ["packages/document/src/index.ts"],
+      "@cognia/document/*": ["packages/document/src/*"],
+      "@cognia/agent-config-types": ["packages/agent-config-types/src/index.ts"],
+      "@cognia/agent-config-types/*": ["packages/agent-config-types/src/*"],
       "@cognia/memory": ["packages/memory/src/index.ts"],
       "@cognia/memory/*": ["packages/memory/src/*"],
       "@cognia/ocr": ["packages/ocr/src/index.ts"],

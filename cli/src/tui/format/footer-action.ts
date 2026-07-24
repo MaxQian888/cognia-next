@@ -21,6 +21,8 @@ export function footerSegmentCommand(id: StatusSegment): string | null {
       return "/context"
     case "git":
       return "/diff"
+    case "backend":
+      return "/backend"
     case "tokens":
     case "cost":
     case "cache":

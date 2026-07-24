@@ -30,6 +30,7 @@ import type { runLoopStreaming } from "../../runtime/loop-run"
 import type { runFixStreaming } from "../../runtime/fix-run"
 import type { CommandEffect } from "../../commands/types"
 import type { TuiState, TuiAction } from "../../state/types"
+import { supportsFeature, unsupportedFeatureMessage } from "../../runtime/backend-capabilities"
 import type { AgentSessionApi } from "../../hooks/useAgentSession"
 import type { TranscriptCursor } from "../../hooks/useTranscriptCursor"
 import type { BashFailure } from "./use-bash-shellout"
@@ -94,6 +95,13 @@ export interface ApplyEffectDeps {
    * dispatches `SET_CWD`, and re-resolves SendOptions). The effect handler
    * validates the path before calling this. */
   changeCwd: (dir: string) => void
+  /** Reclaim the live external-agent process (App-owned `connectionRef`). Called
+   * on a `/backend` switch to the built-in agent, where nothing reconnects, so
+   * the old external process would otherwise leak until exit. On an external →
+   * external switch this is NOT called: `connectBackend`'s own idempotent
+   * re-register reclaims the old process as it comes back up, and an explicit
+   * removal here would race that re-register. */
+  reclaimBackend: () => void
   /** Arm/clear the shared runtime-abort controller (a ref owned by App). Passed
    * as accessors rather than the raw ref so the hook never mutates a prop. */
   setRuntimeAbort: (controller: AbortController | null) => void
@@ -146,6 +154,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
     takeSteer,
     doExit,
     changeCwd,
+    reclaimBackend,
     setRuntimeAbort,
     getRuntimeAbort,
     mcpProbeCache,
@@ -195,6 +204,17 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
           void agent.send(effect.prompt)
           break
         case "compact":
+          // `/compact` posts a control message to the built-in sidecar and waits
+          // for a boundary event nothing else emits, so on an external backend it
+          // used to hang silently. Refuse it outright instead.
+          if (!supportsFeature(state.backendCapabilities, "compact")) {
+            dispatch({
+              type: "NOTICE",
+              message: unsupportedFeatureMessage(state.backendCapabilities, "compact"),
+              severity: "warn",
+            })
+            break
+          }
           // Light up the PreCompact lifecycle hook (ADR-0040 follow-up) just
           // before the context window is trimmed. Fire-and-forget observational.
           void createCliLifecycleFirer({ home, osHome })(
@@ -499,6 +519,39 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
             dispatch({ type: "NOTICE", message: `Layout: ${effect.mode}` })
           }
           break
+        case "backend": {
+          // A backend switch is a lifecycle event, not a setting: the live
+          // session belongs to the old agent and its context cannot follow it.
+          const previous = state.config.agentBackend ?? "builtin"
+          void agent.switchBackend(effect.backend)
+          if (!persist("agentBackend", effect.backend)) {
+            dispatch({
+              type: "NOTICE",
+              message: `Backend: ${effect.backend} (couldn't save to config)`,
+            })
+          }
+          // The transcript stays on screen, so say plainly that the new agent
+          // cannot see it — the same honesty the restart notice provides.
+          dispatch({
+            type: "NOTICE",
+            message: `Switched from ${previous} to ${effect.backend} — the conversation above is not visible to ${effect.backend}.`,
+          })
+          // Only an external backend has anything to connect to; the built-in
+          // one is already reachable, and routing it through the connect flow
+          // would fail on a preset lookup that will never match.
+          if (effect.backend !== "builtin") {
+            // The reconnect reuses the stable agent id, and connectBackend's own
+            // idempotent removeAgent reclaims the previous process as it comes
+            // back up — so no explicit reclaim here (which would race that
+            // re-register and could remove the freshly-added agent).
+            dispatch({ type: "BACKEND_CONNECT_RETRY", backend: effect.backend })
+          } else {
+            // Switching to the built-in agent: nothing reconnects, so the old
+            // external process would otherwise live until exit. Reclaim it now.
+            reclaimBackend()
+          }
+          break
+        }
         case "mouse":
           // Live-apply the mouse model by rewriting the terminal tracking /
           // alternate-scroll escapes in place (only meaningful while fullscreen
@@ -690,6 +743,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
             version: VERSION,
             usage: state.usage,
             contextWindow: state.modelMeta?.contextWindow,
+            ...(state.backendCapabilities ? { capabilities: state.backendCapabilities } : {}),
             usageHistory: state.usageHistory,
             toolStats: state.toolStats,
             ...(state.rateLimits ? { rateLimits: state.rateLimits } : {}),
@@ -784,6 +838,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
       syncAndRefreshModelOverlay,
       takeSteer,
       changeCwd,
+      reclaimBackend,
       scrollReset,
       cursor,
       fullscreen,
@@ -794,6 +849,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
       getRuntimeAbort,
       mcpProbeCache,
       state.config,
+      state.backendCapabilities,
       state.sessionId,
       state.inflight.tools,
       state.usage,

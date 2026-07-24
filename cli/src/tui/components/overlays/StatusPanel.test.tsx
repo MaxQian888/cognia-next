@@ -7,6 +7,7 @@ import type { StatusReport } from "../../state/types"
 
 const report: StatusReport = {
   version: "9.9.9",
+  agentBackend: "builtin",
   provider: "anthropic",
   model: "claude-x",
   modelValid: true,

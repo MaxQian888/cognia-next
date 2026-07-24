@@ -24,6 +24,9 @@ import { createGateController, runTurn } from "./turn-engine"
 import { captureEventToActions } from "../state/event-mapper"
 import { sidecarEventToMcpLog } from "../runtime/mcp-log-model"
 import { defaultMcpLogFileWriter, type McpLogFileWriter } from "../runtime/mcp-log-file"
+import { resumeContinuityNotice } from "../../agent/external-session-link"
+import { supportsFeature, type BackendCapabilities } from "../runtime/backend-capabilities"
+import { classifyError } from "../format/error-classify"
 import { parseRateLimitHeaders, rateLimitWarning } from "../format/rate-limits"
 import { DEFAULT_PERMISSION_CHOICES } from "../components/overlays/PermissionOverlay"
 import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
@@ -60,6 +63,9 @@ export interface AgentSessionApi {
   switchMode(mode: PermissionMode): Promise<void>
   switchThinking(level: ThinkingLevel, pluginTools?: boolean): Promise<void>
   switchProvider(provider: string, model?: string): Promise<void>
+  /** Switch the hosting agent backend (`/backend`). Drops the live session so the
+   * next turn runs on the new agent; the transcript is left in place. */
+  switchBackend(backend: string): Promise<void>
   /** Switch the active agent mode (built-in or custom). The mode's prompt /
    * tools / model / permission fold deep into resolved SendOptions, so the
    * session is recreated to take effect on the next turn. */
@@ -118,6 +124,19 @@ function cellsToEntries(cells: Cell[]): TranscriptEntry[] {
   return entries
 }
 
+/**
+ * The line shown when an unrecoverable fault forces the agent session to be torn
+ * down and respawned. The transcript is untouched, so without this the next turn
+ * silently starts from an empty history while the screen still shows the whole
+ * conversation. Names the external backend when one is active, since that is the
+ * process whose memory was actually lost.
+ */
+export function sessionRestartNotice(config: ResolvedConfig): string {
+  const backend = config.agentBackend
+  const who = backend && backend !== "builtin" ? backend : "the agent"
+  return `Agent session restarted — the conversation above is no longer visible to ${who}.`
+}
+
 export function useAgentSession({
   config,
   dispatch,
@@ -135,9 +154,13 @@ export function useAgentSession({
   createCheckpoints = defaultCreateCheckpoints,
   resolveApprovedTools,
   appendMcpLog,
+  capabilities,
 }: {
   config: ResolvedConfig
   dispatch: (action: TuiAction) => void
+  /** What the active backend supports. Only `resume` is read here: without it a
+   * `/resume` reloads the transcript onto an agent that has never seen it. */
+  capabilities?: BackendCapabilities
   /** The app's current session id (from mount / `/clear` / `/resume`). The
    * lazily-created chat session is bound to it so its on-disk transcript lands
    * under the SAME id `/export`, `/handoff`, `/resume`, and the checkpoint store
@@ -437,7 +460,24 @@ export function useAgentSession({
     async (prompt: string) => {
       // In copilot mode the turn runs on the dedicated workflow-editor session.
       const copilotTarget = copilotTargetRef.current
-      const session = copilotTarget ? ensureCopilotSession(copilotTarget) : ensureSession()
+      // Creating the session can throw BEFORE the turn engine's own try/catch —
+      // e.g. an unknown `--backend` id, which used to swallow the prompt whole
+      // and leave the composer looking like nothing happened.
+      let session: AgentSession
+      try {
+        session = copilotTarget ? ensureCopilotSession(copilotTarget) : ensureSession()
+      } catch (err) {
+        const message = (err as Error).message
+        const classified = classifyError({ message })
+        dispatch({
+          type: "TURN_ERROR",
+          message,
+          title: classified.title,
+          ...(classified.hint ? { hint: classified.hint } : {}),
+          category: classified.category,
+        })
+        return null
+      }
       // Fire UserPromptSubmit hooks before the turn (observational here).
       hookRunner.onPrompt(prompt)
       // Open a rewind checkpoint for this turn (cellCount = state before it ran).
@@ -473,6 +513,11 @@ export function useAgentSession({
         // context, so keep it — the next message continues the conversation
         // instead of silently restarting from an empty history.
         if (!recoverable) {
+          // Dropping the session restarts the agent with an EMPTY history while
+          // the transcript above still shows the whole conversation. Say so, in a
+          // permanent cell — a toast scrolls away and the user would keep asking
+          // follow-ups the agent can no longer see.
+          dispatch({ type: "NOTICE", message: sessionRestartNotice(configRef.current) })
           if (copilotTarget) await dropCopilotSession()
           else await dropSession()
         }
@@ -529,6 +574,7 @@ export function useAgentSession({
     [dispatch, dropSession]
   )
 
+  const supportsResume = supportsFeature(capabilities, "resume")
   const resume = useCallback(
     async (sessionId: string, cells: Cell[]) => {
       await dropSession()
@@ -538,8 +584,17 @@ export function useAgentSession({
       sessionRef.current = createSession({ config: configRef.current, sessionId })
       dispatch({ type: "RESET", sessionId })
       dispatch({ type: "LOAD_CELLS", cells })
+      // On an external backend the transcript coming back does NOT mean the
+      // agent has it — say so unless the agent's own session was resumed.
+      const notice = resumeContinuityNotice(
+        resolveHome(process.env, os.homedir()),
+        sessionId,
+        configRef.current.agentBackend,
+        supportsResume
+      )
+      if (notice) dispatch({ type: "NOTICE", message: notice })
     },
-    [createSession, dispatch, dropSession]
+    [createSession, dispatch, dropSession, supportsResume]
   )
 
   const switchModel = useCallback(
@@ -607,6 +662,21 @@ export function useAgentSession({
       if (model) dispatch({ type: "SET_MODEL", model })
       // The provider determines the dispatch path + auth env, both resolved
       // lazily per session — recreate so the switch takes effect next turn.
+      await dropSession()
+    },
+    [dispatch, dropSession]
+  )
+
+  /**
+   * Switch the hosting agent backend. Follows the provider-switch precedent: the
+   * config changes and the live session is dropped so the next turn runs on the
+   * new agent, while the TRANSCRIPT stays — wiping it would hide the fact that
+   * the new agent cannot see any of it, which is exactly what the restart notice
+   * is there to say.
+   */
+  const switchBackend = useCallback(
+    async (backend: string) => {
+      dispatch({ type: "SET_BACKEND", backend })
       await dropSession()
     },
     [dispatch, dropSession]
@@ -724,6 +794,7 @@ export function useAgentSession({
     switchMode,
     switchThinking,
     switchProvider,
+    switchBackend,
     switchAgentMode,
     changeCwd,
     invalidate,

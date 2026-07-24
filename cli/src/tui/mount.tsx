@@ -12,6 +12,7 @@ import { defaultCrashLogger } from "./crash-log"
 import { installProcessCrashGuards } from "./process-guards"
 import { loadHistory } from "./input/history-store"
 import { mintSessionId } from "../agent/run"
+import { createExternalAgentSession } from "../agent/external-agent-session"
 import { resolveActiveModel } from "../config/active-model"
 import { resolveHome } from "../config/load"
 import { isTrusted } from "../config/trusted-folders"
@@ -25,6 +26,10 @@ import type { ResolvedConfig } from "../config/schema"
 export interface RenderTuiDeps {
   config: ResolvedConfig
   createSession?: CreateSession
+  /** Factory for external-agent sessions. The App picks between this and
+   * `createSession` from the live `agentBackend`, so `/backend` can switch
+   * without restarting the command. */
+  createExternalSession?: React.ComponentProps<typeof App>["createExternalSession"]
   pushHandoff?: (sessionId: string) => void | Promise<void>
   sessionId?: string
   render?: typeof inkRender
@@ -84,6 +89,9 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
         config={config}
         sessionId={sessionId}
         createSession={deps.createSession}
+        {...(deps.createExternalSession
+          ? { createExternalSession: deps.createExternalSession }
+          : { createExternalSession: createExternalAgentSession })}
         pushHandoff={deps.pushHandoff}
         trusted={trusted}
         initialHistory={initialHistory}

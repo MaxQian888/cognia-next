@@ -108,11 +108,16 @@ describe("chatCommand", () => {
     expect(f.sessions[0].close).toHaveBeenCalled()
   })
 
-  it("selects the external session factory for --backend and passes it to Ink", async () => {
+  it("hands the TUI both session factories so /backend can switch mid-session", async () => {
     const external = fakeSessionFactory()
     const builtin = fakeSessionFactory()
     const renderTui = jest.fn(
-      async (_deps: { config: ResolvedConfig; createSession: unknown; pushHandoff: unknown }) => 0
+      async (_deps: {
+        config: ResolvedConfig
+        createSession: unknown
+        createExternalSession: unknown
+        pushHandoff: unknown
+      }) => 0
     )
     await chatCommand(parseArgv(["chat", "--backend", "claude-code"]), {
       loadConfig: (overrides) => ({
@@ -127,8 +132,11 @@ describe("chatCommand", () => {
     })
 
     const mounted = renderTui.mock.calls[0][0]
+    // The launcher no longer picks: it reports the selection through the config
+    // and lets the TUI route, so a runtime `/backend` switch is possible at all.
     expect(mounted.config.agentBackend).toBe("claude-code")
-    expect(mounted.createSession).toBe(external.factory)
+    expect(mounted.createSession).toBe(builtin.factory)
+    expect(mounted.createExternalSession).toBe(external.factory)
   })
 
   it("/handoff pushes the current session", async () => {

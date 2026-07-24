@@ -14,22 +14,34 @@ import { createGateController, runTurn } from "../tui/hooks/turn-engine"
 import { createInitialState } from "../tui/state/initial"
 import { tuiReducer } from "../tui/state/reducer"
 import type { TranscriptFs } from "./transcript"
+import { RunAndCaptureError } from "@/lib/claude/run-and-capture"
+
 import {
   acpPermissionRequestToCli,
   captureDecisionToAcp,
+  classifyExternalFailure,
   createExternalAgentSession,
   externalAgentCredentialEnv,
   type ExternalAgentSessionManager,
 } from "./external-agent-session"
 
-function memoryTranscript(): { fs: TranscriptFs; lines: string[] } {
+function memoryTranscript(seed: Record<string, string> = {}): {
+  fs: TranscriptFs
+  lines: string[]
+  written: Record<string, string>
+} {
   const lines: string[] = []
+  const written: Record<string, string> = { ...seed }
   return {
     lines,
+    written,
     fs: {
       append: (_path, line) => lines.push(line),
-      read: () => null,
+      read: (p) => written[p] ?? null,
       mkdirp: () => undefined,
+      write: (p, content) => {
+        written[p] = content
+      },
     },
   }
 }
@@ -380,5 +392,632 @@ describe("createExternalAgentSession", () => {
     await expect(session.send("go", { gate: async () => ({ decision: "allow" }) })).rejects.toThrow(
       "failed"
     )
+  })
+})
+
+describe("external-agent adaptation edge cases", () => {
+  it("falls back to the request id and an empty input, and carries a decision reason", () => {
+    expect(
+      acpPermissionRequestToCli(
+        {
+          id: "req-only",
+          sessionId: "acp",
+          toolInfo: { id: "bash", name: "bash" },
+          reason: "policy",
+        },
+        "fallback"
+      )
+    ).toMatchObject({
+      requestId: "req-only",
+      toolUseID: "req-only",
+      input: {},
+      decisionReason: "policy",
+    })
+  })
+
+  it("maps the codex credential through the openai slot when no codex slot exists", () => {
+    expect(
+      externalAgentCredentialEnv(
+        {
+          ...DEFAULT_RESOLVED_CONFIG,
+          cwd: "/work",
+          providers: { openai: { apiKey: "sk-o", authToken: "tok" } },
+        },
+        "codex"
+      )
+    ).toEqual({ CODEX_ACCESS_TOKEN: "tok", OPENAI_API_KEY: "sk-o", CODEX_API_KEY: "sk-o" })
+  })
+
+  it("forwards an Anthropic base URL and yields nothing for an unmapped preset", () => {
+    const config = {
+      ...DEFAULT_RESOLVED_CONFIG,
+      cwd: "/work",
+      providers: { anthropic: { baseURL: "https://relay.example" } },
+    }
+    expect(externalAgentCredentialEnv(config, "claude-code")).toEqual({
+      ANTHROPIC_BASE_URL: "https://relay.example",
+    })
+    expect(externalAgentCredentialEnv(config, "opencode")).toEqual({})
+  })
+})
+
+describe("classifyExternalFailure", () => {
+  it("defaults to a recoverable session error so one bad turn never discards the conversation", () => {
+    expect(classifyExternalFailure("model refused the request")).toBe("session_error")
+    expect(classifyExternalFailure("429 rate limited")).toBe("session_error")
+    expect(classifyExternalFailure("")).toBe("session_error")
+  })
+
+  it.each([
+    "spawn codex ENOENT",
+    "write EPIPE",
+    "agent process exited unexpectedly",
+    "adapter is not connected",
+    "connection closed by peer",
+  ])("treats %p as a dead process", (message) => {
+    expect(classifyExternalFailure(message)).toBe("sidecar_exited")
+  })
+
+  it("honours an explicit error code over the message text", () => {
+    expect(classifyExternalFailure("something odd", "disconnected")).toBe("sidecar_exited")
+  })
+})
+
+describe("external-agent turn bounds", () => {
+  const baseConfig = { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "claude-code" }
+
+  /** A manager whose turn emits one event and then never finishes. */
+  function hangingManager(opts: { onPermission?: boolean } = {}) {
+    const manager: ExternalAgentSessionManager = {
+      addAgent: jest.fn(async () => undefined),
+      execute: jest.fn(async (_agentId, _prompt, options) => {
+        options?.onEvent?.({
+          type: "message_delta",
+          sessionId: "acp-hang",
+          timestamp: new Date(),
+          delta: { type: "text", text: "thinking" },
+        })
+        if (opts.onPermission) {
+          await options?.onPermissionRequest?.({
+            id: "p1",
+            requestId: "p1",
+            sessionId: "acp-hang",
+            toolCallId: "t1",
+            toolInfo: { id: "bash", name: "bash" },
+            rawInput: {},
+            options: [{ optionId: "once", name: "Allow once", kind: "allow_once" }],
+          })
+          return {
+            success: true,
+            sessionId: "acp-hang",
+            finalResponse: "done",
+            messages: [],
+            steps: [],
+            toolCalls: [],
+            duration: 1,
+          }
+        }
+        return new Promise<ExternalAgentResult>(() => {})
+      }),
+      setSessionMode: jest.fn(async () => undefined),
+      cancel: jest.fn(async () => undefined),
+      removeAgent: jest.fn(async () => undefined),
+    }
+    return manager
+  }
+
+  it("hands the manager an explicit, effectively unbounded per-turn wall clock", async () => {
+    const { manager, getExecuteOptions } = fakeManager()
+    const session = createExternalAgentSession({
+      config: baseConfig,
+      manager,
+      transcriptFs: memoryTranscript().fs,
+    })
+
+    await session.send("go", { gate: async () => ({ decision: "allow" }) })
+
+    // Anything near the 60s connect budget would kill ordinary agentic turns.
+    expect(getExecuteOptions()?.timeout).toBeGreaterThan(60 * 60 * 1000)
+  })
+
+  it("still honours an explicit caller timeout", async () => {
+    const { manager, getExecuteOptions } = fakeManager()
+    const session = createExternalAgentSession({
+      config: baseConfig,
+      manager,
+      transcriptFs: memoryTranscript().fs,
+    })
+
+    await session.send("go", { gate: async () => ({ decision: "allow" }), timeoutMs: 5_000 })
+
+    expect(getExecuteOptions()?.timeout).toBe(5_000)
+  })
+
+  it("does not make startup stricter when the stream watchdog is disabled", async () => {
+    const { manager } = fakeManager()
+    const session = createExternalAgentSession({
+      config: { ...baseConfig, streamIdleTimeoutMs: 0 },
+      manager,
+      transcriptFs: memoryTranscript().fs,
+    })
+
+    await session.send("go", { gate: async () => ({ decision: "allow" }) })
+
+    // Regression: `streamIdleTimeoutMs || undefined` used to fall through to the
+    // preset's 30s default, so DISABLING the watchdog tightened the budget.
+    expect(manager.addAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ timeout: 60_000 }) as ExternalAgentConfig
+    )
+  })
+
+  it("fails a silent turn as recoverable and cancels without discarding the session", async () => {
+    const manager = hangingManager()
+    const session = createExternalAgentSession({
+      config: { ...baseConfig, streamIdleTimeoutMs: 20 },
+      manager,
+      transcriptFs: memoryTranscript().fs,
+    })
+
+    const error = await session
+      .send("go", { gate: async () => ({ decision: "allow" }) })
+      .catch((err: unknown) => err)
+
+    expect(error).toBeInstanceOf(RunAndCaptureError)
+    expect((error as RunAndCaptureError).code).toBe("session_error")
+    expect(manager.cancel).toHaveBeenCalledWith(expect.any(String), "acp-hang")
+    expect(manager.removeAgent).not.toHaveBeenCalled()
+  })
+
+  it("classifies a thrown execution failure instead of letting it read as a dead session", async () => {
+    const manager: ExternalAgentSessionManager = {
+      addAgent: jest.fn(async () => undefined),
+      execute: jest.fn(async () => {
+        throw new Error("provider returned 500")
+      }),
+      setSessionMode: jest.fn(async () => undefined),
+      cancel: jest.fn(async () => undefined),
+      removeAgent: jest.fn(async () => undefined),
+    }
+    const session = createExternalAgentSession({
+      config: baseConfig,
+      manager,
+      transcriptFs: memoryTranscript().fs,
+    })
+
+    const error = await session
+      .send("go", { gate: async () => ({ decision: "allow" }) })
+      .catch((err: unknown) => err)
+
+    expect((error as RunAndCaptureError).code).toBe("session_error")
+  })
+
+  it("passes an already-classified error through untouched", async () => {
+    const cause = new RunAndCaptureError("agent process exited", "sidecar_exited")
+    const manager: ExternalAgentSessionManager = {
+      addAgent: jest.fn(async () => undefined),
+      execute: jest.fn(async () => {
+        throw cause
+      }),
+      setSessionMode: jest.fn(async () => undefined),
+      cancel: jest.fn(async () => undefined),
+      removeAgent: jest.fn(async () => undefined),
+    }
+    const session = createExternalAgentSession({
+      config: baseConfig,
+      manager,
+      transcriptFs: memoryTranscript().fs,
+    })
+
+    await expect(session.send("go", { gate: async () => ({ decision: "allow" }) })).rejects.toBe(
+      cause
+    )
+  })
+
+  it("treats a dead process as unrecoverable so the caller respawns", async () => {
+    const { manager } = fakeManager({
+      success: false,
+      error: "spawn codex ENOENT",
+      errorCode: "spawn_failed",
+    })
+    const session = createExternalAgentSession({
+      config: baseConfig,
+      manager,
+      transcriptFs: memoryTranscript().fs,
+    })
+
+    const error = await session
+      .send("go", { gate: async () => ({ decision: "allow" }) })
+      .catch((err: unknown) => err)
+
+    expect((error as RunAndCaptureError).code).toBe("sidecar_exited")
+  })
+
+  it("falls back to a default idle budget when none is configured", async () => {
+    const { manager } = fakeManager()
+    const config = { ...baseConfig }
+    delete (config as { streamIdleTimeoutMs?: number }).streamIdleTimeoutMs
+    const session = createExternalAgentSession({
+      config,
+      manager,
+      transcriptFs: memoryTranscript().fs,
+    })
+
+    await expect(
+      session.send("go", { gate: async () => ({ decision: "allow" }) })
+    ).resolves.toMatchObject({ text: "hello" })
+    expect(manager.addAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ timeout: 60_000 }) as ExternalAgentConfig
+    )
+  })
+
+  it("projects tool and usage actions into CaptureStreamEvents for the readline chat", async () => {
+    const manager: ExternalAgentSessionManager = {
+      addAgent: jest.fn(async () => undefined),
+      execute: jest.fn(async (_agentId, _prompt, options) => {
+        options?.onEvent?.({
+          type: "tool_use_start",
+          sessionId: "s",
+          timestamp: new Date(),
+          toolUseId: "t1",
+          toolName: "Read",
+          kind: "read",
+          rawInput: { file_path: "/a.ts" },
+        })
+        options?.onEvent?.({
+          type: "tool_result",
+          sessionId: "s",
+          timestamp: new Date(),
+          toolUseId: "t1",
+          toolName: "Read",
+          kind: "read",
+          rawInput: { file_path: "/a.ts" },
+          result: "contents",
+          isError: true,
+        })
+        options?.onEvent?.({
+          type: "done",
+          sessionId: "s",
+          timestamp: new Date(),
+          success: true,
+          tokenUsage: { promptTokens: 1, completionTokens: 2, totalTokens: 3 },
+        })
+        return {
+          success: true,
+          sessionId: "s",
+          finalResponse: "ok",
+          messages: [],
+          steps: [],
+          toolCalls: [],
+          duration: 1,
+        }
+      }),
+      setSessionMode: jest.fn(async () => undefined),
+      cancel: jest.fn(async () => undefined),
+      removeAgent: jest.fn(async () => undefined),
+    }
+    const session = createExternalAgentSession({
+      config: baseConfig,
+      manager,
+      transcriptFs: memoryTranscript().fs,
+    })
+    const events: string[] = []
+
+    // No `onAction` — the readline chat only understands CaptureStreamEvents.
+    await session.send("go", {
+      gate: async () => ({ decision: "allow" }),
+      onEvent: (event) => events.push(event.type),
+    })
+
+    expect(events).toEqual(["tool-call", "tool-result", "usage"])
+  })
+
+  it("forwards every configured execution field the backend can honour", async () => {
+    const { manager, getExecuteOptions } = fakeManager()
+    const controller = new AbortController()
+    const session = createExternalAgentSession({
+      config: {
+        ...baseConfig,
+        model: "gpt-5-codex",
+        systemPrompt: "be terse",
+        allowedTools: ["Read", "Bash"],
+        additionalRoots: ["/shared"],
+      },
+      manager,
+      transcriptFs: memoryTranscript().fs,
+    })
+
+    await session.send("go", {
+      gate: async () => ({ decision: "allow" }),
+      signal: controller.signal,
+    })
+
+    expect(getExecuteOptions()).toMatchObject({
+      model: "gpt-5-codex",
+      systemPrompt: "be terse",
+      allowedTools: ["Read", "Bash"],
+      signal: controller.signal,
+      context: { custom: { mcpServers: [], additionalDirectories: ["/shared"] } },
+    })
+  })
+
+  it("reuses an agent the backend controller already connected", async () => {
+    const { manager } = fakeManager()
+    const session = createExternalAgentSession({
+      config: baseConfig,
+      manager,
+      transcriptFs: memoryTranscript().fs,
+      connection: { agentId: "preconnected-1", presetId: "claude-code" },
+    })
+
+    // Live before any turn: the process is already up.
+    expect(session.isLive?.()).toBe(true)
+    await session.send("go", { gate: async () => ({ decision: "allow" }) })
+
+    // No second process — the startup connect is the only spawn.
+    expect(manager.addAgent).not.toHaveBeenCalled()
+    expect(manager.execute).toHaveBeenCalledWith("preconnected-1", "go", expect.any(Object))
+
+    // Ownership stays with the controller that registered it.
+    await session.close()
+    expect(manager.removeAgent).not.toHaveBeenCalled()
+    expect(manager.cancel).toHaveBeenCalledWith("preconnected-1", "acp-session-1")
+  })
+
+  it("forwards the user's MCP servers into session/new", async () => {
+    const { manager, getExecuteOptions } = fakeManager()
+    const session = createExternalAgentSession({
+      config: baseConfig,
+      manager,
+      transcriptFs: memoryTranscript().fs,
+      resolveMcpServers: () =>
+        [
+          {
+            id: "files",
+            name: "files",
+            transport: "stdio",
+            enabled: true,
+            config: { command: "node", args: ["server.js"] },
+          },
+        ] as never,
+    })
+
+    await session.send("go", { gate: async () => ({ decision: "allow" }) })
+
+    // Was a hardcoded `[]`, so a server enabled in `/mcp` did nothing here while
+    // the panel still showed it as on.
+    expect(getExecuteOptions()?.context?.custom).toMatchObject({
+      mcpServers: [{ name: "files", command: "node", args: ["server.js"] }],
+    })
+  })
+
+  it("re-resolves MCP servers after an invalidate, without respawning the agent", async () => {
+    let servers: unknown[] = []
+    const { manager, getExecuteOptions } = fakeManager()
+    const session = createExternalAgentSession({
+      config: baseConfig,
+      manager,
+      transcriptFs: memoryTranscript().fs,
+      resolveMcpServers: () => servers as never,
+    })
+
+    await session.send("first", { gate: async () => ({ decision: "allow" }) })
+    expect(getExecuteOptions()?.context?.custom).toMatchObject({ mcpServers: [] })
+
+    // `/mcp enable files`
+    servers = [
+      { id: "f", name: "files", transport: "stdio", enabled: true, config: { command: "node" } },
+    ]
+    await session.send("second", { gate: async () => ({ decision: "allow" }) })
+    // Still cached — a resolved set must not change under a running turn.
+    expect(getExecuteOptions()?.context?.custom).toMatchObject({ mcpServers: [] })
+
+    session.invalidateOptions?.()
+    await session.send("third", { gate: async () => ({ decision: "allow" }) })
+
+    expect(getExecuteOptions()?.context?.custom).toMatchObject({
+      mcpServers: [{ name: "files", command: "node", args: [] }],
+    })
+    expect(manager.addAgent).toHaveBeenCalledTimes(1)
+  })
+
+  it("records the agent's own session id so a later resume can continue it", async () => {
+    const transcript = memoryTranscript()
+    const { manager } = fakeManager()
+    const session = createExternalAgentSession({
+      config: baseConfig,
+      sessionId: "cli-1",
+      home: "/home/.cognia",
+      manager,
+      transcriptFs: transcript.fs,
+    })
+
+    await session.send("go", { gate: async () => ({ decision: "allow" }) })
+
+    expect(transcript.written["/home/.cognia/sessions/cli-1.external.json"]).toBe(
+      JSON.stringify({ backend: "claude-code", externalSessionId: "acp-session-1" })
+    )
+  })
+
+  it("resumes the recorded agent session instead of starting an empty one", async () => {
+    const transcript = memoryTranscript({
+      "/home/.cognia/sessions/cli-1.external.json": JSON.stringify({
+        backend: "claude-code",
+        externalSessionId: "acp-earlier",
+      }),
+    })
+    const { manager, getExecuteOptions } = fakeManager()
+    const session = createExternalAgentSession({
+      config: baseConfig,
+      sessionId: "cli-1",
+      home: "/home/.cognia",
+      manager,
+      transcriptFs: transcript.fs,
+    })
+
+    await session.send("continue", { gate: async () => ({ decision: "allow" }) })
+
+    // Without this the transcript came back but the agent remembered nothing.
+    expect(getExecuteOptions()?.sessionId).toBe("acp-earlier")
+  })
+
+  it("ignores a link recorded on a different backend", async () => {
+    const transcript = memoryTranscript({
+      "/home/.cognia/sessions/cli-1.external.json": JSON.stringify({
+        backend: "codex",
+        externalSessionId: "codex-9",
+      }),
+    })
+    const { manager, getExecuteOptions } = fakeManager()
+    const session = createExternalAgentSession({
+      config: baseConfig,
+      sessionId: "cli-1",
+      home: "/home/.cognia",
+      manager,
+      transcriptFs: transcript.fs,
+    })
+
+    await session.send("go", { gate: async () => ({ decision: "allow" }) })
+
+    // No agent can load another agent's session; asking would fail confusingly.
+    expect(getExecuteOptions()?.sessionId).toBeUndefined()
+  })
+
+  it("names the backend it does not recognise", () => {
+    expect(() =>
+      createExternalAgentSession({
+        config: { ...baseConfig, agentBackend: "cdoex" },
+        manager: fakeManager().manager,
+      })
+    ).toThrow("Unknown external-agent backend: cdoex")
+  })
+
+  it("reports cache token usage and normalizes the auto permission mode", async () => {
+    const { manager, getExecuteOptions } = fakeManager({
+      tokenUsage: {
+        promptTokens: 3,
+        completionTokens: 2,
+        totalTokens: 5,
+        cacheReadTokens: 7,
+        cacheWriteTokens: 9,
+      },
+    })
+    const session = createExternalAgentSession({
+      config: { ...baseConfig, permissionMode: "auto" },
+      manager,
+      transcriptFs: memoryTranscript().fs,
+    })
+
+    const turn = await session.send("go", { gate: async () => ({ decision: "allow" }) })
+
+    expect(turn.usage).toMatchObject({ cacheReadInputTokens: 7, cacheCreationInputTokens: 9 })
+    // "auto" is a CLI-side alias the ACP contract does not know about.
+    expect(getExecuteOptions()?.permissionMode).toBe("default")
+  })
+
+  it("tracks liveness and tolerates a close before any turn", async () => {
+    const { manager } = fakeManager()
+    const session = createExternalAgentSession({
+      config: baseConfig,
+      manager,
+      transcriptFs: memoryTranscript().fs,
+    })
+
+    expect(session.isLive?.()).toBe(false)
+    await session.close()
+    expect(manager.removeAgent).not.toHaveBeenCalled()
+
+    await expect(session.send("go", { gate: async () => ({ decision: "allow" }) })).rejects.toThrow(
+      "agent session is closed"
+    )
+  })
+
+  it("still removes the agent when cancelling a live session fails", async () => {
+    const { manager } = fakeManager()
+    ;(manager.cancel as jest.Mock).mockRejectedValueOnce(new Error("already gone"))
+    const session = createExternalAgentSession({
+      config: baseConfig,
+      manager,
+      transcriptFs: memoryTranscript().fs,
+    })
+
+    await session.send("go", { gate: async () => ({ decision: "allow" }) })
+    expect(session.isLive?.()).toBe(true)
+    await session.close()
+
+    expect(manager.removeAgent).toHaveBeenCalledTimes(1)
+  })
+
+  it("describes a failure that carried no message, and a non-Error throw", async () => {
+    const { manager: silent } = fakeManager({ success: false, error: undefined })
+    const quiet = createExternalAgentSession({
+      config: baseConfig,
+      manager: silent,
+      transcriptFs: memoryTranscript().fs,
+    })
+    await expect(quiet.send("go", { gate: async () => ({ decision: "allow" }) })).rejects.toThrow(
+      "External agent execution failed"
+    )
+
+    const manager: ExternalAgentSessionManager = {
+      addAgent: jest.fn(async () => undefined),
+      execute: jest.fn(async () => {
+        throw "just a string"
+      }),
+      setSessionMode: jest.fn(async () => undefined),
+      cancel: jest.fn(async () => undefined),
+      removeAgent: jest.fn(async () => undefined),
+    }
+    const session = createExternalAgentSession({
+      config: baseConfig,
+      manager,
+      transcriptFs: memoryTranscript().fs,
+    })
+    await expect(session.send("go", { gate: async () => ({ decision: "allow" }) })).rejects.toThrow(
+      "just a string"
+    )
+  })
+
+  it("resolves the preferred codex executable preset lazily", async () => {
+    const { manager } = fakeManager()
+    const session = createExternalAgentSession({
+      config: { ...baseConfig, agentBackend: "codex" },
+      manager,
+      transcriptFs: memoryTranscript().fs,
+    })
+
+    await session.send("go", { gate: async () => ({ decision: "allow" }) })
+
+    expect(manager.addAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ process: expect.objectContaining({ cwd: "/work" }) })
+    )
+  })
+
+  it("builds its own manager when none is injected", () => {
+    expect(() =>
+      createExternalAgentSession({
+        config: baseConfig,
+        transcriptFs: memoryTranscript().fs,
+      })
+    ).not.toThrow()
+  })
+
+  it("pauses the watchdog while a permission prompt awaits the user", async () => {
+    const manager = hangingManager({ onPermission: true })
+    const session = createExternalAgentSession({
+      config: { ...baseConfig, streamIdleTimeoutMs: 30 },
+      manager,
+      transcriptFs: memoryTranscript().fs,
+    })
+
+    const result = await session.send("go", {
+      // Deliberate far past the idle budget — an approval must never trip it.
+      gate: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 150))
+        return { decision: "allow" as const }
+      },
+    })
+
+    expect(result.text).toBe("done")
+    expect(manager.cancel).not.toHaveBeenCalled()
   })
 })

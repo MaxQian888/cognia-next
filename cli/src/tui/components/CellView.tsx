@@ -188,7 +188,9 @@ function ToolView({ cell }: { cell: ToolCell }) {
       <Box>
         <StatusGlyph status={cell.status} color={STATUS_COLOR[cell.status]} />
         <ToolBadge toolName={cell.toolName} />
-        <Text bold>{toolDisplayName(cell.toolName)}</Text>
+        {/* Label from the protocol when there is one, canonical name otherwise —
+            `cell.toolName` still drives every formatter above. */}
+        <Text bold>{cell.displayTitle ?? toolDisplayName(cell.toolName)}</Text>
         {summary ? <Text color={theme.muted}> {summaryDisplay}</Text> : null}
         {stat.added > 0 ? <Text color={theme.diffAdded}> +{stat.added}</Text> : null}
         {stat.removed > 0 ? <Text color={theme.diffRemoved}> -{stat.removed}</Text> : null}

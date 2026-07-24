@@ -1,4 +1,5 @@
 import os from "node:os"
+import path from "node:path"
 
 import {
   buildDoctorReport,
@@ -161,6 +162,114 @@ describe("runDoctor", () => {
         externalAgentHooksActive: false,
         externalAgentTerminalActive: false,
       })
+    }
+  })
+
+  it("reports sandbox readiness, not just whether the command is on PATH", async () => {
+    // The command resolving says nothing about whether we can sandbox it, and
+    // without the launcher every turn fails to spawn.
+    const actions = await run(
+      { agentBackend: "claude-code" },
+      {
+        checkExternalCommand: async () => true,
+        findLauncher: () => undefined,
+        platformSupportsSandbox: () => true,
+      }
+    )
+    if (actions[0].type === "OVERLAY_OPEN" && actions[0].overlay.kind === "doctor") {
+      expect(actions[0].overlay.report).toMatchObject({
+        externalAgentAvailable: true,
+        externalAgentSandboxReady: false,
+        externalAgentPlatformSupported: true,
+      })
+    }
+  })
+
+  it("flags a platform that cannot host external agents at all", async () => {
+    const actions = await run(
+      { agentBackend: "claude-code" },
+      {
+        checkExternalCommand: async () => true,
+        findLauncher: () => "/opt/launcher",
+        platformSupportsSandbox: () => false,
+      }
+    )
+    if (actions[0].type === "OVERLAY_OPEN" && actions[0].overlay.kind === "doctor") {
+      expect(actions[0].overlay.report.externalAgentPlatformSupported).toBe(false)
+    }
+  })
+
+  it("resolves the preferred codex executable preset before probing", async () => {
+    const checkExternalCommand = jest.fn(async () => true)
+    const actions = await run(
+      { agentBackend: "codex" },
+      { checkExternalCommand, findLauncher: () => "/opt/launcher" }
+    )
+    expect(checkExternalCommand).toHaveBeenCalledWith(expect.any(String))
+    if (actions[0].type === "OVERLAY_OPEN" && actions[0].overlay.kind === "doctor") {
+      expect(actions[0].overlay.report.agentBackend).toBe("codex")
+      expect(actions[0].overlay.report.externalAgentCommand).toEqual(expect.any(String))
+    }
+  })
+
+  it("reports a preset with no launchable command as unavailable", async () => {
+    const checkExternalCommand = jest.fn(async () => true)
+    const actions = await run({ agentBackend: "not-a-preset" }, { checkExternalCommand })
+    expect(checkExternalCommand).not.toHaveBeenCalled()
+    if (actions[0].type === "OVERLAY_OPEN" && actions[0].overlay.kind === "doctor") {
+      expect(actions[0].overlay.report.externalAgentAvailable).toBe(false)
+    }
+  })
+
+  it("probes the real launcher + platform when no override is injected", async () => {
+    const actions = await run(
+      { agentBackend: "claude-code" },
+      { checkExternalCommand: async () => true }
+    )
+    if (actions[0].type === "OVERLAY_OPEN" && actions[0].overlay.kind === "doctor") {
+      expect(typeof actions[0].overlay.report.externalAgentSandboxReady).toBe("boolean")
+      expect(typeof actions[0].overlay.report.externalAgentPlatformSupported).toBe("boolean")
+    }
+  })
+
+  it("degrades gracefully where no crash/log directory can be resolved", async () => {
+    const actions = await run(
+      {},
+      { os: { platform: () => "freebsd" as NodeJS.Platform, homedir: os.homedir } }
+    )
+    if (actions[0].type === "OVERLAY_OPEN" && actions[0].overlay.kind === "doctor") {
+      expect(actions[0].overlay.report.crashReportCount).toBe(0)
+      expect(actions[0].overlay.report.logDirBytes).toBe(0)
+    }
+  })
+
+  it("works off its real defaults when nothing is injected", async () => {
+    // Exercises the production credential/catalog/fs/command readers rather than
+    // the test doubles every other case supplies.
+    const actions: TuiAction[] = []
+    await runDoctor({
+      dispatch: (a) => actions.push(a),
+      config: promoteActiveModel({
+        ...DEFAULT_RESOLVED_CONFIG,
+        cwd: "/work",
+        agentBackend: "claude-code",
+      }),
+      home: path.join(os.tmpdir(), "cognia-doctor-absent"),
+      version: "9.9.9",
+      os: { platform: os.platform, homedir: os.homedir },
+      env: process.env,
+    })
+    expect(actions).toHaveLength(1)
+    if (actions[0].type === "OVERLAY_OPEN" && actions[0].overlay.kind === "doctor") {
+      expect(actions[0].overlay.report.dbSnapshotExists).toBe(false)
+      expect(actions[0].overlay.report.credentialedProviders).toEqual([])
+    }
+  })
+
+  it("leaves sandbox facts absent on the built-in backend", async () => {
+    const actions = await run({ agentBackend: "builtin" })
+    if (actions[0].type === "OVERLAY_OPEN" && actions[0].overlay.kind === "doctor") {
+      expect(actions[0].overlay.report.externalAgentSandboxReady).toBeUndefined()
     }
   })
 })

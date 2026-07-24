@@ -63,6 +63,41 @@ describe("DoctorPanel", () => {
     expect(text).toContain("crash-2026-05-25_14-30-00-panic")
   })
 
+  it.each([
+    [{ externalAgentSandboxReady: true, externalAgentPlatformSupported: true }, "strict launcher"],
+    [
+      { externalAgentSandboxReady: false, externalAgentPlatformSupported: true },
+      "launcher missing",
+    ],
+    [
+      { externalAgentSandboxReady: false, externalAgentPlatformSupported: false },
+      "unsupported on this platform",
+    ],
+  ])("reports sandbox readiness alongside the command check", (patch, expected) => {
+    const { container } = render(
+      <DoctorPanel
+        report={{ ...report, ...patch }}
+        onClose={() => undefined}
+        onViewReport={() => undefined}
+      />
+    )
+    const text = container.textContent ?? ""
+    // The command check alone would still read "npx ✓" here.
+    expect(text).toContain("Sandbox")
+    expect(text).toContain(expected)
+  })
+
+  it("omits the sandbox row on the built-in backend", () => {
+    const { container } = render(
+      <DoctorPanel
+        report={{ ...report, agentBackend: "builtin", externalAgentSandboxReady: undefined }}
+        onClose={() => undefined}
+        onViewReport={() => undefined}
+      />
+    )
+    expect(container.textContent ?? "").not.toContain("Sandbox")
+  })
+
   it("flags an invalid model", () => {
     const { container } = render(
       <DoctorPanel
@@ -121,5 +156,47 @@ describe("DoctorPanel", () => {
     const text = container.textContent ?? ""
     expect(text).toContain("unable to resolve")
     expect(text).not.toContain("Recent crash reports")
+  })
+
+  it("reports an unresolvable logs directory too", () => {
+    const { container } = render(
+      <DoctorPanel
+        report={{ ...report, logsDir: null }}
+        onClose={() => undefined}
+        onViewReport={() => undefined}
+      />
+    )
+    expect(container.textContent ?? "").toContain("unable to resolve")
+  })
+
+  it("labels a crash report that carries neither a kind nor a capture time", () => {
+    const { container } = render(
+      <DoctorPanel
+        report={{
+          ...report,
+          latestCrash: {
+            stem: "crash-bare",
+            sizeBytes: 10,
+            hasTxt: true,
+            hasJson: false,
+            hasDmp: false,
+          },
+        }}
+        onClose={() => undefined}
+        onViewReport={() => undefined}
+      />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("crash-bare")
+    expect(text).toContain("unknown")
+  })
+
+  it("clamps arrow navigation to the single available crash report", () => {
+    const view = jest.fn()
+    render(<DoctorPanel report={report} onClose={() => undefined} onViewReport={view} />)
+    __fireInput("", { downArrow: true })
+    __fireInput("", { upArrow: true })
+    __fireInput("", { return: true })
+    expect(view).toHaveBeenCalledWith("crash-2026-05-25_14-30-00-panic")
   })
 })

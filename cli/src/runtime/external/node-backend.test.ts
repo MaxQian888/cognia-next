@@ -4,7 +4,7 @@ import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { buildExternalAgentChildEnv, NodeExternalAgentBackend } from "./node-backend"
+import { buildExternalAgentChildEnv, commandExists, NodeExternalAgentBackend } from "./node-backend"
 
 /**
  * Wait for a real backend event instead of sleeping. Everything the backend
@@ -181,6 +181,23 @@ describe("NodeExternalAgentBackend", () => {
     await expect(
       backend.invoke("check_command_exists", { command: "cognia-no-such-command-xyz" })
     ).resolves.toBe(false)
+  })
+
+  it("finds a binary in a fallback install root that PATH omits", async () => {
+    const cargoHome = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-agent-cargo-"))
+    const bin = path.join(cargoHome, "bin")
+    fs.mkdirSync(bin, { recursive: true })
+    const tool = path.join(bin, "faux-agent")
+    fs.writeFileSync(tool, "#!/bin/sh\n")
+    fs.chmodSync(tool, 0o755)
+    // PATH is empty; the binary is reachable only through the CARGO_HOME fallback.
+    const runtime = { platform: process.platform, home: undefined, env: { CARGO_HOME: cargoHome } }
+    try {
+      await expect(commandExists("faux-agent", runtime)).resolves.toBe(true)
+      await expect(commandExists("faux-agent", { ...runtime, env: {} })).resolves.toBe(false)
+    } finally {
+      fs.rmSync(cargoHome, { recursive: true, force: true })
+    }
   })
 
   it("waits for process-group teardown before allowing the same id to respawn", async () => {

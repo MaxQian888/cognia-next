@@ -18,6 +18,10 @@ import { listCredentialProviders } from "../../config/credentials"
 import { providerAuthMode } from "../commands/builtins"
 import { resolveActiveModel } from "../../config/active-model"
 import { commandExists } from "../../runtime/external/node-backend"
+import {
+  findSandboxLauncher,
+  sandboxSupportsPlatform,
+} from "../../runtime/external/sandbox-launcher"
 import type { ResolvedConfig } from "../../config/schema"
 import type { CrashReportItem, DoctorReport, TuiAction } from "../state/types"
 import {
@@ -79,6 +83,10 @@ export interface DoctorReportDeps extends DoctorDeps {
   /** Injected fs shim for crash/log discovery. */
   crashLogFs?: CrashLogFs
   checkExternalCommand?: (command: string) => Promise<boolean>
+  /** Probe for the strict-sandbox launcher (injected in tests). */
+  findLauncher?: () => string | undefined
+  /** Whether this platform can host external agents (injected in tests). */
+  platformSupportsSandbox?: (platform: NodeJS.Platform) => boolean
 }
 
 /**
@@ -170,6 +178,14 @@ export async function runDoctor(deps: DoctorReportDeps): Promise<void> {
     report.externalAgentAvailable = command
       ? await (deps.checkExternalCommand ?? commandExists)(command)
       : false
+    // The agent binary being on PATH is only half the story: every external
+    // process is launched through the strict-sandbox launcher, so a missing
+    // launcher (or an unsupported platform) fails every turn while the command
+    // check still reads "✓". Report both, or the panel lies.
+    report.externalAgentPlatformSupported = (
+      deps.platformSupportsSandbox ?? sandboxSupportsPlatform
+    )(deps.os.platform())
+    report.externalAgentSandboxReady = Boolean((deps.findLauncher ?? findSandboxLauncher)())
   }
   deps.dispatch({
     type: "OVERLAY_OPEN",

@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react"
 
-import { useAgentSession, type CreateSession } from "./useAgentSession"
+import { sessionRestartNotice, useAgentSession, type CreateSession } from "./useAgentSession"
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
 import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
@@ -39,6 +39,8 @@ function harness(
     /** Custom `session.send` — receives the gate responder so a test can simulate
      * a mid-turn tool permission request. */
     sendImpl?: (prompt: string, o: { gate: (req: unknown) => Promise<unknown> }) => Promise<unknown>
+    /** Make session creation itself fail (e.g. an unknown `--backend` id). */
+    createError?: Error
   } = {}
 ) {
   const actions: TuiAction[] = []
@@ -46,13 +48,16 @@ function harness(
   const send = jest.fn(opts.sendImpl ?? (async () => result()))
   const close = jest.fn(async () => {})
   const setPermissionMode = jest.fn(async () => {})
-  const create: CreateSession = jest.fn(() => ({
-    sessionId: "s",
-    send,
-    close,
-    setPermissionMode,
-    isLive: () => opts.isLive ?? false,
-  })) as unknown as CreateSession
+  const create: CreateSession = jest.fn(() => {
+    if (opts.createError) throw opts.createError
+    return {
+      sessionId: "s",
+      send,
+      close,
+      setPermissionMode,
+      isLive: () => opts.isLive ?? false,
+    }
+  }) as unknown as CreateSession
   let sidecarHandler: ((p: unknown) => void) | null = null
   const subscribeSidecar = jest.fn((h: (p: unknown) => void) => {
     sidecarHandler = h
@@ -606,10 +611,18 @@ describe("useAgentSession", () => {
     await act(async () => {
       await h.api().send("crash")
     })
+    expect(h.actions).toContainEqual(
+      expect.objectContaining({
+        type: "TURN_ERROR",
+        message: "sidecar exited mid-run",
+        category: "sidecar",
+      })
+    )
+    // …and the drop is announced permanently: the transcript above still shows
+    // the whole conversation, but the respawned agent can no longer see it.
     expect(h.actions.at(-1)).toMatchObject({
-      type: "TURN_ERROR",
-      message: "sidecar exited mid-run",
-      category: "sidecar",
+      type: "NOTICE",
+      message: expect.stringContaining("no longer visible") as unknown as string,
     })
     // The stale session is dropped — close called, gate reset.
     expect(h.close).toHaveBeenCalled()
@@ -619,6 +632,22 @@ describe("useAgentSession", () => {
       await h.api().send("recovery")
     })
     expect(h.create).toHaveBeenCalledTimes(2)
+  })
+
+  it("surfaces a session that fails to be CREATED instead of swallowing the prompt", async () => {
+    // e.g. `cognia-agent chat --backend cdoex` — the factory throws synchronously,
+    // outside the turn engine's try, so the message used to vanish silently.
+    const h = harness({ createError: new Error("Unknown external-agent backend: cdoex") })
+
+    await act(async () => {
+      await h.api().send("hi")
+    })
+
+    expect(h.actions.at(-1)).toMatchObject({
+      type: "TURN_ERROR",
+      message: "Unknown external-agent backend: cdoex",
+    })
+    expect(h.send).not.toHaveBeenCalled()
   })
 
   it("KEEPS the session on a recoverable error (idle/timeout) so context survives", async () => {
@@ -724,5 +753,16 @@ describe("useAgentSession", () => {
       await h.api().forkConversationAt(0, [])
     })
     expect(h.actions.some((a) => a.type === "LOAD_CELLS")).toBe(false)
+  })
+})
+
+describe("sessionRestartNotice", () => {
+  it("names the external backend whose memory was actually lost", () => {
+    expect(sessionRestartNotice({ ...config, agentBackend: "codex" })).toContain("codex")
+  })
+
+  it("falls back to a generic subject on the built-in backend", () => {
+    expect(sessionRestartNotice(config)).toContain("the agent")
+    expect(sessionRestartNotice({ ...config, agentBackend: undefined })).toContain("the agent")
   })
 })

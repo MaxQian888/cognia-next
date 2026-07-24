@@ -38,6 +38,7 @@ function buildDeps(over: Partial<GlobalKeysDeps> = {}): GlobalKeysDeps {
     renderPrefs: resolveRenderConfig(undefined),
     now: () => 1000,
     doExit: jest.fn(),
+    cancelBackendConnect: jest.fn(),
     agent: { abort: jest.fn(), switchMode: jest.fn() } as unknown as AgentSessionApi,
     abortRuntime: jest.fn(),
     askUser: { resolve: jest.fn() } as unknown as AskUserOverlayApi,

@@ -1357,24 +1357,27 @@ describe("App", () => {
     const gate = new Promise<void>((r) => {
       release = r
     })
+    const send: ReturnType<CreateSession>["send"] = jest.fn(async (_prompt, opts) => {
+      opts.onEvent?.({ type: "text-delta", delta: "hi" })
+      await gate
+      return result("hi")
+    })
     const create: CreateSession = () => ({
       sessionId: "ses-gate",
-      async send(_prompt, opts) {
-        opts.onEvent?.({ type: "text-delta", delta: "hi" })
-        await gate
-        return result("hi")
-      },
+      send,
       close: jest.fn(),
     })
     const titleOut = { isTTY: true, write: jest.fn() }
     let t = 0
+    const now = jest.fn(() => (t += 100000))
     render(
       <App
         config={{ ...config, notify: true, terminalTitle: false }}
         sessionId="s1"
         createSession={create}
         titleOut={titleOut}
-        now={jest.fn(() => (t += 100000))}
+        titleEnv={{ TERM: "xterm-256color" }}
+        now={now}
       />
     )
     type("hello")
@@ -1382,13 +1385,18 @@ describe("App", () => {
       submit()
       await Promise.resolve()
     })
-    // The turn is in flight (busy === true committed). Complete it.
-    await act(async () => {
-      release()
-      await Promise.resolve()
-      await Promise.resolve()
+    // Wait until the async turn actually starts. Backend initialization can
+    // add awaits before `send`, and releasing earlier would batch TURN_START
+    // with TURN_COMMIT so the duration gate never observes the busy edge.
+    await waitFor(() => {
+      expect(send).toHaveBeenCalled()
+      expect(now).toHaveBeenCalled()
     })
-    await waitFor(() => expect(titleOut.write).toHaveBeenCalledWith("\x07"))
+    release()
+    await waitFor(() => expect(now.mock.calls.length).toBeGreaterThanOrEqual(2), {
+      timeout: 1000,
+    })
+    expect(titleOut.write).toHaveBeenCalledWith("\x07")
   })
 
   it("does not ring the bell when notify is off", async () => {

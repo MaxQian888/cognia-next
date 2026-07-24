@@ -13,6 +13,10 @@ describe("footerSegmentCommand", () => {
     expect(footerSegmentCommand("git")).toBe("/diff")
   })
 
+  it("routes the backend segment to /backend", () => {
+    expect(footerSegmentCommand("backend")).toBe("/backend")
+  })
+
   it.each(["tokens", "cost", "cache", "ratelimit"] as const)(
     "routes the %s segment to /usage",
     (id) => {

@@ -118,11 +118,13 @@ describe("external chat integration", () => {
     }
     const renderTui = jest.fn(
       async ({
-        createSession,
+        createExternalSession,
       }: {
-        createSession: (params: { config: typeof config }) => AgentSession
+        // The launcher hands over BOTH factories now and lets the TUI route by
+        // the live `agentBackend`, so `/backend` can switch mid-session.
+        createExternalSession: (params: { config: typeof config }) => AgentSession
       }) => {
-        const session = createSession({ config })
+        const session = createExternalSession({ config })
         let state = createInitialState(config, "integration-session")
         const dispatch = (action: Parameters<typeof tuiReducer>[1]) => {
           state = tuiReducer(state, action)

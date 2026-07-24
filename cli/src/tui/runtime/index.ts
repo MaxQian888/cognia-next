@@ -112,6 +112,8 @@ export interface RuntimeDeps {
   usage?: UsageInfo
   /** Per-model context window (from the catalog) for the `/status` context gauge. */
   contextWindow?: number
+  /** What the active agent backend supports, for `/status`'s blocked-feature list. */
+  capabilities?: import("./backend-capabilities").BackendCapabilities
   /** Per-turn token history (for the `/limits` session analysis). */
   usageHistory?: number[]
   /** Per-tool call/error tallies (for the `/limits` session analysis). */
@@ -553,6 +555,7 @@ export async function runRuntimeRequest(
         version: deps.version,
         usage: deps.usage,
         contextWindow: deps.contextWindow,
+        capabilities: deps.capabilities,
       })
     case "limits":
       return impl.runLimits({

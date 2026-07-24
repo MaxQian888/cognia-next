@@ -29,6 +29,8 @@ import {
   shortenCwd,
 } from "./usage"
 import { tightestRemainingPct, type RateLimitSnapshot } from "./rate-limits"
+import { isBuiltinBackend } from "../runtime/backend-capabilities"
+import { backendSegmentText } from "../runtime/backend-identity"
 import type { SessionTotals, UsageInfo } from "../state/types"
 import { permissionModeMeta } from "../state/permission-mode-meta"
 
@@ -45,6 +47,7 @@ export interface StatusSegmentView {
 const SEGMENT_TOKEN: Record<StatusSegment, keyof ThemePalette> = {
   model: "accent",
   provider: "success",
+  backend: "secondary",
   mode: "warning",
   tokens: "info",
   ctx: "secondary",
@@ -97,6 +100,14 @@ export function readGitBranch(
   }
 }
 
+/**
+ * True when an external agent is answering and nothing has told us its context
+ * window — the case where a `% ctx` gauge would be pure fabrication.
+ */
+function externalWithoutKnownWindow(config: ResolvedConfig, contextWindow?: number): boolean {
+  return !isBuiltinBackend(config.agentBackend) && !(contextWindow && contextWindow > 0)
+}
+
 /** Render the text for one segment, or null when it has nothing to show. */
 function segmentText(
   id: StatusSegment,
@@ -132,8 +143,15 @@ function segmentText(
         : (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0)
       return `${formatTokens(total)} tok`
     }
+    case "backend":
+      return backendSegmentText(config)
     case "ctx":
-      return `${contextPercent(usage, resolveActiveModel(config), ctx.contextWindow)}% ctx`
+      // The window comes from the built-in provider's catalog, which says
+      // nothing about an external agent's model — a percentage derived from it
+      // would be invented. Show nothing instead.
+      return externalWithoutKnownWindow(config, ctx.contextWindow)
+        ? null
+        : `${contextPercent(usage, resolveActiveModel(config), ctx.contextWindow)}% ctx`
     case "cache":
       // Prefix-cache hit rate. Hidden until a turn reports prompt tokens — a
       // "0%" before the first turn would just be noise in the footer.
@@ -141,7 +159,11 @@ function segmentText(
         ? `⚡ ${Math.round(cacheHitRatio(usage) * 100)}%`
         : null
     case "cost":
-      return formatCost(totals ? totals.costUsd : usage?.totalCostUsd)
+      // Same reason as `ctx`: the cost would be this session's tokens priced
+      // with the built-in model's rate card, which is not what ran.
+      return isBuiltinBackend(config.agentBackend)
+        ? formatCost(totals ? totals.costUsd : usage?.totalCostUsd)
+        : null
     case "cwd":
       return shortenCwd(config.cwd)
     case "git":
@@ -209,6 +231,9 @@ export function buildStatusBar(ctx: {
  */
 const SEGMENT_KEEP_PRIORITY: Record<StatusSegment, number> = {
   model: 100,
+  // Ranks with the model: on a narrow terminal, WHICH agent is answering is the
+  // last thing that should be dropped.
+  backend: 95,
   mode: 90,
   ctx: 80,
   tokens: 70,

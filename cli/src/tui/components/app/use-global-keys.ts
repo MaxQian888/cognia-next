@@ -52,6 +52,9 @@ export interface GlobalKeysDeps {
   renderPrefs: ResolvedRenderConfig
   now: () => number
   doExit: () => void
+  /** Abort an in-flight external-backend connect (Esc during `"connecting"`),
+   * reclaiming the half-registered agent and routing to the failure page. */
+  cancelBackendConnect: () => void
   agent: AgentSessionApi
   abortRuntime: () => void
   askUser: AskUserOverlayApi
@@ -115,6 +118,7 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
       renderPrefs,
       now,
       doExit,
+      cancelBackendConnect,
       agent,
       abortRuntime,
       askUser,
@@ -208,6 +212,22 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
     // During the startup gate, only Ctrl+C (above) is honored — the gate owns
     // its own keys.
     if (state.phase === "startup") return
+    // While the external backend is coming up, Esc aborts the connect (the one
+    // escape hatch from a handshake that hangs, since the composer isn't open);
+    // every other key is swallowed so nothing is typed into a backend that may
+    // still fail. The failure page owns its own keys via its SelectList, so the
+    // global handler must stay out of its way there — otherwise both consume the
+    // same keypress.
+    if (state.phase === "connecting") {
+      if (key.escape) cancelBackendConnect()
+      return
+    }
+    if (state.phase === "connect-failed") return
+    // While an install runs, swallow every key: interrupting an `npm install`
+    // or a vendor script mid-write can leave a half-installed binary. The page
+    // is display-only and auto-advances (retry on success, failure page on
+    // error), so there is nothing to drive here.
+    if (state.phase === "installing") return
     // Find-in-viewport (Ctrl+F): while the find bar is open it owns all input —
     // printable keys extend the query (live incremental search), arrows / Enter
     // step matches, Ctrl+Y copies the focused match, Esc closes. The composer is

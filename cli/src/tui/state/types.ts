@@ -21,6 +21,9 @@ import type { AgentPanelRow } from "../runtime/agents-panel-model"
 import type { AgentStatsOverview, ConvStatRow, ConvWithUsage } from "../runtime/agent-stats-model"
 import type { SessionReport } from "@/lib/analysis/session-report"
 import type { SubagentModelRow } from "../runtime/subagent-models-model"
+import type { BackendCapabilities } from "../runtime/backend-capabilities"
+import type { BackendConnectFailure, BackendConnectStage } from "../runtime/backend-controller"
+import type { InstallMethod } from "../runtime/backend-install"
 
 import type {
   ResolvedConfig,
@@ -71,7 +74,15 @@ export interface ToolCell {
   kind: "tool"
   /** Correlation key from the capture stream (toolName + serialized input). */
   callKey: string
+  /** CANONICAL tool name — every formatter (`isDiffTool`, `isTodoTool`,
+   * `toolFilePath`, `toolKind`) dispatches on it, so it must stay a real tool
+   * name even when the source protocol only offers a human label. */
   toolName: string
+  /** Human label supplied by an external agent's protocol (an ACP tool call
+   * `title`, e.g. "Reading configuration file"). Shown in the card header in
+   * place of `toolName`; keeping the two apart is what lets an external tool
+   * card keep diff rendering, clickable paths, and the namespace badge. */
+  displayTitle?: string
   input: Record<string, unknown>
   status: ToolStatus
   result?: unknown
@@ -288,9 +299,43 @@ export interface SessionSummary {
   updatedAt: number
 }
 
+/**
+ * A resolvable auto-install for the missing agent binary, surfaced on the
+ * `"connect-failed"` page when the failure is a missing command AND an
+ * officially-supported install method is available on this machine. Absent when
+ * the failure is something else, or when nothing installable can run here (then
+ * only the docs hint is shown).
+ */
+export interface BackendInstallOption {
+  /** The missing agent binary this installs. */
+  command: string
+  /** Agent display name for the "Install <name>" choice and prompt. */
+  name: string
+  /** The chosen official method (npm/brew/curl), prerequisites already verified. */
+  method: InstallMethod
+}
+
+/** Live state of an in-progress agent install (the `"installing"` phase): the
+ * command being run and its streamed output so the user can watch it work. */
+export interface BackendInstallState {
+  name: string
+  /** The exact command line being run (e.g. "npm install -g @openai/codex"). */
+  display: string
+  /** Accumulated installer stdout/stderr, newest last. */
+  output: string
+  status: "running" | "error"
+}
+
 /** Health + context snapshot shown by the `/status` panel. */
 export interface StatusReport {
   version: string
+  /** The hosting agent backend. `collectDoctorFacts` always knew this; `/status`
+   * used to drop it, so the panel reported the built-in provider while an
+   * external agent was answering. */
+  agentBackend: string
+  /** Features unavailable on the active backend, so the panel can say so rather
+   * than leave the user to discover it one silent no-op at a time. */
+  blockedFeatures?: string[]
   provider: string
   model: string
   modelValid: boolean
@@ -325,6 +370,14 @@ export interface DoctorReport {
   externalAgentTerminalActive?: boolean
   externalAgentCommand?: string
   externalAgentAvailable?: boolean
+  /** Whether this platform can host external agents at all (they require a
+   * strict sandbox, so Windows fails closed). */
+  externalAgentPlatformSupported?: boolean
+  /** Whether the strict-sandbox launcher is present. The external command being
+   * on PATH says nothing about this, and without it every turn fails to spawn —
+   * so a report that omitted it could show "available ✓" for a backend that
+   * cannot start. */
+  externalAgentSandboxReady?: boolean
   provider: string
   model: string
   modelValid: boolean
@@ -630,12 +683,37 @@ export interface TuiState {
   sessionId: string
   config: ResolvedConfig
   /**
-   * Session phase. `"startup"` shows only the welcome banner + trust gate (the
-   * Claude-Code-style "do you trust this folder?" onboarding); `"chat"` is the
-   * normal transcript + composer view. Starts `"chat"` when the cwd was already
-   * trusted on a prior launch, otherwise `"startup"`.
+   * Session phase.
+   *
+   * `"startup"` shows only the welcome banner + trust gate (the Claude-Code-style
+   * "do you trust this folder?" onboarding). On an external backend the gate is
+   * followed by `"connecting"` — the agent process is started BEFORE the composer
+   * opens, so a missing binary or sandbox surfaces with the user's hands still
+   * free rather than after their first message — and by `"connect-failed"` when
+   * that cannot be done. `"chat"` is the normal transcript + composer view.
+   *
+   * Trust always comes first: an untrusted folder must never have an external
+   * process spawned against it, since the sandbox hands that folder to the agent
+   * as a writable root.
    */
-  phase: "startup" | "chat"
+  phase: "startup" | "connecting" | "connect-failed" | "installing" | "chat"
+  /** What the ACTIVE backend can do. Every capability-gated surface reads this
+   * instead of re-deriving "is this the builtin sidecar?" on its own. Absent
+   * until resolved, which reads as "everything supported" (the builtin path). */
+  backendCapabilities?: BackendCapabilities
+  /** Live connect progress, for the single-line startup indicator. */
+  backendConnect?: { backend: string; stage: BackendConnectStage }
+  /** Why the backend could not start — drives the `"connect-failed"` page. */
+  backendFailure?: BackendConnectFailure
+  /** An installable fix for a missing-command failure, when one can run here.
+   * Drives the extra "Install <agent>" recovery choice on the failure page. */
+  backendInstallOption?: BackendInstallOption
+  /** Live install progress — drives the `"installing"` page. */
+  backendInstall?: BackendInstallState
+  /** Why the last install attempt failed — shown on the failure page so a flashed
+   * install that failed says so instead of silently returning. Cleared on any
+   * fresh connect/install attempt. */
+  backendInstallError?: string
   cells: Cell[]
   inflight: Inflight
   overlay: Overlay
@@ -754,7 +832,29 @@ export type TuiAction =
   // Streaming (from the capture stream via event-mapper)
   | { type: "INFLIGHT_TEXT"; delta: string }
   | { type: "INFLIGHT_THINKING"; delta: string }
-  | { type: "TOOL_CALL"; callKey: string; toolName: string; input: Record<string, unknown> }
+  | {
+      type: "TOOL_CALL"
+      callKey: string
+      toolName: string
+      input: Record<string, unknown>
+      /** Human label to show instead of `toolName` (see {@link ToolCell}). */
+      displayTitle?: string
+    }
+  /**
+   * Refine an already-announced tool call in place — new input, a sharpened
+   * canonical name, or a label. Idempotent by construction (it merges into the
+   * cell with the matching `callKey`), which is what keeps a protocol that
+   * re-sends the same content on every status change from stacking duplicate
+   * cards. Creates the cell when the update outran its `TOOL_CALL`, so content
+   * is never dropped.
+   */
+  | {
+      type: "TOOL_UPDATE"
+      callKey: string
+      toolName?: string
+      displayTitle?: string
+      input?: Record<string, unknown>
+    }
   // Programmatic plan capture from the `/plan explore` pipeline (the Plan
   // subagent's output), routed through the same commit path as the ExitPlanMode
   // tool signal so it surfaces the approval overlay.
@@ -943,6 +1043,30 @@ export type TuiAction =
   | { type: "INPUT_UNDO" }
   | { type: "INPUT_REDO" }
   // Startup onboarding (trust gate + folder picker)
+  // ── Backend lifecycle ───────────────────────────────────────────────────────
+  /** Report which connect step is running (drives the startup progress line). */
+  | { type: "BACKEND_CONNECT_STAGE"; backend: string; stage: BackendConnectStage }
+  /** The backend is live: adopt its negotiated capabilities and open the chat. */
+  | { type: "BACKEND_CONNECT_OK"; capabilities: BackendCapabilities }
+  /** The backend could not start — show the failure page with recovery actions.
+   * `installOption` is set only for a missing-command failure that this machine
+   * can actually install, adding an "Install <agent>" choice to the page. */
+  | {
+      type: "BACKEND_CONNECT_FAIL"
+      failure: BackendConnectFailure
+      installOption?: BackendInstallOption
+    }
+  /** Re-enter the connecting phase (retry, or a `/backend` switch). */
+  | { type: "BACKEND_CONNECT_RETRY"; backend: string }
+  /** Begin installing the missing agent binary — enters the `"installing"` page. */
+  | { type: "BACKEND_INSTALL_START"; name: string; display: string }
+  /** Append a line of installer output to the `"installing"` page. */
+  | { type: "BACKEND_INSTALL_OUTPUT"; chunk: string }
+  /** The install failed — return to the failure page, which shows `message`. */
+  | { type: "BACKEND_INSTALL_FAIL"; message: string }
+  /** Switch the active backend id. Clears the capabilities that belonged to the
+   * previous one so nothing renders stale support while the next connect runs. */
+  | { type: "SET_BACKEND"; backend: string }
   /** Trust the current cwd and enter the chat phase. */
   | { type: "STARTUP_TRUST" }
   /** Switch the working directory (from the startup folder picker). */

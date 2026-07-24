@@ -7,7 +7,8 @@ import type { RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 
 import { createInitialState } from "./initial"
 import { tuiReducer } from "./reducer"
-import type { Cell, ToolCell, TuiAction, TuiState } from "./types"
+import { externalCapabilities } from "../runtime/backend-capabilities"
+import type { Cell, InputEditOp, ToolCell, TuiAction, TuiState } from "./types"
 
 const config: ResolvedConfig = { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work" }
 
@@ -1847,6 +1848,182 @@ describe("tuiReducer", () => {
     expect(s.lastCtrlCAt).toBe(5000)
     s = reduce(s, { type: "CLEAR_CTRL_C" })
     expect(s.lastCtrlCAt).toBeUndefined()
+  })
+})
+
+describe("tuiReducer — backend lifecycle", () => {
+  const external = (backend: string): TuiState =>
+    createInitialState({ ...config, agentBackend: backend }, "ses1", false)
+
+  it("routes the trust gate into a connect on an external backend", () => {
+    expect(reduce(external("codex"), { type: "STARTUP_TRUST" }).phase).toBe("connecting")
+  })
+
+  it("goes straight to chat on the built-in backend", () => {
+    const start = createInitialState(config, "ses1", false)
+    expect(reduce(start, { type: "STARTUP_TRUST" }).phase).toBe("chat")
+  })
+
+  it("tracks the connect stage for the progress line", () => {
+    const next = reduce(external("codex"), {
+      type: "BACKEND_CONNECT_STAGE",
+      backend: "codex",
+      stage: "sandbox",
+    })
+    expect(next.phase).toBe("connecting")
+    expect(next.backendConnect).toEqual({ backend: "codex", stage: "sandbox" })
+  })
+
+  it("adopts negotiated capabilities and opens the chat on success", () => {
+    const caps = externalCapabilities({ backend: "codex" })
+    const next = reduce(
+      reduce(external("codex"), {
+        type: "BACKEND_CONNECT_STAGE",
+        backend: "codex",
+        stage: "launch",
+      }),
+      { type: "BACKEND_CONNECT_OK", capabilities: caps }
+    )
+    expect(next.phase).toBe("chat")
+    expect(next.backendCapabilities).toBe(caps)
+    expect(next.backendConnect).toBeUndefined()
+  })
+
+  it("holds the failure for the recovery page, then clears it on retry", () => {
+    const failure = { kind: "launcher" as const, stage: "sandbox" as const, message: "missing" }
+    const failed = reduce(external("codex"), { type: "BACKEND_CONNECT_FAIL", failure })
+    expect(failed.phase).toBe("connect-failed")
+    expect(failed.backendFailure).toBe(failure)
+    expect(failed.backendConnect).toBeUndefined()
+
+    const retried = reduce(failed, { type: "BACKEND_CONNECT_RETRY", backend: "codex" })
+    expect(retried.phase).toBe("connecting")
+    expect(retried.backendFailure).toBeUndefined()
+    expect(retried.backendConnect).toEqual({ backend: "codex", stage: "preset" })
+  })
+
+  it("drops the old backend's capabilities the moment the backend changes", () => {
+    const live = reduce(external("codex"), {
+      type: "BACKEND_CONNECT_OK",
+      capabilities: externalCapabilities({ backend: "codex" }),
+    })
+    const switched = reduce(live, { type: "SET_BACKEND", backend: "claude-code" })
+    expect(switched.config.agentBackend).toBe("claude-code")
+    // Stale support is exactly the lie the capability gate exists to prevent.
+    expect(switched.backendCapabilities).toBeUndefined()
+  })
+
+  it("restores full capabilities when switching back to the built-in agent", () => {
+    const switched = reduce(external("codex"), { type: "SET_BACKEND", backend: "builtin" })
+    expect(switched.backendCapabilities?.builtin).toBe(true)
+  })
+})
+
+describe("tuiReducer — INPUT_EDIT", () => {
+  const edit = (state: TuiState, ...ops: InputEditOp[]): TuiState =>
+    reduce(state, ...ops.map((op): TuiAction => ({ type: "INPUT_EDIT", edit: op })))
+
+  const typed = (text: string): TuiState => edit(base(), { op: "insert", text })
+  const text = (state: TuiState): string => state.input.buffer.lines.join("\n")
+
+  it("applies each text-mutating op to the live buffer", () => {
+    expect(text(typed("hello"))).toBe("hello")
+    expect(text(edit(typed("hello"), { op: "backspace" }))).toBe("hell")
+    expect(text(edit(typed("hello world"), { op: "delete-word" }))).toBe("hello ")
+    expect(text(edit(typed("hi"), { op: "newline" }))).toBe("hi\n")
+    expect(text(edit(typed("hello"), { op: "kill-to-start" }))).toBe("")
+    expect(text(edit(typed("hello"), { op: "move", dir: "home" }, { op: "kill-to-end" }))).toBe("")
+  })
+
+  it.each([
+    ["left", 4],
+    ["right", 5],
+    ["home", 0],
+    ["end", 5],
+    ["word-left", 0],
+    ["word-right", 5],
+    // On a single line, ↑/↓ fall back to jumping to the start / end of the buffer.
+    ["up", 0],
+    ["down", 5],
+  ] as const)("moves the cursor %s", (dir, cursorCol) => {
+    expect(edit(typed("hello"), { op: "move", dir }).input.buffer.cursorCol).toBe(cursorCol)
+  })
+})
+
+describe("tuiReducer — TOOL_UPDATE", () => {
+  const start = (): TuiState =>
+    reduce(
+      base(),
+      { type: "TURN_START", prompt: "go" },
+      {
+        type: "TOOL_CALL",
+        callKey: "t1",
+        toolName: "Write",
+        input: {},
+        displayTitle: "Edit the config",
+      }
+    )
+
+  it("refines the announced card in place rather than adding another", () => {
+    const next = reduce(start(), {
+      type: "TOOL_UPDATE",
+      callKey: "t1",
+      toolName: "Edit",
+      input: { file_path: "/work/a.ts", old_string: "a", new_string: "b" },
+    })
+    expect(next.inflight.tools).toHaveLength(1)
+    expect(next.inflight.tools[0]).toMatchObject({
+      toolName: "Edit",
+      displayTitle: "Edit the config",
+      input: { file_path: "/work/a.ts", old_string: "a", new_string: "b" },
+      status: "running",
+    })
+  })
+
+  it("is idempotent, so a re-sent update never stacks cards", () => {
+    const update: TuiAction = {
+      type: "TOOL_UPDATE",
+      callKey: "t1",
+      toolName: "Edit",
+      input: { file_path: "/work/a.ts" },
+    }
+    const next = reduce(start(), update, update, update)
+    expect(next.inflight.tools).toHaveLength(1)
+  })
+
+  it("merges onto a card that already moved into the transcript", () => {
+    // A late update for a tool that was flushed to cells at a commit boundary.
+    const committed = reduce(
+      start(),
+      { type: "TOOL_RESULT", callKey: "t1", toolName: "Write", result: "ok" },
+      { type: "TURN_COMMIT", result: result() }
+    )
+    const next = reduce(committed, {
+      type: "TOOL_UPDATE",
+      callKey: "t1",
+      input: { file_path: "/work/a.ts" },
+    })
+    const tools = next.cells.filter((c): c is ToolCell => c.kind === "tool")
+    expect(tools).toHaveLength(1)
+    expect(tools[0].input).toMatchObject({ file_path: "/work/a.ts" })
+    // The result is untouched — an update refines, it does not re-open a tool.
+    expect(tools[0].status).toBe("done")
+  })
+
+  it("materializes a card when the update outran its announcement", () => {
+    const next = reduce(reduce(base(), { type: "TURN_START", prompt: "go" }), {
+      type: "TOOL_UPDATE",
+      callKey: "orphan",
+      toolName: "Edit",
+      input: { file_path: "/a" },
+    })
+    expect(next.inflight.tools).toHaveLength(1)
+    expect(next.inflight.tools[0]).toMatchObject({ callKey: "orphan", toolName: "Edit" })
+  })
+
+  it("leaves the canonical name alone when the update only carries input", () => {
+    const next = reduce(start(), { type: "TOOL_UPDATE", callKey: "t1", input: { a: 1 } })
+    expect(next.inflight.tools[0].toolName).toBe("Write")
   })
 })
 

@@ -4,6 +4,13 @@ import fs from "node:fs"
 import path from "node:path"
 import readline from "node:readline"
 
+import {
+  agentSearchDirs,
+  defaultAgentPathRuntime,
+  resolveAgentSearchPath,
+  type AgentPathRuntime,
+} from "./agent-path"
+
 export interface NodeExternalAgentSpawnConfig {
   id: string
   command: string
@@ -260,9 +267,16 @@ export class NodeExternalAgentBackend {
     const launch = await this.resolveLaunch(normalized)
     this.emit(CHANNEL.spawn, { agentId: config.id, status: "starting" })
     this.emit(CHANNEL.state, { agentId: config.id, state: "Starting" })
+    const env = buildExternalAgentChildEnv(process.env, config.env)
+    // The launcher child (and the sandboxed exec it starts) resolves the agent
+    // binary from PATH, so it must see the SAME enriched search path the
+    // readiness probe used — otherwise a binary the probe found in a fallback
+    // install root (Homebrew, ~/.cargo/bin, a native installer's dir) would be
+    // reported present yet fail to spawn.
+    env.PATH = resolveAgentSearchPath()
     const child = spawn(launch.command, launch.args, {
       cwd,
-      env: buildExternalAgentChildEnv(process.env, config.env),
+      env,
       stdio: ["pipe", "pipe", "pipe"],
       detached: process.platform !== "win32",
     })
@@ -336,13 +350,20 @@ export class NodeExternalAgentBackend {
   }
 }
 
-export async function commandExists(command: string): Promise<boolean> {
+export async function commandExists(
+  command: string,
+  runtime: AgentPathRuntime = defaultAgentPathRuntime()
+): Promise<boolean> {
   const trimmed = command.trim()
   if (!trimmed || trimmed.includes("/") || trimmed.includes("\\")) return false
-  const pathDirs = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean)
+  // Search the enriched set — process PATH plus the well-known install roots a
+  // minimal (non-login-shell) environment omits — so an installed agent binary
+  // is never reported missing merely because PATH was stripped. Mirrors the Rust
+  // `command_resolver::check_command_exists`.
+  const dirs = agentSearchDirs(runtime)
   const extensions =
-    process.platform === "win32" ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";") : [""]
-  return pathDirs.some((dir) =>
+    runtime.platform === "win32" ? (runtime.env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";") : [""]
+  return dirs.some((dir) =>
     extensions.some((extension) => {
       try {
         fs.accessSync(path.join(dir, `${trimmed}${extension}`), fs.constants.X_OK)

@@ -11,9 +11,17 @@ import { resolveActiveModel } from "../../config/active-model"
 import { collectDoctorFacts, type DoctorDeps } from "./doctor-controller"
 import { contextPercent, contextTokens } from "../format/usage"
 import { readGitBranch } from "../format/status-bar"
+import { backendIdentity } from "./backend-identity"
+import {
+  BACKEND_FEATURE_LABELS,
+  blockedFeatures,
+  type BackendCapabilities,
+} from "./backend-capabilities"
 import type { StatusReport, TuiAction, UsageInfo } from "../state/types"
 
 export interface StatusDeps extends DoctorDeps {
+  /** What the active backend supports, for the blocked-feature summary. */
+  capabilities?: BackendCapabilities
   /** Latest turn usage (drives the context gauge). */
   usage?: UsageInfo
   /** Per-model context window (from the catalog); falls back to the pattern table. */
@@ -28,10 +36,22 @@ export function collectStatusReport(deps: StatusDeps): StatusReport {
   const model = resolveActiveModel(deps.config)
   const window =
     deps.contextWindow && deps.contextWindow > 0 ? deps.contextWindow : getModelContextWindow(model)
+  // Same preset the banner names, so the panel can never disagree with it.
+  const identity = backendIdentity(deps.config, deps.capabilities?.presetId)
   return {
     version: facts.version,
-    provider: facts.provider,
-    model: facts.model,
+    agentBackend: facts.agentBackend,
+    ...(deps.capabilities
+      ? {
+          blockedFeatures: blockedFeatures(deps.capabilities).map(
+            (feature) => BACKEND_FEATURE_LABELS[feature]
+          ),
+        }
+      : {}),
+    // The identity the rest of the UI shows — the backend, not the built-in
+    // provider it would otherwise borrow.
+    provider: identity.provider,
+    model: identity.model ?? facts.model,
     modelValid: facts.modelValid,
     auth: facts.auth,
     credentialedProviders: facts.credentialedProviders,

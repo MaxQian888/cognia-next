@@ -31,6 +31,7 @@ function buildDeps(over: Partial<ApplyEffectDeps> = {}): ApplyEffectDeps {
     invalidate: jest.fn(),
     switchMode: jest.fn(),
     switchAgentMode: jest.fn(),
+    switchBackend: jest.fn(),
   } as unknown as AgentSessionApi
   return {
     agent,
@@ -68,6 +69,7 @@ function buildDeps(over: Partial<ApplyEffectDeps> = {}): ApplyEffectDeps {
     takeSteer: jest.fn(() => null),
     doExit: jest.fn(),
     changeCwd: jest.fn(),
+    reclaimBackend: jest.fn(),
     setRuntimeAbort: jest.fn(),
     getRuntimeAbort: jest.fn(() => null),
     mcpProbeCache: createMcpProbeCache(),
@@ -90,6 +92,35 @@ describe("useApplyEffect", () => {
     const deps = buildDeps()
     run(deps)({ kind: "none" })
     expect(deps.dispatch).not.toHaveBeenCalled()
+  })
+
+  describe("backend switch", () => {
+    it("reconnects to an external backend without an explicit reclaim", () => {
+      // The reconnect reuses the stable agent id and reclaims the old process as
+      // it re-registers, so an explicit reclaim here would race that.
+      const deps = buildDeps({ state: createInitialState(config, "s1", true, []) })
+      run(deps)({ kind: "backend", backend: "codex" })
+
+      expect(deps.agent.switchBackend).toHaveBeenCalledWith("codex")
+      expect(deps.dispatch).toHaveBeenCalledWith({
+        type: "BACKEND_CONNECT_RETRY",
+        backend: "codex",
+      })
+      expect(deps.reclaimBackend).not.toHaveBeenCalled()
+    })
+
+    it("reclaims the external process when switching to the built-in agent", () => {
+      // Nothing reconnects, so the old external process would leak until exit.
+      const state = createInitialState({ ...config, agentBackend: "codex" }, "s1", true, [])
+      const deps = buildDeps({ state })
+      run(deps)({ kind: "backend", backend: "builtin" })
+
+      expect(deps.agent.switchBackend).toHaveBeenCalledWith("builtin")
+      expect(deps.reclaimBackend).toHaveBeenCalledTimes(1)
+      expect(deps.dispatch).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "BACKEND_CONNECT_RETRY" })
+      )
+    })
   })
 
   it("persists + live-merges + re-resolves for the flag effect (/route auto on)", () => {

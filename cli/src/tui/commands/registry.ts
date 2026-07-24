@@ -29,6 +29,7 @@ import { mascotCommand } from "./mascot-command"
 import { themeCommand } from "./theme-command"
 import { outputStyleCommand } from "./output-style-command"
 import { agentModeCommand } from "./agent-mode-command"
+import { backendCommand } from "./backend-command"
 import { layoutCommand } from "./layout-command"
 import { mouseCommand } from "./mouse-command"
 import { editorCommands } from "./editor-command"
@@ -134,6 +135,7 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
   themeCommand,
   outputStyleCommand,
   agentModeCommand,
+  backendCommand,
   layoutCommand,
   mouseCommand,
   ...editorCommands,

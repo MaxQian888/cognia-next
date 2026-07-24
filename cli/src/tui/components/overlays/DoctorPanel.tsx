@@ -99,6 +99,20 @@ export function DoctorPanel({
             </Text>
           )}
         </Text>
+        {report.externalAgentSandboxReady !== undefined && (
+          <Text>
+            <Text color={theme.muted}>{"Sandbox".padEnd(13)}</Text>
+            {report.externalAgentPlatformSupported === false ? (
+              <Text color={theme.danger}>{`unsupported on this platform ${STATUS.fail}`}</Text>
+            ) : (
+              <Text color={report.externalAgentSandboxReady ? theme.success : theme.danger}>
+                {report.externalAgentSandboxReady
+                  ? `strict launcher ${STATUS.pass}`
+                  : `launcher missing ${STATUS.fail}`}
+              </Text>
+            )}
+          </Text>
+        )}
         {(report.externalAgentHooksActive === false ||
           report.externalAgentTerminalActive === false) && (
           <Text>

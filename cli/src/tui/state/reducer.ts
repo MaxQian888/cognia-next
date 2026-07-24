@@ -28,6 +28,10 @@ import {
 } from "../format/usage"
 import { resolveActiveModel } from "../../config/active-model"
 import {
+  builtinCapabilities as capabilitiesForBuiltin,
+  isBuiltinBackend,
+} from "../runtime/backend-capabilities"
+import {
   isExitPlanTool,
   looksLikePlan,
   looksLikeQuestion,
@@ -307,6 +311,7 @@ const STREAM_ACTIVITY = new Set<TuiAction["type"]>([
   "INFLIGHT_TEXT",
   "INFLIGHT_THINKING",
   "TOOL_CALL",
+  "TOOL_UPDATE",
   "TOOL_RESULT",
   "SET_USAGE",
 ])
@@ -463,6 +468,7 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         kind: "tool",
         callKey: action.callKey,
         toolName: action.toolName,
+        ...(action.displayTitle ? { displayTitle: action.displayTitle } : {}),
         input: action.input,
         status: "running",
         // Tools collapse by default (Claude-Code look); a user pref can flip it.
@@ -475,6 +481,46 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         seq,
         inflight: { text: "", thinking: "", tools: remainingTools },
         toolStats,
+      }
+    }
+    case "TOOL_UPDATE": {
+      const patch = (cell: ToolCell): ToolCell => ({
+        ...cell,
+        ...(action.toolName ? { toolName: action.toolName } : {}),
+        ...(action.displayTitle ? { displayTitle: action.displayTitle } : {}),
+        ...(action.input ? { input: { ...cell.input, ...action.input } } : {}),
+      })
+      const inflightIdx = state.inflight.tools.findIndex((c) => c.callKey === action.callKey)
+      if (inflightIdx >= 0) {
+        const tools = [...state.inflight.tools]
+        tools[inflightIdx] = patch(tools[inflightIdx])
+        return { ...state, inflight: { ...state.inflight, tools } }
+      }
+      const cellIdx = state.cells.findIndex(
+        (c) => c.kind === "tool" && c.callKey === action.callKey
+      )
+      if (cellIdx >= 0) {
+        const cells = [...state.cells]
+        cells[cellIdx] = patch(cells[cellIdx] as ToolCell)
+        return { ...state, cells }
+      }
+      // The update outran its `TOOL_CALL` (or the call was never announced):
+      // materialize the card rather than dropping the content. Idempotent —
+      // every later update for this key now finds it above.
+      const created: ToolCell = {
+        id: makeId(state.seq),
+        kind: "tool",
+        callKey: action.callKey,
+        toolName: action.toolName ?? "external",
+        ...(action.displayTitle ? { displayTitle: action.displayTitle } : {}),
+        input: action.input ?? {},
+        status: "running",
+        collapsed: state.config.render?.collapseToolsByDefault !== false,
+      }
+      return {
+        ...state,
+        seq: state.seq + 1,
+        inflight: { ...state.inflight, tools: [...state.inflight.tools, created] },
       }
     }
     case "TOOL_RESULT": {
@@ -1389,7 +1435,113 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
 
     // ── Startup onboarding ───────────────────────────────────────────────────────
     case "STARTUP_TRUST":
-      return { ...state, phase: "chat" }
+      // Trust gates the spawn, not the other way round: only once the folder is
+      // trusted may an external agent be started against it as a writable root.
+      return {
+        ...state,
+        phase: isBuiltinBackend(state.config.agentBackend) ? "chat" : "connecting",
+      }
+    case "BACKEND_CONNECT_STAGE":
+      return {
+        ...state,
+        phase: "connecting",
+        backendConnect: { backend: action.backend, stage: action.stage },
+      }
+    case "BACKEND_CONNECT_OK": {
+      const {
+        backendConnect: _connect,
+        backendFailure: _failure,
+        backendInstallOption: _installOpt,
+        backendInstall: _install,
+        backendInstallError: _installErr,
+        ...rest
+      } = state
+      return { ...rest, phase: "chat", backendCapabilities: action.capabilities }
+    }
+    case "BACKEND_CONNECT_FAIL": {
+      const {
+        backendConnect: _connect,
+        backendInstall: _install,
+        backendInstallError: _installErr,
+        ...rest
+      } = state
+      return {
+        ...rest,
+        phase: "connect-failed",
+        backendFailure: action.failure,
+        // Replaces any prior option — a fresh failure recomputes what can install.
+        ...(action.installOption
+          ? { backendInstallOption: action.installOption }
+          : { backendInstallOption: undefined }),
+      }
+    }
+    case "BACKEND_CONNECT_RETRY": {
+      const {
+        backendFailure: _failure,
+        backendInstallOption: _installOpt,
+        backendInstall: _install,
+        backendInstallError: _installErr,
+        ...rest
+      } = state
+      return {
+        ...rest,
+        phase: "connecting",
+        backendConnect: { backend: action.backend, stage: "preset" },
+      }
+    }
+    case "BACKEND_INSTALL_START": {
+      // Keep `backendFailure` / `backendInstallOption` so a failed install can
+      // return to a fully-formed failure page (and retry the install). Clear any
+      // prior install error so a retry starts clean.
+      const { backendInstallError: _installErr, ...rest } = state
+      return {
+        ...rest,
+        phase: "installing",
+        backendInstall: {
+          name: action.name,
+          display: action.display,
+          output: "",
+          status: "running",
+        },
+      }
+    }
+    case "BACKEND_INSTALL_OUTPUT": {
+      // Ignore a late line that arrives after the phase moved on (retry / cancel).
+      if (!state.backendInstall) return state
+      return {
+        ...state,
+        backendInstall: {
+          ...state.backendInstall,
+          output: state.backendInstall.output + action.chunk,
+        },
+      }
+    }
+    case "BACKEND_INSTALL_FAIL": {
+      // Back to the failure page. The original failure + install option are kept
+      // (never cleared on START) so the user can retry the install or pick another
+      // route; `backendInstallError` tells them why the last attempt failed.
+      const { backendInstall: _install, ...rest } = state
+      return { ...rest, phase: "connect-failed", backendInstallError: action.message }
+    }
+    case "SET_BACKEND": {
+      // Drop the previous backend's capabilities immediately — rendering them
+      // against the new one is exactly the stale-support lie the gate prevents.
+      const {
+        backendCapabilities: _caps,
+        backendFailure: _failure,
+        backendInstallOption: _installOpt,
+        backendInstall: _install,
+        backendInstallError: _installErr,
+        ...rest
+      } = state
+      return {
+        ...rest,
+        config: { ...state.config, agentBackend: action.backend },
+        ...(isBuiltinBackend(action.backend)
+          ? { backendCapabilities: capabilitiesForBuiltin() }
+          : {}),
+      }
+    }
     case "SET_CWD":
       return { ...state, config: { ...state.config, cwd: action.cwd } }
 

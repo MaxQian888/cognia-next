@@ -153,7 +153,7 @@ describe("externalAgentEventToActions", () => {
     ])
   })
 
-  it("maps ACP diff content to completed Edit tool cards", () => {
+  it("folds ACP diff content into the tool's OWN card instead of synthesizing a second one", () => {
     expect(
       externalAgentEventToActions(
         event({
@@ -167,19 +167,235 @@ describe("externalAgentEventToActions", () => {
       )
     ).toEqual([
       {
-        type: "TOOL_CALL",
-        callKey: "tool-1:diff:0",
+        type: "TOOL_UPDATE",
+        callKey: "tool-1",
         toolName: "Edit",
         input: { file_path: "/work/a.ts", old_string: "a", new_string: "b" },
-      },
-      {
-        type: "TOOL_RESULT",
-        callKey: "tool-1:diff:0",
-        toolName: "Edit",
-        input: { file_path: "/work/a.ts", old_string: "a", new_string: "b" },
-        result: { path: "/work/a.ts", oldText: "a", newText: "b" },
       },
     ])
+  })
+
+  it("reads a file creation as a Write, not an Edit against empty text", () => {
+    expect(
+      externalAgentEventToActions(
+        event({
+          type: "tool_call_update",
+          toolCallId: "tool-1",
+          content: [{ type: "diff", path: "/work/new.ts", newText: "hello" }],
+        })
+      )
+    ).toEqual([
+      {
+        type: "TOOL_UPDATE",
+        callKey: "tool-1",
+        toolName: "Write",
+        input: { file_path: "/work/new.ts", content: "hello" },
+      },
+    ])
+  })
+
+  it("keeps every hunk of a multi-diff call on one MultiEdit card", () => {
+    expect(
+      externalAgentEventToActions(
+        event({
+          type: "tool_call_update",
+          toolCallId: "tool-1",
+          content: [
+            { type: "diff", path: "/work/a.ts", oldText: "a", newText: "b" },
+            { type: "diff", path: "/work/a.ts", oldText: "c", newText: "d" },
+          ],
+        })
+      )
+    ).toEqual([
+      {
+        type: "TOOL_UPDATE",
+        callKey: "tool-1",
+        toolName: "MultiEdit",
+        input: {
+          file_path: "/work/a.ts",
+          edits: [
+            { old_string: "a", new_string: "b" },
+            { old_string: "c", new_string: "d" },
+          ],
+        },
+      },
+    ])
+  })
+
+  it("omits a shared path when the hunks disagree about the file", () => {
+    const [action] = externalAgentEventToActions(
+      event({
+        type: "tool_call_update",
+        toolCallId: "tool-1",
+        content: [
+          { type: "diff", path: "/work/a.ts", oldText: "a", newText: "b" },
+          { type: "diff", path: "/work/b.ts", oldText: "c", newText: "d" },
+        ],
+      })
+    )
+    expect(action.type).toBe("TOOL_UPDATE")
+    if (action.type === "TOOL_UPDATE") expect(action.input).not.toHaveProperty("file_path")
+  })
+
+  it("derives a canonical tool name from the ACP kind and keeps the title as a label", () => {
+    expect(
+      externalAgentEventToActions(
+        event({
+          type: "tool_use_start",
+          toolUseId: "tool-1",
+          toolName: "Reading configuration file",
+          kind: "read",
+          locations: [{ path: "/work/cognia.json" }],
+        })
+      )
+    ).toEqual([
+      {
+        type: "TOOL_CALL",
+        callKey: "tool-1",
+        // Free-form prose used to land here, silently disabling every formatter
+        // that dispatches on a tool name.
+        toolName: "Read",
+        displayTitle: "Reading configuration file",
+        // …and the structured location fills in the path the card links to.
+        input: { file_path: "/work/cognia.json" },
+      },
+    ])
+  })
+
+  it("keeps the protocol title as the tool name when no canonical mapping is safe", () => {
+    expect(
+      externalAgentEventToActions(
+        event({
+          type: "tool_use_start",
+          toolUseId: "tool-1",
+          toolName: "search_docs",
+          kind: "mcp",
+          rawInput: { query: "acp" },
+        })
+      )
+    ).toEqual([
+      { type: "TOOL_CALL", callKey: "tool-1", toolName: "search_docs", input: { query: "acp" } },
+    ])
+  })
+
+  it("never overwrites a path the tool supplied itself", () => {
+    const [action] = externalAgentEventToActions(
+      event({
+        type: "tool_use_start",
+        toolUseId: "tool-1",
+        toolName: "Read",
+        kind: "read",
+        rawInput: { file_path: "/work/explicit.ts" },
+        locations: [{ path: "/work/other.ts" }],
+      })
+    )
+    if (action.type === "TOOL_CALL") expect(action.input.file_path).toBe("/work/explicit.ts")
+  })
+
+  it("does not stack duplicate cards when the protocol re-sends the same diff", () => {
+    const update = event({
+      type: "tool_call_update",
+      toolCallId: "t",
+      content: [{ type: "diff", path: "/work/a.ts", oldText: "a", newText: "b" }],
+    })
+    let state = createInitialState({ ...DEFAULT_RESOLVED_CONFIG, cwd: "/work" }, "session-1")
+    state = tuiReducer(state, { type: "TURN_START", prompt: "edit" })
+    state = externalAgentEventToActions(
+      event({ type: "tool_use_start", toolUseId: "t", toolName: "Edit file", kind: "file_write" })
+    ).reduce(tuiReducer, state)
+
+    // ACP emits an update on every non-terminal status change, re-sending content.
+    for (let i = 0; i < 3; i++) {
+      state = externalAgentEventToActions(update).reduce(tuiReducer, state)
+    }
+
+    const tools = state.inflight.tools
+    expect(tools).toHaveLength(1)
+    expect(tools[0]).toMatchObject({
+      toolName: "Edit",
+      displayTitle: "Edit file",
+      input: { file_path: "/work/a.ts", old_string: "a", new_string: "b" },
+    })
+  })
+
+  it("labels a nameless tool result rather than dropping it", () => {
+    expect(
+      externalAgentEventToActions(event({ type: "tool_result", toolUseId: "t1", result: "done" }))
+    ).toEqual([{ type: "TOOL_RESULT", callKey: "t1", toolName: "external", result: "done" }])
+  })
+
+  it("ignores an update that carries no content at all", () => {
+    expect(
+      externalAgentEventToActions(event({ type: "tool_call_update", toolCallId: "t1" }))
+    ).toEqual([])
+    expect(
+      externalAgentEventToActions(
+        event({
+          type: "tool_call_update",
+          toolCallId: "t1",
+          content: [{ type: "content", content: { type: "text", text: "no diff here" } }],
+        })
+      )
+    ).toEqual([])
+  })
+
+  it("carries the update's own title onto the card", () => {
+    const [action] = externalAgentEventToActions(
+      event({
+        type: "tool_call_update",
+        toolCallId: "t1",
+        title: "Applying patch",
+        content: [{ type: "diff", path: "/a.ts", oldText: "a", newText: "b" }],
+      })
+    )
+    if (action.type === "TOOL_UPDATE") expect(action.displayTitle).toBe("Applying patch")
+  })
+
+  it("treats a hunk with no prior text as an insertion inside a MultiEdit", () => {
+    const [action] = externalAgentEventToActions(
+      event({
+        type: "tool_call_update",
+        toolCallId: "t1",
+        content: [
+          { type: "diff", path: "/a.ts", oldText: "a", newText: "b" },
+          { type: "diff", path: "/a.ts", newText: "appended" },
+        ],
+      })
+    )
+    if (action.type === "TOOL_UPDATE") {
+      expect(action.input).toMatchObject({
+        edits: [
+          { old_string: "a", new_string: "b" },
+          { old_string: "", new_string: "appended" },
+        ],
+      })
+    }
+  })
+
+  it("summarises a hook fire from whichever field carries the detail", () => {
+    expect(
+      externalAgentEventToActions(
+        event({ type: "hook_fire", event: "PreToolUse", outcome: "warning", warnings: ["slow"] })
+      )
+    ).toEqual([{ type: "NOTICE", message: "PreToolUse warning: slow" }])
+
+    expect(
+      externalAgentEventToActions(
+        event({ type: "hook_fire", event: "Stop", outcome: "context", warnings: [] })
+      )
+    ).toEqual([{ type: "NOTICE", message: "Stop context" }])
+  })
+
+  it("keeps a recoverable error as a warning notice rather than ending the turn", () => {
+    expect(
+      externalAgentEventToActions(
+        event({ type: "error", error: "retrying", code: "E_RETRY", recoverable: true })
+      )
+    ).toEqual([{ type: "NOTICE", message: "E_RETRY: retrying", severity: "warn" }])
+
+    expect(
+      externalAgentEventToActions(event({ type: "error", error: "hiccup", recoverable: true }))
+    ).toEqual([{ type: "NOTICE", message: "hiccup", severity: "warn" }])
   })
 
   it("maps terminal errors and consequential hooks", () => {
@@ -258,6 +474,10 @@ describe("externalAgentEventToActions", () => {
         toolCallId: "t",
         content: [{ type: "diff", path: "/work/a.ts", oldText: "a", newText: "b" }],
       }),
+      // ACP reports completion as a terminal tool_call_update, which the shared
+      // client surfaces as a tool_result — that, not a synthesized card, is what
+      // resolves the ⏳.
+      event({ type: "tool_result", toolUseId: "t", toolName: "Edit", result: "applied" }),
       event({
         type: "done",
         success: true,

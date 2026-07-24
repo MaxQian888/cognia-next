@@ -55,6 +55,26 @@ describe("CellView", () => {
     expect(text).toContain("y")
   })
 
+  it("shows a protocol label in the header while the canonical name still drives the diff", () => {
+    // An external agent supplies prose ("Edit the config") as the tool label.
+    // The header shows it, but formatting must key off the canonical name — the
+    // whole point of keeping the two fields apart.
+    const text = renderCell({
+      id: "1",
+      kind: "tool",
+      callKey: "k",
+      toolName: "edit",
+      displayTitle: "Edit the config",
+      input: { file_path: "/a.ts", old_string: "x", new_string: "y" },
+      status: "running",
+      collapsed: true,
+    })
+    expect(text).toContain("Edit the config")
+    expect(text).toContain("/a.ts")
+    expect(text).toContain("x")
+    expect(text).toContain("y")
+  })
+
   it("shows a tool-specific result count (grep → matches) in the collapsed header", () => {
     const text = renderCell({
       id: "1",
