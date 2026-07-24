@@ -152,7 +152,7 @@ export function VersionHistory({ datasetId }: { datasetId: string }) {
                 </p>
               )}
 
-              {diff && (
+              {diff && from && (
                 <div className="text-xs" data-testid="version-diff">
                   <p className="text-muted-foreground">
                     {t("versions.diffHeading", { from: from.version, to: v.version })}

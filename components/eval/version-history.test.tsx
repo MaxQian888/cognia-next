@@ -15,11 +15,11 @@ jest.mock("@/hooks/eval/use-eval-data", () => ({
   useEvalDatasetVersions: () => versions,
   useEvalCases: () => cases,
 }))
-const tagVersion = jest.fn(async () => {})
-const restoreVersion = jest.fn(async () => ({ deleted: 0, readded: 0 }))
+const tagVersion = jest.fn(async (_id: string, _tag: string) => {})
+const restoreVersion = jest.fn(async (_id: string) => ({ deleted: 0, readded: 0 }))
 jest.mock("@/lib/db/eval-dataset-versions", () => ({
-  tagVersion: (...a: unknown[]) => tagVersion(...(a as [])),
-  restoreVersion: (...a: unknown[]) => restoreVersion(...(a as unknown as [string])),
+  tagVersion: (id: string, tag: string) => tagVersion(id, tag),
+  restoreVersion: (id: string) => restoreVersion(id),
 }))
 
 import { VersionHistory } from "./version-history"
