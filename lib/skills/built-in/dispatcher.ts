@@ -43,6 +43,33 @@ import type { BuiltInSkill, BuiltInSkillContext, BuiltInSkillResult } from "./ty
 const SKILL_INVOKE_TTL_MS = 7 * 24 * 3600 * 1000
 
 /**
+ * Actor scope for the pending skill_invoke binding (plan 2026-07-24 Phase 2):
+ * the human whose message is driving the CURRENT turn — read from the
+ * conversation's `running` inbound job — may confirm; otherwise only
+ * configured operators. Keeps the confirm button from being clickable by
+ * bystanders in a group.
+ */
+async function skillInvokeActorScope(
+  conversationKey: string
+): Promise<import("@/types/connectors/interaction").CallbackActorScope> {
+  try {
+    const { getDb } = await import("@/lib/db/schema")
+    const jobs = await getDb()
+      .connectorInboundJobs.where("conversationKey")
+      .equals(conversationKey)
+      .filter((row) => row.status === "running")
+      .toArray()
+    const current = jobs.sort((a, b) => b.receivedAt - a.receivedAt)[0]
+    const initiatorId = current?.event.sender.remoteUserId
+    return initiatorId
+      ? { mode: "initiator", allowedUserIds: [initiatorId] }
+      : { mode: "operators" }
+  } catch {
+    return { mode: "operators" }
+  }
+}
+
+/**
  * Run a built-in skill end-to-end.
  *
  * `args` is the raw structured payload the assistant passed via MCP
@@ -203,6 +230,7 @@ export async function runBuiltInSkill(
         createdAt: now,
         expiresAt: now + SKILL_INVOKE_TTL_MS,
         payload: { skillId: skill.id, args: validArgs as never },
+        actorScope: await skillInvokeActorScope(ctx.imBinding.conversationKey),
       })
       await safeAppendAudit({
         adapterId: ctx.imBinding.adapterId,

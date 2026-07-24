@@ -261,4 +261,35 @@ export interface ConnectorCallbackBindingRow {
    * `modal_open` two-hop).
    */
   payload?: Record<string, unknown>
+  // ── Callback authorization guard fields (plan 2026-07-24 Phase 2) ────
+  // All optional and absent on every pre-existing row: `&id`-keyed table, so
+  // no Dexie version is needed. The guard applies deterministic per-kind
+  // legacy fallbacks when `actorScope` is missing (see
+  // lib/connectors/callback-authorization.ts); legacy rows age out within
+  // the 30-day binding TTL.
+  /** Cognia account the surface was emitted under. */
+  accountId?: string
+  /** Who may activate this callback. Absent → per-kind legacy fallback. */
+  actorScope?: CallbackActorScope
+  /** Action values this binding may perform (e.g. ["approve","cancel"]). */
+  allowedActions?: string[]
+  /** Set on first successful activation of a consume-once kind. */
+  consumedAt?: number
+}
+
+/**
+ * Actor authorization scope for a callback binding (plan 2026-07-24 P2.1).
+ *
+ *   - `"initiator"`    — only the users in `allowedUserIds` (typically the
+ *                        run/request initiator) plus configured operators.
+ *   - `"operators"`    — `allowedUserIds` ∪ the adapter's
+ *                        `settings.runOperatorUserIds`.
+ *   - `"conversation"` — anyone inside the bound conversation (the platform
+ *                        guarantees the click came from that chat).
+ *   - `"anyone"`       — no actor restriction (help/welcome surfaces).
+ */
+export interface CallbackActorScope {
+  mode: "initiator" | "operators" | "conversation" | "anyone"
+  /** Platform remoteUserIds (Lark open_id). Used by initiator/operators. */
+  allowedUserIds?: string[]
 }

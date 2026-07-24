@@ -528,3 +528,188 @@ describe("ConnectorBus.dispatchConnectorCallback — wf_fanout_approve / wf_fano
     expect((jobs[0].request.segments[0] as { text: string }).text).toContain("已取消")
   })
 })
+
+describe("callback authorization guard (plan 2026-07-24 Phase 2)", () => {
+  const CONVERSATION = "telegram:adp_tg:c1"
+
+  async function seedEnforcingAdapter(settings: Record<string, unknown> = {}): Promise<string> {
+    const { createAdapterInstance } = await import("@/lib/db/adapter-instances")
+    const row = await createAdapterInstance({
+      type: "telegram",
+      displayName: "Guarded Bot",
+      enabled: true,
+      transportMode: "stub",
+      settings: { larkStrictCallbackAuthorization: "enforce", ...settings },
+      credentialsRef: { keyringService: "test", accounts: [] },
+      trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
+      defaultMode: "auto",
+    })
+    return row.id
+  }
+
+  async function seedApprovalBinding(adapterId: string, initiator: string): Promise<string> {
+    const { createWorkflow } = await import("@/lib/db/workflows")
+    const wf = await createWorkflow({ name: `Guarded ${Math.random().toString(36).slice(2, 6)}` })
+    const conversationKey = `telegram:${adapterId}:c1`
+    const actionId = `wfapp:guard_${Math.random().toString(36).slice(2, 8)}`
+    await recordCallbackBinding({
+      adapterId,
+      actionId,
+      kind: "wf_approve",
+      surfaceId: "wfsurf:guard",
+      componentId: "approve",
+      conversationKey,
+      payload: {
+        workflowId: wf.id,
+        workflowName: wf.name,
+        runParams: {},
+        triggeredFrom: { source: "im", adapterId, conversationKey, sessionId: "s1" },
+      },
+      actorScope: { mode: "initiator", allowedUserIds: [initiator] },
+      allowedActions: ["approve", "cancel"],
+    })
+    return actionId
+  }
+
+  it("strict mode: a non-initiator click is denied, audited, noticed, and terminal", async () => {
+    const { startWorkflowFromIM } = await import("@/lib/workflow/runtime/start-from-im")
+    const startMock = startWorkflowFromIM as jest.Mock
+    startMock.mockClear()
+
+    const adapterId = await seedEnforcingAdapter()
+    const actionId = await seedApprovalBinding(adapterId, "u_initiator")
+    const conversationKey = `telegram:${adapterId}:c1`
+    const bus = getBus()
+    const handler = jest.fn<ReturnType<CallbackHandler>, Parameters<CallbackHandler>>()
+    bus.callbackHandler = handler
+
+    const bystanderClick = makeEvent({
+      adapterId,
+      triggerId: actionId,
+      conversationKey,
+      value: "approve",
+      payload: { action: "approve" },
+      user: { id: "id-2", platform: "telegram", adapterId, remoteUserId: "u_bystander" },
+    })
+    await bus.dispatchConnectorCallback(bystanderClick)
+
+    expect(startMock).not.toHaveBeenCalled()
+    expect(handler).not.toHaveBeenCalled()
+    const audit = await getDb().connectorAudit.toArray()
+    const forbidden = audit.find((r) => r.kind === "callback.forbidden")
+    expect(forbidden?.reason).toBe("actor_forbidden")
+    expect(JSON.stringify(forbidden)).not.toContain("u_bystander")
+    // Denial notice enqueued once, keyed to the trigger.
+    const outbound = await getDb().outboundQueue.toArray()
+    expect(outbound.some((j) => j.idempotencyKey === `cb-denied:${actionId}`)).toBe(true)
+    // Terminal: the same trigger redelivered is deduped, not re-evaluated.
+    await bus.dispatchConnectorCallback(bystanderClick)
+    expect(
+      (await getDb().connectorAudit.toArray()).some((r) => r.kind === "callback.deduped")
+    ).toBe(true)
+  })
+
+  it("strict mode: the initiator's click executes and consumes the binding", async () => {
+    const { startWorkflowFromIM } = await import("@/lib/workflow/runtime/start-from-im")
+    const startMock = startWorkflowFromIM as jest.Mock
+    startMock.mockClear()
+
+    const adapterId = await seedEnforcingAdapter()
+    const actionId = await seedApprovalBinding(adapterId, "u_999")
+    const conversationKey = `telegram:${adapterId}:c1`
+    const bus = getBus()
+
+    await bus.dispatchConnectorCallback(
+      makeEvent({
+        adapterId,
+        triggerId: actionId,
+        conversationKey,
+        value: "approve",
+        payload: { action: "approve" },
+      })
+    )
+    expect(startMock).toHaveBeenCalledTimes(1)
+    // The guard consumed the binding before dispatch; the wf handler then
+    // deletes the sibling rows outright — either way it can never re-fire.
+    const stored = await getDb().connectorCallbackBindings.get(`${adapterId}:${actionId}`)
+    expect(stored === undefined || stored.consumedAt !== undefined).toBe(true)
+
+    // A second click on the SAME card (new triggerId, same binding row via a
+    // sibling action) would be denied binding_consumed — assert via the guard
+    // path by re-dispatching with a fresh triggerId that maps to the consumed
+    // binding id through the same actionId.
+    startMock.mockClear()
+    await bus.dispatchConnectorCallback(
+      makeEvent({
+        adapterId,
+        triggerId: actionId,
+        conversationKey,
+        value: "approve",
+        payload: { action: "approve" },
+      })
+    )
+    // Same triggerId → dedup catches it first; either way the workflow must
+    // not start twice.
+    expect(startMock).not.toHaveBeenCalled()
+  })
+
+  it("audit (default) mode: would-deny is audited but the callback still executes", async () => {
+    const { startWorkflowFromIM } = await import("@/lib/workflow/runtime/start-from-im")
+    const startMock = startWorkflowFromIM as jest.Mock
+    startMock.mockClear()
+
+    // No adapter row → global default mode ("audit").
+    const { createWorkflow } = await import("@/lib/db/workflows")
+    const wf = await createWorkflow({ name: "Shadow Flow" })
+    const actionId = "wfapp:shadow_1"
+    await recordCallbackBinding({
+      adapterId: "adp_tg",
+      actionId,
+      kind: "wf_approve",
+      surfaceId: "wfsurf:shadow",
+      componentId: "approve",
+      conversationKey: CONVERSATION,
+      payload: {
+        workflowId: wf.id,
+        workflowName: wf.name,
+        runParams: {},
+        triggeredFrom: {
+          source: "im",
+          adapterId: "adp_tg",
+          conversationKey: CONVERSATION,
+          sessionId: "s1",
+        },
+      },
+      actorScope: { mode: "initiator", allowedUserIds: ["someone_else"] },
+    })
+    const bus = getBus()
+    await bus.dispatchConnectorCallback(
+      makeEvent({ triggerId: actionId, value: "approve", payload: { action: "approve" } })
+    )
+    expect(startMock).toHaveBeenCalledTimes(1)
+    const audit = await getDb().connectorAudit.toArray()
+    const wouldDeny = audit.find((r) => r.kind === "callback.authorization_would_deny")
+    expect(wouldDeny?.reason).toBe("actor_forbidden")
+    // Shadow mode never consumes.
+    const stored = await getDb().connectorCallbackBindings.get(`adp_tg:${actionId}`)
+    expect(stored?.consumedAt).toBeUndefined()
+  })
+
+  it("off mode: no guard evaluation, no would-deny rows", async () => {
+    const adapterId = await seedEnforcingAdapter({ larkStrictCallbackAuthorization: "off" })
+    const actionId = await seedApprovalBinding(adapterId, "someone_else")
+    const bus = getBus()
+    await bus.dispatchConnectorCallback(
+      makeEvent({
+        adapterId,
+        triggerId: actionId,
+        conversationKey: `telegram:${adapterId}:c1`,
+        value: "approve",
+        payload: { action: "approve" },
+      })
+    )
+    const audit = await getDb().connectorAudit.toArray()
+    expect(audit.some((r) => r.kind === "callback.forbidden")).toBe(false)
+    expect(audit.some((r) => r.kind === "callback.authorization_would_deny")).toBe(false)
+  })
+})

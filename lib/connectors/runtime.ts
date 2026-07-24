@@ -1087,6 +1087,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             adapterId: event.adapterId,
             conversationKey: event.conversationKey,
             conversationRef: event.conversationRef,
+            initiatorUserId: event.sender.remoteUserId,
             deliveryTarget: deliveryTargetFromEvent(event),
             approvalMode: override?.approvalMode,
           }),

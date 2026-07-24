@@ -90,6 +90,7 @@ import {
   resolveConnectorPrincipal,
 } from "./principal/resolve"
 import { handleUnresolvedPrincipal } from "./principal/unbound"
+import { authorizeConnectorCallback, notifyCallbackDenied } from "./callback-authorization"
 
 export interface BusInboundHandler {
   (event: NormalizedInboundEvent): Promise<void>
@@ -1822,61 +1823,101 @@ export class ConnectorBus {
     const runId = typeof event.payload?.runId === "string" ? event.payload.runId : ""
     const runAction = typeof event.payload?.action === "string" ? event.payload.action : ""
     const runRevision = Number(event.payload?.revision)
-    if (runId && Number.isInteger(runRevision)) {
-      const allowedActions = new Set([
-        "stop",
-        "pause",
-        "resume",
-        "approve",
-        "deny",
-        "retry",
-        "open_details",
-      ])
-      if (allowedActions.has(runAction)) {
-        // Return to the transport immediately so CardKit can ACK well inside
-        // its three-second deadline. Durable execution and card refresh happen
-        // asynchronously from the journal update.
-        void (async () => {
-          try {
-            const [{ executeRunControlCommand }, adapterRow] = await Promise.all([
-              import("@/lib/execution/run-control"),
-              getAdapterInstance(event.adapterId),
-            ])
-            const configuredOperators = adapterRow?.settings.runOperatorUserIds
-            const operatorIds = Array.isArray(configuredOperators)
-              ? configuredOperators.filter((value): value is string => typeof value === "string")
-              : []
-            await executeRunControlCommand(
-              {
-                runId,
-                action: runAction as import("@/types/execution/run").RunControlAction,
-                idempotencyKey: event.triggerId,
-                expectedRevision: runRevision,
-                actor: {
-                  platformIdentityId: event.user.id,
-                  remoteUserId: event.user.remoteUserId,
-                  displayName: event.user.displayName,
-                },
-                ...(typeof event.payload?.interruptId === "string"
-                  ? { interruptId: event.payload.interruptId }
-                  : {}),
-              },
-              { operatorIds }
-            )
-          } catch (err) {
-            await appendAudit({
-              adapterId: event.adapterId,
-              kind: "callback.handler_failed",
-              at: Date.now(),
-              conversationKey: resolvedConversationKey ?? undefined,
-              reason: err instanceof Error ? err.name : "unknown",
-              message: err instanceof Error ? err.message : String(err),
-              fields: { triggerId: event.triggerId, runId, action: runAction },
-            })
-          }
-        })()
+    const RUN_CONTROL_ACTIONS = new Set([
+      "stop",
+      "pause",
+      "resume",
+      "approve",
+      "deny",
+      "retry",
+      "open_details",
+    ])
+    const isRunControl =
+      Boolean(runId) && Number.isInteger(runRevision) && RUN_CONTROL_ACTIONS.has(runAction)
+
+    // ── Step 2.6: unified callback authorization (plan 2026-07-24 Phase 2)
+    // One guard in front of EVERY consumer below — run controls, the
+    // kind-specific short-circuits, and the generic bridge hand-off. Denied
+    // callbacks never reach passive observers either (Step 3 comes after).
+    // A strict deny is TERMINAL: the triggerId commits to the dedup ledger so
+    // platform redelivery cannot retry a forbidden click into execution.
+    // Adapter lookup failure degrades to `undefined` (guard falls back to
+    // env/global flag defaults) instead of killing the callback pipeline.
+    const adapterRow = await getAdapterInstance(event.adapterId).catch(() => undefined)
+    const authDecision = await authorizeConnectorCallback({
+      event,
+      binding: resolvedBinding,
+      adapterRow,
+      resolvedConversationKey,
+      kindClass: isRunControl ? "run_control" : (resolvedBinding?.kind ?? "generic"),
+      ...(isRunControl ? { runId } : {}),
+    })
+    if (!authDecision.allowed) {
+      await appendAudit({
+        adapterId: event.adapterId,
+        kind:
+          authDecision.mode === "audit"
+            ? "callback.authorization_would_deny"
+            : "callback.forbidden",
+        at: Date.now(),
+        conversationKey: resolvedConversationKey ?? undefined,
+        idempotencyKey: event.triggerId,
+        reason: authDecision.reason,
+        fields: authDecision.auditFields,
+      }).catch(() => undefined)
+      if (authDecision.mode === "enforce") {
+        if (authDecision.reason === "actor_forbidden" && resolvedConversationKey) {
+          await notifyCallbackDenied(event, resolvedConversationKey)
+        }
         return true
       }
+      // audit (shadow) mode: fall through and execute exactly as before.
+    }
+    if (authDecision.allowed && authDecision.consume) {
+      await authDecision.consume()
+    }
+
+    if (isRunControl) {
+      // Return to the transport immediately so CardKit can ACK well inside
+      // its three-second deadline. Durable execution and card refresh happen
+      // asynchronously from the journal update.
+      void (async () => {
+        try {
+          const { executeRunControlCommand } = await import("@/lib/execution/run-control")
+          const configuredOperators = adapterRow?.settings.runOperatorUserIds
+          const operatorIds = Array.isArray(configuredOperators)
+            ? configuredOperators.filter((value): value is string => typeof value === "string")
+            : []
+          await executeRunControlCommand(
+            {
+              runId,
+              action: runAction as import("@/types/execution/run").RunControlAction,
+              idempotencyKey: event.triggerId,
+              expectedRevision: runRevision,
+              actor: {
+                platformIdentityId: event.user.id,
+                remoteUserId: event.user.remoteUserId,
+                displayName: event.user.displayName,
+              },
+              ...(typeof event.payload?.interruptId === "string"
+                ? { interruptId: event.payload.interruptId }
+                : {}),
+            },
+            { operatorIds }
+          )
+        } catch (err) {
+          await appendAudit({
+            adapterId: event.adapterId,
+            kind: "callback.handler_failed",
+            at: Date.now(),
+            conversationKey: resolvedConversationKey ?? undefined,
+            reason: err instanceof Error ? err.name : "unknown",
+            message: err instanceof Error ? err.message : String(err),
+            fields: { triggerId: event.triggerId, runId, action: runAction },
+          })
+        }
+      })()
+      return true
     }
 
     if (!resolvedSurfaceId) {

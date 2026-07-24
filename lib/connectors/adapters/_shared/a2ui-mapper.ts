@@ -20,7 +20,10 @@
  */
 
 import { getDb } from "@/lib/db/schema"
-import type { ConnectorCallbackBindingRow } from "@/types/connectors/interaction"
+import type {
+  CallbackActorScope,
+  ConnectorCallbackBindingRow,
+} from "@/types/connectors/interaction"
 import type { A2UIComponentKind } from "@/types/connectors/capability"
 import type { A2UISegmentContent } from "@/types/connectors/segment"
 
@@ -190,6 +193,12 @@ export async function recordCallbackBinding(input: {
    * HITL bypass; `"modal_open"` may carry the platform view payload.
    */
   payload?: Record<string, unknown>
+  // Callback authorization guard fields (plan 2026-07-24 Phase 2). Optional
+  // pass-throughs — absent fields leave the guard on its per-kind legacy
+  // fallbacks (see lib/connectors/callback-authorization.ts).
+  accountId?: string
+  actorScope?: CallbackActorScope
+  allowedActions?: string[]
 }): Promise<void> {
   const createdAt = input.createdAt ?? Date.now()
   const row: ConnectorCallbackBindingRow = {
@@ -203,6 +212,9 @@ export async function recordCallbackBinding(input: {
     createdAt,
     expiresAt: input.expiresAt ?? createdAt + DEFAULT_CALLBACK_BINDING_TTL_MS,
     payload: input.payload,
+    accountId: input.accountId,
+    actorScope: input.actorScope,
+    allowedActions: input.allowedActions,
   }
   await getDb().connectorCallbackBindings.put(row)
 }

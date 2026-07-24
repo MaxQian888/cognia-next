@@ -34,7 +34,13 @@ function req(over: Partial<PermissionRequestEvent> = {}): PermissionRequestEvent
 
 interface Harness {
   enqueued: Array<{ segments: unknown[]; deliveryTarget?: ConversationDeliveryTarget }>
-  bindings: Array<{ actionId: string; kind?: string; payload?: Record<string, unknown> }>
+  bindings: Array<{
+    actionId: string
+    kind?: string
+    payload?: Record<string, unknown>
+    actorScope?: { mode: string; allowedUserIds?: string[] }
+    allowedActions?: string[]
+  }>
   audits: string[]
   ctx: Parameters<typeof makeImPermissionResponder>[0]
 }
@@ -65,8 +71,16 @@ function harness(
       actionId: string
       kind?: string
       payload?: Record<string, unknown>
+      actorScope?: { mode: string; allowedUserIds?: string[] }
+      allowedActions?: string[]
     }) => {
-      bindings.push({ actionId: b.actionId, kind: b.kind, payload: b.payload })
+      bindings.push({
+        actionId: b.actionId,
+        kind: b.kind,
+        payload: b.payload,
+        actorScope: b.actorScope,
+        allowedActions: b.allowedActions,
+      })
     }) as Harness["ctx"]["recordBinding"],
     audit: (async (e: { kind: string }) => {
       audits.push(e.kind)
@@ -210,5 +224,37 @@ describe("applyToolApprovalCallback", () => {
       resolve: () => true,
     })
     expect(hasSessionBypass("s9", "Edit")).toBe(true)
+  })
+})
+
+describe("approval binding actor scope (plan 2026-07-24 Phase 2)", () => {
+  it("stamps initiator scope + wire-verb allowedActions when initiatorUserId is known", async () => {
+    const h = harness("prompt")
+    h.ctx.initiatorUserId = "u_init"
+    const responder = makeImPermissionResponder(h.ctx)
+    void responder(req())
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(h.bindings).toHaveLength(3)
+    for (const b of h.bindings) {
+      expect(b.actorScope).toEqual({ mode: "initiator", allowedUserIds: ["u_init"] })
+    }
+    const byComponent = Object.fromEntries(
+      h.bindings.map((b) => [b.payload?.decision, b.allowedActions])
+    )
+    // Allow / allow-session buttons emit wire action "approve"; deny emits "cancel".
+    expect(byComponent.allow).toEqual(["approve"])
+    expect(byComponent.allow_session).toEqual(["approve"])
+    expect(byComponent.deny).toEqual(["cancel"])
+  })
+
+  it("falls back to operators-only scope without an initiator", async () => {
+    const h = harness("prompt")
+    const responder = makeImPermissionResponder(h.ctx)
+    void responder(req())
+    await new Promise((r) => setTimeout(r, 0))
+    for (const b of h.bindings) {
+      expect(b.actorScope).toEqual({ mode: "operators" })
+    }
   })
 })

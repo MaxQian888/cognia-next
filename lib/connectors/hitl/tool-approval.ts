@@ -99,6 +99,13 @@ export interface ImPermissionResponderContext {
   ttlMs?: number
   /** Durable Execution Run that owns this permission request. */
   runId?: string
+  /**
+   * remoteUserId of the human whose message started this turn. Feeds the
+   * approval bindings' actorScope so the callback authorization guard only
+   * lets the requester (or a configured operator) resolve the approval
+   * (plan 2026-07-24 Phase 2). Absent → operators-only scope.
+   */
+  initiatorUserId?: string
 }
 
 /**
@@ -153,6 +160,9 @@ export function makeImPermissionResponder(
       },
     ]
     try {
+      const actorScope = ctx.initiatorUserId
+        ? { mode: "initiator" as const, allowedUserIds: [ctx.initiatorUserId] }
+        : { mode: "operators" as const }
       await Promise.all(
         buttons.map((b) =>
           recordBinding({
@@ -168,6 +178,10 @@ export function makeImPermissionResponder(
               toolName: req.toolName,
               decision: b.decision,
             },
+            actorScope,
+            // Wire-level A2UI verbs, not decisions: the allow/allow-session
+            // buttons emit action "approve", the deny button emits "cancel".
+            allowedActions: [b.decision === "deny" ? "cancel" : "approve"],
           })
         )
       )

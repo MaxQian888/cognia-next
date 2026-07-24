@@ -237,6 +237,57 @@ describe("runBuiltInSkill — write tier HITL routing", () => {
       .toArray()
     expect(bindings).toHaveLength(1)
     expect(bindings[0].payload?.skillId).toBe("lark.calendar.create_event")
+    // No running inbound job in this harness → confirm button is scoped to
+    // configured operators only (plan 2026-07-24 Phase 2).
+    expect(bindings[0].actorScope).toEqual({ mode: "operators" })
+  })
+
+  it("scopes the confirm binding to the current turn's sender when a job is running", async () => {
+    const { enqueueConnectorInboundJob, claimConnectorInboundJob } =
+      await import("@/lib/db/connector-inbound-jobs")
+    const job = await enqueueConnectorInboundJob(
+      {
+        platform: "lark",
+        adapterId: "lark-1",
+        selfId: "bot",
+        messageId: "om_turn",
+        conversationRef: { platform: "lark", adapterId: "lark-1", channelId: "oc_1" },
+        conversationKey: imCtx.imBinding!.conversationKey,
+        sender: {
+          id: "lark:ou_turn_user",
+          platform: "lark",
+          adapterId: "lark-1",
+          remoteUserId: "ou_turn_user",
+        },
+        channel: { id: imCtx.imBinding!.conversationKey, kind: "group" },
+        segments: [{ type: "text", text: "do it" }],
+        plainText: "do it",
+        mentions: { selfMentioned: false, users: [] },
+        timestamp: Date.now(),
+        raw: {},
+      },
+      "queue"
+    )
+    await claimConnectorInboundJob(job.id, { leaseOwner: "test", leaseMs: 60_000 })
+
+    registerBuiltInSkill(
+      mkSkill({
+        id: "lark.calendar.create_event",
+        mutation: "write",
+        hitlSurface,
+        mcpToolName: "lark_calendar_create_event",
+      })
+    )
+    const r = await runBuiltInSkill("lark.calendar.create_event", { calendarId: "cal_1" }, imCtx)
+    expect(r.status).toBe("pending_hitl")
+    const bindings = await getDb()
+      .connectorCallbackBindings.where("kind")
+      .equals("skill_invoke")
+      .toArray()
+    expect(bindings[0].actorScope).toEqual({
+      mode: "initiator",
+      allowedUserIds: ["ou_turn_user"],
+    })
   })
 
   it("executes without HITL when requireHitlForWrites = false", async () => {
