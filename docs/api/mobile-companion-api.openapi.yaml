@@ -6659,6 +6659,120 @@ paths:
             content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
           }
 
+  /api/v1/_rpc/git_clone:
+    post:
+      operationId: rpcGitClone
+      tags: [rpc-git]
+      summary: Clone a remote repository into a destination. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [remoteUrl, destination],
+                    properties: { remoteUrl: { type: string }, destination: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Canonical cloned worktree path.,
+            content: { application/json: { schema: { type: string } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_identity:
+    post:
+      operationId: rpcGitIdentity
+      tags: [rpc-git]
+      summary: Resolve the effective commit identity for a repository.
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath],
+                    properties: { repoPath: { type: string } },
+                  },
+              },
+          }
+      responses:
+        "200":
+          {
+            description: Effective identity.,
+            content:
+              {
+                application/json:
+                  {
+                    schema:
+                      {
+                        type: object,
+                        required: [name, email],
+                        properties:
+                          { name: { type: [string, "null"] }, email: { type: [string, "null"] } },
+                      },
+                  },
+              },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/git_set_identity:
+    post:
+      operationId: rpcGitSetIdentity
+      tags: [rpc-git]
+      summary: Set repository-local or user-global commit identity. Requires allowRemoteControl.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              {
+                schema:
+                  {
+                    type: object,
+                    required: [repoPath, name, email, global],
+                    properties:
+                      {
+                        repoPath: { type: string },
+                        name: { type: string },
+                        email: { type: string },
+                        global: { type: boolean },
+                      },
+                  },
+              },
+          }
+      responses:
+        "200": { description: OK., content: { application/json: { schema: { type: "null" } } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "403": { $ref: "#/components/responses/RemoteControlForbidden" }
+        "500":
+          {
+            description: error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
   /api/v1/_rpc/git_ignore_add:
     post:
       operationId: rpcGitIgnoreAdd

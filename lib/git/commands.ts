@@ -29,6 +29,7 @@ import {
   type GitDiff,
   type GitFileChange,
   type GitFileDiffStat,
+  type GitIdentity,
   type GitRef,
   type GitRemote,
   type GitRepoState,
@@ -487,6 +488,29 @@ export async function gitResolveConflict(
 export async function gitInit(path: string): Promise<void> {
   if (!hasGitBridge()) return
   await transport.call("git_init", { path })
+}
+
+/** Clone a remote repository and return the canonical cloned worktree path. */
+export async function gitClone(remoteUrl: string, destination: string): Promise<string> {
+  if (!hasGitBridge()) return ""
+  return transport.call<string>("git_clone", { remoteUrl, destination })
+}
+
+/** Resolve the repository's effective local/global commit identity. */
+export async function gitIdentity(repoPath: string): Promise<GitIdentity> {
+  if (!hasGitBridge()) return { name: null, email: null }
+  return transport.call<GitIdentity>("git_identity", { repoPath })
+}
+
+/** Set repository-local or user-global commit identity. */
+export async function gitSetIdentity(
+  repoPath: string,
+  name: string,
+  email: string,
+  global: boolean
+): Promise<void> {
+  if (!hasGitBridge()) return
+  await transport.call("git_set_identity", { repoPath, name, email, global })
 }
 
 /** Append a pattern to the repo-root `.gitignore` (no-op when already present). */

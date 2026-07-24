@@ -115,6 +115,11 @@ export interface GitRemote {
   pushUrl: string
 }
 
+export interface GitIdentity {
+  name: string | null
+  email: string | null
+}
+
 export interface GitTag {
   name: string
   targetHash: string
@@ -210,6 +215,7 @@ export type GitErrorKind =
   | "dirtyWorkingTree"
   | "mergeConflict"
   | "authRequired"
+  | "identityRequired"
   | "networkFailed"
   | "patchFailed"
   | "lockHeld"

@@ -69,6 +69,9 @@ pub enum GitError {
     #[error("authentication required: {0}")]
     AuthRequired(Detail),
 
+    #[error("git commit identity is required: {0}")]
+    IdentityRequired(Detail),
+
     #[error("network operation failed: {0}")]
     NetworkFailed(Detail),
 

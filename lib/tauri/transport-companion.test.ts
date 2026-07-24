@@ -375,6 +375,7 @@ describe("call() — idempotency key", () => {
       "git_tags",
       "git_worktree_list",
       "git_rebase_commits",
+      "git_identity",
       "read_text_file",
       "default_export_dir",
       "fs_search_workspace",
@@ -508,6 +509,24 @@ describe("call() — 4xx errors", () => {
     })
     expect(stateHandler).toHaveBeenCalledWith("unauthenticated")
   })
+
+  it.each([
+    [401, "unauthenticated", "device unauthenticated"],
+    [418, "http_418", "HTTP 418"],
+  ])("uses HTTP fallbacks when a %i response has no JSON body", async (status, code, message) => {
+    fetchSpy.mockResolvedValue({
+      ok: false,
+      status,
+      json: () => Promise.reject(new Error("invalid JSON")),
+    })
+    transport = new CompanionTransport()
+
+    await expect(transport.call("bad_command")).rejects.toMatchObject({
+      code,
+      message,
+      retryable: false,
+    })
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -579,6 +598,42 @@ describe("call() — retries", () => {
 
     expect(result).toEqual({ ok: true })
     expect(fetchSpy.mock.calls.length).toBe(2)
+  })
+
+  it("stringifies non-Error network failures", async () => {
+    jest.useFakeTimers()
+    fetchSpy.mockRejectedValue("socket closed")
+    transport = new CompanionTransport()
+    const callPromise = transport.call("claude_send").catch((error: unknown) => error)
+
+    await jest.advanceTimersByTimeAsync(250)
+    await jest.advanceTimersByTimeAsync(500)
+    await jest.advanceTimersByTimeAsync(1000)
+
+    await expect(callPromise).resolves.toMatchObject({
+      code: "network",
+      message: "socket closed",
+    })
+  })
+
+  it("uses the status text when a 5xx response has no JSON body", async () => {
+    jest.useFakeTimers()
+    fetchSpy.mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: () => Promise.reject(new Error("invalid JSON")),
+    })
+    transport = new CompanionTransport()
+    const callPromise = transport.call("claude_send").catch((error: unknown) => error)
+
+    await jest.advanceTimersByTimeAsync(250)
+    await jest.advanceTimersByTimeAsync(500)
+    await jest.advanceTimersByTimeAsync(1000)
+
+    await expect(callPromise).resolves.toMatchObject({
+      code: "server_error",
+      message: "HTTP 503",
+    })
   })
 })
 
@@ -1297,6 +1352,22 @@ describe("call() — LAN-first gate", () => {
     expect(fakeRtc.call).toHaveBeenCalled()
     expect(fetchSpy).not.toHaveBeenCalled()
   })
+
+  it("falls back to HTTPS with the same mutation key when the DataChannel fails", async () => {
+    await setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL })
+    transport = new CompanionTransport()
+    const fakeRtc = makeFakeRtc()
+    fakeRtc.call.mockRejectedValueOnce(new Error("channel closed"))
+    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+    fetchSpy.mockResolvedValueOnce(mockResponse({ ok: true }, 200))
+
+    await expect(transport.call("git_set_identity", { repoPath: "/repo" })).resolves.toEqual({
+      ok: true,
+    })
+    const rtcArgs = (fakeRtc.call.mock.calls as unknown[][])[0][1] as Record<string, unknown>
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    expect(rtcArgs.idempotencyKey).toBe((init.headers as Record<string, string>)["Idempotency-Key"])
+  })
 })
 
 describe("subscribe() — LAN-first gate", () => {
@@ -1367,5 +1438,41 @@ describe("reconnectWs()", () => {
     transport = new CompanionTransport()
     transport.reconnectWs()
     expect(MockWebSocket.instances.length).toBe(0)
+  })
+
+  it("is a no-op after the transport is destroyed", () => {
+    transport = new CompanionTransport()
+    transport.destroy()
+    transport.reconnectWs()
+    expect(MockWebSocket.instances).toHaveLength(0)
+  })
+})
+
+describe("defensive teardown and frame parsing", () => {
+  it("detaches and tolerates a throwing WebRTC close", () => {
+    transport = new CompanionTransport()
+    const detach = jest.fn()
+    const close = jest.fn(() => {
+      throw new Error("already closed")
+    })
+    ;(transport as unknown as { rtcDetach: (() => void) | null }).rtcDetach = detach
+    ;(transport as unknown as { rtc: unknown }).rtc = { ...makeFakeRtc(), close }
+
+    expect(() => transport.disableWebRtcTier()).not.toThrow()
+    expect(detach).toHaveBeenCalled()
+    expect(close).toHaveBeenCalled()
+  })
+
+  it("ignores malformed and typeless WebSocket frames", async () => {
+    await setConfig()
+    const handler = jest.fn()
+    transport = new CompanionTransport()
+    transport.subscribe("ch:test", handler)
+    const ws = MockWebSocket.lastInstance!
+
+    ws.triggerMessage("{invalid")
+    ws.triggerMessage(JSON.stringify({ payload: "missing type" }))
+
+    expect(handler).not.toHaveBeenCalled()
   })
 })

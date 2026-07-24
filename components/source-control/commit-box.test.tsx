@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { CommitBox } from "./commit-box"
 import { useGitStore } from "@/stores/git/git-store"
@@ -7,6 +8,14 @@ import { useSettingsStore } from "@/stores/settings/settings-store"
 const mockGenerate = jest.fn().mockResolvedValue("feat: ai message")
 jest.mock("@/hooks/git/use-ai-commit-message", () => ({
   useAiCommitMessage: () => ({ generating: false, error: null, generate: mockGenerate }),
+}))
+jest.mock("./git-identity-dialog", () => ({
+  GitIdentityDialog: ({ open, onSaved }: { open: boolean; onSaved: () => void | Promise<void> }) =>
+    open ? (
+      <button type="button" data-testid="identity-dialog-stub" onClick={() => void onSaved()}>
+        save identity
+      </button>
+    ) : null,
 }))
 
 function makeActions() {
@@ -76,6 +85,36 @@ describe("CommitBox", () => {
       fireEvent.keyDown(screen.getByTestId("commit-message"), { key: "Enter", ctrlKey: true })
     })
     expect(actions.commit).toHaveBeenCalled()
+  })
+
+  it("opens identity recovery and retries the same commit after identity is saved", async () => {
+    const actions = makeActions()
+    actions.commit
+      .mockResolvedValueOnce({
+        kind: "identityRequired",
+        detail: "Author identity unknown",
+      })
+      .mockResolvedValueOnce(null)
+    render(<CommitBox rootDir="/r" stagedCount={1} committing={false} actions={actions} />)
+    fireEvent.change(screen.getByTestId("commit-message"), {
+      target: { value: "feat: recover identity" },
+    })
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("commit-button"))
+    })
+    expect(screen.getByTestId("identity-dialog-stub")).toBeInTheDocument()
+    expect(useGitStore.getState().commitDraft["/r"]).toBe("feat: recover identity")
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("identity-dialog-stub"))
+    })
+    expect(actions.commit).toHaveBeenCalledTimes(2)
+    expect(actions.commit).toHaveBeenLastCalledWith("feat: recover identity", {
+      amend: false,
+      signoff: false,
+    })
+    expect(useGitStore.getState().commitDraft["/r"]).toBe("")
   })
 
   it("recalls a prior commit message with ArrowUp on the first line", async () => {
@@ -157,6 +196,35 @@ describe("CommitBox", () => {
       fireEvent.click(screen.getByTestId("commit-button"))
     })
     expect(actions.commit).toHaveBeenCalled()
+    expect(actions.push).toHaveBeenCalledWith({ setUpstream: true })
+  })
+
+  it("supports commit-and-sync plus amend and signoff menu actions", async () => {
+    const user = userEvent.setup()
+    const actions = makeActions()
+    render(<CommitBox rootDir="/r" stagedCount={1} committing={false} actions={actions} />)
+    fireEvent.change(screen.getByTestId("commit-message"), { target: { value: "feat: menu" } })
+
+    await user.click(screen.getByTestId("commit-more"))
+    await user.click(screen.getByTestId("commit-amend-toggle"))
+    await user.click(screen.getByTestId("commit-more"))
+    await user.click(screen.getByTestId("commit-signoff-toggle"))
+    await user.click(screen.getByTestId("commit-more"))
+    await user.click(screen.getByTestId("commit-and-sync"))
+
+    expect(actions.commit).toHaveBeenCalledWith("feat: menu", { amend: true, signoff: true })
+    expect(actions.sync).toHaveBeenCalled()
+  })
+
+  it("supports the explicit commit-and-push menu action", async () => {
+    const user = userEvent.setup()
+    const actions = makeActions()
+    render(<CommitBox rootDir="/r" stagedCount={1} committing={false} actions={actions} />)
+    fireEvent.change(screen.getByTestId("commit-message"), { target: { value: "feat: push" } })
+
+    await user.click(screen.getByTestId("commit-more"))
+    await user.click(screen.getByTestId("commit-and-push"))
+
     expect(actions.push).toHaveBeenCalledWith({ setUpstream: true })
   })
 

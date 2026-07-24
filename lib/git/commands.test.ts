@@ -25,6 +25,7 @@ import {
   gitBranches,
   gitCheckoutBranch,
   gitCherryPick,
+  gitClone,
   gitCommit,
   gitCommitFiles,
   gitConflicts,
@@ -44,6 +45,7 @@ import {
   gitFileHistory,
   gitBlame,
   gitIgnoreAdd,
+  gitIdentity,
   gitInit,
   gitIsRepo,
   gitLog,
@@ -67,6 +69,7 @@ import {
   gitResolveConflict,
   gitSequencerAbort,
   gitSequencerContinue,
+  gitSetIdentity,
   gitStage,
   gitStashApply,
   gitStashDrop,
@@ -259,6 +262,7 @@ describe("when in Tauri", () => {
     await gitDiffStagedAll("/r")
     await gitRefs("/r")
     await gitBlame("/r", "a.ts", "HEAD")
+    await gitBlame("/r", "a.ts")
     await gitRemotes("/r")
     await gitTags("/r")
     expect(callMock).toHaveBeenCalledWith("git_diff_commit", {
@@ -277,10 +281,12 @@ describe("when in Tauri", () => {
     await gitRemoteAdd("/r", "upstream", "https://example.test/repo.git")
     await gitRemoteRemove("/r", "upstream")
     await gitCreateTag("/r", "v1", "release", "HEAD")
+    await gitCreateTag("/r", "v2")
     await gitDeleteTag("/r", "v1")
     await gitPushTag("/r", "v1")
     await gitReset("/r", "mixed", "HEAD~1")
     await gitRestore("/r", ["a.ts"], true, "HEAD")
+    await gitRestore("/r", ["b.ts"])
     await gitRebase("/r", "main")
     await gitCherryPick("/r", "abc")
     await gitRevert("/r", "def")
@@ -501,6 +507,27 @@ describe("when in Tauri", () => {
     })
     await gitInit("/dir")
     expect(callMock).toHaveBeenCalledWith("git_init", { path: "/dir" })
+    callMock.mockResolvedValueOnce("/work/cloned")
+    await expect(gitClone("https://example.com/team/repo.git", "/work/cloned")).resolves.toBe(
+      "/work/cloned"
+    )
+    expect(callMock).toHaveBeenCalledWith("git_clone", {
+      remoteUrl: "https://example.com/team/repo.git",
+      destination: "/work/cloned",
+    })
+    callMock.mockResolvedValueOnce({ name: "Cognia Developer", email: "developer@example.com" })
+    await expect(gitIdentity("/work/cloned")).resolves.toEqual({
+      name: "Cognia Developer",
+      email: "developer@example.com",
+    })
+    expect(callMock).toHaveBeenCalledWith("git_identity", { repoPath: "/work/cloned" })
+    await gitSetIdentity("/work/cloned", "Cognia Developer", "developer@example.com", true)
+    expect(callMock).toHaveBeenCalledWith("git_set_identity", {
+      repoPath: "/work/cloned",
+      name: "Cognia Developer",
+      email: "developer@example.com",
+      global: true,
+    })
     callMock.mockResolvedValueOnce([])
     await gitDiffRefsFiles("/r", "main", "feature")
     expect(callMock).toHaveBeenCalledWith("git_diff_refs_files", {

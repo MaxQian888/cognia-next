@@ -1,22 +1,37 @@
-const repoCfg: { available: boolean; rootDir: string | null; openFolder: jest.Mock } = {
+const repoCfg: {
+  available: boolean
+  rootDir: string | null
+  openFolder: jest.Mock
+  refresh: jest.Mock
+} = {
   available: true,
   rootDir: "/repo",
   openFolder: jest.fn(),
+  refresh: jest.fn().mockResolvedValue(undefined),
+}
+const actionCfg = {
+  resolveConflict: jest.fn(),
+  sequencerContinue: jest.fn(),
+  sequencerAbort: jest.fn(),
 }
 
 jest.mock("@/hooks/git/use-git-repo", () => ({
   useGitRepo: () => ({
     available: repoCfg.available,
     rootDir: repoCfg.rootDir,
-    refresh: jest.fn().mockResolvedValue(undefined),
+    refresh: repoCfg.refresh,
     openFolder: repoCfg.openFolder,
   }),
 }))
 jest.mock("@/hooks/git/use-git-actions", () => ({
-  useGitActions: () => ({ resolveConflict: jest.fn() }),
+  useGitActions: () => actionCfg,
 }))
 jest.mock("@/lib/git/commands", () => ({
   gitInit: jest.fn().mockResolvedValue(undefined),
+}))
+const openPathAsWorkspace = jest.fn()
+jest.mock("@/lib/workspace/open-folder", () => ({
+  openPathAsWorkspace: (path: string) => openPathAsWorkspace(path),
 }))
 jest.mock("@/hooks/ui/use-resizable-layout", () => ({
   useResizableLayout: () => ({ defaultLayout: undefined, onLayoutChanged: jest.fn() }),
@@ -59,31 +74,228 @@ jest.mock("@/components/ui/resizable", () => ({
   ),
   ResizableHandle: () => <div data-slot="resizable-handle" />,
 }))
-jest.mock("./changes-view", () => ({ ChangesView: () => <div data-testid="changes-view-stub" /> }))
+jest.mock("./changes-view", () => ({
+  ChangesView: ({
+    onSelectFile,
+    onViewHistory,
+    onViewBlame,
+    onRestore,
+  }: {
+    onSelectFile: (path: string, staged: boolean) => void
+    onViewHistory: (path: string) => void
+    onViewBlame: (path: string) => void
+    onRestore: (path: string) => void
+  }) => (
+    <div data-testid="changes-view-stub">
+      <button
+        type="button"
+        data-testid="changes-select"
+        onClick={() => onSelectFile("a.ts", false)}
+      >
+        select
+      </button>
+      <button type="button" data-testid="changes-history" onClick={() => onViewHistory("a.ts")}>
+        history
+      </button>
+      <button type="button" data-testid="changes-blame" onClick={() => onViewBlame("a.ts")}>
+        blame
+      </button>
+      <button type="button" data-testid="changes-restore" onClick={() => onRestore("a.ts")}>
+        restore
+      </button>
+    </div>
+  ),
+}))
 jest.mock("./diff-pane", () => ({ DiffPane: () => <div data-testid="diff-pane-stub" /> }))
 jest.mock("./conflict-resolver", () => ({
-  ConflictResolver: () => <div data-testid="conflict-stub" />,
+  ConflictResolver: ({ onResolve }: { onResolve: (resolution: string) => void }) => (
+    <button type="button" data-testid="conflict-stub" onClick={() => onResolve("ours")}>
+      resolve
+    </button>
+  ),
 }))
 jest.mock("./commit-detail", () => ({
-  CommitDetail: () => <div data-testid="commit-detail-stub" />,
+  CommitDetail: ({
+    onViewBlame,
+    onInteractiveRebase,
+  }: {
+    onViewBlame: (path: string, rev: string) => void
+    onInteractiveRebase: (base: string) => void
+  }) => (
+    <div data-testid="commit-detail-stub">
+      <button
+        type="button"
+        data-testid="commit-detail-blame"
+        onClick={() => onViewBlame("a.ts", "abc123")}
+      >
+        blame
+      </button>
+      <button
+        type="button"
+        data-testid="commit-detail-rebase"
+        onClick={() => onInteractiveRebase("main")}
+      >
+        rebase
+      </button>
+    </div>
+  ),
 }))
-jest.mock("./stash-panel", () => ({ StashPanel: () => null }))
-jest.mock("./timeline-view", () => ({ TimelineView: () => null }))
+jest.mock("./stash-panel", () => ({
+  StashPanel: ({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) =>
+    open ? (
+      <button type="button" data-testid="stash-panel-stub" onClick={() => onOpenChange(false)}>
+        close stash
+      </button>
+    ) : null,
+}))
+jest.mock("./timeline-view", () => ({
+  TimelineView: ({
+    open,
+    onOpenChange,
+  }: {
+    open: boolean
+    onOpenChange: (open: boolean) => void
+  }) =>
+    open ? (
+      <button type="button" data-testid="timeline-view-stub" onClick={() => onOpenChange(false)}>
+        close timeline
+      </button>
+    ) : null,
+}))
+jest.mock("./remote-panel", () => ({
+  RemotePanel: ({
+    open,
+    onOpenChange,
+  }: {
+    open: boolean
+    onOpenChange: (open: boolean) => void
+  }) =>
+    open ? (
+      <button type="button" data-testid="remote-panel-stub" onClick={() => onOpenChange(false)}>
+        close remotes
+      </button>
+    ) : null,
+}))
+jest.mock("./tag-panel", () => ({
+  TagPanel: ({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) =>
+    open ? (
+      <button type="button" data-testid="tag-panel-stub" onClick={() => onOpenChange(false)}>
+        close tags
+      </button>
+    ) : null,
+}))
+jest.mock("./compare-refs-sheet", () => ({
+  CompareRefsSheet: ({
+    open,
+    onOpenChange,
+  }: {
+    open: boolean
+    onOpenChange: (open: boolean) => void
+  }) =>
+    open ? (
+      <button type="button" data-testid="compare-panel-stub" onClick={() => onOpenChange(false)}>
+        close compare
+      </button>
+    ) : null,
+}))
+jest.mock("./restore-dialog", () => ({
+  RestoreDialog: ({
+    path,
+    onOpenChange,
+  }: {
+    path: string | null
+    onOpenChange: (open: boolean) => void
+  }) =>
+    path ? (
+      <button type="button" data-testid="restore-dialog-stub" onClick={() => onOpenChange(false)}>
+        close restore
+      </button>
+    ) : null,
+}))
+jest.mock("./interactive-rebase-dialog", () => ({
+  InteractiveRebaseDialog: ({
+    base,
+    onOpenChange,
+  }: {
+    base: string | null
+    onOpenChange: (open: boolean) => void
+  }) =>
+    base ? (
+      <button type="button" data-testid="rebase-dialog-stub" onClick={() => onOpenChange(false)}>
+        close rebase
+      </button>
+    ) : null,
+}))
+jest.mock("./blame-view", () => ({ BlameView: () => <div data-testid="blame-view-stub" /> }))
 jest.mock("./branch-header", () => ({
   BranchHeader: () => <div data-testid="branch-header-stub" />,
 }))
 jest.mock("./sync-toolbar", () => ({
-  SyncToolbar: ({ onOpenWorktrees }: { onOpenWorktrees: () => void }) => (
+  SyncToolbar: ({
+    onOpenStash,
+    onOpenTimeline,
+    onOpenRemotes,
+    onOpenTags,
+    onOpenCompare,
+    onOpenWorktrees,
+    onRefresh,
+  }: Record<string, () => void>) => (
     <div data-testid="sync-toolbar-stub">
+      <button type="button" onClick={onOpenStash} data-testid="open-stash-stub">
+        stash
+      </button>
+      <button type="button" onClick={onOpenTimeline} data-testid="open-timeline-stub">
+        timeline
+      </button>
+      <button type="button" onClick={onOpenRemotes} data-testid="open-remotes-stub">
+        remotes
+      </button>
+      <button type="button" onClick={onOpenTags} data-testid="open-tags-stub">
+        tags
+      </button>
+      <button type="button" onClick={onOpenCompare} data-testid="open-compare-stub">
+        compare
+      </button>
       <button type="button" onClick={onOpenWorktrees} data-testid="open-worktrees-stub">
         worktrees
+      </button>
+      <button type="button" onClick={onRefresh} data-testid="refresh-stub">
+        refresh
       </button>
     </div>
   ),
 }))
 jest.mock("./worktree-panel", () => ({
-  WorktreePanel: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="worktree-panel-stub" /> : null,
+  WorktreePanel: ({
+    open,
+    onOpenChange,
+  }: {
+    open: boolean
+    onOpenChange: (open: boolean) => void
+  }) =>
+    open ? (
+      <button type="button" data-testid="worktree-panel-stub" onClick={() => onOpenChange(false)}>
+        close worktrees
+      </button>
+    ) : null,
+}))
+jest.mock("./clone-repository-dialog", () => ({
+  CloneRepositoryDialog: ({
+    open,
+    onCloned,
+  }: {
+    open: boolean
+    onCloned: (path: string) => void
+  }) =>
+    open ? (
+      <button
+        type="button"
+        data-testid="clone-dialog-stub"
+        onClick={() => onCloned("/work/cloned")}
+      >
+        clone
+      </button>
+    ) : null,
 }))
 
 import { act, fireEvent, render, screen } from "@testing-library/react"
@@ -111,6 +323,9 @@ beforeEach(() => {
   repoCfg.available = true
   repoCfg.rootDir = "/repo"
   repoCfg.openFolder.mockReset()
+  repoCfg.refresh.mockClear()
+  openPathAsWorkspace.mockReset()
+  Object.values(actionCfg).forEach((mock) => mock.mockReset())
   act(() => {
     useGitStore.getState().reset()
     useGitStore.setState({ rootDir: "/repo" })
@@ -137,6 +352,14 @@ describe("SourceControlPanel", () => {
     render(<SourceControlPanel />)
     fireEvent.click(screen.getByTestId("open-folder-button"))
     expect(repoCfg.openFolder).toHaveBeenCalled()
+  })
+
+  it("opens clone from the no-folder state and activates the cloned workspace", () => {
+    repoCfg.rootDir = null
+    render(<SourceControlPanel />)
+    fireEvent.click(screen.getByTestId("clone-repo-button"))
+    fireEvent.click(screen.getByTestId("clone-dialog-stub"))
+    expect(openPathAsWorkspace).toHaveBeenCalledWith("/work/cloned")
   })
 
   it("shows the not-a-repo state", () => {
@@ -167,6 +390,20 @@ describe("SourceControlPanel", () => {
       fireEvent.click(screen.getByTestId("init-repo-button"))
     })
     expect(gitInitMock).toHaveBeenCalledWith("/repo")
+  })
+
+  it("offers clone alongside init when the bound folder is not a repository", () => {
+    act(() =>
+      useGitStore.getState().setRepoState({
+        isRepo: false,
+        rootDir: "/repo",
+        detachedHead: false,
+        operationInProgress: null,
+      })
+    )
+    render(<SourceControlPanel />)
+    fireEvent.click(screen.getByTestId("clone-repo-button"))
+    expect(screen.getByTestId("clone-dialog-stub")).toBeInTheDocument()
   })
 
   // The wallpaper/surface system in globals.css only frosts a subtree that
@@ -247,5 +484,84 @@ describe("SourceControlPanel", () => {
     render(<SourceControlPanel />)
     fireEvent.click(screen.getByTestId("open-worktrees-stub"))
     expect(screen.getByTestId("worktree-panel-stub")).toBeInTheDocument()
+  })
+
+  it("wires toolbar actions and closes every auxiliary panel", () => {
+    render(<SourceControlPanel />)
+    for (const trigger of [
+      "open-stash-stub",
+      "open-timeline-stub",
+      "open-remotes-stub",
+      "open-tags-stub",
+      "open-compare-stub",
+      "open-worktrees-stub",
+    ]) {
+      fireEvent.click(screen.getByTestId(trigger))
+    }
+    fireEvent.click(screen.getByTestId("refresh-stub"))
+    expect(repoCfg.refresh).toHaveBeenCalled()
+
+    for (const panel of [
+      "stash-panel-stub",
+      "timeline-view-stub",
+      "remote-panel-stub",
+      "tag-panel-stub",
+      "compare-panel-stub",
+      "worktree-panel-stub",
+    ]) {
+      fireEvent.click(screen.getByTestId(panel))
+      expect(screen.queryByTestId(panel)).not.toBeInTheDocument()
+    }
+  })
+
+  it("wires changes, history, blame, restore, and conflict resolution callbacks", () => {
+    render(<SourceControlPanel />)
+    fireEvent.click(screen.getByTestId("changes-select"))
+    expect(screen.getByTestId("diff-pane-stub")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("changes-history"))
+    expect(screen.getByTestId("timeline-view-stub")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("timeline-view-stub"))
+
+    fireEvent.click(screen.getByTestId("changes-blame"))
+    expect(screen.getByTestId("blame-view-stub")).toBeInTheDocument()
+    fireEvent.keyDown(document, { key: "Escape" })
+
+    fireEvent.click(screen.getByTestId("changes-restore"))
+    expect(screen.getByTestId("restore-dialog-stub")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("restore-dialog-stub"))
+
+    act(() => useGitStore.getState().selectFile("conf.ts", false))
+    fireEvent.click(screen.getByTestId("conflict-stub"))
+    expect(actionCfg.resolveConflict).toHaveBeenCalledWith("conf.ts", "ours")
+  })
+
+  it("wires commit detail blame and interactive rebase callbacks", () => {
+    act(() => useGitStore.getState().selectCommit("abc123"))
+    render(<SourceControlPanel />)
+
+    fireEvent.click(screen.getByTestId("commit-detail-blame"))
+    expect(screen.getByTestId("blame-view-stub")).toBeInTheDocument()
+    fireEvent.keyDown(document, { key: "Escape" })
+
+    fireEvent.click(screen.getByTestId("commit-detail-rebase"))
+    expect(screen.getByTestId("rebase-dialog-stub")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("rebase-dialog-stub"))
+  })
+
+  it("wires sequencer controls to their actions", () => {
+    act(() =>
+      useGitStore.getState().setRepoState({
+        isRepo: true,
+        rootDir: "/repo",
+        detachedHead: false,
+        operationInProgress: "rebase",
+      })
+    )
+    render(<SourceControlPanel />)
+    fireEvent.click(screen.getByTestId("sequencer-continue"))
+    fireEvent.click(screen.getByTestId("sequencer-abort"))
+    expect(actionCfg.sequencerContinue).toHaveBeenCalled()
+    expect(actionCfg.sequencerAbort).toHaveBeenCalled()
   })
 })

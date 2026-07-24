@@ -25415,6 +25415,22 @@
       "search": "搜索分支…",
       "switch": "切换分支"
     },
+    "clone": {
+      "authHelp": "请先通过 Git 凭据管理器或 SSH Agent 登录，然后重试。",
+      "authRetry": "登录后重试",
+      "browse": "选择目标目录",
+      "browseFailed": "无法打开文件夹选择器",
+      "cloning": "正在克隆…",
+      "description": "输入远程仓库 URL，并选择用于存放克隆仓库的目录。",
+      "destinationLabel": "目标目录",
+      "destinationPlaceholder": "/仓库/保存路径",
+      "failed": "克隆仓库失败",
+      "open": "克隆仓库",
+      "submit": "克隆",
+      "title": "克隆仓库",
+      "urlLabel": "仓库 URL",
+      "urlPlaceholder": "https://example.com/team/repository.git"
+    },
     "commit": {
       "ai": {
         "failed": "生成提交信息失败",
@@ -25508,6 +25524,20 @@
       "changes": "更改",
       "merge": "合并冲突",
       "staged": "已暂存的更改"
+    },
+    "identity": {
+      "description": "Git 需要姓名和邮箱才能创建此次提交。保存后将自动重试提交。",
+      "emailLabel": "邮箱",
+      "emailPlaceholder": "developer@example.com",
+      "globalDescription": "将此身份作为本设备所有仓库的默认身份。",
+      "globalLabel": "应用到全局",
+      "loadFailed": "加载 Git 身份失败",
+      "nameLabel": "姓名",
+      "namePlaceholder": "Cognia Developer",
+      "saveAndRetry": "保存并重试提交",
+      "saveFailed": "保存 Git 身份失败",
+      "saving": "正在保存…",
+      "title": "设置 Git 身份"
     },
     "irebase": {
       "action": {

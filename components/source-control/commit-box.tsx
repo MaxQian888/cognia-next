@@ -5,7 +5,7 @@
  * & push, commit & sync, and a sign-off toggle (VSCode parity).
  */
 
-import { useCallback, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { CheckIcon, ChevronDownIcon, SparklesIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -27,6 +27,7 @@ import { useCommandHistory, handleHistoryArrowKey } from "@/hooks/use-command-hi
 import { GIT_DEFAULTS, useGitStore } from "@/stores/git/git-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import type { PostCommitAction } from "@/lib/git/panel-prefs"
+import { GitIdentityDialog } from "./git-identity-dialog"
 
 interface CommitBoxProps {
   rootDir: string
@@ -42,6 +43,8 @@ export function CommitBox({ rootDir, stagedCount, committing, actions }: CommitB
   const amend = useGitStore((s) => s.commitAmend)
   const setAmend = useGitStore((s) => s.setAmend)
   const [signoff, setSignoff] = useState(false)
+  const [identityOpen, setIdentityOpen] = useState(false)
+  const pendingPostCommit = useRef<PostCommitAction | undefined>(undefined)
   const aiEnabled = useSettingsStore(
     (s) => s.settings?.gitSettings?.commitMessageAI?.enabled ?? false
   )
@@ -62,16 +65,22 @@ export function CommitBox({ rootDir, stagedCount, committing, actions }: CommitB
     !committing
 
   const doCommit = useCallback(
-    async (afterOverride?: PostCommitAction) => {
+    async (afterOverride?: PostCommitAction, retryAfterIdentity = false) => {
       if (!canCommit) return
-      history.record(draft)
-      if (smartWillStage) {
+      if (!retryAfterIdentity) history.record(draft)
+      if (smartWillStage && !retryAfterIdentity) {
         // Read the paths fresh so this callback needn't depend on a new array
         // each render.
         const paths = useGitStore.getState().status?.changes.map((c) => c.path) ?? []
         if (paths.length > 0) await actions.stage(paths)
       }
-      await actions.commit(draft, { amend, signoff })
+      const failure = await actions.commit(draft, { amend, signoff })
+      if (failure?.kind === "identityRequired") {
+        pendingPostCommit.current = afterOverride
+        setIdentityOpen(true)
+        return
+      }
+      if (failure) return
       setCommitDraft(rootDir, "")
       setAmend(false)
       // The default button chains the configured post-commit action; the split
@@ -194,6 +203,12 @@ export function CommitBox({ rootDir, stagedCount, committing, actions }: CommitB
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      <GitIdentityDialog
+        open={identityOpen}
+        repoPath={rootDir}
+        onOpenChange={setIdentityOpen}
+        onSaved={() => doCommit(pendingPostCommit.current, true)}
+      />
     </div>
   )
 }

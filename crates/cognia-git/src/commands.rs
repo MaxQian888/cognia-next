@@ -10,8 +10,8 @@ use tauri::{AppHandle, State};
 use super::error::GitError;
 use super::types::{
     AheadBehind, ConflictSide, GitBlameLine, GitBranch, GitCommit, GitConflict, GitDiff,
-    GitFileChange, GitFileDiffStat, GitRef, GitRemote, GitRepoState, GitStashEntry, GitStatus,
-    GitTag, GitWorktree, RebaseTodoEntry,
+    GitFileChange, GitFileDiffStat, GitIdentity, GitRef, GitRemote, GitRepoState, GitStashEntry,
+    GitStatus, GitTag, GitWorktree, RebaseTodoEntry,
 };
 use super::watcher::GitWatcherState;
 use super::{
@@ -501,6 +501,26 @@ pub async fn git_init(path: String) -> Result<(), GitError> {
 }
 
 #[tauri::command]
+pub async fn git_clone(remote_url: String, destination: String) -> Result<String, GitError> {
+    repo::clone_repo(&remote_url, &destination).await
+}
+
+#[tauri::command]
+pub async fn git_identity(repo_path: String) -> Result<GitIdentity, GitError> {
+    blocking("git_identity", move || repo::identity(&repo_path)).await
+}
+
+#[tauri::command]
+pub async fn git_set_identity(
+    repo_path: String,
+    name: String,
+    email: String,
+    global: bool,
+) -> Result<(), GitError> {
+    repo::set_identity(&repo_path, &name, &email, global).await
+}
+
+#[tauri::command]
 pub async fn git_ignore_add(repo_path: String, pattern: String) -> Result<(), GitError> {
     repo::ignore_add(&repo_path, &pattern).await
 }
@@ -619,5 +639,57 @@ mod tests {
 
         git_unstage(rp, vec!["a.txt".into()], None).await.unwrap();
         assert!(!staged_names(p).contains("a.txt"));
+    }
+
+    #[tokio::test]
+    async fn clone_command_returns_the_created_worktree_path() {
+        if !git_on_path() {
+            return;
+        }
+        let fixture = tempfile::TempDir::new().unwrap();
+        let source = fixture.path().join("source");
+        std::fs::create_dir(&source).unwrap();
+        run_git(&source, &["init", "-q", "-b", "main"]);
+        run_git(&source, &["config", "user.email", "test@example.com"]);
+        run_git(&source, &["config", "user.name", "Test User"]);
+        std::fs::write(source.join("README.md"), "# source\n").unwrap();
+        run_git(&source, &["add", "README.md"]);
+        run_git(&source, &["commit", "-q", "-m", "initial"]);
+
+        let destination = fixture.path().join("clone");
+        let cloned = git_clone(
+            source.to_string_lossy().into_owned(),
+            destination.to_string_lossy().into_owned(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            std::path::PathBuf::from(cloned),
+            destination.canonicalize().unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn identity_commands_round_trip_repository_local_config() {
+        if !git_on_path() {
+            return;
+        }
+        let tmp = tempfile::TempDir::new().unwrap();
+        run_git(tmp.path(), &["init", "-q", "-b", "main"]);
+        let repo_path = tmp.path().to_string_lossy().into_owned();
+
+        git_set_identity(
+            repo_path.clone(),
+            "Cognia Developer".into(),
+            "developer@example.com".into(),
+            false,
+        )
+        .await
+        .unwrap();
+        let configured = git_identity(repo_path).await.unwrap();
+
+        assert_eq!(configured.name.as_deref(), Some("Cognia Developer"));
+        assert_eq!(configured.email.as_deref(), Some("developer@example.com"));
     }
 }

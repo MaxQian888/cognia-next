@@ -392,6 +392,9 @@ const KNOWN_COMMANDS: &[&str] = &[
     "git_sequencer_abort",
     "git_interactive_rebase",
     "git_init",
+    "git_clone",
+    "git_identity",
+    "git_set_identity",
     "git_ignore_add",
     "git_merge",
     // ── Filesystem ──────────────────────────────────────────────────────────
@@ -705,6 +708,7 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "git_tags",
     "git_worktree_list",
     "git_rebase_commits",
+    "git_identity",
     // Filesystem reads.
     "read_text_file",
     "default_export_dir",
@@ -853,6 +857,8 @@ const CONTROL_COMMANDS: &[&str] = &[
     "git_sequencer_abort",
     "git_interactive_rebase",
     "git_init",
+    "git_clone",
+    "git_set_identity",
     "git_ignore_add",
     "git_merge",
     // Filesystem writes (raw absolute + sandboxed).
@@ -3368,6 +3374,32 @@ pub(super) async fn dispatch(
         "git_init" => {
             let path: String = required(&args, "path")?;
             crate::git::commands::git_init(path)
+                .await
+                .map(|_| Value::Null)
+                .map_err(|e| RpcError::internal(e.to_string()))
+        }
+        "git_clone" => {
+            let remote_url: String = required(&args, "remoteUrl")?;
+            let destination: String = required(&args, "destination")?;
+            crate::git::commands::git_clone(remote_url, destination)
+                .await
+                .map(Value::String)
+                .map_err(|e| RpcError::internal(e.to_string()))
+        }
+        "git_identity" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let identity = crate::git::commands::git_identity(repo_path)
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))?;
+            serde_json::to_value(identity)
+                .map_err(|e| RpcError::internal(format!("serialize git identity: {e}")))
+        }
+        "git_set_identity" => {
+            let repo_path: String = required(&args, "repoPath")?;
+            let name: String = required(&args, "name")?;
+            let email: String = required(&args, "email")?;
+            let global: bool = optional(&args, "global")?.unwrap_or(false);
+            crate::git::commands::git_set_identity(repo_path, name, email, global)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -7357,6 +7389,13 @@ rl.on("line", (line) => {
                 "{write} must NOT be read-only (would skip idempotency on a mutation)"
             );
         }
+    }
+
+    #[test]
+    fn git_identity_read_is_not_idempotency_cached_as_a_mutation() {
+        assert!(KNOWN_COMMANDS.contains(&"git_identity"));
+        assert!(READ_ONLY_COMMANDS.contains(&"git_identity"));
+        assert!(!READ_ONLY_COMMANDS.contains(&"git_set_identity"));
     }
 
     #[test]

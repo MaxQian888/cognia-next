@@ -7,7 +7,7 @@ description: A full VSCode-built-in-Git equivalent panel — stage/unstage/disca
 
 > **Status**: Accepted. Implemented end-to-end and since extracted to a
 > dedicated crate — `crates/cognia-git/` (ADR-0067 Phase 2, moved out of the
-> original `src-tauri/src/git/`): **62 `git_*` commands**, the `lib/git/` seam +
+> original `src-tauri/src/git/`): **65 `git_*` commands**, the `lib/git/` seam +
 > `stores/git/` store + `hooks/git/` controllers, the
 > `components/source-control/` UI, the `/source-control` route, and a StatusBar
 > branch/sync indicator.
@@ -103,8 +103,10 @@ URL-credential redactor (`exec::redact`) before it leaves the backend.
   cargo target lives at the repo root `target/`.
 - Frontend: `pnpm typecheck`, `pnpm build`, `pnpm test` (co-located, ≥90%),
   `pnpm lint:i18n` (the `sourceControl` namespace + `desktop.guildRail.sourceControl`).
-- Manual (`pnpm tauri dev`): open a dirty repo → stage a hunk → commit → switch
-  branch → fetch/pull/push/sync → stash → resolve a conflict → blame → Timeline.
+- Manual (`pnpm tauri dev`): clone a repository and confirm the cloned workspace
+  opens → stage a hunk → trigger an identity-required commit → save repository-local
+  and global identities and confirm the original commit retries → switch branch →
+  fetch/pull/push/sync → stash → resolve a conflict → blame → Timeline.
 
 ## Implemented since (originally scoped out)
 
@@ -115,6 +117,11 @@ URL-credential redactor (`exec::redact`) before it leaves the backend.
 - **Worktree management** from the sync toolbar: list, create, open, remove,
   optionally delete the linked branch, and prune stale worktree records through
   the existing `git_worktree_*` command seam.
+- **Repository cloning** from either empty Source Control state
+  (`git_clone`) and repository-local/global commit identity recovery
+  (`git_identity` / `git_set_identity`). Missing-identity commit failures use a
+  typed `identityRequired` error, open an inline recovery dialog, and retry the
+  original commit after the user saves their name and email.
 
 ## Out of scope / follow-ups
 
@@ -122,6 +129,5 @@ URL-credential redactor (`exec::redact`) before it leaves the backend.
 - Backing the sidecar VSCode `scm` shim with this UI.
 - Migrating `twin/code_repo.rs` onto the crate's `read.rs` and converging
   `github/workspace.rs` onto the crate's `exec.rs`.
-- Not yet implemented (candidate follow-ups): `git clone` into the panel,
-  in-panel `git config` writes (empty-ident recovery), reflog/recovery view, GPG
-  `-S` commit signing (only signoff today), and line-level / sub-hunk staging.
+- Not yet implemented (candidate follow-ups): reflog/recovery view, GPG `-S`
+  commit signing (only signoff today), and line-level / sub-hunk staging.

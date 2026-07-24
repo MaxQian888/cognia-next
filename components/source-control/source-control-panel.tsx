@@ -9,7 +9,13 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { FolderOpenIcon, GitBranchIcon, SlidersHorizontalIcon, SparklesIcon } from "lucide-react"
+import {
+  DownloadIcon,
+  FolderOpenIcon,
+  GitBranchIcon,
+  SlidersHorizontalIcon,
+  SparklesIcon,
+} from "lucide-react"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -17,6 +23,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { useResizableLayout } from "@/hooks/ui/use-resizable-layout"
 import { gitInit } from "@/lib/git/commands"
+import { openPathAsWorkspace } from "@/lib/workspace/open-folder"
 import { useGitRepo } from "@/hooks/git/use-git-repo"
 import { useGitActions } from "@/hooks/git/use-git-actions"
 import { useSourceControlPrefs } from "@/hooks/git/use-source-control-prefs"
@@ -38,6 +45,7 @@ import { TagPanel } from "./tag-panel"
 import { TimelineView } from "./timeline-view"
 import { SourceControlViewSettings } from "./view-settings"
 import { WorktreePanel } from "./worktree-panel"
+import { CloneRepositoryDialog } from "./clone-repository-dialog"
 
 export function SourceControlPanel() {
   const t = useTranslations("sourceControl")
@@ -57,6 +65,7 @@ export function SourceControlPanel() {
   const selectCommit = useGitStore((s) => s.selectCommit)
   const committing = useGitStore((s) => s.ops.commit)
 
+  const [cloneOpen, setCloneOpen] = useState(false)
   const [stashOpen, setStashOpen] = useState(false)
   const [remoteOpen, setRemoteOpen] = useState(false)
   const [tagOpen, setTagOpen] = useState(false)
@@ -68,6 +77,13 @@ export function SourceControlPanel() {
   const [timelineOpen, setTimelineOpen] = useState(false)
   const [timelineFile, setTimelineFile] = useState<string | null>(null)
   const layout = useResizableLayout("cognia-git-panel")
+  const cloneDialog = (
+    <CloneRepositoryDialog
+      open={cloneOpen}
+      onOpenChange={setCloneOpen}
+      onCloned={openPathAsWorkspace}
+    />
+  )
 
   if (!available) {
     return (
@@ -85,50 +101,74 @@ export function SourceControlPanel() {
 
   if (!rootDir) {
     return (
-      <Empty className="h-full border-0" data-testid="sc-open-folder">
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <FolderOpenIcon />
-          </EmptyMedia>
-          <EmptyTitle>{t("emptyState.noFolder")}</EmptyTitle>
-        </EmptyHeader>
-        <Button onClick={() => void openFolder()} data-testid="open-folder-button">
-          {t("emptyState.openFolder")}
-        </Button>
-      </Empty>
+      <>
+        <Empty className="h-full border-0" data-testid="sc-open-folder">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <FolderOpenIcon />
+            </EmptyMedia>
+            <EmptyTitle>{t("emptyState.noFolder")}</EmptyTitle>
+          </EmptyHeader>
+          <div className="flex gap-2">
+            <Button onClick={() => void openFolder()} data-testid="open-folder-button">
+              {t("emptyState.openFolder")}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setCloneOpen(true)}
+              data-testid="clone-repo-button"
+            >
+              <DownloadIcon className="size-3.5" />
+              {t("clone.open")}
+            </Button>
+          </div>
+        </Empty>
+        {cloneDialog}
+      </>
     )
   }
 
   if (repoState && !repoState.isRepo) {
     return (
-      <Empty className="h-full border-0" data-testid="sc-not-a-repo">
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <GitBranchIcon />
-          </EmptyMedia>
-          <EmptyDescription>{t("emptyState.notARepo")}</EmptyDescription>
-        </EmptyHeader>
-        <div className="flex gap-2">
-          <Button
-            onClick={() => {
-              // Direct call (not via actions.run): rootDir is bound but not a
-              // repo yet; refresh flips the panel once init lands.
-              void gitInit(rootDir).then(() => refresh())
-            }}
-            data-testid="init-repo-button"
-          >
-            <SparklesIcon className="size-3.5" />
-            {t("emptyState.initRepo")}
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => void openFolder()}
-            data-testid="open-folder-button"
-          >
-            {t("emptyState.openFolder")}
-          </Button>
-        </div>
-      </Empty>
+      <>
+        <Empty className="h-full border-0" data-testid="sc-not-a-repo">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <GitBranchIcon />
+            </EmptyMedia>
+            <EmptyDescription>{t("emptyState.notARepo")}</EmptyDescription>
+          </EmptyHeader>
+          <div className="flex gap-2">
+            <Button
+              onClick={() => {
+                // Direct call (not via actions.run): rootDir is bound but not a
+                // repo yet; refresh flips the panel once init lands.
+                void gitInit(rootDir).then(() => refresh())
+              }}
+              data-testid="init-repo-button"
+            >
+              <SparklesIcon className="size-3.5" />
+              {t("emptyState.initRepo")}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setCloneOpen(true)}
+              data-testid="clone-repo-button"
+            >
+              <DownloadIcon className="size-3.5" />
+              {t("clone.open")}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => void openFolder()}
+              data-testid="open-folder-button"
+            >
+              {t("emptyState.openFolder")}
+            </Button>
+          </div>
+        </Empty>
+        {cloneDialog}
+      </>
     )
   }
 

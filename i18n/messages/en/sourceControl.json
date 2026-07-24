@@ -35,6 +35,22 @@
     "title": "Blame · {path}",
     "uncommitted": "Uncommitted"
   },
+  "clone": {
+    "authHelp": "Sign in with your Git credential manager or SSH agent, then retry.",
+    "authRetry": "Retry after Signing In",
+    "browse": "Choose destination",
+    "browseFailed": "Could not open the folder picker",
+    "cloning": "Cloning…",
+    "description": "Enter a remote URL and choose the directory that should contain the cloned repository.",
+    "destinationLabel": "Destination",
+    "destinationPlaceholder": "/path/to/repository",
+    "failed": "Failed to clone repository",
+    "open": "Clone Repository",
+    "submit": "Clone",
+    "title": "Clone Repository",
+    "urlLabel": "Repository URL",
+    "urlPlaceholder": "https://example.com/team/repository.git"
+  },
   "branches": {
     "create": "Create Branch",
     "delete": "Delete Branch",
@@ -140,6 +156,20 @@
     "changes": "Changes",
     "merge": "Merge Changes",
     "staged": "Staged Changes"
+  },
+  "identity": {
+    "description": "Git needs a name and email before it can create this commit. Save them and the commit will be retried automatically.",
+    "emailLabel": "Email",
+    "emailPlaceholder": "developer@example.com",
+    "globalDescription": "Use this identity as the default for repositories on this device.",
+    "globalLabel": "Apply globally",
+    "loadFailed": "Failed to load Git identity",
+    "nameLabel": "Name",
+    "namePlaceholder": "Cognia Developer",
+    "saveAndRetry": "Save and Retry Commit",
+    "saveFailed": "Failed to save Git identity",
+    "saving": "Saving…",
+    "title": "Set Git Identity"
   },
   "irebase": {
     "action": {

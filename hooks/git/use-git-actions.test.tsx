@@ -116,6 +116,26 @@ describe("useGitActions", () => {
     expect(commands.gitCommit).toHaveBeenCalledWith("/repo", "msg", true, true)
   })
 
+  it("returns identityRequired to the commit UI without showing a generic failure toast", async () => {
+    commands.gitCommit.mockRejectedValue({
+      kind: "identityRequired",
+      detail: "Author identity unknown",
+    })
+    const { result } = renderHook(() => useGitActions(refresh))
+
+    let failure: Awaited<ReturnType<typeof result.current.commit>> | undefined
+    await act(async () => {
+      failure = await result.current.commit("feat: identity")
+    })
+
+    expect(failure).toEqual({
+      kind: "identityRequired",
+      detail: "Author identity unknown",
+    })
+    expect(toastErrorMock).not.toHaveBeenCalled()
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
   it("push with setUpstream sends the current branch and lets the backend resolve the remote", async () => {
     const { result } = renderHook(() => useGitActions(refresh))
     await act(async () => {

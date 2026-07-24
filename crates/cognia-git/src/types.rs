@@ -6,6 +6,13 @@
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitIdentity {
+    pub name: Option<String>,
+    pub email: Option<String>,
+}
+
 /// Per-file change classification, mirroring VSCode's decoration letters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

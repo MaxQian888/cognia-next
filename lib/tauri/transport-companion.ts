@@ -61,6 +61,7 @@ const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   "git_tags",
   "git_worktree_list",
   "git_rebase_commits",
+  "git_identity",
   // Filesystem reads.
   "read_text_file",
   "default_export_dir",

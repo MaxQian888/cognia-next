@@ -61,6 +61,12 @@ pub fn classify_failure(stderr: &str) -> GitError {
     // `Detail` redacts on Serialize/Display, so the payload is carried raw here
     // and stripped of any embedded credential when it leaves the backend.
     let detail: Detail = stderr.trim().into();
+    if s.contains("author identity unknown")
+        || s.contains("please tell me who you are")
+        || s.contains("unable to auto-detect email address")
+    {
+        return GitError::IdentityRequired(detail);
+    }
     if s.contains("authentication failed")
         || s.contains("could not read username")
         || s.contains("could not read password")
@@ -262,6 +268,19 @@ mod tests {
             ),
             GitError::AuthRequired(_)
         ));
+    }
+
+    #[test]
+    fn classify_missing_commit_identity_as_identity_required() {
+        for stderr in [
+            "Author identity unknown\n\n*** Please tell me who you are.",
+            "fatal: unable to auto-detect email address (got 'runner@host.(none)')",
+        ] {
+            assert!(matches!(
+                classify_failure(stderr),
+                GitError::IdentityRequired(_)
+            ));
+        }
     }
 
     #[test]
