@@ -56,6 +56,7 @@ describe("LarkEntrySurfaces", () => {
     render(<LarkEntrySurfaces adapterId={ADAPTER_ID} />)
 
     const input = await screen.findByTestId("lark-web-base-input")
+    await waitFor(() => expect(input).toBeEnabled())
     await user.type(input, "https://cognia.example")
     await user.tab()
     await waitFor(async () => {
@@ -67,6 +68,30 @@ describe("LarkEntrySurfaces", () => {
     await waitFor(async () => {
       const row = await getDb().adapterInstances.get(ADAPTER_ID)
       expect(row?.settings?.larkChatTab).toBe(true)
+    })
+  })
+
+  it("loads the stored web entry base before enabling edits", async () => {
+    await seedAdapter({ webEntryBaseUrl: "https://stored.example" })
+    render(<LarkEntrySurfaces adapterId={ADAPTER_ID} />)
+
+    expect(await screen.findByDisplayValue("https://stored.example")).toBeEnabled()
+  })
+
+  it("preserves rapid sibling setting updates", async () => {
+    await seedAdapter()
+    const user = userEvent.setup()
+    render(<LarkEntrySurfaces adapterId={ADAPTER_ID} />)
+
+    await screen.findByTestId("lark-flag-larkChatTab")
+    await Promise.all([
+      user.click(screen.getByTestId("lark-flag-larkChatTab")),
+      user.click(screen.getByTestId("lark-flag-larkWebSso")),
+    ])
+
+    await waitFor(async () => {
+      const row = await getDb().adapterInstances.get(ADAPTER_ID)
+      expect(row?.settings).toMatchObject({ larkChatTab: true, larkWebSso: true })
     })
   })
 

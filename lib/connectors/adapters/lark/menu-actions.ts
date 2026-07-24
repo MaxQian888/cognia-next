@@ -45,6 +45,11 @@ const UNKNOWN_KEY_REPLY = [
   "该菜单项尚未配置。请联系管理员在 Cognia → 设置 → 连接 中完成映射。",
 ].join("\n")
 
+const DISABLED_KEY_REPLY = [
+  "This Cognia menu action is currently disabled. Ask your administrator to enable it in Cognia → Settings → Connections.",
+  "此 Cognia 菜单项当前已停用。请联系管理员在 Cognia → 设置 → 连接 中启用。",
+].join("\n")
+
 const LINK_BASE_MISSING_REPLY = [
   "The Cognia web entry isn't configured for this workspace yet, so this menu can't open a link.",
   "当前工作区尚未配置 Cognia Web 入口，此菜单暂时无法打开链接。",
@@ -96,6 +101,22 @@ export async function handleMenuUnknownKey(
   })
   await deps.enqueue(
     p2pReply(adapterId, outcome.openId, outcome.eventId, "menu-unknown", UNKNOWN_KEY_REPLY)
+  )
+}
+
+/**
+ * A recognized built-in whose feature batch is disabled is not an unknown key:
+ * reply with an operational notice, but do not emit the misconfiguration audit
+ * or `unmapped_event_key` metric used for genuinely unrecognized event keys.
+ */
+export async function handleMenuDisabledKey(
+  adapterId: string,
+  outcome: { openId: string; eventId: string },
+  overrides: Partial<MenuActionDependencies> = {}
+): Promise<void> {
+  const deps = withDefaults(overrides)
+  await deps.enqueue(
+    p2pReply(adapterId, outcome.openId, outcome.eventId, "menu-disabled", DISABLED_KEY_REPLY)
   )
 }
 

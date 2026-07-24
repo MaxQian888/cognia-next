@@ -185,7 +185,13 @@ pub fn render_prometheus() -> String {
         ),
     ];
     for (name, counter, help) in lark_series {
-        push_metric(&mut out, name, "counter", help, counter.load(Ordering::Relaxed));
+        push_metric(
+            &mut out,
+            name,
+            "counter",
+            help,
+            counter.load(Ordering::Relaxed),
+        );
     }
 
     // Supervision blocks (headless installs only; 0/absent on desktop).

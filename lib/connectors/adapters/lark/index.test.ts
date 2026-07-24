@@ -16,6 +16,7 @@ const mockListen = listen as jest.Mock
 const mockEnrich = jest.fn(async (..._args: unknown[]) => undefined)
 jest.mock("./menu-actions", () => ({
   handleMenuUnknownKey: jest.fn(async () => undefined),
+  handleMenuDisabledKey: jest.fn(async () => undefined),
   handleMenuLink: jest.fn(async () => undefined),
 }))
 
@@ -535,6 +536,7 @@ describe("createLarkAdapter", () => {
   it("gates reserved cognia.* built-ins on the larkNativeSlash batch flag", async () => {
     const menuActions = jest.requireMock("./menu-actions") as {
       handleMenuUnknownKey: jest.Mock
+      handleMenuDisabledKey: jest.Mock
     }
     const reservedClick = {
       schema: "2.0",
@@ -555,8 +557,9 @@ describe("createLarkAdapter", () => {
         transport: "long-connection",
       })
 
-    // Flag off (default): the reserved click terminates as unknown.
+    // Flag off (default): the recognized reserved click terminates as disabled.
     menuActions.handleMenuUnknownKey.mockClear()
+    menuActions.handleMenuDisabledKey.mockClear()
     let session = createFakeLongConnSession()
     mockListen.mockImplementation(session.listenImpl)
     let adapter = makeAdapter("lark-menu-batch-off")
@@ -567,16 +570,17 @@ describe("createLarkAdapter", () => {
     await new Promise((r) => setTimeout(r, 30))
     await adapter.stop()
     expect(emitted).toHaveLength(0)
-    expect(menuActions.handleMenuUnknownKey).toHaveBeenCalledTimes(1)
-    expect(menuActions.handleMenuUnknownKey.mock.calls[0][1]).toMatchObject({
-      kind: "unknown",
-      eventKey: "cognia.new_task",
-    })
+    expect(menuActions.handleMenuUnknownKey).not.toHaveBeenCalled()
+    expect(menuActions.handleMenuDisabledKey).toHaveBeenCalledWith(
+      "lark-menu-batch-off",
+      expect.objectContaining({ openId: "ou_user_777", eventId: "evt_menu_3" })
+    )
 
     // Flag on (env layer): the reserved slash runs through the normal path.
     process.env.COGNIA_LARK_NATIVE_SLASH = "1"
     try {
       menuActions.handleMenuUnknownKey.mockClear()
+      menuActions.handleMenuDisabledKey.mockClear()
       session = createFakeLongConnSession()
       mockListen.mockImplementation(session.listenImpl)
       adapter = makeAdapter("lark-menu-batch-on")
@@ -587,6 +591,7 @@ describe("createLarkAdapter", () => {
       await new Promise((r) => setTimeout(r, 30))
       await adapter.stop()
       expect(menuActions.handleMenuUnknownKey).not.toHaveBeenCalled()
+      expect(menuActions.handleMenuDisabledKey).not.toHaveBeenCalled()
       expect(emitted.length).toBeGreaterThanOrEqual(1)
       expect(emitted[0].plainText).toBe("/new")
     } finally {

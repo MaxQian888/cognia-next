@@ -174,7 +174,10 @@ pub struct IssueEntryInput {
     pub session_id: Option<String>,
 }
 
-pub fn issue_entry_token(secret: &[u8], input: &IssueEntryInput) -> Result<(String, String, i64), String> {
+pub fn issue_entry_token(
+    secret: &[u8],
+    input: &IssueEntryInput,
+) -> Result<(String, String, i64), String> {
     let now = now_secs();
     let jti = Uuid::new_v4().to_string();
     let claims = EntryClaims {
@@ -382,7 +385,10 @@ pub async fn login_handler(Query(query): Query<LoginQuery>) -> Response {
         return error_json(StatusCode::BAD_REQUEST, "sso_return_to_invalid");
     }
     let Some(base) = public_base() else {
-        return error_json(StatusCode::SERVICE_UNAVAILABLE, "sso_public_base_unconfigured");
+        return error_json(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "sso_public_base_unconfigured",
+        );
     };
     let app_id = match crate::connectors::keyring::get(&query.adapter_id, "appId") {
         Ok(Some(value)) if !value.is_empty() => value,
@@ -405,14 +411,27 @@ pub async fn login_handler(Query(query): Query<LoginQuery>) -> Response {
     );
 
     let redirect_uri = format!("{base}/integrations/lark/web/callback");
-    let authorize = format!(
-        "{LARK_AUTHORIZE_URL}?client_id={}&redirect_uri={}&state={}&code_challenge={}&code_challenge_method=S256",
-        urlencoding::encode(&app_id),
-        urlencoding::encode(&redirect_uri),
-        urlencoding::encode(&state_id),
-        urlencoding::encode(&challenge),
-    );
+    let authorize = build_authorize_url(&app_id, &redirect_uri, &state_id, &challenge);
     Redirect::temporary(&authorize).into_response()
+}
+
+/// Assemble the Lark authorize URL. Every value is percent-encoded by
+/// `query_pairs_mut`, so an app id or redirect URI carrying reserved
+/// characters cannot break out of its parameter.
+fn build_authorize_url(
+    app_id: &str,
+    redirect_uri: &str,
+    state_id: &str,
+    challenge: &str,
+) -> String {
+    let mut url = url::Url::parse(LARK_AUTHORIZE_URL).expect("LARK_AUTHORIZE_URL is a valid URL");
+    url.query_pairs_mut()
+        .append_pair("client_id", app_id)
+        .append_pair("redirect_uri", redirect_uri)
+        .append_pair("state", state_id)
+        .append_pair("code_challenge", challenge)
+        .append_pair("code_challenge_method", "S256");
+    url.into()
 }
 
 #[derive(Deserialize)]
@@ -486,7 +505,10 @@ pub async fn callback_handler(
     };
     let Some(base) = public_base() else {
         super::metrics::record_lark_counter("lark_sso_failures_total");
-        return error_json(StatusCode::SERVICE_UNAVAILABLE, "sso_public_base_unconfigured");
+        return error_json(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "sso_public_base_unconfigured",
+        );
     };
 
     let client = reqwest::Client::new();
@@ -568,7 +590,12 @@ pub async fn callback_handler(
     };
 
     super::metrics::record_lark_counter("lark_sso_logins_total");
-    let target = format!("{}{}#lark_session={}", web_base(), pending.return_to, session);
+    let target = format!(
+        "{}{}#lark_session={}",
+        web_base(),
+        pending.return_to,
+        session
+    );
     Redirect::temporary(&target).into_response()
 }
 
@@ -920,7 +947,8 @@ async fn fetch_jssdk_ticket(app_id: &str, app_secret: &str) -> Result<String, St
 /// SHA-1 hex of the JSSDK verify string — Lark's documented signature input.
 pub fn jssdk_signature(ticket: &str, nonce: &str, timestamp_ms: i64, url: &str) -> String {
     use sha1::{Digest, Sha1};
-    let verify = format!("jsapi_ticket={ticket}&noncestr={nonce}&timestamp={timestamp_ms}&url={url}");
+    let verify =
+        format!("jsapi_ticket={ticket}&noncestr={nonce}&timestamp={timestamp_ms}&url={url}");
     let digest = Sha1::digest(verify.as_bytes());
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
@@ -1042,10 +1070,7 @@ pub fn rpc_entry_issue(state: &SharedState, args: &Value) -> Result<Value, Strin
                 app_id: str_field("appId")?,
                 adapter_id: str_field("adapterId")?,
                 chat_id: str_field("chatId")?,
-                url_version: args
-                    .get("urlVersion")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(1) as u32,
+                url_version: args.get("urlVersion").and_then(Value::as_u64).unwrap_or(1) as u32,
                 surface_kind: str_field("surface")?,
             };
             let token = issue_surface_token(&secret, &input)?;
@@ -1165,7 +1190,10 @@ mod tests {
             PENDING_INTENTS.lock().get(&id),
             Some(IntentState::Pending { .. })
         ));
-        assert!(complete_intent(&id, Ok(json!({ "conversationKey": "lark:a:b" }))));
+        assert!(complete_intent(
+            &id,
+            Ok(json!({ "conversationKey": "lark:a:b" }))
+        ));
         assert!(matches!(
             PENDING_INTENTS.lock().get(&id),
             Some(IntentState::Done { .. })
@@ -1474,17 +1502,32 @@ mod tests {
 
     #[test]
     fn jssdk_signature_is_deterministic_sha1_hex() {
-        let sig = jssdk_signature("ticket_x", "nonce_y", 1_700_000_000_000, "https://a.example/p");
+        let sig = jssdk_signature(
+            "ticket_x",
+            "nonce_y",
+            1_700_000_000_000,
+            "https://a.example/p",
+        );
         assert_eq!(sig.len(), 40);
         assert!(sig.chars().all(|c| c.is_ascii_hexdigit()));
         // Same inputs → same signature; any field change → different.
         assert_eq!(
             sig,
-            jssdk_signature("ticket_x", "nonce_y", 1_700_000_000_000, "https://a.example/p")
+            jssdk_signature(
+                "ticket_x",
+                "nonce_y",
+                1_700_000_000_000,
+                "https://a.example/p"
+            )
         );
         assert_ne!(
             sig,
-            jssdk_signature("ticket_x", "nonce_y", 1_700_000_000_001, "https://a.example/p")
+            jssdk_signature(
+                "ticket_x",
+                "nonce_y",
+                1_700_000_000_001,
+                "https://a.example/p"
+            )
         );
     }
 
@@ -1501,5 +1544,27 @@ mod tests {
             let ok = good.starts_with('/') && !good.starts_with("//");
             assert!(ok, "{good} must be accepted");
         }
+    }
+
+    #[test]
+    fn authorize_url_percent_encodes_every_parameter() {
+        let url = build_authorize_url(
+            "cli_a1&b",
+            "https://host.example/integrations/lark/web/callback",
+            "state-1",
+            "chal+lenge/=",
+        );
+        assert!(url.starts_with(&format!("{LARK_AUTHORIZE_URL}?")));
+        // Reserved characters stay inside their own parameter.
+        assert!(url.contains("client_id=cli_a1%26b"), "{url}");
+        assert!(
+            url.contains(
+                "redirect_uri=https%3A%2F%2Fhost.example%2Fintegrations%2Flark%2Fweb%2Fcallback"
+            ),
+            "{url}"
+        );
+        assert!(url.contains("code_challenge=chal%2Blenge%2F%3D"), "{url}");
+        assert!(url.contains("state=state-1"), "{url}");
+        assert!(url.ends_with("&code_challenge_method=S256"), "{url}");
     }
 }

@@ -37,7 +37,7 @@ import {
 import { applyTenantKeyBackfill } from "./tenant-key-backfill"
 import { isLarkFeatureEnabled } from "@/lib/connectors/feature-flags"
 import { recordConnectorMetric } from "@/lib/connectors/metrics"
-import { handleMenuLink, handleMenuUnknownKey } from "./menu-actions"
+import { handleMenuDisabledKey, handleMenuLink, handleMenuUnknownKey } from "./menu-actions"
 import { reconcileChatTabSurface } from "./chat-tabs"
 import { reconcileGroupMenuSurface } from "./group-menu"
 import { sweepLarkChatSurfaces } from "./surface-sweep"
@@ -453,19 +453,16 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
           : undefined
         // Reserved cognia.* built-ins are the "command menu batch" — gated
         // per adapter (larkNativeSlash). Adapter-configured rows are never
-        // gated. Gated-off clicks get the same terminal notice as unknown
-        // keys so a menu published ahead of the gray flip stays explainable.
+        // gated. Gated-off clicks get a terminal disabled notice without
+        // polluting the unknown-key audit/metric.
         if (
           outcome.kind !== "unknown" &&
           outcome.builtIn &&
           !isLarkFeatureEnabled("larkNativeSlash", adapterRow)
         ) {
-          await handleMenuUnknownKey(opts.id, {
-            kind: "unknown",
+          await handleMenuDisabledKey(opts.id, {
             openId: outcome.openId,
-            eventKey: outcome.eventKey,
             eventId: outcome.eventId,
-            ...(outcome.identityScope ? { identityScope: outcome.identityScope } : {}),
           })
           return
         }

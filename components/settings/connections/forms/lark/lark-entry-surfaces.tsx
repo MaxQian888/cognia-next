@@ -23,7 +23,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { getDb } from "@/lib/db/schema"
-import { updateAdapterInstance } from "@/lib/db/adapter-instances"
+import { patchAdapterInstanceSettings } from "@/lib/db/adapter-instances"
 import { connectorsKeyringGet } from "@/lib/connectors/tauri/commands"
 import { resyncLarkChatSurfaces } from "@/lib/connectors/adapters/lark/surface-sweep"
 import {
@@ -63,6 +63,9 @@ export interface LarkEntrySurfacesProps {
 
 export function LarkEntrySurfaces({ adapterId }: LarkEntrySurfacesProps) {
   const t = useTranslations("settings.connections.lark.entrySurfaces")
+  const [webBaseDraft, setWebBaseDraft] = useState<{ adapterId: string; value: string } | null>(
+    null
+  )
   const [resyncState, setResyncState] = useState<
     | { phase: "idle" }
     | { phase: "running" }
@@ -89,9 +92,8 @@ export function LarkEntrySurfaces({ adapterId }: LarkEntrySurfacesProps) {
   const settings = row?.settings ?? {}
   const webBase = typeof settings.webEntryBaseUrl === "string" ? settings.webEntryBaseUrl : ""
 
-  const patchSettings = async (patch: Record<string, unknown>) => {
-    await updateAdapterInstance(adapterId, { settings: { ...settings, ...patch } })
-  }
+  const patchSettings = (patch: Record<string, unknown>) =>
+    patchAdapterInstanceSettings(adapterId, patch)
 
   const strictMode = getLarkStrictCallbackAuthorizationMode(row ?? undefined)
 
@@ -126,12 +128,28 @@ export function LarkEntrySurfaces({ adapterId }: LarkEntrySurfacesProps) {
           </Label>
           <Input
             id="lark-web-base"
-            defaultValue={webBase}
+            value={webBaseDraft?.adapterId === adapterId ? webBaseDraft.value : webBase}
+            disabled={!row}
             placeholder={t("webBasePlaceholder")}
+            onChange={(e) => setWebBaseDraft({ adapterId, value: e.target.value })}
             onBlur={(e) => {
               const next = e.target.value.trim()
               if (next !== webBase) {
-                void patchSettings({ webEntryBaseUrl: next || undefined })
+                void patchSettings({ webEntryBaseUrl: next || undefined }).then(
+                  () => {
+                    setWebBaseDraft((current) =>
+                      current?.adapterId === adapterId && current.value.trim() === next
+                        ? null
+                        : current
+                    )
+                  },
+                  () => {
+                    // Keep the user's draft visible for a retry; the stored
+                    // value was not changed and the rejection is handled.
+                  }
+                )
+              } else {
+                setWebBaseDraft(null)
               }
             }}
             data-testid="lark-web-base-input"

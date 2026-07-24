@@ -1,4 +1,9 @@
-import { handleMenuLink, handleMenuUnknownKey, type MenuActionDependencies } from "./menu-actions"
+import {
+  handleMenuDisabledKey,
+  handleMenuLink,
+  handleMenuUnknownKey,
+  type MenuActionDependencies,
+} from "./menu-actions"
 import { hashOpenId } from "@/lib/connectors/principal/resolve"
 
 const ADAPTER_ID = "lark-menu-1"
@@ -63,6 +68,19 @@ describe("handleMenuUnknownKey", () => {
     expect(job.request.segments[0].text).toContain("该菜单项尚未配置")
     expect(job.request.segments[0].text).toContain("isn't configured")
     expect(job.request.metadata.idempotencyKey).toBe(`menu-unknown:${ADAPTER_ID}:evt_1`)
+  })
+})
+
+describe("handleMenuDisabledKey", () => {
+  it("replies without recording an unmapped-key audit", async () => {
+    const d = deps()
+    await handleMenuDisabledKey(ADAPTER_ID, { openId: "ou_user_1", eventId: "evt_disabled" }, d)
+
+    expect(d.audit).not.toHaveBeenCalled()
+    expect(d.enqueue).toHaveBeenCalledTimes(1)
+    const job = d.enqueue.mock.calls[0][0]
+    expect(job.request.metadata.idempotencyKey).toBe(`menu-disabled:${ADAPTER_ID}:evt_disabled`)
+    expect(job.request.segments[0].text).toMatch(/currently disabled/)
   })
 })
 
