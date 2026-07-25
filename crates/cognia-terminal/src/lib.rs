@@ -28,6 +28,7 @@ pub mod osc633;
 pub mod path_scan;
 pub mod replay;
 pub mod session;
+pub mod ssh;
 
 use std::collections::HashMap;
 use std::sync::Arc;

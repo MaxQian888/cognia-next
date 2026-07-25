@@ -16,12 +16,12 @@
  * scope per the plan).
  */
 
-import type { TerminalSession } from "./session"
+import type { BaseTerminalSession } from "./base-session"
 
-const sessions = new Map<string, TerminalSession>()
+const sessions = new Map<string, BaseTerminalSession>()
 const listeners = new Set<() => void>()
 
-export function registerLiveSession(session: TerminalSession): void {
+export function registerLiveSession(session: BaseTerminalSession): void {
   sessions.set(session.id, session)
   notify()
 }
@@ -32,11 +32,11 @@ export function unregisterLiveSession(id: string): boolean {
   return removed
 }
 
-export function getLiveSession(id: string): TerminalSession | undefined {
+export function getLiveSession(id: string): BaseTerminalSession | undefined {
   return sessions.get(id)
 }
 
-export function listLiveSessions(): TerminalSession[] {
+export function listLiveSessions(): BaseTerminalSession[] {
   return Array.from(sessions.values())
 }
 

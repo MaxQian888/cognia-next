@@ -2507,6 +2507,20 @@ export interface AppSettings {
      */
     runInDockTimeoutSec?: number
     /**
+     * Saved SSH connection metadata. Authentication material is never stored
+     * here; `credentialRef` points at the native `cognia-ssh` keyring.
+     */
+    sshHosts?: Array<{
+      id: string
+      name: string
+      host: string
+      port: number
+      username: string
+      authMethod: "password" | "privateKey"
+      privateKeyPath?: string
+      credentialRef?: string
+    }>
+    /**
      * xterm.js cursor shape. Defaults to `"block"`. Mapped 1:1 to the
      * `cursorStyle` Terminal option.
      */

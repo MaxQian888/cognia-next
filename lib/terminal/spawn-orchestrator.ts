@@ -21,6 +21,7 @@
 
 import { getPluginEventHooks } from "@/lib/plugin"
 
+import type { BaseTerminalSession } from "./base-session"
 import { selectTerminalTransport } from "./pick-transport"
 import { TerminalSession } from "./session"
 import { registerLiveSession, unregisterLiveSession } from "./session-registry"
@@ -196,7 +197,7 @@ export async function spawnFromDock(input: SpawnFromDockInput): Promise<SpawnOut
  * path so a reattached session behaves identically to a fresh one.
  */
 export function wireSessionToStore(
-  session: TerminalSession,
+  session: BaseTerminalSession,
   store: TerminalStoreLike,
   hooks: ReturnType<typeof getPluginEventHooks> = getPluginEventHooks()
 ): void {
@@ -266,7 +267,7 @@ export function wireSessionToStore(
  *   3. PII check — lines that look like secrets are never persisted.
  */
 function persistCommandHistory(
-  session: TerminalSession,
+  session: BaseTerminalSession,
   store: TerminalStoreLike,
   cmd: string,
   exitCode: number | null
@@ -304,7 +305,7 @@ function persistCommandHistory(
  * surface as a terminal error.
  */
 function fanOutCommandTrigger(
-  session: TerminalSession,
+  session: BaseTerminalSession,
   store: TerminalStoreLike,
   cmd: string,
   exitCode: number | null,
@@ -400,7 +401,7 @@ export async function restartFromDock(input: {
  * pre-OSC 633 `E`. Handles BS/DEL for in-line edits; arrow-key edits
  * remain approximate.
  */
-function installCommandCapture(session: TerminalSession): {
+function installCommandCapture(session: BaseTerminalSession): {
   markCommandStart: () => void
   takeCapturedCommand: () => string
 } {
@@ -409,7 +410,7 @@ function installCommandCapture(session: TerminalSession): {
   let armed = false
 
   const originalWrite = session.write.bind(session)
-  ;(session as unknown as { write: TerminalSession["write"] }).write = async (data) => {
+  ;(session as unknown as { write: BaseTerminalSession["write"] }).write = async (data) => {
     const str = typeof data === "string" ? data : new TextDecoder().decode(data)
     for (let i = 0; i < str.length; i++) {
       const c = str.charCodeAt(i)

@@ -43,6 +43,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { FontFamilyPicker } from "@/components/settings/appearance/components/font-family-picker"
 import { TerminalFontPreview } from "./terminal-font-preview"
 import { TerminalProfiles } from "./terminal-profiles"
+import { SshHosts } from "./ssh-hosts"
 import { TerminalProjectOverride } from "./terminal-project-override"
 
 type TerminalSettings = NonNullable<
@@ -1087,6 +1088,8 @@ export function TerminalCard() {
       </Section>
 
       <TerminalProfiles />
+
+      <SshHosts />
 
       <TerminalProjectOverride />
     </div>

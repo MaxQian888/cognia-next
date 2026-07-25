@@ -24512,6 +24512,41 @@
         "helper": "Animate wheel and touchpad scrolling instead of jumping between terminal rows.",
         "label": "Smooth scrolling"
       },
+      "ssh": {
+        "add": "Add SSH host",
+        "auth": {
+          "password": "Password",
+          "privateKey": "Private key"
+        },
+        "connect": "Connect",
+        "connecting": "Connecting…",
+        "empty": "No SSH hosts saved yet.",
+        "fields": {
+          "authMethod": "Authentication method",
+          "credentialSaved": "Credential saved securely",
+          "host": "Host",
+          "hostPlaceholder": "server.example.com",
+          "name": "Display name",
+          "passphrase": "Key passphrase",
+          "passphraseOptional": "Key passphrase (optional)",
+          "password": "Password",
+          "port": "Port",
+          "privateKeyPath": "Private key path",
+          "privateKeyPathPlaceholder": "~/.ssh/id_ed25519",
+          "username": "Username"
+        },
+        "helper": "Credentials are stored in the system keyring. The first connection trusts and saves the host fingerprint; changed fingerprints are rejected.",
+        "newName": "New SSH host",
+        "remove": "Remove SSH host",
+        "title": "SSH hosts",
+        "toasts": {
+          "connectFailed": "SSH connection failed",
+          "credentialRequired": "Enter a password before connecting.",
+          "learned": "Connected and saved the host fingerprint",
+          "removeFailed": "Could not remove the SSH host",
+          "verified": "Connected with a verified host fingerprint"
+        }
+      },
       "stickyScroll": {
         "helper": "Pin the current command's prompt line at the top of the viewport while you scroll through its output.",
         "label": "Sticky scroll"

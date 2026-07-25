@@ -21,6 +21,9 @@ path = "src/lib.rs"
 [dependencies]
 # Sandbox launch policy (bwrap/sandbox-exec prefixes, dangerous-env filter).
 cognia-automation = { path = "../cognia-automation" }
+# SSH credentials are resolved inside the native process so passwords and
+# private-key passphrases never round-trip through the renderer.
+cognia-secrets = { path = "../cognia-secrets" }
 # perf span guards (terminal.exec).
 cognia-instrument = { path = "../cognia-instrument" }
 tauri = { version = "=2.11.1" }
@@ -32,6 +35,8 @@ tokio = { version = "1", features = ["process", "sync", "io-util", "time"] }
 uuid = { version = "1", features = ["v4", "v7"] }
 dirs = "6"
 log = "0.4"
+russh = { version = "=0.62.4", default-features = false, features = ["ring", "rsa"] }
+thiserror = "2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

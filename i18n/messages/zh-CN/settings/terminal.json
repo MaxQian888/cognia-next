@@ -220,6 +220,41 @@
     "helper": "向 bash / zsh / pwsh 注入 OSC 633 提示符标记，让面板能展示命令状态和 cwd 徽章。若 shell 会解析错误，请关闭。",
     "label": "启用 shell 集成"
   },
+  "ssh": {
+    "add": "添加 SSH 主机",
+    "auth": {
+      "password": "密码",
+      "privateKey": "私钥"
+    },
+    "connect": "连接",
+    "connecting": "连接中…",
+    "empty": "尚未保存 SSH 主机。",
+    "fields": {
+      "authMethod": "认证方式",
+      "credentialSaved": "凭据已安全保存",
+      "host": "主机",
+      "hostPlaceholder": "server.example.com",
+      "name": "显示名称",
+      "passphrase": "私钥口令",
+      "passphraseOptional": "私钥口令（可选）",
+      "password": "密码",
+      "port": "端口",
+      "privateKeyPath": "私钥路径",
+      "privateKeyPathPlaceholder": "~/.ssh/id_ed25519",
+      "username": "用户名"
+    },
+    "helper": "凭据保存在系统密钥环中。首次连接会信任并保存主机指纹；后续若指纹发生变化将拒绝连接。",
+    "newName": "新 SSH 主机",
+    "remove": "移除 SSH 主机",
+    "title": "SSH 主机",
+    "toasts": {
+      "connectFailed": "SSH 连接失败",
+      "credentialRequired": "连接前请输入密码。",
+      "learned": "已连接并保存主机指纹",
+      "removeFailed": "无法移除 SSH 主机",
+      "verified": "已通过主机指纹校验并连接"
+    }
+  },
   "stickyScroll": {
     "helper": "查看长输出时，将当前命令的提示符行固定在视口顶部。",
     "label": "粘性滚动"

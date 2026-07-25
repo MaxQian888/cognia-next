@@ -513,6 +513,7 @@ pub fn run() {
         // The store outlives the window; dropping it on app shutdown
         // cascades into per-session Drop kills.
         .manage(terminal::TerminalState::new())
+        .manage(terminal::ssh::SshTerminalState::new())
         // Headless (unattended) terminal sessions — workflow nodes running
         // shell lines with no visible dock tab. Independent of TerminalState
         // so dock listing / audit views never see them.
@@ -779,6 +780,10 @@ pub fn run() {
             terminal::commands::terminal_write,
             terminal::commands::terminal_resize,
             terminal::commands::terminal_kill,
+            terminal::ssh::ssh_terminal_spawn,
+            terminal::ssh::ssh_terminal_write,
+            terminal::ssh::ssh_terminal_resize,
+            terminal::ssh::ssh_terminal_kill,
             terminal::exec::terminal_exec,
             terminal::complete::terminal_complete_paths,
             terminal::path_scan::terminal_list_path_executables,
