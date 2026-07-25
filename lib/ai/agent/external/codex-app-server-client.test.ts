@@ -279,14 +279,33 @@ describe("CodexAppServerAdapter", () => {
       })
       feed("thread/tokenUsage/updated", {
         threadId: "thr_1",
-        usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+        turnId: "turn_1",
+        tokenUsage: {
+          total: {
+            inputTokens: 40,
+            cachedInputTokens: 12,
+            outputTokens: 9,
+            reasoningOutputTokens: 3,
+            totalTokens: 61,
+          },
+          last: {
+            inputTokens: 10,
+            cachedInputTokens: 2,
+            outputTokens: 5,
+            reasoningOutputTokens: 1,
+            totalTokens: 17,
+          },
+          modelContextWindow: 272_000,
+        },
       })
       feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
 
       const events: string[] = []
+      let doneUsage: unknown
       let r = await first
       while (!r.done) {
         events.push(r.value.type)
+        if (r.value.type === "done") doneUsage = r.value.tokenUsage
         r = await it.next()
       }
 
@@ -295,6 +314,15 @@ describe("CodexAppServerAdapter", () => {
       expect(events).toContain("message_end")
       const done = events[events.length - 1]
       expect(done).toBe("done")
+      expect(doneUsage).toEqual({
+        promptTokens: 10,
+        completionTokens: 5,
+        totalTokens: 17,
+        cacheReadTokens: 2,
+        reasoningTokens: 1,
+        contextTokens: 17,
+        modelContextWindow: 272_000,
+      })
 
       // turn/start was sent (no jsonrpc) with the user input.
       const turn = lastWritten((m) => m.method === "turn/start")!
@@ -1671,13 +1699,11 @@ describe("CodexAppServerAdapter", () => {
           },
         },
       })
-      // thread/start already carries the sandbox default.
+      // thread/start carries the sandbox default as the kebab-case `SandboxMode`
+      // STRING — not turn/start's tagged union. Sending the union here is a hard
+      // `-32600 unknown variant "type"` from the server.
       const started = lastWritten((m) => m.method === "thread/start")!
-      expect((started.params as { sandbox?: unknown }).sandbox).toEqual({
-        type: "workspaceWrite",
-        networkAccess: true,
-        writableRoots: ["/extra"],
-      })
+      expect((started.params as { sandbox?: unknown }).sandbox).toBe("workspace-write")
 
       const it = iterator(adapter, session.id, userMessage("go"))
       const first = it.next()
@@ -1707,6 +1733,66 @@ describe("CodexAppServerAdapter", () => {
       const turn = lastWritten((m) => m.method === "turn/start")!
       expect((turn.params as { sandboxPolicy?: unknown }).sandboxPolicy).toEqual({
         type: "readOnly",
+      })
+    })
+
+    it("sends the kebab-case SandboxMode string on thread/start, never the union", async () => {
+      const adapter = await connectedAdapter()
+      for (const [configured, wire] of [
+        ["readOnly", "read-only"],
+        ["workspaceWrite", "workspace-write"],
+        ["dangerFullAccess", "danger-full-access"],
+      ] as const) {
+        await adapter.createSession({ metadata: { codexOptions: { sandboxMode: configured } } })
+        const started = lastWritten((m) => m.method === "thread/start")!
+        expect((started.params as { sandbox?: unknown }).sandbox).toBe(wire)
+      }
+    })
+
+    it("forces full access in bypassPermissions, on both the thread and the turn", async () => {
+      const adapter = await connectedAdapter()
+      // A workspaceWrite sandbox is explicitly configured: bypass must override
+      // it. Otherwise Codex stops asking (approvalPolicy "never") but still
+      // blocks anything outside the workspace — "bypass" that silently fails.
+      const session = await adapter.createSession({
+        permissionMode: "bypassPermissions",
+        metadata: { codexOptions: { sandboxMode: "workspaceWrite" } },
+      })
+      const started = lastWritten((m) => m.method === "thread/start")!
+      expect(started.params).toMatchObject({
+        sandbox: "danger-full-access",
+        approvalPolicy: "never",
+      })
+
+      const it = iterator(adapter, session.id, userMessage("go"))
+      const first = it.next()
+      feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
+      let r = await first
+      while (!r.done) r = await it.next()
+      const turn = lastWritten((m) => m.method === "turn/start")!
+      expect(turn.params).toMatchObject({
+        sandboxPolicy: { type: "dangerFullAccess" },
+        approvalPolicy: "never",
+      })
+    })
+
+    it("relaxes the sandbox on the next turn after a mid-session switch to bypass", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession({
+        metadata: { codexOptions: { sandboxMode: "workspaceWrite" } },
+      })
+      // `/mode bypassPermissions` only mutates the live session's mode — the
+      // sandbox has to follow without a reconnect.
+      await adapter.setSessionMode(session.id, "bypassPermissions")
+      const it = iterator(adapter, session.id, userMessage("go"))
+      const first = it.next()
+      feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
+      let r = await first
+      while (!r.done) r = await it.next()
+      const turn = lastWritten((m) => m.method === "turn/start")!
+      expect(turn.params).toMatchObject({
+        sandboxPolicy: { type: "dangerFullAccess" },
+        approvalPolicy: "never",
       })
     })
   })

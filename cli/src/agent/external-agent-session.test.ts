@@ -714,6 +714,28 @@ describe("external-agent turn bounds", () => {
     )
   })
 
+  it("publishes the resolved tool-host projection to the capability owner", async () => {
+    const { manager } = fakeManager()
+    const onToolHostStatus = jest.fn()
+    const session = createExternalAgentSession({
+      disableToolHost: true,
+      config: baseConfig,
+      manager,
+      transcriptFs: memoryTranscript().fs,
+      onToolHostStatus,
+    })
+
+    await session.send("go", { gate: async () => ({ decision: "allow" }) })
+
+    expect(onToolHostStatus).toHaveBeenCalledWith(
+      expect.objectContaining({
+        backend: baseConfig.agentBackend,
+        attachable: false,
+        running: false,
+      })
+    )
+  })
+
   it("projects tool and usage actions into CaptureStreamEvents for the readline chat", async () => {
     const manager: ExternalAgentSessionManager = {
       addAgent: jest.fn(async () => undefined),
@@ -1016,6 +1038,9 @@ describe("external-agent turn bounds", () => {
         totalTokens: 5,
         cacheReadTokens: 7,
         cacheWriteTokens: 9,
+        reasoningTokens: 1,
+        contextTokens: 120_000,
+        modelContextWindow: 272_000,
       },
     })
     const session = createExternalAgentSession({
@@ -1027,7 +1052,13 @@ describe("external-agent turn bounds", () => {
 
     const turn = await session.send("go", { gate: async () => ({ decision: "allow" }) })
 
-    expect(turn.usage).toMatchObject({ cacheReadInputTokens: 7, cacheCreationInputTokens: 9 })
+    expect(turn.usage).toMatchObject({
+      cacheReadInputTokens: 7,
+      cacheCreationInputTokens: 9,
+      reasoningTokens: 1,
+      contextTokens: 120_000,
+      contextWindow: 272_000,
+    })
     // "auto" is a CLI-side alias the ACP contract does not know about.
     expect(getExecuteOptions()?.permissionMode).toBe("default")
   })

@@ -297,3 +297,35 @@ describe("SelectList — wrapped-row viewport", () => {
     expect(frame).toContain("three")
   })
 })
+
+describe("per-row colour", () => {
+  const rowFor = (container: HTMLElement, label: string) =>
+    Array.from(container.querySelectorAll('[data-ink="text"]')).find((n) =>
+      (n.textContent ?? "").includes(label)
+    )
+
+  it("colours an unhighlighted row from item.color", () => {
+    const { container } = render(
+      <SelectList
+        items={[{ label: "safe" }, { label: "risky", color: "red" }]}
+        index={0}
+        onMove={() => {}}
+        onSelect={() => {}}
+      />
+    )
+    expect(rowFor(container, "risky")?.getAttribute("data-color")).toBe("red")
+    expect(rowFor(container, "safe")?.getAttribute("data-color")).toBe("cyan")
+  })
+
+  it("lets the highlight win, so the cursor stays legible on a coloured row", () => {
+    const { container } = render(
+      <SelectList
+        items={[{ label: "safe" }, { label: "risky", color: "red" }]}
+        index={1}
+        onMove={() => {}}
+        onSelect={() => {}}
+      />
+    )
+    expect(rowFor(container, "risky")?.getAttribute("data-color")).not.toBe("red")
+  })
+})

@@ -58,6 +58,16 @@ export interface ProviderOption {
   configured: boolean
   /** "subscription" | "api key" | "no credential". */
   auth: string
+  /**
+   * Whether this provider authenticates with a metered API key (catalog
+   * `apiKeyRequired`). Drives the picker's "prompt for a key" affordance: a
+   * key-required provider with no credential opens the inline key prompt on
+   * select, while key-less providers (local runtimes, OAuth/subscription) just
+   * switch. Unknown/custom ids default to `true` — they need *some* credential.
+   */
+  requiresKey: boolean
+  /** Where the user obtains a key (catalog dashboard/docs URL), when known. */
+  keyUrl?: string
 }
 
 export function collectProviderOptions(config: ResolvedConfig): ProviderOption[] {
@@ -71,11 +81,15 @@ export function collectProviderOptions(config: ResolvedConfig): ProviderOption[]
   for (const id of KNOWN_PROVIDERS) add(id)
   return ids.map((id) => {
     const p = config.providers[id]
+    const cat = PROVIDERS[id]
+    const keyUrl = cat?.dashboardUrl ?? cat?.docsUrl
     return {
       id,
-      name: PROVIDERS[id]?.name ?? id,
+      name: cat?.name ?? id,
       configured: Boolean(p?.apiKey || p?.authToken),
       auth: providerAuthMode(config, id),
+      requiresKey: cat?.apiKeyRequired ?? true,
+      ...(keyUrl ? { keyUrl } : {}),
     }
   })
 }

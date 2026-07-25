@@ -29,6 +29,15 @@ describe("contextTokens", () => {
   it("is 0 for undefined usage", () => {
     expect(contextTokens(undefined)).toBe(0)
   })
+  it("prefers the external agent's authoritative live-context count", () => {
+    expect(
+      contextTokens({
+        inputTokens: 100,
+        cacheReadInputTokens: 50,
+        contextTokens: 120_000,
+      })
+    ).toBe(120_000)
+  })
 })
 
 describe("contextPercent", () => {

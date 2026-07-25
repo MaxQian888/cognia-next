@@ -589,6 +589,7 @@ export async function runRuntimeRequest(
         sessionId: deps.sessionId,
         usage: deps.usage,
         contextWindow: deps.contextWindow,
+        ...(deps.capabilities?.presetId ? { presetId: deps.capabilities.presetId } : {}),
       })
     case "tasks": {
       const tk = { dispatch }

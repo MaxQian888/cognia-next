@@ -95,6 +95,7 @@ export function accumulateModelTotals(
 /** Tokens currently occupying the context window (the prompt side of a turn). */
 export function contextTokens(usage: UsageInfo | undefined): number {
   if (!usage) return 0
+  if (usage.contextTokens !== undefined) return usage.contextTokens
   return (
     (usage.inputTokens ?? 0) +
     (usage.cacheReadInputTokens ?? 0) +

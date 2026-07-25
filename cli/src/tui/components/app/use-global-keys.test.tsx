@@ -18,6 +18,7 @@ import type { ScrollController } from "../../hooks/useScroll"
 import type { TranscriptCursor } from "../../hooks/useTranscriptCursor"
 import type { AgentSessionApi } from "../../hooks/useAgentSession"
 import type { AskUserOverlayApi } from "../../hooks/use-ask-user-overlay"
+import type { SelectionController } from "../../selection/selection-controller"
 
 jest.mock("../../input/element-position", () => ({ absoluteTopLeft: jest.fn(() => null) }))
 const mockPos = absoluteTopLeft as jest.Mock
@@ -33,6 +34,11 @@ function buildDeps(over: Partial<GlobalKeysDeps> = {}): GlobalKeysDeps {
     busy: false,
     fullscreen: false,
     mouseMode: "scroll",
+    selectionMode: "off",
+    selection: { current: null },
+    screenRows: () => [],
+    fileExists: () => false,
+    openFileAt: jest.fn(),
     notices: resolveNotices(undefined),
     keybindings: resolveKeybindings(undefined),
     renderPrefs: resolveRenderConfig(undefined),
@@ -48,7 +54,6 @@ function buildDeps(over: Partial<GlobalKeysDeps> = {}): GlobalKeysDeps {
     copyClipboard: jest.fn(async () => ({ ok: true }) as never),
     runCommandLine: jest.fn(),
     openModelPicker: jest.fn(),
-    persist: jest.fn(() => true),
     pasteClipboardImage: jest.fn(async () => {}),
     scrollReset: jest.fn(),
     disarmBacktrack: jest.fn(),
@@ -154,19 +159,23 @@ describe("useGlobalKeys", () => {
     expect(deps.dispatch).toHaveBeenCalledWith({ type: "TOGGLE_COLLAPSE_ALL" })
   })
 
-  it("cycles the permission mode on Shift+Tab and notices what runs without asking", () => {
+  // Shift+Tab no longer persists/switches inline: it runs `/mode <next>` so the
+  // persist + notice + danger-tier acknowledgement have ONE implementation.
+  it("cycles the permission mode on Shift+Tab through the command path", () => {
     const deps = buildDeps()
     render(<Harness deps={deps} />)
     act(() => __fireInput("", { tab: true, shift: true }))
-    expect(deps.persist).toHaveBeenCalledWith("permissionMode", expect.any(String))
-    expect(deps.agent.switchMode).toHaveBeenCalled()
-    // The notice carries the mode plus its one-line "runs without asking" summary,
-    // and only ever cycles into a safe-core mode (never a power mode).
-    const notice = (deps.dispatch as jest.Mock).mock.calls
-      .map((c) => c[0])
-      .find((a: { type: string }) => a.type === "NOTICE") as { message: string } | undefined
-    expect(notice?.message).toMatch(/Permission mode: (default|acceptEdits|plan) —/)
-    expect(notice?.message).not.toMatch(/bypassPermissions|dontAsk/)
+    expect(deps.runCommandLine).toHaveBeenCalledWith("/mode acceptEdits")
+  })
+
+  it("cycles into bypassPermissions at the end of the cycle (the confirm gates it)", () => {
+    const base = createInitialState(config, "s1", true, [])
+    const deps = buildDeps({
+      state: { ...base, config: { ...base.config, permissionMode: "plan" } } as TuiState,
+    })
+    render(<Harness deps={deps} />)
+    act(() => __fireInput("", { tab: true, shift: true }))
+    expect(deps.runCommandLine).toHaveBeenCalledWith("/mode bypassPermissions")
   })
 })
 
@@ -244,5 +253,219 @@ describe("running-agents tree clicks", () => {
     expect(deps.dispatch).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: "OVERLAY_OPEN" })
     )
+  })
+})
+
+/** A stub selection controller that records what the key handler asked it to do. */
+function fakeSelection(over: Partial<SelectionController> = {}) {
+  return {
+    handleMouse: jest.fn(() => false),
+    hasSelection: jest.fn(() => false),
+    copySelection: jest.fn(() => false),
+    clear: jest.fn(() => false),
+    dispose: jest.fn(),
+    ...over,
+  } satisfies SelectionController
+}
+
+describe("useGlobalKeys — text selection", () => {
+  it("routes mouse events to the selection controller and stops when it consumes one", () => {
+    const selection = fakeSelection({ handleMouse: jest.fn(() => true) })
+    const deps = buildDeps({
+      fullscreen: true,
+      selectionMode: "auto-copy",
+      selection: { current: selection },
+      scroll: { lineUp: jest.fn(), lineDown: jest.fn() } as unknown as ScrollController,
+    })
+    render(<Harness deps={deps} />)
+    // A wheel notch the selection claims must NOT also scroll the transcript.
+    act(() => __fireInput("[<64;5;3M"))
+    expect(selection.handleMouse).toHaveBeenCalledWith({ kind: "wheel", dir: "up" })
+    expect(deps.scroll.lineUp).not.toHaveBeenCalled()
+  })
+
+  it("lets an unclaimed wheel notch keep scrolling the transcript", () => {
+    const selection = fakeSelection()
+    const deps = buildDeps({
+      fullscreen: true,
+      selection: { current: selection },
+      scroll: { lineUp: jest.fn(), lineDown: jest.fn() } as unknown as ScrollController,
+    })
+    render(<Harness deps={deps} />)
+    act(() => __fireInput("[<64;5;3M"))
+    expect(deps.scroll.lineUp).toHaveBeenCalled()
+  })
+
+  it("Esc clears a live selection instead of interrupting", () => {
+    const selection = fakeSelection({ clear: jest.fn(() => true) })
+    const deps = buildDeps({
+      fullscreen: true,
+      busy: true,
+      selection: { current: selection },
+      agent: { abort: jest.fn(), switchMode: jest.fn() } as unknown as AgentSessionApi,
+    })
+    render(<Harness deps={deps} />)
+    act(() => __fireInput("", { escape: true }))
+    expect(selection.clear).toHaveBeenCalled()
+    expect(deps.agent.abort).not.toHaveBeenCalled()
+  })
+
+  it("Esc falls through to the interrupt when nothing is selected", () => {
+    const selection = fakeSelection()
+    const deps = buildDeps({
+      fullscreen: true,
+      busy: true,
+      selection: { current: selection },
+      agent: { abort: jest.fn(), switchMode: jest.fn() } as unknown as AgentSessionApi,
+    })
+    render(<Harness deps={deps} />)
+    act(() => __fireInput("", { escape: true }))
+    expect(deps.agent.abort).toHaveBeenCalled()
+  })
+
+  it("the copy chord copies the selection", () => {
+    const selection = fakeSelection({ copySelection: jest.fn(() => true) })
+    const deps = buildDeps({ selection: { current: selection } })
+    render(<Harness deps={deps} />)
+    act(() => __fireInput("s", { ctrl: true }))
+    expect(selection.copySelection).toHaveBeenCalled()
+    expect(deps.dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining("Nothing selected") })
+    )
+  })
+
+  it("the copy chord says so when nothing is selected", () => {
+    const deps = buildDeps({ selection: { current: fakeSelection() } })
+    render(<Harness deps={deps} />)
+    act(() => __fireInput("s", { ctrl: true }))
+    expect(deps.dispatch).toHaveBeenCalledWith({
+      type: "NOTICE",
+      message: resolveNotices(undefined).noSelectionToCopy,
+    })
+  })
+})
+
+describe("useGlobalKeys — Ctrl+click smart action", () => {
+  const ROWS = ["edited src/app.ts:12 today", "https://example.com/x", "just prose here"]
+
+  function clickDeps(over: Partial<GlobalKeysDeps> = {}) {
+    return buildDeps({
+      fullscreen: true,
+      screenRows: () => ROWS,
+      fileExists: (candidate) => candidate === "src/app.ts",
+      openFileAt: jest.fn(),
+      ...over,
+    })
+  }
+
+  it("opens the file under the pointer, with its line", () => {
+    const deps = clickDeps()
+    render(<Harness deps={deps} />)
+    // Ctrl+click (button 16) at row 1, col 11 → inside "src/app.ts:12".
+    act(() => __fireInput("[<16;11;1M"))
+    expect(deps.openFileAt).toHaveBeenCalledWith("src/app.ts", 12, undefined)
+  })
+
+  it("copies the URL under the pointer", () => {
+    const deps = clickDeps()
+    render(<Harness deps={deps} />)
+    act(() => __fireInput("[<16;5;2M"))
+    expect(deps.copyClipboard).toHaveBeenCalledWith("https://example.com/x")
+    expect(deps.openFileAt).not.toHaveBeenCalled()
+  })
+
+  it("falls back to copying the whole row", () => {
+    const deps = clickDeps()
+    render(<Harness deps={deps} />)
+    act(() => __fireInput("[<16;3;3M"))
+    expect(deps.copyClipboard).toHaveBeenCalledWith("just prose here")
+  })
+
+  it("ignores a Ctrl+click on a row the frame does not have", () => {
+    const deps = clickDeps()
+    render(<Harness deps={deps} />)
+    act(() => __fireInput("[<16;3;9M"))
+    expect(deps.copyClipboard).not.toHaveBeenCalled()
+    expect(deps.openFileAt).not.toHaveBeenCalled()
+  })
+
+  it("leaves a plain (unmodified) click to the existing handlers", () => {
+    const deps = clickDeps()
+    render(<Harness deps={deps} />)
+    act(() => __fireInput("[<0;11;1M"))
+    expect(deps.openFileAt).not.toHaveBeenCalled()
+    expect(deps.copyClipboard).not.toHaveBeenCalled()
+  })
+})
+
+describe("useGlobalKeys — copy family and mode chords", () => {
+  const cells = [
+    { id: "u1", kind: "user" as const, text: "my question" },
+    { id: "a1", kind: "assistant" as const, raw: "an answer\n\n```ts\nconst x = 1\n```" },
+  ]
+
+  function withCells(over: Partial<GlobalKeysDeps> = {}) {
+    const base = createInitialState(config, "s1", true, [])
+    return buildDeps({ state: { ...base, cells } as TuiState, ...over })
+  }
+
+  it("Ctrl+X Ctrl+U copies the last user message", () => {
+    const deps = withCells()
+    render(<Harness deps={deps} />)
+    act(() => __fireInput("x", { ctrl: true }))
+    act(() => __fireInput("u", { ctrl: true }))
+    expect(deps.copyClipboard).toHaveBeenCalledWith("my question")
+  })
+
+  it("Ctrl+X Ctrl+B copies the last code block", () => {
+    const deps = withCells()
+    render(<Harness deps={deps} />)
+    act(() => __fireInput("x", { ctrl: true }))
+    act(() => __fireInput("b", { ctrl: true }))
+    expect(deps.copyClipboard).toHaveBeenCalledWith("const x = 1")
+  })
+
+  it("Ctrl+X Ctrl+A copies the whole conversation as markdown", () => {
+    const deps = withCells()
+    render(<Harness deps={deps} />)
+    act(() => __fireInput("x", { ctrl: true }))
+    act(() => __fireInput("a", { ctrl: true }))
+    const copied = (deps.copyClipboard as jest.Mock).mock.calls[0][0] as string
+    expect(copied).toContain("## User\n\nmy question")
+    expect(copied).toContain("## Assistant")
+  })
+
+  it("reports when there is nothing to copy", () => {
+    const deps = buildDeps()
+    render(<Harness deps={deps} />)
+    act(() => __fireInput("x", { ctrl: true }))
+    act(() => __fireInput("u", { ctrl: true }))
+    expect(deps.copyClipboard).not.toHaveBeenCalled()
+    expect(deps.dispatch).toHaveBeenCalledWith({
+      type: "NOTICE",
+      message: resolveNotices(undefined).noUserMessageToCopy,
+    })
+  })
+
+  it("Ctrl+X Ctrl+P swaps the mouse model", () => {
+    const deps = buildDeps({ mouseMode: "scroll" })
+    render(<Harness deps={deps} />)
+    act(() => __fireInput("x", { ctrl: true }))
+    act(() => __fireInput("p", { ctrl: true }))
+    expect(deps.runCommandLine).toHaveBeenCalledWith("/mouse select")
+  })
+
+  it("Ctrl+X Ctrl+S cycles the selection mode and wraps around", () => {
+    const off = buildDeps({ selectionMode: "off" })
+    render(<Harness deps={off} />)
+    act(() => __fireInput("x", { ctrl: true }))
+    act(() => __fireInput("s", { ctrl: true }))
+    expect(off.runCommandLine).toHaveBeenCalledWith("/select manual")
+
+    const last = buildDeps({ selectionMode: "auto-copy" })
+    render(<Harness deps={last} />)
+    act(() => __fireInput("x", { ctrl: true }))
+    act(() => __fireInput("s", { ctrl: true }))
+    expect(last.runCommandLine).toHaveBeenCalledWith("/select off")
   })
 })

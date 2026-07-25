@@ -18,7 +18,7 @@ import { createExternalAgentSession } from "../agent/external-agent-session"
 import type { ResolvedConfig } from "../config/schema"
 import { createPermissionGate } from "../agent/permission-gate"
 import { maybePushHandoff as defaultPushHandoff } from "./handoff-cmd"
-import { runFlagsToOverrides } from "./run-command"
+import { bypassRequested, runFlagsToOverrides } from "./run-command"
 import { boolFlag, type ParsedArgs } from "./args"
 import { realOutput, type OutputSink } from "./output"
 
@@ -96,6 +96,7 @@ export interface ChatDeps {
     createExternalSession: typeof createExternalAgentSession
     pushHandoff: (sessionId: string) => void | Promise<void>
     initialCommand?: string
+    sessionOnlyPermissionMode?: ResolvedConfig["permissionMode"]
   }) => Promise<number>
 }
 
@@ -143,6 +144,7 @@ export async function chatCommand(args: ParsedArgs, deps: ChatDeps = {}): Promis
         void pushHandoff(sessionId, undefined, { out })
       },
       initialCommand,
+      ...(bypassRequested(args) ? { sessionOnlyPermissionMode: "bypassPermissions" } : {}),
     })
   }
   // The readline fallback has no session store — resuming needs the TUI.

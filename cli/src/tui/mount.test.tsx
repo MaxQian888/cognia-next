@@ -57,11 +57,22 @@ describe("renderTui", () => {
     expect(mountedSessionId).toBe("ses-abc")
   })
 
-  it("threads the launch-flag initial command through to the app element", async () => {
-    let mounted: string | undefined
+  it("threads launch-only options through to the app element", async () => {
+    let mounted:
+      | { initialCommand?: string; sessionOnlyPermissionMode?: ResolvedConfig["permissionMode"] }
+      | undefined
     const render = jest.fn(
-      (element: { props: { children: { props: { initialCommand?: string } } } }) => {
-        mounted = element.props.children.props.initialCommand
+      (element: {
+        props: {
+          children: {
+            props: {
+              initialCommand?: string
+              sessionOnlyPermissionMode?: ResolvedConfig["permissionMode"]
+            }
+          }
+        }
+      }) => {
+        mounted = element.props.children.props
         return {
           unmount: jest.fn(),
           waitUntilExit: () => Promise.resolve(),
@@ -71,8 +82,16 @@ describe("renderTui", () => {
         }
       }
     ) as never
-    await renderTui({ config, initialCommand: "/continue", render })
-    expect(mounted).toBe("/continue")
+    await renderTui({
+      config,
+      initialCommand: "/continue",
+      sessionOnlyPermissionMode: "bypassPermissions",
+      render,
+    })
+    expect(mounted).toMatchObject({
+      initialCommand: "/continue",
+      sessionOnlyPermissionMode: "bypassPermissions",
+    })
   })
 
   it("backfills the active model so the banner matches the model the agent runs", async () => {

@@ -130,4 +130,59 @@ describe("runInstall", () => {
       signal: null,
     })
   })
+
+  it("passes an explicit env and cwd through to the spawner", async () => {
+    const child = fakeChild()
+    const spawnFn = jest.fn(() => child) as unknown as typeof import("node:child_process").spawn
+    const run = runInstall({
+      method,
+      spawnFn,
+      env: { NODE_ENV: "test", PATH: "/x" } as NodeJS.ProcessEnv,
+      cwd: "/work",
+    })
+    child.emit("exit", 0, null)
+    await run
+    expect(spawnFn).toHaveBeenCalledWith(
+      "npm",
+      method.args,
+      expect.objectContaining({ cwd: "/work", env: { NODE_ENV: "test", PATH: "/x" } })
+    )
+  })
+
+  it("stringifies a non-Error emitted on the child", async () => {
+    const child = fakeChild()
+    const spawnFn = jest.fn(() => child) as unknown as typeof import("node:child_process").spawn
+    const lines: string[] = []
+    const run = runInstall({ method, spawnFn, onLine: (line) => lines.push(line) })
+    child.emit("error", "raw-string-error")
+    await expect(run).resolves.toEqual({ ok: false, exitCode: null, signal: null })
+    expect(lines).toContain("raw-string-error")
+  })
+
+  it("tolerates a child missing its stdout/stderr streams", async () => {
+    const child = new EventEmitter() as EventEmitter & { stdout: null; stderr: null }
+    child.stdout = null
+    child.stderr = null
+    const spawnFn = jest.fn(() => child) as unknown as typeof import("node:child_process").spawn
+    const run = runInstall({ method, spawnFn })
+    child.emit("exit", 0, null)
+    await expect(run).resolves.toEqual({ ok: true, exitCode: 0, signal: null })
+  })
+
+  it("spawns for real with the default runner and enriched PATH", async () => {
+    // No `spawnFn` / `env` → exercises the default node spawn and the
+    // enriched-PATH env, end to end, with a trivial process.
+    const result = await runInstall({
+      method: {
+        kind: "npm",
+        label: "node",
+        display: "node -e",
+        command: process.execPath,
+        args: ["-e", "process.stdout.write('ok\\n')"],
+        requires: [],
+      },
+      onLine: () => {},
+    })
+    expect(result).toEqual({ ok: true, exitCode: 0, signal: null })
+  })
 })

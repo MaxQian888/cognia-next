@@ -17,6 +17,7 @@ import {
   CLIPBOARD_OSC52_MODES,
   DEFAULT_COAUTHOR_TRAILER,
   DEFAULT_MOUSE_MODE,
+  DEFAULT_SELECTION_MODE,
   DEFAULT_OSC52_MAX_BYTES,
   DEFAULT_PR_FOOTER,
   MASCOT_STYLES,
@@ -31,6 +32,12 @@ import {
   type ResolvedRenderConfig,
 } from "../../config/schema"
 import { DEFAULT_LAYOUT } from "../layout-mode"
+import {
+  supportsFeature,
+  unsupportedFeatureMessage,
+  type BackendCapabilities,
+  type BackendFeature,
+} from "./backend-capabilities"
 import type { BuiltinToolsConfig } from "@cognia/agent-config-types"
 import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 import { BUILTIN_HOOKS } from "@/lib/claude/hooks/builtin-hooks"
@@ -115,6 +122,15 @@ export interface SettingsRow {
   control: SettingsControl
   /** One-line help shown for the focused row (the panel's description strip). */
   description?: string
+  /**
+   * Why this row cannot be used on the ACTIVE backend, when it cannot.
+   *
+   * Set rather than hiding the row: a setting that vanishes on Codex reads as a
+   * missing feature, while one that says "unavailable on codex — the agent
+   * protocol has no equivalent" tells the user what is actually going on. The
+   * row still activates; its command re-states the same reason.
+   */
+  unavailable?: string
 }
 
 export interface SettingsSectionView {
@@ -182,10 +198,23 @@ const BUILTIN_TOOL_ROWS: { key: keyof BuiltinToolsConfig; label: string; desc: s
 /**
  * Build the full settings panel model from the resolved config. Every section is
  * always present (stable order) so the panel layout is deterministic.
+ *
+ * `capabilities` describes the backend actually answering. Rows whose setting
+ * cannot reach that backend are marked {@link SettingsRow.unavailable} with the
+ * reason — the panel used to present every row as live regardless of who was
+ * hosting, so on Codex a user could change a value that went nowhere.
  */
-export function settingsSections(config: ResolvedConfig): SettingsSectionView[] {
+export function settingsSections(
+  config: ResolvedConfig,
+  capabilities?: BackendCapabilities
+): SettingsSectionView[] {
   const mascotEnabled = config.mascot?.enabled !== false
   const statusTheme = config.statusBar?.theme ?? "default"
+  /** The reason a feature is unreachable here, or undefined when it is fine. */
+  const blocked = (feature: BackendFeature): string | undefined =>
+    supportsFeature(capabilities, feature)
+      ? undefined
+      : unsupportedFeatureMessage(capabilities, feature)
 
   const model: SettingsSectionView = {
     id: "model",
@@ -204,6 +233,10 @@ export function settingsSections(config: ResolvedConfig): SettingsSectionView[] 
         value: config.model ?? "default",
         control: { type: "delegate", command: "/model" },
         description: "The model id used for your turns (opens the model picker).",
+        ...(() => {
+          const reason = blocked("modelPicker")
+          return reason ? { unavailable: reason } : {}
+        })(),
       },
       {
         id: "mode",
@@ -219,6 +252,10 @@ export function settingsSections(config: ResolvedConfig): SettingsSectionView[] 
         control: { type: "delegate", command: "/think" },
         description:
           "Reasoning effort forwarded to the model (off → max; ultracode also enables workflow tools).",
+        ...(() => {
+          const reason = blocked("thinking")
+          return reason ? { unavailable: reason } : {}
+        })(),
       },
       {
         id: "subagentModels",
@@ -229,6 +266,10 @@ export function settingsSections(config: ResolvedConfig): SettingsSectionView[] 
         })(),
         control: { type: "delegate", command: "/agents models" },
         description: "Assign a provider/model to each dispatchable subagent.",
+        ...(() => {
+          const reason = blocked("subagentModels")
+          return reason ? { unavailable: reason } : {}
+        })(),
       },
     ],
   }
@@ -655,6 +696,14 @@ export function settingsSections(config: ResolvedConfig): SettingsSectionView[] 
         control: { type: "delegate", command: "/mouse" },
         description:
           "Wheel-scroll the transcript vs native click-drag text selection (fullscreen).",
+      },
+      {
+        id: "selection",
+        label: "Drag to select",
+        value: config.selection ?? DEFAULT_SELECTION_MODE,
+        control: { type: "delegate", command: "/select" },
+        description:
+          "In-app text selection over the rendered frame; auto-copy puts it on the clipboard on release.",
       },
       {
         id: "vim",

@@ -35,6 +35,7 @@ import {
   onExternalAgentExit,
 } from "@/lib/native/external-agent"
 import { BaseProtocolAdapter, type SessionCreateOptions } from "./protocol-adapter"
+import { withCodexMcpServers } from "./codex-mcp-config"
 import { JsonRpcPeer } from "./json-rpc-peer"
 import { buildAgentEnv } from "./env-builder"
 import { spawnReclaimingOrphan } from "./spawn-reclaim"
@@ -72,15 +73,23 @@ const HEALTH_PROBE_TIMEOUT_MS = 5000
 // Codex app-server wire types (local — kept out of the public type surface)
 // ============================================================================
 
-// Wire-format ground truth: verified against `codex app-server generate-json-schema`
-// (codex-cli 0.144.4). Key invariants encoded below:
-// - `approvalPolicy` (AskForApproval) is kebab-case: "untrusted" | "on-failure" |
-//   "on-request" | "never".
-// - `sandboxPolicy` is a `type`-tagged camelCase union (see CodexSandboxPolicy).
+// Wire-format ground truth: verified against `codex app-server generate-json-schema
+// --out <dir>` (codex-cli 0.145.0). Key invariants encoded below:
+// - `approvalPolicy` (AskForApproval) is kebab-case: "untrusted" | "on-request" |
+//   "never" (or a `{ granular: … }` object we don't emit).
+// - THE SANDBOX HAS TWO DIFFERENT SHAPES, and conflating them is a hard
+//   `-32600 Invalid request` at the JSON-RPC boundary:
+//     · `thread/start` + `thread/resume` take `sandbox`: a plain kebab-case
+//       `SandboxMode` STRING — "read-only" | "workspace-write" |
+//       "danger-full-access" (see CodexSandboxModeWire).
+//     · `turn/start` takes `sandboxPolicy`: the `type`-tagged camelCase
+//       `SandboxPolicy` UNION (see CodexSandboxPolicy), which is the only one of
+//       the two that can carry writableRoots / networkAccess.
+//   Sending the union to `thread/start` makes serde read the object's `type` key
+//   as the enum variant and fail with "unknown variant `type`".
 // - `effort` is a free-form model-advertised string; `summary` is
 //   "auto" | "concise" | "detailed" | "none".
-// - `thread/start` accepts `developerInstructions` (system-prompt channel) and
-//   `sandbox` (same SandboxPolicy union as turn/start's `sandboxPolicy`).
+// - `thread/start` also accepts `developerInstructions` (system-prompt channel).
 
 /** A user input item for `thread/start` / `turn/start`. */
 type CodexUserInput =
@@ -92,8 +101,28 @@ type CodexUserInput =
 type CodexCommandDecision = "accept" | "acceptForSession" | "decline" | "cancel"
 type CodexFileChangeDecision = "accept" | "acceptForSession" | "decline" | "cancel"
 
-/** Sandbox modes the client exposes (externalSandbox is server-managed only). */
+/** Sandbox modes the client exposes (externalSandbox is server-managed only).
+ *  This is the CAMEL-CASE id carried in session metadata / `codexOptions` — the
+ *  session-config picker and the settings UI both speak it. It is NOT the wire
+ *  spelling for `thread/start`; {@link toWireSandboxMode} maps it. */
 export type CodexSandboxMode = "readOnly" | "workspaceWrite" | "dangerFullAccess"
+
+/** `SandboxMode` as serialized on `thread/start` / `thread/resume` — a plain
+ *  kebab-case string enum, NOT the tagged union `turn/start` takes. */
+export type CodexSandboxModeWire = "read-only" | "workspace-write" | "danger-full-access"
+
+const SANDBOX_MODE_WIRE: Record<CodexSandboxMode, CodexSandboxModeWire> = {
+  readOnly: "read-only",
+  workspaceWrite: "workspace-write",
+  dangerFullAccess: "danger-full-access",
+}
+
+/** Map a metadata sandbox mode onto its `thread/start` wire spelling. Returns
+ *  undefined for an unset/unknown value so the param is simply omitted and Codex
+ *  keeps its own `config.toml` default. */
+export function toWireSandboxMode(mode: string | undefined): CodexSandboxModeWire | undefined {
+  return mode && mode in SANDBOX_MODE_WIRE ? SANDBOX_MODE_WIRE[mode as CodexSandboxMode] : undefined
+}
 
 /** `SandboxPolicy` tagged union as serialized on the wire. */
 export type CodexSandboxPolicy =
@@ -589,13 +618,26 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     if (cwd) params.cwd = cwd
     const model = readString(metadata.selectedModel)
     if (model) params.model = model
-    const sandbox = this.sandboxPolicyFrom(metadata)
+    const sandbox = this.sandboxModeParam(
+      metadata,
+      (options?.permissionMode || "default") as AcpPermissionMode
+    )
     if (sandbox) params.sandbox = sandbox
     // `developerInstructions` is the native system-prompt channel (verified in
     // the 0.141 schema) — carrying it here supersedes the first-turn text
     // prepend, which stays as the fallback for resumed/forked threads only.
     const systemPrompt = resolveSystemPromptText(metadata)
     if (systemPrompt) params.developerInstructions = systemPrompt
+    // Codex has no per-session `mcpServers` parameter — it reads MCP servers from
+    // config — so attached servers ride `thread/start`'s per-thread `config`
+    // overrides. Without this the adapter dropped every server the caller
+    // attached, and a hosted agent reported Cognia's own tools as unavailable
+    // while everything upstream said the bridge was healthy.
+    const config = withCodexMcpServers(
+      readObject(params.config) as Record<string, unknown> | undefined,
+      options?.mcpServers
+    )
+    if (config) params.config = config
 
     const result = await this.peer.sendRequest<{ thread?: { id?: string } }>("thread/start", params)
     const threadId = result?.thread?.id
@@ -649,11 +691,49 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     return metadata
   }
 
-  /** Build the wire `SandboxPolicy` from resolved session metadata, if any. */
-  private sandboxPolicyFrom(
-    metadata: Record<string, unknown> | undefined
-  ): CodexSandboxPolicy | undefined {
+  /**
+   * The effective sandbox mode for a session: what the user configured, unless
+   * the permission mode overrides it.
+   *
+   * `bypassPermissions` forces full access. Approval policy and sandbox are
+   * independent knobs on the Codex side, and setting only
+   * {@link approvalPolicyFor}'s `never` produced the worst of both: Codex
+   * stopped asking AND kept the `workspaceWrite` sandbox, so anything reaching
+   * outside the workspace (or the network) failed outright instead of
+   * prompting. "No guardrails" has to mean the same thing on an external agent
+   * as it does on the built-in one, or the mode is a different feature
+   * depending on who is answering.
+   */
+  private sandboxModeFor(
+    metadata: Record<string, unknown> | undefined,
+    permissionMode?: AcpPermissionMode
+  ): CodexSandboxMode | undefined {
+    if (permissionMode === "bypassPermissions") return "dangerFullAccess"
     const mode = readString(metadata?.sandboxMode)
+    return mode && mode in SANDBOX_MODE_WIRE ? (mode as CodexSandboxMode) : undefined
+  }
+
+  /**
+   * The `sandbox` value for `thread/start` / `thread/resume` — the kebab-case
+   * `SandboxMode` STRING. Never the tagged union: that is `turn/start`'s shape
+   * and Codex rejects it here with `-32600 unknown variant "type"`.
+   */
+  private sandboxModeParam(
+    metadata: Record<string, unknown> | undefined,
+    permissionMode?: AcpPermissionMode
+  ): CodexSandboxModeWire | undefined {
+    return toWireSandboxMode(this.sandboxModeFor(metadata, permissionMode))
+  }
+
+  /**
+   * Build the wire `SandboxPolicy` for `turn/start` — the `type`-tagged union,
+   * which is the only shape that can carry `writableRoots` / `networkAccess`.
+   */
+  private sandboxPolicyFrom(
+    metadata: Record<string, unknown> | undefined,
+    permissionMode?: AcpPermissionMode
+  ): CodexSandboxPolicy | undefined {
+    const mode = this.sandboxModeFor(metadata, permissionMode)
     if (mode === "dangerFullAccess") return { type: "dangerFullAccess" }
     if (mode === "readOnly") {
       const policy: CodexSandboxPolicy = { type: "readOnly" }
@@ -774,7 +854,10 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     const params: Record<string, unknown> = { threadId: sessionId }
     const model = readString(metadata.selectedModel)
     if (model) params.model = model
-    const sandbox = this.sandboxPolicyFrom(metadata)
+    const sandbox = this.sandboxModeParam(
+      metadata,
+      (options?.permissionMode || "default") as AcpPermissionMode
+    )
     if (sandbox) params.sandbox = sandbox
 
     const result = await this.callSessionExtension<{
@@ -973,7 +1056,10 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     if (effort) params.effort = effort
     const summary = readString(session?.metadata?.reasoningSummary)
     if (summary) params.summary = summary
-    const sandboxPolicy = this.sandboxPolicyFrom(session?.metadata)
+    // Read from the LIVE session, so a mid-session `/mode bypassPermissions`
+    // (which only mutates `session.permissionMode` via `setSessionMode`) relaxes
+    // the sandbox on the very next turn instead of waiting for a reconnect.
+    const sandboxPolicy = this.sandboxPolicyFrom(session?.metadata, session?.permissionMode)
     if (sandboxPolicy) params.sandboxPolicy = sandboxPolicy
 
     const result = await this.peer.sendRequest<{ turn?: { id?: string } }>("turn/start", params)
@@ -2539,16 +2625,30 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
 
   private mapTokenUsage(params: Record<string, unknown>): ExternalAgentTokenUsage | undefined {
     const usage = readObject(params.usage) ?? readObject(params.tokenUsage) ?? params
-    const prompt = readNumber(usage.inputTokens) ?? readNumber(usage.promptTokens)
-    const completion = readNumber(usage.outputTokens) ?? readNumber(usage.completionTokens)
+    // App-server v2 wraps two TokenUsageBreakdowns:
+    // `{ last, total, modelContextWindow }`. `last` is this turn's billable
+    // usage; using cumulative `total` here would double-count every prior turn
+    // when Cognia folds the result into session totals. The context gauge follows
+    // Codex itself: `last.totalTokens / modelContextWindow`.
+    const last = readObject(usage.last)
+    const breakdown = last ?? usage
+    const prompt = readNumber(breakdown.inputTokens) ?? readNumber(breakdown.promptTokens)
+    const completion = readNumber(breakdown.outputTokens) ?? readNumber(breakdown.completionTokens)
     if (prompt === undefined && completion === undefined) return undefined
     const promptTokens = prompt ?? 0
     const completionTokens = completion ?? 0
+    const reasoningTokens = readNumber(breakdown.reasoningOutputTokens)
+    const contextTokens = last ? readNumber(last.totalTokens) : undefined
+    const modelContextWindow = readNumber(usage.modelContextWindow)
     return {
       promptTokens,
       completionTokens,
-      totalTokens: readNumber(usage.totalTokens) ?? promptTokens + completionTokens,
-      cacheReadTokens: readNumber(usage.cachedInputTokens) ?? readNumber(usage.cacheReadTokens),
+      totalTokens: readNumber(breakdown.totalTokens) ?? promptTokens + completionTokens,
+      cacheReadTokens:
+        readNumber(breakdown.cachedInputTokens) ?? readNumber(breakdown.cacheReadTokens),
+      ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
+      ...(contextTokens === undefined ? {} : { contextTokens }),
+      ...(modelContextWindow === undefined ? {} : { modelContextWindow }),
     }
   }
 }

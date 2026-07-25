@@ -25,6 +25,7 @@ import {
   type CliConfigFile,
   type CredentialsFile,
   type EditorConfig,
+  type ExternalBackendConfig,
   type ProviderConfig,
   type ResolvedConfig,
 } from "./schema"
@@ -122,6 +123,21 @@ function mergeProviders(
   return out
 }
 
+/** Merge per-backend records field-by-field; `over` wins per field, never wipes.
+ * Same contract as {@link mergeProviders}, but a separate namespace — an
+ * external agent backend is not a chat provider. */
+function mergeAgentBackends(
+  base: Record<string, ExternalBackendConfig> | undefined,
+  over: Record<string, ExternalBackendConfig> | undefined
+): Record<string, ExternalBackendConfig> | undefined {
+  if (!over) return base
+  const out: Record<string, ExternalBackendConfig> = { ...(base ?? {}) }
+  for (const [id, entry] of Object.entries(over)) {
+    out[id] = { ...(out[id] ?? {}), ...stripUndefined(entry) }
+  }
+  return out
+}
+
 function stripUndefined<T extends Record<string, unknown>>(obj: T): T {
   const out = {} as T
   for (const [k, v] of Object.entries(obj)) {
@@ -206,6 +222,7 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
       layer.subagentStreamIdleTimeoutMs ?? acc.subagentStreamIdleTimeoutMs,
     subagentMaxDepth: layer.subagentMaxDepth ?? acc.subagentMaxDepth,
     agentBackend: layer.agentBackend ?? acc.agentBackend,
+    agentBackends: mergeAgentBackends(acc.agentBackends, layer.agentBackends),
   }
 }
 

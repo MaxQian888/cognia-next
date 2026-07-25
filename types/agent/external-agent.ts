@@ -1412,6 +1412,12 @@ export interface ExternalAgentTokenUsage {
   totalTokens: number
   cacheReadTokens?: number
   cacheWriteTokens?: number
+  /** Reasoning tokens reported separately by the external agent. */
+  reasoningTokens?: number
+  /** Tokens currently occupying the agent's live context, when reported. */
+  contextTokens?: number
+  /** The live model's authoritative context-window size, when reported. */
+  modelContextWindow?: number
 }
 
 // ============================================================================

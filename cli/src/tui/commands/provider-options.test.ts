@@ -66,4 +66,28 @@ describe("collectProviderOptions", () => {
     expect(byId.openai).toMatchObject({ configured: true, auth: "api key" })
     expect(byId.google).toMatchObject({ configured: false, auth: "no credential" })
   })
+
+  it("flags whether a provider authenticates with a metered API key", () => {
+    const byId = Object.fromEntries(collectProviderOptions(base).map((o) => [o.id, o]))
+    // Metered providers require a key; local runtimes / OAuth agents don't.
+    expect(byId.openai?.requiresKey).toBe(true)
+    expect(byId.anthropic?.requiresKey).toBe(true)
+    expect(byId.ollama?.requiresKey).toBe(false)
+  })
+
+  it("defaults an unknown configured provider to requiring a key", () => {
+    const cfg: ResolvedConfig = { ...base, providers: { customcorp: { apiKey: "k" } } }
+    const opt = collectProviderOptions(cfg).find((o) => o.id === "customcorp")
+    // Not in the catalog → assume it needs a credential rather than switch blind.
+    expect(opt?.requiresKey).toBe(true)
+    expect(opt?.keyUrl).toBeUndefined()
+  })
+
+  it("surfaces the catalog's key-source URL when the provider has one", () => {
+    const byId = Object.fromEntries(collectProviderOptions(base).map((o) => [o.id, o]))
+    // zhipu carries a dashboard URL in the catalog; openai has none, so its
+    // keyUrl comes directly from the catalog rather than being fabricated.
+    expect(byId.zhipu?.keyUrl).toBe("https://open.bigmodel.cn/usercenter/apikeys")
+    expect(byId.openai?.keyUrl).toBe("https://platform.openai.com/api-keys")
+  })
 })

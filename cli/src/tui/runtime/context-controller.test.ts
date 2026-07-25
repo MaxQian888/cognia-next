@@ -56,6 +56,23 @@ describe("runContextReport", () => {
     expect(msg).toContain("MCP tools:       1")
   })
 
+  it("passes the launched preset through so the report names the backend's model", async () => {
+    const { actions, dispatch } = collect()
+    await runContextReport({
+      dispatch,
+      config: {
+        ...config,
+        agentBackend: "codex",
+        agentBackends: { "codex-app-server": { model: "gpt-5.2-codex" } },
+      },
+      sessionId: "",
+      presetId: "codex-app-server",
+    })
+    // Without the preset the per-backend memory is keyed by the alias the user
+    // typed and the model would be lost, falling back to "default".
+    expect(noticeText(actions)).toContain("Context window — gpt-5.2-codex")
+  })
+
   it("falls back to the estimate when the SDK round-trip rejects", async () => {
     const { actions, dispatch } = collect()
     await runContextReport({

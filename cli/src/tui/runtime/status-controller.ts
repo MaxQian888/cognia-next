@@ -5,13 +5,10 @@
  * anything the rest of the CLI already knows. Pure aside from the injected reads
  * collectDoctorFacts already owns.
  */
-import { getModelContextWindow } from "@/lib/claude/usage"
-
-import { resolveActiveModel } from "../../config/active-model"
 import { collectDoctorFacts, type DoctorDeps } from "./doctor-controller"
 import { contextPercent, contextTokens } from "../format/usage"
 import { readGitBranch } from "../format/status-bar"
-import { backendIdentity } from "./backend-identity"
+import { backendContextWindow, backendIdentity } from "./backend-identity"
 import { buildCogniaParityReport } from "./cognia-parity-report"
 import {
   BACKEND_FEATURE_LABELS,
@@ -39,11 +36,15 @@ export interface StatusDeps extends DoctorDeps {
 /** Assemble the status report (pure given the injected fs/credential reads). */
 export function collectStatusReport(deps: StatusDeps): StatusReport {
   const facts = collectDoctorFacts(deps)
-  const model = resolveActiveModel(deps.config)
-  const window =
-    deps.contextWindow && deps.contextWindow > 0 ? deps.contextWindow : getModelContextWindow(model)
   // Same preset the banner names, so the panel can never disagree with it.
-  const identity = backendIdentity(deps.config, deps.capabilities?.presetId)
+  const presetId = deps.capabilities?.presetId
+  const identity = backendIdentity(deps.config, presetId)
+  // The gauge must describe the model that actually answers. It used to be sized
+  // from `resolveActiveModel` — the built-in provider's view — so on
+  // `--backend codex` the panel reported an Anthropic window and a percentage
+  // derived from it while Codex was answering. Absent means "no honest number
+  // for this agent"; the panel renders the raw token count and no gauge.
+  const window = backendContextWindow(deps.config, deps.contextWindow, presetId)
   const parity = deps.sessionId
     ? (deps.readParity ?? buildCogniaParityReport)(deps.sessionId)
     : undefined
@@ -61,15 +62,21 @@ export function collectStatusReport(deps: StatusDeps): StatusReport {
     // The identity the rest of the UI shows — the backend, not the built-in
     // provider it would otherwise borrow.
     provider: identity.provider,
-    model: identity.model ?? facts.model,
-    modelValid: facts.modelValid,
+    // `facts.model` is the built-in provider's resolved model, which is only the
+    // right answer on the built-in agent. An external agent we never named a
+    // model for runs its own choice from its own config file.
+    model: identity.model ?? (identity.external ? "(agent default)" : facts.model),
+    // The catalog `facts.modelValid` checks is the built-in provider's, so on an
+    // external backend it would be grading a model the panel isn't even showing.
+    // There is no catalog to fail against there — never flag it.
+    modelValid: identity.external ? true : facts.modelValid,
     auth: facts.auth,
     credentialedProviders: facts.credentialedProviders,
     cwd: facts.cwd,
     gitBranch: (deps.readBranch ?? readGitBranch)(facts.cwd),
-    contextPct: contextPercent(deps.usage, model, window),
+    ...(window ? { contextPct: contextPercent(deps.usage, identity.model, window) } : {}),
     contextTokens: contextTokens(deps.usage),
-    contextWindow: window,
+    ...(window ? { contextWindow: window } : {}),
     dbSnapshotExists: facts.dbSnapshotExists,
   }
 }

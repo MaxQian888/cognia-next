@@ -1,9 +1,11 @@
 import {
   ADVANCED_MODES,
+  CYCLE_MODES,
   PERMISSION_MODE_META,
   SAFE_CYCLE_MODES,
   permissionModeMeta,
   permissionRiskMarker,
+  requiresAcknowledgement,
 } from "./permission-mode-meta"
 import { PERMISSION_MODES } from "../../config/schema"
 
@@ -27,14 +29,32 @@ describe("PERMISSION_MODE_META", () => {
   })
 })
 
-describe("SAFE_CYCLE_MODES / ADVANCED_MODES", () => {
-  it("cycles only the safe core and partitions the rest as advanced", () => {
+describe("CYCLE_MODES / ADVANCED_MODES", () => {
+  it("cycles the safe core plus bypass, and partitions the rest as advanced", () => {
     expect(SAFE_CYCLE_MODES).toEqual(["default", "acceptEdits", "plan"])
-    expect(ADVANCED_MODES).toEqual(expect.arrayContaining(["bypassPermissions", "dontAsk", "auto"]))
+    // Bypass is the LAST rung of the cycle, not an off-cycle mode — reaching it
+    // is gated by the acknowledgement confirm, not by hiding it from Shift+Tab.
+    expect(CYCLE_MODES).toEqual(["default", "acceptEdits", "plan", "bypassPermissions"])
+    expect(ADVANCED_MODES).toEqual(expect.arrayContaining(["dontAsk", "auto"]))
+    expect(ADVANCED_MODES).not.toContain("bypassPermissions")
     // The two sets partition PERMISSION_MODES with no overlap.
-    const union = new Set([...SAFE_CYCLE_MODES, ...ADVANCED_MODES])
+    const union = new Set([...CYCLE_MODES, ...ADVANCED_MODES])
     expect(union).toEqual(new Set(PERMISSION_MODES))
-    for (const m of SAFE_CYCLE_MODES) expect(ADVANCED_MODES).not.toContain(m)
+    for (const m of CYCLE_MODES) expect(ADVANCED_MODES).not.toContain(m)
+  })
+})
+
+describe("requiresAcknowledgement", () => {
+  it("gates exactly the danger-tier modes", () => {
+    for (const mode of PERMISSION_MODES) {
+      expect(requiresAcknowledgement(mode)).toBe(PERMISSION_MODE_META[mode].risk === "danger")
+    }
+    expect(requiresAcknowledgement("bypassPermissions")).toBe(true)
+    expect(requiresAcknowledgement("acceptEdits")).toBe(false)
+  })
+
+  it("treats an unknown mode as not requiring one (safe fallback)", () => {
+    expect(requiresAcknowledgement("bogus" as never)).toBe(false)
   })
 })
 

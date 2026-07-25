@@ -4,10 +4,12 @@
 import {
   SEARCHABLE_MIN,
   filterInspectItems,
+  filterProviderOptions,
   filterQuickActions,
   filterSelectItems,
   filterSessionItems,
 } from "./overlay-search"
+import type { ProviderOption } from "../commands/provider-options"
 import type { InspectItem, QuickActionRow, SelectItem, SessionSummary } from "./types"
 
 describe("SEARCHABLE_MIN", () => {
@@ -82,5 +84,27 @@ describe("filterQuickActions", () => {
     const noHint: QuickActionRow[] = [{ id: "bare", label: "Bare command", command: "/bare" }]
     expect(filterQuickActions(noHint, "bare").map((r) => r.id)).toEqual(["bare"])
     expect(filterQuickActions(noHint, "missing")).toEqual([])
+  })
+})
+
+describe("filterProviderOptions", () => {
+  const opts: ProviderOption[] = [
+    { id: "anthropic", name: "Anthropic", configured: true, auth: "api key", requiresKey: true },
+    {
+      id: "openrouter",
+      name: "OpenRouter",
+      configured: false,
+      auth: "no credential",
+      requiresKey: true,
+    },
+    { id: "ollama", name: "Ollama", configured: false, auth: "no credential", requiresKey: false },
+  ]
+  it("matches on both the display name and the catalog id", () => {
+    expect(filterProviderOptions(opts, "anthropic").map((o) => o.id)).toEqual(["anthropic"])
+    // "or" appears in the OpenRouter id — id search, not just name.
+    expect(filterProviderOptions(opts, "openrouter").map((o) => o.id)).toEqual(["openrouter"])
+  })
+  it("returns all rows for a blank query", () => {
+    expect(filterProviderOptions(opts, "")).toBe(opts)
   })
 })

@@ -165,6 +165,8 @@ export interface ExternalAgentSessionParams {
       negotiated?: import("@/types/agent/external-agent").AcpCapabilities
     }
   }
+  /** Publish the session's actual projected tool surface back to capability UI. */
+  onToolHostStatus?: (snapshot: ToolHostSnapshot) => void
   /**
    * The MCP servers to hand the agent's `session/new`. Defaults to the CLI's own
    * resolved set — `.mcp.json` from the cwd + home, minus the `/mcp` disable
@@ -290,6 +292,15 @@ function usageFromResult(result: ExternalAgentResult) {
   return {
     inputTokens: result.tokenUsage.promptTokens,
     outputTokens: result.tokenUsage.completionTokens,
+    ...(result.tokenUsage.contextTokens === undefined
+      ? {}
+      : { contextTokens: result.tokenUsage.contextTokens }),
+    ...(result.tokenUsage.modelContextWindow === undefined
+      ? {}
+      : { contextWindow: result.tokenUsage.modelContextWindow }),
+    ...(result.tokenUsage.reasoningTokens === undefined
+      ? {}
+      : { reasoningTokens: result.tokenUsage.reasoningTokens }),
     ...(result.tokenUsage.cacheReadTokens === undefined
       ? {}
       : { cacheReadInputTokens: result.tokenUsage.cacheReadTokens }),
@@ -527,6 +538,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       connections: broker?.connections() ?? 0,
     }
     publishToolHostStatus(sessionId, snapshot)
+    params.onToolHostStatus?.(snapshot)
   }
 
   /**

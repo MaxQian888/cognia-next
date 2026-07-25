@@ -21,6 +21,7 @@ import {
   SHOW_CURSOR,
   MOUSE_TRACK_OFF,
   MOUSE_TRACK_ON,
+  MOUSE_DRAG_OFF,
   type ScreenStream,
 } from "../screen"
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
@@ -79,13 +80,18 @@ describe("App — fullscreen layout", () => {
     )
     // Default config has no `mouse` set ⇒ "scroll": enable SGR wheel tracking so
     // the wheel scrolls the transcript out of the box.
-    expect(writes).toEqual([ALT_SCREEN_ON, CLEAR_HOME, HIDE_CURSOR, MOUSE_TRACK_ON])
+    // `selection` defaults to off ⇒ drag reporting is released FIRST, so the
+    // tracking enable is the last word (the three modes share one slot in the
+    // terminal — a trailing reset would disable the wheel outright).
+    expect(writes).toEqual([ALT_SCREEN_ON, CLEAR_HOME, HIDE_CURSOR, MOUSE_DRAG_OFF, MOUSE_TRACK_ON])
     unmount()
     expect(writes).toEqual([
       ALT_SCREEN_ON,
       CLEAR_HOME,
       HIDE_CURSOR,
+      MOUSE_DRAG_OFF,
       MOUSE_TRACK_ON,
+      MOUSE_DRAG_OFF,
       MOUSE_TRACK_OFF,
       ALT_SCREEN_OFF,
       SHOW_CURSOR,
@@ -111,7 +117,7 @@ describe("App — fullscreen layout", () => {
     )
     expect(writes).toEqual([])
     unmount()
-    expect(writes).toEqual([MOUSE_TRACK_OFF, ALT_SCREEN_OFF, SHOW_CURSOR])
+    expect(writes).toEqual([MOUSE_DRAG_OFF, MOUSE_TRACK_OFF, ALT_SCREEN_OFF, SHOW_CURSOR])
   })
 
   it("renders the fixed banner with a live status line (mode + context)", () => {
@@ -167,8 +173,9 @@ describe("App — fullscreen layout", () => {
         screenOut={screen}
       />
     )
-    // Scroll mode enables button tracking so the wheel reaches the App.
-    expect(writes).toEqual([ALT_SCREEN_ON, CLEAR_HOME, HIDE_CURSOR, MOUSE_TRACK_ON])
+    // Scroll mode enables button tracking so the wheel reaches the App — and
+    // the enable comes last, so nothing resets it back off.
+    expect(writes).toEqual([ALT_SCREEN_ON, CLEAR_HOME, HIDE_CURSOR, MOUSE_DRAG_OFF, MOUSE_TRACK_ON])
     // SGR wheel-up / wheel-down reports as Ink surfaces them (leading ESC stripped).
     expect(() => {
       act(() => __fireInput("[<64;10;5M"))
@@ -191,11 +198,13 @@ describe("App — fullscreen layout", () => {
         screenOut={screen}
       />
     )
-    // Select mode releases tracking + suppresses alternate-scroll (no wheel SGR).
+    // Select mode releases drag reporting + tracking, then suppresses
+    // alternate-scroll (no wheel SGR).
     expect(writes).toEqual([
       ALT_SCREEN_ON,
       CLEAR_HOME,
       HIDE_CURSOR,
+      MOUSE_DRAG_OFF,
       MOUSE_TRACK_OFF,
       ALT_SCROLL_OFF,
     ])

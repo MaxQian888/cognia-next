@@ -6,6 +6,7 @@
  * (a mismatch would let the highlight range over hidden rows). Pure.
  */
 import { filterRowsByQuery } from "../components/select-list-state"
+import type { ProviderOption } from "../commands/provider-options"
 import type { InspectItem, QuickActionRow, SelectItem, SessionSummary } from "./types"
 
 /**
@@ -25,3 +26,8 @@ export const filterInspectItems = (items: InspectItem[], query: string): Inspect
 
 export const filterQuickActions = (rows: QuickActionRow[], query: string): QuickActionRow[] =>
   filterRowsByQuery(rows, query, (r) => `${r.label} ${r.hint ?? ""}`)
+
+/** Match the `/provider` picker on both the display name and the catalog id, so
+ * "claude" finds Anthropic and "or" finds OpenRouter. */
+export const filterProviderOptions = (options: ProviderOption[], query: string): ProviderOption[] =>
+  filterRowsByQuery(options, query, (p) => `${p.name} ${p.id}`)

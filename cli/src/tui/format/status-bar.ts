@@ -29,8 +29,12 @@ import {
   shortenCwd,
 } from "./usage"
 import { tightestRemainingPct, type RateLimitSnapshot } from "./rate-limits"
-import { isBuiltinBackend } from "../runtime/backend-capabilities"
-import { backendSegmentText } from "../runtime/backend-identity"
+import {
+  effectivePermissionMode,
+  isBuiltinBackend,
+  type BackendCapabilities,
+} from "../runtime/backend-capabilities"
+import { backendIdentity, backendSegmentText } from "../runtime/backend-identity"
 import type { SessionTotals, UsageInfo } from "../state/types"
 import { permissionModeMeta } from "../state/permission-mode-meta"
 
@@ -103,12 +107,50 @@ export function readGitBranch(
 /**
  * True when an external agent is answering and nothing has told us its context
  * window — the case where a `% ctx` gauge would be pure fabrication.
+ *
+ * Exported because the fullscreen banner pins its own status line on screen for
+ * the whole session and must make the identical call; two copies of this rule
+ * would drift, and the fullscreen one was the last surface still inventing a
+ * percentage from the built-in provider's window.
  */
-function externalWithoutKnownWindow(config: ResolvedConfig, contextWindow?: number): boolean {
+export function externalWithoutKnownWindow(
+  config: ResolvedConfig,
+  contextWindow?: number
+): boolean {
   return !isBuiltinBackend(config.agentBackend) && !(contextWindow && contextWindow > 0)
 }
 
 /** Render the text for one segment, or null when it has nothing to show. */
+/**
+ * The `mode` segment's text: the picked mode, or `picked→effective` when the
+ * active backend cannot enforce what was picked.
+ *
+ * A danger-tier mode (`bypassPermissions`) disarms every tool-approval gate, so
+ * it carries a loud, persistent `⚠` — sourced from the shared risk model, so a
+ * future danger mode is covered without editing this. The clamp arrow is the
+ * other half of the same honesty: a footer that keeps reading
+ * `bypassPermissions` while an `a2a`/`http` agent actually runs under `default`
+ * would be advertising guardrails-off on a session that still asks.
+ */
+export function modeSegmentText(
+  config: ResolvedConfig,
+  capabilities?: BackendCapabilities
+): string {
+  const picked = config.permissionMode
+  const effective = effectivePermissionMode(capabilities, picked)
+  const marker = permissionModeMeta(picked).risk === "danger" ? "⚠ " : ""
+  return effective === picked ? `${marker}${picked}` : `${marker}${picked}→${effective}`
+}
+
+/** True when the `mode` segment must be forced to the warning colour: either the
+ * picked mode is danger-tier, or the backend is quietly running a different one. */
+function modeSegmentIsLoud(config: ResolvedConfig, capabilities?: BackendCapabilities): boolean {
+  return (
+    permissionModeMeta(config.permissionMode).risk === "danger" ||
+    effectivePermissionMode(capabilities, config.permissionMode) !== config.permissionMode
+  )
+}
+
 function segmentText(
   id: StatusSegment,
   ctx: {
@@ -118,25 +160,27 @@ function segmentText(
     git?: string | null
     contextWindow?: number
     rateLimits?: RateLimitSnapshot
+    capabilities?: BackendCapabilities
   }
 ): string | null {
   const { config, usage, totals } = ctx
   switch (id) {
-    case "model":
+    case "model": {
       // The model actually dispatched is the active provider's resolved model —
       // NOT the legacy top-level `config.model`, which can hold another
       // provider's leftover id and show e.g. a DeepSeek model on Anthropic.
-      return resolveActiveModel(config) ?? "default"
+      // On an external backend neither is true: `backendIdentity` yields a model
+      // only when we explicitly asked that agent to use one, and falling back to
+      // a built-in default here would be exactly the fabrication `ctx` and
+      // `cost` already refuse to print.
+      const model = backendIdentity(config).model
+      if (model) return model
+      return isBuiltinBackend(config.agentBackend) ? "default" : null
+    }
     case "provider":
       return config.provider
     case "mode":
-      // A danger-tier mode (bypassPermissions) disarms every tool-approval gate —
-      // surface a loud, persistent warning so it can't run silently for a whole
-      // session. Sourced from the shared risk model so a future danger mode is
-      // covered without editing this branch.
-      return permissionModeMeta(config.permissionMode).risk === "danger"
-        ? `⚠ ${config.permissionMode}`
-        : config.permissionMode
+      return modeSegmentText(config, ctx.capabilities)
     case "tokens": {
       const total = totals
         ? totals.inputTokens + totals.outputTokens
@@ -200,6 +244,9 @@ export function buildStatusBar(ctx: {
   contextWindow?: number
   /** Live API rate-limit reading for the `ratelimit` segment. */
   rateLimits?: RateLimitSnapshot
+  /** The connected backend's capabilities, for the `mode` segment's clamp check.
+   * Absent (built-in agent, or still connecting) ⇒ nothing clamps. */
+  capabilities?: BackendCapabilities
   /** Active colour palette. Defaults to `classic` so the footer keeps its
    * historic colours when no theme is supplied (e.g. in unit tests). */
   palette?: ThemePalette
@@ -211,9 +258,9 @@ export function buildStatusBar(ctx: {
     const text = segmentText(id, ctx)
     if (text === null) continue
     const style = styleFor(theme, id, palette)
-    // Force a danger-tier mode segment (bypassPermissions) to a warning colour
+    // Force a danger-tier (or clamped) mode segment to a warning colour
     // regardless of theme.
-    if (id === "mode" && permissionModeMeta(ctx.config.permissionMode).risk === "danger") {
+    if (id === "mode" && modeSegmentIsLoud(ctx.config, ctx.capabilities)) {
       out.push({ id, text, color: palette.warning, dim: false })
       continue
     }

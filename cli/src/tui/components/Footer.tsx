@@ -23,6 +23,7 @@ import {
 } from "../format/status-bar"
 import { useTheme } from "../theme/context"
 import type { RateLimitSnapshot } from "../format/rate-limits"
+import type { BackendCapabilities } from "../runtime/backend-capabilities"
 import type { ResolvedConfig } from "../../config/schema"
 import type { SessionTotals, TurnStatus, UsageInfo } from "../state/types"
 
@@ -36,6 +37,7 @@ function FooterImpl({
   rateLimits,
   planTitle,
   columns,
+  capabilities,
   rowRef,
   segmentsRef,
 }: {
@@ -55,6 +57,9 @@ function FooterImpl({
   planTitle?: string
   /** Terminal width for priority truncation; defaults to the live stdout width. */
   columns?: number
+  /** Connected backend's capabilities — lets the `mode` segment say when the
+   * agent is running under a mode other than the one that was picked. */
+  capabilities?: BackendCapabilities
   /** Ref to the status-line Box so App can hit-test a click against its row. */
   rowRef?: React.Ref<DOMElement>
   /** Receives the exact fitted segments App needs to map a click column to a
@@ -80,9 +85,10 @@ function FooterImpl({
         git,
         contextWindow,
         rateLimits,
+        capabilities,
         palette: theme,
       }),
-    [config, usage, totals, git, contextWindow, rateLimits, theme]
+    [config, usage, totals, git, contextWindow, rateLimits, capabilities, theme]
   )
   const { segments, truncated } = React.useMemo(
     () => fitStatusSegments(allSegments, cols),

@@ -1025,7 +1025,7 @@ describe("App", () => {
     expect(container.textContent).toContain("Permission mode")
   })
 
-  it("switches + persists the provider on /provider", async () => {
+  it("prompts for a key (without switching) when the picked provider has no credential", async () => {
     const { create } = fakeSession()
     const persistConfig = jest.fn().mockReturnValue(true)
     const { container } = render(
@@ -1036,13 +1036,83 @@ describe("App", () => {
     expect(container.textContent).toContain("Switch provider")
     // anthropic is active + first; move down once to "openai" and select it.
     act(() => __fireInput("", { downArrow: true }))
+    act(() => __fireInput("", { return: true }))
+    // A key-required provider with no credential opens the inline key prompt —
+    // the session is NOT switched until the key is entered.
+    expect(container.textContent).toContain("Add API key for OpenAI")
+    expect(persistConfig).not.toHaveBeenCalledWith("provider", "openai")
+  })
+
+  it("saves the entered key and switches to the provider", async () => {
+    const { create } = fakeSession()
+    const persistConfig = jest.fn().mockReturnValue(true)
+    const persistCredential = jest.fn().mockReturnValue(true)
+    const { container } = render(
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={create}
+        persistConfig={persistConfig}
+        persistCredential={persistCredential}
+      />
+    )
+    type("/provider")
+    submit()
+    act(() => __fireInput("", { downArrow: true })) // → openai
+    act(() => __fireInput("", { return: true })) // opens the key prompt
+    expect(container.textContent).toContain("Add API key for OpenAI")
+    // The typed key is masked in the prompt, never echoed in the clear.
+    type("sk-test-123")
+    expect(container.textContent).not.toContain("sk-test-123")
     await act(async () => {
       __fireInput("", { return: true })
       await Promise.resolve()
     })
+    expect(persistCredential).toHaveBeenCalledWith("openai", "sk-test-123", "apiKey")
     expect(persistConfig).toHaveBeenCalledWith("provider", "openai")
-    // The unconfigured provider warns how to add a credential.
-    await waitFor(() => expect(container.textContent).toContain("No credential"))
+    await waitFor(() => expect(container.textContent).toContain("Saved API key and switched"))
+  })
+
+  it("surfaces a failure to save the key on the prompt (no switch)", async () => {
+    const { create } = fakeSession()
+    const persistConfig = jest.fn().mockReturnValue(true)
+    const persistCredential = jest.fn().mockReturnValue(false)
+    const { container } = render(
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={create}
+        persistConfig={persistConfig}
+        persistCredential={persistCredential}
+      />
+    )
+    type("/provider")
+    submit()
+    act(() => __fireInput("", { downArrow: true }))
+    act(() => __fireInput("", { return: true }))
+    type("sk-bad")
+    act(() => __fireInput("", { return: true }))
+    expect(container.textContent).toContain("Couldn't save the key")
+    expect(persistConfig).not.toHaveBeenCalledWith("provider", "openai")
+  })
+
+  it("filters the provider picker by typeahead and switches a key-less provider directly", async () => {
+    const { create } = fakeSession()
+    const persistConfig = jest.fn().mockReturnValue(true)
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} persistConfig={persistConfig} />
+    )
+    type("/provider")
+    submit()
+    // Narrow the shared catalog to Ollama by typing into the search row, then
+    // select it: a key-less provider switches straight away — no key prompt.
+    type("ollama")
+    await act(async () => {
+      __fireInput("", { return: true })
+      await Promise.resolve()
+    })
+    expect(persistConfig).toHaveBeenCalledWith("provider", "ollama")
+    expect(container.textContent).not.toContain("Add API key")
   })
 
   it("sets + persists the thinking level on /think (warns on a non-reasoning model)", async () => {
@@ -1888,6 +1958,76 @@ describe("App", () => {
       const text = container.textContent ?? ""
       expect(text).not.toContain("Choose a folder")
       expect(text).not.toContain("Do you trust the files")
+    })
+  })
+
+  // ── Danger-tier startup gate (--bypass / a persisted bypassPermissions) ─────
+  describe("bypass acknowledgement", () => {
+    const bypassConfig: ResolvedConfig = { ...config, permissionMode: "bypassPermissions" }
+
+    it("asks before the composer accepts anything when the session opens in bypass", () => {
+      const { create } = fakeSession()
+      const { container } = render(
+        <App config={bypassConfig} sessionId="s1" createSession={create} />
+      )
+      const text = container.textContent ?? ""
+      expect(text).toContain("Enable bypassPermissions for this session?")
+      // The load-bearing half: the mode is forwarded, not a local UI preference.
+      expect(text).toMatch(/external agent/i)
+    })
+
+    it("does not ask for a mode that keeps a real approval gate", () => {
+      const { create } = fakeSession()
+      const { container } = render(<App config={config} sessionId="s1" createSession={create} />)
+      expect(container.textContent ?? "").not.toContain("Enable bypassPermissions")
+    })
+
+    it("waits for the trust gate before asking", () => {
+      const { create } = fakeSession()
+      const { container } = render(
+        <App config={bypassConfig} sessionId="s1" createSession={create} trusted={false} />
+      )
+      const text = container.textContent ?? ""
+      expect(text).toContain("Do you trust the files")
+      expect(text).not.toContain("Enable bypassPermissions")
+    })
+
+    it("de-escalates to default when the acknowledgement is declined", () => {
+      const { create } = fakeSession()
+      const persistFn = jest.fn(() => true)
+      const { container } = render(
+        <App
+          config={bypassConfig}
+          sessionId="s1"
+          createSession={create}
+          home="/home/u/.cognia"
+          persistConfig={persistFn}
+        />
+      )
+      act(() => __fireInput("", { escape: true }))
+      const text = container.textContent ?? ""
+      expect(text).not.toContain("Enable bypassPermissions")
+      // Declining must not leave the session silently armed.
+      expect(persistFn).toHaveBeenCalledWith("permissionMode", "default")
+    })
+
+    it("applies the mode and stops asking once acknowledged", () => {
+      const { create } = fakeSession()
+      const persistFn = jest.fn(() => true)
+      const { container } = render(
+        <App
+          config={bypassConfig}
+          sessionId="s1"
+          createSession={create}
+          home="/home/u/.cognia"
+          persistConfig={persistFn}
+        />
+      )
+      act(() => __fireInput("", { return: true }))
+      expect(persistFn).toHaveBeenCalledWith("permissionMode", "bypassPermissions")
+      // Cycling back around with Shift+Tab must not re-open the confirm.
+      const text = container.textContent ?? ""
+      expect(text).not.toContain("Enable bypassPermissions")
     })
   })
 

@@ -61,10 +61,15 @@ describe("useTerminalChrome — alt screen", () => {
   it("enters the alt screen + applies the mouse mode on mount, restores on unmount", () => {
     const { unmount } = renderHook(() => useTerminalChrome(baseOpts()))
     expect(screenMod.enterAltScreen).toHaveBeenCalledWith(screen)
-    expect(screenMod.applyMouseMode).toHaveBeenCalledWith("scroll", screen)
+    expect(screenMod.applyMouseMode).toHaveBeenCalledWith("scroll", screen, { drag: undefined })
     unmount()
     expect(screenMod.resetMouse).toHaveBeenCalledWith(screen)
     expect(screenMod.exitAltScreen).toHaveBeenCalledWith(screen)
+  })
+
+  it("seeds button-event tracking when in-app selection is on", () => {
+    renderHook(() => useTerminalChrome(baseOpts({ mouseDrag: true })))
+    expect(screenMod.applyMouseMode).toHaveBeenCalledWith("scroll", screen, { drag: true })
   })
 
   it("skips the enter when mount.tsx pre-entered the alt screen", () => {

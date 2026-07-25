@@ -30,18 +30,28 @@ import type { runLoopStreaming } from "../../runtime/loop-run"
 import type { runFixStreaming } from "../../runtime/fix-run"
 import type { CommandEffect } from "../../commands/types"
 import type { TuiState, TuiAction } from "../../state/types"
-import { supportsFeature, unsupportedFeatureMessage } from "../../runtime/backend-capabilities"
+import {
+  effectivePermissionMode,
+  supportsFeature,
+  unsupportedFeatureMessage,
+} from "../../runtime/backend-capabilities"
+import { planPermissionModeSwitch } from "../../runtime/permission-mode-switch"
+import { requiresAcknowledgement } from "../../state/permission-mode-meta"
 import type { AgentSessionApi } from "../../hooks/useAgentSession"
 import type { TranscriptCursor } from "../../hooks/useTranscriptCursor"
 import type { BashFailure } from "./use-bash-shellout"
 import type { ShellResult, RunShellOpts } from "../../../agent/run-shell"
-import type {
-  ResolvedConfig,
-  ResolvedNotices,
-  StatusBarConfig,
-  MascotConfig,
-  EditorConfig,
+import {
+  DEFAULT_MOUSE_MODE,
+  DEFAULT_SELECTION_MODE,
+  type ResolvedConfig,
+  type ResolvedNotices,
+  type StatusBarConfig,
+  type MascotConfig,
+  type EditorConfig,
+  type SelectionMode,
 } from "../../../config/schema"
+import type { SelectionController } from "../../selection/selection-controller"
 
 /**
  * The `/mcp` actions that change the RESOLVED send options (the server set fed to
@@ -51,6 +61,13 @@ import type {
  * must leave the live session's cached options (and its MCP connections) intact.
  */
 const MCP_OPTION_MUTATING_ACTIONS = new Set(["add", "remove", "toggle", "enable", "disable"])
+
+/** What each `/select` mode does, in one line — the notice after a switch. */
+const SELECTION_NOTICES: Record<SelectionMode, string> = {
+  off: "Selection: off — the terminal's own selection is back in charge.",
+  manual: "Selection: manual — drag to highlight, then copy with the copy-selection chord.",
+  "auto-copy": "Selection: auto-copy — a drag copies itself the moment you let go.",
+}
 
 export interface ApplyEffectDeps {
   agent: AgentSessionApi
@@ -66,6 +83,9 @@ export interface ApplyEffectDeps {
   notices: ResolvedNotices
   pushHandoff?: (sessionId: string) => void | Promise<void>
   openSessions: () => void
+  /** Open the `/model` switcher — backend-aware, so it may query the external
+   * agent for its own catalog before the overlay can be built. */
+  openModelPicker: () => void
   resumeMostRecent: () => void
   /** Resume a specific past session by id (`/resume <id>`); the App validates
    * the id against the session store and notices when it's unknown. */
@@ -85,6 +105,9 @@ export interface ApplyEffectDeps {
   persistDb: () => void
   fullscreen: boolean
   screen: ScreenStream
+  /** The live in-app selection, when the frame buffer is available. `/select`
+   * drops any painted highlight through it before switching modes. */
+  selectionRef: { current: SelectionController | null }
   startGoalRun: typeof runGoalStreaming
   startLoopRun: typeof runLoopStreaming
   startFixRun: typeof runFixStreaming
@@ -109,6 +132,8 @@ export interface ApplyEffectDeps {
   /** Shared MCP probe cache (App-owned) — threaded to the runtime so command-path
    * `/mcp` mutators keep it coherent with the panel. */
   mcpProbeCache: McpProbeCache
+  /** Mode injected by a session-only CLI flag such as `--bypass`. */
+  sessionOnlyPermissionMode?: ResolvedConfig["permissionMode"]
 }
 
 /**
@@ -132,6 +157,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
     notices,
     pushHandoff,
     openSessions,
+    openModelPicker,
     resumeMostRecent,
     resumeSession,
     runBash,
@@ -147,6 +173,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
     persistDb,
     fullscreen,
     screen,
+    selectionRef,
     startGoalRun,
     startLoopRun,
     startFixRun,
@@ -158,6 +185,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
     setRuntimeAbort,
     getRuntimeAbort,
     mcpProbeCache,
+    sessionOnlyPermissionMode,
   } = deps
   return useCallback(
     (effect: CommandEffect) => {
@@ -248,6 +276,9 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
           void Promise.resolve(pushHandoff?.(state.sessionId)).then(() =>
             dispatch({ type: "NOTICE", message: "Pushed this session to the desktop app." })
           )
+          break
+        case "modelPicker":
+          openModelPicker()
           break
         case "openSessions":
           openSessions()
@@ -491,6 +522,45 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
           agent.invalidate()
           dispatch({ type: "NOTICE", message: `Output style: ${effect.style}` })
           break
+        case "permissionMode": {
+          // The ONE place a permission mode is applied. `/mode`, `/mode <name>`,
+          // Shift+Tab and the footer click all arrive here, so the danger-tier
+          // acknowledgement cannot be skipped by picking a different entry point.
+          const plan = planPermissionModeSwitch({
+            next: effect.mode,
+            acknowledged: state.bypassAcknowledged,
+            ...(effect.force ? { force: true } : {}),
+          })
+          if (plan.kind === "confirm") {
+            dispatch({ type: "OVERLAY_OPEN", overlay: plan.overlay })
+            break
+          }
+          // Reaching apply on a danger-tier mode means the warning was accepted
+          // (now or earlier this session) — remember it so cycling back through
+          // the mode doesn't re-ask.
+          if (requiresAcknowledgement(plan.mode)) dispatch({ type: "BYPASS_ACK" })
+          if (!sessionOnlyPermissionMode && !persist("permissionMode", plan.mode)) {
+            dispatch({
+              type: "NOTICE",
+              message: "Permission mode updated (couldn't save to config).",
+            })
+          }
+          void agent.switchMode(plan.mode)
+          dispatch({ type: "NOTICE", message: plan.notice })
+          // The backend may not be able to enforce what was picked (an `a2a` /
+          // `http` / `websocket` agent has no client-side approval loop, so the
+          // manager clamps down to `default` before the agent sees it). Saying so
+          // is the point — a footer reading `bypassPermissions` while the agent
+          // runs under `default` is exactly the silent lie to avoid.
+          const effective = effectivePermissionMode(state.backendCapabilities, plan.mode)
+          if (effective !== plan.mode) {
+            dispatch({
+              type: "NOTICE",
+              message: `${state.backendCapabilities?.backend ?? "This backend"} can't enforce ${plan.mode} — it runs under ${effective} instead.`,
+            })
+          }
+          break
+        }
         case "agentMode":
           // Persist the active mode (scalar config key) and recreate the session
           // (switchAgentMode dispatches SET_AGENT_MODE + drops the session) so the
@@ -552,12 +622,15 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
           }
           break
         }
-        case "mouse":
+        case "mouse": {
           // Live-apply the mouse model by rewriting the terminal tracking /
           // alternate-scroll escapes in place (only meaningful while fullscreen
           // owns the screen; a no-op on a non-TTY). Then persist the scalar key.
+          // Drag reporting rides along whenever in-app selection is on, so the
+          // two features stay consistent through a live `/mouse` switch.
+          const selecting = (state.config.selection ?? DEFAULT_SELECTION_MODE) !== "off"
           dispatch({ type: "SET_MOUSE", mode: effect.mode })
-          if (fullscreen) applyMouseMode(effect.mode, screen)
+          if (fullscreen) applyMouseMode(effect.mode, screen, { drag: selecting })
           if (!persist("mouse", effect.mode)) {
             dispatch({ type: "NOTICE", message: "Mouse mode updated (couldn't save to config)." })
           } else {
@@ -570,6 +643,37 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
             })
           }
           break
+        }
+        case "selection": {
+          // In-app selection reads the mouse, so switching it on/off has to
+          // re-issue the tracking escapes: `?1002h` (motion while held) is what
+          // makes a drag visible to the TUI at all.
+          const configuredMouse = state.config.mouse ?? DEFAULT_MOUSE_MODE
+          // `mouse=select` deliberately disables SGR tracking so the terminal
+          // can own native selection. That makes in-app drag selection
+          // impossible, so enabling `/select` switches to the tracked scroll
+          // mode atomically with the selection setting.
+          const mouse =
+            effect.mode !== "off" && configuredMouse === "select" ? "scroll" : configuredMouse
+          if (mouse !== configuredMouse) {
+            dispatch({ type: "SET_MOUSE", mode: mouse })
+            if (!persist("mouse", mouse)) {
+              dispatch({ type: "NOTICE", message: "Mouse mode updated (couldn't save to config)." })
+            }
+          }
+          dispatch({ type: "SET_SELECTION", mode: effect.mode })
+          selectionRef.current?.clear()
+          if (fullscreen) applyMouseMode(mouse, screen, { drag: effect.mode !== "off" })
+          if (!persist("selection", effect.mode)) {
+            dispatch({
+              type: "NOTICE",
+              message: "Selection mode updated (couldn't save to config).",
+            })
+          } else {
+            dispatch({ type: "NOTICE", message: SELECTION_NOTICES[effect.mode] })
+          }
+          break
+        }
         case "customTheme": {
           // Write the user's edited base colours to ~/.cognia/themes/cli.json and
           // activate `custom:cli` (the reducer re-resolves the palette → expandPalette
@@ -818,6 +922,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
       osHome,
       mintId,
       openSessions,
+      openModelPicker,
       persist,
       persistDb,
       persistStatusBar,
@@ -843,13 +948,16 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
       cursor,
       fullscreen,
       screen,
+      selectionRef,
       notices,
       dispatch,
       setRuntimeAbort,
       getRuntimeAbort,
       mcpProbeCache,
+      sessionOnlyPermissionMode,
       state.config,
       state.backendCapabilities,
+      state.bypassAcknowledged,
       state.sessionId,
       state.inflight.tools,
       state.usage,

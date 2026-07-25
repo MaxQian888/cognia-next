@@ -43,6 +43,10 @@ export function createInitialState(
     // enters the staged connect flow rather than a composer whose first message
     // would fail; only the built-in agent is reachable immediately.
     phase: trusted ? (isBuiltinBackend(config.agentBackend) ? "chat" : "connecting") : "startup",
+    // Never pre-acknowledged: a session that STARTS in bypassPermissions (via
+    // `--bypass` or a persisted config) still has to accept the warning once,
+    // exactly like one that switches into it mid-session.
+    bypassAcknowledged: false,
     cells: [],
     inflight: { text: "", thinking: "", tools: [] },
     overlay: { kind: "none" },

@@ -150,6 +150,24 @@ export type MouseMode = (typeof MOUSE_MODES)[number]
 export const DEFAULT_MOUSE_MODE: MouseMode = "scroll"
 
 /**
+ * In-app text selection ("drag to select") for the fullscreen `scroll` mouse
+ * model. With the wheel captured, the terminal's own click-drag selection is
+ * gone; this re-implements it inside the TUI, against the frame Ink actually
+ * drew, so it also works over SSH where a native selection can't reach the
+ * local clipboard.
+ *
+ * `"off"` (the default) leaves input exactly as it was. `"manual"` paints the
+ * highlight and waits for the copy chord. `"auto-copy"` puts the selection on
+ * the clipboard the moment the drag ends — 划词自动复制.
+ */
+export const SELECTION_MODES = ["off", "manual", "auto-copy"] as const
+export type SelectionMode = (typeof SELECTION_MODES)[number]
+
+/** Default selection mode — off, so nothing about the historic input path
+ * changes until the user opts in via `/select`. */
+export const DEFAULT_SELECTION_MODE: SelectionMode = "off"
+
+/**
  * Clipboard OSC 52 strategy for `/copy` & the copy keybinding. `"auto"` (the
  * default) uses the native helper locally but switches to the OSC 52 terminal
  * escape over SSH (or where no helper exists); `"always"` forces OSC 52;
@@ -284,6 +302,16 @@ export const noticesSchema = z
     noCodeBlockToCopy: z.string().optional(),
     /** Shown by `/copy tool` when no tool result exists yet. */
     noToolResultToCopy: z.string().optional(),
+    /** Shown by the copy chord when nothing is currently selected. */
+    noSelectionToCopy: z.string().optional(),
+    /** Shown by `/copy user` when no user message exists yet. */
+    noUserMessageToCopy: z.string().optional(),
+    /** Shown after copying the latest user message. */
+    copiedUserMessage: z.string().optional(),
+    /** Shown after copying the most recent code block. */
+    copiedCodeBlock: z.string().optional(),
+    /** Shown after copying the most recent tool output. */
+    copiedToolOutput: z.string().optional(),
   })
   .strict()
 
@@ -301,6 +329,11 @@ export const NOTICE_DEFAULTS: ResolvedNotices = {
   noReplyToCopy: "No reply to copy yet.",
   noCodeBlockToCopy: "No code block to copy yet.",
   noToolResultToCopy: "No tool result to copy yet.",
+  noSelectionToCopy: "Nothing selected — drag over the transcript first.",
+  noUserMessageToCopy: "No message of yours to copy yet.",
+  copiedUserMessage: "Copied your last message to the clipboard.",
+  copiedCodeBlock: "Copied the last code block to the clipboard.",
+  copiedToolOutput: "Copied the last tool output to the clipboard.",
 }
 
 /** Fill missing notice keys with {@link NOTICE_DEFAULTS}. */
@@ -535,6 +568,17 @@ export const providerConfigSchema = z
 
 export type ProviderConfig = z.infer<typeof providerConfigSchema>
 
+/**
+ * What we remember for one external agent backend. Only the model so far: the
+ * id we explicitly asked that agent to run with. Absent means "the agent picks"
+ * — for Codex that is `~/.codex/config.toml`, which is the correct default.
+ */
+export const externalBackendConfigSchema = z
+  .object({ model: z.string().min(1).optional() })
+  .strict()
+
+export type ExternalBackendConfig = z.infer<typeof externalBackendConfigSchema>
+
 /** A declarative limits descriptor's extract spec (balance | window). */
 const descriptorExtractSchema = z.union([
   z
@@ -762,6 +806,11 @@ export const cliConfigFileSchema = z
      * the transcript; `"select"` keeps native click-drag text selection (losing
      * wheel-scroll). Only meaningful in the fullscreen layout on a TTY. */
     mouse: z.enum(MOUSE_MODES).optional(),
+    /** In-app drag-to-select over the rendered frame (`/select`). `"off"`
+     * (default) leaves input untouched; `"manual"` paints a highlight the copy
+     * chord picks up; `"auto-copy"` copies the moment the drag ends. Requires
+     * the fullscreen layout with the `"scroll"` mouse model. */
+    selection: z.enum(SELECTION_MODES).optional(),
     /** Vim editing mode for the composer (`/vim` to toggle): modal NORMAL/INSERT
      * editing with the classic motions/operators. Absent ⇒ off. */
     vim: z.boolean().optional(),
@@ -846,6 +895,18 @@ export const cliConfigFileSchema = z
     /** Agent runtime hosted by `chat`: built-in sidecar (default) or any
      * executable external-agent preset id (for example codex/claude-code). */
     agentBackend: z.string().min(1).optional(),
+    /**
+     * Per-external-backend memory, keyed by the *executable preset id* that was
+     * actually launched (`codex-app-server`, `codex`, `claude-code`, …).
+     *
+     * Deliberately NOT folded into {@link providers}: that record is the chat
+     * provider namespace, and every key in it becomes a selectable entry in the
+     * `/provider` picker — an external agent is not a chat provider. Worse, the
+     * preset→provider mapping sends `claude-code` to `anthropic`, so sharing the
+     * record would make "switch Claude Code's model" silently rewrite the user's
+     * real Anthropic chat model.
+     */
+    agentBackends: z.record(z.string(), externalBackendConfigSchema).optional(),
   })
   .strict()
 
@@ -891,6 +952,9 @@ export interface ResolvedConfig {
   allowedTools?: string[]
   builtinTools: BuiltinToolsConfig
   providers: Record<string, ProviderConfig>
+  /** Per-external-backend model memory, keyed by executable preset id. Separate
+   * from {@link providers} on purpose — see the config-file schema field. */
+  agentBackends?: Record<string, ExternalBackendConfig>
   cwd: string
   /** When true, the in-tree first-party plugin tools are loaded and exposed to
    * the agent (and executed via the plugin_tool_exec round-trip). Default off. */
@@ -962,6 +1026,9 @@ export interface ResolvedConfig {
   /** Fullscreen mouse model (`select` / `scroll`). Absent ⇒ `scroll` (wheel
    * scrolls the transcript). Only meaningful in the fullscreen layout on a TTY. */
   mouse?: MouseMode
+  /** In-app drag-to-select mode (`off` / `manual` / `auto-copy`). Absent ⇒
+   * {@link DEFAULT_SELECTION_MODE}. Requires fullscreen + the `scroll` mouse model. */
+  selection?: SelectionMode
   /** Vim editing mode for the composer. Absent ⇒ off. */
   vim?: boolean
   /** Whether the TUI updates the terminal window/tab title with live session

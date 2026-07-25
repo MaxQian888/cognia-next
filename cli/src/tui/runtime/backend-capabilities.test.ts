@@ -6,6 +6,7 @@ import {
   BACKEND_FEATURES,
   blockedFeatures,
   builtinCapabilities,
+  effectivePermissionMode,
   externalCapabilities,
   featureBlockedReason,
   supportsFeature,
@@ -194,5 +195,46 @@ describe("externalCapabilities — Cognia tool projection", () => {
     })
     expect(featureBlockedReason(caps, "plugins")).toMatch(/tool bridge/)
     expect(featureBlockedReason(caps, "skills")).toMatch(/tool bridge/)
+  })
+})
+
+describe("effectivePermissionMode", () => {
+  const caps = (protocol: string) =>
+    externalCapabilities({ backend: "b", protocol: protocol as never })
+
+  it("is the identity on the built-in sidecar, which honours every mode", () => {
+    expect(effectivePermissionMode(builtinCapabilities(), "bypassPermissions")).toBe(
+      "bypassPermissions"
+    )
+  })
+
+  it("normalizes Cognia-only `auto` to `default` (it has no ACP rung)", () => {
+    expect(effectivePermissionMode(builtinCapabilities(), "auto")).toBe("default")
+    expect(effectivePermissionMode(undefined, "auto")).toBe("default")
+  })
+
+  it("passes through while still connecting (no capabilities, no protocol)", () => {
+    expect(effectivePermissionMode(undefined, "bypassPermissions")).toBe("bypassPermissions")
+    expect(effectivePermissionMode(caps(""), "bypassPermissions")).toBe("bypassPermissions")
+  })
+
+  it("keeps a mode the protocol can enforce", () => {
+    expect(effectivePermissionMode(caps("acp"), "bypassPermissions")).toBe("bypassPermissions")
+    expect(effectivePermissionMode(caps("codex-app-server"), "bypassPermissions")).toBe(
+      "bypassPermissions"
+    )
+  })
+
+  it("clamps down on a transport with no client-side approval loop", () => {
+    // a2a / http / websocket are fire-and-forget: the remote agent owns its own
+    // policy, so anything but `default` is not enforceable here.
+    for (const protocol of ["a2a", "http", "websocket"]) {
+      expect(effectivePermissionMode(caps(protocol), "bypassPermissions")).toBe("default")
+      expect(effectivePermissionMode(caps(protocol), "acceptEdits")).toBe("default")
+    }
+  })
+
+  it("drops `dontAsk` on a backend with no pre-approval registry", () => {
+    expect(effectivePermissionMode(caps("codex-app-server"), "dontAsk")).toBe("plan")
   })
 })

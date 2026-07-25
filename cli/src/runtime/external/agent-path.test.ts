@@ -27,6 +27,9 @@ describe("external-agent path resolution", () => {
       ".deno/bin",
       "Library/pnpm",
       ".nix-profile/bin",
+      // Vendor-installer targets so an auto-installed agent is found on reconnect.
+      ".factory/bin",
+      ".opencode/bin",
     ]) {
       expect(dirs).toContain(path.join("/home/user", ...relative.split("/")))
     }

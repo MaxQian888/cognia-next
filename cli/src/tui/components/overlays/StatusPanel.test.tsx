@@ -36,11 +36,89 @@ describe("StatusPanel", () => {
     expect(text).toContain("/work")
   })
 
+  it("keeps the token count but drops the gauge when the window is unknown", () => {
+    // An external agent whose real window nothing resolved — a "/ 200k" or a
+    // percentage here would come from the built-in provider's table.
+    const { container } = render(
+      <StatusPanel
+        report={{ ...report, contextPct: undefined, contextWindow: undefined }}
+        onClose={() => {}}
+      />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("1.1k used · window unknown for this agent")
+    expect(text).not.toContain("42%")
+  })
+
   it("shows a dash when no git branch", () => {
     const { container } = render(
       <StatusPanel report={{ ...report, gitBranch: null }} onClose={() => {}} />
     )
     expect(container.textContent).toContain("—")
+  })
+
+  it("counts the Cognia tools an external agent can actually call", () => {
+    const { container } = render(
+      <StatusPanel
+        report={{
+          ...report,
+          cogniaParity: {
+            backend: "codex",
+            contextVersion: "v124",
+            attachable: true,
+            running: true,
+            builtinToolCount: 12,
+            hostToolCount: 3,
+            userMcpCount: 1,
+            connections: 1,
+            restartRequired: [],
+          },
+        }}
+        onClose={() => {}}
+      />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("12 built-in · 3 host · 1 user MCP")
+    expect(text).toContain("v124")
+  })
+
+  it("distinguishes a bridge that never started from one the agent cannot host", () => {
+    const parity = {
+      backend: "codex",
+      contextVersion: "v124",
+      attachable: true,
+      running: false,
+      builtinToolCount: 0,
+      hostToolCount: 0,
+      userMcpCount: 0,
+      connections: 0,
+      restartRequired: [],
+    }
+    const notStarted = render(
+      <StatusPanel report={{ ...report, cogniaParity: parity }} onClose={() => {}} />
+    )
+    expect(notStarted.container.textContent).toContain("bridge not started")
+
+    __resetInk()
+    const unavailable = render(
+      <StatusPanel
+        report={{ ...report, cogniaParity: { ...parity, attachable: false } }}
+        onClose={() => {}}
+      />
+    )
+    expect(unavailable.container.textContent).toContain("unavailable on this agent")
+  })
+
+  it("flags a model outside the catalog and a missing local store", () => {
+    const { container } = render(
+      <StatusPanel
+        report={{ ...report, modelValid: false, dbSnapshotExists: false }}
+        onClose={() => {}}
+      />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("claude-x ✗")
+    expect(text).toContain("✗")
   })
 
   it("closes on Escape", () => {

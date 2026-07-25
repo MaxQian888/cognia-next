@@ -16,13 +16,29 @@
  * real terminal.
  */
 
-/** A decoded terminal mouse event. The wheel carries a scroll direction; a
- * left-button press carries its 1-based `col`/`row` (so the composer can place
- * the cursor where the user clicked); everything else (drags, releases, other
- * buttons) collapses to `other` so callers can swallow it without acting. */
+/** Modifier keys held during a mouse report, decoded from the SGR button bits. */
+export interface MouseModifiers {
+  ctrl: boolean
+  /** Alt / Option / Meta — terminals report all three on the same bit. */
+  alt: boolean
+  shift: boolean
+}
+
+/**
+ * A decoded terminal mouse event.
+ *
+ * The wheel carries a scroll direction; the button events carry their 1-based
+ * `col`/`row` (so the composer can place the cursor where the user clicked, and
+ * the selection controller can anchor a drag) plus the modifiers that were held.
+ * `drag` / `release` only arrive while button-event tracking (`?1002h`) is on —
+ * see {@link ../screen.applyMouseMode}. Non-left buttons collapse to `other` so
+ * callers can swallow them without acting.
+ */
 export type MouseEvent =
   | { kind: "wheel"; dir: "up" | "down" }
-  | { kind: "click"; col: number; row: number }
+  | { kind: "click"; col: number; row: number; mods: MouseModifiers }
+  | { kind: "drag"; col: number; row: number; mods: MouseModifiers }
+  | { kind: "release"; col: number; row: number; mods: MouseModifiers }
   | { kind: "other" }
 
 // SGR mouse report, with the leading ESC optionally already stripped by Ink:
@@ -31,12 +47,24 @@ const SGR_MOUSE = /^\x1b?\[<(\d+);(\d+);(\d+)([Mm])$/
 
 // The wheel sets bit 6 of the button code (64); bit 0 then selects the direction
 // (0 = up, 1 = down). Bit 5 (32) marks a drag/motion event; the low two bits pick
-// the button (0 = left). Modifier bits (ctrl/meta/shift) may also be OR-ed in, so
-// we mask rather than compare exact values.
+// the button (0 = left). Modifier bits (shift 4 / alt 8 / ctrl 16) may also be
+// OR-ed in, so we mask rather than compare exact values.
 const WHEEL_BIT = 0b100_0000
 const MOTION_BIT = 0b10_0000
 const BUTTON_MASK = 0b11
 const DIR_BIT = 0b1
+const SHIFT_BIT = 0b100
+const ALT_BIT = 0b1000
+const CTRL_BIT = 0b1_0000
+
+/** Decode the modifier bits of an SGR button code. */
+function modifiers(button: number): MouseModifiers {
+  return {
+    ctrl: (button & CTRL_BIT) !== 0,
+    alt: (button & ALT_BIT) !== 0,
+    shift: (button & SHIFT_BIT) !== 0,
+  }
+}
 
 /** Decode a raw `input` string into a {@link MouseEvent}, or null when it isn't a
  * mouse report at all. */
@@ -47,11 +75,21 @@ export function parseMouseEvent(input: string): MouseEvent | null {
   if ((button & WHEEL_BIT) !== 0) {
     return { kind: "wheel", dir: (button & DIR_BIT) === 0 ? "up" : "down" }
   }
-  // A bare left-button PRESS (no wheel/motion bits, button 0, suffix `M`) is a
-  // click the composer can act on; drags/releases/other buttons are swallowed.
-  if (m[4] === "M" && (button & MOTION_BIT) === 0 && (button & BUTTON_MASK) === 0) {
-    return { kind: "click", col: Number(m[2]), row: Number(m[3]) }
+  const col = Number(m[2])
+  const row = Number(m[3])
+  const mods = modifiers(button)
+  // A release (`m`) ends whatever gesture was in flight. Terminals disagree on
+  // the button code they report on release (some send the released button, some
+  // send 3 = "no button"), so we don't filter on it — the caller knows which
+  // gesture it started.
+  if (m[4] === "m") return { kind: "release", col, row, mods }
+  // Motion while a button is held. Only a left drag drives a selection;
+  // middle/right drags are swallowed.
+  if ((button & MOTION_BIT) !== 0) {
+    return (button & BUTTON_MASK) === 0 ? { kind: "drag", col, row, mods } : { kind: "other" }
   }
+  // A bare left-button PRESS is a click the composer / panels can act on.
+  if ((button & BUTTON_MASK) === 0) return { kind: "click", col, row, mods }
   return { kind: "other" }
 }
 

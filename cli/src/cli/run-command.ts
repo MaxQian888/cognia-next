@@ -77,9 +77,25 @@ export function mergePrompt(argPrompt: string, stdin: string): string {
   return a || s
 }
 
+/**
+ * Was the session launched with permissions disarmed?
+ *
+ * `--bypass` and Claude Code's `--dangerously-skip-permissions` are the same
+ * switch. Read through one predicate so the config override, the headless gate,
+ * and any future call site can never disagree about which spellings count.
+ */
+export function bypassRequested(args: ParsedArgs): boolean {
+  return boolFlag(args, "bypass") || boolFlag(args, "dangerously-skip-permissions")
+}
+
 /** Map run flags onto the config loader's override layer. */
 export function runFlagsToOverrides(args: ParsedArgs): Partial<CliConfigFile> {
   const flags: Partial<CliConfigFile> = {}
+  // Overlay-only, never written back: a `--bypass` run must not leave the mode
+  // armed in `config.json` for the next, flagless session. In the TUI it still
+  // has to be acknowledged before the composer accepts anything (App's startup
+  // gate); headless has no one to ask, so the flag IS the consent.
+  if (bypassRequested(args)) flags.permissionMode = "bypassPermissions"
   const model = stringFlag(args, "model")
   if (model) flags.model = model
   const provider = stringFlag(args, "provider")
@@ -165,7 +181,13 @@ export async function runCommand(args: ParsedArgs, deps: RunDeps = {}): Promise<
           .filter(Boolean)
       : undefined
   })()
-  const gate = createPermissionGate({ yes: boolFlag(args, "yes"), allow: allowList })
+  // `--bypass` implies `--yes`: without it the mode would disarm the sidecar's
+  // gate while this CLI-side gate still denied anything that did reach it —
+  // "bypass" that refuses tools is worse than no flag at all.
+  const gate = createPermissionGate({
+    yes: boolFlag(args, "yes") || bypassRequested(args),
+    allow: allowList,
+  })
 
   const timeoutRaw = stringFlag(args, "timeout")
   const timeoutMs = timeoutRaw ? Number(timeoutRaw) : undefined

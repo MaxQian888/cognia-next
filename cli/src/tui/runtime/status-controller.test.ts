@@ -100,6 +100,44 @@ describe("collectStatusReport — backend", () => {
     expect(report.blockedFeatures).not.toContain("Thinking level")
   })
 
+  it("never borrows the built-in provider's model or window for an external agent", () => {
+    // The regression: `config.model`/`resolveActiveModel` are the anthropic
+    // view, so the panel reported "claude-x" at 78% of a 128k window while
+    // Codex was answering.
+    const report = collectStatusReport(
+      deps({
+        config: { ...config, agentBackend: "codex" },
+        capabilities: externalCapabilities({ backend: "codex", presetId: "codex-app-server" }),
+        usage: { inputTokens: 100_000 },
+      })
+    )
+    expect(report.model).toBe("(agent default)")
+    expect(report.modelValid).toBe(true)
+    expect(report.contextWindow).toBeUndefined()
+    expect(report.contextPct).toBeUndefined()
+    // The token count is measured, not inferred, so it survives.
+    expect(report.contextTokens).toBe(100_000)
+  })
+
+  it("reports the model the external backend was actually told to run", () => {
+    const report = collectStatusReport(
+      deps({
+        config: {
+          ...config,
+          agentBackend: "codex",
+          agentBackends: { "codex-app-server": { model: "gpt-5.2-codex" } },
+        },
+        capabilities: externalCapabilities({ backend: "codex", presetId: "codex-app-server" }),
+        usage: { inputTokens: 100_000 },
+        contextWindow: 400_000,
+      })
+    )
+    expect(report.model).toBe("gpt-5.2-codex")
+    // A resolved window is a real fact, so the gauge comes back — sized by it.
+    expect(report.contextWindow).toBe(400_000)
+    expect(report.contextPct).toBe(25)
+  })
+
   it("lists nothing as blocked on the built-in capability set", () => {
     const report = collectStatusReport(deps({ capabilities: builtinCapabilities() }))
     expect(report.blockedFeatures).toEqual([])

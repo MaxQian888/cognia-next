@@ -30,3 +30,38 @@ export function resolveActiveModel(config: ResolvedConfig): string | undefined {
   if (catalogDefault) return catalogDefault
   return config.model
 }
+
+/** True for the built-in sidecar backend (absent ⇒ built-in). Kept local so this
+ * module stays importable from both the TUI and the plain `chat` path. */
+function isBuiltinAgentBackend(backend: string | undefined): boolean {
+  return !backend || backend === "builtin"
+}
+
+/**
+ * Which model the *active backend* should actually run with.
+ *
+ * The built-in sidecar keeps {@link resolveActiveModel} unchanged. An external
+ * agent is different in kind: it has its own model catalog and its own config
+ * file, and the built-in provider's catalog default says nothing about it. So we
+ * return **only** a model the user explicitly chose for that backend, and
+ * `undefined` otherwise — which the caller must treat as "send no model", i.e.
+ * let the agent use its own configuration (`~/.codex/config.toml` for Codex).
+ *
+ * This is the contract `runtime/backend-identity.ts` already documents ("show
+ * what is true, or show nothing") and that a blanket `config.model` assignment
+ * used to break: the built-in catalog default was both displayed as, and sent to
+ * the external agent as, the model it was running — neither of which was true.
+ *
+ * Lookup prefers the resolved executable preset (`codex-app-server`) and falls
+ * back to the id the user typed (`codex`), because the preset is only known once
+ * the connect flow has probed for the native CLI.
+ */
+export function resolveBackendModel(config: ResolvedConfig, presetId?: string): string | undefined {
+  const backend = config.agentBackend
+  // Narrows `backend` to a string for the lookups below: the builtin guard has
+  // already returned for both `undefined` and `"builtin"`.
+  if (isBuiltinAgentBackend(backend)) return resolveActiveModel(config)
+  const backends = config.agentBackends
+  if (!backends) return undefined
+  return (presetId ? backends[presetId]?.model : undefined) ?? backends[backend!]?.model
+}

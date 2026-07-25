@@ -128,6 +128,14 @@ function acceptTrust() {
   act(() => __fireInput("", { return: true }))
 }
 
+function type(text: string) {
+  for (const char of text) act(() => __fireInput(char))
+}
+
+function submit() {
+  act(() => __fireInput("", { return: true }))
+}
+
 async function settle() {
   await act(async () => {
     await Promise.resolve()
@@ -184,6 +192,49 @@ describe("App — external backend startup", () => {
     expect(container.textContent).not.toContain("starting codex")
     // The banner reports who is actually answering, not the built-in provider.
     expect(container.textContent).toContain("codex (codex-app-server)")
+  })
+
+  it("does not open a stale model list after switching backends", async () => {
+    let resolveModels: ((models: Array<{ id: string }>) => void) | undefined
+    const listExternalModels = jest.fn(
+      () =>
+        new Promise<Array<{ id: string }>>((resolve) => {
+          resolveModels = resolve
+        })
+    )
+    const { container } = renderApp(fakeConnect(ok), {
+      trusted: true,
+      listExternalModels,
+    })
+    await settle()
+
+    type("/model")
+    submit()
+    expect(listExternalModels).toHaveBeenCalledWith("cli-backend-s1")
+
+    type("/backend builtin")
+    submit()
+    await settle()
+    await act(async () => resolveModels?.([{ id: "stale-codex-model" }]))
+
+    expect(container.textContent).not.toContain("stale-codex-model")
+    expect(container.textContent).not.toContain("Switch model")
+  })
+
+  it("reports external model-list failures instead of leaking a rejection", async () => {
+    const { container } = renderApp(fakeConnect(ok), {
+      trusted: true,
+      listExternalModels: jest.fn(async () => {
+        throw new Error("catalog unavailable")
+      }),
+    })
+    await settle()
+
+    type("/model")
+    submit()
+    await settle()
+
+    expect(container.textContent).toContain("codex did not report any models")
   })
 
   it("shows a recovery page instead of a composer when the agent cannot start", async () => {

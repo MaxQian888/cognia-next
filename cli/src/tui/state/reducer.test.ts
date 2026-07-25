@@ -1017,6 +1017,109 @@ describe("tuiReducer", () => {
     expect(s.config.model).toBe("deepseek-reasoner")
   })
 
+  describe("model routing on an external backend", () => {
+    /** `--backend codex`, connected and resolved to the native app-server. */
+    const onCodex = (): TuiState => {
+      const started = createInitialState({ ...config, agentBackend: "codex" }, "ses1")
+      return reduce(started, {
+        type: "BACKEND_CONNECT_OK",
+        capabilities: externalCapabilities({ backend: "codex", presetId: "codex-app-server" }),
+      })
+    }
+
+    it("SET_MODEL stores the pick under the backend, NOT the chat provider", () => {
+      const s = reduce(onCodex(), { type: "SET_MODEL", model: "gpt-5.6-sol" })
+      expect(s.config.agentBackends?.["codex-app-server"]?.model).toBe("gpt-5.6-sol")
+      expect(s.config.model).toBe("gpt-5.6-sol")
+      // Choosing a Codex model must not rewrite what the built-in sidecar runs.
+      expect(s.config.providers[s.config.provider]?.model).toBeUndefined()
+    })
+
+    it("uses Codex's authoritative usage window for post-5.4 models", () => {
+      const selected = reduce(onCodex(), { type: "SET_MODEL", model: "gpt-5.6-sol" })
+      const s = reduce(selected, {
+        type: "SET_USAGE",
+        usage: { inputTokens: 100_000, outputTokens: 2_000, contextWindow: 272_000 },
+      })
+      expect(s.modelMeta).toMatchObject({
+        modelId: "gpt-5.6-sol",
+        contextWindow: 272_000,
+        runtime: true,
+      })
+    })
+
+    it("does not let a late catalog fallback overwrite Codex's live window", () => {
+      const selected = reduce(onCodex(), { type: "SET_MODEL", model: "gpt-5.6-sol" })
+      const reported = reduce(selected, {
+        type: "SET_USAGE",
+        usage: { inputTokens: 100_000, outputTokens: 2_000, contextWindow: 272_000 },
+      })
+      const s = reduce(reported, {
+        type: "SET_MODEL_META",
+        meta: {
+          modelId: "gpt-5.6-sol",
+          contextWindow: 128_000,
+          pricing: { promptPer1M: 3 },
+        },
+      })
+      expect(s.modelMeta).toEqual({
+        modelId: "gpt-5.6-sol",
+        contextWindow: 272_000,
+        pricing: { promptPer1M: 3 },
+        runtime: true,
+      })
+    })
+
+    it("SET_PROVIDER does not re-point the model back at the built-in provider", () => {
+      // Switching the chat provider while Codex answers used to overwrite
+      // `config.model` with the built-in catalog default — which was then both
+      // displayed as, and sent to, Codex as the model it was running.
+      const s = reduce(onCodex(), { type: "SET_PROVIDER", provider: "deepseek" })
+      expect(s.config.provider).toBe("deepseek")
+      expect(s.config.model).toBeUndefined()
+    })
+
+    it("BACKEND_CONNECT_OK re-resolves the model under the launched preset", () => {
+      // A model remembered for `codex-app-server` is unreachable at mount (only
+      // the typed alias is known), so the connect result must re-resolve it.
+      const started = createInitialState(
+        {
+          ...config,
+          agentBackend: "codex",
+          agentBackends: { "codex-app-server": { model: "gpt-5.6-sol" } },
+        },
+        "ses1"
+      )
+      expect(started.config.model).toBeUndefined()
+      const s = reduce(started, {
+        type: "BACKEND_CONNECT_OK",
+        capabilities: externalCapabilities({ backend: "codex", presetId: "codex-app-server" }),
+      })
+      expect(s.config.model).toBe("gpt-5.6-sol")
+    })
+  })
+
+  it("BACKEND_CAPABILITIES_UPDATE replaces only the live capability projection", () => {
+    const initial = base()
+    const capabilities = externalCapabilities({
+      backend: "codex",
+      presetId: "codex-app-server",
+      toolHost: {
+        attachable: true,
+        running: true,
+        builtinToolCount: 12,
+        hostToolCount: 3,
+        subagentDispatch: true,
+      },
+    })
+
+    const next = reduce(initial, { type: "BACKEND_CAPABILITIES_UPDATE", capabilities })
+
+    expect(next.backendCapabilities).toBe(capabilities)
+    expect(next.phase).toBe(initial.phase)
+    expect(next.config).toBe(initial.config)
+  })
+
   it("SET_PROVIDER re-points the displayed model to the new provider (no stale bleed)", () => {
     // Anthropic with a Claude model, then switch to deepseek: the model must
     // follow the provider, not stay on the Claude id.
@@ -1390,6 +1493,130 @@ describe("tuiReducer", () => {
   it("OVERLAY_QUERY no-ops for an overlay kind without typeahead", () => {
     const usage = reduce(base(), { type: "OVERLAY_OPEN", overlay: { kind: "usage" } })
     expect(reduce(usage, { type: "OVERLAY_QUERY", query: "x" })).toBe(usage)
+  })
+
+  it("OVERLAY_QUERY filters the provider picker and navigates the filtered view", () => {
+    let s = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "provider",
+        options: [
+          {
+            id: "anthropic",
+            name: "Anthropic",
+            configured: true,
+            auth: "api key",
+            requiresKey: true,
+          },
+          {
+            id: "openai",
+            name: "OpenAI",
+            configured: false,
+            auth: "no credential",
+            requiresKey: true,
+          },
+          {
+            id: "openrouter",
+            name: "OpenRouter",
+            configured: false,
+            auth: "no credential",
+            requiresKey: true,
+          },
+        ],
+        index: 2,
+      },
+    })
+    s = reduce(s, { type: "OVERLAY_QUERY", query: "open" })
+    expect((s.overlay as { query: string }).query).toBe("open")
+    // Highlight resets to the top of the 2 "open*" matches.
+    expect((s.overlay as { index: number }).index).toBe(0)
+    s = reduce(s, { type: "OVERLAY_MOVE", delta: 1 })
+    expect((s.overlay as { index: number }).index).toBe(1)
+    s = reduce(s, { type: "OVERLAY_MOVE", delta: 1 })
+    expect((s.overlay as { index: number }).index).toBe(0) // wraps past the 2nd match
+  })
+
+  it("SET_PROVIDER_CREDENTIAL merges the secret into the provider config without touching the overlay", () => {
+    const opened = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "providerKey",
+        providerId: "openai",
+        providerName: "OpenAI",
+        credentialKind: "apiKey",
+        value: "sk-live",
+        reveal: false,
+      },
+    })
+    const s = reduce(opened, {
+      type: "SET_PROVIDER_CREDENTIAL",
+      providerId: "openai",
+      credentialKind: "apiKey",
+      secret: "sk-live",
+    })
+    expect(s.config.providers.openai?.apiKey).toBe("sk-live")
+    // The overlay is left for the caller's follow-up switch to close.
+    expect(s.overlay.kind).toBe("providerKey")
+  })
+
+  it("SET_PROVIDER_CREDENTIAL preserves the other credential kind for the provider", () => {
+    const withKey = reduce(base(), {
+      type: "SET_PROVIDER_CREDENTIAL",
+      providerId: "opencode",
+      credentialKind: "apiKey",
+      secret: "k",
+    })
+    const withBoth = reduce(withKey, {
+      type: "SET_PROVIDER_CREDENTIAL",
+      providerId: "opencode",
+      credentialKind: "authToken",
+      secret: "tok",
+    })
+    expect(withBoth.config.providers.opencode).toMatchObject({ apiKey: "k", authToken: "tok" })
+  })
+
+  it("OVERLAY_PROVIDER_KEY_INPUT sets the value and clears any error; REVEAL toggles masking", () => {
+    let s = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "providerKey",
+        providerId: "openai",
+        providerName: "OpenAI",
+        credentialKind: "apiKey",
+        value: "",
+        reveal: false,
+        error: "Enter a key, or press Esc to cancel.",
+      },
+    })
+    s = reduce(s, { type: "OVERLAY_PROVIDER_KEY_INPUT", value: "sk-1" })
+    expect(s.overlay).toMatchObject({ kind: "providerKey", value: "sk-1", error: undefined })
+    s = reduce(s, { type: "OVERLAY_PROVIDER_KEY_REVEAL" })
+    expect((s.overlay as { reveal: boolean }).reveal).toBe(true)
+    s = reduce(s, { type: "OVERLAY_PROVIDER_KEY_REVEAL" })
+    expect((s.overlay as { reveal: boolean }).reveal).toBe(false)
+  })
+
+  it("OVERLAY_PROVIDER_KEY_ERROR surfaces a validation error on the prompt", () => {
+    const opened = reduce(base(), {
+      type: "OVERLAY_OPEN",
+      overlay: {
+        kind: "providerKey",
+        providerId: "openai",
+        providerName: "OpenAI",
+        credentialKind: "apiKey",
+        value: "",
+        reveal: false,
+      },
+    })
+    const s = reduce(opened, { type: "OVERLAY_PROVIDER_KEY_ERROR", error: "nope" })
+    expect((s.overlay as { error?: string }).error).toBe("nope")
+  })
+
+  it("the provider-key actions no-op unless the prompt overlay is open", () => {
+    const usage = reduce(base(), { type: "OVERLAY_OPEN", overlay: { kind: "usage" } })
+    expect(reduce(usage, { type: "OVERLAY_PROVIDER_KEY_INPUT", value: "x" })).toBe(usage)
+    expect(reduce(usage, { type: "OVERLAY_PROVIDER_KEY_REVEAL" })).toBe(usage)
+    expect(reduce(usage, { type: "OVERLAY_PROVIDER_KEY_ERROR", error: "e" })).toBe(usage)
   })
 
   it("MARKETPLACE_PATCH_ENTRY updates one entry's badge in the open browser", () => {
@@ -2468,5 +2695,94 @@ describe("tuiReducer — MCP logs", () => {
     const afterReset = reduce(withLog, { type: "RESET", sessionId: "ses2" })
     expect(afterReset.mcpLogs).toHaveLength(1)
     expect(afterReset.mcpLogs[0].message).toBe("kept")
+  })
+})
+
+describe("tuiReducer — unified log buffer", () => {
+  const entries = (n: number, prefix = "m") =>
+    Array.from({ length: n }, (_, i) => ({
+      ts: i,
+      level: "info" as const,
+      channel: "agent" as const,
+      message: `${prefix}${i}`,
+    }))
+
+  it("LOG_APPEND_BATCH appends the whole batch and stamps unique ids", () => {
+    const s = reduce(base(), { type: "LOG_APPEND_BATCH", entries: entries(3) })
+    expect(s.logs).toHaveLength(3)
+    expect(new Set(s.logs.map((l) => l.id)).size).toBe(3)
+    expect(s.logs.map((l) => l.message)).toEqual(["m0", "m1", "m2"])
+  })
+
+  it("advances seq once per entry so ids can't collide with later cells", () => {
+    const start = base()
+    const s = reduce(start, { type: "LOG_APPEND_BATCH", entries: entries(5) })
+    expect(s.seq).toBe(start.seq + 5)
+  })
+
+  it("returns the same state for an empty batch", () => {
+    const start = base()
+    expect(reduce(start, { type: "LOG_APPEND_BATCH", entries: [] })).toBe(start)
+  })
+
+  it("trims only after crossing the high-water mark, not on every append", () => {
+    // 1500 lines is past MAX but under the 2000 high-water mark: no trim yet, so
+    // the O(n) slice is amortized instead of running on every single line.
+    const grown = reduce(base(), { type: "LOG_APPEND_BATCH", entries: entries(1500) })
+    expect(grown.logs).toHaveLength(1500)
+
+    // Crossing 2000 trims back to 1000, keeping the NEWEST rows.
+    const trimmed = reduce(grown, { type: "LOG_APPEND_BATCH", entries: entries(600, "n") })
+    expect(trimmed.logs).toHaveLength(1000)
+    expect(trimmed.logs[trimmed.logs.length - 1].message).toBe("n599")
+  })
+
+  it("LOG_CLEAR empties the buffer and is identity when already empty", () => {
+    const filled = reduce(base(), { type: "LOG_APPEND_BATCH", entries: entries(2) })
+    expect(reduce(filled, { type: "LOG_CLEAR" }).logs).toEqual([])
+    const empty = base()
+    expect(reduce(empty, { type: "LOG_CLEAR" })).toBe(empty)
+  })
+
+  it("LOG_CLEAR leaves the MCP buffer alone (it has its own clear)", () => {
+    const s = reduce(
+      base(),
+      { type: "MCP_LOG_APPEND", entry: { ts: 1, level: "info", source: "stderr", message: "mcp" } },
+      { type: "LOG_APPEND_BATCH", entries: entries(1) },
+      { type: "LOG_CLEAR" }
+    )
+    expect(s.logs).toEqual([])
+    expect(s.mcpLogs).toHaveLength(1)
+  })
+
+  it("survives RESET — backend diagnostics are not conversation state", () => {
+    const s = reduce(
+      base(),
+      { type: "LOG_APPEND_BATCH", entries: entries(1, "kept") },
+      { type: "RESET", sessionId: "ses2" }
+    )
+    expect(s.logs).toHaveLength(1)
+    expect(s.logs[0].message).toBe("kept0")
+  })
+})
+
+describe("BYPASS_ACK", () => {
+  it("starts unacknowledged, so a session that OPENS in bypass still has to accept", () => {
+    expect(base().bypassAcknowledged).toBe(false)
+  })
+
+  it("records the acknowledgement without touching the mode", () => {
+    const s = reduce(
+      base(),
+      { type: "SET_MODE", mode: "bypassPermissions" },
+      { type: "BYPASS_ACK" }
+    )
+    expect(s.bypassAcknowledged).toBe(true)
+    expect(s.config.permissionMode).toBe("bypassPermissions")
+  })
+
+  it("survives a later de-escalation — the warning was seen once, that is enough", () => {
+    const s = reduce(base(), { type: "BYPASS_ACK" }, { type: "SET_MODE", mode: "default" })
+    expect(s.bypassAcknowledged).toBe(true)
   })
 })

@@ -185,7 +185,10 @@ describe("dispatchCommand", () => {
   })
 
   it("keeps /mode and /model distinct (no prefix collision in dispatch)", () => {
+    // Different effects precisely because they are different commands: `/mode`
+    // opens a ready-made overlay, while `/model` defers to the App because the
+    // option list depends on which backend is answering.
     expect(dispatchCommand("/mode", ctx("")).kind).toBe("openOverlay")
-    expect(dispatchCommand("/model", ctx("")).kind).toBe("openOverlay")
+    expect(dispatchCommand("/model", ctx("")).kind).toBe("modelPicker")
   })
 })

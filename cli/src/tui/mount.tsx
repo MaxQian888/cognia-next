@@ -13,13 +13,18 @@ import { installProcessCrashGuards } from "./process-guards"
 import { loadHistory } from "./input/history-store"
 import { mintSessionId } from "../agent/run"
 import { createExternalAgentSession } from "../agent/external-agent-session"
-import { resolveActiveModel } from "../config/active-model"
+import { resolveBackendModel } from "../config/active-model"
 import { resolveHome } from "../config/load"
 import { isTrusted } from "../config/trusted-folders"
 import { resolveLayoutMode, readLayoutCapability } from "./layout-mode"
 import { enterAltScreen, exitAltScreen, applyMouseMode, resetMouse } from "./screen"
 import { resetTerminalTitle } from "./terminal-title"
-import { DEFAULT_MOUSE_MODE, resolveCliLoggingConfig } from "../config/schema"
+import { createFrameBuffer } from "./selection/frame-buffer"
+import {
+  DEFAULT_MOUSE_MODE,
+  DEFAULT_SELECTION_MODE,
+  resolveCliLoggingConfig,
+} from "../config/schema"
 import type { CreateSession } from "./hooks/useAgentSession"
 import type { ResolvedConfig } from "../config/schema"
 
@@ -35,6 +40,8 @@ export interface RenderTuiDeps {
   render?: typeof inkRender
   /** Slash command to run once on mount (launch flags: `--continue`/`--resume`). */
   initialCommand?: string
+  /** Launch-only mode overlay (for example `--bypass`) that must not be persisted. */
+  sessionOnlyPermissionMode?: ResolvedConfig["permissionMode"]
 }
 
 export async function renderTui(deps: RenderTuiDeps): Promise<number> {
@@ -56,7 +63,14 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
   // Pin the displayed model to the one the agent will actually run with, so the
   // banner/footer/`/model` list are in sync from the very first frame — not just
   // after the user switches providers once (which is what used to set it).
-  const config: ResolvedConfig = { ...deps.config, model: resolveActiveModel(deps.config) }
+  //
+  // Backend-aware on purpose: `config.model` means "the model we explicitly asked
+  // this agent to use". For an external backend that is only ever a model the
+  // user picked for that backend — never the built-in provider's catalog default,
+  // which would otherwise be both displayed as, and *sent to*, the external agent
+  // as the model it runs with. Undefined here correctly means "send no model",
+  // leaving Codex on its own `~/.codex/config.toml`.
+  const config: ResolvedConfig = { ...deps.config, model: resolveBackendModel(deps.config) }
   // Seed the composer history from the persisted store so ↑ recalls lines from
   // earlier sessions (best-effort — a missing/corrupt file yields []).
   const initialHistory = loadHistory(home)
@@ -75,13 +89,22 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
   // `finally` below restores the terminal on every exit path as a safety net in
   // case React's unmount cleanup is skipped on a hard signal.
   const fullscreen = resolveLayoutMode(config.layout, readLayoutCapability()) === "fullscreen"
+  // In-app drag-to-select needs to know what is on screen, so Ink renders
+  // through a tap that remembers each committed frame. Created unconditionally
+  // (it is a transparent passthrough) so `/select` can be switched on mid-session
+  // without a restart; the App only wires it up in the fullscreen layout.
+  const frames = createFrameBuffer(process.stdout)
   if (fullscreen) {
+    // Apply the configured mouse model before the first paint. `scroll` (the
+    // default) captures the wheel; `select` leaves the mouse to the terminal and
+    // disables alternate-scroll. Button-event tracking rides along when in-app
+    // selection is on, so a drag is reported from the very first frame. The
+    // App's effect also manages this for live `/mouse` / `/select` / `/layout`
+    // toggles; the `finally` below is the hard-exit safety net.
     enterAltScreen()
-    // Apply the configured mouse model before the first paint. `select` (default)
-    // keeps native click-drag selection and disables alternate-scroll; `scroll`
-    // captures the wheel. The App's effect also manages this for live `/mouse` /
-    // `/layout` toggles; the `finally` below is the hard-exit safety net.
-    applyMouseMode(config.mouse ?? DEFAULT_MOUSE_MODE)
+    applyMouseMode(config.mouse ?? DEFAULT_MOUSE_MODE, process.stdout, {
+      drag: (config.selection ?? DEFAULT_SELECTION_MODE) !== "off",
+    })
   }
   const instance = render(
     <AppErrorBoundary onCrash={(err, stack) => crashLogger("render", err, stack)}>
@@ -96,7 +119,9 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
         trusted={trusted}
         initialHistory={initialHistory}
         initialCommand={deps.initialCommand}
+        sessionOnlyPermissionMode={deps.sessionOnlyPermissionMode}
         altScreenPreEntered={fullscreen}
+        frames={frames}
       />
     </AppErrorBoundary>,
     // The App owns Ctrl+C: a single press shows the "press again to exit" hint,
@@ -105,7 +130,17 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
     // the stdin readable listener — which silently kills the composer's input
     // (looks like the input box "loses focus" and never recovers). Disable it
     // so the App's handler is the sole owner of Ctrl+C.
-    { exitOnCtrlC: false }
+    //
+    // `stdout` is the frame tap, not the bare `process.stdout`: every write
+    // still reaches the terminal untouched, but the in-app selection can read
+    // back what was actually drawn.
+    //
+    // `incrementalRendering: false` is Ink's own default, pinned here because
+    // the frame tap DEPENDS on it: incremental mode writes only the changed
+    // lines interleaved with cursor moves, so a single write would no longer be
+    // a complete frame and a selection would copy the wrong text. See
+    // `selection/frame-buffer.ts`.
+    { exitOnCtrlC: false, stdout: frames.stdout, incrementalRendering: false }
   )
   try {
     await instance.waitUntilExit()

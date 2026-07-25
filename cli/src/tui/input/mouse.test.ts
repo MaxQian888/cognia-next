@@ -1,5 +1,8 @@
 import { isMouseSequence, parseMouseEvent } from "./mouse"
 
+/** No modifier keys held — the common case for the button reports below. */
+const NO_MODS = { ctrl: false, alt: false, shift: false }
+
 describe("parseMouseEvent", () => {
   it("decodes a wheel-up report (button 64)", () => {
     expect(parseMouseEvent("[<64;10;5M")).toEqual({ kind: "wheel", dir: "up" })
@@ -20,15 +23,39 @@ describe("parseMouseEvent", () => {
   })
 
   it("decodes a left-button press as a click with 1-based col/row", () => {
-    expect(parseMouseEvent("[<0;4;2M")).toEqual({ kind: "click", col: 4, row: 2 })
-    // Modifier bits OR-ed in still classify as a click (button low bits 0).
-    expect(parseMouseEvent("[<16;9;3M")).toEqual({ kind: "click", col: 9, row: 3 })
+    expect(parseMouseEvent("[<0;4;2M")).toEqual({ kind: "click", col: 4, row: 2, mods: NO_MODS })
   })
 
-  it("classifies releases, drags, and non-left buttons as 'other'", () => {
-    expect(parseMouseEvent("[<0;4;2m")).toEqual({ kind: "other" }) // left release
-    expect(parseMouseEvent("[<32;4;2M")).toEqual({ kind: "other" }) // drag/motion bit
+  it("decodes the modifier bits held during a click", () => {
+    // shift = 4, alt = 8, ctrl = 16.
+    expect(parseMouseEvent("[<16;9;3M")).toEqual({
+      kind: "click",
+      col: 9,
+      row: 3,
+      mods: { ctrl: true, alt: false, shift: false },
+    })
+    expect(parseMouseEvent("[<12;9;3M")).toEqual({
+      kind: "click",
+      col: 9,
+      row: 3,
+      mods: { ctrl: false, alt: true, shift: true },
+    })
+  })
+
+  it("decodes a held-button motion report as a drag", () => {
+    // 32 = motion bit + left button.
+    expect(parseMouseEvent("[<32;7;4M")).toEqual({ kind: "drag", col: 7, row: 4, mods: NO_MODS })
+  })
+
+  it("decodes any release as a release, whichever button code the terminal sends", () => {
+    expect(parseMouseEvent("[<0;4;2m")).toEqual({ kind: "release", col: 4, row: 2, mods: NO_MODS })
+    // Some terminals report 3 ("no button") on release instead of the button.
+    expect(parseMouseEvent("[<3;4;2m")).toEqual({ kind: "release", col: 4, row: 2, mods: NO_MODS })
+  })
+
+  it("classifies non-left presses and non-left drags as 'other'", () => {
     expect(parseMouseEvent("[<2;4;2M")).toEqual({ kind: "other" }) // right-button press
+    expect(parseMouseEvent("[<34;4;2M")).toEqual({ kind: "other" }) // right-button drag
   })
 
   it("returns null for ordinary text and key sequences", () => {

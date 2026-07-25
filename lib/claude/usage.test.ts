@@ -99,6 +99,17 @@ describe("tokensInWindow", () => {
     }
     expect(tokensInWindow(usage)).toBe(1050)
   })
+
+  it("prefers an authoritative live-context token count from an external agent", () => {
+    expect(
+      tokensInWindow({
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheReadInputTokens: 2,
+        contextTokens: 120_000,
+      })
+    ).toBe(120_000)
+  })
 })
 
 describe("contextLevel", () => {
@@ -169,6 +180,11 @@ describe("getLatestUsage", () => {
       }),
     ]
     expect(getLatestUsage(messages)).toBeNull()
+  })
+
+  it("recognises authoritative external context usage without billable fields", () => {
+    const usage: UsageInfo = { contextTokens: 120_000, contextWindow: 272_000 }
+    expect(getLatestUsage([asUiMessage("assistant", { usage })])).toEqual(usage)
   })
 
   it("walks from the tail forward, picking the most recent assistant usage", () => {

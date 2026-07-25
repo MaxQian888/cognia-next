@@ -1,4 +1,4 @@
-import { resolveActiveModel } from "./active-model"
+import { resolveActiveModel, resolveBackendModel } from "./active-model"
 import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "./schema"
 
 jest.mock("@/lib/ai/model-options", () => ({
@@ -64,5 +64,67 @@ describe("resolveActiveModel", () => {
 
   it("returns undefined for an unknown provider with no configuration", () => {
     expect(resolveActiveModel(makeConfig({ provider: "mystery" }))).toBeUndefined()
+  })
+})
+
+describe("resolveBackendModel", () => {
+  it("falls through to the built-in resolution when no external backend hosts", () => {
+    const config = makeConfig({ provider: "deepseek", providers: { deepseek: {} } })
+    expect(resolveBackendModel(config)).toBe("deepseek-chat")
+    expect(resolveBackendModel({ ...config, agentBackend: "builtin" })).toBe("deepseek-chat")
+  })
+
+  it("sends NO model for an external backend the user never picked one for", () => {
+    // The whole point: absent means "the agent uses its own config"
+    // (`~/.codex/config.toml`). The built-in provider's catalog default is not a
+    // stand-in for it — that was the bug this function exists to prevent.
+    const config = makeConfig({
+      provider: "anthropic",
+      agentBackend: "codex",
+      providers: { anthropic: { model: "claude-opus-4-8" } },
+    })
+    expect(resolveBackendModel(config, "codex-app-server")).toBeUndefined()
+  })
+
+  it("uses the model remembered for the resolved preset", () => {
+    const config = makeConfig({
+      agentBackend: "codex",
+      agentBackends: { "codex-app-server": { model: "gpt-5.6-sol" } },
+    })
+    expect(resolveBackendModel(config, "codex-app-server")).toBe("gpt-5.6-sol")
+  })
+
+  it("falls back to the alias the user typed when the preset has no entry", () => {
+    // `--backend codex` resolves to `codex-app-server` only after probing, so a
+    // model stored under the alias must still be found before that happens.
+    const config = makeConfig({
+      agentBackend: "codex",
+      agentBackends: { codex: { model: "gpt-5.2-codex" } },
+    })
+    expect(resolveBackendModel(config)).toBe("gpt-5.2-codex")
+    expect(resolveBackendModel(config, "codex-app-server")).toBe("gpt-5.2-codex")
+  })
+
+  it("prefers the resolved preset's entry over the alias", () => {
+    const config = makeConfig({
+      agentBackend: "codex",
+      agentBackends: { codex: { model: "shim-model" }, "codex-app-server": { model: "native" } },
+    })
+    expect(resolveBackendModel(config, "codex-app-server")).toBe("native")
+  })
+
+  it("keeps each external backend's memory separate from the chat providers", () => {
+    // Anti-regression: the preset→provider mapping sends `claude-code` to
+    // `anthropic`, so storing backend models in `config.providers` would make a
+    // Claude Code model pick silently rewrite the built-in Anthropic model.
+    const config = makeConfig({
+      provider: "anthropic",
+      agentBackend: "claude-code",
+      providers: { anthropic: { model: "claude-opus-4-8" } },
+      agentBackends: { "claude-code": { model: "some-acp-model" } },
+    })
+    expect(resolveBackendModel(config, "claude-code")).toBe("some-acp-model")
+    // The built-in provider's own model is untouched by the backend memory.
+    expect(resolveActiveModel(config)).toBe("claude-opus-4-8")
   })
 })

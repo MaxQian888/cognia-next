@@ -40,6 +40,18 @@ export const MOUSE_TRACK_ON = "\x1b[?1000h\x1b[?1006h"
 export const MOUSE_TRACK_OFF = "\x1b[?1006l\x1b[?1000l"
 
 /**
+ * Additionally report motion WHILE a button is held (xterm `?1002h`) — the
+ * button-event tracking mode. Needed only for in-app text selection: without it
+ * a drag produces a press and a release with nothing in between, so the
+ * selection can't follow the pointer. Layered on top of {@link MOUSE_TRACK_ON}
+ * and only emitted when the selection feature is on, so the default session
+ * keeps exactly the old escape traffic.
+ */
+export const MOUSE_DRAG_ON = "\x1b[?1002h"
+/** Disable the drag reporting enabled by {@link MOUSE_DRAG_ON}. */
+export const MOUSE_DRAG_OFF = "\x1b[?1002l"
+
+/**
  * Disable "alternate scroll" (xterm `?1007l`). Many terminals default it ON,
  * which forges the wheel into Up/Down arrow keys inside the alternate screen —
  * exactly the keys the composer eats as history navigation. Turning it OFF lets
@@ -61,15 +73,36 @@ export type MouseMode = "select" | "scroll"
  *     copy works, and disables alternate-scroll so the wheel can't forge arrow
  *     keys into the composer (the wheel simply does nothing — use PgUp/PgDn to
  *     scroll the transcript).
+ * Pass `drag` to layer {@link MOUSE_DRAG_ON} on top of `"scroll"` so a held-button
+ * drag is reported — required by in-app text selection, and off by default.
+ * Whatever the flags, the LAST tracking escape written is always the one that
+ * enables reporting: the three tracking modes share one slot in the terminal, so
+ * a trailing reset would disable the wheel outright (see the body).
  * No-op on a non-TTY stream.
  */
-export function applyMouseMode(mode: MouseMode, out: ScreenStream = process.stdout): void {
+export function applyMouseMode(
+  mode: MouseMode,
+  out: ScreenStream = process.stdout,
+  opts: { drag?: boolean } = {}
+): void {
   if (!out.isTTY) return
   if (mode === "scroll") {
+    // ORDER IS LOad-BEARING. 1000/1002/1003 are not independent flags: xterm
+    // keeps ONE `send_mouse_pos` slot, so setting one selects it and resetting
+    // ANY of them turns reporting off wholesale. Ghostty (a single `mouse_event`
+    // enum) and xterm.js agree. So the release has to come BEFORE the enable —
+    // writing `?1002l` after `?1000h` left the terminal reporting nothing, the
+    // wheel fell back to alternate-scroll, and the forged Up/Down arrows landed
+    // in the composer as command-history navigation.
+    if (!opts.drag) out.write(MOUSE_DRAG_OFF)
     out.write(MOUSE_TRACK_ON)
+    // Drag reporting is meaningless without button tracking, so it rides along
+    // with "scroll" only — and last, since 1002 supersedes the 1000 above.
+    if (opts.drag) out.write(MOUSE_DRAG_ON)
   } else {
     // Ensure any prior tracking (e.g. a live switch from "scroll") is released,
     // then suppress alternate-scroll so the wheel never forges arrow keys.
+    out.write(MOUSE_DRAG_OFF)
     out.write(MOUSE_TRACK_OFF)
     out.write(ALT_SCROLL_OFF)
   }
@@ -79,6 +112,7 @@ export function applyMouseMode(mode: MouseMode, out: ScreenStream = process.stdo
  * raw mouse escapes. Idempotent at the terminal level; no-op on a non-TTY. */
 export function resetMouse(out: ScreenStream = process.stdout): void {
   if (!out.isTTY) return
+  out.write(MOUSE_DRAG_OFF)
   out.write(MOUSE_TRACK_OFF)
 }
 

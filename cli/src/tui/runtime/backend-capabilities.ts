@@ -19,7 +19,17 @@
  *
  * Pure — the caller supplies the negotiated half.
  */
-import type { AcpCapabilities } from "@/types/agent/external-agent"
+import type {
+  AcpCapabilities,
+  AcpPermissionMode,
+  ExternalAgentProtocol,
+} from "@/types/agent/external-agent"
+// Pure mode arithmetic (a protocol→supported-modes table plus a permissiveness
+// rank), NOT the protocol stack this module otherwise keeps out of its graph:
+// `permission-modes` → `permission-cascade` → `sandbox/policy-bridge` are three
+// dependency-free modules. Duplicating the table here would be the drift the
+// single-source comment on `PROTOCOL_PERMISSION_MODE_SUPPORT` warns about.
+import { adaptPermissionMode } from "@/lib/ai/agent/external/permission-modes"
 
 /**
  * Is this backend id the built-in sidecar?
@@ -89,9 +99,38 @@ export interface BackendCapabilities {
    * (`codex` resolves to an executable variant). Carried here so the identity
    * line can name it from state rather than reaching into a ref during render. */
   presetId?: string
+  /** The wire protocol the launched agent speaks. Carried on state because it
+   * decides which permission modes the backend can actually ENFORCE, and the
+   * footer has to answer that on every render without importing the manager. */
+  protocol?: ExternalAgentProtocol
   /** True for the built-in sidecar, where everything is reachable. */
   builtin: boolean
   features: Record<BackendFeature, FeatureSupport>
+}
+
+/**
+ * The mode the ACTIVE backend will really run under, given the one the user
+ * picked.
+ *
+ * The built-in sidecar honours every mode, so it is always the identity. An
+ * external backend can only enforce what its protocol models — `a2a` / `http` /
+ * `websocket` are fire-and-forget transports with no client-side approval loop,
+ * so a `bypassPermissions` pick there is clamped down to `default` by the
+ * manager before the agent ever sees it. Surfacing the clamp is the point: a
+ * footer that keeps reading `bypassPermissions` while the agent runs under
+ * `default` is the same silent lie the capability model exists to prevent.
+ *
+ * `auto` is Cognia-only (it has no ACP rung) and normalizes to `default`, which
+ * is exactly what the external session sends.
+ */
+export function effectivePermissionMode(
+  capabilities: BackendCapabilities | undefined,
+  requested: AcpPermissionMode | "auto"
+): AcpPermissionMode {
+  const normalized: AcpPermissionMode = requested === "auto" ? "default" : requested
+  // No capabilities yet (still connecting) or the built-in agent: nothing clamps.
+  if (!capabilities || capabilities.builtin || !capabilities.protocol) return normalized
+  return adaptPermissionMode(normalized, capabilities.protocol).mode
 }
 
 const SUPPORTED: FeatureSupport = { supported: true }
@@ -175,6 +214,8 @@ export interface ExternalCapabilityInput {
   backend: string
   /** The preset actually launched — `codex` resolves to an executable variant. */
   presetId?: string
+  /** The launched agent config's wire protocol, when known. */
+  protocol?: ExternalAgentProtocol
   /** What the agent advertised during `initialize`, when the handshake got that
    * far. Absent means "not negotiated yet"; a negotiated feature then reads as
    * unsupported rather than being optimistically assumed. */
@@ -222,6 +263,7 @@ export function externalCapabilities(input: ExternalCapabilityInput): BackendCap
   return {
     backend: input.backend,
     ...(input.presetId ? { presetId: input.presetId } : {}),
+    ...(input.protocol ? { protocol: input.protocol } : {}),
     builtin: false,
     features: {
       // Forwarded at session/new, so a `/mcp` toggle restarts the agent context.

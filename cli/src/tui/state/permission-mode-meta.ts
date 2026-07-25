@@ -53,17 +53,36 @@ export const PERMISSION_MODE_META: Record<PermissionMode, PermissionModeMeta> = 
   },
 }
 
-/**
- * The modes the Shift+Tab affordance cycles through — the safe core only. Power
- * modes ({@link ADVANCED_MODES}) are reachable only via the `/mode` overlay, so a
- * quick key-repeat can never silently escalate a session into `bypassPermissions`.
- */
+/** The modes that need no acknowledgement — they keep a real approval gate. */
 export const SAFE_CYCLE_MODES: readonly PermissionMode[] = ["default", "acceptEdits", "plan"]
+
+/**
+ * The modes the Shift+Tab affordance cycles through: the safe core, then
+ * `bypassPermissions` as the last rung.
+ *
+ * Bypass used to be kept out of the cycle entirely so a key-repeat could not
+ * silently escalate a session into a no-guardrail mode. That guarantee now comes
+ * from a different place — every transition INTO a danger-tier mode opens the
+ * acknowledgement confirm (see `runtime/permission-mode-switch.ts`), and an open
+ * overlay swallows further Shift+Tabs — so the cycle can carry it without the
+ * escalation being silent.
+ */
+export const CYCLE_MODES: readonly PermissionMode[] = [...SAFE_CYCLE_MODES, "bypassPermissions"]
 
 /** Modes deliberately kept OUT of the Shift+Tab cycle (explicit selection only). */
 export const ADVANCED_MODES: readonly PermissionMode[] = PERMISSION_MODES.filter(
-  (m) => !SAFE_CYCLE_MODES.includes(m)
+  (m) => !CYCLE_MODES.includes(m)
 )
+
+/**
+ * Does entering `mode` require an explicit acknowledgement first?
+ *
+ * Sourced from the shared risk model rather than a hardcoded id, so a future
+ * danger-tier mode is gated by the same confirm without editing the call sites.
+ */
+export function requiresAcknowledgement(mode: PermissionMode): boolean {
+  return permissionModeMeta(mode).risk === "danger"
+}
 
 /** The metadata for a mode, falling back to a minimal safe entry for unknowns. */
 export function permissionModeMeta(mode: PermissionMode): PermissionModeMeta {

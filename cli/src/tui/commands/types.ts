@@ -22,8 +22,9 @@ import type {
   OutputStyle,
   LayoutMode,
   MouseMode,
+  SelectionMode,
 } from "../../config/schema"
-import type { Overlay, TuiState } from "../state/types"
+import type { Overlay, PermissionMode, TuiState } from "../state/types"
 
 /** A guided-form parameter. Identical to the desktop spec so the CLI form reuses
  * `buildArgs` / `firstMissingRequired` verbatim. */
@@ -88,6 +89,12 @@ export type CommandEffect =
   | { kind: "copy"; text: string }
   | { kind: "handoff" }
   | { kind: "openSessions" }
+  /** Open the `/model` switcher. An effect rather than a ready-made overlay
+   * because the option list depends on WHO is answering: an external agent is
+   * asked for its own models (async), while the built-in path reads the local
+   * catalog. Routing both entry points through one effect keeps `/model` and the
+   * keyboard shortcut from drifting apart. */
+  | { kind: "modelPicker" }
   | { kind: "resumeLast" }
   /** Resume a specific past session by id (`/resume <id>` / `--resume <id>`). */
   | { kind: "resumeSession"; id: string }
@@ -128,6 +135,11 @@ export type CommandEffect =
   /** Persist + live-apply an output-style change (`/output-style`). Re-resolves
    * SendOptions so the next turn uses the new system prompt. */
   | { kind: "outputStyle"; style: OutputStyle }
+  /** Switch the session's permission mode (`/mode <name>`). The App routes it
+   * through `planPermissionModeSwitch`, so a danger-tier pick opens the
+   * acknowledgement confirm instead of applying; `force` IS that acknowledgement
+   * (the confirm overlay re-dispatches `/mode <name> --force`) and skips it. */
+  | { kind: "permissionMode"; mode: PermissionMode; force?: boolean }
   /** Persist + live-apply an agent-mode change (`/agent-mode <id>`). The mode's
    * prompt / tools / model / permission flow through `resolveSendOptions`; the
    * App persists `config.agentMode` and recreates the session so it takes effect
@@ -142,6 +154,9 @@ export type CommandEffect =
   /** Persist + live-apply a fullscreen mouse-mode change (`/mouse`). The App
    * re-applies the terminal mouse tracking/alternate-scroll escapes in place. */
   | { kind: "mouse"; mode: MouseMode }
+  /** Persist + live-apply an in-app drag-to-select change (`/select`). The App
+   * re-issues the mouse escapes so button-event tracking follows the mode. */
+  | { kind: "selection"; mode: SelectionMode }
   /** Start a self-driving goal loop (`/goal <objective>`), streaming each turn
    * into the transcript. status/pause/resume/stop/list stay `runtime` requests. */
   | { kind: "goalRun"; objective: string }
@@ -206,6 +221,7 @@ export interface RuntimeRequest {
     | "team"
     | "memory"
     | "mcp"
+    | "logs"
     | "plugin"
     | "skill"
     | "export"

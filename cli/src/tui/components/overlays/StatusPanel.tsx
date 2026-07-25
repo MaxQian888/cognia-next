@@ -33,9 +33,15 @@ export function StatusPanel({ report, onClose }: { report: StatusReport; onClose
     },
     {
       label: "Context",
-      value: `${contextGauge(report.contextPct)}  ${formatTokens(report.contextTokens)} / ${formatTokens(
-        report.contextWindow
-      )}`,
+      // No window ⇒ an external agent whose real window nothing resolved. The
+      // token count is still a fact, so show it; the gauge and the "/ total"
+      // would both be derived from the built-in provider's table, which
+      // describes a model this session isn't running.
+      value: report.contextWindow
+        ? `${contextGauge(report.contextPct ?? 0)}  ${formatTokens(report.contextTokens)} / ${formatTokens(
+            report.contextWindow
+          )}`
+        : `${formatTokens(report.contextTokens)} used · window unknown for this agent`,
     },
     { label: "Working dir", value: report.cwd },
     {

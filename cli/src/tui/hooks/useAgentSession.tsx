@@ -33,7 +33,8 @@ import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claud
 import { resolveCliLoggingConfig } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
 import type { ThinkingLevel } from "../../config/schema"
-import type { Cell, PermissionMode, TuiAction } from "../state/types"
+import type { Cell, LogInput, PermissionMode, TuiAction } from "../state/types"
+import { sidecarExitedLog, turnErrorLog } from "../runtime/log-ingest"
 
 export type CreateSession = (params: {
   config: ResolvedConfig
@@ -155,9 +156,14 @@ export function useAgentSession({
   resolveApprovedTools,
   appendMcpLog,
   capabilities,
+  onLog = () => {},
 }: {
   config: ResolvedConfig
   dispatch: (action: TuiAction) => void
+  /** Feed the unified `/logs` buffer. Defaults to a no-op so existing callers
+   *  (and every existing test) are unaffected. MCP lines are NOT sent here —
+   *  the panel projects `state.mcpLogs` at read time instead. */
+  onLog?: (entry: LogInput) => void
   /** What the active backend supports. Only `resume` is read here: without it a
    * `/resume` reloads the transcript onto an agent that has never seen it. */
   capabilities?: BackendCapabilities
@@ -309,6 +315,7 @@ export function useAgentSession({
         // next send failed. Flag it and raise a transient toast so the user knows
         // the backend is down (it respawns automatically on the next message).
         dispatch({ type: "SIDECAR_STATUS", down: true })
+        onLog(sidecarExitedLog(Date.now()))
         dispatch({
           type: "TOAST_PUSH",
           severity: "error",
@@ -318,7 +325,7 @@ export function useAgentSession({
       }
     })
     return off
-  }, [subscribeSidecar, dispatch, writeMcpLogFile])
+  }, [subscribeSidecar, dispatch, writeMcpLogFile, onLog])
 
   // The settings.json lifecycle-hook runner (loads the merged cognia + .claude
   // hook config once). Fired for each capture event + at turn end + on submit.
@@ -476,6 +483,7 @@ export function useAgentSession({
           ...(classified.hint ? { hint: classified.hint } : {}),
           category: classified.category,
         })
+        onLog(turnErrorLog(Date.now(), message, classified.category))
         return null
       }
       // Fire UserPromptSubmit hooks before the turn (observational here).
@@ -600,6 +608,13 @@ export function useAgentSession({
   const switchModel = useCallback(
     async (model: string) => {
       dispatch({ type: "SET_MODEL", model })
+      // An external agent can usually switch the model of a LIVE session in
+      // place, which keeps the thread — dropping it would throw away the
+      // conversation just to change a setting. Only when there is nothing live
+      // to switch (or the agent has no model selection) do we fall back to the
+      // built-in contract below.
+      const session = sessionRef.current
+      if (session?.setModel && (await session.setModel(model))) return
       // Options resolve lazily and are cached per session; recreate so the new
       // model takes effect on the next turn.
       await dropSession()

@@ -188,6 +188,7 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
         totals={state.sessionTotals}
         contextWindow={state.modelMeta?.contextWindow}
         rateLimits={state.rateLimits}
+        capabilities={state.backendCapabilities}
         turnStatus={state.turnStatus}
         planTitle={footerPlanTitle}
         columns={columns}

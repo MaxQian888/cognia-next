@@ -6,7 +6,11 @@
  * pure data transform with no Ink/IO and unit-tests without a render.
  */
 import { resolveActiveModel } from "../../config/active-model"
-import { DEFAULT_MOUSE_MODE, type ResolvedConfig } from "../../config/schema"
+import {
+  DEFAULT_MOUSE_MODE,
+  DEFAULT_SELECTION_MODE,
+  type ResolvedConfig,
+} from "../../config/schema"
 import type { QuickActionRow } from "../state/types"
 
 /**
@@ -19,6 +23,7 @@ export function buildQuickActions(config: ResolvedConfig): QuickActionRow[] {
   const thinking =
     config.thinkingLevel && config.thinkingLevel !== "off" ? config.thinkingLevel : "off"
   const mouse = config.mouse ?? DEFAULT_MOUSE_MODE
+  const selection = config.selection ?? DEFAULT_SELECTION_MODE
   return [
     { id: "mode", label: "⚖ Permission mode", hint: config.permissionMode, command: "/mode" },
     { id: "model", label: "✦ Model", hint: model, command: "/model" },
@@ -34,6 +39,8 @@ export function buildQuickActions(config: ResolvedConfig): QuickActionRow[] {
     { id: "diff", label: "± Git diff", hint: "working-tree changes", command: "/diff" },
     { id: "theme", label: "🎨 Theme", hint: "recolour the UI", command: "/theme" },
     { id: "mouse", label: "🖱 Mouse model", hint: mouse, command: "/mouse" },
+    { id: "selection", label: "⌖ Drag to select", hint: selection, command: "/select" },
+    { id: "copy", label: "⧉ Copy…", hint: "reply · code · tool · yours", command: "/copy" },
     { id: "help", label: "? Help", hint: "all commands & keys", command: "/help" },
   ]
 }

@@ -53,4 +53,10 @@ describe("BackendInstall", () => {
     expect(text).toContain("line-39")
     expect(text).not.toContain("line-0")
   })
+
+  it("falls back to a default budget when maxRows is omitted", () => {
+    const { container } = render(<BackendInstall install={install} />)
+    // Still renders the header + command with no maxRows prop.
+    expect(container.textContent ?? "").toContain("Installing OpenAI Codex CLI")
+  })
 })

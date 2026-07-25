@@ -83,6 +83,38 @@ describe("buildStatusBar", () => {
     expect(byId.cost).toBeUndefined()
   })
 
+  it("hides the model rather than naming the built-in one while an agent hosts", () => {
+    // Same rule as `ctx`/`cost`: the built-in provider's resolved model is not
+    // what the external agent runs, so naming it in the footer is a fabrication.
+    // `model: undefined` is what `resolveBackendModel` yields for an external
+    // backend the user never picked a model for — the state the TUI is really in.
+    const byId = Object.fromEntries(
+      buildStatusBar({
+        config: { ...base, agentBackend: "codex", model: undefined },
+        usage,
+      }).map((s) => [s.id, s])
+    )
+    expect(byId.model).toBeUndefined()
+    // The built-in provider's own remembered model is still there — untouched,
+    // just not presented as the thing answering.
+    expect(base.providers.anthropic?.model).toBe("claude-x")
+  })
+
+  it("shows the model we explicitly gave the external agent", () => {
+    const byId = Object.fromEntries(
+      buildStatusBar({
+        config: {
+          ...base,
+          agentBackend: "codex",
+          agentBackends: { codex: { model: "gpt-5.6-sol" } },
+          model: "gpt-5.6-sol",
+        },
+        usage,
+      }).map((s) => [s.id, s])
+    )
+    expect(byId.model.text).toBe("gpt-5.6-sol")
+  })
+
   it("shows the gauge again once a real context window is known for the backend", () => {
     const byId = Object.fromEntries(
       buildStatusBar({
@@ -119,7 +151,7 @@ describe("buildStatusBar", () => {
     }
     const byId = Object.fromEntries(buildStatusBar({ config: cfg }).map((s) => [s.id, s]))
     expect(byId.model.text).not.toBe("deepseek-chat")
-    expect(byId.model.text).toBe("claude-sonnet-4-6")
+    expect(byId.model.text).toBe("claude-sonnet-5")
   })
 
   it("sizes the ctx segment against the per-model window override", () => {
@@ -218,6 +250,62 @@ describe("buildStatusBar", () => {
   it("leaves a normal mode unstyled in mono theme", () => {
     const segs = buildStatusBar({ config: withSB({ theme: "mono", segments: ["mode"] }) })
     expect(segs[0].text).toBe("default")
+    expect(segs[0].color).toBeUndefined()
+  })
+
+  it("shows picked→effective when the backend can't enforce the picked mode", () => {
+    // An `a2a` transport has no client-side approval loop; the manager clamps
+    // bypass to `default` before the agent sees it. A footer still reading
+    // `bypassPermissions` would be advertising guardrails-off on a session that
+    // still asks.
+    const cfg: ResolvedConfig = {
+      ...base,
+      permissionMode: "bypassPermissions",
+      statusBar: { theme: "mono", segments: ["mode"] },
+    }
+    const segs = buildStatusBar({
+      config: cfg,
+      capabilities: {
+        backend: "remote",
+        builtin: false,
+        protocol: "a2a",
+        features: {} as never,
+      },
+    })
+    expect(segs[0].text).toBe("⚠ bypassPermissions→default")
+    expect(segs[0].color).toBe("yellow")
+  })
+
+  it("goes loud for a clamp even when the picked mode is not danger-tier", () => {
+    const cfg: ResolvedConfig = {
+      ...base,
+      permissionMode: "acceptEdits",
+      statusBar: { theme: "mono", segments: ["mode"] },
+    }
+    const segs = buildStatusBar({
+      config: cfg,
+      capabilities: { backend: "remote", builtin: false, protocol: "http", features: {} as never },
+    })
+    expect(segs[0].text).toBe("acceptEdits→default")
+    expect(segs[0].color).toBe("yellow")
+  })
+
+  it("keeps the plain mode when the backend enforces it", () => {
+    const cfg: ResolvedConfig = {
+      ...base,
+      permissionMode: "acceptEdits",
+      statusBar: { theme: "mono", segments: ["mode"] },
+    }
+    const segs = buildStatusBar({
+      config: cfg,
+      capabilities: {
+        backend: "codex-app-server",
+        builtin: false,
+        protocol: "codex-app-server",
+        features: {} as never,
+      },
+    })
+    expect(segs[0].text).toBe("acceptEdits")
     expect(segs[0].color).toBeUndefined()
   })
 

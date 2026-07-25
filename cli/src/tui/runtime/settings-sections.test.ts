@@ -7,6 +7,7 @@ import {
 import type { ResolvedConfig } from "../../config/schema"
 import type { BuiltinToolsConfig } from "@cognia/agent-config-types"
 import { BUILTIN_HOOKS } from "@/lib/claude/hooks/builtin-hooks"
+import { externalCapabilities } from "./backend-capabilities"
 
 type CfgOver = Partial<Omit<ResolvedConfig, "builtinTools">> & {
   builtinTools?: Partial<BuiltinToolsConfig>
@@ -32,6 +33,49 @@ function findRow(
     .find((s) => s.id === sectionId)
     ?.rows.find((r) => r.id === rowId)
 }
+
+describe("settingsSections — backend capability gating", () => {
+  const rowsFor = (caps?: Parameters<typeof settingsSections>[1]) =>
+    Object.fromEntries(
+      settingsSections(cfg({ agentBackend: "codex" }), caps)
+        .find((s) => s.id === "model")!
+        .rows.map((r) => [r.id, r])
+    )
+
+  it("leaves every row live when no capabilities are supplied (built-in path)", () => {
+    // An absent capability set must never disable the built-in path — that is
+    // the default the whole TUI ran under before backends existed.
+    const rows = rowsFor(undefined)
+    expect(rows.model.unavailable).toBeUndefined()
+    expect(rows.thinking.unavailable).toBeUndefined()
+    expect(rows.subagentModels.unavailable).toBeUndefined()
+  })
+
+  it("marks rows the hosting agent cannot honour, with the reason", () => {
+    const rows = rowsFor(externalCapabilities({ backend: "codex", presetId: "codex-app-server" }))
+    // Codex forwards reasoning effort and can list its own models…
+    expect(rows.thinking.unavailable).toBeUndefined()
+    expect(rows.model.unavailable).toBeUndefined()
+    // …but subagent model overrides are not forwarded to any external agent.
+    expect(rows.subagentModels.unavailable).toMatch(/Subagent models is unavailable on codex/)
+  })
+
+  it("marks the model row unavailable on an agent that cannot list its models", () => {
+    // The ACP shim has no `model/list`; showing a live Model row there would
+    // offer the built-in provider's catalog, which that agent cannot run.
+    const rows = rowsFor(externalCapabilities({ backend: "codex", presetId: "codex" }))
+    expect(rows.model.unavailable).toMatch(/Model selection is unavailable on codex/)
+    expect(rows.thinking.unavailable).toBeUndefined()
+  })
+
+  it("keeps the row visible rather than hiding it", () => {
+    // Hiding would read as a missing feature; the row plus a reason explains.
+    const rows = rowsFor(externalCapabilities({ backend: "claude-code" }))
+    expect(rows.thinking).toBeDefined()
+    expect(rows.thinking.label).toBe("Thinking level")
+    expect(rows.thinking.unavailable).toMatch(/Thinking level is unavailable on claude-code/)
+  })
+})
 
 describe("settingsSections", () => {
   it("returns the sections in a stable order", () => {

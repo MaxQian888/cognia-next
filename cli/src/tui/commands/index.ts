@@ -14,6 +14,7 @@ import { PARITY_COMMANDS } from "./parity-commands"
 import { EXPAND_COMMANDS } from "./expand-command"
 import { INSPECT_COMMANDS } from "./inspect-command"
 import { KEYBIND_COMMANDS } from "./keybind-command"
+import { LOG_COMMANDS } from "./log-commands"
 import { menuCommand } from "./menu-command"
 import { PLUGIN_COMMANDS } from "./plugin-commands"
 import { routeCommand } from "./route-command"
@@ -33,6 +34,7 @@ export function registerFeatureCommands(): void {
     ...BASHES_COMMANDS,
     ...DEV_WORKFLOW_COMMANDS,
     ...MCP_COMMANDS,
+    ...LOG_COMMANDS,
     ...SKILL_COMMANDS,
     ...PLUGIN_COMMANDS,
     ...VIEW_COMMANDS,

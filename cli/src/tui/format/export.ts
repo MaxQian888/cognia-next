@@ -5,7 +5,9 @@
  * pretty array; `markdown` is a readable document. Kept pure so the controller's
  * fs side is the only thing that needs a fake in tests.
  */
+import { cellToText } from "./scrollback-search"
 import type { TranscriptEntry, TranscriptRole } from "../../agent/transcript"
+import type { Cell } from "../state/types"
 
 export type ExportFormat = "markdown" | "json" | "jsonl"
 
@@ -50,4 +52,48 @@ export function formatTranscriptExport(entries: TranscriptEntry[], format: Expor
     parts.push(`## ${ROLE_HEADING[e.role] ?? e.role}`, "", e.content.trim(), "")
   }
   return parts.join("\n")
+}
+
+/**
+ * Heading for each transcript cell kind in the clipboard export, or null to drop
+ * the cell. Notices are ephemeral UI chatter ("Copied…", "Mouse: scroll…") — they
+ * are not part of the conversation and would only pollute a paste.
+ */
+const CELL_HEADING: Record<Cell["kind"], string | null> = {
+  user: "## User",
+  assistant: "## Assistant",
+  thinking: "### Thinking",
+  tool: "### Tool",
+  bash: "### Shell",
+  todo: "### Todos",
+  plan: "### Plan",
+  error: "### Error",
+  notice: null,
+}
+
+/** Cell kinds whose body is program output, not prose — fenced so a paste keeps
+ * its formatting instead of being re-flowed as markdown. */
+const FENCED_KINDS = new Set<Cell["kind"]>(["tool", "bash"])
+
+/**
+ * Render the LIVE transcript (the in-memory cells the TUI is showing) as
+ * markdown, for the copy-transcript chord.
+ *
+ * Distinct from {@link formatTranscriptExport}, which renders the persisted
+ * `TranscriptEntry[]` store and therefore only knows user/assistant/system
+ * turns. This one covers every cell kind on screen — tool calls, shell output,
+ * thinking, plans — because "copy the conversation" should hand over what you
+ * are actually looking at. Both share {@link cellToText} with find/search, so a
+ * cell renders to the same text everywhere.
+ */
+export function formatCellsAsMarkdown(cells: readonly Cell[]): string {
+  const parts: string[] = []
+  for (const cell of cells) {
+    const heading = CELL_HEADING[cell.kind]
+    if (heading === null || heading === undefined) continue
+    const body = cellToText(cell).trim()
+    if (!body) continue
+    parts.push(heading, "", FENCED_KINDS.has(cell.kind) ? `\`\`\`\n${body}\n\`\`\`` : body, "")
+  }
+  return parts.length === 0 ? "" : `# Conversation\n\n${parts.join("\n")}`
 }

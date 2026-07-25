@@ -71,6 +71,13 @@ export interface UsageInfo {
   inputTokens?: number
   outputTokens?: number
   /**
+   * Authoritative tokens currently occupying the live context. External agents
+   * such as Codex report this independently from per-turn billable usage.
+   */
+  contextTokens?: number
+  /** Authoritative live model context-window size, when the provider reports it. */
+  contextWindow?: number
+  /**
    * Prompt tokens occupying the *current* context window after the turn, when
    * that differs from `inputTokens`. On the ai-sdk channel a turn runs a manual
    * agent loop of several legs, and `inputTokens` SUMS every leg's prompt (the

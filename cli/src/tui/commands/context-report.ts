@@ -10,38 +10,56 @@ import type { UsageInfo } from "@/lib/claude/adapter"
 import type { SdkContextUsage } from "@cognia/agent-config-types"
 
 import { describeBuiltinTools } from "./builtins"
-import { cacheHitRatio, contextComposition, formatTokens } from "../format/usage"
+import { cacheHitRatio, contextComposition, contextTokens, formatTokens } from "../format/usage"
 import { markedGauge, stackedBar } from "../format/charts"
-import { resolveActiveModel } from "../../config/active-model"
+import { backendContextWindow, backendIdentity } from "../runtime/backend-identity"
 import type { ResolvedConfig } from "../../config/schema"
 
 /**
  * Build the `/context` report for the latest turn's `usage` against `config`.
  * `windowOverride` (the per-model window resolved from the catalog) pins the
- * window size so the report matches the footer gauge.
+ * window size so the report matches the footer gauge. `presetId` is the launched
+ * executable preset, which is what the per-backend model memory is keyed by.
+ *
+ * Everything here is stated from the ACTIVE BACKEND's point of view, not the
+ * built-in provider's: on `--backend codex` the header used to name an Anthropic
+ * model and the gauge used to size itself from that model's window, describing a
+ * session that wasn't running.
  */
 export function buildContextReport(
   usage: UsageInfo | undefined,
   config: ResolvedConfig,
-  windowOverride?: number
+  windowOverride?: number,
+  presetId?: string
 ): string {
-  const model = resolveActiveModel(config) ?? "default"
-  const ctx = computeContextWindowUsage(
-    usage ?? null,
-    resolveActiveModel(config),
-    windowOverride && windowOverride > 0 ? windowOverride : undefined
-  )
-  const pct = Math.round(ctx.fraction * 100)
-  const compactPct = ctx.max > 0 ? Math.round((ctx.compactThresholdTokens / ctx.max) * 100) : 0
-  const lines = [
-    `Context window — ${model} (${config.provider})`,
-    // The gauge marks the auto-compact threshold (┊) so you can see how close
-    // the current fill is to triggering a compaction.
-    `  ${markedGauge(pct, compactPct, 10)}`,
-    `  Used:            ${formatTokens(ctx.used)} / ${formatTokens(ctx.max)} (${pct}%)`,
-    `  Remaining:       ${formatTokens(ctx.remaining)}`,
-    `  Auto-compact at: ${formatTokens(ctx.compactThresholdTokens)} (${compactPct}%)`,
-  ]
+  const identity = backendIdentity(config, presetId)
+  const model = identity.model ?? "default"
+  const window = backendContextWindow(config, windowOverride, presetId)
+  const lines = [`Context window — ${model} (${identity.provider})`]
+  if (window) {
+    const ctx = computeContextWindowUsage(usage ?? null, identity.model, window)
+    const pct = Math.round(ctx.fraction * 100)
+    // `ctx.max` is `window`, which the guard above already proved positive — no
+    // divide-by-zero arm to carry here.
+    const compactPct = Math.round((ctx.compactThresholdTokens / ctx.max) * 100)
+    lines.push(
+      // The gauge marks the auto-compact threshold (┊) so you can see how close
+      // the current fill is to triggering a compaction.
+      `  ${markedGauge(pct, compactPct, 10)}`,
+      `  Used:            ${formatTokens(ctx.used)} / ${formatTokens(ctx.max)} (${pct}%)`,
+      `  Remaining:       ${formatTokens(ctx.remaining)}`,
+      `  Auto-compact at: ${formatTokens(ctx.compactThresholdTokens)} (${compactPct}%)`
+    )
+  } else {
+    // External agent, real window unknown. Tokens are still measured; the
+    // window, percentage and compaction threshold would all be extrapolated from
+    // the built-in provider's table for a model this session isn't running, so
+    // they are omitted rather than guessed.
+    lines.push(
+      `  Used:            ${formatTokens(contextTokens(usage))}`,
+      `  Window:          unknown for this agent`
+    )
+  }
   // Once a turn has reported usage, surface the prefix-cache efficiency and the
   // prompt-side composition (reused / newly-cached / fresh) as a monochrome
   // segmented bar — the cost lever the harness-design notes highlight.

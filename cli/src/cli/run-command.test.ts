@@ -3,6 +3,7 @@
  */
 import {
   runCommand,
+  bypassRequested,
   runFlagsToOverrides,
   resolveOutputFormat,
   mergePrompt,
@@ -57,6 +58,26 @@ describe("runFlagsToOverrides", () => {
       provider: "openai",
       allowedTools: ["write", "bash"],
       agentBackend: "claude-code",
+    })
+  })
+
+  it("maps --bypass (and its Claude Code alias) onto the bypassPermissions mode", () => {
+    for (const flag of ["--bypass", "--dangerously-skip-permissions"]) {
+      expect(runFlagsToOverrides(parseArgv(["chat", flag]))).toEqual({
+        permissionMode: "bypassPermissions",
+      })
+      expect(bypassRequested(parseArgv(["chat", flag]))).toBe(true)
+    }
+    // Absent by default — the override layer must not arm the mode on its own.
+    expect(runFlagsToOverrides(parseArgv(["chat"]))).not.toHaveProperty("permissionMode")
+    expect(bypassRequested(parseArgv(["chat"]))).toBe(false)
+  })
+
+  it("keeps --bypass a boolean, so it never swallows the next token", () => {
+    const a = parseArgv(["run", "hi", "--bypass", "--model", "m"])
+    expect(runFlagsToOverrides(a)).toMatchObject({
+      permissionMode: "bypassPermissions",
+      model: "m",
     })
   })
 

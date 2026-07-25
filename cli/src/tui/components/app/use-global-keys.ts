@@ -12,14 +12,20 @@ import { absoluteTopLeft } from "../../input/element-position"
 import { segmentAtColumn } from "../../format/status-bar-hit"
 import { footerSegmentCommand } from "../../format/footer-action"
 import { cyclePermissionMode } from "../../input/mode-cycle"
-import { permissionModeMeta } from "../../state/permission-mode-meta"
 import { deriveEffortSliderState } from "../../../config/thinking"
 import {
   LEADER_TIMEOUT_MS,
   resolveChordEvent,
   type KeybindableAction,
 } from "../../input/keybindings"
-import { lastAssistantText } from "../../state/selectors"
+import {
+  lastAssistantText,
+  lastCodeBlock,
+  lastToolResultText,
+  lastUserText,
+} from "../../state/selectors"
+import { formatCellsAsMarkdown } from "../../format/export"
+import { resolveClickTarget } from "../../selection/click-target"
 import { collectInspectables } from "../../runtime/inspect"
 import { buildStepInspectorDoc } from "../../runtime/workflow-step-doc"
 import { DOUBLE_CTRL_C_MS, WHEEL_SCROLL_LINES } from "./app-helpers"
@@ -32,8 +38,15 @@ import type { AskUserOverlayApi } from "../../hooks/use-ask-user-overlay"
 import type { StatusSegmentView } from "../../format/status-bar"
 import { agentTreeRowTarget, type AgentTreeHit } from "../BottomStatus"
 import type { resolveKeybindings } from "../../input/keybindings"
-import type { MouseMode, ResolvedNotices, ResolvedRenderConfig } from "../../../config/schema"
+import { SELECTION_MODES } from "../../../config/schema"
+import type {
+  MouseMode,
+  ResolvedNotices,
+  ResolvedRenderConfig,
+  SelectionMode,
+} from "../../../config/schema"
 import type { CopyResult } from "../../clipboard"
+import type { SelectionController } from "../../selection/selection-controller"
 
 /**
  * Inputs the global key handler reads off the App. They are read fresh on every
@@ -47,6 +60,19 @@ export interface GlobalKeysDeps {
   busy: boolean
   fullscreen: boolean
   mouseMode: MouseMode
+  /** Live in-app selection mode (`/select`). */
+  selectionMode: SelectionMode
+  /** The selection controller, held by REF rather than by value: the hook that
+   * owns it fills the ref in an effect, so a by-value read during render would
+   * be null on the first pass (and stale on any pass that follows a remount). */
+  selection: { current: SelectionController | null }
+  /** Plain rows of the last rendered frame — the surface Ctrl+click resolves
+   * its target from. Empty when no frame has been captured. */
+  screenRows: () => readonly string[]
+  /** Whether a path-shaped token names a real file (resolved against cwd). */
+  fileExists: (candidate: string) => boolean
+  /** Open a file in the configured editor (routes through the `openFile` effect). */
+  openFileAt: (path: string, line?: number, col?: number) => void
   notices: ResolvedNotices
   keybindings: ReturnType<typeof resolveKeybindings>
   renderPrefs: ResolvedRenderConfig
@@ -64,7 +90,6 @@ export interface GlobalKeysDeps {
   copyClipboard: (text: string) => Promise<CopyResult>
   runCommandLine: (line: string) => void
   openModelPicker: () => void
-  persist: (key: string, value: string) => boolean
   pasteClipboardImage: () => Promise<void>
   scrollReset: () => void
   disarmBacktrack: () => void
@@ -80,14 +105,6 @@ export interface GlobalKeysDeps {
   footerSegmentsRef: MutableRefObject<StatusSegmentView[] | null>
   scrollContentRef: MutableRefObject<DOMElement | null>
   backtrackArmedRef: MutableRefObject<boolean>
-}
-
-/** The Shift+Tab / footer-click permission-switch notice: the mode plus its
- * one-line "what runs without asking" summary, so the user sees the consequence
- * of the switch, not just the mode name. */
-function permissionModeNotice(mode: TuiState["config"]["permissionMode"]): string {
-  const meta = permissionModeMeta(mode)
-  return `Permission mode: ${mode} — ${meta.runsWithoutAsking}`
 }
 
 /**
@@ -113,6 +130,11 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
       busy,
       fullscreen,
       mouseMode,
+      selectionMode,
+      selection,
+      screenRows,
+      fileExists,
+      openFileAt,
       notices,
       keybindings,
       renderPrefs,
@@ -128,7 +150,6 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
       copyClipboard,
       runCommandLine,
       openModelPicker,
-      persist,
       pasteClipboardImage,
       scrollReset,
       disarmBacktrack,
@@ -144,6 +165,29 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
       scrollContentRef,
       backtrackArmedRef,
     } = deps
+
+    /** Copy `text`, then report success with `okMessage` or the clipboard's own
+     * failure reason. Every copy path in this handler funnels through here so
+     * the OSC 52 "too large" / "unavailable" notices stay consistent. */
+    const copyWithNotice = (text: string, okMessage: string): void => {
+      void Promise.resolve(copyClipboard(text)).then((res) =>
+        dispatch({
+          type: "NOTICE",
+          message: res.ok ? okMessage : clipboardFailureMessage(res.reason, notices),
+        })
+      )
+    }
+
+    /** Copy `text` when it exists, else surface `emptyMessage`. The shape every
+     * "copy the last X" chord shares. */
+    const copyOrNotice = (
+      text: string | null | undefined,
+      okMessage: string,
+      emptyMessage: string
+    ): void => {
+      if (text) copyWithNotice(text, okMessage)
+      else dispatch({ type: "NOTICE", message: emptyMessage })
+    }
 
     if (key.ctrl && input === "c") {
       // A Ctrl+C with draft text in the composer clears the draft first (Claude
@@ -338,6 +382,23 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
       // still swallowed here rather than inserted.
       const mouse = parseMouseEvent(input)
       if (mouse) {
+        // Ctrl+click is the "smart action at point": open the file path under
+        // the pointer, copy the URL under it, or copy the whole clicked row.
+        // Checked before the selection so a modified click never starts a drag.
+        if (mouse.kind === "click" && mouse.mods.ctrl) {
+          const row = screenRows()[mouse.row - 1]
+          if (row !== undefined) {
+            const target = resolveClickTarget(row, mouse.col - 1, fileExists)
+            if (target.kind === "file") openFileAt(target.path, target.line, target.col)
+            else if (target.kind === "url") copyWithNotice(target.url, "Copied the link.")
+            else if (target.kind === "line") copyWithNotice(target.text, "Copied the line.")
+            return
+          }
+        }
+        // In-app text selection owns drags (and the repeat press of a double /
+        // triple click). It deliberately declines a first plain press, so every
+        // single-click behaviour below is untouched.
+        if (selection.current?.handleMouse(mouse)) return
         // While the composer popup owns input, let it consume the wheel (it
         // scrolls the popup) instead of paging the transcript underneath.
         if (mouse.kind === "wheel" && mouseMode === "scroll" && !composerPopupOpen.current) {
@@ -398,10 +459,7 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
               if (id === "model" || id === "provider") {
                 openModelPicker()
               } else if (id === "mode") {
-                const next = cyclePermissionMode(state.config.permissionMode)
-                persist("permissionMode", next)
-                void agent.switchMode(next)
-                dispatch({ type: "NOTICE", message: permissionModeNotice(next) })
+                runCommandLine(`/mode ${cyclePermissionMode(state.config.permissionMode)}`)
               } else if (id === "thinking") {
                 dispatch({
                   type: "OVERLAY_OPEN",
@@ -526,17 +584,49 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
     // Copy the latest assistant reply to the clipboard without entering find
     // mode (Codex Ctrl+O parity). The injected writer handles OSC 52 over SSH.
     if (chord === "copyLast") {
-      const reply = lastAssistantText(state)
-      if (reply) {
-        void Promise.resolve(copyClipboard(reply)).then((res) =>
-          dispatch({
-            type: "NOTICE",
-            message: res.ok ? notices.copiedReply : clipboardFailureMessage(res.reason, notices),
-          })
-        )
-      } else {
-        dispatch({ type: "NOTICE", message: notices.noReplyToCopy })
+      copyOrNotice(lastAssistantText(state), notices.copiedReply, notices.noReplyToCopy)
+      return
+    }
+    // The rest of the copy family — the same "grab the last X" shape, each on a
+    // rebindable chord so the common targets need no `/copy` round-trip.
+    if (chord === "copyLastUser") {
+      copyOrNotice(lastUserText(state), notices.copiedUserMessage, notices.noUserMessageToCopy)
+      return
+    }
+    if (chord === "copyCodeBlock") {
+      copyOrNotice(lastCodeBlock(state), notices.copiedCodeBlock, notices.noCodeBlockToCopy)
+      return
+    }
+    if (chord === "copyToolOutput") {
+      copyOrNotice(lastToolResultText(state), notices.copiedToolOutput, notices.noToolResultToCopy)
+      return
+    }
+    // The whole conversation as markdown — every cell on screen, not just the
+    // persisted user/assistant turns (see `formatCellsAsMarkdown`).
+    if (chord === "copyTranscript") {
+      const doc = formatCellsAsMarkdown(state.cells)
+      copyOrNotice(doc, `Copied the conversation (${doc.length} chars).`, "Nothing to copy yet.")
+      return
+    }
+    // Copy whatever is currently highlighted. Only meaningful with `/select`
+    // on; the notice says so rather than failing silently.
+    if (chord === "copySelection") {
+      if (!selection.current?.copySelection()) {
+        dispatch({ type: "NOTICE", message: notices.noSelectionToCopy })
       }
+      return
+    }
+    // One-key swap of the mouse model, routed through `/mouse` so persistence
+    // and the live escape re-issue stay in one place.
+    if (chord === "mouseToggle") {
+      runCommandLine(`/mouse ${mouseMode === "scroll" ? "select" : "scroll"}`)
+      return
+    }
+    // Cycle off → manual → auto-copy → off, likewise through `/select`.
+    if (chord === "selectionCycle") {
+      const next =
+        SELECTION_MODES[(SELECTION_MODES.indexOf(selectionMode) + 1) % SELECTION_MODES.length]
+      runCommandLine(`/select ${next}`)
       return
     }
     // Clear the visible scrollback + repaint WITHOUT resetting the conversation
@@ -575,18 +665,22 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
       }
       return
     }
-    // Shift+Tab cycles the permission mode (Claude Code parity). Persists the
-    // choice and re-resolves SendOptions via switchMode so the next turn honours
-    // it. Gated on no-overlay so a completion popup's Tab keeps priority.
+    // Shift+Tab cycles the permission mode (Claude Code parity). Routed through
+    // the command path so the persist / switchMode / notice — and the danger-tier
+    // acknowledgement that now guards `bypassPermissions` at the end of the
+    // cycle — have exactly ONE implementation. Gated on no-overlay so a
+    // completion popup's Tab keeps priority; that same gate is what stops a
+    // key-repeat from blowing past the acknowledgement confirm once it opens.
     if (key.tab && key.shift && !overlayOpen) {
-      const next = cyclePermissionMode(state.config.permissionMode)
-      persist("permissionMode", next)
-      void agent.switchMode(next)
-      dispatch({ type: "NOTICE", message: permissionModeNotice(next) })
+      runCommandLine(`/mode ${cyclePermissionMode(state.config.permissionMode)}`)
       return
     }
     // Esc only acts here when no overlay is open (overlays own their Esc).
     if (key.escape && !overlayOpen) {
+      // A painted selection is the most local thing Esc can undo, so it goes
+      // first — and only when there IS one, so Esc keeps interrupting / arming
+      // backtrack exactly as before whenever nothing is selected.
+      if (selection.current?.clear()) return
       // A live turn / background run: Esc interrupts (existing behaviour) and
       // cancels any half-armed backtrack.
       if (busy || state.activity) {

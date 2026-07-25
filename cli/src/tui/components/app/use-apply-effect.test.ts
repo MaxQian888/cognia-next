@@ -47,6 +47,7 @@ function buildDeps(over: Partial<ApplyEffectDeps> = {}): ApplyEffectDeps {
     notices: resolveNotices(undefined),
     pushHandoff: jest.fn(),
     openSessions: jest.fn(),
+    openModelPicker: jest.fn(),
     resumeMostRecent: jest.fn(),
     resumeSession: jest.fn(),
     runBash: jest.fn(),
@@ -62,6 +63,7 @@ function buildDeps(over: Partial<ApplyEffectDeps> = {}): ApplyEffectDeps {
     persistDb: jest.fn(),
     fullscreen: false,
     screen: {} as never,
+    selectionRef: { current: null },
     startGoalRun: jest.fn(() => Promise.resolve()) as never,
     startLoopRun: jest.fn(() => Promise.resolve()) as never,
     startFixRun: jest.fn(() => Promise.resolve()) as never,
@@ -380,5 +382,188 @@ describe("useApplyEffect", () => {
     })
 
     afterEach(() => jest.restoreAllMocks())
+  })
+
+  describe("selection effect (/select)", () => {
+    function selectionDeps(over: Partial<ApplyEffectDeps> = {}) {
+      const writes: string[] = []
+      const deps = buildDeps({
+        fullscreen: true,
+        screen: { isTTY: true, write: (d: string) => writes.push(d) } as never,
+        ...over,
+      })
+      return { deps, writes }
+    }
+
+    it("live-applies the mode, drops the highlight, and persists", () => {
+      const clear = jest.fn()
+      const { deps, writes } = selectionDeps({ selectionRef: { current: { clear } as never } })
+      run(deps)({ kind: "selection", mode: "auto-copy" })
+      expect(deps.dispatch).toHaveBeenCalledWith({ type: "SET_SELECTION", mode: "auto-copy" })
+      expect(clear).toHaveBeenCalled()
+      expect(deps.persist).toHaveBeenCalledWith("selection", "auto-copy")
+      // Button-event tracking (?1002h) must go on with the feature.
+      expect(writes.join("")).toContain("\x1b[?1002h")
+    })
+
+    it("releases drag reporting when the mode goes back to off", () => {
+      const { deps, writes } = selectionDeps()
+      run(deps)({ kind: "selection", mode: "off" })
+      expect(writes.join("")).toContain("\x1b[?1002l")
+      expect(writes.join("")).not.toContain("\x1b[?1002h")
+    })
+
+    it("notices each mode in plain language", () => {
+      const { deps } = selectionDeps()
+      run(deps)({ kind: "selection", mode: "manual" })
+      expect(deps.dispatch).toHaveBeenCalledWith({
+        type: "NOTICE",
+        message: expect.stringContaining("Selection: manual"),
+      })
+    })
+
+    it("still applies the mode when persistence fails", () => {
+      const { deps } = selectionDeps({ persist: jest.fn(() => false) })
+      run(deps)({ kind: "selection", mode: "manual" })
+      expect(deps.dispatch).toHaveBeenCalledWith({ type: "SET_SELECTION", mode: "manual" })
+      expect(deps.dispatch).toHaveBeenCalledWith({
+        type: "NOTICE",
+        message: "Selection mode updated (couldn't save to config).",
+      })
+    })
+
+    it("writes no escapes outside the fullscreen layout", () => {
+      const { deps, writes } = selectionDeps({ fullscreen: false })
+      run(deps)({ kind: "selection", mode: "manual" })
+      expect(writes).toEqual([])
+      expect(deps.persist).toHaveBeenCalledWith("selection", "manual")
+    })
+
+    it("keeps drag reporting on across a /mouse switch while selection is on", () => {
+      const state = { ...createInitialState(config, "s1", true, []) }
+      state.config = { ...state.config, selection: "auto-copy" }
+      const { deps, writes } = selectionDeps({ state })
+      run(deps)({ kind: "mouse", mode: "scroll" })
+      expect(writes.join("")).toContain("\x1b[?1002h")
+    })
+
+    it("switches mouse=select to tracked scroll mode when selection is enabled", () => {
+      const state = { ...createInitialState(config, "s1", true, []) }
+      state.config = { ...state.config, mouse: "select", selection: "off" }
+      const { deps, writes } = selectionDeps({ state })
+
+      run(deps)({ kind: "selection", mode: "manual" })
+
+      expect(deps.dispatch).toHaveBeenCalledWith({ type: "SET_MOUSE", mode: "scroll" })
+      expect(deps.persist).toHaveBeenCalledWith("mouse", "scroll")
+      expect(writes.join("")).toContain("\x1b[?1002h")
+    })
+  })
+
+  describe("permissionMode", () => {
+    const notices = (deps: ApplyEffectDeps): string[] =>
+      (deps.dispatch as jest.Mock).mock.calls
+        .map((c) => c[0])
+        .filter((a: { type: string }) => a.type === "NOTICE")
+        .map((a: { message: string }) => a.message)
+
+    it("applies a safe mode: persist + switchMode + a consequence notice", () => {
+      const deps = buildDeps()
+      run(deps)({ kind: "permissionMode", mode: "acceptEdits" })
+      expect(deps.persist).toHaveBeenCalledWith("permissionMode", "acceptEdits")
+      expect(deps.agent.switchMode).toHaveBeenCalledWith("acceptEdits")
+      expect(notices(deps)[0]).toMatch(/Permission mode: acceptEdits — /)
+    })
+
+    it("opens the acknowledgement instead of applying bypass", () => {
+      const deps = buildDeps()
+      run(deps)({ kind: "permissionMode", mode: "bypassPermissions" })
+      expect(deps.agent.switchMode).not.toHaveBeenCalled()
+      expect(deps.persist).not.toHaveBeenCalled()
+      expect(deps.dispatch).toHaveBeenCalledWith({
+        type: "OVERLAY_OPEN",
+        overlay: expect.objectContaining({
+          kind: "confirm",
+          onConfirmCommand: "mode bypassPermissions --force",
+        }),
+      })
+    })
+
+    it("applies bypass once forced, and records the acknowledgement", () => {
+      const deps = buildDeps()
+      run(deps)({ kind: "permissionMode", mode: "bypassPermissions", force: true })
+      expect(deps.agent.switchMode).toHaveBeenCalledWith("bypassPermissions")
+      expect(deps.dispatch).toHaveBeenCalledWith({ type: "BYPASS_ACK" })
+    })
+
+    it("does not persist a launch-only bypass mode after confirmation", () => {
+      const deps = buildDeps({ sessionOnlyPermissionMode: "bypassPermissions" })
+      run(deps)({ kind: "permissionMode", mode: "bypassPermissions", force: true })
+
+      expect(deps.agent.switchMode).toHaveBeenCalledWith("bypassPermissions")
+      expect(deps.persist).not.toHaveBeenCalledWith("permissionMode", "bypassPermissions")
+    })
+
+    it("keeps the startup bypass decline session-only too", () => {
+      const deps = buildDeps({ sessionOnlyPermissionMode: "bypassPermissions" })
+      run(deps)({ kind: "permissionMode", mode: "default" })
+
+      expect(deps.agent.switchMode).toHaveBeenCalledWith("default")
+      expect(deps.persist).not.toHaveBeenCalledWith("permissionMode", "default")
+    })
+
+    it("stops asking after the session acknowledged once", () => {
+      const state = { ...createInitialState(config, "s1", true, []), bypassAcknowledged: true }
+      const deps = buildDeps({ state })
+      run(deps)({ kind: "permissionMode", mode: "bypassPermissions" })
+      expect(deps.agent.switchMode).toHaveBeenCalledWith("bypassPermissions")
+    })
+
+    it("still applies the mode when persistence fails", () => {
+      const deps = buildDeps({ persist: jest.fn(() => false) })
+      run(deps)({ kind: "permissionMode", mode: "plan" })
+      expect(deps.agent.switchMode).toHaveBeenCalledWith("plan")
+      expect(notices(deps)).toContain("Permission mode updated (couldn't save to config).")
+    })
+
+    it("says so when the backend can't enforce the picked mode", () => {
+      // An `a2a` transport has no client-side approval loop, so the manager
+      // clamps bypass down to `default` before the agent ever sees it.
+      const base = createInitialState(config, "s1", true, [])
+      const deps = buildDeps({
+        state: {
+          ...base,
+          bypassAcknowledged: true,
+          backendCapabilities: {
+            backend: "remote",
+            builtin: false,
+            protocol: "a2a",
+            features: {} as never,
+          },
+        },
+      })
+      run(deps)({ kind: "permissionMode", mode: "bypassPermissions" })
+      expect(notices(deps)).toContainEqual(
+        expect.stringContaining("remote can't enforce bypassPermissions — it runs under default")
+      )
+    })
+
+    it("stays quiet about clamping when the backend honours the mode", () => {
+      const base = createInitialState(config, "s1", true, [])
+      const deps = buildDeps({
+        state: {
+          ...base,
+          bypassAcknowledged: true,
+          backendCapabilities: {
+            backend: "codex-app-server",
+            builtin: false,
+            protocol: "codex-app-server",
+            features: {} as never,
+          },
+        },
+      })
+      run(deps)({ kind: "permissionMode", mode: "bypassPermissions" })
+      expect(notices(deps).join("\n")).not.toMatch(/can't enforce/)
+    })
   })
 })

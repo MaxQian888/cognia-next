@@ -22,12 +22,15 @@ export interface ContextReportDeps {
   sessionId: string
   usage?: UsageInfo
   contextWindow?: number
+  /** The launched executable preset — what the per-backend model memory is keyed
+   * by, so the report names the model this backend actually runs. */
+  presetId?: string
   /** SDK live-context fetch seam (tests); defaults to the IPC control round-trip. */
   fetchSdkContext?: (sessionId: string) => Promise<SdkContextUsage>
 }
 
 export async function runContextReport(deps: ContextReportDeps): Promise<void> {
-  const base = buildContextReport(deps.usage, deps.config, deps.contextWindow)
+  const base = buildContextReport(deps.usage, deps.config, deps.contextWindow, deps.presetId)
 
   let sdk: SdkContextUsage | null = null
   if (deps.sessionId) {

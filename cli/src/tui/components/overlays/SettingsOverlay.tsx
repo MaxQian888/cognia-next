@@ -156,13 +156,24 @@ export function SettingsOverlay({
               {row.label.padEnd(labelWidth)}
               {"  "}
             </Text>
-            {rowValue(row, theme.accent, theme.muted)}
+            {/* A row the active backend cannot honour shows "unavailable"
+                instead of a value it would never apply. */}
+            {row.unavailable ? (
+              <Text color={theme.muted} dimColor>
+                unavailable
+              </Text>
+            ) : (
+              rowValue(row, theme.accent, theme.muted)
+            )}
           </Box>
         )
       })}
       {win.below > 0 ? <Text color={theme.muted} dimColor>{`  ↓ ${win.below} more`}</Text> : null}
-      {/* Help strip: the focused row's one-line description. */}
-      {current?.description ? (
+      {/* Help strip: WHY the focused row is unavailable takes precedence over
+          its description — that is the thing the user needs right then. */}
+      {current?.unavailable ? (
+        <Text color={theme.muted} wrap="truncate-end">{`  ${current.unavailable}`}</Text>
+      ) : current?.description ? (
         <Text color={theme.muted} wrap="truncate-end">{`  ${current.description}`}</Text>
       ) : null}
       <OverlayFooter hint={FOOTER_HINT} />

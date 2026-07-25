@@ -67,6 +67,7 @@ export function fallbackInstallDirs(runtime: AgentPathRuntime): string[] {
 
   if (home) {
     for (const relative of [
+      // Package-manager roots — mirrors the Rust `fallback_install_dirs`.
       ".local/bin",
       ".bun/bin",
       ".cargo/bin",
@@ -75,6 +76,11 @@ export function fallbackInstallDirs(runtime: AgentPathRuntime): string[] {
       ".deno/bin",
       "Library/pnpm",
       ".nix-profile/bin",
+      // Agent-native installer targets, so a binary we install from the failure
+      // page (Factory Droid, OpenCode) is found on the reconnect even when its
+      // installer did not add its dir to PATH. Harmless when absent.
+      ".factory/bin",
+      ".opencode/bin",
     ]) {
       dirs.push(path.join(home, ...relative.split("/")))
     }

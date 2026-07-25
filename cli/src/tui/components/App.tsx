@@ -29,11 +29,16 @@ import { BackendInstall } from "./BackendInstall"
 import type { BackendInstallOption } from "../state/types"
 import { createAgentSession, type AgentSession } from "../../agent/session-runner"
 import {
+  externalCapabilities,
   isBuiltinBackend,
   supportsFeature,
   unsupportedFeatureMessage,
 } from "../runtime/backend-capabilities"
-import { defaultBackendModelHost, type ExternalModelOption } from "../runtime/backend-models"
+import {
+  defaultBackendModelHost,
+  formatExternalModelLabel,
+  type ExternalModelOption,
+} from "../runtime/backend-models"
 import { disconnectBackend } from "../runtime/backend-controller"
 import { LaunchShell } from "./LaunchShell"
 import { LAUNCH_LIST_CHROME_ROWS, launchListRows, launchShellLayout } from "./launch-shell-layout"
@@ -44,7 +49,7 @@ import type {
   BackendConnectFailure,
 } from "../runtime/backend-controller"
 import type { RunInstallResult, InstallMethod } from "../runtime/backend-install"
-import { backendIdentity } from "../runtime/backend-identity"
+import { backendIdentity, backendModelMetaTarget } from "../runtime/backend-identity"
 import type { ListDirs } from "./FolderPicker"
 import { trustFolder as defaultTrustFolder } from "../../config/trusted-folders"
 import { listSessions, type ReadDir } from "./sessions-list"
@@ -88,7 +93,6 @@ import { copilotCheckProposal } from "../runtime/workflow-copilot-controller"
 import { resolveModelMeta, type ModelMeta } from "../runtime/model-meta"
 import { initOpenRouterCatalog as defaultInitOpenRouterCatalog } from "../runtime/openrouter-catalog-controller"
 import { registerCustomCommands as defaultRegisterCustomCommands } from "../commands/custom-commands"
-import { resolveActiveModel } from "../../config/active-model"
 import { shouldAutoCompact } from "../../agent/auto-compact"
 import { ensureCliDb } from "../../db/bootstrap"
 import { formSubmit } from "../state/form"
@@ -239,7 +243,12 @@ export interface AppProps {
   createExternalSession?: (params: {
     config: ResolvedConfig
     sessionId?: string
-    connection?: { agentId: string; presetId: string }
+    connection?: {
+      agentId: string
+      presetId: string
+      capabilities?: { negotiated?: import("@/types/agent/external-agent").AcpCapabilities }
+    }
+    onToolHostStatus?: (snapshot: import("../../agent/tool-host/status").ToolHostSnapshot) => void
   }) => AgentSession
   /** Bring the external backend up. Injected so tests never spawn a process. */
   connectBackendFn?: typeof connectBackend
@@ -336,6 +345,8 @@ export interface AppProps {
   /** Slash command to run once on mount, after the trust gate clears — the
    * `--continue` / `--resume` launch flags (`/continue`, `/resume [id]`). */
   initialCommand?: string
+  /** Permission mode supplied as a launch-only CLI overlay; never persist it. */
+  sessionOnlyPermissionMode?: ResolvedConfig["permissionMode"]
   /** Persist a newly-submitted composer line to the history store; defaults to
    * the real appender. Injected as a no-op by tests. */
   persistHistory?: (entry: string) => void
@@ -455,6 +466,7 @@ export function App({
   persistPluginTools = setPluginToolsConfig,
   initialHistory = [],
   initialCommand,
+  sessionOnlyPermissionMode,
   persistHistory = (entry) => {
     try {
       appendHistory(home, entry)
@@ -490,10 +502,17 @@ export function App({
   // which is what the old local `cancelled` flag could not do.
   const connectionRef = useRef<BackendConnection | null>(null)
   const lifecycleRef = useRef<BackendLifecycle<BackendConnection> | null>(null)
+  const externalModelRequestRef = useRef(0)
   // The install option resolved for the current failure (a ref so the failure
   // page's "install" handler reads the latest without recreating the callback).
   const installOptionRef = useRef<BackendInstallOption | null>(null)
-  const activeBackend = state.config.agentBackend
+  const activeBackend = state.config.agentBackend ?? "builtin"
+  useEffect(() => {
+    // Invalidate an in-flight external catalog read whenever the selected/live
+    // backend identity changes. The resolver also checks the connection ref,
+    // so disconnects cannot publish their late results.
+    externalModelRequestRef.current += 1
+  }, [activeBackend, state.backendCapabilities?.backend])
   // Route session creation to the backend the user has selected RIGHT NOW.
   // `/backend` drops the live session, so a changed identity here always lands
   // on a fresh session rather than being ignored by the existing one.
@@ -513,7 +532,29 @@ export function App({
         ...params,
         config: { ...params.config, agentBackend: activeBackend },
         ...(connection
-          ? { connection: { agentId: connection.agentId, presetId: connection.presetId } }
+          ? {
+              connection: {
+                agentId: connection.agentId,
+                presetId: connection.presetId,
+                ...(connection.negotiated
+                  ? { capabilities: { negotiated: connection.negotiated } }
+                  : {}),
+              },
+              onToolHostStatus: (toolHost) => {
+                const live = connectionRef.current
+                if (!live || live.agentId !== connection.agentId) return
+                dispatch({
+                  type: "BACKEND_CAPABILITIES_UPDATE",
+                  capabilities: externalCapabilities({
+                    backend: live.backend,
+                    presetId: live.presetId,
+                    ...(live.capabilities.protocol ? { protocol: live.capabilities.protocol } : {}),
+                    ...(live.negotiated ? { negotiated: live.negotiated } : {}),
+                    toolHost,
+                  }),
+                })
+              },
+            }
           : {}),
       })
     },
@@ -522,7 +563,7 @@ export function App({
   // Mounted ONCE for the app's lifetime (never per turn): the external-agent
   // emitter has the default 10-listener cap, and a MaxListenersExceededWarning
   // would print to stderr straight through the Ink frame.
-  const { pushLog } = useLogIngest({ dispatch })
+  const { pushLog, clearLogs } = useLogIngest({ dispatch })
   const agent = useAgentSession({
     config: state.config,
     dispatch,
@@ -828,8 +869,12 @@ export function App({
   // to the real window (not the 200k fallback) and the cost segment can price
   // turns the SDK reports as $0 (every non-Anthropic provider). Best-effort and
   // async — a missing catalog leaves the pattern-table window in place.
-  const activeModel = useMemo(() => resolveActiveModel(state.config), [state.config])
-  const activeProvider = state.config.provider
+  const activeMetaTarget = useMemo(
+    () => backendModelMetaTarget(state.config, state.backendCapabilities?.presetId),
+    [state.config, state.backendCapabilities?.presetId]
+  )
+  const activeModel = activeMetaTarget.model
+  const activeProvider = activeMetaTarget.provider
   useEffect(() => {
     let cancelled = false
     void countInterruptedCliBackgroundRuns({ home })
@@ -910,21 +955,39 @@ export function App({
         return
       }
       const list = listExternalModels ?? defaultBackendModelHost().listExternalModels
-      void list(agentId).then((models) => {
-        if (models.length === 0) {
-          dispatch({ type: "NOTICE", message: `${caps.backend} did not report any models.` })
-          return
+      const unavailableMessage = `${caps.backend} did not report any models.`
+      const requestId = ++externalModelRequestRef.current
+      const isCurrentRequest = () => {
+        return (
+          externalModelRequestRef.current === requestId &&
+          connectionRef.current?.agentId === agentId
+        )
+      }
+      void list(agentId).then(
+        (models) => {
+          if (!isCurrentRequest()) return
+          if (models.length === 0) {
+            dispatch({ type: "NOTICE", message: unavailableMessage })
+            return
+          }
+          dispatch({
+            type: "OVERLAY_OPEN",
+            overlay: {
+              kind: "model",
+              options: models.map((m) => m.id),
+              labels: Object.fromEntries(
+                models.map((model) => [model.id, formatExternalModelLabel(model)])
+              ),
+              index: 0,
+              query: "",
+            },
+          })
+        },
+        () => {
+          if (!isCurrentRequest()) return
+          dispatch({ type: "NOTICE", message: unavailableMessage })
         }
-        dispatch({
-          type: "OVERLAY_OPEN",
-          overlay: {
-            kind: "model",
-            options: models.map((m) => m.id),
-            index: 0,
-            query: "",
-          },
-        })
-      })
+      )
       return
     }
     const options = collectModelOptions(state.config)
@@ -1408,6 +1471,7 @@ export function App({
     setRuntimeAbort,
     getRuntimeAbort,
     mcpProbeCache,
+    sessionOnlyPermissionMode,
   })
 
   // Ctrl+click "smart action at point" needs two capabilities the resolver
@@ -2234,6 +2298,7 @@ export function App({
             onPlanDecision={onPlanDecision}
             askUser={askUser}
             mcpPanelDeps={mcpPanelDeps}
+            clearLogs={clearLogs}
           />
           <BottomRegion
             state={state}

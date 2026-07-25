@@ -139,6 +139,19 @@ describe("chatCommand", () => {
     expect(mounted.createExternalSession).toBe(external.factory)
   })
 
+  it("marks --bypass as a session-only TUI permission mode", async () => {
+    const renderTui = jest.fn(
+      async (_deps: { sessionOnlyPermissionMode?: ResolvedConfig["permissionMode"] }) => 0
+    )
+    await chatCommand(parseArgv(["chat", "--bypass"]), {
+      ...baseDeps(),
+      isTty: () => true,
+      renderTui,
+    })
+
+    expect(renderTui.mock.calls[0][0].sessionOnlyPermissionMode).toBe("bypassPermissions")
+  })
+
   it("/handoff pushes the current session", async () => {
     const s = sink()
     const f = fakeSessionFactory()

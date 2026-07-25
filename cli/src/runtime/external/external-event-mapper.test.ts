@@ -436,6 +436,9 @@ describe("externalAgentEventToActions", () => {
             totalTokens: 17,
             cacheReadTokens: 3,
             cacheWriteTokens: 2,
+            reasoningTokens: 1,
+            contextTokens: 17,
+            modelContextWindow: 272_000,
           },
         })
       )
@@ -447,6 +450,9 @@ describe("externalAgentEventToActions", () => {
           outputTokens: 5,
           cacheReadInputTokens: 3,
           cacheCreationInputTokens: 2,
+          reasoningTokens: 1,
+          contextTokens: 17,
+          contextWindow: 272_000,
         },
       },
     ])

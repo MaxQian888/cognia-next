@@ -114,6 +114,36 @@ export function setProviderModel(
 }
 
 /**
+ * Remember the model for one EXTERNAL AGENT BACKEND
+ * (`agentBackends[presetId].model`), keyed by the executable preset actually
+ * launched (`codex-app-server`, `codex`, `claude-code`, …).
+ *
+ * Deliberately NOT {@link setProviderModel}: an external agent is not a chat
+ * provider. Sharing that record would put a bogus entry in the `/provider`
+ * picker, and because the preset→provider mapping sends `claude-code` to
+ * `anthropic`, picking a Claude Code model would silently rewrite the model the
+ * built-in sidecar runs with. Unlike the provider writer this does NOT touch the
+ * legacy top-level `model` key — that pin belongs to the built-in path.
+ */
+export function setAgentBackendModel(
+  home: string,
+  presetId: string,
+  modelId: string,
+  fsx: ConfigMutateFs = realConfigMutateFs
+): string {
+  const current = readUserConfig(home, fsx)
+  const agentBackends = {
+    ...current.agentBackends,
+    [presetId]: { ...current.agentBackends?.[presetId], model: modelId },
+  }
+  const merged = cliConfigFileSchema.parse({ ...current, agentBackends })
+  const target = userConfigPath(home)
+  fsx.mkdirp(path.dirname(target))
+  fsx.write(target, JSON.stringify(merged, null, 2) + "\n")
+  return target
+}
+
+/**
  * ADR-0090 Phase 4 — toggle the EXPERIMENTAL "Claude Agent SDK through the
  * built-in Gateway" opt-in for one provider/deployment id
  * (`providers[providerId].experimentalAgentSdk`). Explicit opt-in only: this

@@ -11,6 +11,7 @@ import {
   registerCommands,
 } from "./registry"
 import type { CommandDescriptor } from "./types"
+import { externalCapabilities } from "../runtime/backend-capabilities"
 
 const stub = (name: string, over: Partial<CommandDescriptor> = {}): CommandDescriptor => ({
   name,
@@ -73,6 +74,38 @@ describe("command registry", () => {
     expect(effect).toMatchObject({
       kind: "openOverlay",
       overlay: { kind: "effortSlider", off: false, index: 2 },
+    })
+  })
+
+  describe("/mode", () => {
+    const runMode = (args: string) =>
+      getCommand("mode")?.handler?.({ state: {}, config: {}, version: "0", args } as never)
+
+    it("opens the picker when invoked bare", () => {
+      expect(runMode("")).toMatchObject({ kind: "openOverlay", overlay: { kind: "mode" } })
+    })
+
+    it("applies a named mode directly, case-insensitively", () => {
+      expect(runMode("acceptEdits")).toEqual({ kind: "permissionMode", mode: "acceptEdits" })
+      expect(runMode("BYPASSPERMISSIONS")).toEqual({
+        kind: "permissionMode",
+        mode: "bypassPermissions",
+      })
+    })
+
+    it("carries --force, which is how the acknowledgement re-enters the switch", () => {
+      expect(runMode("bypassPermissions --force")).toEqual({
+        kind: "permissionMode",
+        mode: "bypassPermissions",
+        force: true,
+      })
+    })
+
+    it("refuses an unknown mode and lists the valid ones", () => {
+      const effect = runMode("yolo") as { kind: string; message: string }
+      expect(effect.kind).toBe("notice")
+      expect(effect.message).toContain('Unknown permission mode "yolo"')
+      expect(effect.message).toContain("bypassPermissions")
     })
   })
 
@@ -141,6 +174,51 @@ describe("command registry", () => {
       ({ state: {}, config: { cwd: "/w" }, version: "0", args }) as never
     expect(cwd?.handler?.(ctx(""))).toEqual({ kind: "notice", message: "/w" })
     expect(cwd?.handler?.(ctx("  ../other  "))).toEqual({ kind: "changeCwd", dir: "../other" })
+  })
+
+  describe("backend capability gating", () => {
+    const ctxWith = (backend: string, presetId?: string) =>
+      ({
+        state: {
+          backendCapabilities: externalCapabilities({
+            backend,
+            ...(presetId ? { presetId } : {}),
+          }),
+        },
+        config: { agentBackend: backend },
+        version: "0",
+        args: "",
+      }) as never
+
+    const builtinCtx = () =>
+      ({ state: {}, config: { agentBackend: "builtin" }, version: "0", args: "" }) as never
+
+    it("/think opens the slider on a backend that forwards reasoning effort", () => {
+      expect(getCommand("think")?.handler?.(ctxWith("codex", "codex-app-server"))).toMatchObject({
+        kind: "openOverlay",
+        overlay: { kind: "effortSlider" },
+      })
+    })
+
+    it("/think explains itself instead of opening a slider that changes nothing", () => {
+      // Claude Code over ACP has no reasoning-effort slot: the slider used to
+      // open and set a value that was never forwarded.
+      const effect = getCommand("think")?.handler?.(ctxWith("claude-code")) as {
+        kind: string
+        message: string
+      }
+      expect(effect.kind).toBe("notice")
+      expect(effect.message).toMatch(/Thinking level is unavailable on claude-code/)
+    })
+
+    it("/model defers to the App so the option list can follow the backend", () => {
+      // Same effect either way — the App decides whether to ask the agent for
+      // its catalog or read the local one, so the two paths cannot drift.
+      expect(getCommand("model")?.handler?.(ctxWith("codex", "codex-app-server"))).toEqual({
+        kind: "modelPicker",
+      })
+      expect(getCommand("model")?.handler?.(builtinCtx())).toEqual({ kind: "modelPicker" })
+    })
   })
 
   it("/clear confirms before wiping, and `--yes` performs the reset", () => {

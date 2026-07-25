@@ -28,6 +28,28 @@ describe("main", () => {
     expect(s.stdout()).toMatch(/Usage:/)
   })
 
+  it("prints help on the `help` subcommand (exit 0, stdout)", async () => {
+    const s = sink()
+    expect(await main(["help"], { out: s.out })).toBe(0)
+    expect(s.stdout()).toMatch(/Usage:/)
+    expect(s.stderr()).toBe("")
+  })
+
+  it("prints the version on the `version` subcommand (exit 0)", async () => {
+    const s = sink()
+    expect(await main(["version"], { out: s.out })).toBe(0)
+    expect(s.stdout()).toBe(`${VERSION}\n`)
+  })
+
+  it("treats `help` as a prompt under the -p shorthand, not usage", async () => {
+    const s = sink()
+    const run = jest.fn().mockResolvedValue(0)
+    expect(await main(["-p", "help"], { out: s.out, run })).toBe(0)
+    expect(run).toHaveBeenCalled()
+    expect(run.mock.calls[0][1]).toMatchObject({ promptOverride: "help" })
+    expect(s.stdout()).toBe("")
+  })
+
   it("prints help to stderr with exit 2 when no command", async () => {
     const s = sink()
     expect(await main([], { out: s.out })).toBe(2)

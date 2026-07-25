@@ -27,7 +27,7 @@ import {
   emptySessionTotals,
   turnCostUsd,
 } from "../format/usage"
-import { resolveActiveModel, resolveBackendModel } from "../../config/active-model"
+import { resolveBackendModel } from "../../config/active-model"
 import {
   builtinCapabilities as capabilitiesForBuiltin,
   isBuiltinBackend,
@@ -620,10 +620,22 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
     case "SET_USAGE": {
       // Attribute this turn to the model that ran it (resolved from the active
       // config) so the panel can break usage down per model like `/usage`.
-      const turnModel = resolveActiveModel(state.config) ?? "default"
+      const turnModel =
+        resolveBackendModel(state.config, state.backendCapabilities?.presetId) ?? "default"
+      const reportedWindow = action.usage.contextWindow
       return {
         ...state,
         usage: action.usage,
+        ...(reportedWindow && reportedWindow > 0
+          ? {
+              modelMeta: {
+                ...state.modelMeta,
+                modelId: turnModel,
+                contextWindow: reportedWindow,
+                runtime: true,
+              },
+            }
+          : {}),
         sessionTotals: accumulateUsage(state.sessionTotals, action.usage, state.modelMeta?.pricing),
         modelTotals: accumulateModelTotals(
           state.modelTotals,
@@ -640,8 +652,24 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
       // Account-level live quota — persists across /clear (a fresh chat doesn't
       // reset the API key's per-window remaining), overwritten by each response.
       return { ...state, rateLimits: action.snapshot }
-    case "SET_MODEL_META":
+    case "SET_MODEL_META": {
+      // A catalog lookup may have started before the live backend reported its
+      // actual window. Keep the authoritative runtime value while still taking
+      // any late-arriving pricing metadata; a model/provider switch clears
+      // modelMeta, so this cannot leak a window across models.
+      const runtimeMeta = state.modelMeta
+      if (runtimeMeta?.runtime && runtimeMeta.modelId === action.meta.modelId) {
+        return {
+          ...state,
+          modelMeta: {
+            ...action.meta,
+            contextWindow: runtimeMeta.contextWindow,
+            runtime: true,
+          },
+        }
+      }
       return { ...state, modelMeta: action.meta }
+    }
 
     // ── Turn lifecycle ──────────────────────────────────────────────────────────
     case "TURN_START": {
@@ -725,7 +753,7 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
               ),
               modelTotals: accumulateModelTotals(
                 state.modelTotals,
-                resolveActiveModel(state.config) ?? "default",
+                resolveBackendModel(state.config, state.backendCapabilities?.presetId) ?? "default",
                 fallbackUsage,
                 state.modelMeta?.pricing
               ),
@@ -1145,6 +1173,8 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         config: { ...state.config, permissionMode: action.mode },
         overlay: { kind: "none" },
       }
+    case "BYPASS_ACK":
+      return { ...state, bypassAcknowledged: true }
     case "SET_THINKING":
       return {
         ...state,
@@ -1576,6 +1606,8 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         },
       }
     }
+    case "BACKEND_CAPABILITIES_UPDATE":
+      return { ...state, backendCapabilities: action.capabilities }
     case "BACKEND_CONNECT_FAIL": {
       const {
         backendConnect: _connect,

@@ -238,6 +238,9 @@ function tokenUsageToUsageInfo(usage: ExternalAgentTokenUsage) {
   return {
     inputTokens: usage.promptTokens,
     outputTokens: usage.completionTokens,
+    ...(usage.contextTokens === undefined ? {} : { contextTokens: usage.contextTokens }),
+    ...(usage.modelContextWindow === undefined ? {} : { contextWindow: usage.modelContextWindow }),
+    ...(usage.reasoningTokens === undefined ? {} : { reasoningTokens: usage.reasoningTokens }),
     ...(usage.cacheReadTokens === undefined ? {} : { cacheReadInputTokens: usage.cacheReadTokens }),
     ...(usage.cacheWriteTokens === undefined
       ? {}

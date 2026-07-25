@@ -24,6 +24,8 @@ export interface ModelMeta {
   modelId: string
   /** Context window in tokens for the active model. */
   contextWindow: number
+  /** True when the live backend reported the window authoritatively. */
+  runtime?: boolean
   /** Per-token pricing, when the catalog knows it (drives the cost fallback). */
   pricing?: Partial<ModelPricing>
 }

@@ -19,6 +19,7 @@ import {
   setProviderBaseURL,
   setProviderExperimentalAgentSdk,
   setProviderModel,
+  setAgentBackendModel,
   setRenderConfig,
   setStatusBarConfig,
   setStringArrayConfig,
@@ -181,6 +182,51 @@ describe("setProviderModel", () => {
       provider: "deepseek",
       providers: { deepseek: { model: "deepseek-chat" } },
     })
+  })
+})
+
+describe("setAgentBackendModel", () => {
+  it("writes the model under the launched preset's slot", () => {
+    const m = memFs()
+    const target = setAgentBackendModel(HOME, "codex-app-server", "gpt-5.6-sol", m.fsx)
+    expect(target).toBe(userConfigPath(HOME))
+    expect(JSON.parse(m.files.get(target)!)).toEqual({
+      agentBackends: { "codex-app-server": { model: "gpt-5.6-sol" } },
+    })
+  })
+
+  it("keeps each backend's memory separate", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({
+        agentBackends: { codex: { model: "shim-model" } },
+      }),
+    })
+    setAgentBackendModel(HOME, "codex-app-server", "gpt-5.6-sol", m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({
+      agentBackends: {
+        codex: { model: "shim-model" },
+        "codex-app-server": { model: "gpt-5.6-sol" },
+      },
+    })
+  })
+
+  it("never touches the chat providers or the top-level model pin", () => {
+    // The anti-regression for the rejected design: the preset→provider mapping
+    // sends `claude-code` to `anthropic`, so writing backend models into
+    // `providers` would silently rewrite the model the built-in sidecar runs.
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({
+        provider: "anthropic",
+        model: "claude-opus-4-8",
+        providers: { anthropic: { apiKey: "k", model: "claude-opus-4-8" } },
+      }),
+    })
+    setAgentBackendModel(HOME, "claude-code", "some-acp-model", m.fsx)
+    const written = JSON.parse(m.files.get(userConfigPath(HOME))!)
+    expect(written.providers).toEqual({ anthropic: { apiKey: "k", model: "claude-opus-4-8" } })
+    // Unlike the provider writer, this one leaves the built-in path's pin alone.
+    expect(written.model).toBe("claude-opus-4-8")
+    expect(written.agentBackends).toEqual({ "claude-code": { model: "some-acp-model" } })
   })
 })
 

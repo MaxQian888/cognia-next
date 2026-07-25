@@ -12,6 +12,7 @@ import { spawn } from "node:child_process"
 import type { Dispatch } from "react"
 
 import { SelectList } from "../SelectList"
+import { useTheme } from "../../theme/context"
 import { MarketplaceBrowser } from "../MarketplaceBrowser"
 import { McpPanel } from "../McpPanel"
 import { McpToolsPanel } from "../McpToolsPanel"
@@ -120,6 +121,8 @@ export interface AppOverlaysProps {
   onPlanDecision: (decision: PlanDecision) => void
   askUser: AskUserOverlayApi
   mcpPanelDeps: () => McpDeps
+  /** Clears both committed and coalescer-pending unified logs. */
+  clearLogs: () => void
 }
 
 export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
@@ -148,7 +151,9 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
     onPlanDecision,
     askUser,
     mcpPanelDeps,
+    clearLogs,
   } = props
+  const theme = useTheme()
 
   // MCP rows are projected into the unified view at READ time rather than being
   // mirrored into `state.logs` at ingest, so nothing is stored twice and the
@@ -192,12 +197,13 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           // The list can run to hundreds of OpenRouter ids, so the picker
           // filters by a typeahead query. `index` already tracks the FILTERED
           // view (reducer), so map the selected row back through `filtered`.
-          const filtered = filterByQuery(state.overlay.options, state.overlay.query)
+          const { labels, options, query } = state.overlay
+          const filtered = filterByQuery(options, query)
           return (
             <SelectList
               title="Switch model"
               items={filtered.map((m) => ({
-                label: formatModelOptionLabel(m, state.config.provider),
+                label: labels?.[m] ?? formatModelOptionLabel(m, state.config.provider),
                 hint: modelInfoHint(m, state.config.provider),
               }))}
               index={state.overlay.index}
@@ -231,12 +237,16 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
         })()}
       {state.overlay.kind === "mode" && (
         <SelectList
-          title="Permission mode — Shift+Tab cycles the safe core; ⚠/• = fewer guardrails"
+          title="Permission mode — Shift+Tab cycles; ⚠ = no guardrails, • = fewer"
           items={state.overlay.options.map((m) => {
             const meta = permissionModeMeta(m)
             return {
               label: `${permissionRiskMarker(m)}${meta.label}`,
               hint: meta.runsWithoutAsking,
+              // A danger-tier row is coloured, not just marked: it disarms every
+              // approval gate for the session (and for the hosted agent), so it
+              // must not read like one more neutral choice in the list.
+              ...(meta.risk === "danger" ? { color: theme.danger } : {}),
             }
           })}
           index={state.overlay.index}
@@ -245,8 +255,10 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
           onSelect={(i) => {
             const m = (state.overlay as { options: (typeof PERMISSION_MODES)[number][] }).options[i]
-            persist("permissionMode", m)
-            void agent.switchMode(m)
+            // Through the command path, not straight to `switchMode`: that is
+            // where the danger-tier acknowledgement and the backend-clamp notice
+            // live, and this picker must not be the one entry point that skips them.
+            runCommandLine(`/mode ${m}`)
           }}
           onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
         />
@@ -306,12 +318,14 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           // the list is long enough, or the moment the user starts typing.
           const filtered = filterProviderOptions(providerOverlay.options, query)
           const searchable = providerOverlay.options.length >= SEARCHABLE_MIN || query.length > 0
-          // Activate a provider: reset to its remembered/default model so a stale
-          // id from the previous provider is never sent to one that won't serve
-          // it (shared model catalog). No top-level model pin on switch —
-          // resolveActiveModel drives the display from the provider's own slot.
+          // On the built-in agent, reset to the provider's remembered/default
+          // model so no stale id bleeds across providers. While an external
+          // agent hosts, provider selection must not inject that chat default
+          // into the hosted agent; its model lives in the backend namespace.
           const activate = (p: ProviderOption) => {
-            const defaultModel = state.config.providers[p.id]?.model ?? catalogModelIds(p.id)[0]
+            const defaultModel = isBuiltinBackend(state.config.agentBackend)
+              ? (state.config.providers[p.id]?.model ?? catalogModelIds(p.id)[0])
+              : undefined
             persist("provider", p.id)
             void agent.switchProvider(p.id, defaultModel)
           }
@@ -343,8 +357,9 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
                   activate(picked)
                   return
                 }
-                const defaultModel =
-                  state.config.providers[picked.id]?.model ?? catalogModelIds(picked.id)[0]
+                const defaultModel = isBuiltinBackend(state.config.agentBackend)
+                  ? (state.config.providers[picked.id]?.model ?? catalogModelIds(picked.id)[0])
+                  : undefined
                 dispatch({
                   type: "OVERLAY_OPEN",
                   overlay: {
@@ -734,7 +749,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           entries={mergedLogs}
           width={columns}
           maxRows={overlayRows}
-          onClear={() => dispatch({ type: "LOG_CLEAR" })}
+          onClear={clearLogs}
           onCopy={(text) => {
             if (!text) return
             void copyToClipboard(text).then((res) =>

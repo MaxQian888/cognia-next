@@ -12,6 +12,7 @@ import type { ResolvedConfig } from "../../../config/schema"
 import type { TuiState } from "../../state/types"
 import type { ScrollController } from "../../hooks/useScroll"
 import type { TranscriptCursor } from "../../hooks/useTranscriptCursor"
+import type { BackendIdentity } from "../../runtime/backend-identity"
 
 const config: ResolvedConfig = { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work" }
 
@@ -45,6 +46,14 @@ const cursor = (): TranscriptCursor =>
     reportCellHeight: jest.fn(),
   }) as unknown as TranscriptCursor
 
+/** Built-in identity — what `backendIdentity` returns when no external agent
+ * is hosting, which is the default these render cases exercise. */
+const builtinIdentity: BackendIdentity = {
+  provider: "anthropic",
+  model: "claude-x",
+  external: false,
+}
+
 const wrap = (el: React.ReactElement) =>
   render(
     <ThemeProvider palette={BUILTIN_THEMES.ansi}>
@@ -59,6 +68,7 @@ describe("TranscriptRegion", () => {
         state={makeState()}
         fullscreen={false}
         banner={<>BANNER</>}
+        identity={builtinIdentity}
         activeModel="claude-x"
         scroll={scroll()}
         scrollContentRef={{ current: null }}
@@ -77,6 +87,7 @@ describe("TranscriptRegion", () => {
         state={makeState()}
         fullscreen
         banner={<>BANNER</>}
+        identity={builtinIdentity}
         activeModel="claude-x"
         scroll={scroll({ atBottom: true })}
         scrollContentRef={{ current: null }}
@@ -97,6 +108,7 @@ describe("TranscriptRegion", () => {
         state={makeState()}
         fullscreen
         banner={<>BANNER</>}
+        identity={builtinIdentity}
         activeModel="claude-x"
         scroll={scroll({ atBottom: false, hidden: { above: 2, below: 5 } })}
         scrollContentRef={{ current: null }}
@@ -107,5 +119,61 @@ describe("TranscriptRegion", () => {
     const text = container.textContent ?? ""
     expect(text).toContain("5 more lines below")
     expect(text).toContain("End to jump to latest")
+  })
+
+  describe("external backend", () => {
+    /** State whose config hosts Codex, with no context window ever reported. */
+    const externalState = (): TuiState => {
+      const base = makeState()
+      return {
+        ...base,
+        config: { ...base.config, agentBackend: "codex" },
+        usage: { inputTokens: 1000, outputTokens: 500 },
+      } as TuiState
+    }
+
+    const externalIdentity: BackendIdentity = {
+      provider: "codex (codex-app-server)",
+      external: true,
+    }
+
+    it("pins the external backend as the identity, not the built-in provider", () => {
+      const { container } = wrap(
+        <TranscriptRegion
+          state={externalState()}
+          fullscreen
+          banner={<>BANNER</>}
+          identity={externalIdentity}
+          activeModel="claude-x"
+          scroll={scroll({ atBottom: true })}
+          scrollContentRef={{ current: null }}
+          cursor={cursor()}
+          mutedColor="gray"
+        />
+      )
+      const text = container.textContent ?? ""
+      expect(text).toContain("codex (codex-app-server)")
+      // The built-in provider's model must never appear while Codex answers —
+      // it is not what runs, and the fixed header stays on screen all session.
+      expect(text).not.toContain("claude-x")
+    })
+
+    it("omits the context gauge when the external agent's window is unknown", () => {
+      const { container } = wrap(
+        <TranscriptRegion
+          state={externalState()}
+          fullscreen
+          banner={<>BANNER</>}
+          identity={externalIdentity}
+          activeModel="claude-x"
+          scroll={scroll({ atBottom: true })}
+          scrollContentRef={{ current: null }}
+          cursor={cursor()}
+          mutedColor="gray"
+        />
+      )
+      // A percentage here could only have come from the built-in catalog window.
+      expect(container.textContent ?? "").not.toContain("% ctx")
+    })
   })
 })

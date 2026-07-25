@@ -543,7 +543,7 @@ describe("Input (rich composer)", () => {
     const onSubmit = jest.fn()
     const { container } = render(<Harness onSubmit={onSubmit} />)
     type("/copy ")
-    expect(container.textContent).toContain("/copy [n|code|tool]")
+    expect(container.textContent).toContain("/copy [n|code|tool|user]")
   })
 
   it("Tab completes a slash command in place without submitting", () => {

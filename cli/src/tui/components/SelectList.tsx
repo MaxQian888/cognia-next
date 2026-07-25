@@ -19,6 +19,12 @@ const LIST_ROW_CHROME = 2
 export interface SelectItem {
   label: string
   hint?: string
+  /**
+   * Label colour for the row while it is NOT highlighted (the highlight always
+   * wins, so the cursor stays legible). Lets a list mark a row as dangerous —
+   * e.g. `/mode`'s `bypassPermissions` — instead of relying on a glyph alone.
+   */
+  color?: string
 }
 
 export function SelectList({
@@ -165,7 +171,7 @@ export function SelectList({
       {visible.map((item, i) => {
         const row = win.start + i
         return (
-          <Text key={row} color={row === index ? theme.accent : undefined} bold={row === index}>
+          <Text key={row} color={row === index ? theme.accent : item.color} bold={row === index}>
             {row === index ? "❯ " : "  "}
             {item.label}
             {item.hint ? <Text color={theme.muted}> {item.hint}</Text> : null}

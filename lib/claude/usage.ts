@@ -95,7 +95,8 @@ export function getLatestUsage(messages: UIMessage[]): UsageInfo | null {
     if (
       usage.inputTokens !== undefined ||
       usage.outputTokens !== undefined ||
-      usage.cacheReadInputTokens !== undefined
+      usage.cacheReadInputTokens !== undefined ||
+      usage.contextTokens !== undefined
     ) {
       return usage
     }
@@ -113,6 +114,7 @@ export function getLatestUsage(messages: UIMessage[]): UsageInfo | null {
  * Code and Codex report current context occupancy.
  */
 export function tokensInWindow(usage: UsageInfo): number {
+  if (usage.contextTokens !== undefined) return usage.contextTokens
   // Prefer the explicit window-prompt size when the channel reports one (the
   // ai-sdk agent loop sums every leg's prompt into `inputTokens` for billing,
   // but only the last leg's prompt actually occupies the window).

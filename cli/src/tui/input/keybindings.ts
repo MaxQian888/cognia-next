@@ -30,6 +30,13 @@ export const KEYBINDABLE_ACTIONS = [
   "undo",
   "redo",
   "copyLast",
+  "copySelection",
+  "copyLastUser",
+  "copyCodeBlock",
+  "copyToolOutput",
+  "copyTranscript",
+  "mouseToggle",
+  "selectionCycle",
   "clearScreen",
 ] as const
 
@@ -53,6 +60,17 @@ export const DEFAULT_KEYBINDINGS: Record<KeybindableAction, string> = {
   undo: "ctrl+z",
   redo: "ctrl+y",
   copyLast: "ctrl+p",
+  // The copy family shares a `Ctrl+X` leader (emacs-style), because the free
+  // single ctrl-chords ran out. BOTH steps carry ctrl on purpose: the composer
+  // ignores unhandled ctrl chords but INSERTS a bare printable key, so a
+  // second step like `"ctrl+x b"` would leave a stray "b" in the draft.
+  copySelection: "ctrl+s",
+  copyLastUser: "ctrl+x ctrl+u",
+  copyCodeBlock: "ctrl+x ctrl+b",
+  copyToolOutput: "ctrl+x ctrl+o",
+  copyTranscript: "ctrl+x ctrl+a",
+  mouseToggle: "ctrl+x ctrl+p",
+  selectionCycle: "ctrl+x ctrl+s",
   clearScreen: "ctrl+l",
 }
 
@@ -74,6 +92,13 @@ export const KEYBINDING_LABELS: Record<KeybindableAction, string> = {
   undo: "Undo edit",
   redo: "Redo edit",
   copyLast: "Copy last reply",
+  copySelection: "Copy the selection",
+  copyLastUser: "Copy your last message",
+  copyCodeBlock: "Copy last code block",
+  copyToolOutput: "Copy last tool output",
+  copyTranscript: "Copy whole conversation",
+  mouseToggle: "Toggle mouse model",
+  selectionCycle: "Cycle drag-to-select mode",
   clearScreen: "Clear screen",
 }
 

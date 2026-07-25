@@ -60,7 +60,7 @@ describe("buildCommandHint", () => {
   })
 
   it("derives a hint from a core command's argumentHint (/copy)", () => {
-    expect(buildCommandHint("/copy ")).toBe("/copy [n|code|tool]")
+    expect(buildCommandHint("/copy ")).toBe("/copy [n|code|tool|user]")
   })
 
   it("returns null when a core command has no hint (/clear)", () => {

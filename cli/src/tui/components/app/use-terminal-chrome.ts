@@ -34,6 +34,10 @@ export interface TerminalChromeOptions {
   screen: ScreenStream
   /** Fullscreen mouse model (select | scroll); seeded once into the alt buffer. */
   mouseMode: MouseMode
+  /** Whether to also report motion while a button is held (`?1002h`) — on
+   * exactly when in-app drag-to-select is enabled. Seeded alongside `mouseMode`;
+   * live changes go through `applyEffect` for the same reason. */
+  mouseDrag?: boolean
   /** True when `mount.tsx` already entered + cleared the alt screen before Ink's
    * first paint, so the effect must skip the redundant (frame-wiping) re-enter. */
   altScreenPreEntered?: boolean
@@ -79,6 +83,7 @@ export function useTerminalChrome(opts: TerminalChromeOptions): void {
     fullscreen,
     screen,
     mouseMode,
+    mouseDrag,
     altScreenPreEntered,
     stdout,
     clearScreen,
@@ -110,7 +115,7 @@ export function useTerminalChrome(opts: TerminalChromeOptions): void {
       // Mouse handling lives with the alt-screen lifecycle: it is only meaningful
       // (and only safe) while fullscreen owns the screen. A live `/mouse` toggle
       // re-applies imperatively in `applyEffect` — this only seeds the initial mode.
-      applyMouseMode(mouseMode, screen)
+      applyMouseMode(mouseMode, screen, { drag: mouseDrag })
       altScreenActive.current = true
     }
     return () => {
@@ -118,9 +123,10 @@ export function useTerminalChrome(opts: TerminalChromeOptions): void {
       exitAltScreen(screen)
       altScreenActive.current = false
     }
-    // `mouseMode` is intentionally NOT a dep: the initial application is gated by
-    // `altScreenActive`, and live changes go through `applyEffect` so a re-enter
-    // never re-issues CLEAR_HOME. eslint-disable to keep the effect enter-once.
+    // `mouseMode` / `mouseDrag` are intentionally NOT deps: the initial
+    // application is gated by `altScreenActive`, and live changes go through
+    // `applyEffect` so a re-enter never re-issues CLEAR_HOME. eslint-disable to
+    // keep the effect enter-once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullscreen, screen])
 

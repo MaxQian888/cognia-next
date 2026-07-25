@@ -80,6 +80,8 @@ export interface BackendConnection {
   /** The agent id this connection is registered under, so the session reuses it. */
   agentId: string
   command?: string
+  /** Raw initialize result, forwarded to the session's parity projection. */
+  negotiated?: AcpCapabilities
   capabilities: BackendCapabilities
 }
 
@@ -284,9 +286,14 @@ export async function connectBackend(deps: BackendConnectDeps): Promise<BackendC
         agentId,
         // Guaranteed present: the `!command` case returned at the command stage.
         command,
+        ...(negotiated ? { negotiated } : {}),
         capabilities: externalCapabilities({
           backend,
           presetId,
+          // Which permission modes this agent can ENFORCE follows from its
+          // protocol, and this is the only place that knows it — the preset was
+          // already resolved into a concrete agent config here.
+          protocol: agentConfig.protocol,
           ...(negotiated ? { negotiated } : {}),
         }),
       },

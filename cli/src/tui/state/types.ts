@@ -345,9 +345,13 @@ export interface StatusReport {
   credentialedProviders: string[]
   cwd: string
   gitBranch: string | null
-  contextPct: number
+  /** Occupancy of {@link contextWindow}; absent exactly when that is. */
+  contextPct?: number
   contextTokens: number
-  contextWindow: number
+  /** The window the tokens are scored against. Absent when an external agent is
+   * answering and nothing resolved its real window — the built-in provider's
+   * table describes a different model, so any number here would be invented. */
+  contextWindow?: number
   dbSnapshotExists: boolean
   /** Cognia parity on an external backend; absent on the built-in agent. */
   cogniaParity?: CogniaParityReport
@@ -518,7 +522,14 @@ export type Overlay =
   // live typeahead filter (the list can run to hundreds of OpenRouter ids), and
   // `index` points into the FILTERED view, not `options` — so navigation and
   // selection always track what's on screen.
-  | { kind: "model"; options: string[]; index: number; query: string }
+  | {
+      kind: "model"
+      options: string[]
+      /** Optional display labels keyed by the model id that is persisted/sent. */
+      labels?: Record<string, string>
+      index: number
+      query: string
+    }
   | { kind: "mode"; options: PermissionMode[]; index: number }
   // Reasoning-effort slider (replaces the old vertical `thinking` list). `off`
   // mirrors the "use model default" checkbox; `index` points into the non-off
@@ -798,6 +809,16 @@ export interface TuiState {
    * install that failed says so instead of silently returning. Cleared on any
    * fresh connect/install attempt. */
   backendInstallError?: string
+  /**
+   * Whether the user has already acknowledged this session's danger-tier
+   * ("no guardrails") permission warning.
+   *
+   * Session-scoped on purpose — nothing is persisted, so every new `cognia-agent
+   * chat` that starts in (or switches into) `bypassPermissions` asks once, and
+   * only once. Until it is true, every switch into a danger-tier mode opens the
+   * acknowledgement confirm instead of applying.
+   */
+  bypassAcknowledged: boolean
   cells: Cell[]
   inflight: Inflight
   overlay: Overlay
@@ -1067,6 +1088,10 @@ export type TuiAction =
   // Config switches
   | { type: "SET_MODEL"; model: string }
   | { type: "SET_MODE"; mode: PermissionMode }
+  // Record that the danger-tier ("no guardrails") warning was acknowledged for
+  // this session, so the confirm is a once-per-session gate rather than a toll
+  // on every Shift+Tab lap through the cycle.
+  | { type: "BYPASS_ACK" }
   | { type: "SET_THINKING"; level: ThinkingLevel; pluginTools?: boolean }
   | { type: "SET_PROVIDER"; provider: string }
   // Merge a freshly-entered credential into the in-memory config so the very
@@ -1175,6 +1200,8 @@ export type TuiAction =
   | { type: "BACKEND_CONNECT_STAGE"; backend: string; stage: BackendConnectStage }
   /** The backend is live: adopt its negotiated capabilities and open the chat. */
   | { type: "BACKEND_CONNECT_OK"; capabilities: BackendCapabilities }
+  /** Refresh capability truth after the live tool host projects its manifest. */
+  | { type: "BACKEND_CAPABILITIES_UPDATE"; capabilities: BackendCapabilities }
   /** The backend could not start — show the failure page with recovery actions.
    * `installOption` is set only for a missing-command failure that this machine
    * can actually install, adding an "Install <agent>" choice to the page. */

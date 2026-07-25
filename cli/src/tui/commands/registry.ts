@@ -13,7 +13,7 @@
  */
 import { PERMISSION_MODES, resolveNotices } from "../../config/schema"
 import { deriveEffortSliderState } from "../../config/thinking"
-import { collectModelOptions } from "../components/model-options"
+import { supportsFeature, unsupportedFeatureMessage } from "../runtime/backend-capabilities"
 import {
   lastCodeBlock,
   lastToolResultText,
@@ -32,6 +32,7 @@ import { agentModeCommand } from "./agent-mode-command"
 import { backendCommand } from "./backend-command"
 import { layoutCommand } from "./layout-command"
 import { mouseCommand } from "./mouse-command"
+import { selectCommand } from "./select-command"
 import { editorCommands } from "./editor-command"
 import type { CommandDescriptor, CommandEffect } from "./types"
 
@@ -69,7 +70,14 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
       }
       return {
         kind: "openOverlay",
-        overlay: { kind: "settings", sections: settingsSections(ctx.config), section: 0, index: 0 },
+        overlay: {
+          kind: "settings",
+          // Capabilities come from state so rows that cannot reach the hosting
+          // agent are marked unavailable with a reason rather than presented live.
+          sections: settingsSections(ctx.config, ctx.state.backendCapabilities),
+          section: 0,
+          index: 0,
+        },
       }
     },
   },
@@ -86,36 +94,57 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
     name: "model",
     description: "switch the model",
     category: "config",
-    handler: (ctx) => {
-      const options = collectModelOptions(ctx.config)
-      if (options.length === 0) {
-        return {
-          kind: "notice",
-          message: "No models configured. Set one with `cognia-agent config set model <id>`.",
-        }
-      }
-      return { kind: "openOverlay", overlay: { kind: "model", options, index: 0, query: "" } }
-    },
+    // Which models exist depends on WHO is answering, and an external agent has
+    // to be asked over the wire — neither fits a pure handler, so the App owns
+    // opening this (it also owns the "nothing configured" guidance, which would
+    // otherwise be duplicated here and drift).
+    handler: () => ({ kind: "modelPicker" }),
   },
   {
     name: "mode",
     description: "switch the permission mode",
+    argumentHint: `[${PERMISSION_MODES.join(" | ")}]`,
     category: "config",
-    handler: () => ({
-      kind: "openOverlay",
-      overlay: { kind: "mode", options: [...PERMISSION_MODES], index: 0 },
-    }),
+    // Bare → the picker. Named → apply directly, which is also how the
+    // danger-tier acknowledgement re-enters the switch (`--force`).
+    handler: (ctx) => {
+      const [name, ...rest] = ctx.args.trim().split(/\s+/).filter(Boolean)
+      if (!name) {
+        return {
+          kind: "openOverlay",
+          overlay: { kind: "mode", options: [...PERMISSION_MODES], index: 0 },
+        }
+      }
+      const mode = PERMISSION_MODES.find((m) => m.toLowerCase() === name.toLowerCase())
+      if (!mode) {
+        return {
+          kind: "notice",
+          message: `Unknown permission mode "${name}" — pick one of: ${PERMISSION_MODES.join(", ")}.`,
+        }
+      }
+      return { kind: "permissionMode", mode, ...(rest.includes("--force") ? { force: true } : {}) }
+    },
   },
   {
     name: "think",
     aliases: ["thinking", "effort"],
     description: "set the reasoning effort (thinking level)",
     category: "config",
-    handler: (ctx) => ({
-      kind: "openOverlay",
-      // Seed the slider from the persisted level so it opens on the current pick.
-      overlay: { kind: "effortSlider", ...deriveEffortSliderState(ctx.config.thinkingLevel) },
-    }),
+    handler: (ctx) => {
+      // Reasoning effort reaches an external agent only through the Codex
+      // metadata channel. On a backend without it the slider used to open and
+      // change a value that was never forwarded — a setting that silently does
+      // nothing is worse than one that explains why it cannot.
+      const caps = ctx.state.backendCapabilities
+      if (!supportsFeature(caps, "thinking")) {
+        return { kind: "notice", message: unsupportedFeatureMessage(caps, "thinking") }
+      }
+      return {
+        kind: "openOverlay",
+        // Seed the slider from the persisted level so it opens on the current pick.
+        overlay: { kind: "effortSlider", ...deriveEffortSliderState(ctx.config.thinkingLevel) },
+      }
+    },
   },
   {
     name: "sessions",
@@ -138,6 +167,7 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
   backendCommand,
   layoutCommand,
   mouseCommand,
+  selectCommand,
   ...editorCommands,
   {
     name: "retry",
@@ -153,9 +183,9 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
   },
   {
     name: "copy",
-    description: "copy a reply, code block, or tool result to the clipboard",
+    description: "copy a reply, code block, tool result, or your last message",
     category: "chat",
-    argumentHint: "[n|code|tool]",
+    argumentHint: "[n|code|tool|user]",
     handler: (ctx) => {
       const notices = resolveNotices(ctx.config.notices)
       const arg = ctx.args.trim().toLowerCase()
@@ -171,11 +201,17 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
           ? { kind: "copy", text: out }
           : { kind: "notice", message: notices.noToolResultToCopy }
       }
+      if (arg === "user") {
+        const mine = lastUserText(ctx.state)
+        return mine
+          ? { kind: "copy", text: mine }
+          : { kind: "notice", message: notices.noUserMessageToCopy }
+      }
       const n = arg ? Number(arg) : 1
       if (!Number.isInteger(n) || n < 1) {
         return {
           kind: "notice",
-          message: "Usage: /copy [n|code|tool] — n is a positive reply index (1 = latest).",
+          message: "Usage: /copy [n|code|tool|user] — n is a positive reply index (1 = latest).",
         }
       }
       const reply = nthAssistantText(ctx.state, n)
