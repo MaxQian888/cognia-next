@@ -4,15 +4,39 @@ export type ContextWorkbenchMode = "collapsed" | "narrow" | "wide" | "focus"
 export type ContextWorkbenchPlacement = "adjacent-editor" | "chat-dock" | "mobile-sheet"
 export type ContextPanelRetention = "stateful" | "ephemeral"
 export type ContextPanelMode = Exclude<ContextWorkbenchMode, "collapsed">
+/**
+ * What a resource affords, resolved per resource in
+ * `lib/context-workbench/capabilities.ts`.
+ *
+ * **This is a plugin-facing extension point in its entirety.** Capabilities are
+ * consumed only through a panel's `requiredCapabilities`, and no first-party
+ * panel declares that field — the built-in panels gate themselves with
+ * `appliesTo` predicates instead, which can express things a capability set
+ * cannot (e.g. "this artifact, in this session"). So a capability having no
+ * first-party consumer is the norm here, not evidence of drift, and none of
+ * these should be deleted for looking unused.
+ *
+ * What *would* be drift is a capability that `resolveContextCapabilities` never
+ * produces: a plugin could declare it and its panel would then never appear for
+ * any resource. `lib/context-workbench/taxonomy-parity.test.ts` pins that.
+ */
 export type ContextCapability =
   | "ai"
   | "comments"
   | "inspect"
   | "review"
   | "preview"
+  /** Resource can execute (canvas / runnable artifact / workflow). */
   | "run"
+  /** Resource has reusable templates (workflow). */
   | "templates"
   | "workspace"
+  /**
+   * Resource has a version history. Note the built-in panel that once sat here
+   * was renamed to `artifacts` under the `review` activity — it lists every
+   * artifact in scope rather than a version timeline — so nothing first-party
+   * corresponds to this capability by name.
+   */
   | "history"
 /**
  * The canonical activity groups an activity rail can show.
@@ -26,6 +50,10 @@ export type ContextCapability =
  * rail button with `metadata` (which sorts first) buried the project workspace
  * behind an ℹ️ icon plus a group tab, turning a one-click surface into
  * two-level navigation.
+ *
+ * Unlike `ContextCapability` above, activities ARE consumed first-party — every
+ * built-in panel declares one. `templates` is the single exception; see
+ * `INTENTIONALLY_UNCONSUMED_CONTEXT_ACTIVITIES`.
  */
 export const CANONICAL_CONTEXT_ACTIVITIES = [
   "ai",
@@ -36,6 +64,19 @@ export const CANONICAL_CONTEXT_ACTIVITIES = [
   "templates",
   "workspace",
 ] as const
+
+/**
+ * Activities no first-party panel registers into — rail groups reserved for
+ * plugins. `templates` is claimed by the in-tree `prompt-templates` plugin,
+ * which registers imperatively via `ctx.contextPanels.register()` rather than
+ * declaring a manifest panel, so it does not read as a first-party consumer.
+ *
+ * Same contract as the capability list above: the taxonomy gate test rejects an
+ * activity that is neither consumed nor listed here.
+ */
+export const INTENTIONALLY_UNCONSUMED_CONTEXT_ACTIVITIES = [
+  "templates",
+] as const satisfies readonly CanonicalContextActivity[]
 
 export type CanonicalContextActivity = (typeof CANONICAL_CONTEXT_ACTIVITIES)[number]
 export type ContextActivity = CanonicalContextActivity | (string & {})
