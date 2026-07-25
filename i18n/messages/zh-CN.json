@@ -24388,7 +24388,13 @@
         "nerdFontHelper": "oh-my-posh 和 powerlevel10k 提示符的图标需要 Nerd Font。应用已内置 MesloLGS NF，图标开箱即用——点击下方即可选用，或填入你自己安装的 Nerd Font。",
         "pickerHint": "从本机检测到的等宽字体中选择。",
         "pickerLabel": "检测到的字体",
+        "reset": "恢复默认字体",
         "useNerdFont": "使用内置 Nerd Font（MesloLGS NF）"
+      },
+      "fontPreview": {
+        "label": "预览",
+        "missing": "本机未安装「{family}」，终端会回退到字体栈中的下一个字体。",
+        "resolved": "当前以「{family}」{size}px 渲染。"
       },
       "fontSize": {
         "label": "字号"
