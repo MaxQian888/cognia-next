@@ -7,8 +7,10 @@ const mockToastError = jest.fn()
 jest.mock("sonner", () => ({ toast: { error: (...args: unknown[]) => mockToastError(...args) } }))
 const disposeOpener = jest.fn()
 const registerOpener = jest.fn((_args: unknown) => disposeOpener)
+const notifyActiveEditorChanged = jest.fn()
 jest.mock("@/lib/files/project-editor-bridge", () => ({
   registerProjectEditorOpener: (args: unknown) => registerOpener(args),
+  notifyActiveEditorChanged: () => notifyActiveEditorChanged(),
 }))
 jest.mock("@/stores/canvas/keybinding-store", () => ({
   useKeybindingStore: (selector: (state: { bindings: Record<string, string> }) => unknown) =>
@@ -58,12 +60,51 @@ jest.mock("./project-search-panel", () => ({
     <button data-testid="search" onClick={() => onOpenMatch("src/search.ts")} />
   ),
 }))
+// `mount-monaco` stands in for ProjectMonaco's real `onMount`, which is the
+// only place the live monaco/editor instances surface.
 jest.mock("./project-monaco", () => ({
-  ProjectMonaco: ({ actions }: { actions: Array<{ id: string; run?: () => void }> }) => (
+  ProjectMonaco: ({
+    actions,
+    onDiagnosticsReady,
+  }: {
+    actions: Array<{ id: string; run?: () => void }>
+    onDiagnosticsReady?: (relPath: string, next: unknown) => void
+  }) => (
     <div data-testid="monaco">
       {actions.map((action) => (
         <button key={action.id} data-testid={action.id} onClick={action.run} />
       ))}
+      <button
+        data-testid="mount-monaco"
+        onClick={() =>
+          onDiagnosticsReady?.("src/a.ts", {
+            monaco: {
+              editor: {
+                getModelMarkers: () => [
+                  {
+                    severity: 8,
+                    message: "boom",
+                    startLineNumber: 3,
+                    startColumn: 5,
+                    endLineNumber: 3,
+                    endColumn: 9,
+                  },
+                ],
+                onDidChangeMarkers: () => ({ dispose: () => {} }),
+              },
+            },
+            editor: {
+              getSelection: () => ({
+                startLineNumber: 2,
+                startColumn: 1,
+                endLineNumber: 2,
+                endColumn: 6,
+              }),
+              getModel: () => ({ uri: "file:///repo/src/a.ts", getValueInRange: () => "const" }),
+            },
+          })
+        }
+      />
     </div>
   ),
 }))
@@ -171,6 +212,74 @@ it("registers the root opener and removes it on unmount", () => {
 it("can suspend Monaco routing while another editor owns the root", () => {
   render(<Harness registerProjectOpener={false} />)
   expect(registerOpener).not.toHaveBeenCalled()
+})
+
+describe("readActive", () => {
+  /** The `readActive` the hook handed to the bridge on the latest registration. */
+  const registeredReadActive = () => {
+    const args = registerOpener.mock.calls.at(-1)?.[0] as {
+      readActive?: () => Promise<unknown>
+    }
+    return args.readActive
+  }
+
+  it("registers a readActive so the read side is not Pro-IDE-only", () => {
+    // Monaco is the default engine, so without this the `read_active_editor`
+    // tool is permanently unavailable for almost every user.
+    render(<Harness />)
+    expect(registeredReadActive()).toEqual(expect.any(Function))
+  })
+
+  it("answers with the open files even before Monaco has mounted", async () => {
+    editor.openFiles = [{ relPath: "src/a.ts" }, { relPath: "src/b.ts" }]
+    render(<Harness />)
+
+    await expect(registeredReadActive()!()).resolves.toEqual({
+      path: "/repo/src/a.ts",
+      selection: null,
+      selectedText: null,
+      diagnostics: [],
+      openEditors: ["/repo/src/a.ts", "/repo/src/b.ts"],
+    })
+    editor.openFiles = []
+  })
+
+  it("folds in the live selection and diagnostics once Monaco mounts", async () => {
+    editor.openFiles = [{ relPath: "src/a.ts" }]
+    render(<Harness />)
+
+    fireEvent.click(screen.getByTestId("mount-monaco"))
+
+    await expect(registeredReadActive()!()).resolves.toEqual({
+      path: "/repo/src/a.ts",
+      selection: { startLine: 2, startColumn: 1, endLine: 2, endColumn: 6 },
+      selectedText: "const",
+      diagnostics: [{ message: "boom", severity: "error", line: 3, column: 5 }],
+      openEditors: ["/repo/src/a.ts"],
+    })
+    editor.openFiles = []
+  })
+
+  it("announces the move so ctx.editor subscribers re-read", () => {
+    // Without this the change event would only fire on mount/unmount, which is
+    // not what `onDidChangeActiveEditor` promises.
+    notifyActiveEditorChanged.mockClear()
+    render(<Harness />)
+
+    expect(notifyActiveEditorChanged).toHaveBeenCalled()
+  })
+
+  it("does not re-register the opener when the mounted handles change", () => {
+    // `readActive` reads its inputs through refs precisely so the bridge is not
+    // churned on every caret move; re-registering would also thrash the
+    // deepest-root/latest-registration resolution.
+    render(<Harness />)
+    const before = registerOpener.mock.calls.length
+
+    fireEvent.click(screen.getByTestId("mount-monaco"))
+
+    expect(registerOpener.mock.calls.length).toBe(before)
+  })
 })
 
 it("supports the shared left-sidebar composition used by Agent Team", () => {

@@ -100,6 +100,11 @@ impl RunningInstance {
 pub struct CodeServerState {
     instances: Mutex<HashMap<String, RunningInstance>>,
     operation_lock: Mutex<()>,
+    /// Shared cancel handle for whichever first-run download is in flight.
+    /// One per app rather than per root: the install is version-global, and
+    /// `operation_lock` already serializes downloads, so there is only ever one
+    /// to cancel.
+    download_cancel: Arc<download::DownloadCancel>,
 }
 
 impl CodeServerState {
@@ -138,7 +143,7 @@ impl CodeServerState {
             return Ok(port);
         }
 
-        let info = download::ensure_code_server(app)
+        let info = download::ensure_code_server(app, Some(self.download_cancel.clone()))
             .await
             .map_err(|e| format!("install code-server: {e:#}"))?;
 
@@ -147,15 +152,21 @@ impl CodeServerState {
         let port = pick_free_loopback_port()?;
         let args = code_server_args(&canonical, port, &user_data_dir, &extensions_dir);
 
+        // Side-load the agent-bridge extension (best-effort, once per version) BEFORE
+        // the child starts so it activates on this launch. A missing/failed install
+        // only degrades the Pro IDE agent-drive features, never the spawn itself.
+        install_agent_extension(app, &info.binary_path, &extensions_dir, &user_data_dir).await;
+
         // Register this instance with the agent control channel BEFORE spawn so the
-        // WS port + per-instance token can be injected into the child's env — the
-        // companion extension reads them on activate to dial back. Any failure after
-        // this point must deregister so a leaked token can't address a dead editor.
-        let (agent_ws_port, agent_token) = super::agent_channel::global()
+        // agent-channel port + per-instance token can be injected into the child's
+        // env — the companion extension reads them on activate to dial back. Any
+        // failure after this must deregister so a leaked token can't address a dead
+        // editor.
+        let (agent_port, agent_token) = super::agent_channel::global()
             .register_instance(&canonical)
             .await?;
         let agent_envs = [
-            ("COGNIA_CS_AGENT_WS", agent_ws_port.to_string()),
+            ("COGNIA_CS_AGENT_PORT", agent_port.to_string()),
             ("COGNIA_CS_AGENT_TOKEN", agent_token),
         ];
 
@@ -230,9 +241,15 @@ impl CodeServerState {
     /// be concurrently replaced or deleted.
     pub async fn download(&self, app: &tauri::AppHandle) -> Result<download::InstallInfo, String> {
         let _guard = self.operation_lock.lock().await;
-        download::ensure_code_server(app)
+        download::ensure_code_server(app, Some(self.download_cancel.clone()))
             .await
             .map_err(|e| format!("{e:#}"))
+    }
+
+    /// Abort an in-flight first-run download. No-op when none is running, so
+    /// the UI can fire it without first asking whether it is worth firing.
+    pub fn cancel_download(&self) {
+        self.download_cancel.cancel();
     }
 
     /// Stop all children and reclaim code-server files as one serialized
@@ -518,6 +535,80 @@ fn pick_free_loopback_port() -> Result<u16, String> {
     Ok(port)
 }
 
+/// Version of the bundled agent-bridge extension. Bump in lockstep with
+/// `sidecar/codeserver-agent-ext/package.json` `version` so an upgrade triggers a
+/// reinstall (the marker below stores the installed version).
+const AGENT_EXT_VERSION: &str = "0.1.0";
+/// Stable filename of the bundled `.vsix` (see the extension's `build.mjs`).
+const AGENT_EXT_VSIX: &str = "cognia-agent-bridge.vsix";
+
+/// Whether a stored install-marker value means the current extension version is
+/// already installed (so the reinstall can be skipped). Pure, so the version-gate
+/// contract is unit-tested without spawning code-server.
+fn agent_ext_install_up_to_date(marker: Option<&str>) -> bool {
+    marker == Some(AGENT_EXT_VERSION)
+}
+
+/// Side-load the Cognia agent-bridge extension into `extensions_dir`, at most once
+/// per version. Best-effort: a missing vsix or a failed install only degrades the
+/// Pro IDE agent-drive features (open/reveal falls back to the CLI, edits to a disk
+/// reload) — it must never block a code-server spawn, so every failure just logs.
+async fn install_agent_extension(
+    app: &tauri::AppHandle,
+    binary: &str,
+    extensions_dir: &Path,
+    user_data_dir: &Path,
+) {
+    let marker = extensions_dir.join(".cognia-agent-ext-version");
+    // Async I/O on the runtime thread (this runs under `ensure`'s operation_lock);
+    // matches the spawn_blocking-avoidance the sibling settings commands use.
+    let existing = tokio::fs::read_to_string(&marker).await.ok();
+    if agent_ext_install_up_to_date(existing.as_deref()) {
+        return;
+    }
+    let vsix = match crate::claude::sidecar::sidecar_dir(app) {
+        Ok(dir) => dir.join("codeserver-agent-ext").join(AGENT_EXT_VSIX),
+        Err(e) => {
+            log::warn!("code-server agent ext: sidecar dir unresolved: {e}");
+            return;
+        }
+    };
+    if !vsix.exists() {
+        log::warn!(
+            "code-server agent ext: vsix not found at {} (Pro IDE agent-drive disabled)",
+            vsix.display()
+        );
+        return;
+    }
+
+    let mut command = Command::new(binary);
+    command
+        .arg("--install-extension")
+        .arg(&vsix)
+        .arg("--extensions-dir")
+        .arg(extensions_dir)
+        .arg("--user-data-dir")
+        .arg(user_data_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+
+    match tokio::time::timeout(Duration::from_secs(60), command.output()).await {
+        Ok(Ok(output)) if output.status.success() => {
+            if let Err(e) = tokio::fs::write(&marker, AGENT_EXT_VERSION).await {
+                log::warn!("code-server agent ext: write install marker: {e}");
+            }
+        }
+        Ok(Ok(output)) => log::warn!(
+            "code-server agent ext install failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ),
+        Ok(Err(e)) => log::warn!("code-server agent ext install: {e}"),
+        Err(_) => log::warn!("code-server agent ext install timed out"),
+    }
+}
+
 fn spawn_child(binary: &str, args: &[String], envs: &[(&str, String)]) -> Result<Child, String> {
     let mut cmd = Command::new(binary);
     cmd.args(args)
@@ -712,6 +803,14 @@ mod tests {
         assert!(resolve_open_target(&root, "../outside.ts", None, None).is_err());
         assert!(resolve_open_target(&root, "/tmp/outside.ts", None, None).is_err());
         assert!(resolve_open_target(&root, "missing.ts", None, None).is_err());
+    }
+
+    #[test]
+    fn agent_ext_marker_gates_reinstall_on_version() {
+        // Same version → skip; different or absent marker → (re)install.
+        assert!(agent_ext_install_up_to_date(Some(AGENT_EXT_VERSION)));
+        assert!(!agent_ext_install_up_to_date(Some("0.0.1")));
+        assert!(!agent_ext_install_up_to_date(None));
     }
 
     #[test]

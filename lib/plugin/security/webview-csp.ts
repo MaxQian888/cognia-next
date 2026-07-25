@@ -25,6 +25,15 @@ export interface WebviewCspInput {
    * capability keep the minimal surface.
    */
   contextPanelApi?: boolean
+  /**
+   * Also inject `acquireCogniaEditorApi()` — set by the webview bridge for
+   * every webview of a plugin declaring the `editor` capability. Same
+   * inject-on-capability rule as `contextPanelApi` (the srcDoc is wrapped once,
+   * at enable, so it cannot be decided per-reference later), but a separate
+   * flag: editor access includes writing into the file the user is editing, and
+   * must not ride along with panel rendering.
+   */
+  editorApi?: boolean
 }
 
 function connectSrc(allowedDomains: string[] | undefined): string {
@@ -73,12 +82,16 @@ export function wrapWebviewHtml(body: string, input: WebviewCspInput): string {
   const contextPanelScript = input.contextPanelApi
     ? `\n<script>${acquireCogniaContextPanelApiSource()}</script>`
     : ""
+  // Injected on the `editor` capability, NOT on `context-panel`: a plugin that
+  // merely renders a panel has no business writing into the file the user is
+  // editing. Same reasoning as the separate wire channel.
+  const editorScript = input.editorApi ? `\n<script>${acquireCogniaEditorApiSource()}</script>` : ""
   return `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8" />
 <meta http-equiv="Content-Security-Policy" content="${csp}" />
-<script>${acquireCogniaWebviewApiSource()}</script>${contextPanelScript}
+<script>${acquireCogniaWebviewApiSource()}</script>${contextPanelScript}${editorScript}
 </head>
 <body>${body}</body>
 </html>`
@@ -167,6 +180,81 @@ export function acquireCogniaContextPanelApiSource(): string {
           onDidChangeActiveContext: on("activeContext"),
           onDidChangeWorkbenchState: on("workbenchState"),
           onDidChangeVisibility: on("visibility"),
+        };
+      };
+    }());
+  `
+}
+
+/**
+ * Source injected for plugins declaring the `editor` capability: the in-frame
+ * half of the editor RPC. Mirrors `ctx.editor` exactly — same three calls, same
+ * payload-free change event.
+ *
+ * `onDidChangeActiveEditor` hands the listener nothing and expects it to call
+ * `readActive()`. That is not an oversight: pushing the snapshot would deliver
+ * editor text into the frame without passing the host's PII screen or
+ * re-checking `editor:read`, and a sandboxed surface must not be able to
+ * out-read the module surface it mirrors.
+ */
+export function acquireCogniaEditorApiSource(): string {
+  return `
+    (function () {
+      var claimed = false;
+      var CHANNEL = "cognia.editor";
+      window.acquireCogniaEditorApi = function () {
+        if (claimed) throw new Error("acquireCogniaEditorApi() can only be called once.");
+        claimed = true;
+        var nextId = 1;
+        var pending = {};
+        var listeners = [];
+        window.addEventListener("message", function (event) {
+          var payload = event.data;
+          if (!payload || payload.__cogniaWebview !== "host") return;
+          var data = payload.data;
+          if (!data || data.channel !== CHANNEL) return;
+          if (data.kind === "response") {
+            var entry = pending[data.id];
+            if (!entry) return;
+            delete pending[data.id];
+            clearTimeout(entry.timer);
+            if (data.ok) { entry.resolve(data.result); }
+            else { entry.reject(new Error(data.error || "editor request failed")); }
+          } else if (data.kind === "event" && data.event === "activeEditorChanged") {
+            listeners.forEach(function (fn) {
+              try { fn(); } catch (err) {}
+            });
+          }
+        });
+        function call(method, params) {
+          return new Promise(function (resolve, reject) {
+            var id = nextId++;
+            var timer = setTimeout(function () {
+              delete pending[id];
+              reject(new Error("editor request timed out: " + method));
+            }, 5000);
+            pending[id] = { resolve: resolve, reject: reject, timer: timer };
+            window.parent.postMessage(
+              { __cogniaWebview: "post", data: { channel: CHANNEL, kind: "request", id: id, method: method, params: params } },
+              "*"
+            );
+          });
+        }
+        window.parent.postMessage(
+          { __cogniaWebview: "post", data: { channel: CHANNEL, kind: "ready" } },
+          "*"
+        );
+        return {
+          openFile: function (path, options) { return call("openFile", [path, options]); },
+          reflectEdit: function (path, options) { return call("reflectEdit", [path, options]); },
+          readActive: function () { return call("readActive", []); },
+          onDidChangeActiveEditor: function (fn) {
+            listeners.push(fn);
+            return function () {
+              var index = listeners.indexOf(fn);
+              if (index >= 0) listeners.splice(index, 1);
+            };
+          },
         };
       };
     }());

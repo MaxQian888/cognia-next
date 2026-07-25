@@ -44,8 +44,14 @@ jest.mock("@/lib/files/workspace-backend", () => ({
 jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
 
 const supportedMock = jest.fn<Promise<boolean>, []>()
+const driveOpenMock = jest.fn().mockResolvedValue(undefined)
+const cliOpenFileMock = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/codeserver/client", () => ({
-  codeServerClient: { supported: () => supportedMock() },
+  codeServerClient: {
+    supported: () => supportedMock(),
+    driveOpen: (...args: unknown[]) => driveOpenMock(...args),
+    openFile: (...args: unknown[]) => cliOpenFileMock(...args),
+  },
 }))
 jest.mock("@/components/editor/project/editor-engine-toggle", () => ({
   EditorEngineToggle: ({
@@ -66,6 +72,11 @@ jest.mock("@/components/editor/project/code-server-pane", () => ({
   CodeServerPane: ({ root, ownerId }: { root: string; ownerId: string }) => (
     <div data-testid="mock-code-server" data-root={root} data-owner={ownerId} />
   ),
+  joinProjectPath: (root: string, relative: string) => {
+    const base = root.replace(/[/\\]+$/, "")
+    const clean = relative.replace(/^[/\\]+/, "")
+    return clean ? `${base}/${clean}` : base
+  },
 }))
 
 jest.mock("@/hooks/data", () => ({
@@ -245,6 +256,8 @@ beforeEach(() => {
   saveAll.mockClear().mockResolvedValue(undefined)
   mockUseProjectEditor.mockClear()
   supportedMock.mockReset().mockImplementation(() => new Promise(() => {}))
+  driveOpenMock.mockClear().mockResolvedValue(undefined)
+  cliOpenFileMock.mockClear().mockResolvedValue(undefined)
   activePath = null
   editorRootKey = "/repo"
   editorRootPath = "/repo"
@@ -517,5 +530,33 @@ describe("DockWorkspace", () => {
       "session:session-1"
     )
     expect(screen.queryByTestId("monaco")).not.toBeInTheDocument()
+  })
+
+  it("routes a file reveal to code-server (not Monaco) when Pro IDE is the engine", async () => {
+    const gotoListener = jest.fn()
+    window.addEventListener(PROJECT_EDITOR_GOTO_EVENT, gotoListener)
+    act(() =>
+      useProjectEditorSessionStore.getState().setSession("session:session-1", {
+        editorMode: "codeserver",
+      })
+    )
+    act(() => {
+      useArtifactDockLayoutStore.getState().revealWorkspaceFile({
+        sessionId: "session-1",
+        rootPath: "/repo",
+        relPath: "src/a.ts",
+        line: 7,
+        column: 2,
+      })
+    })
+
+    render(<DockWorkspace activeSessionId="session-1" />)
+
+    // A3: the reveal drives the live code-server by ABSOLUTE path; Monaco's
+    // `gotoLine` (which dispatches the goto event) must NOT fire.
+    await waitFor(() => expect(driveOpenMock).toHaveBeenCalledWith("/repo", "/repo/src/a.ts", 7, 2))
+    expect(gotoListener).not.toHaveBeenCalled()
+    expect(clearReveal).toHaveBeenCalled()
+    window.removeEventListener(PROJECT_EDITOR_GOTO_EVENT, gotoListener)
   })
 })

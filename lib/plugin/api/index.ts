@@ -87,6 +87,7 @@ export { createBackupAPI } from "./backup-api"
 export { createAutomationAPI } from "./automation-api"
 export { createCompanionAPI } from "./companion-api"
 export { createContextPanelAPI } from "./context-panel-api"
+export { createEditorAPI } from "./editor-api"
 
 // Re-export types
 export type {

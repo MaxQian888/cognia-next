@@ -17,6 +17,7 @@
   "newFile": "新建文件",
   "newFolder": "新建文件夹",
   "proIde": {
+    "cancelDownload": "取消",
     "checkingTooltip": "正在检查 Pro IDE 是否可用…",
     "disabledTooltip": "此平台不支持，请改用本机 VS Code。",
     "downloading": "正在下载 VS Code… {percent}%",
@@ -25,6 +26,7 @@
     "openFileFailed": "无法在 VS Code 中打开文件：{error}",
     "openLocalVsCode": "用本机 VS Code 打开",
     "retry": "重试",
+    "revokedToMonaco": "已切回 Monaco —— VS Code 面板被另一个编辑器占用或已停止。",
     "starting": "正在启动 VS Code…",
     "supportCheckFailed": "无法检查 Pro IDE 是否可用。请重新连接桌面端后再试。",
     "switchLabel": "编辑器引擎",

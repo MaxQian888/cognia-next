@@ -81,6 +81,15 @@ pub async fn codeserver_download(
     state.download(&app).await
 }
 
+/// Abort an in-flight first-run download. The first run pulls 100–200MB and
+/// used to be uninterruptible — a mis-click committed the user to the whole
+/// transfer. Safe to call when nothing is downloading.
+#[tauri::command]
+pub fn codeserver_cancel_download(state: State<'_, CodeServerState>) -> Result<(), String> {
+    state.cancel_download();
+    Ok(())
+}
+
 /// Install + disk state for the Pro IDE settings card. Walks the install tree,
 /// so it runs on the blocking pool.
 #[tauri::command]

@@ -13,6 +13,7 @@
 
 import type { PluginManifest } from "@/types/plugin/plugin"
 import type { PluginWebviewDef, ResolvedPluginWebview } from "@/types/plugin/plugin-webview"
+import { attachEditorWebviewRpc } from "@/lib/plugin/bridge/editor-webview-rpc"
 import { loggers } from "@/lib/plugin/core/logger"
 import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 import { wrapWebviewHtml } from "@/lib/plugin/security/webview-csp"
@@ -34,10 +35,30 @@ export interface WebviewBridgeResult {
 
 export interface WebviewBridgeOptions {
   importer?: (entry: string) => Promise<Record<string, unknown>>
+  /**
+   * Live permission resolver, forwarded to the editor RPC server so each
+   * mirrored call re-checks `editor:read`/`editor:write` against current
+   * grants. Omitted (tests, callers with no editor capability) means the RPC
+   * fails closed — which is the right default for a sandboxed surface.
+   */
+  hasPermission?: (permission: string) => boolean
 }
 
 const DEFAULT_IMPORTER: NonNullable<WebviewBridgeOptions["importer"]> = (entry) =>
   import(/* @vite-ignore */ /* webpackIgnore: true */ entry)
+
+/**
+ * Editor-RPC releases owned by each plugin. Held here rather than inside the
+ * RPC module because this bridge is what creates and re-creates the frames:
+ * re-registering a plugin must drop the old attachments or the refcount never
+ * reaches zero and a disabled plugin keeps a live editor channel.
+ */
+const editorRpcDisposers = new Map<string, Array<() => void>>()
+
+function releaseEditorRpc(pluginId: string): void {
+  for (const dispose of editorRpcDisposers.get(pluginId) ?? []) dispose()
+  editorRpcDisposers.delete(pluginId)
+}
 
 export async function registerWebviewsForPlugin(
   manifest: PluginManifest,
@@ -49,6 +70,7 @@ export async function registerWebviewsForPlugin(
   if (defs.length === 0) return { registered: 0, errors: [] }
 
   unregisterWebviewsByPlugin(pluginId)
+  releaseEditorRpc(pluginId)
 
   const importer = options.importer ?? DEFAULT_IMPORTER
   const allowedDomains = manifest.networkAccess?.allowedDomains
@@ -65,15 +87,30 @@ export async function registerWebviewsForPlugin(
       const contextPanelApi =
         (manifest.contextPanels?.some((panel) => panel.webview === def.id) ?? false) ||
         (manifest.capabilities?.includes("context-panel") ?? false)
+      // Capability-gated only — there is no manifest field that "references"
+      // the editor, and it must not ride along with `context-panel`: rendering
+      // a panel is not grounds for writing into the user's open file.
+      const editorApi = manifest.capabilities?.includes("editor") ?? false
       const resolved = await resolveWebview(
         def,
         pluginId,
         installRoot,
         allowedDomains,
         importer,
-        contextPanelApi
+        contextPanelApi,
+        editorApi
       )
       registerWebview(resolved)
+      // Attach AFTER registerWebview: the RPC server subscribes through the
+      // webview registry, which has to know the frame first.
+      if (editorApi) {
+        const release = attachEditorWebviewRpc(pluginId, def.id, {
+          hasPermission: options.hasPermission ?? (() => false),
+        })
+        const disposers = editorRpcDisposers.get(pluginId) ?? []
+        disposers.push(release)
+        editorRpcDisposers.set(pluginId, disposers)
+      }
       registered++
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -94,7 +131,8 @@ async function resolveWebview(
   installRoot: string,
   allowedDomains: string[] | undefined,
   importer: NonNullable<WebviewBridgeOptions["importer"]>,
-  contextPanelApi: boolean
+  contextPanelApi: boolean,
+  editorApi: boolean
 ): Promise<ResolvedPluginWebview> {
   let body: string
   if (typeof def.html === "string") {
@@ -114,7 +152,7 @@ async function resolveWebview(
     )
   }
 
-  const srcDoc = wrapWebviewHtml(body, { allowedDomains, contextPanelApi })
+  const srcDoc = wrapWebviewHtml(body, { allowedDomains, contextPanelApi, editorApi })
   return {
     pluginId,
     viewId: def.id,
@@ -128,4 +166,5 @@ async function resolveWebview(
 
 export function unregisterWebviewsForPlugin(pluginId: string): void {
   unregisterWebviewsByPlugin(pluginId)
+  releaseEditorRpc(pluginId)
 }

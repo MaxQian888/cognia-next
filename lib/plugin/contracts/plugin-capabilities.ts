@@ -1558,6 +1558,29 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     ],
   },
   {
+    id: "editor",
+    support: "supported",
+    manifestFields: [],
+    runtimeBinding:
+      "context.editor (createEditorAPI) → lib/files/project-editor-bridge → whichever engine registered an opener (Monaco workbench or the code-server Pro IDE pane). Gated by editor:read / editor:write, re-checked per call; readActive is PII-screened at the API boundary.",
+    hostBindings: [
+      "lib/plugin/api/editor-api.ts",
+      "lib/plugin/core/context.ts",
+      "lib/files/project-editor-bridge.ts",
+      "components/editor/project/monaco-active-editor.ts",
+      "components/editor/project/project-editor-workbench.tsx",
+      "components/editor/project/code-server-pane.tsx",
+    ],
+    typescriptSdk: ["packages/plugin-sdk/src/api/editor.ts", "packages/plugin-sdk/src/index.ts"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/context.py"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: [
+      "lib/plugin/api/editor-api.test.ts",
+      "lib/files/project-editor-bridge.test.ts",
+      "components/editor/project/monaco-active-editor.test.ts",
+    ],
+  },
+  {
     id: "pet",
     support: "supported",
     manifestFields: [],

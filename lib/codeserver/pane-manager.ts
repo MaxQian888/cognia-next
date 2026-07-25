@@ -29,11 +29,18 @@ import { isTauri } from "@/lib/tauri"
 const PARKED_RECT: ElementRect = { x: -32000, y: -32000, width: 0, height: 0 }
 
 /**
- * Root marker set while some surface holds the pane. `app/globals.css` uses it
- * to collapse the app-shell transitions the native webview sits inside — see
- * {@link reflectActive}.
+ * Root marker set while some surface holds the pane, valued with the owning
+ * surface's id. `app/globals.css` uses it to collapse the app-shell transitions
+ * the native webview sits inside — see {@link reflectActive}.
  */
 const ACTIVE_ATTR = "data-pro-ide-active"
+
+/**
+ * Marker a hosting surface puts on the reserved `<div>` the native webview is
+ * pinned over, so an animating ancestor can ask "is a live Pro IDE pane inside
+ * the box I am about to tween?" without knowing anything about owner ids.
+ */
+export const PRO_IDE_REGION_ATTR = "data-pro-ide-region"
 
 interface Owner {
   id: string
@@ -58,8 +65,29 @@ let queue: Promise<unknown> = Promise.resolve()
  */
 function reflectActive(): void {
   if (typeof document === "undefined") return
-  if (owner) document.documentElement.setAttribute(ACTIVE_ATTR, "")
+  // Valued with the owner id rather than empty: `[data-pro-ide-active]` still
+  // matches for the CSS guards, and a reader that cares *which* surface holds
+  // the pane (or a human reading the DOM) no longer has to guess.
+  if (owner) document.documentElement.setAttribute(ACTIVE_ATTR, owner.id)
   else document.documentElement.removeAttribute(ACTIVE_ATTR)
+}
+
+/**
+ * Is a live Pro IDE pane pinned somewhere inside `element`?
+ *
+ * The native webview floats above the DOM: it cannot be clipped, tweened, or
+ * transformed by CSS, and its bounds are re-pushed over IPC once per frame. So
+ * any ancestor about to run a layout animation must first ask this and skip the
+ * animation when it answers true — otherwise the pane either smears across
+ * whatever the animation reveals, or forces VS Code to relayout every frame.
+ *
+ * Deliberately containment-based rather than owner-id matching: the caller is a
+ * layout container that has no business knowing how surfaces name themselves,
+ * and containment is the property that actually matters.
+ */
+export function isProIdePanePinnedWithin(element: Element | null | undefined): boolean {
+  if (!element || !owner) return false
+  return element.querySelector(`[${PRO_IDE_REGION_ATTR}]`) !== null
 }
 
 /** Serialize a native round-trip behind every previously queued one. */

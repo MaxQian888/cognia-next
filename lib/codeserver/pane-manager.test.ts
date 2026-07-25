@@ -24,6 +24,8 @@ import {
   claimCodeServerPane,
   destroyCodeServerPane,
   getCodeServerPaneOwner,
+  isProIdePanePinnedWithin,
+  PRO_IDE_REGION_ATTR,
   releaseCodeServerPane,
   setCodeServerPaneVisible,
   updateCodeServerPaneRect,
@@ -297,11 +299,13 @@ it("swallows a destroy failure so teardown never rejects", async () => {
 describe("shell-transition marker", () => {
   const marker = () => document.documentElement.getAttribute("data-pro-ide-active")
 
-  it("is set while a surface holds the pane and cleared on release", async () => {
+  it("is set to the holding surface's id and cleared on release", async () => {
     expect(marker()).toBeNull()
 
     await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
-    expect(marker()).toBe("")
+    // Valued rather than empty: `[data-pro-ide-active]` still matches for the
+    // CSS guards, and a reader can tell *which* surface holds the pane.
+    expect(marker()).toBe("editor")
 
     releaseCodeServerPane("editor")
     expect(marker()).toBeNull()
@@ -311,8 +315,9 @@ describe("shell-transition marker", () => {
     await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
     await claimCodeServerPane("dock", URL_A, RECT, jest.fn())
 
-    // The webview never left the screen, so the guard must not blink off.
-    expect(marker()).toBe("")
+    // The webview never left the screen, so the guard must not blink off — it
+    // just re-points at the new holder.
+    expect(marker()).toBe("dock")
   })
 
   it("is cleared by destroy", async () => {
@@ -321,10 +326,54 @@ describe("shell-transition marker", () => {
     expect(marker()).toBeNull()
   })
 
-  it("is not set by a release from a non-owner", async () => {
+  it("is not cleared by a release from a non-owner", async () => {
     await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
     releaseCodeServerPane("dock")
-    expect(marker()).toBe("")
+    expect(marker()).toBe("editor")
+  })
+})
+
+describe("isProIdePanePinnedWithin", () => {
+  /** A container holding a reserved region, as a hosting surface renders it. */
+  const withRegion = () => {
+    const container = document.createElement("div")
+    const region = document.createElement("div")
+    region.setAttribute(PRO_IDE_REGION_ATTR, "")
+    container.append(region)
+    return container
+  }
+
+  it("is false when no surface holds the pane, even with a region present", () => {
+    // The reserved <div> is rendered by CodeServerPane whether or not the
+    // native webview has been claimed over it, so containment alone is not
+    // enough — an unclaimed pane is not pinned over anything.
+    expect(isProIdePanePinnedWithin(withRegion())).toBe(false)
+  })
+
+  it("is true once a surface holds the pane and the region is inside", async () => {
+    await claimCodeServerPane("dock", URL_A, RECT, jest.fn())
+    expect(isProIdePanePinnedWithin(withRegion())).toBe(true)
+  })
+
+  it("is false for a container that does not contain the region", async () => {
+    await claimCodeServerPane("dock", URL_A, RECT, jest.fn())
+    // The Agent Team editor may hold the pane while an unrelated container
+    // animates; that container must keep its animation.
+    expect(isProIdePanePinnedWithin(document.createElement("div"))).toBe(false)
+  })
+
+  it("is false for a null container", async () => {
+    await claimCodeServerPane("dock", URL_A, RECT, jest.fn())
+    expect(isProIdePanePinnedWithin(null)).toBe(false)
+  })
+
+  it("goes false again once the holder releases", async () => {
+    const container = withRegion()
+    await claimCodeServerPane("dock", URL_A, RECT, jest.fn())
+    expect(isProIdePanePinnedWithin(container)).toBe(true)
+
+    releaseCodeServerPane("dock")
+    expect(isProIdePanePinnedWithin(container)).toBe(false)
   })
 })
 

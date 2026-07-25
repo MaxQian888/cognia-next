@@ -51,6 +51,12 @@
       "require": "./dist/context-panel.cjs",
       "default": "./dist/context-panel.js"
     },
+    "./api/editor": {
+      "types": "./dist/editor.d.ts",
+      "import": "./dist/editor.js",
+      "require": "./dist/editor.cjs",
+      "default": "./dist/editor.js"
+    },
     "./api/webview": {
       "types": "./dist/webview.d.ts",
       "import": "./dist/webview.js",

@@ -28,6 +28,8 @@ const renderToggle = (
   }> = {}
 ) => {
   const onChange = props.onChange ?? jest.fn()
+  // Rendered bare on purpose: the toggle carries its own TooltipProvider, so a
+  // host that forgot to mount one gets a working tooltip rather than a crash.
   render(
     <EditorEngineToggle
       value={props.value ?? "monaco"}
@@ -94,12 +96,24 @@ it("keeps an engine selected when the active one is clicked again", () => {
   expect(onChange).not.toHaveBeenCalled()
 })
 
-it("disables Pro IDE with an explanation when the platform has no binary", async () => {
+it("disables Pro IDE with an explanation the user can actually reach", async () => {
   renderToggle({ proIdeSupport: "unsupported" })
 
   const proIde = screen.getByTestId("editor-mode-codeserver")
   expect(proIde).toBeDisabled()
-  expect(proIde).toHaveAttribute("title", "proIde.disabledTooltip")
+
+  // The explanation used to hang off `title` on this very button — and a
+  // disabled button dispatches no mouse events, so it never appeared. It now
+  // rides a Radix tooltip on a non-disabled wrapper, and is tied to the control
+  // through aria-describedby for assistive tech.
+  const trigger = screen.getByTestId("editor-mode-codeserver-disabled")
+  expect(trigger).toBeInTheDocument()
+  expect(proIde).toHaveAttribute("aria-describedby")
+
+  fireEvent.focus(trigger)
+  const tip = await screen.findAllByText("proIde.disabledTooltip")
+  expect(tip.length).toBeGreaterThan(0)
+
   // Let the fallback probe settle so its setState lands inside act().
   await screen.findByTestId("editor-open-local-vscode")
 })
@@ -108,6 +122,8 @@ it("leaves the tooltip off when Pro IDE is available", () => {
   renderToggle({ proIdeSupport: "supported" })
 
   expect(screen.getByTestId("editor-mode-codeserver")).not.toHaveAttribute("title")
+  expect(screen.getByTestId("editor-mode-codeserver")).not.toHaveAttribute("aria-describedby")
+  expect(screen.queryByTestId("editor-mode-codeserver-disabled")).not.toBeInTheDocument()
 })
 
 describe("local VS Code fallback", () => {
@@ -155,10 +171,14 @@ describe("local VS Code fallback", () => {
   it("distinguishes a failed support probe from an unsupported platform", async () => {
     renderToggle({ proIdeSupport: "error" })
 
-    expect(screen.getByTestId("editor-mode-codeserver")).toHaveAttribute(
-      "title",
-      "proIde.supportCheckFailed"
-    )
+    // A probe that failed is retryable and says so, unlike "no build exists for
+    // this OS" — and, like that one, the reason has to be reachable rather than
+    // parked on a disabled button's `title`.
+    fireEvent.focus(screen.getByTestId("editor-mode-codeserver-disabled"))
+    expect((await screen.findAllByText("proIde.supportCheckFailed")).length).toBeGreaterThan(0)
+
+    // No local-VS-Code fallback here: we do not yet know the platform lacks a
+    // build, only that we could not ask.
     await waitFor(() => expect(client.localVsCodeAvailable).not.toHaveBeenCalled())
     expect(screen.queryByTestId("editor-open-local-vscode")).not.toBeInTheDocument()
   })

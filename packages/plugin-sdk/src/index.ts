@@ -44,6 +44,18 @@ export { defineTool } from "./define/define-tool"
 export { defineGuardrail } from "./define/define-guardrail"
 export { defineContextProvider } from "./define/define-context-provider"
 export { defineContextPanel } from "./define/define-context-panel"
+/**
+ * `ctx.editor` has no manifest field to define — it is a pure runtime API — so
+ * only its types surface here. The full contract lives in `./api/editor`.
+ */
+export type {
+  ActiveEditorContext,
+  ActiveEditorDiagnostic,
+  PluginActiveEditorContext,
+  PluginEditorAPI,
+  PluginEditorOpenOptions,
+  PluginEditorOpenResult,
+} from "./api/editor"
 export { defineA2UIComponent } from "./define/define-a2ui-component"
 export { defineA2UITemplate } from "./define/define-a2ui-template"
 export { defineAiProvider } from "./define/define-ai-provider"

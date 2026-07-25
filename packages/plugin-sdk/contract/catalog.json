@@ -19,11 +19,27 @@
     "settings:write",
     "session:read",
     "session:write",
+    "session:delete",
     "project:read",
+    "project:write",
+    "project:delete",
     "canvas:read",
+    "canvas:write",
+    "canvas:run",
+    "canvas:collaborate",
     "artifact:read",
     "artifact:write",
     "workflow:read",
+    "editor:read",
+    "editor:write",
+    "vector:read",
+    "vector:write",
+    "ai:chat",
+    "ai:embed",
+    "export:session",
+    "export:project",
+    "theme:read",
+    "theme:write",
     "extension:ui",
     "media:image:read",
     "media:image:write",
@@ -37,6 +53,8 @@
     "twin:read",
     "ipc:call",
     "ipc:expose",
+    "events:publish",
+    "events:subscribe",
     "python:execute",
     "sandbox:web-execute",
     "secrets:read",
@@ -512,6 +530,13 @@
       "minimumHostVersion": "0.1.0"
     },
     {
+      "id": "editor",
+      "support": "supported",
+      "manifestFields": [],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
       "id": "pet",
       "support": "supported",
       "manifestFields": [],
@@ -933,7 +958,10 @@
       "capabilities": ["protocol-adapter"],
       "execution": "conditional",
       "pythonExecution": "supported",
-      "javascriptWhen": { "path": "spec.kind", "equals": "code" },
+      "javascriptWhen": {
+        "path": "spec.kind",
+        "equals": "code"
+      },
       "entryPath": "protocolAdapters[].entry"
     },
     {
@@ -1084,7 +1112,9 @@
       "field": "webviews",
       "capabilities": ["webview"],
       "execution": "conditional",
-      "javascriptWhen": { "path": "entry" },
+      "javascriptWhen": {
+        "path": "entry"
+      },
       "entryPath": "webviews[].entry"
     },
     {

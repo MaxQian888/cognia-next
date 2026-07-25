@@ -36,6 +36,11 @@ import {
   runSlashCommandBuiltinTool,
   type SlashToolRunDeps,
 } from "./slash-builtin-tools"
+import {
+  isEditorBuiltinTool,
+  runEditorBuiltinTool,
+  type EditorToolRunDeps,
+} from "./editor-builtin-tools"
 import { isTeamBuiltinTool, runTeamBuiltinTool } from "./team-builtin-tools"
 import { getTeamDispatchContext } from "./agents/dispatch-context-registry"
 
@@ -148,6 +153,35 @@ async function resolveSlashToolDeps(): Promise<SlashToolRunDeps> {
     }
   } catch {
     return {}
+  }
+}
+
+async function resolveEditorToolDeps(): Promise<EditorToolRunDeps> {
+  const [
+    { readActiveFromProjectEditor },
+    { getSession },
+    { resolveSessionProjectRoot },
+    { useProjectStore },
+    { hasNoLeakingPiiDeep },
+  ] = await Promise.all([
+    import("@/lib/files/project-editor-bridge"),
+    import("@/lib/db/sessions"),
+    import("@/lib/workspace/roots"),
+    import("@/stores/project/project-store"),
+    import("@cognia/redact"),
+  ])
+  return {
+    resolveRoot: async (sessionId) => {
+      const session = await getSession(sessionId).catch(() => null)
+      const projects = useProjectStore.getState().projects
+      return resolveSessionProjectRoot(session, projects).root?.path ?? null
+    },
+    // Through the bridge, not `codeServerClient`: whichever engine is mounted
+    // answers. Reading code-server directly made the tool return
+    // `{available:false}` for every user who never switched to Pro IDE — i.e.
+    // almost all of them — while Monaco could answer the whole time.
+    readActive: readActiveFromProjectEditor,
+    gate: (payload) => hasNoLeakingPiiDeep(payload),
   }
 }
 
@@ -295,6 +329,18 @@ export async function handlePluginToolExec(
     // lib/search + lib/document, which the .mjs sidecar can't import.
     if (isWebBuiltinTool(request.name)) {
       const result = await runWebBuiltinTool(request.name, request.args, await resolveWebToolDeps())
+      return { ...baseResponse, result }
+    }
+    // ── Promoted editor built-in — read_active_editor (Pro IDE → agent) ────
+    // Host-routed: needs the renderer transport (codeserver_agent_read_active)
+    // and the `@cognia/redact` PII gate, neither reachable from the .mjs sidecar.
+    if (isEditorBuiltinTool(request.name)) {
+      const result = await runEditorBuiltinTool(
+        request.name,
+        request.args,
+        await resolveEditorToolDeps(),
+        { sessionId: request.sessionId }
+      )
       return { ...baseResponse, result }
     }
     // ── Promoted Skill built-in — load a skill's instructions ──────────────

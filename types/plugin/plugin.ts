@@ -204,6 +204,7 @@ export type PluginCapability =
   | "context-panel" // Contributes resource-scoped trusted React panels to the Context Workbench
   | "auth-provider" // Contributes a native auth/OAuth provider (C1) — ctx.auth.registerProvider
   | "uri-handler" // Handles cognia://plugin/<id>/... deep-links (C2) — ctx.uri.registerHandler
+  | "editor" // Drives the live project editor — gates ctx.editor (engine-agnostic: Monaco or the code-server Pro IDE)
   | "pet" // Reads + nurtures the desktop pet — gates ctx.pet (rate-limited, budget-clamped)
   | "pet-achievement" // Contributes data-only pet achievements (condition DSL, manifest.petAchievements)
   | "pet-item" // Contributes data-only pet shop items (manifest.petItems)
@@ -399,10 +400,27 @@ export type PluginPermission =
   | "settings:write" // Modify settings
   | "session:read" // Read chat sessions
   | "session:write" // Modify chat sessions
+  | "session:delete" // Delete chat sessions
   | "project:read" // Read project metadata and files through scoped APIs
+  | "project:write" // Create/modify projects, their knowledge files and links
+  | "project:delete" // Delete projects
   | "canvas:read" // Read Canvas document metadata and selection
+  | "canvas:write" // Create/modify/delete Canvas documents
+  | "canvas:run" // Execute Canvas code blocks and actions
+  | "canvas:collaborate" // Join Canvas collaboration sessions
   | "artifact:read" // Read artifact metadata
+  | "artifact:write" // Create and modify artifacts
   | "workflow:read" // Read workflow metadata and selection
+  | "editor:read" // Read what the user is looking at in the project editor
+  | "editor:write" // Open files and reflect edits in the project editor
+  | "vector:read" // Query the vector store
+  | "vector:write" // Write to and delete from the vector store
+  | "ai:chat" // Send prompts to a language model on the user's account
+  | "ai:embed" // Generate embeddings on the user's account
+  | "export:session" // Export chat sessions
+  | "export:project" // Export whole projects
+  | "theme:read" // Read the active theme
+  | "theme:write" // Change the active theme
   | "extension:ui" // Contribute trusted host-rendered UI
   | "media:image:read" // Read image media assets
   | "media:image:write" // Write image media assets
@@ -416,6 +434,8 @@ export type PluginPermission =
   | "twin:read" // Query the employee twin's RAG memory
   | "ipc:call" // Call/send to another plugin over inter-plugin IPC (incl. RPC)
   | "ipc:expose" // Expose RPC methods other plugins can invoke over IPC
+  | "events:publish" // Emit onto the cross-plugin event bus
+  | "events:subscribe" // Listen on the cross-plugin event bus
   | "python:execute" // Execute Python code
   | "sandbox:web-execute" // Execute code in browser sandbox (Pyodide/JS)
   | "secrets:read" // Read from OS keyring / secure storage
@@ -2187,6 +2207,13 @@ export interface PluginContext {
 
   /** Resource-scoped Context Workbench panel registration. */
   contextPanels?: import("@/lib/plugin/api/context-panel-api").PluginContextPanelAPI
+
+  /**
+   * Live project editor — open files, reflect edits, read what the user is
+   * looking at. Engine-agnostic: the built-in Monaco workbench and the embedded
+   * code-server "Pro IDE" both answer.
+   */
+  editor?: import("@/lib/plugin/api/editor-api").PluginEditorAPI
 
   /** Desktop pet — available only with the "pet" capability; warn-once no-op otherwise. */
   pet?: import("@/lib/plugin/api/pet-api").PluginPetAPI
@@ -4608,6 +4635,9 @@ export interface PluginContextAPI {
 
   /** Resource-scoped Context Workbench panel registration. */
   contextPanels: import("@/lib/plugin/api/context-panel-api").PluginContextPanelAPI
+
+  /** Live project editor — open files, reflect edits, read the active editor. */
+  editor: import("@/lib/plugin/api/editor-api").PluginEditorAPI
 
   /** Project management API */
   project: PluginProjectAPI

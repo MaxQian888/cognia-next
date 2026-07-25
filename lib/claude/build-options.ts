@@ -2351,6 +2351,22 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
   }
 
+  // First-class editor context tool — read_active_editor (Pro IDE → agent).
+  // Appended OUTSIDE the disablePluginTools gate when a workspace filesystem
+  // backend exists (desktop), and resolved host-side in plugin-tool-ipc where the
+  // renderer transport + PII gate live. On web/mobile there is no backend, so it
+  // is not surfaced at all.
+  try {
+    const { hasWorkspaceFsBackend } = await import("@/lib/files/workspace-backend")
+    if (ctx.activeProject && hasWorkspaceFsBackend()) {
+      const { buildEditorBuiltinManifestEntries } =
+        await import("@/lib/claude/editor-builtin-tools")
+      opts.pluginTools = [...(opts.pluginTools ?? []), ...buildEditorBuiltinManifestEntries()]
+    }
+  } catch (err) {
+    loggers.app.warn("failed to append editor built-in tool", { error: String(err) })
+  }
+
   // Agent self-invocation tools (Skill / SlashCommand). Opt-in (default off).
   // Like the web tools they are appended OUTSIDE the disablePluginTools gate and
   // round-trip through the same plugin_tool_exec wire, resolving host-side in

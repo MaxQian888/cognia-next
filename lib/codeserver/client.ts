@@ -9,6 +9,7 @@
  *    from the in-app browser preview, so both can be shown at once.
  */
 import type { ElementRect } from "@/lib/browser/protocol"
+import type { ActiveEditorContext, ActiveEditorDiagnostic } from "@/lib/files/project-editor-bridge"
 import { transport } from "@/lib/tauri"
 
 /** Mirror of `codeserver::process::CodeServerStatus`. */
@@ -36,9 +37,26 @@ export interface CodeServerInstallInfo {
   binaryPath: string
 }
 
+/**
+ * Live active-editor context read back from code-server (Pro IDE Phase 2).
+ *
+ * Aliases — not re-declares — the canonical engine-agnostic shape, because
+ * Monaco now answers the same read. Two structurally-identical declarations
+ * would drift the first time a field is added on one side only, and every
+ * consumer downstream (the PII gate, the agent tool contract, the plugin API)
+ * is written to be engine-blind.
+ */
+export type CodeServerDiagnostic = ActiveEditorDiagnostic
+export type CodeServerActiveEditor = ActiveEditorContext
+
 /** Payload of the `codeserver://download-progress` event. */
 export interface CodeServerDownloadProgress {
-  stage: "downloading" | "verifying" | "extracting" | "done"
+  /**
+   * `cancelled` is terminal like `done`, but reached because the user backed
+   * out — the partial archive has already been removed. Surfaces separately so
+   * the UI can go quiet instead of showing a retryable error.
+   */
+  stage: "downloading" | "verifying" | "extracting" | "done" | "cancelled"
   bytesDone: number
   bytesTotal: number
   message: string
@@ -73,6 +91,12 @@ export const codeServerClient = {
   stopAll: () => transport.call<void>("codeserver_stop_all", {}),
   /** Download + install code-server without spawning (pre-fetch). */
   download: () => transport.call<CodeServerInstallInfo>("codeserver_download", {}),
+  /**
+   * Abort an in-flight first-run download (~100-200MB). Safe to call when none
+   * is running; the in-flight `ensure`/`download` call rejects and the partial
+   * archive is removed backend-side.
+   */
+  cancelDownload: () => transport.call<void>("codeserver_cancel_download", {}),
   /** Pinned version, install state and disk footprint. */
   diskUsage: () => transport.call<CodeServerDiskUsage>("codeserver_disk_usage", {}),
   /**
@@ -85,6 +109,28 @@ export const codeServerClient = {
   /** Open a project-relative file in the running CodeServer window. */
   openFile: (root: string, path: string, line?: number, column?: number) =>
     transport.call<void>("codeserver_open_file", { root, path, line, column }),
+  /**
+   * Ask the companion extension (Pro IDE Phase 2) to open + reveal an ABSOLUTE
+   * path in the live VS Code. Preferred over `openFile` (no CLI cold start);
+   * rejects when the extension isn't connected, so callers fall back to it.
+   */
+  driveOpen: (root: string, path: string, line?: number, column?: number) =>
+    transport.call<void>("codeserver_agent_open", { root, path, line, column }),
+  /**
+   * Ask the companion extension to reflect an agent's on-disk write to an
+   * ABSOLUTE path as an undo-able edit in the live editor (a live diff instead of
+   * a bare external reload). Rejects when the extension isn't connected.
+   */
+  driveApplyEdit: (root: string, path: string, line?: number, column?: number) =>
+    transport.call<void>("codeserver_agent_apply_edit", { root, path, line, column }),
+  /**
+   * Read the live active-editor context (focused file, selection, selected text,
+   * that file's diagnostics, open editors) back from code-server. Rejects when
+   * the companion extension isn't connected. The caller PII-gates the payload
+   * before it reaches the model.
+   */
+  readActive: (root: string) =>
+    transport.call<CodeServerActiveEditor>("codeserver_agent_read_active", { root }),
 
   /** Raw `settings.json` for the embedded editor; `""` when it doesn't exist. */
   readUserSettings: () => transport.call<string>("codeserver_read_user_settings", {}),

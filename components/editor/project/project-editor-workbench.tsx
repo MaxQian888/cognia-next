@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { CodeIcon, FilesIcon, PanelRightIcon, SaveIcon, SearchIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
@@ -8,8 +8,18 @@ import { LightCodeEditor } from "@/components/editor/light-code-editor"
 import { Button } from "@/components/ui/button"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import type { EditorActionDef } from "@/lib/editor-workbench/register-editor-actions"
-import { registerProjectEditorOpener } from "@/lib/files/project-editor-bridge"
+import {
+  notifyActiveEditorChanged,
+  registerProjectEditorOpener,
+  type ActiveEditorContext,
+} from "@/lib/files/project-editor-bridge"
+// Separator-aware join from the instructions helpers — a dependency-free leaf.
+// Deliberately not `code-server-pane`'s `joinProjectPath`: importing that would
+// drag the whole Tauri-coupled Pro IDE component into the Monaco path, and it
+// hardcodes `/` besides.
+import { joinPath } from "@/lib/claude/instructions/paths"
 import { cn } from "@/lib/utils"
+import { readMonacoActiveEditor, type ReadableMonacoEditor } from "./monaco-active-editor"
 import { useKeybindingStore } from "@/stores/canvas/keybinding-store"
 import { PROJECT_EDITOR_GOTO_EVENT } from "./editor-events"
 import { ProjectEditorTabs } from "./project-editor-tabs"
@@ -27,6 +37,12 @@ interface UseProjectEditorWorkbenchArgs extends UseProjectEditorArgs {
   registerProjectOpener?: boolean
 }
 
+/** The live Monaco handles a read needs, as ProjectMonaco hands them over. */
+export interface MonacoReadHandles {
+  monaco: MonacoLike
+  editor: ReadableMonacoEditor
+}
+
 export function useProjectEditorWorkbench({
   scopeKey,
   workingDir,
@@ -40,6 +56,41 @@ export function useProjectEditorWorkbench({
   const [mobilePane, setMobilePane] = useState<"files" | "search" | "editor">("files")
   const editor = useProjectEditor({ scopeKey, workingDir, deps })
   const { activeFile, activePath, openFile, rootPath, saveAll, saveFile } = editor
+
+  // Monaco's live handles mount inside ProjectEditorFileWorkbench, but the
+  // project-editor opener is registered here. Rather than re-registering the
+  // opener whenever the caret moves (which would churn the bridge on every
+  // keystroke), the component pushes its handles into this ref and `readActive`
+  // reads whatever is current at call time.
+  const monacoHandlesRef = useRef<MonacoReadHandles | null>(null)
+  const setMonacoReadHandles = useCallback((handles: MonacoReadHandles | null) => {
+    monacoHandlesRef.current = handles
+  }, [])
+
+  // Same reason: the snapshot's path/openEditors come from state that changes
+  // constantly, so they are read through a ref instead of captured. Synced in an
+  // effect rather than during render — a render-phase ref write is not safe under
+  // concurrent rendering, and `readActive` only ever runs after commit anyway.
+  const editorStateRef = useRef({ rootPath, activePath, openFiles: editor.openFiles })
+  const { openFiles } = editor
+  useEffect(() => {
+    editorStateRef.current = { rootPath, activePath, openFiles }
+    // Announce the move so `ctx.editor.onDidChangeActiveEditor` subscribers
+    // re-read. Without this the event would only fire on mount/unmount, which
+    // is not what its name promises.
+    notifyActiveEditorChanged()
+  }, [activePath, openFiles, rootPath])
+
+  const readActive = useCallback(async (): Promise<ActiveEditorContext> => {
+    const { rootPath: root, activePath: active, openFiles } = editorStateRef.current
+    const handles = monacoHandlesRef.current
+    return readMonacoActiveEditor({
+      path: active ? joinPath(root, active) : null,
+      openEditors: openFiles.map((file) => joinPath(root, file.relPath)),
+      editor: handles?.editor ?? null,
+      monaco: handles?.monaco ?? null,
+    })
+  }, [])
 
   const gotoLine = useCallback(
     (relPath: string, line?: number, column?: number) => {
@@ -64,8 +115,12 @@ export function useProjectEditorWorkbench({
     return registerProjectEditorOpener({
       root: rootPath,
       open: gotoLine,
+      // No `applyEdit`: Monaco reflects an agent's disk write through its own
+      // external-change reload. `readActive`, though, has no such fallback —
+      // without it the read side would stay Pro-IDE-only.
+      readActive,
     })
-  }, [gotoLine, registerProjectOpener, rootPath])
+  }, [gotoLine, readActive, registerProjectOpener, rootPath])
 
   const saveActive = useCallback(() => {
     if (!activePath) return
@@ -164,6 +219,7 @@ export function useProjectEditorWorkbench({
     actionLabels,
     actions,
     onKeyDown,
+    setMonacoReadHandles,
   }
 }
 
@@ -210,6 +266,7 @@ export function ProjectEditorFileWorkbench({
     saveActive,
     saveAll,
     setMobilePane,
+    setMonacoReadHandles,
     sideTab,
     setSideTab,
   } = workbench
@@ -238,6 +295,22 @@ export function ProjectEditorFileWorkbench({
       setDiagnosticsState({ relPath, diagnostics: next }),
     []
   )
+
+  // Hand Monaco's live handles to the hook so the project-editor opener it
+  // registered can answer `readActive`. This mount callback is the only place
+  // the raw instances surface; `EditorLike` is the narrow view the diagnostics
+  // hook needs, and the same object also satisfies `ReadableMonacoEditor`.
+  useEffect(() => {
+    setMonacoReadHandles(
+      diagnostics
+        ? {
+            monaco: diagnostics.monaco,
+            editor: diagnostics.editor as unknown as ReadableMonacoEditor,
+          }
+        : null
+    )
+    return () => setMonacoReadHandles(null)
+  }, [diagnostics, setMonacoReadHandles])
 
   const fileTree = (
     <ProjectFileTree
@@ -448,9 +521,13 @@ export function ProjectEditorFileWorkbench({
                   actions={actions}
                   actionLabels={actionLabels}
                   bindings={bindings}
-                  onSelectionChange={(selection) =>
+                  onSelectionChange={(selection) => {
                     setEditorSelectionState({ relPath: activeFile.relPath, selection })
-                  }
+                    // Caret/selection moves are the other half of "the active
+                    // editor changed" — the ref-based read above only covers
+                    // which file is open, not where the user is inside it.
+                    notifyActiveEditorChanged()
+                  }}
                   onDiagnosticsReady={handleDiagnosticsReady}
                 />
               </div>

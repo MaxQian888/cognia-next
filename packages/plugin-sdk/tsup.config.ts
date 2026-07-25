@@ -10,6 +10,7 @@ const runtimeEntries = {
   permissions: "src/permissions/index.ts",
   extensions: "src/extensions/index.ts",
   "context-panel": "src/api/context-panel.ts",
+  editor: "src/api/editor.ts",
   webview: "src/api/webview.ts",
 }
 

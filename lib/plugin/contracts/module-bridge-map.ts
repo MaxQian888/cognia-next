@@ -478,7 +478,13 @@ export const MODULE_BRIDGE_CAPABILITIES = {
     key: "webview",
     manifestField: "webviews",
     register: async (ctx) => {
-      await registerWebviewsForPlugin(ctx.manifest, ctx.installRoot, { importer: ctx.importer })
+      // `hasPermission` is forwarded for the editor RPC server the bridge
+      // attaches to `editor`-capability webviews — it must see live grants, not
+      // a snapshot taken at enable.
+      await registerWebviewsForPlugin(ctx.manifest, ctx.installRoot, {
+        importer: ctx.importer,
+        hasPermission: ctx.hasPermission,
+      })
     },
     unregister: (pluginId) => {
       unregisterWebviewsForPlugin(pluginId)

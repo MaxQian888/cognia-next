@@ -17,6 +17,7 @@
   "newFile": "New File",
   "newFolder": "New Folder",
   "proIde": {
+    "cancelDownload": "Cancel",
     "checkingTooltip": "Checking whether Pro IDE is available…",
     "disabledTooltip": "Not available on this platform — use your local VS Code instead.",
     "downloading": "Downloading VS Code… {percent}%",
@@ -25,6 +26,7 @@
     "openFileFailed": "Couldn't open the file in VS Code: {error}",
     "openLocalVsCode": "Open in VS Code",
     "retry": "Retry",
+    "revokedToMonaco": "Switched back to Monaco — the VS Code pane was taken by another editor or stopped.",
     "starting": "Starting VS Code…",
     "supportCheckFailed": "Couldn't check Pro IDE availability. Try again after reconnecting to the desktop host.",
     "switchLabel": "Editor engine",

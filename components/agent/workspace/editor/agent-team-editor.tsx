@@ -90,7 +90,12 @@ function ProjectEditorBody({ team, workingDir }: { team: AgentTeam; workingDir: 
       </div>
       {mode === "codeserver" ? (
         <div className="min-h-0 flex-1">
-          <CodeServerPane root={rootPath} ownerId={scopeKey} onRevoked={() => setMode("monaco")} />
+          <CodeServerPane
+            root={rootPath}
+            ownerId={scopeKey}
+            onRevoked={() => setMode("monaco")}
+            onCancelled={() => setMode("monaco")}
+          />
         </div>
       ) : (
         <div className="min-h-0 flex-1">

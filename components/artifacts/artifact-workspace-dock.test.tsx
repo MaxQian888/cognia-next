@@ -100,8 +100,13 @@ jest.mock("@/components/ui/resizable", () => {
   }
 })
 
+// Renders the Pro IDE reserved-region marker the real dock tree carries when
+// CodeServerPane is mounted. Harmless for every other test: the region only
+// counts as "pinned" once a surface has actually claimed the native pane.
+// Literal attribute name rather than the imported constant — a jest.mock
+// factory referencing a module-scope import hits the TDZ trap.
 jest.mock("./artifact-dock", () => ({
-  ArtifactDock: () => <div data-testid="dock" />,
+  ArtifactDock: () => <div data-testid="dock" data-pro-ide-region="" />,
 }))
 
 jest.mock("./artifact-panel", () => ({
@@ -115,12 +120,19 @@ import { ArtifactWorkspaceDock } from "./artifact-workspace-dock"
 import { useBreakpoint } from "@/hooks/ui"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
+import {
+  __resetCodeServerPaneManagerForTesting,
+  claimCodeServerPane,
+} from "@/lib/codeserver/pane-manager"
 
 const useBreakpointMock = useBreakpoint as jest.MockedFunction<typeof useBreakpoint>
+
+const RECT = { x: 0, y: 0, width: 400, height: 600 }
 
 beforeEach(() => {
   localStorage.clear()
   useBreakpointMock.mockReturnValue("desktop")
+  __resetCodeServerPaneManagerForTesting()
   act(() => {
     useArtifactDockLayoutStore.getState().resetLayout()
     useArtifactStore.setState({ activeArtifactId: null, panelOpen: false, panelView: "artifact" })
@@ -314,6 +326,48 @@ describe("ArtifactWorkspaceDock", () => {
       // the panel body is not, so an unpinned body gets crushed alone.
       expect(body.style.width).toBe("400px")
       await waitFor(() => expect(body.style.width).toBe(""))
+    } finally {
+      offsetWidth.mockRestore()
+    }
+  })
+
+  it("skips the transition and the width pin while a Pro IDE pane is pinned inside", async () => {
+    // The embedded code-server pane is a native child webview floating above the
+    // DOM. CSS cannot clip it, so the frozen content width below would hold its
+    // reserved rect at full size for the whole 200ms — a collapse left a
+    // full-width VS Code hanging over the chat before snapping away. And every
+    // frame of the transition costs an IPC bounds push plus a VS Code relayout.
+    const offsetWidth = jest.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(400)
+    try {
+      render(
+        <ArtifactWorkspaceDock>
+          <div data-testid="chat" />
+        </ArtifactWorkspaceDock>
+      )
+      const dockPanel = screen.getByTestId("resizable-panel-artifact-dock")
+      const body = screen.getByTestId("artifact-dock-wrapper")
+
+      // Nothing holds the pane yet, so the region alone must not disarm the
+      // animation — otherwise the guard would silently kill it for everyone.
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+      expect(dockPanel.style.transitionProperty).toBe("flex-grow")
+      await waitFor(() => expect(body.style.width).toBe(""))
+
+      await act(async () => {
+        await claimCodeServerPane("session:s1", "http://127.0.0.1:1/", RECT, jest.fn())
+      })
+
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
+
+      // The size change still lands — it just lands in one frame.
+      expect(dockPanel).toHaveAttribute("data-size", "0%")
+      expect(dockPanel.style.transitionProperty).toBe("")
+      expect(body.style.width).toBe("")
+
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+      expect(dockPanel).toHaveAttribute("data-size", "34%")
+      expect(dockPanel.style.transitionProperty).toBe("")
+      expect(body.style.width).toBe("")
     } finally {
       offsetWidth.mockRestore()
     }

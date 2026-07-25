@@ -127,6 +127,7 @@ import {
   createStorageAPI,
   createContextPanelAPI,
 } from "../api"
+import { createEditorAPI } from "../api/editor-api"
 import { createMessagePartAPI } from "../api/message-part-api"
 import { createDexieAPI } from "../api/dexie-api"
 import { createOcrAPI, type PluginOcrAPI } from "../api/ocr-api"
@@ -350,6 +351,9 @@ export function createFullPluginContext(
       hasPermission: (permission) => permissionsAPI.hasPermission(permission as never),
     }),
     contextPanels: createContextPanelAPI(pluginId, (permission) =>
+      permissionsAPI.hasPermission(permission as never)
+    ),
+    editor: createEditorAPI(pluginId, (permission) =>
       permissionsAPI.hasPermission(permission as never)
     ),
     permissions: permissionsAPI,

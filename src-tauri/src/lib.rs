@@ -1207,6 +1207,7 @@ pub fn run() {
             codeserver::commands::codeserver_stop,
             codeserver::commands::codeserver_stop_all,
             codeserver::commands::codeserver_download,
+            codeserver::commands::codeserver_cancel_download,
             codeserver::commands::codeserver_disk_usage,
             codeserver::commands::codeserver_uninstall,
             codeserver::commands::codeserver_open_file,

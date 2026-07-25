@@ -20,7 +20,39 @@
 use ::anyhow::{anyhow, Context, Result};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tauri::{Emitter, Manager};
+use tokio::sync::Notify;
+
+/// Cancellation handle for an in-flight first-run download.
+///
+/// The first run pulls 100–200MB, and until now there was no way out of it: a
+/// mis-click committed the user to the whole transfer. Cancellation is modelled
+/// as a `Notify` raced against the streaming future rather than a flag polled
+/// inside it, because the streaming loop lives in the shared `cognia_net`
+/// helper (also used by the Open VSX fetch) and must not grow a code-server
+/// specific check. Dropping the future is what actually aborts the HTTP stream.
+#[derive(Default)]
+pub struct DownloadCancel {
+    notify: Notify,
+}
+
+impl DownloadCancel {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+
+    /// Ask any in-flight download to stop. No-op when none is running.
+    pub fn cancel(&self) {
+        self.notify.notify_waiters();
+    }
+}
+
+/// Raised when the user cancelled the download. Distinguished from a transport
+/// failure so the UI can go quiet instead of showing a retryable error.
+#[derive(Debug, thiserror::Error)]
+#[error("code-server download cancelled")]
+pub struct DownloadCancelled;
 
 /// Pinned code-server release. Bumping this REQUIRES updating `expected_sha256`
 /// with the new per-asset digests (from
@@ -308,7 +340,10 @@ fn extract_tar_gz_strip1(archive: &Path, dest: &Path) -> Result<()> {
 
 /// Ensure the pinned code-server is installed, downloading + verifying it on
 /// first use. Idempotent: a present install short-circuits with no network.
-pub async fn ensure_code_server(app: &tauri::AppHandle) -> Result<InstallInfo> {
+pub async fn ensure_code_server(
+    app: &tauri::AppHandle,
+    cancel: Option<Arc<DownloadCancel>>,
+) -> Result<InstallInfo> {
     let (os, arch) = resolve_platform()?;
     let install_dir = install_dir_for(app)?;
     let binary = binary_path_in(&install_dir);
@@ -337,9 +372,19 @@ pub async fn ensure_code_server(app: &tauri::AppHandle) -> Result<InstallInfo> {
         0,
         "Downloading VS Code (code-server)…",
     );
-    let actual = stream_to_file(app, &url, &partial)
-        .await
-        .with_context(|| format!("download {url}"))?;
+    let actual = match stream_to_file(app, &url, &partial, cancel).await {
+        Ok(digest) => digest,
+        Err(err) => {
+            // Either way the `.partial` is dead weight: there is no resume
+            // support, so a leftover would just occupy disk until the next
+            // successful run overwrote it.
+            let _ = std::fs::remove_file(&partial);
+            if err.is::<DownloadCancelled>() {
+                emit_progress(app, "cancelled", 0, 0, "Download cancelled");
+            }
+            return Err(err).with_context(|| format!("download {url}"));
+        }
+    };
 
     // 2. Verify against the embedded digest before touching the install dir.
     emit_progress(app, "verifying", 0, 0, "Verifying download…");
@@ -385,22 +430,39 @@ pub async fn ensure_code_server(app: &tauri::AppHandle) -> Result<InstallInfo> {
 /// code-server policy: the user agent, and where progress is emitted. No byte
 /// ceiling: the asset is a pinned release whose digest is baked in, so its
 /// size is known-good rather than attacker-chosen.
-async fn stream_to_file(app: &tauri::AppHandle, url: &str, dest: &Path) -> Result<String> {
+async fn stream_to_file(
+    app: &tauri::AppHandle,
+    url: &str,
+    dest: &Path,
+    cancel: Option<Arc<DownloadCancel>>,
+) -> Result<String> {
     let client = reqwest::Client::builder()
         .user_agent("cognia-desktop")
         .build()
         .context("build http client")?;
 
-    let outcome = cognia_net::http_download::stream_to_file(
-        &client,
-        url,
-        dest,
-        None,
-        &mut |bytes_done, bytes_total| {
-            emit_progress(app, "downloading", bytes_done, bytes_total, "Downloading…");
-        },
-    )
-    .await
+    // Bound to a `let` rather than passed inline: the future is held across a
+    // `select!` below, so the closure must outlive the statement that built it.
+    let mut on_progress = |bytes_done: u64, bytes_total: u64| {
+        emit_progress(app, "downloading", bytes_done, bytes_total, "Downloading…");
+    };
+    let download =
+        cognia_net::http_download::stream_to_file(&client, url, dest, None, &mut on_progress);
+
+    // Race rather than poll: dropping the streaming future on the cancel branch
+    // is what tears down the HTTP connection. A flag checked between chunks
+    // would leave the socket open until the next chunk arrived, which on a
+    // stalled transfer is exactly when the user is most likely to cancel.
+    let outcome = match cancel {
+        Some(token) => {
+            tokio::select! {
+                biased;
+                _ = token.notify.notified() => return Err(DownloadCancelled.into()),
+                result = download => result,
+            }
+        }
+        None => download.await,
+    }
     .with_context(|| format!("stream {url} to {}", dest.display()))?;
 
     Ok(outcome.sha256_hex)
@@ -409,6 +471,48 @@ async fn stream_to_file(app: &tauri::AppHandle, url: &str, dest: &Path) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pending `cancel()` must be observed by a waiter that is already
+    /// parked — this is the whole contract the `select!` in `stream_to_file`
+    /// relies on.
+    #[tokio::test]
+    async fn cancel_wakes_a_parked_waiter() {
+        let token = DownloadCancel::new();
+        let waiter = token.clone();
+
+        let parked = tokio::spawn(async move {
+            waiter.notify.notified().await;
+            true
+        });
+        // Give the task a chance to reach the await before signalling.
+        tokio::task::yield_now().await;
+        token.cancel();
+
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_secs(2), parked)
+                .await
+                .expect("cancel did not wake the waiter")
+                .unwrap()
+        );
+    }
+
+    /// `notify_waiters` only reaches waiters that are already parked, so a
+    /// cancel with nothing downloading must simply evaporate rather than arm
+    /// the next download. The UI fires this button without checking first.
+    #[tokio::test]
+    async fn cancel_with_no_download_in_flight_is_inert() {
+        let token = DownloadCancel::new();
+        token.cancel();
+
+        let waiter = token.clone();
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            async move { waiter.notify.notified().await },
+        )
+        .await;
+
+        assert!(result.is_err(), "a stale cancel armed the next download");
+    }
 
     /// Build a plausible code-server root: the pinned install, an older one,
     /// both state dirs, and an abandoned partial download.

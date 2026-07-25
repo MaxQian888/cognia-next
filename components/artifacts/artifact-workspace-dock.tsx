@@ -20,6 +20,7 @@
 import { useEffect, useRef, type ReactNode } from "react"
 import type { PanelImperativeHandle } from "react-resizable-panels"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
+import { isProIdePanePinnedWithin } from "@/lib/codeserver/pane-manager"
 import { cn } from "@/lib/utils"
 import { useBreakpoint } from "@/hooks/ui"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
@@ -50,6 +51,16 @@ import { WorkspaceRevealOpener } from "./workspace-mode/workspace-reveal-opener"
  * arbitrary Tailwind class would never be JIT-compiled into the CSS. The
  * cleanup delay is scaled by the same multiplier so a slower (1.5×) preference
  * isn't cut short; reduce-motion collapses it via the global CSS guard.
+ *
+ * **Skipped entirely while a Pro IDE pane is pinned inside this dock.** That
+ * pane is a native child webview floating above the DOM: CSS neither clips nor
+ * tweens it, and its bounds are re-pushed over IPC once per frame. Animating
+ * around it costs a full VS Code relayout every frame — and, worse, the frozen
+ * content width below would hold the reserved rect at full size for the whole
+ * 200ms, so a collapse left a full-width VS Code hanging over the chat before
+ * snapping away. `app/globals.css` states this policy for the shell transitions
+ * it can reach; inline styles are out of the stylesheet's reach, so the same
+ * policy is enforced here instead.
  */
 function animateDockResize(
   panel: HTMLDivElement,
@@ -58,6 +69,11 @@ function animateDockResize(
   targetPercent: number | null,
   apply: () => void
 ): () => void {
+  if (isProIdePanePinnedWithin(panel)) {
+    apply()
+    return () => {}
+  }
+
   // Collapsing: hold what is on screen. Expanding: the panel is at ~0, so hold
   // the width it is heading for — the content is then laid out correctly from
   // the first frame and the widening panel reveals it.

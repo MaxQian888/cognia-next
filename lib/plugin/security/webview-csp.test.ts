@@ -1,5 +1,6 @@
 import {
   acquireCogniaContextPanelApiSource,
+  acquireCogniaEditorApiSource,
   acquireCogniaWebviewApiSource,
   buildWebviewCsp,
   wrapWebviewHtml,
@@ -62,6 +63,57 @@ describe("wrapWebviewHtml", () => {
       contextPanelApi: true,
     })
     expect(panelBacked).toContain("acquireCogniaContextPanelApi")
+  })
+
+  it("injects the editor client only when asked", () => {
+    const plain = wrapWebviewHtml("<main></main>", { allowedDomains: [] })
+    expect(plain).not.toContain("acquireCogniaEditorApi")
+
+    const editorBacked = wrapWebviewHtml("<main></main>", { allowedDomains: [], editorApi: true })
+    expect(editorBacked).toContain("acquireCogniaEditorApi")
+  })
+
+  it("does not hand editor access to a plugin that only renders a panel", () => {
+    // The whole point of the separate flag: rendering a panel is not grounds
+    // for writing into the file the user is editing.
+    const panelOnly = wrapWebviewHtml("<main></main>", {
+      allowedDomains: [],
+      contextPanelApi: true,
+    })
+
+    expect(panelOnly).toContain("acquireCogniaContextPanelApi")
+    expect(panelOnly).not.toContain("acquireCogniaEditorApi")
+  })
+
+  it("can inject both clients for a plugin declaring both capabilities", () => {
+    const both = wrapWebviewHtml("<main></main>", {
+      allowedDomains: [],
+      contextPanelApi: true,
+      editorApi: true,
+    })
+
+    expect(both).toContain("acquireCogniaContextPanelApi")
+    expect(both).toContain("acquireCogniaEditorApi")
+  })
+})
+
+describe("acquireCogniaEditorApiSource", () => {
+  it("emits a once-guarded client covering every mirrored method", () => {
+    const src = acquireCogniaEditorApiSource()
+    expect(src).toContain("can only be called once")
+    expect(src).toContain('"cognia.editor"')
+    for (const method of ["openFile", "reflectEdit", "readActive", "onDidChangeActiveEditor"]) {
+      expect(src).toContain(method)
+    }
+  })
+
+  it("hands the change listener nothing, so the frame must re-read", () => {
+    // Pushing a snapshot would put editor text in the frame without the host's
+    // PII screen or an `editor:read` re-check.
+    const src = acquireCogniaEditorApiSource()
+    expect(src).toContain("listeners.forEach(function (fn) {")
+    expect(src).toContain("fn();")
+    expect(src).not.toContain("fn(data.payload)")
   })
 })
 

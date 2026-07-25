@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react"
 import type { UIMessage } from "ai"
 import { extractAgentFileActivity } from "@/lib/agent-team/file-activity"
-import { openInProjectEditor } from "@/lib/files/project-editor-bridge"
+import { openInProjectEditor, reflectEditInProjectEditor } from "@/lib/files/project-editor-bridge"
 import { resolveLinkPath } from "@/lib/terminal/terminal-links"
 
 interface UseAgentFileAutoFollowArgs {
@@ -47,7 +47,13 @@ export function useAgentFileAutoFollow({
       followedRef.current.add(key)
 
       const absolutePath = resolveLinkPath(projectRoot, activity.path)
-      openInProjectEditor(absolutePath, activity.line, activity.column)
+      // A completed write/edit reflects as an undo-able live edit where the
+      // editor supports it; a read just opens + reveals.
+      if (activity.timing === "success") {
+        reflectEditInProjectEditor(absolutePath, activity.line, activity.column)
+      } else {
+        openInProjectEditor(absolutePath, activity.line, activity.column)
+      }
     })
   }, [isStreaming, parts, projectRoot])
 }

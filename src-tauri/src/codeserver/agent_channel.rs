@@ -1,5 +1,5 @@
-//! Loopback WebSocket control channel between the app and the companion VS Code
-//! extension side-loaded into code-server (Pro IDE Phase 2 — agent↔IDE bidirectional).
+//! Loopback control channel between the app and the companion VS Code extension
+//! side-loaded into code-server (Pro IDE Phase 2 — agent↔IDE bidirectional).
 //!
 //! # Why a dedicated channel
 //!
@@ -11,17 +11,24 @@
 //! editor feature never depends on remote-access being enabled: it comes up and tears
 //! down with the code-server processes it drives.
 //!
+//! # Transport
+//!
+//! Newline-delimited JSON over a loopback TCP socket (`127.0.0.1`) — not a WebSocket:
+//! both ends are ours and never cross a proxy or a browser, so WS's handshake +
+//! framing + client-side masking is pure ceremony, and the extension host (code-server
+//! runs on Node 20, no global `WebSocket`) would otherwise need a bundled WS client.
+//!
 //! # Topology
 //!
-//! There is exactly ONE loopback WS server per app (lazily bound to `127.0.0.1:0`).
+//! There is exactly ONE loopback TCP server per app (lazily bound to `127.0.0.1:0`).
 //! Each spawned code-server instance is `register`ed here, minting a per-instance
-//! CSPRNG token mapped to that instance's canonical project root. The token + the WS
+//! CSPRNG token mapped to that instance's canonical project root. The token + the
 //! port are injected into the code-server child's environment (`process.rs`); the
-//! companion extension reads them, dials the WS, and sends a `hello { token }` frame.
-//! The server maps the token back to the root and stores the connection, so
+//! companion extension reads them, connects, and sends a `hello { token }` line. The
+//! server maps the token back to the root and stores the connection, so
 //! [`AgentChannel::send`] can address a request "to the editor serving root X".
 //!
-//! # Wire protocol (JSON text frames)
+//! # Wire protocol (one JSON object per line)
 //!
 //! ```text
 //! // extension → app, once on connect
@@ -50,19 +57,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use axum::{
-    extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
-        ConnectInfo, State,
-    },
-    response::{IntoResponse, Response},
-    routing::get,
-    Router,
-};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::net::TcpListener;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot, OnceCell};
 use uuid::Uuid;
 
@@ -116,6 +115,12 @@ struct Conn {
     tx: mpsc::Sender<String>,
 }
 
+struct PendingRequest {
+    root: String,
+    conn_id: u64,
+    responder: oneshot::Sender<Result<Value, String>>,
+}
+
 #[derive(Default)]
 struct Registry {
     /// per-instance token → canonical project root.
@@ -128,7 +133,7 @@ struct Registry {
 pub struct AgentChannel {
     port: OnceCell<u16>,
     registry: Mutex<Registry>,
-    pending: Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>,
+    pending: Mutex<HashMap<u64, PendingRequest>>,
     next_request_id: AtomicU64,
     next_conn_id: AtomicU64,
 }
@@ -175,17 +180,24 @@ impl AgentChannel {
     /// when no extension is connected for that root (caller degrades to the CLI /
     /// disk-reload path) or the request times out.
     pub async fn send(&self, root: &str, method: &str, params: Value) -> Result<Value, String> {
-        let tx = {
+        let (tx, conn_id) = {
             let reg = self.lock_registry();
             reg.conns
                 .get(root)
-                .map(|conn| conn.tx.clone())
+                .map(|conn| (conn.tx.clone(), conn.conn_id))
                 .ok_or_else(|| "Pro IDE extension is not connected for this project".to_string())?
         };
 
         let id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
         let (response_tx, response_rx) = oneshot::channel();
-        self.lock_pending().insert(id, response_tx);
+        self.lock_pending().insert(
+            id,
+            PendingRequest {
+                root: root.to_string(),
+                conn_id,
+                responder: response_tx,
+            },
+        );
 
         let frame = OutboundFrame::Req {
             id,
@@ -227,13 +239,21 @@ impl AgentChannel {
                     .local_addr()
                     .map_err(|e| format!("read agent channel port: {e}"))?;
                 let channel = Arc::clone(self);
-                let app = Router::new().route("/", get(ws_handler)).with_state(channel);
                 tokio::spawn(async move {
-                    let _ = axum::serve(
-                        listener,
-                        app.into_make_service_with_connect_info::<SocketAddr>(),
-                    )
-                    .await;
+                    loop {
+                        match listener.accept().await {
+                            Ok((stream, peer)) => {
+                                // The listener binds loopback; reject anything else defensively.
+                                if !is_loopback(&peer) {
+                                    continue;
+                                }
+                                tokio::spawn(handle_conn(stream, Arc::clone(&channel)));
+                            }
+                            Err(e) => {
+                                log::warn!("codeserver agent_channel accept error: {e}");
+                            }
+                        }
+                    }
                 });
                 Ok::<u16, String>(addr.port())
             })
@@ -272,9 +292,15 @@ impl AgentChannel {
 
     /// Fire the responder for a correlated response id. Unknown ids (already
     /// timed out) are a silent no-op.
-    fn resolve(&self, id: u64, outcome: Result<Value, String>) {
-        if let Some(responder) = self.lock_pending().remove(&id) {
-            let _ = responder.send(outcome);
+    fn resolve(&self, root: &str, conn_id: u64, id: u64, outcome: Result<Value, String>) {
+        let mut pending = self.lock_pending();
+        let matches_connection = pending
+            .get(&id)
+            .is_some_and(|request| request.root == root && request.conn_id == conn_id);
+        if matches_connection {
+            if let Some(request) = pending.remove(&id) {
+                let _ = request.responder.send(outcome);
+            }
         }
     }
 
@@ -282,9 +308,7 @@ impl AgentChannel {
         self.registry.lock().unwrap_or_else(|p| p.into_inner())
     }
 
-    fn lock_pending(
-        &self,
-    ) -> std::sync::MutexGuard<'_, HashMap<u64, oneshot::Sender<Result<Value, String>>>> {
+    fn lock_pending(&self) -> std::sync::MutexGuard<'_, HashMap<u64, PendingRequest>> {
         self.pending.lock().unwrap_or_else(|p| p.into_inner())
     }
 }
@@ -303,79 +327,79 @@ fn is_loopback(addr: &SocketAddr) -> bool {
     addr.ip().is_loopback()
 }
 
-/// Axum handler: one task per extension connection. Rejects non-loopback peers,
-/// authenticates the first `hello` frame against a minted token, then proxies
-/// request/response frames.
-async fn ws_handler(
-    ws: WebSocketUpgrade,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    State(channel): State<Arc<AgentChannel>>,
-) -> Response {
-    if !is_loopback(&peer) {
-        return axum::http::StatusCode::FORBIDDEN.into_response();
+/// One task per extension connection. Reads newline-delimited JSON frames off the
+/// loopback socket, authenticates the first `hello` frame against a minted token,
+/// then proxies request/response frames until EOF.
+async fn handle_conn(stream: TcpStream, channel: Arc<AgentChannel>) {
+    // Defence-in-depth: the listener already binds loopback and screens peers.
+    if !stream.peer_addr().map(|a| is_loopback(&a)).unwrap_or(false) {
+        return;
     }
-    ws.on_upgrade(move |socket| handle_socket(socket, channel))
-}
+    let (read_half, mut write_half) = stream.into_split();
+    let mut lines = BufReader::new(read_half).lines();
 
-async fn handle_socket(mut socket: WebSocket, channel: Arc<AgentChannel>) {
-    // The connection is unauthenticated until a valid `hello` lands, so nothing is
-    // registered and no outbound queue exists yet.
+    // Unauthenticated until a valid `hello` lands, so nothing is registered and no
+    // outbound queue is published yet.
     let mut bound: Option<(String, u64)> = None;
     let (outbound_tx, mut outbound_rx) = mpsc::channel::<String>(OUTBOUND_CHANNEL_CAPACITY);
 
     loop {
         tokio::select! {
-            // App → extension: drain queued request frames onto the socket.
+            // App → extension: drain queued request frames onto the socket (one
+            // JSON object per line).
             frame = outbound_rx.recv() => {
                 match frame {
-                    Some(text) => {
-                        if socket.send(Message::Text(text.into())).await.is_err() {
+                    Some(mut text) => {
+                        text.push('\n');
+                        if write_half.write_all(text.as_bytes()).await.is_err() {
                             break;
                         }
                     }
                     None => break,
                 }
             }
-            // Extension → app.
-            msg = socket.recv() => {
-                match msg {
-                    Some(Ok(Message::Text(text))) => {
-                        match serde_json::from_str::<InboundFrame>(text.as_str()) {
-                            Ok(InboundFrame::Hello { token }) => {
-                                // Ignore a duplicate hello — the socket is already bound.
-                                if bound.is_some() {
-                                    continue;
-                                }
-                                match channel.root_for_token(&token) {
-                                    Some(root) => {
-                                        let conn_id = channel.attach_conn(&root, outbound_tx.clone());
-                                        bound = Some((root, conn_id));
-                                    }
-                                    None => {
-                                        // Unknown/revoked token — refuse the connection.
-                                        break;
-                                    }
-                                }
+            // Extension → app: one JSON object per line.
+            line = lines.next_line() => {
+                let text = match line {
+                    Ok(Some(text)) => text,
+                    // EOF or read error — the connection is gone.
+                    Ok(None) | Err(_) => break,
+                };
+                if text.trim().is_empty() {
+                    continue;
+                }
+                match serde_json::from_str::<InboundFrame>(&text) {
+                    Ok(InboundFrame::Hello { token }) => {
+                        // Ignore a duplicate hello — the socket is already bound.
+                        if bound.is_some() {
+                            continue;
+                        }
+                        match channel.root_for_token(&token) {
+                            Some(root) => {
+                                let conn_id = channel.attach_conn(&root, outbound_tx.clone());
+                                bound = Some((root, conn_id));
                             }
-                            Ok(InboundFrame::Res { id, ok, result, error }) => {
-                                let outcome = if ok {
-                                    Ok(result.unwrap_or(Value::Null))
-                                } else {
-                                    Err(error.unwrap_or_else(|| "Pro IDE extension error".to_string()))
-                                };
-                                channel.resolve(id, outcome);
-                            }
-                            Err(reason) => {
-                                log::warn!("codeserver agent_channel: bad frame: {reason}");
-                            }
+                            // Unknown/revoked token — refuse the connection.
+                            None => break,
                         }
                     }
-                    Some(Ok(Message::Close(_))) | None => break,
-                    Some(Ok(Message::Ping(data))) => {
-                        let _ = socket.send(Message::Pong(data)).await;
+                    Ok(InboundFrame::Res { id, ok, result, error }) => {
+                        let Some((root, conn_id)) = bound.as_ref() else {
+                            // The first accepted frame must authenticate this
+                            // socket. An unauthenticated client may not consume
+                            // a globally visible pending request id.
+                            break;
+                        };
+                        let outcome = if ok {
+                            Ok(result.unwrap_or(Value::Null))
+                        } else {
+                            Err(error.unwrap_or_else(|| "Pro IDE extension error".to_string()))
+                        };
+                        channel.resolve(root, *conn_id, id, outcome);
                     }
-                    Some(Ok(_)) => {}
-                    Some(Err(_)) => break,
+                    Err(reason) => {
+                        log::warn!("codeserver agent_channel: bad frame: {reason}");
+                    }
                 }
             }
         }
@@ -429,9 +453,7 @@ mod tests {
         let err: InboundFrame =
             serde_json::from_str(r#"{"type":"res","id":8,"ok":false,"error":"nope"}"#).unwrap();
         match err {
-            InboundFrame::Res {
-                id, ok, error, ..
-            } => {
+            InboundFrame::Res { id, ok, error, .. } => {
                 assert_eq!(id, 8);
                 assert!(!ok);
                 assert_eq!(error.as_deref(), Some("nope"));
@@ -468,7 +490,8 @@ mod tests {
         let channel = AgentChannel::new();
         {
             let mut reg = channel.lock_registry();
-            reg.tokens.insert("tok-1".to_string(), "/work/a".to_string());
+            reg.tokens
+                .insert("tok-1".to_string(), "/work/a".to_string());
         }
         assert_eq!(channel.root_for_token("tok-1").as_deref(), Some("/work/a"));
         assert_eq!(channel.root_for_token("missing"), None);
@@ -479,8 +502,10 @@ mod tests {
         let channel = AgentChannel::new();
         {
             let mut reg = channel.lock_registry();
-            reg.tokens.insert("tok-a".to_string(), "/work/a".to_string());
-            reg.tokens.insert("tok-b".to_string(), "/work/b".to_string());
+            reg.tokens
+                .insert("tok-a".to_string(), "/work/a".to_string());
+            reg.tokens
+                .insert("tok-b".to_string(), "/work/b".to_string());
         }
         // Attach a fake connection for /work/a.
         let (tx, _rx) = mpsc::channel::<String>(1);
@@ -517,13 +542,26 @@ mod tests {
     fn resolve_fires_the_pending_responder_and_ignores_unknown_ids() {
         let channel = AgentChannel::new();
         let (tx, rx) = oneshot::channel();
-        channel.lock_pending().insert(42, tx);
+        channel.lock_pending().insert(
+            42,
+            PendingRequest {
+                root: "/work/a".to_string(),
+                conn_id: 7,
+                responder: tx,
+            },
+        );
 
-        channel.resolve(42, Ok(json!({ "ok": 1 })));
+        // Each binding dimension is independently load-bearing.
+        channel.resolve("/work/a", 8, 42, Ok(json!({ "wrong_conn": true })));
+        assert!(channel.lock_pending().contains_key(&42));
+        channel.resolve("/work/b", 7, 42, Ok(json!({ "wrong_root": true })));
+        assert!(channel.lock_pending().contains_key(&42));
+
+        channel.resolve("/work/a", 7, 42, Ok(json!({ "ok": 1 })));
         assert_eq!(rx.blocking_recv().unwrap().unwrap()["ok"], 1);
 
         // Unknown id — no panic, no effect.
-        channel.resolve(999, Ok(Value::Null));
+        channel.resolve("/work/a", 7, 999, Ok(Value::Null));
     }
 
     #[tokio::test]
@@ -550,5 +588,128 @@ mod tests {
             IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7)),
             5555
         )));
+    }
+
+    /// End-to-end over a real loopback socket: bind the server, connect a stand-in
+    /// "extension", authenticate with `hello`, then prove a `send` request reaches
+    /// the socket and its response is correlated back to the caller.
+    #[tokio::test]
+    async fn tcp_round_trip_delivers_a_request_and_returns_its_response() {
+        let channel = Arc::new(AgentChannel::new());
+        let (port, token) = channel.register_instance("/work/rt").await.unwrap();
+
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        stream
+            .write_all(format!("{{\"type\":\"hello\",\"token\":\"{token}\"}}\n").as_bytes())
+            .await
+            .unwrap();
+
+        // Wait until the server has bound this connection to the root.
+        for _ in 0..100 {
+            if is_connected(&channel, "/work/rt") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert!(is_connected(&channel, "/work/rt"));
+
+        // Fire the request from the app side; the stand-in extension answers below.
+        let client = Arc::clone(&channel);
+        let request = tokio::spawn(async move {
+            client
+                .send("/work/rt", "openFile", json!({ "path": "/a.ts" }))
+                .await
+        });
+
+        let (read_half, mut write_half) = stream.into_split();
+        let mut lines = BufReader::new(read_half).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let frame: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(frame["type"], "req");
+        assert_eq!(frame["method"], "openFile");
+        assert_eq!(frame["params"]["path"], "/a.ts");
+        let id = frame["id"].as_u64().unwrap();
+        write_half
+            .write_all(
+                format!(
+                    "{{\"type\":\"res\",\"id\":{id},\"ok\":true,\"result\":{{\"opened\":true}}}}\n"
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+
+        let result = request.await.unwrap().unwrap();
+        assert_eq!(result["opened"], true);
+    }
+
+    #[tokio::test]
+    async fn response_before_hello_cannot_consume_an_authenticated_request() {
+        let channel = Arc::new(AgentChannel::new());
+        let (port, token) = channel.register_instance("/work/auth").await.unwrap();
+
+        let mut legitimate = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        legitimate
+            .write_all(format!("{{\"type\":\"hello\",\"token\":\"{token}\"}}\n").as_bytes())
+            .await
+            .unwrap();
+        for _ in 0..100 {
+            if is_connected(&channel, "/work/auth") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+
+        let client = Arc::clone(&channel);
+        let request =
+            tokio::spawn(async move { client.send("/work/auth", "readActive", json!({})).await });
+        let (read_half, mut legitimate_write) = legitimate.into_split();
+        let mut lines = BufReader::new(read_half).lines();
+        let line = tokio::time::timeout(Duration::from_secs(1), lines.next_line())
+            .await
+            .expect("authenticated request frame timed out")
+            .unwrap()
+            .unwrap();
+        let id = serde_json::from_str::<Value>(&line).unwrap()["id"]
+            .as_u64()
+            .unwrap();
+
+        let mut unauthenticated = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        unauthenticated
+            .write_all(
+                format!("{{\"type\":\"res\",\"id\":{id},\"ok\":true,\"result\":\"forged\"}}\n")
+                    .as_bytes(),
+            )
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(!request.is_finished());
+
+        legitimate_write
+            .write_all(
+                format!("{{\"type\":\"res\",\"id\":{id},\"ok\":true,\"result\":\"real\"}}\n")
+                    .as_bytes(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(request.await.unwrap().unwrap(), json!("real"));
+    }
+
+    /// A connection presenting an unknown token is refused: the server never binds
+    /// it, so a subsequent `send` for that root still reports "not connected".
+    #[tokio::test]
+    async fn tcp_connection_with_a_bad_token_is_refused() {
+        let channel = Arc::new(AgentChannel::new());
+        let (port, _token) = channel.register_instance("/work/bad").await.unwrap();
+
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        stream
+            .write_all(b"{\"type\":\"hello\",\"token\":\"not-a-real-token\"}\n")
+            .await
+            .unwrap();
+
+        // Give the server a beat to process (and reject) the hello.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!is_connected(&channel, "/work/bad"));
     }
 }

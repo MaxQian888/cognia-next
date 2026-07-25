@@ -63,6 +63,11 @@ jest.mock("@/lib/plugin/bridge/sidecar-tools-bridge", () => ({
   buildPluginToolsManifest: jest.fn(() => []),
 }))
 
+const mockHasWorkspaceFsBackend = jest.fn(() => true)
+jest.mock("@/lib/files/workspace-backend", () => ({
+  hasWorkspaceFsBackend: () => mockHasWorkspaceFsBackend(),
+}))
+
 jest.mock("@/lib/db/conversation-overrides", () => ({
   readForResolution: jest.fn(),
 }))
@@ -255,6 +260,27 @@ beforeEach(() => {
   mResolveSkillsForCharacter.mockResolvedValue([])
   mExtractContainerSkillIds.mockReturnValue([])
   mRenderResolvedSkillsSection.mockReturnValue("")
+  mockHasWorkspaceFsBackend.mockReturnValue(true)
+})
+
+describe("resolveSendOptions — editor workspace tool", () => {
+  it("exposes read_active_editor only when an active workspace is present", async () => {
+    const withoutWorkspace = await resolveSendOptions({ character: makeChar() })
+    expect(toolNames(withoutWorkspace)).not.toContain("read_active_editor")
+
+    const withWorkspace = await resolveSendOptions({
+      character: makeChar(),
+      activeProject: makeProject([{ path: "/work/project", isPrimary: true }]),
+    })
+    expect(toolNames(withWorkspace)).toContain("read_active_editor")
+
+    mockHasWorkspaceFsBackend.mockReturnValue(false)
+    const withoutBackend = await resolveSendOptions({
+      character: makeChar(),
+      activeProject: makeProject([{ path: "/work/project", isPrimary: true }]),
+    })
+    expect(toolNames(withoutBackend)).not.toContain("read_active_editor")
+  })
 })
 
 describe("resolveMemberConfig", () => {

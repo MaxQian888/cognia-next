@@ -6,8 +6,9 @@ import { useTranslations } from "next-intl"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
-import { CodeServerPane } from "@/components/editor/project/code-server-pane"
+import { CodeServerPane, joinProjectPath } from "@/components/editor/project/code-server-pane"
 import { EditorEngineToggle } from "@/components/editor/project/editor-engine-toggle"
+import { codeServerClient } from "@/lib/codeserver/client"
 import { ProjectEditorTabs } from "@/components/editor/project/project-editor-tabs"
 import { ProjectRootSwitcher } from "@/components/editor/project/project-root-switcher"
 import {
@@ -163,7 +164,27 @@ function WorkspaceEditorBody({
   )
   const setEditorSession = useProjectEditorSessionStore((state) => state.setSession)
   const proIdeAllowed = isTauri() && layout !== "mobile"
-  const engine = proIdeAllowed && persistedEngine === "codeserver" ? "codeserver" : "monaco"
+  const taskWorkspaceEnabled = useSettingsStore(
+    (state) => state.settings?.developer?.taskWorkspace === true
+  )
+  const activeTask = useTaskWorkspaceStore((state) => state.activeBySession[sessionId])
+  const activateTask = useTaskWorkspaceStore((state) => state.activate)
+  const hasTaskScope = taskWorkspaceEnabled && Boolean(activeTask)
+  const visibleScope = hasTaskScope ? scope : "workspace"
+
+  // Task scope replaces the editor body with the task resources panel and hides
+  // the engine toggle, so Pro IDE cannot be running or switched there. Deriving
+  // the engine down to Monaco rather than leaving the persisted value showing
+  // through fixes a dead reveal path: with `engine` still "codeserver" the
+  // Monaco workbench was told not to register a project-editor opener, while
+  // CodeServerPane was not mounted to register one either — so nothing claimed
+  // the root and every terminal / review file jump silently fell back to the
+  // read-only viewer. The persisted choice is untouched, so leaving task scope
+  // restores Pro IDE.
+  const engine =
+    proIdeAllowed && visibleScope === "workspace" && persistedEngine === "codeserver"
+      ? "codeserver"
+      : "monaco"
   const setEngine = useCallback(
     (next: "monaco" | "codeserver") => setEditorSession(scopeKey, { editorMode: next }),
     [scopeKey, setEditorSession]
@@ -180,13 +201,6 @@ function WorkspaceEditorBody({
   })
   const { gotoLine } = workbench
   const editor = workbench.editor
-  const taskWorkspaceEnabled = useSettingsStore(
-    (state) => state.settings?.developer?.taskWorkspace === true
-  )
-  const activeTask = useTaskWorkspaceStore((state) => state.activeBySession[sessionId])
-  const activateTask = useTaskWorkspaceStore((state) => state.activate)
-  const hasTaskScope = taskWorkspaceEnabled && Boolean(activeTask)
-  const visibleScope = hasTaskScope ? scope : "workspace"
 
   useEffect(() => {
     if (!taskWorkspaceEnabled || activeTask) return
@@ -264,6 +278,20 @@ function WorkspaceEditorBody({
       })
       return
     }
+    // A3: in Pro IDE (code-server) mode the Monaco workbench is unmounted, so its
+    // `gotoLine` would open the file in a hidden editor. Route file reveals to the
+    // live code-server instead (companion extension, CLI reuse-window fallback).
+    if (engine === "codeserver") {
+      const relPath = request.relPath
+      const line = request.line
+      const column = request.column
+      void codeServerClient
+        .driveOpen(rootPath, joinProjectPath(rootPath, relPath), line, column)
+        .catch(() => codeServerClient.openFile(rootPath, relPath, line, column).catch(() => {}))
+      if (processedRequest.current === request.id) setSurface("file")
+      clearRequest(request.id)
+      return
+    }
     gotoLine(request.relPath, request.line, request.column)
     if (processedRequest.current === request.id) setSurface("file")
     clearRequest(request.id)
@@ -273,6 +301,7 @@ function WorkspaceEditorBody({
     workingDir,
     rootKey,
     rootPath,
+    engine,
     selectRoot,
     selectFile,
     gotoLine,
@@ -459,6 +488,7 @@ function WorkspaceEditorBody({
                   root={rootPath}
                   ownerId={scopeKey}
                   onRevoked={() => setEngine("monaco")}
+                  onCancelled={() => setEngine("monaco")}
                 />
               ) : (
                 <ProjectEditorFileWorkbench

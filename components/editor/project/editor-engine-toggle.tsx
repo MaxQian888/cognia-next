@@ -5,13 +5,14 @@
 // CodeServerPane, so the control that picks between them lives here rather than
 // being copy-pasted per host.
 
-import { useEffect, useState } from "react"
+import { useEffect, useId, useState } from "react"
 import { useTranslations } from "next-intl"
 import { CodeIcon, ExternalLinkIcon, SquareCodeIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { codeServerClient } from "@/lib/codeserver/client"
 import type { CodeServerSupportStatus } from "@/hooks/codeserver/use-code-server-supported"
 import { isTauri } from "@/lib/tauri"
@@ -60,6 +61,7 @@ export function EditorEngineToggle({
   }, [proIdeSupport])
 
   const proIdeSupported = proIdeSupport === "supported"
+  const disabledTooltipId = useId()
   const disabledTooltip =
     proIdeSupport === "error"
       ? t("proIde.supportCheckFailed")
@@ -96,17 +98,49 @@ export function EditorEngineToggle({
           <CodeIcon className="size-3.5" />
           {t("proIde.toggleMonaco")}
         </ToggleGroupItem>
-        <ToggleGroupItem
-          value="codeserver"
-          data-testid="editor-mode-codeserver"
-          aria-label={t("proIde.toggleVsCode")}
-          disabled={!proIdeSupported}
-          title={proIdeSupported ? undefined : disabledTooltip}
-          className="gap-1 px-2 text-xs"
-        >
-          <SquareCodeIcon className="size-3.5" />
-          {t("proIde.toggleVsCode")}
-        </ToggleGroupItem>
+        {proIdeSupported ? (
+          <ToggleGroupItem
+            value="codeserver"
+            data-testid="editor-mode-codeserver"
+            aria-label={t("proIde.toggleVsCode")}
+            className="gap-1 px-2 text-xs"
+          >
+            <SquareCodeIcon className="size-3.5" />
+            {t("proIde.toggleVsCode")}
+          </ToggleGroupItem>
+        ) : (
+          // A `disabled` button dispatches no mouse events, so the native
+          // `title` tooltip this used to carry never appeared — on Windows and
+          // other unsupported platforms the option was simply greyed out with
+          // no way to find out why. Radix needs a non-disabled element to hang
+          // the trigger on, hence the wrapping span; `aria-describedby` ties the
+          // reason to the control for screen readers, which `title` on a
+          // disabled control also failed to do.
+          // Self-provided rather than relying on the app-shell provider: this
+          // control ships in two hosts and several test harnesses, and a
+          // missing ancestor provider is a hard crash, not a degraded tooltip.
+          // Radix nests providers without complaint.
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex" data-testid="editor-mode-codeserver-disabled">
+                  <ToggleGroupItem
+                    value="codeserver"
+                    data-testid="editor-mode-codeserver"
+                    aria-label={t("proIde.toggleVsCode")}
+                    aria-describedby={disabledTooltipId}
+                    disabled
+                    className="gap-1 px-2 text-xs"
+                  >
+                    <SquareCodeIcon className="size-3.5" />
+                    {t("proIde.toggleVsCode")}
+                  </ToggleGroupItem>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent id={disabledTooltipId}>{disabledTooltip}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
       </ToggleGroup>
 
       {proIdeSupport === "unsupported" && localVsCode ? (
