@@ -273,6 +273,20 @@ Verified against a live opencode install + the Zen gateway:
 
 ## Renderer-side IPC surface
 
+> **Amended 2026-07-25.** Two things drifted from the list below.
+>
+> 1. **The count is 28, not 20.** The v3 preset *library* commands
+>    (`subscription_list_presets`, `subscription_save_preset`,
+>    `subscription_delete_preset`, `subscription_set_default_preset`), the
+>    generic `subscription_authed_get`, `subscription_volcengine_usage`, and the
+>    ADR-0028 env resolvers (`claude_env_for_account`,
+>    `claude_proxy_env_for_session`) all landed after this section was written.
+> 2. **The implementation moved.** Per ADR-0067, the vault / active-pointer /
+>    preset / per-provider discovery + OAuth logic now lives in
+>    `crates/cognia-subscription/`; `src-tauri/src/subscription/` is a thin
+>    re-export facade plus the Volcengine SigV4 usage command. Paths quoted
+>    elsewhere in this ADR should be read against the crate.
+
 20 commands total registered in `src-tauri/src/lib.rs`:
 
 Shared (10): `subscription_init`, `subscription_list_accounts`,

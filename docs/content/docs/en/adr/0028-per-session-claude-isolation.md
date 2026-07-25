@@ -5,7 +5,19 @@ description: Per-`ChatSession` OAuth / `CLAUDE_CONFIG_DIR` / base-URL / proxy is
 
 # ADR-0028 — Per-session Claude Code isolation
 
-**Status**: Proposed (2026-05-20)
+**Status**: Proposed (2026-05-20) — **partially shipped**; see the note below
+
+> **Note (2026-07-25).** The per-session / per-character *account pinning* half
+> of this ADR is live and user-reachable, not speculative: `accountIdOverride`
+> is resolved by `lib/claude/env-resolver.ts`, edited from the Character editor
+> (`components/settings/characters-section.tsx`) and the chat session settings
+> sheet, surfaced as "in use by" chips in
+> `components/settings/subscription/account-usage-chips.tsx`, and backed by the
+> registered `claude_env_for_account` / `claude_proxy_env_for_session` commands.
+> A reader who took the front-matter at face value would think none of it
+> exists. The execution-sandbox half has not been re-verified against this
+> document, so the overall status stays Proposed rather than flipping to
+> Accepted.
 **Supersedes**: extends ADR-0010 (Claude subscription OAuth), ADR-0020 (Computer-use completeness), ADR-0025 (Unified subscription module), ADR-0026 (Plugin extension point expansion)
 **Authors**: Max Qian + Claude Opus 4.7
 
