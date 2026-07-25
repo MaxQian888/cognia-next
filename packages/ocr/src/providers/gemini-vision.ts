@@ -19,9 +19,9 @@ import {
 } from "./_llm-vision"
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-// gemini-2.5-pro is deprecated (shutdown 2026-10-16); gemini-3.5-flash is the
-// current GA multimodal model suited to OCR transcription.
-const DEFAULT_MODEL = "gemini-3.5-flash"
+// Gemini 3.6 Flash is the current GA multimodal model and Google's recommended
+// production successor for 3.5 Flash workloads.
+const DEFAULT_MODEL = "gemini-3.6-flash"
 
 export interface GeminiVisionConfig extends VisionConfig {
   maxTokens?: number
@@ -114,10 +114,10 @@ export async function geminiVisionExtract(
   if (data.usageMetadata) {
     const promptTokens = data.usageMetadata.promptTokenCount ?? 0
     const completionTokens = data.usageMetadata.candidatesTokenCount ?? 0
-    // Gemini 3.5 Flash list pricing: $1.50/M in + $9/M out (2026-Q2).
+    // Gemini 3.6 Flash list pricing: $1.50/M in + $7.50/M out (2026-07).
     result.costEstimate = {
       unit: "token",
-      amount: (promptTokens * 1.5) / 1_000_000 + (completionTokens * 9) / 1_000_000,
+      amount: (promptTokens * 1.5) / 1_000_000 + (completionTokens * 7.5) / 1_000_000,
       currency: "USD",
     }
   }

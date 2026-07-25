@@ -20,7 +20,7 @@ import {
 } from "./_llm-vision"
 
 const ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages"
-const DEFAULT_MODEL = "claude-opus-4-8"
+const DEFAULT_MODEL = "claude-sonnet-5"
 const DEFAULT_API_VERSION = "2023-06-01"
 
 export interface AnthropicVisionConfig extends VisionConfig {

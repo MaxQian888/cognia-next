@@ -59,6 +59,17 @@ describe("OCR_PARAMETER_SCHEMAS", () => {
     }
   })
 
+  it("uses current production defaults for managed OCR models", () => {
+    expect(
+      OCR_PARAMETER_SCHEMAS["anthropic-vision"]?.parameters.find((p) => p.key === "model")
+        ?.defaultValue
+    ).toBe("claude-sonnet-5")
+    expect(
+      OCR_PARAMETER_SCHEMAS["gemini-vision"]?.parameters.find((p) => p.key === "model")
+        ?.defaultValue
+    ).toBe("gemini-3.6-flash")
+  })
+
   it("ocrs ships only the common parameter block", () => {
     const schema = OCR_PARAMETER_SCHEMAS["ocrs"]!
     const keys = schema.parameters.map((p) => p.key).sort()
@@ -126,7 +137,7 @@ describe("applyOcrParameterDefaults", () => {
     expect(out.format).toBe("markdown")
     expect(out.languages).toBe("en")
     expect(out.maxImageDimension).toBe(2000)
-    expect(out.model).toBe("mistral-ocr-latest")
+    expect(out.model).toBe("mistral-ocr-4-0")
   })
 
   it("preserves caller-supplied overrides", () => {

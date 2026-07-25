@@ -69,10 +69,12 @@ export const OCR_PROVIDER_CAPABILITIES: Record<string, OcrCapabilityFields> = {
     cjk: "yes",
     layout: "yes",
     offline: "no",
-    multilang: 80,
+    multilang: 40,
     costTier: "$",
     maxPagesPerCall: 1000,
-    structuredOutput: "no",
+    // OCR 4 returns native structural blocks, but Cognia currently preserves
+    // them only in the provider response while exposing Markdown publicly.
+    structuredOutput: "partial",
     pdfNative: "yes",
     category: "document-cloud",
   },

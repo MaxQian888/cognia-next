@@ -58,14 +58,14 @@ describe("geminiVisionExtract — success", () => {
     expect(seenUrl).toContain("?key=gem-test")
   })
 
-  it("defaults to the GA gemini-3.5-flash model in the endpoint path", async () => {
+  it("defaults to the latest GA gemini-3.6-flash model in the endpoint path", async () => {
     let seenUrl = ""
     const fetchImpl = jest.fn(async (url: RequestInfo | URL) => {
       seenUrl = typeof url === "string" ? url : url.toString()
       return new Response(JSON.stringify({ candidates: [] }), { status: 200 })
     }) as unknown as typeof fetch
     await geminiVisionExtract(input, makeCtx(), fetchImpl)
-    expect(seenUrl).toContain("/models/gemini-3.5-flash:generateContent")
+    expect(seenUrl).toContain("/models/gemini-3.6-flash:generateContent")
   })
 
   it("warns but still returns partial text when finishReason is MAX_TOKENS", async () => {

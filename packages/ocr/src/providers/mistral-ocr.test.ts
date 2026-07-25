@@ -62,14 +62,17 @@ describe("mistralExtract — success", () => {
     expect(result.costEstimate?.amount).toBeCloseTo(0.008)
   })
 
-  it("sends the official default model alias when none is configured", async () => {
+  it("uses OCR 4 and requests its structured block output by default", async () => {
     const seen: { body?: string } = {}
     const fetchImpl = jest.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
       seen.body = init?.body as string
       return new Response(JSON.stringify({ pages: [] }), { status: 200 })
     }) as unknown as typeof fetch
     await mistralExtract(dataUrlInput, makeCtx(), fetchImpl)
-    expect(JSON.parse(seen.body!).model).toBe("mistral-ocr-latest")
+    expect(JSON.parse(seen.body!)).toMatchObject({
+      model: "mistral-ocr-4-0",
+      include_blocks: true,
+    })
   })
 
   it("falls back to positional page numbers when index is missing", async () => {

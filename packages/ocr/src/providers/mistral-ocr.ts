@@ -1,12 +1,13 @@
 /**
- * Mistral OCR provider (mistral-ocr-latest).
+ * Mistral OCR 4 provider.
  *
  * Endpoint: POST https://api.mistral.ai/v1/ocr
  *   body: { model, document: { type, image_url|document_url } }
  *   response: { pages: [{ index, markdown, dimensions }], usage_info, ... }
  *
- * Returns per-page Markdown (Mistral's native output) — bbox / blocks are
- * not exposed by this endpoint as of 2026-Q1.
+ * OCR 4 can also return structural blocks. The current public OCR result keeps
+ * the Markdown response as its lossless representation until Mistral's block
+ * labels are mapped onto Cognia's narrower block-kind union.
  */
 
 import { bytesToDataUrl, isPdfMimeType, normalizeImage } from "../image-prep"
@@ -24,7 +25,7 @@ interface MistralOcrResponse {
   usage_info?: { pages_processed?: number; doc_size_bytes?: number }
 }
 
-const MISTRAL_DEFAULT_MODEL = "mistral-ocr-latest"
+const MISTRAL_DEFAULT_MODEL = "mistral-ocr-4-0"
 const MISTRAL_ENDPOINT = "https://api.mistral.ai/v1/ocr"
 
 export interface MistralOcrConfig {
@@ -67,7 +68,14 @@ export async function mistralExtract(
     providerId: "mistral-ocr",
     url: endpoint,
     headers: { Authorization: `Bearer ${apiKey}` },
-    body: { model, document },
+    body: {
+      model,
+      document,
+      // OCR 4 adds native paragraph bounding boxes and structural labels.
+      // Request them now so the response remains forward-compatible even
+      // while the public OcrPage contract continues to use Markdown.
+      include_blocks: model === "mistral-ocr-4-0",
+    },
     signal: ctx.signal,
     fetchImpl: fetchImpl ?? config.fetchImpl,
   })

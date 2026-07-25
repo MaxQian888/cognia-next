@@ -208,7 +208,7 @@ function compose(
  * shared dynamic-form helpers in `components/settings/provider/`.
  */
 export const OCR_PARAMETER_SCHEMAS: Record<string, ProviderParameterSchema> = {
-  "mistral-ocr": compose("mistral-ocr", "Mistral OCR", [MODEL_PARAM("mistral-ocr-latest")]),
+  "mistral-ocr": compose("mistral-ocr", "Mistral OCR", [MODEL_PARAM("mistral-ocr-4-0")]),
   "google-vision": compose("google-vision", "Google Cloud Vision", [
     MODEL_PARAM("DOCUMENT_TEXT_DETECTION"),
     ENABLE_TABLES_PARAM,
@@ -224,7 +224,7 @@ export const OCR_PARAMETER_SCHEMAS: Record<string, ProviderParameterSchema> = {
     [ENDPOINT_PARAM("https://<resource>.cognitiveservices.azure.com"), MODEL_PARAM("prebuilt-read")]
   ),
   "anthropic-vision": compose("anthropic-vision", "Claude (vision)", [
-    MODEL_PARAM("claude-opus-4-8"),
+    MODEL_PARAM("claude-sonnet-5"),
     PROMPT_TEMPLATE_PARAM,
   ]),
   "openai-vision": compose("openai-vision", "OpenAI (vision)", [
@@ -232,7 +232,7 @@ export const OCR_PARAMETER_SCHEMAS: Record<string, ProviderParameterSchema> = {
     PROMPT_TEMPLATE_PARAM,
   ]),
   "gemini-vision": compose("gemini-vision", "Gemini (vision)", [
-    MODEL_PARAM("gemini-3.5-flash"),
+    MODEL_PARAM("gemini-3.6-flash"),
     PROMPT_TEMPLATE_PARAM,
   ]),
   // Mathpix v3/text has no model parameter — only the common params apply.
