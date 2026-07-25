@@ -9,7 +9,7 @@
   "updateInternalDependencies": "patch",
   "ignore": ["docs", "mobile"],
   "privatePackages": {
-    "version": false,
+    "version": true,
     "tag": false
   }
 }
