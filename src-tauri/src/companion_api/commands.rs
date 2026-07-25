@@ -971,7 +971,11 @@ pub async fn companion_test_local_reachability(
 
 /// Best-effort detect a routable LAN IPv4 address.  Returns `None` when the
 /// host has no non-loopback interface (e.g., container without a network).
-fn detect_lan_ip() -> Option<String> {
+///
+/// `pub(crate)` so the `companion_endpoints` RPC arm can report the same LAN
+/// address the QR pair payload would have carried — a phone that paired over a
+/// tunnel needs it to discover that the desktop is also reachable on the LAN.
+pub(crate) fn detect_lan_ip() -> Option<String> {
     match local_ip_address::local_ip() {
         Ok(IpAddr::V4(v4)) if !v4.is_loopback() && !v4.is_unspecified() => Some(v4.to_string()),
         Ok(IpAddr::V6(v6)) if !v6.is_loopback() && !v6.is_unspecified() => Some(v6.to_string()),

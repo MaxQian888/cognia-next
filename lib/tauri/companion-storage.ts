@@ -62,6 +62,28 @@ export interface CompanionConfig {
    * cloud servers route by it; absent on rows paired before it shipped.
    */
   accountId?: string
+  /**
+   * ADR-0021 channel inventory — the desktop's cloudflared tunnel URL, as
+   * last reported by the `companion_endpoints` RPC.
+   *
+   * The QR pair payload carries exactly ONE `baseUrl`, so a device paired on
+   * the LAN would otherwise never learn that its desktop is also reachable
+   * from the internet: leaving the network stranded it on the WebRTC tier
+   * alone, and a client with WebRTC disabled (or behind a symmetric NAT with
+   * no TURN) had no route home at all. Refreshed on every successful connect
+   * by `lib/connectivity/endpoint-refresh.ts` and consumed as a failover
+   * candidate by the mobile signaling controller. Absent when the desktop is
+   * running no tunnel.
+   */
+  tunnelBaseUrl?: string
+  /**
+   * ADR-0021 channel inventory — the desktop's `https://<lan-ip>:<port>`
+   * address, as last reported by `companion_endpoints`. The mirror of
+   * {@link tunnelBaseUrl} for the opposite transition: a device paired over
+   * the tunnel learns where to look on the LAN. Absent when the desktop is
+   * loopback-bound or has no routable interface.
+   */
+  lanBaseUrl?: string
 }
 
 export interface CompanionConfigStorage {

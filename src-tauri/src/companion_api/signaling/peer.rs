@@ -460,8 +460,7 @@ mod tests {
         // `String(event.data)` and silently drops a binary (ArrayBuffer/Blob)
         // message. The real-pair harness (`pnpm webrtc:pair`) caught this when
         // every desktop→peer RPC response timed out; this test locks it down.
-        let (mobile_msg_tx, mut mobile_msg_rx) =
-            tokio::sync::mpsc::channel::<(Vec<u8>, bool)>(1);
+        let (mobile_msg_tx, mut mobile_msg_rx) = tokio::sync::mpsc::channel::<(Vec<u8>, bool)>(1);
         mobile_dc.on_message(Box::new(move |msg: DataChannelMessage| {
             let tx = mobile_msg_tx.clone();
             Box::pin(async move {

@@ -319,6 +319,15 @@ const KNOWN_COMMANDS: &[&str] = &[
     // gated RPC. NOT a CONTROL_COMMAND: every paired device may query its own
     // standing.
     "companion_can_control",
+    // Read-only channel inventory — reports every address this desktop is
+    // currently reachable on (LAN + cloudflared tunnel) plus the self-signed
+    // TLS fingerprint. The QR pair payload can only carry ONE base URL, so a
+    // phone paired on the LAN never learns the tunnel address (and a phone
+    // paired over the tunnel never learns the LAN fingerprint it needs to pin
+    // a LAN hit). This arm closes both gaps: the client refreshes it on every
+    // successful connect and caches the result for failover. NOT a
+    // CONTROL_COMMAND — every paired device may ask how to reach its own host.
+    "companion_endpoints",
     // ── Source control (ADR-0038) ───────────────────────────────────────────
     // Native git porcelain over a repo path. Reads are ungated; writes /
     // network ops require the remote-control capability (see CONTROL_COMMANDS).
@@ -686,6 +695,11 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     // Read-only remote-control capability probe (drives the mobile
     // computer-use consent sheet). Pure read of the process-global allow list.
     "companion_can_control",
+    // Read-only channel inventory (LAN / tunnel base URLs + TLS fingerprint).
+    // Polled by the mobile transport on connect, so caching it behind the 60 s
+    // idempotency TTL would hand back a stale tunnel URL right after the user
+    // started one.
+    "companion_endpoints",
     // Source-control reads — same (repoPath, …) returns the same snapshot.
     "git_is_repo",
     "git_repo_state",
@@ -1149,6 +1163,63 @@ fn can_control_response(device_id: &str) -> Value {
     serde_json::json!({ "allowed": super::control_allow_list::global().is_allowed(device_id) })
 }
 
+/// Read-only response body for `companion_endpoints` — the set of addresses
+/// this desktop is currently reachable on.
+///
+/// The QR pair payload carries exactly one `baseUrl` (tunnel takes priority
+/// over LAN — see [`super::commands::companion_issue_pair_jwt`]), which leaves
+/// every paired client with a single-channel view of a multi-channel host:
+///
+///   * paired on the LAN → never learns the tunnel URL, so leaving the network
+///     strands it on WebRTC alone;
+///   * paired over the tunnel → the payload's `fingerprint` is empty (Cloudflare
+///     terminates TLS), and `lib/connectivity/lan-resolver.ts` refuses to trust
+///     an unpinned LAN hit, so it can never be promoted back to the LAN.
+///
+/// Reporting both channels plus the self-signed fingerprint lets the client
+/// cache what it needs for either transition. Nothing here is a secret: the
+/// fingerprint is in every TLS handshake, and the tunnel URL is a public
+/// Cloudflare hostname that only forwards to the same authenticated surface.
+///
+/// Factored out as a pure helper for the same reason as
+/// [`can_control_response`] — the dispatch arm needs a live `AppHandle`, this
+/// does not.
+fn endpoints_response(
+    lan_base_url: Option<String>,
+    tunnel_base_url: Option<String>,
+    fingerprint: String,
+    server_id: String,
+) -> Value {
+    serde_json::json!({
+        "lanBaseUrl": lan_base_url,
+        "tunnelBaseUrl": tunnel_base_url,
+        "fingerprint": fingerprint,
+        "serverId": server_id,
+    })
+}
+
+/// The `https://<lan-ip>:<port>` address a phone could reach this host on, or
+/// `None` when the server is loopback-bound / the host has no routable
+/// interface.
+///
+/// Mirrors the LAN branch of [`super::commands::companion_issue_pair_jwt`]:
+/// same `detect_lan_ip` probe, same HTTPS scheme (M2.9 self-signed
+/// termination). `bind_mode` is only consultable through the Tauri-managed
+/// `CompanionServerState`; a headless `cognia-server` always binds `0.0.0.0`
+/// (`bin/cognia-server.rs`), so `None` for `bind_lan` there means "assume LAN"
+/// rather than "assume loopback".
+fn lan_base_url(bind_lan: Option<bool>) -> Option<String> {
+    if bind_lan == Some(false) {
+        return None;
+    }
+    let port = match super::advertised_port() {
+        0 => super::server::DEFAULT_PORT,
+        p => p,
+    };
+    let host = crate::companion_api::commands::detect_lan_ip()?;
+    Some(format!("https://{host}:{port}"))
+}
+
 /// Allowlisted patch keys for `app_settings_update`. The mobile client may
 /// only mutate user-facing preferences; transport, sidecar, and provider
 /// configuration stay desktop-only. Mirror this with the OpenAPI spec.
@@ -1271,6 +1342,7 @@ const APP_SETTINGS_MOBILE_ALLOWED_KEYS: &[&str] = &[
     "cartesiaVoice",
     "deepgramVoice",
     "xiaomiVoice",
+    "mistralVoiceId",
     // ADR-0056 (Wave 2) — web-search completeness. Preferred provider +
     // cloud→system fallback edited from `/me/web-search`. Provider API keys
     // stay device-local (`searchProviders` is deliberately NOT allowlisted).
@@ -2845,6 +2917,38 @@ pub(super) async fn dispatch(
         // is deliberately absent from CONTROL_COMMANDS so every paired device
         // can query its own standing.
         "companion_can_control" => Ok(can_control_response(device_id)),
+
+        // Read-only channel inventory. Deliberately degrades instead of 503-ing
+        // off the desktop: the tunnel launcher is Tauri-managed state, and a
+        // headless `cognia-server` simply has no tunnel — that is a `null`
+        // `tunnelBaseUrl`, not an unsupported command. The LAN address and the
+        // TLS fingerprint are process-global and answer correctly on both hosts.
+        "companion_endpoints" => {
+            let (tunnel_base_url, bind_lan) = match host.tauri_app(name) {
+                Ok(app) => {
+                    let server_state: tauri::State<'_, super::CompanionServerState> = app.state();
+                    let tunnel = server_state
+                        .tunnel
+                        .current()
+                        .map(|info| info.public_url)
+                        .or_else(|| server_state.tunnel.named_public_url());
+                    let bind_lan = server_state
+                        .bind_mode()
+                        .map(|mode| matches!(mode, super::BindMode::Lan));
+                    (tunnel, bind_lan)
+                }
+                // Headless: no tunnel launcher, and the listener is bound
+                // `0.0.0.0`, so leave `bind_lan` unknown (= assume LAN).
+                Err(_) => (None, None),
+            };
+            let server_id = super::healthz::derive_server_id(&state.secret.read());
+            Ok(endpoints_response(
+                lan_base_url(bind_lan),
+                tunnel_base_url,
+                super::tls_fingerprint(),
+                server_id,
+            ))
+        }
 
         "app_settings_update" => {
             // Allowlist enforcement — phone may only mutate user-facing
@@ -5159,6 +5263,80 @@ mod tests {
         super::super::control_allow_list::global().disallow(device);
     }
 
+    #[test]
+    fn endpoints_response_reports_both_channels() {
+        let value = endpoints_response(
+            Some("https://192.168.1.42:27890".to_string()),
+            Some("https://calm-rock.trycloudflare.com".to_string()),
+            "abc123".to_string(),
+            "server-id-1".to_string(),
+        );
+        assert_eq!(value["lanBaseUrl"], "https://192.168.1.42:27890");
+        assert_eq!(value["tunnelBaseUrl"], "https://calm-rock.trycloudflare.com");
+        assert_eq!(value["fingerprint"], "abc123");
+        assert_eq!(value["serverId"], "server-id-1");
+    }
+
+    #[test]
+    fn endpoints_response_nulls_absent_channels() {
+        // A loopback-bound desktop with no tunnel running: both address fields
+        // must serialise as JSON `null`, not as the string "null" or a missing
+        // key — the mobile client distinguishes "no such channel" from
+        // "channel unchanged" by key presence.
+        let value = endpoints_response(None, None, String::new(), "server-id-2".to_string());
+        assert!(value["lanBaseUrl"].is_null());
+        assert!(value["tunnelBaseUrl"].is_null());
+        assert_eq!(value["fingerprint"], "");
+        assert_eq!(value["serverId"], "server-id-2");
+    }
+
+    #[test]
+    fn lan_base_url_is_none_when_bound_loopback() {
+        // Loopback bind mode is an explicit "not reachable from the LAN" —
+        // handing the phone a 127.0.0.1 URL would make it probe itself.
+        assert_eq!(lan_base_url(Some(false)), None);
+    }
+
+    #[test]
+    fn lan_base_url_is_https_with_the_advertised_port_when_lan_bound() {
+        // `detect_lan_ip` returns None on a network-less CI container, in which
+        // case there is genuinely no LAN address to report. Both outcomes are
+        // valid; assert the SHAPE of the one that exists.
+        for bind_lan in [Some(true), None] {
+            match lan_base_url(bind_lan) {
+                Some(url) => {
+                    assert!(url.starts_with("https://"), "expected https, got {url}");
+                    let port = match super::super::advertised_port() {
+                        0 => super::super::server::DEFAULT_PORT,
+                        p => p,
+                    };
+                    assert!(
+                        url.ends_with(&format!(":{port}")),
+                        "expected port {port} in {url}"
+                    );
+                }
+                None => {
+                    assert!(
+                        crate::companion_api::commands::detect_lan_ip().is_none(),
+                        "lan_base_url returned None despite a routable interface"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn companion_endpoints_is_read_only_and_ungated() {
+        // Read-tier: a device JWT must reach it (not SERVICE_ONLY), any paired
+        // device may ask how to reach its own host (not CONTROL), and the
+        // answer must never be served from the 60 s idempotency cache — a
+        // freshly-started tunnel has to show up on the very next poll.
+        assert!(KNOWN_COMMANDS_SET.contains("companion_endpoints"));
+        assert!(READ_ONLY_COMMANDS_SET.contains("companion_endpoints"));
+        assert!(!CONTROL_COMMANDS_SET.contains("companion_endpoints"));
+        assert!(!SERVICE_ONLY_COMMANDS_SET.contains("companion_endpoints"));
+    }
+
     #[tokio::test]
     async fn companion_can_control_is_not_control_gated() {
         // A device with no remote-control grant must still be able to PROBE its
@@ -6988,6 +7166,11 @@ rl.on("line", (line) => {
     }
 
     #[tokio::test]
+    async fn dispatch_coverage_companion_endpoints() {
+        assert_not_404!("companion_endpoints", json!({}));
+    }
+
+    #[tokio::test]
     async fn dispatch_coverage_claude_approve() {
         assert_not_404!(
             "claude_approve",
@@ -7605,6 +7788,7 @@ rl.on("line", (line) => {
             "cartesiaVoice",
             "deepgramVoice",
             "xiaomiVoice",
+            "mistralVoiceId",
         ] {
             assert!(
                 APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),

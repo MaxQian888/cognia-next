@@ -1428,6 +1428,92 @@ paths:
             content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
           }
 
+  /api/v1/_rpc/companion_endpoints:
+    post:
+      operationId: rpcCompanionEndpoints
+      tags: [rpc-remote-control]
+      summary: List every address this desktop is currently reachable on.
+      description: |
+        Read-only — skips the idempotency cache so a freshly-started tunnel
+        shows up on the very next poll.
+
+        The QR pair payload carries exactly ONE `baseUrl` (tunnel takes
+        priority over LAN), which leaves every client with a single-channel
+        view of a multi-channel host: a phone paired on the LAN never learns
+        the tunnel address, and a phone paired over the tunnel receives an
+        empty `fingerprint` (Cloudflare terminates TLS) so it can never pin —
+        and therefore never trust — a LAN hit. Clients refresh this on every
+        successful connect and cache the result for channel failover.
+
+        Nothing returned is a secret: the fingerprint appears in every TLS
+        handshake and the tunnel hostname only forwards to this same
+        authenticated surface. NOT gated by `allowRemoteControl` — every
+        paired device may ask how to reach its own host.
+
+        On a headless `cognia-server` there is no tunnel launcher, so
+        `tunnelBaseUrl` is always `null` there rather than a 503.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, description: "Empty body." }
+            examples:
+              empty: { value: {} }
+      responses:
+        "200":
+          description: Reachability snapshot.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [lanBaseUrl, tunnelBaseUrl, fingerprint, serverId]
+                properties:
+                  lanBaseUrl:
+                    type: string
+                    nullable: true
+                    description:
+                      "`https://<lan-ip>:<port>`, or null when the server is loopback-bound or the
+                      host has no routable interface."
+                  tunnelBaseUrl:
+                    type: string
+                    nullable: true
+                    description:
+                      "Public URL of the active cloudflared tunnel (quick or named), or null when no
+                      tunnel is running."
+                  fingerprint:
+                    type: string
+                    description:
+                      "Lower-case hex SHA-256 of the server's self-signed TLS SPKI. Empty when the
+                      cert subsystem is uninitialised. Clients pin this before trusting a LAN hit."
+                  serverId:
+                    type: string
+                    description:
+                      "Stable 32-char installation identifier, same value `/api/v1/healthz` returns.
+                      Survives cert rotation."
+              examples:
+                both:
+                  value:
+                    {
+                      lanBaseUrl: "https://192.168.1.42:27890",
+                      tunnelBaseUrl: "https://calm-rock.trycloudflare.com",
+                      fingerprint: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+                      serverId: "3a7bd3e2360a3d29eea436fcfb7e44c7",
+                    }
+                lanOnly:
+                  value:
+                    {
+                      lanBaseUrl: "https://192.168.1.42:27890",
+                      tunnelBaseUrl: null,
+                      fingerprint: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+                      serverId: "3a7bd3e2360a3d29eea436fcfb7e44c7",
+                    }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: internal error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
   /api/v1/_rpc/claude_sidecar_status:
     post:
       operationId: rpcClaudeSidecarStatus

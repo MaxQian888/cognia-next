@@ -29,6 +29,9 @@ import {
   saveCompanionConfig,
 } from "@/lib/tauri/transport-companion"
 import { resolveLanBaseUrl } from "@/lib/connectivity/lan-resolver"
+import { buildCandidates, pickReachable } from "@/lib/connectivity/connection-strategy"
+import { refreshCompanionEndpoints } from "@/lib/connectivity/endpoint-refresh"
+import { fetchHealthz } from "@/lib/connectivity/healthz"
 import { getSettings } from "@/lib/db/settings"
 import { resolveTurnServerCredentials } from "@/lib/credentials/turn-credentials"
 import {
@@ -76,6 +79,42 @@ export interface MobileSignalingControllerOptions {
   resolveLanBaseUrlOverride?: typeof resolveLanBaseUrl
   /** Test injection of the TURN provisioner (defaults to `startTurnProvisioner`). */
   startTurnProvisionerOverride?: typeof startTurnProvisioner
+  /** Test injection of the endpoint refresher (defaults to `refreshCompanionEndpoints`). */
+  refreshEndpointsOverride?: typeof refreshCompanionEndpoints
+  /**
+   * Test injection of the per-candidate liveness probe used by the channel
+   * failover sweep. Defaults to a `/healthz` probe that also verifies the
+   * server's self-signed TLS fingerprint against the stored pin.
+   */
+  probeCandidateOverride?: (baseUrl: string, signal: AbortSignal) => Promise<boolean>
+}
+
+/** Per-candidate probe budget during a failover sweep (ms). */
+const CANDIDATE_PROBE_TIMEOUT_MS = 1500
+
+/**
+ * Default liveness probe for the channel failover sweep.
+ *
+ * `/healthz` reports the desktop's OWN self-signed SPKI fingerprint no matter
+ * which channel the request arrived on — so it identifies the host even over
+ * a Cloudflare-terminated tunnel, where the TLS certificate the client sees
+ * belongs to Cloudflare rather than the desktop. When the device holds a pin,
+ * a mismatch rejects the candidate: a squatted tunnel hostname must not be
+ * able to attract the connection.
+ */
+export async function probeCandidateDefault(
+  baseUrl: string,
+  signal: AbortSignal,
+  expectedFingerprint?: string,
+  fetchHealthzImpl: typeof fetchHealthz = fetchHealthz
+): Promise<boolean> {
+  const health = await fetchHealthzImpl(baseUrl, {
+    signal,
+    timeoutMs: CANDIDATE_PROBE_TIMEOUT_MS,
+  })
+  if (!health) return false
+  if (!expectedFingerprint) return true
+  return health.fingerprint.toLowerCase() === expectedFingerprint.toLowerCase()
 }
 
 /**
@@ -105,6 +144,11 @@ export function installMobileSignalingController(
   const now = options.nowOverride ?? Date.now
   const resolveLan = options.resolveLanBaseUrlOverride ?? resolveLanBaseUrl
   const startProvisioner = options.startTurnProvisionerOverride ?? startTurnProvisioner
+  const refreshEndpoints = options.refreshEndpointsOverride ?? refreshCompanionEndpoints
+  const probeCandidate =
+    options.probeCandidateOverride ??
+    ((baseUrl: string, signal: AbortSignal) =>
+      probeCandidateDefault(baseUrl, signal, loadCompanionConfig()?.serverFingerprint))
 
   // ADR-0021 — automatic ephemeral-TURN provisioning. The provisioner is a
   // sibling of the settings subscription (not nested in `applySettings`) so
@@ -133,36 +177,77 @@ export function installMobileSignalingController(
     }
   }
 
-  // ADR-0021 LAN-first re-resolution. The paired `baseUrl` is otherwise only
-  // chosen at pair time, so after a network change it can keep pointing at a
-  // tunnel even when the desktop is live on the LAN. On each reachability
-  // trigger we probe (bounded, abortable) whether the desktop is reachable
-  // on the LAN and, if so, repoint `baseUrl` + reconnect the WS so the
-  // LAN-first gate (`isOnConnectedLan`) becomes true and the WebRTC tier is
-  // torn down. Own throttle clock (heavier than re-upgrade) + single
-  // in-flight scan (a newer trigger aborts the previous).
+  // ADR-0021 LAN-first re-resolution, then channel failover. The paired
+  // `baseUrl` is otherwise only chosen at pair time, so after a network change
+  // it can keep pointing at a tunnel even when the desktop is live on the LAN
+  // — or, worse, at a LAN address that no longer resolves at all.
+  //
+  // On each reachability trigger:
+  //   1. probe (bounded, abortable) whether the desktop is reachable on the
+  //      LAN and, if so, repoint `baseUrl` + reconnect the WS so the LAN-first
+  //      gate (`isOnConnectedLan`) becomes true and the WebRTC tier is torn
+  //      down;
+  //   2. if there is no LAN and the transport is NOT currently connected,
+  //      sweep the remaining channels (cached LAN address → tunnel → the
+  //      pair-time address) and repoint at the first that answers. Without
+  //      this step a phone that paired on the LAN has no route home once it
+  //      leaves the network except the WebRTC tier, which is unavailable when
+  //      the user disabled it, the signaling service is unreachable, or a
+  //      symmetric NAT offers no relay.
+  //
+  // Own throttle clock (heavier than re-upgrade) + single in-flight sweep (a
+  // newer trigger aborts the previous).
   let lastLanResolveMs = Number.NEGATIVE_INFINITY
   let lanAbort: AbortController | null = null
-  const maybeReresolveLan = async (): Promise<void> => {
+  const maybeRepointTransport = async (): Promise<void> => {
     const t = now()
     if (t - lastLanResolveMs < LAN_RERESOLVE_MIN_SPACING_MS) return
     lastLanResolveMs = t
     const config = loadCompanionConfig()
     if (!config) return
-    // Already healthy on LAN — no need to scan.
+    // Already healthy on LAN — the best channel is in use, nothing to do.
     if (tx.isOnConnectedLan()) return
     lanAbort?.abort()
     const controller = new AbortController()
     lanAbort = controller
+
     let lanBaseUrl: string | null = null
     try {
       ;({ lanBaseUrl } = await resolveLan({ config, signal: controller.signal }))
     } catch {
-      return
+      // Scan failure is not fatal — fall through to the failover sweep, which
+      // probes concrete addresses rather than discovering new ones.
     }
     if (controller.signal.aborted) return
-    if (lanBaseUrl && lanBaseUrl !== config.baseUrl) {
-      await saveCompanionConfig({ ...config, baseUrl: lanBaseUrl })
+    if (lanBaseUrl) {
+      if (lanBaseUrl !== config.baseUrl) {
+        await saveCompanionConfig({ ...config, baseUrl: lanBaseUrl })
+        tx.reconnectWs()
+      }
+      return
+    }
+
+    // No LAN. A live connection over some other channel must not be torn down
+    // to go probing — only sweep when we have actually lost the desktop.
+    if (tx.getConnectionState() === "connected") return
+
+    const candidates = buildCandidates({
+      // Server-reported LAN address from `companion_endpoints`. The live scan
+      // above already failed, but it can miss a subnet the phone can still
+      // route to (mDNS blocked, /24 sweep on the wrong interface), and the
+      // probe below verifies the pin before we commit to it.
+      lanBaseUrl: config.lanBaseUrl,
+      tunnelUrl: config.tunnelBaseUrl,
+      cachedBaseUrl: config.baseUrl,
+      expectedFingerprint: config.serverFingerprint,
+    })
+    if (candidates.length === 0) return
+    const winner = await pickReachable(candidates, (candidate) =>
+      probeCandidate(candidate.baseUrl, controller.signal)
+    )
+    if (controller.signal.aborted) return
+    if (winner && winner.baseUrl !== config.baseUrl) {
+      await saveCompanionConfig({ ...config, baseUrl: winner.baseUrl })
       tx.reconnectWs()
     }
   }
@@ -171,11 +256,33 @@ export function installMobileSignalingController(
   // upgrade can run on a cold boot before the pair onboarding screen
   // mounts. Re-resolve LAN once hydration settles.
   void hydrateCompanionConfig()
-    .then(() => maybeReresolveLan())
+    .then(() => maybeRepointTransport())
     .catch(() => {
       // Hydration errors land in the no-paired-device branch of
       // `enableWebRtcTier`; nothing to do here.
     })
+
+  // ADR-0021 channel inventory. The pair payload carries ONE address, so the
+  // set of channels a device knows about is only ever refreshed here, over an
+  // authenticated connection. Runs on each transition INTO `connected` —
+  // that's the one moment the RPC is guaranteed to be answerable, and it is
+  // exactly when a newly-started tunnel (or a fingerprint the tunnel pairing
+  // could not carry) needs to reach the phone. Fire-and-forget: the refresher
+  // never throws, and nothing downstream waits on it.
+  const runEndpointRefresh = (): void => {
+    void refreshEndpoints().catch((err) => {
+      console.warn("mobile-signaling-controller: endpoint refresh failed", err)
+    })
+  }
+  const detachConnectionState = tx.onConnectionStateChange((state) => {
+    if (state !== "connected") return
+    runEndpointRefresh()
+  })
+  // `onConnectionStateChange` does not seed the listener with the current value
+  // (unlike `onTierChange`), so a controller installed while the transport is
+  // ALREADY connected would never see a transition and would never refresh —
+  // which is the common case on a warm remount. Seed it here.
+  if (tx.getConnectionState() === "connected") runEndpointRefresh()
 
   const sub: Subscription = liveQuery(() => readSettings()).subscribe({
     next: (settings) => {
@@ -216,7 +323,7 @@ export function installMobileSignalingController(
   // subsequent `applySettings` sees a truthful `isOnConnectedLan`), then
   // re-upgrade the WebRTC tier (throttled, self-gating).
   const onTrigger = async (): Promise<void> => {
-    await maybeReresolveLan()
+    await maybeRepointTransport()
     await reupgrade()
   }
 
@@ -254,6 +361,7 @@ export function installMobileSignalingController(
     sub.unsubscribe()
     netUnsub?.()
     resumeUnsub?.()
+    detachConnectionState()
     lanAbort?.abort()
     provisioner?.stop()
   }

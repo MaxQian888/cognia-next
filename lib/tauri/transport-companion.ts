@@ -24,6 +24,10 @@ const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   "read_agent_config",
   "session_list",
   "companion_can_control",
+  // Channel inventory (LAN / tunnel base URLs + TLS fingerprint) — polled on
+  // connect by the endpoint refresher, so it must not be served from the
+  // 60s idempotency cache.
+  "companion_endpoints",
   "fleet_get_snapshot",
   "browser_capability",
   "browser_session_get",
