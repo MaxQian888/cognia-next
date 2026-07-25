@@ -115,6 +115,28 @@ export async function updateAdapterInstance(
   await getDb().adapterInstances.update(id, { ...patch, updatedAt: Date.now() })
 }
 
+/**
+ * Atomically merge adapter settings against the latest stored row.
+ *
+ * Settings cards often issue several fire-and-forget field updates before a
+ * live query rerenders. Reading outside the transaction would let each update
+ * merge against the same stale snapshot and silently discard its siblings.
+ */
+export async function patchAdapterInstanceSettings(
+  id: string,
+  patch: Record<string, unknown>
+): Promise<void> {
+  const db = getDb()
+  await db.transaction("rw", db.adapterInstances, async () => {
+    const current = await db.adapterInstances.get(id)
+    if (!current) return
+    await db.adapterInstances.update(id, {
+      settings: { ...(current.settings ?? {}), ...patch },
+      updatedAt: Date.now(),
+    })
+  })
+}
+
 export async function deleteAdapterInstance(id: string): Promise<void> {
   const db = getDb()
   await db.adapterInstances.delete(id)
