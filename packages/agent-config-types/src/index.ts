@@ -2969,6 +2969,7 @@ export interface AppSettings {
     | "cartesia"
     | "deepgram"
     | "xiaomi"
+    | "mistral"
   /** Browser SpeechSynthesisVoice.voiceURI (system provider). */
   systemVoice?: string
 
@@ -2981,6 +2982,7 @@ export interface AppSettings {
 
   /** Gemini TTS settings. */
   geminiVoice?: string
+  geminiModel?: string
 
   /** Edge TTS settings. */
   edgeVoice?: string
@@ -3015,6 +3017,11 @@ export interface AppSettings {
   xiaomiModel?: string
   xiaomiStyle?: string
   xiaomiDialect?: string
+
+  /** Mistral Voxtral TTS settings. */
+  mistralVoiceId?: string
+  mistralModel?: string
+  mistralResponseFormat?: string
 
   /** OpenAI Realtime TTS settings (desktop-only streaming). */
   realtimeVoice?: string
