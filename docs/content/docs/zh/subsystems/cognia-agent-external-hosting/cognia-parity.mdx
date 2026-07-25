@@ -117,6 +117,29 @@ ACP 与 Codex app-server 在 `session/new` 时一次性消费指令、根目录�
 `/status` 与 `/doctor` 报告的是实际达成的状态：当前上下文版本、当前策略下的 Cognia 内建/host 工具数量、
 用户 MCP 数量、桥健康度，以及哪些设置会重启 Agent 上下文。
 
+## 真机 agent 验证
+
+`pnpm smoke:external-parity` 驱动的是**真实 agent**（非 stub），穿过真实的 manager、
+真实的沙箱 launcher、真实的 broker 与真实的桥，并以「agent 确实调用了一个只读工具和一个
+变更工具、且磁盘上有可验证的副作用」作为通过条件。
+
+| 后端 | 结果 | 说明 |
+| --- | --- | --- |
+| `codex-app-server` | PASS | 投射 46 个内建 + 4 个 host 工具；`read` 与 `write` 均经桥执行 |
+| `codex`（ACP shim） | PASS | 同一工具面，走 `@zed-industries/codex-acp` 传输 |
+| `claude-code` | 本机未能验证 | `claude-agent-acp` 在 `session/new` 报 `spawn Unknown system error -88`，**即使一个 MCP server 都不挂**也一样，故失败发生在该 agent 自身拉起 Claude 的环节，与工具投射无关 |
+
+smoke 暴露出两个问题，二者都是在工具真正被投射之后才可能被发现的：
+
+- **Codex 忽略了挂载的 MCP server。** Codex 没有 per-session 的 `mcpServers` 参数——它从
+  配置读取——因此 adapter 静默丢弃了调用方挂载的全部 server。现在它们随
+  `thread/start` 的 per-thread `config` 覆盖下发
+  （`lib/ai/agent/external/codex-mcp-config.ts`）。在此之前，桥报告一切健康，而 Codex
+  回答 `mcp__cognia-tools__*` 不可用。
+- **`git` 工具类别在严格 launcher 沙箱下经桥调用不可用。** git 子进程确实执行了，但对一个
+  在非沙箱下 `git` 能正常读取的工作区报「not a git repository」。这是 launcher 沙箱与 git
+  工具的交互问题，与桥无关，smoke 对其只报告、不作为通过条件。
+
 ## 文件
 
 | 关注点 | 位置 |

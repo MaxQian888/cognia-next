@@ -166,3 +166,4 @@ public/swe-worker-*.js
 
 # Conversation/share export artifacts (produced by /export)
 cognia-export-*.md
+.smoke-workspace-*

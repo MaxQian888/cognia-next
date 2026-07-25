@@ -129,6 +129,34 @@ silent tool call at a time.
 built-in and host tool counts under the current policy, the user MCP count, bridge health, and which
 settings restart the agent's context.
 
+## Verified against real agents
+
+`pnpm smoke:external-parity` drives the REAL agent — not a stub — through the
+real manager, the real sandbox launcher, the real broker and the real bridge,
+and gates on the agent invoking a read-only AND a mutating Cognia tool with a
+verified side effect on disk.
+
+| Backend | Result | Notes |
+| --- | --- | --- |
+| `codex-app-server` | PASS | 46 built-in + 4 host tools projected; `read` and `write` both executed through the bridge |
+| `codex` (ACP shim) | PASS | same surface over the `@zed-industries/codex-acp` transport |
+| `claude-code` | not verified here | `claude-agent-acp` fails `session/new` with `spawn Unknown system error -88` **even with zero MCP servers attached**, so the failure is inside that agent's own Claude launch, not the projection |
+
+Two findings the smoke surfaced, both of which only became reachable once the
+tools were actually projected:
+
+- **Codex ignored attached MCP servers.** Codex has no per-session `mcpServers`
+  parameter — it reads them from config — so the adapter silently dropped every
+  server the caller attached. They now ride `thread/start`'s per-thread
+  `config` overrides (`lib/ai/agent/external/codex-mcp-config.ts`). Before this
+  the bridge reported healthy while Codex answered that
+  `mcp__cognia-tools__*` was unavailable.
+- **The `git` tool category does not work through the bridge under the strict
+  launcher sandbox.** The git subprocess executes but reports "not a git
+  repository" for a workspace that `git` reads fine unsandboxed. This is a
+  launcher-sandbox × git-tools interaction, independent of the bridge, and is
+  reported by the smoke rather than gated on.
+
 ## Files
 
 | Concern | Lives in |
