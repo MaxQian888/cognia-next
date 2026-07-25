@@ -189,7 +189,70 @@ const baseRemarkPlugins: RemarkPlugins = [
   ...cjk.remarkPluginsAfter,
 ]
 const mathRemarkPlugins: RemarkPlugins = [...baseRemarkPlugins, remarkMath]
-const rehypePlugins: RehypePlugins = [rehypeRaw, [rehypeSanitize, sanitizeSchema]]
+const rehypePlugins: RehypePlugins = [
+  rehypeRaw,
+  [rehypeSanitize, sanitizeSchema],
+  rehypeMarkdownHeadingIds,
+]
+
+interface MarkdownAstNode {
+  type?: string
+  tagName?: string
+  value?: string
+  properties?: Record<string, unknown>
+  children?: MarkdownAstNode[]
+}
+
+function markdownNodeText(node: MarkdownAstNode): string {
+  if (node.type === "text") return node.value ?? ""
+  return node.children?.map(markdownNodeText).join("") ?? ""
+}
+
+function markdownHeadingSlug(value: string): string {
+  return value
+    .toLocaleLowerCase()
+    .trim()
+    .replace(/[^\p{Letter}\p{Number}\s_-]/gu, "")
+    .replace(/[\s_]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+}
+
+/**
+ * Add GitHub-style ids to Markdown headings so fragment links work without a
+ * runtime dependency. This transformer runs after sanitization and only for
+ * completed messages, keeping it out of the per-token streaming path.
+ */
+export function addMarkdownHeadingIds(tree: unknown): void {
+  if (!tree || typeof tree !== "object") return
+  const seen = new Map<string, number>()
+
+  const visit = (node: MarkdownAstNode) => {
+    if (/^h[1-6]$/.test(node.tagName ?? "")) {
+      const existingId = typeof node.properties?.id === "string" ? node.properties.id : undefined
+      if (existingId) {
+        seen.set(existingId, Math.max(seen.get(existingId) ?? 0, 1))
+      } else {
+        const base = markdownHeadingSlug(markdownNodeText(node))
+        if (base) {
+          const duplicateIndex = seen.get(base) ?? 0
+          node.properties = {
+            ...node.properties,
+            id: duplicateIndex === 0 ? base : `${base}-${duplicateIndex}`,
+          }
+          seen.set(base, duplicateIndex + 1)
+        }
+      }
+    }
+    node.children?.forEach(visit)
+  }
+
+  visit(tree as MarkdownAstNode)
+}
+
+function rehypeMarkdownHeadingIds() {
+  return addMarkdownHeadingIds
+}
 
 /**
  * Convert `\[...\]` → `$$...$$` and `\(...\)` → `$...$` so remark-math accepts
@@ -509,17 +572,47 @@ function buildComponents(
       }
       return <li className="leading-relaxed">{children}</li>
     },
-    h1({ children }) {
-      return <h1 className="text-2xl font-bold mt-6 mb-4">{children}</h1>
+    h1({ children, id }) {
+      return (
+        <h1 id={id} className="scroll-mt-20 text-2xl font-bold mt-6 mb-4">
+          {children}
+        </h1>
+      )
     },
-    h2({ children }) {
-      return <h2 className="text-xl font-bold mt-5 mb-3">{children}</h2>
+    h2({ children, id }) {
+      return (
+        <h2 id={id} className="scroll-mt-20 text-xl font-bold mt-5 mb-3">
+          {children}
+        </h2>
+      )
     },
-    h3({ children }) {
-      return <h3 className="text-lg font-semibold mt-4 mb-2">{children}</h3>
+    h3({ children, id }) {
+      return (
+        <h3 id={id} className="scroll-mt-20 text-lg font-semibold mt-4 mb-2">
+          {children}
+        </h3>
+      )
     },
-    h4({ children }) {
-      return <h4 className="text-base font-semibold mt-3 mb-2">{children}</h4>
+    h4({ children, id }) {
+      return (
+        <h4 id={id} className="scroll-mt-20 text-base font-semibold mt-3 mb-2">
+          {children}
+        </h4>
+      )
+    },
+    h5({ children, id }) {
+      return (
+        <h5 id={id} className="scroll-mt-20 text-sm font-semibold mt-3 mb-2">
+          {children}
+        </h5>
+      )
+    },
+    h6({ children, id }) {
+      return (
+        <h6 id={id} className="scroll-mt-20 text-sm font-medium text-muted-foreground mt-3 mb-2">
+          {children}
+        </h6>
+      )
     },
     p({ children }) {
       return <p className="my-2 leading-relaxed">{children}</p>

@@ -54,6 +54,8 @@ const MODELS_DEV_IDENTITY_PROVIDERS = new Set<string>([
   "nvidia",
   "huggingface",
   "modelscope",
+  "opencode",
+  "opencode-go",
 ])
 
 /**

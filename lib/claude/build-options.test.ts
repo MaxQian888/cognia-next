@@ -1155,8 +1155,10 @@ describe("resolveSendOptions — compaction config", () => {
       } as unknown as AppSettings,
     })
     // deepseek-v4-pro is 1M in the provider catalog — NOT the regex table's
-    // 128k floor that would auto-compact at ~107k.
-    expect(opts.compaction?.contextWindow).toBe(1_048_576)
+    // 128k floor that would auto-compact at ~107k. The catalog states a round
+    // decimal 1_000_000; this used to read 1_048_576 because the inline entry
+    // shadowed the catalog and carried the binary value.
+    expect(opts.compaction?.contextWindow).toBe(1_000_000)
   })
 
   it("omits contextWindow when compaction is disabled", async () => {

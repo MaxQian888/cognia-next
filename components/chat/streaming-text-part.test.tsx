@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import { createElement, type ReactNode } from "react"
 
 const mockStreamdownParser = jest.fn((markdown: string) =>
@@ -107,5 +107,35 @@ describe("StreamingTextPart", () => {
       "[content-visibility:auto]",
       "[contain-intrinsic-size:auto_160px]"
     )
+  })
+
+  it("uses native-safe external links while streaming", () => {
+    render(<StreamingTextPart text="[site](https://example.com)" isStreaming={true} />)
+    const props = mockMessageResponse.mock.calls.at(-1)?.[0] as {
+      components?: {
+        a?: React.ComponentType<{ href?: string; children?: ReactNode }>
+      }
+    }
+    const Anchor = props.components?.a
+    expect(Anchor).toBeDefined()
+
+    render(createElement(Anchor!, { href: "https://example.com" }, "site"))
+    expect(screen.getByRole("link", { name: "site" })).toHaveAttribute("target", "_blank")
+  })
+
+  it("turns workspace links into project file actions while streaming", () => {
+    render(
+      <StreamingTextPart text="[app](src/app.ts#L7C2)" isStreaming={true} projectRoot="/repo" />
+    )
+    const props = mockMessageResponse.mock.calls.at(-1)?.[0] as {
+      components?: {
+        a?: React.ComponentType<{ href?: string; children?: ReactNode }>
+      }
+    }
+    const Anchor = props.components?.a
+    expect(Anchor).toBeDefined()
+
+    render(createElement(Anchor!, { href: "src/app.ts#L7C2" }, "app"))
+    expect(screen.getByRole("button", { name: "app" })).toBeInTheDocument()
   })
 })

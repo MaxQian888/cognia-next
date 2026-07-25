@@ -66,4 +66,22 @@ describe("useModelsDevCatalog", () => {
     })
     expect(result.current.error).toBe("network down")
   })
+
+  // `row === undefined` conflated "still reading Dexie" with "no cached
+  // catalog". Callers that render model metadata need the difference, or they
+  // paint a bare list and grow chips into it once the row lands.
+  it("reports isLoading until the Dexie read settles, then false with no row", async () => {
+    const { result } = renderHook(() => useModelsDevCatalog())
+    expect(result.current.isLoading).toBe(true)
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.row).toBeUndefined()
+    expect(result.current.providerCount).toBe(0)
+  })
+
+  it("reports isLoading false once a cached row resolves", async () => {
+    await saveModelsDevCatalog({ providers, fetchedAt: 1000, source: "remote" })
+    const { result } = renderHook(() => useModelsDevCatalog())
+    await waitFor(() => expect(result.current.row).toBeDefined())
+    expect(result.current.isLoading).toBe(false)
+  })
 })

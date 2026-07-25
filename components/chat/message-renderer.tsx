@@ -1009,7 +1009,14 @@ function renderPart(
     }
 
     if (isStreaming) {
-      return <StreamingTextPart key={key} text={text} isStreaming={isStreaming} />
+      return (
+        <StreamingTextPart
+          key={key}
+          text={text}
+          isStreaming={isStreaming}
+          projectRoot={projectRoot}
+        />
+      )
     }
 
     return (

@@ -481,10 +481,9 @@ export interface ProviderUIPreferences {
  * Curated, hand-authored provider definitions.
  *
  * These carry richer model metadata (pricing, capability flags, OAuth config)
- * than the catalog and therefore take precedence on id collision. Every other
- * chat-capable provider from {@link getBuiltInProviderCatalog} is folded in by
- * {@link buildBuiltInProviders} so the settings UI lists all of them — see the
- * exported {@link PROVIDERS} below.
+ * than the catalog. On id collision, {@link buildBuiltInProviders} keeps this
+ * richer UI metadata and legacy model history while taking the catalog's
+ * current default and model entries as the source of truth.
  */
 const INLINE_PROVIDERS: Record<string, ProviderConfig> = {
   openai: {
@@ -2091,8 +2090,8 @@ function catalogModelToModelConfig(model: BuiltInProviderModelEntry): ModelConfi
 /**
  * Projects a built-in catalog entry onto the {@link ProviderConfig} shape used
  * by the settings UI and resolver. OAuth fields are intentionally not mapped:
- * every OAuth provider is hand-authored in {@link INLINE_PROVIDERS} and wins on
- * id collision, so a catalog-only entry never needs them.
+ * OAuth providers keep those richer fields from {@link INLINE_PROVIDERS} when
+ * the two sources are merged.
  */
 export function catalogEntryToProviderConfig(entry: BuiltInProviderCatalogEntry): ProviderConfig {
   return {
@@ -2129,19 +2128,39 @@ export function isChatCapableCatalogEntry(entry: BuiltInProviderCatalogEntry): b
 }
 
 /**
- * Builds the full built-in provider map: every chat-capable provider from the
- * built-in catalog, with the hand-authored {@link INLINE_PROVIDERS} spread last
- * so their curated metadata wins on id collision. This is what makes the
- * settings UI list all catalog providers (with their default base URL) instead
- * of only the ~29 inline ones.
+ * Merge current catalog models ahead of inline legacy models. The catalog owns
+ * defaults and actively supported model metadata; inline entries retain older
+ * selectable IDs for persisted settings and carry richer UI/OAuth metadata.
+ */
+function mergeProviderModels(current: ModelConfig[], legacy: ModelConfig[]): ModelConfig[] {
+  const currentIds = new Set(current.map((model) => model.id))
+  return [...current, ...legacy.filter((model) => !currentIds.has(model.id))]
+}
+
+/**
+ * Builds the full built-in provider map. The catalog is the source of truth
+ * for current defaults and model metadata, while inline definitions augment it
+ * with richer UI metadata and backwards-compatible legacy model choices.
  */
 function buildBuiltInProviders(): Record<string, ProviderConfig> {
   const merged: Record<string, ProviderConfig> = {}
   for (const entry of getBuiltInProviderCatalog()) {
     if (!isChatCapableCatalogEntry(entry)) continue
-    merged[entry.id] = catalogEntryToProviderConfig(entry)
+    const catalog = catalogEntryToProviderConfig(entry)
+    const inline = INLINE_PROVIDERS[entry.id]
+    merged[entry.id] = inline
+      ? {
+          ...catalog,
+          ...inline,
+          defaultBaseURL: inline.defaultBaseURL ?? catalog.defaultBaseURL,
+          protocol: inline.protocol ?? catalog.protocol,
+          defaultEnabled: inline.defaultEnabled ?? catalog.defaultEnabled,
+          defaultModel: catalog.defaultModel,
+          models: mergeProviderModels(catalog.models, inline.models),
+        }
+      : catalog
   }
-  return { ...merged, ...INLINE_PROVIDERS }
+  return merged
 }
 
 /**

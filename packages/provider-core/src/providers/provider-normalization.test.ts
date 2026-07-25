@@ -17,7 +17,7 @@ describe("normalizeBuiltInProviderConfig", () => {
       source: "built-in",
       adapterId: "openai-compatible",
       apiKey: " second ",
-      defaultModel: "gpt-4.1",
+      defaultModel: "gpt-5.6",
       enabled: true,
       requiresCredential: true,
       requiresBaseUrl: false,

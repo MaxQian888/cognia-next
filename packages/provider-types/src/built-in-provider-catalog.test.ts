@@ -48,6 +48,82 @@ describe("built-in provider catalog", () => {
     expect(getBuiltInProviderDefaultBaseURL("deepseek")).toContain("deepseek")
   })
 
+  it("uses current production model fallbacks for flagship providers", () => {
+    expect(getBuiltInProviderDefaultModel("openai")).toBe("gpt-5.6")
+    expect(getBuiltInProviderDefaultModel("anthropic")).toBe("claude-sonnet-5")
+    expect(getBuiltInProviderDefaultModel("google")).toBe("gemini-3.6-flash")
+    expect(getBuiltInProviderDefaultModel("xai")).toBe("grok-4.5")
+
+    expect(
+      getBuiltInProviderCatalogEntry("google")?.models?.find(
+        (model) => model.id === "gemini-3.6-flash"
+      )
+    ).toMatchObject({
+      contextLength: 1_000_000,
+      maxOutputTokens: 65_536,
+      supportsVision: true,
+    })
+    expect(
+      getBuiltInProviderCatalogEntry("xai")?.models?.find((model) => model.id === "grok-4.5")
+    ).toMatchObject({
+      contextLength: 500_000,
+      maxOutputTokens: 500_000,
+      supportsReasoning: true,
+      supportsVision: true,
+    })
+  })
+
+  it("ships complete first-party OpenAI and Anthropic model choices", () => {
+    const openai = getBuiltInProviderCatalogEntry("openai")
+    expect(openai?.models?.map((model) => model.id)).toEqual([
+      "gpt-5.6",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+    ])
+    expect(openai?.models?.[0]).toMatchObject({
+      contextLength: 1_050_000,
+      maxOutputTokens: 128_000,
+      supportsTools: true,
+      supportsVision: true,
+      supportsReasoning: true,
+      pricing: { promptPer1M: 5, completionPer1M: 30, cachedInputPer1M: 0.5 },
+    })
+
+    const anthropic = getBuiltInProviderCatalogEntry("anthropic")
+    expect(anthropic?.models?.map((model) => model.id)).toEqual([
+      "claude-fable-5",
+      "claude-opus-4-8",
+      "claude-sonnet-5",
+      "claude-haiku-4-5-20251001",
+    ])
+    expect(anthropic?.models?.find((model) => model.id === "claude-sonnet-5")).toMatchObject({
+      contextLength: 1_000_000,
+      maxOutputTokens: 128_000,
+      supportsTools: true,
+      supportsVision: true,
+      supportsReasoning: true,
+      pricing: { promptPer1M: 3, completionPer1M: 15 },
+    })
+  })
+
+  it("uses active Groq production models and current Mistral aliases", () => {
+    const groq = getBuiltInProviderCatalogEntry("groq")
+    expect(groq?.defaultModel).toBe("openai/gpt-oss-120b")
+    expect(groq?.models?.map((model) => model.id)).toEqual([
+      "openai/gpt-oss-120b",
+      "openai/gpt-oss-20b",
+      "qwen/qwen3.6-27b",
+      "groq/compound",
+      "groq/compound-mini",
+    ])
+
+    const mistral = getBuiltInProviderCatalogEntry("mistral")
+    expect(mistral?.defaultModel).toBe("mistral-medium-latest")
+    expect(mistral?.models?.map((model) => model.id)).toEqual(
+      expect.arrayContaining(["mistral-medium-latest", "mistral-small-latest"])
+    )
+  })
+
   it("registers cc-switch Anthropic-wire relay presets under the anthropic-native family", () => {
     const relay = getBuiltInProviderCatalogEntry("deepseek-anthropic")
     expect(relay).toMatchObject({

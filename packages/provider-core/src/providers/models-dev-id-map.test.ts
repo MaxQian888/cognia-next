@@ -54,6 +54,8 @@ describe("models-dev-id-map", () => {
     it("includes mapped and identity providers, excludes untracked ones", () => {
       const list = builtInProvidersWithModelsDevEntry()
       expect(list).toContain("openai")
+      expect(list).toContain("opencode")
+      expect(list).toContain("opencode-go")
       expect(list).toContain("fireworks")
       expect(list).toContain("zhipu")
       expect(list).not.toContain("ollama")

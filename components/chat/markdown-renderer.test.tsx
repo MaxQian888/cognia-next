@@ -112,7 +112,7 @@ jest.mock("@/lib/tauri/opener", () => ({
 
 import { render, screen, fireEvent } from "@testing-library/react"
 import React from "react"
-import { MarkdownRenderer, parseTaskListItem } from "./markdown-renderer"
+import { MarkdownRenderer, addMarkdownHeadingIds, parseTaskListItem } from "./markdown-renderer"
 import { openExternal } from "@/lib/tauri/opener"
 
 const mockOpenExternal = openExternal as jest.Mock
@@ -410,6 +410,13 @@ describe("MarkdownRenderer", () => {
     expect(link?.getAttribute("rel")).toContain("noreferrer")
   })
 
+  it("keeps fragment links in the current document", () => {
+    render(<MarkdownRenderer content="[details](#details)" />)
+    const link = screen.getByRole("link", { name: "details" })
+    expect(link).not.toHaveAttribute("target")
+    expect(link).not.toHaveAttribute("rel")
+  })
+
   // ── headings ────────────────────────────────────────────────────────────────
 
   it("renders h1 with correct class", () => {
@@ -430,6 +437,12 @@ describe("MarkdownRenderer", () => {
     render(<MarkdownRenderer content={"### Heading 3\n#### Heading 4"} />)
     expect(screen.getByRole("heading", { level: 3 })).toHaveClass("text-lg")
     expect(screen.getByRole("heading", { level: 4 })).toHaveClass("text-base")
+  })
+
+  it("renders h5 and h6 with restrained semantic heading styles", () => {
+    render(<MarkdownRenderer content={"##### Heading 5\n###### Heading 6"} />)
+    expect(screen.getByRole("heading", { level: 5 })).toHaveClass("text-sm")
+    expect(screen.getByRole("heading", { level: 6 })).toHaveClass("text-muted-foreground")
   })
 
   // ── safe raw HTML ─────────────────────────────────────────────────────────
@@ -495,6 +508,91 @@ describe("MarkdownRenderer", () => {
   it("accepts className and applies it to the container", () => {
     render(<MarkdownRenderer content="hi" className="custom-class" />)
     expect(document.querySelector(".custom-class")).toBeTruthy()
+  })
+})
+
+describe("addMarkdownHeadingIds", () => {
+  it("adds stable slugs and disambiguates duplicate headings", () => {
+    const tree = {
+      type: "root",
+      children: [
+        {
+          type: "element",
+          tagName: "h2",
+          properties: {},
+          children: [{ type: "text", value: "Quick Start" }],
+        },
+        {
+          type: "element",
+          tagName: "h2",
+          properties: {},
+          children: [{ type: "text", value: "Quick Start" }],
+        },
+        {
+          type: "element",
+          tagName: "h3",
+          properties: {},
+          children: [{ type: "text", value: "中文渲染" }],
+        },
+      ],
+    }
+
+    addMarkdownHeadingIds(tree)
+
+    expect(tree.children[0].properties).toMatchObject({ id: "quick-start" })
+    expect(tree.children[1].properties).toMatchObject({ id: "quick-start-1" })
+    expect(tree.children[2].properties).toMatchObject({ id: "中文渲染" })
+  })
+
+  it("preserves an explicit heading id and ignores empty headings", () => {
+    const tree = {
+      type: "root",
+      children: [
+        {
+          type: "element",
+          tagName: "h2",
+          properties: { id: "custom" },
+          children: [{ type: "text", value: "Custom" }],
+        },
+        {
+          type: "element",
+          tagName: "h2",
+          properties: {},
+          children: [{ type: "text", value: "!!!" }],
+        },
+      ],
+    }
+
+    addMarkdownHeadingIds(tree)
+
+    expect(tree.children[0].properties).toMatchObject({ id: "custom" })
+    expect(tree.children[1].properties).toEqual({})
+  })
+
+  it("collects nested heading text and safely ignores non-tree input", () => {
+    const tree = {
+      type: "root",
+      children: [
+        {
+          type: "element",
+          tagName: "h2",
+          properties: {},
+          children: [
+            { type: "text", value: "Rich " },
+            {
+              type: "element",
+              tagName: "code",
+              children: [{ type: "text", value: "Text" }],
+            },
+          ],
+        },
+      ],
+    }
+
+    addMarkdownHeadingIds(null)
+    addMarkdownHeadingIds(tree)
+
+    expect(tree.children[0].properties).toMatchObject({ id: "rich-text" })
   })
 })
 

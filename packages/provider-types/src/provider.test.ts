@@ -7,7 +7,10 @@ import {
   catalogEntryToProviderConfig,
   isChatCapableCatalogEntry,
 } from "./provider"
-import type { BuiltInProviderCatalogEntry } from "./built-in-provider-catalog"
+import {
+  getBuiltInProviderCatalog,
+  type BuiltInProviderCatalogEntry,
+} from "./built-in-provider-catalog"
 
 describe("provider catalog fallback", () => {
   it("returns built-in provider and model configs", () => {
@@ -45,11 +48,23 @@ describe("catalog → PROVIDERS merge", () => {
     expect(PROVIDERS.fal).toBeUndefined()
   })
 
-  it("keeps the curated inline entry on id collision", () => {
-    // openai exists in both the inline map and the catalog — the inline,
-    // richer definition must win (identity preserved for downstream `===`).
+  it("merges current catalog defaults and models into richer inline entries", () => {
     expect(getProviderConfig("openai")).toBe(PROVIDERS.openai)
-    expect(PROVIDERS.openai?.models.length).toBeGreaterThan(0)
+    expect(PROVIDERS.openai?.defaultModel).toBe("gpt-5.6")
+    expect(PROVIDERS.openai?.models.map((model) => model.id)).toEqual(
+      expect.arrayContaining(["gpt-5.6", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-4.1"])
+    )
+  })
+
+  it("keeps every colliding provider aligned with the catalog default", () => {
+    for (const entry of getBuiltInProviderCatalog()) {
+      const provider = PROVIDERS[entry.id]
+      if (!provider) continue
+      expect(provider.defaultModel).toBe(entry.defaultModel)
+      if (provider.models.length > 0) {
+        expect(provider.models.map((model) => model.id)).toContain(provider.defaultModel)
+      }
+    }
   })
 
   it("resolves codex from the catalog, keeping its protocol and default base URL", () => {

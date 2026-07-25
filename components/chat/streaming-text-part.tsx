@@ -16,10 +16,13 @@
  * routes through `<MarkdownRenderer>` for the finalised message.
  */
 
-import { memo, useState } from "react"
+import { memo, useMemo, useState } from "react"
 import { Block, parseMarkdownIntoBlocks, type BlockProps } from "streamdown"
-import { MessageResponse } from "@/components/ai-elements/message"
+import { MessageResponse, type MessageResponseProps } from "@/components/ai-elements/message"
 import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
+import { ProjectFileLink } from "@/components/chat/project-file-link"
+import { ExternalLink } from "@/components/shared/external-link"
+import { parseProjectFileReference } from "@/lib/files/project-file-reference"
 import { cn } from "@/lib/utils"
 import {
   createIncrementalMarkdownBlockParser,
@@ -29,6 +32,7 @@ import {
 interface Props {
   text: string
   isStreaming: boolean
+  projectRoot?: string | null
 }
 
 const ContainedStreamdownBlock = memo(function ContainedStreamdownBlock(props: BlockProps) {
@@ -39,10 +43,29 @@ const ContainedStreamdownBlock = memo(function ContainedStreamdownBlock(props: B
   )
 })
 
-function StreamingTextPartInner({ text }: Props) {
+type StreamdownComponents = NonNullable<MessageResponseProps["components"]>
+
+function createStreamingComponents(projectRoot?: string | null): StreamdownComponents {
+  return {
+    a({ href, children, node: _node, ...props }) {
+      const target = href ? parseProjectFileReference(href, projectRoot) : null
+      if (target) {
+        return <ProjectFileLink target={target}>{children}</ProjectFileLink>
+      }
+      return (
+        <ExternalLink href={href ?? ""} className="text-primary hover:underline" {...props}>
+          {children}
+        </ExternalLink>
+      )
+    },
+  }
+}
+
+function StreamingTextPartInner({ text, projectRoot }: Props) {
   const [parser] = useState<MarkdownBlockParser>(() =>
     createIncrementalMarkdownBlockParser(parseMarkdownIntoBlocks)
   )
+  const components = useMemo(() => createStreamingComponents(projectRoot), [projectRoot])
   // Reduced motion: a static (non-blinking) caret so we still signal "more is
   // coming" without an animation. `animate-pulse` is a guaranteed Tailwind
   // utility (no dependency on `animate-caret-blink`).
@@ -51,6 +74,7 @@ function StreamingTextPartInner({ text }: Props) {
     <>
       <MessageResponse
         BlockComponent={ContainedStreamdownBlock}
+        components={components}
         mode="streaming"
         parseMarkdownIntoBlocksFn={parser}
       >
@@ -70,6 +94,9 @@ function StreamingTextPartInner({ text }: Props) {
 
 export const StreamingTextPart = memo(
   StreamingTextPartInner,
-  (prev, next) => prev.text === next.text && prev.isStreaming === next.isStreaming
+  (prev, next) =>
+    prev.text === next.text &&
+    prev.isStreaming === next.isStreaming &&
+    prev.projectRoot === next.projectRoot
 )
 StreamingTextPart.displayName = "StreamingTextPart"
