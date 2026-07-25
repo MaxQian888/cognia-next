@@ -15,7 +15,6 @@
 
 import net from "node:net"
 import fs from "node:fs"
-import os from "node:os"
 import path from "node:path"
 import { randomBytes } from "node:crypto"
 
@@ -30,6 +29,7 @@ import {
   encodeLine,
   COGNIA_PLUGIN_TOOLS_SERVER,
   COGNIA_TOOLS_SERVER,
+  toolHostRuntimeDir,
   type AuthorizeParams,
   type AuthorizeResult,
   type ExecParams,
@@ -111,7 +111,7 @@ export interface ToolHostBroker {
  * rather than "the name was too long". Uniqueness still comes from the attempt
  * and pid, so truncating the id costs nothing.
  */
-const MAX_ENDPOINT_SESSION_CHARS = 16
+const MAX_ENDPOINT_SESSION_CHARS = 8
 
 /** A pipe name on Windows; a short socket path under the temp dir elsewhere. */
 export function toolHostEndpoint(sessionId: string, attempt: number, dir?: string): string {
@@ -121,7 +121,7 @@ export function toolHostEndpoint(sessionId: string, attempt: number, dir?: strin
     // Named pipes have no such limit, so the full (sanitised) id stays.
     return `\\\\.\\pipe\\cognia-toolhost-${token}-${process.pid}`
   }
-  return path.join(dir ?? os.tmpdir(), `cognia-th-${token}-${process.pid}.sock`)
+  return path.join(dir ?? toolHostRuntimeDir(), `cognia-th-${token}-${process.pid}.sock`)
 }
 
 /** Namespaced name for the audit/approval surfaces, per server. */
@@ -353,6 +353,7 @@ export async function startToolHostBroker(params: ToolHostBrokerParams): Promise
   // EADDRINUSE; the path is process- and attempt-scoped, so removing it is safe.
   if (process.platform !== "win32") {
     try {
+      fs.mkdirSync(path.dirname(endpoint), { recursive: true, mode: 0o700 })
       fs.rmSync(endpoint, { force: true })
     } catch {
       // best-effort

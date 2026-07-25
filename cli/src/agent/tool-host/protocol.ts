@@ -13,6 +13,9 @@
  * being guessed at.
  */
 
+import os from "node:os"
+import path from "node:path"
+
 /** Which MCP server the bridge is impersonating. */
 export type ToolHostServerName = "cognia-tools" | "cognia-plugin-tools"
 
@@ -25,6 +28,16 @@ export const TOOL_HOST_ENV = {
   token: "COGNIA_TOOLHOST_TOKEN",
   server: "COGNIA_TOOLHOST_SERVER",
 } as const
+
+/**
+ * Narrow host directory exposed inside strict external-agent sandboxes. Linux
+ * mounts `/tmp` as a private tmpfs, so a broker socket in the temp root is not
+ * reachable; binding this dedicated directory keeps the rest of the host temp
+ * tree hidden.
+ */
+export function toolHostRuntimeDir(tempRoot = os.tmpdir(), uid = process.getuid?.()): string {
+  return path.join(tempRoot, `cognia-toolhost-${uid ?? "user"}`)
+}
 
 /** One tool the bridge should advertise but NOT execute (broker executes it). */
 export interface HostToolDescriptor {

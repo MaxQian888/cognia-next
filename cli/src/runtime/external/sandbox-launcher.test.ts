@@ -14,6 +14,7 @@ import {
   sandboxLauncherUnavailableMessage,
   sandboxSupportsPlatform,
 } from "./sandbox-launcher"
+import { toolHostRuntimeDir } from "../../agent/tool-host/protocol"
 
 describe("external-agent sandbox launcher", () => {
   it("discovers launchers beside both single-file and split bundles", () => {
@@ -41,6 +42,8 @@ describe("external-agent sandbox launcher", () => {
       "/work/repo",
       "--writable",
       "/home/user/.codex",
+      "--writable",
+      toolHostRuntimeDir(),
       "--readable",
       "/home/user",
       "--network",
@@ -48,6 +51,20 @@ describe("external-agent sandbox launcher", () => {
       "codex",
       "app-server",
     ])
+  })
+
+  it("binds the dedicated tool-host runtime directory instead of the whole temp root", () => {
+    const args = buildSandboxLauncherArgs(
+      { id: "a", command: "codex", cwd: "/work/repo" },
+      "/home/user"
+    )
+    const writableRoots = args
+      .map((arg, index) => [arg, args[index + 1]] as const)
+      .filter(([arg]) => arg === "--writable")
+      .map(([, value]) => value)
+
+    expect(writableRoots).toContain(toolHostRuntimeDir())
+    expect(writableRoots).not.toContain(os.tmpdir())
   })
 
   it("grants only the selected agent's state directory and npx cache", () => {

@@ -4,6 +4,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 
 import type { ExternalAgentLaunch, NodeExternalAgentSpawnConfig } from "./node-backend"
+import { toolHostRuntimeDir } from "../../agent/tool-host/protocol"
 
 export interface SandboxLauncherRuntime {
   platform: NodeJS.Platform
@@ -98,7 +99,7 @@ export function buildSandboxLauncherArgs(
   homedir: string
 ): string[] {
   if (!config.cwd) throw new Error("external-agent sandbox requires a working directory")
-  const writable = [config.cwd, ...agentStateWritableRoots(config, homedir)]
+  const writable = [config.cwd, ...agentStateWritableRoots(config, homedir), toolHostRuntimeDir()]
   return [
     "--cwd",
     config.cwd,
@@ -183,6 +184,7 @@ export async function resolveSandboxedExternalAgentLaunch(
     )
   }
   for (const root of agentStateDirectoryRoots(config, runtime.homedir)) runtime.ensureDir?.(root)
+  runtime.ensureDir?.(toolHostRuntimeDir())
   for (const root of agentStateFileRoots(config, runtime.homedir)) runtime.ensureFile?.(root)
   return {
     command: launcher,
