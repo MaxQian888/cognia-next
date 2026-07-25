@@ -594,14 +594,20 @@ mod tests {
         let reg = registry();
         let minted = reg.mint(mint_request(), Some(&snapshot()), 0).unwrap();
         let ticket = minted.ticket;
-        assert_eq!(ticket.resolve_model("primary").as_deref(), Some("model-alpha"));
+        assert_eq!(
+            ticket.resolve_model("primary").as_deref(),
+            Some("model-alpha")
+        );
         // Family selector embedded in a full model id.
         assert_eq!(
             ticket.resolve_model("claude-sonnet-5").as_deref(),
             Some("model-alpha")
         );
         // Verbatim candidate model.
-        assert_eq!(ticket.resolve_model("model-alpha").as_deref(), Some("model-alpha"));
+        assert_eq!(
+            ticket.resolve_model("model-alpha").as_deref(),
+            Some("model-alpha")
+        );
         // Unmapped selector fails closed.
         assert_eq!(ticket.resolve_model("gpt-4o"), None);
     }

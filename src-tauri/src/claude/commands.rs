@@ -227,7 +227,6 @@ pub struct SidecarStatus {
     pub ready: bool,
 }
 
-
 // ---- Canonical agent_* command surface (ADR-0090 Phase 3) -------------------
 //
 // Thin wrappers over the SAME impl bodies the claude_* commands use — one
@@ -273,7 +272,9 @@ pub async fn agent_send(
                     .and_then(|v| v.as_str())
                     .is_some();
             if !spec_ok {
-                return Err("agent_send: malformed execution spec (specVersion/runtimeAdapter)".into());
+                return Err(
+                    "agent_send: malformed execution spec (specVersion/runtimeAdapter)".into(),
+                );
             }
         }
     }
@@ -1313,5 +1314,4 @@ mod tests {
         // Secret-free by construction: names + counts only.
         assert!(!payload.to_string().to_lowercase().contains("api"));
     }
-
 }

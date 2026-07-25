@@ -527,8 +527,7 @@ pub async fn spawn(host: Arc<dyn SidecarHost>, state: SidecarState) -> Result<()
                                 // Canonical envelopes (ADR-0090) ride their own
                                 // channel; they are additive alongside the raw
                                 // stream and never re-enter SIDECAR_EVENT.
-                                if value.get("type").and_then(|t| t.as_str())
-                                    == Some("agent_event")
+                                if value.get("type").and_then(|t| t.as_str()) == Some("agent_event")
                                 {
                                     host.emit(AGENT_EVENT, &value);
                                     continue;
