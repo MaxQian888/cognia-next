@@ -1115,7 +1115,7 @@ describe("runWorkflow — concurrent scheduling", () => {
     expect(completed.length).toBeLessThanOrEqual(2)
   })
 
-  it("scheduler exits cleanly when controller is 0 from start (no infinite loop)", async () => {
+  it("fails instead of reporting success when the scheduler cannot dispatch pending nodes", async () => {
     const controller = createConcurrencyController(0)
     registerNodeExecutor({
       kind: "test.async" as never,
@@ -1128,9 +1128,60 @@ describe("runWorkflow — concurrent scheduling", () => {
       runWorkflow({ workflow: wf, trigger, concurrency: controller }),
       new Promise((_, reject) => setTimeout(() => reject(new Error("hung")), 800)),
     ])
-    // We accept any terminal status — the assertion is "doesn't hang".
     const result = (await guarded) as Awaited<ReturnType<typeof runWorkflow>>
-    expect(result).toBeDefined()
+    expect(result).toEqual(
+      expect.objectContaining({
+        status: "failed",
+        error: expect.objectContaining({
+          code: "orchestration_stalled",
+          message: expect.stringContaining("a"),
+        }),
+      })
+    )
+    const events = await listRunEvents(result.runId)
+    expect(events.at(-1)).toEqual(
+      expect.objectContaining({
+        type: "run_failed",
+        payload: expect.objectContaining({ code: "orchestration_stalled" }),
+      })
+    )
+  })
+
+  it("fails an in-flight run when the caller aborts its external signal", async () => {
+    const controller = new AbortController()
+    let markStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve
+    })
+    registerNodeExecutor({
+      kind: "test.async" as never,
+      typeVersion: 1,
+      execute: async (ctx) => {
+        markStarted()
+        return new Promise<{ output: null }>((_, reject) => {
+          ctx.signal.addEventListener(
+            "abort",
+            () => reject(ctx.signal.reason ?? new Error("aborted")),
+            { once: true }
+          )
+        })
+      },
+    })
+
+    const run = runWorkflow({
+      workflow: buildAsyncWorkflow(["a"], [], 1),
+      trigger,
+      signal: controller.signal,
+    })
+    await started
+    controller.abort()
+
+    await expect(run).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        error: expect.objectContaining({ nodeId: "a" }),
+      })
+    )
   })
 })
 

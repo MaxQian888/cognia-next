@@ -49,7 +49,7 @@ import {
   remoteCapabilityUnion,
 } from "./capability-preflight"
 import { IdempotencyCache } from "./idempotency"
-import { topoSort, upstream as upstreamOf } from "./topo-sort"
+import { createWorkflowGraphIndex, topoSort, type WorkflowGraphIndex } from "./topo-sort"
 import { runStep } from "./step-executor"
 import { applyNodeRiskGate } from "./risk-gate"
 import { runLoopContainer } from "./loop-container"
@@ -364,6 +364,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   const concurrency =
     input.concurrency ??
     createConcurrencyController(validated.settings.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY)
+  const workflowGraph = createWorkflowGraphIndex(validated as VisualWorkflow)
 
   // Loop-container bodies (schemaVersion 2): nodes whose parent is a flow.loop
   // container belong to that container's sub-canvas and are executed by the
@@ -386,7 +387,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   let order: string[]
   let backEdgeIds: Set<string>
   try {
-    const sortResult = topoSort(validated as VisualWorkflow)
+    const sortResult = topoSort(validated as VisualWorkflow, workflowGraph)
     order = sortResult.order.filter((id) => !childNodeIds.has(id))
     backEdgeIds = new Set(sortResult.backEdges.map((e) => e.id))
   } catch (err) {
@@ -410,7 +411,18 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   const stepOutputs = new Map<string, unknown>()
   const retryPolicy = validated.settings.retryDefaults
   let executedStepIndex = -1
-  let firstFailure: { stepId: string; err: unknown } | undefined
+  let firstFailure: { stepId: string; err: unknown; code?: string } | undefined
+  const orderIndex = new Map(order.map((stepId, index) => [stepId, index] as const))
+  const pendingSkipLogs = new Map<string, string>()
+  const markSkipped = (
+    stepId: string,
+    reason = "Skipped due to upstream branch decision or disabled flag"
+  ): boolean => {
+    if (completed.has(stepId) || skipped.has(stepId)) return false
+    skipped.add(stepId)
+    pendingSkipLogs.set(stepId, reason)
+    return true
+  }
 
   // Forward-edge dependency map for cheap ready checks (top-level only —
   // body-internal edges are the loop runtime's concern).
@@ -430,7 +442,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   // branches. TOP-LEVEL joins only — a join inside a loop body falls back to
   // "all" (the loop runtime has its own readiness; documented limitation).
   const joinPolicyOf = (stepId: string): "any" | "race" | null => {
-    const n = validated.nodes.find((n) => n.id === stepId)
+    const n = workflowGraph.nodeById.get(stepId)
     // A join inside a LOOP body falls back to "all"; a join inside an
     // annotation.group is still a top-level join (group is visual-only).
     const isLoopChild = n?.parentId !== undefined && loopContainerIds.has(n.parentId)
@@ -449,8 +461,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   // the executor semantics (skipped steps emit `stepSkipped` events as
   // usual). We use a BFS over forward edges from the start node.
   if (input.startStepId) {
-    const wf = validated as VisualWorkflow
-    if (!wf.nodes.some((n) => n.id === input.startStepId)) {
+    if (!workflowGraph.nodeById.has(input.startStepId)) {
       const message = `startStepId ${input.startStepId} not present in workflow`
       await logger.runFailed({ message })
       runRow = { ...runRow, status: "failed", completedAt: Date.now(), error: { message } }
@@ -465,15 +476,15 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     const queue: string[] = [input.startStepId]
     while (queue.length > 0) {
       const cur = queue.shift()!
-      for (const edge of wf.edges) {
-        if (edge.source === cur && !reachable.has(edge.target)) {
+      for (const edge of workflowGraph.outgoingEdgesByNode.get(cur) ?? []) {
+        if (!reachable.has(edge.target)) {
           reachable.add(edge.target)
           queue.push(edge.target)
         }
       }
     }
     for (const stepId of order) {
-      if (!reachable.has(stepId)) skipped.add(stepId)
+      if (!reachable.has(stepId)) markSkipped(stepId)
     }
   }
 
@@ -482,7 +493,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   if (input.restrictToStepIds) {
     const keep = new Set(input.restrictToStepIds)
     for (const stepId of order) {
-      if (!keep.has(stepId)) skipped.add(stepId)
+      if (!keep.has(stepId)) markSkipped(stepId)
     }
   }
 
@@ -501,35 +512,27 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     : new Set(matchingTriggerNodes.map((node) => node.id))
   if (trigger.triggerId || matchingTriggerNodes.length > 0) {
     const inactiveTriggerNodes = triggerNodes.filter((node) => !activeTriggerIds.has(node.id))
-    for (const node of inactiveTriggerNodes) skipped.add(node.id)
+    for (const node of inactiveTriggerNodes) markSkipped(node.id)
     for (const node of inactiveTriggerNodes) {
-      for (const edge of topLevelForwardEdges) {
-        if (edge.source === node.id) {
-          propagateSkip(validated as VisualWorkflow, edge.target, skipped)
-        }
+      for (const edge of workflowGraph.outgoingEdgesByNode.get(node.id) ?? []) {
+        if (childNodeIds.has(edge.target) || backEdgeIds.has(edge.id)) continue
+        propagateSkip(workflowGraph, edge.target, skipped, markSkipped)
       }
     }
   }
 
-  // Eagerly log pre-skipped steps so the event log mirrors today's behavior.
-  // We also track which steps we've already logged-as-skipped so we don't
-  // double-emit when branch routing / disabled propagation grows the set.
-  const loggedSkips = new Set<string>()
-  for (const stepId of order) {
-    if (skipped.has(stepId)) {
-      await logger.stepSkipped(stepId, "Skipped due to upstream branch decision or disabled flag")
-      loggedSkips.add(stepId)
-    }
-  }
-
+  // Flush only newly-skipped steps. Sorting the small dirty set by topological
+  // position preserves deterministic logs, while Promise.all lets the event
+  // writer coalesce the batch into one IndexedDB bulkPut.
   const flushNewSkipLogs = async (): Promise<void> => {
-    for (const stepId of order) {
-      if (skipped.has(stepId) && !loggedSkips.has(stepId)) {
-        await logger.stepSkipped(stepId, "Skipped due to upstream branch decision or disabled flag")
-        loggedSkips.add(stepId)
-      }
-    }
+    if (pendingSkipLogs.size === 0) return
+    const batch = [...pendingSkipLogs.entries()].sort(
+      ([left], [right]) => (orderIndex.get(left) ?? 0) - (orderIndex.get(right) ?? 0)
+    )
+    pendingSkipLogs.clear()
+    await Promise.all(batch.map(([stepId, reason]) => logger.stepSkipped(stepId, reason)))
   }
+  await flushNewSkipLogs()
 
   const inflight = new Map<string, Promise<void>>()
 
@@ -570,29 +573,30 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
       const scope = losingBranchScope(topLevelForwardEdges, joinId, winner, loser)
       for (const id of scope) {
         if (completed.has(id)) continue
-        skipped.add(id)
+        markSkipped(id)
         stepControllers.get(id)?.abort(new JoinCancelError(joinId))
       }
     }
   }
 
   const scheduleOne = (stepId: string): Promise<void> => {
-    const node = validated.nodes.find((n) => n.id === stepId)
+    const node = workflowGraph.nodeById.get(stepId)
     if (!node) {
       completed.add(stepId)
       return Promise.resolve()
     }
     if (node.data.disabled) {
-      return (async () => {
-        await logger.stepSkipped(stepId, "Node is disabled")
-        // Disabled nodes should not block downstream — propagate skip.
-        propagateSkip(validated as VisualWorkflow, stepId, skipped)
-      })()
+      // Disabled nodes should not block downstream — propagate skip.
+      propagateSkip(workflowGraph, stepId, skipped, (id) =>
+        markSkipped(id, id === stepId ? "Node is disabled" : undefined)
+      )
+      return Promise.resolve()
     }
 
     // Gather upstream outputs.
     const upstreamMap: Record<string, unknown> = {}
-    for (const sourceId of upstreamOf(validated as VisualWorkflow, stepId)) {
+    for (const edge of workflowGraph.incomingEdgesByNode.get(stepId) ?? []) {
+      const sourceId = edge.source
       // A skipped source still feeds downstream when its value is available in
       // the idempotency cache — i.e. it was explicitly seeded ("re-run from
       // this step" reuses the prior run's upstream outputs) or already computed
@@ -715,10 +719,10 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
         if (result.decision !== undefined) {
           const decisions = Array.isArray(result.decision) ? result.decision : [result.decision]
           const chosen = new Set(decisions)
-          for (const edge of validated.edges.filter((e) => e.source === stepId)) {
+          for (const edge of workflowGraph.outgoingEdgesByNode.get(stepId) ?? []) {
             const routeKey = edge.sourceHandle ?? edge.label ?? "default"
             if (!chosen.has(routeKey) && chosen.size > 0) {
-              propagateSkip(validated as VisualWorkflow, edge.target, skipped)
+              propagateSkip(workflowGraph, edge.target, skipped, markSkipped)
             }
           }
         }
@@ -728,13 +732,13 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
         // cancelLosingBranches adds it before aborting — but keep this
         // idempotent in case the abort raced the step's own completion.)
         if (isJoinCancel(stepAc.signal.reason) || isJoinCancel(err)) {
-          skipped.add(stepId)
+          markSkipped(stepId)
           return
         }
         const errorObj = err instanceof Error ? err : new Error(String(err))
         getPluginEventHooks().dispatchWorkflowNodeError(workflow.id, stepId, errorObj)
         const policy = validated.settings.errorPolicy
-        const outgoing = validated.edges.filter((e) => e.source === stepId)
+        const outgoing = workflowGraph.outgoingEdgesByNode.get(stepId) ?? []
 
         // Per-node error handling (data.errorHandling.onError) wins over the
         // workflow-level policy. mode null → legacy behavior below.
@@ -771,7 +775,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
             await logger.stepCompleted(stepId, output)
             for (const edge of outgoing) {
               if (!isErrorEdge(edge)) {
-                propagateSkip(validated as VisualWorkflow, edge.target, skipped)
+                propagateSkip(workflowGraph, edge.target, skipped, markSkipped)
               }
             }
             return
@@ -790,7 +794,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
             completed.add(stepId)
             for (const edge of outgoing) {
               if (!isErrorEdge(edge)) {
-                propagateSkip(validated as VisualWorkflow, edge.target, skipped)
+                propagateSkip(workflowGraph, edge.target, skipped, markSkipped)
               }
             }
             return
@@ -804,7 +808,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
         if (policy === "continue") {
           completed.add(stepId)
           for (const edge of outgoing) {
-            propagateSkip(validated as VisualWorkflow, edge.target, skipped)
+            propagateSkip(workflowGraph, edge.target, skipped, markSkipped)
           }
           return
         }
@@ -838,10 +842,23 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     }
 
     if (inflight.size === 0) {
-      // Nothing scheduled this tick AND nothing in flight — either the run is
-      // done or the remaining nodes are unreachable (deps will never resolve).
-      // Either way, exit the loop; finalization decides terminal status.
-      if (scheduledThisTick === 0) break
+      // Nothing scheduled and nothing in flight while work remains means the
+      // execution graph is stalled. Never persist a partial run as succeeded:
+      // surface the unresolved nodes as a structured orchestration failure.
+      if (scheduledThisTick === 0) {
+        const pendingStepIds = order.filter(
+          (stepId) => !completed.has(stepId) && !skipped.has(stepId)
+        )
+        const stepId = pendingStepIds[0] ?? order[0] ?? "unknown"
+        firstFailure = {
+          stepId,
+          err: new Error(
+            `Workflow orchestration stalled with unresolved steps: ${pendingStepIds.join(", ")}`
+          ),
+          code: "orchestration_stalled",
+        }
+        break
+      }
       // Disabled-only schedule that resolved synchronously without awaiting —
       // loop again to pick up newly-skipped descendants.
       await flushNewSkipLogs()
@@ -859,16 +876,16 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
 
   if (firstFailure) {
     if (timeoutHandle) clearTimeout(timeoutHandle)
-    const { stepId, err } = firstFailure
+    const { stepId, err, code } = firstFailure
     const baseMessage = err instanceof Error ? err.message : String(err)
     const message = wallClockExpired
       ? `Wall-clock timeout (${wallClockTimeoutMs}ms) exceeded — aborted at ${stepId}`
       : baseMessage
-    await logger.runFailed({ message, nodeId: stepId })
     // `RunStatus` does not (yet) carry a dedicated "timed_out" variant — we
     // surface the wall-clock expiry through `error.code` so consumers can
     // discriminate without parsing the message string.
-    const errorCode = wallClockExpired ? "timeout" : undefined
+    const errorCode = wallClockExpired ? "timeout" : code
+    await logger.runFailed({ message, nodeId: stepId, code: errorCode })
     runRow = {
       ...runRow,
       status: "failed",
@@ -929,7 +946,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   if (timeoutHandle) clearTimeout(timeoutHandle)
 
   // 6. Wrap up. The "output" of a run is the output of its terminal node(s).
-  const terminalIds = computeTerminalNodes(validated as VisualWorkflow)
+  const terminalIds = computeTerminalNodes(validated as VisualWorkflow, workflowGraph)
   const terminalOutputs: Record<string, unknown> = {}
   for (const id of terminalIds) {
     if (skipped.has(id)) continue
@@ -971,33 +988,39 @@ function isErrorEdge(edge: WorkflowEdge): boolean {
  * the downstream node has another live upstream path. The orchestrator
  * relies on this to skip whole branches after a flow.branch decision.
  */
-function propagateSkip(workflow: VisualWorkflow, startId: string, skipped: Set<string>): void {
+function propagateSkip(
+  graph: WorkflowGraphIndex,
+  startId: string,
+  skipped: Set<string>,
+  markSkipped: (stepId: string) => boolean
+): void {
   const stack = [startId]
   while (stack.length > 0) {
     const id = stack.pop()!
     if (skipped.has(id)) continue
     // Don't skip if some other (non-skipped) parent still feeds this node.
-    const liveParents = workflow.edges
-      .filter((e) => e.target === id)
+    const liveParents = (graph.incomingEdgesByNode.get(id) ?? [])
       .map((e) => e.source)
       .filter((p) => p !== startId && !skipped.has(p))
     if (liveParents.length > 0 && id !== startId) continue
-    skipped.add(id)
-    for (const next of workflow.edges.filter((e) => e.source === id).map((e) => e.target)) {
-      stack.push(next)
+    if (!markSkipped(id)) continue
+    for (const edge of graph.outgoingEdgesByNode.get(id) ?? []) {
+      stack.push(edge.target)
     }
   }
 }
 
-function computeTerminalNodes(workflow: VisualWorkflow): string[] {
-  const hasOutgoing = new Set(workflow.edges.map((e) => e.source))
+function computeTerminalNodes(
+  workflow: VisualWorkflow,
+  graph = createWorkflowGraphIndex(workflow)
+): string[] {
   const loopContainerIds = new Set(
     workflow.nodes.filter((n) => n.type === "flow.loop" && n.typeVersion >= 2).map((n) => n.id)
   )
   return workflow.nodes
     .filter(
       (n) =>
-        !hasOutgoing.has(n.id) &&
+        (graph.outgoingEdgesByNode.get(n.id)?.length ?? 0) === 0 &&
         !n.type.startsWith("trigger.") &&
         // Annotations never produce run output.
         !n.type.startsWith("annotation.") &&
