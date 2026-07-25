@@ -56,7 +56,7 @@ fn default_voice() -> String {
     "marin".into()
 }
 fn default_model() -> String {
-    "gpt-realtime".into()
+    "gpt-realtime-2.1".into()
 }
 
 /// Streamed back to the renderer. Serializes as `{ "event": "...", "data": "..." }`.

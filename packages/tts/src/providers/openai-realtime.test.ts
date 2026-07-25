@@ -97,7 +97,7 @@ describe("synthesizeRealtimeStream", () => {
       expect.objectContaining({
         request: expect.objectContaining({
           voice: "marin",
-          model: "gpt-realtime",
+          model: "gpt-realtime-2.1",
           instructions: "",
         }),
       })

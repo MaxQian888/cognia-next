@@ -26,7 +26,7 @@ jest.mock("./api-key-input", () => ({
   ApiKeyInput: () => <div data-testid="api-key" />,
 }))
 
-import { OpenAiRealtimeConfig, PROVIDER_CONFIG_COMPONENTS } from "./provider-config"
+import { MistralConfig, OpenAiRealtimeConfig, PROVIDER_CONFIG_COMPONENTS } from "./provider-config"
 
 beforeEach(() => {
   saveMock.mockClear()
@@ -55,5 +55,19 @@ describe("OpenAiRealtimeConfig", () => {
     const textarea = screen.getByPlaceholderText("voiceInstructionsPlaceholder")
     fireEvent.change(textarea, { target: { value: "sound excited" } })
     expect(saveMock).toHaveBeenCalledWith({ realtimeInstructions: "sound excited" })
+  })
+})
+
+describe("MistralConfig", () => {
+  it("registers in the provider component map", () => {
+    expect(PROVIDER_CONFIG_COMPONENTS.mistral).toBe(MistralConfig)
+  })
+
+  it("persists the reusable voice id", () => {
+    render(<MistralConfig />)
+    fireEvent.change(screen.getByPlaceholderText("mistralVoiceIdPlaceholder"), {
+      target: { value: "voice-123" },
+    })
+    expect(saveMock).toHaveBeenCalledWith({ mistralVoiceId: "voice-123" })
   })
 })

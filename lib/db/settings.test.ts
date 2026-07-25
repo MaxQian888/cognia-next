@@ -28,6 +28,11 @@ describe("getSettings", () => {
     expect(s.updates).toEqual(DEFAULT_UPDATE_SETTINGS)
     expect(s.browserCookieImportEnabled).toBe(false)
     expect(s.remoteBrowserEnabled).toBe(false)
+    expect(s.geminiModel).toBe("gemini-3.1-flash-tts-preview")
+    expect(s.mistralModel).toBe("voxtral-mini-tts-2603")
+    expect(s.mistralResponseFormat).toBe("mp3")
+    expect(s.xiaomiModel).toBe("mimo-v2-tts")
+    expect(s.realtimeModel).toBe("gpt-realtime-2.1")
     expect(s.customLimitsSources).toEqual([])
     expect(s.limitsQueryEnabledAccounts).toEqual([])
     expect(s.behaviorTelemetry).toMatchObject({

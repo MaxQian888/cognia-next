@@ -33,8 +33,10 @@ import {
   ELEVENLABS_TTS_MODELS,
   ELEVENLABS_TTS_VOICES,
   GEMINI_TTS_VOICES,
+  GEMINI_TTS_MODELS,
   HUME_TTS_VOICES,
   LMNT_TTS_VOICES,
+  MISTRAL_TTS_MODELS,
   OPENAI_TTS_MODELS,
   OPENAI_TTS_VOICES,
   REALTIME_TTS_MODELS,
@@ -232,6 +234,7 @@ export function GeminiConfig() {
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
   const voice = settings?.geminiVoice ?? "Kore"
+  const model = settings?.geminiModel ?? "gemini-3.1-flash-tts-preview"
 
   return (
     <div className="space-y-3">
@@ -240,6 +243,21 @@ export function GeminiConfig() {
         label={t("label.google")}
         placeholder={t("apiKeyPlaceholder.google")}
       />
+      <div className="space-y-2">
+        <Label className="text-xs">{t("model")}</Label>
+        <Select value={model} onValueChange={(v) => void save({ geminiModel: v })}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {GEMINI_TTS_MODELS.map((item) => (
+              <SelectItem key={item.id} value={item.id}>
+                {item.name} — {item.description}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
       <div className="space-y-2">
         <Label className="text-xs">{t("voice")}</Label>
         <Select value={voice} onValueChange={(v) => void save({ geminiVoice: v })}>
@@ -250,6 +268,65 @@ export function GeminiConfig() {
             {GEMINI_TTS_VOICES.map((v) => (
               <SelectItem key={v.id} value={v.id}>
                 {v.name} — {v.description}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  )
+}
+
+// -- Mistral -----------------------------------------------------------------
+
+export function MistralConfig() {
+  const t = useTranslations("settings.speech.provider")
+  const settings = useSettingsStore((s) => s.settings)
+  const save = useSettingsStore((s) => s.save)
+  const voiceId = settings?.mistralVoiceId ?? ""
+  const model = settings?.mistralModel ?? "voxtral-mini-tts-2603"
+  const responseFormat = settings?.mistralResponseFormat ?? "mp3"
+
+  return (
+    <div className="space-y-3">
+      <ApiKeyInput provider="mistral" label={t("label.mistral")} />
+      <div className="space-y-2">
+        <Label className="text-xs">{t("voice")}</Label>
+        <Input
+          value={voiceId}
+          onChange={(event) => void save({ mistralVoiceId: event.target.value })}
+          placeholder={t("mistralVoiceIdPlaceholder")}
+        />
+        <p className="text-[10px] text-muted-foreground">{t("mistralVoiceIdHint")}</p>
+      </div>
+      <div className="space-y-2">
+        <Label className="text-xs">{t("model")}</Label>
+        <Select value={model} onValueChange={(value) => void save({ mistralModel: value })}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {MISTRAL_TTS_MODELS.map((item) => (
+              <SelectItem key={item.id} value={item.id}>
+                {item.name} — {item.description}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label className="text-xs">{t("audioFormat")}</Label>
+        <Select
+          value={responseFormat}
+          onValueChange={(value) => void save({ mistralResponseFormat: value })}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {OPENAI_RESPONSE_FORMATS.filter((format) => format.id !== "aac").map((format) => (
+              <SelectItem key={format.id} value={format.id}>
+                {format.name}
               </SelectItem>
             ))}
           </SelectContent>
@@ -672,7 +749,7 @@ export function OpenAiRealtimeConfig() {
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
   const voice = settings?.realtimeVoice ?? "marin"
-  const model = settings?.realtimeModel ?? "gpt-realtime"
+  const model = settings?.realtimeModel ?? "gpt-realtime-2.1"
   const instructions = settings?.realtimeInstructions ?? ""
 
   return (
@@ -745,4 +822,5 @@ export const PROVIDER_CONFIG_COMPONENTS: Record<TTSProvider, () => React.ReactEl
   cartesia: CartesiaConfig,
   deepgram: DeepgramConfig,
   xiaomi: XiaomiConfig,
+  mistral: MistralConfig,
 }

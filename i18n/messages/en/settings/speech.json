@@ -10,6 +10,16 @@
     "saving": "Saving…",
     "showKey": "Show key"
   },
+  "live": {
+    "apiKey": "OpenAI API key",
+    "description": "Configure low-latency, full-duplex speech with automatic turn detection and interruption.",
+    "instructions": "Conversation instructions",
+    "instructionsPlaceholder": "Be concise, conversational, and confirm before consequential actions.",
+    "model": "Realtime model",
+    "privacy": "Microphone audio is streamed to OpenAI only while a live voice session is active.",
+    "title": "Live voice",
+    "voice": "Voice"
+  },
   "provider": {
     "audioFormat": "Audio format",
     "cartesiaEmotion": "Emotion",
@@ -30,10 +40,13 @@
       "google": "Google AI Studio API key",
       "hume": "Hume AI API key",
       "lmnt": "LMNT API key",
+      "mistral": "Mistral API key",
       "openai": "OpenAI API key",
       "xiaomi": "Xiaomi MiMo API key"
     },
     "model": "Model",
+    "mistralVoiceIdHint": "Enter a Voice Library ID created in the Mistral console.",
+    "mistralVoiceIdPlaceholder": "voice_…",
     "realtimeDesktopOnly": "OpenAI Realtime streams over a WebSocket and only works in the desktop app.",
     "realtimeIntro": "Low-latency streaming voices that start speaking on the first audio chunk. Uses your OpenAI API key.",
     "speed": "Speed",

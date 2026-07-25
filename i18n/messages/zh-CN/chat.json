@@ -442,6 +442,27 @@
       },
       "grantMicAccess": "允许访问麦克风",
       "languageLabel": "语言",
+      "live": {
+        "description": "自然连续对话，随时插话打断，免手动保持交流。",
+        "end": "结束实时语音",
+        "errors": {
+          "sessionFailed": "实时语音连接已中断，请结束会话后重试。",
+          "startFailed": "无法启动实时语音，请检查 OpenAI 密钥和麦克风权限。"
+        },
+        "mute": "麦克风静音",
+        "phases": {
+          "connecting": "正在连接…",
+          "error": "连接错误",
+          "idle": "准备就绪",
+          "listening": "正在聆听…",
+          "responding": "正在说话…",
+          "speaking": "你正在说话",
+          "thinking": "正在思考…"
+        },
+        "startLive": "开始实时语音",
+        "title": "实时语音",
+        "unmute": "取消麦克风静音"
+      },
       "listening": "正在聆听…",
       "micPermissionDenied": "麦克风访问已被禁止——请在系统或浏览器设置中开启。",
       "microphoneLabel": "麦克风",

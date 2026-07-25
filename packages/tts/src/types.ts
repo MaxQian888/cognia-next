@@ -1,7 +1,7 @@
 /**
  * TTS Types — ported verbatim from D:\Project\Cognia\types\media\tts.ts.
- * Supports 11 providers: system (Web Speech), OpenAI, OpenAI Realtime, Gemini,
- * Edge, ElevenLabs, LMNT, Hume, Cartesia, Deepgram, and Xiaomi.
+ * Supports 12 providers: system (Web Speech), OpenAI, OpenAI Realtime, Gemini,
+ * Edge, ElevenLabs, LMNT, Hume, Cartesia, Deepgram, Xiaomi, and Mistral.
  */
 
 export type TTSProvider =
@@ -15,6 +15,7 @@ export type TTSProvider =
   | "cartesia"
   | "deepgram"
   | "xiaomi"
+  | "mistral"
   | "openai-realtime"
 
 /**
@@ -61,7 +62,7 @@ export const TTS_PROVIDERS: Record<TTSProvider, TTSProviderInfo> = {
   gemini: {
     id: "gemini",
     name: "Google Gemini TTS",
-    description: "Native text-to-speech from Gemini 2.5",
+    description: "Native expressive text-to-speech from Gemini 3.1 and 2.5",
     requiresApiKey: true,
     apiKeyProvider: "google",
     supportsStreaming: false,
@@ -82,7 +83,7 @@ export const TTS_PROVIDERS: Record<TTSProvider, TTSProviderInfo> = {
     requiresApiKey: true,
     apiKeyProvider: "elevenlabs",
     supportsStreaming: true,
-    maxTextLength: 5000,
+    maxTextLength: 10000,
   },
   lmnt: {
     id: "lmnt",
@@ -128,6 +129,17 @@ export const TTS_PROVIDERS: Record<TTSProvider, TTSProviderInfo> = {
     apiKeyProvider: "xiaomi",
     supportsStreaming: false,
     maxTextLength: 8000,
+  },
+  mistral: {
+    id: "mistral",
+    name: "Mistral Voxtral TTS",
+    description: "Multilingual speech and zero-shot voice cloning with Voxtral",
+    requiresApiKey: true,
+    apiKeyProvider: "mistral",
+    supportsStreaming: false,
+    // Mistral recommends prompts under 300 words. This conservative character
+    // limit keeps chunks within that guidance for typical prose.
+    maxTextLength: 3000,
   },
   "openai-realtime": {
     id: "openai-realtime",
@@ -205,6 +217,26 @@ export const GEMINI_TTS_VOICES = [
 
 export type GeminiTTSVoice = (typeof GEMINI_TTS_VOICES)[number]["id"]
 
+export const GEMINI_TTS_MODELS = [
+  {
+    id: "gemini-3.1-flash-tts-preview",
+    name: "Gemini 3.1 Flash TTS",
+    description: "Latest low-latency expressive speech model",
+  },
+  {
+    id: "gemini-2.5-flash-preview-tts",
+    name: "Gemini 2.5 Flash TTS",
+    description: "Cost-efficient controllable speech",
+  },
+  {
+    id: "gemini-2.5-pro-preview-tts",
+    name: "Gemini 2.5 Pro TTS",
+    description: "High-fidelity speech for structured workflows",
+  },
+] as const
+
+export type GeminiTTSModel = (typeof GEMINI_TTS_MODELS)[number]["id"]
+
 export const EDGE_TTS_VOICES = [
   { id: "zh-CN-XiaoxiaoNeural", name: "Xiaoxiao (女)", language: "zh-CN", gender: "Female" },
   { id: "zh-CN-YunxiNeural", name: "Yunxi (男)", language: "zh-CN", gender: "Male" },
@@ -249,13 +281,36 @@ export type ElevenLabsTTSVoice = (typeof ELEVENLABS_TTS_VOICES)[number]["id"]
 
 export const ELEVENLABS_TTS_MODELS = [
   {
+    id: "eleven_v3",
+    name: "Eleven v3",
+    description: "Most expressive, 70+ languages",
+  },
+  {
     id: "eleven_multilingual_v2",
     name: "Multilingual v2",
     description: "Best quality, 29 languages",
   },
-  { id: "eleven_turbo_v2_5", name: "Turbo v2.5", description: "Low latency, high quality" },
-  { id: "eleven_turbo_v2", name: "Turbo v2", description: "Low latency" },
-  { id: "eleven_monolingual_v1", name: "Monolingual v1", description: "English only, fast" },
+  {
+    id: "eleven_flash_v2_5",
+    name: "Flash v2.5",
+    description: "Ultra-low latency, 32 languages",
+  },
+  { id: "eleven_flash_v2", name: "Flash v2", description: "Ultra-low latency, English" },
+  {
+    id: "eleven_turbo_v2_5",
+    name: "Turbo v2.5 (deprecated)",
+    description: "Use Flash v2.5 for lower latency",
+  },
+  {
+    id: "eleven_turbo_v2",
+    name: "Turbo v2 (deprecated)",
+    description: "Use Flash v2 for lower latency",
+  },
+  {
+    id: "eleven_monolingual_v1",
+    name: "Monolingual v1 (legacy)",
+    description: "Legacy English-only model",
+  },
 ] as const
 
 export type ElevenLabsTTSModel = (typeof ELEVENLABS_TTS_MODELS)[number]["id"]
@@ -353,6 +408,13 @@ export const DEEPGRAM_TTS_VOICES = [
   { id: "aura-2-stella-en", name: "Stella", description: "Friendly female", language: "en" },
   { id: "aura-2-zeus-en", name: "Zeus", description: "Authoritative male", language: "en" },
   { id: "aura-2-asteria-en", name: "Asteria", description: "Natural female", language: "en" },
+  { id: "aura-2-celeste-es", name: "Celeste", description: "Energetic female", language: "es" },
+  { id: "aura-2-estrella-es", name: "Estrella", description: "Calm female", language: "es" },
+  { id: "aura-2-nestor-es", name: "Nestor", description: "Professional male", language: "es" },
+  { id: "aura-2-rhea-nl", name: "Rhea", description: "Warm female", language: "nl" },
+  { id: "aura-2-sander-nl", name: "Sander", description: "Deep male", language: "nl" },
+  { id: "aura-2-fujin-ja", name: "Fujin", description: "Professional male", language: "ja" },
+  { id: "aura-2-izanami-ja", name: "Izanami", description: "Polite female", language: "ja" },
 ] as const
 
 export type DeepgramTTSVoice = (typeof DEEPGRAM_TTS_VOICES)[number]["id"]
@@ -370,6 +432,17 @@ export const XIAOMI_TTS_MODELS = [
 ] as const
 
 export type XiaomiTTSModel = (typeof XIAOMI_TTS_MODELS)[number]["id"]
+
+export const MISTRAL_TTS_MODELS = [
+  {
+    id: "voxtral-mini-tts-2603",
+    name: "Voxtral TTS",
+    description: "Expressive multilingual TTS with reusable cloned voices",
+  },
+] as const
+
+export type MistralTTSModel = (typeof MISTRAL_TTS_MODELS)[number]["id"]
+export type MistralTTSResponseFormat = "mp3" | "wav" | "pcm" | "flac" | "opus"
 
 export const XIAOMI_TTS_STYLES = [
   { id: "开心", name: "Happy", tag: "[开心]" },
@@ -407,11 +480,21 @@ export const REALTIME_TTS_VOICES = [
 export type RealtimeTTSVoice = (typeof REALTIME_TTS_VOICES)[number]["id"]
 
 export const REALTIME_TTS_MODELS = [
-  { id: "gpt-realtime", name: "GPT Realtime", description: "Latest realtime speech model" },
+  {
+    id: "gpt-realtime-2.1",
+    name: "GPT Realtime 2.1",
+    description: "Latest full-size realtime speech model",
+  },
+  {
+    id: "gpt-realtime-2.1-mini",
+    name: "GPT Realtime 2.1 Mini",
+    description: "Latest lower-cost realtime speech model",
+  },
+  { id: "gpt-realtime", name: "GPT Realtime (legacy)", description: "Legacy persisted model" },
   {
     id: "gpt-realtime-mini",
-    name: "GPT Realtime Mini",
-    description: "Lower-cost realtime speech",
+    name: "GPT Realtime Mini (legacy)",
+    description: "Legacy persisted lower-cost model",
   },
 ] as const
 
@@ -434,6 +517,7 @@ export interface TTSSettings {
   openaiResponseFormat: "mp3" | "opus" | "aac" | "flac" | "wav" | "pcm"
 
   geminiVoice: GeminiTTSVoice
+  geminiModel: GeminiTTSModel
 
   edgeVoice: EdgeTTSVoice
   edgeRate: string
@@ -461,6 +545,10 @@ export interface TTSSettings {
   xiaomiModel: XiaomiTTSModel
   xiaomiStyle: XiaomiTTSStyle | ""
   xiaomiDialect: string
+
+  mistralVoiceId: string
+  mistralModel: MistralTTSModel
+  mistralResponseFormat: MistralTTSResponseFormat
 
   realtimeVoice: RealtimeTTSVoice
   realtimeModel: RealtimeTTSModel
@@ -494,6 +582,7 @@ export const DEFAULT_TTS_SETTINGS: TTSSettings = {
   openaiResponseFormat: "mp3",
 
   geminiVoice: "Kore",
+  geminiModel: "gemini-3.1-flash-tts-preview",
 
   edgeVoice: "en-US-JennyNeural",
   edgeRate: "+0%",
@@ -522,8 +611,12 @@ export const DEFAULT_TTS_SETTINGS: TTSSettings = {
   xiaomiStyle: "",
   xiaomiDialect: "",
 
+  mistralVoiceId: "",
+  mistralModel: "voxtral-mini-tts-2603",
+  mistralResponseFormat: "mp3",
+
   realtimeVoice: "marin",
-  realtimeModel: "gpt-realtime",
+  realtimeModel: "gpt-realtime-2.1",
   realtimeInstructions: "",
 
   ttsEnabled: false,
@@ -650,6 +743,7 @@ export const KEYED_TTS_PROVIDERS: TTSProvider[] = [
   "cartesia",
   "deepgram",
   "xiaomi",
+  "mistral",
   "openai-realtime",
 ]
 
@@ -686,6 +780,7 @@ export const ORDERED_TTS_PROVIDERS: TTSProvider[] = [
   "cartesia",
   "deepgram",
   "xiaomi",
+  "mistral",
   "lmnt",
   "hume",
 ]

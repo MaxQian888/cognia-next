@@ -59,7 +59,7 @@ export async function synthesizeRealtimeStream(opts: TTSStreamOptions): Promise<
         apiKey,
         text,
         voice: (runtime.voice as string | undefined) ?? "marin",
-        model: (runtime.model as string | undefined) ?? "gpt-realtime",
+        model: (runtime.model as string | undefined) ?? "gpt-realtime-2.1",
         instructions: (runtime.instructions as string | undefined) ?? "",
       },
       onEvent: channel,

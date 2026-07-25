@@ -4403,6 +4403,27 @@
         "grantMicAccess": "Allow microphone access",
         "languageLabel": "Language",
         "listening": "Listening…",
+        "live": {
+          "description": "Talk naturally, interrupt at any time, and keep the conversation moving hands-free.",
+          "end": "End live voice",
+          "errors": {
+            "sessionFailed": "The live voice connection was interrupted. End the session and try again.",
+            "startFailed": "Could not start live voice. Check your OpenAI key and microphone access."
+          },
+          "mute": "Mute microphone",
+          "phases": {
+            "connecting": "Connecting…",
+            "error": "Connection error",
+            "idle": "Ready",
+            "listening": "Listening…",
+            "responding": "Speaking…",
+            "speaking": "You’re speaking",
+            "thinking": "Thinking…"
+          },
+          "startLive": "Start live voice",
+          "title": "Live voice",
+          "unmute": "Unmute microphone"
+        },
         "micPermissionDenied": "Microphone access is blocked — enable it in your system or browser settings.",
         "microphoneLabel": "Microphone",
         "noMicFound": "No microphone found.",
@@ -23857,6 +23878,16 @@
         "saving": "Saving…",
         "showKey": "Show key"
       },
+      "live": {
+        "apiKey": "OpenAI API key",
+        "description": "Configure low-latency, full-duplex speech with automatic turn detection and interruption.",
+        "instructions": "Conversation instructions",
+        "instructionsPlaceholder": "Be concise, conversational, and confirm before consequential actions.",
+        "model": "Realtime model",
+        "privacy": "Microphone audio is streamed to OpenAI only while a live voice session is active.",
+        "title": "Live voice",
+        "voice": "Voice"
+      },
       "provider": {
         "apiKeyPlaceholder": {
           "elevenlabs": "sk_…",
@@ -23882,9 +23913,12 @@
           "google": "Google AI Studio API key",
           "hume": "Hume AI API key",
           "lmnt": "LMNT API key",
+          "mistral": "Mistral API key",
           "openai": "OpenAI API key",
           "xiaomi": "Xiaomi MiMo API key"
         },
+        "mistralVoiceIdHint": "Enter a Voice Library ID created in the Mistral console.",
+        "mistralVoiceIdPlaceholder": "voice_…",
         "model": "Model",
         "realtimeDesktopOnly": "OpenAI Realtime streams over a WebSocket and only works in the desktop app.",
         "realtimeIntro": "Low-latency streaming voices that start speaking on the first audio chunk. Uses your OpenAI API key.",

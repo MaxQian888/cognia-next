@@ -23,6 +23,8 @@ import {
   type GeminiTTSVoice,
   type HumeTTSVoice,
   type LMNTTTSVoice,
+  type MistralTTSModel,
+  type MistralTTSResponseFormat,
   type OpenAITTSModel,
   type OpenAITTSVoice,
   type RealtimeTTSModel,
@@ -75,6 +77,9 @@ export function selectSpeechSettings(
 
     geminiVoice:
       (settings.geminiVoice as GeminiTTSVoice | undefined) ?? DEFAULT_SPEECH_SETTINGS.geminiVoice,
+    geminiModel:
+      (settings.geminiModel as SpeechSettings["geminiModel"] | undefined) ??
+      DEFAULT_SPEECH_SETTINGS.geminiModel,
 
     edgeVoice:
       (settings.edgeVoice as EdgeTTSVoice | undefined) ?? DEFAULT_SPEECH_SETTINGS.edgeVoice,
@@ -120,6 +125,14 @@ export function selectSpeechSettings(
     xiaomiStyle:
       (settings.xiaomiStyle as XiaomiTTSStyle | undefined) ?? DEFAULT_SPEECH_SETTINGS.xiaomiStyle,
     xiaomiDialect: settings.xiaomiDialect ?? DEFAULT_SPEECH_SETTINGS.xiaomiDialect,
+
+    mistralVoiceId: settings.mistralVoiceId ?? DEFAULT_SPEECH_SETTINGS.mistralVoiceId,
+    mistralModel:
+      (settings.mistralModel as MistralTTSModel | undefined) ??
+      DEFAULT_SPEECH_SETTINGS.mistralModel,
+    mistralResponseFormat:
+      (settings.mistralResponseFormat as MistralTTSResponseFormat | undefined) ??
+      DEFAULT_SPEECH_SETTINGS.mistralResponseFormat,
 
     realtimeVoice:
       (settings.realtimeVoice as RealtimeTTSVoice | undefined) ??

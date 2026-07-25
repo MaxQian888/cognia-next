@@ -442,6 +442,27 @@
       },
       "grantMicAccess": "Allow microphone access",
       "languageLabel": "Language",
+      "live": {
+        "description": "Talk naturally, interrupt at any time, and keep the conversation moving hands-free.",
+        "end": "End live voice",
+        "errors": {
+          "sessionFailed": "The live voice connection was interrupted. End the session and try again.",
+          "startFailed": "Could not start live voice. Check your OpenAI key and microphone access."
+        },
+        "mute": "Mute microphone",
+        "phases": {
+          "connecting": "Connecting…",
+          "error": "Connection error",
+          "idle": "Ready",
+          "listening": "Listening…",
+          "responding": "Speaking…",
+          "speaking": "You’re speaking",
+          "thinking": "Thinking…"
+        },
+        "startLive": "Start live voice",
+        "title": "Live voice",
+        "unmute": "Unmute microphone"
+      },
       "listening": "Listening…",
       "micPermissionDenied": "Microphone access is blocked — enable it in your system or browser settings.",
       "microphoneLabel": "Microphone",

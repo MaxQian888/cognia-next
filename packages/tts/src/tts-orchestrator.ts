@@ -1,5 +1,5 @@
 /**
- * TTS orchestrator — singleton wrapper around all 11 providers.
+ * TTS orchestrator — singleton wrapper around all 12 providers.
  *
  * Ported from `D:\Project\Cognia\lib\ai\tts\tts-orchestrator.ts`. The
  * cognia-next port drops the `/api/tts/<x>` route fallback (no server

@@ -42,7 +42,7 @@ describe("TTS provider registry", () => {
       instructions: "",
       responseFormat: "mp3",
     },
-    gemini: { voice: "Kore" },
+    gemini: { voice: "Kore", model: "gemini-3.1-flash-tts-preview" },
     edge: {
       voice: "en-US-JennyNeural",
       rate: "+0%",
@@ -67,7 +67,12 @@ describe("TTS provider registry", () => {
     },
     deepgram: { voice: "aura-2-asteria-en" },
     xiaomi: { voice: "mimo_default", model: "mimo-v2-tts", style: "", dialect: "" },
-    "openai-realtime": { voice: "marin", model: "gpt-realtime", instructions: "" },
+    mistral: {
+      voiceId: "",
+      model: "voxtral-mini-tts-2603",
+      responseFormat: "mp3",
+    },
+    "openai-realtime": { voice: "marin", model: "gpt-realtime-2.1", instructions: "" },
   }
 
   it.each(ALL_PROVIDERS)("runtimeOptions(%s) matches the legacy switch", (provider) => {

@@ -99,6 +99,7 @@ describe("resolveCharacterVoice", () => {
     const providers: Array<{ p: string; field: string }> = [
       { p: "system", field: "systemVoice" },
       { p: "openai", field: "openaiVoice" },
+      { p: "openai-realtime", field: "realtimeVoice" },
       { p: "gemini", field: "geminiVoice" },
       { p: "edge", field: "edgeVoice" },
       { p: "elevenlabs", field: "elevenlabsVoice" },
@@ -107,6 +108,7 @@ describe("resolveCharacterVoice", () => {
       { p: "cartesia", field: "cartesiaVoice" },
       { p: "deepgram", field: "deepgramVoice" },
       { p: "xiaomi", field: "xiaomiVoice" },
+      { p: "mistral", field: "mistralVoiceId" },
     ]
     for (const { p, field } of providers) {
       const overlay = resolveCharacterVoice(

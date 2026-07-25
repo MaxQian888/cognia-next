@@ -24,6 +24,7 @@ const KNOWN_PROVIDERS: &[&str] = &[
     "cartesia",
     "deepgram",
     "xiaomi",
+    "mistral",
 ];
 
 fn validate_provider(provider: &str) -> Result<(), String> {
@@ -33,10 +34,14 @@ fn validate_provider(provider: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn get_provider_key(provider: &str) -> Result<Option<String>, String> {
+    validate_provider(provider)?;
+    secret_store::get(SERVICE, provider)
+}
+
 #[tauri::command]
 pub async fn tts_keyring_get(provider: String) -> Result<Option<String>, String> {
-    validate_provider(&provider)?;
-    secret_store::get(SERVICE, &provider)
+    get_provider_key(&provider)
 }
 
 #[tauri::command]

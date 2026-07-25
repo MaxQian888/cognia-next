@@ -1,5 +1,5 @@
 /**
- * Gemini 2.5 native TTS provider. Returns base64 PCM that we wrap in a
+ * Gemini native TTS provider. Returns base64 PCM that we wrap in a
  * minimal WAV header so the HTML <audio> element can play it. Ported from
  * `D:\Project\Cognia\lib\ai\tts\providers\gemini-tts.ts`.
  */
@@ -7,7 +7,7 @@
 import { proxyFetch } from "../proxy-fetch"
 import { ttsFailure, TTS_PROVIDERS, type GeminiTTSVoice, type TTSResponse } from "../types"
 
-const GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts"
+const GEMINI_TTS_MODEL = "gemini-3.1-flash-tts-preview"
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 export interface GeminiTTSOptions {

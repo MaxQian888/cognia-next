@@ -34,6 +34,7 @@ const PROVIDER_VOICE_FIELD: Record<TTSProvider, keyof SpeechSettings> = {
   cartesia: "cartesiaVoice",
   deepgram: "deepgramVoice",
   xiaomi: "xiaomiVoice",
+  mistral: "mistralVoiceId",
 }
 
 /**

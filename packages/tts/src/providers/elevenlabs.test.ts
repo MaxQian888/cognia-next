@@ -26,7 +26,7 @@ describe("generateElevenLabsTTS", () => {
   })
 
   it("rejects oversized text", async () => {
-    const r = await generateElevenLabsTTS("x".repeat(5001), { apiKey: "k" })
+    const r = await generateElevenLabsTTS("x".repeat(10001), { apiKey: "k" })
     expect(r.success).toBe(false)
     expect(r.error).toMatch(/maximum length/i)
   })

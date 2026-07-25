@@ -1,6 +1,7 @@
 "use client"
 
 import { SttCard } from "./speech/stt-card"
+import { LiveVoiceCard } from "./speech/live-voice-card"
 import { TtsCard } from "./speech/tts-card"
 
 /**
@@ -13,6 +14,7 @@ export function SpeechSection() {
   return (
     <div className="space-y-4">
       <SttCard />
+      <LiveVoiceCard />
       <TtsCard />
     </div>
   )

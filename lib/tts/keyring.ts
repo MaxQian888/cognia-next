@@ -12,7 +12,15 @@ import { KEYED_TTS_PROVIDERS, type TTSProvider } from "@cognia/tts/types"
 
 /** Stable provider keys understood by the keyring backend. */
 export type KeyringProviderId =
-  "openai" | "google" | "elevenlabs" | "lmnt" | "hume" | "cartesia" | "deepgram" | "xiaomi"
+  | "openai"
+  | "google"
+  | "elevenlabs"
+  | "lmnt"
+  | "hume"
+  | "cartesia"
+  | "deepgram"
+  | "xiaomi"
+  | "mistral"
 
 export const KEYRING_PROVIDER_IDS: KeyringProviderId[] = [
   "openai",
@@ -23,6 +31,7 @@ export const KEYRING_PROVIDER_IDS: KeyringProviderId[] = [
   "cartesia",
   "deepgram",
   "xiaomi",
+  "mistral",
 ]
 
 /** Map a TTSProvider → the keyring account it consumes. */
@@ -45,6 +54,8 @@ export function keyringProviderFor(provider: TTSProvider): KeyringProviderId | n
       return "deepgram"
     case "xiaomi":
       return "xiaomi"
+    case "mistral":
+      return "mistral"
     default:
       return null
   }

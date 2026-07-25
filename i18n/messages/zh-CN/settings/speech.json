@@ -10,6 +10,16 @@
     "saving": "保存中…",
     "showKey": "显示密钥"
   },
+  "live": {
+    "apiKey": "OpenAI API 密钥",
+    "description": "配置低延迟全双工语音，支持自动轮次检测和随时插话打断。",
+    "instructions": "对话指令",
+    "instructionsPlaceholder": "保持简洁自然，执行有影响的操作前先确认。",
+    "model": "实时模型",
+    "privacy": "仅在实时语音会话开启时，麦克风音频才会流式发送至 OpenAI。",
+    "title": "实时语音",
+    "voice": "音色"
+  },
   "provider": {
     "audioFormat": "音频格式",
     "cartesiaEmotion": "情感",
@@ -30,10 +40,13 @@
       "google": "Google AI Studio API 密钥",
       "hume": "Hume AI API 密钥",
       "lmnt": "LMNT API 密钥",
+      "mistral": "Mistral API 密钥",
       "openai": "OpenAI API 密钥",
       "xiaomi": "小米 MiMo API 密钥"
     },
     "model": "模型",
+    "mistralVoiceIdHint": "请输入在 Mistral 控制台创建的 Voice Library ID。",
+    "mistralVoiceIdPlaceholder": "voice_…",
     "realtimeDesktopOnly": "OpenAI Realtime 经 WebSocket 流式传输,仅在桌面应用中可用。",
     "realtimeIntro": "低延迟流式声音,首个音频块到达即开始朗读。使用你的 OpenAI API 密钥。",
     "speed": "语速",

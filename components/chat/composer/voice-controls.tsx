@@ -42,6 +42,7 @@ import {
   type SpeechLanguageCode,
 } from "@cognia/tts/speech"
 import { cn } from "@/lib/utils"
+import { LiveVoiceDialog } from "./live-voice-dialog"
 
 interface VoiceControlsProps {
   onTranscription: (text: string) => void
@@ -150,6 +151,8 @@ export function VoiceControls({ onTranscription, disabled }: VoiceControlsProps)
         </TooltipTrigger>
         <TooltipContent>{speechLabel}</TooltipContent>
       </Tooltip>
+
+      <LiveVoiceDialog disabled={disabled} onUserTranscript={onTranscription} />
 
       <Popover>
         <Tooltip>

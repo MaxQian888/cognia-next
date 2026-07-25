@@ -1,7 +1,7 @@
 // Generic HTTPS proxy for TTS provider REST calls.
 //
 // Browser fetches to OpenAI / ElevenLabs / Cartesia / Deepgram / LMNT / Hume /
-// Gemini / Xiaomi fail under static export: some providers reject browser
+// Gemini / Xiaomi / Mistral fail under static export: some providers reject browser
 // Origins outright (CORS), and a browser-side call would expose the API key to
 // any other renderer code. So the frontend builds the request — URL, headers
 // (INCLUDING the provider key) and body — and hands it to this command, which
@@ -47,6 +47,7 @@ const ALLOWED_HOST_SUFFIXES: &[&str] = &[
     "hume.ai",
     "googleapis.com",
     "xiaomimimo.com",
+    "mistral.ai",
 ];
 
 #[derive(Debug, Deserialize)]
@@ -249,6 +250,7 @@ mod tests {
         assert!(validate_url("https://generativelanguage.googleapis.com/v1beta/x").is_ok());
         assert!(validate_url("https://api.xiaomimimo.com/x").is_ok());
         assert!(validate_url("https://platform.xiaomimimo.com/x").is_ok());
+        assert!(validate_url("https://api.mistral.ai/v1/audio/speech").is_ok());
     }
 
     #[test]

@@ -1,7 +1,9 @@
 import {
+  DEEPGRAM_TTS_VOICES,
   DEFAULT_SPEECH_SETTINGS,
   DEFAULT_TTS_SETTINGS,
   ORDERED_TTS_PROVIDERS,
+  REALTIME_TTS_MODELS,
   RETIRED_TTS_PROVIDERS,
   TTS_PROVIDERS,
   getApiKeyProvider,
@@ -12,7 +14,7 @@ import {
 } from "./types"
 
 describe("TTS types & helpers", () => {
-  it("ships exactly the 11 documented providers in TTS_PROVIDERS", () => {
+  it("ships exactly the 12 documented providers in TTS_PROVIDERS", () => {
     const ids = Object.keys(TTS_PROVIDERS).sort()
     expect(ids).toEqual(
       [
@@ -27,16 +29,17 @@ describe("TTS types & helpers", () => {
         "cartesia",
         "deepgram",
         "xiaomi",
+        "mistral",
       ].sort()
     )
   })
 
   it("ORDERED_TTS_PROVIDERS lists every selectable provider once with system first", () => {
-    // 11 providers ship, but edge (W9/O2) and openai-realtime (W8/D2) are
-    // retired, leaving 9 selectable.
-    expect(ORDERED_TTS_PROVIDERS).toHaveLength(9)
+    // 12 providers ship, but edge (W9/O2) and openai-realtime (W8/D2) are
+    // retired, leaving 10 selectable.
+    expect(ORDERED_TTS_PROVIDERS).toHaveLength(10)
     expect(ORDERED_TTS_PROVIDERS[0]).toBe("system")
-    expect(new Set(ORDERED_TTS_PROVIDERS).size).toBe(9)
+    expect(new Set(ORDERED_TTS_PROVIDERS).size).toBe(10)
   })
 
   it("retires edge and openai-realtime on all three axes", () => {
@@ -56,11 +59,27 @@ describe("TTS types & helpers", () => {
     expect(DEFAULT_TTS_SETTINGS.ttsRate).toBe(1)
     expect(DEFAULT_TTS_SETTINGS.openaiVoice).toBe("alloy")
     expect(DEFAULT_TTS_SETTINGS.elevenlabsVoice).toBe("rachel")
+    expect(DEFAULT_TTS_SETTINGS.geminiModel).toBe("gemini-3.1-flash-tts-preview")
+    expect(DEFAULT_TTS_SETTINGS.mistralModel).toBe("voxtral-mini-tts-2603")
   })
 
   it("DEFAULT_SPEECH_SETTINGS adds sttLanguage on top of TTS defaults", () => {
     expect(DEFAULT_SPEECH_SETTINGS.sttLanguage).toBe("en-US")
     expect(DEFAULT_SPEECH_SETTINGS.ttsProvider).toBe(DEFAULT_TTS_SETTINGS.ttsProvider)
+  })
+
+  it("offers current multilingual Deepgram voices and Realtime models", () => {
+    expect(DEEPGRAM_TTS_VOICES.map((voice) => voice.id)).toEqual(
+      expect.arrayContaining([
+        "aura-2-thalia-en",
+        "aura-2-celeste-es",
+        "aura-2-rhea-nl",
+        "aura-2-fujin-ja",
+      ])
+    )
+    expect(REALTIME_TTS_MODELS.map((model) => model.id)).toEqual(
+      expect.arrayContaining(["gpt-realtime-2.1", "gpt-realtime-2.1-mini"])
+    )
   })
 
   it("providerRequiresApiKey distinguishes free vs paid providers", () => {

@@ -18,6 +18,7 @@ import { generateHumeTTS } from "./hume"
 import { generateCartesiaTTS } from "./cartesia"
 import { generateDeepgramTTS } from "./deepgram"
 import { generateXiaomiTTS } from "./xiaomi"
+import { generateMistralTTS } from "./mistral"
 import { synthesizeRealtimeStream } from "./openai-realtime"
 import type { TTSProviderAdapter } from "./adapter"
 
@@ -57,8 +58,8 @@ export const TTS_ADAPTERS: Record<TTSProvider, TTSProviderAdapter> = {
   gemini: {
     info: TTS_PROVIDERS.gemini,
     kind: "http",
-    runtimeOptions: (s) => ({ voice: s.geminiVoice }),
-    cacheKeyFields: (s) => ({ voice: s.geminiVoice }),
+    runtimeOptions: (s) => ({ voice: s.geminiVoice, model: s.geminiModel }),
+    cacheKeyFields: (s) => ({ voice: s.geminiVoice, model: s.geminiModel }),
     generate: (text, options) =>
       generateGeminiTTS(text, options as Parameters<typeof generateGeminiTTS>[1]),
   },
@@ -161,6 +162,22 @@ export const TTS_ADAPTERS: Record<TTSProvider, TTSProviderAdapter> = {
     }),
     generate: (text, options) =>
       generateXiaomiTTS(text, options as Parameters<typeof generateXiaomiTTS>[1]),
+  },
+  mistral: {
+    info: TTS_PROVIDERS.mistral,
+    kind: "http",
+    runtimeOptions: (s) => ({
+      voiceId: s.mistralVoiceId,
+      model: s.mistralModel,
+      responseFormat: s.mistralResponseFormat,
+    }),
+    cacheKeyFields: (s) => ({
+      voiceId: s.mistralVoiceId,
+      model: s.mistralModel,
+      responseFormat: s.mistralResponseFormat,
+    }),
+    generate: (text, options) =>
+      generateMistralTTS(text, options as Parameters<typeof generateMistralTTS>[1]),
   },
   // Retired as a selectable TTS provider (RETIRED_TTS_PROVIDERS, plan D2): a
   // pure-TTS use of the speech-to-speech Realtime model costs ~$64/1M vs ~$12

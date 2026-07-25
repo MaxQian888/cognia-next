@@ -47,7 +47,7 @@ describe("generateGeminiTTS", () => {
     expect(r.success).toBe(true)
     expect(r.mimeType).toBe("audio/wav")
     const [url, init] = mockProxy.mock.calls[0]
-    expect(url).toContain("gemini-2.5-flash-preview-tts:generateContent?key=kkk")
+    expect(url).toContain("gemini-3.1-flash-tts-preview:generateContent?key=kkk")
     expect(init.json.contents[0].parts[0].text).toBe("hello")
     expect(init.json.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName).toBe(
       "Kore"
