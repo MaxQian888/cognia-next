@@ -6744,7 +6744,8 @@
         "preview": "{count} case(s) will be added, {skipped} skipped",
         "scorer": "Judge",
         "seed": "Add {count} item(s)",
-        "set": "Calibration set"
+        "set": "Calibration set",
+        "setId": "Calibration set"
       },
       "caseColumn": "Case",
       "fail": "Fail",
