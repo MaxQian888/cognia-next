@@ -38,16 +38,25 @@ describe("WindowGaugeCard", () => {
     expect(screen.getByText("Representative")).toBeInTheDocument()
   })
 
-  it("renders warn/crit level words with the right emphasis", () => {
+  it("renders warn/crit level words with the right emphasis", async () => {
     const { rerender } = render(
       <WindowGaugeCard meter={meter({ usedPct: 92, status: "warn" })} now={NOW} />
     )
     expect(screen.getByText("Approaching limit")).toBeInTheDocument()
     rerender(<WindowGaugeCard meter={meter({ usedPct: 104, status: "exceeded" })} now={NOW} />)
     expect(screen.getByText("At limit")).toBeInTheDocument()
-    // The headline percent shows the raw value; the bar clamps at 100.
-    expect(screen.getByText("104%")).toBeInTheDocument()
+    // The headline percent shows the raw value; the bar clamps at 100. The
+    // number now tweens to a changed target (matching the bar, which always
+    // animated), so settle before asserting the final figure.
+    expect(await screen.findByText("104%")).toBeInTheDocument()
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "100")
+  })
+
+  // A tween on first paint would mean every gauge counts up from 0 on mount,
+  // which reads as a loading animation rather than a value change.
+  it("shows the value immediately on mount without counting up from zero", () => {
+    render(<WindowGaugeCard meter={meter({ usedPct: 73, status: "warn" })} now={NOW} />)
+    expect(screen.getByText("73%")).toBeInTheDocument()
   })
 
   it("handles a missing percent, unknown status, and expired reset", () => {

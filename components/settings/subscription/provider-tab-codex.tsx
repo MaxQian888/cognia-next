@@ -11,10 +11,15 @@ import { useTranslations } from "next-intl"
 
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { SettingsCard, SettingsToggle } from "@/components/settings/common/settings-section"
+import {
+  SettingsAlert,
+  SettingsCard,
+  SettingsToggle,
+} from "@/components/settings/common/settings-section"
 
 import { PROBE_CADENCE_FLOOR_MS, clampCadence } from "@/lib/subscription/anthropic/scheduler"
 import { useAccounts } from "@/lib/subscription/core/hooks"
+import { isTauri } from "@/lib/tauri"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
 import { AccountList } from "./account-list"
@@ -94,6 +99,13 @@ export function ProviderTabCodex() {
   }
   const cadenceFloorSec = Math.floor(PROBE_CADENCE_FLOOR_MS / 1000)
 
+  // Every action on this tab ends in a keychain-backed Tauri command. Say so up
+  // front rather than letting the user walk an add-account flow that can only
+  // reject at the final IPC call. Matches the Overview/Account tabs.
+  if (!isTauri()) {
+    return <SettingsAlert title={t("title")}>{t("webModeBanner")}</SettingsAlert>
+  }
+
   return (
     <div className="space-y-4">
       <div className="space-y-1">
@@ -102,16 +114,17 @@ export function ProviderTabCodex() {
       </div>
 
       <AccountList provider="codex" onAdd={() => setAddOpen(true)} />
-      <ProviderQuotaPanel provider="codex" />
 
       {/* Rate-limit windows require a ChatGPT login — an API key has no usage
-          endpoint upstream. Explain the empty panel instead of leaving a gap
-          that reads as a broken fetch. */}
+          endpoint upstream. This sits *above* the panel: showing an empty gauge
+          first and only then explaining it reads as a broken fetch. */}
       {apiKeyOnly && (
         <p className="text-xs text-muted-foreground" data-testid="codex-quota-api-key-only">
           {t("quotaApiKeyOnly")}
         </p>
       )}
+
+      <ProviderQuotaPanel provider="codex" />
 
       <PresetPicker provider="codex" />
 

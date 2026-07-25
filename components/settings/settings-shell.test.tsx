@@ -65,6 +65,20 @@ jest.mock("@/hooks/settings/use-setting-focus", () => ({
 
 import { SettingsShell } from "./settings-shell"
 
+// Desktop-only sections are gated on the Tauri marker `isTauri()` reads. jsdom
+// has no marker, so anything asserting a desktop-only section renders has to
+// opt in explicitly.
+const TAURI_MARKER = "__TAURI_INTERNALS__"
+function setDesktop(on: boolean) {
+  if (on) {
+    ;(window as unknown as Record<string, unknown>)[TAURI_MARKER] = {}
+  } else {
+    delete (window as unknown as Record<string, unknown>)[TAURI_MARKER]
+  }
+}
+
+afterEach(() => setDesktop(false))
+
 describe("SettingsShell reset row", () => {
   beforeEach(() => {
     replace.mockClear()
@@ -110,10 +124,48 @@ describe("SettingsShell reset row", () => {
   })
 
   it("mounts the Pro IDE settings section without redirecting it", () => {
+    setDesktop(true)
     mockSection = "pro-ide"
     render(<SettingsShell />)
     expect(screen.getByTestId("section-body")).toBeInTheDocument()
     expect(replace).not.toHaveBeenCalled()
+  })
+})
+
+describe("SettingsShell desktop-only backstop", () => {
+  beforeEach(() => {
+    replace.mockClear()
+  })
+
+  it("refuses a desktop-only section in web mode and explains why", () => {
+    setDesktop(false)
+    mockSection = "subscription"
+    render(<SettingsShell />)
+    expect(screen.queryByTestId("section-body")).not.toBeInTheDocument()
+    expect(screen.getByText("desktopOnlySectionTitle")).toBeInTheDocument()
+    expect(screen.getByText("desktopOnlySectionBody")).toBeInTheDocument()
+  })
+
+  it("explains rather than silently redirecting — the deep link stays addressable", () => {
+    setDesktop(false)
+    mockSection = "ccswitch"
+    render(<SettingsShell />)
+    expect(replace).not.toHaveBeenCalled()
+  })
+
+  it("renders the same section normally on desktop", () => {
+    setDesktop(true)
+    mockSection = "subscription"
+    render(<SettingsShell />)
+    expect(screen.getByTestId("section-body")).toBeInTheDocument()
+    expect(screen.queryByText("desktopOnlySectionTitle")).not.toBeInTheDocument()
+  })
+
+  it("leaves sections that work in the browser alone", () => {
+    setDesktop(false)
+    mockSection = "appearance"
+    render(<SettingsShell />)
+    expect(screen.getByTestId("section-body")).toBeInTheDocument()
   })
 })
 

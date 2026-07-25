@@ -995,9 +995,10 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     render(<ProviderSettings />)
     expect(screen.getByTestId("provider-sidebar-item-openai")).toBeInTheDocument()
     fireEvent.click(screen.getByTestId("provider-sidebar-category"))
-    // openai has no category in the inline provider map, so the "ai" filter empties the list.
-    expect(screen.queryByTestId("provider-sidebar-item-openai")).not.toBeInTheDocument()
-    expect(screen.getByTestId("provider-empty-state")).toBeInTheDocument()
+    // Built-in catalog metadata classifies OpenAI as an AI provider, so the
+    // category filter keeps it visible.
+    expect(screen.getByTestId("provider-sidebar-item-openai")).toBeInTheDocument()
+    expect(screen.queryByTestId("provider-empty-state")).not.toBeInTheDocument()
   })
 
   it("uses persisted discovered models and the OpenRouter live catalog", () => {

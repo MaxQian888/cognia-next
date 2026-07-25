@@ -10,6 +10,10 @@ import { useTranslations } from "next-intl"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { splitCountdown } from "@/lib/subscription/anthropic/usage-analytics"
+import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
+import { useCountUp } from "@/hooks/usage/use-count-up"
+
+import { QuotaBar } from "./quota-bar"
 
 import type { LimitsMeter, LimitsMeterStatus } from "@/types/subscription"
 
@@ -19,14 +23,6 @@ const STATUS_TEXT: Record<LimitsMeterStatus, string> = {
   crit: "text-destructive",
   exceeded: "text-destructive",
   unknown: "text-muted-foreground",
-}
-
-const STATUS_BAR: Record<LimitsMeterStatus, string> = {
-  ok: "bg-emerald-500",
-  warn: "bg-amber-500",
-  crit: "bg-destructive",
-  exceeded: "bg-destructive",
-  unknown: "bg-muted-foreground",
 }
 
 /** Level word rendered next to the percent, keyed off the meter status. */
@@ -63,6 +59,16 @@ export function WindowGaugeCard({ meter, now, representative, testid }: WindowGa
   const pct = rawPct == null ? null : Math.max(0, Math.min(100, Math.round(rawPct)))
   const level = levelKey(meter.status)
 
+  // The bar animated over 500ms while the headline number it describes snapped
+  // — two representations of one value moving at different speeds. `useCountUp`
+  // is the same primitive the Usage tab's stat tiles already use; it honours the
+  // app-wide reduced-motion preference through `useFlowMotion`.
+  //
+  // Tweens the *raw* percent, not the clamped one: the headline deliberately
+  // reports overage (104%) while only the bar clamps at 100.
+  const { reduce } = useFlowMotion()
+  const displayPct = Math.round(useCountUp(rawPct ?? 0, { disabled: reduce, durationMs: 500 }))
+
   const countdown =
     meter.resetAt == null
       ? t("resetUnknown")
@@ -86,26 +92,11 @@ export function WindowGaugeCard({ meter, now, representative, testid }: WindowGa
       </div>
       <div className="flex items-baseline gap-2">
         <span className={cn("text-2xl font-bold tabular-nums", STATUS_TEXT[meter.status])}>
-          {rawPct == null ? "—" : `${Math.round(rawPct)}%`}
+          {rawPct == null ? "—" : `${displayPct}%`}
         </span>
         {level && <span className="text-xs text-muted-foreground">{t(`level.${level}`)}</span>}
       </div>
-      <div
-        className="h-2 w-full overflow-hidden rounded-full bg-muted"
-        role="progressbar"
-        aria-valuenow={pct ?? 0}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-label={label}
-      >
-        <div
-          className={cn(
-            "h-full rounded-full transition-all duration-500",
-            STATUS_BAR[meter.status]
-          )}
-          style={{ width: `${pct ?? 0}%` }}
-        />
-      </div>
+      <QuotaBar pct={pct} status={meter.status} label={label} />
       <p className="text-xs text-muted-foreground">{countdown}</p>
     </div>
   )

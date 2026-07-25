@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, useEffect, useRef } from "react"
+import { useMemo, useEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
 import { ChevronRightIcon, SearchIcon, XIcon } from "lucide-react"
 import {
@@ -31,7 +31,7 @@ import {
   type SettingsGroup,
   type SettingsSectionId,
 } from "./settings-nav-config"
-import { isTauri } from "@/lib/tauri"
+import { useDesktopAvailable } from "@/hooks/settings/use-desktop-available"
 import { useSettingsSidebarCollapse } from "@/hooks/settings/use-settings-sidebar-collapse"
 
 interface Props {
@@ -46,11 +46,7 @@ export function SettingsSidebar({ activeSection, onSelect, searchQuery, onSearch
   const { state, setOpenMobile } = useSidebar()
   const isCollapsed = state === "collapsed"
   const { isGroupCollapsed, setGroupCollapsed, expandGroup } = useSettingsSidebarCollapse()
-  const [desktopAvailable, setDesktopAvailable] = useState(false)
-  useEffect(() => {
-    const timer = setTimeout(() => setDesktopAvailable(isTauri()), 0)
-    return () => clearTimeout(timer)
-  }, [])
+  const desktopAvailable = useDesktopAvailable()
 
   // While searching, collapse state is ignored: every group with a hit is
   // forced open (the persisted state is left untouched).

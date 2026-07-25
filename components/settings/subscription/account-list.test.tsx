@@ -179,3 +179,41 @@ describe("AccountList", () => {
     await waitFor(() => expect(screen.queryByText("removeDialogTitle")).not.toBeInTheDocument())
   })
 })
+
+// `expiresAtMs` always rode along in the cheap summary but nothing rendered it,
+// so a user with several saved accounts had no read-out until they switched.
+describe("AccountList credential expiry", () => {
+  const HOUR = 3_600_000
+
+  it("hides the line for logins that never expire (the documented 0 sentinel)", () => {
+    state.accounts = [summary({ id: "z1", label: "zen", expiresAtMs: 0 })]
+    render(<AccountList provider="opencode" />)
+    expect(screen.queryByTestId("account-expiry")).not.toBeInTheDocument()
+  })
+
+  it("shows the expiry timestamp while the token is valid", () => {
+    state.accounts = [summary({ id: "a1", label: "claude", expiresAtMs: Date.now() + 8 * HOUR })]
+    render(<AccountList provider="anthropic" />)
+    expect(screen.getByTestId("account-expiry")).toHaveAttribute("data-state", "valid")
+  })
+
+  // Deliberately not "expired"/"broken": an elapsed access token refreshes on
+  // next use, and refresh failures are not persisted anywhere in the vault.
+  it("marks an elapsed token stale rather than claiming the account is dead", () => {
+    state.accounts = [summary({ id: "a1", label: "claude", expiresAtMs: Date.now() - HOUR })]
+    render(<AccountList provider="anthropic" />)
+    const line = screen.getByTestId("account-expiry")
+    expect(line).toHaveAttribute("data-state", "stale")
+    expect(line).toHaveTextContent("expiryStale")
+  })
+
+  it("renders one line per account", () => {
+    state.accounts = [
+      summary({ id: "a1", expiresAtMs: Date.now() + 8 * HOUR }),
+      summary({ id: "a2", expiresAtMs: Date.now() - HOUR }),
+      summary({ id: "a3", expiresAtMs: 0 }),
+    ]
+    render(<AccountList provider="anthropic" />)
+    expect(screen.getAllByTestId("account-expiry")).toHaveLength(2)
+  })
+})

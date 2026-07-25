@@ -6,6 +6,7 @@ import { Search, BarChart3 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { ProviderSidebarItem } from "./provider-sidebar-item"
 import type { ProviderConnectionStatus } from "./provider-sidebar-item"
@@ -148,8 +149,12 @@ export function ProviderSidebar({
         </div>
       </div>
 
-      {/* Provider list (scrollable) */}
-      <div className="flex-1 overflow-x-hidden overflow-y-auto p-1">
+      {/* Provider list (scrollable). Themed `ScrollArea` rather than a native
+          `overflow-y-auto`: every dialog in this feature already uses it, so a
+          raw OS scrollbar here made the rail and the dialogs look like two
+          different products. `min-h-0` keeps it shrinkable inside the flex
+          column. */}
+      <ScrollArea className="min-h-0 flex-1 overflow-x-hidden p-1">
         {visibleProviders.length === 0 ? (
           filtersNarrowTheList ? (
             // A filtered-to-nothing list used to render as a blank box with no
@@ -178,7 +183,7 @@ export function ProviderSidebar({
             />
           ))
         )}
-      </div>
+      </ScrollArea>
 
       {/* Model Compare button */}
       <div className="min-w-0 border-t px-3 py-2">

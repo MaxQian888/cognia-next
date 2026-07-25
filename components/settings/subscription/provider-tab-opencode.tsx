@@ -14,6 +14,8 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
+import { SettingsAlert } from "@/components/settings/common/settings-section"
+import { isTauri } from "@/lib/tauri"
 
 import { AccountList } from "./account-list"
 import { OpencodeAddAccountDialog } from "./add-account-dialog/opencode"
@@ -48,6 +50,12 @@ export function ProviderTabOpencode() {
     }
   }
 
+  // Accounts and discovery both read the OS keychain / local auth.json through
+  // Tauri commands, so nothing on this tab can work in the browser.
+  if (!isTauri()) {
+    return <SettingsAlert title={t("title")}>{t("webModeBanner")}</SettingsAlert>
+  }
+
   return (
     <div className="space-y-4">
       <div className="space-y-1">
@@ -65,14 +73,13 @@ export function ProviderTabOpencode() {
         }
       />
 
-      <ProviderQuotaPanel provider="opencode" />
-
       {/* OpenCode Zen/Go has NO API-key-queryable balance/usage endpoint —
           billing gates run server-side inside the inference handler and the
           numbers are only visible in the session-authenticated Console
           (verified against sst/opencode packages/console zen/util/handler.ts,
-          2026-07-11). Say so instead of leaving the quota panel silently
-          empty. */}
+          2026-07-11). This precedes the panel: rendering a permanently empty
+          gauge with a dead Refresh button first, and only then explaining it,
+          reads as a bug. */}
       <p className="text-xs text-muted-foreground">
         {t("quotaConsoleOnly")}{" "}
         <a
@@ -84,6 +91,8 @@ export function ProviderTabOpencode() {
           {t("quotaConsoleLink")}
         </a>
       </p>
+
+      <ProviderQuotaPanel provider="opencode" />
 
       <PresetPicker provider="opencode" />
 

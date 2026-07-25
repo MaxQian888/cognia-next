@@ -18,6 +18,8 @@ import { useState } from "react"
 import { useTranslations } from "next-intl"
 
 import { Label } from "@/components/ui/label"
+import { SettingsAlert } from "@/components/settings/common/settings-section"
+import { isTauri } from "@/lib/tauri"
 
 import { AccountList } from "../account-list"
 import { AnthropicAddAccountDialog } from "../add-account-dialog/anthropic"
@@ -27,7 +29,16 @@ import { SubscriptionAccountTab } from "../tabs/account-tab"
 
 export function ClaudeAccountPanel() {
   const t = useTranslations("subscription.nav.items.claude")
+  const tRoot = useTranslations("subscription")
   const [addOpen, setAddOpen] = useState(false)
+
+  // `SubscriptionAccountTab` gates itself, but the account list, quota panel and
+  // preset picker above it did not — so in the browser this panel rendered an
+  // "empty" account list whose Add button opened the full PKCE dialog, and the
+  // user only hit `tauri-only command from web mode` after pasting their code.
+  if (!isTauri()) {
+    return <SettingsAlert title={t("label")}>{tRoot("webModeBanner")}</SettingsAlert>
+  }
 
   return (
     <div className="space-y-4">

@@ -49,6 +49,19 @@ jest.mock("@/components/ui/collapsible")
 
 import { CloudSyncCard } from "./cloud-sync-card"
 
+// The panel refuses to render in web mode (the credential vault is
+// keychain-backed), so the suite has to declare itself desktop.
+const TAURI_MARKER = "__TAURI_INTERNALS__"
+function setDesktop(on: boolean) {
+  if (on) {
+    ;(window as unknown as Record<string, unknown>)[TAURI_MARKER] = {}
+  } else {
+    delete (window as unknown as Record<string, unknown>)[TAURI_MARKER]
+  }
+}
+beforeAll(() => setDesktop(true))
+afterAll(() => setDesktop(false))
+
 beforeEach(() => {
   jest.clearAllMocks()
   settings = {}
@@ -156,5 +169,18 @@ describe("CloudSyncCard", () => {
     await userEvent.type(passInput, "pw")
     await userEvent.click(screen.getByRole("button", { name: /unlock/i }))
     expect(await screen.findByText(/404 not found/)).toBeInTheDocument()
+  })
+})
+
+describe("CloudSyncCard in web mode", () => {
+  beforeEach(() => setDesktop(false))
+  afterEach(() => setDesktop(true))
+
+  // This suite renders real translations, so match the copy rather than a key.
+  it("shows the keychain banner instead of a surface that cannot work", () => {
+    render(<CloudSyncCard />)
+    expect(screen.getByText(/OS keychain/i)).toBeInTheDocument()
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /restore/i })).not.toBeInTheDocument()
   })
 })

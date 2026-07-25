@@ -17,6 +17,7 @@
   "description": "Reusable templates and live status for sub-agents spawned by a parent agent. Templates persist across sessions; runtime data is ephemeral.",
   "import": {
     "applyButton": "Import {count} agent(s)",
+    "applying": "Applying…",
     "description": "Read sub-agent configurations from external tools and convert them to cognia templates or characters.",
     "errors": {
       "pickFailed": "Could not read the selected files."

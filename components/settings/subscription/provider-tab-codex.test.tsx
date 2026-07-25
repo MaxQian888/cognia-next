@@ -76,6 +76,19 @@ jest.mock("@/stores/settings/settings-store", () => ({
 
 import { ProviderTabCodex } from "./provider-tab-codex"
 
+// The tab refuses to render in web mode — every action ends in a keychain-backed
+// Tauri command — so the suite has to declare itself desktop.
+const TAURI_MARKER = "__TAURI_INTERNALS__"
+function setDesktop(on: boolean) {
+  if (on) {
+    ;(window as unknown as Record<string, unknown>)[TAURI_MARKER] = {}
+  } else {
+    delete (window as unknown as Record<string, unknown>)[TAURI_MARKER]
+  }
+}
+beforeAll(() => setDesktop(true))
+afterAll(() => setDesktop(false))
+
 beforeEach(() => {
   saveMock.mockClear()
   mockSettingsState.codexSubscriptionSettings = { ...defaultMockCodexSettings }
@@ -154,6 +167,16 @@ describe("ProviderTabCodex", () => {
     expect(screen.queryByTestId("codex-quota-api-key-only")).not.toBeInTheDocument()
   })
 
+  // Explaining an empty gauge only *after* rendering it reads as a broken fetch.
+  it("puts the api-key explanation before the quota panel, not after", () => {
+    mockAccountsState.accounts = [{ id: "a1", variant: "codex", expiresAtMs: 0 }]
+    mockAccountsState.activeAccountId = "a1"
+    render(<ProviderTabCodex />)
+    const note = screen.getByTestId("codex-quota-api-key-only")
+    const panel = screen.getByTestId("quota-panel-codex")
+    expect(note.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
   it("clamps a too-fast visible cadence to the floor on save", async () => {
     mockSettingsState.codexSubscriptionSettings = {
       ...defaultMockCodexSettings,
@@ -171,5 +194,17 @@ describe("ProviderTabCodex", () => {
         },
       })
     })
+  })
+})
+
+describe("ProviderTabCodex in web mode", () => {
+  beforeEach(() => setDesktop(false))
+  afterEach(() => setDesktop(true))
+
+  it("refuses to render the account surface instead of dead-ending at the last IPC call", () => {
+    render(<ProviderTabCodex />)
+    expect(screen.queryByTestId("account-list-codex")).not.toBeInTheDocument()
+    expect(screen.queryByText("cardTitle")).not.toBeInTheDocument()
+    expect(screen.getByText("webModeBanner")).toBeInTheDocument()
   })
 })

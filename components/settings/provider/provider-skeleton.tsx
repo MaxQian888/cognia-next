@@ -1,157 +1,125 @@
 "use client"
 
 /**
- * ProviderSkeleton - Loading skeleton state for provider settings
- * Matches the design spec with animated placeholders
+ * Loading skeleton for the provider settings pane, shown until the Dexie-backed
+ * settings hydrate (`provider-settings.tsx`, gated on `settingsLoaded`).
+ *
+ * Shaped like the layout it actually precedes: a fixed 320px provider rail
+ * beside a detail pane with a tab strip. It previously drew a single column of
+ * stacked "provider cards" — the shape of an older layout — so the moment real
+ * settings landed the whole page changed form rather than filling in.
+ *
+ * Mirrors `provider-settings.tsx`'s own responsive rules: the rail is hidden
+ * below `md` (where the real UI moves the list into a Sheet) and a compact
+ * mobile bar stands in for the Sheet trigger.
  */
 
 import { Skeleton } from "@/components/ui/skeleton"
-import { Card, CardContent, CardHeader } from "@/components/ui/card"
 
 export function ProviderSkeleton() {
   return (
-    <div className="space-y-6 animate-in fade-in duration-300">
-      {/* Quick Overview Skeleton */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Skeleton className="h-5 w-5 rounded" />
-              <Skeleton className="h-5 w-32" />
-            </div>
-            <Skeleton className="h-6 w-6 rounded" />
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <QuickStatSkeleton />
-            <QuickStatSkeleton />
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <SecondaryStatSkeleton />
-            <SecondaryStatSkeleton />
-            <SecondaryStatSkeleton />
-          </div>
-        </CardContent>
-      </Card>
+    <div className="flex h-full min-h-0 flex-col gap-4 animate-in fade-in duration-300">
+      {/* Onboarding banner slot — reserved so its later arrival doesn't shove
+          the grid down. */}
+      <Skeleton className="h-16 w-full shrink-0 rounded-lg" />
 
-      {/* Page Header Skeleton */}
-      <div className="flex items-center justify-between">
-        <div className="space-y-2">
-          <Skeleton className="h-7 w-40" />
-          <Skeleton className="h-4 w-28" />
-        </div>
-        <div className="flex items-center gap-3">
-          <Skeleton className="h-9 w-20 rounded-md" />
-          <Skeleton className="h-9 w-28 rounded-md" />
-        </div>
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[320px_1fr]">
+        <SidebarSkeleton />
+        <MobileBarSkeleton />
+        <DetailPaneSkeleton />
       </div>
+    </div>
+  )
+}
 
-      {/* Filter Row Skeleton */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1 p-1 bg-muted/50 rounded-lg">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <Skeleton key={i} className="h-7 w-16 rounded-md" />
+/** The 320px rail: search + category tabs + provider rows. */
+function SidebarSkeleton() {
+  return (
+    <div className="hidden min-h-0 md:flex md:flex-col md:overflow-hidden md:rounded-lg md:border">
+      <div className="space-y-3 border-b p-3">
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-8 flex-1 rounded-md" />
+          <Skeleton className="h-8 w-8 shrink-0 rounded-md" />
+        </div>
+        <div className="flex gap-1">
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-6 flex-1 rounded-md" />
           ))}
         </div>
-        <div className="flex items-center gap-3">
-          <Skeleton className="h-9 w-48 rounded-md" />
-          <Skeleton className="h-9 w-20 rounded-md" />
+      </div>
+      <div className="min-h-0 flex-1 space-y-1.5 overflow-hidden p-2">
+        {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+          <ProviderRowSkeleton key={i} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ProviderRowSkeleton() {
+  return (
+    <div className="flex items-center gap-2.5 rounded-md px-2 py-2">
+      <Skeleton className="size-8 shrink-0 rounded-lg" />
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <Skeleton className="h-3.5 w-24" />
+        <Skeleton className="h-2.5 w-32" />
+      </div>
+      <Skeleton className="size-2 shrink-0 rounded-full" />
+    </div>
+  )
+}
+
+/** Below `md` the rail collapses to a Sheet trigger plus the active name. */
+function MobileBarSkeleton() {
+  return (
+    <div className="flex items-center gap-2 md:hidden">
+      <Skeleton className="h-8 w-28 shrink-0 rounded-md" />
+      <Skeleton className="h-4 w-40" />
+    </div>
+  )
+}
+
+/** Detail pane: header row, tab strip, then a form body. */
+function DetailPaneSkeleton() {
+  return (
+    <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">
+      <div className="flex items-center justify-between gap-3 border-b p-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <Skeleton className="size-10 shrink-0 rounded-lg" />
+          <div className="space-y-2">
+            <Skeleton className="h-5 w-32" />
+            <Skeleton className="h-3 w-44" />
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Skeleton className="h-5 w-10 rounded-full" />
+          <Skeleton className="h-8 w-8 rounded-md" />
         </div>
       </div>
 
-      {/* Provider Cards Skeleton */}
-      <div className="space-y-4">
-        <ProviderCardSkeleton expanded />
-        <ProviderCardSkeleton />
-        <ProviderCardSkeleton />
+      <div className="flex gap-1 border-b px-4 py-2">
+        {[0, 1, 2, 3].map((i) => (
+          <Skeleton key={i} className="h-7 w-20 rounded-md" />
+        ))}
+      </div>
+
+      <div className="min-h-0 flex-1 space-y-5 overflow-hidden p-4">
+        <FieldSkeleton />
+        <FieldSkeleton />
+        <FieldSkeleton short />
+        <Skeleton className="h-9 w-32 rounded-md" />
       </div>
     </div>
   )
 }
 
-function QuickStatSkeleton() {
+function FieldSkeleton({ short = false }: { short?: boolean }) {
   return (
-    <div className="flex items-center justify-between p-4 rounded-lg bg-muted/30 border">
-      <div className="space-y-2">
-        <Skeleton className="h-3 w-16" />
-        <Skeleton className="h-8 w-12" />
-      </div>
-      <Skeleton className="h-8 w-20 rounded-full" />
+    <div className="space-y-2">
+      <Skeleton className="h-4 w-24" />
+      <Skeleton className={short ? "h-9 w-1/2 rounded-md" : "h-9 w-full rounded-md"} />
+      <Skeleton className="h-3 w-40" />
     </div>
-  )
-}
-
-function SecondaryStatSkeleton() {
-  return (
-    <div className="p-3 rounded-lg bg-muted/20 border space-y-2">
-      <Skeleton className="h-3 w-20" />
-      <Skeleton className="h-5 w-24" />
-    </div>
-  )
-}
-
-function ProviderCardSkeleton({ expanded = false }: { expanded?: boolean }) {
-  return (
-    <Card>
-      <CardHeader className="py-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Skeleton className="h-10 w-10 rounded-lg" />
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <Skeleton className="h-5 w-24" />
-                <Skeleton className="h-5 w-16 rounded-full" />
-              </div>
-              <Skeleton className="h-3 w-48" />
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <Skeleton className="h-5 w-10 rounded-full" />
-            <Skeleton className="h-5 w-5" />
-          </div>
-        </div>
-      </CardHeader>
-      {expanded && (
-        <CardContent className="pt-0 space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Skeleton className="h-4 w-16" />
-              <Skeleton className="h-10 w-full rounded-md" />
-              <Skeleton className="h-3 w-32" />
-            </div>
-            <div className="space-y-2">
-              <Skeleton className="h-4 w-20" />
-              <Skeleton className="h-10 w-full rounded-md" />
-              <Skeleton className="h-3 w-40" />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="p-4 rounded-lg bg-muted/20 border space-y-3">
-              <div className="flex items-center justify-between">
-                <Skeleton className="h-4 w-24" />
-                <Skeleton className="h-5 w-10 rounded-full" />
-              </div>
-              <div className="space-y-2">
-                <Skeleton className="h-8 w-full rounded-md" />
-                <Skeleton className="h-8 w-full rounded-md" />
-              </div>
-            </div>
-            <div className="p-4 rounded-lg bg-muted/20 border space-y-3">
-              <div className="flex items-center justify-between">
-                <Skeleton className="h-4 w-28" />
-                <Skeleton className="h-3 w-20" />
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {[1, 2, 3, 4].map((i) => (
-                  <Skeleton key={i} className="h-6 w-20 rounded-full" />
-                ))}
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      )}
-    </Card>
   )
 }
 

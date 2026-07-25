@@ -289,7 +289,7 @@ describe("QuickAddProviderDialog", () => {
       await userEvent.type(screen.getByLabelText("apiKey"), "sk-x")
       await userEvent.click(screen.getByText("test"))
 
-      expect(await screen.findByText("configTab.verificationLimited")).toBeInTheDocument()
+      expect(await screen.findByText("verificationLimited")).toBeInTheDocument()
       expect(screen.queryByText("configTab.connectionSuccess")).not.toBeInTheDocument()
     })
 

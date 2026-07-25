@@ -129,6 +129,8 @@
       "cancel": "取消",
       "confirm": "保存",
       "empty": "暂无账号。先添加一个再使用此服务商。",
+      "expiryStale": "访问令牌已过期——下次使用时自动刷新",
+      "expiryValid": "令牌有效期至 {at}",
       "inUseByCharacter": "角色：{name}",
       "inUseBySession": "会话：{name}",
       "inUseMore": "另有 {count} 项",
@@ -492,14 +494,15 @@
     }
   },
   "overview": {
+    "loading": "正在加载配额…",
     "noDataBody": "点击刷新可直接从 Anthropic 免费用量接口获取额度——不消耗 token，也无需先发消息。",
     "noDataTitle": "暂无用量数据",
     "officialQuotaDisabledBody": "仅在你接受上游兼容性和网络路径风险时前往订阅设置启用。正常工作产生的被动用量仍可显示。",
     "officialQuotaDisabledTitle": "官方额度查询已关闭",
     "refresh": "刷新",
-    "signInCta": "登录",
     "signedOutBody": "登录 Claude 账号即可监控 5 小时 / 7 天速率限制窗口。",
     "signedOutTitle": "未登录",
+    "signInCta": "登录",
     "sourceEndpoint": "用量接口实时数据",
     "sourceHeaders": "来自对话响应头",
     "status": {

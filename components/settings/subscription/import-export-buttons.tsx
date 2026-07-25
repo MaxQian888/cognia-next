@@ -24,6 +24,8 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
+import { SettingsAlert } from "@/components/settings/common/settings-section"
+import { isTauri } from "@/lib/tauri"
 import { toast } from "sonner"
 
 import {
@@ -43,8 +45,15 @@ type ImportMode = "idle" | "decrypting" | "preview" | "applying"
 
 export function ImportExportButtons() {
   const t = useTranslations("subscription.common.importExport")
+  const tRoot = useTranslations("subscription")
   const [exportOpen, setExportOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+
+  // Both directions go through `snapshotVaults`/`applyVaults`, i.e. the OS
+  // keychain — there is nothing to export and nowhere to import to in a browser.
+  if (!isTauri()) {
+    return <SettingsAlert title={t("title")}>{tRoot("webModeBanner")}</SettingsAlert>
+  }
 
   return (
     <Card>

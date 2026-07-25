@@ -34,6 +34,7 @@ import { buildBuiltInProviderModelDiscoverySnapshot } from "@cognia/provider-cor
 import { PROVIDERS } from "@cognia/provider-types/provider"
 import type { CustomProviderSettings } from "@cognia/provider-types/provider"
 import { validateBedrockConnectionSettings } from "@cognia/provider-types"
+import { PanelTransition } from "@/components/settings/common/panel-transition"
 import { ProviderDetailPanel } from "./provider-detail-panel"
 import { ProviderConfigTab } from "./provider-config-tab"
 import { ProviderModelsTab } from "./provider-models-tab"
@@ -368,7 +369,11 @@ export function ProviderSettings() {
   // models.dev catalog (reactive) → enrich the built-in provider's model list
   // with models.dev-authoritative metadata (pricing/context/capabilities) plus
   // the extra display fields (variants/family/release date/adapter).
-  const { row: modelsDevRow, sync: syncModelsDevCatalog } = useModelsDevCatalog()
+  const {
+    row: modelsDevRow,
+    isLoading: modelsDevLoading,
+    sync: syncModelsDevCatalog,
+  } = useModelsDevCatalog()
   const enrichedBuiltInModels = useMemo(() => {
     if (!selectedBuiltIn || !selectedId) return []
     const devModels = modelsDevRow?.providers[selectedId]?.models ?? []
@@ -576,262 +581,140 @@ export function ProviderSettings() {
             window and laying out 2- and 4-column grids into a ~430px pane at
             the md breakpoint. Same fix the subscription pane already uses. */}
         <div className="@container/provider-pane flex min-h-0 flex-col overflow-hidden rounded-lg border">
-          {selectedId === null ? (
-            <div className="flex h-full items-center justify-center">
-              <div className="flex flex-col items-center gap-4 py-12 text-center">
-                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-muted">
-                  <Settings className="h-8 w-8 text-muted-foreground/40" />
-                </div>
-                <div>
-                  <h3 className="text-base font-semibold text-foreground">
-                    {t("detailPanel.emptyTitle")}
-                  </h3>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {t("detailPanel.emptyDescription")}
-                  </p>
+          {/* Selecting a provider swapped this whole subtree instantly, which is
+              exactly what `PanelTransition` exists for — Appearance and
+              Subscription already crossfade their master/detail bodies with it.
+              Keyed on the selection (plus the empty state) so the outgoing pane
+              fades out before the incoming one settles. It collapses to a plain
+              wrapper under reduced motion. */}
+          <PanelTransition
+            activeKey={selectedId ?? "__empty__"}
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            {selectedId === null ? (
+              <div className="flex h-full items-center justify-center">
+                <div className="flex flex-col items-center gap-4 py-12 text-center">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-muted">
+                    <Settings className="h-8 w-8 text-muted-foreground/40" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-semibold text-foreground">
+                      {t("detailPanel.emptyTitle")}
+                    </h3>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {t("detailPanel.emptyDescription")}
+                    </p>
+                  </div>
                 </div>
               </div>
-            </div>
-          ) : (
-            <ProviderDetailPanel
-              provider={
-                selectedBuiltIn
-                  ? {
-                      id: selectedId,
-                      name: selectedBuiltIn.name,
-                      modelCount: selectedBuiltIn.models.length,
-                    }
-                  : selectedCustom
+            ) : (
+              <ProviderDetailPanel
+                provider={
+                  selectedBuiltIn
                     ? {
                         id: selectedId,
-                        name: selectedCustom.customName,
-                        modelCount: selectedCustom.customModels?.length ?? 0,
+                        name: selectedBuiltIn.name,
+                        modelCount: selectedBuiltIn.models.length,
                       }
-                    : null
-              }
-              isEnabled={isEnabled}
-              isCustom={isCustom}
-              isDefault={selectedId === defaultProvider}
-              onSetDefault={() => void s.setDefaultProvider(selectedId)}
-              connectionStatus={
-                isCustom
-                  ? deriveStatus(
-                      selectedCustom?.apiKey,
-                      selectedCustom?.baseURL,
-                      s.customTestResults[selectedId] === "success"
-                        ? true
-                        : s.customTestResults[selectedId] === "error"
-                          ? false
-                          : undefined
-                    )
-                  : deriveStatus(
-                      selectedSettings?.apiKey,
-                      selectedSettings?.baseURL,
-                      s.testResults[selectedId]?.success,
-                      s.testResults[selectedId]?.outcome,
-                      selectedId === "bedrock" && !!selectedSettings?.bedrock
-                        ? validateBedrockConnectionSettings(selectedSettings.bedrock).valid
-                        : false,
-                      selectedSettings?.verificationStatus ?? null
-                    )
-              }
-              onToggleEnabled={(next) => {
-                if (isCustom && selectedCustom) {
-                  void s.updateCustomProvider(selectedId, { enabled: next })
-                } else {
-                  void setProviderConfig(selectedId, { enabled: next })
-                }
-              }}
-              onDelete={isCustom ? () => setPendingDeleteId(selectedId) : undefined}
-              configTab={
-                // A local engine (Ollama, LM Studio, llama.cpp, …) is keyless
-                // and gets its own dashboard, but it stays INSIDE the shared
-                // detail shell so it keeps the header, enable switch, default
-                // badge and status the rest of the list has.
-                isLocalProvider ? (
-                  <LocalProviderSettings />
-                ) : isCustom && selectedCustom ? (
-                  <CustomProviderInlineConfig
-                    cp={selectedCustom}
-                    onApiKeyChange={(key) =>
-                      void s.updateCustomProvider(selectedId, { apiKey: key })
-                    }
-                    onBaseURLChange={(url) =>
-                      void s.updateCustomProvider(selectedId, { baseURL: url })
-                    }
-                    onDefaultModelChange={(model) =>
-                      void s.updateCustomProvider(selectedId, { defaultModel: model })
-                    }
-                    onEditClick={handleEditCustom}
-                    onTestConnection={() => void s.testCustomProvider(selectedId)}
-                    testResult={s.customTestResults[selectedId] ?? null}
-                    isTesting={!!s.testingCustomProviders[selectedId]}
-                  />
-                ) : selectedBuiltIn ? (
-                  <div className="space-y-6">
-                    <ProviderConfigTab
-                      providerId={selectedId}
-                      settings={
-                        selectedSettings ?? {
-                          providerId: selectedId,
-                          enabled: false,
-                          defaultModel: selectedBuiltIn.defaultModel,
+                    : selectedCustom
+                      ? {
+                          id: selectedId,
+                          name: selectedCustom.customName,
+                          modelCount: selectedCustom.customModels?.length ?? 0,
                         }
+                      : null
+                }
+                isEnabled={isEnabled}
+                isCustom={isCustom}
+                isDefault={selectedId === defaultProvider}
+                onSetDefault={() => void s.setDefaultProvider(selectedId)}
+                connectionStatus={
+                  isCustom
+                    ? deriveStatus(
+                        selectedCustom?.apiKey,
+                        selectedCustom?.baseURL,
+                        s.customTestResults[selectedId] === "success"
+                          ? true
+                          : s.customTestResults[selectedId] === "error"
+                            ? false
+                            : undefined
+                      )
+                    : deriveStatus(
+                        selectedSettings?.apiKey,
+                        selectedSettings?.baseURL,
+                        s.testResults[selectedId]?.success,
+                        s.testResults[selectedId]?.outcome,
+                        selectedId === "bedrock" && !!selectedSettings?.bedrock
+                          ? validateBedrockConnectionSettings(selectedSettings.bedrock).valid
+                          : false,
+                        selectedSettings?.verificationStatus ?? null
+                      )
+                }
+                onToggleEnabled={(next) => {
+                  if (isCustom && selectedCustom) {
+                    void s.updateCustomProvider(selectedId, { enabled: next })
+                  } else {
+                    void setProviderConfig(selectedId, { enabled: next })
+                  }
+                }}
+                onDelete={isCustom ? () => setPendingDeleteId(selectedId) : undefined}
+                configTab={
+                  // A local engine (Ollama, LM Studio, llama.cpp, …) is keyless
+                  // and gets its own dashboard, but it stays INSIDE the shared
+                  // detail shell so it keeps the header, enable switch, default
+                  // badge and status the rest of the list has.
+                  isLocalProvider ? (
+                    <LocalProviderSettings />
+                  ) : isCustom && selectedCustom ? (
+                    <CustomProviderInlineConfig
+                      cp={selectedCustom}
+                      onApiKeyChange={(key) =>
+                        void s.updateCustomProvider(selectedId, { apiKey: key })
                       }
-                      providerModels={configModelOptions}
-                      providerDashboardUrl={selectedBuiltIn.dashboardUrl}
-                      providerDocsUrl={selectedBuiltIn.docsUrl}
-                      onApiKeyChange={(key) => void setProviderConfig(selectedId, { apiKey: key })}
                       onBaseURLChange={(url) =>
-                        void setProviderConfig(selectedId, { baseURL: url })
-                      }
-                      onBedrockSettingsChange={(bedrock) =>
-                        void setProviderConfig(selectedId, {
-                          bedrock,
-                          apiKey: bedrock.authMode === "api-key" ? bedrock.apiKey : undefined,
-                          baseURL: bedrock.baseURL,
-                        })
-                      }
-                      onApiProtocolChange={(protocol) =>
-                        void setProviderConfig(selectedId, { apiProtocol: protocol })
+                        void s.updateCustomProvider(selectedId, { baseURL: url })
                       }
                       onDefaultModelChange={(model) =>
-                        void setProviderConfig(selectedId, { defaultModel: model })
+                        void s.updateCustomProvider(selectedId, { defaultModel: model })
                       }
-                      onTestConnection={async () => {
-                        const result = await s.testProvider(selectedId)
-                        return {
-                          success: !!result?.success,
-                          latency: result?.latency_ms,
-                          error: result?.success ? undefined : result?.message,
-                          outcome: result?.outcome,
-                        }
-                      }}
-                      testResult={
-                        s.testResults[selectedId]
-                          ? {
-                              success: !!s.testResults[selectedId]?.success,
-                              latency: s.testResults[selectedId]?.latency_ms,
-                              error: s.testResults[selectedId]?.success
-                                ? undefined
-                                : s.testResults[selectedId]?.message,
-                            }
-                          : null
-                      }
-                      isTesting={!!s.testingProviders[selectedId]}
-                      onAddApiKey={(key) => {
-                        const pool = selectedSettings?.apiKeys ?? []
-                        void setProviderConfig(selectedId, { apiKeys: [...pool, key] })
-                      }}
-                      onRemoveApiKey={(index) => {
-                        const pool = selectedSettings?.apiKeys ?? []
-                        void setProviderConfig(selectedId, {
-                          apiKeys: pool.filter((_, i) => i !== index),
-                        })
-                      }}
-                      onReorderApiKeys={(from, to) => {
-                        const pool = [...(selectedSettings?.apiKeys ?? [])]
-                        const [moved] = pool.splice(from, 1)
-                        if (moved === undefined) return
-                        pool.splice(to, 0, moved)
-                        void setProviderConfig(selectedId, { apiKeys: pool })
-                      }}
-                      onToggleRotation={(enabled) =>
-                        void setProviderConfig(selectedId, { apiKeyRotationEnabled: enabled })
-                      }
-                      onRotationStrategyChange={(strategy) =>
-                        void setProviderConfig(selectedId, { apiKeyRotationStrategy: strategy })
-                      }
+                      onEditClick={handleEditCustom}
+                      onTestConnection={() => void s.testCustomProvider(selectedId)}
+                      testResult={s.customTestResults[selectedId] ?? null}
+                      isTesting={!!s.testingCustomProviders[selectedId]}
                     />
-                    {/* Self-gates on the catalog's `supportsOAuth` and renders
-                        null otherwise, so mounting it for every built-in is
-                        safe and picks up any future OAuth provider for free.
-                        Until now nothing rendered it, which left
-                        `oauthConnected` / `oauthExpiresAt` unreachable from the
-                        UI even though both are persisted on the settings row. */}
-                    <OAuthLoginButton providerId={selectedId} />
-                    {/* Provider-specific panels. Both shipped with a catalog
-                        entry and a full settings schema but were never mounted,
-                        so every field they expose was unreachable. */}
-                    {selectedId === "openrouter" && (
-                      <>
-                        <OpenRouterSettings />
-                        <OpenRouterKeyManagement />
-                      </>
-                    )}
-                    {selectedId === "cliproxyapi" && <CLIProxyAPISettings />}
-                  </div>
-                ) : (
-                  <div className="text-sm text-muted-foreground">
-                    {t("unknownProviderType") || "Unknown provider type."}
-                  </div>
-                )
-              }
-              // Local engines manage their own models/setup inside the config
-              // dashboard, and have no per-token cost or cloud routing — so
-              // these slots stay empty and the tabs simply don't render.
-              modelsTab={
-                isLocalProvider ? undefined : isCustom ? (
-                  <div className="text-sm text-muted-foreground">
-                    {t("customProviderModelsManaged") ||
-                      "Custom-provider models are managed inside the provider editor."}
-                  </div>
-                ) : selectedBuiltIn ? (
-                  <ProviderModelsTab
-                    providerId={selectedId}
-                    models={enrichedBuiltInModels}
-                    enabledModels={selectedSettings?.enabledModels ?? []}
-                    onEnabledModelsChange={(ids) =>
-                      void setProviderConfig(selectedId, { enabledModels: ids })
-                    }
-                    onRefreshModels={handleRefreshModels}
-                    isRefreshing={!!testingConnection[selectedId]}
-                    onTestConnection={handleTestConnection}
-                    isTesting={!!s.testingProviders[selectedId]}
-                  />
-                ) : (
-                  <div className="text-sm text-muted-foreground">
-                    {t("noModelsAvailable") || "No models available."}
-                  </div>
-                )
-              }
-              costTab={isLocalProvider ? undefined : <ProviderCostTab providerId={selectedId} />}
-              advancedTab={
-                isLocalProvider ? undefined : (
-                  <Tabs
-                    value={activeTab}
-                    onValueChange={(v) => setActiveTab(v as typeof activeTab)}
-                  >
-                    <TabsList>
-                      <TabsTrigger value="parameters">
-                        {t("tabs.parameters" as never) as string}
-                      </TabsTrigger>
-                      <TabsTrigger value="routing">
-                        {t("tabs.routing" as never) as string}
-                      </TabsTrigger>
-                      <TabsTrigger value="health">
-                        {t("tabs.health" as never) as string}
-                      </TabsTrigger>
-                    </TabsList>
-                    <TabsContent value="parameters">
-                      {selectedSettings ? (
-                        <ProviderParametersTab
-                          providerId={selectedId}
-                          settings={selectedSettings}
-                        />
-                      ) : (
-                        <div className="py-4 text-center text-xs text-muted-foreground">
-                          {t("configureProviderForParameters") ||
-                            "Configure this provider in the Config tab to enable parameters."}
-                        </div>
-                      )}
-                    </TabsContent>
-                    <TabsContent value="routing">
-                      <RoutingTab />
-                    </TabsContent>
-                    <TabsContent value="health">
-                      <HealthTab
+                  ) : selectedBuiltIn ? (
+                    <div className="space-y-6">
+                      <ProviderConfigTab
                         providerId={selectedId}
+                        settings={
+                          selectedSettings ?? {
+                            providerId: selectedId,
+                            enabled: false,
+                            defaultModel: selectedBuiltIn.defaultModel,
+                          }
+                        }
+                        providerModels={configModelOptions}
+                        providerDashboardUrl={selectedBuiltIn.dashboardUrl}
+                        providerDocsUrl={selectedBuiltIn.docsUrl}
+                        onApiKeyChange={(key) =>
+                          void setProviderConfig(selectedId, { apiKey: key })
+                        }
+                        onBaseURLChange={(url) =>
+                          void setProviderConfig(selectedId, { baseURL: url })
+                        }
+                        onBedrockSettingsChange={(bedrock) =>
+                          void setProviderConfig(selectedId, {
+                            bedrock,
+                            apiKey: bedrock.authMode === "api-key" ? bedrock.apiKey : undefined,
+                            baseURL: bedrock.baseURL,
+                          })
+                        }
+                        onApiProtocolChange={(protocol) =>
+                          void setProviderConfig(selectedId, { apiProtocol: protocol })
+                        }
+                        onDefaultModelChange={(model) =>
+                          void setProviderConfig(selectedId, { defaultModel: model })
+                        }
                         onTestConnection={async () => {
                           const result = await s.testProvider(selectedId)
                           return {
@@ -841,14 +724,150 @@ export function ProviderSettings() {
                             outcome: result?.outcome,
                           }
                         }}
+                        testResult={
+                          s.testResults[selectedId]
+                            ? {
+                                success: !!s.testResults[selectedId]?.success,
+                                latency: s.testResults[selectedId]?.latency_ms,
+                                error: s.testResults[selectedId]?.success
+                                  ? undefined
+                                  : s.testResults[selectedId]?.message,
+                              }
+                            : null
+                        }
                         isTesting={!!s.testingProviders[selectedId]}
+                        onAddApiKey={(key) => {
+                          const pool = selectedSettings?.apiKeys ?? []
+                          void setProviderConfig(selectedId, { apiKeys: [...pool, key] })
+                        }}
+                        onRemoveApiKey={(index) => {
+                          const pool = selectedSettings?.apiKeys ?? []
+                          void setProviderConfig(selectedId, {
+                            apiKeys: pool.filter((_, i) => i !== index),
+                          })
+                        }}
+                        onReorderApiKeys={(from, to) => {
+                          const pool = [...(selectedSettings?.apiKeys ?? [])]
+                          const [moved] = pool.splice(from, 1)
+                          if (moved === undefined) return
+                          pool.splice(to, 0, moved)
+                          void setProviderConfig(selectedId, { apiKeys: pool })
+                        }}
+                        onToggleRotation={(enabled) =>
+                          void setProviderConfig(selectedId, { apiKeyRotationEnabled: enabled })
+                        }
+                        onRotationStrategyChange={(strategy) =>
+                          void setProviderConfig(selectedId, { apiKeyRotationStrategy: strategy })
+                        }
                       />
-                    </TabsContent>
-                  </Tabs>
-                )
-              }
-            />
-          )}
+                      {/* Self-gates on the catalog's `supportsOAuth` and renders
+                        null otherwise, so mounting it for every built-in is
+                        safe and picks up any future OAuth provider for free.
+                        Until now nothing rendered it, which left
+                        `oauthConnected` / `oauthExpiresAt` unreachable from the
+                        UI even though both are persisted on the settings row. */}
+                      <OAuthLoginButton providerId={selectedId} />
+                      {/* Provider-specific panels. Both shipped with a catalog
+                        entry and a full settings schema but were never mounted,
+                        so every field they expose was unreachable. */}
+                      {selectedId === "openrouter" && (
+                        <>
+                          <OpenRouterSettings />
+                          <OpenRouterKeyManagement />
+                        </>
+                      )}
+                      {selectedId === "cliproxyapi" && <CLIProxyAPISettings />}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">
+                      {t("unknownProviderType") || "Unknown provider type."}
+                    </div>
+                  )
+                }
+                // Local engines manage their own models/setup inside the config
+                // dashboard, and have no per-token cost or cloud routing — so
+                // these slots stay empty and the tabs simply don't render.
+                modelsTab={
+                  isLocalProvider ? undefined : isCustom ? (
+                    <div className="text-sm text-muted-foreground">
+                      {t("customProviderModelsManaged") ||
+                        "Custom-provider models are managed inside the provider editor."}
+                    </div>
+                  ) : selectedBuiltIn ? (
+                    <ProviderModelsTab
+                      providerId={selectedId}
+                      models={enrichedBuiltInModels}
+                      enabledModels={selectedSettings?.enabledModels ?? []}
+                      onEnabledModelsChange={(ids) =>
+                        void setProviderConfig(selectedId, { enabledModels: ids })
+                      }
+                      onRefreshModels={handleRefreshModels}
+                      isRefreshing={!!testingConnection[selectedId]}
+                      onTestConnection={handleTestConnection}
+                      isTesting={!!s.testingProviders[selectedId]}
+                      metadataLoading={modelsDevLoading}
+                    />
+                  ) : (
+                    <div className="text-sm text-muted-foreground">
+                      {t("noModelsAvailable") || "No models available."}
+                    </div>
+                  )
+                }
+                costTab={isLocalProvider ? undefined : <ProviderCostTab providerId={selectedId} />}
+                advancedTab={
+                  isLocalProvider ? undefined : (
+                    <Tabs
+                      value={activeTab}
+                      onValueChange={(v) => setActiveTab(v as typeof activeTab)}
+                    >
+                      <TabsList>
+                        <TabsTrigger value="parameters">
+                          {t("tabs.parameters" as never) as string}
+                        </TabsTrigger>
+                        <TabsTrigger value="routing">
+                          {t("tabs.routing" as never) as string}
+                        </TabsTrigger>
+                        <TabsTrigger value="health">
+                          {t("tabs.health" as never) as string}
+                        </TabsTrigger>
+                      </TabsList>
+                      <TabsContent value="parameters">
+                        {selectedSettings ? (
+                          <ProviderParametersTab
+                            providerId={selectedId}
+                            settings={selectedSettings}
+                          />
+                        ) : (
+                          <div className="py-4 text-center text-xs text-muted-foreground">
+                            {t("configureProviderForParameters") ||
+                              "Configure this provider in the Config tab to enable parameters."}
+                          </div>
+                        )}
+                      </TabsContent>
+                      <TabsContent value="routing">
+                        <RoutingTab />
+                      </TabsContent>
+                      <TabsContent value="health">
+                        <HealthTab
+                          providerId={selectedId}
+                          onTestConnection={async () => {
+                            const result = await s.testProvider(selectedId)
+                            return {
+                              success: !!result?.success,
+                              latency: result?.latency_ms,
+                              error: result?.success ? undefined : result?.message,
+                              outcome: result?.outcome,
+                            }
+                          }}
+                          isTesting={!!s.testingProviders[selectedId]}
+                        />
+                      </TabsContent>
+                    </Tabs>
+                  )
+                }
+              />
+            )}
+          </PanelTransition>
         </div>
       </div>
 

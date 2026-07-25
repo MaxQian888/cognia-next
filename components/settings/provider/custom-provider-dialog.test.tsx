@@ -364,7 +364,7 @@ describe("CustomProviderDialog", () => {
       fireEvent.change(screen.getByTestId("api-key"), { target: { value: "sk-x" } })
       fireEvent.click(screen.getByText("test"))
 
-      expect(await screen.findByText("configTab.verificationLimited")).toBeInTheDocument()
+      expect(await screen.findByText("verificationLimited")).toBeInTheDocument()
       expect(screen.queryByText("configTab.connectionSuccess")).not.toBeInTheDocument()
     })
 

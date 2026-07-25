@@ -4,17 +4,19 @@ import { Suspense, useEffect, useState } from "react"
 import dynamic from "next/dynamic"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { ArrowLeftIcon, ChevronRightIcon, SearchIcon } from "lucide-react"
+import { ArrowLeftIcon, ChevronRightIcon, MonitorIcon, SearchIcon } from "lucide-react"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SettingsSidebar } from "./settings-sidebar"
 import { SectionResetButton } from "./common/section-reset-button"
+import { SettingsEmptyState } from "./common/settings-section"
 import { SettingsFinder } from "./finder/settings-finder"
 import { resetKeysForSection } from "@/lib/settings/section-keys"
+import { useDesktopAvailable } from "@/hooks/settings/use-desktop-available"
 import { useSettingFocus } from "@/hooks/settings/use-setting-focus"
-import { SETTINGS_NAV, type SettingsSectionId } from "./settings-nav-config"
+import { DESKTOP_ONLY_SECTIONS, SETTINGS_NAV, type SettingsSectionId } from "./settings-nav-config"
 
 const SectionLoading = () => {
   const t = useTranslations("settings")
@@ -445,6 +447,25 @@ function SettingsShellInner({ actions }: Props) {
 }
 
 function SectionContent({ section, onClose }: { section: SettingsSectionId; onClose: () => void }) {
+  const t = useTranslations("settings")
+  const desktopAvailable = useDesktopAvailable()
+
+  // Last line of defence for desktop-only sections. The sidebar and the finder
+  // both hide them in web mode, but `?section=` is a public deep-link contract
+  // (bookmarks, docs, finder anchors), so the dispatch itself has to refuse —
+  // otherwise the panel renders and the user only discovers it can't work when
+  // a Tauri IPC call rejects at the end of a multi-step flow. An explicit
+  // explanation beats a silent redirect: the user asked for this section.
+  if (!desktopAvailable && DESKTOP_ONLY_SECTIONS.has(section)) {
+    return (
+      <SettingsEmptyState
+        icon={<MonitorIcon />}
+        title={t("desktopOnlySectionTitle")}
+        description={t("desktopOnlySectionBody")}
+      />
+    )
+  }
+
   switch (section) {
     case "account":
       return <AccountOverviewSection />

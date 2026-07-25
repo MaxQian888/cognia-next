@@ -16,18 +16,32 @@ jest.mock("next-intl", () => ({
 }))
 
 // One control with keywords, one without — exercises the optional-keywords path.
+// The third targets a desktop-only section, which the finder must hide in web
+// mode (the registry really does contain such controls: tools, security, sandbox).
 jest.mock("./control-registry", () => ({
   SETTING_CONTROLS: [
     { id: "default-model", sectionId: "general", labelKey: "defaultModel", keywords: ["model"] },
     { id: "no-keywords", sectionId: "about", labelKey: "autoUpdate" },
+    { id: "desktop-bound", sectionId: "security", labelKey: "secretStore" },
   ],
 }))
 
 import { SettingsFinder } from "./settings-finder"
 
+const TAURI_MARKER = "__TAURI_INTERNALS__"
+function setDesktop(on: boolean) {
+  if (on) {
+    ;(window as unknown as Record<string, unknown>)[TAURI_MARKER] = {}
+  } else {
+    delete (window as unknown as Record<string, unknown>)[TAURI_MARKER]
+  }
+}
+
 beforeEach(() => {
   replaceMock.mockClear()
 })
+
+afterEach(() => setDesktop(false))
 
 describe("SettingsFinder", () => {
   it("lists control and section entries when open", () => {
@@ -56,5 +70,37 @@ describe("SettingsFinder", () => {
     const url = replaceMock.mock.calls[0][0] as string
     expect(url).toContain("section=")
     expect(url).not.toContain("focus=")
+  })
+})
+
+// The sidebar has always hidden desktop-only sections in web mode; the finder
+// did not, which made ⌘K the back door into panels whose IPC can only reject.
+describe("SettingsFinder desktop-only filtering", () => {
+  it("hides desktop-only sections in web mode", () => {
+    setDesktop(false)
+    render(<SettingsFinder open onOpenChange={jest.fn()} />)
+    expect(screen.queryByText("tabs.subscription")).not.toBeInTheDocument()
+    expect(screen.queryByText("tabs.ccswitch")).not.toBeInTheDocument()
+  })
+
+  it("hides controls that deep-link into a desktop-only section", () => {
+    setDesktop(false)
+    render(<SettingsFinder open onOpenChange={jest.fn()} />)
+    expect(screen.queryByText("finder.controls.secretStore")).not.toBeInTheDocument()
+  })
+
+  it("keeps browser-capable sections and controls listed in web mode", () => {
+    setDesktop(false)
+    render(<SettingsFinder open onOpenChange={jest.fn()} />)
+    expect(screen.getByText("tabs.appearance")).toBeInTheDocument()
+    expect(screen.getByText("finder.controls.defaultModel")).toBeInTheDocument()
+  })
+
+  it("lists everything on desktop", () => {
+    setDesktop(true)
+    render(<SettingsFinder open onOpenChange={jest.fn()} />)
+    expect(screen.getByText("tabs.subscription")).toBeInTheDocument()
+    expect(screen.getByText("tabs.ccswitch")).toBeInTheDocument()
+    expect(screen.getByText("finder.controls.secretStore")).toBeInTheDocument()
   })
 })

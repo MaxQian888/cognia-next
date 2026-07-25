@@ -3,7 +3,7 @@
  */
 import React from "react"
 import { render, screen, fireEvent } from "@testing-library/react"
-import { ProviderConfigTab } from "./provider-config-tab"
+import { ConnectionStatusCard, ProviderConfigTab } from "./provider-config-tab"
 import type { UserProviderSettings } from "@cognia/provider-types"
 
 // ── i18n mock ────────────────────────────────────────────────────────────────
@@ -571,5 +571,43 @@ describe("ProviderConfigTab", () => {
       fireEvent.keyDown(newKeyInput!, { key: "Enter" })
       expect(onAddApiKey).not.toHaveBeenCalled()
     })
+  })
+})
+
+// A "limited" outcome means no authoritative request was made (Anthropic in a
+// browser: CORS forces a key-format check only). Read as a pass, that misleads.
+describe("ConnectionStatusCard limited outcome", () => {
+  it("does not present a limited result as a successful connection", () => {
+    render(<ConnectionStatusCard result={{ success: false, outcome: "limited" }} />)
+    expect(screen.queryByText("Connected")).not.toBeInTheDocument()
+    expect(screen.queryByText("Connection failed")).not.toBeInTheDocument()
+  })
+
+  it("spells out that authoritative verification did not happen", () => {
+    render(<ConnectionStatusCard result={{ success: false, outcome: "limited" }} />)
+    expect(screen.getByText("verificationLimitedHint")).toBeInTheDocument()
+  })
+
+  // The headline reached for `configTab.verificationLimited`, which does not
+  // exist in either locale, so next-intl rendered the raw key path.
+  it("resolves the headline key that actually exists", () => {
+    render(<ConnectionStatusCard result={{ success: false, outcome: "limited" }} />)
+    expect(screen.getByText("verificationLimited")).toBeInTheDocument()
+    expect(screen.queryByText("configTab.verificationLimited")).not.toBeInTheDocument()
+  })
+
+  it("still surfaces the underlying detail message", () => {
+    render(
+      <ConnectionStatusCard
+        result={{ success: false, outcome: "limited", error: "API key format valid." }}
+      />
+    )
+    expect(screen.getByText("API key format valid.")).toBeInTheDocument()
+  })
+
+  it("keeps a genuine success on the success branch", () => {
+    render(<ConnectionStatusCard result={{ success: true, outcome: "verified", latency: 42 }} />)
+    expect(screen.getByText("Connected")).toBeInTheDocument()
+    expect(screen.queryByText("verificationLimitedHint")).not.toBeInTheDocument()
   })
 })

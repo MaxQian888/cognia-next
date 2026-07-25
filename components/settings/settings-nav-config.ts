@@ -591,6 +591,19 @@ export const SETTINGS_GROUP_ORDER: SettingsGroup[] = [
 ]
 
 /**
+ * Sections that only work inside the Tauri desktop shell, derived from the nav
+ * so the two can't drift.
+ *
+ * The sidebar filters on `item.desktopOnly` directly, but the ⌘K finder and the
+ * shell's section dispatch both need the same answer keyed by id — without it a
+ * web user can still reach these panels via the finder or a `?section=` deep
+ * link and walk a flow that can only fail at the last IPC call.
+ */
+export const DESKTOP_ONLY_SECTIONS: ReadonlySet<SettingsSectionId> = new Set(
+  SETTINGS_NAV.filter((item) => item.desktopOnly).map((item) => item.id)
+)
+
+/**
  * Lightweight keyword index for the sidebar search. Each entry can attach
  * extra keywords beyond the label/description (e.g., "anthropic" for the
  * api-key section). Mirrors Cognia's SETTINGS_SEARCH_INDEX shape.

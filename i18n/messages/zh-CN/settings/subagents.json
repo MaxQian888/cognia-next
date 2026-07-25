@@ -17,6 +17,7 @@
   "description": "由父代理派生的子代理模板与实时运行状态。模板会持久化保存,运行时数据为内存级,重启后清空。",
   "import": {
     "applyButton": "导入 {count} 个",
+    "applying": "应用中…",
     "description": "从外部工具读取子代理配置，并转换为 Cognia 模板或角色。",
     "errors": {
       "pickFailed": "无法读取所选文件。"

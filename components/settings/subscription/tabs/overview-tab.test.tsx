@@ -215,3 +215,54 @@ describe("SubscriptionOverviewTab", () => {
     expect(screen.getByTestId("overview-refresh")).toBeDisabled()
   })
 })
+
+// A pending first fetch used to render the *identical* "no data" empty state as
+// a genuinely empty account — the only tell was a spinner inside its action
+// button. These pin the two apart.
+describe("SubscriptionOverviewTab first load", () => {
+  beforeEach(() => {
+    isTauriMock.mockReturnValue(true)
+    credentialResult = { credential: { mode: "subscription" }, activeAccountId: "acc-1" }
+    latestRow = null
+  })
+
+  it("shows a busy placeholder while the first quota fetch is in flight", () => {
+    limitsResult = { snapshot: null, refreshing: true, queryEnabled: true }
+    render(<SubscriptionOverviewTab />)
+    expect(screen.getByLabelText("Loading quota…")).toBeInTheDocument()
+    expect(screen.queryByTestId("overview-refresh")).not.toBeInTheDocument()
+  })
+
+  it("falls back to the empty state once the fetch settles with nothing", () => {
+    limitsResult = { snapshot: null, refreshing: false, queryEnabled: true }
+    render(<SubscriptionOverviewTab />)
+    expect(screen.queryByLabelText("Loading quota…")).not.toBeInTheDocument()
+    expect(screen.getByTestId("overview-refresh")).toBeInTheDocument()
+  })
+
+  // A failed read is not "still loading" — the error has to win over the
+  // placeholder or a broken quota read would spin forever.
+  it("shows the error rather than the placeholder when the read failed", () => {
+    limitsResult = {
+      snapshot: {
+        provider: "anthropic",
+        accountId: "acc-1",
+        fetchedAt: NOW,
+        meters: [],
+        error: "401",
+      },
+      refreshing: true,
+      queryEnabled: true,
+    }
+    render(<SubscriptionOverviewTab />)
+    expect(screen.queryByLabelText("Loading quota…")).not.toBeInTheDocument()
+    expect(screen.getByTestId("overview-refresh")).toBeInTheDocument()
+  })
+
+  it("keeps the signed-out state ahead of any loading placeholder", () => {
+    credentialResult = { credential: null, activeAccountId: null }
+    limitsResult = { snapshot: null, refreshing: true, queryEnabled: true }
+    render(<SubscriptionOverviewTab />)
+    expect(screen.queryByLabelText("Loading quota…")).not.toBeInTheDocument()
+  })
+})

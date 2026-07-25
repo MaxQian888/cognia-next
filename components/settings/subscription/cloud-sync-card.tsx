@@ -23,7 +23,9 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import { SettingsAlert } from "@/components/settings/common/settings-section"
 import { SyncStatusStrip, type SyncPhase } from "@/components/settings/_shared/sync-status-strip"
+import { isTauri } from "@/lib/tauri"
 
 import { getSettings, saveSettings } from "@/lib/db/settings"
 import { SubscriptionPassphraseError } from "@/lib/subscription/core/encrypted-package"
@@ -45,6 +47,7 @@ import { ALL_PROVIDER_IDS } from "@/types/subscription"
 
 export function CloudSyncCard() {
   const t = useTranslations("subscription.common.cloudSync")
+  const tRoot = useTranslations("subscription")
   const [enabled, setEnabled] = useState(false)
   const [connectionReady, setConnectionReady] = useState(false)
   const [lastSyncAt, setLastSyncAt] = useState<string | undefined>()
@@ -117,6 +120,12 @@ export function CloudSyncCard() {
       return
     }
     void onSyncNow()
+  }
+
+  // Both sync and restore round-trip the keychain-backed vault, and the WebDAV
+  // password itself lives in the keyring — none of it resolves in a browser.
+  if (!isTauri()) {
+    return <SettingsAlert title={t("title")}>{tRoot("webModeBanner")}</SettingsAlert>
   }
 
   return (

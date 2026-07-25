@@ -9,7 +9,13 @@
 
 import { useCallback, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { DownloadIcon, FolderOpenIcon, FileTextIcon, AlertCircleIcon } from "lucide-react"
+import {
+  DownloadIcon,
+  FolderOpenIcon,
+  FileTextIcon,
+  AlertCircleIcon,
+  Loader2Icon,
+} from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -324,6 +330,7 @@ export function SubagentImportDialog({ open, onOpenChange, onImported }: Props) 
                     disabled={busy}
                     data-testid="subagent-import-tauri-pick"
                   >
+                    {busy && <Loader2Icon className="mr-2 size-4 animate-spin" aria-hidden />}
                     {t("pickFiles")}
                   </Button>
                 </div>
@@ -337,6 +344,7 @@ export function SubagentImportDialog({ open, onOpenChange, onImported }: Props) 
                     disabled={busy}
                     data-testid="subagent-import-tauri-pick-folder"
                   >
+                    {busy && <Loader2Icon className="mr-2 size-4 animate-spin" aria-hidden />}
                     {t("pickFolder")}
                   </Button>
                 </div>
@@ -528,8 +536,12 @@ export function SubagentImportDialog({ open, onOpenChange, onImported }: Props) 
                 disabled={busy || selected.size === 0}
                 data-testid="subagent-import-apply"
               >
-                <DownloadIcon className="mr-2 size-4" />
-                {t("applyButton", { count: selected.size })}
+                {busy ? (
+                  <Loader2Icon className="mr-2 size-4 animate-spin" aria-hidden />
+                ) : (
+                  <DownloadIcon className="mr-2 size-4" />
+                )}
+                {busy ? t("applying") : t("applyButton", { count: selected.size })}
               </Button>
             </DialogFooter>
           </div>

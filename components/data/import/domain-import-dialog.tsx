@@ -1,10 +1,17 @@
 "use client"
 
-// Per-domain import: pick a JSON file produced by `buildDomainExport`,
-// confirm the merge strategy, apply.
+// Per-domain import: pick a JSON file produced by `buildDomainExport`, review
+// what it will write, confirm the merge strategy, apply.
+//
+// The review step matters: this used to commit on nothing more than the domain
+// name and an export timestamp, while its sibling full-restore dialog showed a
+// per-table row count. `PayloadRowCounts` is that same read-out — a
+// `DomainExportFile.payload` is a `BackupPayloadV3`, so the counts are computed
+// by one shared loop rather than two that can drift.
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
+import { Loader2Icon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import {
@@ -34,6 +41,7 @@ import {
 } from "@/lib/data/domain"
 import type { ImportMergeStrategy, ImportSummary } from "@/lib/data/types"
 import { ImportSummary as ImportSummaryView } from "./import-summary"
+import { PayloadRowCounts } from "./import-preview"
 import { toast } from "sonner"
 
 const log = createLogger("data-import")
@@ -133,17 +141,24 @@ export function DomainImportDialog({ domain, labelKey, trigger }: Props) {
 
           {!pending && (
             <Button onClick={() => void pick()} disabled={busy}>
-              {tImport("dialog.pickButton")}
+              {busy && <Loader2Icon className="mr-2 size-4 animate-spin" aria-hidden />}
+              {busy ? t("loading") : tImport("dialog.pickButton")}
             </Button>
           )}
 
           {pending && (
-            <p className="rounded-md border bg-muted/30 p-2 text-xs text-muted-foreground">
-              {t("domain.importLoaded", {
-                domain: pending.domain,
-                exportedAt: new Date(pending.exportedAt).toLocaleString(),
-              })}
-            </p>
+            <div
+              className="space-y-2 rounded-md border bg-muted/30 p-2 text-xs text-muted-foreground"
+              data-testid="domain-import-preview"
+            >
+              <p>
+                {t("domain.importLoaded", {
+                  domain: pending.domain,
+                  exportedAt: new Date(pending.exportedAt).toLocaleString(),
+                })}
+              </p>
+              <PayloadRowCounts payload={pending.payload} />
+            </div>
           )}
 
           {summary && <ImportSummaryView summary={summary} />}

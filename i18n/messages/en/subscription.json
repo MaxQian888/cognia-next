@@ -129,6 +129,8 @@
       "cancel": "Cancel",
       "confirm": "Save",
       "empty": "No accounts yet. Add one to start using this provider.",
+      "expiryStale": "Access token expired — refreshes on next use",
+      "expiryValid": "Token valid until {at}",
       "inUseByCharacter": "Char: {name}",
       "inUseBySession": "Session: {name}",
       "inUseMore": "+{count} more",
@@ -492,14 +494,15 @@
     }
   },
   "overview": {
+    "loading": "Loading quota…",
     "noDataBody": "Fetch your quota straight from Anthropic's free usage endpoint — no token cost, no chat message needed.",
     "noDataTitle": "No usage data yet",
     "officialQuotaDisabledBody": "Enable it in Subscription settings only if you accept the upstream compatibility and network-path risk. Passive usage from normal work remains available.",
     "officialQuotaDisabledTitle": "Official quota query is off",
     "refresh": "Refresh",
-    "signInCta": "Sign in",
     "signedOutBody": "Sign in with your Claude account to monitor 5h/7d rate-limit windows.",
     "signedOutTitle": "Not signed in",
+    "signInCta": "Sign in",
     "sourceEndpoint": "Live usage API",
     "sourceHeaders": "From chat response headers",
     "status": {

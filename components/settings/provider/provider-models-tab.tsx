@@ -6,6 +6,7 @@ import { Search, RefreshCw, Loader2, ArrowUpDown, X, PlugZap } from "lucide-reac
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 
@@ -78,6 +79,11 @@ export interface ProviderModelsTabProps {
    */
   onTestConnection?: () => void
   isTesting?: boolean
+  /**
+   * True while the models.dev metadata read is still in flight. Model rows then
+   * reserve space for the capability chips instead of growing them in later.
+   */
+  metadataLoading?: boolean
 }
 
 /* ── Helpers ─────────────────────────────────────────────────────────────── */
@@ -111,6 +117,8 @@ interface ModelCardProps {
   openWeightsLabel: string
   /** Pre-translated "modes" suffix, formatted with the count via ICU. */
   formatModes: (count: number) => string
+  /** See `ProviderModelsTabProps.metadataLoading`. */
+  metadataLoading?: boolean
 }
 
 function ModelCard({
@@ -123,10 +131,16 @@ function ModelCard({
   maxOutputLabel,
   openWeightsLabel,
   formatModes,
+  metadataLoading = false,
 }: ModelCardProps) {
   const caps: string[] = model.capabilities ?? []
   const variants = model.variants ?? []
   const statusVariant = statusBadgeVariant(model.status)
+  // The models.dev catalog is a separate Dexie read that lands after the static
+  // provider catalog. Without a placeholder the card first paints bare and then
+  // *grows* a capability row, shifting everything below it. Reserve the row at
+  // the same height while the read is still in flight.
+  const showCapsPlaceholder = metadataLoading && caps.length === 0
 
   return (
     <div className="rounded-lg border p-3 flex flex-col gap-2">
@@ -157,14 +171,22 @@ function ModelCard({
         />
       </div>
 
-      {caps.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {caps.map((cap) => (
-            <Badge key={cap} variant="secondary" className="text-xs px-1.5 py-0">
-              {cap}
-            </Badge>
+      {showCapsPlaceholder ? (
+        <div className="flex flex-wrap gap-1" data-testid="model-caps-placeholder" aria-hidden>
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-4 w-14 rounded-full" />
           ))}
         </div>
+      ) : (
+        caps.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {caps.map((cap) => (
+              <Badge key={cap} variant="secondary" className="text-xs px-1.5 py-0">
+                {cap}
+              </Badge>
+            ))}
+          </div>
+        )
       )}
 
       {variants.length > 0 && (
@@ -218,6 +240,7 @@ export function ProviderModelsTab({
   isRefreshing = false,
   onTestConnection,
   isTesting = false,
+  metadataLoading = false,
 }: ProviderModelsTabProps) {
   const t = useTranslations("providers")
   const [search, setSearch] = useState("")
@@ -458,6 +481,7 @@ export function ProviderModelsTab({
               maxOutputLabel={t("modelsTab.maxOutput")}
               openWeightsLabel={t("modelsTab.openWeights")}
               formatModes={(count) => t("modelsTab.modes", { count })}
+              metadataLoading={metadataLoading}
             />
           ))}
         </div>

@@ -14056,6 +14056,7 @@
     },
     "import": {
       "cancel": "Cancel",
+      "capabilitiesLabel": "Capabilities:",
       "confirm": "Install {count}",
       "description": "Confirm the entries staged from {source} before installing.",
       "emptyDrafts": "Nothing to import — all files failed to parse.",
@@ -21722,6 +21723,8 @@
       "webOnlyHintBefore": "Available in the desktop build only. Run ",
       "webOnlyHintCode": "pnpm tauri dev"
     },
+    "desktopOnlySectionBody": "This section needs the desktop app — it reads credentials and local files the browser can't reach. Open Cognia on your desktop to use it.",
+    "desktopOnlySectionTitle": "Available in the desktop app only",
     "developer": {
       "lsp": {
         "description": "When enabled, the VS Code extension LSP binary policy lets unsigned servers spawn after one in-session consent prompt instead of refusing them outright. Useful when developing your own .vsix.",
@@ -24007,6 +24010,7 @@
       "description": "Reusable templates and live status for sub-agents spawned by a parent agent. Templates persist across sessions; runtime data is ephemeral.",
       "import": {
         "applyButton": "Import {count} agent(s)",
+        "applying": "Applying…",
         "description": "Read sub-agent configurations from external tools and convert them to cognia templates or characters.",
         "errors": {
           "pickFailed": "Could not read the selected files."
@@ -26052,6 +26056,8 @@
         "cancel": "Cancel",
         "confirm": "Save",
         "empty": "No accounts yet. Add one to start using this provider.",
+        "expiryStale": "Access token expired — refreshes on next use",
+        "expiryValid": "Token valid until {at}",
         "inUseByCharacter": "Char: {name}",
         "inUseBySession": "Session: {name}",
         "inUseMore": "+{count} more",

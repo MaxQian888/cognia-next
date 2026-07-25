@@ -1,7 +1,9 @@
 "use client"
 
-// Third-party endpoint preset *library* (Anthropic + Codex only — the OpenCode
-// provider tab doesn't render this component).
+// Third-party endpoint preset *library*, for all three providers. (Anthropic +
+// Codex only until the 2026-06-07 ADR-0025 amendment brought OpenCode to
+// parity; `PresetProvider` below includes it and `provider-tab-opencode.tsx`
+// renders this component.)
 //
 // Storage: `ProviderVault.presets` (a library of named presets per provider)
 // plus `defaultPresetId`. Accounts bind to a preset by id; the default applies
@@ -369,6 +371,7 @@ function PresetEditor({
               id="preset-headers"
               value={headersText}
               onChange={(e) => setHeadersText(e.target.value)}
+              // i18n-exempt: HTTP header syntax sample, not UI prose
               placeholder="X-Org: cognia"
               rows={4}
               spellCheck={false}

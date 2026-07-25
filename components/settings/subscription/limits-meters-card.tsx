@@ -20,10 +20,14 @@ import { GaugeIcon, RefreshCwIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { SettingsCard } from "@/components/settings/common/settings-section"
 import { cn } from "@/lib/utils"
+import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
+import { useCountUp } from "@/hooks/usage/use-count-up"
 import { useProviderLimits } from "@/lib/subscription/limits/hooks"
 import { splitCountdown } from "@/lib/subscription/anthropic/usage-analytics"
 
-import type { LimitsMeter, LimitsMeterStatus, ProviderId } from "@/types/subscription"
+import { QuotaBar } from "./quota-bar"
+
+import type { LimitsMeter, ProviderId } from "@/types/subscription"
 
 export interface LimitsMetersCardProps {
   provider: ProviderId
@@ -38,14 +42,6 @@ export interface LimitsMetersCardProps {
    * card renders nothing so credit-only providers don't show an empty shell.
    */
   windowsOnly?: boolean
-}
-
-const STATUS_BAR: Record<LimitsMeterStatus, string> = {
-  ok: "bg-emerald-500",
-  warn: "bg-amber-500",
-  crit: "bg-destructive",
-  exceeded: "bg-destructive",
-  unknown: "bg-muted-foreground",
 }
 
 function currencySymbol(currency?: string): string {
@@ -77,17 +73,19 @@ export function MeterRow({
   const label =
     meter.labelKey && tr.has(meter.labelKey) ? tr(meter.labelKey) : (meter.label ?? meter.id)
   const pct = meter.usedPct == null ? null : Math.max(0, Math.min(100, Math.round(meter.usedPct)))
+  const { reduce } = useFlowMotion()
+  const displayPct = Math.round(useCountUp(pct ?? 0, { disabled: reduce, durationMs: 500 }))
 
   // Right-hand figure: "21% used" for windows, "¥88.50 left" for balances.
   let figure: string
   if (meter.kind === "window") {
-    figure = t("percentUsed", { pct: pct ?? 0 })
+    figure = t("percentUsed", { pct: displayPct })
   } else if (typeof meter.remaining === "number") {
     const sym = currencySymbol(meter.currency ?? meter.unit)
     const unit = sym ? "" : meter.unit ? ` ${meter.unit}` : ""
     figure = t("amountLeft", { amount: `${sym}${trimAmount(meter.remaining)}${unit}` })
   } else if (pct != null) {
-    figure = t("percentUsed", { pct })
+    figure = t("percentUsed", { pct: displayPct })
   } else {
     figure = t("noValue")
   }
@@ -109,19 +107,7 @@ export function MeterRow({
         <span className="text-sm font-medium">{label}</span>
         <span className="text-xs tabular-nums text-muted-foreground">{figure}</span>
       </div>
-      <div
-        className="h-2 w-full overflow-hidden rounded-full bg-muted"
-        role="progressbar"
-        aria-valuenow={pct ?? 0}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-label={label}
-      >
-        <div
-          className={cn("h-full rounded-full transition-all", STATUS_BAR[meter.status])}
-          style={{ width: `${pct ?? 0}%` }}
-        />
-      </div>
+      <QuotaBar pct={pct} status={meter.status} label={label} />
       {reset && <p className="text-xs text-muted-foreground">{reset}</p>}
     </div>
   )

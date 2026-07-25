@@ -2,8 +2,9 @@
 
 // Per-account preset binding selector (v3). Lets the user pin one account to a
 // specific endpoint preset from the provider's library, or fall back to the
-// provider-level default. Only meaningful for providers that support presets
-// (anthropic, codex) — OpenCode manages endpoints in its own auth.json.
+// provider-level default. Gated on `providerSupportsPresets` below, which
+// covers all three providers — OpenCode reached preset parity in the 2026-06-07
+// ADR-0025 amendment, so it is no longer the exception this comment claimed.
 //
 // On change it fetches the full Account (to keep the secret bearer intact),
 // rewrites `presetId`, and saves it back through the keyring transport.

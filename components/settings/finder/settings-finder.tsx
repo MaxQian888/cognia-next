@@ -22,10 +22,12 @@ import {
   CommandList,
 } from "@/components/ui/command"
 import {
+  DESKTOP_ONLY_SECTIONS,
   SETTINGS_NAV,
   SETTINGS_SEARCH_KEYWORDS,
   type SettingsSectionId,
 } from "@/components/settings/settings-nav-config"
+import { useDesktopAvailable } from "@/hooks/settings/use-desktop-available"
 import { SETTING_CONTROLS } from "./control-registry"
 
 const SECTION_LABEL_KEY: Record<SettingsSectionId, string> = Object.fromEntries(
@@ -42,6 +44,14 @@ export function SettingsFinder({
   const t = useTranslations("settings")
   const router = useRouter()
   const searchParams = useSearchParams()
+  const desktopAvailable = useDesktopAvailable()
+
+  // The sidebar hides desktop-only sections in web mode; the finder has to make
+  // the same cut or it becomes the back door into them — including the controls
+  // that deep-link into one.
+  const reachable = (id: SettingsSectionId) => desktopAvailable || !DESKTOP_ONLY_SECTIONS.has(id)
+  const navItems = SETTINGS_NAV.filter((n) => reachable(n.id))
+  const controls = SETTING_CONTROLS.filter((c) => reachable(c.sectionId))
 
   const sectionLabel = (id: SettingsSectionId) => t(`tabs.${SECTION_LABEL_KEY[id]}` as never)
 
@@ -66,7 +76,7 @@ export function SettingsFinder({
         <CommandEmpty>{t("finder.empty")}</CommandEmpty>
 
         <CommandGroup heading={t("finder.controlsHeading")}>
-          {SETTING_CONTROLS.map((c) => {
+          {controls.map((c) => {
             const label = t(`finder.controls.${c.labelKey}` as never)
             return (
               <CommandItem
@@ -86,7 +96,7 @@ export function SettingsFinder({
         </CommandGroup>
 
         <CommandGroup heading={t("finder.sectionsHeading")}>
-          {SETTINGS_NAV.map((n) => (
+          {navItems.map((n) => (
             <CommandItem
               key={n.id}
               value={`section:${n.id}`}

@@ -256,13 +256,17 @@ export function SubscriptionUsageTab() {
         onExpandAll={() => setAllSections(true)}
         onCollapseAll={() => setAllSections(false)}
       />
-      <BalancesSection now={now} />
+      {/* Was the one section on this tab rendered outside `MotionReveal`, so it
+          popped in while everything below it faded up in sequence. */}
+      <MotionReveal index={0}>
+        <BalancesSection now={now} />
+      </MotionReveal>
       {models.length > 0 && (
-        <MotionReveal index={0}>
+        <MotionReveal index={1}>
           <UsageStatGrid models={models} />
         </MotionReveal>
       )}
-      <MotionReveal index={1}>
+      <MotionReveal index={2}>
         <CurrentWindowCard
           latest={latest}
           now={now}
@@ -270,7 +274,7 @@ export function SubscriptionUsageTab() {
           onToggle={() => toggleSection("window")}
         />
       </MotionReveal>
-      <MotionReveal index={2}>
+      <MotionReveal index={3}>
         <UtilizationTrendCard
           rows={snapshotRows}
           rangeDays={rangeDays}
@@ -279,7 +283,7 @@ export function SubscriptionUsageTab() {
           onToggle={() => toggleSection("trend")}
         />
       </MotionReveal>
-      <MotionReveal index={3}>
+      <MotionReveal index={4}>
         <ModelBreakdownCard
           models={models}
           mode={mode}
@@ -287,21 +291,21 @@ export function SubscriptionUsageTab() {
           onToggle={() => toggleSection("models")}
         />
       </MotionReveal>
-      <MotionReveal index={4}>
+      <MotionReveal index={5}>
         <InsightsCard
           contributors={contributors}
           open={isOpen("insights")}
           onToggle={() => toggleSection("insights")}
         />
       </MotionReveal>
-      <MotionReveal index={5}>
+      <MotionReveal index={6}>
         <CostOverTimeCard
           rows={filteredSessionRows}
           open={isOpen("cost")}
           onToggle={() => toggleSection("cost")}
         />
       </MotionReveal>
-      <MotionReveal index={6}>
+      <MotionReveal index={7}>
         <TopSessionsCard
           rows={filteredSessionRows}
           mode={mode}
@@ -309,7 +313,7 @@ export function SubscriptionUsageTab() {
           onToggle={() => toggleSection("sessions")}
         />
       </MotionReveal>
-      <MotionReveal index={7}>
+      <MotionReveal index={8}>
         <RawSamplesCard
           rows={snapshotRows}
           rangeDays={rangeDays}

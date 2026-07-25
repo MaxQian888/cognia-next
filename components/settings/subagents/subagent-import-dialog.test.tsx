@@ -523,3 +523,45 @@ describe("SubagentImportDialog", () => {
     expect(toastError).toHaveBeenCalled()
   })
 })
+
+// Apply writes each selected draft over sequential IPC. Its only feedback was a
+// disabled button, so on a multi-draft import the click read as dead.
+describe("SubagentImportDialog apply feedback", () => {
+  it("swaps the apply button to a busy label while the write is in flight", async () => {
+    let release: (v: unknown) => void = () => {}
+    applyMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+        })
+    )
+    render(<SubagentImportDialog open={true} onOpenChange={() => {}} />)
+    fireEvent.click(screen.getByTestId("subagent-import-next"))
+
+    const input = screen.getByTestId("subagent-import-file-input") as HTMLInputElement
+    const file = makeFile(
+      "code-reviewer.md",
+      SAMPLE_FILE_CONTENT,
+      ".claude/agents/code-reviewer.md"
+    )
+    await act(async () => {
+      Object.defineProperty(input, "files", { value: [file], writable: false })
+      fireEvent.change(input)
+    })
+    await waitFor(() =>
+      expect(screen.getByTestId("subagent-import-step-review")).toBeInTheDocument()
+    )
+
+    const applyBtn = screen.getByTestId("subagent-import-apply") as HTMLButtonElement
+    expect(applyBtn.textContent).toContain("applyButton")
+
+    fireEvent.click(applyBtn)
+    await waitFor(() => expect(applyBtn.textContent).toContain("applying"))
+    expect(applyBtn.querySelector(".animate-spin")).not.toBeNull()
+    expect(applyBtn.disabled).toBe(true)
+
+    await act(async () => {
+      release({ imported: [], failed: [] })
+    })
+  })
+})

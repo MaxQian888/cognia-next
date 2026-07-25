@@ -4,6 +4,7 @@ import React from "react"
 import { Settings, Star, Trash2 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
@@ -175,26 +176,37 @@ export function ProviderDetailPanel({
           {costTab && <TabsTrigger value="cost">{t("tabs.cost")}</TabsTrigger>}
           {advancedTab && <TabsTrigger value="advanced">{t("tabs.advanced")}</TabsTrigger>}
         </TabsList>
-        <div className="flex-1 overflow-y-auto">
-          <TabsContent value="config" className="m-0 p-4">
-            {configTab ?? <div>{t("detailPanel.configPlaceholder")}</div>}
-          </TabsContent>
-          {modelsTab && (
-            <TabsContent value="models" className="m-0 p-4">
-              {modelsTab}
+        {/* Themed `ScrollArea`, matching this feature's dialogs — a native
+            scrollbar here made the pane and the dialogs look unrelated.
+
+            `max-w-4xl`: the providers section opts out of the settings shell's
+            `max-w-5xl` cap (it owns a fill-height master/detail frame), so on an
+            ultrawide window these forms stretched edge to edge. The cap lives
+            here, once, rather than in each of Config / Models / Cost / Advanced.
+            Container queries still resolve against `@container/provider-pane`
+            one level up, so the cost tab's `@3xl` grid is unaffected. */}
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="mx-auto w-full max-w-4xl">
+            <TabsContent value="config" className="m-0 p-4">
+              {configTab ?? <div>{t("detailPanel.configPlaceholder")}</div>}
             </TabsContent>
-          )}
-          {costTab && (
-            <TabsContent value="cost" className="m-0 p-4">
-              {costTab}
-            </TabsContent>
-          )}
-          {advancedTab && (
-            <TabsContent value="advanced" className="m-0 p-4">
-              {advancedTab}
-            </TabsContent>
-          )}
-        </div>
+            {modelsTab && (
+              <TabsContent value="models" className="m-0 p-4">
+                {modelsTab}
+              </TabsContent>
+            )}
+            {costTab && (
+              <TabsContent value="cost" className="m-0 p-4">
+                {costTab}
+              </TabsContent>
+            )}
+            {advancedTab && (
+              <TabsContent value="advanced" className="m-0 p-4">
+                {advancedTab}
+              </TabsContent>
+            )}
+          </div>
+        </ScrollArea>
       </Tabs>
     </div>
   )

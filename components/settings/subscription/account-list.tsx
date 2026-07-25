@@ -29,6 +29,8 @@ import {
 } from "@/components/ui/dropdown-menu"
 
 import { useAccounts } from "@/lib/subscription/core/hooks"
+import { accountExpiryState } from "@/lib/subscription/core/account-expiry"
+import { useSubscriptionNow } from "@/lib/subscription/core/now-ticker"
 import type { AccountSummary, ProviderId } from "@/types/subscription"
 
 import { AccountUsageChips, useAccountUsageIndex } from "./account-usage-chips"
@@ -49,6 +51,8 @@ export function AccountList({ provider, onAdd, secondaryAction }: AccountListPro
   const { accounts, activeAccountId, loading, setActive, rename, remove } = useAccounts(provider)
   // Queried once for the whole list — see `useAccountUsageIndex`.
   const usageIndex = useAccountUsageIndex()
+  // Shared ticker, so the expiry read-out doesn't go stale while the pane is open.
+  const now = useSubscriptionNow()
 
   const [renameTarget, setRenameTarget] = useState<AccountSummary | null>(null)
   const [removeTarget, setRemoveTarget] = useState<AccountSummary | null>(null)
@@ -101,6 +105,7 @@ export function AccountList({ provider, onAdd, secondaryAction }: AccountListPro
                   <div className="truncate text-[11px] text-muted-foreground">
                     {[account.email, account.plan].filter(Boolean).join(" · ")}
                   </div>
+                  <AccountExpiryLine expiresAtMs={account.expiresAtMs} nowMs={now} />
                   <AccountUsageChips accountId={account.id} usage={usageIndex.get(account.id)} />
                   {providerSupportsPresets(provider) && (
                     <AccountPresetSelector provider={provider} accountId={account.id} />
@@ -157,6 +162,34 @@ export function AccountList({ provider, onAdd, secondaryAction }: AccountListPro
         />
       )}
     </Card>
+  )
+}
+
+/**
+ * Per-row credential expiry. Previously invisible everywhere in the list — only
+ * the *active* account's expiry showed, one panel over in the Account tab — so
+ * a user with several saved accounts had no read-out at all.
+ *
+ * Says "refreshes on next use" rather than "expired": `expiresAtMs` is the
+ * access token's expiry and an elapsed one is routine (see `account-expiry.ts`).
+ * Refresh failures aren't persisted in the vault, so there is nothing here that
+ * could honestly claim an account is broken.
+ */
+function AccountExpiryLine({ expiresAtMs, nowMs }: { expiresAtMs: number; nowMs: number }) {
+  const t = useTranslations("subscription.common.accountList")
+  const state = accountExpiryState(expiresAtMs, nowMs)
+  if (state === "notApplicable") return null
+
+  return (
+    <div
+      className={`truncate text-[11px] ${state === "stale" ? "text-amber-600 dark:text-amber-500" : "text-muted-foreground"}`}
+      data-testid="account-expiry"
+      data-state={state}
+    >
+      {state === "stale"
+        ? t("expiryStale")
+        : t("expiryValid", { at: new Date(expiresAtMs).toLocaleString() })}
+    </div>
   )
 }
 

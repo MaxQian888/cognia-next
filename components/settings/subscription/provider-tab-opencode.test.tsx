@@ -70,6 +70,19 @@ jest.mock("@/lib/subscription/opencode/discovery", () => ({
 
 import { ProviderTabOpencode } from "./provider-tab-opencode"
 
+// The panel refuses to render in web mode (the credential vault is
+// keychain-backed), so the suite has to declare itself desktop.
+const TAURI_MARKER = "__TAURI_INTERNALS__"
+function setDesktop(on: boolean) {
+  if (on) {
+    ;(window as unknown as Record<string, unknown>)[TAURI_MARKER] = {}
+  } else {
+    delete (window as unknown as Record<string, unknown>)[TAURI_MARKER]
+  }
+}
+beforeAll(() => setDesktop(true))
+afterAll(() => setDesktop(false))
+
 beforeEach(() => {
   jest.clearAllMocks()
   discoveryState.discovered = {
@@ -117,5 +130,16 @@ describe("ProviderTabOpencode", () => {
     discoveryState.discovered = { authJsonPath: "/x/auth.json", entries: [] }
     render(<ProviderTabOpencode />)
     expect(screen.getByText("empty")).toBeInTheDocument()
+  })
+})
+
+describe("ProviderTabOpencode in web mode", () => {
+  beforeEach(() => setDesktop(false))
+  afterEach(() => setDesktop(true))
+
+  it("shows the keychain banner instead of a surface that cannot work", () => {
+    render(<ProviderTabOpencode />)
+    expect(screen.queryByTestId("account-list-opencode")).not.toBeInTheDocument()
+    expect(screen.getByText("webModeBanner")).toBeInTheDocument()
   })
 })

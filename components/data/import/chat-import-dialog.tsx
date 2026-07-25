@@ -1,7 +1,10 @@
 "use client"
 
-// Drag-or-pick a third-party export file (ChatGPT / Claude / Gemini), preview
-// the detected conversations, then commit them to the session list.
+// Pick a third-party export file (ChatGPT / Claude / Gemini), preview the
+// detected conversations, then commit them to the session list.
+//
+// Pick only — no drag-and-drop. (This said "Drag-or-pick" for a capability that
+// was never built: no importer in the app has a drop target.)
 
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"

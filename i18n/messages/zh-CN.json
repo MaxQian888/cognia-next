@@ -14056,6 +14056,7 @@
     },
     "import": {
       "cancel": "取消",
+      "capabilitiesLabel": "能力：",
       "confirm": "安装 {count} 个",
       "description": "确认从 {source} 暂存的条目后再安装。",
       "emptyDrafts": "没有可导入项——所有文件均解析失败。",
@@ -21722,6 +21723,8 @@
       "webOnlyHintBefore": "仅在桌面版本中可用。运行 ",
       "webOnlyHintCode": "pnpm tauri dev"
     },
+    "desktopOnlySectionBody": "该设置项需要桌面应用——它要读取浏览器无法访问的凭据和本地文件。请在桌面端打开 Cognia 使用。",
+    "desktopOnlySectionTitle": "仅桌面应用可用",
     "developer": {
       "lsp": {
         "description": "开启后，VS Code 扩展的 LSP 二进制策略会在一次会话内确认后允许未签名服务器启动，而非直接拒绝。仅当你在调试自己开发的 .vsix 时使用。",
@@ -24007,6 +24010,7 @@
       "description": "由父代理派生的子代理模板与实时运行状态。模板会持久化保存,运行时数据为内存级,重启后清空。",
       "import": {
         "applyButton": "导入 {count} 个",
+        "applying": "应用中…",
         "description": "从外部工具读取子代理配置，并转换为 Cognia 模板或角色。",
         "errors": {
           "pickFailed": "无法读取所选文件。"
@@ -26052,6 +26056,8 @@
         "cancel": "取消",
         "confirm": "保存",
         "empty": "暂无账号。先添加一个再使用此服务商。",
+        "expiryStale": "访问令牌已过期——下次使用时自动刷新",
+        "expiryValid": "令牌有效期至 {at}",
         "inUseByCharacter": "角色：{name}",
         "inUseBySession": "会话：{name}",
         "inUseMore": "另有 {count} 项",

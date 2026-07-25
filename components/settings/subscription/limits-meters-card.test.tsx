@@ -9,8 +9,12 @@ import type { ProviderLimitsRow } from "@/types/subscription"
 // next-intl is globally mocked against en.json in jest.setup.ts.
 
 const useProviderLimitsMock = jest.fn()
+const useCountUpMock = jest.fn((target: number, _options?: unknown) => target)
 jest.mock("@/lib/subscription/limits/hooks", () => ({
   useProviderLimits: (...a: unknown[]) => useProviderLimitsMock(...a),
+}))
+jest.mock("@/hooks/usage/use-count-up", () => ({
+  useCountUp: (target: number, options: unknown) => useCountUpMock(target, options),
 }))
 
 import { LimitsMetersCard } from "./limits-meters-card"
@@ -80,6 +84,7 @@ describe("LimitsMetersCard", () => {
     expect(screen.getByTestId("limits-meter-acc-1-credit")).toHaveTextContent("Credit balance")
     expect(screen.getByTestId("limits-meter-acc-1-credit")).toHaveTextContent("¥88.50 left")
     expect(screen.getByTestId("limits-fetched-acc-1")).toBeInTheDocument()
+    expect(useCountUpMock).toHaveBeenCalledWith(21, expect.objectContaining({ durationMs: 500 }))
   })
 
   it("renders the error state", () => {

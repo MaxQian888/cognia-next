@@ -275,7 +275,14 @@ function PermissionStep({
   )
 }
 
-function PermissionListCard({ title, perms }: { title: string; perms: PluginPermission[] }) {
+/**
+ * Exported so the import dialog can show the same permission read-out. Import
+ * only stages a `discovered` row rather than running the marketplace install
+ * chain, so it can't reuse the whole `PermissionStep` — but "here is what this
+ * plugin declares, with the dangerous ones flagged" must look identical
+ * wherever the user is asked to accept a manifest.
+ */
+export function PermissionListCard({ title, perms }: { title: string; perms: PluginPermission[] }) {
   return (
     <Card className="p-3 space-y-2">
       <div className="text-xs font-semibold">{title}</div>

@@ -21,7 +21,9 @@ import {
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import { SettingsAlert, SettingsEmptyState } from "@/components/settings/common/settings-section"
+import { PanelTransition } from "@/components/settings/common/panel-transition"
 import { WindowGaugeCard } from "@/components/settings/subscription/window-gauge-card"
 import { MeterRow } from "@/components/settings/subscription/limits-meters-card"
 import { cn } from "@/lib/utils"
@@ -91,49 +93,70 @@ export function SubscriptionOverviewTab({
     void refresh()
   }, [tabReady, credential, activeAccountId, resolved, now, queryEnabled, refresh])
 
-  if (!tabReady) {
-    return <SettingsAlert title={t("webModeBanner")}>{t("webModeBanner")}</SettingsAlert>
-  }
+  // The pane has four mutually exclusive full-subtree states. They used to
+  // replace each other instantly; `PanelTransition` crossfades them, keyed on
+  // which branch is showing (it collapses to a plain wrapper under reduced
+  // motion). `branch` is also what distinguishes a first load in flight from a
+  // genuinely empty account — previously both rendered the same "no data" block
+  // and the only tell was a spinner buried in its action button.
+  const firstLoad = resolved.windows.length === 0 && refreshing && !snapshot?.error
+  const branch = !tabReady
+    ? "web"
+    : !credential
+      ? "signedOut"
+      : firstLoad
+        ? "loading"
+        : resolved.windows.length === 0
+          ? "empty"
+          : "ready"
 
-  if (!credential) {
+  if (branch !== "ready") {
     return (
-      <SettingsEmptyState
-        title={t("overview.signedOutTitle")}
-        description={t("overview.signedOutBody")}
-        action={
-          onRequestAddAccount ? (
-            <Button onClick={onRequestAddAccount}>{t("overview.signInCta")}</Button>
-          ) : undefined
-        }
-      />
-    )
-  }
-
-  if (resolved.windows.length === 0) {
-    return (
-      <SettingsEmptyState
-        title={queryEnabled ? t("overview.noDataTitle") : t("overview.officialQuotaDisabledTitle")}
-        // A failed query is not "no data yet": show why (expired bearer,
-        // throttle, outage) rather than the generic empty copy, which is what
-        // made a broken quota read indistinguishable from an idle account.
-        description={
-          !queryEnabled
-            ? t("overview.officialQuotaDisabledBody")
-            : snapshot?.error
-              ? t("limits.error", { message: snapshot.error })
-              : t("overview.noDataBody")
-        }
-        action={
-          <Button
-            onClick={() => void (queryEnabled ? refresh({ force: true }) : setQueryEnabled(true))}
-            disabled={refreshing}
-            data-testid="overview-refresh"
-          >
-            <RefreshCwIcon className={cn("mr-2 size-4", refreshing && "animate-spin")} />
-            {queryEnabled ? t("overview.refresh") : t("limits.query.enable")}
-          </Button>
-        }
-      />
+      <PanelTransition activeKey={branch}>
+        {branch === "web" ? (
+          <SettingsAlert title={t("webModeBanner")}>{t("webModeBanner")}</SettingsAlert>
+        ) : branch === "signedOut" ? (
+          <SettingsEmptyState
+            title={t("overview.signedOutTitle")}
+            description={t("overview.signedOutBody")}
+            action={
+              onRequestAddAccount ? (
+                <Button onClick={onRequestAddAccount}>{t("overview.signInCta")}</Button>
+              ) : undefined
+            }
+          />
+        ) : branch === "loading" ? (
+          <OverviewSkeleton label={t("overview.loading")} />
+        ) : (
+          <SettingsEmptyState
+            title={
+              queryEnabled ? t("overview.noDataTitle") : t("overview.officialQuotaDisabledTitle")
+            }
+            // A failed query is not "no data yet": show why (expired bearer,
+            // throttle, outage) rather than the generic empty copy, which is what
+            // made a broken quota read indistinguishable from an idle account.
+            description={
+              !queryEnabled
+                ? t("overview.officialQuotaDisabledBody")
+                : snapshot?.error
+                  ? t("limits.error", { message: snapshot.error })
+                  : t("overview.noDataBody")
+            }
+            action={
+              <Button
+                onClick={() =>
+                  void (queryEnabled ? refresh({ force: true }) : setQueryEnabled(true))
+                }
+                disabled={refreshing}
+                data-testid="overview-refresh"
+              >
+                <RefreshCwIcon className={cn("mr-2 size-4", refreshing && "animate-spin")} />
+                {queryEnabled ? t("overview.refresh") : t("limits.query.enable")}
+              </Button>
+            }
+          />
+        )}
+      </PanelTransition>
     )
   }
 
@@ -210,6 +233,25 @@ export function SubscriptionOverviewTab({
 }
 
 /** Compact relative time ("3 minutes ago"), `null` when the input is absent. */
+/**
+ * First-load placeholder, shaped like the status strip + gauge grid it precedes.
+ * Without it a pending quota fetch rendered the identical "no data" empty state,
+ * so an account that was merely still loading was indistinguishable from one
+ * with nothing to show.
+ */
+function OverviewSkeleton({ label }: { label: string }) {
+  return (
+    <div className="@container space-y-3" aria-busy="true" aria-label={label}>
+      <Skeleton className="h-[68px] w-full rounded-lg" />
+      <div className="grid grid-cols-1 gap-3 @lg:grid-cols-2">
+        {[0, 1, 2, 3].map((i) => (
+          <Skeleton key={i} className="h-[124px] w-full rounded-lg" />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function formatRelative(target: number | null, now: number): string | null {
   if (target == null) return null
   const deltaSec = Math.round((target - now) / 1000)

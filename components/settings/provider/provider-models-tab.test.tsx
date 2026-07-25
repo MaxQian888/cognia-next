@@ -467,3 +467,34 @@ describe("ProviderModelsTab", () => {
     expect(screen.getByText("Showing 2 of 3 · 1 enabled")).toBeInTheDocument()
   })
 })
+
+// The models.dev catalog is a separate Dexie read that lands after the static
+// provider catalog, so cards used to paint bare and then *grow* a capability
+// row, shifting everything below.
+describe("ProviderModelsTab late metadata", () => {
+  const bare = [
+    { id: "m1", name: "M1", contextLength: 1000 },
+    { id: "m2", name: "M2", contextLength: 2000 },
+  ]
+
+  it("reserves the capability row while the catalog read is in flight", () => {
+    render(<ProviderModelsTab {...defaultProps} models={bare} metadataLoading />)
+    expect(screen.getAllByTestId("model-caps-placeholder")).toHaveLength(2)
+  })
+
+  it("drops the placeholder once metadata has landed", () => {
+    render(<ProviderModelsTab {...defaultProps} models={bare} metadataLoading={false} />)
+    expect(screen.queryByTestId("model-caps-placeholder")).not.toBeInTheDocument()
+  })
+
+  it("never placeholders a model that already has capabilities", () => {
+    render(<ProviderModelsTab {...defaultProps} metadataLoading />)
+    expect(screen.queryByTestId("model-caps-placeholder")).not.toBeInTheDocument()
+    expect(screen.getAllByText("Vision").length).toBeGreaterThan(0)
+  })
+
+  it("defaults to no placeholder when the prop is omitted", () => {
+    render(<ProviderModelsTab {...defaultProps} models={bare} />)
+    expect(screen.queryByTestId("model-caps-placeholder")).not.toBeInTheDocument()
+  })
+})
