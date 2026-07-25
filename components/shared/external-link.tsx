@@ -31,18 +31,20 @@ export const ExternalLink = forwardRef<HTMLAnchorElement, ExternalLinkProps>(fun
   { href, onClick, rel, target, children, ...rest },
   ref
 ) {
+  const isExternalHttpLink = /^https?:\/\//i.test(href)
+
   return (
     <a
       ref={ref}
       href={href}
-      target={target ?? "_blank"}
-      rel={rel ?? "noopener noreferrer"}
+      target={target ?? (isExternalHttpLink ? "_blank" : undefined)}
+      rel={rel ?? (isExternalHttpLink ? "noopener noreferrer" : undefined)}
       onClick={(e) => {
         onClick?.(e)
         // Respect a caller that already handled the click (e.g. an A2UI
         // action that calls preventDefault).
         if (e.defaultPrevented) return
-        if (!href || !/^https?:\/\//i.test(href)) return
+        if (!isExternalHttpLink) return
         if (isCapacitor() || isTauri()) {
           e.preventDefault()
           void openExternal(href)

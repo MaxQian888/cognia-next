@@ -85,6 +85,28 @@ describe("ExternalLink", () => {
     expect(mockOpen).not.toHaveBeenCalled()
   })
 
+  it("keeps document fragments in the current browsing context", () => {
+    render(
+      <ExternalLink href="#details" data-testid="lnk">
+        details
+      </ExternalLink>
+    )
+    const link = screen.getByTestId("lnk")
+    expect(link).not.toHaveAttribute("target")
+    expect(link).not.toHaveAttribute("rel")
+  })
+
+  it("preserves explicit target and rel values for non-http links", () => {
+    render(
+      <ExternalLink href="#details" target="_self" rel="bookmark" data-testid="lnk">
+        details
+      </ExternalLink>
+    )
+    const link = screen.getByTestId("lnk")
+    expect(link).toHaveAttribute("target", "_self")
+    expect(link).toHaveAttribute("rel", "bookmark")
+  })
+
   it("still fires the caller's onClick and respects preventDefault", () => {
     mockIsCapacitor.mockReturnValue(true)
     const onClick = jest.fn((e: React.MouseEvent) => e.preventDefault())
