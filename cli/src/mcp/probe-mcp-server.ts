@@ -61,6 +61,35 @@ export interface ProbeServerDeps {
   skipPrompts?: boolean
 }
 
+/** Cap the captured stderr appended to a failure so the badge/detail stays sane. */
+const STDERR_TAIL_BYTES = 2000
+const STDERR_TAIL_LINES = 8
+
+/**
+ * A bounded sink for a stdio server's stderr. A failed handshake usually times
+ * out or EOFs with no useful `Error.message`, while the *reason* (missing key,
+ * a Python traceback, "command not found") is printed to the child's stderr —
+ * which we now pipe instead of leaking to the terminal. Keeping the tail lets a
+ * failed probe explain itself.
+ */
+export function makeStderrTail(): { push: (chunk: string) => void; value: () => string } {
+  let buf = ""
+  return {
+    push(chunk: string): void {
+      buf += chunk
+      if (buf.length > STDERR_TAIL_BYTES) buf = buf.slice(buf.length - STDERR_TAIL_BYTES)
+    },
+    /** The last few non-blank lines, trimmed; "" when nothing was captured. */
+    value(): string {
+      const lines = buf
+        .split(/\r?\n/)
+        .map((line) => line.trimEnd())
+        .filter((line) => line.trim().length > 0)
+      return lines.slice(-STDERR_TAIL_LINES).join("\n")
+    },
+  }
+}
+
 /** Default auth-error detector: SDK `UnauthorizedError` or a 401-ish message. */
 export function isUnauthorized(err: unknown): boolean {
   if (!err) return false
@@ -106,6 +135,10 @@ export async function probeMcpServer(
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
     let timedOut = false
+    // Capture the stdio child's stderr so a failure can report the real reason
+    // instead of a bare "timed out" / EOF. Piped (not inherited) by the transport,
+    // so it never smears the TUI frame.
+    const stderr = makeStderrTail()
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
         timedOut = true
@@ -115,13 +148,15 @@ export async function probeMcpServer(
     })
     try {
       const opened = await Promise.race([
-        open(server, { signal: controller.signal, authProvider }),
+        open(server, { signal: controller.signal, authProvider, onStderr: stderr.push }),
         timeout,
       ])
       return { ok: true, opened }
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err)
-      return { ok: false, error: reason, timedOut, auth: !timedOut && isAuthError(err) }
+      const tail = stderr.value()
+      const error = tail ? `${reason}\n${tail}` : reason
+      return { ok: false, error, timedOut, auth: !timedOut && isAuthError(err) }
     } finally {
       if (timer) clearTimeout(timer)
     }

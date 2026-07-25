@@ -31,12 +31,19 @@ function recordingCtors(): {
 }
 
 describe("buildMcpTransport", () => {
-  it("builds a stdio transport with command/args/env", () => {
+  it("builds a stdio transport with command/args/env and pipes stderr", () => {
     const { ctors, calls } = recordingCtors()
     buildMcpTransport(srv("stdio", { command: "npx", args: ["-y", "s"], env: { K: "v" } }), ctors)
     expect(calls).toHaveLength(1)
     expect(calls[0].kind).toBe("stdio")
-    expect(calls[0].args[0]).toEqual({ command: "npx", args: ["-y", "s"], env: { K: "v" } })
+    // stderr MUST be "pipe": the SDK otherwise inherits it to our terminal and
+    // smears the TUI frame (the whole point of this seam).
+    expect(calls[0].args[0]).toEqual({
+      command: "npx",
+      args: ["-y", "s"],
+      env: { K: "v" },
+      stderr: "pipe",
+    })
   })
 
   it("uses the streamable-HTTP ctor for http and folds headers into requestInit", () => {
@@ -103,6 +110,95 @@ describe("createMcpConnection", () => {
     })
     await createMcpConnection(srv("stdio", { command: "x" }), {}, { load })
     expect(seen?.name).toBe("cognia")
+  })
+})
+
+describe("createMcpConnection with the real SDK loader", () => {
+  it("loads the SDK and builds a live stdio transport (piped stderr, no spawn)", async () => {
+    // No injected `load`: this exercises the real dynamic-import `loadSdk`.
+    // Constructing a StdioClientTransport does not spawn a child (that waits for
+    // connect), so the test stays side-effect free while covering the loader.
+    const { client, transport } = await createMcpConnection(srv("stdio", { command: "true" }))
+    expect(typeof client.connect).toBe("function")
+    // stderr: "pipe" makes the SDK expose a readable stream — our drain target —
+    // instead of inheriting the child's stderr to the terminal.
+    expect((transport as { stderr?: unknown }).stderr).toBeTruthy()
+  })
+})
+
+describe("createMcpConnection stderr capture", () => {
+  /** A stderr stub with hand-driven `data`/`error` emission (no timing races). */
+  function fakeStderr() {
+    const handlers: Record<string, Array<(v: unknown) => void>> = {}
+    return {
+      on(event: string, cb: (v: unknown) => void) {
+        ;(handlers[event] ??= []).push(cb)
+        return this
+      },
+      emit(event: string, v?: unknown) {
+        for (const cb of handlers[event] ?? []) cb(v)
+      },
+    }
+  }
+
+  /** A loader whose stdio transport instance exposes `stderr` verbatim. */
+  const loadWithStderr = (stderr: unknown) => async () => ({
+    Client: class {} as never,
+    ctors: {
+      Stdio: class {
+        stderr = stderr
+      } as never,
+      Http: class {} as never,
+      Sse: class {} as never,
+    },
+  })
+
+  it("forwards decoded stderr chunks (bytes + strings) to onStderr", async () => {
+    const stderr = fakeStderr()
+    const seen: string[] = []
+    await createMcpConnection(
+      srv("stdio", { command: "x" }),
+      { onStderr: (c) => seen.push(c) },
+      { load: loadWithStderr(stderr) }
+    )
+    stderr.emit("data", new TextEncoder().encode("Error: missing API key\n"))
+    stderr.emit("data", "second line\n")
+    stderr.emit("data", 42) // non-string / non-bytes → coerced via String()
+    expect(seen.join("")).toBe("Error: missing API key\nsecond line\n42")
+  })
+
+  it("drains without a sink and swallows a throwing sink / stream error", async () => {
+    const stderr = fakeStderr()
+    // No onStderr: the data listener must still consume the chunk (drain) silently.
+    await createMcpConnection(srv("stdio", { command: "x" }), {}, { load: loadWithStderr(stderr) })
+    expect(() => stderr.emit("data", "noise")).not.toThrow()
+
+    // A throwing sink must not escape the drain, and a stream 'error' is swallowed.
+    const stderr2 = fakeStderr()
+    await createMcpConnection(
+      srv("stdio", { command: "x" }),
+      {
+        onStderr: () => {
+          throw new Error("sink blew up")
+        },
+      },
+      { load: loadWithStderr(stderr2) }
+    )
+    expect(() => stderr2.emit("data", "boom")).not.toThrow()
+    expect(() => stderr2.emit("error", new Error("child died"))).not.toThrow()
+  })
+
+  it("is a no-op when the transport exposes no readable stderr", async () => {
+    const seen: string[] = []
+    // stderr present but not a stream (no `.on`) → skipped without throwing.
+    await expect(
+      createMcpConnection(
+        srv("stdio", { command: "x" }),
+        { onStderr: (c) => seen.push(c) },
+        { load: loadWithStderr({}) }
+      )
+    ).resolves.toBeDefined()
+    expect(seen).toEqual([])
   })
 })
 
