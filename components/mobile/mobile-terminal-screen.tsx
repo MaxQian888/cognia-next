@@ -54,6 +54,10 @@ import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings"
 import { useTerminalStore, type TerminalSessionRow } from "@/stores/terminal/terminal-store"
 
+// Phone-sized *defaults*, not overrides: a phone screen fits fewer columns, so
+// the desktop 13px default is too large here. An explicit user setting still
+// wins — otherwise Settings → Terminal → Font size silently does nothing on
+// mobile, which reads as "the font setting doesn't work".
 const MOBILE_FONT_SIZE = 11
 const MOBILE_SCROLLBACK = 5000
 
@@ -71,6 +75,14 @@ export function MobileTerminalScreen() {
   const settingsShell = useSettingsStore(
     (s) => (s.settings?.terminal as { defaultShell?: string } | undefined)?.defaultShell
   )
+  const settingsFontSize = useSettingsStore(
+    (s) => (s.settings?.terminal as { fontSize?: number } | undefined)?.fontSize
+  )
+  const settingsScrollback = useSettingsStore(
+    (s) => (s.settings?.terminal as { scrollback?: number } | undefined)?.scrollback
+  )
+  const fontSize = typeof settingsFontSize === "number" ? settingsFontSize : MOBILE_FONT_SIZE
+  const scrollback = typeof settingsScrollback === "number" ? settingsScrollback : MOBILE_SCROLLBACK
 
   const instanceRef = useRef<TerminalInstanceHandle | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -188,8 +200,8 @@ export function MobileTerminalScreen() {
             <TerminalInstance
               ref={instanceRef}
               sessionId={activeRow.id}
-              fontSize={MOBILE_FONT_SIZE}
-              scrollback={MOBILE_SCROLLBACK}
+              fontSize={fontSize}
+              scrollback={scrollback}
             />
             <TerminalSearchOverlay
               open={searchOpen}

@@ -27,8 +27,21 @@ jest.mock("@/lib/terminal/spawn-orchestrator", () => ({
 // Skip the heavy xterm path — the instance is mounted but the wrapper
 // returns a div placeholder so we focus on the screen-level wiring.
 jest.mock("@/components/terminal/terminal-instance", () => ({
-  TerminalInstance: ({ sessionId }: { sessionId: string }) => (
-    <div data-testid="terminal-instance-stub" data-session-id={sessionId} />
+  TerminalInstance: ({
+    sessionId,
+    fontSize,
+    scrollback,
+  }: {
+    sessionId: string
+    fontSize?: number
+    scrollback?: number
+  }) => (
+    <div
+      data-testid="terminal-instance-stub"
+      data-session-id={sessionId}
+      data-font-size={fontSize}
+      data-scrollback={scrollback}
+    />
   ),
 }))
 jest.mock("@/components/mobile/connection-state-badge", () => ({
@@ -57,6 +70,7 @@ jest.mock("@/lib/terminal/pick-transport", () => ({
 import { MobileTerminalScreen } from "./mobile-terminal-screen"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { useProjectStore } from "@/stores/project/project-store"
+import { useSettingsStore } from "@/stores/settings"
 import type { SessionInfo } from "@/lib/terminal/types"
 
 function info(overrides: Partial<SessionInfo> = {}): SessionInfo {
@@ -73,6 +87,7 @@ function info(overrides: Partial<SessionInfo> = {}): SessionInfo {
 beforeEach(() => {
   useTerminalStore.getState().reset()
   useProjectStore.setState({ projects: [], activeProjectId: "proj-a" })
+  useSettingsStore.setState({ settings: null })
   mockSpawnFromDock.mockClear()
   mockKillFromDock.mockClear()
   routerBack.mockClear()
@@ -91,6 +106,27 @@ describe("MobileTerminalScreen", () => {
     render(<MobileTerminalScreen />)
     expect(screen.getByTestId("mobile-terminal-tabs")).toBeInTheDocument()
     expect(screen.getByTestId("terminal-instance-stub")).toHaveAttribute("data-session-id", "s-1")
+  })
+
+  it("falls back to the phone-sized font/scrollback when the user set none", () => {
+    useTerminalStore.getState().registerSession(info())
+    render(<MobileTerminalScreen />)
+    const stub = screen.getByTestId("terminal-instance-stub")
+    expect(stub).toHaveAttribute("data-font-size", "11")
+    expect(stub).toHaveAttribute("data-scrollback", "5000")
+  })
+
+  // Regression: the phone-sized values used to be hard pins, so Settings →
+  // Terminal → Font size had no effect at all on mobile.
+  it("honors the configured terminal font size and scrollback", () => {
+    useSettingsStore.setState({
+      settings: { terminal: { fontSize: 17, scrollback: 20000 } },
+    } as never)
+    useTerminalStore.getState().registerSession(info())
+    render(<MobileTerminalScreen />)
+    const stub = screen.getByTestId("terminal-instance-stub")
+    expect(stub).toHaveAttribute("data-font-size", "17")
+    expect(stub).toHaveAttribute("data-scrollback", "20000")
   })
 
   it("calls spawnFromDock when + New is tapped", () => {

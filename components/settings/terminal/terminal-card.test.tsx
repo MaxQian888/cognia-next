@@ -19,25 +19,55 @@ jest.mock("next-intl", () => ({
 
 const settingsSave = jest.fn(async (..._args: unknown[]) => undefined)
 let settingsState: { terminal?: Record<string, unknown> } = {}
+// Subscribers of the fake store. The real `useSettingsStore` is a live Zustand
+// store: a `save()` re-renders every subscriber, which is exactly what makes a
+// settings input *controlled* by persisted state. Modelling that here is not
+// gold-plating — a non-reactive mock silently turns every controlled input into
+// an uncontrolled one, which is how the "typing a font size is eaten by the
+// clamp" bug survived the original suite.
+const settingsListeners = new Set<() => void>()
 
-jest.mock("@/stores/settings", () => ({
-  useSettingsStore: Object.assign(
-    (selector: (s: unknown) => unknown) =>
-      selector({
-        settings: settingsState,
-        save: (patch: { terminal?: Record<string, unknown> }) => {
-          settingsState = { ...settingsState, ...patch }
-          return settingsSave(patch)
+function saveSettingsPatch(patch: { terminal?: Record<string, unknown> }) {
+  settingsState = { ...settingsState, ...patch }
+  const result = settingsSave(patch)
+  settingsListeners.forEach((listener) => listener())
+  return result
+}
+
+jest.mock("@/stores/settings", () => {
+  // Required lazily: the factory is hoisted above the imports, so `react` has
+  // to be resolved inside the hook body, not at factory-evaluation time.
+  const useSettingsStore = Object.assign(
+    (selector: (s: unknown) => unknown) => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { useSyncExternalStore } = require("react") as typeof import("react")
+      // The snapshot must be referentially stable while nothing changed;
+      // `settingsState` / `saveSettingsPatch` identities satisfy that.
+      const read = () => selector({ settings: settingsState, save: saveSettingsPatch })
+      return useSyncExternalStore(
+        (onChange: () => void) => {
+          settingsListeners.add(onChange)
+          return () => settingsListeners.delete(onChange)
         },
-      }),
+        read,
+        read
+      )
+    },
     {
-      getState: () => ({
-        settings: settingsState,
-        save: settingsSave,
-      }),
+      getState: () => ({ settings: settingsState, save: saveSettingsPatch }),
     }
-  ),
-}))
+  )
+  return { useSettingsStore }
+})
+
+// The font specimen probes availability by measuring text on a 2D canvas,
+// which jsdom doesn't implement (it logs a "not implemented" error). The probe
+// itself is covered in lib/appearance/font-availability.test.ts; here it only
+// has to stay quiet and inconclusive.
+jest.mock("@/lib/appearance/font-availability", () => {
+  const actual = jest.requireActual("@/lib/appearance/font-availability")
+  return { ...actual, isFontFamilyAvailable: () => null }
+})
 
 jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: Object.assign(
@@ -56,7 +86,15 @@ beforeEach(() => {
   cleanup()
   settingsSave.mockClear()
   settingsState = {}
+  settingsListeners.clear()
 })
+
+/** Last `terminal` blob handed to `save()`, or `{}` when nothing was saved. */
+function lastSavedTerminal(): Record<string, unknown> {
+  const calls = settingsSave.mock.calls
+  const last = calls[calls.length - 1]?.[0] as { terminal?: Record<string, unknown> } | undefined
+  return last?.terminal ?? {}
+}
 
 describe("TerminalCard", () => {
   it("renders the shell selector with auto as the default", () => {
@@ -75,26 +113,61 @@ describe("TerminalCard", () => {
     })
   })
 
-  it("clamps fontSize between 8 and 32", async () => {
+  it("clamps fontSize between 8 and 32 on commit", async () => {
     render(<TerminalCard />)
     const fontInput = screen.getByTestId("terminal-card-font-size") as HTMLInputElement
     await act(async () => {
       fireEvent.change(fontInput, { target: { value: "200" } })
+      fireEvent.blur(fontInput)
     })
-    expect(settingsSave).toHaveBeenLastCalledWith({
-      terminal: expect.objectContaining({ fontSize: 32 }),
-    })
+    expect(lastSavedTerminal()).toMatchObject({ fontSize: 32 })
   })
 
-  it("clamps scrollback between 1000 and 100000", async () => {
+  // Regression: typing a two-digit size used to be swallowed by the
+  // clamp-on-every-keystroke. "2" clamped up to the 8 floor, so the field
+  // could never reach 20 — the user's font size "didn't take effect".
+  it("lets a multi-digit font size be typed one keystroke at a time", async () => {
+    const user = userEvent.setup()
+    render(<TerminalCard />)
+    const fontInput = screen.getByTestId("terminal-card-font-size") as HTMLInputElement
+    await user.clear(fontInput)
+    await user.type(fontInput, "20")
+    await user.tab()
+    expect(fontInput.value).toBe("20")
+    expect(lastSavedTerminal()).toMatchObject({ fontSize: 20 })
+  })
+
+  it("clamps scrollback between 1000 and 100000 on commit", async () => {
     render(<TerminalCard />)
     const scrollback = screen.getByTestId("terminal-card-scrollback") as HTMLInputElement
     await act(async () => {
       fireEvent.change(scrollback, { target: { value: "10" } })
+      fireEvent.blur(scrollback)
     })
-    expect(settingsSave).toHaveBeenLastCalledWith({
-      terminal: expect.objectContaining({ scrollback: 1000 }),
-    })
+    expect(lastSavedTerminal()).toMatchObject({ scrollback: 1000 })
+  })
+
+  // Same regression class as the font size, with a much wider floor: every
+  // prefix of "20000" shorter than four digits is below the 1000 minimum.
+  it("lets a five-digit scrollback be typed one keystroke at a time", async () => {
+    const user = userEvent.setup()
+    render(<TerminalCard />)
+    const scrollback = screen.getByTestId("terminal-card-scrollback") as HTMLInputElement
+    await user.clear(scrollback)
+    await user.type(scrollback, "20000")
+    await user.tab()
+    expect(lastSavedTerminal()).toMatchObject({ scrollback: 20000 })
+  })
+
+  it("restores the committed value when the field is left empty", async () => {
+    const user = userEvent.setup()
+    render(<TerminalCard />)
+    const fontInput = screen.getByTestId("terminal-card-font-size") as HTMLInputElement
+    await user.clear(fontInput)
+    await user.tab()
+    // Blanking the field is not "set me to the minimum" — it reverts.
+    expect(fontInput.value).toBe("13")
+    expect(settingsSave).not.toHaveBeenCalled()
   })
 
   it("persists fontFamily updates", async () => {
@@ -102,9 +175,54 @@ describe("TerminalCard", () => {
     const fontFamilyInput = screen.getByPlaceholderText('"JetBrains Mono", monospace')
     await act(async () => {
       fireEvent.change(fontFamilyInput, { target: { value: "Cascadia Code, monospace" } })
+      fireEvent.blur(fontFamilyInput)
     })
-    expect(settingsSave).toHaveBeenLastCalledWith({
-      terminal: expect.objectContaining({ fontFamily: "Cascadia Code, monospace" }),
+    expect(lastSavedTerminal()).toMatchObject({ fontFamily: "Cascadia Code, monospace" })
+  })
+
+  // Regression: the font-family box wrote straight through to the store on
+  // every keystroke, so a quoted stack was persisted (and pushed into the live
+  // xterm) in broken intermediate states like `"` or `"JetBrains Mo`.
+  it("does not persist half-typed font stacks", async () => {
+    const user = userEvent.setup()
+    render(<TerminalCard />)
+    const fontFamilyInput = screen.getByPlaceholderText(
+      '"JetBrains Mono", monospace'
+    ) as HTMLInputElement
+    await user.click(fontFamilyInput)
+    await user.type(fontFamilyInput, '"Fira Code", monospace')
+    const midTypingSaves = settingsSave.mock.calls.length
+    await user.tab()
+    expect(lastSavedTerminal()).toMatchObject({ fontFamily: '"Fira Code", monospace' })
+    // One commit on blur — not one per character.
+    expect(settingsSave.mock.calls.length).toBeLessThanOrEqual(midTypingSaves + 1)
+    expect(settingsSave.mock.calls.length).toBeLessThan(5)
+  })
+
+  it("renders a live specimen of the configured typography", async () => {
+    settingsState = { terminal: { fontFamily: '"Fira Code", monospace', fontSize: 18 } }
+    render(<TerminalCard />)
+    expect(screen.getByTestId("terminal-font-preview-sample")).toHaveStyle({
+      fontFamily: '"Fira Code", monospace',
+      fontSize: "18px",
+    })
+  })
+
+  it("hides the font reset while the font is untouched", () => {
+    render(<TerminalCard />)
+    expect(screen.queryByTestId("terminal-card-reset-font")).toBeNull()
+  })
+
+  it("resets family, size and weight back to the defaults", async () => {
+    settingsState = { terminal: { fontFamily: "Menlo", fontSize: 22, fontWeight: "700" } }
+    render(<TerminalCard />)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("terminal-card-reset-font"))
+    })
+    expect(lastSavedTerminal()).toMatchObject({
+      fontFamily: "",
+      fontSize: 13,
+      fontWeight: "normal",
     })
   })
 
@@ -229,10 +347,9 @@ describe("TerminalCard", () => {
     const input = screen.getByTestId("terminal-card-cursor-width") as HTMLInputElement
     await act(async () => {
       fireEvent.change(input, { target: { value: "99" } })
+      fireEvent.blur(input)
     })
-    expect(settingsSave).toHaveBeenLastCalledWith({
-      terminal: expect.objectContaining({ cursorWidth: 10 }),
-    })
+    expect(lastSavedTerminal()).toMatchObject({ cursorWidth: 10 })
   })
 
   it("persists the inactive cursor style", async () => {
@@ -278,10 +395,9 @@ describe("TerminalCard", () => {
     const input = screen.getByTestId("terminal-card-line-height") as HTMLInputElement
     await act(async () => {
       fireEvent.change(input, { target: { value: "5" } })
+      fireEvent.blur(input)
     })
-    expect(settingsSave).toHaveBeenLastCalledWith({
-      terminal: expect.objectContaining({ lineHeight: 2 }),
-    })
+    expect(lastSavedTerminal()).toMatchObject({ lineHeight: 2 })
   })
 
   it("persists letter spacing updates", async () => {
@@ -300,10 +416,9 @@ describe("TerminalCard", () => {
     const input = screen.getByTestId("terminal-card-scroll-sensitivity") as HTMLInputElement
     await act(async () => {
       fireEvent.change(input, { target: { value: "99" } })
+      fireEvent.blur(input)
     })
-    expect(settingsSave).toHaveBeenLastCalledWith({
-      terminal: expect.objectContaining({ scrollSensitivity: 10 }),
-    })
+    expect(lastSavedTerminal()).toMatchObject({ scrollSensitivity: 10 })
   })
 
   it("turns smooth scrolling on (defaults off)", async () => {
@@ -396,11 +511,10 @@ describe("TerminalCard", () => {
       const debounce = screen.getByTestId("terminal-card-autocomplete-debounce") as HTMLInputElement
       await act(async () => {
         fireEvent.change(debounce, { target: { value: "9000" } })
+        fireEvent.blur(debounce)
       })
-      expect(settingsSave).toHaveBeenLastCalledWith({
-        terminal: expect.objectContaining({
-          autocomplete: expect.objectContaining({ debounceMs: 2000 }),
-        }),
+      expect(lastSavedTerminal()).toMatchObject({
+        autocomplete: expect.objectContaining({ debounceMs: 2000 }),
       })
     })
 

@@ -26372,6 +26372,7 @@
       }
     },
     "overview": {
+      "loading": "正在加载配额…",
       "noDataBody": "点击刷新可直接从 Anthropic 免费用量接口获取额度——不消耗 token，也无需先发消息。",
       "noDataTitle": "暂无用量数据",
       "officialQuotaDisabledBody": "仅在你接受上游兼容性和网络路径风险时前往订阅设置启用。正常工作产生的被动用量仍可显示。",

@@ -26372,6 +26372,7 @@
       }
     },
     "overview": {
+      "loading": "Loading quota…",
       "noDataBody": "Fetch your quota straight from Anthropic's free usage endpoint — no token cost, no chat message needed.",
       "noDataTitle": "No usage data yet",
       "officialQuotaDisabledBody": "Enable it in Subscription settings only if you accept the upstream compatibility and network-path risk. Passive usage from normal work remains available.",

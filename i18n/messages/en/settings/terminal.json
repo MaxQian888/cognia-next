@@ -88,7 +88,13 @@
     "nerdFontHelper": "oh-my-posh and powerlevel10k prompts need a Nerd Font for their icons. The app ships MesloLGS NF, so they render out of the box — click below to select it, or type your own installed Nerd Font.",
     "pickerHint": "Pick from monospace fonts detected on this device.",
     "pickerLabel": "Detected fonts",
+    "reset": "Reset font to default",
     "useNerdFont": "Use bundled Nerd Font (MesloLGS NF)"
+  },
+  "fontPreview": {
+    "label": "Preview",
+    "missing": "\"{family}\" isn't installed on this machine — the terminal is falling back to the next font in the stack.",
+    "resolved": "Rendering with \"{family}\" at {size}px."
   },
   "fontSize": {
     "label": "Font size"

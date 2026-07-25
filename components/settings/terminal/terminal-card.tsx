@@ -21,7 +21,6 @@ import { useTranslations } from "next-intl"
 
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { Input } from "@/components/ui/input"
 import {
   AUTO_SCHEME_ID,
   TERMINAL_COLOR_SCHEMES,
@@ -37,9 +36,12 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { ClampedNumberInput } from "@/components/settings/common/clamped-number-input"
+import { DeferredTextInput } from "@/components/settings/common/deferred-text-input"
 import { useSettingsStore } from "@/stores/settings"
 
 import { FontFamilyPicker } from "@/components/settings/appearance/components/font-family-picker"
+import { TerminalFontPreview } from "./terminal-font-preview"
 import { TerminalProfiles } from "./terminal-profiles"
 import { TerminalProjectOverride } from "./terminal-project-override"
 
@@ -96,6 +98,13 @@ const DEFAULT_VALUES: TerminalSettings = {
   confirmOnClose: true,
   bell: "none",
 }
+
+/**
+ * Accepted terminal font sizes. Deliberately narrower than the terminal's own
+ * zoom clamp (6–40 in `terminal-instance.tsx`): Ctrl+= / Ctrl+- zoom rides on
+ * top of this configured size, so the base has headroom at both ends.
+ */
+const FONT_SIZE_RANGE = { min: 8, max: 32 } as const
 
 /** Font-weight options offered by the pickers — CSS keywords + the numeric scale. */
 const FONT_WEIGHTS: readonly FontWeightOption[] = [
@@ -256,12 +265,15 @@ export function TerminalCard() {
               value={terminal.fontFamily || undefined}
               onChange={(next) => update({ fontFamily: next ?? "" })}
             />
-            <Input
+            {/* Commit-on-blur: a font stack typed one character at a time would
+                otherwise be persisted (and pushed into the live terminal) in
+                broken intermediate states. */}
+            <DeferredTextInput
               value={terminal.fontFamily ?? ""}
               placeholder={
                 /* i18n-exempt: example font stack, not translatable UI */ '"JetBrains Mono", monospace'
               }
-              onChange={(e) => update({ fontFamily: e.target.value })}
+              onCommit={(next) => update({ fontFamily: next })}
               className="h-8 text-xs"
               aria-label={t("settings.terminal.fontFamily.label")}
               data-testid="terminal-card-font-family"
@@ -269,21 +281,41 @@ export function TerminalCard() {
           </div>
           <div className="space-y-2">
             <Label className="text-xs">{t("settings.terminal.fontSize.label")}</Label>
-            <Input
-              type="number"
-              min={8}
-              max={32}
-              value={terminal.fontSize ?? DEFAULT_VALUES.fontSize}
-              onChange={(e) => {
-                const n = Number(e.target.value)
-                if (Number.isFinite(n)) update({ fontSize: Math.max(8, Math.min(32, n)) })
-              }}
+            <ClampedNumberInput
+              min={FONT_SIZE_RANGE.min}
+              max={FONT_SIZE_RANGE.max}
+              integer
+              value={terminal.fontSize ?? DEFAULT_VALUES.fontSize!}
+              onCommit={(fontSize) => update({ fontSize })}
               className="h-8 text-xs"
               aria-label={t("settings.terminal.fontSize.label")}
               data-testid="terminal-card-font-size"
             />
           </div>
         </div>
+
+        <TerminalFontPreview
+          fontFamily={terminal.fontFamily || undefined}
+          fontSize={terminal.fontSize ?? DEFAULT_VALUES.fontSize!}
+          fontWeight={terminal.fontWeight ?? "normal"}
+          lineHeight={terminal.lineHeight ?? 1}
+          letterSpacing={terminal.letterSpacing ?? 0}
+          colorScheme={terminal.colorScheme}
+        />
+        {terminal.fontSize !== DEFAULT_VALUES.fontSize || terminal.fontFamily ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 text-xs"
+            onClick={() =>
+              update({ fontFamily: "", fontSize: DEFAULT_VALUES.fontSize, fontWeight: "normal" })
+            }
+            data-testid="terminal-card-reset-font"
+          >
+            {t("settings.terminal.fontFamily.reset")}
+          </Button>
+        ) : null}
 
         <div className="space-y-1.5">
           <p className="text-[11px] text-muted-foreground">
@@ -343,16 +375,12 @@ export function TerminalCard() {
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-2">
             <Label className="text-xs">{t("settings.terminal.lineHeight.label")}</Label>
-            <Input
-              type="number"
+            <ClampedNumberInput
               min={0.8}
               max={2}
               step={0.05}
               value={terminal.lineHeight ?? 1}
-              onChange={(e) => {
-                const n = Number(e.target.value)
-                if (Number.isFinite(n)) update({ lineHeight: Math.max(0.8, Math.min(2, n)) })
-              }}
+              onCommit={(lineHeight) => update({ lineHeight })}
               className="h-8 text-xs"
               aria-label={t("settings.terminal.lineHeight.label")}
               data-testid="terminal-card-line-height"
@@ -360,16 +388,12 @@ export function TerminalCard() {
           </div>
           <div className="space-y-2">
             <Label className="text-xs">{t("settings.terminal.letterSpacing.label")}</Label>
-            <Input
-              type="number"
+            <ClampedNumberInput
               min={-2}
               max={8}
               step={0.5}
               value={terminal.letterSpacing ?? 0}
-              onChange={(e) => {
-                const n = Number(e.target.value)
-                if (Number.isFinite(n)) update({ letterSpacing: Math.max(-2, Math.min(8, n)) })
-              }}
+              onCommit={(letterSpacing) => update({ letterSpacing })}
               className="h-8 text-xs"
               aria-label={t("settings.terminal.letterSpacing.label")}
               data-testid="terminal-card-letter-spacing"
@@ -415,18 +439,13 @@ export function TerminalCard() {
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-2">
             <Label className="text-xs">{t("settings.terminal.cursor.width")}</Label>
-            <Input
-              type="number"
+            <ClampedNumberInput
               min={1}
               max={10}
               step={1}
+              integer
               value={terminal.cursorWidth ?? 1}
-              onChange={(e) => {
-                const n = Number(e.target.value)
-                if (Number.isFinite(n)) {
-                  update({ cursorWidth: Math.max(1, Math.min(10, Math.round(n))) })
-                }
-              }}
+              onCommit={(cursorWidth) => update({ cursorWidth })}
               className="h-8 text-xs"
               aria-label={t("settings.terminal.cursor.width")}
               data-testid="terminal-card-cursor-width"
@@ -616,12 +635,12 @@ export function TerminalCard() {
             </SelectContent>
           </Select>
           {currentShellValue === CUSTOM ? (
-            <Input
+            <DeferredTextInput
               value={terminal.defaultShell ?? ""}
               placeholder={
                 /* i18n-exempt: example shell path, not translatable UI */ "/usr/local/bin/fish"
               }
-              onChange={(e) => update({ defaultShell: e.target.value })}
+              onCommit={(defaultShell) => update({ defaultShell })}
               className="h-8 text-xs"
               aria-label={t("settings.terminal.shell.customLabel")}
             />
@@ -631,18 +650,13 @@ export function TerminalCard() {
 
         <div className="space-y-2">
           <Label className="text-xs">{t("settings.terminal.scrollback.label")}</Label>
-          <Input
-            type="number"
+          <ClampedNumberInput
             min={1000}
             max={100000}
             step={1000}
-            value={terminal.scrollback ?? DEFAULT_VALUES.scrollback}
-            onChange={(e) => {
-              const n = Number(e.target.value)
-              if (Number.isFinite(n)) {
-                update({ scrollback: Math.max(1000, Math.min(100000, n)) })
-              }
-            }}
+            integer
+            value={terminal.scrollback ?? DEFAULT_VALUES.scrollback!}
+            onCommit={(scrollback) => update({ scrollback })}
             className="h-8 text-xs"
             aria-label={t("settings.terminal.scrollback.label")}
             data-testid="terminal-card-scrollback"
@@ -738,18 +752,13 @@ export function TerminalCard() {
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-2">
             <Label className="text-xs">{t("settings.terminal.scrollSensitivity.label")}</Label>
-            <Input
-              type="number"
+            <ClampedNumberInput
               min={1}
               max={10}
               step={1}
+              integer
               value={terminal.scrollSensitivity ?? 1}
-              onChange={(e) => {
-                const n = Number(e.target.value)
-                if (Number.isFinite(n)) {
-                  update({ scrollSensitivity: Math.max(1, Math.min(10, Math.round(n))) })
-                }
-              }}
+              onCommit={(scrollSensitivity) => update({ scrollSensitivity })}
               className="h-8 text-xs"
               aria-label={t("settings.terminal.scrollSensitivity.label")}
               data-testid="terminal-card-scroll-sensitivity"
@@ -912,24 +921,16 @@ export function TerminalCard() {
                   <Label className="text-xs" htmlFor="terminal-card-autocomplete-debounce">
                     {t("settings.terminal.autocomplete.debounce.label")}
                   </Label>
-                  <Input
+                  <ClampedNumberInput
                     id="terminal-card-autocomplete-debounce"
-                    type="number"
                     min={50}
                     max={2000}
                     step={50}
+                    integer
                     value={autocomplete.debounceMs ?? 350}
-                    onChange={(e) => {
-                      const n = Number(e.target.value)
-                      if (Number.isFinite(n)) {
-                        update({
-                          autocomplete: {
-                            ...autocomplete,
-                            debounceMs: Math.max(50, Math.min(2000, Math.floor(n))),
-                          },
-                        })
-                      }
-                    }}
+                    onCommit={(debounceMs) =>
+                      update({ autocomplete: { ...autocomplete, debounceMs } })
+                    }
                     className="h-8 text-xs"
                     aria-label={t("settings.terminal.autocomplete.debounce.label")}
                     data-testid="terminal-card-autocomplete-debounce"
@@ -1025,18 +1026,14 @@ export function TerminalCard() {
               {t("settings.terminal.runInDockTimeout.helper")}
             </p>
           </div>
-          <Input
+          <ClampedNumberInput
             id="terminal-card-run-in-dock-timeout"
-            type="number"
             min={5}
             max={600}
+            integer
             className="w-24"
             value={terminal.runInDockTimeoutSec ?? 60}
-            onChange={(e) => {
-              const next = Number(e.target.value)
-              if (!Number.isFinite(next)) return
-              update({ runInDockTimeoutSec: Math.max(5, Math.min(600, Math.floor(next))) })
-            }}
+            onCommit={(runInDockTimeoutSec) => update({ runInDockTimeoutSec })}
             aria-label={t("settings.terminal.runInDockTimeout.label")}
             data-testid="terminal-card-run-in-dock-timeout"
           />
