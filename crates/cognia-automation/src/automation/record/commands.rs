@@ -61,8 +61,16 @@ pub async fn record_start(
         process_name: None,
         window_title: None,
         command_detail: Some("Record desktop actions to generate a skill".into()),
+        // Recording consent is a one-shot for the whole capture session and is
+        // never persisted as a grant, so it carries no chat session tag.
+        session_key: None,
     };
-    if !state.consent.request(app.clone(), prompt).await {
+    let consent_timeout = state.gate.settings().consent_timeout_ms();
+    if !state
+        .consent
+        .request(app.clone(), prompt, consent_timeout)
+        .await
+    {
         return Err(err_to_string(&AutomationError::UserDeclined));
     }
 

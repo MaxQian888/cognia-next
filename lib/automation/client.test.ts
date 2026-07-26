@@ -263,9 +263,19 @@ describe("desktop client", () => {
 
   it("consentRespond forwards the broker reply", async () => {
     mockCall.mockResolvedValueOnce(undefined)
-    await desktop.consentRespond({ id: "c1", allow: true, persist: true })
+    await desktop.consentRespond({
+      id: "c1",
+      allow: true,
+      persist: true,
+      grantDurationMs: 15 * 60 * 1000,
+    })
     expect(mockCall).toHaveBeenCalledWith("automation_consent_respond", {
-      args: { id: "c1", allow: true, persist: true },
+      args: {
+        id: "c1",
+        allow: true,
+        persist: true,
+        grantDurationMs: 15 * 60 * 1000,
+      },
     })
   })
 
@@ -325,5 +335,6 @@ describe("defaultAutomationSettings", () => {
     expect(s.screenshotDedup).toBe(true)
     expect(s.alwaysHidePictureInPicture).toBe(false)
     expect(s.pasteThresholdChars).toBe(200)
+    expect(s.consentTimeoutMs).toBe(90_000)
   })
 })

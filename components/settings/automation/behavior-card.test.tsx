@@ -112,6 +112,34 @@ describe("BehaviorCard", () => {
     )
   })
 
+  it("shows the consent wait in seconds", async () => {
+    render(<BehaviorCard />)
+    // Default is 90_000ms — the operator sees 90, not the raw milliseconds.
+    expect(await screen.findByLabelText(/consent wait/i)).toHaveValue(90)
+  })
+
+  it("clamps the consent wait below the sidecar tool-call ceiling", async () => {
+    render(<BehaviorCard />)
+    const input = await screen.findByLabelText(/consent wait/i)
+    // 600s would outlive the plugin tool call it is gating, so the answer
+    // would land on a request the sidecar already abandoned.
+    fireEvent.change(input, { target: { value: "600" } })
+    await waitFor(() =>
+      expect(settingsSet).toHaveBeenCalledWith(
+        expect.objectContaining({ consentTimeoutMs: 115_000 })
+      )
+    )
+  })
+
+  it("floors an unanswerably short consent wait", async () => {
+    render(<BehaviorCard />)
+    const input = await screen.findByLabelText(/consent wait/i)
+    fireEvent.change(input, { target: { value: "1" } })
+    await waitFor(() =>
+      expect(settingsSet).toHaveBeenCalledWith(expect.objectContaining({ consentTimeoutMs: 5_000 }))
+    )
+  })
+
   it("shows the load error inline when settingsGet rejects", async () => {
     settingsGet.mockRejectedValueOnce(new Error("UNSUPPORTED_PLATFORM"))
     render(<BehaviorCard />)

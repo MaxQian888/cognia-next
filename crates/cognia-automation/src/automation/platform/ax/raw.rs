@@ -143,6 +143,18 @@ pub fn has_visible_windows(app: &AXUIElement) -> bool {
     app.windows().map(|w| !w.is_empty()).unwrap_or(false)
 }
 
+/// Whether the currently focused control is a secure text field.
+///
+/// Process-name matching catches dedicated password managers and OS prompts,
+/// but a browser or native app can host its own password field. AX exposes
+/// those controls with the `AXSecureTextField` subrole, so treat that signal as
+/// authoritative without reading the field's value.
+pub fn focused_element_is_secure_text_field(app: &AXUIElement) -> bool {
+    copy_element_attr(app, "AXFocusedUIElement")
+        .and_then(|element| element.subrole().ok())
+        .is_some_and(|subrole| subrole.to_string() == "AXSecureTextField")
+}
+
 /// Read `AXValue` as a string when it is one (text fields, static text). Returns
 /// `None` for non-string values (sliders, checkboxes) or absent attributes.
 pub fn read_value_string(el: &AXUIElement) -> Option<String> {

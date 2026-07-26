@@ -420,6 +420,12 @@ fn read_focused_window() -> Result<FocusedSnapshot> {
     Ok(snap)
 }
 
+pub(crate) fn focused_window_credential_signals() -> Option<(Option<String>, Option<String>, bool)>
+{
+    let snap = read_focused_window().ok()?;
+    Some((snap.process_name, snap.window_title, false))
+}
+
 /// Run `xdotool <args>` and return trimmed stdout. Shared by the
 /// focused-window reader and the window-under-cursor pick.
 fn run_xdotool(args: &[&str]) -> Result<String> {

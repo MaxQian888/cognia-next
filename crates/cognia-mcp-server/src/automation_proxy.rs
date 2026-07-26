@@ -338,6 +338,10 @@ async fn dispatch(
         click_y: None,
         force_tier: None,
         command_detail: None,
+        // The External Bridge proxy has no chat context, and with no
+        // `AppHandle` a `RequireConsent` decision here can only deny — so
+        // there is no grant for a session tag to scope.
+        session_key: None,
     };
     let result = run_gated_enf(None, enforcement, gctx, &gate_command, move || async move {
         run(req, handle)

@@ -27,6 +27,10 @@
     "title": "审计日志"
   },
   "behavior": {
+    "consentTimeout": {
+      "help": "逐次确认弹窗在自动拒绝前等待多久。窗口越长，手机越有时间收到通知、解锁并作答。上限 115 秒，确保作答不会晚于工具调用本身的放弃时间。",
+      "label": "确认等待时长（秒）"
+    },
     "dedup": {
       "help": "连续截图内容相同时，发送一条简短文本说明而不是重复图片。长任务可大幅节省 token。",
       "label": "跳过未变化的截图"
@@ -65,8 +69,9 @@
   },
   "consent": {
     "actions": {
+      "allowForLabel": "接下来不再询问：",
+      "allowForMinutes": "{minutes} 分钟",
       "allowOnce": "本次允许",
-      "allowSession": "本会话总是允许",
       "close": "关闭",
       "reject": "拒绝"
     },

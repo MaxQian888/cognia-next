@@ -29,11 +29,12 @@ use super::commands::{
     emit_audit, err_to_string, now_ms, record_allow, record_deny, record_policy_deny,
     AutomationState,
 };
-use super::consent::ConsentBroker;
+use super::consent::{ConsentBroker, ConsentThumbnail};
 use super::cua_route;
 use super::permission::{
     maybe_upgrade_to_consent, Call, Decision, PermissionGate, Surface, TargetMeta, Tier,
 };
+use super::platform::shared::{credential_window, screenshot};
 use super::policy::{ActionFacts, Decision as PolicyDecision, PolicyState};
 use super::tool_exec;
 use super::types::*;
@@ -58,6 +59,10 @@ pub struct GateContext {
     /// overlay so the operator sees what they're approving. `None` for calls
     /// whose verb already says everything (click, type, screenshot, …).
     pub command_detail: Option<String>,
+    /// Chat session tag, forwarded into the consent prompt so a session
+    /// grant can't cross conversations. `None` for calls with no chat
+    /// context (workflow steps, the headless MCP proxy).
+    pub session_key: Option<String>,
 }
 
 impl GateContext {
@@ -91,6 +96,57 @@ pub struct Enforcement {
     pub policy: PolicyState,
 }
 
+/// Largest base64 thumbnail payload we will attach to a consent request.
+///
+/// `/ws/v1/events` refuses a frame over 64 KiB
+/// (`companion_api::ws::MAX_WS_FRAME_BYTES`), and a refused frame means the
+/// remote approver silently never sees the prompt — the exact failure this
+/// whole path exists to remove. This budget leaves room for the prompt fields
+/// and the JSON framing wrapped around the image.
+const MAX_THUMBNAIL_B64_BYTES: usize = 44 * 1024;
+
+/// Boxes tried in order until the encoded thumbnail fits the budget. Detailed
+/// screens (dense text, many windows) do not compress predictably, so a single
+/// fixed size is not a guarantee — stepping down is.
+const THUMBNAIL_BOXES: [(u32, u32); 3] = [(640, 400), (400, 250), (256, 160)];
+
+/// Grab a downscaled screen thumbnail for a consent prompt, or `None` if
+/// capture fails or nothing fits the frame budget. Dropping the image degrades
+/// the consent surfaces to the text-only rendering they had before; emitting an
+/// oversized frame would drop the whole prompt.
+///
+/// Redaction here is **forced**, not settings-driven: unlike a tool_result that
+/// stays on the host, this frame leaves the desktop for a phone, so a focused
+/// credential prompt is blanked even when the operator left global screenshot
+/// redaction off.
+///
+/// This calls the backend directly rather than recursing through `run_gated`,
+/// and that is deliberate — gating it would deadlock (a consent prompt whose
+/// own capture needs a consent prompt) and there is nothing to gate: the image
+/// is shown only to the operator being asked to authorize, never returned to
+/// the model, never written to the audit ring, and never persisted.
+async fn capture_consent_thumbnail(handle: &AutomationHandle) -> Option<ConsentThumbnail> {
+    let shot = handle.screenshot(ScreenshotOpts::default()).await.ok()?;
+    let redacted = credential_window::is_credential_window_focused();
+    let shot = if redacted {
+        screenshot::redact_screenshot(shot).ok()?
+    } else {
+        shot
+    };
+    for (max_w, max_h) in THUMBNAIL_BOXES {
+        let scaled = screenshot::downscale_encoded(shot.clone(), max_w, max_h).ok()?;
+        if scaled.bytes.len() <= MAX_THUMBNAIL_B64_BYTES {
+            return Some(ConsentThumbnail {
+                bytes: scaled.bytes,
+                width: scaled.width,
+                height: scaled.height,
+                redacted,
+            });
+        }
+    }
+    None
+}
+
 impl Enforcement {
     pub fn from_state(state: &AutomationState) -> Self {
         Self {
@@ -122,6 +178,7 @@ where
         &state.audit,
         &state.consent,
         &state.policy,
+        Some(&state.handle),
         gctx,
         command,
         do_call,
@@ -142,12 +199,16 @@ where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<T>>,
 {
+    // No handle: this is the headless MCP proxy, where `app` is `None` and a
+    // `RequireConsent` decision can only resolve to deny — there is no consent
+    // surface to show a thumbnail on.
     run_gated_impl(
         app,
         &enf.gate,
         &enf.audit,
         &enf.consent,
         &enf.policy,
+        None,
         gctx,
         command,
         do_call,
@@ -162,6 +223,7 @@ async fn run_gated_impl<T, F, Fut>(
     audit: &AuditRing,
     consent: &ConsentBroker,
     policy: &PolicyState,
+    handle: Option<&AutomationHandle>,
     gctx: GateContext,
     command: &str,
     do_call: F,
@@ -218,11 +280,31 @@ where
             if prompt.command_detail.is_none() {
                 prompt.command_detail = gctx.command_detail.clone();
             }
+            if prompt.session_key.is_none() {
+                prompt.session_key = gctx.session_key.clone();
+            }
             // Headless (no AppHandle) can't render the overlay → decline. This
             // is the path the External Bridge MCP proxy takes; a PerCall tier
             // there means "deny" rather than "silently allow".
             let allow = match app {
-                Some(app) => consent.request(app.clone(), prompt.clone()).await,
+                Some(app) => {
+                    // Capture before prompting so the approver sees the screen
+                    // as it stands at decision time. Best-effort: a failed or
+                    // oversized capture just means a text-only prompt, never a
+                    // blocked action.
+                    let thumbnail = match handle {
+                        Some(h) => capture_consent_thumbnail(h).await,
+                        None => None,
+                    };
+                    consent
+                        .request_with_thumbnail(
+                            app.clone(),
+                            prompt.clone(),
+                            gate.settings().consent_timeout_ms(),
+                            thumbnail,
+                        )
+                        .await
+                }
                 None => false,
             };
             if allow {
@@ -410,4 +492,71 @@ pub async fn execute_action(
             None => tool_exec::run_text_editor(te).await?,
         }),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::automation::consent::ConsentRequestEvent;
+    use crate::automation::permission::ConsentPrompt;
+
+    /// Mirror of `companion_api::ws::MAX_WS_FRAME_BYTES`. A consent frame that
+    /// exceeds this is dropped by the transport, which puts us straight back in
+    /// the "remote approver never sees the prompt" hole this path exists to fix.
+    const WS_FRAME_CAP_BYTES: usize = 64 * 1024;
+
+    fn worst_case_event() -> ConsentRequestEvent {
+        ConsentRequestEvent {
+            id: "b3f1c2a4-5d6e-4f70-8a91-2b3c4d5e6f70".into(),
+            prompt: ConsentPrompt {
+                command: "computer_use".into(),
+                surface: Surface::ComputerUse,
+                plugin_id: Some("cognia-computer-use".into()),
+                process_name: Some("Some Very Long Application Name.app".into()),
+                window_title: Some("x".repeat(512)),
+                command_detail: Some("y".repeat(2048)),
+                session_key: Some("z".repeat(128)),
+            },
+            timeout_ms: 90_000,
+            thumbnail: Some(ConsentThumbnail {
+                // A thumbnail sitting exactly on the budget ceiling.
+                bytes: "A".repeat(MAX_THUMBNAIL_B64_BYTES),
+                width: 640,
+                height: 400,
+                redacted: false,
+            }),
+        }
+    }
+
+    #[test]
+    fn consent_frame_with_max_thumbnail_fits_the_ws_cap() {
+        let json = serde_json::to_string(&worst_case_event()).expect("event serializes");
+        assert!(
+            json.len() < WS_FRAME_CAP_BYTES,
+            "consent frame is {} bytes, over the {} byte transport cap — the \
+             remote prompt would be silently dropped",
+            json.len(),
+            WS_FRAME_CAP_BYTES
+        );
+    }
+
+    /// Compile-time, not a test: the image budget must leave room for the
+    /// prompt fields and JSON framing wrapped around it, and a regression here
+    /// should fail the build rather than wait for someone to run the suite.
+    const _: () = assert!(
+        MAX_THUMBNAIL_B64_BYTES + 16 * 1024 <= WS_FRAME_CAP_BYTES,
+        "thumbnail budget leaves under 16 KiB for the rest of the consent frame"
+    );
+
+    #[test]
+    fn thumbnail_boxes_step_down_monotonically() {
+        for pair in THUMBNAIL_BOXES.windows(2) {
+            let (prev_w, prev_h) = pair[0];
+            let (next_w, next_h) = pair[1];
+            assert!(
+                next_w < prev_w && next_h < prev_h,
+                "fallback boxes must shrink, got {prev_w}x{prev_h} then {next_w}x{next_h}"
+            );
+        }
+    }
 }

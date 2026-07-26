@@ -21,6 +21,11 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { desktop, type AutomationSettings } from "@/lib/automation/client"
+import {
+  MAX_CONSENT_TIMEOUT_MS,
+  MIN_CONSENT_TIMEOUT_MS,
+  clampConsentTimeoutMs,
+} from "@/lib/automation/consent-durations"
 import { setComputerUsePipAlwaysHidden } from "@/lib/automation/computer-use-pip"
 
 export function BehaviorCard() {
@@ -199,6 +204,30 @@ export function BehaviorCard() {
               void save({
                 ...settings,
                 pasteThresholdChars: Math.max(0, Number(e.target.value) || 0),
+              })
+            }
+          />
+        </div>
+
+        {/* Consent wait. Seconds in the UI, ms on the wire. The ceiling keeps
+            the window inside the sidecar's plugin-tool budget so an answer
+            never lands on a call that already timed out. */}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="space-y-0.5">
+            <Label htmlFor="behavior-consent-timeout">{t("consentTimeout.label")}</Label>
+            <p className="text-xs text-muted-foreground">{t("consentTimeout.help")}</p>
+          </div>
+          <Input
+            id="behavior-consent-timeout"
+            type="number"
+            min={Math.ceil(MIN_CONSENT_TIMEOUT_MS / 1000)}
+            max={Math.floor(MAX_CONSENT_TIMEOUT_MS / 1000)}
+            className="sm:w-28"
+            value={Math.round(clampConsentTimeoutMs(settings.consentTimeoutMs) / 1000)}
+            onChange={(e) =>
+              void save({
+                ...settings,
+                consentTimeoutMs: clampConsentTimeoutMs(Number(e.target.value) * 1000),
               })
             }
           />

@@ -14,10 +14,10 @@
 //! the buffer we read, but a prefix match is enough because Microsoft
 //! versions the classes by adding `_<hex>` suffixes.
 //!
-//! **macOS / Linux**: today this returns `false`. Wave 2 adds get_focus
-//! support on those platforms, after which we'll match against known
-//! process names (Keychain Access / 1Password / Bitwarden / GNOME Keyring)
-//! and lift this guard.
+//! **macOS / Linux**: reuses the platform focus snapshots already maintained by
+//! the AX / AT-SPI backends. Dedicated credential applications and prompt
+//! titles are matched conservatively; macOS also checks the focused AX control
+//! for the `AXSecureTextField` subrole. Focus-query failures fail closed.
 
 /// Returns `true` when the foreground window appears to be a credential
 /// prompt. Pure — no I/O outside the platform window query (which is
@@ -84,20 +84,156 @@ mod platform {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
 mod platform {
     pub fn is_credential_window_focused() -> bool {
-        // Wave 2 will replace this with a `get_focus` + process-name
-        // lookup against {Keychain Access, 1Password, Bitwarden,
-        // GNOME Keyring, KWalletManager}. Until then the redact flag is a
-        // Windows-only safety net; mac / linux capture without redaction.
-        false
+        match crate::automation::platform::ax::focused_window_credential_signals() {
+            Some((process_name, window_title, secure_text_field)) => {
+                super::credential_context_is_sensitive(Some((
+                    process_name.as_deref(),
+                    window_title.as_deref(),
+                    secure_text_field,
+                )))
+            }
+            None => super::credential_context_is_sensitive(None),
+        }
     }
+}
+
+#[cfg(target_os = "linux")]
+mod platform {
+    pub fn is_credential_window_focused() -> bool {
+        match crate::automation::platform::atspi::focused_window_credential_signals() {
+            Some((process_name, window_title, secure_text_field)) => {
+                super::credential_context_is_sensitive(Some((
+                    process_name.as_deref(),
+                    window_title.as_deref(),
+                    secure_text_field,
+                )))
+            }
+            None => super::credential_context_is_sensitive(None),
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+mod platform {
+    pub fn is_credential_window_focused() -> bool {
+        true
+    }
+}
+
+fn credential_context_is_sensitive(context: Option<(Option<&str>, Option<&str>, bool)>) -> bool {
+    let Some((process_name, window_title, secure_text_field)) = context else {
+        // A frame whose foreground owner cannot be established is not safe to
+        // send to a remote approver. Blank it instead of guessing.
+        return true;
+    };
+    if secure_text_field {
+        return true;
+    }
+
+    let process_name = process_name.unwrap_or_default().to_ascii_lowercase();
+    let window_title = window_title.unwrap_or_default().to_ascii_lowercase();
+    if process_name.is_empty() && window_title.is_empty() {
+        return true;
+    }
+
+    const CREDENTIAL_PROCESS_MARKERS: &[&str] = &[
+        "1password",
+        "bitwarden",
+        "gcr-prompter",
+        "gksu",
+        "gnome-keyring",
+        "keepassxc",
+        "keychain access",
+        "kdesu",
+        "ksshaskpass",
+        "kwallet",
+        "lxqt-policykit",
+        "mate-polkit",
+        "pinentry",
+        "pkexec",
+        "polkit",
+        "securityagent",
+        "seahorse",
+        "ssh-askpass",
+        "xfce-polkit",
+    ];
+    const CREDENTIAL_TITLE_MARKERS: &[&str] = &[
+        "authentication",
+        "authentication required",
+        "credential",
+        "credentials required",
+        "enter password",
+        "passphrase",
+        "password",
+        "password required",
+        "pin entry",
+        "unlock",
+        "unlock keyring",
+        "unlock login keyring",
+        "unlock wallet",
+        "凭据",
+        "密码",
+        "认证",
+        "解锁",
+    ];
+
+    CREDENTIAL_PROCESS_MARKERS
+        .iter()
+        .any(|marker| process_name.contains(marker))
+        || CREDENTIAL_TITLE_MARKERS
+            .iter()
+            .any(|marker| window_title.contains(marker))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn credential_context_matches_secure_fields_and_known_apps() {
+        assert!(credential_context_is_sensitive(Some((
+            Some("Safari"),
+            Some("Sign in"),
+            true,
+        ))));
+        assert!(credential_context_is_sensitive(Some((
+            Some("1Password"),
+            Some("Quick Access"),
+            false,
+        ))));
+        assert!(credential_context_is_sensitive(Some((
+            Some("gcr-prompter"),
+            Some("Authentication Required"),
+            false,
+        ))));
+        assert!(credential_context_is_sensitive(Some((
+            Some("polkit-gnome-authentication-agent-1"),
+            Some("System action"),
+            false,
+        ))));
+        assert!(credential_context_is_sensitive(Some((
+            Some("zenity"),
+            Some("请输入密码"),
+            false,
+        ))));
+    }
+
+    #[test]
+    fn credential_context_rejects_normal_windows() {
+        assert!(!credential_context_is_sensitive(Some((
+            Some("Terminal"),
+            Some("cognia-next"),
+            false,
+        ))));
+    }
+
+    #[test]
+    fn credential_context_fails_closed_when_focus_cannot_be_resolved() {
+        assert!(credential_context_is_sensitive(None));
+    }
 
     #[test]
     fn returns_a_bool_without_panicking() {

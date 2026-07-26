@@ -4,6 +4,11 @@ import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { ConsentOverlay } from "./consent-overlay"
 import { isTauri } from "@/lib/tauri"
 import { desktop } from "@/lib/automation/client"
+// Use the real event shape rather than a local copy — a hand-maintained
+// duplicate silently stops catching drift the moment the wire type grows a
+// field (as it did when the grant key gained `sessionKey`). `import type` is
+// erased, so it survives the module mock below.
+import type { ConsentRequestEvent } from "@/lib/automation/client"
 
 jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn(),
@@ -27,17 +32,6 @@ const mockedConsentRespond = (desktop as unknown as { consentRespond: jest.Mock 
 beforeEach(() => {
   jest.clearAllMocks()
 })
-
-interface ConsentRequestEvent {
-  id: string
-  command: string
-  surface: "workflow" | "computerUse" | "mcp" | "plugin"
-  pluginId: string | null
-  processName: string | null
-  windowTitle: string | null
-  commandDetail?: string | null
-  timeoutMs: number
-}
 
 function setupListener() {
   let onEvent: ((event: { payload: ConsentRequestEvent }) => void) | null = null
@@ -120,7 +114,10 @@ describe("ConsentOverlay", () => {
     expect(screen.getByText("Click on screen")).toBeInTheDocument()
     expect(screen.getByText("Computer Use")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Allow once" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Always allow this session" })).toBeInTheDocument()
+    expect(screen.getByText("Stop asking for:")).toBeInTheDocument()
+    for (const minutes of [15, 30, 60]) {
+      expect(screen.getByRole("button", { name: `${minutes} min` })).toBeInTheDocument()
+    }
   })
 
   it("renders the command detail block for a shell-class action", async () => {
@@ -206,7 +203,7 @@ describe("ConsentOverlay", () => {
     )
   })
 
-  it("Always allow this session sends the prompt back so the broker can register the grant", async () => {
+  it("a timed grant sends the prompt back so the broker can register it", async () => {
     mockedIsTauri.mockReturnValue(true)
     const { fire } = setupListener()
     render(<ConsentOverlay />)
@@ -219,21 +216,78 @@ describe("ConsentOverlay", () => {
       pluginId: "cognia-computer-use",
       processName: "notepad.exe",
       windowTitle: "Notepad",
-      timeoutMs: 30000,
+      sessionKey: "session-a",
+      timeoutMs: 90000,
     })
 
-    fireEvent.click(screen.getByRole("button", { name: "Always allow this session" }))
+    fireEvent.click(screen.getByRole("button", { name: "30 min" }))
     await waitFor(() =>
       expect(mockedConsentRespond).toHaveBeenCalledWith(
         expect.objectContaining({
           id: "evt-session",
           allow: true,
           persist: true,
+          grantDurationMs: 30 * 60_000,
           prompt: expect.objectContaining({
             command: "click",
             surface: "computerUse",
             pluginId: "cognia-computer-use",
+            // Part of the host's grant key — dropping it would register the
+            // grant under an empty session tag and it would never match.
+            sessionKey: "session-a",
           }),
+        })
+      )
+    )
+  })
+
+  it("each duration button asks for its own window", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    const { fire } = setupListener()
+    render(<ConsentOverlay />)
+    await waitFor(() => expect(mockListen).toHaveBeenCalledTimes(1))
+
+    fire({
+      id: "evt-15",
+      command: "click",
+      surface: "computerUse",
+      pluginId: null,
+      processName: null,
+      windowTitle: null,
+      timeoutMs: 90000,
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "15 min" }))
+    await waitFor(() =>
+      expect(mockedConsentRespond).toHaveBeenCalledWith(
+        expect.objectContaining({ grantDurationMs: 15 * 60_000 })
+      )
+    )
+  })
+
+  it("Allow once carries no grant duration", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    const { fire } = setupListener()
+    render(<ConsentOverlay />)
+    await waitFor(() => expect(mockListen).toHaveBeenCalledTimes(1))
+
+    fire({
+      id: "evt-once-nogrant",
+      command: "click",
+      surface: "computerUse",
+      pluginId: null,
+      processName: null,
+      windowTitle: null,
+      timeoutMs: 90000,
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Allow once" }))
+    await waitFor(() =>
+      expect(mockedConsentRespond).toHaveBeenCalledWith(
+        expect.objectContaining({
+          persist: false,
+          grantDurationMs: undefined,
+          prompt: undefined,
         })
       )
     )

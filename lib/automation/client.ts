@@ -13,6 +13,7 @@
  */
 
 import { transport } from "@/lib/tauri"
+import { DEFAULT_CONSENT_TIMEOUT_MS } from "./consent-durations"
 
 import type {
   ButtonTransition,
@@ -132,9 +133,12 @@ export interface CallContext {
   /**
    * Renderer-only session tag for per-session action-mapper state
    * (coordinate scaling, screenshot dedup, consecutive-failure counters —
-   * see `lib/automation/anthropic-action-mapper.ts`). Serialized over the
-   * wire but ignored by the Rust side (serde tolerates unknown fields).
-   * Stamped by the computer-use plugin from the active chat session id.
+   * see `lib/automation/anthropic-action-mapper.ts`). Stamped by the
+   * computer-use plugin from the active chat session id.
+   *
+   * Also read by the Rust gate: it lands in `GateContext.session_key` and
+   * from there in the consent prompt, so a time-boxed "don't ask again"
+   * grant is scoped to one conversation instead of the whole app session.
    */
   sessionKey?: string
 }
@@ -363,6 +367,13 @@ export const desktop = {
     allow: boolean
     persist?: boolean
     prompt?: ConsentPromptPayload
+    /**
+     * How long a `persist` grant should live, in ms. Ignored unless
+     * `allow && persist`. Omitted = the broker's default window. The broker
+     * also clamps the ceiling, so this is a request rather than a mandate —
+     * see `lib/automation/consent-durations.ts`.
+     */
+    grantDurationMs?: number
   }): Promise<void> {
     return transport.call<void>("automation_consent_respond", { args })
   },
@@ -465,15 +476,45 @@ export interface ConsentPromptPayload {
    * bare verb. Absent (`null`/`undefined`) for self-describing actions.
    */
   commandDetail?: string | null
+  /**
+   * Chat session this call belongs to. Part of the session-grant key, so a
+   * grant created in one conversation never covers another. Absent for calls
+   * with no chat context (workflow steps, the headless MCP proxy).
+   */
+  sessionKey?: string | null
 }
 
 /**
  * Full event payload — includes the broker id the renderer must pass back
  * to `desktop.consentRespond`, plus the timeout the broker honors.
  */
+/**
+ * Screen thumbnail attached to a consent request so a remote approver isn't
+ * deciding blind. Display-only: it never affects the decision, the session
+ * grant, or the audit row, and it rides the authenticated `/ws/v1/events`
+ * frame only — never a push payload.
+ */
+export interface ConsentThumbnail {
+  /** Base64-encoded PNG (no `data:` prefix). */
+  bytes: string
+  width: number
+  height: number
+  /**
+   * The capture was blanked because the host's foreground window is a
+   * credential prompt. Surfaces render an explicit note so a black frame reads
+   * as "it is touching a password box" rather than a broken image.
+   */
+  redacted: boolean
+}
+
 export interface ConsentRequestEvent extends ConsentPromptPayload {
   id: string
   timeoutMs: number
+  /**
+   * Absent when capture failed or nothing fit the transport's frame budget —
+   * consumers degrade to the text-only rendering.
+   */
+  thumbnail?: ConsentThumbnail | null
 }
 
 export type AuditDecision = "allow" | "deny" | "consent"
@@ -552,6 +593,14 @@ export interface AutomationSettings {
    * clipboard-paste fast path. 0 disables. Default 200.
    */
   pasteThresholdChars: number
+  /**
+   * How long a Per-Call consent prompt waits for an answer before
+   * fail-closing (rejecting). Default 90s — long enough for a push to reach a
+   * backgrounded phone, be unlocked, and answered. The host clamps this to
+   * `[MIN_CONSENT_TIMEOUT_MS, MAX_CONSENT_TIMEOUT_MS]`
+   * (`lib/automation/consent-durations.ts`).
+   */
+  consentTimeoutMs: number
 }
 
 export function defaultAutomationSettings(): AutomationSettings {
@@ -571,5 +620,6 @@ export function defaultAutomationSettings(): AutomationSettings {
     screenshotDedup: true,
     alwaysHidePictureInPicture: false,
     pasteThresholdChars: 200,
+    consentTimeoutMs: DEFAULT_CONSENT_TIMEOUT_MS,
   }
 }

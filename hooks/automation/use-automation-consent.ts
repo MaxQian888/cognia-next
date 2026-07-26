@@ -42,8 +42,17 @@ export interface AutomationConsentStream {
   queue: PendingConsent[]
   /** Monotonic clock (ms) so a consumer can render the auto-reject countdown. */
   now: number
-  /** Resolve a prompt. `persist` = "always allow this session" for the tuple. */
-  respond: (event: PendingConsent, allow: boolean, persist: boolean) => Promise<void>
+  /**
+   * Resolve a prompt. `persist` = "don't ask again for this tuple", bounded by
+   * `grantDurationMs` (the broker defaults and clamps it — see
+   * `lib/automation/consent-durations.ts`).
+   */
+  respond: (
+    event: PendingConsent,
+    allow: boolean,
+    persist: boolean,
+    grantDurationMs?: number
+  ) => Promise<void>
 }
 
 function promptOnly(event: ConsentRequestEvent): ConsentPromptPayload {
@@ -53,6 +62,10 @@ function promptOnly(event: ConsentRequestEvent): ConsentPromptPayload {
     pluginId: event.pluginId,
     processName: event.processName,
     windowTitle: event.windowTitle,
+    // Part of the host's grant key — omitting it would register the grant
+    // under an empty session tag, so it would never match the prompts it was
+    // meant to cover and the user would be re-asked every call.
+    sessionKey: event.sessionKey ?? null,
   }
 }
 
@@ -73,7 +86,8 @@ export function useAutomationConsent({ enabled }: { enabled: boolean }): Automat
   }, [enabled])
 
   // 0.5s tick drives the countdown + drops expired prompts inline. The Rust
-  // broker enforces the real 30s timeout — this is UI tidy-up only.
+  // broker enforces the real timeout (`AutomationSettings.consentTimeoutMs`,
+  // echoed on each frame as `timeoutMs`) — this is UI tidy-up only.
   useEffect(() => {
     if (queue.length === 0) return
     const id = window.setInterval(() => {
@@ -84,21 +98,25 @@ export function useAutomationConsent({ enabled }: { enabled: boolean }): Automat
     return () => window.clearInterval(id)
   }, [queue.length])
 
-  const respond = useCallback(async (event: PendingConsent, allow: boolean, persist: boolean) => {
-    // Optimistically dequeue so the user can't double-tap a decision.
-    setQueue((prev) => prev.filter((p) => p.id !== event.id))
-    try {
-      await desktop.consentRespond({
-        id: event.id,
-        allow,
-        persist,
-        prompt: persist ? promptOnly(event) : undefined,
-      })
-    } catch (err) {
-      // Best-effort — if this never lands, the Rust broker's timeout fires.
-      console.warn("automation_consent_respond failed", err)
-    }
-  }, [])
+  const respond = useCallback(
+    async (event: PendingConsent, allow: boolean, persist: boolean, grantDurationMs?: number) => {
+      // Optimistically dequeue so the user can't double-tap a decision.
+      setQueue((prev) => prev.filter((p) => p.id !== event.id))
+      try {
+        await desktop.consentRespond({
+          id: event.id,
+          allow,
+          persist,
+          prompt: persist ? promptOnly(event) : undefined,
+          grantDurationMs: persist ? grantDurationMs : undefined,
+        })
+      } catch (err) {
+        // Best-effort — if this never lands, the Rust broker's timeout fires.
+        console.warn("automation_consent_respond failed", err)
+      }
+    },
+    []
+  )
 
   return { queue, now, respond }
 }

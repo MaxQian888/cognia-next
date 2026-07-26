@@ -455,6 +455,19 @@ fn read_focused_window() -> Result<FocusedSnapshot> {
     Ok(snap)
 }
 
+pub(crate) fn focused_window_credential_signals() -> Option<(Option<String>, Option<String>, bool)>
+{
+    if !raw::is_trusted() {
+        return None;
+    }
+    let snap = read_focused_window().ok()?;
+    let secure_text_field = snap
+        .pid
+        .map(|pid| raw::focused_element_is_secure_text_field(&AXUIElement::application(pid as i32)))
+        .unwrap_or(false);
+    Some((snap.process_name, snap.window_title, secure_text_field))
+}
+
 fn fork_osascript() -> Result<FocusedSnapshot> {
     // Single AppleScript run that returns three lines:
     //   line 1: front process name

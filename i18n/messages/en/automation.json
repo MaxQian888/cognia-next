@@ -27,6 +27,10 @@
     "title": "Audit Log"
   },
   "behavior": {
+    "consentTimeout": {
+      "help": "How long a per-call consent prompt waits before rejecting on its own. Longer windows give a phone time to receive the notification, unlock, and answer. Capped at 115s so the answer never arrives after the tool call has already given up.",
+      "label": "Consent wait (seconds)"
+    },
     "dedup": {
       "help": "When consecutive screenshots are identical, send a short text note instead of the duplicate image. Saves tokens on long tasks.",
       "label": "Skip unchanged screenshots"
@@ -65,8 +69,9 @@
   },
   "consent": {
     "actions": {
+      "allowForLabel": "Stop asking for:",
+      "allowForMinutes": "{minutes} min",
       "allowOnce": "Allow once",
-      "allowSession": "Always allow this session",
       "close": "Close",
       "reject": "Reject"
     },

@@ -64,22 +64,24 @@ describe("useAutomationConsent", () => {
     expect(result.current.queue).toHaveLength(1)
   })
 
-  it("respond(allow, persist) echoes the prompt back and dequeues", async () => {
+  it("respond(allow, persist) echoes the session-scoped prompt and grant duration", async () => {
     const { result } = renderHook(() => useAutomationConsent({ enabled: true }))
     await waitFor(() => expect(handler).toBeTruthy())
-    act(() => handler!(evt({ pluginId: "cu" })))
+    act(() => handler!(evt({ pluginId: "cu", sessionKey: "chat-42" })))
     await act(async () => {
-      await result.current.respond(result.current.queue[0], true, true)
+      await result.current.respond(result.current.queue[0], true, true, 15 * 60 * 1000)
     })
     expect(consentRespondMock).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "evt-1",
         allow: true,
         persist: true,
+        grantDurationMs: 15 * 60 * 1000,
         prompt: expect.objectContaining({
           command: "click",
           surface: "computerUse",
           pluginId: "cu",
+          sessionKey: "chat-42",
         }),
       })
     )
@@ -94,7 +96,29 @@ describe("useAutomationConsent", () => {
       await result.current.respond(result.current.queue[0], false, false)
     })
     expect(consentRespondMock).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "evt-1", allow: false, persist: false, prompt: undefined })
+      expect.objectContaining({
+        id: "evt-1",
+        allow: false,
+        persist: false,
+        grantDurationMs: undefined,
+        prompt: undefined,
+      })
+    )
+  })
+
+  it("normalizes a missing session key to null in a persisted prompt", async () => {
+    const { result } = renderHook(() => useAutomationConsent({ enabled: true }))
+    await waitFor(() => expect(handler).toBeTruthy())
+    act(() => handler!(evt({ sessionKey: undefined })))
+
+    await act(async () => {
+      await result.current.respond(result.current.queue[0], true, true)
+    })
+
+    expect(consentRespondMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.objectContaining({ sessionKey: null }),
+      })
     )
   })
 

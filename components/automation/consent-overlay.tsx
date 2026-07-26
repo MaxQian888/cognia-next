@@ -17,15 +17,15 @@
  * Three actions:
  *
  * 1. **Allow once** — `consentRespond({ allow: true, persist: false })`.
- * 2. **Always allow this session** — `consentRespond({ allow: true,
- *    persist: true, prompt })`. The broker keys the grant by
- *    `(surface, command, pluginId, processName)`; identical future calls
- *    skip the overlay until the kill switch is engaged.
+ * 2. **Don't ask again for N minutes** — `consentRespond({ allow: true,
+ *    persist: true, prompt, grantDurationMs })`. The broker keys the grant by
+ *    `(sessionKey, surface, command, pluginId, processName)` and stamps it
+ *    with an expiry; identical future calls in the same conversation skip the
+ *    overlay until the window lapses (or the kill switch fires).
  * 3. **Reject** — `consentRespond({ allow: false })`.
  *
  * Closing the overlay (X button) is equivalent to Reject so the broker's
- * pending channel resolves promptly rather than waiting for the 30s
- * timeout.
+ * pending channel resolves promptly rather than waiting out `timeoutMs`.
  *
  * Multiple concurrent requests are queued — the overlay shows the most
  * recent prompt and exposes a small "N more pending" pill so the user
@@ -43,6 +43,10 @@ import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { isTauri } from "@/lib/tauri"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
+import {
+  CONSENT_GRANT_DURATIONS_MS,
+  grantDurationMinutes,
+} from "@/lib/automation/consent-durations"
 import {
   desktop,
   type ConsentPromptPayload,
@@ -62,6 +66,10 @@ function promptOnly(event: ConsentRequestEvent): ConsentPromptPayload {
     processName: event.processName,
     windowTitle: event.windowTitle,
     commandDetail: event.commandDetail ?? null,
+    // Part of the host's grant key — omitting it would register the grant
+    // under an empty session tag, so it would never match the prompts it was
+    // meant to cover and the user would be re-asked every call.
+    sessionKey: event.sessionKey ?? null,
   }
 }
 
@@ -112,23 +120,27 @@ export function ConsentOverlay() {
     return () => window.clearInterval(id)
   }, [queue.length])
 
-  const respond = useCallback(async (event: PendingPrompt, allow: boolean, persist: boolean) => {
-    // Remove the prompt from the UI immediately — Rust resolves the
-    // channel async, but we don't want the user to be able to click twice.
-    setQueue((prev) => prev.filter((p) => p.id !== event.id))
-    try {
-      await desktop.consentRespond({
-        id: event.id,
-        allow,
-        persist,
-        prompt: persist ? promptOnly(event) : undefined,
-      })
-    } catch (err) {
-      // Best-effort — log but don't re-queue. If `respond` fails the
-      // Rust-side timeout will fire eventually.
-      console.warn("automation_consent_respond failed", err)
-    }
-  }, [])
+  const respond = useCallback(
+    async (event: PendingPrompt, allow: boolean, persist: boolean, grantDurationMs?: number) => {
+      // Remove the prompt from the UI immediately — Rust resolves the
+      // channel async, but we don't want the user to be able to click twice.
+      setQueue((prev) => prev.filter((p) => p.id !== event.id))
+      try {
+        await desktop.consentRespond({
+          id: event.id,
+          allow,
+          persist,
+          prompt: persist ? promptOnly(event) : undefined,
+          grantDurationMs: persist ? grantDurationMs : undefined,
+        })
+      } catch (err) {
+        // Best-effort — log but don't re-queue. If `respond` fails the
+        // Rust-side timeout will fire eventually.
+        console.warn("automation_consent_respond failed", err)
+      }
+    },
+    []
+  )
 
   if (!isTauri() || queue.length === 0) return null
 
@@ -219,9 +231,25 @@ export function ConsentOverlay() {
             <Button size="sm" onClick={() => respond(current, true, false)}>
               {t("actions.allowOnce")}
             </Button>
-            <Button size="sm" variant="outline" onClick={() => respond(current, true, true)}>
-              {t("actions.allowSession")}
-            </Button>
+            <div className="space-y-1">
+              <span className="text-[10px] text-muted-foreground">
+                {t("actions.allowForLabel")}
+              </span>
+              <div className="flex gap-1">
+                {CONSENT_GRANT_DURATIONS_MS.map((ms) => (
+                  <Button
+                    key={ms}
+                    size="sm"
+                    variant="outline"
+                    className="flex-1 text-[11px]"
+                    onClick={() => respond(current, true, true, ms)}
+                    data-testid={`consent-allow-for-${grantDurationMinutes(ms)}`}
+                  >
+                    {t("actions.allowForMinutes", { minutes: grantDurationMinutes(ms) })}
+                  </Button>
+                ))}
+              </div>
+            </div>
             <Button size="sm" variant="ghost" onClick={() => respond(current, false, false)}>
               {t("actions.reject")}
             </Button>

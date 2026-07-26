@@ -213,6 +213,41 @@ pub struct AutomationSettings {
     /// `type` calls longer than this many chars transparently use the
     /// clipboard-paste fast path. 0 disables. Default 200.
     pub paste_threshold_chars: u32,
+    /// How long a `PerCall` consent prompt waits for an answer before
+    /// fail-closing. Raised from the original hard-coded 30 s so a remote
+    /// approver has time to receive the push, unlock, and open the app.
+    ///
+    /// Read through [`consent_timeout_ms`](Self::consent_timeout_ms), which
+    /// clamps it below the sidecar's plugin-tool budget — a consent window
+    /// wider than that would expire against a tool call that already died.
+    pub consent_timeout_ms: u64,
+}
+
+/// Upper bound for [`AutomationSettings::consent_timeout_ms`].
+///
+/// The sidecar aborts a plugin tool call at `DEFAULT_PLUGIN_TOOL_TIMEOUT_MS`
+/// (120 s, `sidecar/builtin-tools/plugin-tools.mjs`). A consent window at or
+/// past that ceiling is worse than useless: the operator answers, and the
+/// answer lands on a tool call the sidecar already gave up on. Leave headroom.
+pub const MAX_CONSENT_TIMEOUT_MS: u64 = 115_000;
+
+/// Floor for the same setting — below this the prompt is unanswerable even
+/// with the app already open.
+pub const MIN_CONSENT_TIMEOUT_MS: u64 = 5_000;
+
+/// Default consent wait. Long enough to cover push → unlock → open app.
+pub const DEFAULT_CONSENT_TIMEOUT_MS: u64 = 90_000;
+
+impl AutomationSettings {
+    /// The effective consent wait, clamped into
+    /// `[MIN_CONSENT_TIMEOUT_MS, MAX_CONSENT_TIMEOUT_MS]`. A zero / absent
+    /// stored value (older settings.json) reads as the default.
+    pub fn consent_timeout_ms(&self) -> u64 {
+        match self.consent_timeout_ms {
+            0 => DEFAULT_CONSENT_TIMEOUT_MS,
+            ms => ms.clamp(MIN_CONSENT_TIMEOUT_MS, MAX_CONSENT_TIMEOUT_MS),
+        }
+    }
 }
 
 impl Default for AutomationSettings {
@@ -228,6 +263,7 @@ impl Default for AutomationSettings {
             screenshot_dedup: true,
             always_hide_picture_in_picture: false,
             paste_threshold_chars: 200,
+            consent_timeout_ms: DEFAULT_CONSENT_TIMEOUT_MS,
         }
     }
 }
@@ -318,6 +354,13 @@ pub struct ConsentPrompt {
     /// — never part of the session-grant key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command_detail: Option<String>,
+    /// Chat session this call belongs to. The gate can't see it (it has no
+    /// access to the renderer context); the dispatcher fills it from
+    /// `GateContext` the same way it fills `command_detail`. Unlike that
+    /// field this one IS part of the session-grant key: a "don't ask again
+    /// for 30 minutes" grant must not leak into a different conversation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_key: Option<String>,
 }
 
 /// Build a consent prompt for `call` (command-detail filled later by the
@@ -330,6 +373,7 @@ fn consent_prompt(call: &Call<'_>) -> ConsentPrompt {
         process_name: call.target.process_name.clone(),
         window_title: call.target.window_title.clone(),
         command_detail: None,
+        session_key: None,
     }
 }
 
@@ -528,6 +572,55 @@ pub fn maybe_upgrade_to_consent(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn consent_timeout_defaults_when_unset() {
+        // A settings.json written before this field existed deserializes to 0.
+        let s = AutomationSettings {
+            consent_timeout_ms: 0,
+            ..AutomationSettings::default()
+        };
+        assert_eq!(s.consent_timeout_ms(), DEFAULT_CONSENT_TIMEOUT_MS);
+    }
+
+    #[test]
+    fn consent_timeout_is_capped_below_the_sidecar_tool_budget() {
+        // The sidecar abandons a plugin tool call at 120s. A longer consent
+        // window would let the operator answer a call that is already dead.
+        let s = AutomationSettings {
+            consent_timeout_ms: 10 * 60 * 1000,
+            ..AutomationSettings::default()
+        };
+        assert_eq!(s.consent_timeout_ms(), MAX_CONSENT_TIMEOUT_MS);
+        assert!(MAX_CONSENT_TIMEOUT_MS < 120_000);
+    }
+
+    #[test]
+    fn consent_timeout_is_floored_at_an_answerable_window() {
+        let s = AutomationSettings {
+            consent_timeout_ms: 100,
+            ..AutomationSettings::default()
+        };
+        assert_eq!(s.consent_timeout_ms(), MIN_CONSENT_TIMEOUT_MS);
+    }
+
+    #[test]
+    fn consent_timeout_passes_through_a_sane_value() {
+        let s = AutomationSettings {
+            consent_timeout_ms: 45_000,
+            ..AutomationSettings::default()
+        };
+        assert_eq!(s.consent_timeout_ms(), 45_000);
+    }
+
+    #[test]
+    fn default_consent_timeout_is_the_documented_90s() {
+        assert_eq!(
+            AutomationSettings::default().consent_timeout_ms(),
+            90_000,
+            "the default must stay long enough to cover push → unlock → answer"
+        );
+    }
 
     fn target(proc: &str) -> TargetMeta {
         TargetMeta {

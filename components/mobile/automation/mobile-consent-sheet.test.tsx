@@ -89,6 +89,36 @@ describe("<MobileConsentSheet />", () => {
     expect(screen.getByText("experimental_verb")).toBeInTheDocument()
   })
 
+  it("renders the screen thumbnail so the approver is not deciding blind", () => {
+    stream = baseStream([
+      prompt({
+        thumbnail: { bytes: "aGVsbG8=", width: 640, height: 400, redacted: false },
+      }),
+    ])
+    render(<MobileConsentSheet />)
+    const img = screen.getByAltText("Desktop screen at the moment of the request")
+    expect(img).toHaveAttribute("src", "data:image/png;base64,aGVsbG8=")
+    expect(screen.queryByText(/Screen hidden/)).not.toBeInTheDocument()
+  })
+
+  it("explains a blanked frame instead of showing a bare black rectangle", () => {
+    stream = baseStream([
+      prompt({
+        thumbnail: { bytes: "aGVsbG8=", width: 640, height: 400, redacted: true },
+      }),
+    ])
+    render(<MobileConsentSheet />)
+    expect(screen.getByText(/credential prompt/)).toBeInTheDocument()
+  })
+
+  it("degrades to the text-only prompt when capture produced nothing", () => {
+    stream = baseStream([prompt()])
+    render(<MobileConsentSheet />)
+    expect(screen.queryByTestId("mobile-consent-thumbnail")).not.toBeInTheDocument()
+    // …and the decision is still actionable.
+    expect(screen.getByTestId("mobile-consent-allow")).toBeInTheDocument()
+  })
+
   it("Allow once runs the biometric guard then responds with persist=false", async () => {
     stream = baseStream([prompt()])
     render(<MobileConsentSheet />)
@@ -97,22 +127,28 @@ describe("<MobileConsentSheet />", () => {
       expect(respondMock).toHaveBeenCalledWith(
         expect.objectContaining({ id: "evt-1" }),
         true,
-        false
+        false,
+        undefined
       )
     )
   })
 
-  it("Always allow responds with persist=true", async () => {
-    stream = baseStream([prompt()])
-    render(<MobileConsentSheet />)
-    fireEvent.click(screen.getByTestId("mobile-consent-allow-always"))
-    await waitFor(() =>
-      expect(respondMock).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "evt-1" }),
-        true,
-        true
+  it("each duration button responds with persist=true and its own window", async () => {
+    for (const minutes of [15, 30, 60]) {
+      respondMock.mockClear()
+      stream = baseStream([prompt()])
+      const { unmount } = render(<MobileConsentSheet />)
+      fireEvent.click(screen.getByTestId(`mobile-consent-allow-for-${minutes}`))
+      await waitFor(() =>
+        expect(respondMock).toHaveBeenCalledWith(
+          expect.objectContaining({ id: "evt-1" }),
+          true,
+          true,
+          minutes * 60_000
+        )
       )
-    )
+      unmount()
+    }
   })
 
   it("Reject responds immediately without the biometric guard", async () => {

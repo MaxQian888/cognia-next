@@ -104,6 +104,7 @@ impl CallContext {
             click_y: point.map(|p| p.y),
             force_tier: self.force_tier,
             command_detail: None,
+            session_key: self.session_key.clone(),
         }
     }
 }

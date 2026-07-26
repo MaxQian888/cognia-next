@@ -202,6 +202,12 @@ pub struct CallContext {
     /// computer-use plugin when the session has the sandbox enabled.
     #[serde(default)]
     pub sandbox_confine: Option<super::types::SandboxConfine>,
+    /// Renderer-supplied chat session tag. The TS client has always sent this
+    /// (`lib/automation/client.ts` `CallContext.sessionKey`); it used to be
+    /// dropped on the floor here. Forwarded into `GateContext` so a
+    /// time-boxed consent grant is scoped to one conversation.
+    #[serde(default)]
+    pub session_key: Option<String>,
 }
 
 impl CallContext {
@@ -284,6 +290,7 @@ macro_rules! command_body {
             click_y: $ctx.click_y,
             force_tier: $ctx.force_tier,
             command_detail: None,
+            session_key: $ctx.session_key.clone(),
         };
         $crate::automation::dispatcher::run_gated(
             Some(&$app),
@@ -850,6 +857,7 @@ pub async fn automation_execute(
         click_y: point.map(|p| p.y).or(ctx.click_y),
         force_tier: ctx.force_tier,
         command_detail: action.consent_detail(),
+        session_key: ctx.session_key.clone(),
     };
     dispatcher::run_gated(
         Some(&app),
@@ -1398,6 +1406,11 @@ pub struct ConsentRespondArgs {
     pub persist: bool,
     #[serde(default)]
     pub prompt: Option<super::permission::ConsentPrompt>,
+    /// How long the "don't ask again" grant should live, in ms. Ignored
+    /// unless `allow && persist`. Absent = the broker's default window; the
+    /// broker also clamps the ceiling, so this is a request, not a mandate.
+    #[serde(default)]
+    pub grant_duration_ms: Option<u64>,
 }
 
 #[tauri::command]
@@ -1405,9 +1418,13 @@ pub async fn automation_consent_respond(
     state: State<'_, AutomationState>,
     args: ConsentRespondArgs,
 ) -> std::result::Result<(), String> {
-    state
-        .consent
-        .resolve(&args.id, args.allow, args.persist, args.prompt.as_ref());
+    state.consent.resolve(
+        &args.id,
+        args.allow,
+        args.persist,
+        args.grant_duration_ms,
+        args.prompt.as_ref(),
+    );
     Ok(())
 }
 
@@ -1639,6 +1656,7 @@ mod tests {
             force_tier: None,
             sandbox_connection_id: None,
             sandbox_confine: None,
+            session_key: None,
         };
         let facts = ctx.facts();
         assert_eq!(facts.process_name, Some("Chrome"));
