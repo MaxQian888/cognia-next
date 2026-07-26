@@ -65,7 +65,7 @@ it("renders items and shows the row menu without hover (touch)", () => {
   hook.items = [rec({ title: "Alpha" })]
   render(<NotificationFeedMobile />)
   expect(screen.getByText("Alpha")).toBeInTheDocument()
-  const menu = screen.getByRole("button", { name: "notificationCenter.center.settings" })
+  const menu = screen.getByRole("button", { name: "notificationCenter.center.itemActions" })
   expect(menu.className).toContain("opacity-100")
   expect(menu.className).not.toContain("opacity-0")
 })

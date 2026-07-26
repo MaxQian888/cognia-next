@@ -34,6 +34,7 @@ export function useNotifications() {
     markSeen: useNotificationStore.getState().markSeen,
     markRead: useNotificationStore.getState().markRead,
     markDone: useNotificationStore.getState().markDone,
+    restore: useNotificationStore.getState().restore,
     markAllRead: useNotificationStore.getState().markAllRead,
     archiveAll: useNotificationStore.getState().archiveAll,
     snooze: useNotificationStore.getState().snooze,

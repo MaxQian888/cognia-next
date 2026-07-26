@@ -56,6 +56,8 @@ export interface NotificationStoreState {
   markSeen: (id: string) => Promise<void>
   markRead: (id: string) => Promise<void>
   markDone: (id: string) => Promise<void>
+  /** Move an archived record back to the active feed without making it unread. */
+  restore: (id: string) => Promise<void>
   markAllRead: () => Promise<void>
   /** Archive every record currently in the active feed (active → done). */
   archiveAll: () => Promise<void>
@@ -126,6 +128,14 @@ export const useNotificationStore = create<NotificationStoreState>()((set, get) 
       set,
       get().items.filter((r) => r.id !== id)
     )
+  },
+
+  restore: async (id) => {
+    const rec = await getNotification(id)
+    if (!rec || rec.readState !== "done") return
+    const patch = { readState: "read" as const, doneAt: undefined }
+    await patchNotification(id, patch)
+    recount(set, upsert(get().items, { ...rec, ...patch }))
   },
 
   markAllRead: async () => {

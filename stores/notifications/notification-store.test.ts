@@ -181,6 +181,34 @@ describe("read-state actions", () => {
     expect(db.patchNotification).not.toHaveBeenCalled()
     expect(useNotificationStore.getState().items).toEqual([])
   })
+
+  it("restore moves an archived record back to the active feed as read", async () => {
+    db.getNotification.mockResolvedValueOnce(
+      rec({ id: "archived", readState: "done", doneAt: 123 })
+    )
+
+    await useNotificationStore.getState().restore("archived")
+
+    expect(db.patchNotification).toHaveBeenCalledWith("archived", {
+      readState: "read",
+      doneAt: undefined,
+    })
+    expect(useNotificationStore.getState().items).toEqual([
+      expect.objectContaining({ id: "archived", readState: "read", doneAt: undefined }),
+    ])
+  })
+
+  it("restore ignores a missing or already-active record", async () => {
+    db.getNotification
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(rec({ id: "active", readState: "read" }))
+
+    await useNotificationStore.getState().restore("missing")
+    await useNotificationStore.getState().restore("active")
+
+    expect(db.patchNotification).not.toHaveBeenCalled()
+    expect(useNotificationStore.getState().items).toEqual([])
+  })
 })
 
 describe("snooze", () => {

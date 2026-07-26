@@ -24,12 +24,14 @@ jest.mock("@/lib/db/notifications", () => ({
 
 const hook = {
   items: [] as NotificationRecord[],
+  markSeen: jest.fn(),
   markRead: jest.fn(),
   markDone: jest.fn(),
+  restore: jest.fn().mockResolvedValue(undefined),
   markAllRead: jest.fn(),
   archiveAll: jest.fn().mockResolvedValue(undefined),
   snooze: jest.fn(),
-  remove: jest.fn(),
+  remove: jest.fn().mockResolvedValue(undefined),
   clearAll: jest.fn().mockResolvedValue(undefined),
   sourceFilter: undefined as string | undefined,
   setSourceFilter: jest.fn(),
@@ -78,6 +80,33 @@ it("re-pulls the active feed on mount", () => {
   expect(hook.refresh).toHaveBeenCalled()
 })
 
+it("marks visible unseen notifications as seen when the center opens", () => {
+  hook.items = [
+    rec({ id: "unseen", readState: "unseen" }),
+    rec({ id: "seen", readState: "seen" }),
+    rec({ id: "read", readState: "read" }),
+  ]
+  render(<NotificationCenter />)
+  expect(hook.markSeen).toHaveBeenCalledTimes(1)
+  expect(hook.markSeen).toHaveBeenCalledWith("unseen")
+})
+
+it("marks only the filtered first page as seen", () => {
+  hook.sourceFilter = "scheduler"
+  hook.items = [
+    rec({ id: "hidden", source: "connector", readState: "unseen" }),
+    ...Array.from({ length: 21 }, (_, index) =>
+      rec({ id: `visible-${index}`, source: "scheduler", readState: "unseen" })
+    ),
+  ]
+
+  render(<NotificationCenter />)
+
+  expect(hook.markSeen.mock.calls.map(([id]) => id)).toEqual(
+    Array.from({ length: 20 }, (_, index) => `visible-${index}`)
+  )
+})
+
 it("mark-all-read button calls the store", async () => {
   hook.items = [rec()]
   render(<NotificationCenter />)
@@ -110,9 +139,11 @@ it("inline action dispatches the command and marks read", async () => {
 })
 
 it("settings button navigates to the notifications settings section", async () => {
-  render(<NotificationCenter />)
+  const onNavigate = jest.fn()
+  render(<NotificationCenter onNavigate={onNavigate} />)
   await userEvent.click(screen.getByRole("button", { name: "notificationCenter.center.settings" }))
   expect(push).toHaveBeenCalledWith("/settings?section=notifications")
+  expect(onNavigate).toHaveBeenCalled()
 })
 
 it("source filter selects a source", async () => {
@@ -123,11 +154,62 @@ it("source filter selects a source", async () => {
   expect(hook.setSourceFilter).toHaveBeenCalledWith("scheduler")
 })
 
+it("filters active notifications by source", () => {
+  hook.sourceFilter = "scheduler"
+  hook.items = [
+    rec({ id: "scheduled", source: "scheduler", title: "Scheduled" }),
+    rec({ id: "message", source: "connector", title: "Message" }),
+  ]
+
+  render(<NotificationCenter />)
+
+  expect(screen.getByText("Scheduled")).toBeInTheDocument()
+  expect(screen.queryByText("Message")).not.toBeInTheDocument()
+})
+
 it("toggling 'show archived' loads done notifications", async () => {
   render(<NotificationCenter />)
-  await userEvent.click(screen.getByRole("button", { name: "notificationCenter.center.showDone" }))
+  await userEvent.click(screen.getByRole("button", { name: "notificationCenter.center.archived" }))
   expect(listDone).toHaveBeenCalledWith(
     expect.objectContaining({ includeDone: true, readStates: ["done"] })
+  )
+})
+
+it("restores an archived notification to the active feed", async () => {
+  const user = userEvent.setup()
+  listDone.mockResolvedValueOnce([
+    rec({ id: "archived", title: "Archived item", readState: "done" }),
+  ])
+  render(<NotificationCenter />)
+
+  await user.click(screen.getByRole("button", { name: "notificationCenter.center.archived" }))
+  expect(await screen.findByText("Archived item")).toBeInTheDocument()
+  await user.click(screen.getByRole("button", { name: "notificationCenter.center.itemActions" }))
+  await user.click(await screen.findByText("notificationCenter.center.restore"))
+
+  expect(hook.restore).toHaveBeenCalledWith("archived")
+})
+
+it("filters archived notifications by source and switches back to the inbox", async () => {
+  const user = userEvent.setup()
+  hook.sourceFilter = "scheduler"
+  listDone.mockResolvedValueOnce([
+    rec({ id: "scheduled", source: "scheduler", title: "Scheduled", readState: "done" }),
+    rec({ id: "message", source: "connector", title: "Message", readState: "done" }),
+  ])
+  render(<NotificationCenter />)
+
+  expect(
+    screen.getByRole("button", { name: "notificationCenter.sources.scheduler" })
+  ).toBeInTheDocument()
+  await user.click(screen.getByRole("button", { name: "notificationCenter.center.archived" }))
+  expect(await screen.findByText("Scheduled")).toBeInTheDocument()
+  expect(screen.queryByText("Message")).not.toBeInTheDocument()
+
+  await user.click(screen.getByRole("button", { name: "notificationCenter.center.active" }))
+  expect(screen.getByRole("button", { name: "notificationCenter.center.active" })).toHaveAttribute(
+    "aria-pressed",
+    "true"
   )
 })
 
@@ -142,6 +224,14 @@ it("hides the unread badge when everything is read", () => {
   hook.items = [rec({ id: "a", readState: "read" })]
   render(<NotificationCenter />)
   expect(screen.queryByTestId("notification-center-unread")).not.toBeInTheDocument()
+})
+
+it("caps the center unread count at 99+", () => {
+  hook.items = Array.from({ length: 100 }, (_, index) =>
+    rec({ id: `unread-${index}`, readState: "unseen" })
+  )
+  render(<NotificationCenter />)
+  expect(screen.getByTestId("notification-center-unread")).toHaveTextContent("99+")
 })
 
 it("groups notifications into dated buckets", () => {
@@ -196,7 +286,7 @@ it("wires per-row triage actions (mark read / archive / snooze / remove) to the 
   render(<NotificationCenter />)
   const row = screen.getByTestId("notification-item")
   const openMenu = () =>
-    user.click(within(row).getByRole("button", { name: "notificationCenter.center.settings" }))
+    user.click(within(row).getByRole("button", { name: "notificationCenter.center.itemActions" }))
 
   await openMenu()
   await user.click(await screen.findByText("notificationCenter.center.markRead"))
