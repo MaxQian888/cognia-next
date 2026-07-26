@@ -143,6 +143,8 @@
     "ariaUploadImage": "上传文件",
     "attachImageTooltip": "添加文件",
     "attachMenu": {
+      "attachGroup": "附加",
+      "capabilitiesGroup": "能力",
       "file": "上传文件",
       "folder": "添加文件夹",
       "trigger": "添加附件"
@@ -291,6 +293,7 @@
       "capTools": "工具调用",
       "capVision": "视觉",
       "contextWindowLabel": "上下文窗口",
+      "effortSuffix": "· {effort}",
       "liveSwitchFailed": "无法实时切换模型",
       "liveSwitched": "已切换到 {model}",
       "noProviders": "尚未配置任何模型提供商",
@@ -530,6 +533,7 @@
       "named": "{greeting}，{name}",
       "night": "夜深了"
     },
+    "illustrationAlt": "连接对话、代码、文档与自动化的智能工作台",
     "newChat": "新建会话",
     "samples": {
       "draftPrompt": "查看暂存区改动（`git diff --cached`），按 Conventional Commits 提一条提交信息。",
@@ -687,9 +691,11 @@
     "dismiss": "忽略",
     "noSession": "当前没有打开的会话，请先新建一个再发送。",
     "openSettings": "打开设置",
+    "pendingPromptPiiBlocked": "自动提示词可能包含隐私或凭据类数据，已阻止发送。请新建普通对话，并只提供你明确希望发送的内容。",
     "retry": "重试",
     "sidecarExited": "AI 进程意外停止，本轮已中断。点击重试可继续。",
-    "title": "发送失败"
+    "title": "发送失败",
+    "unflushedEditorBuffers": "本回合开始前有 {count} 个打开的文件未能保存，agent 可能读到过期内容：{files}"
   },
   "list": {
     "clear": "清空",
@@ -993,6 +999,9 @@
       "unwrapAria": "取消自动换行",
       "wrap": "自动换行",
       "wrapAria": "启用自动换行"
+    },
+    "details": {
+      "defaultSummary": "详情"
     },
     "diff": {
       "copy": "复制",

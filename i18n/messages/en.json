@@ -2733,11 +2733,15 @@
       "artifactMode": "Artifact",
       "browseArtifacts": "Browse artifacts",
       "closeTab": "Close {title}",
+      "closeTabMenuItem": "Close tab",
       "collapse": "Collapse panel",
+      "goToSource": "Go to source message",
       "openArtifacts": "Open artifacts",
       "openInNewTab": "Open in new tab",
+      "referenceInChat": "Reference in conversation",
       "saveToProject": "Save to project…",
       "splitView": "Split",
+      "tabHint": "{title} — double-click to reveal its source message",
       "title": "Artifacts",
       "toggleHint": "Toggle panel (Ctrl/Cmd+J)",
       "workspaceMode": "Workspace",
@@ -2781,18 +2785,23 @@
       "applyAccepted": "Apply accepted",
       "commentOnSelection": "Comment on selection",
       "discard": "Discard",
+      "editTargetBadge": "Edit target",
+      "editTargetHint": "Only the edit target receives the AI's revision proposal. Click another chip to switch.",
       "empty": "No changes to review",
+      "emptyDescription": "When the assistant proposes a revision to this artifact, its diff appears here for you to accept or reject hunk by hunk.",
       "hunkDelete": "Deletion",
       "hunkInsert": "Insertion",
       "hunkReplace": "Replacement",
       "lines": "Lines",
       "original": "Current",
+      "promoteSelectionAria": "Make {title} the edit target",
       "proposed": "Proposed",
       "reDiff": "Re-diff against current",
       "reject": "Reject",
       "rejectAll": "Reject all",
       "removeSelectionAria": "Remove selection {title}",
       "selectionChipLabel": "{title} · lines {start}-{end}",
+      "selectionChipWholeLabel": "{title} · whole artifact",
       "selectionCommentPlaceholder": "What should change here?",
       "staleBanner": "The artifact changed since this proposal was generated. Re-diff or discard.",
       "title": "Review changes",
@@ -2969,6 +2978,10 @@
       "title": "Audit Log"
     },
     "behavior": {
+      "consentTimeout": {
+        "help": "How long a per-call consent prompt waits before rejecting on its own. Longer windows give a phone time to receive the notification, unlock, and answer. Capped at 115s so the answer never arrives after the tool call has already given up.",
+        "label": "Consent wait (seconds)"
+      },
       "dedup": {
         "help": "When consecutive screenshots are identical, send a short text note instead of the duplicate image. Saves tokens on long tasks.",
         "label": "Skip unchanged screenshots"
@@ -2992,8 +3005,9 @@
     },
     "consent": {
       "actions": {
+        "allowForLabel": "Stop asking for:",
+        "allowForMinutes": "{minutes} min",
         "allowOnce": "Allow once",
-        "allowSession": "Always allow this session",
         "close": "Close",
         "reject": "Reject"
       },
@@ -4103,6 +4117,8 @@
       "ariaUploadImage": "Upload files",
       "attachImageTooltip": "Attach files",
       "attachMenu": {
+        "attachGroup": "Attach",
+        "capabilitiesGroup": "Capabilities",
         "file": "Upload files",
         "folder": "Add folder",
         "trigger": "Attach"
@@ -4251,6 +4267,7 @@
         "capTools": "Tool use",
         "capVision": "Vision",
         "contextWindowLabel": "Context window",
+        "effortSuffix": "· {effort}",
         "liveSwitchFailed": "Couldn't switch the live model",
         "liveSwitched": "Switched to {model}",
         "noProviders": "No providers configured",
@@ -4490,6 +4507,7 @@
         "named": "{greeting}, {name}",
         "night": "Working late"
       },
+      "illustrationAlt": "A connected workspace for chat, code, documents, and automation",
       "newChat": "New chat",
       "samples": {
         "draftPrompt": "Look at the staged changes (`git diff --cached`) and propose a conventional-commits message.",
@@ -4647,9 +4665,11 @@
       "dismiss": "Dismiss",
       "noSession": "No conversation is open. Start a new one to send this.",
       "openSettings": "Open settings",
+      "pendingPromptPiiBlocked": "The automated prompt was blocked because it may contain private or credential-like data. Start a normal chat and share only the details you intend to send.",
       "retry": "Retry",
       "sidecarExited": "The assistant stopped unexpectedly and the turn was interrupted. Retry to continue.",
-      "title": "Failed to send"
+      "title": "Failed to send",
+      "unflushedEditorBuffers": "{count, plural, one {# open file could not be saved} other {# open files could not be saved}} before this turn, so the agent may read an out-of-date copy: {files}"
     },
     "list": {
       "clear": "Clear",
@@ -4953,6 +4973,9 @@
         "unwrapAria": "Disable word wrap",
         "wrap": "Wrap",
         "wrapAria": "Enable word wrap"
+      },
+      "details": {
+        "defaultSummary": "Details"
       },
       "diff": {
         "copy": "Copy",
@@ -5261,6 +5284,7 @@
     "no": "No",
     "remove": "Remove",
     "save": "Save",
+    "saving": "Saving…",
     "yes": "Yes"
   },
   "connectors": {
@@ -5322,9 +5346,11 @@
     "actions": {
       "collapse": "Collapse workbench",
       "focus": "Focus mode",
+      "layoutMenu": "Layout options",
       "narrow": "Narrow mode",
       "pin": "Pin panel",
       "pinHint": "Pinned panels stay put — automatic reveals become badges instead",
+      "resetLayout": "Reset layout",
       "resize": "Resize workbench",
       "retry": "Retry panel",
       "switchPanel": "Switch panel",
@@ -5367,6 +5393,7 @@
       "artifactType": "Type",
       "canvasTitle": "Document properties",
       "documentType": "Type",
+      "goToSource": "Go to source message",
       "language": "Language",
       "notRun": "Not run",
       "revision": "Revision",
@@ -6046,6 +6073,10 @@
       "desktopOnlyTitle": "Run inside Tauri",
       "emptyTitle": "Cognia"
     },
+    "shellLayoutNotice": {
+      "description": "Panel toggles, theme, zoom and language now live in the Views menu in the title bar. The pet, OCR and clipboard buttons moved there too. Press ⌘B to show or hide the conversation list.",
+      "title": "Layout simplified"
+    },
     "statusBar": {
       "awaitingApproval": "Awaiting approval",
       "connOffline": "Offline",
@@ -6053,39 +6084,15 @@
       "connReconnecting": "Reconnecting…",
       "error": "Error",
       "idle": "Idle",
-      "locale": "Language",
-      "noSession": "No session",
-      "openCommandPalette": "Open command palette",
-      "openLogs": "Open logs",
       "perf": "Performance",
       "perfCpu": "CPU",
       "perfMem": "Memory",
-      "permissionAcceptEdits": "Auto-accept",
-      "permissionAdvanced": "Advanced",
-      "permissionAuto": "Auto",
-      "permissionBypass": "Bypass",
-      "permissionDefault": "Default",
-      "permissionDontAsk": "Don't ask",
-      "permissionMode": "Permission",
-      "permissionPlan": "Plan",
       "streaming": "Streaming",
-      "switchLocale": "Switch language",
       "syncLast": "Synced {time}",
       "syncNever": "Not synced",
       "syncNow": "Sync now",
-      "tauri": "Desktop",
-      "themeDark": "Dark theme",
-      "themeLight": "Light theme",
-      "themeNext": "Switch theme",
-      "themeSystem": "System theme",
-      "toggleSidebar": "Toggle sidebar",
       "usage": "Usage & limits",
-      "usageOpen": "Open usage & limits",
-      "web": "Web",
-      "zoom": "Zoom",
-      "zoomIn": "Zoom in",
-      "zoomOut": "Zoom out",
-      "zoomReset": "Reset zoom"
+      "usageOpen": "Open usage & limits"
     },
     "titleBar": {
       "alwaysOnTop": "Always on top",
@@ -6102,6 +6109,7 @@
       "forward": "Go forward",
       "kbdHint": "Ctrl+K",
       "layout": {
+        "appearanceGroup": "Appearance",
         "customize": "Customize layout",
         "itemAccount": "Account",
         "itemConnectivity": "Connectivity",
@@ -6110,14 +6118,24 @@
         "itemSync": "Sync status",
         "itemUsage": "Usage & limits",
         "itemWorkspace": "Workspace",
+        "localeEn": "English",
+        "localeZh": "简体中文",
+        "openBrowser": "Open browser panel",
         "statusBarGroup": "Status bar",
+        "themeDark": "Dark",
+        "themeLight": "Light",
+        "themeSystem": "System",
         "title": "Customize Layout",
         "titleBarGroup": "Title bar",
         "toggleGuildRail": "Toggle Guild Rail",
         "toggleRightSidebar": "Toggle Right Sidebar",
         "toggleSidebar": "Toggle Sidebar",
         "toggleStatusBar": "Toggle Status Bar",
-        "toggleTerminal": "Toggle Terminal"
+        "toggleTerminal": "Toggle Terminal",
+        "zoomIn": "Zoom in",
+        "zoomLabel": "Zoom",
+        "zoomOut": "Zoom out",
+        "zoomReset": "Reset zoom"
       },
       "maximize": "Maximize",
       "minimize": "Minimize",
@@ -6374,6 +6392,20 @@
       "compact": "Compact",
       "grid": "Grid",
       "list": "List"
+    }
+  },
+  "docsSite": {
+    "notFound": {
+      "body": "The page this link points to has moved or no longer exists.",
+      "docs": "Back to the docs home",
+      "heading": "Page not found",
+      "other": "中文版本"
+    },
+    "pageActions": {
+      "copied": "Copied",
+      "failed": "Copy failed",
+      "idle": "Copy Markdown",
+      "view": "View Markdown"
     }
   },
   "editor": {
@@ -9737,7 +9769,9 @@
         "biometricDescription": "Allowing lets the connected desktop run this action.",
         "biometricReason": "Approve the desktop computer-use action",
         "biometricTitle": "Confirm remote action",
-        "sheetDescription": "The connected desktop wants to run an action. Review it, then allow or reject."
+        "sheetDescription": "The connected desktop wants to run an action. Review it, then allow or reject.",
+        "thumbnailAlt": "Desktop screen at the moment of the request",
+        "thumbnailRedacted": "Screen hidden: the desktop is focused on a password or credential prompt."
       }
     },
     "backup": {
@@ -11667,16 +11701,20 @@
       "yesterday": "Yesterday"
     },
     "center": {
+      "active": "Inbox",
       "archiveAll": "Archive all",
+      "archived": "Archived",
       "clearAll": "Clear all",
       "clearAllBody": "This permanently removes every notification, including archived ones. This cannot be undone.",
       "clearAllCancel": "Cancel",
       "clearAllConfirm": "Clear all",
       "clearAllTitle": "Clear all notifications?",
       "empty": "You're all caught up.",
+      "emptyArchived": "No archived notifications.",
       "filterAll": "All sources",
       "groupCount": "+{count} more updates",
       "hideDone": "Hide archived",
+      "itemActions": "Notification actions",
       "loadMore": "Load more ({count})",
       "markAllRead": "Mark all as read",
       "markDone": "Archive",
@@ -11685,6 +11723,7 @@
       "open": "Open",
       "refresh": "Refresh",
       "remove": "Remove",
+      "restore": "Restore to inbox",
       "settings": "Notification settings",
       "showDone": "Show archived",
       "snooze": "Snooze",
@@ -14016,11 +14055,18 @@
     },
     "githubDialog": {
       "cancel": "Cancel",
+      "conversionCounts": "{converted} converted, {warnings} warnings",
+      "conversionSource": "Detected source: {source}",
+      "conversionTitle": "Conversion report",
       "description": "Paste a public repository — owner/repo, owner/repo@ref, a /sub/dir, or a full github.com URL. The repo must contain a conforming plugin.json and ship its built artifacts (no build runs on your machine).",
       "desktopOnly": "Installing from GitHub requires the Cognia desktop app.",
       "emptyError": "Please enter a repository.",
       "fetch": "Fetch",
       "fetchError": "Could not load the plugin: {message}",
+      "fidelityContextual": "Contextual: behaviour is rebuilt from what the source declared, not translated one-to-one.",
+      "fidelityNativeExact": "Native Cognia plugin; no conversion required.",
+      "fidelityStructured": "Structured: the manifest and its contributions carry over; anything host-specific is listed below.",
+      "fidelityUnsupported": "Unsupported: this plugin cannot be converted without losing behaviour.",
       "install": "Install",
       "installCancelled": "Installation cancelled.",
       "installFailed": "Installation failed: {message}",
@@ -14028,6 +14074,10 @@
       "label": "GitHub repository",
       "placeholder": "owner/repo  ·  owner/repo@v1.0.0  ·  https://github.com/owner/repo",
       "readme": "README",
+      "sourceClaudeCode": "Claude Code",
+      "sourceCodex": "Codex",
+      "sourceCognia": "Cognia",
+      "sourceGeminiCli": "Gemini CLI",
       "title": "Install from GitHub"
     },
     "governance": {
@@ -14826,6 +14876,8 @@
       "disabledTooltip": "Not available on this platform — use your local VS Code instead.",
       "downloading": "Downloading VS Code… {percent}%",
       "errorTitle": "Couldn't start VS Code",
+      "languageRestart": "Restarting the Pro IDE to apply the new display language…",
+      "languageUnavailable": "The Pro IDE has no translation for {locale}; its interface stays in English.",
       "localVsCodeFailed": "Couldn't open your local VS Code: {error}",
       "openFileFailed": "Couldn't open the file in VS Code: {error}",
       "openLocalVsCode": "Open in VS Code",
@@ -15327,6 +15379,7 @@
     "customBaseURL": "Custom Base URL",
     "customProviderDescription": "Configure a custom API provider with your preferred protocol.",
     "customProviderModelsManaged": "Custom-provider models are managed inside the provider editor.",
+    "customProviderMutationFailed": "Could not save the provider change: {error}",
     "customProviders": "Custom Providers",
     "customProvidersDescription": "Add custom API providers with OpenAI, Anthropic, or Gemini protocol.",
     "customTestError": "Connection failed",
@@ -15353,6 +15406,7 @@
     "deploymentProfileTitle": "Unified execution profile",
     "deploymentProfileTransport": "Transport",
     "deploymentProfileVendorOf": "Deployment of {vendor}",
+    "deselectAll": "Deselect All",
     "detailPanel": {
       "advancedPlaceholder": "Advanced placeholder",
       "configPlaceholder": "Config placeholder",
@@ -15474,6 +15528,7 @@
     "importSettings": "Import Settings",
     "importSuccess": "Settings imported successfully!",
     "importTitle": "Import Provider Settings",
+    "importing": "Importing…",
     "includeApiKeys": "Include API keys (not recommended for sharing)",
     "inputPricing": "Input Pricing",
     "installed": "Installed",
@@ -15743,6 +15798,7 @@
     },
     "quickAddDescription": "Select a pre-configured provider to add quickly with just your API key.",
     "quickAddProvider": "Quick Add Provider",
+    "quickAddSaveFailed": "Could not save this provider: {error}",
     "quickSetup": "Quick Setup",
     "quotaExceeded": "Quota Exceeded Behavior",
     "quotaUsage": "Quota Usage",
@@ -16261,7 +16317,7 @@
       "namePlaceholder": "e.g., Daily Backup",
       "options": {
         "artifacts": "Artifacts",
-        "indexedDB": "Database (IndexedDB)",
+        "indexedDB": "Other database content",
         "sessions": "Chat Sessions",
         "settings": "App Settings"
       },
@@ -18166,7 +18222,7 @@
         "description": "Inject your own CSS into the app. Remote @import / url(http) statements are stripped on save. Use carefully — bad CSS can hide UI elements.",
         "enabledLabel": "Enable custom CSS",
         "monacoLink": {
-          "description": "Control how the Monaco/Canvas editor follows the app theme.",
+          "description": "Control how the app theme drives both editor engines — the Monaco/Canvas editor and the embedded Pro IDE (code-server).",
           "enabledLabel": "Match app theme",
           "lock": {
             "hcBlack": "High contrast dark",
@@ -18175,7 +18231,7 @@
             "vs": "Light (vs)",
             "vsDark": "Dark (vs-dark)"
           },
-          "lockHint": "Pin Monaco to a specific base theme regardless of the app theme.",
+          "lockHint": "Pin Monaco to a specific base theme and stop the app palette from driving either engine. High contrast still overrides this.",
           "lockLabel": "Lock editor theme",
           "title": "Editor theme linking"
         },
@@ -21141,6 +21197,19 @@
         "rotateKeyTitle": "Rotate auto-key",
         "schedule": {
           "body": "When enabled, Cognia writes an encrypted backup to your chosen folder every N days and keeps the newest M files.",
+          "cloudAiConfigure": "Configure cloud folder with AI",
+          "cloudAiFailed": "Could not open the cloud-folder setup chat: {error}",
+          "cloudAiPrompt": "Help me configure Cognia's encrypted scheduled backup using the {provider} desktop sync folder. Follow the provider's current official desktop-sync documentation at {docsUrl}; use browser automation or a relevant skill if available. Verify that the official desktop client is installed, signed in, and actively syncing. Then guide me to choose a dedicated Cognia backup folder inside the provider's local sync directory from Settings → Data & privacy → Backup & restore. Never ask me to paste account credentials, private local paths, recovery keys, or encryption secrets into chat. Explain that Cognia writes auto-key-encrypted files locally while the provider client performs cloud upload, and finish by verifying a backup file appears and sync completes without errors.",
+          "cloudAiSessionTitle": "Configure {provider} backup folder",
+          "cloudFolderHint": "Choose a folder managed by the provider's official desktop sync app. Cognia writes encrypted files locally; the provider uploads them.",
+          "cloudOfficialDocs": "Official setup guide",
+          "cloudProviderLabel": "Cloud-synced folder provider",
+          "cloudProviders": {
+            "dropbox": "Dropbox",
+            "google-drive": "Google Drive",
+            "icloud-drive": "iCloud Drive",
+            "onedrive": "OneDrive"
+          },
           "enableHint": "Runs while the app is open. Auto-key encrypted; no passphrase needed.",
           "enableLabel": "Enable scheduled backups",
           "folderLabel": "Destination folder",
@@ -21544,13 +21613,25 @@
       "title": "Data & privacy",
       "typeToConfirm": "Type DELETE to confirm",
       "webdav": {
+        "aiConfigure": "Configure with AI",
+        "aiConfigureFailed": "Could not open the configuration chat: {error}",
+        "aiPrompt": "Help me configure encrypted WebDAV backup in Cognia for {provider}. Use the provider's current official documentation at {docsUrl}; if browser automation or a relevant skill is available, use it to inspect the settings screen and guide the configuration. Never ask me to paste a password, app password, encryption passphrase, private server URL, or other secret into chat. Explain where I should enter secrets locally, verify the correct endpoint and authentication method, have me use Test connection, save the settings, explain the separate zero-knowledge sync passphrase and its remember-on-device trade-off, then run Sync now and verify the result. If a required value is unknown, ask only for non-secret context and give precise provider-specific instructions.",
+        "aiSessionTitle": "Configure {provider} backup",
+        "allowInvalidCertificatesDescription": "Use only for a self-signed certificate on a server you control. This disables certificate verification for this WebDAV endpoint and can expose credentials to interception.",
+        "allowInvalidCertificatesLabel": "Allow an invalid or self-signed certificate",
         "clear": "Clear",
         "cleared": "Password cleared.",
+        "credentialHints": {
+          "app-password": "Use the account email or username plus a provider-generated app password.",
+          "password": "Use the provider account username and password. Follow the provider's 2FA confirmation flow when required.",
+          "password-or-app-password": "Use an app password when 2FA, SSO, or your server policy requires one."
+        },
         "description": "Periodically upload an encrypted backup to a WebDAV server so another device can download and restore it. End-to-end encrypted with your sync passphrase.",
         "enableLabel": "Enable WebDAV sync",
         "folderLabel": "Remote folder",
         "lastSync": "Last synced {time}",
         "neverSynced": "Not synced yet.",
+        "officialDocs": "Official setup guide",
         "passphraseHint": "Session-only by default — re-enter each session, or opt into remembering it below. Encrypts the backup so the server never sees plaintext.",
         "passphraseLabel": "Sync passphrase",
         "passphrasePlaceholder": "Shared across your devices",
@@ -21564,6 +21645,17 @@
         "phaseEncrypting": "Encrypting…",
         "phaseUploading": "Uploading…",
         "producedBy": "from {device}",
+        "providerLabel": "WebDAV provider",
+        "providers": {
+          "generic": "Other / self-hosted WebDAV",
+          "koofr": "Koofr",
+          "nextcloud": "Nextcloud",
+          "nutstore": "Nutstore (Jianguoyun)",
+          "owncloud": "ownCloud",
+          "pcloud-eu": "pCloud (EU data region)",
+          "pcloud-us": "pCloud (US data region)",
+          "yandex": "Yandex Disk"
+        },
         "rememberPassphraseDescription": "Stores the passphrase in this device's OS keyring so scheduled uploads and restore checks run unattended after a restart. Anyone who can unlock this device can then decrypt your synced data — leave off to keep it memory-only.",
         "rememberPassphraseLabel": "Remember sync passphrase on this device",
         "restore": "Restore…",

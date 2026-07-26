@@ -22,6 +22,8 @@
     "disabledTooltip": "此平台不支持，请改用本机 VS Code。",
     "downloading": "正在下载 VS Code… {percent}%",
     "errorTitle": "无法启动 VS Code",
+    "languageRestart": "正在重启 Pro IDE 以应用新的界面语言……",
+    "languageUnavailable": "Pro IDE 没有 {locale} 的界面翻译，将继续显示英文。",
     "localVsCodeFailed": "无法打开本机 VS Code：{error}",
     "openFileFailed": "无法在 VS Code 中打开文件：{error}",
     "openLocalVsCode": "用本机 VS Code 打开",

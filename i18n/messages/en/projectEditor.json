@@ -22,6 +22,8 @@
     "disabledTooltip": "Not available on this platform — use your local VS Code instead.",
     "downloading": "Downloading VS Code… {percent}%",
     "errorTitle": "Couldn't start VS Code",
+    "languageRestart": "Restarting the Pro IDE to apply the new display language…",
+    "languageUnavailable": "The Pro IDE has no translation for {locale}; its interface stays in English.",
     "localVsCodeFailed": "Couldn't open your local VS Code: {error}",
     "openFileFailed": "Couldn't open the file in VS Code: {error}",
     "openLocalVsCode": "Open in VS Code",

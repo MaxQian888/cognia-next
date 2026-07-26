@@ -2733,11 +2733,15 @@
       "artifactMode": "产物",
       "browseArtifacts": "浏览产物",
       "closeTab": "关闭 {title}",
+      "closeTabMenuItem": "关闭标签",
       "collapse": "折叠面板",
+      "goToSource": "跳转到来源消息",
       "openArtifacts": "已打开的产物",
       "openInNewTab": "在新标签页打开",
+      "referenceInChat": "引用到对话",
       "saveToProject": "保存到项目…",
       "splitView": "分屏",
+      "tabHint": "{title} —— 双击定位到来源消息",
       "title": "产物",
       "toggleHint": "切换面板 (Ctrl/Cmd+J)",
       "workspaceMode": "工作区",
@@ -2781,18 +2785,23 @@
       "applyAccepted": "应用已接受",
       "commentOnSelection": "对选区添加注释",
       "discard": "丢弃",
+      "editTargetBadge": "编辑目标",
+      "editTargetHint": "只有编辑目标会收到 AI 的修改提案。点击其他引用可切换。",
       "empty": "没有可审阅的改动",
+      "emptyDescription": "当助手为此产物提出修订时，差异会显示在这里，可逐块接受或拒绝。",
       "hunkDelete": "删除",
       "hunkInsert": "新增",
       "hunkReplace": "替换",
       "lines": "行",
       "original": "当前",
+      "promoteSelectionAria": "把 {title} 设为编辑目标",
       "proposed": "提案",
       "reDiff": "与当前重新比对",
       "reject": "拒绝",
       "rejectAll": "全部拒绝",
       "removeSelectionAria": "移除选区 {title}",
       "selectionChipLabel": "{title} · 第 {start}-{end} 行",
+      "selectionChipWholeLabel": "{title} · 整份产物",
       "selectionCommentPlaceholder": "这里希望怎么改？",
       "staleBanner": "此提案生成后 Artifact 已变化，请重新比对或丢弃。",
       "title": "审阅改动",
@@ -2969,6 +2978,10 @@
       "title": "审计日志"
     },
     "behavior": {
+      "consentTimeout": {
+        "help": "逐次确认弹窗在自动拒绝前等待多久。窗口越长，手机越有时间收到通知、解锁并作答。上限 115 秒，确保作答不会晚于工具调用本身的放弃时间。",
+        "label": "确认等待时长（秒）"
+      },
       "dedup": {
         "help": "连续截图内容相同时，发送一条简短文本说明而不是重复图片。长任务可大幅节省 token。",
         "label": "跳过未变化的截图"
@@ -2992,8 +3005,9 @@
     },
     "consent": {
       "actions": {
+        "allowForLabel": "接下来不再询问：",
+        "allowForMinutes": "{minutes} 分钟",
         "allowOnce": "本次允许",
-        "allowSession": "本会话总是允许",
         "close": "关闭",
         "reject": "拒绝"
       },
@@ -4103,6 +4117,8 @@
       "ariaUploadImage": "上传文件",
       "attachImageTooltip": "添加文件",
       "attachMenu": {
+        "attachGroup": "附加",
+        "capabilitiesGroup": "能力",
         "file": "上传文件",
         "folder": "添加文件夹",
         "trigger": "添加附件"
@@ -4251,6 +4267,7 @@
         "capTools": "工具调用",
         "capVision": "视觉",
         "contextWindowLabel": "上下文窗口",
+        "effortSuffix": "· {effort}",
         "liveSwitchFailed": "无法实时切换模型",
         "liveSwitched": "已切换到 {model}",
         "noProviders": "尚未配置任何模型提供商",
@@ -4490,6 +4507,7 @@
         "named": "{greeting}，{name}",
         "night": "夜深了"
       },
+      "illustrationAlt": "连接对话、代码、文档与自动化的智能工作台",
       "newChat": "新建会话",
       "samples": {
         "draftPrompt": "查看暂存区改动（`git diff --cached`），按 Conventional Commits 提一条提交信息。",
@@ -4647,9 +4665,11 @@
       "dismiss": "忽略",
       "noSession": "当前没有打开的会话，请先新建一个再发送。",
       "openSettings": "打开设置",
+      "pendingPromptPiiBlocked": "自动提示词可能包含隐私或凭据类数据，已阻止发送。请新建普通对话，并只提供你明确希望发送的内容。",
       "retry": "重试",
       "sidecarExited": "AI 进程意外停止，本轮已中断。点击重试可继续。",
-      "title": "发送失败"
+      "title": "发送失败",
+      "unflushedEditorBuffers": "本回合开始前有 {count} 个打开的文件未能保存，agent 可能读到过期内容：{files}"
     },
     "list": {
       "clear": "清空",
@@ -4953,6 +4973,9 @@
         "unwrapAria": "取消自动换行",
         "wrap": "自动换行",
         "wrapAria": "启用自动换行"
+      },
+      "details": {
+        "defaultSummary": "详情"
       },
       "diff": {
         "copy": "复制",
@@ -5261,6 +5284,7 @@
     "no": "否",
     "remove": "移除",
     "save": "保存",
+    "saving": "保存中…",
     "yes": "是"
   },
   "connectors": {
@@ -5322,9 +5346,11 @@
     "actions": {
       "collapse": "收起工作台",
       "focus": "聚焦模式",
+      "layoutMenu": "布局选项",
       "narrow": "窄栏模式",
       "pin": "固定面板",
       "pinHint": "固定后面板不再被自动切换，自动打开改为角标提示",
+      "resetLayout": "重置布局",
       "resize": "调整工作台宽度",
       "retry": "重试面板",
       "switchPanel": "切换面板",
@@ -5367,6 +5393,7 @@
       "artifactType": "类型",
       "canvasTitle": "文档属性",
       "documentType": "类型",
+      "goToSource": "跳转到来源消息",
       "language": "语言",
       "notRun": "未运行",
       "revision": "修订",
@@ -6046,6 +6073,10 @@
       "desktopOnlyTitle": "请在 Tauri 中运行",
       "emptyTitle": "Cognia"
     },
+    "shellLayoutNotice": {
+      "description": "面板开关、主题、缩放和语言已移到标题栏的「视图」菜单，桌宠、OCR、剪贴板按钮也在那里。按 ⌘B 可显示或隐藏会话列表。",
+      "title": "布局已简化"
+    },
     "statusBar": {
       "awaitingApproval": "等待批准",
       "connOffline": "离线",
@@ -6053,39 +6084,15 @@
       "connReconnecting": "重新连接中…",
       "error": "错误",
       "idle": "空闲",
-      "locale": "语言",
-      "noSession": "无会话",
-      "openCommandPalette": "打开命令面板",
-      "openLogs": "查看日志",
       "perf": "性能",
       "perfCpu": "CPU",
       "perfMem": "内存",
-      "permissionAcceptEdits": "自动接受",
-      "permissionAdvanced": "高级",
-      "permissionAuto": "自动",
-      "permissionBypass": "Bypass",
-      "permissionDefault": "默认",
-      "permissionDontAsk": "不询问",
-      "permissionMode": "权限",
-      "permissionPlan": "Plan",
       "streaming": "流式响应中",
-      "switchLocale": "切换语言",
       "syncLast": "已同步 {time}",
       "syncNever": "未同步",
       "syncNow": "立即同步",
-      "tauri": "桌面",
-      "themeDark": "深色主题",
-      "themeLight": "浅色主题",
-      "themeNext": "切换主题",
-      "themeSystem": "跟随系统",
-      "toggleSidebar": "切换侧边栏",
       "usage": "用量与额度",
-      "usageOpen": "打开用量与额度",
-      "web": "Web",
-      "zoom": "缩放",
-      "zoomIn": "放大",
-      "zoomOut": "缩小",
-      "zoomReset": "重置缩放"
+      "usageOpen": "打开用量与额度"
     },
     "titleBar": {
       "alwaysOnTop": "置顶窗口",
@@ -6102,6 +6109,7 @@
       "forward": "前进",
       "kbdHint": "Ctrl+K",
       "layout": {
+        "appearanceGroup": "外观",
         "customize": "自定义布局",
         "itemAccount": "账户",
         "itemConnectivity": "连接状态",
@@ -6110,14 +6118,24 @@
         "itemSync": "同步状态",
         "itemUsage": "用量与额度",
         "itemWorkspace": "工作区",
+        "localeEn": "English",
+        "localeZh": "简体中文",
+        "openBrowser": "打开浏览器面板",
         "statusBarGroup": "状态栏",
+        "themeDark": "深色",
+        "themeLight": "浅色",
+        "themeSystem": "跟随系统",
         "title": "自定义布局",
         "titleBarGroup": "标题栏",
         "toggleGuildRail": "切换工会侧栏",
         "toggleRightSidebar": "切换右侧栏",
         "toggleSidebar": "切换侧栏",
         "toggleStatusBar": "切换状态栏",
-        "toggleTerminal": "切换终端"
+        "toggleTerminal": "切换终端",
+        "zoomIn": "放大",
+        "zoomLabel": "缩放",
+        "zoomOut": "缩小",
+        "zoomReset": "重置缩放"
       },
       "maximize": "最大化",
       "minimize": "最小化",
@@ -6374,6 +6392,20 @@
       "compact": "紧凑",
       "grid": "网格",
       "list": "列表"
+    }
+  },
+  "docsSite": {
+    "notFound": {
+      "body": "这个链接指向的页面已被移动或删除。",
+      "docs": "返回文档首页",
+      "heading": "页面不存在",
+      "other": "English version"
+    },
+    "pageActions": {
+      "copied": "已复制",
+      "failed": "复制失败",
+      "idle": "复制 Markdown",
+      "view": "查看 Markdown"
     }
   },
   "editor": {
@@ -9737,7 +9769,9 @@
         "biometricDescription": "允许后，已连接的桌面将执行此操作。",
         "biometricReason": "批准桌面的 computer-use 操作",
         "biometricTitle": "确认远程操作",
-        "sheetDescription": "已连接的桌面请求执行一个操作。请确认后选择允许或拒绝。"
+        "sheetDescription": "已连接的桌面请求执行一个操作。请确认后选择允许或拒绝。",
+        "thumbnailAlt": "请求发生时的桌面画面",
+        "thumbnailRedacted": "画面已隐藏：桌面端当前聚焦在密码或凭据输入框上。"
       }
     },
     "backup": {
@@ -11667,16 +11701,20 @@
       "yesterday": "昨天"
     },
     "center": {
+      "active": "收件箱",
       "archiveAll": "全部归档",
+      "archived": "已归档",
       "clearAll": "清空",
       "clearAllBody": "这将永久删除所有通知，包括已归档的通知。此操作无法撤销。",
       "clearAllCancel": "取消",
       "clearAllConfirm": "全部清除",
       "clearAllTitle": "清除所有通知？",
       "empty": "已全部处理完毕。",
+      "emptyArchived": "暂无已归档通知。",
       "filterAll": "全部来源",
       "groupCount": "另有 {count} 条更新",
       "hideDone": "隐藏已归档",
+      "itemActions": "通知操作",
       "loadMore": "加载更多（{count}）",
       "markAllRead": "全部标为已读",
       "markDone": "归档",
@@ -11685,6 +11723,7 @@
       "open": "打开",
       "refresh": "刷新",
       "remove": "移除",
+      "restore": "恢复到收件箱",
       "settings": "通知设置",
       "showDone": "显示已归档",
       "snooze": "暂停提醒",
@@ -14016,11 +14055,18 @@
     },
     "githubDialog": {
       "cancel": "取消",
+      "conversionCounts": "已转换 {converted} 项，警告 {warnings} 条",
+      "conversionSource": "检测到的来源：{source}",
+      "conversionTitle": "转换报告",
       "description": "粘贴一个公开仓库——owner/repo、owner/repo@ref、/子目录，或完整的 github.com 链接。仓库需包含符合规范的 plugin.json 并自带构建产物（不会在本机执行构建）。",
       "desktopOnly": "从 GitHub 安装需要 Cognia 桌面应用。",
       "emptyError": "请输入仓库。",
       "fetch": "获取",
       "fetchError": "无法加载插件：{message}",
+      "fidelityContextual": "上下文重建：行为按来源声明的意图重建，而非逐项翻译。",
+      "fidelityNativeExact": "原生 Cognia 插件，无需转换。",
+      "fidelityStructured": "结构化：清单及其贡献点可携带；宿主特有的部分列在下方。",
+      "fidelityUnsupported": "不支持：该插件无法在不损失行为的前提下转换。",
       "install": "安装",
       "installCancelled": "已取消安装。",
       "installFailed": "安装失败：{message}",
@@ -14028,6 +14074,10 @@
       "label": "GitHub 仓库",
       "placeholder": "owner/repo  ·  owner/repo@v1.0.0  ·  https://github.com/owner/repo",
       "readme": "README",
+      "sourceClaudeCode": "Claude Code",
+      "sourceCodex": "Codex",
+      "sourceCognia": "Cognia",
+      "sourceGeminiCli": "Gemini CLI",
       "title": "从 GitHub 安装"
     },
     "governance": {
@@ -14826,6 +14876,8 @@
       "disabledTooltip": "此平台不支持，请改用本机 VS Code。",
       "downloading": "正在下载 VS Code… {percent}%",
       "errorTitle": "无法启动 VS Code",
+      "languageRestart": "正在重启 Pro IDE 以应用新的界面语言……",
+      "languageUnavailable": "Pro IDE 没有 {locale} 的界面翻译，将继续显示英文。",
       "localVsCodeFailed": "无法打开本机 VS Code：{error}",
       "openFileFailed": "无法在 VS Code 中打开文件：{error}",
       "openLocalVsCode": "用本机 VS Code 打开",
@@ -15327,6 +15379,7 @@
     "customBaseURL": "自定义基础 URL",
     "customProviderDescription": "配置使用您首选协议的自定义 API 服务商。",
     "customProviderModelsManaged": "自定义服务商的模型在服务商编辑器中管理。",
+    "customProviderMutationFailed": "无法保存服务商更改：{error}",
     "customProviders": "自定义服务商",
     "customProvidersDescription": "添加支持 OpenAI、Anthropic 或 Gemini 协议的自定义 API 服务商。",
     "customTestError": "连接失败",
@@ -15353,6 +15406,7 @@
     "deploymentProfileTitle": "统一执行档案",
     "deploymentProfileTransport": "传输",
     "deploymentProfileVendorOf": "{vendor} 的部署",
+    "deselectAll": "取消全选",
     "detailPanel": {
       "advancedPlaceholder": "高级占位",
       "configPlaceholder": "配置占位",
@@ -15474,6 +15528,7 @@
     "importSettings": "导入设置",
     "importSuccess": "设置导入成功！",
     "importTitle": "导入服务商设置",
+    "importing": "正在导入…",
     "includeApiKeys": "包含 API 密钥（不建议分享）",
     "inputPricing": "输入价格",
     "installed": "已安装",
@@ -15743,6 +15798,7 @@
     },
     "quickAddDescription": "选择预配置的服务商，只需填写 API 密钥即可快速添加。",
     "quickAddProvider": "快速添加服务商",
+    "quickAddSaveFailed": "无法保存此服务商：{error}",
     "quickSetup": "快速设置",
     "quotaExceeded": "配额超限行为",
     "quotaUsage": "配额使用",
@@ -16261,7 +16317,7 @@
       "namePlaceholder": "例如：每日备份",
       "options": {
         "artifacts": "产物",
-        "indexedDB": "数据库（IndexedDB）",
+        "indexedDB": "其他数据库内容",
         "sessions": "聊天会话",
         "settings": "应用设置"
       },
@@ -18166,7 +18222,7 @@
         "description": "向应用注入自定义 CSS。保存时会移除远程 @import / url(http)。错误的 CSS 可能让界面显示异常，请谨慎使用。",
         "enabledLabel": "启用自定义 CSS",
         "monacoLink": {
-          "description": "控制 Monaco/Canvas 编辑器如何跟随应用主题。",
+          "description": "控制应用主题如何驱动两个编辑器引擎：Monaco/Canvas 编辑器与内嵌 Pro IDE（code-server）。",
           "enabledLabel": "跟随应用主题",
           "lock": {
             "hcBlack": "高对比深色",
@@ -18175,7 +18231,7 @@
             "vs": "浅色 (vs)",
             "vsDark": "深色 (vs-dark)"
           },
-          "lockHint": "将 Monaco 固定为指定的基础主题，忽略应用主题。",
+          "lockHint": "将 Monaco 固定为指定的基础主题，并停止用应用调色板驱动两个引擎。高对比度模式仍会覆盖此设置。",
           "lockLabel": "锁定编辑器主题",
           "title": "编辑器主题联动"
         },
@@ -21141,6 +21197,19 @@
         "rotateKeyTitle": "轮换自动密钥",
         "schedule": {
           "body": "启用后，Cognia 会每隔 N 天向所选目录写入一份加密备份，并仅保留最新的 M 份。",
+          "cloudAiConfigure": "使用 AI 配置云同步文件夹",
+          "cloudAiFailed": "无法打开云文件夹配置对话：{error}",
+          "cloudAiPrompt": "请帮助我使用 {provider} 桌面同步文件夹配置 Cognia 的加密定时备份。以服务商当前的官方桌面同步文档 {docsUrl} 为准；如果可以使用浏览器自动化或相关 skill，请使用它。请核对官方桌面客户端已安装、已登录且正在正常同步，然后指导我从“设置 → 数据与隐私 → 备份与恢复”中选择服务商本地同步目录内专用于 Cognia 的备份文件夹。绝不要让我把账户凭据、私有本地路径、恢复密钥或加密秘密粘贴到对话中。请解释 Cognia 在本地写入自动密钥加密文件、云服务客户端负责上传，最后验证备份文件已经生成且云同步无错误完成。",
+          "cloudAiSessionTitle": "配置 {provider} 备份文件夹",
+          "cloudFolderHint": "请选择由服务商官方桌面客户端管理的同步文件夹。Cognia 在本地写入加密文件，服务商客户端负责上传。",
+          "cloudOfficialDocs": "官方配置指南",
+          "cloudProviderLabel": "云同步文件夹服务商",
+          "cloudProviders": {
+            "dropbox": "Dropbox",
+            "google-drive": "Google Drive",
+            "icloud-drive": "iCloud Drive",
+            "onedrive": "OneDrive"
+          },
           "enableHint": "应用打开时执行；使用自动密钥加密，无需手动输入密码短语。",
           "enableLabel": "启用定时备份",
           "folderLabel": "目标文件夹",
@@ -21544,13 +21613,25 @@
       "title": "数据与隐私",
       "typeToConfirm": "输入 DELETE 以确认",
       "webdav": {
+        "aiConfigure": "使用 AI 配置",
+        "aiConfigureFailed": "无法打开配置对话：{error}",
+        "aiPrompt": "请帮助我在 Cognia 中为 {provider} 配置加密 WebDAV 备份。以服务商当前的官方文档 {docsUrl} 为准；如果可以使用浏览器自动化或相关 skill，请用它查看设置界面并指导配置。绝不要让我把密码、应用专用密码、加密口令、私有服务器地址或其他秘密粘贴到对话中。请说明我应在本地哪个位置输入秘密，核对正确的地址和认证方式，让我执行“测试连接”并保存设置，解释独立的零知识同步口令及“在设备上记住”的安全取舍，然后执行“立即同步”并验证结果。如果缺少必填值，只询问非敏感背景，并给出准确的服务商专属说明。",
+        "aiSessionTitle": "配置 {provider} 备份",
+        "allowInvalidCertificatesDescription": "仅用于你自行控制且使用自签名证书的服务器。开启后会跳过此 WebDAV 地址的证书验证，凭据可能遭到中间人截获。",
+        "allowInvalidCertificatesLabel": "允许无效或自签名证书",
         "clear": "清除",
         "cleared": "密码已清除。",
+        "credentialHints": {
+          "app-password": "请使用账户邮箱或用户名，以及服务商生成的应用专用密码。",
+          "password": "请使用服务商账户的用户名和密码；需要时按官方说明完成双重验证确认。",
+          "password-or-app-password": "启用双重验证、单点登录或服务器策略要求时，请使用应用专用密码。"
+        },
         "description": "定期把加密备份上传到 WebDAV 服务器，另一台设备即可下载并恢复。使用同步口令端到端加密。",
         "enableLabel": "启用 WebDAV 同步",
         "folderLabel": "远程文件夹",
         "lastSync": "上次同步：{time}",
         "neverSynced": "尚未同步。",
+        "officialDocs": "官方配置指南",
         "passphraseHint": "默认仅本次会话有效——每次会话需重新输入，或在下方选择记住口令。会对备份加密，服务器看不到明文。",
         "passphraseLabel": "同步口令",
         "passphrasePlaceholder": "在你的多台设备间共享",
@@ -21564,6 +21645,17 @@
         "phaseEncrypting": "正在加密…",
         "phaseUploading": "正在上传…",
         "producedBy": "来自 {device}",
+        "providerLabel": "WebDAV 服务商",
+        "providers": {
+          "generic": "其他 / 自托管 WebDAV",
+          "koofr": "Koofr",
+          "nextcloud": "Nextcloud",
+          "nutstore": "坚果云",
+          "owncloud": "ownCloud",
+          "pcloud-eu": "pCloud（欧盟数据区）",
+          "pcloud-us": "pCloud（美国数据区）",
+          "yandex": "Yandex Disk"
+        },
         "rememberPassphraseDescription": "把口令存入本设备的系统密钥环，重启后定时上传和恢复检测可无人值守运行。但任何能解锁本设备的人都能解密你的同步数据——保持关闭则口令仅保留在内存中。",
         "rememberPassphraseLabel": "在本设备记住同步口令",
         "restore": "恢复…",
