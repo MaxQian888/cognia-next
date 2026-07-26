@@ -75,7 +75,7 @@ beforeEach(() => {
   setIsTauriValue(true)
   useArtifactStore.setState({
     artifacts: {},
-    activeArtifactId: null,
+    activeArtifactIdBySession: {},
     artifactVersions: {},
     artifactWorkspace: {
       scope: "session",
@@ -88,8 +88,6 @@ beforeEach(() => {
     },
     canvasDocuments: {},
     activeCanvasId: null,
-    canvasOpen: false,
-    analysisResults: {},
     panelOpen: true,
     panelView: "artifact",
   })
@@ -193,8 +191,18 @@ describe("saveToProject", () => {
   })
 
   it("falls back to the artifact's own project when the chat is unbound", async () => {
+    // An artifact with no conversation behind it (the workspace route, a
+    // plugin-created one) lands in the session-less bucket, which is what the
+    // panel resolves against when no chat is mounted.
     useChatStore.setState({ activeSessionId: null } as never)
-    const a = makeArtifact()
+    const a = useArtifactStore.getState().createArtifact({
+      sessionId: "",
+      messageId: "m",
+      type: "html",
+      title: "Page",
+      content: "<!DOCTYPE html><html></html>",
+      language: "html",
+    })
     act(() =>
       useArtifactStore.setState((state) => ({
         artifacts: { ...state.artifacts, [a.id]: { ...state.artifacts[a.id], projectId: "p1" } },
@@ -413,12 +421,12 @@ describe("useArtifactPanelState — extra coverage", () => {
       const { result } = openArtifactInCanvas()
       const firstDocId = useArtifactStore.getState().activeCanvasId
 
-      act(() => useArtifactStore.getState().closeCanvas())
+      act(() => useArtifactStore.getState().setActiveCanvas(null))
       act(() => result.current.handleOpenInCanvas())
 
       expect(useArtifactStore.getState().activeCanvasId).toBe(firstDocId)
       expect(Object.keys(useArtifactStore.getState().canvasDocuments)).toHaveLength(1)
-      expect(useArtifactStore.getState().canvasOpen).toBe(true)
+      expect(useArtifactStore.getState().panelView).toBe("canvas")
     })
 
     it("creates a fresh document when the linked one was deleted", () => {

@@ -43,13 +43,15 @@ import {
   clearArtifactAccountStorage,
   purgeArtifactAccountStorage,
   MAX_OPEN_ARTIFACTS,
+  selectActiveArtifactId,
+  selectOpenArtifactIds,
   useArtifactStore,
 } from "./artifact-store"
 
 const initial = {
   artifacts: {},
-  activeArtifactId: null,
-  openArtifactIds: [],
+  activeArtifactIdBySession: {},
+  openArtifactIdsBySession: {},
   artifactVersions: {},
   artifactWorkspace: {
     scope: "session" as const,
@@ -62,11 +64,15 @@ const initial = {
   },
   canvasDocuments: {},
   activeCanvasId: null,
-  canvasOpen: false,
-  analysisResults: {},
   panelOpen: false,
   panelView: "artifact" as const,
 }
+
+/** Tabs and active id are bucketed per session; most suites only use `s1`. */
+const openTabs = (sessionId: string | null = "s1") =>
+  selectOpenArtifactIds(useArtifactStore.getState(), sessionId)
+const activeTab = (sessionId: string | null = "s1") =>
+  selectActiveArtifactId(useArtifactStore.getState(), sessionId)
 
 beforeEach(() => {
   localStorage.clear()
@@ -90,18 +96,18 @@ describe("openArtifactIds (the dock's tab strip)", () => {
   it("opens a tab on create and on activate, without reordering", () => {
     const a = make("A")
     const b = make("B")
-    expect(useArtifactStore.getState().openArtifactIds).toEqual([a.id, b.id])
+    expect(openTabs()).toEqual([a.id, b.id])
 
     useArtifactStore.getState().setActiveArtifact(a.id)
 
     // Tabs keep open order; only `recentArtifactIds` is an MRU list.
-    expect(useArtifactStore.getState().openArtifactIds).toEqual([a.id, b.id])
+    expect(openTabs()).toEqual([a.id, b.id])
     expect(useArtifactStore.getState().artifactWorkspace.recentArtifactIds[0]).toBe(a.id)
   })
 
   it("drops the oldest tab past the cap", () => {
     const created = Array.from({ length: MAX_OPEN_ARTIFACTS + 2 }, (_, i) => make(`A${i}`))
-    const open = useArtifactStore.getState().openArtifactIds
+    const open = openTabs()
 
     expect(open).toHaveLength(MAX_OPEN_ARTIFACTS)
     expect(open).not.toContain(created[0].id)
@@ -115,19 +121,19 @@ describe("openArtifactIds (the dock's tab strip)", () => {
     const recentsBefore = useArtifactStore.getState().artifactWorkspace.recentArtifactIds
 
     useArtifactStore.getState().reorderOpenArtifact(a.id, 2)
-    expect(useArtifactStore.getState().openArtifactIds).toEqual([b.id, c.id, a.id])
+    expect(openTabs()).toEqual([b.id, c.id, a.id])
 
     // Out-of-range targets clamp instead of dropping the id.
     useArtifactStore.getState().reorderOpenArtifact(a.id, -5)
-    expect(useArtifactStore.getState().openArtifactIds).toEqual([a.id, b.id, c.id])
+    expect(openTabs()).toEqual([a.id, b.id, c.id])
     useArtifactStore.getState().reorderOpenArtifact(a.id, 99)
-    expect(useArtifactStore.getState().openArtifactIds).toEqual([b.id, c.id, a.id])
+    expect(openTabs()).toEqual([b.id, c.id, a.id])
 
     // Unknown id and same-position moves are no-ops.
-    const before = useArtifactStore.getState().openArtifactIds
+    const before = openTabs()
     useArtifactStore.getState().reorderOpenArtifact("nope", 0)
     useArtifactStore.getState().reorderOpenArtifact(a.id, 2)
-    expect(useArtifactStore.getState().openArtifactIds).toBe(before)
+    expect(openTabs()).toBe(before)
 
     expect(useArtifactStore.getState().artifactWorkspace.recentArtifactIds).toEqual(recentsBefore)
   })
@@ -135,14 +141,12 @@ describe("openArtifactIds (the dock's tab strip)", () => {
   it("ignores closing an id that is not open", () => {
     const a = make("A")
     make("B")
-    const before = useArtifactStore.getState().openArtifactIds
+    const before = openTabs()
 
     useArtifactStore.getState().closeArtifact("nope")
 
-    expect(useArtifactStore.getState().openArtifactIds).toBe(before)
-    expect(useArtifactStore.getState().activeArtifactId).toBe(
-      useArtifactStore.getState().activeArtifactId
-    )
+    expect(openTabs()).toBe(before)
+    expect(activeTab()).toBe(activeTab())
     expect(useArtifactStore.getState().artifacts[a.id]).toBeDefined()
   })
 
@@ -154,7 +158,7 @@ describe("openArtifactIds (the dock's tab strip)", () => {
 
     // Closing is not deleting — the artifact stays reachable from history.
     expect(useArtifactStore.getState().artifacts[a.id]).toBeDefined()
-    expect(useArtifactStore.getState().openArtifactIds).not.toContain(a.id)
+    expect(openTabs()).not.toContain(a.id)
   })
 
   it.each([
@@ -166,7 +170,7 @@ describe("openArtifactIds (the dock's tab strip)", () => {
 
     remove(a.id)
 
-    expect(useArtifactStore.getState().openArtifactIds).not.toContain(a.id)
+    expect(openTabs()).not.toContain(a.id)
   })
 
   it("duplicating an artifact opens the copy as a tab", () => {
@@ -177,20 +181,20 @@ describe("openArtifactIds (the dock's tab strip)", () => {
 
     // The copy becomes active, so a tab strip missing it would show every tab
     // unselected while the panel displayed something else entirely.
-    expect(useArtifactStore.getState().activeArtifactId).toBe(copy!.id)
-    expect(useArtifactStore.getState().openArtifactIds).toContain(copy!.id)
+    expect(activeTab()).toBe(copy!.id)
+    expect(openTabs()).toContain(copy!.id)
   })
 
   it("clearSessionData and purgeProject drop tabs for artifacts they remove", () => {
     const a = make("A")
     useArtifactStore.getState().clearSessionData("s1")
-    expect(useArtifactStore.getState().openArtifactIds).not.toContain(a.id)
+    expect(openTabs()).not.toContain(a.id)
 
     mockActiveProjectId = "proj_x"
     const b = make("B")
-    expect(useArtifactStore.getState().openArtifactIds).toContain(b.id)
+    expect(openTabs()).toContain(b.id)
     useArtifactStore.getState().purgeProject("proj_x")
-    expect(useArtifactStore.getState().openArtifactIds).not.toContain(b.id)
+    expect(openTabs()).not.toContain(b.id)
   })
 })
 
@@ -206,7 +210,7 @@ describe("createArtifact", () => {
     })
     expect(a.id).toBeDefined()
     const s = useArtifactStore.getState()
-    expect(s.activeArtifactId).toBe(a.id)
+    expect(activeTab()).toBe(a.id)
     expect(s.panelOpen).toBe(true)
     expect(s.panelView).toBe("artifact")
     expect(s.artifactWorkspace.recentArtifactIds[0]).toBe(a.id)
@@ -314,7 +318,7 @@ describe("deleteArtifact + deleteArtifacts", () => {
     })
     useArtifactStore.getState().deleteArtifact(a.id)
     expect(useArtifactStore.getState().artifacts[a.id]).toBeUndefined()
-    expect(useArtifactStore.getState().activeArtifactId).toBeNull()
+    expect(activeTab()).toBeNull()
   })
 
   it("batch-deletes ids and prunes recents", () => {
@@ -360,10 +364,10 @@ describe("plugin event dispatch — onPanelOpen / onPanelClose", () => {
   })
 
   it("closePanel dispatches onPanelClose with the previously-active view", () => {
-    useArtifactStore.getState().openPanel("analysis")
+    useArtifactStore.getState().openPanel("canvas")
     mockHooksManager.dispatchPanelClose.mockClear()
     useArtifactStore.getState().closePanel()
-    expect(mockHooksManager.dispatchPanelClose).toHaveBeenCalledWith("artifact:analysis")
+    expect(mockHooksManager.dispatchPanelClose).toHaveBeenCalledWith("artifact:canvas")
   })
 })
 
@@ -376,13 +380,13 @@ describe("setActiveArtifact + panel open/close", () => {
       title: "t",
       content: "x",
     })
-    useArtifactStore.setState({ activeArtifactId: null, panelOpen: false })
+    useArtifactStore.setState({ activeArtifactIdBySession: {}, panelOpen: false })
     useArtifactStore.getState().setActiveArtifact(a.id)
     expect(useArtifactStore.getState().panelOpen).toBe(true)
-    expect(useArtifactStore.getState().activeArtifactId).toBe(a.id)
+    expect(activeTab("s")).toBe(a.id)
   })
 
-  it("nulls activeArtifactId when called with null", () => {
+  it("clears only the named session's active tab when called with null", () => {
     const a = useArtifactStore.getState().createArtifact({
       sessionId: "s",
       messageId: "m",
@@ -390,8 +394,17 @@ describe("setActiveArtifact + panel open/close", () => {
       title: "t",
       content: "x",
     })
-    useArtifactStore.getState().setActiveArtifact(null)
-    expect(useArtifactStore.getState().activeArtifactId).toBeNull()
+    const other = useArtifactStore.getState().createArtifact({
+      sessionId: "other",
+      messageId: "m",
+      type: "code",
+      title: "t",
+      content: "x",
+    })
+    useArtifactStore.getState().setActiveArtifact(null, "s")
+    expect(activeTab("s")).toBeNull()
+    // The clear names one conversation; the other keeps its tab.
+    expect(activeTab("other")).toBe(other.id)
     expect(useArtifactStore.getState().artifacts[a.id]).toBeDefined()
   })
 
@@ -404,8 +417,8 @@ describe("setActiveArtifact + panel open/close", () => {
   })
 
   it("setPanelView swaps the active view", () => {
-    useArtifactStore.getState().setPanelView("analysis")
-    expect(useArtifactStore.getState().panelView).toBe("analysis")
+    useArtifactStore.getState().setPanelView("canvas")
+    expect(useArtifactStore.getState().panelView).toBe("canvas")
   })
 })
 
@@ -581,7 +594,6 @@ describe("canvas documents", () => {
     expect(id).toBeDefined()
     const s = useArtifactStore.getState()
     expect(s.activeCanvasId).toBe(id)
-    expect(s.canvasOpen).toBe(true)
     expect(s.panelView).toBe("canvas")
   })
 
@@ -605,18 +617,15 @@ describe("canvas documents", () => {
     expect(useArtifactStore.getState().canvasDocuments).toEqual({})
   })
 
-  it("setActiveCanvas / openCanvas / closeCanvas toggle state", () => {
+  it("setActiveCanvas drives the canvas surface on its own", () => {
     const id = useArtifactStore
       .getState()
       .createCanvasDocument({ title: "d", content: "x", language: "javascript", type: "code" })
-    useArtifactStore.getState().closeCanvas()
-    expect(useArtifactStore.getState().canvasOpen).toBe(false)
-    useArtifactStore.getState().openCanvas()
-    expect(useArtifactStore.getState().canvasOpen).toBe(true)
     useArtifactStore.getState().setActiveCanvas(null)
     expect(useArtifactStore.getState().activeCanvasId).toBeNull()
     useArtifactStore.getState().setActiveCanvas(id)
     expect(useArtifactStore.getState().activeCanvasId).toBe(id)
+    expect(useArtifactStore.getState().panelView).toBe("canvas")
   })
 
   it("deleteCanvasDocument clears active when needed", () => {
@@ -708,21 +717,6 @@ describe("canvas documents", () => {
 
   it("compareVersions returns null when versions are missing", () => {
     expect(useArtifactStore.getState().compareVersions("missing", "x", "y")).toBeNull()
-  })
-})
-
-describe("analysis results", () => {
-  it("addAnalysisResult + getMessageAnalysis", () => {
-    useArtifactStore.getState().addAnalysisResult({
-      sessionId: "s",
-      messageId: "m1",
-      type: "math",
-      content: "1+1",
-      output: { result: 2 },
-    })
-    const list = useArtifactStore.getState().getMessageAnalysis("m1")
-    expect(list).toHaveLength(1)
-    expect(list[0].type).toBe("math")
   })
 })
 
@@ -818,9 +812,11 @@ describe("getArtifact / getSessionArtifacts / search / filter / recent", () => {
 })
 
 describe("setActiveArtifact unknown id", () => {
-  it("still updates activeArtifactId even when the artifact does not exist", () => {
-    useArtifactStore.getState().setActiveArtifact("does-not-exist")
-    expect(useArtifactStore.getState().activeArtifactId).toBe("does-not-exist")
+  it("still parks the named session on an id that does not resolve", () => {
+    // An id can outlive its artifact (LRU eviction, or a delete in another
+    // tab); the caller names the session because the artifact can't.
+    useArtifactStore.getState().setActiveArtifact("does-not-exist", "s1")
+    expect(activeTab()).toBe("does-not-exist")
   })
 })
 
@@ -1022,7 +1018,7 @@ describe("deleteArtifact + returnContext interaction", () => {
       .createArtifact({ sessionId: "s", messageId: "m", type: "code", title: "b", content: "y" })
     // Both a and b are in recents (newest first). Active artifact is b. Delete b.
     useArtifactStore.getState().deleteArtifact(b.id)
-    expect(useArtifactStore.getState().activeArtifactId).toBe(a.id)
+    expect(activeTab("s")).toBe(a.id)
   })
 
   it("uses returnContext to resolve the next active artifact when available", () => {
@@ -1032,8 +1028,8 @@ describe("deleteArtifact + returnContext interaction", () => {
     const b = useArtifactStore
       .getState()
       .createArtifact({ sessionId: "s", messageId: "m", type: "code", title: "b", content: "y" })
+    useArtifactStore.getState().setActiveArtifact(b.id)
     useArtifactStore.setState((state) => ({
-      activeArtifactId: b.id,
       artifactWorkspace: {
         ...state.artifactWorkspace,
         returnContext: {
@@ -1048,7 +1044,7 @@ describe("deleteArtifact + returnContext interaction", () => {
     }))
     useArtifactStore.getState().deleteArtifact(b.id)
     // returnContext should win over recent fallback
-    expect(useArtifactStore.getState().activeArtifactId).toBe(a.id)
+    expect(activeTab("s")).toBe(a.id)
   })
 })
 
@@ -1058,7 +1054,7 @@ describe("openPanel honors returnContext when no active artifact", () => {
       .getState()
       .createArtifact({ sessionId: "s", messageId: "m", type: "code", title: "t", content: "x" })
     useArtifactStore.setState((state) => ({
-      activeArtifactId: null,
+      activeArtifactIdBySession: {},
       artifactWorkspace: {
         ...state.artifactWorkspace,
         returnContext: {
@@ -1072,7 +1068,8 @@ describe("openPanel honors returnContext when no active artifact", () => {
       },
     }))
     useArtifactStore.getState().openPanel("artifact")
-    expect(useArtifactStore.getState().activeArtifactId).toBe(a.id)
+    // Restored into the session that owns the artifact, not a global slot.
+    expect(activeTab("s")).toBe(a.id)
   })
 
   it("keeps the existing active id when set", () => {
@@ -1080,7 +1077,7 @@ describe("openPanel honors returnContext when no active artifact", () => {
       .getState()
       .createArtifact({ sessionId: "s", messageId: "m", type: "code", title: "t", content: "x" })
     useArtifactStore.getState().openPanel("artifact")
-    expect(useArtifactStore.getState().activeArtifactId).toBe(a.id)
+    expect(activeTab("s")).toBe(a.id)
   })
 })
 
@@ -1137,9 +1134,9 @@ describe("deleteArtifacts batch returnContext handling", () => {
     const b = useArtifactStore
       .getState()
       .createArtifact({ sessionId: "s", messageId: "m", type: "code", title: "b", content: "y" })
-    useArtifactStore.setState({ activeArtifactId: a.id })
+    useArtifactStore.getState().setActiveArtifact(a.id)
     useArtifactStore.getState().deleteArtifacts([b.id])
-    expect(useArtifactStore.getState().activeArtifactId).toBe(a.id)
+    expect(activeTab("s")).toBe(a.id)
   })
 })
 
@@ -1250,16 +1247,16 @@ describe("updateCanvasDocument editor-context only updates", () => {
 })
 
 describe("clearSessionData additional branches", () => {
-  it("preserves the activeArtifactId when it survives the session purge", () => {
+  it("preserves another session's active tab when one session is purged", () => {
     const a = useArtifactStore
       .getState()
       .createArtifact({ sessionId: "s1", messageId: "m", type: "code", title: "a", content: "x" })
     const b = useArtifactStore
       .getState()
       .createArtifact({ sessionId: "s2", messageId: "m", type: "code", title: "b", content: "y" })
-    useArtifactStore.setState({ activeArtifactId: b.id })
     useArtifactStore.getState().clearSessionData("s1")
-    expect(useArtifactStore.getState().activeArtifactId).toBe(b.id)
+    expect(activeTab("s2")).toBe(b.id)
+    expect(activeTab("s1")).toBeNull()
     expect(useArtifactStore.getState().artifacts[a.id]).toBeUndefined()
   })
 
@@ -1322,12 +1319,11 @@ describe("persist migration", () => {
       const state = mod.useArtifactStore.getState()
       expect(state.canvasDocuments).toBeDefined()
       expect(state.artifactVersions).toBeDefined()
-      expect(state.analysisResults).toBeDefined()
       expect(state.artifactWorkspace).toBeDefined()
     })
   })
 
-  it("rehydrates canvasDocuments/artifacts/analysisResults date fields to Date instances", () => {
+  it("rehydrates canvasDocuments/artifacts date fields to Date instances", () => {
     // Persist serializes Date -> ISO string. After rehydration the raw maps
     // (read directly by components like CanvasDocumentRail) must hold real
     // Date objects again, or `updatedAt.getTime()` throws.
@@ -1359,17 +1355,9 @@ describe("persist migration", () => {
           },
         },
         artifactVersions: {},
-        analysisResults: {
-          r1: {
-            id: "r1",
-            sessionId: "s",
-            messageId: "m",
-            createdAt: "2024-01-01T00:00:00.000Z",
-          },
-        },
         artifactWorkspace: {},
       },
-      version: 3,
+      version: 4,
     })
     localStorage.setItem("cognia-artifacts", snapshot)
     jest.isolateModules(() => {
@@ -1380,7 +1368,6 @@ describe("persist migration", () => {
       expect(state.canvasDocuments.d1!.createdAt).toBeInstanceOf(Date)
       expect(state.artifacts.a1!.updatedAt).toBeInstanceOf(Date)
       expect(state.artifacts.a1!.createdAt).toBeInstanceOf(Date)
-      expect(state.analysisResults.r1!.createdAt).toBeInstanceOf(Date)
       // The actual crash site: a direct consumer calling .getTime().
       expect(() => state.canvasDocuments.d1!.updatedAt.getTime()).not.toThrow()
     })
@@ -1392,7 +1379,6 @@ describe("persist migration", () => {
         artifacts: {},
         canvasDocuments: {},
         artifactVersions: {},
-        analysisResults: {},
         artifactWorkspace: {
           searchQuery: "preserved",
         },
@@ -1408,52 +1394,93 @@ describe("persist migration", () => {
       expect(state.artifactWorkspace.scope).toBe("session")
     })
   })
+
+  it("v3→v4 re-buckets one global tab list by the owning artifact's session", () => {
+    // v3 kept `openArtifactIds` global, so a reload could hand the dock one
+    // conversation's tabs while another was on screen.
+    const artifact = (id: string, sessionId: string) => ({
+      id,
+      sessionId,
+      messageId: "m",
+      type: "code",
+      title: id,
+      content: "x",
+      version: 1,
+      createdAt: "2024-01-01T00:00:00.000Z",
+      updatedAt: "2024-01-02T00:00:00.000Z",
+    })
+    const snapshot = JSON.stringify({
+      state: {
+        artifacts: {
+          a1: artifact("a1", "s1"),
+          a2: artifact("a2", "s2"),
+          a3: artifact("a3", "s1"),
+        },
+        canvasDocuments: {},
+        artifactVersions: {},
+        artifactWorkspace: {},
+        // `gone` was evicted by the LRU cap and must not survive as a tab.
+        openArtifactIds: ["a1", "a2", "gone", "a3"],
+        analysisResults: { r1: { id: "r1", sessionId: "s", messageId: "m" } },
+      },
+      version: 3,
+    })
+    localStorage.setItem("cognia-artifacts", snapshot)
+    jest.isolateModules(() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const mod = require("./artifact-store") as typeof import("./artifact-store")
+      const state = mod.useArtifactStore.getState()
+      expect(state.openArtifactIdsBySession).toEqual({ s1: ["a1", "a3"], s2: ["a2"] })
+      expect(state.activeArtifactIdBySession).toEqual({})
+      const raw = state as unknown as Record<string, unknown>
+      expect(raw.openArtifactIds).toBeUndefined()
+      expect(raw.analysisResults).toBeUndefined()
+    })
+  })
 })
 
 describe("resolveNextActiveArtifactId fallback paths", () => {
-  it("falls back to the most-recently-updated artifact when scope is recent (no session filter)", () => {
+  it("never hands a session a neighbour from another conversation", () => {
+    const only = useArtifactStore
+      .getState()
+      .createArtifact({ sessionId: "s1", messageId: "m", type: "code", title: "a", content: "x" })
+    useArtifactStore
+      .getState()
+      .createArtifact({ sessionId: "s2", messageId: "m", type: "code", title: "b", content: "y" })
+    // The workspace scope used to widen this fallback to every artifact in the
+    // store, so deleting a conversation's last artifact parked it on one from
+    // an unrelated conversation.
+    useArtifactStore.setState((state) => ({
+      artifactWorkspace: { ...state.artifactWorkspace, scope: "recent", sessionId: null },
+    }))
+    useArtifactStore.getState().deleteArtifact(only.id)
+    expect(activeTab("s1")).toBeNull()
+  })
+
+  it("falls back to the session's newest artifact once recents are exhausted", () => {
     const a = useArtifactStore
       .getState()
       .createArtifact({ sessionId: "s1", messageId: "m", type: "code", title: "a", content: "x" })
     const b = useArtifactStore
       .getState()
-      .createArtifact({ sessionId: "s2", messageId: "m", type: "code", title: "b", content: "y" })
-    // Move scope away from "session" so the fallback hits the `: true` branch.
+      .createArtifact({ sessionId: "s1", messageId: "m", type: "code", title: "b", content: "y" })
+    const cS2 = useArtifactStore
+      .getState()
+      .createArtifact({ sessionId: "s2", messageId: "m", type: "code", title: "c", content: "z" })
+    useArtifactStore.getState().setActiveArtifact(a.id)
     useArtifactStore.setState((state) => ({
-      activeArtifactId: a.id,
       artifactWorkspace: {
         ...state.artifactWorkspace,
-        scope: "recent",
-        sessionId: null,
         recentArtifactIds: [],
+        returnContext: null,
       },
     }))
     useArtifactStore.getState().deleteArtifact(a.id)
-    // Expect the most-recently-updated remaining artifact (b) to be picked up
-    expect(useArtifactStore.getState().activeArtifactId).toBe(b.id)
+    expect(activeTab("s1")).toBe(b.id)
+    expect(activeTab("s1")).not.toBe(cS2.id)
   })
 
-  it("falls back to the latest artifact even when scope is session but no sessionId is set", () => {
-    const a = useArtifactStore
-      .getState()
-      .createArtifact({ sessionId: "s1", messageId: "m", type: "code", title: "a", content: "x" })
-    const b = useArtifactStore
-      .getState()
-      .createArtifact({ sessionId: "s2", messageId: "m", type: "code", title: "b", content: "y" })
-    useArtifactStore.setState((state) => ({
-      activeArtifactId: a.id,
-      artifactWorkspace: {
-        ...state.artifactWorkspace,
-        scope: "session",
-        sessionId: null,
-        recentArtifactIds: [],
-      },
-    }))
-    useArtifactStore.getState().deleteArtifact(a.id)
-    expect(useArtifactStore.getState().activeArtifactId).toBe(b.id)
-  })
-
-  it("filters by sessionId when scope is session AND sessionId is set", () => {
+  it("prefers the return context, but only when it belongs to the same session", () => {
     const aS1 = useArtifactStore
       .getState()
       .createArtifact({ sessionId: "s1", messageId: "m", type: "code", title: "a", content: "x" })
@@ -1463,21 +1490,24 @@ describe("resolveNextActiveArtifactId fallback paths", () => {
     const cS2 = useArtifactStore
       .getState()
       .createArtifact({ sessionId: "s2", messageId: "m", type: "code", title: "c", content: "z" })
+    useArtifactStore.getState().setActiveArtifact(aS1.id)
     useArtifactStore.setState((state) => ({
-      activeArtifactId: aS1.id,
       artifactWorkspace: {
         ...state.artifactWorkspace,
-        scope: "session",
-        sessionId: "s1",
         recentArtifactIds: [],
-        returnContext: null,
+        returnContext: {
+          activeArtifactId: cS2.id,
+          scope: "session",
+          sessionId: "s2",
+          searchQuery: "",
+          typeFilter: "all",
+          runtimeFilter: "all",
+        },
       },
     }))
-    // Delete the active artifact: resolveNextActiveArtifactId should pick a
-    // scoped artifact from session "s1" (not "s2").
     useArtifactStore.getState().deleteArtifact(aS1.id)
-    expect(useArtifactStore.getState().activeArtifactId).toBe(bS1.id)
-    expect(useArtifactStore.getState().activeArtifactId).not.toBe(cS2.id)
+    // The return context names an artifact from s2, so s1 skips it.
+    expect(activeTab("s1")).toBe(bS1.id)
   })
 })
 
@@ -2048,16 +2078,23 @@ describe("AI-revision review (pending reviews)", () => {
       language: "javascript",
     })
 
-  it("proposeArtifactUpdate stages a review, activates the artifact, and opens the panel", () => {
+  it("proposeArtifactUpdate stages a review and activates the artifact without raising the panel", () => {
     const a = makeArtifact("a\nb\nc\nd")
+    // `makeArtifact` opens the panel on the way in, so the old assertion that
+    // this call "opens the panel" passed no matter what it did. Close it first
+    // and the real contract shows: whether a proposal may take over the screen
+    // depends on `userDismissed`, which lives in the dock's layout store — so
+    // the decision belongs to `useDockAttentionSignal`, not here.
+    useArtifactStore.getState().closePanel()
+
     const review = useArtifactStore.getState().proposeArtifactUpdate(a.id, "A\nb\nc\nD")
+
     expect(review).not.toBeNull()
     expect(review!.items.length).toBeGreaterThanOrEqual(2)
     const s = useArtifactStore.getState()
     expect(s.pendingReviews[a.id]).toBeDefined()
-    expect(s.activeArtifactId).toBe(a.id)
-    expect(s.panelOpen).toBe(true)
-    expect(s.panelView).toBe("artifact")
+    expect(activeTab()).toBe(a.id)
+    expect(s.panelOpen).toBe(false)
     // content is NOT applied yet
     expect(s.artifacts[a.id].content).toBe("a\nb\nc\nd")
   })

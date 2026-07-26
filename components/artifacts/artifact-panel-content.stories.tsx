@@ -3,15 +3,17 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { ArtifactPanelContent } from "./artifact-panel-content"
 import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { useChatStore } from "@/stores/chat"
 import { makeArtifact } from "@/lib/storybook/fixtures/artifacts"
 
 const artifact = makeArtifact()
 
 function seedActiveArtifact() {
   resetStore(useArtifactStore)
+  seedStore(useChatStore, { activeSessionId: artifact.sessionId })
   seedStore(useArtifactStore, {
     artifacts: { [artifact.id]: artifact },
-    activeArtifactId: artifact.id,
+    activeArtifactIdBySession: { [artifact.sessionId]: artifact.id },
     panelOpen: true,
     panelView: "artifact",
   })

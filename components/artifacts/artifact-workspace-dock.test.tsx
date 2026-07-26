@@ -39,6 +39,16 @@ jest.mock("@/components/ui/resizable", () => {
           data-testid="resize-dock"
           onClick={() => onLayoutChanged?.({ "artifact-dock": 42 })}
         />
+        <button
+          type="button"
+          data-testid="resize-dock-narrow"
+          onClick={() => onLayoutChanged?.({ "artifact-dock": 19 })}
+        />
+        <button
+          type="button"
+          data-testid="resize-dock-collapsed"
+          onClick={() => onLayoutChanged?.({ "artifact-dock": 0 })}
+        />
       </div>
     ),
     ResizablePanel: ({
@@ -120,6 +130,9 @@ import { ArtifactWorkspaceDock } from "./artifact-workspace-dock"
 import { useBreakpoint } from "@/hooks/ui"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
+import { useChatStore } from "@/stores/chat"
+
+const SESSION = "session-1"
 import {
   __resetCodeServerPaneManagerForTesting,
   claimCodeServerPane,
@@ -135,12 +148,20 @@ beforeEach(() => {
   __resetCodeServerPaneManagerForTesting()
   act(() => {
     useArtifactDockLayoutStore.getState().resetLayout()
-    useArtifactStore.setState({ activeArtifactId: null, panelOpen: false, panelView: "artifact" })
+    // Tabs and the active artifact are bucketed per conversation.
+    useChatStore.setState({ activeSessionId: SESSION })
+    useArtifactStore.setState({
+      activeArtifactIdBySession: {},
+      openArtifactIdsBySession: {},
+      panelOpen: false,
+      panelView: "artifact",
+    })
   })
 })
 
 describe("ArtifactWorkspaceDock", () => {
   it("desktop: renders children plus the dock (no Sheet)", () => {
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
     render(
       <ArtifactWorkspaceDock>
         <div data-testid="chat" />
@@ -149,6 +170,38 @@ describe("ArtifactWorkspaceDock", () => {
     expect(screen.getByTestId("chat")).toBeInTheDocument()
     expect(screen.getByTestId("dock")).toBeInTheDocument()
     expect(screen.queryByTestId("sheet-panel")).not.toBeInTheDocument()
+  })
+
+  it("keeps nothing mounted behind a collapsed dock, but only after it has retracted", async () => {
+    jest.useFakeTimers()
+    try {
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+      render(
+        <ArtifactWorkspaceDock>
+          <div data-testid="chat" />
+        </ArtifactWorkspaceDock>
+      )
+      expect(screen.getByTestId("dock")).toBeInTheDocument()
+
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
+
+      // Still mounted through the collapse animation: `animateDockResize` pins
+      // the content's width so the shrinking shell wipes it, and unmounting on
+      // the same frame would leave that 200ms animation wiping a blank box.
+      expect(screen.getByTestId("dock")).toBeInTheDocument()
+
+      act(() => jest.advanceTimersByTime(400))
+
+      // Once retracted it must actually go: a zero-width dock used to keep
+      // Monaco, the chat pane and the embedded browser alive — and the browser
+      // holds a process-wide webview lease released only on unmount.
+      expect(screen.queryByTestId("dock")).not.toBeInTheDocument()
+
+      act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+      expect(screen.getByTestId("dock")).toBeInTheDocument()
+    } finally {
+      jest.useRealTimers()
+    }
   })
 
   it("mobile: renders children plus the Sheet fallback (no resizable dock)", () => {
@@ -193,31 +246,41 @@ describe("ArtifactWorkspaceDock", () => {
 
     // The reveal used to have to close the Artifact Sheet to make room for the
     // Workspace one; now it just opens the one Sheet on the workspace panel.
-    await waitFor(() => expect(useArtifactStore.getState().panelOpen).toBe(true))
+    await waitFor(() => expect(useArtifactDockLayoutStore.getState().mobileSheetOpen).toBe(true))
     expect(useArtifactDockLayoutStore.getState().dockProfile).toBe("workspace")
   })
 
-  it("keeps the sheet-open request in step when the panel closes on mobile", async () => {
+  it("mobile: a reveal keeps the target it is pointing at", async () => {
     useBreakpointMock.mockReturnValue("mobile")
-    act(() => {
-      useArtifactDockLayoutStore.getState().revealWorkspaceReview({
-        sessionId: "session-1",
-        rootPath: "/repo",
-      })
-    })
     render(
       <ArtifactWorkspaceDock>
         <div data-testid="chat" />
       </ArtifactWorkspaceDock>
     )
 
-    // The reveal raised the Sheet; closing the panel must retract the request
-    // too, or a stale `mobileSheetOpen` re-opens it on the next render.
-    await waitFor(() => expect(useArtifactStore.getState().panelOpen).toBe(true))
-    act(() => useArtifactStore.getState().closePanel())
+    act(() => {
+      useArtifactDockLayoutStore.getState().revealWorkspaceFile({
+        sessionId: SESSION,
+        rootPath: "/repo",
+        relPath: "src/main.ts",
+        line: 12,
+      })
+    })
 
-    await waitFor(() => expect(useArtifactDockLayoutStore.getState().mobileSheetOpen).toBe(false))
-    expect(useArtifactStore.getState().panelOpen).toBe(false)
+    // Two effects here once mirrored `mobileSheetOpen` and `panelOpen` into each
+    // other behind identical guards, so a reveal fired both in the same commit:
+    // one opened the panel while the other recorded a dismissal and cleared the
+    // pending request — the terminal link landed on an empty workspace, and the
+    // *next* artifact was suppressed as "already dismissed".
+    await waitFor(() => expect(useArtifactDockLayoutStore.getState().mobileSheetOpen).toBe(true))
+    const layout = useArtifactDockLayoutStore.getState()
+    expect(layout.workspaceRevealRequest).toMatchObject({
+      kind: "file",
+      relPath: "src/main.ts",
+      line: 12,
+    })
+    expect(layout.workspaceContext).toMatchObject({ kind: "file", relPath: "src/main.ts" })
+    expect(layout.userDismissed).toBe(false)
   })
 
   it("auto-expands the dock when a new artifact becomes active", () => {
@@ -228,7 +291,7 @@ describe("ArtifactWorkspaceDock", () => {
         <div data-testid="chat" />
       </ArtifactWorkspaceDock>
     )
-    act(() => useArtifactStore.setState({ activeArtifactId: "a-1" }))
+    act(() => useArtifactStore.setState({ activeArtifactIdBySession: { [SESSION]: "a-1" } }))
     rerender(
       <ArtifactWorkspaceDock>
         <div data-testid="chat" />
@@ -247,6 +310,48 @@ describe("ArtifactWorkspaceDock", () => {
 
     act(() => screen.getByTestId("resize-dock").click())
     expect(useArtifactDockLayoutStore.getState().dockSize).toBe(42)
+  })
+
+  it("persists a workspace-profile drag below the artifact floor", () => {
+    // jsdom reports every width as 0, and the workspace floor is only a
+    // percentage once the group's width is known.
+    const offsetWidth = jest
+      .spyOn(HTMLElement.prototype, "offsetWidth", "get")
+      .mockReturnValue(2560)
+    act(() => {
+      useArtifactDockLayoutStore.getState().setDockCollapsed(false)
+      useArtifactDockLayoutStore.getState().setDockProfile("workspace")
+    })
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+
+    // The workspace profile's real floor is an absolute 480px, which on a wide
+    // screen is well under the artifact profile's 24%. The old guard rejected
+    // anything below 24% outright, so dragging the workspace dock to its own
+    // minimum never persisted — and the next collapse/expand restored the stale
+    // wider value.
+    // 480px of 2560px ≈ 18.75%, so 19% is a legitimate width in this profile.
+    act(() => screen.getByTestId("resize-dock-narrow").click())
+    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(19)
+    offsetWidth.mockRestore()
+  })
+
+  it("ignores the collapse itself as a resize", () => {
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+    const before = useArtifactDockLayoutStore.getState().dockSize
+
+    act(() => screen.getByTestId("resize-dock-collapsed").click())
+
+    // Collapsing reports 0%; recording it would lose the width to come back to.
+    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(before)
   })
 
   it("double-clicking the divider restores the profile's preset width, animated", () => {
@@ -454,8 +559,61 @@ describe("ArtifactWorkspaceDock", () => {
     expect(useArtifactDockLayoutStore.getState().userDismissed).toBe(true)
 
     // A fresh artifact must not yank it open again.
-    act(() => useArtifactStore.setState({ activeArtifactId: "a-new" }))
+    act(() => useArtifactStore.setState({ activeArtifactIdBySession: { [SESSION]: "a-new" } }))
     expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
     expect(useArtifactDockLayoutStore.getState().unreadArtifact).toBe(true)
+  })
+
+  it("mobile: honours a dismissal the same way the desktop dock does", async () => {
+    useBreakpointMock.mockReturnValue("mobile")
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+
+    // First artifact raises the Sheet.
+    act(() => useArtifactStore.setState({ activeArtifactIdBySession: { [SESSION]: "a-1" } }))
+    await waitFor(() => expect(useArtifactDockLayoutStore.getState().mobileSheetOpen).toBe(true))
+
+    // Swiping the Sheet away is this platform's dismissal gesture; the host
+    // records it through the same collapse the desktop rail uses.
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
+    await waitFor(() => expect(useArtifactDockLayoutStore.getState().userDismissed).toBe(true))
+
+    // The next artifact must stay out of the way. The auto-expand effect used
+    // to live in the desktop branch only, while the Sheet was force-opened from
+    // `artifact-store` — which cannot see `userDismissed` — so a phone got the
+    // 92dvh modal thrown back over the conversation every single time.
+    act(() => useArtifactStore.setState({ activeArtifactIdBySession: { [SESSION]: "a-2" } }))
+    expect(useArtifactDockLayoutStore.getState().mobileSheetOpen).toBe(false)
+    expect(useArtifactDockLayoutStore.getState().unreadArtifact).toBe(true)
+
+    // ...and the header toggle is the way back in.
+    act(() => useArtifactDockLayoutStore.getState().toggleDock())
+    await waitFor(() => expect(useArtifactDockLayoutStore.getState().mobileSheetOpen).toBe(true))
+    expect(useArtifactDockLayoutStore.getState().unreadArtifact).toBe(false)
+  })
+
+  it("raises the dock for an AI revision proposal, on desktop too", () => {
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+    expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
+
+    // A proposal arriving for the already-active artifact leaves
+    // `activeArtifactId` untouched, so the artifact signal alone would miss it.
+    // Desktop never surfaced this at all — only the mobile Sheet did, by
+    // force-opening from the store.
+    act(() =>
+      useArtifactStore.setState({
+        activeArtifactIdBySession: { [SESSION]: "a-1" },
+        pendingReviews: { "a-1": { artifactId: "a-1" } as never },
+      })
+    )
+
+    expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
   })
 })

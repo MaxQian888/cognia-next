@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 import { revealArtifactInWorkspace } from "./reveal"
-import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { selectActiveArtifactId, useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 
 afterEach(() => {
@@ -8,7 +8,7 @@ afterEach(() => {
   // and the test runner shares localStorage across cases.
   useArtifactStore.setState({
     artifacts: {},
-    activeArtifactId: null,
+    activeArtifactIdBySession: {},
     panelOpen: false,
     panelView: "artifact",
   })
@@ -29,11 +29,11 @@ describe("revealArtifactInWorkspace", () => {
       content: "console.log(1)",
     })
     // createArtifact already opens the panel; clear it to make the assertion crisp.
-    useArtifactStore.setState({ panelOpen: false, activeArtifactId: null })
+    useArtifactStore.setState({ panelOpen: false, activeArtifactIdBySession: {} })
 
     const revealed = revealArtifactInWorkspace(artifact.id)
     expect(revealed?.id).toBe(artifact.id)
-    expect(useArtifactStore.getState().activeArtifactId).toBe(artifact.id)
+    expect(selectActiveArtifactId(useArtifactStore.getState(), "s")).toBe(artifact.id)
     expect(useArtifactStore.getState().panelOpen).toBe(true)
     expect(useArtifactStore.getState().panelView).toBe("artifact")
   })

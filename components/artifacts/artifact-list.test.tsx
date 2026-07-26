@@ -48,7 +48,7 @@ jest.mock("@/components/ui/context-menu", () => {
 
 import { ArtifactList, ArtifactListCompact } from "./artifact-list"
 import { getPluginEventHooks } from "@/lib/plugin"
-import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { selectActiveArtifactId, useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 
@@ -56,7 +56,7 @@ beforeEach(() => {
   localStorage.clear()
   useArtifactStore.setState({
     artifacts: {},
-    activeArtifactId: null,
+    activeArtifactIdBySession: {},
     artifactVersions: {},
     artifactWorkspace: {
       scope: "session",
@@ -69,8 +69,6 @@ beforeEach(() => {
     },
     canvasDocuments: {},
     activeCanvasId: null,
-    canvasOpen: false,
-    analysisResults: {},
     panelOpen: false,
     panelView: "artifact",
   })
@@ -130,7 +128,7 @@ describe("ArtifactList", () => {
     })
     render(<ArtifactList />)
     fireEvent.click(screen.getByTestId(`artifact-list-item-${a.id}`))
-    expect(useArtifactStore.getState().activeArtifactId).toBe(a.id)
+    expect(selectActiveArtifactId(useArtifactStore.getState(), "s1")).toBe(a.id)
   })
 
   it("typing in the search box updates the filter", () => {
@@ -289,7 +287,7 @@ describe("ArtifactList", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "open" }))
 
-    expect(useArtifactStore.getState().activeArtifactId).toBe(a.id)
+    expect(selectActiveArtifactId(useArtifactStore.getState(), "s1")).toBe(a.id)
   })
 
   it("confirms before deleting, and only deletes on confirm", () => {
@@ -448,10 +446,10 @@ describe("ArtifactList", () => {
       title: "Bar",
       content: "x",
     })
-    useArtifactStore.setState({ panelOpen: false, activeArtifactId: null })
+    useArtifactStore.setState({ panelOpen: false, activeArtifactIdBySession: {} })
     render(<ArtifactListCompact sessionId="s1" />)
     fireEvent.click(screen.getByText("Bar"))
-    expect(useArtifactStore.getState().activeArtifactId).toBe(a.id)
+    expect(selectActiveArtifactId(useArtifactStore.getState(), "s1")).toBe(a.id)
     expect(useArtifactStore.getState().panelOpen).toBe(true)
   })
 })

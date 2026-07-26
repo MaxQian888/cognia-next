@@ -4,6 +4,7 @@ import { ArtifactDock } from "./artifact-dock"
 import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
+import { useChatStore } from "@/stores/chat"
 import { makeArtifact, makeArtifactList } from "@/lib/storybook/fixtures/artifacts"
 
 const SESSION = "ses_1"
@@ -13,9 +14,12 @@ function seedDock(withArtifact: boolean) {
   resetStore(useArtifactStore)
   resetStore(useArtifactDockLayoutStore)
   const list = makeArtifactList(SESSION)
+  // Tabs are bucketed per conversation, so the dock only sees them once a
+  // conversation is on screen.
+  seedStore(useChatStore, { activeSessionId: SESSION })
   seedStore(useArtifactStore, {
     artifacts: Object.fromEntries([...list, artifact].map((a) => [a.id, a])),
-    activeArtifactId: withArtifact ? artifact.id : null,
+    activeArtifactIdBySession: withArtifact ? { [SESSION]: artifact.id } : {},
     artifactWorkspace: {
       scope: "session",
       sessionId: SESSION,

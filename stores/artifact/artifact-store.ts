@@ -59,7 +59,6 @@ import type {
   CanvasPendingReview,
   CanvasReviewItemStatus,
   CanvasWorkbenchActionType,
-  AnalysisResult,
   ArtifactDetectionConfig,
   DetectedArtifact,
 } from "@/types"
@@ -265,22 +264,12 @@ function mergeCanvasEditorContext(
 }
 
 /**
- * Rehydrate analysis result dates from storage
- */
-function rehydrateAnalysisResult(result: AnalysisResult): AnalysisResult {
-  return {
-    ...result,
-    createdAt: ensureDate(result.createdAt),
-  }
-}
-
-/**
  * Rehydrate the date-bearing maps of a persisted snapshot back into `Date`
  * objects. Zustand `persist` serializes `Date` to ISO strings, so without
- * this every direct consumer of the raw `canvasDocuments` / `artifacts` /
- * `analysisResults` maps (e.g. CanvasDocumentRail calling `updatedAt.getTime()`)
- * would crash after a reload. The per-action getters rehydrate on read, but the
- * raw state maps must be restored too.
+ * this every direct consumer of the raw `canvasDocuments` / `artifacts` maps
+ * (e.g. CanvasDocumentRail calling `updatedAt.getTime()`) would crash after a
+ * reload. The per-action getters rehydrate on read, but the raw state maps must
+ * be restored too.
  */
 function rehydratePersistedArtifactState<T extends Partial<ArtifactState>>(state: T): T {
   const next = { ...state }
@@ -292,14 +281,6 @@ function rehydratePersistedArtifactState<T extends Partial<ArtifactState>>(state
   if (next.canvasDocuments) {
     next.canvasDocuments = Object.fromEntries(
       Object.entries(next.canvasDocuments).map(([id, doc]) => [id, rehydrateCanvasDocument(doc)])
-    )
-  }
-  if (next.analysisResults) {
-    next.analysisResults = Object.fromEntries(
-      Object.entries(next.analysisResults).map(([id, result]) => [
-        id,
-        rehydrateAnalysisResult(result),
-      ])
     )
   }
   return next
@@ -381,8 +362,21 @@ function applyArtifactWorkspaceFilters(
   })
 }
 
-/** Tabs the dock will show at once before the oldest is dropped. */
+/** Tabs the dock will show at once *per session* before the oldest is dropped. */
 export const MAX_OPEN_ARTIFACTS = 12
+
+/**
+ * Bucket key for artifacts that belong to no conversation — the plugin API
+ * creates them with `sessionId: ""`, and the artifact workspace route browses
+ * with no chat mounted at all. Matches the `?? "none"` the workbench already
+ * uses to build a scope key so the two never disagree about which bucket a
+ * session-less surface is looking at.
+ */
+export const NO_SESSION_KEY = "none"
+
+export function artifactSessionKey(sessionId: string | null | undefined): string {
+  return sessionId ? sessionId : NO_SESSION_KEY
+}
 
 /**
  * Append to the open-tab list, preserving open order (unlike the MRU recents
@@ -393,6 +387,66 @@ function withOpenArtifact(openArtifactIds: string[], artifactId: string): string
   return [...openArtifactIds, artifactId].slice(-MAX_OPEN_ARTIFACTS)
 }
 
+/** Replace one session's tab list, dropping the bucket once it empties. */
+function withSessionTabs(
+  bySession: Record<string, string[]>,
+  sessionKey: string,
+  tabs: string[]
+): Record<string, string[]> {
+  if (tabs.length === 0) {
+    if (!(sessionKey in bySession)) return bySession
+    const { [sessionKey]: _dropped, ...rest } = bySession
+    return rest
+  }
+  return { ...bySession, [sessionKey]: tabs }
+}
+
+/**
+ * Drop artifacts that no longer exist from every session's bucket at once.
+ * Used by the delete/purge paths, which cannot know which sessions were hit.
+ */
+function pruneSessionTabs(
+  bySession: Record<string, string[]>,
+  survives: (artifactId: string) => boolean
+): Record<string, string[]> {
+  const next: Record<string, string[]> = {}
+  for (const [sessionKey, tabs] of Object.entries(bySession)) {
+    const kept = tabs.filter(survives)
+    if (kept.length > 0) next[sessionKey] = kept
+  }
+  return next
+}
+
+function pruneSessionActive(
+  bySession: Record<string, string | null>,
+  resolve: (sessionKey: string, current: string | null) => string | null
+): Record<string, string | null> {
+  const next: Record<string, string | null> = {}
+  for (const [sessionKey, current] of Object.entries(bySession)) {
+    const resolved = resolve(sessionKey, current)
+    if (resolved) next[sessionKey] = resolved
+  }
+  return next
+}
+
+/** The tabs one session has open. Stable empty array so selectors stay shallow-safe. */
+export function selectOpenArtifactIds(
+  state: Pick<ArtifactState, "openArtifactIdsBySession">,
+  sessionId: string | null | undefined
+): string[] {
+  return state.openArtifactIdsBySession[artifactSessionKey(sessionId)] ?? EMPTY_ARTIFACT_IDS
+}
+
+/** The artifact one session is parked on. */
+export function selectActiveArtifactId(
+  state: Pick<ArtifactState, "activeArtifactIdBySession">,
+  sessionId: string | null | undefined
+): string | null {
+  return state.activeArtifactIdBySession[artifactSessionKey(sessionId)] ?? null
+}
+
+const EMPTY_ARTIFACT_IDS: string[] = []
+
 function updateRecentArtifactIds(
   recentArtifactIds: string[],
   artifactId: string,
@@ -401,26 +455,37 @@ function updateRecentArtifactIds(
   return [artifactId, ...recentArtifactIds.filter((id) => id !== artifactId)].slice(0, limit)
 }
 
+/**
+ * Pick the tab a session should fall back to after its active one disappeared.
+ *
+ * Constrained to `sessionKey`: every candidate — the return context, the MRU
+ * recents, the newest artifact — is filtered to that session, because the dock
+ * shows one conversation's tabs at a time and handing it an artifact from
+ * another conversation is exactly the cross-session bleed this shape exists to
+ * prevent.
+ */
 function resolveNextActiveArtifactId(
   artifacts: Record<string, Artifact>,
-  workspace: ArtifactWorkspaceState
+  workspace: ArtifactWorkspaceState,
+  sessionKey: string
 ): string | null {
+  const inSession = (artifactId: string): boolean => {
+    const artifact = artifacts[artifactId]
+    return Boolean(artifact) && artifactSessionKey(artifact.sessionId) === sessionKey
+  }
+
   const returnContextArtifactId = workspace.returnContext?.activeArtifactId
-  if (returnContextArtifactId && artifacts[returnContextArtifactId]) {
+  if (returnContextArtifactId && inSession(returnContextArtifactId)) {
     return returnContextArtifactId
   }
 
-  const recentArtifactId = workspace.recentArtifactIds.find((artifactId) => artifacts[artifactId])
+  const recentArtifactId = workspace.recentArtifactIds.find(inSession)
   if (recentArtifactId) {
     return recentArtifactId
   }
 
   const scopedArtifacts = Object.values(artifacts)
-    .filter((artifact) =>
-      workspace.scope === "session" && workspace.sessionId
-        ? artifact.sessionId === workspace.sessionId
-        : true
-    )
+    .filter((artifact) => artifactSessionKey(artifact.sessionId) === sessionKey)
     .sort((a, b) => ensureDate(b.updatedAt).getTime() - ensureDate(a.updatedAt).getTime())
 
   return scopedArtifacts[0]?.id || null
@@ -429,7 +494,16 @@ function resolveNextActiveArtifactId(
 interface ArtifactState {
   // Artifacts
   artifacts: Record<string, Artifact>
-  activeArtifactId: string | null
+  /**
+   * The artifact each chat session is parked on, keyed by session id (see
+   * `artifactSessionKey`). Read it through `selectActiveArtifactId` /
+   * `useActiveArtifactId` rather than indexing directly.
+   *
+   * Was a single global id. Switching conversations left it pointing at the
+   * previous conversation's artifact, so the dock showed one session's tab
+   * strip and preview next to another session's artifact list and browser.
+   */
+  activeArtifactIdBySession: Record<string, string | null>
   artifactVersions: Record<string, ArtifactVersion[]>
   artifactWorkspace: ArtifactWorkspaceState
   /**
@@ -442,22 +516,35 @@ interface ArtifactState {
   // Canvas
   canvasDocuments: Record<string, CanvasDocument>
   activeCanvasId: string | null
-  canvasOpen: boolean
-
-  // Analysis
-  analysisResults: Record<string, AnalysisResult>
 
   /**
    * Artifacts the user currently has open, in the order they were opened —
-   * the dock's tab strip. Deliberately NOT `artifactWorkspace.recentArtifactIds`:
-   * that is an MRU history the workspace page's "recent" scope browses, so
-   * closing a tab would silently erase browsing history.
+   * the dock's tab strip — bucketed by chat session. Deliberately NOT
+   * `artifactWorkspace.recentArtifactIds`: that is an MRU history the workspace
+   * page's "recent" scope browses, so closing a tab would silently erase
+   * browsing history. Read it through `selectOpenArtifactIds` /
+   * `useOpenArtifactIds`.
+   *
+   * `MAX_OPEN_ARTIFACTS` applies **per session**, so a busy conversation can
+   * never evict another one's tabs.
    */
-  openArtifactIds: string[]
+  openArtifactIdsBySession: Record<string, string[]>
 
   // Panel state
+  /**
+   * The artifact surface is engaged — it drives the panel's keyboard shortcuts
+   * (Escape / ⌘S / ⌘E in `useArtifactPanelState`).
+   *
+   * **Not a visibility flag.** The narrow-screen Sheet's visibility belongs to
+   * `artifactDockLayoutStore.mobileSheetOpen` alone, which is also the only
+   * field that can see `userDismissed`. This used to double as that flag, and
+   * because `createArtifact` / `setActiveArtifact` raise it unconditionally,
+   * every new artifact threw a 92dvh Sheet over the conversation — including
+   * immediately after the user swiped it away.
+   */
   panelOpen: boolean
-  panelView: "artifact" | "canvas" | "analysis"
+  /** Which resource surface the artifact panel is bound to. */
+  panelView: "artifact" | "canvas"
 }
 
 interface ArtifactActions {
@@ -507,7 +594,14 @@ interface ArtifactActions {
   purgeProject: (projectId: string) => void
   getArtifact: (id: string) => Artifact | undefined
   getSessionArtifacts: (sessionId: string) => Artifact[]
-  setActiveArtifact: (id: string | null) => void
+  /**
+   * Park a session on an artifact. The session is derived from the artifact
+   * itself, so callers never have to thread one through.
+   *
+   * Clearing (`id === null`) needs a session to clear, since there is one
+   * active id per conversation — pass the session whose tab should be dropped.
+   */
+  setActiveArtifact: (id: string | null, sessionId?: string | null) => void
   setArtifactWorkspaceFilters: (filters: {
     searchQuery?: string
     typeFilter?: ArtifactType | "all"
@@ -593,8 +687,6 @@ interface ArtifactActions {
   updateCanvasDocument: (id: string, updates: Partial<CanvasDocument>) => void
   deleteCanvasDocument: (id: string) => void
   setActiveCanvas: (id: string | null) => void
-  openCanvas: () => void
-  closeCanvas: () => void
 
   // Canvas suggestions
   addSuggestion: (documentId: string, suggestion: Omit<CanvasSuggestion, "id">) => void
@@ -629,14 +721,10 @@ interface ArtifactActions {
     versionId2: string
   ) => { v1: string; v2: string } | null
 
-  // Analysis actions
-  addAnalysisResult: (result: Omit<AnalysisResult, "id" | "createdAt">) => AnalysisResult
-  getMessageAnalysis: (messageId: string) => AnalysisResult[]
-
   // Panel actions
-  openPanel: (view?: "artifact" | "canvas" | "analysis") => void
+  openPanel: (view?: "artifact" | "canvas") => void
   closePanel: () => void
-  setPanelView: (view: "artifact" | "canvas" | "analysis") => void
+  setPanelView: (view: "artifact" | "canvas") => void
 
   // Utility
   clearSessionData: (sessionId: string) => void
@@ -653,15 +741,13 @@ interface ArtifactActions {
 
 const initialState: ArtifactState = {
   artifacts: {},
-  activeArtifactId: null,
+  activeArtifactIdBySession: {},
   artifactVersions: {},
   artifactWorkspace: INITIAL_ARTIFACT_WORKSPACE,
-  openArtifactIds: [],
+  openArtifactIdsBySession: {},
   pendingReviews: {},
   canvasDocuments: {},
   activeCanvasId: null,
-  canvasOpen: false,
-  analysisResults: {},
   panelOpen: false,
   panelView: "artifact",
 }
@@ -688,10 +774,18 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           updatedAt: new Date(),
         }
 
+        const sessionKey = artifactSessionKey(sessionId)
         set((state) => ({
           artifacts: { ...state.artifacts, [artifact.id]: artifact },
-          activeArtifactId: artifact.id,
-          openArtifactIds: withOpenArtifact(state.openArtifactIds, artifact.id),
+          activeArtifactIdBySession: {
+            ...state.activeArtifactIdBySession,
+            [sessionKey]: artifact.id,
+          },
+          openArtifactIdsBySession: withSessionTabs(
+            state.openArtifactIdsBySession,
+            sessionKey,
+            withOpenArtifact(state.openArtifactIdsBySession[sessionKey] ?? [], artifact.id)
+          ),
           artifactWorkspace: {
             ...state.artifactWorkspace,
             sessionId,
@@ -731,16 +825,19 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
               ([reviewId]) => artifacts[reviewId] || canvasDocuments[reviewId]
             )
           )
-          const removedActiveArtifact =
-            state.activeArtifactId != null && !artifacts[state.activeArtifactId]
           const removedActiveCanvas =
             state.activeCanvasId != null && !canvasDocuments[state.activeCanvasId]
           return {
             artifacts,
             canvasDocuments,
             pendingReviews,
-            openArtifactIds: state.openArtifactIds.filter((id) => artifacts[id]),
-            activeArtifactId: removedActiveArtifact ? null : state.activeArtifactId,
+            openArtifactIdsBySession: pruneSessionTabs(state.openArtifactIdsBySession, (id) =>
+              Boolean(artifacts[id])
+            ),
+            activeArtifactIdBySession: pruneSessionActive(
+              state.activeArtifactIdBySession,
+              (_sessionKey, current) => (current && artifacts[current] ? current : null)
+            ),
             activeCanvasId: removedActiveCanvas ? null : state.activeCanvasId,
           }
         })
@@ -825,10 +922,6 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
                 ? null
                 : state.artifactWorkspace.returnContext,
           }
-          const nextActiveArtifactId =
-            state.activeArtifactId === id
-              ? resolveNextActiveArtifactId(rest, nextWorkspace)
-              : state.activeArtifactId
           getPluginEventHooks().dispatchArtifactDelete(id)
           loggers.store.info("artifacts.delete", {
             id,
@@ -838,36 +931,69 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
             artifacts: rest,
             pendingReviews,
             artifactWorkspace: nextWorkspace,
-            activeArtifactId: nextActiveArtifactId,
-            openArtifactIds: state.openArtifactIds.filter((openId) => openId !== id),
+            activeArtifactIdBySession: pruneSessionActive(
+              state.activeArtifactIdBySession,
+              (sessionKey, current) =>
+                current === id
+                  ? resolveNextActiveArtifactId(rest, nextWorkspace, sessionKey)
+                  : current
+            ),
+            openArtifactIdsBySession: pruneSessionTabs(
+              state.openArtifactIdsBySession,
+              (openId) => openId !== id
+            ),
           }
         })
       },
 
       closeArtifact: (id) => {
         set((state) => {
-          const openArtifactIds = state.openArtifactIds.filter((openId) => openId !== id)
-          if (openArtifactIds.length === state.openArtifactIds.length) return state
-          if (state.activeArtifactId !== id) return { openArtifactIds }
+          const sessionKey = artifactSessionKey(state.artifacts[id]?.sessionId)
+          const current = state.openArtifactIdsBySession[sessionKey] ?? []
+          const openArtifactIds = current.filter((openId) => openId !== id)
+          if (openArtifactIds.length === current.length) return state
+
+          const openArtifactIdsBySession = withSessionTabs(
+            state.openArtifactIdsBySession,
+            sessionKey,
+            openArtifactIds
+          )
+          if (state.activeArtifactIdBySession[sessionKey] !== id) {
+            return { openArtifactIdsBySession }
+          }
 
           // Prefer the tab that took this one's slot, else the one before it —
           // the same neighbour a closed editor tab hands focus to.
-          const closedIndex = state.openArtifactIds.indexOf(id)
+          const closedIndex = current.indexOf(id)
           const neighbour = openArtifactIds[closedIndex] ?? openArtifactIds[closedIndex - 1] ?? null
-          return { openArtifactIds, activeArtifactId: neighbour }
+          return {
+            openArtifactIdsBySession,
+            activeArtifactIdBySession: {
+              ...state.activeArtifactIdBySession,
+              [sessionKey]: neighbour,
+            },
+          }
         })
       },
 
       reorderOpenArtifact: (id, toIndex) => {
         set((state) => {
-          const fromIndex = state.openArtifactIds.indexOf(id)
+          const sessionKey = artifactSessionKey(state.artifacts[id]?.sessionId)
+          const current = state.openArtifactIdsBySession[sessionKey] ?? []
+          const fromIndex = current.indexOf(id)
           if (fromIndex === -1) return state
-          const clamped = Math.max(0, Math.min(state.openArtifactIds.length - 1, toIndex))
+          const clamped = Math.max(0, Math.min(current.length - 1, toIndex))
           if (clamped === fromIndex) return state
-          const openArtifactIds = [...state.openArtifactIds]
+          const openArtifactIds = [...current]
           openArtifactIds.splice(fromIndex, 1)
           openArtifactIds.splice(clamped, 0, id)
-          return { openArtifactIds }
+          return {
+            openArtifactIdsBySession: withSessionTabs(
+              state.openArtifactIdsBySession,
+              sessionKey,
+              openArtifactIds
+            ),
+          }
         })
       },
 
@@ -882,21 +1008,42 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           .map(rehydrateArtifact)
           .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()),
 
-      setActiveArtifact: (id) => {
-        const previousId = get().activeArtifactId
+      setActiveArtifact: (id, sessionId) => {
+        // An id that no longer resolves still names its session through the
+        // caller; a clear names it only through the argument.
+        const clearKey = artifactSessionKey(sessionId)
+        const previousId = id ? null : (get().activeArtifactIdBySession[clearKey] ?? null)
         set((state) => {
           if (!id) {
-            return { activeArtifactId: null }
+            return {
+              activeArtifactIdBySession: {
+                ...state.activeArtifactIdBySession,
+                [clearKey]: null,
+              },
+            }
           }
 
           const artifact = state.artifacts[id]
+          const sessionKey = artifactSessionKey(artifact ? artifact.sessionId : sessionId)
           if (!artifact) {
-            return { activeArtifactId: id }
+            return {
+              activeArtifactIdBySession: {
+                ...state.activeArtifactIdBySession,
+                [sessionKey]: id,
+              },
+            }
           }
 
           return {
-            activeArtifactId: id,
-            openArtifactIds: withOpenArtifact(state.openArtifactIds, id),
+            activeArtifactIdBySession: {
+              ...state.activeArtifactIdBySession,
+              [sessionKey]: id,
+            },
+            openArtifactIdsBySession: withSessionTabs(
+              state.openArtifactIdsBySession,
+              sessionKey,
+              withOpenArtifact(state.openArtifactIdsBySession[sessionKey] ?? [], id)
+            ),
             artifacts: {
               ...state.artifacts,
               [id]: {
@@ -1039,9 +1186,20 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
 
         // Set the first artifact as active and open panel
         if (createdArtifacts.length > 0) {
+          const sessionKey = artifactSessionKey(sessionId)
           set({
-            activeArtifactId: createdArtifacts[0].id,
-            openArtifactIds: withOpenArtifact(get().openArtifactIds, createdArtifacts[0].id),
+            activeArtifactIdBySession: {
+              ...get().activeArtifactIdBySession,
+              [sessionKey]: createdArtifacts[0].id,
+            },
+            openArtifactIdsBySession: withSessionTabs(
+              get().openArtifactIdsBySession,
+              sessionKey,
+              withOpenArtifact(
+                get().openArtifactIdsBySession[sessionKey] ?? [],
+                createdArtifacts[0].id
+              )
+            ),
             artifactWorkspace: {
               ...get().artifactWorkspace,
               sessionId,
@@ -1050,8 +1208,13 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
                 createdArtifacts[0].id
               ),
             },
-            panelOpen: true,
-            panelView: "artifact",
+            // Deliberately does NOT open the panel. Whether a fresh artifact is
+            // allowed to take over the screen is a layout decision that depends
+            // on `userDismissed`, which this store cannot see; forcing it open
+            // from here re-threw the mobile Sheet over the conversation every
+            // time, including right after the user closed it. The dock's
+            // `useDockAttentionSignal` watches `activeArtifactId` and routes it
+            // through `notifyNewArtifact` instead.
           })
         }
 
@@ -1081,9 +1244,14 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
 
         set((state) => ({
           pendingReviews: { ...state.pendingReviews, [id]: review },
-          activeArtifactId: id,
-          panelOpen: true,
-          panelView: "artifact",
+          activeArtifactIdBySession: {
+            ...state.activeArtifactIdBySession,
+            [artifactSessionKey(artifact.sessionId)]: id,
+          },
+          // See `autoCreateFromContent`: raising the surface is the dock's call,
+          // not this store's. `useDockAttentionSignal` watches the pending-review
+          // count and raises it through `notifyNewArtifact`, which is also why a
+          // proposal now reaches a collapsed *desktop* dock — it never did.
           artifactWorkspace: {
             ...state.artifactWorkspace,
             sessionId: artifact.sessionId,
@@ -1373,7 +1541,6 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
             artifacts,
             canvasDocuments: { ...state.canvasDocuments, [doc.id]: doc },
             activeCanvasId: doc.id,
-            canvasOpen: true,
             panelView: "canvas",
           }
         })
@@ -1504,15 +1671,12 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
         const previousId = get().activeCanvasId
         set({ activeCanvasId: id })
         if (id) {
-          set({ canvasOpen: true, panelView: "canvas" })
+          set({ panelView: "canvas" })
         }
         if (previousId !== id) {
           getPluginEventHooks().dispatchCanvasSwitch(id)
         }
       },
-
-      openCanvas: () => set({ canvasOpen: true, panelView: "canvas" }),
-      closeCanvas: () => set({ canvasOpen: false }),
 
       // Canvas suggestions
       addSuggestion: (documentId, suggestion) => {
@@ -1735,40 +1899,28 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
         }
       },
 
-      // Analysis actions
-      addAnalysisResult: (result) => {
-        const newResult: AnalysisResult = {
-          ...result,
-          id: nanoid(),
-          createdAt: new Date(),
-        }
-
-        set((state) => ({
-          analysisResults: { ...state.analysisResults, [newResult.id]: newResult },
-        }))
-
-        return newResult
-      },
-
-      getMessageAnalysis: (messageId) =>
-        Object.values(get().analysisResults)
-          .filter((r) => r.messageId === messageId)
-          .map(rehydrateAnalysisResult)
-          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()),
-
       // Panel actions
       openPanel: (view = "artifact") => {
-        set((state) => ({
-          panelOpen: true,
-          panelView: view,
-          activeArtifactId:
-            view === "artifact" &&
-            !state.activeArtifactId &&
-            state.artifactWorkspace.returnContext?.activeArtifactId &&
-            state.artifacts[state.artifactWorkspace.returnContext.activeArtifactId]
-              ? state.artifactWorkspace.returnContext.activeArtifactId
-              : state.activeArtifactId,
-        }))
+        set((state) => {
+          // Restore the artifact the workspace route was launched from, into
+          // *its own* session's slot — the return context records an id, and
+          // the artifact it names is what says which conversation owns it.
+          const restoredId = state.artifactWorkspace.returnContext?.activeArtifactId
+          const restored = restoredId ? state.artifacts[restoredId] : undefined
+          if (view !== "artifact" || !restored) return { panelOpen: true, panelView: view }
+          const sessionKey = artifactSessionKey(restored.sessionId)
+          if (state.activeArtifactIdBySession[sessionKey]) {
+            return { panelOpen: true, panelView: view }
+          }
+          return {
+            panelOpen: true,
+            panelView: view,
+            activeArtifactIdBySession: {
+              ...state.activeArtifactIdBySession,
+              [sessionKey]: restoredId ?? null,
+            },
+          }
+        })
         getPluginEventHooks().dispatchArtifactOpen(view)
         // Generic UI panel hook — fires for every right-rail panel open so
         // plugins that don't need the artifact-vs-canvas distinction get a
@@ -1808,9 +1960,7 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
                 ? null
                 : state.artifactWorkspace.returnContext,
           }
-          const nextActiveArtifactId = ids.includes(state.activeArtifactId || "")
-            ? resolveNextActiveArtifactId(artifacts, nextWorkspace)
-            : state.activeArtifactId
+          const removed = new Set(ids)
 
           for (const id of ids) {
             getPluginEventHooks().dispatchArtifactDelete(id)
@@ -1823,8 +1973,16 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
             artifactVersions,
             pendingReviews,
             artifactWorkspace: nextWorkspace,
-            openArtifactIds: state.openArtifactIds.filter((openId) => artifacts[openId]),
-            activeArtifactId: nextActiveArtifactId,
+            openArtifactIdsBySession: pruneSessionTabs(state.openArtifactIdsBySession, (openId) =>
+              Boolean(artifacts[openId])
+            ),
+            activeArtifactIdBySession: pruneSessionActive(
+              state.activeArtifactIdBySession,
+              (sessionKey, current) =>
+                current && removed.has(current)
+                  ? resolveNextActiveArtifactId(artifacts, nextWorkspace, sessionKey)
+                  : current
+            ),
           }
         })
       },
@@ -1849,10 +2007,18 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           }),
         }
 
+        const sessionKey = artifactSessionKey(duplicated.sessionId)
         set((s) => ({
           artifacts: { ...s.artifacts, [duplicated.id]: duplicated },
-          activeArtifactId: duplicated.id,
-          openArtifactIds: withOpenArtifact(s.openArtifactIds, duplicated.id),
+          activeArtifactIdBySession: {
+            ...s.activeArtifactIdBySession,
+            [sessionKey]: duplicated.id,
+          },
+          openArtifactIdsBySession: withSessionTabs(
+            s.openArtifactIdsBySession,
+            sessionKey,
+            withOpenArtifact(s.openArtifactIdsBySession[sessionKey] ?? [], duplicated.id)
+          ),
           artifactWorkspace: {
             ...s.artifactWorkspace,
             sessionId: duplicated.sessionId,
@@ -1916,10 +2082,6 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           const canvasDocuments = Object.fromEntries(
             Object.entries(state.canvasDocuments).filter(([, d]) => d.sessionId !== sessionId)
           )
-          const analysisResults = Object.fromEntries(
-            Object.entries(state.analysisResults).filter(([, r]) => r.sessionId !== sessionId)
-          )
-
           return {
             artifacts,
             artifactVersions,
@@ -1935,12 +2097,19 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
                   : state.artifactWorkspace.sessionId,
             },
             canvasDocuments,
-            analysisResults,
-            openArtifactIds: state.openArtifactIds.filter((id) => artifacts[id]),
-            activeArtifactId:
-              state.activeArtifactId && artifacts[state.activeArtifactId]
-                ? state.activeArtifactId
-                : null,
+            // The cleared session's whole bucket goes with it; other sessions
+            // only lose tabs whose artifact was collateral.
+            openArtifactIdsBySession: pruneSessionTabs(
+              withSessionTabs(state.openArtifactIdsBySession, artifactSessionKey(sessionId), []),
+              (id) => Boolean(artifacts[id])
+            ),
+            activeArtifactIdBySession: pruneSessionActive(
+              state.activeArtifactIdBySession,
+              (sessionKey, current) =>
+                sessionKey === artifactSessionKey(sessionId) || !current || !artifacts[current]
+                  ? null
+                  : current
+            ),
             activeCanvasId:
               state.activeCanvasId && canvasDocuments[state.activeCanvasId]
                 ? state.activeCanvasId
@@ -1952,17 +2121,14 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
     {
       name: ARTIFACT_STORAGE_KEY,
       storage: persistLocalStorage(),
-      version: 3,
-      migrate: (persistedState: unknown) => {
+      version: 4,
+      migrate: (persistedState: unknown, version) => {
         const state = persistedState as Record<string, unknown>
         if (!state.canvasDocuments || typeof state.canvasDocuments !== "object") {
           state.canvasDocuments = {}
         }
         if (!state.artifactVersions || typeof state.artifactVersions !== "object") {
           state.artifactVersions = {}
-        }
-        if (!state.analysisResults || typeof state.analysisResults !== "object") {
-          state.analysisResults = {}
         }
         if (!state.artifactWorkspace || typeof state.artifactWorkspace !== "object") {
           state.artifactWorkspace = INITIAL_ARTIFACT_WORKSPACE
@@ -1971,6 +2137,33 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
             ...INITIAL_ARTIFACT_WORKSPACE,
             ...(state.artifactWorkspace as Record<string, unknown>),
           }
+        }
+        if (version < 4) {
+          // v3 kept one global tab list and one global active id, so a reload
+          // could hand the dock a conversation's tabs while another one was on
+          // screen. Re-bucket by the owning artifact's session and drop the
+          // analysis map, which nothing outside this store ever read.
+          delete state.analysisResults
+          const artifacts = (state.artifacts ?? {}) as Record<string, Artifact | undefined>
+          const legacyOpen = Array.isArray(state.openArtifactIds)
+            ? (state.openArtifactIds as string[])
+            : []
+          const openArtifactIdsBySession: Record<string, string[]> = {}
+          for (const id of legacyOpen) {
+            const artifact = artifacts[id]
+            if (!artifact) continue
+            const sessionKey = artifactSessionKey(artifact.sessionId)
+            const bucket = openArtifactIdsBySession[sessionKey] ?? []
+            if (bucket.length < MAX_OPEN_ARTIFACTS) {
+              bucket.push(id)
+              openArtifactIdsBySession[sessionKey] = bucket
+            }
+          }
+          delete state.openArtifactIds
+          delete state.activeArtifactId
+          state.openArtifactIdsBySession = openArtifactIdsBySession
+          // The active id was never persisted, so there is nothing to re-bucket.
+          state.activeArtifactIdBySession = {}
         }
         return state
       },
@@ -2014,9 +2207,10 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           artifactVersions,
           artifactWorkspace: state.artifactWorkspace,
           // Only tabs whose artifact survived the LRU eviction above.
-          openArtifactIds: state.openArtifactIds.filter((id) => artifacts[id]),
+          openArtifactIdsBySession: pruneSessionTabs(state.openArtifactIdsBySession, (id) =>
+            Boolean(artifacts[id])
+          ),
           canvasDocuments: state.canvasDocuments,
-          analysisResults: state.analysisResults,
         }
       },
     }

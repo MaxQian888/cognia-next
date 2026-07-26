@@ -4,6 +4,7 @@ import { ArtifactWorkspaceDock } from "./artifact-workspace-dock"
 import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
+import { useChatStore } from "@/stores/chat"
 import { makeArtifact } from "@/lib/storybook/fixtures/artifacts"
 
 const artifact = makeArtifact()
@@ -33,9 +34,10 @@ const meta = {
   beforeEach: () => {
     resetStore(useArtifactStore)
     resetStore(useArtifactDockLayoutStore)
+    seedStore(useChatStore, { activeSessionId: artifact.sessionId })
     seedStore(useArtifactStore, {
       artifacts: { [artifact.id]: artifact },
-      activeArtifactId: artifact.id,
+      activeArtifactIdBySession: { [artifact.sessionId]: artifact.id },
     })
     seedStore(useArtifactDockLayoutStore, { dockCollapsed: false })
   },
@@ -54,7 +56,7 @@ export const WithDock: Story = {
 export const SessionSurface: Story = {
   args: { children: <ChatPlaceholder /> },
   beforeEach: () => {
-    seedStore(useArtifactStore, { artifacts: {}, activeArtifactId: null })
+    seedStore(useArtifactStore, { artifacts: {}, activeArtifactIdBySession: {} })
   },
 }
 

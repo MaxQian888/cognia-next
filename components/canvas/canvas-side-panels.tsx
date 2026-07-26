@@ -112,6 +112,10 @@ function CanvasContextWorkbench({ mobile }: { mobile: boolean }) {
   const activeRightTab = useCanvasLayoutStore((state) => state.activeRightTab)
   const setRightCollapsed = useCanvasLayoutStore((state) => state.setRightCollapsed)
   const setMobileRightOpen = useCanvasLayoutStore((state) => state.setMobileRightOpen)
+  // `resetLayout` had lived on the store with no caller since it was written,
+  // so a canvas shell dragged to an unusable split had no way back. Same entry
+  // point as the chat dock's, in the workbench header's layout menu.
+  const resetCanvasLayout = useCanvasLayoutStore((state) => state.resetLayout)
   const navigatePanel = useContextWorkbenchStore((state) => state.navigatePanel)
   const smartReveal = useContextWorkbenchStore((state) => state.smartReveal)
   const layouts = useContextWorkbenchStore((state) => state.layouts)
@@ -386,6 +390,7 @@ function CanvasContextWorkbench({ mobile }: { mobile: boolean }) {
         resource={resource}
         panels={panels}
         onCollapse={() => (mobile ? setMobileRightOpen(false) : setRightCollapsed(true))}
+        onResetLayout={resetCanvasLayout}
         placement={mobile ? "mobile-sheet" : "adjacent-editor"}
         manageOwnWidth={false}
         className="w-full flex-1"

@@ -209,6 +209,40 @@ describe("ContextWorkbench", () => {
     expect(onCollapse).toHaveBeenCalledTimes(1)
   })
 
+  it("names the group overflow with the current panel and sibling count", () => {
+    const First = () => <div>first-panel</div>
+    const Second = () => <div>second-panel</div>
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ContextWorkbench
+          workbenchInstanceId="overflow-a"
+          resource={resource}
+          headerLeading={<div>artifact-tabs</div>}
+          panels={[
+            {
+              id: "comments",
+              activity: "comments",
+              labelKey: "contextWorkbench.panels.comments",
+              appliesTo: () => true,
+              renderer: First,
+            },
+            {
+              id: "comments-two",
+              activity: "comments",
+              labelKey: "contextWorkbench.panels.commentsTwo",
+              appliesTo: () => true,
+              renderer: Second,
+            },
+          ]}
+        />
+      </NextIntlClientProvider>
+    )
+
+    expect(screen.getByTestId("context-workbench-group-overflow")).toHaveAccessibleName(
+      "contextWorkbench.panels.comments 1"
+    )
+  })
+
   it("isolates a crashing plugin panel", () => {
     const consoleError = jest.spyOn(console, "error").mockImplementation(() => undefined)
     const Crash = () => {
@@ -370,6 +404,89 @@ describe("ContextWorkbench", () => {
     expect(screen.getByTestId("context-workbench")).toHaveStyle({ width: "360px" })
   })
 
+  it("remembers a dragged width per panel and restores it when that panel returns", () => {
+    const panels: ContextPanelDefinition[] = [
+      {
+        id: "comments",
+        activity: "comments",
+        labelKey: "contextWorkbench.panels.comments",
+        appliesTo: () => true,
+        renderer: () => <div>comments-panel</div>,
+      },
+      {
+        id: "review",
+        activity: "review",
+        labelKey: "contextWorkbench.panels.review",
+        appliesTo: () => true,
+        renderer: () => <div>review-panel</div>,
+      },
+    ]
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ContextWorkbench workbenchInstanceId="perpanel-a" resource={resource} panels={panels} />
+      </NextIntlClientProvider>
+    )
+
+    const handle = screen.getByRole("separator", { name: "Resize workbench" })
+    const drag = (from: number, to: number) => {
+      fireEvent(handle, new MouseEvent("pointerdown", { bubbles: true, clientX: from }))
+      act(() => {
+        window.dispatchEvent(new MouseEvent("pointermove", { clientX: to }))
+        window.dispatchEvent(new MouseEvent("pointerup"))
+      })
+    }
+
+    // `comments` is the default panel; widen it.
+    drag(500, 300)
+    expect(screen.getByTestId("context-workbench")).toHaveStyle({ width: "560px" })
+
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.panels.review" }))
+    drag(500, 600)
+    expect(screen.getByTestId("context-workbench")).toHaveStyle({ width: "460px" })
+
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.panels.comments" }))
+    expect(screen.getByTestId("context-workbench")).toHaveStyle({ width: "560px" })
+
+    const layout = useContextWorkbenchStore.getState().layouts["perpanel-a::canvas:doc-1"]
+    expect(layout?.panelWidths).toEqual({ comments: 560, review: 460 })
+  })
+
+  it("double-click forgets the active panel's remembered width rather than replaying it", () => {
+    const panels: ContextPanelDefinition[] = [
+      {
+        id: "comments",
+        activity: "comments",
+        labelKey: "contextWorkbench.panels.comments",
+        appliesTo: () => true,
+        renderer: () => <div>comments-panel</div>,
+      },
+      {
+        id: "review",
+        activity: "review",
+        labelKey: "contextWorkbench.panels.review",
+        appliesTo: () => true,
+        renderer: () => <div>review-panel</div>,
+      },
+    ]
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ContextWorkbench workbenchInstanceId="reset-a" resource={resource} panels={panels} />
+      </NextIntlClientProvider>
+    )
+
+    const handle = screen.getByRole("separator", { name: "Resize workbench" })
+    fireEvent(handle, new MouseEvent("pointerdown", { bubbles: true, clientX: 500 }))
+    act(() => {
+      window.dispatchEvent(new MouseEvent("pointermove", { clientX: 300 }))
+      window.dispatchEvent(new MouseEvent("pointerup"))
+    })
+    fireEvent.dblClick(handle)
+
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.panels.review" }))
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.panels.comments" }))
+    expect(screen.getByTestId("context-workbench")).toHaveStyle({ width: "360px" })
+  })
+
   it("explains what pinning does instead of leaving a bare pin glyph", async () => {
     render(
       <NextIntlClientProvider locale="en" messages={messages}>
@@ -520,6 +637,7 @@ describe("ContextWorkbench", () => {
         "window-a::canvas:doc-1": {
           mode: "narrow",
           width: 360,
+          panelWidths: {},
           activePanelId: "resource-chat",
           userPinned: true,
           activatedPanelIds: ["resource-chat"],
@@ -620,6 +738,52 @@ describe("ContextWorkbench", () => {
     expect(mounted).toHaveBeenCalledTimes(2)
   })
 
+  it("orders the rail by the activity table and parks unknown activities at the end", () => {
+    renderWorkbench([
+      {
+        id: "plugin-panel",
+        // A plugin activity outside CONTEXT_ACTIVITY_RAIL_ORDER must still get
+        // a rail entry — sorting it to `-1` would have put it first, and
+        // dropping it would have made the panel unreachable.
+        activity: "vendor-thing",
+        labelKey: "contextWorkbench.panels.gated",
+        appliesTo: () => true,
+        renderer: () => <div>plugin-panel</div>,
+        order: 1,
+      },
+      {
+        id: "comments",
+        activity: "comments",
+        labelKey: "contextWorkbench.panels.comments",
+        appliesTo: () => true,
+        renderer: () => <div>comments-panel</div>,
+        order: 2,
+      },
+      {
+        id: "review",
+        activity: "review",
+        labelKey: "contextWorkbench.panels.review",
+        appliesTo: () => true,
+        renderer: () => <div>review-panel</div>,
+        order: 3,
+      },
+    ])
+
+    const railLabels = Array.from(
+      screen
+        .getByTestId("context-workbench-activity-rail")
+        .querySelectorAll<HTMLButtonElement>("[data-workbench-activity-button]")
+    ).map((button) => button.getAttribute("aria-label"))
+
+    // `order` governs the group alone: the plugin panel sorts first among the
+    // panels, yet `review` still leads the rail because the table says so.
+    expect(railLabels).toEqual([
+      "contextWorkbench.panels.review",
+      "contextWorkbench.panels.comments",
+      "contextWorkbench.panels.gated",
+    ])
+  })
+
   it("supports arrow, Home, and End keyboard navigation for activities and grouped panels", () => {
     renderWorkbench([
       {
@@ -645,15 +809,27 @@ describe("ContextWorkbench", () => {
       },
     ])
 
+    // The rail follows `CONTEXT_ACTIVITY_RAIL_ORDER`, so `review` sits above
+    // `comments` regardless of which panel sorts first inside its group.
     const commentsActivity = screen.getByRole("button", {
       name: "contextWorkbench.panels.comments",
     })
     commentsActivity.focus()
-    fireEvent.keyDown(commentsActivity, { key: "ArrowDown" })
+    fireEvent.keyDown(commentsActivity, { key: "ArrowUp" })
     expect(screen.getByText("review-panel")).toBeInTheDocument()
 
     fireEvent.keyDown(screen.getByRole("button", { name: "contextWorkbench.panels.review" }), {
+      key: "End",
+    })
+    expect(screen.getByText("comments-panel")).toBeInTheDocument()
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "contextWorkbench.panels.comments" }), {
       key: "Home",
+    })
+    expect(screen.getByText("review-panel")).toBeInTheDocument()
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "contextWorkbench.panels.review" }), {
+      key: "ArrowDown",
     })
     const firstTab = screen.getByRole("tab", { name: "contextWorkbench.panels.comments" })
     firstTab.focus()
@@ -742,6 +918,35 @@ describe("ContextWorkbench", () => {
       expect(section).toHaveAttribute("data-mode", "focus")
       expect(section.className).toContain("zoom-in-95")
       expect(section.className).toContain("--motion-duration-scale")
+    })
+
+    it("plays the focus takeover back out instead of snapping into the rail", () => {
+      jest.useFakeTimers()
+      try {
+        renderWorkbench(twoPanels)
+        const section = screen.getByTestId("context-workbench")
+
+        fireEvent.click(screen.getByRole("button", { name: "Focus mode" }))
+        expect(section.className).toContain("zoom-in-95")
+
+        fireEvent.click(screen.getByRole("button", { name: "Narrow mode" }))
+
+        // The entrance zoomed and faded; leaving used to just drop the class,
+        // so a full-screen surface reappeared inside a ~34% rail in one frame.
+        // The takeover layout is held for exactly the mirrored exit.
+        expect(section).toHaveAttribute("data-mode", "narrow")
+        expect(section.className).toContain("zoom-out-95")
+        expect(section.className).toContain("fixed")
+
+        act(() => {
+          jest.advanceTimersByTime(400)
+        })
+
+        expect(section.className).not.toContain("zoom-out-95")
+        expect(section.className).not.toContain("fixed")
+      } finally {
+        jest.useRealTimers()
+      }
     })
 
     it("leaves focus before handing collapse to the host", () => {

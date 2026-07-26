@@ -116,7 +116,18 @@ export interface ArtifactDockLayoutState {
   workspaceRevealRequest: WorkspaceRevealRequest | null
   /** Runtime-only workspace target retained after a reveal request is consumed. */
   workspaceContext: WorkspaceDockContext | null
-  /** Runtime-only: the mobile/tablet Sheet fallback open state (NOT persisted). */
+  /**
+   * The narrow-screen Sheet's visibility — **the single source of truth** for
+   * "is the right rail on screen" on mobile, mirroring `dockCollapsed` on
+   * desktop. Runtime-only (NOT persisted), so dragging a desktop window down to
+   * a phone width never throws a 92dvh Sheet over the conversation.
+   *
+   * `<ArtifactPanel />` reads this and nothing else. It used to read
+   * `artifactStore.panelOpen` as well, which `createArtifact` /
+   * `setActiveArtifact` raise unconditionally — a back channel that could not
+   * see `userDismissed`, so every new artifact re-threw the Sheet over a
+   * conversation the user had just cleared.
+   */
   mobileSheetOpen: boolean
   /**
    * Runtime-only: true after the user manually collapsed the dock, so a fresh
@@ -214,13 +225,26 @@ function nextRevealId(): string {
 // after the drag settles.
 let pendingFlush: ReturnType<typeof setTimeout> | null = null
 
+/**
+ * Absolute floor for a *stored* width, well below either profile's real
+ * minimum.
+ *
+ * The per-profile bounds are enforced at render time by the `ResizablePanel`
+ * itself, so this only has to stop a corrupt or absurd value from being kept.
+ * It used to be the artifact floor (24%), which is not permissive at all for
+ * the workspace profile: that one's real minimum is an absolute `480px`, ≈18.75%
+ * on a 2560px screen — so dragging the workspace dock to its own minimum was
+ * silently rounded back up to 24%, and the width sprang wider on the next
+ * collapse/expand.
+ */
+export const DOCK_SIZE_PERSIST_FLOOR = 10
+
 function clampDockSize(value: number): number {
   if (!Number.isFinite(value)) return ARTIFACT_DOCK_BOUNDS.default
-  // Permissive window spanning both modes; the per-mode min/max on the
-  // ResizablePanel does the real render-time enforcement. Keeping the stored
-  // percent within [artifact.min, workspace.max] lets a wide workspace size
-  // survive a reload without being clamped down to the artifact cap.
-  return Math.max(ARTIFACT_DOCK_BOUNDS.min, Math.min(WORKSPACE_DOCK_BOUNDS.max, value))
+  // Permissive window spanning both profiles; keeping the stored percent under
+  // `workspace.max` lets a wide workspace size survive a reload without being
+  // clamped down to the artifact cap.
+  return Math.max(DOCK_SIZE_PERSIST_FLOOR, Math.min(WORKSPACE_DOCK_BOUNDS.max, value))
 }
 
 export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
@@ -252,17 +276,31 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
         }, ARTIFACT_DOCK_PERSIST_DEBOUNCE_MS)
       },
 
+      // `dockCollapsed` and `mobileSheetOpen` are two renderings of one idea —
+      // "is the dock on screen" — so every writer of the first moves the second
+      // with it. They drifted apart before: the toggle raised only the desktop
+      // dock, which is why tapping it on a phone did nothing at all.
       toggleDock: () =>
         set((state) =>
           state.dockCollapsed
-            ? { dockCollapsed: false, userDismissed: false, unreadArtifact: false }
-            : { dockCollapsed: true, userDismissed: true }
+            ? {
+                dockCollapsed: false,
+                userDismissed: false,
+                unreadArtifact: false,
+                mobileSheetOpen: true,
+              }
+            : { dockCollapsed: true, userDismissed: true, mobileSheetOpen: false }
         ),
       setDockCollapsed: (collapsed) =>
         set(
           collapsed
-            ? { dockCollapsed: true, userDismissed: true }
-            : { dockCollapsed: false, userDismissed: false, unreadArtifact: false }
+            ? { dockCollapsed: true, userDismissed: true, mobileSheetOpen: false }
+            : {
+                dockCollapsed: false,
+                userDismissed: false,
+                unreadArtifact: false,
+                mobileSheetOpen: true,
+              }
         ),
       notifyNewArtifact: () =>
         set((state) =>
@@ -272,19 +310,40 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
                 dockCollapsed: false,
                 userDismissed: false,
                 unreadArtifact: false,
+                // Raise the narrow-screen Sheet too, the same way every other
+                // reveal in this store does. Without it the mobile shell had to
+                // be force-opened from the artifact store instead, which had no
+                // way to see `userDismissed` — so a phone got the full-height
+                // Sheet thrown over the conversation every single time, even
+                // immediately after the user closed it.
+                mobileSheetOpen: true,
               }
         ),
       setDockProfile: (dockProfile) =>
-        set((state) =>
-          state.dockProfile === dockProfile
-            ? state
-            : dockProfile === "workspace"
-              ? { dockProfile }
-              : // Left the workspace surface — the reveal that routed us there
-                // no longer has a target, so drop it instead of letting it
-                // re-fire the next time workspace mounts.
-                { dockProfile, workspaceRevealRequest: null, workspaceContext: null }
-        ),
+        set((state) => {
+          if (state.dockProfile === dockProfile) return state
+          if (dockProfile === "workspace") return { dockProfile }
+          // Left the workspace surface — the reveal that routed us there no
+          // longer has a target, so drop it instead of letting it re-fire the
+          // next time workspace mounts.
+          const left = {
+            dockProfile,
+            workspaceRevealRequest: null,
+            workspaceContext: null,
+          }
+          // Compact caps the dock lower than workspace does (50% vs 65%). The
+          // ResizablePanel enforces the new `maxSize` on its next layout, so
+          // without this the dock snaps in with no transition. Routing the
+          // clamp through the request token animates it like every other
+          // programmatic width change.
+          return state.dockSize > ARTIFACT_DOCK_BOUNDS.max
+            ? {
+                ...left,
+                dockSize: ARTIFACT_DOCK_BOUNDS.max,
+                dockSizeRequest: state.dockSizeRequest + 1,
+              }
+            : left
+        }),
       requestReveal: (revealIntent) => set({ revealIntent, unreadArtifact: false }),
       consumeRevealIntent: (panelId) =>
         set((state) => (state.revealIntent?.panelId === panelId ? { revealIntent: null } : state)),

@@ -98,6 +98,7 @@ describe("context workbench layout store", () => {
         {
           mode: "narrow" as const,
           width: 360,
+          panelWidths: {},
           activePanelId: null,
           userPinned: false,
           activatedPanelIds: [],
@@ -125,6 +126,7 @@ describe("context workbench layout store", () => {
       "window-a::canvas:doc-1": {
         mode: "focus",
         width: 360,
+        panelWidths: {},
         activePanelId: "comments",
         userPinned: false,
         activatedPanelIds: ["comments"],
@@ -165,6 +167,180 @@ describe("context workbench layout store", () => {
     expect(store.getState().layouts[key]?.mode).toBe("focus")
     store.getState().setWidth(key, 500)
     expect(store.getState().layouts[key]?.mode).toBe("focus")
+  })
+
+  it("records a session-scoped activation without touching the visible panel or width", () => {
+    const store = createContextWorkbenchStoreForTesting()
+    const key = "window-a::session:s-1"
+
+    store.getState().navigatePanel(key, "comments", "narrow")
+    store.getState().setWidth(key, 500, "comments")
+    store.getState().markPanelActivated(key, "browser")
+
+    expect(store.getState().layouts[key]).toMatchObject({
+      activePanelId: "comments",
+      width: 500,
+      activatedPanelIds: ["comments", "browser"],
+    })
+
+    // Idempotent — a second call for an already-recorded panel is a no-op.
+    const before = store.getState().layouts
+    store.getState().markPanelActivated(key, "browser")
+    expect(store.getState().layouts).toBe(before)
+  })
+
+  describe("per-panel width memory", () => {
+    it("does not record a width when the caller names no panel", () => {
+      const store = createContextWorkbenchStoreForTesting()
+      const key = "window-a::canvas:doc-1"
+      store.getState().navigatePanel(key, "comments", "narrow")
+      store.getState().setWidth(key, 500)
+
+      expect(store.getState().layouts[key]?.width).toBe(500)
+      expect(store.getState().layouts[key]?.panelWidths).toEqual({})
+    })
+
+    it("restores the width the user dragged to for that panel when it comes back", () => {
+      const store = createContextWorkbenchStoreForTesting()
+      const key = "window-a::canvas:doc-1"
+
+      store.getState().navigatePanel(key, "comments", "narrow")
+      store.getState().setWidth(key, 500, "comments")
+      store.getState().navigatePanel(key, "inspect", "narrow")
+      store.getState().setWidth(key, 700, "inspect")
+
+      expect(store.getState().layouts[key]?.width).toBe(700)
+
+      store.getState().navigatePanel(key, "comments", "narrow")
+      expect(store.getState().layouts[key]?.width).toBe(500)
+      expect(store.getState().layouts[key]?.panelWidths).toEqual({
+        comments: 500,
+        inspect: 700,
+      })
+    })
+
+    it("leaves the live width alone for a panel that was never dragged", () => {
+      const store = createContextWorkbenchStoreForTesting()
+      const key = "window-a::canvas:doc-1"
+
+      store.getState().navigatePanel(key, "comments", "narrow")
+      store.getState().setWidth(key, 620, "comments")
+      store.getState().navigatePanel(key, "review", "narrow")
+
+      expect(store.getState().layouts[key]?.width).toBe(620)
+    })
+
+    it("restores through every reveal route, including a plugin smartReveal", () => {
+      const store = createContextWorkbenchStoreForTesting()
+      const key = "window-a::artifact:a-1"
+
+      store.getState().activatePanel(key, "demo:panel", "narrow")
+      store.getState().setWidth(key, 480, "demo:panel")
+      store.getState().navigatePanel(key, "review", "narrow")
+      store.getState().setWidth(key, 320, "review")
+
+      expect(store.getState().smartReveal(key, "demo:panel", "narrow")).toBe(true)
+      expect(store.getState().layouts[key]?.width).toBe(480)
+    })
+
+    it("does not restore a width for a reveal that was queued behind a pin", () => {
+      const store = createContextWorkbenchStoreForTesting()
+      const key = "window-a::artifact:a-1"
+
+      store.getState().navigatePanel(key, "demo:panel", "narrow")
+      store.getState().setWidth(key, 480, "demo:panel")
+      store.getState().navigatePanel(key, "review", "narrow")
+      store.getState().setWidth(key, 320, "review")
+      store.getState().setUserPinned(key, true)
+
+      expect(store.getState().smartReveal(key, "demo:panel", "narrow")).toBe(false)
+      // The pinned surface stayed on `review`, so its width must stay too.
+      expect(store.getState().layouts[key]?.width).toBe(320)
+      expect(store.getState().layouts[key]?.pendingPanelIds).toEqual(["demo:panel"])
+    })
+
+    it("restores the fallback panel's width when the active one disappears", () => {
+      const store = createContextWorkbenchStoreForTesting()
+      const key = "window-a::canvas:doc-1"
+
+      store.getState().navigatePanel(key, "comments", "narrow")
+      store.getState().setWidth(key, 500, "comments")
+      store.getState().navigatePanel(key, "demo:panel", "narrow")
+      store.getState().setWidth(key, 800, "demo:panel")
+
+      // The plugin behind `demo:panel` is disabled — reconcile hands the scope
+      // back to `comments`, which has a remembered width of its own.
+      store.getState().reconcilePanels(key, ["comments"], "comments")
+      expect(store.getState().layouts[key]?.width).toBe(500)
+    })
+
+    it("leaves the width alone on a reconcile that does not change the active panel", () => {
+      const store = createContextWorkbenchStoreForTesting()
+      const key = "window-a::canvas:doc-1"
+
+      store.getState().navigatePanel(key, "comments", "narrow")
+      store.getState().setWidth(key, 500, "comments")
+      // A width the user dragged *after* the memory was written must not be
+      // reverted by the reconcile that runs on every mount.
+      store.getState().setWidth(key, 640)
+      store.getState().reconcilePanels(key, ["comments", "review"], "comments")
+      expect(store.getState().layouts[key]?.width).toBe(640)
+    })
+
+    it("stores the clamped width, so an out-of-bounds drag cannot be replayed later", () => {
+      const store = createContextWorkbenchStoreForTesting()
+      const key = "window-a::canvas:doc-1"
+
+      store.getState().navigatePanel(key, "comments", "narrow")
+      store.getState().setWidth(key, 5000, "comments")
+      expect(store.getState().layouts[key]?.panelWidths.comments).toBe(960)
+
+      store.getState().setWidth(key, 10, "comments")
+      expect(store.getState().layouts[key]?.panelWidths.comments).toBe(240)
+    })
+
+    it("re-clamps and sanitises widths restored from disk", () => {
+      const now = Date.now()
+      const pruned = pruneContextWorkbenchLayouts(
+        {
+          "window-a::canvas:doc-1": {
+            mode: "narrow",
+            width: 360,
+            // Out-of-range and non-numeric entries are what a bounds change or a
+            // hand-edited localStorage snapshot actually looks like.
+            panelWidths: { comments: 5000, inspect: 10, broken: "wide" as unknown as number },
+            activePanelId: "comments",
+            userPinned: false,
+            activatedPanelIds: ["comments"],
+            pendingPanelIds: [],
+            lastUsedAt: now,
+          },
+        },
+        now
+      )
+      expect(pruned["window-a::canvas:doc-1"]?.panelWidths).toEqual({
+        comments: 960,
+        inspect: 240,
+      })
+    })
+
+    it("defaults panelWidths for a layout persisted before the field existed", () => {
+      const now = Date.now()
+      const legacy = {
+        "window-a::canvas:doc-1": {
+          mode: "narrow" as const,
+          width: 360,
+          activePanelId: "comments",
+          userPinned: false,
+          activatedPanelIds: ["comments"],
+          pendingPanelIds: [],
+          lastUsedAt: now,
+        } as unknown as ContextWorkbenchLayout,
+      }
+      expect(
+        pruneContextWorkbenchLayouts(legacy, now)["window-a::canvas:doc-1"]?.panelWidths
+      ).toEqual({})
+    })
   })
 
   it("persists and clears an explicit resource-session reassociation", () => {

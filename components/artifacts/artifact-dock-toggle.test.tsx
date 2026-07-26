@@ -55,6 +55,16 @@ describe("ArtifactDockToggle", () => {
     )
   })
 
+  it("leaves its own visibility to the caller", () => {
+    renderToggle()
+
+    // It used to carry `hidden md:inline-flex` itself, which put the unread dot
+    // permanently out of reach on a phone — and the mobile shell renders the
+    // chat with `showHeader={false}`, so the one host that did mount this never
+    // existed at that width anyway. Desktop hosts now opt into the breakpoint.
+    expect(screen.getByTestId("chat-artifact-dock-toggle")).not.toHaveClass("hidden")
+  })
+
   it("hides the unread mark once the dock is open", () => {
     act(() => useArtifactDockLayoutStore.setState({ unreadArtifact: true }))
     act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))

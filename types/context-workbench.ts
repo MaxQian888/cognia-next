@@ -81,6 +81,36 @@ export const INTENTIONALLY_UNCONSUMED_CONTEXT_ACTIVITIES = [
 export type CanonicalContextActivity = (typeof CANONICAL_CONTEXT_ACTIVITIES)[number]
 export type ContextActivity = CanonicalContextActivity | (string & {})
 
+/**
+ * Top-to-bottom order of the activity rail.
+ *
+ * Explicit because the rail used to inherit its order from each group's
+ * lowest-ordered panel, which made one `order` number mean two things: where an
+ * activity sits in the rail, AND where a panel sits inside its group. Ordering
+ * the artifact AI panel ahead of the proposal review therefore also dragged the
+ * whole `ai` group above `preview-run` — the primary surface ended up third in
+ * the rail behind a chat panel. `order` now governs the group alone.
+ *
+ * Activities missing from this list (every plugin-contributed one) sort after
+ * the named entries, in first-seen order, so a third-party panel can never fall
+ * off the rail.
+ */
+export const CONTEXT_ACTIVITY_RAIL_ORDER: readonly ContextActivity[] = [
+  "preview-run",
+  "review",
+  "ai",
+  "comments",
+  "inspect",
+  "workspace",
+  "templates",
+]
+
+/** Rail position of an activity; unknown activities sort to the end. */
+export function contextActivityRailIndex(activity: ContextActivity): number {
+  const index = CONTEXT_ACTIVITY_RAIL_ORDER.indexOf(activity)
+  return index === -1 ? CONTEXT_ACTIVITY_RAIL_ORDER.length : index
+}
+
 export interface TextSelectionCoordinates {
   kind: "text"
   start: number
@@ -196,6 +226,23 @@ export interface ContextPanelDefinition {
   hasRequiredPermissions?: () => boolean
   preferredMode?: ContextPanelMode
   retention?: ContextPanelRetention
+  /**
+   * Whose lifetime this panel's *mounted-ness* follows.
+   *
+   * - `"resource"` (default) — the panel belongs to the resource on screen and
+   *   unmounts when the host moves to another one.
+   * - `"session"` — the panel's content is session-scoped even though it hangs
+   *   off a resource surface (the embedded browser, the project workspace). It
+   *   stays mounted while the conversation does.
+   *
+   * Without this, switching artifact tabs re-keyed the whole layout, the new
+   * scope's `activatedPanelIds` did not contain the browser, and the panel was
+   * dropped — releasing the process-wide embedded-webview lease and losing the
+   * page, the Monaco buffers and the file-tree state. Switching back opened a
+   * blank one. Hosts opt in by passing `sessionScopeKey` to `ContextWorkbench`;
+   * without it this degrades to `"resource"`.
+   */
+  scope?: "resource" | "session"
   requiresChatScope?: boolean
   getBadge?: (resource: ContextResource) => number | undefined
   renderer: ComponentType<ContextPanelRenderProps>

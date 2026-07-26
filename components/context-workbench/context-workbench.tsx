@@ -9,6 +9,7 @@ import {
   useMemo,
   useEffect,
   useRef,
+  useState,
   useSyncExternalStore,
   type ErrorInfo,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -24,6 +25,7 @@ import {
   PinIcon,
   RotateCcwIcon,
   Rows3Icon,
+  SlidersHorizontalIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -56,10 +58,12 @@ import {
   type ContextWorkbenchLayout,
 } from "@/stores/context-workbench/context-workbench-store"
 import {
+  contextActivityRailIndex,
   getContextResourceKey,
   type ContextPanelDefinition,
   type ContextPanelMode,
   type ContextResource,
+  type ContextWorkbenchMode,
   type ContextWorkbenchPlacement,
 } from "@/types/context-workbench"
 
@@ -75,11 +79,48 @@ const ContextWorkbenchContext = createContext<ContextWorkbenchValue | null>(null
 const FALLBACK_CONTEXT_WORKBENCH_LAYOUT: ContextWorkbenchLayout = {
   mode: "narrow",
   width: 360,
+  panelWidths: {},
   activePanelId: null,
   userPinned: false,
   activatedPanelIds: [],
   pendingPanelIds: [],
   lastUsedAt: 0,
+}
+
+const FOCUS_TAKEOVER_DURATION_MS = 200
+/** Outlast the animation slightly so a slower motion preference isn't cut short. */
+const FOCUS_TAKEOVER_SLACK_MS = 40
+
+/**
+ * Hold the focus takeover's layout for one animation after the mode leaves it.
+ *
+ * Entering focus zoomed and faded in; leaving it simply had the class taken
+ * away, so a full-screen surface snapped back into a 34%-wide rail in a single
+ * frame. Keeping the fixed layout mounted for the exit lets the same easing
+ * contract run in reverse. Returns true only while that exit is playing.
+ */
+function useFocusExitAnimation(isFocus: boolean): boolean {
+  // Only the timer writes this. Entering focus re-arms it *during render* —
+  // React's sanctioned "adjust state when a prop changes" pattern, and what
+  // `react-hooks/set-state-in-effect` steers you to: arming is derivable from
+  // the new prop, so it must not cost a second render pass through an effect.
+  const [exitDone, setExitDone] = useState(true)
+  if (isFocus && exitDone) setExitDone(false)
+
+  useEffect(() => {
+    if (isFocus || exitDone) return
+    const scale =
+      Number(
+        getComputedStyle(document.documentElement).getPropertyValue("--motion-duration-scale")
+      ) || 1
+    const timer = window.setTimeout(
+      () => setExitDone(true),
+      FOCUS_TAKEOVER_DURATION_MS * scale + FOCUS_TAKEOVER_SLACK_MS
+    )
+    return () => window.clearTimeout(timer)
+  }, [exitDone, isFocus])
+
+  return !isFocus && !exitDone
 }
 
 export function useContextWorkbench(): ContextWorkbenchValue {
@@ -128,12 +169,25 @@ export interface ContextWorkbenchProps {
    */
   onEnsureVisible?: () => void
   /**
-   * Called when the user picks a mode from the header. Hosts that own the
+   * A panel wants the host's shell at a given width. Hosts that own the
    * workbench width themselves (`manageOwnWidth={false}` — e.g. the chat dock,
    * whose width belongs to the outer resizable panel) use this to resize their
    * own shell. Without it the narrow/wide buttons render but do nothing.
+   *
+   * `panelId` distinguishes the two callers, and hosts are expected to treat
+   * them differently:
+   * - **present** — a panel activation. The mode is the panel's `preferredMode`,
+   *   which is a preference, not an instruction; the chat dock applies it as a
+   *   high-water mark so it never undoes a width the user dragged to.
+   * - **absent** — the header's own narrow/wide buttons. That is an explicit
+   *   user request and applies unconditionally.
+   *
+   * It also tells the host *which* panel is coming, which matters when the
+   * host's width presets depend on the panel: the dock's sizing profile is
+   * derived from the active panel in an effect, so a host reading its own
+   * profile during activation would be a frame behind.
    */
-  onModeWidthHint?: (mode: ContextPanelMode) => void
+  onModeWidthHint?: (mode: ContextPanelMode, panelId?: string) => void
   /**
    * Host content for the left of the panel header (the dock puts its open
    * artifact tabs here). When present the group tabs collapse into an overflow
@@ -142,6 +196,40 @@ export interface ContextWorkbenchProps {
    * content height they need more.
    */
   headerLeading?: ReactNode
+  /**
+   * Which width preset the host is *actually* sitting at, for hosts that own
+   * their own width (`manageOwnWidth={false}`). Drives the narrow/wide button
+   * highlight only — never navigation.
+   *
+   * Without it the highlight reads `layout.mode`, which a panel activation
+   * writes from its `preferredMode`. The chat dock applies that mode as a
+   * high-water mark (it may widen, never narrow), so moving from the workspace
+   * back to the preview wrote `narrow`, lit the narrow button, and left the dock
+   * at 65% — the highlight claimed a width the user was not looking at. Hosts
+   * that size the workbench themselves omit this and keep reading `layout.mode`,
+   * which for them *is* the width.
+   */
+  resolvedMode?: ContextPanelMode
+  /**
+   * The scope key standing in for "this conversation", for panels declared
+   * `scope: "session"`. Supplying it keeps those panels mounted while the host
+   * moves between resources — the chat dock passes its session surface's own
+   * scope key, so the artifact and session surfaces share one browser and one
+   * workspace instead of tearing them down on every tab switch. Hosts that omit
+   * it treat every panel as resource-scoped, exactly as before.
+   */
+  sessionScopeKey?: string
+  /**
+   * Restore the host's own shell layout (width, collapsed state, sizing
+   * profile) to its defaults. Surfaced in the header's layout menu.
+   *
+   * Every host that owns a resizable shell already had a `resetLayout` action
+   * on its layout store and no way to reach it — a dock dragged to an unusable
+   * width, or one whose persisted size predated a bounds change, had no escape
+   * hatch short of clearing localStorage. Omitted by hosts with nothing to
+   * reset, which hides the entry.
+   */
+  onResetLayout?: () => void
 }
 
 export interface ContextWorkbenchMobileSheetProps extends Omit<
@@ -218,6 +306,9 @@ export function ContextWorkbench({
   onEnsureVisible,
   onModeWidthHint,
   headerLeading,
+  resolvedMode,
+  sessionScopeKey,
+  onResetLayout,
 }: ContextWorkbenchProps) {
   const sectionRef = useRef<HTMLElement | null>(null)
   const previousFocusRef = useRef<HTMLElement | null>(null)
@@ -234,6 +325,14 @@ export function ContextWorkbench({
   const layout = persistedLayout ?? FALLBACK_CONTEXT_WORKBENCH_LAYOUT
   const navigatePanel = useContextWorkbenchStore((state) => state.navigatePanel)
   const reconcilePanels = useContextWorkbenchStore((state) => state.reconcilePanels)
+  const markPanelActivated = useContextWorkbenchStore((state) => state.markPanelActivated)
+  // Which session-scoped panels have ever been opened in this conversation.
+  // Held separately from `layout` so moving between resources cannot retract it.
+  const sessionActivatedPanelIds = useContextWorkbenchStore((state) =>
+    sessionScopeKey && sessionScopeKey !== scopeKey
+      ? state.layouts[sessionScopeKey]?.activatedPanelIds
+      : undefined
+  )
   const setMode = useContextWorkbenchStore((state) => state.setMode)
   const setWidth = useContextWorkbenchStore((state) => state.setWidth)
   const setUserPinned = useContextWorkbenchStore((state) => state.setUserPinned)
@@ -362,7 +461,14 @@ export function ContextWorkbench({
       group.push(panel)
       groups.set(panel.activity, group)
     }
-    return [...groups.entries()]
+    // The rail follows its own declared order (`panel.order` governs the group
+    // alone). Deriving rail position from each group's lowest-ordered panel made
+    // one number mean two things, so ordering panels within a group silently
+    // reshuffled the rail — which is how the primary surface ended up third,
+    // behind a chat panel that merely happened to sort first.
+    return [...groups.entries()].sort(
+      ([left], [right]) => contextActivityRailIndex(left) - contextActivityRailIndex(right)
+    )
   }, [resolvedPanels])
   const activePanel = resolvedPanels.find((panel) => panel.id === layout.activePanelId)
   const activeGroup = activePanel
@@ -413,13 +519,20 @@ export function ContextWorkbench({
     if (!persistedLayout?.activatedPanelIds.includes(activePanel.id)) {
       navigatePanel(scopeKey, activePanel.id, layout.mode === "collapsed" ? "narrow" : layout.mode)
     }
+    // Catches the routes that never touch `handleActivate` — a one-shot reveal
+    // published from outside the workbench, and a layout restored from disk.
+    if (activePanel.scope === "session" && sessionScopeKey) {
+      markPanelActivated(sessionScopeKey, activePanel.id)
+    }
   }, [
     activePanel,
     invokePanelLifecycle,
     layout.mode,
+    markPanelActivated,
     navigatePanel,
     persistedLayout?.activatedPanelIds,
     scopeKey,
+    sessionScopeKey,
   ])
 
   const handleCollapse = () => {
@@ -453,7 +566,19 @@ export function ContextWorkbench({
     const phase = seen.has(panel.id) ? "restore" : "first"
     seen.add(panel.id)
     lastActivePanelRef.current.set(scopeKey, panel.id)
-    navigatePanel(scopeKey, panel.id, panel.preferredMode ?? "narrow")
+    const mode = panel.preferredMode ?? "narrow"
+    navigatePanel(scopeKey, panel.id, mode)
+    // Session-scoped panels record their activation against the conversation as
+    // well, which is what keeps them mounted after the host moves on. Only the
+    // activation is shared — `activePanelId` stays per-resource, so switching
+    // artifact tabs still restores each artifact's own panel.
+    if (panel.scope === "session" && sessionScopeKey) markPanelActivated(sessionScopeKey, panel.id)
+    // `navigatePanel` writes the mode, which lights up the matching header
+    // button — but only the host can act on it, and only if we tell it. Without
+    // this every `preferredMode: "wide"` panel reached from the rail, a group
+    // tab or the overflow menu claimed to be wide while leaving the dock at
+    // whatever width it already had.
+    onModeWidthHint?.(mode, panel.id)
     invokePanelLifecycle(panel, phase)
   }
 
@@ -466,8 +591,14 @@ export function ContextWorkbench({
     event.preventDefault()
     const startX = event.clientX
     const startWidth = layout.width
+    // Attribute the drag to whatever is in front, so the width comes back with
+    // that panel. Read once at pointer-down: the active panel cannot change
+    // mid-drag (the pointer is captured by the separator), and re-reading per
+    // move event would only risk writing the tail of one panel's drag onto the
+    // next panel's memory.
+    const draggedPanelId = layout.activePanelId ?? undefined
     const handleMove = (moveEvent: PointerEvent) => {
-      setWidth(scopeKey, startWidth + startX - moveEvent.clientX)
+      setWidth(scopeKey, startWidth + startX - moveEvent.clientX, draggedPanelId)
     }
     const handleUp = () => {
       window.removeEventListener("pointermove", handleMove)
@@ -531,6 +662,16 @@ export function ContextWorkbench({
     [layout, resource, scopeKey, workbenchInstanceId]
   )
 
+  // Focus is a takeover rather than a width, so it always wins the highlight —
+  // a host's `resolvedMode` only ever speaks for narrow vs wide.
+  const widthMode: ContextWorkbenchMode =
+    layout.mode === "focus" ? "focus" : (resolvedMode ?? layout.mode)
+  const isFocus = layout.mode === "focus"
+  const focusExiting = useFocusExitAnimation(isFocus)
+  // The takeover owns the viewport for the entrance, the whole time it is held,
+  // and now the exit too.
+  const focusTakeover = isFocus || focusExiting
+
   return (
     <ContextWorkbenchContext.Provider value={value}>
       <section
@@ -548,13 +689,19 @@ export function ContextWorkbench({
           // Focus used to snap straight to a full-screen takeover. Zooming it in
           // (same easing contract as Dialog) keeps the jump legible; the global
           // reduce-motion guard collapses the duration to 1ms.
-          layout.mode === "focus" &&
-            "fixed inset-0 z-50 w-screen border-l-0 bg-background animate-in fade-in-0 zoom-in-95 [animation-duration:calc(200ms*var(--motion-duration-scale,1))]"
+          focusTakeover &&
+            "fixed inset-0 z-50 w-screen border-l-0 bg-background [animation-duration:calc(200ms*var(--motion-duration-scale,1))]",
+          isFocus && "animate-in fade-in-0 zoom-in-95",
+          // Mirrored exit. The layout is held for exactly this animation by
+          // `useFocusExitAnimation`; without it the class simply vanished and a
+          // full-screen surface reappeared inside the rail in one frame.
+          // Non-interactive on the way out — it is no longer a modal surface.
+          focusExiting && "pointer-events-none animate-out fade-out-0 zoom-out-95"
         )}
         style={
           !manageOwnWidth ||
           layout.mode === "collapsed" ||
-          layout.mode === "focus" ||
+          focusTakeover ||
           placement === "mobile-sheet"
             ? undefined
             : { width: layout.mode === "wide" ? "clamp(640px, 50%, 960px)" : layout.width }
@@ -579,8 +726,14 @@ export function ContextWorkbench({
             aria-label={t("contextWorkbench.actions.resize")}
             className="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize touch-none"
             onPointerDown={handleResizeStart}
-            // Editor-splitter convention: double-click restores the default width.
-            onDoubleClick={() => setWidth(scopeKey, CONTEXT_WORKBENCH_DEFAULT_WIDTH)}
+            // Editor-splitter convention: double-click restores the default
+            // width — and, because it is attributed to the active panel like a
+            // drag is, it is also how a user forgets a per-panel width they
+            // regret. Without the attribution the panel's remembered width
+            // would survive the reset and snap straight back on the next reveal.
+            onDoubleClick={() =>
+              setWidth(scopeKey, CONTEXT_WORKBENCH_DEFAULT_WIDTH, layout.activePanelId ?? undefined)
+            }
           />
         ) : null}
         <TooltipProvider delayDuration={300}>
@@ -683,19 +836,40 @@ export function ContextWorkbench({
               className="shrink-0 border-b p-2"
               context={{ resource, activePanelId: activePanel?.id ?? null }}
             />
-            <header className="flex h-10 shrink-0 items-center gap-1 border-b px-2">
+            {/* A container query, not a viewport breakpoint: this header's width
+                is whatever the user dragged the dock to. At the 24% preset on a
+                1280px screen it is ~259px after the activity rail, and it has to
+                hold the artifact tabs, the group overflow, plugin actions and
+                the layout controls — so the controls fold into a menu on the
+                narrow end rather than squashing everything. */}
+            <header className="@container/wb-header flex h-10 shrink-0 items-center gap-1 border-b px-2">
               {headerLeading}
               {activeGroup.length > 1 && headerLeading ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
+                    {/* Once the artifact tabs claim the header this is the only
+                        route to the rest of the group, so a bare ⋯ glyph hid
+                        both which panel is showing and that there were others
+                        at all. Name the current panel, and count the siblings
+                        behind it. `w-auto` because the shared icon size is
+                        square and this now carries text. */}
                     <Button
                       type="button"
                       size="icon-sm"
                       variant="ghost"
-                      aria-label={t("contextWorkbench.actions.switchPanel")}
                       data-testid="context-workbench-group-overflow"
+                      className="w-auto max-w-32 shrink-0 gap-1 px-1.5"
                     >
-                      <MoreHorizontalIcon className="size-4" />
+                      <MoreHorizontalIcon className="size-4 shrink-0" />
+                      <span className="truncate text-xs">
+                        {activePanel ? getPanelLabel(activePanel) : null}
+                      </span>
+                      <Badge
+                        variant="secondary"
+                        className="h-4 min-w-4 shrink-0 px-1 text-[9px] tabular-nums"
+                      >
+                        {activeGroup.length - 1}
+                      </Badge>
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start">
@@ -746,58 +920,144 @@ export function ContextWorkbench({
               />
               {placement !== "mobile-sheet" ? (
                 <>
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant={layout.mode === "narrow" ? "secondary" : "ghost"}
-                    aria-label={t("contextWorkbench.actions.narrow")}
-                    onClick={() => selectMode("narrow")}
-                  >
-                    <PanelRightIcon className="size-4" />
-                  </Button>
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant={layout.mode === "wide" ? "secondary" : "ghost"}
-                    aria-label={t("contextWorkbench.actions.wide")}
-                    onClick={() => selectMode("wide")}
-                  >
-                    <Rows3Icon className="size-4" />
-                  </Button>
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant={layout.mode === "focus" ? "secondary" : "ghost"}
-                    aria-label={t("contextWorkbench.actions.focus")}
-                    onClick={() => selectMode("focus")}
-                  >
-                    <FocusIcon className="size-4" />
-                  </Button>
+                  {/* Inline above ~20rem of header; below that the same actions
+                      live in the menu beside this, so neither form is ever the
+                      only route to them. */}
+                  <div className="hidden shrink-0 items-center gap-1 @[20rem]/wb-header:flex">
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant={widthMode === "narrow" ? "secondary" : "ghost"}
+                      aria-label={t("contextWorkbench.actions.narrow")}
+                      onClick={() => selectMode("narrow")}
+                    >
+                      <PanelRightIcon className="size-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant={widthMode === "wide" ? "secondary" : "ghost"}
+                      aria-label={t("contextWorkbench.actions.wide")}
+                      onClick={() => selectMode("wide")}
+                    >
+                      <Rows3Icon className="size-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant={layout.mode === "focus" ? "secondary" : "ghost"}
+                      aria-label={t("contextWorkbench.actions.focus")}
+                      onClick={() => selectMode("focus")}
+                    >
+                      <FocusIcon className="size-4" />
+                    </Button>
+                  </div>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        size="icon-sm"
+                        variant="ghost"
+                        aria-label={t("contextWorkbench.actions.layoutMenu")}
+                        data-testid="context-workbench-layout-menu"
+                        className={cn(
+                          "shrink-0",
+                          // Reset alone does not justify a permanent button, so
+                          // above the fold this menu only appears when there is
+                          // something in it beyond the three inline controls.
+                          onResetLayout ? "" : "@[20rem]/wb-header:hidden"
+                        )}
+                      >
+                        <SlidersHorizontalIcon className="size-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        className="@[20rem]/wb-header:hidden"
+                        onSelect={() => selectMode("narrow")}
+                      >
+                        <PanelRightIcon className="size-4" />
+                        {t("contextWorkbench.actions.narrow")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="@[20rem]/wb-header:hidden"
+                        onSelect={() => selectMode("wide")}
+                      >
+                        <Rows3Icon className="size-4" />
+                        {t("contextWorkbench.actions.wide")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="@[20rem]/wb-header:hidden"
+                        onSelect={() => selectMode("focus")}
+                      >
+                        <FocusIcon className="size-4" />
+                        {t("contextWorkbench.actions.focus")}
+                      </DropdownMenuItem>
+                      {onResetLayout ? (
+                        <DropdownMenuItem
+                          data-testid="context-workbench-reset-layout"
+                          onSelect={onResetLayout}
+                        >
+                          <RotateCcwIcon className="size-4" />
+                          {t("contextWorkbench.actions.resetLayout")}
+                        </DropdownMenuItem>
+                      ) : null}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </>
               ) : null}
             </header>
             <div className="relative min-h-0 flex-1 overflow-hidden">
               {resolvedPanels.map((panel) => {
-                if (!layout.activatedPanelIds.includes(panel.id)) return null
+                // A session-scoped panel keeps its mount for as long as the
+                // conversation lasts, so moving between artifact tabs no longer
+                // tears down the embedded browser (releasing a process-wide
+                // webview lease) or the workspace's Monaco buffers.
+                const activatedIn =
+                  panel.scope === "session" && sessionActivatedPanelIds
+                    ? sessionActivatedPanelIds
+                    : layout.activatedPanelIds
                 const active = layout.activePanelId === panel.id
+                // The panel on screen always mounts, even before its activation
+                // is recorded: a fresh scope gets its default panel from
+                // `reconcilePanels`, which deliberately leaves `activatedPanelIds`
+                // alone so the first activation still counts as a *first*. Hosts
+                // used to paper over this with a second "open on the default
+                // panel" effect that raced the reconcile.
+                if (!active && !activatedIn.includes(panel.id)) return null
                 const Renderer = panel.renderer
                 const waitingForChatScope = panel.requiresChatScope && !resourceSession
                 const content = (
                   <div
                     id={`context-workbench-panel-${panel.id}`}
                     role="tabpanel"
+                    // Scope root for a plugin panel's `manifest.styles` sheet,
+                    // which is injected as `@scope ([data-plugin-root="<id>"])`.
+                    // Absent for host-owned panels so their markup stays
+                    // outside any plugin's bound. Panels read their width from
+                    // `getWorkbenchState()` rather than a container query — a
+                    // `container-type` here would also apply `contain: layout`
+                    // and re-anchor absolutely-positioned panel content.
+                    data-plugin-root={panel.pluginId}
                     className={cn(
                       "h-full",
                       !active && "pointer-events-none",
                       // Panels stay mounted behind `<Activity>`, so switching one
                       // in is a display flip with no transition to hook. A CSS
                       // *animation* restarts on re-display, which gives the
-                      // incoming panel a soft entrance; the outgoing one is left
-                      // alone because a cross-fade would need both painted at
-                      // once, which Activity deliberately prevents. The global
-                      // reduce-motion guard in globals.css collapses this to 1ms.
+                      // incoming panel a soft entrance; the outgoing one cannot
+                      // be animated at all, because a cross-fade needs both
+                      // painted at once and Activity deliberately prevents that.
+                      //
+                      // A fade with no translate, deliberately: the outgoing
+                      // panel disappears in a single frame, so sliding the
+                      // incoming one up from 4px below read as an empty gap
+                      // followed by a jump. Dissolving in place is the only
+                      // shape that stays honest about a swap we cannot tween.
+                      // The reduce-motion guard in globals.css collapses this
+                      // to 1ms.
                       active &&
-                        "animate-in fade-in-0 slide-in-from-bottom-1 [animation-duration:calc(150ms*var(--motion-duration-scale,1))]"
+                        "animate-in fade-in-0 [animation-duration:calc(120ms*var(--motion-duration-scale,1))]"
                     )}
                     inert={!active}
                     aria-hidden={!active}

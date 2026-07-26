@@ -21,12 +21,15 @@ jest.mock("@/components/context-workbench/resource-workbench-chat-panel", () => 
     pendingPrompt,
     getResourceContext,
     onPendingPromptConsumed,
+    selectionHeader,
   }: {
     pendingPrompt?: string | null
     getResourceContext: () => string
     onPendingPromptConsumed: () => void
+    selectionHeader?: React.ReactNode
   }) => (
     <div data-testid="resource-workbench-chat" data-context={getResourceContext()}>
+      {selectionHeader}
       {pendingPrompt}
       <button type="button" data-testid="consume-prompt" onClick={onPendingPromptConsumed}>
         consume
@@ -99,6 +102,7 @@ import {
 } from "@/stores/artifact/artifact-dock-layout-store"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
+import { useChatViewportStore } from "@/stores/chat/chat-viewport-store"
 
 /** The panel a scope is currently showing, per the workbench's own store. */
 function activePanelId(scope: "artifact:artifact-1" | "session:sess-1") {
@@ -108,7 +112,7 @@ function activePanelId(scope: "artifact:artifact-1" | "session:sess-1") {
 function activateArtifact(version = 1) {
   act(() => {
     useArtifactStore.setState({
-      activeArtifactId: "artifact-1",
+      activeArtifactIdBySession: { "sess-1": "artifact-1" },
       artifacts: {
         "artifact-1": {
           id: "artifact-1",
@@ -132,7 +136,12 @@ beforeEach(() => {
   artifactListProps.length = 0
   act(() => {
     useArtifactDockLayoutStore.getState().resetLayout()
-    useArtifactStore.setState({ activeArtifactId: null, artifacts: {}, pendingReviews: {} })
+    useArtifactStore.setState({
+      activeArtifactIdBySession: {},
+      openArtifactIdsBySession: {},
+      artifacts: {},
+      pendingReviews: {},
+    })
     useContextWorkbenchStore.setState({ layouts: {}, sessionOverrides: {} })
   })
 })
@@ -171,10 +180,43 @@ describe("ArtifactDock — converged workbench shell", () => {
 
     // The browser used to force a swap to the session surface, evicting the
     // artifact scope entirely. It is now a panel on the artifact surface too,
-    // so the preview stays mounted (inert) behind it and one click returns.
+    // so the artifact is still what backs the workbench and one click returns
+    // to it — with the browser left mounted behind, holding its page.
     expect(screen.getByTestId("browser-preview")).toBeInTheDocument()
     expect(activePanelId("artifact:artifact-1")).toBe("browser")
+
+    // Preview and browser share the `preview-run` activity, so the way back is
+    // the group tab rather than the rail button (which now names the browser).
+    fireEvent.click(screen.getByRole("tab", { name: "artifacts.dock.artifactMode" }))
+
+    expect(activePanelId("artifact:artifact-1")).toBe("preview")
     expect(screen.getByTestId("panel-content")).toBeInTheDocument()
+    expect(screen.getByTestId("browser-preview")).toBeInTheDocument()
+  })
+
+  it("keeps the browser mounted across an artifact tab switch", () => {
+    activateArtifact()
+    act(() => {
+      useArtifactStore.setState((state) => ({
+        artifacts: {
+          ...state.artifacts,
+          "artifact-2": { ...state.artifacts["artifact-1"], id: "artifact-2", title: "Second" },
+        },
+        openArtifactIdsBySession: { "sess-1": ["artifact-1", "artifact-2"] },
+      }))
+      useArtifactDockLayoutStore.getState().openBrowser()
+    })
+    const { rerender } = render(<ArtifactDock />)
+    expect(screen.getByTestId("browser-preview")).toBeInTheDocument()
+
+    act(() => useArtifactStore.setState({ activeArtifactIdBySession: { "sess-1": "artifact-2" } }))
+    rerender(<ArtifactDock />)
+
+    // The browser's content is session-scoped, so it survives the tab switch.
+    // Keyed only to the artifact scope, the new tab's empty `activatedPanelIds`
+    // unmounted it — releasing a process-wide embedded-webview lease and losing
+    // the page, with a blank one on the way back.
+    expect(screen.getByTestId("browser-preview")).toBeInTheDocument()
   })
 
   it("keeps the artifact scope when moving from the browser to the workspace", () => {
@@ -228,7 +270,9 @@ describe("ArtifactDock — converged workbench shell", () => {
       "selected text"
     )
 
-    fireEvent.click(screen.getByRole("tab", { name: "contextWorkbench.aiActions" }))
+    // The selection composer is folded into the resource-chat panel itself now
+    // — as its own panel it shared the `ai` activity at a higher order, so the
+    // rail could never open it and two artifact tabs buried it behind ⋯.
     fireEvent.change(screen.getByRole("textbox", { name: "label" }), {
       target: { value: "Rewrite this" },
     })
@@ -245,12 +289,12 @@ describe("ArtifactDock — converged workbench shell", () => {
     activateArtifact()
     render(<ArtifactDock />)
 
-    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.proposalReview" }))
+    fireEvent.click(screen.getByRole("button", { name: "artifacts.dock.browseArtifacts" }))
 
     expect(screen.queryByTestId("artifact-tab-strip")).not.toBeInTheDocument()
     // The header slot must stay free, or the panel's own tabs get displaced
     // into an overflow menu for no reason.
-    expect(screen.getByRole("tab", { name: "artifacts.dock.browseArtifacts" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "contextWorkbench.proposalReview" })).toBeInTheDocument()
     expect(screen.queryByTestId("context-workbench-group-overflow")).not.toBeInTheDocument()
   })
 
@@ -262,20 +306,26 @@ describe("ArtifactDock — converged workbench shell", () => {
           ...state.artifacts,
           "artifact-2": { ...state.artifacts["artifact-1"], id: "artifact-2", title: "Second" },
         },
-        openArtifactIds: ["artifact-1", "artifact-2"],
+        openArtifactIdsBySession: { "sess-1": ["artifact-1", "artifact-2"] },
       }))
     })
     render(<ArtifactDock />)
 
-    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.proposalReview" }))
+    fireEvent.click(screen.getByRole("button", { name: "artifacts.dock.browseArtifacts" }))
 
     // Both cannot share a ~34% wide header, so the panel's group tabs step
     // aside into an overflow menu rather than a third header band appearing.
     expect(screen.getByTestId("artifact-tab-strip")).toBeInTheDocument()
-    expect(screen.getByTestId("context-workbench-group-overflow")).toBeInTheDocument()
+    const overflow = screen.getByTestId("context-workbench-group-overflow")
+    expect(overflow).toBeInTheDocument()
     expect(
-      screen.queryByRole("tab", { name: "artifacts.dock.browseArtifacts" })
+      screen.queryByRole("tab", { name: "contextWorkbench.proposalReview" })
     ).not.toBeInTheDocument()
+
+    // A bare ⋯ glyph hid both which panel was showing and that there were any
+    // others — and in this state it is the only route to the rest of the group.
+    expect(overflow).toHaveTextContent("artifacts.dock.browseArtifacts")
+    expect(overflow).toHaveTextContent("1")
   })
 
   it("collapses the dock from the artifact surface rail too", () => {
@@ -316,6 +366,45 @@ describe("ArtifactDock — converged workbench shell", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
+  it("keeps the artifact tabs on the session surface when no artifact is active", () => {
+    act(() =>
+      useArtifactStore.setState({
+        artifacts: {
+          "artifact-1": {
+            id: "artifact-1",
+            sessionId: "sess-1",
+            messageId: "message-1",
+            type: "document",
+            title: "First",
+            content: "x",
+            version: 1,
+            createdAt: new Date(0),
+            updatedAt: new Date(0),
+          },
+          "artifact-2": {
+            id: "artifact-2",
+            sessionId: "sess-1",
+            messageId: "message-2",
+            type: "document",
+            title: "Second",
+            content: "y",
+            version: 1,
+            createdAt: new Date(0),
+            updatedAt: new Date(0),
+          },
+        },
+        openArtifactIdsBySession: { "sess-1": ["artifact-1", "artifact-2"] },
+        activeArtifactIdBySession: {},
+      })
+    )
+    render(<ArtifactDock />)
+
+    // "Tabs open, none active" is an ordinary state now that tabs are bucketed
+    // per conversation. The session surface passed no `headerLeading`, so the
+    // strip vanished and every other open artifact became unreachable.
+    expect(screen.getByTestId("artifact-tab-strip")).toBeInTheDocument()
+  })
+
   it("collapses the dock from the workbench rail", () => {
     act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
     render(<ArtifactDock />)
@@ -325,11 +414,65 @@ describe("ArtifactDock — converged workbench shell", () => {
     expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
   })
 
+  it("drops focus when the dock is collapsed from outside the workbench", () => {
+    activateArtifact()
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
+    render(<ArtifactDock />)
+
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.actions.focus" }))
+    expect(
+      useContextWorkbenchStore.getState().layouts["test-workbench::artifact:artifact-1"]?.mode
+    ).toBe("focus")
+
+    // ⌘J, the Views menu and the chat-header toggle all write `dockCollapsed`
+    // directly and never touch the mode. The overlay used to vanish with the
+    // dock's content while the mode persisted, so re-opening came back as a
+    // full-screen takeover covering the whole app.
+    act(() => useArtifactDockLayoutStore.getState().toggleDock())
+
+    expect(
+      useContextWorkbenchStore.getState().layouts["test-workbench::artifact:artifact-1"]?.mode
+    ).toBe("narrow")
+  })
+
+  it("highlights the width preset the dock is actually at, not the one a panel asked for", () => {
+    activateArtifact()
+    act(() => {
+      useArtifactDockLayoutStore.getState().setDockCollapsed(false)
+      useArtifactDockLayoutStore.getState().requestDockSize(DOCK_MODE_WIDTH_PERCENT.compact.wide)
+    })
+    render(<ArtifactDock />)
+
+    expect(screen.getByRole("button", { name: "contextWorkbench.actions.wide" })).toHaveAttribute(
+      "data-variant",
+      "secondary"
+    )
+
+    // Activating a panel with no `preferredMode` writes `layout.mode = "narrow"`,
+    // but the dock's width is a high-water mark that never narrows on its own —
+    // so the old highlight claimed "narrow" over a 50%-wide dock.
+    fireEvent.click(screen.getByRole("button", { name: "artifacts.dock.artifactMode" }))
+
+    expect(screen.getByRole("button", { name: "contextWorkbench.actions.wide" })).toHaveAttribute(
+      "data-variant",
+      "secondary"
+    )
+    expect(screen.getByRole("button", { name: "contextWorkbench.actions.narrow" })).toHaveAttribute(
+      "data-variant",
+      "ghost"
+    )
+  })
+
   it("hands a reveal intent to the session surface when the artifact is gone", () => {
     // The id outlived its artifact, so both workbenches are mounted: the dead
     // artifact scope as the host, the session one as its fallback child. Only
     // the surface actually on screen may consume the intent.
-    act(() => useArtifactStore.setState({ activeArtifactId: "artifact-1", artifacts: {} }))
+    act(() =>
+      useArtifactStore.setState({
+        activeArtifactIdBySession: { "sess-1": "artifact-1" },
+        artifacts: {},
+      })
+    )
     act(() => useArtifactDockLayoutStore.getState().openBrowser())
     render(<ArtifactDock />)
 
@@ -408,6 +551,94 @@ describe("ArtifactDock — converged workbench shell", () => {
     )
   })
 
+  it("widens the dock for a panel that asked for it, at that panel's own cap", () => {
+    render(<ArtifactDock />)
+
+    fireEvent.click(screen.getByRole("button", { name: "artifacts.dock.workspaceMode" }))
+
+    // Activating a `preferredMode: "wide"` panel used to light up the header's
+    // wide button while leaving the dock at whatever width it already had.
+    // The cap has to come from the *arriving* panel too: `dockProfile` is only
+    // flipped by an effect after `activePanelId` changes, so reading it here
+    // would look up compact.wide (50%) instead of workspace.wide (65%).
+    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(
+      DOCK_MODE_WIDTH_PERCENT.workspace.wide
+    )
+  })
+
+  it("carries the width through a reveal published from outside the workbench", () => {
+    activateArtifact()
+    act(() => useArtifactDockLayoutStore.getState().openBrowser())
+    render(<ArtifactDock />)
+
+    // External reveals (the chat header's browser button, the Edit/Write review
+    // bridge, save-to-project) reach the workbench through the intent path
+    // rather than a click, so they need the same width wiring.
+    expect(activePanelId("artifact:artifact-1")).toBe("browser")
+    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(
+      DOCK_MODE_WIDTH_PERCENT.compact.wide
+    )
+  })
+
+  it("never narrows the dock on its own, but the header's own button still does", () => {
+    activateArtifact()
+    render(<ArtifactDock />)
+    act(() => useArtifactDockLayoutStore.getState().setDockSize(45))
+
+    // High-water mark: a panel preference may widen, never narrow — otherwise
+    // moving between panels would keep yanking back a width the user dragged
+    // to, and the dock would feel like it was fighting the pointer.
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.comments" }))
+    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(45)
+
+    // Naming no panel means an explicit user request, which applies either way.
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.actions.narrow" }))
+    expect(useArtifactDockLayoutStore.getState().dockSize).toBe(
+      DOCK_MODE_WIDTH_PERCENT.compact.narrow
+    )
+  })
+
+  it("offers a jump back to the message an artifact came out of", () => {
+    activateArtifact()
+    const jump = jest.fn()
+    act(() => useChatViewportStore.getState().registerJumpToMessage(jump))
+    render(<ArtifactDock />)
+
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.metadata.artifactTitle" }))
+    fireEvent.click(screen.getByTestId("artifact-source-message-link"))
+
+    expect(jump).toHaveBeenCalledWith("message-1")
+  })
+
+  it("hides the source jump when no conversation is mounted to jump within", () => {
+    activateArtifact()
+    act(() => useChatViewportStore.getState().registerJumpToMessage(null))
+    render(<ArtifactDock />)
+
+    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.metadata.artifactTitle" }))
+
+    // The artifact workspace route and a bare Sheet host have no message list
+    // behind them; a dead button there would promise something impossible.
+    expect(screen.queryByTestId("artifact-source-message-link")).not.toBeInTheDocument()
+  })
+
+  it("never lets the workbench's own width or resize handle reach the chat dock", () => {
+    activateArtifact()
+    act(() =>
+      useContextWorkbenchStore.getState().setWidth("test-workbench::artifact:artifact-1", 800)
+    )
+    render(<ArtifactDock />)
+
+    // `ContextWorkbenchLayout.width` is intentionally dormant here: the dock
+    // mounts with `manageOwnWidth={false}` because its width belongs to the
+    // outer ResizablePanel (`dockSize`, a percentage). If the workbench ever
+    // starts honouring its own width there would be two writers for one thing,
+    // which is exactly the fight the `dockMode` convergence removed.
+    const section = screen.getByTestId("context-workbench")
+    expect(section.style.width).toBe("")
+    expect(screen.queryByRole("separator")).not.toBeInTheDocument()
+  })
+
   it("gives the workspace its own rail entry rather than burying it under metadata", () => {
     activateArtifact(3)
     render(<ArtifactDock />)
@@ -449,16 +680,28 @@ describe("ArtifactDock — converged workbench shell", () => {
     expect(screen.getByTestId("context-workbench-mobile-sheet")).toBeInTheDocument()
   })
 
-  it("reaches the artifact browser from the review activity group", () => {
+  it("lands the review activity on the artifact browser, not the proposal view", () => {
     activateArtifact()
     render(<ArtifactDock />)
 
-    // `proposal-review` and `history` share the review activity, so history is a
-    // group tab behind the rail button rather than a rail entry of its own.
-    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.proposalReview" }))
-    fireEvent.click(screen.getByRole("tab", { name: "artifacts.dock.browseArtifacts" }))
+    // The rail targets the lowest-ordered panel in the group. `proposal-review`
+    // used to win that race and renders nothing at all without a pending
+    // proposal, so the first click on Review handed the user a blank panel
+    // while the always-populated artifact browser hid behind the group tabs.
+    fireEvent.click(screen.getByRole("button", { name: "artifacts.dock.browseArtifacts" }))
 
     expect(screen.getByTestId("list")).toHaveAttribute("data-session", "sess-1")
+    expect(activePanelId("artifact:artifact-1")).toBe("artifacts")
+  })
+
+  it("still reaches the proposal review as a group tab behind the same activity", () => {
+    activateArtifact()
+    render(<ArtifactDock />)
+
+    fireEvent.click(screen.getByRole("button", { name: "artifacts.dock.browseArtifacts" }))
+    fireEvent.click(screen.getByRole("tab", { name: "contextWorkbench.proposalReview" }))
+
+    expect(screen.getByTestId("review-view")).toHaveAttribute("data-artifact", "artifact-1")
   })
 
   it("anchors the comments panel to the artifact revision", () => {
@@ -502,7 +745,9 @@ describe("ArtifactDock — converged workbench shell", () => {
     })
 
     fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.resourceChat" }))
-    fireEvent.click(screen.getByRole("tab", { name: "contextWorkbench.aiActions" }))
+    // The selection composer is folded into the resource-chat panel itself now
+    // — as its own panel it shared the `ai` activity at a higher order, so the
+    // rail could never open it and two artifact tabs buried it behind ⋯.
     fireEvent.change(screen.getByRole("textbox", { name: "label" }), {
       target: { value: "Rewrite this selection" },
     })

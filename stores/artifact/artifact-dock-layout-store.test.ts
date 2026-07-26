@@ -6,6 +6,7 @@
 import { act, renderHook } from "@testing-library/react"
 import {
   ARTIFACT_DOCK_BOUNDS,
+  DOCK_SIZE_PERSIST_FLOOR,
   ARTIFACT_DOCK_PERSIST_DEBOUNCE_MS,
   DOCK_MODE_WIDTH_PERCENT,
   WORKSPACE_DOCK_BOUNDS,
@@ -65,11 +66,21 @@ describe("useArtifactDockLayoutStore", () => {
 
     it("clamps a requested width into the allowed span", () => {
       const { result } = renderHook(() => useArtifactDockLayoutStore())
-      act(() => result.current.requestDockSize(5))
-      expect(result.current.dockSize).toBe(ARTIFACT_DOCK_BOUNDS.min)
+      act(() => result.current.requestDockSize(1))
+      expect(result.current.dockSize).toBe(DOCK_SIZE_PERSIST_FLOOR)
 
       act(() => result.current.requestDockSize(999))
       expect(result.current.dockSize).toBe(WORKSPACE_DOCK_BOUNDS.max)
+    })
+
+    it("keeps a workspace width below the artifact floor", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+      // The workspace profile's real minimum is an absolute 480px, which is
+      // under 24% on a wide screen. Clamping the *stored* value at the artifact
+      // floor rounded that back up, so the dock sprang wider on the next
+      // collapse/expand. Per-profile bounds are the ResizablePanel's job.
+      act(() => result.current.setDockSize(19))
+      expect(result.current.dockSize).toBe(19)
     })
 
     it("never restores the runtime request token from disk", () => {
@@ -104,9 +115,9 @@ describe("useArtifactDockLayoutStore", () => {
     it("clamps below the min and above the workspace max", () => {
       const { result } = renderHook(() => useArtifactDockLayoutStore())
       act(() => {
-        result.current.setDockSize(5)
+        result.current.setDockSize(1)
       })
-      expect(result.current.dockSize).toBe(ARTIFACT_DOCK_BOUNDS.min)
+      expect(result.current.dockSize).toBe(DOCK_SIZE_PERSIST_FLOOR)
       // Upper bound spans both modes so a wide workspace size survives; the
       // per-mode artifact cap (50%) is enforced at render by the ResizablePanel.
       act(() => {
@@ -191,6 +202,41 @@ describe("useArtifactDockLayoutStore", () => {
       expect(result.current.unreadArtifact).toBe(false)
     })
 
+    it("keeps the mobile Sheet in lockstep with the collapsed flag", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+
+      // `dockCollapsed` and `mobileSheetOpen` are two renderings of one idea.
+      // They used to drift: the toggle raised only the desktop dock, so tapping
+      // it on a phone did nothing, and the Sheet had to be force-opened from
+      // the artifact store instead — which could not see `userDismissed`.
+      act(() => result.current.toggleDock())
+      expect(result.current.dockCollapsed).toBe(false)
+      expect(result.current.mobileSheetOpen).toBe(true)
+
+      act(() => result.current.toggleDock())
+      expect(result.current.dockCollapsed).toBe(true)
+      expect(result.current.mobileSheetOpen).toBe(false)
+
+      act(() => result.current.setDockCollapsed(false))
+      expect(result.current.mobileSheetOpen).toBe(true)
+    })
+
+    it("raises the mobile Sheet for a new artifact, but not once dismissed", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+
+      act(() => result.current.notifyNewArtifact())
+      expect(result.current.mobileSheetOpen).toBe(true)
+
+      // Dismiss, then let another artifact arrive. The phone used to get the
+      // full-height Sheet thrown back over the conversation every time.
+      act(() => result.current.setDockCollapsed(true))
+      expect(result.current.mobileSheetOpen).toBe(false)
+
+      act(() => result.current.notifyNewArtifact())
+      expect(result.current.mobileSheetOpen).toBe(false)
+      expect(result.current.unreadArtifact).toBe(true)
+    })
+
     it("an explicit reveal request clears the unread flag", () => {
       const { result } = renderHook(() => useArtifactDockLayoutStore())
       act(() => result.current.setDockCollapsed(true))
@@ -246,6 +292,34 @@ describe("useArtifactDockLayoutStore", () => {
       act(() => result.current.setDockProfile("compact"))
       expect(result.current.workspaceRevealRequest).toBeNull()
       expect(result.current.workspaceContext).toBeNull()
+    })
+
+    it("animates the dock back under the compact cap when leaving the workspace", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+      act(() => result.current.setDockProfile("workspace"))
+      act(() => result.current.setDockSize(WORKSPACE_DOCK_BOUNDS.max))
+      const requestsBefore = result.current.dockSizeRequest
+
+      act(() => result.current.setDockProfile("compact"))
+
+      // Compact caps lower than workspace does, and the ResizablePanel enforces
+      // the new maxSize on its next layout — so without this the dock snapped
+      // in with no transition. Going through the request token makes it animate
+      // like every other programmatic width change.
+      expect(result.current.dockSize).toBe(ARTIFACT_DOCK_BOUNDS.max)
+      expect(result.current.dockSizeRequest).toBe(requestsBefore + 1)
+    })
+
+    it("leaves a width already inside the compact cap alone", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+      act(() => result.current.setDockProfile("workspace"))
+      act(() => result.current.setDockSize(40))
+      const requestsBefore = result.current.dockSizeRequest
+
+      act(() => result.current.setDockProfile("compact"))
+
+      expect(result.current.dockSize).toBe(40)
+      expect(result.current.dockSizeRequest).toBe(requestsBefore)
     })
 
     it("migrates a v1 snapshot onto the compact profile", async () => {

@@ -17,13 +17,14 @@
  * Cmd/Ctrl+J toggles it (see `useArtifactDockShortcuts`).
  */
 
-import { useEffect, useRef, type ReactNode } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import type { PanelImperativeHandle } from "react-resizable-panels"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { isProIdePanePinnedWithin } from "@/lib/codeserver/pane-manager"
 import { cn } from "@/lib/utils"
 import { useBreakpoint } from "@/hooks/ui"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { useActiveArtifactId } from "@/hooks/artifacts/use-session-artifacts"
 import {
   ARTIFACT_DOCK_BOUNDS,
   CHAT_MIN_PERCENT,
@@ -62,6 +63,18 @@ import { WorkspaceRevealOpener } from "./workspace-mode/workspace-reveal-opener"
  * it can reach; inline styles are out of the stylesheet's reach, so the same
  * policy is enforced here instead.
  */
+const DOCK_RESIZE_DURATION_MS = 200
+/** Cleanup runs a beat past the animation so a slower preference isn't cut short. */
+const DOCK_RESIZE_CLEANUP_SLACK_MS = 40
+
+/**
+ * The user's motion-speed preference, as published by `motion-applier`.
+ * jsdom reports no custom properties, so this falls back to 1× in tests.
+ */
+function motionDurationScale(element: HTMLElement): number {
+  return Number(getComputedStyle(element).getPropertyValue("--motion-duration-scale")) || 1
+}
+
 function animateDockResize(
   panel: HTMLDivElement,
   content: HTMLDivElement | null,
@@ -91,22 +104,113 @@ function animateDockResize(
 
   if (content && frozenWidth > 0) content.style.width = `${frozenWidth}px`
   panel.style.transitionProperty = "flex-grow"
-  panel.style.transitionDuration = "calc(200ms * var(--motion-duration-scale, 1))"
+  panel.style.transitionDuration = `calc(${DOCK_RESIZE_DURATION_MS}ms * var(--motion-duration-scale, 1))`
   panel.style.transitionTimingFunction = "ease-in-out"
   // Commit the transition style before react-resizable-panels updates flex-grow.
   void panel.offsetWidth
   apply()
 
-  const scale = Number(getComputedStyle(panel).getPropertyValue("--motion-duration-scale")) || 1
-  const timer = window.setTimeout(reset, 200 * scale + 40)
+  const timer = window.setTimeout(
+    reset,
+    DOCK_RESIZE_DURATION_MS * motionDurationScale(panel) + DOCK_RESIZE_CLEANUP_SLACK_MS
+  )
   return () => {
     window.clearTimeout(timer)
     reset()
   }
 }
 
+/**
+ * The narrowest width the dock is allowed to settle at, as a percent of the
+ * group — the same bound the `ResizablePanel` enforces at render time.
+ *
+ * The workspace profile's floor is an absolute `480px` (a percentage floor
+ * leaves the file tree + Monaco + diff unusable on a small laptop), so it only
+ * becomes a percentage once the group's width is known. Falls back to the
+ * artifact floor when it isn't — jsdom reports every width as 0, and so does
+ * the very first layout callback.
+ */
+function dockFloorPercent(panel: HTMLElement | null, workspaceProfile: boolean): number {
+  if (!workspaceProfile) return ARTIFACT_DOCK_BOUNDS.min
+  const groupWidth = panel?.parentElement?.offsetWidth ?? 0
+  if (groupWidth <= 0) return ARTIFACT_DOCK_BOUNDS.min
+  return (Number.parseFloat(WORKSPACE_DOCK_BOUNDS.minPx) / groupWidth) * 100
+}
+
+/**
+ * Raise the dock when something new wants attention inside it — a freshly
+ * active artifact, or an AI revision proposal that just arrived.
+ *
+ * Mounted on the shared layer so the desktop dock and the mobile Sheet obey the
+ * same rule. It used to live in the desktop branch alone while the Sheet was
+ * force-opened straight from `artifact-store`, which cannot see `userDismissed`
+ * — so the two platforms disagreed: the desktop honoured a dismissal and the
+ * phone re-threw a full-height modal over the conversation regardless.
+ * `notifyNewArtifact` is the one place that decides, and when the user has
+ * dismissed the dock it only flags the toggle unread.
+ */
+function useDockAttentionSignal(): void {
+  const notifyNewArtifact = useArtifactDockLayoutStore((s) => s.notifyNewArtifact)
+  // Scoped to the conversation on screen: an artifact landing in a *background*
+  // session must not raise the dock over the one the user is reading.
+  const activeArtifactId = useActiveArtifactId()
+  const pendingReviewCount = useArtifactStore((s) => Object.keys(s.pendingReviews).length)
+  const previousRef = useRef({ activeArtifactId, pendingReviewCount })
+
+  useEffect(() => {
+    const previous = previousRef.current
+    previousRef.current = { activeArtifactId, pendingReviewCount }
+    // Keyed on the id so it only reacts to a *new* artifact, not every render.
+    const freshArtifact =
+      Boolean(activeArtifactId) && activeArtifactId !== previous.activeArtifactId
+    const freshReview = pendingReviewCount > previous.pendingReviewCount
+    if (freshArtifact || freshReview) notifyNewArtifact()
+  }, [activeArtifactId, notifyNewArtifact, pendingReviewCount])
+}
+
+/**
+ * Keep the dock's contents mounted while it is open, and for exactly one
+ * collapse animation after it closes.
+ *
+ * A collapsed dock used to stay fully mounted at zero width — Monaco, the
+ * resource chat pane and the embedded browser all still running behind a panel
+ * nobody could see. The browser pane is the sharpest case: it holds a
+ * *process-wide* embedded-webview lease that is only released on unmount, so an
+ * invisible zero-width dock could lock every other surface out of the webview
+ * and leave them retrying on a backoff.
+ *
+ * The delay is not cosmetic. `animateDockResize` freezes the content's width so
+ * the shrinking shell wipes it rather than reflowing it; unmounting on the same
+ * frame would leave that animation wiping an empty box.
+ */
+function useDockContentMounted(
+  dockCollapsed: boolean,
+  panelElementRef: { current: HTMLElement | null }
+): boolean {
+  // Only the timer writes this. Expanding clears it *during render* — React's
+  // sanctioned "adjust state when a prop changes" pattern, and what
+  // `react-hooks/set-state-in-effect` steers you to: re-opening is immediate
+  // and must not wait a second render pass to put the dock back.
+  const [retracted, setRetracted] = useState(dockCollapsed)
+  if (!dockCollapsed && retracted) setRetracted(false)
+
+  useEffect(() => {
+    if (!dockCollapsed || retracted) return
+    const element = panelElementRef.current
+    const timer = window.setTimeout(
+      () => setRetracted(true),
+      DOCK_RESIZE_DURATION_MS * (element ? motionDurationScale(element) : 1) +
+        DOCK_RESIZE_CLEANUP_SLACK_MS
+    )
+    return () => window.clearTimeout(timer)
+  }, [dockCollapsed, panelElementRef, retracted])
+
+  return !retracted
+}
+
 export function ArtifactWorkspaceDock({ children }: { children: ReactNode }) {
   useArtifactDockShortcuts()
+  useDockAttentionSignal()
   const breakpoint = useBreakpoint()
 
   if (breakpoint !== "desktop") {
@@ -117,23 +221,14 @@ export function ArtifactWorkspaceDock({ children }: { children: ReactNode }) {
 }
 
 function ArtifactWorkspaceDockNarrow({ children }: { children: ReactNode }) {
-  const mobileSheetOpen = useArtifactDockLayoutStore((state) => state.mobileSheetOpen)
-  const setMobileSheetOpen = useArtifactDockLayoutStore((state) => state.setMobileSheetOpen)
-  const panelOpen = useArtifactStore((state) => state.panelOpen)
-  const openPanel = useArtifactStore((state) => state.openPanel)
-
-  // A reveal from outside (terminal link, Edit/Write review, the browser
-  // button) asks for the Sheet by raising `mobileSheetOpen`. There is now a
-  // single Sheet to raise, so that request simply opens the artifact panel —
-  // the two-Sheet mutual-exclusion dance this replaced is gone.
-  useEffect(() => {
-    if (mobileSheetOpen && !panelOpen) openPanel("artifact")
-  }, [mobileSheetOpen, openPanel, panelOpen])
-
-  useEffect(() => {
-    if (!panelOpen && mobileSheetOpen) setMobileSheetOpen(false)
-  }, [mobileSheetOpen, panelOpen, setMobileSheetOpen])
-
+  // No effects here on purpose. A reveal from outside (terminal link,
+  // Edit/Write review, the browser button) raises `mobileSheetOpen`, and
+  // `<ArtifactPanel />` reads exactly that — so the Sheet follows without a
+  // relay. The two effects this replaced mirrored `mobileSheetOpen` and
+  // `panelOpen` into each other behind *identical* guards, so every reveal fired
+  // both in the same commit: one opened the panel while the other recorded a
+  // dismissal and cleared the pending workspace reveal, losing the very file the
+  // reveal was pointing at.
   return (
     <div data-testid="artifact-workspace-dock-mobile" className="flex min-h-0 flex-1 flex-col">
       <WorkspaceRevealOpener />
@@ -151,12 +246,12 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
   const dockSizeRequest = useArtifactDockLayoutStore((s) => s.dockSizeRequest)
   const setDockSize = useArtifactDockLayoutStore((s) => s.setDockSize)
   const requestDockSize = useArtifactDockLayoutStore((s) => s.requestDockSize)
-  const notifyNewArtifact = useArtifactDockLayoutStore((s) => s.notifyNewArtifact)
   const dockPanelRef = useRef<PanelImperativeHandle | null>(null)
   const dockPanelElementRef = useRef<HTMLDivElement | null>(null)
   const dockContentElementRef = useRef<HTMLDivElement | null>(null)
   const previousDockCollapsedRef = useRef(dockCollapsed)
   const previousDockSizeRequestRef = useRef(dockSizeRequest)
+  const dockContentMounted = useDockContentMounted(dockCollapsed, dockPanelElementRef)
 
   // Match the conversation sidebar: animate only collapse/expand for ~200ms,
   // then remove the transition so manual divider dragging remains immediate.
@@ -196,19 +291,8 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
     )
   }, [dockCollapsed, dockSize, dockSizeRequest])
 
-  // Auto-expand the dock when a fresh artifact becomes active — unless the user
-  // manually dismissed it, in which case `notifyNewArtifact` only flags it
-  // unread (a dot on the chat-header toggle) instead of yanking it open. Keyed
-  // on the id so it only reacts to a *new* artifact, not every render.
-  const activeArtifactId = useArtifactStore((s) => s.activeArtifactId)
-  const prevActiveIdRef = useRef<string | null>(activeArtifactId)
-  useEffect(() => {
-    const prev = prevActiveIdRef.current
-    prevActiveIdRef.current = activeArtifactId
-    if (activeArtifactId && activeArtifactId !== prev) {
-      notifyNewArtifact()
-    }
-  }, [activeArtifactId, notifyNewArtifact])
+  // Auto-expanding on a fresh artifact lives in `useDockAttentionSignal` on the
+  // shared layer, so the mobile Sheet gets the identical rule.
 
   const workspaceProfile = dockProfile === "workspace"
   const chatMinSize = workspaceProfile
@@ -233,7 +317,14 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
         className="flex-1 min-h-0"
         onLayoutChanged={(layout) => {
           const dock = layout["artifact-dock"]
-          if (!dockCollapsed && typeof dock === "number" && dock >= ARTIFACT_DOCK_BOUNDS.min) {
+          if (dockCollapsed || typeof dock !== "number") return
+          // Reject only the collapse itself (0%), not a legitimately narrow
+          // drag. This used to gate on the *artifact* floor (24%) regardless of
+          // profile, while the workspace profile's real floor is 480px — on a
+          // 2560px screen that is ~18.75%, so dragging the workspace dock down
+          // to its own minimum silently failed to persist and the next
+          // collapse/expand snapped it back to the stale wider value.
+          if (dock >= dockFloorPercent(dockPanelElementRef.current, workspaceProfile)) {
             setDockSize(dock)
           }
         }}
@@ -277,7 +368,7 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
             data-testid="artifact-dock-wrapper"
             className="h-full min-w-0 overflow-hidden"
           >
-            <ArtifactDock />
+            {dockContentMounted ? <ArtifactDock /> : null}
           </div>
         </ResizablePanel>
       </ResizablePanelGroup>

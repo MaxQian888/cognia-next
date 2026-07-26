@@ -3,13 +3,16 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { ArtifactPanel } from "./artifact-panel"
 import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
+import { useChatStore } from "@/stores/chat"
 import { makeArtifact } from "@/lib/storybook/fixtures/artifacts"
 
 const artifact = makeArtifact()
 
 // The Sheet (offcanvas) host for the artifacts surface — the mobile/tablet
-// fallback. The Sheet is only open when `panelOpen && panelView === "artifact"`,
-// so the Open story seeds both plus an active artifact.
+// fallback. Visibility comes from `mobileSheetOpen` (the layout store), which is
+// the one field every reveal writes and the only one that can see
+// `userDismissed`, so the Open story raises that plus an active artifact.
 const meta = {
   title: "Artifacts/ArtifactPanel",
   component: ArtifactPanel,
@@ -22,12 +25,15 @@ type Story = StoryObj<typeof meta>
 export const Open: Story = {
   beforeEach: () => {
     resetStore(useArtifactStore)
+    resetStore(useArtifactDockLayoutStore)
+    seedStore(useChatStore, { activeSessionId: artifact.sessionId })
     seedStore(useArtifactStore, {
       artifacts: { [artifact.id]: artifact },
-      activeArtifactId: artifact.id,
+      activeArtifactIdBySession: { [artifact.sessionId]: artifact.id },
       panelOpen: true,
       panelView: "artifact",
     })
+    seedStore(useArtifactDockLayoutStore, { mobileSheetOpen: true })
   },
 }
 
@@ -35,5 +41,6 @@ export const Open: Story = {
 export const Closed: Story = {
   beforeEach: () => {
     resetStore(useArtifactStore)
+    resetStore(useArtifactDockLayoutStore)
   },
 }

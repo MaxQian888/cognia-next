@@ -234,11 +234,13 @@ jest.mock("@/components/shell/guild-rail", () => ({
   GuildRail: ({
     onCreateTeam,
     onOpenSettings,
+    variant,
   }: {
     onCreateTeam: () => void
     onOpenSettings: () => void
+    variant?: string
   }) => (
-    <div>
+    <div data-testid="guild-rail" data-variant={variant ?? "rail"}>
       <button data-testid="guild-create-team" onClick={onCreateTeam} />
       <button data-testid="guild-open-settings" onClick={onOpenSettings} />
     </div>
@@ -298,7 +300,9 @@ jest.mock("@/components/mobile/shell/character-header", () => ({
   }) => <div data-testid="mobile-active-title">{subject?.name ?? fallbackTitle}</div>,
 }))
 jest.mock("@/components/shell/member-list", () => ({
-  MemberList: () => <div data-testid="member-list" />,
+  MemberList: ({ variant }: { variant?: string }) => (
+    <div data-testid="member-list" data-variant={variant ?? "rail"} />
+  ),
 }))
 
 import { AppShellMobile } from "./app-shell-mobile"
@@ -371,6 +375,18 @@ describe("<AppShellMobile />", () => {
     await user.click(screen.getByTestId("mobile-nav-trigger"))
     await waitFor(() => expect(screen.getByTestId("mobile-nav-sheet")).toBeInTheDocument())
     expect(screen.getByTestId("guild-create-team")).toBeInTheDocument()
+  })
+
+  it("mounts the guild rail in its sheet variant so it is not md-gated away", async () => {
+    // The rail's default variant is `hidden md:flex`. A phone viewport never
+    // reaches `md`, so the default would render the drawer's entire navigation
+    // column — workspaces, DM/Canvas, pinned features, More, Settings — as
+    // display:none, leaving only the session list.
+    const user = userEvent.setup()
+    render(<AppShellMobile />)
+    await user.click(screen.getByTestId("mobile-nav-trigger"))
+    await waitFor(() => expect(screen.getByTestId("mobile-nav-sheet")).toBeInTheDocument())
+    expect(screen.getByTestId("guild-rail")).toHaveAttribute("data-variant", "sheet")
   })
 
   it("closes the drawer and selects a session when a channel is picked", async () => {
@@ -475,6 +491,9 @@ describe("<AppShellMobile />", () => {
     await user.click(screen.getByTestId("mobile-members-trigger"))
     await waitFor(() => expect(screen.getByTestId("mobile-members-sheet")).toBeInTheDocument())
     expect(screen.getByTestId("member-list")).toBeInTheDocument()
+    // Sheet variant, else the `lg:` gate + the persisted `showMemberList`
+    // collapse would both render this sheet blank on a phone.
+    expect(screen.getByTestId("member-list")).toHaveAttribute("data-variant", "sheet")
   })
 
   it("does not render the members trigger for direct (non-team) sessions", () => {

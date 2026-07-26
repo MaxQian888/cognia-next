@@ -51,12 +51,16 @@ jest.mock("@/components/editor/light-code-editor", () => ({
 
 import { ArtifactPanelContent } from "./artifact-panel-content"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { useChatStore } from "@/stores/chat"
 
 beforeEach(() => {
   localStorage.clear()
+  // The active artifact is bucketed per conversation, so the panel only
+  // resolves one once a conversation is on screen.
+  useChatStore.setState({ activeSessionId: "s" })
   useArtifactStore.setState({
     artifacts: {},
-    activeArtifactId: null,
+    activeArtifactIdBySession: {},
     artifactVersions: {},
     artifactWorkspace: {
       scope: "session",
@@ -69,8 +73,6 @@ beforeEach(() => {
     },
     canvasDocuments: {},
     activeCanvasId: null,
-    canvasOpen: false,
-    analysisResults: {},
     panelOpen: true,
     panelView: "artifact",
   })

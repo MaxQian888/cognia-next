@@ -38,7 +38,12 @@ export function ArtifactDockToggle({ className }: { className?: string }) {
     <Button
       variant="ghost"
       size="icon"
-      className={cn("relative hidden size-8 shrink-0 md:inline-flex", className)}
+      // Visibility belongs to the caller. Hiding below `md` here made the
+      // unread dot unreachable on a phone — and the mobile shell renders the
+      // chat with `showHeader={false}`, so the one host that did mount this
+      // never existed there at all, leaving no way back once the Sheet was
+      // closed. Desktop hosts opt into the breakpoint themselves.
+      className={cn("relative size-8 shrink-0", className)}
       onClick={toggleDock}
       aria-label={label}
       aria-pressed={!dockCollapsed}

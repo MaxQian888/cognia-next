@@ -17,6 +17,7 @@ import { useShallow } from "zustand/react/shallow"
 import { useTranslations } from "next-intl"
 import { useMediaQuery } from "@/hooks/ui"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { useActiveArtifactId } from "@/hooks/artifacts/use-session-artifacts"
 import { useSettingsStore } from "@/stores/settings"
 import { isTauri } from "@/lib/tauri"
 import { revealInExplorer, openPath } from "@/lib/tauri/opener"
@@ -60,15 +61,15 @@ export function useArtifactPanelState() {
   const tCommon = useTranslations("common")
 
   // Store state - using useShallow for optimized subscriptions
-  const { panelOpen, panelView, activeArtifactId, artifacts, artifactWorkspace } = useArtifactStore(
+  const { panelOpen, panelView, artifacts, artifactWorkspace } = useArtifactStore(
     useShallow((state) => ({
       panelOpen: state.panelOpen,
       panelView: state.panelView,
-      activeArtifactId: state.activeArtifactId,
       artifacts: state.artifacts,
       artifactWorkspace: state.artifactWorkspace,
     }))
   )
+  const activeArtifactId = useActiveArtifactId()
   // Subscribe to only the active artifact's pending review — selecting the
   // whole `pendingReviews` map would re-render the panel whenever a proposal
   // lands/resolves on any *other* artifact.

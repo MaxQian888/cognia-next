@@ -21,6 +21,7 @@ import {
   SearchCodeIcon,
   InfoIcon,
   GlobeIcon,
+  CornerUpLeftIcon,
 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
@@ -29,6 +30,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { hasWorkspaceFsBackend } from "@/lib/files/workspace-backend"
 import { isRunnableArtifactType } from "@/lib/artifacts/constants"
 import { useChatStore } from "@/stores/chat"
+import { useChatViewportStore } from "@/stores/chat/chat-viewport-store"
 import {
   DOCK_MODE_WIDTH_PERCENT,
   useArtifactDockLayoutStore,
@@ -42,6 +44,7 @@ import {
   ContextWorkbenchMobileSheet,
 } from "@/components/context-workbench/context-workbench"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { useActiveArtifactId } from "@/hooks/artifacts/use-session-artifacts"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 import type {
   ContextPanelDefinition,
@@ -59,7 +62,7 @@ import { useContextCommentBadge } from "@/hooks/context-workbench/use-context-co
 import { BrowserPreviewPane } from "@/components/browser/browser-preview-pane"
 
 export function ArtifactDock() {
-  const activeArtifactId = useArtifactStore((state) => state.activeArtifactId)
+  const activeArtifactId = useActiveArtifactId()
   // The only branch in the dock: which resource backs the one workbench shell.
   // The browser used to force a surface swap because it is session-scoped; it
   // is now a panel on both surfaces, so opening it keeps your artifact context.
@@ -76,18 +79,84 @@ export function ArtifactDock() {
  * resize the dock instead of the workbench, or they do nothing at all. The
  * preset table is keyed by profile so "wide" reaches the workspace cap (65%)
  * rather than the artifact one (50%).
+ *
+ * Two callers, two contracts (see `onModeWidthHint`): a panel activation names
+ * its panel and is applied as a high-water mark; the header buttons name none
+ * and apply unconditionally.
  */
 function useDockWidthHint() {
   const requestDockSize = useArtifactDockLayoutStore((state) => state.requestDockSize)
   const dockProfile = useArtifactDockLayoutStore((state) => state.dockProfile)
   return useCallback(
-    (mode: ContextPanelMode) => {
+    (mode: ContextPanelMode, panelId?: string) => {
       // Focus is a full-screen takeover; it owns no dock width.
       if (mode === "focus") return
-      requestDockSize(DOCK_MODE_WIDTH_PERCENT[dockProfile][mode])
+      // Derive the profile from the panel that is arriving rather than reading
+      // `dockProfile`. That field is written by `useDockPanelSync` in an effect
+      // that runs *after* `activePanelId` changes, so during the activation
+      // itself it still holds the outgoing panel's profile — activating the
+      // workspace would look up `compact.wide` (50%) instead of
+      // `workspace.wide` (65%), silently under-delivering exactly where the
+      // extra room matters most. Only the header buttons, which name no panel,
+      // fall back to the settled profile.
+      const profile = panelId
+        ? panelId === WORKSPACE_PANEL_ID
+          ? "workspace"
+          : "compact"
+        : dockProfile
+      const target = DOCK_MODE_WIDTH_PERCENT[profile][mode]
+      // High-water mark: a panel's `preferredMode` may widen the dock, never
+      // narrow it. Otherwise moving from the workspace back to the preview
+      // would yank a width the user had dragged to back down to the preset,
+      // and the dock would feel like it was fighting the pointer. Narrowing
+      // stays available through the header's narrow button and the divider.
+      if (panelId && target <= useArtifactDockLayoutStore.getState().dockSize) return
+      requestDockSize(target)
     },
     [dockProfile, requestDockSize]
   )
+}
+
+/**
+ * The one panel whose surface needs the wider sizing profile (file tree +
+ * Monaco + git diff). Named because three separate places key off it: the
+ * profile sync below, the width-preset lookup above, and the panel definition
+ * itself.
+ */
+const WORKSPACE_PANEL_ID = "workspace"
+
+/**
+ * The scope key standing in for "this conversation". Built in one place because
+ * both dock surfaces need the identical string: the session surface uses it as
+ * its own layout scope, and the artifact surface hands it to the workbench so
+ * `scope: "session"` panels record their activation against the conversation.
+ */
+function sessionWorkbenchScopeKey(
+  workbenchInstanceId: string,
+  activeSessionId: string | null
+): string {
+  return `${workbenchInstanceId}::session:${activeSessionId ?? "none"}`
+}
+
+/**
+ * Which width preset the dock is *actually* sitting at, for the workbench
+ * header's narrow/wide highlight.
+ *
+ * The dock's width lives in `dockSize`, not in `layout.mode`: mounted with
+ * `manageOwnWidth={false}`, the workbench never applies its own width, so that
+ * field only ever coloured two buttons. Because a panel activation writes the
+ * mode while `useDockWidthHint` applies it as a high-water mark, the two drifted
+ * apart the moment a `preferredMode: "wide"` panel handed back to a narrow one —
+ * the button said narrow over a 65%-wide dock. Deriving it from the width means
+ * the highlight cannot lie, and dragging the divider updates it for free.
+ */
+function useResolvedDockMode(): ContextPanelMode {
+  const dockSize = useArtifactDockLayoutStore((state) => state.dockSize)
+  const dockProfile = useArtifactDockLayoutStore((state) => state.dockProfile)
+  const presets = DOCK_MODE_WIDTH_PERCENT[dockProfile]
+  // Midpoint rather than an exact match: the user can drag anywhere between the
+  // two presets, and every width above the halfway mark reads as "wide".
+  return dockSize >= (presets.narrow + presets.wide) / 2 ? "wide" : "narrow"
 }
 
 /**
@@ -100,23 +169,49 @@ function useDockWidthHint() {
  * activate an unrelated panel, have it write the mode, and bounce the dock out
  * of the surface the user asked for.
  */
-function useDockPanelSync(scopeKey: string, panelIds: string[], activePanelId?: string | null) {
+function useDockPanelSync(
+  scopeKey: string,
+  panelIds: string[],
+  activePanelId: string | null | undefined,
+  onWidthHint: (mode: ContextPanelMode, panelId?: string) => void
+) {
   const setDockProfile = useArtifactDockLayoutStore((state) => state.setDockProfile)
   const revealIntent = useArtifactDockLayoutStore((state) => state.revealIntent)
   const consumeRevealIntent = useArtifactDockLayoutStore((state) => state.consumeRevealIntent)
+  const dockCollapsed = useArtifactDockLayoutStore((state) => state.dockCollapsed)
   const navigatePanel = useContextWorkbenchStore((state) => state.navigatePanel)
+  const setMode = useContextWorkbenchStore((state) => state.setMode)
+  const isFocus = useContextWorkbenchStore((state) => state.layouts[scopeKey]?.mode === "focus")
 
   useEffect(() => {
     if (!activePanelId) return
-    setDockProfile(activePanelId === "workspace" ? "workspace" : "compact")
+    setDockProfile(activePanelId === WORKSPACE_PANEL_ID ? "workspace" : "compact")
   }, [activePanelId, setDockProfile])
+
+  // Focus is a full-screen takeover that outlives the dock it was opened from.
+  // The workbench's own collapse button drops it on the way out, but the three
+  // routes users actually reach for — ⌘J, the desktop Views menu, the chat
+  // header toggle — write `dockCollapsed` directly and never touch the mode. The
+  // overlay then vanished with the dock's content 240ms later while the mode
+  // persisted, so re-opening came back `fixed inset-0 z-50` over the whole app.
+  // This seam is the only one that can see both facts, so the rule lives here.
+  useEffect(() => {
+    if (!dockCollapsed || !isFocus) return
+    setMode(scopeKey, "narrow")
+  }, [dockCollapsed, isFocus, scopeKey, setMode])
 
   const owns = revealIntent ? panelIds.includes(revealIntent.panelId) : false
   useEffect(() => {
     if (!revealIntent || !owns) return
     navigatePanel(scopeKey, revealIntent.panelId, revealIntent.mode)
+    // An external reveal carries a mode too, and it reaches the workbench
+    // through this path rather than `handleActivate` — so without the hint the
+    // chat header's browser button, the Edit/Write review bridge and
+    // save-to-project all asked for "wide" and got whatever width the dock
+    // happened to be at.
+    onWidthHint(revealIntent.mode, revealIntent.panelId)
     consumeRevealIntent(revealIntent.panelId)
-  }, [consumeRevealIntent, navigatePanel, owns, revealIntent, scopeKey])
+  }, [consumeRevealIntent, navigatePanel, onWidthHint, owns, revealIntent, scopeKey])
 }
 
 /** Stable identity so the sync effects don't re-run on every render. */
@@ -148,9 +243,13 @@ export function ArtifactContextWorkbench({
   const hadPendingReview = useRef(false)
   const activeSessionId = useChatStore((state) => state.activeSessionId)
   const setDockCollapsed = useArtifactDockLayoutStore((state) => state.setDockCollapsed)
-  const navigatePanel = useContextWorkbenchStore((state) => state.navigatePanel)
   const smartReveal = useContextWorkbenchStore((state) => state.smartReveal)
   const scopeKey = `${workbenchInstanceId}::artifact:${artifactId}`
+  // The session surface's own scope key. Session-scoped panels (browser,
+  // workspace) record their activation there, so the artifact and session
+  // surfaces share one mounted browser instead of tearing it down whenever the
+  // dock moves between them.
+  const sessionScopeKey = sessionWorkbenchScopeKey(workbenchInstanceId, activeSessionId)
   const layout = useContextWorkbenchStore((state) => state.layouts[scopeKey])
   const [selectionState, setSelectionState] = useState<
     { artifactId: string; start: number; end: number } | undefined
@@ -165,6 +264,8 @@ export function ArtifactContextWorkbench({
   )
   const workspaceAvailable = hasWorkspaceFsBackend()
   const dockWidthHint = useDockWidthHint()
+  const resolvedDockMode = useResolvedDockMode()
+  const resetDockLayout = useArtifactDockLayoutStore((state) => state.resetLayout)
   // The same panels back the desktop dock and the Sheet hosts, so the host —
   // not the viewport — decides the density. Hardcoding "desktop" here mounted
   // Monaco and the split tab inside the phone Sheet.
@@ -185,20 +286,24 @@ export function ArtifactContextWorkbench({
     return () => window.removeEventListener("artifact-context-selection", handleSelection)
   }, [artifactId])
 
-  // A scope with no history opens on the preview. Everything else is restored
-  // by `reconcilePanels` from the persisted layout, so this must not run again.
-  // Skipped without an artifact, or a dead id would seed a layout entry against
-  // the workbench's 200-scope persistence budget for a surface never rendered.
-  useEffect(() => {
-    if (!artifact || layout?.activePanelId) return
-    navigatePanel(scopeKey, "preview", "narrow")
-  }, [artifact, layout?.activePanelId, navigatePanel, scopeKey])
+  // A scope with no history opens on the preview — but that rule is not written
+  // here. `reconcilePanels` already falls back to the lowest-ordered panel, and
+  // `preview` now *is* that panel, so the workbench seeds itself. This used to
+  // be a second, opposite write racing the reconcile: whichever effect ran last
+  // won, and it only landed on the preview because child effects happen to run
+  // before parent ones.
 
   useEffect(() => {
     const appeared = !hadPendingReview.current && pendingReview !== null
     hadPendingReview.current = pendingReview !== null
-    if (appeared) smartReveal(scopeKey, "proposal-review", "wide")
-  }, [pendingReview, scopeKey, smartReveal])
+    // Only widen when the reveal actually took: `smartReveal` declines while
+    // the user has the workbench pinned (it queues a badge instead), and
+    // resizing the dock for a panel that never came forward would be a
+    // uninvited jolt.
+    if (appeared && smartReveal(scopeKey, "proposal-review", "wide")) {
+      dockWidthHint("wide", "proposal-review")
+    }
+  }, [dockWidthHint, pendingReview, scopeKey, smartReveal])
 
   const panels = useMemo<ContextPanelDefinition[]>(
     () => [
@@ -207,7 +312,7 @@ export function ArtifactContextWorkbench({
         activity: "ai",
         labelKey: "contextWorkbench.resourceChat",
         icon: BotIcon,
-        order: 5,
+        order: 25,
         appliesTo: (resource) => resource.kind === "artifact",
         retention: "stateful",
         requiresChatScope: true,
@@ -216,6 +321,19 @@ export function ArtifactContextWorkbench({
             getResourceContext={() => artifact?.content ?? ""}
             pendingPrompt={pendingSelectionComment}
             onPendingPromptConsumed={() => setPendingSelectionComment(null)}
+            // The selection composer used to be a panel of its own
+            // (`selection-ai`), sharing the `ai` activity with this one at a
+            // higher `order` — so the rail button could only ever open this
+            // panel, and once two artifact tabs claimed the header the group
+            // tabs collapsed into an overflow menu and buried it a second time.
+            // Folding it in makes "select a range, hand it to the AI" one click
+            // from the rail, next to the conversation it feeds.
+            selectionHeader={
+              <ArtifactSelectionCommentPanel
+                hasSelection={Boolean(textSelection)}
+                onSubmit={setPendingSelectionComment}
+              />
+            }
           />
         ),
       },
@@ -224,7 +342,7 @@ export function ArtifactContextWorkbench({
         activity: "comments",
         labelKey: "contextWorkbench.comments",
         icon: MessageSquareIcon,
-        order: 10,
+        order: 30,
         appliesTo: (resource) => resource.kind === "artifact",
         retention: "stateful",
         getBadge: () => unresolvedCommentCount,
@@ -247,29 +365,17 @@ export function ArtifactContextWorkbench({
           ) : null,
       },
       {
-        id: "selection-ai",
-        activity: "ai",
-        labelKey: "contextWorkbench.aiActions",
-        icon: BotIcon,
-        order: 12,
-        appliesTo: (resource) => resource.kind === "artifact",
-        retention: "stateful",
-        renderer: () => (
-          <ArtifactSelectionCommentPanel
-            hasSelection={Boolean(textSelection)}
-            onSubmit={(comment) => {
-              setPendingSelectionComment(comment)
-              navigatePanel(scopeKey, "resource-chat", "narrow")
-            }}
-          />
-        ),
-      },
-      {
+        // Ordered *after* the artifact list inside the `review` activity. The
+        // rail's group button targets the lowest-ordered panel, so leading with
+        // this one meant every first click on Review landed on a proposal that
+        // usually does not exist, while the artifact library — the panel with
+        // content every time — sat behind the overflow menu. A pending proposal
+        // still comes forward on its own via `smartReveal` + the badge below.
         id: "proposal-review",
         activity: "review",
         labelKey: "contextWorkbench.proposalReview",
         icon: History,
-        order: 15,
+        order: 20,
         appliesTo: (resource) => resource.kind === "artifact",
         retention: "stateful",
         preferredMode: "wide",
@@ -298,6 +404,10 @@ export function ArtifactContextWorkbench({
         order: 11,
         appliesTo: (resource) => resource.kind === "artifact",
         retention: "stateful",
+        // Its content belongs to the conversation, not to this artifact, so it
+        // survives a tab switch. Without this the page — and the process-wide
+        // embedded-webview lease behind it — was torn down every time.
+        scope: "session",
         preferredMode: "wide",
         renderer: () => <BrowserPreviewPane sessionId={activeSessionId ?? undefined} />,
       },
@@ -310,7 +420,7 @@ export function ArtifactContextWorkbench({
         activity: "review",
         labelKey: "artifacts.dock.browseArtifacts",
         icon: LibraryIcon,
-        order: 20,
+        order: 15,
         appliesTo: (resource) => resource.kind === "artifact",
         retention: "stateful",
         preferredMode: "wide",
@@ -327,7 +437,7 @@ export function ArtifactContextWorkbench({
         activity: "inspect",
         labelKey: "contextWorkbench.metadata.artifactTitle",
         icon: InfoIcon,
-        order: 25,
+        order: 35,
         appliesTo: (resource) => resource.kind === "artifact",
         retention: "stateful",
         renderer: () =>
@@ -350,17 +460,21 @@ export function ArtifactContextWorkbench({
                   value: artifact.updatedAt.toLocaleString(),
                 },
               ]}
+              footer={<ArtifactSourceMessageLink messageId={artifact.messageId} />}
             />
           ) : null,
       },
       {
-        id: "workspace",
+        id: WORKSPACE_PANEL_ID,
         activity: "workspace",
         labelKey: "artifacts.dock.workspaceMode",
         icon: SearchCodeIcon,
-        order: 30,
+        order: 40,
         appliesTo: (resource) => resource.kind === "artifact",
         retention: "stateful",
+        // Same as the browser: the file tree, the open Monaco buffers and the
+        // git diff belong to the conversation's project, not to one artifact.
+        scope: "session",
         preferredMode: "wide",
         renderer: () =>
           workspaceAvailable ? (
@@ -371,7 +485,6 @@ export function ArtifactContextWorkbench({
       },
     ],
     [
-      navigatePanel,
       activeSessionId,
       artifact,
       artifactId,
@@ -379,7 +492,6 @@ export function ArtifactContextWorkbench({
       workspaceLayout,
       pendingReview,
       pendingSelectionComment,
-      scopeKey,
       tWorkbench,
       textSelection,
       unresolvedCommentCount,
@@ -392,7 +504,8 @@ export function ArtifactContextWorkbench({
   useDockPanelSync(
     scopeKey,
     artifact ? panels.map((panel) => panel.id) : EMPTY_PANEL_IDS,
-    artifact ? layout?.activePanelId : null
+    artifact ? layout?.activePanelId : null,
+    dockWidthHint
   )
 
   // The id outlived its artifact (evicted by the persist cap, or cleared in
@@ -419,6 +532,7 @@ export function ArtifactContextWorkbench({
       workbenchInstanceId={workbenchInstanceId}
       resource={resource}
       panels={panels}
+      sessionScopeKey={sessionScopeKey}
       // The Sheet needs the tabs as much as the dock does — without them a
       // phone has no way to move between open artifacts at all.
       headerLeading={hasArtifactTabs ? <ArtifactTabStrip className="flex-1" /> : undefined}
@@ -430,14 +544,44 @@ export function ArtifactContextWorkbench({
       workbenchInstanceId={workbenchInstanceId}
       resource={resource}
       panels={panels}
+      sessionScopeKey={sessionScopeKey}
       onCollapse={() => setDockCollapsed(true)}
       onEnsureVisible={() => setDockCollapsed(false)}
       onModeWidthHint={dockWidthHint}
+      resolvedMode={resolvedDockMode}
+      onResetLayout={resetDockLayout}
       headerLeading={hasArtifactTabs ? <ArtifactTabStrip className="flex-1" /> : undefined}
       placement="chat-dock"
       manageOwnWidth={false}
       className="w-full"
     />
+  )
+}
+
+/**
+ * Jump the conversation to the message this artifact came out of.
+ *
+ * Every artifact has recorded its `messageId` since the beginning, but nothing
+ * ever read it back: the chat could open the dock, and the dock could not point
+ * at the chat. Renders nothing when no message list is mounted to jump within
+ * (the artifact workspace route, a Sheet host with no conversation behind it).
+ */
+function ArtifactSourceMessageLink({ messageId }: { messageId: string }) {
+  const t = useTranslations("contextWorkbench.metadata")
+  const jumpToMessage = useChatViewportStore((state) => state.jumpToMessage)
+  if (!jumpToMessage) return null
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className="w-full"
+      data-testid="artifact-source-message-link"
+      onClick={() => jumpToMessage(messageId)}
+    >
+      <CornerUpLeftIcon className="size-4" />
+      {t("goToSource")}
+    </Button>
   )
 }
 
@@ -493,10 +637,17 @@ export function SessionContextWorkbench({ mobile }: { mobile?: SheetHost }) {
   const workspaceAvailable = hasWorkspaceFsBackend()
   const workspaceLayout = mobile?.panelMode === "mobile" ? "mobile" : "desktop"
   const dockWidthHint = useDockWidthHint()
-  const scopeKey = `${workbenchInstanceId}::session:${activeSessionId ?? "none"}`
+  const resolvedDockMode = useResolvedDockMode()
+  const resetDockLayout = useArtifactDockLayoutStore((state) => state.resetLayout)
+  const scopeKey = sessionWorkbenchScopeKey(workbenchInstanceId, activeSessionId)
   const activePanelId = useContextWorkbenchStore(
     (state) => state.layouts[scopeKey]?.activePanelId ?? null
   )
+  // Once tabs are bucketed per conversation, "this session has open tabs but no
+  // active artifact" is an ordinary state — closing the last artifact you were
+  // reading, or coming back to a conversation whose active tab was evicted. The
+  // strip used to vanish entirely there, stranding every other open artifact.
+  const hasArtifactTabs = useOpenArtifactTabs().length > 0
 
   const panels = useMemo<ContextPanelDefinition[]>(
     () => [
@@ -524,17 +675,19 @@ export function SessionContextWorkbench({ mobile }: { mobile?: SheetHost }) {
         order: 20,
         appliesTo: (resource) => resource.kind === "session",
         retention: "stateful",
+        scope: "session",
         preferredMode: "wide",
         renderer: () => <BrowserPreviewPane sessionId={activeSessionId ?? undefined} />,
       },
       {
-        id: "workspace",
+        id: WORKSPACE_PANEL_ID,
         activity: "workspace",
         labelKey: "artifacts.dock.workspaceMode",
         icon: SearchCodeIcon,
         order: 30,
         appliesTo: (resource) => resource.kind === "session",
         retention: "stateful",
+        scope: "session",
         preferredMode: "wide",
         renderer: () =>
           workspaceAvailable ? (
@@ -549,7 +702,8 @@ export function SessionContextWorkbench({ mobile }: { mobile?: SheetHost }) {
   useDockPanelSync(
     scopeKey,
     panels.map((panel) => panel.id),
-    activePanelId
+    activePanelId,
+    dockWidthHint
   )
 
   const resource: ContextResource = {
@@ -566,6 +720,7 @@ export function SessionContextWorkbench({ mobile }: { mobile?: SheetHost }) {
       workbenchInstanceId={workbenchInstanceId}
       resource={resource}
       panels={panels}
+      headerLeading={hasArtifactTabs ? <ArtifactTabStrip className="flex-1" /> : undefined}
       onCollapse={() => mobile.onOpenChange(false)}
       onEnsureVisible={() => mobile.onOpenChange(true)}
     />
@@ -574,9 +729,12 @@ export function SessionContextWorkbench({ mobile }: { mobile?: SheetHost }) {
       workbenchInstanceId={workbenchInstanceId}
       resource={resource}
       panels={panels}
+      headerLeading={hasArtifactTabs ? <ArtifactTabStrip className="flex-1" /> : undefined}
       onCollapse={() => setDockCollapsed(true)}
       onEnsureVisible={() => setDockCollapsed(false)}
       onModeWidthHint={dockWidthHint}
+      resolvedMode={resolvedDockMode}
+      onResetLayout={resetDockLayout}
       placement="chat-dock"
       manageOwnWidth={false}
       className="w-full"

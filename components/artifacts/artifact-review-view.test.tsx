@@ -49,7 +49,7 @@ beforeEach(() => {
   act(() => {
     useArtifactStore.setState({
       artifacts: {},
-      activeArtifactId: null,
+      activeArtifactIdBySession: {},
       artifactVersions: {},
       pendingReviews: {},
     })
@@ -57,10 +57,17 @@ beforeEach(() => {
 })
 
 describe("ArtifactReviewView", () => {
-  it("returns null when there is no pending review", () => {
+  it("explains itself when there is no pending review instead of rendering nothing", () => {
     const a = seedArtifact()
-    const { container } = render(<ArtifactReviewView artifact={a} panelMode="desktop" />)
-    expect(container.firstChild).toBeNull()
+    render(<ArtifactReviewView artifact={a} panelMode="desktop" />)
+
+    // This panel is permanently registered on the artifact surface, so the
+    // Review activity is reachable whether or not a proposal exists. Returning
+    // null handed the user a blank panel with no hint of what it was for.
+    expect(screen.getByTestId("artifact-review-empty")).toBeInTheDocument()
+    expect(screen.getByText("empty")).toBeInTheDocument()
+    expect(screen.getByText("emptyDescription")).toBeInTheDocument()
+    expect(screen.queryByTestId("diff-editor")).not.toBeInTheDocument()
   })
 
   it("renders the Monaco DiffEditor and one row per hunk on desktop", () => {

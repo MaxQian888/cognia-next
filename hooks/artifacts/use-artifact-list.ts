@@ -10,6 +10,7 @@
 
 import { useState, useCallback, useEffect } from "react"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { useActiveArtifactId } from "@/hooks/artifacts/use-session-artifacts"
 import { useChatStore } from "@/stores/chat"
 import { revealArtifactInWorkspace } from "@/lib/artifacts"
 import type { Artifact, ArtifactType, ArtifactRuntimeHealth, ArtifactWorkspaceScope } from "@/types"
@@ -20,7 +21,7 @@ interface UseArtifactListOptions {
 }
 
 export function useArtifactList({ sessionId, onArtifactClick }: UseArtifactListOptions) {
-  const activeArtifactId = useArtifactStore((state) => state.activeArtifactId)
+  const activeArtifactId = useActiveArtifactId()
   const artifacts = useArtifactStore((state) => state.artifacts)
   const deleteArtifact = useArtifactStore((state) => state.deleteArtifact)
   const deleteArtifacts = useArtifactStore((state) => state.deleteArtifacts)

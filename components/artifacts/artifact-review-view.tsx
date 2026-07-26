@@ -55,8 +55,21 @@ export function ArtifactReviewView({ artifact, panelMode }: ArtifactReviewViewPr
   const rejectArtifactReview = useArtifactStore((state) => state.rejectArtifactReview)
   const proposeArtifactUpdate = useArtifactStore((state) => state.proposeArtifactUpdate)
 
+  // No proposal pending. This panel is permanently registered on the artifact
+  // surface, so the Review activity can be reached at any time — returning null
+  // handed the user a blank panel with no explanation of what it was for.
+  // Deliberately not `ContextCapabilityUnavailable`: nothing is unavailable
+  // here, there is simply nothing to review yet.
   if (!review) {
-    return null
+    return (
+      <div
+        data-testid="artifact-review-empty"
+        className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center"
+      >
+        <p className="text-sm font-medium">{t("empty")}</p>
+        <p className="text-xs text-muted-foreground">{t("emptyDescription")}</p>
+      </div>
+    )
   }
 
   const stats = computeDiffStats(computeDiff(review.originalContent, review.proposedContent))

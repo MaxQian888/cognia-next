@@ -50,12 +50,16 @@ jest.mock("@/lib/files/document-writer", () => ({
 
 import { useArtifactPanelState } from "./use-artifact-panel"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { useChatStore } from "@/stores/chat"
 
 beforeEach(() => {
   localStorage.clear()
+  // The active artifact is bucketed per conversation, so the panel only
+  // resolves one once a conversation is on screen.
+  useChatStore.setState({ activeSessionId: "s" })
   useArtifactStore.setState({
     artifacts: {},
-    activeArtifactId: null,
+    activeArtifactIdBySession: {},
     artifactVersions: {},
     pendingReviews: {},
     artifactWorkspace: {
@@ -69,8 +73,6 @@ beforeEach(() => {
     },
     canvasDocuments: {},
     activeCanvasId: null,
-    canvasOpen: false,
-    analysisResults: {},
     panelOpen: false,
     panelView: "artifact",
   })

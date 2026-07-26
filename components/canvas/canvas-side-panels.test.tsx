@@ -203,6 +203,36 @@ describe("CanvasSidePanels", () => {
     ).toBe("history")
   })
 
+  it("resets the canvas shell layout from the Context Workbench layout menu", async () => {
+    window.localStorage.setItem(
+      "cognia-canvas-feature-flags-v1",
+      JSON.stringify({ "contextWorkbench.v1": true })
+    )
+    seedDocument("doc-1")
+    act(() => {
+      useCanvasLayoutStore.setState({
+        leftCollapsed: true,
+        rightCollapsed: true,
+        activeRightTab: "history",
+        previewMode: "preview",
+      })
+    })
+    const previousVersion = useCanvasLayoutStore.getState().layoutVersion
+    const user = userEvent.setup()
+    renderWithProviders(<CanvasSidePanels />)
+
+    await user.click(screen.getByTestId("context-workbench-layout-menu"))
+    await user.click(await screen.findByTestId("context-workbench-reset-layout"))
+
+    expect(useCanvasLayoutStore.getState()).toMatchObject({
+      leftCollapsed: false,
+      rightCollapsed: false,
+      activeRightTab: "suggestions",
+      previewMode: "split",
+      layoutVersion: previousVersion + 1,
+    })
+  })
+
   it("hosts document language and export actions in Inspect and Preview", async () => {
     window.localStorage.setItem(
       "cognia-canvas-feature-flags-v1",

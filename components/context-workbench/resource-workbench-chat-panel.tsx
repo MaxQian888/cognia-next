@@ -1,6 +1,6 @@
 "use client"
 
-import { lazy, Suspense, useCallback, useEffect, useRef } from "react"
+import { lazy, Suspense, useCallback, useEffect, useRef, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import type { SendContent } from "@cognia/agent-config-types"
@@ -31,10 +31,17 @@ export function ResourceWorkbenchChatPanel({
   getResourceContext,
   pendingPrompt,
   onPendingPromptConsumed,
+  selectionHeader,
 }: {
   getResourceContext?: () => string | Promise<string>
   pendingPrompt?: string | null
   onPendingPromptConsumed?: () => void
+  /**
+   * Host content above the conversation — the artifact surface puts its
+   * "comment on the current selection" composer here. It used to be a separate
+   * panel in the same activity group, which the rail could never reach.
+   */
+  selectionHeader?: ReactNode
 }) {
   const t = useTranslations("contextWorkbench")
   const { sessionId } = useChatScope()
@@ -150,6 +157,11 @@ export function ResourceWorkbenchChatPanel({
           <DownloadIcon className="size-4" />
         </Button>
       </div>
+      {selectionHeader ? (
+        <div className="shrink-0 border-b" data-testid="resource-chat-selection-header">
+          {selectionHeader}
+        </div>
+      ) : null}
       <div className="min-h-0 flex-1">
         <Suspense
           fallback={

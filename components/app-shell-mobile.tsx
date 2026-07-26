@@ -45,6 +45,7 @@ import { toast } from "sonner"
 
 import { ChatPane } from "@/components/chat/chat-view"
 import { ArtifactWorkspaceDock } from "@/components/artifacts/artifact-workspace-dock"
+import { ArtifactDockToggle } from "@/components/artifacts/artifact-dock-toggle"
 import { CharacterPicker } from "@/components/chat/character-picker"
 import { GuildRail } from "@/components/shell/guild-rail"
 import { MemberList } from "@/components/shell/member-list"
@@ -348,7 +349,14 @@ export function AppShellMobile() {
               <SheetTitle>{tShell("navSheetTitle")}</SheetTitle>
             </SheetHeader>
             <div className="flex flex-1 overflow-hidden">
+              {/* `variant="sheet"` drops the rail's `md:` breakpoint gate. A
+                  phone viewport never reaches `md`, so the default rail variant
+                  rendered this whole column — workspace switcher, DM/Canvas,
+                  pinned destinations, "More", teams, Settings — as
+                  `display:none`, leaving the drawer with only the session
+                  list. */}
               <GuildRail
+                variant="sheet"
                 onCreateTeam={handleCreateTeam}
                 onOpenSettings={() => {
                   setNavOpen(false)
@@ -399,6 +407,15 @@ export function AppShellMobile() {
         ) : null}
 
         <div className="ml-auto flex items-center gap-1 sm:gap-2">
+          {/* The artifact dock's only standing affordance on a phone. The copy
+              in `chat-header` never mounts here (the chat pane below is given
+              `showHeader={false}`), so without this the Sheet could only be
+              reached by tapping an artifact card that happened to be in the
+              thread — and once closed there was no way back to the session
+              panels (artifact library, browser, workspace) at all. It also
+              carries the unread dot, which had no host on this breakpoint. */}
+          <ArtifactDockToggle className="touch-target" />
+
           <Button
             type="button"
             variant="ghost"
@@ -608,7 +625,11 @@ export function AppShellMobile() {
               <SheetTitle>{tShell("memberSheetTitle")}</SheetTitle>
             </SheetHeader>
             <div className="flex flex-1 overflow-hidden">
+              {/* Same story as the rail above: the default variant is gated on
+                  `lg:` and additionally on the persisted `showMemberList`
+                  toggle, so this sheet opened blank on every phone. */}
               <MemberList
+                variant="sheet"
                 teamSessionId={activeSession?.id ?? null}
                 teamId={activeSession?.teamId ?? null}
                 onMention={(c) => {

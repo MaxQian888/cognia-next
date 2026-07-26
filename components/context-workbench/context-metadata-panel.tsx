@@ -1,5 +1,7 @@
 "use client"
 
+import type { ReactNode } from "react"
+
 export interface ContextMetadataField {
   label: string
   value: string | number
@@ -8,9 +10,12 @@ export interface ContextMetadataField {
 export function ContextMetadataPanel({
   title,
   fields,
+  footer,
 }: {
   title: string
   fields: ContextMetadataField[]
+  /** Actions derived from the metadata above — e.g. "go to the source message". */
+  footer?: ReactNode
 }) {
   return (
     <section className="h-full overflow-auto p-4" aria-label={title}>
@@ -23,6 +28,7 @@ export function ContextMetadataPanel({
           </div>
         ))}
       </dl>
+      {footer ? <div className="mt-4 border-t pt-3">{footer}</div> : null}
     </section>
   )
 }

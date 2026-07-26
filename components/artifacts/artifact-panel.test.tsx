@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { act, render, screen, fireEvent } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -64,13 +64,20 @@ jest.mock("@/components/editor/light-code-editor", () => ({
 
 import { ArtifactPanel } from "./artifact-panel"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
+import { useChatStore } from "@/stores/chat"
 
 beforeEach(() => {
   localStorage.clear()
   mobileViewportRef.current = false
+  // Tabs and the active artifact are bucketed per conversation, so the panel
+  // only resolves one once a conversation is on screen.
+  useChatStore.setState({ activeSessionId: "s" })
+  useArtifactDockLayoutStore.getState().resetLayout()
+  useArtifactDockLayoutStore.setState({ mobileSheetOpen: true })
   useArtifactStore.setState({
     artifacts: {},
-    activeArtifactId: null,
+    activeArtifactIdBySession: {},
     artifactVersions: {},
     artifactWorkspace: {
       scope: "session",
@@ -83,8 +90,6 @@ beforeEach(() => {
     },
     canvasDocuments: {},
     activeCanvasId: null,
-    canvasOpen: false,
-    analysisResults: {},
     panelOpen: true,
     panelView: "artifact",
   })
@@ -103,7 +108,6 @@ function makeArtifact(type: "code" | "html" = "code") {
 
 describe("ArtifactPanel", () => {
   it("hosts the session workbench when no artifact is active", () => {
-    useArtifactStore.setState({ panelOpen: true })
     render(<ArtifactPanel />)
 
     // The empty state used to be a plain Sheet that could only show the
@@ -113,6 +117,47 @@ describe("ArtifactPanel", () => {
     expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
     expect(screen.getByTestId("list")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "browser.title" })).toBeInTheDocument()
+  })
+
+  it("takes its visibility from mobileSheetOpen, not from panelOpen", () => {
+    makeArtifact()
+    const { rerender } = render(<ArtifactPanel />)
+    expect(screen.getByTestId("context-workbench-mobile-sheet")).toHaveAttribute(
+      "data-state",
+      "open"
+    )
+
+    // `panelOpen` is an engagement flag for the panel's keyboard shortcuts, not
+    // a visibility flag. It used to gate this Sheet, and because `createArtifact`
+    // and `setActiveArtifact` raise it unconditionally, every new artifact threw
+    // a 92dvh modal over the conversation — `userDismissed` never got a say.
+    useArtifactStore.setState({ panelOpen: false })
+    rerender(<ArtifactPanel />)
+    expect(screen.getByTestId("context-workbench-mobile-sheet")).toHaveAttribute(
+      "data-state",
+      "open"
+    )
+
+    useArtifactDockLayoutStore.setState({ mobileSheetOpen: false })
+    rerender(<ArtifactPanel />)
+    expect(screen.getByTestId("context-workbench-mobile-sheet")).toHaveAttribute(
+      "data-state",
+      "closed"
+    )
+  })
+
+  it("records a dismissal when the Sheet is swiped away", () => {
+    makeArtifact()
+    render(<ArtifactPanel />)
+
+    act(() => {
+      useArtifactDockLayoutStore.getState().setDockCollapsed(true)
+    })
+
+    // The dismissal has to reach `userDismissed`, or the next artifact re-throws
+    // the Sheet over the conversation the user just cleared.
+    expect(useArtifactDockLayoutStore.getState().userDismissed).toBe(true)
+    expect(useArtifactDockLayoutStore.getState().mobileSheetOpen).toBe(false)
   })
 
   it("renders the active artifact's identity row", () => {

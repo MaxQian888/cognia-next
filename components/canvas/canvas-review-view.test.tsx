@@ -69,7 +69,7 @@ beforeEach(() => {
   act(() => {
     useArtifactStore.setState({
       artifacts: {},
-      activeArtifactId: null,
+      activeArtifactIdBySession: {},
       artifactVersions: {},
       pendingReviews: {},
       canvasDocuments: {},
