@@ -51,7 +51,7 @@
     "description": "向应用注入自定义 CSS。保存时会移除远程 @import / url(http)。错误的 CSS 可能让界面显示异常，请谨慎使用。",
     "enabledLabel": "启用自定义 CSS",
     "monacoLink": {
-      "description": "控制 Monaco/Canvas 编辑器如何跟随应用主题。",
+      "description": "控制应用主题如何驱动两个编辑器引擎：Monaco/Canvas 编辑器与内嵌 Pro IDE（code-server）。",
       "enabledLabel": "跟随应用主题",
       "lock": {
         "hcBlack": "高对比深色",
@@ -60,7 +60,7 @@
         "vs": "浅色 (vs)",
         "vsDark": "深色 (vs-dark)"
       },
-      "lockHint": "将 Monaco 固定为指定的基础主题，忽略应用主题。",
+      "lockHint": "将 Monaco 固定为指定的基础主题，并停止用应用调色板驱动两个引擎。高对比度模式仍会覆盖此设置。",
       "lockLabel": "锁定编辑器主题",
       "title": "编辑器主题联动"
     },

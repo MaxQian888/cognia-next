@@ -1,0 +1,14 @@
+{
+  "notFound": {
+    "body": "The page this link points to has moved or no longer exists.",
+    "docs": "Back to the docs home",
+    "heading": "Page not found",
+    "other": "中文版本"
+  },
+  "pageActions": {
+    "copied": "Copied",
+    "failed": "Copy failed",
+    "idle": "Copy Markdown",
+    "view": "View Markdown"
+  }
+}

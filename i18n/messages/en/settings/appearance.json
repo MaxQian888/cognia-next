@@ -51,7 +51,7 @@
     "description": "Inject your own CSS into the app. Remote @import / url(http) statements are stripped on save. Use carefully — bad CSS can hide UI elements.",
     "enabledLabel": "Enable custom CSS",
     "monacoLink": {
-      "description": "Control how the Monaco/Canvas editor follows the app theme.",
+      "description": "Control how the app theme drives both editor engines — the Monaco/Canvas editor and the embedded Pro IDE (code-server).",
       "enabledLabel": "Match app theme",
       "lock": {
         "hcBlack": "High contrast dark",
@@ -60,7 +60,7 @@
         "vs": "Light (vs)",
         "vsDark": "Dark (vs-dark)"
       },
-      "lockHint": "Pin Monaco to a specific base theme regardless of the app theme.",
+      "lockHint": "Pin Monaco to a specific base theme and stop the app palette from driving either engine. High contrast still overrides this.",
       "lockLabel": "Lock editor theme",
       "title": "Editor theme linking"
     },
