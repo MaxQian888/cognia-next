@@ -21,8 +21,16 @@ import type { TuiAction } from "../tui/state/types"
 
 type Node = string | Array<{ type: "file" | "dir"; path: string }>
 
+/** Any valid 40-hex sha; the preview pins the install to the resolved commit. */
+const HEAD_SHA = "a".repeat(40)
+
 function installFetch(getTree: () => Record<string, Node>): void {
   ;(globalThis as { fetch: unknown }).fetch = jest.fn(async (url: string) => {
+    // The preview resolves the requested ref to a commit before reading any
+    // contents, so provenance records an immutable sha rather than a branch.
+    if (/\/commits\//.test(String(url))) {
+      return { status: 200, ok: true, json: async () => ({ sha: HEAD_SHA }) } as unknown as Response
+    }
     const m = String(url).match(/contents\/(.*?)(\?|$)/)
     const p = decodeURIComponent(m ? m[1] : "")
     const node = getTree()[p]

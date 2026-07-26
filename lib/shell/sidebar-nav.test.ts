@@ -1,4 +1,4 @@
-import { SIDEBAR_NAV_META, DEFAULT_SIDEBAR_LAYOUT } from "@/types/shell/sidebar"
+import { SIDEBAR_NAV_META, DEFAULT_SIDEBAR_LAYOUT, DEFAULT_PINNED_IDS } from "@/types/shell/sidebar"
 import {
   SIDEBAR_NAV_ICONS,
   applyDragReorder,
@@ -46,13 +46,13 @@ describe("resolveSidebarLayout", () => {
   const catalog = getSidebarCatalog("tauri")
   const ids = (items: SidebarCatalogItem[]) => items.map((i) => i.id)
 
-  it("applies the default layout: features pinned, auxiliary in overflow", () => {
+  // The de-crowded rail pins three ids and pushes everything else into "More",
+  // rather than pinning the whole `feature` group as it used to.
+  it("applies the default layout: three ids pinned, the rest in overflow", () => {
     const { pinned, overflow, hidden } = resolveSidebarLayout(catalog, DEFAULT_SIDEBAR_LAYOUT)
-    expect(ids(pinned)).toEqual(
-      SIDEBAR_NAV_META.filter((m) => m.group === "feature").map((m) => m.id)
-    )
+    expect(ids(pinned)).toEqual([...DEFAULT_PINNED_IDS])
     expect(ids(overflow)).toEqual(
-      SIDEBAR_NAV_META.filter((m) => m.group === "auxiliary").map((m) => m.id)
+      SIDEBAR_NAV_META.filter((m) => !DEFAULT_PINNED_IDS.includes(m.id as never)).map((m) => m.id)
     )
     expect(hidden).toEqual([])
   })
