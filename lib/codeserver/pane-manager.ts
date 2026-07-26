@@ -54,6 +54,15 @@ let mountedUrl: string | null = null
 let lastRect: ElementRect | null = null
 let visible = true
 let queue: Promise<unknown> = Promise.resolve()
+/**
+ * Last background the pane webview was painted in (`#RRGGBB`).
+ *
+ * Held here rather than passed per-call because the webview outlives every
+ * hosting surface: a `claim` that happens *before* the appearance sync has run
+ * must still create the webview in the app colour, and a theme flip while no
+ * surface is mounted must still be remembered for the next create.
+ */
+let backgroundHex: string | null = null
 
 /**
  * Publish "a surface is hosting Pro IDE" to CSS.
@@ -124,7 +133,7 @@ export function claimCodeServerPane(
     if (owner?.id !== ownerId) return
     const target = lastRect ?? rect
     if (!created) {
-      await codeServerClient.embedCreate(url, target)
+      await codeServerClient.embedCreate(url, target, backgroundHex ?? undefined)
       created = true
       mountedUrl = url
       return
@@ -203,6 +212,21 @@ export function getCodeServerPaneOwner(): string | null {
   return owner?.id ?? null
 }
 
+/**
+ * Remember the app background the pane webview should paint, and push it to a
+ * live webview.
+ *
+ * Idempotent per colour: a no-op when the value hasn't changed, because the
+ * appearance sync fires on every palette input and most of those changes leave
+ * the background alone.
+ */
+export function setCodeServerPaneBackground(hex: string): void {
+  if (backgroundHex === hex) return
+  backgroundHex = hex
+  if (!isTauri() || !created) return
+  void enqueue(() => codeServerClient.embedSetBackground(hex)).catch(() => undefined)
+}
+
 /** Test-only: drop all state without touching the (mocked) native layer. */
 export function __resetCodeServerPaneManagerForTesting(): void {
   owner = null
@@ -211,5 +235,6 @@ export function __resetCodeServerPaneManagerForTesting(): void {
   mountedUrl = null
   lastRect = null
   visible = true
+  backgroundHex = null
   queue = Promise.resolve()
 }

@@ -59,6 +59,29 @@ export interface ProjectEditorOpener {
    * write-side resolution — see the note there.
    */
   readActive?: () => Promise<ActiveEditorContext>
+  /**
+   * Flush this editor's unsaved buffers to disk, returning the absolute paths it
+   * could not save.
+   *
+   * Optional because not every engine has buffers that can diverge from disk, but
+   * where it exists it is a correctness requirement rather than a nicety: the
+   * agent's file tools read the filesystem, so an unsaved buffer is invisible to
+   * them and a turn can reason about stale content and then overwrite the user's
+   * work. See {@link flushProjectEditorEdits}.
+   */
+  saveDirty?: () => Promise<string[]>
+  /**
+   * Show `content` against the on-disk file (path relative to `root`) as a diff, so
+   * a proposed change can be reviewed before it is written. Optional: an engine
+   * without a diff surface omits it and callers fall back to writing directly.
+   */
+  showDiff?: (relPath: string, content: string, title?: string) => Promise<void>
+  /** Reveal a file (path relative to `root`) in this editor's file tree. */
+  reveal?: (relPath: string) => Promise<void>
+  /** Run a command in this editor's own terminal, visible to the user. */
+  runInTerminal?: (command: string, options?: { cwd?: string; name?: string }) => Promise<void>
+  /** Surface an app-side message inside this editor. */
+  notify?: (message: string, kind?: "info" | "warning" | "error") => Promise<void>
 }
 
 const openers = new Set<ProjectEditorOpener>()
@@ -174,13 +197,16 @@ export function reflectEditInProjectEditor(
  * So: deepest matching root, and only among registrations that can actually
  * read. Ties still go to the latest registration, which is the live editor.
  */
-function resolveReadOpener(root?: string): ProjectEditorOpener | null {
+function resolveOpenerForRoot(
+  root: string | undefined,
+  canAnswer: (opener: ProjectEditorOpener) => boolean
+): ProjectEditorOpener | null {
   // No root asked for: the caller (a plugin, say) has no reason to know project
-  // roots and just wants whatever the user is in. Latest readable registration
+  // roots and just wants whatever the user is in. Latest capable registration
   // wins, which is the most recently mounted editor.
   if (root === undefined) {
     let latest: ProjectEditorOpener | null = null
-    for (const o of openers) if (o.readActive) latest = o
+    for (const o of openers) if (canAnswer(o)) latest = o
     return latest
   }
 
@@ -188,7 +214,7 @@ function resolveReadOpener(root?: string): ProjectEditorOpener | null {
   let bestBase = ""
   const normalizedRoot = normalizePath(root)
   for (const o of openers) {
-    if (!o.readActive) continue
+    if (!canAnswer(o)) continue
     const base = normalizePath(o.root)
     if (normalizedRoot === base || normalizedRoot.startsWith(`${base}/`)) {
       if (!best || base.length >= bestBase.length) {
@@ -198,6 +224,10 @@ function resolveReadOpener(root?: string): ProjectEditorOpener | null {
     }
   }
   return best
+}
+
+function resolveReadOpener(root?: string): ProjectEditorOpener | null {
+  return resolveOpenerForRoot(root, (o) => o.readActive != null)
 }
 
 /**
@@ -212,6 +242,95 @@ export async function readActiveFromProjectEditor(
   const opener = resolveReadOpener(root)
   if (!opener?.readActive) return null
   return opener.readActive()
+}
+
+/**
+ * Flush unsaved editor buffers to disk before something reads the filesystem.
+ *
+ * Call this ahead of any agent turn that may read or write project files. The
+ * agent's file tools go straight to disk, so an editor buffer the user has edited
+ * but not saved is invisible to them — the agent reads the stale copy, reasons about
+ * code that is already out of date, and its write then clobbers the user's unsaved
+ * work. Flushing first is what makes disk an honest source of truth.
+ *
+ * Flushes *every* registered editor rather than the one nearest a path: a turn is
+ * not scoped to a single file, and an editor whose root doesn't obviously contain
+ * the file can still be holding a dirty buffer the agent will touch.
+ *
+ * Returns the absolute paths that could not be saved. An empty array means disk is
+ * trustworthy; a non-empty one is what the caller should warn about. Never throws —
+ * an engine that fails to save is reported, not allowed to abort the turn.
+ */
+export async function flushProjectEditorEdits(): Promise<string[]> {
+  const flushable = [...openers].filter((o) => o.saveDirty)
+  const results = await Promise.all(
+    flushable.map(async (o) => {
+      try {
+        return await o.saveDirty!()
+      } catch {
+        // The engine could not tell us which files failed, only that it failed.
+        // Reporting its root is more useful than reporting nothing.
+        return [o.root]
+      }
+    })
+  )
+  return [...new Set(results.flat())]
+}
+
+/**
+ * Preview `content` against an absolute path as a diff in whichever editor is
+ * rooted there. Returns false when no editor can show a diff, so the caller can
+ * fall back to writing directly.
+ */
+export async function showDiffInProjectEditor(
+  absolutePath: string,
+  content: string,
+  title?: string
+): Promise<boolean> {
+  const resolved = resolveOpener(absolutePath)
+  if (!resolved?.opener.showDiff) return false
+  await resolved.opener.showDiff(resolved.rel, content, title)
+  return true
+}
+
+/** Reveal an absolute path in whichever editor's file tree is rooted there. */
+export async function revealInProjectEditor(absolutePath: string): Promise<boolean> {
+  const resolved = resolveOpener(absolutePath)
+  if (!resolved?.opener.reveal) return false
+  await resolved.opener.reveal(resolved.rel)
+  return true
+}
+
+/**
+ * Run a command in the terminal of the editor rooted at `root`.
+ *
+ * Keyed by root (not by a file path) because a command belongs to a project, not to
+ * a file. Returns false when no editor there owns a terminal.
+ */
+export async function runInProjectEditorTerminal(
+  root: string,
+  command: string,
+  options?: { cwd?: string; name?: string }
+): Promise<boolean> {
+  const opener = resolveOpenerForRoot(root, (o) => o.runInTerminal != null)
+  if (!opener?.runInTerminal) return false
+  await opener.runInTerminal(command, options)
+  return true
+}
+
+/**
+ * Surface a message inside the editor rooted at `root` — or, with no root, the most
+ * recently mounted editor that can show one. Returns false when none can.
+ */
+export async function notifyInProjectEditor(
+  message: string,
+  kind?: "info" | "warning" | "error",
+  root?: string
+): Promise<boolean> {
+  const opener = resolveOpenerForRoot(root, (o) => o.notify != null)
+  if (!opener?.notify) return false
+  await opener.notify(message, kind)
+  return true
 }
 
 /**

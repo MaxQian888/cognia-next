@@ -49,6 +49,16 @@ export interface CodeServerInstallInfo {
 export type CodeServerDiagnostic = ActiveEditorDiagnostic
 export type CodeServerActiveEditor = ActiveEditorContext
 
+/**
+ * Outcome of a `saveAll`. A partial flush is still progress, so this reports both
+ * halves rather than throwing: the caller needs to know *which* files it cannot
+ * trust the on-disk copy of.
+ */
+export interface CodeServerSaveResult {
+  saved: string[]
+  failed: string[]
+}
+
 /** Payload of the `codeserver://download-progress` event. */
 export interface CodeServerDownloadProgress {
   /**
@@ -73,9 +83,25 @@ export interface CodeServerExited {
   port: number
 }
 
+/**
+ * Editor-state change pushed by the companion extension (`codeserver://editor-event`).
+ *
+ * The reverse direction of the agent channel: before this the renderer could only
+ * *ask* (`readActive`), so "what is the user looking at" had to be polled. `payload`
+ * is intentionally loose and advisory — every consumer re-reads the authoritative
+ * snapshot through the editor bridge rather than trusting the event body.
+ */
+export interface CodeServerEditorEvent {
+  /** Canonical project root of the reporting instance. */
+  root: string
+  name: "activeEditorChanged" | "selectionChanged" | "documentSaved" | "diagnosticsChanged"
+  payload: { path?: string | null; empty?: boolean; count?: number } | null
+}
+
 export const CODESERVER_EVENTS = {
   downloadProgress: "codeserver://download-progress",
   instanceExited: "codeserver://instance-exited",
+  editorEvent: "codeserver://editor-event",
 } as const
 
 export const codeServerClient = {
@@ -131,6 +157,39 @@ export const codeServerClient = {
    */
   readActive: (root: string) =>
     transport.call<CodeServerActiveEditor>("codeserver_agent_read_active", { root }),
+  /**
+   * Flush dirty editor buffers to disk (all of them, or just `path`).
+   *
+   * Not a convenience: the agent's file tools read the filesystem, so an unsaved
+   * buffer is invisible to them — a turn would reason about stale content and then
+   * overwrite the user's unsaved work. Returns which files could and could not be
+   * made trustworthy.
+   */
+  saveAll: (root: string, path?: string) =>
+    transport.call<CodeServerSaveResult>("codeserver_agent_save_all", { root, path }),
+  /**
+   * Show `content` beside the on-disk `path` in VS Code's native diff editor, for
+   * review before a change lands. The proposal is served from memory, never disk.
+   */
+  showDiff: (root: string, path: string, content: string, title?: string) =>
+    transport.call<void>("codeserver_agent_show_diff", { root, path, content, title }),
+  /** Reveal an absolute path in the editor's file explorer. */
+  reveal: (root: string, path: string) =>
+    transport.call<void>("codeserver_agent_reveal", { root, path }),
+  /**
+   * Run a command in the editor's integrated terminal. Show-the-user only — the
+   * extension host cannot read terminal output back.
+   */
+  runInTerminal: (root: string, command: string, options?: { cwd?: string; name?: string }) =>
+    transport.call<void>("codeserver_agent_run_in_terminal", {
+      root,
+      command,
+      cwd: options?.cwd,
+      name: options?.name,
+    }),
+  /** Surface an app-side message inside the editor. */
+  notify: (root: string, message: string, kind?: "info" | "warning" | "error") =>
+    transport.call<void>("codeserver_agent_notify", { root, message, kind }),
 
   /** Raw `settings.json` for the embedded editor; `""` when it doesn't exist. */
   readUserSettings: () => transport.call<string>("codeserver_read_user_settings", {}),
@@ -142,6 +201,24 @@ export const codeServerClient = {
     transport.call<void>("codeserver_write_user_settings", { contents }),
 
   /**
+   * Raw `argv.json` for the embedded editor — VS Code's *runtime* arguments,
+   * where the display language lives. `""` when it doesn't exist.
+   */
+  readRuntimeArgs: () => transport.call<string>("codeserver_read_runtime_args", {}),
+  /**
+   * Replace `argv.json`. Unlike `settings.json` this is read only at workbench
+   * startup, so a locale change needs the instance restarted to take effect.
+   */
+  writeRuntimeArgs: (contents: string) =>
+    transport.call<void>("codeserver_write_runtime_args", { contents }),
+  /**
+   * Whether a VS Code display-language pack is published for `locale`. Lets the
+   * UI say the editor has no translation instead of silently staying English.
+   */
+  languagePackAvailable: (locale: string) =>
+    transport.call<boolean>("codeserver_language_pack_available", { locale }),
+
+  /**
    * Whether a local VS Code launcher (`code`) is on PATH. Backs the fallback
    * offered where the embedded Pro IDE has no build (Windows / exotic arch).
    */
@@ -150,9 +227,19 @@ export const codeServerClient = {
   openInLocalVsCode: (path: string, line?: number, column?: number) =>
     transport.call<void>("codeserver_open_in_local_vscode", { path, line, column }),
 
-  /** Create or re-navigate the code-server pane webview at the reserved rect. */
-  embedCreate: (url: string, rect: ElementRect) =>
-    transport.call<string>("codeserver_embed_create", { url, ...rect }),
+  /**
+   * Create or re-navigate the code-server pane webview at the reserved rect.
+   *
+   * `background` is the app's resolved background as `#RRGGBB`. A native webview
+   * paints its own background before the loading page has one, and the platform
+   * default is white — passing the app colour is what stops the pane flashing a
+   * white rectangle over a dark app on every spawn and navigate.
+   */
+  embedCreate: (url: string, rect: ElementRect, background?: string) =>
+    transport.call<string>("codeserver_embed_create", { url, ...rect, background }),
+  /** Repaint the pane webview's own background (theme flip, no navigation). */
+  embedSetBackground: (hex: string) =>
+    transport.call<void>("codeserver_embed_set_background", { hex }),
   embedSetBounds: (rect: ElementRect) =>
     transport.call<void>("codeserver_embed_set_bounds", { ...rect }),
   embedSetVisible: (visible: boolean, rect: ElementRect) =>

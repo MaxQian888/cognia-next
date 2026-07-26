@@ -4,6 +4,11 @@ import {
   readActiveFromProjectEditor,
   reflectEditInProjectEditor,
   deferProjectEditorOpen,
+  flushProjectEditorEdits,
+  notifyInProjectEditor,
+  revealInProjectEditor,
+  runInProjectEditorTerminal,
+  showDiffInProjectEditor,
   __resetProjectEditorBridgeForTesting,
   type ActiveEditorContext,
 } from "./project-editor-bridge"
@@ -198,5 +203,160 @@ describe("project-editor-bridge", () => {
       unregister()
       await expect(readActiveFromProjectEditor("/repo")).resolves.toBeNull()
     })
+  })
+})
+
+describe("flushProjectEditorEdits", () => {
+  it("reports nothing to warn about when there is no editor at all", async () => {
+    await expect(flushProjectEditorEdits()).resolves.toEqual([])
+  })
+
+  it("flushes every registered editor, not just the one nearest a path", async () => {
+    // An agent turn is not scoped to one file, and any mounted editor can be
+    // holding a dirty buffer the agent is about to read.
+    const a = jest.fn().mockResolvedValue([])
+    const b = jest.fn().mockResolvedValue([])
+    registerProjectEditorOpener({ root: "/repo", open: jest.fn(), saveDirty: a })
+    registerProjectEditorOpener({ root: "/other", open: jest.fn(), saveDirty: b })
+
+    await flushProjectEditorEdits()
+
+    expect(a).toHaveBeenCalled()
+    expect(b).toHaveBeenCalled()
+  })
+
+  it("returns the paths that could not be saved, deduplicated", async () => {
+    registerProjectEditorOpener({
+      root: "/repo",
+      open: jest.fn(),
+      saveDirty: jest.fn().mockResolvedValue(["/repo/a.ts", "/repo/b.ts"]),
+    })
+    registerProjectEditorOpener({
+      root: "/repo/pkg",
+      open: jest.fn(),
+      // Nested roots can both report the same file.
+      saveDirty: jest.fn().mockResolvedValue(["/repo/b.ts"]),
+    })
+
+    await expect(flushProjectEditorEdits()).resolves.toEqual(["/repo/a.ts", "/repo/b.ts"])
+  })
+
+  it("skips editors with no buffers of their own", async () => {
+    const saveDirty = jest.fn().mockResolvedValue([])
+    registerProjectEditorOpener({ root: "/repo", open: jest.fn() })
+    registerProjectEditorOpener({ root: "/repo", open: jest.fn(), saveDirty })
+
+    await expect(flushProjectEditorEdits()).resolves.toEqual([])
+    expect(saveDirty).toHaveBeenCalledTimes(1)
+  })
+
+  it("reports a throwing editor by root instead of aborting the turn", async () => {
+    // The engine could not tell us which files failed, only that it failed —
+    // naming its root is more useful than swallowing it, and throwing here would
+    // take down a turn that could still proceed with a warning.
+    registerProjectEditorOpener({
+      root: "/repo",
+      open: jest.fn(),
+      saveDirty: jest.fn().mockRejectedValue(new Error("extension not connected")),
+    })
+    registerProjectEditorOpener({
+      root: "/other",
+      open: jest.fn(),
+      saveDirty: jest.fn().mockResolvedValue([]),
+    })
+
+    await expect(flushProjectEditorEdits()).resolves.toEqual(["/repo"])
+  })
+})
+
+describe("showDiffInProjectEditor", () => {
+  it("routes to the editor rooted at the path, with a project-relative path", async () => {
+    const showDiff = jest.fn().mockResolvedValue(undefined)
+    registerProjectEditorOpener({ root: "/repo", open: jest.fn(), showDiff })
+
+    await expect(showDiffInProjectEditor("/repo/src/a.ts", "next", "Proposed")).resolves.toBe(true)
+    expect(showDiff).toHaveBeenCalledWith("src/a.ts", "next", "Proposed")
+  })
+
+  it("reports false when no editor can show a diff, so the caller can fall back", async () => {
+    registerProjectEditorOpener({ root: "/repo", open: jest.fn() })
+    await expect(showDiffInProjectEditor("/repo/a.ts", "next")).resolves.toBe(false)
+  })
+
+  it("reports false for a path outside every root", async () => {
+    registerProjectEditorOpener({
+      root: "/repo",
+      open: jest.fn(),
+      showDiff: jest.fn().mockResolvedValue(undefined),
+    })
+    await expect(showDiffInProjectEditor("/elsewhere/a.ts", "next")).resolves.toBe(false)
+  })
+})
+
+describe("revealInProjectEditor", () => {
+  it("routes a reveal to the editor rooted at the path", async () => {
+    const reveal = jest.fn().mockResolvedValue(undefined)
+    registerProjectEditorOpener({ root: "/repo", open: jest.fn(), reveal })
+
+    await expect(revealInProjectEditor("/repo/src/a.ts")).resolves.toBe(true)
+    expect(reveal).toHaveBeenCalledWith("src/a.ts")
+  })
+
+  it("reports false when no editor owns a file tree", async () => {
+    registerProjectEditorOpener({ root: "/repo", open: jest.fn() })
+    await expect(revealInProjectEditor("/repo/a.ts")).resolves.toBe(false)
+  })
+})
+
+describe("runInProjectEditorTerminal", () => {
+  it("is keyed by root, because a command belongs to a project not a file", async () => {
+    const runInTerminal = jest.fn().mockResolvedValue(undefined)
+    registerProjectEditorOpener({ root: "/repo", open: jest.fn(), runInTerminal })
+
+    await expect(runInProjectEditorTerminal("/repo", "pnpm test")).resolves.toBe(true)
+    expect(runInTerminal).toHaveBeenCalledWith("pnpm test", undefined)
+  })
+
+  it("picks the deepest matching root for nested worktrees", async () => {
+    const outer = jest.fn().mockResolvedValue(undefined)
+    const inner = jest.fn().mockResolvedValue(undefined)
+    registerProjectEditorOpener({ root: "/repo", open: jest.fn(), runInTerminal: outer })
+    registerProjectEditorOpener({ root: "/repo/pkg", open: jest.fn(), runInTerminal: inner })
+
+    await runInProjectEditorTerminal("/repo/pkg", "pnpm build")
+
+    expect(inner).toHaveBeenCalled()
+    expect(outer).not.toHaveBeenCalled()
+  })
+
+  it("reports false when no editor there owns a terminal", async () => {
+    registerProjectEditorOpener({ root: "/repo", open: jest.fn() })
+    await expect(runInProjectEditorTerminal("/repo", "ls")).resolves.toBe(false)
+  })
+})
+
+describe("notifyInProjectEditor", () => {
+  it("surfaces a message in the editor rooted at the given root", async () => {
+    const notify = jest.fn().mockResolvedValue(undefined)
+    registerProjectEditorOpener({ root: "/repo", open: jest.fn(), notify })
+
+    await expect(notifyInProjectEditor("done", "info", "/repo")).resolves.toBe(true)
+    expect(notify).toHaveBeenCalledWith("done", "info")
+  })
+
+  it("falls back to the most recently mounted editor when no root is given", async () => {
+    const first = jest.fn().mockResolvedValue(undefined)
+    const latest = jest.fn().mockResolvedValue(undefined)
+    registerProjectEditorOpener({ root: "/a", open: jest.fn(), notify: first })
+    registerProjectEditorOpener({ root: "/b", open: jest.fn(), notify: latest })
+
+    await notifyInProjectEditor("done")
+
+    expect(latest).toHaveBeenCalled()
+    expect(first).not.toHaveBeenCalled()
+  })
+
+  it("reports false when nothing can show a message", async () => {
+    await expect(notifyInProjectEditor("done")).resolves.toBe(false)
   })
 })

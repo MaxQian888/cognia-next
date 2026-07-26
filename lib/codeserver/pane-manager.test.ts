@@ -13,6 +13,7 @@ jest.mock("@/lib/codeserver/client", () => ({
     embedSetBounds: jest.fn(),
     embedSetVisible: jest.fn(),
     embedNavigate: jest.fn(),
+    embedSetBackground: jest.fn(),
     embedDestroy: jest.fn(),
   },
 }))
@@ -27,6 +28,7 @@ import {
   isProIdePanePinnedWithin,
   PRO_IDE_REGION_ATTR,
   releaseCodeServerPane,
+  setCodeServerPaneBackground,
   setCodeServerPaneVisible,
   updateCodeServerPaneRect,
 } from "./pane-manager"
@@ -50,13 +52,14 @@ beforeEach(() => {
   client.embedSetBounds.mockReset().mockResolvedValue(undefined)
   client.embedSetVisible.mockReset().mockResolvedValue(undefined)
   client.embedNavigate.mockReset().mockResolvedValue(undefined)
+  client.embedSetBackground.mockReset().mockResolvedValue(undefined)
   client.embedDestroy.mockReset().mockResolvedValue(undefined)
 })
 
 it("creates the webview on the first claim and records the owner", async () => {
   await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
 
-  expect(client.embedCreate).toHaveBeenCalledWith(URL_A, RECT)
+  expect(client.embedCreate).toHaveBeenCalledWith(URL_A, RECT, undefined)
   expect(client.embedNavigate).not.toHaveBeenCalled()
   expect(getCodeServerPaneOwner()).toBe("editor")
 })
@@ -387,4 +390,63 @@ it("keeps draining the queue after a failed round-trip", async () => {
   await drain()
 
   expect(client.embedSetBounds).toHaveBeenLastCalledWith(RECT)
+})
+
+describe("pane background", () => {
+  it("creates the webview already painted in the app background", async () => {
+    // Set before any claim — the appearance sync can run while no surface is
+    // mounted, and the very first create must not flash the platform default.
+    setCodeServerPaneBackground("#0b1220")
+    await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+
+    expect(client.embedCreate).toHaveBeenCalledWith(URL_A, RECT, "#0b1220")
+    // Nothing to push: the create already carried the colour.
+    expect(client.embedSetBackground).not.toHaveBeenCalled()
+  })
+
+  it("pushes a later theme flip to the live webview", async () => {
+    await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+    setCodeServerPaneBackground("#ffffff")
+    await drain()
+
+    expect(client.embedSetBackground).toHaveBeenCalledWith("#ffffff")
+  })
+
+  it("ignores a repeat of the same colour", async () => {
+    await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+    setCodeServerPaneBackground("#ffffff")
+    await drain()
+    client.embedSetBackground.mockClear()
+
+    setCodeServerPaneBackground("#ffffff")
+    await drain()
+
+    expect(client.embedSetBackground).not.toHaveBeenCalled()
+  })
+
+  it("remembers a colour set while no webview exists, for the next create", async () => {
+    setCodeServerPaneBackground("#101010")
+    expect(client.embedSetBackground).not.toHaveBeenCalled()
+
+    await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+    expect(client.embedCreate).toHaveBeenCalledWith(URL_A, RECT, "#101010")
+  })
+
+  it("does not touch the native layer outside the desktop shell", async () => {
+    mockIsTauri = false
+    setCodeServerPaneBackground("#123456")
+    await drain()
+
+    expect(client.embedSetBackground).not.toHaveBeenCalled()
+  })
+
+  it("swallows a failed background push", async () => {
+    await claimCodeServerPane("editor", URL_A, RECT, jest.fn())
+    client.embedSetBackground.mockRejectedValue(new Error("pane closed"))
+
+    setCodeServerPaneBackground("#222222")
+    await drain()
+
+    expect(client.embedSetBackground).toHaveBeenCalled()
+  })
 })
