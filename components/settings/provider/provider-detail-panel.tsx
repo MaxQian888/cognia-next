@@ -29,6 +29,8 @@ interface ProviderDetailPanelProps {
    */
   onSetDefault?: () => void
   isEnabled?: boolean
+  /** Whether an incomplete disabled provider may be enabled. */
+  canEnable?: boolean
   isTesting?: boolean
   isCustom?: boolean
   connectionStatus?: "connected" | "error" | "not-configured" | "warning" | "limited" | "untested"
@@ -46,6 +48,7 @@ export function ProviderDetailPanel({
   isDefault,
   onSetDefault,
   isEnabled,
+  canEnable = true,
   isCustom,
   connectionStatus,
   configTab,
@@ -160,7 +163,11 @@ export function ProviderDetailPanel({
               <Trash2 className="h-4 w-4" />
             </Button>
           )}
-          <Switch checked={isEnabled} onCheckedChange={onToggleEnabled} />
+          <Switch
+            checked={isEnabled}
+            disabled={!isEnabled && !canEnable}
+            onCheckedChange={onToggleEnabled}
+          />
         </div>
       </div>
 

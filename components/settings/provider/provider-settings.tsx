@@ -1,7 +1,7 @@
 "use client"
 
 import dynamic from "next/dynamic"
-import { useEffect, useMemo, useState, useCallback } from "react"
+import { useEffect, useMemo, useState, useCallback, useRef } from "react"
 import { Plus, Menu, Settings, Key, Globe, PlugZap, Loader2 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
@@ -28,11 +28,12 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useProviderSettings } from "@/hooks/settings/use-provider-settings"
+import { useProviderManager, type ProviderHealth } from "@/hooks/ai/use-provider-manager"
 import { useModelsDevCatalog } from "@/hooks/settings/use-models-dev-catalog"
 import { useOpenRouterCatalog } from "@/hooks/settings/use-openrouter-catalog"
 import { buildBuiltInProviderModelDiscoverySnapshot } from "@cognia/provider-core/providers/model-discovery"
 import { PROVIDERS } from "@cognia/provider-types/provider"
-import type { CustomProviderSettings } from "@cognia/provider-types/provider"
+import type { CustomProviderSettings, ProviderUIPreferences } from "@cognia/provider-types/provider"
 import { validateBedrockConnectionSettings } from "@cognia/provider-types"
 import { PanelTransition } from "@/components/settings/common/panel-transition"
 import { ProviderDetailPanel } from "./provider-detail-panel"
@@ -47,10 +48,17 @@ import { ProviderEmptyState } from "./provider-empty-state"
 import { ProviderSkeleton } from "./provider-skeleton"
 import { ProviderOnboardingBanner } from "./provider-onboarding-banner"
 import { ProviderCompareDialog } from "./provider-compare-dialog"
+import { BatchTestProgress, TestResultsSummary } from "./batch-test-progress"
 import { OAuthLoginButton } from "./oauth-login-button"
 import { useSettingsStore } from "@/stores/settings"
 import type { ProviderConnectionStatus } from "./provider-sidebar-item"
 import { deriveStatus, providerMatchesCategory } from "./provider-status-utils"
+import {
+  getBuiltInProviderReadiness,
+  getCustomProviderReadiness,
+  getVisibleEligibleBuiltInProviderIds,
+  getVisibleEligibleCustomProviderIds,
+} from "./provider-readiness"
 
 type SidebarProvider = {
   id: string
@@ -59,6 +67,25 @@ type SidebarProvider = {
   status: ProviderConnectionStatus
   isCustom: boolean
   modelCount?: number
+}
+
+type ProviderStatusFilter = NonNullable<ProviderUIPreferences["statusFilter"]>
+
+function preferLiveHealth(
+  health: ProviderHealth | undefined,
+  fallbackOk: boolean | undefined,
+  fallbackOutcome: "verified" | "failed" | "limited" | "success" | "error" | null | undefined
+): {
+  ok: boolean | undefined
+  outcome: "verified" | "failed" | "limited" | "success" | "error" | null | undefined
+} {
+  if (!health || health.totalRequests === 0) {
+    return { ok: fallbackOk, outcome: fallbackOutcome }
+  }
+  if (health.status === "healthy") return { ok: true, outcome: "verified" }
+  if (health.status === "degraded") return { ok: undefined, outcome: "limited" }
+  if (health.status === "error") return { ok: false, outcome: "failed" }
+  return { ok: fallbackOk, outcome: fallbackOutcome }
 }
 
 const CustomProviderDialog = dynamic(
@@ -254,15 +281,36 @@ export function ProviderSettings() {
   const t = useTranslations("providers")
   const s = useProviderSettings()
   const setProviderConfig = useSettingsStore((store) => store.setProviderConfig)
+  const setProviderUIPreferences = useSettingsStore((store) => store.setProviderUIPreferences)
   const defaultProvider = useSettingsStore((store) => store.settings?.defaultProvider)
   // Before Dexie hydrates, `providerSettings` is {} — every row would derive
   // "not-configured", the auto-select effect would pick the alphabetically
   // first provider, and all the badges would flip once the real settings
   // landed. Show the skeleton until we actually know.
   const settingsLoaded = useSettingsStore((store) => store.loaded)
+  const { providers: liveProviderHealth } = useProviderManager()
 
   const [search, setSearch] = useState("")
-  const [categoryFilter, setCategoryFilter] = useState("all")
+  const [categoryFilterOverride, setCategoryFilterOverride] = useState<string | null>(null)
+  const categoryFilter = categoryFilterOverride ?? s.uiPreferences.categoryFilter ?? "all"
+  const setCategoryFilter = useCallback(
+    (category: string) => {
+      setCategoryFilterOverride(category)
+      void setProviderUIPreferences({ categoryFilter: category === "all" ? undefined : category })
+    },
+    [setProviderUIPreferences]
+  )
+  const [statusFilterOverride, setStatusFilterOverride] = useState<ProviderStatusFilter | null>(
+    null
+  )
+  const statusFilter = statusFilterOverride ?? s.uiPreferences.statusFilter ?? "all"
+  const setStatusFilter = useCallback(
+    (status: ProviderStatusFilter) => {
+      setStatusFilterOverride(status)
+      void setProviderUIPreferences({ statusFilter: status })
+    },
+    [setProviderUIPreferences]
+  )
   const [showQuickAdd, setShowQuickAdd] = useState(false)
   const [customDialogOpen, setCustomDialogOpen] = useState(false)
   const [editingCustomId, setEditingCustomId] = useState<string | null>(null)
@@ -270,6 +318,16 @@ export function ProviderSettings() {
   const [compareOpen, setCompareOpen] = useState(false)
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false)
   const [testingConnection, setTestingConnection] = useState<Record<string, boolean>>({})
+  const batchCancelRequested = useRef(false)
+  const [batchVerification, setBatchVerification] = useState({
+    isRunning: false,
+    cancelRequested: false,
+    total: 0,
+    completed: 0,
+    success: 0,
+    failed: 0,
+    canceled: false,
+  })
   // Deleting a custom provider drops its saved credentials and cannot be
   // undone, so it gets a confirmation step instead of firing on first click.
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
@@ -289,6 +347,7 @@ export function ProviderSettings() {
       .map(([id, cfg]) => {
         const settings = s.providerSettings[id]
         const test = s.testResults[id]
+        const effectiveTest = preferLiveHealth(liveProviderHealth[id], test?.success, test?.outcome)
         return {
           id,
           name: cfg.name,
@@ -296,8 +355,8 @@ export function ProviderSettings() {
           status: deriveStatus(
             settings?.apiKey,
             settings?.baseURL,
-            test?.success,
-            test?.outcome,
+            effectiveTest.ok,
+            effectiveTest.outcome,
             id === "bedrock" && !!settings?.bedrock
               ? validateBedrockConnectionSettings(settings.bedrock).valid
               : false,
@@ -319,11 +378,12 @@ export function ProviderSettings() {
       }
       const testOutcome = s.customTestResults[id]
       const testOk = testOutcome === "success" ? true : testOutcome === "error" ? false : undefined
+      const effectiveTest = preferLiveHealth(liveProviderHealth[id], testOk, testOutcome)
       custom.push({
         id,
         name: cp.customName,
         subtitle: cp.defaultModel ?? cp.baseURL,
-        status: deriveStatus(cp.apiKey, cp.baseURL, testOk, testOutcome),
+        status: deriveStatus(cp.apiKey, cp.baseURL, effectiveTest.ok, effectiveTest.outcome),
         isCustom: true,
         modelCount: cp.customModels?.length ?? 0,
       })
@@ -337,6 +397,7 @@ export function ProviderSettings() {
     s.visibleCustomProviderIds,
     s.customProviders,
     s.customTestResults,
+    liveProviderHealth,
     search,
     categoryFilter,
   ])
@@ -344,7 +405,7 @@ export function ProviderSettings() {
   // Auto-select first provider
   useEffect(() => {
     if (!s.selectedProviderId && sidebarProviders.length > 0) {
-      s.setSelectedProviderId(sidebarProviders[0].id)
+      void s.setSelectedProviderId(sidebarProviders[0].id)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sidebarProviders.length])
@@ -363,8 +424,107 @@ export function ProviderSettings() {
   const isEnabled = isCustom
     ? (selectedCustom?.enabled ?? false)
     : (selectedSettings?.enabled ?? false)
+  const selectedReadiness = useMemo(() => {
+    if (!selectedId) return null
+    if (selectedCustom) {
+      const outcome = s.customTestResults[selectedId]
+      return getCustomProviderReadiness(
+        selectedCustom,
+        outcome === undefined || outcome === null ? undefined : { success: outcome === "success" }
+      )
+    }
+    return getBuiltInProviderReadiness(
+      selectedId,
+      selectedSettings,
+      s.testResults[selectedId]
+        ? {
+            success: !!s.testResults[selectedId]?.success,
+            outcome: s.testResults[selectedId]?.outcome,
+          }
+        : undefined
+    )
+  }, [selectedCustom, selectedId, selectedSettings, s.customTestResults, s.testResults])
+  const canEnable = selectedReadiness?.eligibility.enable.allowed ?? false
+  const canSetDefault = isEnabled && (isCustom ? Boolean(selectedCustom?.defaultModel) : true)
 
   const selectedName = isCustom ? selectedCustom?.customName : selectedBuiltIn?.name
+
+  const batchEligibleBuiltInIds = useMemo(
+    () =>
+      getVisibleEligibleBuiltInProviderIds(
+        s.filteredProviders.map(([providerId]) => providerId),
+        s.providerSettings,
+        s.testResults
+      ),
+    [s.filteredProviders, s.providerSettings, s.testResults]
+  )
+  const batchEligibleCustomIds = useMemo(
+    () =>
+      getVisibleEligibleCustomProviderIds(
+        s.visibleCustomProviderIds,
+        s.customProviders,
+        s.customTestResults
+      ),
+    [s.customProviders, s.customTestResults, s.visibleCustomProviderIds]
+  )
+  const batchEligibleCount = batchEligibleBuiltInIds.length + batchEligibleCustomIds.length
+
+  const runBatchVerification = useCallback(async () => {
+    if (batchVerification.isRunning || batchEligibleCount === 0) return
+    batchCancelRequested.current = false
+    setBatchVerification({
+      isRunning: true,
+      cancelRequested: false,
+      total: batchEligibleCount,
+      completed: 0,
+      success: 0,
+      failed: 0,
+      canceled: false,
+    })
+
+    const jobs = [
+      ...batchEligibleBuiltInIds.map((providerId) => ({
+        providerId,
+        run: () => s.testProvider(providerId),
+      })),
+      ...batchEligibleCustomIds.map((providerId) => ({
+        providerId,
+        run: () => s.testCustomProvider(providerId),
+      })),
+    ]
+
+    let completed = 0
+    let success = 0
+    let failed = 0
+    for (const job of jobs) {
+      if (batchCancelRequested.current) break
+      const result = await job.run()
+      completed += 1
+      if (result?.success) success += 1
+      else failed += 1
+      setBatchVerification((current) => ({
+        ...current,
+        completed,
+        success,
+        failed,
+      }))
+    }
+
+    setBatchVerification((current) => ({
+      ...current,
+      isRunning: false,
+      completed,
+      success,
+      failed,
+      canceled: batchCancelRequested.current,
+    }))
+  }, [
+    batchEligibleBuiltInIds,
+    batchEligibleCount,
+    batchEligibleCustomIds,
+    batchVerification.isRunning,
+    s,
+  ])
 
   // models.dev catalog (reactive) → enrich the built-in provider's model list
   // with models.dev-authoritative metadata (pricing/context/capabilities) plus
@@ -493,12 +653,14 @@ export function ProviderSettings() {
       providers={sidebarProviders}
       selectedId={selectedId}
       onSelect={(id) => {
-        s.setSelectedProviderId(id)
+        void s.setSelectedProviderId(id)
         setMobileSheetOpen(false)
       }}
       onCompareClick={() => setCompareOpen(true)}
       categoryFilter={categoryFilter}
       onCategoryChange={setCategoryFilter}
+      statusFilter={statusFilter}
+      onStatusFilterChange={setStatusFilter}
       searchQuery={search}
       onSearchChange={setSearch}
       emptyState={
@@ -516,9 +678,11 @@ export function ProviderSettings() {
         <div className="flex items-center gap-1.5">
           <Button size="sm" variant="outline" onClick={() => setShowQuickAdd(true)}>
             <Plus className="mr-1 h-4 w-4" />
-            <span className="hidden sm:inline">{t("addProvider" as never) as string}</span>
+            <span className="sr-only @[420px]/provider-rail:not-sr-only">
+              {t("addProvider" as never) as string}
+            </span>
           </Button>
-          <ProviderImportExport />
+          <ProviderImportExport compact />
         </div>
       }
     />
@@ -541,9 +705,51 @@ export function ProviderSettings() {
           // scroll, and select it so the detail panel opens too.
           setSearch("")
           setCategoryFilter("all")
-          s.setSelectedProviderId(id)
+          void s.setSelectedProviderId(id)
         }}
       />
+
+      <div className="space-y-2">
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            data-testid="verify-enabled-providers"
+            disabled={batchVerification.isRunning || batchEligibleCount === 0}
+            title={batchEligibleCount === 0 ? t("batchNoEligibleProviders") : undefined}
+            onClick={() => void runBatchVerification()}
+          >
+            <PlugZap className="h-3.5 w-3.5" />
+            {t("batchOperationVerifyEnabled")}
+          </Button>
+        </div>
+        <BatchTestProgress
+          isRunning={batchVerification.isRunning}
+          progress={
+            batchVerification.total === 0
+              ? 0
+              : (batchVerification.completed / batchVerification.total) * 100
+          }
+          cancelRequested={batchVerification.cancelRequested}
+          onCancel={() => {
+            batchCancelRequested.current = true
+            setBatchVerification((current) => ({ ...current, cancelRequested: true }))
+          }}
+        />
+        {!batchVerification.isRunning && (
+          <TestResultsSummary
+            success={batchVerification.success}
+            failed={batchVerification.failed}
+            total={batchVerification.completed}
+            operationType="verify-enabled"
+            completed={batchVerification.completed}
+            expectedTotal={batchVerification.total}
+            canceled={batchVerification.canceled}
+          />
+        )}
+      </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[320px_1fr]">
         {/* ── Desktop sidebar ──────────────────────────────────────────── */}
@@ -625,32 +831,53 @@ export function ProviderSettings() {
                       : null
                 }
                 isEnabled={isEnabled}
+                canEnable={canEnable}
                 isCustom={isCustom}
                 isDefault={selectedId === defaultProvider}
-                onSetDefault={() => void s.setDefaultProvider(selectedId)}
+                onSetDefault={
+                  canSetDefault ? () => void s.setDefaultProvider(selectedId) : undefined
+                }
                 connectionStatus={
                   isCustom
-                    ? deriveStatus(
-                        selectedCustom?.apiKey,
-                        selectedCustom?.baseURL,
-                        s.customTestResults[selectedId] === "success"
-                          ? true
-                          : s.customTestResults[selectedId] === "error"
-                            ? false
-                            : undefined
-                      )
-                    : deriveStatus(
-                        selectedSettings?.apiKey,
-                        selectedSettings?.baseURL,
-                        s.testResults[selectedId]?.success,
-                        s.testResults[selectedId]?.outcome,
-                        selectedId === "bedrock" && !!selectedSettings?.bedrock
-                          ? validateBedrockConnectionSettings(selectedSettings.bedrock).valid
-                          : false,
-                        selectedSettings?.verificationStatus ?? null
-                      )
+                    ? (() => {
+                        const testOutcome = s.customTestResults[selectedId]
+                        const effectiveTest = preferLiveHealth(
+                          liveProviderHealth[selectedId],
+                          testOutcome === "success"
+                            ? true
+                            : testOutcome === "error"
+                              ? false
+                              : undefined,
+                          testOutcome
+                        )
+                        return deriveStatus(
+                          selectedCustom?.apiKey,
+                          selectedCustom?.baseURL,
+                          effectiveTest.ok,
+                          effectiveTest.outcome
+                        )
+                      })()
+                    : (() => {
+                        const test = s.testResults[selectedId]
+                        const effectiveTest = preferLiveHealth(
+                          liveProviderHealth[selectedId],
+                          test?.success,
+                          test?.outcome
+                        )
+                        return deriveStatus(
+                          selectedSettings?.apiKey,
+                          selectedSettings?.baseURL,
+                          effectiveTest.ok,
+                          effectiveTest.outcome,
+                          selectedId === "bedrock" && !!selectedSettings?.bedrock
+                            ? validateBedrockConnectionSettings(selectedSettings.bedrock).valid
+                            : false,
+                          selectedSettings?.verificationStatus ?? null
+                        )
+                      })()
                 }
                 onToggleEnabled={(next) => {
+                  if (next && !canEnable) return
                   if (isCustom && selectedCustom) {
                     void s.updateCustomProvider(selectedId, { enabled: next })
                   } else {
@@ -893,7 +1120,15 @@ export function ProviderSettings() {
         <ProviderCompareDialog
           open={compareOpen}
           onOpenChange={setCompareOpen}
-          availableProviders={sidebarProviders.map((p) => ({ id: p.id, name: p.name }))}
+          availableProviders={sidebarProviders
+            .filter((provider) => PROVIDERS[provider.id] !== undefined)
+            .map((provider) => ({ id: provider.id, name: provider.name }))}
+          initialSelectedProviderIds={(s.uiPreferences.comparisonProviderIds ?? []).filter(
+            (providerId) => PROVIDERS[providerId] !== undefined
+          )}
+          onSelectedProviderIdsChange={(comparisonProviderIds) => {
+            void setProviderUIPreferences({ comparisonProviderIds })
+          }}
         />
       )}
       <AlertDialog
@@ -923,7 +1158,7 @@ export function ProviderSettings() {
               onClick={() => {
                 if (!pendingDeleteId) return
                 void s.removeCustomProvider(pendingDeleteId)
-                s.setSelectedProviderId(null)
+                void s.setSelectedProviderId(null)
                 setPendingDeleteId(null)
               }}
             >

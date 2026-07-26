@@ -95,6 +95,9 @@ describe("CustomProviderDialog", () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
+    mockAddCustomProvider.mockResolvedValue("custom-provider")
+    mockUpdateCustomProvider.mockResolvedValue(undefined)
+    mockRemoveCustomProvider.mockResolvedValue(undefined)
     mockCustomProviders.length = 0
   })
 
@@ -239,13 +242,67 @@ describe("CustomProviderDialog", () => {
     })
   })
 
-  // TODO(cognia-next): in React 19 + Testing Library 16 the save button stays
-  // disabled after the discovery promise settles even though the underlying
-  // `availableModels` memo recomputes correctly in production. The remaining
-  // 11 dialog tests cover the static surface; this end-to-end discover→save
-  // flow needs a separate look (likely an `act` boundary around the async
-  // setState fan-out from `handleDiscoverModels`).
-  it.skip("persists shared discovered model cache after refreshing openai-compatible models", async () => {
+  it("keeps an edited provider open until the update is persisted", async () => {
+    let resolveUpdate: (() => void) | undefined
+    mockUpdateCustomProvider.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (resolveUpdate = resolve))
+    )
+    mockCustomProviders.push({
+      id: "custom-pending",
+      providerId: "custom-pending",
+      customName: "Pending Provider",
+      name: "Pending Provider",
+      isCustom: true,
+      baseURL: "https://custom.example.com/v1",
+      apiKey: "sk-custom",
+      apiProtocol: "openai",
+      customModels: ["model-1"],
+      defaultModel: "model-1",
+      enabled: true,
+    })
+    const onOpenChange = jest.fn()
+    render(
+      <CustomProviderDialog open onOpenChange={onOpenChange} editingProviderId="custom-pending" />
+    )
+    await waitFor(() => expect(screen.getByDisplayValue("Pending Provider")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByText("save"))
+    expect(screen.getByText("saving")).toBeDisabled()
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+
+    resolveUpdate?.()
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+  })
+
+  it("preserves the editor and reports a failed provider mutation", async () => {
+    mockUpdateCustomProvider.mockRejectedValueOnce(new Error("database unavailable"))
+    mockCustomProviders.push({
+      id: "custom-failed",
+      providerId: "custom-failed",
+      customName: "Failed Provider",
+      name: "Failed Provider",
+      isCustom: true,
+      baseURL: "https://custom.example.com/v1",
+      apiKey: "sk-custom",
+      apiProtocol: "openai",
+      customModels: ["model-1"],
+      defaultModel: "model-1",
+      enabled: true,
+    })
+    const onOpenChange = jest.fn()
+    render(
+      <CustomProviderDialog open onOpenChange={onOpenChange} editingProviderId="custom-failed" />
+    )
+    await waitFor(() => expect(screen.getByDisplayValue("Failed Provider")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByText("save"))
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("customProviderMutationFailed")
+    expect(screen.getByDisplayValue("Failed Provider")).toBeInTheDocument()
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+  })
+
+  it("persists shared discovered model cache after refreshing openai-compatible models", async () => {
     mockDiscoverOpenAICompatibleModels.mockResolvedValue([
       {
         id: "provider/alpha-1",
@@ -257,6 +314,9 @@ describe("CustomProviderDialog", () => {
     ])
 
     render(<CustomProviderDialog {...defaultProps} />)
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    })
 
     fireEvent.change(screen.getByTestId("provider-name"), {
       target: { value: "Remote Custom" },

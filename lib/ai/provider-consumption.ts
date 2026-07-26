@@ -21,13 +21,21 @@ import { createCohere } from "@ai-sdk/cohere"
 import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { createMistral } from "@ai-sdk/mistral"
 import { createOpenAI } from "@ai-sdk/openai"
+import { createAlibaba } from "@ai-sdk/alibaba"
+import { createXai } from "@ai-sdk/xai"
+import { createTogetherAI } from "@ai-sdk/togetherai"
+import { createFireworks } from "@ai-sdk/fireworks"
+import { createDeepInfra } from "@ai-sdk/deepinfra"
 
 import {
   LOCAL_PROVIDER_URLS,
   getOpenAICompatibleURL,
   type LocalProviderName,
 } from "@cognia/provider-types/local-provider"
-import { getBuiltInProviderDefaultBaseURL } from "@cognia/provider-types/built-in-provider-catalog"
+import {
+  getBuiltInProviderCatalogEntry,
+  getBuiltInProviderDefaultBaseURL,
+} from "@cognia/provider-types/built-in-provider-catalog"
 import type {
   ApiFlavor,
   ApiProtocol,
@@ -433,6 +441,12 @@ export function resolveFeatureProvider(
 
   for (const providerId of ordered) {
     attempted.push(providerId)
+    const catalogEntry = getBuiltInProviderCatalogEntry(providerId)
+    if (args.routeProfile === "general-text" && catalogEntry?.supportsChat === false) {
+      lastReason = `Provider "${providerId}" does not support chat completions.`
+      lastNextAction = "open_provider_settings"
+      continue
+    }
     const resolution = resolveOne(providerId, snapshot)
     if (resolution.kind === "resolved") return resolution
     lastReason = resolution.reason
@@ -452,7 +466,7 @@ export function resolveFeatureProvider(
 // =============================================================================
 
 export function createFeatureProviderClient(config: FeatureClientConfig) {
-  const { protocol, apiKey, baseURL, bedrock, fetch: fetchImpl, headers } = config
+  const { providerId, protocol, apiKey, baseURL, bedrock, fetch: fetchImpl, headers } = config
   const settings: {
     apiKey?: string
     baseURL?: string
@@ -466,6 +480,19 @@ export function createFeatureProviderClient(config: FeatureClientConfig) {
   // so non-standalone callers are unaffected.
   if (fetchImpl) settings.fetch = fetchImpl
   if (headers) settings.headers = headers
+
+  switch (providerId) {
+    case "qwen":
+      return createAlibaba(settings)
+    case "xai":
+      return createXai(settings)
+    case "togetherai":
+      return createTogetherAI(settings)
+    case "fireworks":
+      return createFireworks(settings)
+    case "deepinfra":
+      return createDeepInfra(settings)
+  }
 
   switch (protocol) {
     case "anthropic":

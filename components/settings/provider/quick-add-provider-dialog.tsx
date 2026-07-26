@@ -96,6 +96,8 @@ export function QuickAddProviderDialog({
   const [selectedPreset, setSelectedPreset] = useState<QuickAddPreset | null>(null)
   const [apiKey, setApiKey] = useState("")
   const [showKey, setShowKey] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const {
     testing,
     result: testResult,
@@ -131,6 +133,7 @@ export function QuickAddProviderDialog({
   const handleSelectPreset = (preset: QuickAddPreset) => {
     setSelectedPreset(preset)
     setApiKey("")
+    setSaveError(null)
     resetTestResult()
   }
 
@@ -144,21 +147,28 @@ export function QuickAddProviderDialog({
     )
   }
 
-  const handleSave = () => {
-    if (!providerDraft || !providerReadiness?.eligibility.enable.allowed) return
+  const handleSave = async () => {
+    if (!providerDraft || !providerReadiness?.eligibility.enable.allowed || isSaving) return
 
-    addCustomProvider(providerDraft)
-
-    // Reset and close
-    setSelectedPreset(null)
-    setApiKey("")
-    resetTestResult()
-    onOpenChange(false)
+    setIsSaving(true)
+    setSaveError(null)
+    try {
+      await addCustomProvider(providerDraft)
+      setSelectedPreset(null)
+      setApiKey("")
+      resetTestResult()
+      onOpenChange(false)
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   const handleBack = () => {
     setSelectedPreset(null)
     setApiKey("")
+    setSaveError(null)
     resetTestResult()
   }
 
@@ -167,7 +177,12 @@ export function QuickAddProviderDialog({
   )
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!isSaving || nextOpen) onOpenChange(nextOpen)
+      }}
+    >
       <DialogContent className="sm:max-w-[600px] max-h-[85vh]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -296,6 +311,7 @@ export function QuickAddProviderDialog({
                     value={apiKey}
                     onChange={(e) => {
                       setApiKey(e.target.value)
+                      setSaveError(null)
                       resetTestResult()
                     }}
                     placeholder={t("apiKeyPlaceholder")}
@@ -329,17 +345,22 @@ export function QuickAddProviderDialog({
               {t("baseURL")}:{" "}
               <code className="bg-muted px-1 rounded">{selectedPreset.baseURL}</code>
             </p>
+            {saveError && (
+              <p role="alert" className="text-sm text-destructive">
+                {t("quickAddSaveFailed", { error: saveError })}
+              </p>
+            )}
           </div>
         )}
 
         <DialogFooter>
           {selectedPreset ? (
             <>
-              <Button variant="outline" onClick={handleBack}>
+              <Button variant="outline" onClick={handleBack} disabled={isSaving}>
                 {tc("back")}
               </Button>
-              <Button onClick={handleSave} disabled={!canSave}>
-                {tc("save")}
+              <Button onClick={() => void handleSave()} disabled={!canSave || isSaving}>
+                {isSaving ? tc("saving") : tc("save")}
               </Button>
             </>
           ) : (

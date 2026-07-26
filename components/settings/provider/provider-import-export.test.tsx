@@ -116,6 +116,9 @@ describe("ProviderImportExport", () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
+    mockSetProviderSettings.mockResolvedValue(undefined)
+    mockAddCustomProvider.mockResolvedValue("custom-provider")
+    mockUpdateCustomProvider.mockResolvedValue(undefined)
     mockFileReaderContent = ""
   })
 
@@ -132,6 +135,14 @@ describe("ProviderImportExport", () => {
   it("displays import button", () => {
     render(<ProviderImportExport />)
     expect(screen.getByText("import")).toBeInTheDocument()
+  })
+
+  it("keeps compact sidebar controls accessible without consuming label width", () => {
+    render(<ProviderImportExport compact />)
+    expect(screen.getByRole("button", { name: "export" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "import" })).toBeInTheDocument()
+    expect(screen.getByText("export")).toHaveClass("sr-only")
+    expect(screen.getByText("import")).toHaveClass("sr-only")
   })
 
   it("opens export dialog on click", () => {
@@ -314,5 +325,68 @@ describe("ProviderImportExport", () => {
         })
       )
     })
+  })
+
+  it("does not report import success before every settings write is persisted", async () => {
+    let resolveWrite: (() => void) | undefined
+    mockSetProviderSettings.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (resolveWrite = resolve))
+    )
+    mockFileReaderContent = JSON.stringify({
+      version: 1,
+      exportedAt: "2026-03-08T00:00:00.000Z",
+      providerSettings: {
+        openai: {
+          apiKey: "sk-imported",
+          enabled: true,
+        },
+      },
+      customProviders: {},
+    })
+    const { container } = render(<ProviderImportExport />)
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(fileInput, {
+      target: {
+        files: [new File(["ignored"], "providers.json", { type: "application/json" })],
+      },
+    })
+    await waitFor(() => expect(screen.getByText("importNow")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByText("importNow"))
+
+    expect(screen.getByText("importing")).toBeDisabled()
+    expect(screen.queryByText("importSuccess")).not.toBeInTheDocument()
+    resolveWrite?.()
+    await waitFor(() => expect(screen.getByText("importSuccess")).toBeInTheDocument())
+  })
+
+  it("reports a persistence failure instead of claiming the import succeeded", async () => {
+    mockSetProviderSettings.mockRejectedValueOnce(new Error("database unavailable"))
+    mockFileReaderContent = JSON.stringify({
+      version: 1,
+      exportedAt: "2026-03-08T00:00:00.000Z",
+      providerSettings: {
+        openai: {
+          apiKey: "sk-imported",
+          enabled: true,
+        },
+      },
+      customProviders: {},
+    })
+    const { container } = render(<ProviderImportExport />)
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(fileInput, {
+      target: {
+        files: [new File(["ignored"], "providers.json", { type: "application/json" })],
+      },
+    })
+    await waitFor(() => expect(screen.getByText("importNow")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByText("importNow"))
+
+    await waitFor(() =>
+      expect(screen.getByText("importErrors.importFailedRetry")).toBeInTheDocument()
+    )
+    expect(screen.queryByText("importSuccess")).not.toBeInTheDocument()
   })
 })

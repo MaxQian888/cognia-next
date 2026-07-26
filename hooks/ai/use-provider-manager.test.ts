@@ -1,18 +1,49 @@
 /**
  * @jest-environment jsdom
  *
- * Tests for the provider-manager stub. The hook is intentionally inert in
- * cognia-next (the routing engine + circuit breaker + load balancer that
- * Cognia ships hasn't been ported), so the assertions here pin the
- * default shape so consumers don't accidentally depend on behavior that
- * doesn't exist yet.
+ * Provider-manager hooks project the live routing telemetry store into the
+ * compact shape consumed by provider UI components.
  */
 
 import { renderHook, act } from "@testing-library/react"
 import { useProviderHealth, useProviderManager } from "./use-provider-manager"
 
+const metricsState = {
+  metrics: {} as Record<
+    string,
+    {
+      providerId: string
+      totalRequests: number
+      totalSuccesses: number
+      totalErrors: number
+      successRate: number
+      latencyP95: number
+    }
+  >,
+  getMetrics: jest.fn(),
+  getDashboardData: jest.fn(),
+}
+
+jest.mock("@/stores/settings/health-metrics-store", () => ({
+  useHealthMetricsStore: <T>(selector: (state: typeof metricsState) => T): T =>
+    selector(metricsState),
+}))
+
 describe("useProviderHealth", () => {
-  it("returns the inert default health snapshot", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    metricsState.metrics = {}
+    metricsState.getMetrics.mockImplementation((providerId: string) => ({
+      providerId,
+      totalRequests: 0,
+      totalSuccesses: 0,
+      totalErrors: 0,
+      successRate: 1,
+      latencyP95: 0,
+    }))
+  })
+
+  it("returns an unknown snapshot before the provider has telemetry", () => {
     const { result } = renderHook(() => useProviderHealth("openai"))
     expect(result.current.isLoading).toBe(false)
     expect(result.current.health).toEqual({
@@ -24,13 +55,29 @@ describe("useProviderHealth", () => {
     })
   })
 
-  it("ignores the providerId arg (no per-provider memoisation)", () => {
-    const a = renderHook(() => useProviderHealth("openai")).result.current.health
-    const b = renderHook(() => useProviderHealth("anthropic")).result.current.health
-    expect(a).toEqual(b)
+  it("projects provider-specific latency and reliability metrics", () => {
+    metricsState.metrics.openai = {
+      providerId: "openai",
+      totalRequests: 10,
+      totalSuccesses: 8,
+      totalErrors: 2,
+      successRate: 0.8,
+      latencyP95: 420,
+    }
+    metricsState.getMetrics.mockReturnValue(metricsState.metrics.openai)
+
+    const { result } = renderHook(() => useProviderHealth("openai"))
+
+    expect(result.current.health).toEqual({
+      status: "degraded",
+      latencyMs: 420,
+      errorRate: 0.2,
+      successRate: 0.8,
+      totalRequests: 10,
+    })
   })
 
-  it("exposes a refresh() that resolves with undefined and never throws", async () => {
+  it("refresh reads the current synchronous telemetry snapshot", async () => {
     const { result } = renderHook(() => useProviderHealth("openai"))
     await expect(
       act(async () => {
@@ -41,9 +88,30 @@ describe("useProviderHealth", () => {
 })
 
 describe("useProviderManager", () => {
-  it("starts with an empty providers map and isLoading=false", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    metricsState.metrics = {}
+  })
+
+  it("projects every provider currently present in the metrics store", () => {
+    metricsState.metrics = {
+      openai: {
+        providerId: "openai",
+        totalRequests: 4,
+        totalSuccesses: 4,
+        totalErrors: 0,
+        successRate: 1,
+        latencyP95: 120,
+      },
+    }
     const { result } = renderHook(() => useProviderManager())
-    expect(result.current.providers).toEqual({})
+    expect(result.current.providers.openai).toEqual({
+      status: "healthy",
+      latencyMs: 120,
+      errorRate: 0,
+      successRate: 1,
+      totalRequests: 4,
+    })
     expect(result.current.isLoading).toBe(false)
   })
 

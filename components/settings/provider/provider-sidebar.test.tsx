@@ -56,10 +56,16 @@ describe("ProviderSidebar", () => {
     onCompareClick: jest.fn(),
     categoryFilter: "all" as string,
     onCategoryChange: jest.fn(),
+    statusFilter: "all" as const,
+    onStatusFilterChange: jest.fn(),
     searchQuery: "",
     onSearchChange: jest.fn(),
     addButton: <button>Add</button>,
   }
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+  })
 
   it("renders all providers in the list", () => {
     render(<ProviderSidebar {...defaultProps} />)
@@ -166,6 +172,13 @@ describe("ProviderSidebar", () => {
     expect(screen.queryByText("Google")).not.toBeInTheDocument()
     // Stats reflect the narrowed set.
     expect(screen.getByText("2 providers · 2 connected")).toBeInTheDocument()
+    expect(defaultProps.onStatusFilterChange).toHaveBeenCalledWith("connected")
+  })
+
+  it("restores the persisted status filter on remount", () => {
+    render(<ProviderSidebar {...defaultProps} statusFilter="not-configured" />)
+    expect(screen.getByText("Google")).toBeInTheDocument()
+    expect(screen.queryByText("OpenAI")).not.toBeInTheDocument()
   })
 
   it("shows only unconfigured providers when that status is chosen", () => {

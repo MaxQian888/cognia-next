@@ -38,6 +38,8 @@ interface ProviderSidebarProps {
   onCompareClick: () => void
   categoryFilter: string
   onCategoryChange: (category: string) => void
+  statusFilter?: StatusFilter
+  onStatusFilterChange?: (status: StatusFilter) => void
   searchQuery: string
   onSearchChange: (query: string) => void
   addButton?: React.ReactNode
@@ -63,6 +65,8 @@ export function ProviderSidebar({
   onCompareClick,
   categoryFilter,
   onCategoryChange,
+  statusFilter: initialStatusFilter,
+  onStatusFilterChange,
   searchQuery,
   onSearchChange,
   addButton,
@@ -71,7 +75,7 @@ export function ProviderSidebar({
   onClearFilters,
 }: ProviderSidebarProps) {
   const t = useTranslations("providers")
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialStatusFilter ?? "all")
 
   // Local status filter narrows the already-(category/search)-filtered list the
   // parent hands down. Kept here so the parent stays unaware of the extra axis.
@@ -89,6 +93,7 @@ export function ProviderSidebar({
 
   const clearFilters = () => {
     setStatusFilter("all")
+    onStatusFilterChange?.("all")
     onClearFilters?.()
   }
 
@@ -141,7 +146,10 @@ export function ProviderSidebar({
               variant={statusFilter === value ? "secondary" : "ghost"}
               aria-pressed={statusFilter === value}
               className={cn("h-7 shrink-0 whitespace-nowrap px-2 text-xs")}
-              onClick={() => setStatusFilter(value)}
+              onClick={() => {
+                setStatusFilter(value)
+                onStatusFilterChange?.(value)
+              }}
             >
               {t(`sidebar.${key}`)}
             </Button>

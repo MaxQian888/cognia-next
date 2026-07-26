@@ -1,21 +1,11 @@
 "use client"
 
 /**
- * cognia-next adapter for the Cognia provider hook.
+ * Component-facing provider settings adapter.
  *
- * Cognia's `useProviderSettings` is 838 lines and pulls in the MCP
- * store, coding-package gating, batch verification, and routing
- * presets. cognia-next deferred the reliability/routing infrastructure
- * per the provider port plan, so we expose a slimmer hook that:
- *   - reads the rich `UserProviderSettings` map from `useSettingsStore`
- *   - exposes connection-test state in memory (not persisted)
- *   - exposes selected-provider id as a piece of UI state
- *   - delegates create / update / delete to the existing store actions
- *
- * Component imports that point at this path resolve to this hook.
- * Components that need fields the hook doesn't expose either:
- *   1. Get a sensible default (e.g., empty array, no-op callback), or
- *   2. Are skipped from the new `provider-settings.tsx` root.
+ * Provider configuration, persisted UI preferences, connection-test state,
+ * and store mutations stay behind this single surface so consumers do not
+ * maintain competing copies of provider state.
  */
 
 import { useCallback, useMemo, useState } from "react"
@@ -52,7 +42,7 @@ export interface UseProviderSettingsResult {
   // ---------------------------------------------------------------------------
   // Mutations (delegate to the settings store)
   // ---------------------------------------------------------------------------
-  setSelectedProviderId: (id: string | null) => void
+  setSelectedProviderId: (id: string | null) => Promise<void>
   updateProviderSettings: (id: string, patch: Partial<UserProviderSettings>) => Promise<void>
   updateCustomProvider: (id: string, patch: Partial<CustomProviderSettings>) => Promise<void>
   removeCustomProvider: (id: string) => Promise<void>
@@ -77,6 +67,7 @@ export function useProviderSettings(): UseProviderSettingsResult {
   const setStoreDefaultProvider = useSettingsStore((s) => s.setDefaultProvider)
   const upsertCustomProviderStore = useSettingsStore((s) => s.upsertCustomProvider)
   const removeCustomProviderStore = useSettingsStore((s) => s.removeCustomProvider)
+  const setProviderUIPreferences = useSettingsStore((s) => s.setProviderUIPreferences)
 
   const providerSettings = useMemo(
     () => settings?.providerSettings ?? {},
@@ -97,7 +88,7 @@ export function useProviderSettings(): UseProviderSettingsResult {
     return out
   }, [customProvidersList])
 
-  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null)
+  const selectedProviderId = uiPreferences.selectedProviderId ?? null
   const [testResults, setTestResults] = useState<Record<string, ApiTestResult | null>>({})
   const [customTestResults, setCustomTestResults] = useState<
     Record<string, "success" | "error" | "limited" | null>
@@ -128,6 +119,13 @@ export function useProviderSettings(): UseProviderSettingsResult {
       await setProviderConfig(id, patch)
     },
     [setProviderConfig]
+  )
+
+  const setSelectedProviderId = useCallback(
+    async (id: string | null) => {
+      await setProviderUIPreferences({ selectedProviderId: id ?? undefined })
+    },
+    [setProviderUIPreferences]
   )
 
   const updateCustomProvider = useCallback(

@@ -30,6 +30,7 @@ jest.mock("@cognia/provider-core/providers/model-discovery", () => ({
 const mockSetSelectedProviderId = jest.fn()
 const mockSetProviderConfig = jest.fn()
 const mockSetDefaultProvider = jest.fn()
+const mockSetProviderUIPreferences = jest.fn()
 
 let mockHookState: ReturnType<typeof makeHookState>
 
@@ -72,6 +73,7 @@ function makeHookState(overrides?: {
     selectedProviderId: overrides?.selectedProviderId ?? null,
     setSelectedProviderId: mockSetSelectedProviderId,
     setDefaultProvider: mockSetDefaultProvider,
+    uiPreferences: {},
   }
 }
 
@@ -110,6 +112,10 @@ jest.mock("next/dynamic", () => {
 
 jest.mock("@/hooks/settings/use-provider-settings", () => ({
   useProviderSettings: () => mockHookState,
+}))
+
+jest.mock("@/hooks/ai/use-provider-manager", () => ({
+  useProviderManager: () => ({ providers: {}, isLoading: false, refresh: jest.fn() }),
 }))
 
 jest.mock("@/hooks/settings/use-models-dev-catalog", () => ({
@@ -238,6 +244,7 @@ const mockSettingsState = {
   loaded: true,
   setProviderConfig: mockSetProviderConfig,
   setDefaultProvider: mockSetDefaultProvider,
+  setProviderUIPreferences: mockSetProviderUIPreferences,
   providerUsageStats: {},
   settings: { defaultProvider: "openai" } as { defaultProvider?: string },
 }
@@ -622,6 +629,28 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     expect(screen.getByTestId("provider-sidebar-item-openai")).toHaveTextContent("OpenAI")
   })
 
+  it("runs the previously dormant batch verification flow for eligible enabled providers", async () => {
+    mockHookState = makeHookState({
+      filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
+      selectedProviderId: "openai",
+    })
+    mockHookState.providerSettings.openai = {
+      providerId: "openai",
+      enabled: true,
+      apiKey: "sk-openai",
+      defaultModel: "gpt-4o",
+    }
+    mockHookState.testProvider.mockResolvedValue({
+      success: true,
+      outcome: "verified",
+    })
+
+    render(<ProviderSettings />)
+    fireEvent.click(screen.getByTestId("verify-enabled-providers"))
+
+    await waitFor(() => expect(mockHookState.testProvider).toHaveBeenCalledWith("openai"))
+  })
+
   it("auto-selects the first sidebar provider on mount", () => {
     mockHookState = makeHookState({
       filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
@@ -784,6 +813,12 @@ describe("ProviderSettings (cognia-next slim port)", () => {
       ],
       selectedProviderId: "deepseek",
     })
+    mockHookState.providerSettings.deepseek = {
+      providerId: "deepseek",
+      enabled: true,
+      apiKey: "sk-deepseek",
+      defaultModel: "deepseek-chat",
+    }
     rerender(<ProviderSettings />)
     expect(screen.getByTestId("provider-detail-panel")).toHaveAttribute("data-is-default", "false")
     fireEvent.click(screen.getByTestId("mock-set-default"))

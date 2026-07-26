@@ -125,6 +125,8 @@ export interface BuiltInProviderCatalogEntry {
   name: string
   type: BuiltInProviderType
   protocol: BuiltInProviderProtocol
+  /** Whether this provider exposes a chat/text-generation endpoint. Defaults to true. */
+  supportsChat?: boolean
   family?: BuiltInProviderFamily
   /**
    * For relay entries (`*-anthropic` et al.): the vendor this entry is a
@@ -3010,6 +3012,7 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
     name: "Replicate",
     type: "cloud",
     protocol: "openai",
+    supportsChat: false,
     family: "openai-compatible",
     adapter: "openai-compatible",
     apiKeyRequired: true,
@@ -3095,6 +3098,7 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
     name: "Baidu ERNIE (百度文心)",
     type: "cloud",
     protocol: "openai",
+    supportsChat: false,
     family: "openai-compatible",
     adapter: "openai-compatible",
     apiKeyRequired: true,
@@ -3121,6 +3125,7 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
     name: "Tencent Hunyuan (腾讯混元)",
     type: "cloud",
     protocol: "openai",
+    supportsChat: false,
     family: "openai-compatible",
     adapter: "openai-compatible",
     apiKeyRequired: true,
@@ -3175,6 +3180,7 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
     name: "Voyage AI",
     type: "cloud",
     protocol: "openai",
+    supportsChat: false,
     family: "openai-compatible",
     adapter: "openai-compatible",
     apiKeyRequired: true,
@@ -3196,6 +3202,7 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
     name: "Jina AI",
     type: "cloud",
     protocol: "openai",
+    supportsChat: false,
     family: "openai-compatible",
     adapter: "openai-compatible",
     apiKeyRequired: true,
@@ -3217,6 +3224,7 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
     name: "Fal AI",
     type: "cloud",
     protocol: "openai",
+    supportsChat: false,
     family: "openai-compatible",
     adapter: "openai-compatible",
     apiKeyRequired: true,

@@ -15250,6 +15250,10 @@
     "codingPackageMcpZhipuHint": "GLM coding plans include one local Vision MCP server plus remote Search, Reader, and ZRead MCP endpoints.",
     "cohere": "Cohere",
     "cohereDescription": "Command R+, enterprise RAG",
+    "compareModels": "Models",
+    "compareProtocol": "Protocol",
+    "compareSelectedCount": "{count}/{max} selected",
+    "compareType": "Type",
     "comparison": {
       "addModel": "Add Model",
       "audio": "Audio",
@@ -15632,6 +15636,7 @@
     "models": "Models",
     "modelsAvailableThrough": "Models available through this provider",
     "modelsCount": "models",
+    "modelsCountBadge": "{count, plural, one {# model} other {# models}}",
     "modelsDev": {
       "lastSynced": "Last synced: {time}",
       "never": "never",

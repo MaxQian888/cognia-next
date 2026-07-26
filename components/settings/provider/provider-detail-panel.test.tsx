@@ -185,6 +185,22 @@ describe("ProviderDetailPanel", () => {
     expect(onToggleEnabled).toHaveBeenCalledWith(true)
   })
 
+  it("prevents enabling a provider until its required configuration is complete", () => {
+    const onToggleEnabled = jest.fn()
+    render(
+      <ProviderDetailPanel
+        provider={{ id: "openai", name: "OpenAI" }}
+        isEnabled={false}
+        canEnable={false}
+        onToggleEnabled={onToggleEnabled}
+      />
+    )
+
+    expect(screen.getByRole("switch")).toBeDisabled()
+    fireEvent.click(screen.getByRole("switch"))
+    expect(onToggleEnabled).not.toHaveBeenCalled()
+  })
+
   it("renders tab content slots when provided", () => {
     render(
       <ProviderDetailPanel

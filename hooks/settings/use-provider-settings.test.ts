@@ -16,7 +16,12 @@ interface SettingsLike {
     }>
     defaultProvider: string
   } | null
-  providerUIPreferences: { foo: string }
+  providerUIPreferences: {
+    selectedProviderId?: string
+    categoryFilter?: string
+    statusFilter?: "all" | "connected" | "error" | "not-configured"
+  }
+  setProviderUIPreferences: jest.Mock
   setProviderConfig: jest.Mock
   setDefaultProvider: jest.Mock
   upsertCustomProvider: jest.Mock
@@ -31,7 +36,12 @@ const settingsState: SettingsLike = {
     customProviders: [{ id: "cp1", baseURL: "https://x", apiKey: "ck", apiProtocol: "openai" }],
     defaultProvider: "openai",
   },
-  providerUIPreferences: { foo: "bar" },
+  providerUIPreferences: {
+    selectedProviderId: "openai",
+    categoryFilter: "local",
+    statusFilter: "connected",
+  },
+  setProviderUIPreferences: jest.fn().mockResolvedValue(undefined),
   setProviderConfig: jest.fn().mockResolvedValue(undefined),
   setDefaultProvider: jest.fn().mockResolvedValue(undefined),
   upsertCustomProvider: jest.fn().mockResolvedValue(undefined),
@@ -83,7 +93,11 @@ describe("useProviderSettings — derived data", () => {
     })
     expect(result.current.customProviders.cp1).toBeDefined()
     expect(result.current.defaultProvider).toBe("openai")
-    expect(result.current.uiPreferences).toEqual({ foo: "bar" })
+    expect(result.current.uiPreferences).toEqual({
+      selectedProviderId: "openai",
+      categoryFilter: "local",
+      statusFilter: "connected",
+    })
     expect(result.current.visibleCustomProviderIds).toEqual(["cp1"])
   })
 
@@ -103,11 +117,19 @@ describe("useProviderSettings — derived data", () => {
     expect(names).toEqual(sorted)
   })
 
-  it("setSelectedProviderId updates local state", () => {
+  it("restores selectedProviderId from persisted UI preferences", () => {
     const { result } = renderHook(() => useProviderSettings())
-    expect(result.current.selectedProviderId).toBeNull()
-    act(() => result.current.setSelectedProviderId("openai"))
     expect(result.current.selectedProviderId).toBe("openai")
+  })
+
+  it("setSelectedProviderId persists the selection", async () => {
+    const { result } = renderHook(() => useProviderSettings())
+    await act(async () => {
+      await result.current.setSelectedProviderId("anthropic")
+    })
+    expect(settingsState.setProviderUIPreferences).toHaveBeenCalledWith({
+      selectedProviderId: "anthropic",
+    })
   })
 })
 

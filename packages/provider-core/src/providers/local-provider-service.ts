@@ -90,6 +90,24 @@ export interface ModelPullOptions {
   signal?: AbortSignal
 }
 
+function waitForDelay(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) {
+    return Promise.reject(signal.reason ?? new DOMException("Aborted", "AbortError"))
+  }
+
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timeoutId)
+      reject(signal.reason ?? new DOMException("Aborted", "AbortError"))
+    }
+    const timeoutId = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort)
+      resolve()
+    }, ms)
+    signal.addEventListener("abort", onAbort, { once: true })
+  })
+}
+
 /**
  * Get provider capabilities based on provider type
  */
@@ -148,8 +166,8 @@ export function getProviderCapabilities(providerId: LocalProviderName): LocalPro
     localai: {
       canListModels: true,
       canPullModels: true,
-      canDeleteModels: true,
-      canStopModels: false,
+      canDeleteModels: false,
+      canStopModels: true,
       canGenerateEmbeddings: true,
       supportsStreaming: true,
       supportsVision: true,
@@ -157,8 +175,8 @@ export function getProviderCapabilities(providerId: LocalProviderName): LocalPro
     },
     jan: {
       canListModels: true,
-      canPullModels: true,
-      canDeleteModels: true,
+      canPullModels: false,
+      canDeleteModels: false,
       canStopModels: false,
       canGenerateEmbeddings: true,
       supportsStreaming: true,
@@ -345,17 +363,11 @@ export class LocalProviderService {
       return { success: false, unsubscribe: () => {} }
     }
 
-    // PRE-EXISTING GAP, left as-is deliberately: the capability matrix claims
-    // `canPullModels` for localai and jan, but only Ollama's pull protocol is
-    // implemented — the other two expose their own gallery APIs. The old code
-    // called `invoke("local_provider_pull_model")`, a command that has never
-    // existed in Rust, so this path threw on desktop and silently returned
-    // false in the browser. Returning false is the same outcome minus the
-    // throw. Fixing it properly means implementing two more pull protocols,
-    // which is outside this change; flagged rather than quietly widened.
-    if (this.providerId !== "ollama") {
-      return { success: false, unsubscribe: () => {} }
+    if (this.providerId === "localai") {
+      return this.pullLocalAIModel(modelName, options)
     }
+
+    if (this.providerId !== "ollama") return { success: false, unsubscribe: () => {} }
 
     return pullOllamaModelStreaming({
       baseUrl: this.baseUrl,
@@ -363,6 +375,64 @@ export class LocalProviderService {
       onProgress: options?.onProgress,
       signal: options?.signal,
     })
+  }
+
+  private async pullLocalAIModel(
+    modelName: string,
+    options?: ModelPullOptions
+  ): Promise<{ success: boolean; unsubscribe: () => void }> {
+    const controller = new AbortController()
+    const abort = () => controller.abort()
+    options?.signal?.addEventListener("abort", abort, { once: true })
+
+    try {
+      if (options?.signal?.aborted) controller.abort()
+      const applyResponse = await proxyFetch(`${this.baseUrl}/models/apply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: modelName }),
+        signal: controller.signal,
+      })
+      if (!applyResponse.ok) {
+        throw new Error(`Failed to install model: ${applyResponse.status}`)
+      }
+
+      const applyResult = (await applyResponse.json()) as { uuid?: string }
+      if (!applyResult.uuid) {
+        throw new Error("LocalAI did not return a model installation job id")
+      }
+
+      options?.onProgress?.({ model: modelName, status: "queued", percentage: 0 })
+      const jobUrl = `${this.baseUrl}/models/jobs/${encodeURIComponent(applyResult.uuid)}`
+
+      while (true) {
+        const jobResponse = await proxyFetch(jobUrl, {
+          method: "GET",
+          signal: controller.signal,
+        })
+        if (!jobResponse.ok) {
+          throw new Error(`Failed to read model installation job: ${jobResponse.status}`)
+        }
+
+        const job = (await jobResponse.json()) as {
+          processed?: boolean
+          error?: string | null
+          message?: string
+          phase?: string
+        }
+        const status = job.phase || job.message || (job.processed ? "completed" : "processing")
+        if (job.error) throw new Error(job.error)
+        if (job.processed) {
+          options?.onProgress?.({ model: modelName, status, percentage: 100 })
+          return { success: true, unsubscribe: abort }
+        }
+
+        options?.onProgress?.({ model: modelName, status })
+        await waitForDelay(1000, controller.signal)
+      }
+    } finally {
+      options?.signal?.removeEventListener("abort", abort)
+    }
   }
 
   /**
@@ -373,7 +443,6 @@ export class LocalProviderService {
       return false
     }
 
-    // HTTP fallback for Ollama
     if (this.providerId === "ollama") {
       const response = await proxyFetch(`${this.baseUrl}/api/delete`, {
         method: "DELETE",
@@ -407,6 +476,15 @@ export class LocalProviderService {
         body: JSON.stringify({ model: modelName, keep_alive: 0 }),
       })
 
+      return response.ok
+    }
+
+    if (this.providerId === "localai") {
+      const response = await proxyFetch(`${this.baseUrl}/backend/shutdown`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: modelName }),
+      })
       return response.ok
     }
 

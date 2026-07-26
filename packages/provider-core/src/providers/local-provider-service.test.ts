@@ -89,6 +89,19 @@ describe("getProviderCapabilities", () => {
     expect(getProviderCapabilities("vllm").canPullModels).toBe(false)
   })
 
+  it("only advertises model-management operations backed by a public server API", () => {
+    expect(getProviderCapabilities("localai")).toMatchObject({
+      canPullModels: true,
+      canDeleteModels: false,
+      canStopModels: true,
+    })
+    expect(getProviderCapabilities("jan")).toMatchObject({
+      canPullModels: false,
+      canDeleteModels: false,
+      canStopModels: false,
+    })
+  })
+
   it("falls back to a conservative default for unknown providers", () => {
     const cap = getProviderCapabilities("unknown-engine" as unknown as LocalProviderName)
     expect(cap).toMatchObject({
@@ -359,15 +372,65 @@ describe("LocalProviderService.pullModel", () => {
     expect(unlistenFn).toHaveBeenCalled()
   })
 
-  it("reports failure for providers whose pull protocol is unimplemented (localai/jan)", async () => {
+  it("installs LocalAI gallery models and polls the returned job to completion", async () => {
     setTauri(true)
-    setProviderCoreRuntimeAdapters({ isTauri: () => true })
-    // Their capability matrix advertises canPullModels, but only Ollama's pull
-    // protocol exists here — a known gap. It must fail visibly, not invoke a
-    // command that was never written.
-    const result = await new LocalProviderService("localai").pullModel("phi-3")
+    const proxy = jest
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          uuid: "job-123",
+          status: "http://localhost:8080/models/jobs/job-123",
+        })
+      )
+      .mockResolvedValueOnce(jsonResponse({ processed: true, error: null, message: "completed" }))
+    setProviderCoreRuntimeAdapters({ isTauri: () => true, proxyFetch: proxy })
+    const onProgress = jest.fn()
+
+    const result = await new LocalProviderService("localai", "http://127.0.0.1:9080").pullModel(
+      "local-models@phi-3",
+      { onProgress }
+    )
+
+    expect(result.success).toBe(true)
+    expect(proxy).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:9080/models/apply",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ id: "local-models@phi-3" }),
+      })
+    )
+    expect(proxy.mock.calls[1][0]).toBe("http://127.0.0.1:9080/models/jobs/job-123")
+    expect(onProgress).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ model: "local-models@phi-3", status: "queued" })
+    )
+    expect(onProgress).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        model: "local-models@phi-3",
+        status: "completed",
+        percentage: 100,
+      })
+    )
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("rejects LocalAI model jobs that finish with an error", async () => {
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ uuid: "job-123" }))
+      .mockResolvedValueOnce(
+        jsonResponse({ processed: true, error: "download failed", message: "failed" })
+      )
+
+    await expect(
+      new LocalProviderService("localai").pullModel("local-models@phi-3")
+    ).rejects.toThrow("download failed")
+  })
+
+  it("does not advertise or attempt Jan model downloads through its inference API", async () => {
+    const result = await new LocalProviderService("jan").pullModel("phi-3")
     expect(result.success).toBe(false)
-    expect(invokeMock).not.toHaveBeenCalled()
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 
   it("(browser ollama) streams JSON lines from /api/pull and forwards progress payloads", async () => {
@@ -459,12 +522,7 @@ describe("LocalProviderService.deleteModel + stopModel + generateEmbedding", () 
     await expect(svc.deleteModel("foo")).rejects.toThrow(/500/)
   })
 
-  it("deleteModel reports failure for providers whose delete protocol is unimplemented", async () => {
-    setTauri(true)
-    setProviderCoreRuntimeAdapters({ isTauri: () => true })
-    // Same known gap as pullModel: localai/jan advertise the capability, but
-    // only Ollama's delete protocol is implemented. The old code invoked
-    // `local_provider_delete_model`, which does not exist in Rust.
+  it("deleteModel reports failure when the provider has no public delete protocol", async () => {
     await expect(new LocalProviderService("localai").deleteModel("foo")).resolves.toBe(false)
     expect(invokeMock).not.toHaveBeenCalled()
   })
@@ -491,6 +549,16 @@ describe("LocalProviderService.deleteModel + stopModel + generateEmbedding", () 
     expect(JSON.parse((fetchSpy.mock.calls[0][1] as { body: string }).body)).toMatchObject({
       model: "foo",
       keep_alive: 0,
+    })
+  })
+
+  it("stopModel uses LocalAI's backend shutdown endpoint", async () => {
+    fetchSpy.mockResolvedValue(jsonResponse({ message: "stopped" }))
+
+    expect(await new LocalProviderService("localai").stopModel("phi-3")).toBe(true)
+    expect(fetchSpy.mock.calls[0][0]).toBe("http://localhost:8080/backend/shutdown")
+    expect(JSON.parse((fetchSpy.mock.calls[0][1] as { body: string }).body)).toEqual({
+      model: "phi-3",
     })
   })
 

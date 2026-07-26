@@ -15250,6 +15250,10 @@
     "codingPackageMcpZhipuHint": "GLM 代码套餐同时提供一个本地 Vision MCP，以及远程 Search、Reader、ZRead MCP 端点。",
     "cohere": "Cohere",
     "cohereDescription": "Command R+、企业级 RAG",
+    "compareModels": "模型",
+    "compareProtocol": "协议",
+    "compareSelectedCount": "已选 {count}/{max}",
+    "compareType": "类型",
     "comparison": {
       "addModel": "添加模型",
       "audio": "音频",
@@ -15632,6 +15636,7 @@
     "models": "模型",
     "modelsAvailableThrough": "通过此服务商可用的模型",
     "modelsCount": "个模型",
+    "modelsCountBadge": "{count} 个模型",
     "modelsDev": {
       "lastSynced": "上次同步：{time}",
       "never": "尚未同步",

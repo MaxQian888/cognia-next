@@ -465,6 +465,8 @@ export interface ProviderModelUsageEntry {
 
 /** UI state for the providers settings page (sidebar filters / view mode). */
 export interface ProviderUIPreferences {
+  /** Last provider opened in the settings detail pane. */
+  selectedProviderId?: string
   /** Filter by status badge in the sidebar. */
   statusFilter?: "all" | "connected" | "error" | "not-configured"
   /** Filter by category from the catalog (flagship / aggregator / local / …). */

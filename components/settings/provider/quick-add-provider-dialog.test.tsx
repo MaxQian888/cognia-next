@@ -75,6 +75,7 @@ describe("QuickAddProviderDialog", () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
+    mockAddCustomProvider.mockResolvedValue("custom-provider")
   })
 
   describe("rendering", () => {
@@ -214,6 +215,39 @@ describe("QuickAddProviderDialog", () => {
           })
         )
       })
+    })
+
+    it("keeps the dialog open until the provider has been persisted", async () => {
+      let resolveSave: ((providerId: string) => void) | undefined
+      mockAddCustomProvider.mockImplementationOnce(
+        () => new Promise<string>((resolve) => (resolveSave = resolve))
+      )
+      const onOpenChange = jest.fn()
+      render(<QuickAddProviderDialog open onOpenChange={onOpenChange} />)
+
+      await userEvent.click(screen.getByText("SiliconFlow (硅基流动)"))
+      await userEvent.type(screen.getByLabelText("apiKey"), "siliconflow-key")
+      await userEvent.click(screen.getByText("save"))
+
+      expect(screen.getByText("saving")).toBeDisabled()
+      expect(onOpenChange).not.toHaveBeenCalledWith(false)
+
+      resolveSave?.("custom-provider")
+      await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+    })
+
+    it("preserves the draft and shows a localized error when persistence fails", async () => {
+      mockAddCustomProvider.mockRejectedValueOnce(new Error("database unavailable"))
+      const onOpenChange = jest.fn()
+      render(<QuickAddProviderDialog open onOpenChange={onOpenChange} />)
+
+      await userEvent.click(screen.getByText("SiliconFlow (硅基流动)"))
+      await userEvent.type(screen.getByLabelText("apiKey"), "siliconflow-key")
+      await userEvent.click(screen.getByText("save"))
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("quickAddSaveFailed")
+      expect(screen.getByLabelText("apiKey")).toHaveValue("siliconflow-key")
+      expect(onOpenChange).not.toHaveBeenCalledWith(false)
     })
   })
 

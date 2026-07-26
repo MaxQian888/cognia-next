@@ -36,6 +36,12 @@ describe("built-in provider catalog", () => {
     })
   })
 
+  it("marks built-in providers without a working chat endpoint as non-chat", () => {
+    for (const providerId of ["replicate", "baidu", "tencent", "voyage", "jina", "fal"]) {
+      expect(getBuiltInProviderCatalogEntry(providerId)?.supportsChat).toBe(false)
+    }
+  })
+
   it("builds default settings from catalog credential and base URL requirements", () => {
     const settings = buildDefaultBuiltInProviderSettings()
 

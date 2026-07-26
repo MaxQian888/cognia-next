@@ -63,9 +63,12 @@ interface ProviderCompareDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   availableProviders: Array<{ id: string; name: string }>
+  initialSelectedProviderIds?: string[]
+  onSelectedProviderIdsChange?: (ids: string[]) => void
 }
 
 const MAX_COMPARE = 4
+const EMPTY_PROVIDER_SELECTION: string[] = []
 
 function CapabilityCell({ has }: { has: boolean }) {
   return has ? (
@@ -85,9 +88,16 @@ export function ProviderCompareDialog({
   open,
   onOpenChange,
   availableProviders,
+  initialSelectedProviderIds = EMPTY_PROVIDER_SELECTION,
+  onSelectedProviderIdsChange,
 }: ProviderCompareDialogProps) {
   const t = useTranslations("providers")
-  const [selected, setSelected] = useState<string[]>([])
+  const [selected, setSelected] = useState<string[]>(() => {
+    const availableIds = new Set(availableProviders.map((provider) => provider.id))
+    return initialSelectedProviderIds
+      .filter((providerId) => availableIds.has(providerId))
+      .slice(0, MAX_COMPARE)
+  })
 
   const compareData = useMemo(
     () => selected.map((id) => getProviderCompareData(id)).filter(Boolean) as CompareProvider[],
@@ -95,13 +105,15 @@ export function ProviderCompareDialog({
   )
 
   const toggleProvider = (id: string) => {
-    setSelected((prev) =>
-      prev.includes(id)
+    setSelected((prev) => {
+      const next = prev.includes(id)
         ? prev.filter((p) => p !== id)
         : prev.length < MAX_COMPARE
           ? [...prev, id]
           : prev
-    )
+      if (next !== prev) onSelectedProviderIdsChange?.(next)
+      return next
+    })
   }
 
   const columns = Math.min(compareData.length, MAX_COMPARE)
@@ -122,7 +134,7 @@ export function ProviderCompareDialog({
         {/* Provider selection */}
         <div className="space-y-2">
           <Label className="text-xs font-medium text-muted-foreground">
-            {selected.length}/{MAX_COMPARE} selected
+            {t("compareSelectedCount", { count: selected.length, max: MAX_COMPARE })}
           </Label>
           <ScrollArea className="max-h-32">
             <div className="flex flex-wrap gap-1.5">
@@ -178,7 +190,9 @@ export function ProviderCompareDialog({
               ))}
 
               {/* Model count */}
-              <div className="border-b p-2 text-xs font-medium text-muted-foreground">Models</div>
+              <div className="border-b p-2 text-xs font-medium text-muted-foreground">
+                {t("compareModels")}
+              </div>
               {compareData.map((p) => (
                 <div key={p.id} className="border-b border-l p-2 text-center text-sm tabular-nums">
                   {p.modelCount}
@@ -196,7 +210,9 @@ export function ProviderCompareDialog({
               ))}
 
               {/* Protocol */}
-              <div className="border-b p-2 text-xs font-medium text-muted-foreground">Protocol</div>
+              <div className="border-b p-2 text-xs font-medium text-muted-foreground">
+                {t("compareProtocol")}
+              </div>
               {compareData.map((p) => (
                 <div key={p.id} className="border-b border-l p-2 text-center">
                   <Badge variant="secondary" className="text-[10px]">
@@ -206,7 +222,9 @@ export function ProviderCompareDialog({
               ))}
 
               {/* Type */}
-              <div className="border-b p-2 text-xs font-medium text-muted-foreground">Type</div>
+              <div className="border-b p-2 text-xs font-medium text-muted-foreground">
+                {t("compareType")}
+              </div>
               {compareData.map((p) => (
                 <div key={p.id} className="border-b border-l p-2 text-center">
                   <Badge

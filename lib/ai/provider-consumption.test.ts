@@ -2,6 +2,11 @@ import { createAnthropic } from "@ai-sdk/anthropic"
 import { createAzure } from "@ai-sdk/azure"
 import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock"
 import { createOpenAI } from "@ai-sdk/openai"
+import { createAlibaba } from "@ai-sdk/alibaba"
+import { createXai } from "@ai-sdk/xai"
+import { createTogetherAI } from "@ai-sdk/togetherai"
+import { createFireworks } from "@ai-sdk/fireworks"
+import { createDeepInfra } from "@ai-sdk/deepinfra"
 
 import {
   createProviderSettingsSnapshot,
@@ -51,6 +56,26 @@ jest.mock("@ai-sdk/azure", () => ({
 
 jest.mock("@ai-sdk/amazon-bedrock", () => ({
   createAmazonBedrock: makeEndpointFamilyFactory("amazon-bedrock"),
+}))
+
+jest.mock("@ai-sdk/alibaba", () => ({
+  createAlibaba: makeEndpointFamilyFactory("alibaba"),
+}))
+
+jest.mock("@ai-sdk/xai", () => ({
+  createXai: makeEndpointFamilyFactory("xai"),
+}))
+
+jest.mock("@ai-sdk/togetherai", () => ({
+  createTogetherAI: makeEndpointFamilyFactory("togetherai"),
+}))
+
+jest.mock("@ai-sdk/fireworks", () => ({
+  createFireworks: makeEndpointFamilyFactory("fireworks"),
+}))
+
+jest.mock("@ai-sdk/deepinfra", () => ({
+  createDeepInfra: makeEndpointFamilyFactory("deepinfra"),
 }))
 
 describe("createProviderSettingsSnapshot", () => {
@@ -460,6 +485,24 @@ describe("resolveFeatureProvider — selection + fallback modes", () => {
     expect((r as ResolvedProvider).providerId).toBe("google")
   })
 
+  it("skips media-only providers when resolving a general-text fallback", () => {
+    const withMediaFirst: ProviderSettingsSnapshot = {
+      defaultProvider: undefined,
+      providers: {
+        fal: { enabled: true, apiKey: "fal-key" },
+        openai: { enabled: true, apiKey: "openai-key" },
+      },
+      customProviders: [],
+    }
+
+    const r = resolveFeatureProvider(
+      { featureId: "f", routeProfile: "general-text", selectionMode: "any", fallbackMode: "none" },
+      withMediaFirst
+    )
+
+    expect(r).toMatchObject({ kind: "resolved", providerId: "openai" })
+  })
+
   it("'supported-providers' walks the supplied list", () => {
     const r = resolveFeatureProvider(
       {
@@ -574,6 +617,11 @@ describe("createFeatureProviderClient / createFeatureProviderModel", () => {
     ;(createOpenAI as jest.Mock).mockClear()
     ;(createAzure as jest.Mock).mockClear()
     ;(createAmazonBedrock as jest.Mock).mockClear()
+    ;(createAlibaba as jest.Mock).mockClear()
+    ;(createXai as jest.Mock).mockClear()
+    ;(createTogetherAI as jest.Mock).mockClear()
+    ;(createFireworks as jest.Mock).mockClear()
+    ;(createDeepInfra as jest.Mock).mockClear()
   })
 
   const base = {
@@ -596,6 +644,43 @@ describe("createFeatureProviderClient / createFeatureProviderModel", () => {
       const client = createFeatureProviderClient({ ...base, protocol })
       expect(client).toBeDefined()
     }
+  })
+
+  it("uses the native Alibaba AI SDK provider for Qwen", () => {
+    createFeatureProviderClient({
+      ...base,
+      providerId: "qwen",
+      protocol: "openai",
+      apiKey: "dashscope-key",
+      baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    })
+
+    expect(createAlibaba).toHaveBeenCalledWith({
+      apiKey: "dashscope-key",
+      baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    })
+    expect(createOpenAI).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["xai", createXai],
+    ["togetherai", createTogetherAI],
+    ["fireworks", createFireworks],
+    ["deepinfra", createDeepInfra],
+  ] as const)("uses the native %s AI SDK provider for chat", (providerId, factory) => {
+    createFeatureProviderClient({
+      ...base,
+      providerId,
+      protocol: "openai",
+      apiKey: `${providerId}-key`,
+      baseURL: `https://${providerId}.example/v1`,
+    })
+
+    expect(factory).toHaveBeenCalledWith({
+      apiKey: `${providerId}-key`,
+      baseURL: `https://${providerId}.example/v1`,
+    })
+    expect(createOpenAI).not.toHaveBeenCalled()
   })
 
   it("builds Bedrock clients for API-key and explicit-IAM modes", () => {

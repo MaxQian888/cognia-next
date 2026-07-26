@@ -106,6 +106,8 @@ export function CustomProviderDialog({
   >()
   const [discoveringModels, setDiscoveringModels] = useState(false)
   const [discoveryError, setDiscoveryError] = useState<string | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+  const [mutationError, setMutationError] = useState<string | null>(null)
   // ADR-0090 Phase 1 — static transport headers, validated by the shared
   // header policy inside the editor (blocked names never reach the store).
   const [customHeaders, setCustomHeaders] = useState<Record<string, string> | undefined>(undefined)
@@ -257,8 +259,8 @@ export function CustomProviderDialog({
     }
   }
 
-  const handleSave = () => {
-    if (!name.trim() || !baseURL.trim() || availableModels.length === 0) return
+  const handleSave = async () => {
+    if (!name.trim() || !baseURL.trim() || availableModels.length === 0 || isSaving) return
 
     const providerData = {
       providerId: editingProviderId || "",
@@ -281,19 +283,34 @@ export function CustomProviderDialog({
       enabled: editingProviderId ? (customProviders[editingProviderId]?.enabled ?? true) : true,
     }
 
-    if (editingProviderId) {
-      updateCustomProvider(editingProviderId, providerData)
-    } else {
-      addCustomProvider(providerData)
+    setIsSaving(true)
+    setMutationError(null)
+    try {
+      if (editingProviderId) {
+        await updateCustomProvider(editingProviderId, providerData)
+      } else {
+        await addCustomProvider(providerData)
+      }
+      onOpenChange(false)
+    } catch (error) {
+      setMutationError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setIsSaving(false)
     }
-
-    onOpenChange(false)
   }
 
-  const handleDelete = () => {
-    if (editingProviderId) {
-      removeCustomProvider(editingProviderId)
+  const handleDelete = async () => {
+    if (!editingProviderId || isSaving) return
+
+    setIsSaving(true)
+    setMutationError(null)
+    try {
+      await removeCustomProvider(editingProviderId)
       onOpenChange(false)
+    } catch (error) {
+      setMutationError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setIsSaving(false)
     }
   }
 
@@ -301,7 +318,12 @@ export function CustomProviderDialog({
   const canSave = name.trim() && baseURL.trim() && availableModels.length > 0
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!isSaving || nextOpen) onOpenChange(nextOpen)
+      }}
+    >
       <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEditing ? t("editCustomProvider") : t("addCustomProvider")}</DialogTitle>
@@ -659,10 +681,20 @@ export function CustomProviderDialog({
               {showDeleteConfirm ? (
                 <div className="flex items-center gap-2 mr-auto">
                   <span className="text-sm text-destructive">{t("confirmDeleteProvider")}</span>
-                  <Button variant="destructive" size="sm" onClick={handleDelete}>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => void handleDelete()}
+                    disabled={isSaving}
+                  >
                     {tc("confirm")}
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => setShowDeleteConfirm(false)}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowDeleteConfirm(false)}
+                    disabled={isSaving}
+                  >
                     {tc("cancel")}
                   </Button>
                 </div>
@@ -671,17 +703,23 @@ export function CustomProviderDialog({
                   variant="ghost"
                   className="mr-auto text-destructive hover:text-destructive"
                   onClick={() => setShowDeleteConfirm(true)}
+                  disabled={isSaving}
                 >
                   {tc("delete")}
                 </Button>
               )}
             </>
           )}
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          {mutationError && (
+            <p role="alert" className="mr-auto text-sm text-destructive">
+              {t("customProviderMutationFailed", { error: mutationError })}
+            </p>
+          )}
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
             {tc("cancel")}
           </Button>
-          <Button onClick={handleSave} disabled={!canSave}>
-            {tc("save")}
+          <Button onClick={() => void handleSave()} disabled={!canSave || isSaving}>
+            {isSaving ? tc("saving") : tc("save")}
           </Button>
         </DialogFooter>
       </DialogContent>

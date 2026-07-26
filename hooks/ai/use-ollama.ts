@@ -1,19 +1,20 @@
 "use client"
 
 /**
- * Minimal Ollama hook used by `ollama-model-manager.tsx`.
+ * Ollama lifecycle hook used by the legacy `OllamaModelManager`.
  *
- * Cognia ships a richer hook that talks to native Ollama Tauri commands
- * (model pull / cancel / delete). cognia-next defers those Rust bindings;
- * this hook lists models via the public REST API and reports "not
- * available" for the destructive operations until the Rust side ships.
+ * All operations delegate to provider-core, which routes desktop HTTP through
+ * the Rust proxy and uses the dedicated streaming transport for model pulls.
  */
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
-  generateOllamaEmbedding as _ignored,
-  // The HTTP helpers live in the same module as the embedding helper; we
-  // just need direct fetch against /api/tags etc. so this is intentional.
+  deleteOllamaModel,
+  getOllamaStatus,
+  listOllamaModels,
+  listRunningModels,
+  pullOllamaModel,
+  stopOllamaModel,
 } from "@cognia/provider-core/providers/ollama"
 
 export interface OllamaModel {
@@ -74,48 +75,28 @@ export function useOllama(args: UseOllamaArgs): UseOllamaResult {
   const [models, setModels] = useState<OllamaModel[]>([])
   const [runningModels, setRunningModels] = useState<OllamaModel[]>([])
   const [pullStates, setPullStates] = useState<Map<string, OllamaPullState>>(() => new Map())
+  const pullHandles = useRef(new Map<string, () => void>())
 
   const refresh = useCallback(async () => {
     if (!baseUrl) return
     setIsLoading(true)
     setError(null)
     try {
-      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/tags`, {
-        method: "GET",
-      })
-      if (!res.ok) throw new Error(`Ollama responded ${res.status}`)
-      const data = (await res.json()) as { models?: OllamaModel[] }
-      setModels(data.models ?? [])
-
-      // Best-effort version query.
-      let version: string | undefined
-      try {
-        const verRes = await fetch(`${baseUrl.replace(/\/$/, "")}/api/version`)
-        if (verRes.ok) {
-          const verData = (await verRes.json()) as { version?: string }
-          version = verData.version
-        }
-      } catch {
-        // optional
-      }
-
+      const [nextStatus, nextModels] = await Promise.all([
+        getOllamaStatus(baseUrl),
+        listOllamaModels(baseUrl),
+      ])
+      setModels(nextModels)
       setStatus({
-        state: "connected",
-        version,
-        models_count: data.models?.length ?? 0,
+        state: nextStatus.connected ? "connected" : "disconnected",
+        version: nextStatus.version,
+        models_count: nextModels.length,
       })
 
-      // Best-effort running-models query
       try {
-        const psRes = await fetch(`${baseUrl.replace(/\/$/, "")}/api/ps`, {
-          method: "GET",
-        })
-        if (psRes.ok) {
-          const psData = (await psRes.json()) as { models?: OllamaModel[] }
-          setRunningModels(psData.models ?? [])
-        }
+        setRunningModels(await listRunningModels(baseUrl))
       } catch {
-        // /api/ps is optional on older Ollama versions; ignore.
+        setRunningModels([])
       }
     } catch (err) {
       setStatus({ state: "error" })
@@ -137,9 +118,128 @@ export function useOllama(args: UseOllamaArgs): UseOllamaResult {
     }
   }, [refresh, autoRefresh, refreshInterval])
 
-  const unavailable = useCallback(async (op: string, modelName: string) => {
-    setError(`${op} for "${modelName}" requires native Ollama bindings (deferred).`)
+  useEffect(() => {
+    const handles = pullHandles.current
+    return () => {
+      handles.forEach((unsubscribe) => unsubscribe())
+      handles.clear()
+    }
   }, [])
+
+  const pullModel = useCallback(
+    async (modelName: string) => {
+      if (!baseUrl) return
+      setError(null)
+      setPullStates((previous) => {
+        const next = new Map(previous)
+        next.set(modelName, {
+          modelName,
+          status: "pulling",
+          percentage: 0,
+          isActive: true,
+        })
+        return next
+      })
+
+      try {
+        const handle = await pullOllamaModel(baseUrl, modelName, (progress) => {
+          setPullStates((previous) => {
+            const current = previous.get(modelName)
+            if (!current?.isActive) return previous
+            const next = new Map(previous)
+            const percentage =
+              progress.total && progress.completed
+                ? Math.min(100, Math.round((progress.completed / progress.total) * 100))
+                : current.percentage
+            next.set(modelName, {
+              ...current,
+              progress,
+              digest: progress.digest ?? current.digest,
+              percentage,
+            })
+            return next
+          })
+        })
+        pullHandles.current.set(modelName, handle.unsubscribe)
+        setPullStates((previous) => {
+          const current = previous.get(modelName)
+          if (!current?.isActive) return previous
+          const next = new Map(previous)
+          next.set(modelName, {
+            ...current,
+            status: handle.success ? "completed" : "error",
+            percentage: handle.success ? 100 : current.percentage,
+            error: handle.success ? undefined : "pull-failed",
+            isActive: false,
+          })
+          return next
+        })
+        handle.unsubscribe()
+        pullHandles.current.delete(modelName)
+        if (handle.success) await refresh()
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        setError(message)
+        setPullStates((previous) => {
+          const next = new Map(previous)
+          next.set(modelName, {
+            modelName,
+            status: "error",
+            percentage: 0,
+            error: message,
+            isActive: false,
+          })
+          return next
+        })
+      }
+    },
+    [baseUrl, refresh]
+  )
+
+  const cancelPull = useCallback(async (modelName: string) => {
+    pullHandles.current.get(modelName)?.()
+    pullHandles.current.delete(modelName)
+    setPullStates((previous) => {
+      const current = previous.get(modelName)
+      const next = new Map(previous)
+      next.set(modelName, {
+        modelName,
+        percentage: current?.percentage ?? 0,
+        ...current,
+        status: "cancelled",
+        isActive: false,
+      })
+      return next
+    })
+  }, [])
+
+  const deleteModel = useCallback(
+    async (modelName: string) => {
+      if (!baseUrl) return
+      setError(null)
+      try {
+        await deleteOllamaModel(baseUrl, modelName)
+        await refresh()
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+      }
+    },
+    [baseUrl, refresh]
+  )
+
+  const stopModel = useCallback(
+    async (modelName: string) => {
+      if (!baseUrl) return
+      setError(null)
+      try {
+        await stopOllamaModel(baseUrl, modelName)
+        await refresh()
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+      }
+    },
+    [baseUrl, refresh]
+  )
 
   return {
     status,
@@ -151,34 +251,9 @@ export function useOllama(args: UseOllamaArgs): UseOllamaResult {
     pullStates,
     isPulling: Array.from(pullStates.values()).some((p) => p.isActive),
     refresh,
-    pullModel: async (m) => {
-      setPullStates((prev) => {
-        const next = new Map(prev)
-        next.set(m, {
-          modelName: m,
-          status: "error",
-          percentage: 0,
-          error: "Native pull deferred",
-          isActive: false,
-        })
-        return next
-      })
-      await unavailable("pullModel", m)
-    },
-    cancelPull: async (m) => {
-      setPullStates((prev) => {
-        const next = new Map(prev)
-        const cur = next.get(m) ?? {
-          modelName: m,
-          percentage: 0,
-          status: "cancelled" as const,
-          isActive: false,
-        }
-        next.set(m, { ...cur, status: "cancelled", isActive: false })
-        return next
-      })
-    },
-    deleteModel: async (m) => unavailable("deleteModel", m),
-    stopModel: async (m) => unavailable("stopModel", m),
+    pullModel,
+    cancelPull,
+    deleteModel,
+    stopModel,
   }
 }
