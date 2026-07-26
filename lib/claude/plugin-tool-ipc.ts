@@ -22,6 +22,7 @@
  */
 
 import type { PluginToolContext } from "@/types/plugin"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { WORKFLOW_RUNNER_TOOL_NAME } from "@/lib/workflow/publish/runner-tool"
 import { ASK_USER_TOOL_NAME } from "./ask-user-tool"
 import { DISPATCH_AGENT_TOOL_NAME, TASK_TOOL_NAME } from "./agents/dispatch-agent-tool"
@@ -43,6 +44,15 @@ import {
 } from "./editor-builtin-tools"
 import { isTeamBuiltinTool, runTeamBuiltinTool } from "./team-builtin-tools"
 import { getTeamDispatchContext } from "./agents/dispatch-context-registry"
+
+const PLUGIN_TOOL_RESULT_PII_ERROR = "Plugin tool result blocked by the PII redaction gate"
+
+function assertSafePluginToolResult<T>(result: T): T {
+  if (!hasNoLeakingPiiDeep(result)) {
+    throw new Error(PLUGIN_TOOL_RESULT_PII_ERROR)
+  }
+  return result
+}
 
 export interface PluginToolExecRequest {
   type: "plugin_tool_exec"
@@ -329,7 +339,7 @@ export async function handlePluginToolExec(
     // lib/search + lib/document, which the .mjs sidecar can't import.
     if (isWebBuiltinTool(request.name)) {
       const result = await runWebBuiltinTool(request.name, request.args, await resolveWebToolDeps())
-      return { ...baseResponse, result }
+      return { ...baseResponse, result: assertSafePluginToolResult(result) }
     }
     // ── Promoted editor built-in — read_active_editor (Pro IDE → agent) ────
     // Host-routed: needs the renderer transport (codeserver_agent_read_active)
@@ -341,7 +351,7 @@ export async function handlePluginToolExec(
         await resolveEditorToolDeps(),
         { sessionId: request.sessionId }
       )
-      return { ...baseResponse, result }
+      return { ...baseResponse, result: assertSafePluginToolResult(result) }
     }
     // ── Promoted Skill built-in — load a skill's instructions ──────────────
     // Host-routed (reaches the built-in catalog + Dexie custom skills, which
@@ -352,7 +362,7 @@ export async function handlePluginToolExec(
         request.args,
         await resolveSkillToolDeps()
       )
-      return { ...baseResponse, result }
+      return { ...baseResponse, result: assertSafePluginToolResult(result) }
     }
     // ── Promoted SlashCommand built-in — run a registered slash command ────
     if (isSlashCommandBuiltinTool(request.name)) {
@@ -362,7 +372,7 @@ export async function handlePluginToolExec(
         await resolveSlashToolDeps(),
         { sessionId: request.sessionId }
       )
-      return { ...baseResponse, result }
+      return { ...baseResponse, result: assertSafePluginToolResult(result) }
     }
     // ── Promoted team-collaboration built-ins — message / blackboard /
     // consensus / delegate. Host-routed; the caller's teammate identity is
@@ -373,7 +383,7 @@ export async function handlePluginToolExec(
       const result = caller
         ? await runTeamBuiltinTool(request.name, request.args, caller)
         : `Error: ${request.name} is only available to a teammate during a team run.`
-      return { ...baseResponse, result }
+      return { ...baseResponse, result: assertSafePluginToolResult(result) }
     }
     if (resolverOverride) {
       // Test seam — execute through the injected resolver directly so
@@ -386,7 +396,7 @@ export async function handlePluginToolExec(
           config: resolverOverride.getPluginConfig?.(tool.pluginId) ?? {},
         }
         const result = await tool.execute(request.args, context)
-        return { ...baseResponse, result }
+        return { ...baseResponse, result: assertSafePluginToolResult(result) }
       }
     } else {
       // Production path — resolve the owning plugin by bare tool name,
@@ -402,7 +412,7 @@ export async function handlePluginToolExec(
           sessionId: request.sessionId,
           reason: `chat:plugin_tool_exec:${request.name}`,
         })
-        return { ...baseResponse, result }
+        return { ...baseResponse, result: assertSafePluginToolResult(result) }
       }
     }
     // ── Typed workflow runner fallback ─────────────────────────────────
@@ -415,7 +425,7 @@ export async function handlePluginToolExec(
       const { executeRunWorkflowTyped } =
         await import("@/lib/workflow/publish/run-workflow-typed-tool")
       const result = await executeRunWorkflowTyped(request.args)
-      return { ...baseResponse, result }
+      return { ...baseResponse, result: assertSafePluginToolResult(result) }
     }
     // ── ADR-0026 — built-in skill fallback ────────────────────────────
     // Tool not in the plugin registry — try the built-in skill registry.
@@ -435,7 +445,7 @@ export async function handlePluginToolExec(
       // `pending_hitl` / `error` we surface the structured payload so the
       // model can see the reason. The SDK turns this into a tool result
       // string verbatim — opaque to the model is fine.
-      return { ...baseResponse, result }
+      return { ...baseResponse, result: assertSafePluginToolResult(result) }
     }
     // ── Wave 1 — Terminal dock fallback ────────────────────────────────
     // The 4 synthetic `terminal_dock_*` tools are manifested by
@@ -451,7 +461,7 @@ export async function handlePluginToolExec(
     if (request.name === ASK_USER_TOOL_NAME) {
       const { runAskUser } = await import("@/stores/agent/ask-user-store")
       const result = await runAskUser(request.args, { sessionId: request.sessionId })
-      return { ...baseResponse, result }
+      return { ...baseResponse, result: assertSafePluginToolResult(result) }
     }
     // ── Nested dispatch — `dispatch_agent` ─────────────────────────────────
     // Surfaced by `buildDispatchAgentManifestEntries` (gated by nesting depth);
@@ -464,7 +474,7 @@ export async function handlePluginToolExec(
         sessionId: request.sessionId,
         args: request.args,
       })
-      return { ...baseResponse, result }
+      return { ...baseResponse, result: assertSafePluginToolResult(result) }
     }
     if (request.name.startsWith("terminal_dock_")) {
       const { runTerminalDockAction } = await import("@/lib/terminal/dock-tool-handler")
@@ -475,13 +485,14 @@ export async function handlePluginToolExec(
         args: request.args,
         chatSessionId: request.sessionId,
       })
-      return { ...baseResponse, result }
+      return { ...baseResponse, result: assertSafePluginToolResult(result) }
     }
     return { ...baseResponse, error: `plugin tool not found: ${request.name}` }
   } catch (err) {
+    const error = err instanceof Error ? err.message : String(err)
     return {
       ...baseResponse,
-      error: err instanceof Error ? err.message : String(err),
+      error: hasNoLeakingPiiDeep(error) ? error : PLUGIN_TOOL_RESULT_PII_ERROR,
     }
   }
 }

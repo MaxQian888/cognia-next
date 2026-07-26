@@ -106,6 +106,7 @@ import {
 } from "@/lib/db/plugins"
 import { appendPythonEvent, type PythonPluginEvent } from "@/lib/plugin/python/log-buffer"
 import { clearPluginExtensions } from "@/lib/plugin/api/extension-api"
+import { loadPluginStyles, removePluginStyles } from "@/lib/plugin/styles/plugin-stylesheet"
 import { unregisterUriHandlersByPlugin } from "@/lib/plugin/uri/uri-handler-registry"
 import { getPluginExtensions, restorePluginExtensions } from "@/lib/plugin/api/extension-api"
 import {
@@ -1654,7 +1655,12 @@ export class PluginManager {
    * Tauri-only — the caller (GitHub install dialog) gates on
    * `canUseTauriInvoke()`.
    */
-  async installPluginFromGithub(repo: string, gitRef?: string, subdir?: string): Promise<Plugin> {
+  async installPluginFromGithub(
+    repo: string,
+    gitRef?: string,
+    subdir?: string,
+    generatedFiles: Record<string, string> = {}
+  ): Promise<Plugin> {
     const txn: InstallTransactionState = {
       pluginId: null,
       pluginPath: null,
@@ -1677,7 +1683,7 @@ export class PluginManager {
         licenseText?: string | null
         repo: string
         gitRef: string
-      }>("plugin_install_from_github", { repo, gitRef, subdir })
+      }>("plugin_install_from_github", { repo, gitRef, subdir, generatedFiles })
 
       const plugin = await this.registerBackendInstall(
         {
@@ -3664,6 +3670,19 @@ export class PluginManager {
 
     if (!plugin || !context) return
 
+    // `manifest.styles` — injected before any contribution can render, so a
+    // panel never paints one frame unstyled. Scoped to the plugin's own
+    // subtree; see `lib/plugin/styles/plugin-stylesheet.ts`. Non-fatal: a
+    // broken stylesheet must not stop the plugin's behaviour from registering.
+    const stylesRoot = plugin.descriptor?.installRoot.path
+    if (plugin.manifest.styles && stylesRoot) {
+      await loadPluginStyles({
+        pluginId,
+        pluginRoot: stylesRoot,
+        stylesEntry: plugin.manifest.styles,
+      })
+    }
+
     // Note: Tool implementations are provided by the plugin's activate function
     // through the context.agent.registerTool API
 
@@ -4030,6 +4049,10 @@ export class PluginManager {
     // line handles the persistent Dexie-backed rows. Both are required to
     // avoid orphan entries lingering after disable.
     clearCustomThemesForPluginContext(pluginId)
+    // Drop the `manifest.styles` sheet injected by registerPluginContributions.
+    // Unconditional: cheaper than reading the manifest back, and a disabled
+    // plugin leaving live CSS behind would keep restyling its old subtree.
+    removePluginStyles(pluginId)
     clearPluginExtensions(pluginId)
     const { contextPanelRegistry } = await import("@/lib/context-workbench/panel-registry")
     contextPanelRegistry.unregisterPlugin(pluginId)

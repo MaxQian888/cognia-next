@@ -1,10 +1,17 @@
 {
   "cancel": "取消",
+  "conversionCounts": "已转换 {converted} 项，警告 {warnings} 条",
+  "conversionSource": "检测到的来源：{source}",
+  "conversionTitle": "转换报告",
   "description": "粘贴一个公开仓库——owner/repo、owner/repo@ref、/子目录，或完整的 github.com 链接。仓库需包含符合规范的 plugin.json 并自带构建产物（不会在本机执行构建）。",
   "desktopOnly": "从 GitHub 安装需要 Cognia 桌面应用。",
   "emptyError": "请输入仓库。",
   "fetch": "获取",
   "fetchError": "无法加载插件：{message}",
+  "fidelityContextual": "上下文重建：行为按来源声明的意图重建，而非逐项翻译。",
+  "fidelityNativeExact": "原生 Cognia 插件，无需转换。",
+  "fidelityStructured": "结构化：清单及其贡献点可携带；宿主特有的部分列在下方。",
+  "fidelityUnsupported": "不支持：该插件无法在不损失行为的前提下转换。",
   "install": "安装",
   "installCancelled": "已取消安装。",
   "installFailed": "安装失败：{message}",
@@ -12,5 +19,9 @@
   "label": "GitHub 仓库",
   "placeholder": "owner/repo  ·  owner/repo@v1.0.0  ·  https://github.com/owner/repo",
   "readme": "README",
+  "sourceClaudeCode": "Claude Code",
+  "sourceCodex": "Codex",
+  "sourceCognia": "Cognia",
+  "sourceGeminiCli": "Gemini CLI",
   "title": "从 GitHub 安装"
 }

@@ -20,6 +20,14 @@ import {
   type ImageEditProviderId,
 } from "@/lib/ai/media/image-generation-sdk"
 import {
+  generateProviderImage,
+  generateProviderVideo,
+  type ImageGenerationProviderId,
+  type ProviderImageGenerationRequest,
+  type ProviderVideoGenerationRequest,
+} from "@/lib/ai/media/provider-generation"
+import type { VideoProviderId } from "@/lib/ai/media/video-generation-sdk"
+import {
   registerPluginMediaAsset,
   type MediaCatalogWriter,
   type PluginMediaAssetInput,
@@ -42,6 +50,31 @@ export interface ImageProcessingOptions {
   width?: number
   height?: number
   maintainAspectRatio?: boolean
+}
+
+export interface MediaImageGenerationOptions {
+  providerId?: ImageGenerationProviderId
+  model?: string
+  size?: `${number}x${number}`
+  aspectRatio?: `${number}:${number}`
+  seed?: number
+  referenceImages?: ImageData[]
+  mask?: ImageData
+  providerOptions?: ProviderImageGenerationRequest["providerOptions"]
+  abortSignal?: AbortSignal
+}
+
+export interface MediaVideoGenerationOptions {
+  providerId?: VideoProviderId
+  model?: string
+  aspectRatio?: `${number}:${number}`
+  resolution?: `${number}x${number}`
+  duration?: number
+  fps?: number
+  seed?: number
+  inputImage?: ImageData
+  providerOptions?: ProviderVideoGenerationRequest["providerOptions"]
+  abortSignal?: AbortSignal
 }
 
 export interface ImageFilterDefinition {
@@ -263,6 +296,8 @@ export interface PluginMediaAPI {
 
   // AI Processing
   ai: {
+    generateImage: (prompt: string, options?: MediaImageGenerationOptions) => Promise<ImageData>
+    generateVideo: (prompt: string, options?: MediaVideoGenerationOptions) => Promise<Blob>
     upscale: (imageData: ImageData, factor: 2 | 4) => Promise<ImageData>
     removeBackground: (imageData: ImageData) => Promise<ImageData>
     enhanceImage: (
@@ -815,13 +850,18 @@ function getMediaAIProviderSuggestion(): string {
   return "在 Settings -> Providers 中配置并启用支持图像的 provider（OpenAI、xAI、Together AI、Fireworks 或 DeepInfra）。"
 }
 
-function resolveConfiguredImageProvider(): ResolvedImageProviderConfig {
+function currentProviderSettingsSnapshot() {
   const settings = useSettingsStore.getState()
-  const snapshot = createProviderSettingsSnapshot({
+  return createProviderSettingsSnapshot({
     defaultProvider: settings.defaultProvider,
     providerSettings: settings.providerSettings,
     customProviders: settings.customProviders,
   })
+}
+
+function resolveConfiguredImageProvider(): ResolvedImageProviderConfig {
+  const settings = useSettingsStore.getState()
+  const snapshot = currentProviderSettingsSnapshot()
 
   const candidateProviderIds = uniqueStrings([
     isImageEditProvider(settings.defaultProvider || "") ? settings.defaultProvider : undefined,
@@ -943,6 +983,27 @@ async function runImageAi(
       {
         site,
         message: `Image AI call failed: ${site}`,
+        expected: false,
+      },
+      error
+    )
+    throw error
+  }
+}
+
+async function runGeneratedMediaAi<T>(
+  pluginId: string,
+  site: string,
+  runner: () => Promise<T>
+): Promise<T> {
+  try {
+    return await runner()
+  } catch (error) {
+    recordSilentFailure(
+      pluginId,
+      {
+        site,
+        message: `Generated media AI call failed: ${site}`,
         expected: false,
       },
       error
@@ -1417,6 +1478,69 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
     },
 
     ai: {
+      generateImage: async (
+        prompt: string,
+        options?: MediaImageGenerationOptions
+      ): Promise<ImageData> => {
+        assertNoLeakingPii(pluginId, "ctx.media.ai.generateImage", [prompt])
+        return runGeneratedMediaAi(pluginId, "ai.generateImage", async () => {
+          const referenceImages = options?.referenceImages?.map((image) =>
+            imageDataToDataUrl(image)
+          )
+          const generationPrompt =
+            referenceImages?.length || options?.mask
+              ? {
+                  text: prompt,
+                  images: referenceImages ?? [],
+                  ...(options?.mask ? { mask: imageDataToDataUrl(options.mask) } : {}),
+                }
+              : prompt
+          const result = await generateProviderImage({
+            snapshot: currentProviderSettingsSnapshot(),
+            prompt: generationPrompt,
+            ...(options?.providerId ? { providerId: options.providerId } : {}),
+            ...(options?.model ? { model: options.model } : {}),
+            ...(options?.size ? { size: options.size } : {}),
+            ...(options?.aspectRatio ? { aspectRatio: options.aspectRatio } : {}),
+            ...(options?.seed !== undefined ? { seed: options.seed } : {}),
+            ...(options?.providerOptions ? { providerOptions: options.providerOptions } : {}),
+            ...(options?.abortSignal ? { abortSignal: options.abortSignal } : {}),
+          })
+          return dataUrlToImageData(`data:${result.image.mediaType};base64,${result.image.base64}`)
+        })
+      },
+
+      generateVideo: async (
+        prompt: string,
+        options?: MediaVideoGenerationOptions
+      ): Promise<Blob> => {
+        assertNoLeakingPii(pluginId, "ctx.media.ai.generateVideo", [prompt])
+        return runGeneratedMediaAi(pluginId, "ai.generateVideo", async () => {
+          const generationPrompt = options?.inputImage
+            ? {
+                text: prompt,
+                image: imageDataToDataUrl(options.inputImage),
+              }
+            : prompt
+          const result = await generateProviderVideo({
+            snapshot: currentProviderSettingsSnapshot(),
+            prompt: generationPrompt,
+            ...(options?.providerId ? { providerId: options.providerId } : {}),
+            ...(options?.model ? { model: options.model } : {}),
+            ...(options?.aspectRatio ? { aspectRatio: options.aspectRatio } : {}),
+            ...(options?.resolution ? { resolution: options.resolution } : {}),
+            ...(options?.duration !== undefined ? { duration: options.duration } : {}),
+            ...(options?.fps !== undefined ? { fps: options.fps } : {}),
+            ...(options?.seed !== undefined ? { seed: options.seed } : {}),
+            ...(options?.providerOptions ? { providerOptions: options.providerOptions } : {}),
+            ...(options?.abortSignal ? { abortSignal: options.abortSignal } : {}),
+          })
+          return new Blob([toBlobPart(result.video.uint8Array)], {
+            type: result.video.mediaType,
+          })
+        })
+      },
+
       upscale: async (imageData: ImageData, factor: 2 | 4): Promise<ImageData> => {
         return runImageAi(pluginId, "ai.upscale", () =>
           executeProviderImageEdit(
@@ -1557,6 +1681,8 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
       export: "media:video:export",
     }),
     ai: createApiGuardedAPI(pluginId, api.ai, {
+      generateImage: "ai:chat",
+      generateVideo: "ai:chat",
       upscale: "ai:chat",
       removeBackground: "ai:chat",
       enhanceImage: "ai:chat",

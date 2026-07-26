@@ -19,6 +19,7 @@
 //! Public repos only — anonymous fetch. Token auth is intentionally out of
 //! scope for this iteration.
 
+use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -39,6 +40,8 @@ const LICENSE_NAMES: &[&str] = &[
 ];
 /// Directory names never copied into the install dir (VCS / build / deps).
 const SKIP_DIRS: &[&str] = &[".git", ".github", "node_modules", "target"];
+const GENERATED_FILE_PATHS: &[&str] = &["plugin.json", "dist/index.js"];
+const MAX_GENERATED_FILE_BYTES: usize = 2 * 1024 * 1024;
 
 /// What we return to the TS side after a successful install. Mirrors
 /// `WasmInstallResult` plus the README / license text the UI surfaces.
@@ -354,6 +357,34 @@ fn safe_join(base: &Path, subdir: &str) -> Result<PathBuf, String> {
     Ok(base.join(rel))
 }
 
+/// Apply the pure converter's output inside the extracted staging tree.
+///
+/// The frontend is not a trust boundary, so this accepts only the two files
+/// the shared converter is designed to generate. Source resources remain
+/// untouched in the downloaded tarball.
+fn apply_generated_files(root: &Path, files: &BTreeMap<String, String>) -> Result<(), String> {
+    for (path, contents) in files {
+        if !GENERATED_FILE_PATHS.contains(&path.as_str()) {
+            return Err(format!(
+                "generated conversion file is not allowlisted: {path}"
+            ));
+        }
+        if contents.len() > MAX_GENERATED_FILE_BYTES {
+            return Err(format!(
+                "generated conversion file exceeds {MAX_GENERATED_FILE_BYTES} bytes: {path}"
+            ));
+        }
+        let destination = safe_join(root, path)?;
+        if let Some(parent) = destination.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("mkdir generated file parent {parent:?}: {e}"))?;
+        }
+        std::fs::write(&destination, contents)
+            .map_err(|e| format!("write generated conversion file {destination:?}: {e}"))?;
+    }
+    Ok(())
+}
+
 /// Copy a plugin tree, skipping VCS / build / dependency directories.
 pub(crate) fn copy_plugin_tree(src: &Path, dst: &Path) -> Result<(), String> {
     for entry in std::fs::read_dir(src).map_err(|e| format!("read_dir {src:?}: {e}"))? {
@@ -389,8 +420,16 @@ pub async fn plugin_install_from_github(
     repo: String,
     git_ref: Option<String>,
     subdir: Option<String>,
+    generated_files: Option<BTreeMap<String, String>>,
 ) -> Result<GithubInstallResult, String> {
-    plugin_install_from_github_for_state(state.inner(), repo, git_ref, subdir).await
+    plugin_install_from_github_for_state(
+        state.inner(),
+        repo,
+        git_ref,
+        subdir,
+        generated_files.unwrap_or_default(),
+    )
+    .await
 }
 
 /// Host-neutral GitHub install used by Tauri and the headless companion host.
@@ -399,6 +438,7 @@ pub async fn plugin_install_from_github_for_state(
     repo: String,
     git_ref: Option<String>,
     subdir: Option<String>,
+    generated_files: BTreeMap<String, String>,
 ) -> Result<GithubInstallResult, String> {
     let mut gh = parse_github_ref(&repo)?;
     if let Some(r) = git_ref.filter(|s| !s.trim().is_empty()) {
@@ -447,11 +487,15 @@ pub async fn plugin_install_from_github_for_state(
     let plugin_root = match gh.subdir.as_deref() {
         Some(sub) => {
             let candidate = safe_join(staging.path(), sub)?;
-            if !candidate.join("plugin.json").exists() {
+            if !candidate.is_dir() {
+                return Err(format!("plugin subdir does not exist: '{sub}'"));
+            }
+            if generated_files.is_empty() && !candidate.join("plugin.json").exists() {
                 return Err(format!("subdir '{sub}' has no plugin.json"));
             }
             candidate
         }
+        None if !generated_files.is_empty() => staging.path().to_path_buf(),
         None => {
             let manifest_path = find_plugin_manifest(staging.path())
                 .ok_or_else(|| "repository is missing plugin.json".to_string())?;
@@ -463,6 +507,7 @@ pub async fn plugin_install_from_github_for_state(
     };
 
     // Step 4 — parse + validate (no build).
+    apply_generated_files(&plugin_root, &generated_files)?;
     let manifest_path = plugin_root.join("plugin.json");
     let (manifest_value, parsed) = read_manifest(&manifest_path)?;
     crate::contract::validate_manifest_contract(&manifest_value)?;
@@ -755,6 +800,37 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         assert!(safe_join(tmp.path(), "../etc").is_err());
         assert!(safe_join(tmp.path(), "a/b").is_ok());
+    }
+
+    #[test]
+    fn generated_conversion_files_are_confined_and_allowlisted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let files = std::collections::BTreeMap::from([
+            (
+                "plugin.json".to_string(),
+                r#"{"id":"converted"}"#.to_string(),
+            ),
+            (
+                "dist/index.js".to_string(),
+                "module.exports = {};".to_string(),
+            ),
+        ]);
+        apply_generated_files(tmp.path(), &files).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("plugin.json")).unwrap(),
+            r#"{"id":"converted"}"#
+        );
+        assert!(tmp.path().join("dist/index.js").exists());
+
+        let traversal =
+            std::collections::BTreeMap::from([("../plugin.json".to_string(), "{}".to_string())]);
+        assert!(apply_generated_files(tmp.path(), &traversal).is_err());
+
+        let arbitrary = std::collections::BTreeMap::from([(
+            "scripts/postinstall.sh".to_string(),
+            "exit 0".to_string(),
+        )]);
+        assert!(apply_generated_files(tmp.path(), &arbitrary).is_err());
     }
 
     #[test]

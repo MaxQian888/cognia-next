@@ -19,7 +19,7 @@ jest.mock("@/lib/ocr/deps", () => ({ buildOcrDeps: () => ({}) }))
 
 import { captureScreenshot } from "@/lib/ui/screenshot"
 import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
-import screenshotPlugin from "./index"
+import screenshotPlugin, { captureToToolResult } from "./index"
 
 const captureMock = captureScreenshot as jest.Mock
 const registerMock = registerSlashCommand as jest.Mock
@@ -78,6 +78,38 @@ describe("screenshot (built-in)", () => {
     expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/failed/i), "error")
   })
 
+  it("toasts the filename and size on a successful slash-command capture", async () => {
+    // The slash command still consumes the raw capture shape (it needs the
+    // filename/size for the toast), so the tool's content-block wrapper must
+    // not have swallowed it.
+    captureMock.mockResolvedValue({
+      name: "screenshot.png",
+      size: 9,
+      type: "image/png",
+      arrayBuffer: async () => new TextEncoder().encode("png-bytes").buffer,
+    } as unknown as File)
+    const { ctx } = makeCtx()
+    const showToast = jest.fn()
+    ;(ctx as { ui?: unknown }).ui = { showToast }
+    const hooks = await screenshotPlugin.activate?.(ctx)
+    expect(await hooks?.onCommand?.("screenshot", [])).toBe(true)
+    expect(showToast).toHaveBeenCalledWith(
+      expect.stringContaining("Captured screenshot.png (9 bytes)"),
+      "success"
+    )
+  })
+
+  it("surfaces a thrown capture as an error envelope, not a crash", async () => {
+    captureMock.mockRejectedValue(new Error("display denied"))
+    const { ctx, tools } = makeCtx()
+    await screenshotPlugin.activate?.(ctx)
+    expect(await tools.take_screenshot({})).toMatchObject({ ok: false, error: "display denied" })
+    expect(await tools.extract_screenshot_ocr({})).toMatchObject({
+      ok: false,
+      error: "display denied",
+    })
+  })
+
   it("registers extract_screenshot_ocr and OCRs the captured image", async () => {
     extractMock.mockReset().mockResolvedValue({
       providerId: "tesseract-wasm",
@@ -131,10 +163,10 @@ describe("screenshot (built-in)", () => {
     const { ctx, tools } = makeCtx()
     await screenshotPlugin.activate?.(ctx)
     const result = await tools.take_screenshot({})
-    expect(result).toMatchObject({ ok: false })
+    expect(result).toMatchObject({ ok: false, error: "user-cancelled-or-unsupported" })
   })
 
-  it("returns base64 payload on a successful capture", async () => {
+  it("returns an MCP image content block on a successful capture", async () => {
     // jsdom's File.arrayBuffer is unreliable; provide a custom mock object
     // that quacks like a File enough for the plugin's encoding helper.
     const mockFile = {
@@ -146,16 +178,47 @@ describe("screenshot (built-in)", () => {
     captureMock.mockResolvedValue(mockFile)
     const { ctx, tools } = makeCtx()
     await screenshotPlugin.activate?.(ctx)
+    // Returning `{ ok, base64 }` here used to make the sidecar stringify the
+    // PNG into one text block: the model got unreadable base64 and the chat
+    // rendered a wall of it. The content-block form is what both dispatch
+    // paths pass through so a vision model actually sees the screen.
     const result = (await tools.take_screenshot({})) as {
-      ok: boolean
-      filename: string
-      base64: string
-      error?: string
+      content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>
     }
-    expect(result.ok).toBe(true)
-    expect(result.filename).toBe("screenshot.png")
-    expect(typeof result.base64).toBe("string")
-    expect(result.base64.length).toBeGreaterThan(0)
+    expect(result.content).toHaveLength(2)
+    expect(result.content[0]).toMatchObject({ type: "text" })
+    expect(result.content[0].text).toContain("screenshot.png")
+    expect(result.content[1].type).toBe("image")
+    expect(result.content[1].mimeType).toBe("image/png")
+    expect(result.content[1].data?.length).toBeGreaterThan(0)
+  })
+
+  it("notes the clipboard copy in the image caption when it succeeded", () => {
+    expect(
+      captureToToolResult({
+        ok: true,
+        base64: "AAAA",
+        filename: "shot.png",
+        size: 12,
+        mimeType: "image/png",
+        copiedToClipboard: true,
+      })
+    ).toEqual({
+      content: [
+        { type: "text", text: "shot.png (12 bytes), copied to clipboard" },
+        { type: "image", data: "AAAA", mimeType: "image/png" },
+      ],
+    })
+  })
+
+  it("keeps the plain error envelope for a failed capture (no content blocks)", () => {
+    // The passthrough only fires on a well-formed `content[]`, so an error
+    // stays a JSON object the model can read plainly.
+    expect(captureToToolResult({ ok: false, error: "user-cancelled" })).toEqual({
+      ok: false,
+      error: "user-cancelled",
+    })
+    expect(captureToToolResult({ ok: true })).toEqual({ ok: false, error: "capture-failed" })
   })
 
   it("declares lazy activation for its command", async () => {

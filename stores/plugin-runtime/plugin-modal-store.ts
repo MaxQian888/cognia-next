@@ -16,7 +16,12 @@
 
 import { create } from "zustand"
 import { nanoid } from "nanoid"
-import type { PluginModalComponent, PluginModalEntry } from "@/types/plugin/plugin-modal"
+import {
+  resolvePluginModalOptions,
+  type PluginModalComponent,
+  type PluginModalEntry,
+  type PluginModalOptions,
+} from "@/types/plugin/plugin-modal"
 
 interface PluginModalState {
   stack: PluginModalEntry[]
@@ -24,6 +29,7 @@ interface PluginModalState {
     pluginId: string
     component: PluginModalComponent
     args?: Record<string, unknown>
+    options?: PluginModalOptions
   }): string
   close(modalId: string): void
   closeAll(): void
@@ -32,13 +38,14 @@ interface PluginModalState {
 
 export const usePluginModalStore = create<PluginModalState>((set, get) => ({
   stack: [],
-  open({ pluginId, component, args }) {
+  open({ pluginId, component, args, options }) {
     const modalId = `modal_${nanoid(10)}`
     const entry: PluginModalEntry = {
       modalId,
       pluginId,
       component,
       args,
+      options,
       openedAt: Date.now(),
     }
     set((state) => ({ stack: [...state.stack, entry] }))
@@ -92,6 +99,12 @@ export interface DeclaredModalEntry {
   /** Unprefixed modal id, as declared in `manifest.modalMounts[].id`. */
   id: string
   label: string
+  /**
+   * Presentation declared in `manifest.modalMounts[].options`, used as the base
+   * layer for every open of this modal. A call-site `options` overrides it
+   * field by field.
+   */
+  options?: PluginModalOptions
   /** Lazily resolve the modal component (null if the import/export fails). */
   load: () => Promise<PluginModalComponent | null>
 }
@@ -158,13 +171,21 @@ export function subscribeDeclaredModals(listener: () => void): () => void {
 export async function openDeclaredModal(
   pluginId: string,
   id: string,
-  args?: Record<string, unknown>
+  args?: Record<string, unknown>,
+  options?: PluginModalOptions
 ): Promise<string | null> {
   const def = getDeclaredModal(pluginId, id)
   if (!def) return null
   const component = await def.load()
   if (!component) return null
-  return usePluginModalStore.getState().open({ pluginId, component, args })
+  // Field-by-field merge, not object replacement: a call site that only wants a
+  // different `size` must not silently drop the `variant` the manifest declared.
+  // Routed through the shared resolver rather than an object spread so an
+  // explicit `{ variant: undefined }` from a caller degrades to "unspecified"
+  // instead of erasing the declared default.
+  const merged =
+    def.options || options ? resolvePluginModalOptions(def.options, options) : undefined
+  return usePluginModalStore.getState().open({ pluginId, component, args, options: merged })
 }
 
 /** Test-only — wipe the declarative registry. */

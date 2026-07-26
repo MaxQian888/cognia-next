@@ -1,10 +1,17 @@
 {
   "cancel": "Cancel",
+  "conversionCounts": "{converted} converted, {warnings} warnings",
+  "conversionSource": "Detected source: {source}",
+  "conversionTitle": "Conversion report",
   "description": "Paste a public repository — owner/repo, owner/repo@ref, a /sub/dir, or a full github.com URL. The repo must contain a conforming plugin.json and ship its built artifacts (no build runs on your machine).",
   "desktopOnly": "Installing from GitHub requires the Cognia desktop app.",
   "emptyError": "Please enter a repository.",
   "fetch": "Fetch",
   "fetchError": "Could not load the plugin: {message}",
+  "fidelityContextual": "Contextual: behaviour is rebuilt from what the source declared, not translated one-to-one.",
+  "fidelityNativeExact": "Native Cognia plugin; no conversion required.",
+  "fidelityStructured": "Structured: the manifest and its contributions carry over; anything host-specific is listed below.",
+  "fidelityUnsupported": "Unsupported: this plugin cannot be converted without losing behaviour.",
   "install": "Install",
   "installCancelled": "Installation cancelled.",
   "installFailed": "Installation failed: {message}",
@@ -12,5 +19,9 @@
   "label": "GitHub repository",
   "placeholder": "owner/repo  ·  owner/repo@v1.0.0  ·  https://github.com/owner/repo",
   "readme": "README",
+  "sourceClaudeCode": "Claude Code",
+  "sourceCodex": "Codex",
+  "sourceCognia": "Cognia",
+  "sourceGeminiCli": "Gemini CLI",
   "title": "Install from GitHub"
 }

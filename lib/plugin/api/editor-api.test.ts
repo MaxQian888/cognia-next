@@ -223,3 +223,130 @@ describe("onDidChangeActiveEditor", () => {
     expect(listener).toHaveBeenCalledTimes(1)
   })
 })
+
+describe("saveDirty", () => {
+  it("flushes so a plugin's next disk read is not stale", async () => {
+    // The plugin filesystem API reads disk, so an unsaved buffer is invisible to
+    // it and a later write would clobber the user's work.
+    const saveDirty = jest.fn().mockResolvedValue([])
+    registerProjectEditorOpener({ root: "/repo", open: jest.fn(), saveDirty })
+
+    await expect(createEditorAPI("p", ALL).saveDirty()).resolves.toEqual([])
+    expect(saveDirty).toHaveBeenCalled()
+  })
+
+  it("reports the files it could not save", async () => {
+    registerProjectEditorOpener({
+      root: "/repo",
+      open: jest.fn(),
+      saveDirty: jest.fn().mockResolvedValue(["/repo/a.ts"]),
+    })
+
+    await expect(createEditorAPI("p", ALL).saveDirty()).resolves.toEqual(["/repo/a.ts"])
+  })
+
+  it("refuses without editor:write", async () => {
+    await expect(createEditorAPI("p", NONE).saveDirty()).rejects.toThrow("editor:write")
+  })
+})
+
+describe("showDiff", () => {
+  it("routes a proposal to the mounted engine's diff surface", async () => {
+    const showDiff = jest.fn().mockResolvedValue(undefined)
+    registerProjectEditorOpener({ root: "/repo", open: jest.fn(), showDiff })
+
+    await expect(
+      createEditorAPI("p", ALL).showDiff("/repo/src/a.ts", "next", "Proposed")
+    ).resolves.toBe(true)
+    expect(showDiff).toHaveBeenCalledWith("src/a.ts", "next", "Proposed")
+  })
+
+  it("reports false when the mounted engine has no diff surface", async () => {
+    registerProjectEditorOpener({ root: "/repo", open: jest.fn() })
+    await expect(createEditorAPI("p", ALL).showDiff("/repo/a.ts", "next")).resolves.toBe(false)
+  })
+
+  it("refuses without editor:write", async () => {
+    await expect(createEditorAPI("p", NONE).showDiff("/repo/a.ts", "x")).rejects.toThrow(
+      "editor:write"
+    )
+  })
+})
+
+describe("revealInExplorer", () => {
+  it("reveals through the mounted engine's file tree", async () => {
+    const reveal = jest.fn().mockResolvedValue(undefined)
+    registerProjectEditorOpener({ root: "/repo", open: jest.fn(), reveal })
+
+    await expect(createEditorAPI("p", ALL).revealInExplorer("/repo/src/a.ts")).resolves.toBe(true)
+    expect(reveal).toHaveBeenCalledWith("src/a.ts")
+  })
+
+  it("refuses without editor:write, because it moves the user's view", async () => {
+    await expect(createEditorAPI("p", NONE).revealInExplorer("/repo/a.ts")).rejects.toThrow(
+      "editor:write"
+    )
+  })
+})
+
+describe("runInTerminal", () => {
+  it("runs in the editor's own terminal, keyed by project root", async () => {
+    const runInTerminal = jest.fn().mockResolvedValue(undefined)
+    registerProjectEditorOpener({ root: "/repo", open: jest.fn(), runInTerminal })
+
+    await expect(
+      createEditorAPI("p", ALL).runInTerminal("/repo", "pnpm test", { name: "Tests" })
+    ).resolves.toBe(true)
+    expect(runInTerminal).toHaveBeenCalledWith("pnpm test", { cwd: "/repo", name: "Tests" })
+  })
+
+  it("requires terminal:write even when editor:write remains granted", async () => {
+    const editorOnly = (permission: string) => permission === "editor:write"
+
+    await expect(createEditorAPI("p", editorOnly).runInTerminal("/repo", "ls")).rejects.toThrow(
+      "terminal:write"
+    )
+  })
+
+  it("re-checks terminal:write on every command", async () => {
+    const runInTerminal = jest.fn().mockResolvedValue(undefined)
+    registerProjectEditorOpener({ root: "/repo", open: jest.fn(), runInTerminal })
+    let granted = true
+    const api = createEditorAPI("p", (permission) => permission === "terminal:write" && granted)
+
+    await expect(api.runInTerminal("/repo", "pnpm test")).resolves.toBe(true)
+    granted = false
+    await expect(api.runInTerminal("/repo", "pnpm build")).rejects.toThrow("terminal:write")
+    expect(runInTerminal).toHaveBeenCalledTimes(1)
+  })
+
+  it("rejects a cwd that escapes the project root", async () => {
+    const runInTerminal = jest.fn().mockResolvedValue(undefined)
+    registerProjectEditorOpener({ root: "/repo", open: jest.fn(), runInTerminal })
+
+    await expect(
+      createEditorAPI("p", ALL).runInTerminal("/repo", "cat secrets", {
+        cwd: "/repo/../private",
+      })
+    ).rejects.toThrow(/project root/)
+    expect(runInTerminal).not.toHaveBeenCalled()
+  })
+})
+
+describe("notify", () => {
+  it("surfaces a message in whichever editor is mounted", async () => {
+    const notify = jest.fn().mockResolvedValue(undefined)
+    registerProjectEditorOpener({ root: "/repo", open: jest.fn(), notify })
+
+    await expect(createEditorAPI("p", ALL).notify("done", "warning")).resolves.toBe(true)
+    expect(notify).toHaveBeenCalledWith("done", "warning")
+  })
+
+  it("reports false rather than throwing when no editor can show one", async () => {
+    await expect(createEditorAPI("p", ALL).notify("done")).resolves.toBe(false)
+  })
+
+  it("refuses without editor:write, because it puts plugin text in front of the user", async () => {
+    await expect(createEditorAPI("p", NONE).notify("done")).rejects.toThrow("editor:write")
+  })
+})

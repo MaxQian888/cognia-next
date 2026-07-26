@@ -43,4 +43,10 @@ export interface PluginSkillDef {
   attachToCharacterIds?: string[]
   /** Optional allow-list of tools the skill needs. */
   allowedTools?: string[]
+  /**
+   * Runtime-only install directory used to bind plugin-root tokens when the
+   * skill body is loaded. The host adds this during capability registration;
+   * plugin manifests never need to provide it.
+   */
+  runtimePluginRoot?: string
 }

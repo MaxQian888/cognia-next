@@ -41,6 +41,7 @@ import {
 import { initializePluginPermissions } from "./permission-api"
 import { invoke } from "@tauri-apps/api/core"
 import { proxyFetch } from "@/lib/network/proxy-fetch"
+import { generateProviderImage, generateProviderVideo } from "@/lib/ai/media/provider-generation"
 import {
   clearAllPluginPointDiagnostics,
   getPluginPointDiagnostics,
@@ -65,6 +66,11 @@ jest.mock("@/lib/utils", () => ({
 
 jest.mock("@/lib/network/proxy-fetch", () => ({
   proxyFetch: jest.fn(),
+}))
+
+jest.mock("@/lib/ai/media/provider-generation", () => ({
+  generateProviderImage: jest.fn(),
+  generateProviderVideo: jest.fn(),
 }))
 
 jest.mock("@/stores", () => ({
@@ -541,6 +547,123 @@ describe("Media Registry", () => {
   })
 
   describe("AI image processing implementation", () => {
+    it("generates an image through the unified provider execution layer", async () => {
+      ;(generateProviderImage as jest.Mock).mockResolvedValue({
+        image: {
+          uint8Array: new Uint8Array([1, 2, 3]),
+          base64: "AQID",
+          mediaType: "image/png",
+        },
+      })
+      const api = createMediaAPI(testPluginId, {} as never)
+
+      const result = await api.ai.generateImage("A porcelain whale", {
+        providerId: "doubao",
+        model: "seedream-5-0-260128",
+        aspectRatio: "16:9",
+      })
+
+      expect(result).toBeInstanceOf(ImageData)
+      expect(generateProviderImage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          prompt: "A porcelain whale",
+          providerId: "doubao",
+          model: "seedream-5-0-260128",
+          aspectRatio: "16:9",
+          snapshot: expect.objectContaining({ defaultProvider: "openai" }),
+        })
+      )
+
+      await api.ai.generateImage("Merge these references", {
+        referenceImages: [createTestImageData()],
+        mask: createTestImageData(),
+        size: "1024x1024",
+        seed: 12,
+        providerOptions: { bytedance: { watermark: false } },
+        abortSignal: new AbortController().signal,
+      })
+      expect(generateProviderImage).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          prompt: expect.objectContaining({
+            text: "Merge these references",
+            images: [expect.stringMatching(/^data:image\/png;base64,/)],
+            mask: expect.stringMatching(/^data:image\/png;base64,/),
+          }),
+          size: "1024x1024",
+          seed: 12,
+          providerOptions: { bytedance: { watermark: false } },
+          abortSignal: expect.any(AbortSignal),
+        })
+      )
+    })
+
+    it("generates text-to-video and image-to-video through the unified provider layer", async () => {
+      ;(generateProviderVideo as jest.Mock).mockResolvedValue({
+        video: {
+          uint8Array: new Uint8Array([4, 5, 6]),
+          base64: "BAUG",
+          mediaType: "video/mp4",
+        },
+      })
+      const api = createMediaAPI(testPluginId, {} as never)
+
+      const textVideo = await api.ai.generateVideo("A kite rises", {
+        providerId: "volcengine",
+        duration: 5,
+        model: "dreamina-seedance-2-0-260128",
+        aspectRatio: "16:9",
+        resolution: "1280x720",
+        fps: 24,
+        seed: 9,
+        providerOptions: { bytedance: { generateAudio: true } },
+        abortSignal: new AbortController().signal,
+      })
+      const imageVideo = await api.ai.generateVideo("The portrait smiles", {
+        inputImage: createTestImageData(),
+      })
+
+      expect(textVideo).toBeInstanceOf(Blob)
+      expect(textVideo.type).toBe("video/mp4")
+      expect(imageVideo).toBeInstanceOf(Blob)
+      expect(generateProviderVideo).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          providerId: "volcengine",
+          model: "dreamina-seedance-2-0-260128",
+          aspectRatio: "16:9",
+          resolution: "1280x720",
+          duration: 5,
+          fps: 24,
+          seed: 9,
+          providerOptions: { bytedance: { generateAudio: true } },
+          abortSignal: expect.any(AbortSignal),
+        })
+      )
+      expect(generateProviderVideo).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          prompt: expect.objectContaining({
+            text: "The portrait smiles",
+            image: expect.stringMatching(/^data:image\/png;base64,/),
+          }),
+        })
+      )
+    })
+
+    it("blocks generated-media prompts that fail the plugin PII gate", async () => {
+      const api = createMediaAPI(testPluginId, {} as never)
+
+      await expect(api.ai.generateImage("Contact alice@example.com")).rejects.toMatchObject({
+        name: "PluginPiiError",
+      })
+      await expect(api.ai.generateVideo("Send this to bob@example.com")).rejects.toMatchObject({
+        name: "PluginPiiError",
+      })
+      expect(generateProviderImage).not.toHaveBeenCalled()
+      expect(generateProviderVideo).not.toHaveBeenCalled()
+    })
+
     it("routes upscale requests through the configured image provider", async () => {
       mockImageEditResponse()
       const api = createMediaAPI(testPluginId, {} as never)
@@ -746,6 +869,8 @@ describe("permission gate", () => {
   it("throws PermissionError on video/ai namespaces without grants", () => {
     const api = createMediaAPI("no-perms-plugin", {} as never)
     expect(() => api.video.getMetadata("x")).toThrow(/media:video:read/)
+    expect(() => api.ai.generateImage("x")).toThrow(/ai:chat/)
+    expect(() => api.ai.generateVideo("x")).toThrow(/ai:chat/)
     expect(() => api.ai.removeBackground({} as ImageData)).toThrow(/ai:chat/)
   })
 })

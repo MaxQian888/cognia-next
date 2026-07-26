@@ -2,7 +2,8 @@
  * Screenshot — built-in plugin.
  *
  * Wires the host-provided `captureScreenshot()` helper into:
- *   * an agent tool `take_screenshot` that returns a base64 PNG payload
+ *   * an agent tool `take_screenshot` that returns the PNG as an MCP image
+ *     content block (so vision models see it and the chat renders it)
  *   * a slash command `/screenshot` that triggers the same capture from chat
  *
  * Both paths share the same capture function; on success they also write the
@@ -44,14 +45,17 @@ async function copyToClipboard(file: File): Promise<boolean> {
   }
 }
 
-async function performCapture(): Promise<{
+interface CaptureResult {
   ok: boolean
   filename?: string
   size?: number
   base64?: string
+  mimeType?: string
   copiedToClipboard?: boolean
   error?: string
-}> {
+}
+
+async function performCapture(): Promise<CaptureResult> {
   try {
     const file = await captureScreenshot()
     if (!file) {
@@ -64,10 +68,40 @@ async function performCapture(): Promise<{
       filename: file.name,
       size: file.size,
       base64,
+      mimeType: file.type || "image/png",
       copiedToClipboard: copied,
     }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+/**
+ * Shape the capture as an MCP `CallToolResult` so the PNG travels as a real
+ * image content block.
+ *
+ * Returning `{ ok, base64 }` — as this tool used to — meant the sidecar
+ * `JSON.stringify`-ed it into one text block: the model received a few thousand
+ * tokens of base64 it cannot decode, and the chat rendered the same wall. The
+ * block form is what `sidecar/builtin-tools/safety.mjs:toolImage` produces for
+ * built-in tools, and both dispatch paths now pass it through untouched, so a
+ * vision-capable model actually sees the screen.
+ *
+ * The failure envelope stays a plain object: the passthrough only triggers on a
+ * well-formed `content[]`, and an error is better read as JSON anyway.
+ */
+export function captureToToolResult(result: CaptureResult): unknown {
+  if (!result.ok || !result.base64) {
+    return { ok: false, error: result.error ?? "capture-failed" }
+  }
+  const note = `${result.filename ?? "screenshot.png"} (${result.size ?? 0} bytes)${
+    result.copiedToClipboard ? ", copied to clipboard" : ""
+  }`
+  return {
+    content: [
+      { type: "text", text: note },
+      { type: "image", data: result.base64, mimeType: result.mimeType ?? "image/png" },
+    ],
   }
 }
 
@@ -138,14 +172,14 @@ const definition: PluginDefinition = {
       definition: {
         name: "take_screenshot",
         description:
-          "Capture a screen image via getDisplayMedia and return the PNG payload as base64.",
+          "Capture a screen image via getDisplayMedia and return it as an image the model can see.",
         parametersSchema: {
           type: "object",
           properties: {},
           additionalProperties: false,
         },
       } as never,
-      execute: () => performCapture(),
+      execute: async () => captureToToolResult(await performCapture()),
     })
 
     ctx.agent?.registerTool?.({

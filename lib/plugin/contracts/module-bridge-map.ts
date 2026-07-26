@@ -49,6 +49,10 @@ import {
   registerMessageRenderersForPlugin,
   unregisterMessageRenderersForPlugin,
 } from "@/lib/plugin/bridge/message-renderer-bridge"
+import {
+  registerToolRenderersForPlugin,
+  unregisterToolRenderersForPlugin,
+} from "@/lib/plugin/bridge/tool-renderer-bridge"
 import { registerViewsForPlugin, unregisterViewsForPlugin } from "@/lib/plugin/bridge/view-bridge"
 import {
   registerWebviewsForPlugin,
@@ -198,6 +202,20 @@ export const MODULE_BRIDGE_CAPABILITIES = {
       })
     },
     unregister: unregisterMessageRenderersForPlugin,
+  },
+  "tool-renderer": {
+    // Companion to `message-renderer`. Tool parts never reach the message-part
+    // registry (the host claims `tool-*` / `dynamic-tool` before it is
+    // consulted), so a plugin shipping an MCP tool needs this separate seam to
+    // render its own result richly.
+    key: "tool-renderer",
+    manifestField: "toolRenderers",
+    register: async (ctx) => {
+      await registerToolRenderersForPlugin(ctx.manifest, ctx.installRoot, {
+        importer: ctx.importer,
+      })
+    },
+    unregister: unregisterToolRenderersForPlugin,
   },
   connectors: {
     // Different arg order + needs the plugin's loaded exports (factory lookup

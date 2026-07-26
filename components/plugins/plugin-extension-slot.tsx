@@ -7,7 +7,13 @@
 // `priority` order. Each plugin is wrapped in its own ErrorBoundary so a
 // throwing extension can't take down the host UI.
 
-import { Component, useEffect, useSyncExternalStore, type ReactNode } from "react"
+import {
+  Component,
+  useEffect,
+  useSyncExternalStore,
+  type CSSProperties,
+  type ReactNode,
+} from "react"
 import {
   getExtensionsForPoint,
   getExtensionRevision,
@@ -17,7 +23,14 @@ import {
   getContextKeyRevision,
   subscribeContextKeys,
 } from "@/lib/plugin/context-keys/context-key-store"
-import type { CanonicalExtensionPoint } from "@/lib/plugin/contracts/plugin-points"
+import {
+  getExtensionPointFormFactor,
+  type CanonicalExtensionPoint,
+  type PluginPointFormFactor,
+} from "@/lib/plugin/contracts/plugin-points"
+
+/** Hoisted so the slot wrapper's style prop keeps a stable identity. */
+const INLINE_SIZE_CONTAINER = { containerType: "inline-size" } as const
 
 interface Props {
   point: CanonicalExtensionPoint
@@ -75,21 +88,42 @@ export function PluginExtensionSlot({ point, className, limit, fallback, context
     return fallback ? <>{fallback}</> : null
   }
 
+  const formFactor = getExtensionPointFormFactor(point)
+
   return (
     <div
       className={className}
       data-plugin-extension-slot={point}
       data-extension-count={visible.length}
+      data-form-factor={formFactor}
+      // Makes this wrapper a query container, so a plugin's scoped stylesheet
+      // can respond to how wide its slot actually is (`@container (min-width:
+      // …)`) without the host measuring anything per frame. `inline-size` only
+      // — a `size` container would need a fixed block size and would collapse
+      // slots whose height is driven by their content.
+      style={INLINE_SIZE_CONTAINER}
     >
       {visible.map((ext) => {
         const Cmp = ext.component as unknown as React.ComponentType<{
           pluginId: string
           extensionId: string
+          formFactor: PluginPointFormFactor
           context?: Record<string, unknown>
         }>
         return (
-          <PluginExtensionBoundary key={ext.id} pluginId={ext.pluginId} extensionId={ext.id}>
-            <Cmp pluginId={ext.pluginId} extensionId={ext.id} context={context} />
+          <PluginExtensionBoundary
+            key={ext.id}
+            pluginId={ext.pluginId}
+            extensionId={ext.id}
+            minWidth={ext.options.minWidth}
+            maxWidth={ext.options.maxWidth}
+          >
+            <Cmp
+              pluginId={ext.pluginId}
+              extensionId={ext.id}
+              formFactor={formFactor}
+              context={context}
+            />
           </PluginExtensionBoundary>
         )
       })}
@@ -112,9 +146,54 @@ export function usePluginSlotHasExtensions(point: CanonicalExtensionPoint): bool
   return getExtensionsForPoint(point).length > 0
 }
 
+/** Hoisted so the wrapper's style prop keeps a stable identity across renders. */
+const DISPLAY_CONTENTS = { display: "contents" } as const
+
+/**
+ * Memoised by hint pair for the same reason `DISPLAY_CONTENTS` is hoisted: the
+ * wrapper re-renders on every registry and context-key revision, and a fresh
+ * style object each time would rewrite the inline `style` attribute for no
+ * reason. Bounded by the number of distinct hint pairs actually registered.
+ */
+const widthHintStyles = new Map<string, CSSProperties>()
+
+/**
+ * Turn a plugin's width hints into a style for the boundary wrapper.
+ *
+ * The clamping is the whole point of the feature living here rather than in
+ * plugin CSS: `min(<hint>, 100%)` resolves against the slot's content box, so
+ * whatever number a plugin declares, the box it gets can never be wider than
+ * the region the host gave it. A ceiling of `100%` is applied even when only a
+ * floor was declared — the floor is what would otherwise push the box past the
+ * slot edge under flex pressure.
+ *
+ * With no hints the wrapper stays `display: contents`, which is load-bearing:
+ * the element exists only as the `@scope` root for the plugin's
+ * `manifest.styles` sheet, and generating a box would make a contribution to a
+ * flex toolbar lay out as a nested child instead of a direct one. Declaring a
+ * hint is opting into that box, and nothing else in the slot changes.
+ */
+function widthHintStyle(minWidth?: number, maxWidth?: number): CSSProperties {
+  if (minWidth === undefined && maxWidth === undefined) return DISPLAY_CONTENTS
+  const key = `${minWidth ?? ""}|${maxWidth ?? ""}`
+  const cached = widthHintStyles.get(key)
+  if (cached) return cached
+  const style: CSSProperties = {
+    display: "block",
+    minWidth: minWidth === undefined ? undefined : `min(${minWidth}px, 100%)`,
+    maxWidth: maxWidth === undefined ? "100%" : `min(${maxWidth}px, 100%)`,
+  }
+  widthHintStyles.set(key, style)
+  return style
+}
+
 interface BoundaryProps {
   pluginId: string
   extensionId: string
+  /** Plugin-declared inline-size floor in px, already sanitised by `extension-api`. */
+  minWidth?: number
+  /** Plugin-declared inline-size ceiling in px, already sanitised by `extension-api`. */
+  maxWidth?: number
   children: ReactNode
 }
 
@@ -163,6 +242,20 @@ export class PluginExtensionBoundary extends Component<BoundaryProps, BoundarySt
 
   render() {
     if (this.state.hasError) return null
-    return this.props.children
+    // `data-plugin-root` is the bound for the plugin's `manifest.styles` sheet
+    // (`lib/plugin/styles/plugin-stylesheet.ts` wraps it in `@scope`). It needs
+    // a real element, but `display: contents` keeps that element from
+    // generating a layout box — so a plugin contributing a button to a flex
+    // toolbar still lays out as a direct child of that flex container. A
+    // width-hinted extension trades that away for a sizeable box; see
+    // `widthHintStyle`.
+    return (
+      <div
+        data-plugin-root={this.props.pluginId}
+        style={widthHintStyle(this.props.minWidth, this.props.maxWidth)}
+      >
+        {this.props.children}
+      </div>
+    )
   }
 }

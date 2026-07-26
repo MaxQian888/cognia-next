@@ -7,11 +7,13 @@ import {
   CANONICAL_RUNTIME_POINTS,
   PLUGIN_POINT_CONTRACTS,
   getExtensionPointAliases,
+  getExtensionPointFormFactor,
   getRuntimePointContract,
   resolveActivationPattern,
   validateActivationEvent,
   validateExtensionPoint,
   validateHookPoint,
+  type PluginPointFormFactor,
 } from "./plugin-points"
 
 describe("plugin point contracts", () => {
@@ -467,6 +469,55 @@ describe("plugin point contracts", () => {
         expect(contract!.binding).not.toBe("")
         expect(contract!.docs).toEqual(expect.any(String))
         expect(contract!.requiredTests.length).toBeGreaterThan(0)
+      }
+    })
+  })
+
+  describe("form factor", () => {
+    const VALID: PluginPointFormFactor[] = ["icon", "row", "block", "panel"]
+
+    it("classifies every UI slot", () => {
+      // `EXTENSION_POINT_FORM_FACTORS` is a total `Record`, so a new point
+      // fails to compile until it is classified. This guards the case where
+      // someone relaxes that to `Partial` to get a build green — the slot
+      // would then silently hand `undefined` to every contributed component.
+      for (const point of CANONICAL_EXTENSION_POINTS) {
+        expect(VALID).toContain(getExtensionPointFormFactor(point))
+      }
+    })
+
+    it("surfaces the form factor on the published contract", () => {
+      for (const point of CANONICAL_EXTENSION_POINTS) {
+        const contract = PLUGIN_POINT_CONTRACTS.find((c) => c.id === point)
+        expect(contract?.formFactor).toBe(getExtensionPointFormFactor(point))
+      }
+    })
+
+    it("classifies the bar and rail slots as icon-sized", () => {
+      // These mount into ~24-32px chrome; anything with a label overflows.
+      for (const point of [
+        "statusbar.left",
+        "statusbar.center",
+        "statusbar.right",
+        "toolbar.left",
+        "sidebar.left.top",
+      ] as const) {
+        expect(getExtensionPointFormFactor(point)).toBe("icon")
+      }
+    })
+
+    it("classifies the context workbench slots as panels", () => {
+      expect(getExtensionPointFormFactor("sidebar.right.top")).toBe("panel")
+      expect(getExtensionPointFormFactor("sidebar.right.bottom")).toBe("panel")
+    })
+
+    it("classifies composer and message action rows as rows", () => {
+      for (const point of [
+        "chat.input.actions",
+        "chat.message.actions",
+        "chat.tool-call.actions",
+      ] as const) {
+        expect(getExtensionPointFormFactor(point)).toBe("row")
       }
     })
   })

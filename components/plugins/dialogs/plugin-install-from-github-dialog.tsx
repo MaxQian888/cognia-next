@@ -52,6 +52,20 @@ interface Props {
   initialRef?: string
 }
 
+const SOURCE_MESSAGE_KEYS = {
+  cognia: "sourceCognia",
+  "claude-code": "sourceClaudeCode",
+  codex: "sourceCodex",
+  "gemini-cli": "sourceGeminiCli",
+} as const
+
+const FIDELITY_MESSAGE_KEYS = {
+  "native-exact": "fidelityNativeExact",
+  structured: "fidelityStructured",
+  contextual: "fidelityContextual",
+  unsupported: "fidelityUnsupported",
+} as const
+
 export function PluginInstallFromGithubDialog({ open, onOpenChange, initialRef }: Props) {
   const t = useTranslations("plugins.githubDialog")
   const [url, setUrl] = useState("")
@@ -186,6 +200,24 @@ export function PluginInstallFromGithubDialog({ open, onOpenChange, initialRef }
                   licenseText={preview.license}
                   className="pt-1"
                 />
+              </Card>
+
+              <Card className="p-3 space-y-1.5" data-testid="plugin-conversion-report">
+                <div className="font-medium text-sm">{t("conversionTitle")}</div>
+                <p className="text-xs text-muted-foreground">
+                  {t("conversionSource", {
+                    source: t(SOURCE_MESSAGE_KEYS[preview.sourceFormat]),
+                  })}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {t(FIDELITY_MESSAGE_KEYS[preview.conversionReport.fidelity])}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {t("conversionCounts", {
+                    converted: preview.conversionReport.converted.length,
+                    warnings: preview.conversionReport.warnings.length,
+                  })}
+                </p>
               </Card>
 
               <PluginDependencyPanel manifest={preview.manifest} />

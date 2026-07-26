@@ -341,6 +341,31 @@ class MessageRendererDef:
 
 
 @dataclass(frozen=True)
+class ToolRendererDef:
+    """A lazy tool-result renderer contribution (``manifest.toolRenderers``).
+
+    Companion to :class:`MessageRendererDef`. Tool parts are host-owned, so this
+    is how a plugin renders the result of an MCP tool it provides. ``tool_name``
+    is the bare name; the host folds the namespaced provider form onto it.
+    """
+
+    tool_name: str
+    entry: str
+    export: str
+    label: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "toolName": self.tool_name,
+            "entry": self.entry,
+            "export": self.export,
+        }
+        if self.label is not None:
+            out["label"] = self.label
+        return out
+
+
+@dataclass(frozen=True)
 class DensityPresetContribution:
     """A density preset contribution (``manifest.densityPresets``)."""
 

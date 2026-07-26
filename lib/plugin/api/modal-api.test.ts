@@ -55,4 +55,20 @@ describe("createModalAPI", () => {
     api.openModal(FakeModal as never, { foo: "bar" })
     expect(usePluginModalStore.getState().stack[0]!.args).toEqual({ foo: "bar" })
   })
+
+  it("leaves options unset for the pre-existing two-argument call shape", () => {
+    createModalAPI("p").openModal(FakeModal as never, { foo: "bar" })
+    expect(usePluginModalStore.getState().stack[0]!.options).toBeUndefined()
+  })
+
+  it("forwards presentation options to the stack entry", () => {
+    createModalAPI("p").openModal(FakeModal as never, undefined, {
+      size: "full",
+      variant: "sheet-bottom",
+    })
+    expect(usePluginModalStore.getState().stack[0]!.options).toEqual({
+      size: "full",
+      variant: "sheet-bottom",
+    })
+  })
 })

@@ -58,6 +58,17 @@ const messages = {
       installSucceeded: "Installed {name}",
       installCancelled: "Install cancelled",
       installFailed: "Install failed: {message}",
+      conversionTitle: "Automatic conversion",
+      conversionSource: "Detected source: {source}",
+      conversionCounts: "{converted} converted, {warnings} warnings",
+      sourceCognia: "Cognia",
+      sourceClaudeCode: "Claude Code",
+      sourceCodex: "Codex",
+      sourceGeminiCli: "Gemini CLI",
+      fidelityNativeExact: "Native plugin; no conversion required.",
+      fidelityStructured: "Structured conversion preserves supported declarations.",
+      fidelityContextual: "Prompt behavior is preserved contextually.",
+      fidelityUnsupported: "Unsupported behavior blocks installation.",
     },
     license: { label: "License", custom: "Custom", view: "View", hide: "Hide" },
   },
@@ -75,6 +86,14 @@ const PREVIEW = {
   readme: "# Demo readme",
   license: "MIT License text",
   ref: { owner: "acme", repo: "demo" },
+  sourceFormat: "cognia",
+  conversionReport: {
+    fidelity: "native-exact",
+    converted: [],
+    warnings: [],
+    blocking: [],
+  },
+  generatedFiles: {},
 }
 
 function renderDialog(onOpenChange = jest.fn()) {
@@ -107,6 +126,41 @@ describe("PluginInstallFromGithubDialog", () => {
     expect(screen.getByText("Demo Plugin")).toBeInTheDocument()
     expect(screen.getByText("v1.2.3")).toBeInTheDocument()
     expect(screen.getByTestId("md")).toHaveTextContent("Demo readme")
+    expect(screen.getByTestId("plugin-conversion-report")).toHaveTextContent(
+      "Native Cognia plugin; no conversion required."
+    )
+  })
+
+  it("shows the detected foreign format and conversion fidelity", async () => {
+    fetchPreviewMock.mockResolvedValue({
+      ...PREVIEW,
+      sourceFormat: "claude-code",
+      conversionReport: {
+        fidelity: "structured",
+        converted: [
+          {
+            capability: "skills",
+            path: "skills/review/SKILL.md",
+            message: "converted",
+            blocking: false,
+          },
+        ],
+        warnings: [],
+        blocking: [],
+      },
+    })
+    renderDialog()
+    fireEvent.change(screen.getByLabelText("GitHub repository"), {
+      target: { value: "acme/demo" },
+    })
+    fireEvent.click(screen.getByText("Fetch"))
+    await waitFor(() => expect(screen.getByTestId("plugin-conversion-report")).toBeInTheDocument())
+    expect(screen.getByTestId("plugin-conversion-report")).toHaveTextContent(
+      "Detected source: Claude Code"
+    )
+    expect(screen.getByTestId("plugin-conversion-report")).toHaveTextContent(
+      "1 converted, 0 warnings"
+    )
   })
 
   it("surfaces a fetch error", async () => {

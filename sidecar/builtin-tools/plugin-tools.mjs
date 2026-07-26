@@ -26,6 +26,28 @@ export const SERVER_VERSION = "0.1.0"
 const DEFAULT_PLUGIN_TOOL_TIMEOUT_MS = 120_000
 
 /**
+ * True when a plugin tool returned a ready MCP `CallToolResult` rather than a
+ * plain value. Plugin results otherwise get `JSON.stringify`-ed into a single
+ * text block, which makes it *structurally impossible* for a plugin tool to
+ * return an image / audio / embedded resource — the model would only ever see
+ * base64 text, and the chat would only ever render a wall of it. Built-in tools
+ * already return this shape (see `safety.mjs:toolImage`), so the check is the
+ * same one the built-in path relies on.
+ *
+ * @param {unknown} result
+ * @returns {boolean}
+ */
+export function isCallToolResult(result) {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return false
+  const content = /** @type {{ content?: unknown }} */ (result).content
+  return (
+    Array.isArray(content) &&
+    content.length > 0 &&
+    content.every((b) => !!b && typeof b === "object" && typeof b.type === "string")
+  )
+}
+
+/**
  * Register a resolver for `toolUseId` in `pending` and return a promise that
  * settles when the renderer writes the matching `plugin_tool_response` (resolved
  * by `claude-host.mjs:handlePluginToolResponse` via the registered `{ resolve }`),
@@ -136,7 +158,10 @@ export function buildPluginToolsServer({
         if (response && response.error) {
           return toolText(`Error: ${response.error}`, { isError: true })
         }
-        return toolText(response?.result ?? null)
+        const result = response?.result ?? null
+        // A plugin that already speaks MCP (image / audio / resource blocks)
+        // passes through untouched; everything else keeps the JSON-text shape.
+        return isCallToolResult(result) ? result : toolText(result)
       },
       toolExtras
     )

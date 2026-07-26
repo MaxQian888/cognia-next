@@ -1275,6 +1275,60 @@ describe("Plugin Validation", () => {
       })
     })
 
+    describe("modalMounts presentation options", () => {
+      const withModalMount = (options: unknown): PluginManifest => {
+        const manifest = createValidManifest()
+        manifest.capabilities = ["modal-mount"] as PluginManifest["capabilities"]
+        ;(manifest as unknown as Record<string, unknown>).modalMounts = [
+          { id: "wizard", label: "Wizard", entry: "modal.js", export: "Modal", options },
+        ]
+        return manifest
+      }
+
+      it("accepts a declared size and variant", () => {
+        const result = validatePluginManifest(
+          withModalMount({ size: "lg", variant: "sheet-right" }),
+          { governanceMode: "warn" }
+        )
+        expect(result.valid).toBe(true)
+      })
+
+      it("accepts an omitted options block", () => {
+        const result = validatePluginManifest(withModalMount(undefined), {
+          governanceMode: "warn",
+        })
+        expect(result.valid).toBe(true)
+      })
+
+      it("rejects a non-object options block", () => {
+        const result = validatePluginManifest(withModalMount("large"), { governanceMode: "warn" })
+        expect(result.valid).toBe(false)
+        expect(
+          result.diagnostics!.some((d) => d.code === "manifest.modalMounts.options.invalid")
+        ).toBe(true)
+      })
+
+      it("rejects an unknown size", () => {
+        const result = validatePluginManifest(withModalMount({ size: "enormous" }), {
+          governanceMode: "warn",
+        })
+        expect(result.valid).toBe(false)
+        expect(
+          result.diagnostics!.some((d) => d.code === "manifest.modalMounts.options.size.invalid")
+        ).toBe(true)
+      })
+
+      it("rejects an unknown variant", () => {
+        const result = validatePluginManifest(withModalMount({ variant: "sheet-left" }), {
+          governanceMode: "warn",
+        })
+        expect(result.valid).toBe(false)
+        expect(
+          result.diagnostics!.some((d) => d.code === "manifest.modalMounts.options.variant.invalid")
+        ).toBe(true)
+      })
+    })
+
     it("should require main for frontend plugins", () => {
       const manifest = createValidManifest()
       manifest.type = "frontend"

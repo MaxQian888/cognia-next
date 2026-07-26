@@ -140,6 +140,28 @@ describe("handlePluginToolExec", () => {
     )
   })
 
+  it("blocks plugin results that fail the PII gate before returning them to the sidecar", async () => {
+    const execute = jest.fn().mockResolvedValue({
+      content: [
+        {
+          type: "resource",
+          resource: {
+            uri: "file:///repo/contacts.txt",
+            text: "Contact alice@example.com",
+          },
+        },
+      ],
+    })
+    __setPluginToolResolverForTesting({
+      getTool: () => ({ pluginId: "plug-a", execute }),
+    })
+
+    const response = await handlePluginToolExec(makeRequest())
+
+    expect(response.result).toBeUndefined()
+    expect(response.error).toMatch(/PII redaction gate/)
+  })
+
   it("returns an error response when the tool is unknown", async () => {
     const resolver: PluginToolResolver = {
       getTool: () => undefined,

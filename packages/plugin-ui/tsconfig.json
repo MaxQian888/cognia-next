@@ -1,0 +1,25 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    // The root config picks up jest-dom's matcher augmentation via
+    // `jest.setup.ts`, which is outside this package's `include`. Name it here
+    // so `pnpm --filter @cognia/plugin-ui typecheck` checks the tests too
+    // rather than reporting every `toHaveAttribute` as missing.
+    "types": ["node", "jest", "@testing-library/jest-dom"],
+    // tsup's .d.ts emit runs a standalone tsc that can't share the root's
+    // incremental build-info file, and rollup-plugin-dts injects a baseUrl that
+    // TS 6.x flags as deprecated. Scope both overrides to this package's build.
+    "incremental": false,
+    "ignoreDeprecations": "6.0",
+    // A child tsconfig's `paths` REPLACES the parent's. This package has no
+    // `@cognia/*` siblings to re-list; `@/*` stays mapped only so a stray app
+    // import is caught by typecheck rather than silently resolving to `any`.
+    // Nothing here may actually import `@/…` — the `build:packages` gate exists
+    // to catch it if something does.
+    "paths": {
+      "@/*": ["../../*"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["node_modules", "dist"]
+}

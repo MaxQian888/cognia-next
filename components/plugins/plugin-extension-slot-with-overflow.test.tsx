@@ -5,7 +5,10 @@ import {
   getExtensionRevision,
   subscribeExtensionChanges,
 } from "@/lib/plugin/api"
-import type { CanonicalExtensionPoint } from "@/lib/plugin/contracts/plugin-points"
+import type {
+  CanonicalExtensionPoint,
+  PluginPointFormFactor,
+} from "@/lib/plugin/contracts/plugin-points"
 
 jest.mock("@/lib/plugin/api", () => ({
   getExtensionsForPoint: jest.fn(),
@@ -18,7 +21,11 @@ const POINT = "chat.input.actions" as CanonicalExtensionPoint
 interface FakeExt {
   id: string
   pluginId: string
-  component: React.ComponentType<{ pluginId: string; extensionId: string }>
+  component: React.ComponentType<{
+    pluginId: string
+    extensionId: string
+    formFactor: PluginPointFormFactor
+  }>
   options: { priority?: number }
 }
 
@@ -26,8 +33,10 @@ function makeExt(id: string, priority: number | undefined, label: string): FakeE
   return {
     id,
     pluginId: "p1",
-    component: ({ extensionId }: { extensionId: string }) => (
-      <span data-testid={extensionId}>{label}</span>
+    component: ({ extensionId, formFactor }) => (
+      <span data-testid={extensionId} data-form-factor={formFactor}>
+        {label}
+      </span>
     ),
     options: { priority },
   }
@@ -68,6 +77,7 @@ describe("PluginExtensionSlotWithOverflow", () => {
     expect(screen.getByText("Alpha")).toBeInTheDocument()
     expect(screen.getByText("Beta")).toBeInTheDocument()
     expect(screen.getByText("Gamma")).toBeInTheDocument()
+    expect(screen.getByTestId("a")).toHaveAttribute("data-form-factor", "row")
     // No overflow trigger since count <= limit
     expect(screen.queryByTestId(`plugin-extension-overflow-${POINT}`)).not.toBeInTheDocument()
   })

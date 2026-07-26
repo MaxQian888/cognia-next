@@ -243,6 +243,13 @@
       "minimumHostVersion": "0.1.0"
     },
     {
+      "id": "tool-renderer",
+      "support": "supported",
+      "manifestFields": ["toolRenderers"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
       "id": "density-preset",
       "support": "supported",
       "manifestFields": ["densityPresets"],
@@ -695,6 +702,12 @@
       "executable": true
     },
     {
+      "path": "toolRenderers[].entry",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true
+    },
+    {
       "path": "aiProviders[].entry",
       "runtime": "javascript",
       "requiredFor": [],
@@ -913,6 +926,12 @@
       "capabilities": ["message-renderer"],
       "execution": "javascript",
       "entryPath": "messageRenderers[].entry"
+    },
+    {
+      "field": "toolRenderers",
+      "capabilities": ["tool-renderer"],
+      "execution": "javascript",
+      "entryPath": "toolRenderers[].entry"
     },
     {
       "field": "densityPresets",

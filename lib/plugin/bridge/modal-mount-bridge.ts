@@ -36,6 +36,11 @@ export async function registerModalMountsForPlugin(
       pluginId: manifest.id,
       id: def.id,
       label: def.label ?? def.id,
+      // Carried verbatim; the renderer's resolver is what decides whether a
+      // value is meaningful, so a manifest that slipped past validation (an
+      // older install, a hand-edited file) degrades to the default presentation
+      // rather than blocking registration of an otherwise working modal.
+      options: def.options,
       load: async () => {
         const mod = await options.importer(resolved)
         const exported = mod[def.export]

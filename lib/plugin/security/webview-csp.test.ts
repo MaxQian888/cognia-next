@@ -162,3 +162,36 @@ describe("acquireCogniaWebviewApiSource", () => {
     )
   })
 })
+
+describe("wrapWebviewHtml design tokens", () => {
+  it("injects the host tokens so the frame is not styled with browser defaults", () => {
+    // A webview is a separate document behind an opaque origin — it inherits
+    // nothing from the host, so without this it ignores the user's theme
+    // entirely while sitting next to native UI.
+    const html = wrapWebviewHtml("<p>x</p>", {
+      designTokensCss: ":root { --primary: red; }",
+    })
+    expect(html).toContain("<style>:root { --primary: red; }</style>")
+  })
+
+  it("puts the tokens before the body so the frame never paints unstyled", () => {
+    const html = wrapWebviewHtml("<p>x</p>", { designTokensCss: ":root { --primary: red; }" })
+    expect(html.indexOf("--primary")).toBeLessThan(html.indexOf("<body>"))
+  })
+
+  it("injects no style element when tokens are explicitly empty", () => {
+    const html = wrapWebviewHtml("<p>x</p>", { designTokensCss: "" })
+    expect(html).not.toContain("<style>")
+  })
+
+  it("keeps the CSP meta tag ahead of the injected style", () => {
+    // Order matters: a policy declared after content it governs is ignored.
+    const html = wrapWebviewHtml("<p>x</p>", { designTokensCss: ":root { --primary: red; }" })
+    expect(html.indexOf("Content-Security-Policy")).toBeLessThan(html.indexOf("<style>"))
+  })
+
+  it("still denies egress with tokens injected", () => {
+    const html = wrapWebviewHtml("<p>x</p>", { designTokensCss: ":root { --primary: red; }" })
+    expect(html).toContain("connect-src 'none'")
+  })
+})

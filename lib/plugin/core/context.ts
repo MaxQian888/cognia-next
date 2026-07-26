@@ -129,6 +129,7 @@ import {
 } from "../api"
 import { createEditorAPI } from "../api/editor-api"
 import { createMessagePartAPI } from "../api/message-part-api"
+import { createToolResultAPI } from "../api/tool-result-api"
 import { createDexieAPI } from "../api/dexie-api"
 import { createOcrAPI, type PluginOcrAPI } from "../api/ocr-api"
 import { createWorkspaceAPI, type PluginWorkspaceAPI } from "../api/workspace-api"
@@ -358,6 +359,7 @@ export function createFullPluginContext(
     ),
     permissions: permissionsAPI,
     messagePart: createMessagePartAPI(pluginId),
+    toolResult: createToolResultAPI(pluginId),
   }
 
   // Add new communication and utility APIs to base context

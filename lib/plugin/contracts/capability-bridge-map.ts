@@ -57,6 +57,7 @@ import {
 } from "@/lib/plugin/registries/native-anthropic-tool-registry"
 import { registerSkill, unregisterSkillsByPlugin } from "@/lib/plugin/registries/skill-registry"
 import { rebaseSkillSource } from "@/lib/plugin/utils/rebase-skill-source"
+import { replacePluginRootTokens } from "@/lib/plugin/utils/plugin-root-tokens"
 import {
   refreshAllPackWarnings,
   registerCharacterPack,
@@ -221,12 +222,13 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       // path that escapes the plugin dir — the dispatch loop isolates
       // per-entry failures, so only the offending skill is dropped.
       const anchored = rebaseSkillSource(def, ctx.installRoot ?? "")
+      const bound = ctx.installRoot ? { ...anchored, runtimePluginRoot: ctx.installRoot } : anchored
       // The registry stores the entire entry under its `id`. After
       // registration we refresh any character-pack `requires` warnings
       // (ADR-0030): a pack that was previously missing this skill id now
       // has the dep available. Also refresh agent-team-template warnings
       // for the same reason.
-      registerSkill(anchored.id, anchored, ctx)
+      registerSkill(bound.id, bound, ctx)
       refreshAllPackWarnings()
       refreshAllTemplateWarnings()
       refreshAllWorkflowTemplateWarnings()
@@ -242,7 +244,8 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
   "mcp-server-preset": defineOverlayCapability<PluginMcpServerPresetDef>({
     manifestField: "mcpServerPresets",
     registerEntry: (def, ctx) => {
-      registerMcpServerPreset(def.id, def, ctx)
+      const bound = replacePluginRootTokens(def, ctx.installRoot ?? "")
+      registerMcpServerPreset(bound.id, bound, ctx)
       refreshAllPackWarnings()
       refreshAllTemplateWarnings()
       refreshAllWorkflowTemplateWarnings()
@@ -316,7 +319,8 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
     // `requires.subagentIds[]` dependencies, so we refresh those warnings.
     manifestField: "subagents",
     registerEntry: (def, ctx) => {
-      registerSubagent(def.id, def, ctx)
+      const bound = replacePluginRootTokens(def, ctx.installRoot ?? "")
+      registerSubagent(bound.id, bound, ctx)
       refreshAllTemplateWarnings()
       refreshAllWorkflowTemplateWarnings()
     },

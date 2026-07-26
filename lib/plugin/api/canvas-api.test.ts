@@ -48,7 +48,9 @@ const mockCanvasDocuments: Record<
   }
 > = {}
 let mockActiveCanvasId: string | null = null
-let mockPanelView: string | null = null
+// Written by the store mock's `setPanelView` so `openDocument` exercises the
+// real path; nothing asserts on it directly.
+let _mockPanelView: string | null = null
 const mockSubscribers: Array<(state: unknown) => void> = []
 
 function clampOffset(value: number, content: string): number {
@@ -208,11 +210,7 @@ jest.mock("@/stores/artifact/artifact-store", () => ({
         mockActiveCanvasId = id
       }),
       setPanelView: jest.fn((view) => {
-        mockPanelView = view
-      }),
-      closeCanvas: jest.fn(() => {
-        mockActiveCanvasId = null
-        mockPanelView = null
+        _mockPanelView = view
       }),
       saveCanvasVersion: jest.fn((id, description) => {
         const versionId = `version-${Date.now()}`
@@ -248,7 +246,7 @@ describe("Canvas API", () => {
     // Clear state
     Object.keys(mockCanvasDocuments).forEach((key) => delete mockCanvasDocuments[key])
     mockActiveCanvasId = null
-    mockPanelView = null
+    _mockPanelView = null
     mockActiveEditorContext = null
     mockSubscribers.length = 0
   })
@@ -462,13 +460,13 @@ describe("Canvas API", () => {
 
     it("should close canvas", () => {
       mockActiveCanvasId = "active-doc"
-      mockPanelView = "canvas"
 
       const api = createCanvasAPI(testPluginId)
       api.closeCanvas()
 
+      // `canvasOpen` was a second visibility flag nothing ever read; dropping
+      // the active document is what every canvas surface actually keys off.
       expect(mockActiveCanvasId).toBeNull()
-      expect(mockPanelView).toBeNull()
     })
   })
 

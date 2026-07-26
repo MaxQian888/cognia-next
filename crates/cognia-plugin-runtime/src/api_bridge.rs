@@ -851,6 +851,7 @@ async fn handle_network(
                 headers,
                 body,
                 timeout_ms: None,
+                allow_invalid_certificates: None,
             };
             let resp = cognia_connectors::http_client::http_request(req)
                 .await

@@ -38,11 +38,18 @@ let mockPanelView: string | null = null
 let mockPanelOpen = false
 const mockSubscribers: Array<(state: unknown) => void> = []
 
+// The active artifact is bucketed per conversation now, so the API resolves it
+// through the store's selector plus the chat store's active session.
+jest.mock("@/stores/chat", () => ({
+  useChatStore: { getState: jest.fn(() => ({ activeSessionId: "s1" })) },
+}))
+
 jest.mock("@/stores/artifact/artifact-store", () => ({
+  selectActiveArtifactId: jest.fn(() => mockActiveArtifactId),
   useArtifactStore: {
     getState: jest.fn(() => ({
       artifacts: mockArtifacts,
-      activeArtifactId: mockActiveArtifactId,
+      activeArtifactIdBySession: mockActiveArtifactId ? { s1: mockActiveArtifactId } : {},
       createArtifact: jest.fn((options) => {
         const id = `artifact-${Date.now()}`
         mockArtifacts[id] = { id, ...options }
@@ -85,7 +92,7 @@ jest.mock("@/stores", () => ({
   useArtifactStore: {
     getState: jest.fn(() => ({
       artifacts: mockArtifacts,
-      activeArtifactId: mockActiveArtifactId,
+      activeArtifactIdBySession: mockActiveArtifactId ? { s1: mockActiveArtifactId } : {},
       createArtifact: jest.fn((options) => {
         const id = `artifact-${Date.now()}`
         mockArtifacts[id] = { id, ...options }

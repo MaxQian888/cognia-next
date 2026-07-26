@@ -28,6 +28,7 @@ import {
   CONTEXT_RESOURCE_READ_PERMISSIONS,
 } from "@/types/context-workbench"
 import { PLUGIN_CONTEXT_PANEL_ICONS } from "@/types/plugin/plugin-context-panel"
+import { PLUGIN_MODAL_SIZES, PLUGIN_MODAL_VARIANTS } from "@/types/plugin/plugin-modal"
 import { getPluginPathViolations, type PluginPathViolation } from "@/lib/plugin/core/plugin-path"
 import {
   AUTHOR_CAPABILITY_CONTRACTS,
@@ -1391,7 +1392,40 @@ export function validatePluginManifest(
     pushWarning,
     m.type
   )
-  validateLazyFactoryArray(m.modalMounts, { field: "modalMounts" }, pushError, pushWarning, m.type)
+  validateLazyFactoryArray(
+    m.modalMounts,
+    {
+      field: "modalMounts",
+      extra: (entry, _i, push) => {
+        if (entry.options === undefined) return
+        if (!isPlainObject(entry.options)) {
+          push("error", "options.invalid", `modalMounts "options" must be an object if provided`)
+          return
+        }
+        // Rejected loudly here and merely ignored at render time on purpose:
+        // the author gets the failure at install, while an already-installed
+        // manifest that predates a value being removed still opens its modal.
+        const { size, variant } = entry.options
+        if (size !== undefined && !PLUGIN_MODAL_SIZES.includes(size as never)) {
+          push(
+            "error",
+            "options.size.invalid",
+            `modalMounts "options.size" must be one of ${PLUGIN_MODAL_SIZES.join(", ")}`
+          )
+        }
+        if (variant !== undefined && !PLUGIN_MODAL_VARIANTS.includes(variant as never)) {
+          push(
+            "error",
+            "options.variant.invalid",
+            `modalMounts "options.variant" must be one of ${PLUGIN_MODAL_VARIANTS.join(", ")}`
+          )
+        }
+      },
+    },
+    pushError,
+    pushWarning,
+    m.type
+  )
   validateLazyFactoryArray(
     m.routingStrategies,
     { field: "routingStrategies" },

@@ -303,12 +303,17 @@ describe("PluginManager", () => {
       })
 
       const manager = new PluginManager({ pluginDirectory: "/plugins" })
-      const plugin = await manager.installPluginFromGithub("acme/gh", "main", "sub")
+      const generatedFiles = {
+        "plugin.json": JSON.stringify(manifest),
+        "dist/index.js": "module.exports = {}",
+      }
+      const plugin = await manager.installPluginFromGithub("acme/gh", "main", "sub", generatedFiles)
 
       expect(mockInvoke).toHaveBeenCalledWith("plugin_install_from_github", {
         repo: "acme/gh",
         gitRef: "main",
         subdir: "sub",
+        generatedFiles,
       })
       expect(store.discoverPlugin).toHaveBeenCalledWith(
         manifest,

@@ -78,6 +78,20 @@ function passesVisibility(ext: ExtensionRegistration): boolean {
   return true
 }
 
+/**
+ * Width hints arrive as untyped JS from plugin code, so they are sanitised at
+ * the single ingest point rather than at the render site: `restorePluginExtensions`
+ * replays registrations that already passed through here, and the slot renderer
+ * should never have to re-audit a number it did not accept.
+ *
+ * `NaN`/`Infinity` would serialise into the style attribute as garbage and
+ * silently drop the declaration; zero or negative widths are meaningless as a
+ * bound and would only make a contribution disappear.
+ */
+function sanitizeWidthHint(value: number | undefined): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined
+}
+
 function recordExtensionDiagnostic(
   pluginId: string,
   diagnostic: PluginPointDiagnostic,
@@ -127,6 +141,9 @@ export function createExtensionAPI(
       const normalizedPoint = validation.canonicalId as ExtensionPoint
       const extensionId = `${pluginId}:${nanoid()}`
 
+      const minWidth = sanitizeWidthHint(extensionOptions.minWidth)
+      const maxWidth = sanitizeWidthHint(extensionOptions.maxWidth)
+
       const registration: ExtensionRegistration = {
         id: extensionId,
         pluginId,
@@ -136,6 +153,16 @@ export function createExtensionAPI(
           priority: extensionOptions.priority || 0,
           condition: extensionOptions.condition,
           when: extensionOptions.when,
+          // An inverted pair is a typo, not an intent. Left as-is, CSS resolves
+          // it by letting `min-width` win — handing the plugin the *larger* of
+          // the two numbers, which is the one direction the host cannot afford
+          // to guess wrong. Collapse toward the ceiling so the smaller declared
+          // bound is what survives.
+          minWidth:
+            minWidth !== undefined && maxWidth !== undefined && minWidth > maxWidth
+              ? maxWidth
+              : minWidth,
+          maxWidth,
         },
       }
 

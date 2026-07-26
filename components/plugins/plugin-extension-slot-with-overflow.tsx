@@ -13,7 +13,10 @@ import {
   getExtensionsForPoint,
   subscribeExtensionChanges,
 } from "@/lib/plugin/api"
-import type { CanonicalExtensionPoint } from "@/lib/plugin/contracts/plugin-points"
+import {
+  getExtensionPointFormFactor,
+  type CanonicalExtensionPoint,
+} from "@/lib/plugin/contracts/plugin-points"
 
 interface Props {
   point: CanonicalExtensionPoint
@@ -52,6 +55,7 @@ export function PluginExtensionSlotWithOverflow({
 
   const inline = ordered.slice(0, limit)
   const overflow = ordered.slice(limit)
+  const formFactor = getExtensionPointFormFactor(point)
 
   return (
     <div
@@ -59,10 +63,11 @@ export function PluginExtensionSlotWithOverflow({
       data-plugin-extension-slot={point}
       data-extension-count={ordered.length}
       data-extension-overflow={overflow.length}
+      data-form-factor={formFactor}
     >
       {inline.map((ext) => (
         <PluginExtensionBoundary key={ext.id} pluginId={ext.pluginId} extensionId={ext.id}>
-          <ext.component pluginId={ext.pluginId} extensionId={ext.id} />
+          <ext.component pluginId={ext.pluginId} extensionId={ext.id} formFactor={formFactor} />
         </PluginExtensionBoundary>
       ))}
       {overflow.length > 0 && (
@@ -81,7 +86,11 @@ export function PluginExtensionSlotWithOverflow({
           <DropdownMenuContent align="end" sideOffset={4} className={overflowClassName}>
             {overflow.map((ext) => (
               <PluginExtensionBoundary key={ext.id} pluginId={ext.pluginId} extensionId={ext.id}>
-                <ext.component pluginId={ext.pluginId} extensionId={ext.id} />
+                <ext.component
+                  pluginId={ext.pluginId}
+                  extensionId={ext.id}
+                  formFactor={formFactor}
+                />
               </PluginExtensionBoundary>
             ))}
           </DropdownMenuContent>

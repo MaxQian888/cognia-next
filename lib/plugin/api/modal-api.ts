@@ -21,7 +21,11 @@ import {
   openDeclaredModal,
   usePluginModalStore,
 } from "@/stores/plugin-runtime/plugin-modal-store"
-import type { PluginModalComponent, PluginModalHandle } from "@/types/plugin/plugin-modal"
+import type {
+  PluginModalComponent,
+  PluginModalHandle,
+  PluginModalOptions,
+} from "@/types/plugin/plugin-modal"
 
 export interface PluginModalAPI {
   /**
@@ -29,14 +33,29 @@ export interface PluginModalAPI {
    * dismisses it. Plugin authors should usually close from inside the
    * modal component (via the `onClose` prop) rather than holding the
    * handle externally.
+   *
+   * `options` is additive and optional on purpose — every existing
+   * two-argument call keeps producing the centered, medium dialog it produced
+   * before this parameter existed.
    */
-  openModal(component: PluginModalComponent, args?: Record<string, unknown>): PluginModalHandle
+  openModal(
+    component: PluginModalComponent,
+    args?: Record<string, unknown>,
+    options?: PluginModalOptions
+  ): PluginModalHandle
   /**
    * Open a modal declared in `manifest.modalMounts[]` by its (unprefixed)
    * id. The component is resolved lazily on first open. Resolves to a handle,
    * or `null` if the id is unknown or its component failed to load.
+   *
+   * `options` layers on top of the entry's declared
+   * `manifest.modalMounts[].options`, field by field.
    */
-  openById(modalId: string, args?: Record<string, unknown>): Promise<PluginModalHandle | null>
+  openById(
+    modalId: string,
+    args?: Record<string, unknown>,
+    options?: PluginModalOptions
+  ): Promise<PluginModalHandle | null>
   /** Close every modal this plugin opened. */
   closeAll(): void
 }
@@ -44,8 +63,8 @@ export interface PluginModalAPI {
 export function createModalAPI(pluginId: string): PluginModalAPI {
   const logger = createPluginSystemLogger(pluginId)
   return {
-    openModal(component, args) {
-      const modalId = usePluginModalStore.getState().open({ pluginId, component, args })
+    openModal(component, args, options) {
+      const modalId = usePluginModalStore.getState().open({ pluginId, component, args, options })
       logger.info(`[modal] opened ${modalId}`)
       return {
         modalId,
@@ -55,8 +74,8 @@ export function createModalAPI(pluginId: string): PluginModalAPI {
         },
       }
     },
-    async openById(modalId, args) {
-      const resolvedId = await openDeclaredModal(pluginId, modalId, args)
+    async openById(modalId, args, options) {
+      const resolvedId = await openDeclaredModal(pluginId, modalId, args, options)
       if (!resolvedId) {
         logger.warn(`[modal] openById("${modalId}") — unknown id or component failed to load`)
         return null

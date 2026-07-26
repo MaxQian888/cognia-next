@@ -89,6 +89,7 @@ describe("MODULE_BRIDGE_CAPABILITIES", () => {
         "media",
         "workspace-backend",
         "message-renderer",
+        "tool-renderer",
         "connectors",
         "fonts",
         "wallpapers",
@@ -111,7 +112,7 @@ describe("MODULE_BRIDGE_CAPABILITIES", () => {
     )
     // Lock the count — silent growth means the manager dispatch loop picked
     // up new behaviour that may need verification.
-    expect(MODULE_BRIDGE_CAPABILITY_KEYS).toHaveLength(22)
+    expect(MODULE_BRIDGE_CAPABILITY_KEYS).toHaveLength(23)
   })
 
   describe.each(MODULE_BRIDGE_CAPABILITY_KEYS)("%s", (key) => {

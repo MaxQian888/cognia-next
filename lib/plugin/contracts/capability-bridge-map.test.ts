@@ -19,6 +19,11 @@ import {
   type OverlayCapabilityDescriptor,
 } from "./capability-bridge-map"
 import { __resetSkillsForTesting, getSkill } from "@/lib/plugin/registries/skill-registry"
+import {
+  __resetMcpServerPresetsForTesting,
+  getMcpServerPreset,
+} from "@/lib/plugin/registries/mcp-server-preset-registry"
+import { __resetSubagentsForTesting, getSubagent } from "@/lib/plugin/registries/subagent-registry"
 import type { PluginCapability, PluginManifest } from "@/types/plugin"
 
 describe("OVERLAY_REGISTRY_CAPABILITIES (PR-D)", () => {
@@ -120,6 +125,7 @@ describe("skills descriptor anchors plugin-dir-relative source paths", () => {
       kind: "local-bundle",
       path: `${installRoot}/skills/researcher`,
     })
+    expect(getSkill("anchored-skill")?.runtimePluginRoot).toBe(installRoot)
   })
 
   it("leaves inline sources alone", () => {
@@ -148,5 +154,48 @@ describe("skills descriptor anchors plugin-dir-relative source paths", () => {
       )
     ).toThrow(/escapes the plugin directory/)
     expect(getSkill("escaping-skill")).toBeUndefined()
+  })
+})
+
+describe("converted plugin-root tokens", () => {
+  const installRoot = "/opt/cognia/plugins/converted"
+
+  afterEach(() => {
+    __resetMcpServerPresetsForTesting()
+    __resetSubagentsForTesting()
+  })
+
+  it("binds tokens in MCP preset config at registration", () => {
+    OVERLAY_REGISTRY_CAPABILITIES["mcp-server-preset"].registerEntry(
+      {
+        id: "local-server",
+        name: "Local Server",
+        transport: "stdio",
+        config: {
+          command: "node",
+          args: ["${COGNIA_PLUGIN_ROOT}/servers/index.js"],
+        },
+      },
+      { pluginId: "converted", installRoot }
+    )
+
+    expect(getMcpServerPreset("local-server")?.config).toEqual({
+      command: "node",
+      args: [`${installRoot}/servers/index.js`],
+    })
+  })
+
+  it("binds source-ecosystem tokens in subagent prompts at registration", () => {
+    OVERLAY_REGISTRY_CAPABILITIES.subagent.registerEntry(
+      {
+        id: "reviewer",
+        name: "Reviewer",
+        description: "Reviews files.",
+        prompt: "Read ${CLAUDE_PLUGIN_ROOT}/references/policy.md",
+      },
+      { pluginId: "converted", installRoot }
+    )
+
+    expect(getSubagent("reviewer")?.prompt).toBe(`Read ${installRoot}/references/policy.md`)
   })
 })

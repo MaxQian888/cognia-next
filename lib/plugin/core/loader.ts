@@ -24,6 +24,7 @@ import {
   type PluginJsHostInvoker,
 } from "../launcher/launchPluginJs"
 import { resolvePluginPath } from "./plugin-path"
+import { createPluginRequire, primeSharedModules } from "./shared-modules"
 
 const pluginLoaderLogger = loggers.plugin.child("loader")
 
@@ -37,6 +38,23 @@ const pluginLoaderLogger = loggers.plugin.child("loader")
  * via `dirtyTeardowns` so a subsequent `load()` can react.
  */
 export const DEFAULT_TEARDOWN_TIMEOUT_MS = 5_000
+
+/**
+ * The plugin's code was retrieved and then threw while evaluating.
+ *
+ * Distinct from a transport failure so `importModule` can stop walking its
+ * fallback chain: another transport would fetch the same bytes and throw the
+ * same way, and continuing would bury the author's real error.
+ */
+export class PluginEvaluationError extends Error {
+  constructor(
+    message: string,
+    readonly cause?: unknown
+  ) {
+    super(message)
+    this.name = "PluginEvaluationError"
+  }
+}
 
 // =============================================================================
 // Types
@@ -631,6 +649,14 @@ export class PluginLoader {
    * 1. Tauri asset protocol (convertFileSrc) for loading bundled plugins
    * 2. Fetch + eval for loading plugin code from the file system
    * 3. Script tag with blob URL as fallback
+   *
+   * The fallback chain only covers *transport* failures — "this path could not
+   * be reached this way". A `PluginEvaluationError` means the opposite: the
+   * code was fetched and then threw. Retrying that over another transport
+   * fetches the same bytes and fails the same way, so it is rethrown instead.
+   * Swallowing it would replace an author's actionable diagnostic (an
+   * unavailable `require`, a syntax error) with a blob-URL script tag that
+   * never resolves.
    */
   private async importModule(modulePath: string): Promise<unknown> {
     // Strategy 1: Try Tauri asset protocol if available
@@ -638,14 +664,16 @@ export class PluginLoader {
       const { convertFileSrc } = await import("@tauri-apps/api/core")
       const assetUrl = convertFileSrc(modulePath)
       return await this.loadViaFetch(assetUrl, modulePath)
-    } catch {
+    } catch (error) {
+      if (error instanceof PluginEvaluationError) throw error
       // Tauri not available or convertFileSrc failed
     }
 
     // Strategy 2: Try fetch + eval with file:// protocol or direct path
     try {
       return await this.loadViaFetch(modulePath, modulePath)
-    } catch {
+    } catch (error) {
+      if (error instanceof PluginEvaluationError) throw error
       // Fetch failed
     }
 
@@ -663,9 +691,19 @@ export class PluginLoader {
     }
 
     const code = await response.text()
+    await primeSharedModules()
     return this.evaluatePluginCode(code, originalPath)
   }
 
+  /**
+   * Evaluate a CJS plugin bundle.
+   *
+   * `require` resolves the host's shared-module whitelist (React and friends)
+   * and throws for everything else — see `shared-modules.ts` for why sharing
+   * React is load-bearing rather than a convenience. Callers must have awaited
+   * `primeSharedModules()` first: `require` is synchronous, so the instances
+   * have to already be in hand by the time the bundle runs.
+   */
   private evaluatePluginCode(code: string, originalPath: string): unknown {
     // Create a module-like environment for the plugin
     const pluginExports: Record<string, unknown> = {}
@@ -676,16 +714,15 @@ export class PluginLoader {
 
     try {
       const factory = (0, eval)(wrappedCode)
-      factory(pluginModule, pluginExports, () => {
-        throw new Error(
-          `require() is not supported in plugins. Use ES module imports in your build. Path: ${originalPath}`
-        )
-      })
+      factory(pluginModule, pluginExports, createPluginRequire(originalPath))
 
       // Return either module.exports or the exports object
       return pluginModule.exports !== pluginExports ? pluginModule.exports : pluginExports
     } catch (error) {
-      throw new Error(`Failed to evaluate plugin code from ${originalPath}: ${error}`)
+      throw new PluginEvaluationError(
+        `Failed to evaluate plugin code from ${originalPath}: ${error}`,
+        error
+      )
     }
   }
 
@@ -709,6 +746,7 @@ export class PluginLoader {
       pluginPath: pluginRoot,
       entry: relativeEntry,
     })
+    await primeSharedModules()
     return this.evaluatePluginCode(code, absolutePath)
   }
 

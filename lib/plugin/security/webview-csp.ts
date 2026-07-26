@@ -13,6 +13,8 @@
 // unrestricted egress; `["*"]` is an explicit opt-in to unrestricted egress;
 // an explicit list is clamped to those origins over https/wss.
 
+import { buildWebviewTokenCss } from "../api/theme-tokens"
+
 export interface WebviewCspInput {
   /** `manifest.networkAccess.allowedDomains` for the owning plugin. */
   allowedDomains?: string[]
@@ -34,6 +36,17 @@ export interface WebviewCspInput {
    * must not ride along with panel rendering.
    */
   editorApi?: boolean
+  /**
+   * Host design tokens, serialized as a CSS rule, injected into the frame.
+   *
+   * A webview is a separate document behind an opaque origin, so it inherits
+   * nothing from the host — a panel would otherwise render with browser
+   * defaults right next to native UI, and would ignore the user's theme,
+   * density and reduce-motion settings entirely. Defaults to the host's
+   * currently-applied tokens; pass a value to override (tests, or a host with
+   * no DOM). Pass an empty string to inject nothing.
+   */
+  designTokensCss?: string
 }
 
 function connectSrc(allowedDomains: string[] | undefined): string {
@@ -86,11 +99,16 @@ export function wrapWebviewHtml(body: string, input: WebviewCspInput): string {
   // merely renders a panel has no business writing into the file the user is
   // editing. Same reasoning as the separate wire channel.
   const editorScript = input.editorApi ? `\n<script>${acquireCogniaEditorApiSource()}</script>` : ""
+  // Inline `<style>` rather than a linked sheet: the CSP allows
+  // `style-src 'unsafe-inline'` but no external origins, and an opaque-origin
+  // frame has nowhere to link to anyway.
+  const tokenCss = input.designTokensCss ?? buildWebviewTokenCss()
+  const tokenStyle = tokenCss ? `\n<style>${tokenCss}</style>` : ""
   return `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8" />
-<meta http-equiv="Content-Security-Policy" content="${csp}" />
+<meta http-equiv="Content-Security-Policy" content="${csp}" />${tokenStyle}
 <script>${acquireCogniaWebviewApiSource()}</script>${contextPanelScript}${editorScript}
 </head>
 <body>${body}</body>

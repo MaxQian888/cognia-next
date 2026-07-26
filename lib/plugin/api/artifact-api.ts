@@ -4,7 +4,8 @@
  * Provides artifact management capabilities to plugins.
  */
 
-import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { selectActiveArtifactId, useArtifactStore } from "@/stores/artifact/artifact-store"
+import { useChatStore } from "@/stores/chat"
 import {
   buildArtifactSourceMetadata,
   clearRegisteredArtifactRenderers,
@@ -39,8 +40,9 @@ export function createArtifactAPI(pluginId: string): PluginArtifactAPI {
   const api: PluginArtifactAPI = {
     getActiveArtifact: (): Artifact | null => {
       const store = useArtifactStore.getState()
-      if (!store.activeArtifactId) return null
-      return store.artifacts[store.activeArtifactId] || null
+      const activeId = selectActiveArtifactId(store, useChatStore.getState().activeSessionId)
+      if (!activeId) return null
+      return store.artifacts[activeId] || null
     },
 
     getArtifact: (id: string): Artifact | null => {
@@ -146,7 +148,9 @@ export function createArtifactAPI(pluginId: string): PluginArtifactAPI {
       let lastArtifactId: string | null = null
 
       const unsubscribe = useArtifactStore.subscribe((state) => {
-        const currentId = state.activeArtifactId || null
+        // The active artifact is per-conversation now, so "the" active one is
+        // whichever the on-screen conversation is parked on.
+        const currentId = selectActiveArtifactId(state, useChatStore.getState().activeSessionId)
         if (currentId !== lastArtifactId) {
           lastArtifactId = currentId
           const artifact = currentId ? state.artifacts[currentId] : null

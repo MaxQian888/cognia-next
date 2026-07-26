@@ -1,0 +1,49 @@
+{
+  "name": "@cognia/plugin-ui",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The curated component surface third-party Cognia plugins render with. A deliberately small, versioned fork of the host's shadcn/ui primitives — the host resolves this module at plugin load time, so plugins share one instance and inherit the host theme without bundling React.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "cognia-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
+    },
+    "./*": {
+      "cognia-source": "./src/*.tsx",
+      "types": "./dist/*.d.ts",
+      "import": "./dist/*.js",
+      "require": "./dist/*.cjs",
+      "default": "./dist/*.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^3.6.0"
+  },
+  "peerDependencies": {
+    "cmdk": "^1.1.1",
+    "lucide-react": "^1.25.0",
+    "motion": "^12.42.2",
+    "radix-ui": "^1.6.4",
+    "react": "^19.0.0"
+  },
+  "engines": {
+    "node": ">=26.0.0"
+  }
+}

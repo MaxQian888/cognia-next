@@ -322,4 +322,55 @@ describe("Extension API", () => {
       expect(getPluginExtensions(testPluginId)).toHaveLength(1)
     })
   })
+
+  describe("width hints", () => {
+    const Cmp: React.ComponentType<ExtensionProps> = () => null
+
+    const optionsFor = (hints: { minWidth?: number; maxWidth?: number }) => {
+      createExtensionAPI(testPluginId).registerExtension("chat.header", Cmp, hints)
+      return getExtensionsForPoint("chat.header")[0].options
+    }
+
+    it("leaves both bounds unset when none are declared", () => {
+      const options = optionsFor({})
+      expect(options.minWidth).toBeUndefined()
+      expect(options.maxWidth).toBeUndefined()
+    })
+
+    it("carries valid bounds onto the registration", () => {
+      expect(optionsFor({ minWidth: 120, maxWidth: 320 })).toMatchObject({
+        minWidth: 120,
+        maxWidth: 320,
+      })
+    })
+
+    it.each([
+      ["zero", 0],
+      ["negative", -40],
+      ["NaN", Number.NaN],
+      ["Infinity", Number.POSITIVE_INFINITY],
+    ])("drops a %s bound rather than serialising it into a style", (_label, value) => {
+      const options = optionsFor({ minWidth: value, maxWidth: value })
+      expect(options.minWidth).toBeUndefined()
+      expect(options.maxWidth).toBeUndefined()
+    })
+
+    it("drops a non-numeric bound coming from untyped plugin code", () => {
+      const options = optionsFor({ minWidth: "200" as unknown as number })
+      expect(options.minWidth).toBeUndefined()
+    })
+
+    it("collapses an inverted pair toward the ceiling so the smaller bound wins", () => {
+      expect(optionsFor({ minWidth: 400, maxWidth: 100 })).toMatchObject({
+        minWidth: 100,
+        maxWidth: 100,
+      })
+    })
+
+    it("keeps a floor whose paired ceiling was dropped as invalid", () => {
+      const options = optionsFor({ minWidth: 200, maxWidth: -1 })
+      expect(options.minWidth).toBe(200)
+      expect(options.maxWidth).toBeUndefined()
+    })
+  })
 })

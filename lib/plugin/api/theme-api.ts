@@ -13,6 +13,7 @@ import { resolveActiveThemeColors } from "@/lib/themes"
 import { getPluginTheme } from "@/lib/theme/theme-registry"
 import { createPluginSystemLogger } from "../core/logger"
 import { createApiGuardedAPI } from "./api-permission-gate"
+import { readAppliedThemeTokens } from "./theme-tokens"
 import type {
   PluginThemeAPI,
   ThemeMode,
@@ -53,6 +54,12 @@ function getThemeState(): ThemeState {
 
   // A directly-activated plugin theme wins — reflect its palette so plugins
   // reading `getColors()` see what's actually painted.
+  // Motion / density / typography / radius are read off the applied CSS rather
+  // than the settings store: they can be set by a level, a theme pack or a
+  // plugin-contributed density preset, and only the computed value says which
+  // won. Shared by both return paths below.
+  const applied = readAppliedThemeTokens()
+
   if (activePluginThemeId) {
     const pluginTheme = getPluginTheme(activePluginThemeId)
     if (pluginTheme?.colors) {
@@ -64,6 +71,7 @@ function getThemeState(): ThemeState {
         activePluginThemeId,
         colors: pluginTheme.colors,
         themeSource: "plugin",
+        ...applied,
       }
     }
   }
@@ -84,6 +92,7 @@ function getThemeState(): ThemeState {
     activePluginThemeId: activePluginThemeId ?? null,
     colors: resolved.colors as ThemeColors,
     themeSource: resolved.themeSource,
+    ...applied,
   }
 }
 

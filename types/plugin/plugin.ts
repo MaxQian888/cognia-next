@@ -52,6 +52,7 @@ import type { PluginVerificationSnapshot } from "./plugin-verification"
 import type { PluginOcrProviderDef } from "./plugin-ocr"
 import type { PluginWorkspaceBackendDef } from "./plugin-workspace-backend"
 import type { PluginMessageRendererDef } from "./plugin-message-renderer"
+import type { PluginToolRendererDef } from "./plugin-tool-renderer"
 import type { PluginAiProviderDef } from "./plugin-ai-provider"
 import type { PluginTerminalCompletionProviderDef } from "./plugin-terminal-completion"
 import type { PluginModalMountDef } from "./plugin-modal"
@@ -77,7 +78,10 @@ import type { PluginToolRouteDef } from "./plugin-tool-route"
 // the runtime parser in lockstep — historically a local alias was used to
 // avoid a dep cycle, but the contracts module has no upward imports so the
 // real type is safe to bring in here.
-import type { ActivationEventDeclaration } from "@/lib/plugin/contracts/plugin-points"
+import type {
+  ActivationEventDeclaration,
+  PluginPointFormFactor,
+} from "@/lib/plugin/contracts/plugin-points"
 import type { VsCodeExtensionBlock, VsCodeLanguage } from "./plugin-vscode"
 import type {
   Artifact,
@@ -164,6 +168,7 @@ export type PluginCapability =
   | "scheduler" // Provides scheduled tasks
   | "workspace-backend" // Contributes workspace execution backends (sandbox/local runners)
   | "message-renderer" // Contributes per-message-part renderers
+  | "tool-renderer" // Contributes result cards for its own MCP tools
   | "density-preset" // Contributes named appearance density presets
   | "chat-middleware" // Contributes guarded chat request middleware
   | "modal-mount" // Contributes declarative modal mount points
@@ -1085,6 +1090,15 @@ export interface PluginManifest {
    * `extension:ui`.
    */
   messageRenderers?: PluginMessageRendererDef[]
+
+  /**
+   * Result cards for MCP tools this plugin provides. Tool parts are host-owned
+   * (`tool-*` / `dynamic-tool` never reach the message-part registry), so this
+   * is the declarative seam for rendering a plugin tool's output richly instead
+   * of falling through to the generic content-blocks card. Registered with
+   * `lib/plugin/api/tool-result-renderers.ts`. Permission gate: `extension:ui`.
+   */
+  toolRenderers?: PluginToolRendererDef[]
 
   /**
    * Plugin-internal AI providers (LLM completion + embedding). Strictly NOT
@@ -3726,6 +3740,42 @@ export interface CustomTheme {
 /**
  * Current theme state
  */
+/**
+ * Motion preferences, in the form a plugin's *JavaScript* can act on.
+ *
+ * CSS-driven animation already follows the user automatically: plugin UI
+ * inherits `--motion-duration-scale` and the `reduce-motion` reset through the
+ * cascade. Anything driven from JS — `Element.animate`, `requestAnimationFrame`,
+ * a bundled animation library — cannot see either, so without this a plugin
+ * keeps animating after the user has explicitly asked it not to.
+ */
+export interface ThemeMotionState {
+  /** Multiplier to apply to your own durations. Mirrors `--motion-duration-scale`. */
+  durationScale: number
+  /**
+   * True when animation should be suppressed. Covers BOTH the in-app setting
+   * and the OS-level `prefers-reduced-motion`, which the app otherwise handles
+   * only in CSS — so this is the single check a plugin needs.
+   */
+  reduced: boolean
+}
+
+/** Spacing scale currently applied, mirroring the `--density-*` variables. */
+export interface ThemeDensityState {
+  level: "compact" | "comfortable" | "spacious"
+  spacing: string
+  gap: string
+  rowPadding: string
+  inputHeight: string
+  lineHeight: string
+}
+
+/** Type scale currently applied, mirroring the typography variables. */
+export interface ThemeTypographyState {
+  lineHeightScale: number
+  letterSpacingEm: number
+}
+
 export interface ThemeState {
   mode: ThemeMode
   resolvedMode: "light" | "dark"
@@ -3735,6 +3785,14 @@ export interface ThemeState {
   activePluginThemeId?: string | null
   themeSource?: "preset" | "custom" | "plugin"
   colors: ThemeColors
+  /** Motion preferences — check `motion.reduced` before animating from JS. */
+  motion: ThemeMotionState
+  /** Applied spacing scale. Prefer the CSS variables where you can use them. */
+  density: ThemeDensityState
+  /** Applied type scale. */
+  typography: ThemeTypographyState
+  /** Corner radius in rem, mirroring `--radius`. */
+  radius: number
 }
 
 /**
@@ -4509,6 +4567,23 @@ export interface ExtensionOptions {
    * changes without a custom subscription.
    */
   when?: string
+  /**
+   * Inline-size floor for this contribution's box, in CSS pixels.
+   *
+   * A *request*, not a guarantee: the host clamps it to the slot's own inline
+   * size, so a contribution can never be wider than the region hosting it no
+   * matter what number is passed. Non-finite and non-positive values are
+   * dropped at registration.
+   *
+   * Declaring either bound has a real cost — the wrapper stops being
+   * `display: contents` and starts generating a layout box (see
+   * `PluginExtensionBoundary`). In a flex toolbar that turns the contribution
+   * from a direct flex child into a nested one. Omit both unless the
+   * contribution genuinely needs reserved width.
+   */
+  minWidth?: number
+  /** Inline-size ceiling, in CSS pixels. Same clamping and same cost as `minWidth`. */
+  maxWidth?: number
 }
 
 /**
@@ -4528,6 +4603,8 @@ export interface ExtensionRegistration {
 export interface ExtensionProps {
   pluginId: string
   extensionId: string
+  /** Host-declared shape of the slot receiving this contribution. */
+  formFactor: PluginPointFormFactor
 }
 
 /**
@@ -4691,4 +4768,14 @@ export interface PluginContextAPI {
    * the chat renderer.
    */
   messagePart?: import("@/lib/plugin/api/message-part-api").PluginMessagePartAPI
+
+  /**
+   * Tool-result renderer API — register the React card that renders this
+   * plugin's own MCP tool result in chat. Tool parts are host-owned
+   * (`messagePart` reserves the `tool-` prefix), so this is the supported way
+   * for a plugin to render its tool's output richly instead of falling through
+   * to the generic content-blocks card. Optional for the same back-compat
+   * reason as `messagePart`.
+   */
+  toolResult?: import("@/lib/plugin/api/tool-result-api").PluginToolResultAPI
 }

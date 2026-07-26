@@ -1,5 +1,10 @@
 import * as sdk from "./index"
-import type { CanonicalExtensionPoint, ExtensionPoint, ExtensionOptions } from "./index"
+import type {
+  CanonicalExtensionPoint,
+  ExtensionPoint,
+  ExtensionOptions,
+  ExtensionProps,
+} from "./index"
 
 describe("plugin-sdk: extensions", () => {
   it("re-exports the canonical extension-point list as a non-empty const tuple", () => {
@@ -20,5 +25,14 @@ describe("plugin-sdk: extensions", () => {
   it("re-exports ExtensionOptions for plugin-side registration calls", () => {
     const opts: ExtensionOptions = { priority: 10 }
     expect(opts.priority).toBe(10)
+  })
+
+  it("exposes the host form factor on extension component props", () => {
+    const props: ExtensionProps = {
+      pluginId: "example",
+      extensionId: "toolbar-action",
+      formFactor: "row",
+    }
+    expect(props.formFactor).toBe("row")
   })
 })

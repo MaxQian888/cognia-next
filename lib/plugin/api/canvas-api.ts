@@ -306,7 +306,10 @@ export function createCanvasAPI(pluginId: string): PluginCanvasAPI {
 
     closeCanvas: () => {
       const store = useArtifactStore.getState()
-      store.closeCanvas()
+      // `canvasOpen` was a second visibility flag nothing ever read; closing
+      // the canvas means dropping the active document, which every canvas
+      // surface already keys off.
+      store.setActiveCanvas(null)
       logger.info("Closed canvas")
     },
 

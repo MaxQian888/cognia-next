@@ -457,6 +457,29 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     ],
   },
   {
+    id: "tool-renderer",
+    support: "supported",
+    manifestFields: ["toolRenderers"],
+    runtimeBinding:
+      "manifest.toolRenderers → tool-renderer bridge → tool-result renderer registry → MCPToolCard fallback lookup",
+    hostBindings: [
+      "lib/plugin/bridge/tool-renderer-bridge.ts",
+      "lib/plugin/contracts/module-bridge-map.ts",
+      "lib/plugin/api/tool-result-renderers.ts",
+      "components/chat/message-parts/mcp-tool-card.tsx",
+    ],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-tool-renderer.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: [
+      "packages/plugin-sdk/src/define/define-tool-renderer.test.ts",
+      "lib/plugin/bridge/tool-renderer-bridge.test.ts",
+    ],
+  },
+  {
     id: "density-preset",
     support: "supported",
     manifestFields: ["densityPresets"],

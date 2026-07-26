@@ -94,4 +94,46 @@ describe("modal-mount-bridge", () => {
 
     expect(await api.openById("missing")).toBeNull()
   })
+
+  it("carries manifest-declared presentation options into the declarative registry", async () => {
+    await registerModalMountsForPlugin(
+      manifest([
+        {
+          id: "wizard",
+          label: "Wizard",
+          entry: "dist/m.js",
+          export: "Modal",
+          options: { size: "lg", variant: "sheet-right" },
+        },
+      ]),
+      "/p/demo",
+      { importer: async () => ({ Modal }) }
+    )
+    expect(getDeclaredModal("demo", "wizard")?.options).toEqual({
+      size: "lg",
+      variant: "sheet-right",
+    })
+  })
+
+  it("ctx.modal.openById layers its own options over the declared ones", async () => {
+    await registerModalMountsForPlugin(
+      manifest([
+        {
+          id: "wizard",
+          label: "Wizard",
+          entry: "dist/m.js",
+          export: "Modal",
+          options: { variant: "sheet-bottom" },
+        },
+      ]),
+      "/p/demo",
+      { importer: async () => ({ Modal }) }
+    )
+    const api = createModalAPI("demo")
+    await api.openById("wizard", undefined, { size: "full" })
+    expect(usePluginModalStore.getState().stack[0]!.options).toEqual({
+      size: "full",
+      variant: "sheet-bottom",
+    })
+  })
 })

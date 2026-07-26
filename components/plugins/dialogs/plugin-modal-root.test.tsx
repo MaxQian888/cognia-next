@@ -9,7 +9,7 @@ import { NextIntlClientProvider } from "next-intl"
 import enMessages from "@/i18n/messages/en.json"
 import { PluginModalRoot } from "./plugin-modal-root"
 import { usePluginModalStore } from "@/stores/plugin-runtime/plugin-modal-store"
-import type { PluginModalComponent } from "@/types/plugin/plugin-modal"
+import type { PluginModalComponent, PluginModalOptions } from "@/types/plugin/plugin-modal"
 
 function renderRoot() {
   return render(
@@ -107,6 +107,100 @@ describe("PluginModalRoot", () => {
     })
     expect(screen.getByText(/Plugin modal failed to render/)).toBeInTheDocument()
     consoleError.mockRestore()
+  })
+
+  describe("presentation options", () => {
+    function openWith(options?: PluginModalOptions) {
+      const Probe: PluginModalComponent = () => <div>probe-body</div>
+      renderRoot()
+      act(() => {
+        usePluginModalStore.getState().open({ pluginId: "p1", component: Probe, options })
+      })
+      return screen.getByText("probe-body").closest("[data-plugin-modal-variant]")!
+    }
+
+    it("defaults to the centered dialog with no size override class", () => {
+      const shell = openWith()
+      expect(shell).toHaveAttribute("data-slot", "dialog-content")
+      expect(shell).toHaveAttribute("data-plugin-modal-variant", "center")
+      expect(shell).toHaveAttribute("data-plugin-modal-size", "md")
+      // `md` must resolve to DialogContent's own default width, untouched.
+      expect(shell.className).toContain("sm:max-w-lg")
+    })
+
+    it("an unknown variant falls back to the centered dialog", () => {
+      const shell = openWith({ variant: "sheet-diagonal" } as never)
+      expect(shell).toHaveAttribute("data-plugin-modal-variant", "center")
+    })
+
+    it("applies the size preset to the centered dialog", () => {
+      const shell = openWith({ size: "lg" })
+      expect(shell).toHaveAttribute("data-plugin-modal-size", "lg")
+      expect(shell.className).toContain("sm:max-w-3xl")
+      expect(shell.className).not.toContain("sm:max-w-lg")
+    })
+
+    it("renders sheet-right as a right-anchored sheet", () => {
+      const shell = openWith({ variant: "sheet-right", size: "lg" })
+      expect(shell).toHaveAttribute("data-slot", "sheet-content")
+      expect(shell.className).toContain("inset-y-0")
+      expect(shell.className).toContain("sm:max-w-2xl")
+    })
+
+    it("renders sheet-bottom as a bottom-anchored sheet sized on the block axis", () => {
+      const shell = openWith({ variant: "sheet-bottom", size: "full" })
+      expect(shell).toHaveAttribute("data-slot", "sheet-content")
+      expect(shell.className).toContain("bottom-0")
+      expect(shell.className).toContain("h-dvh")
+    })
+
+    it("closes a sheet variant through the same onOpenChange path as a dialog", () => {
+      const Self: PluginModalComponent = ({ onClose }) => <button onClick={onClose}>close</button>
+      renderRoot()
+      act(() => {
+        usePluginModalStore
+          .getState()
+          .open({ pluginId: "p1", component: Self, options: { variant: "sheet-right" } })
+      })
+      act(() => {
+        fireEvent.click(screen.getByText("close"))
+      })
+      expect(usePluginModalStore.getState().stack).toHaveLength(0)
+    })
+
+    it.each([["center" as const], ["sheet-right" as const]])(
+      "pops the stack when the %s shell dismisses itself (Escape)",
+      (variant) => {
+        const Probe: PluginModalComponent = () => <div>probe-body</div>
+        renderRoot()
+        act(() => {
+          usePluginModalStore
+            .getState()
+            .open({ pluginId: "p1", component: Probe, options: { variant } })
+        })
+        // Radix's own dismissal route — the one a plugin component never calls,
+        // and the only path through the host's `onOpenChange` handler.
+        act(() => {
+          fireEvent.keyDown(document.body, { key: "Escape", code: "Escape" })
+        })
+        expect(usePluginModalStore.getState().stack).toHaveLength(0)
+      }
+    )
+
+    it("keeps the error boundary inside the sheet variant", () => {
+      const Broken: PluginModalComponent = () => {
+        throw new Error("plugin boom")
+      }
+      const consoleError = jest.spyOn(console, "error").mockImplementation(() => {})
+      renderRoot()
+      act(() => {
+        usePluginModalStore
+          .getState()
+          .open({ pluginId: "p1", component: Broken, options: { variant: "sheet-bottom" } })
+      })
+      expect(screen.getByText(/Plugin modal failed to render/)).toBeInTheDocument()
+      consoleError.mockRestore()
+    })
   })
 
   it("clearByPlugin removes only that plugin's modals", () => {

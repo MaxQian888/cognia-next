@@ -11,17 +11,24 @@
  * reflect agent edits, and read the active editor (`lib/claude/editor-builtin-tools.ts`),
  * while `lib/plugin/api/` had no editor surface at all.
  *
- * Permissions (`editor:read` / `editor:write`) are re-checked on every call, the
- * same rule the rest of `lib/plugin/api` follows: a grant revoked mid-session
- * must take effect immediately, not at the next reload.
+ * Permissions (`editor:read` / `editor:write`, plus `terminal:write` for shell
+ * commands) are re-checked on every call, the same rule the rest of
+ * `lib/plugin/api` follows: a grant revoked mid-session must take effect
+ * immediately, not at the next reload.
  */
 
+import { checkFileAccess, normalizeFsPath } from "@/lib/files/permissions"
 import {
   deferProjectEditorOpen,
+  flushProjectEditorEdits,
   notifyActiveEditorChanged,
+  notifyInProjectEditor,
   openInProjectEditor,
   readActiveFromProjectEditor,
   reflectEditInProjectEditor,
+  revealInProjectEditor,
+  runInProjectEditorTerminal,
+  showDiffInProjectEditor,
   subscribeActiveEditor,
   type ActiveEditorContext,
 } from "@/lib/files/project-editor-bridge"
@@ -75,6 +82,44 @@ export interface PluginEditorAPI {
    * because a reflect that lands minutes later would reflect stale content.
    */
   reflectEdit: (absolutePath: string, options?: PluginEditorOpenOptions) => Promise<boolean>
+  /**
+   * Flush the editor's unsaved buffers to disk, returning the absolute paths it
+   * could not save (empty means disk is now trustworthy). Requires `editor:write`.
+   *
+   * Call this before reading project files: the plugin filesystem API — like the
+   * agent's own tools — reads disk, so a buffer the user edited but never saved is
+   * invisible to it, and a subsequent write would clobber that work.
+   */
+  saveDirty: () => Promise<string[]>
+  /**
+   * Show `content` against the on-disk `absolutePath` as a diff, so the user can
+   * review a proposed change before the plugin writes it. Requires `editor:write`.
+   * Returns false when the mounted engine has no diff surface, so the caller can
+   * decide between writing directly and doing nothing.
+   */
+  showDiff: (absolutePath: string, content: string, title?: string) => Promise<boolean>
+  /**
+   * Reveal `absolutePath` in the editor's file tree without opening it. Requires
+   * `editor:write` (it moves the user's view). False when no editor can.
+   */
+  revealInExplorer: (absolutePath: string) => Promise<boolean>
+  /**
+   * Run `command` in the editor's own terminal, visible to the user. Requires
+   * `terminal:write`, because writing a command to a terminal is arbitrary shell
+   * execution. `cwd` defaults to `root` and must remain inside it. Output is
+   * deliberately not readable back — this is "show the user this running", not
+   * a shell API; plugins with `process` permission have one of those already.
+   */
+  runInTerminal: (
+    root: string,
+    command: string,
+    options?: { cwd?: string; name?: string }
+  ) => Promise<boolean>
+  /**
+   * Surface a message inside the editor. Requires `editor:write` — it puts plugin
+   * text in front of the user. False when no editor can show one.
+   */
+  notify: (message: string, kind?: "info" | "warning" | "error") => Promise<boolean>
   /**
    * Read what the user is currently looking at: focused file, 1-based
    * selection and its text, that file's diagnostics, and the open editors.
@@ -137,6 +182,26 @@ async function screen(context: ActiveEditorContext): Promise<PluginActiveEditorC
   }
 }
 
+function isAbsoluteFsPath(path: string): boolean {
+  return path.startsWith("/") || /^[A-Za-z]:\//.test(path)
+}
+
+function confineTerminalOptions(
+  root: string,
+  options: { cwd?: string; name?: string } | undefined
+): { root: string; options: { cwd: string; name?: string } } {
+  const normalizedRoot = normalizeFsPath(root)
+  const cwd = normalizeFsPath(options?.cwd ?? root)
+  if (!isAbsoluteFsPath(normalizedRoot) || !isAbsoluteFsPath(cwd)) {
+    throw new Error("Terminal root and cwd must be absolute filesystem paths")
+  }
+  const decision = checkFileAccess(cwd, "list", { allowedRoots: [normalizedRoot] })
+  if (!decision.allowed) {
+    throw new Error(`Terminal cwd must remain inside the project root "${normalizedRoot}"`)
+  }
+  return { root: normalizedRoot, options: { cwd, name: options?.name } }
+}
+
 export function createEditorAPI(
   pluginId: string,
   hasPermission: (permission: string) => boolean
@@ -173,6 +238,36 @@ export function createEditorAPI(
     async reflectEdit(absolutePath, options = {}) {
       requireWrite("reflectEdit")
       return reflectEditInProjectEditor(absolutePath, options.line, options.column)
+    },
+
+    async saveDirty() {
+      requireWrite("saveDirty")
+      return flushProjectEditorEdits()
+    },
+
+    async showDiff(absolutePath, content, title) {
+      requireWrite("showDiff")
+      return showDiffInProjectEditor(absolutePath, content, title)
+    },
+
+    async revealInExplorer(absolutePath) {
+      requireWrite("revealInExplorer")
+      return revealInProjectEditor(absolutePath)
+    },
+
+    async runInTerminal(root, command, options) {
+      if (!hasPermission("terminal:write")) {
+        throw new Error(
+          `Plugin "${pluginId}" lacks the "terminal:write" permission required by "runInTerminal"`
+        )
+      }
+      const confined = confineTerminalOptions(root, options)
+      return runInProjectEditorTerminal(confined.root, command, confined.options)
+    },
+
+    async notify(message, kind) {
+      requireWrite("notify")
+      return notifyInProjectEditor(message, kind)
     },
 
     async readActive() {

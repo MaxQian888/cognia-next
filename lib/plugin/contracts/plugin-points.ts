@@ -17,6 +17,24 @@ export type PluginPointGovernanceMode = "warn" | "block"
 
 export type PluginPointHostKind = "jsx-mount" | "registration"
 
+/**
+ * The shape a slot expects its contributions to take.
+ *
+ * Without this a plugin author reads `statusbar.right` and `sidebar.right.top`
+ * and gets identical information from the contract, then guesses — so a status
+ * bar ends up with a full card in it. Declared per point rather than measured,
+ * because the answer is a property of the host region and the author needs it
+ * at authoring time, not at render time. For the cases where width genuinely
+ * varies (the context workbench's narrow/wide/focus modes), slot wrappers carry
+ * `container-type: inline-size` so plugin CSS can use `@container` instead.
+ *
+ *   - `icon`   a single square control; assume ~24-32px and no room for a label
+ *   - `row`    one item in a horizontal action row; keep it to a button or two
+ *   - `block`  full-width band stacked with host content; any height
+ *   - `panel`  an owned region with its own scroll; render a whole view
+ */
+export type PluginPointFormFactor = "icon" | "row" | "block" | "panel"
+
 export interface PluginPointContract {
   id: string
   kind: PluginPointKind
@@ -36,6 +54,8 @@ export interface PluginPointContract {
    * Hook / runtime / activation contracts leave this undefined.
    */
   hostKind?: PluginPointHostKind
+  /** UI slots only — the shape the host region expects. See the type's doc. */
+  formFactor?: PluginPointFormFactor
   owner: string
   binding: string
   docs: string
@@ -318,6 +338,87 @@ const REGISTRATION_HOST_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
   "vscode.activity-bar",
   "vscode.terminal.output",
 ])
+
+/**
+ * Shape each UI slot expects, keyed by point id. Exhaustive by type — a new
+ * `CanonicalExtensionPoint` will not compile until it is classified here, which
+ * is the point: an unclassified slot is one an author has to guess at.
+ *
+ * Read off the host binding rather than invented: `statusbar.*` mounts into a
+ * ~24px-tall bar, `chat.input.actions` into the composer's flex button row,
+ * `sidebar.right.*` into the context workbench's scrollable column.
+ */
+const EXTENSION_POINT_FORM_FACTORS: Record<CanonicalExtensionPoint, PluginPointFormFactor> = {
+  // Icon rails and bars — square controls, no room for a label.
+  "sidebar.left.top": "icon",
+  "sidebar.left.bottom": "icon",
+  "toolbar.left": "icon",
+  "toolbar.center": "icon",
+  "toolbar.right": "icon",
+  "statusbar.left": "icon",
+  "statusbar.center": "icon",
+  "statusbar.right": "icon",
+  "vscode.activity-bar": "icon",
+
+  // Horizontal action rows — a button or two alongside the host's own.
+  "chat.input.actions": "row",
+  "chat.input.menu": "row",
+  "chat.message.actions": "row",
+  "chat.message.footer": "row",
+  "chat.tool-call.actions": "row",
+  "chat.message-part.actions": "row",
+  "artifact.toolbar": "row",
+  "artifact.actions": "row",
+  "canvas.toolbar": "row",
+  "goal.toolbar": "row",
+  "goal.detail.actions": "row",
+  "pet.panel.actions": "row",
+  "terminal.toolbar": "row",
+  "agent.teammate.actions": "row",
+  "agent.team.task.actions": "row",
+  "agent.team.board.toolbar": "row",
+  "agent.external-session.toolbar": "row",
+  "panel.header": "row",
+  "panel.footer": "row",
+  "inbox.conversation.actions": "row",
+  "inbox.composer.actions": "row",
+  "inbox.draft.actions": "row",
+
+  // Full-width bands stacked with host content.
+  "chat.header": "block",
+  "chat.footer": "block",
+  "chat.input.above": "block",
+  "chat.input.below": "block",
+  "chat.message.before": "block",
+  "chat.message.after": "block",
+  "twin.panel.header": "block",
+  "twin.settings.cards": "block",
+  "settings.general": "block",
+  "settings.appearance": "block",
+  "settings.ai": "block",
+  "settings.plugins": "block",
+  "command-palette": "block",
+  "inbox.sidebar.section": "block",
+  "vscode.terminal.output": "block",
+
+  // Owned regions with their own scroll — render a whole view.
+  "sidebar.right.top": "panel",
+  "sidebar.right.bottom": "panel",
+  "canvas.sidebar": "panel",
+  "pet.console.tab": "panel",
+  "perf.panel": "panel",
+  "agent.team.panel": "panel",
+  "agent.team.report": "panel",
+  "twin.persona.panel": "panel",
+  "twin.overview.panel": "panel",
+  "vscode.sidebar.view": "panel",
+  "vscode.webview.panel": "panel",
+}
+
+/** The shape a slot expects its contributions to take. */
+export function getExtensionPointFormFactor(point: CanonicalExtensionPoint): PluginPointFormFactor {
+  return EXTENSION_POINT_FORM_FACTORS[point]
+}
 
 const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoint, string>> = {
   "sidebar.left.top": "components/shell/guild-rail.tsx",
@@ -744,6 +845,7 @@ const extensionPointContracts: Record<CanonicalExtensionPoint, PluginPointContra
             kind: "ui-slot",
             stability: override.stability,
             status: override.status,
+            formFactor: EXTENSION_POINT_FORM_FACTORS[id],
             owner: "plugin-platform",
             binding: override.binding,
             docs: UI_POINT_DOCS,
@@ -779,6 +881,7 @@ const extensionPointContracts: Record<CanonicalExtensionPoint, PluginPointContra
                 : "deprecated",
           status,
           hostKind,
+          formFactor: EXTENSION_POINT_FORM_FACTORS[id],
           owner: "plugin-platform",
           binding:
             status === "deprecated"

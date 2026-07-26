@@ -75,6 +75,7 @@ export type {
 } from "./connectors-api"
 
 export { createMessagePartAPI, purgeMessagePartRenderersForPlugin } from "./message-part-api"
+export { createToolResultAPI, purgeToolResultRenderersForPlugin } from "./tool-result-api"
 export { createGitAPI, NoActiveRepoError } from "./git-api"
 export { createGoalAPI, NoJudgeModelError } from "./goal-api"
 export { createMemoryAPI } from "./memory-api"

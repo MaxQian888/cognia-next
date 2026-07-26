@@ -23,9 +23,9 @@ export interface PluginMessagePartAPI {
    * than a hard requirement.
    *
    * Constraint — `type` cannot start with `tool-`, `text`, `reasoning`,
-   * `file`, `a2ui`, `subagent`, `agent-team-dispatch`, `artifact`, `sources`,
-   * or `canvas` (those are owned by the host). The function returns a noop
-   * unregister for invalid types and logs a warning.
+   * `file`, or be `dynamic-tool`, `a2ui`, `subagent`, `agent-team-dispatch`,
+   * `artifact`, `sources`, or `canvas` (those are owned by the host). The
+   * function returns a noop unregister for invalid types and logs a warning.
    */
   registerPartRenderer: (
     type: string,
@@ -35,6 +35,9 @@ export interface PluginMessagePartAPI {
 
 const RESERVED_PREFIXES = ["tool-", "text", "reasoning", "file"]
 const RESERVED_TYPES = new Set([
+  // The AI SDK's undeclared-tool shape. Routed through the host's tool
+  // renderer just like `tool-*`, so it is host-owned for the same reason.
+  "dynamic-tool",
   "a2ui",
   "subagent",
   "agent-team-dispatch",

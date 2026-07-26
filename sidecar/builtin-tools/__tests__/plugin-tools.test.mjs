@@ -6,6 +6,7 @@ import {
   SERVER_VERSION,
   awaitPluginToolResponse,
   buildPluginToolsServer,
+  isCallToolResult,
   jsonSchemaToZodShape,
   jsonSchemaPropToZod,
 } from "../plugin-tools.mjs"
@@ -141,6 +142,72 @@ test("synthesized tool returns compact JSON for structured results", async () =>
   const result = await registered.handler({})
   assert.equal(result.isError, undefined)
   assert.equal(result.content[0].text, '{"ok":true,"rows":[1,2]}')
+})
+
+test("synthesized tool passes an MCP CallToolResult through untouched", async () => {
+  // Without the passthrough every plugin result is JSON.stringify-ed into one
+  // text block, which makes returning an image / audio / embedded resource
+  // structurally impossible — the model would only ever get base64 text.
+  const pending = new Map()
+  const callToolResult = {
+    content: [
+      { type: "text", text: "shot.png (12 bytes)" },
+      { type: "image", data: "AAAA", mimeType: "image/png" },
+    ],
+  }
+  const server = buildPluginToolsServer({
+    tools: [
+      {
+        name: "take_screenshot",
+        description: "capture",
+        jsonSchema: { type: "object", properties: {} },
+        pluginId: "p1",
+      },
+    ],
+    emit: (msg) => {
+      const e = pending.get(msg.toolUseId)
+      if (e) e.resolve({ result: callToolResult })
+    },
+    sessionId: "s",
+    pendingPluginToolCalls: pending,
+  })
+  const registered = server.instance?._registeredTools?.take_screenshot
+  assert.ok(registered)
+  const result = await registered.handler({})
+  assert.deepEqual(result, callToolResult)
+  assert.equal(result.content[1].data, "AAAA")
+})
+
+test("isCallToolResult accepts a well-formed MCP result", () => {
+  assert.equal(
+    isCallToolResult({
+      content: [
+        { type: "text", text: "shot.png (12 bytes)" },
+        { type: "image", data: "AAAA", mimeType: "image/png" },
+      ],
+    }),
+    true
+  )
+})
+
+test("isCallToolResult rejects ordinary plugin return values", () => {
+  assert.equal(isCallToolResult({ ok: true, base64: "AAAA" }), false)
+  assert.equal(isCallToolResult({ ok: false, error: "user-cancelled" }), false)
+  assert.equal(isCallToolResult("plain text"), false)
+  assert.equal(isCallToolResult(null), false)
+  assert.equal(isCallToolResult(undefined), false)
+  assert.equal(isCallToolResult(42), false)
+})
+
+test("isCallToolResult rejects a malformed or empty content array", () => {
+  // An empty array carries nothing, so flattening it to `{"content":[]}` text
+  // is no worse — and keeps the passthrough honest about what it accepts.
+  assert.equal(isCallToolResult({ content: [] }), false)
+  assert.equal(isCallToolResult({ content: "not an array" }), false)
+  assert.equal(isCallToolResult({ content: [{ text: "no type field" }] }), false)
+  assert.equal(isCallToolResult({ content: [null] }), false)
+  // An array at the top level is not a CallToolResult.
+  assert.equal(isCallToolResult([{ type: "text", text: "x" }]), false)
 })
 
 test("synthesized tool surfaces error responses as isError content", async () => {
