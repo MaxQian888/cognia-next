@@ -8,6 +8,7 @@ import type { Team } from "@cognia/agent-config-types"
 import type { SelectedGuild } from "@/stores/ui"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { DEFAULT_SIDEBAR_LAYOUT, SIDEBAR_NAV_META } from "@/types/shell/sidebar"
+import { CHROME_BUDGET, countControls } from "@/lib/ui/chrome-budget"
 
 function withTooltipProvider(node: React.ReactNode) {
   return <TooltipProvider>{node}</TooltipProvider>
@@ -130,22 +131,25 @@ test("does not render the account switcher in the rail", () => {
 
 test("renders a pinned rail button for every default-pinned feature", () => {
   render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
-  for (const key of [
-    "workflows",
-    "inbox",
-    "twin",
-    "discover",
-    "skills",
-    "plugins",
-    "agentTeams",
-    "scheduler",
-    "goals",
-  ]) {
+  // Three pins, not eleven: the rail keeps the destinations work arrives in.
+  for (const key of ["inbox", "workflows", "agentTeams"]) {
     expect(screen.getByLabelText(key)).toBeInTheDocument()
   }
-  // Auxiliary items are not pinned by default — they live behind "More".
-  expect(screen.queryByLabelText("logs")).not.toBeInTheDocument()
+  // Configure-once features and the auxiliary group both live behind "More".
+  for (const key of ["twin", "discover", "skills", "plugins", "scheduler", "goals", "logs"]) {
+    expect(screen.queryByLabelText(key)).not.toBeInTheDocument()
+  }
   expect(screen.getByTestId("guild-more")).toBeInTheDocument()
+})
+
+test("the More popover still reaches an unpinned feature", async () => {
+  // Unpinning must not equal hiding — every demoted feature is one click away.
+  const user = userEvent.setup()
+  render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+  await user.click(screen.getByTestId("guild-more"))
+  expect(screen.getByTestId("guild-more-item-skills")).toBeInTheDocument()
+  await user.click(screen.getByTestId("guild-more-item-skills"))
+  expect(routerPush).toHaveBeenCalledWith("/skills")
 })
 
 test("the More popover lists the overflow (auxiliary) items + Customize", async () => {
@@ -349,4 +353,68 @@ test("clicking Create team and Settings invoke the props and log", async () => {
   await user.click(screen.getByLabelText("openSettings"))
   expect(onOpenSettings).toHaveBeenCalled()
   expect(logInfo).toHaveBeenCalledWith("guild open settings")
+})
+
+test("stays within the guild-rail chrome control budget", () => {
+  // Default state: no teams, no plugin view containers — the floor every user
+  // sees on first launch. Ratchet, not a target (lib/ui/chrome-budget.ts).
+  const { container } = render(
+    withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />)
+  )
+  expect(countControls(container.querySelector("aside"))).toBeLessThanOrEqual(
+    CHROME_BUDGET.guildRail
+  )
+})
+
+// ── variant ────────────────────────────────────────────────────────────────
+// The rail is mounted in two places with opposite width constraints. Only the
+// desktop one may carry the `md:` breakpoint gate: `DesktopAppShell` bails out
+// of the mobile shell on the Capacitor *runtime*, so a narrow desktop window
+// still renders the rail and needs it to collapse. The mobile nav Sheet is the
+// opposite case — a phone viewport is never `md`, so the gate blanked the rail.
+
+test("the default rail variant keeps the md breakpoint gate", () => {
+  const { container } = render(
+    withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />)
+  )
+  const aside = container.querySelector("aside")!
+  expect(aside).toHaveAttribute("data-variant", "rail")
+  expect(aside.className).toContain("hidden")
+  expect(aside.className).toContain("md:flex")
+})
+
+test("the sheet variant renders unconditionally on a phone viewport", () => {
+  const { container } = render(
+    withTooltipProvider(
+      <GuildRail variant="sheet" onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />
+    )
+  )
+  const aside = container.querySelector("aside")!
+  expect(aside).toHaveAttribute("data-variant", "sheet")
+  // `hidden` would be `display:none` at every width a phone can be.
+  expect(aside.className).not.toContain("hidden")
+  expect(aside.className).toContain("flex")
+})
+
+test("the sheet variant still reaches every navigation destination", async () => {
+  // The regression this guards: mounted-but-invisible. Assert the actual
+  // destinations, not just the container.
+  const user = userEvent.setup()
+  const onOpenSettings = jest.fn()
+  render(
+    withTooltipProvider(
+      <GuildRail variant="sheet" onCreateTeam={jest.fn()} onOpenSettings={onOpenSettings} />
+    )
+  )
+  expect(screen.getByTestId("workspace-switcher")).toBeInTheDocument()
+  expect(screen.getByLabelText("directMessages")).toBeInTheDocument()
+  expect(screen.getByLabelText("canvas")).toBeInTheDocument()
+  for (const key of ["inbox", "workflows", "agentTeams"]) {
+    expect(screen.getByLabelText(key)).toBeInTheDocument()
+  }
+  await user.click(screen.getByTestId("guild-more"))
+  expect(screen.getByTestId("guild-more-item-skills")).toBeInTheDocument()
+
+  await user.click(screen.getByLabelText("openSettings"))
+  expect(onOpenSettings).toHaveBeenCalled()
 })

@@ -300,6 +300,7 @@ beforeAll(() => {
 })
 
 import { TitleBar } from "./title-bar"
+import { CHROME_BUDGET, countControls } from "@/lib/ui/chrome-budget"
 import { resetNavHistory } from "@/hooks/desktop/use-nav-history"
 
 beforeEach(() => {
@@ -1571,4 +1572,26 @@ test("wide menubar exposes Tools as a top-level trigger", async () => {
   setPlatform("Win32")
   render(<TitleBar />)
   await waitFor(() => expect(screen.getByText("desktop.menu.tools.label")).toBeInTheDocument())
+})
+
+test("stays within the title-bar chrome control budget on macOS", async () => {
+  // macOS is the tightest case worth guarding: `!isMac` suppresses the whole
+  // in-window Menubar, so what remains IS the permanent control surface.
+  // Ratchet, not a target — see lib/ui/chrome-budget.ts.
+  //
+  // `beforeEach` forces `quickActions` / `accountTop` on so the other tests can
+  // assert those segments; the budget must measure what users actually get, so
+  // restore the shipped defaults here.
+  isTauriMock.mockReturnValue(true)
+  setPlatform("MacIntel")
+  // Resolved lazily: a top-level import of the mocked module hits the TDZ when
+  // the jest.mock factory runs.
+  Object.assign(
+    barItemsRef,
+    jest.requireActual<typeof import("@/stores/ui/ui-store")>("@/stores/ui/ui-store")
+      .DEFAULT_BAR_ITEMS
+  )
+  render(<TitleBar />)
+  const header = await screen.findByTestId("title-bar")
+  expect(countControls(header)).toBeLessThanOrEqual(CHROME_BUDGET.titleBar)
 })

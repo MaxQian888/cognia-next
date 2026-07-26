@@ -406,6 +406,28 @@ describe("Composer — mobile (Claude-style) layout", () => {
     expect(screen.queryByTestId("composer-plus-toggle")).toBeNull()
   })
 
+  it("places Enhance, web search, and Skills inside the desktop `+` menu", () => {
+    mockUsePlatform.mockReturnValue("web")
+    renderComposer()
+
+    fireEvent.click(screen.getByTestId("composer-attach-menu"))
+
+    expect(screen.getByTestId("composer-enhance-trigger")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Toggle web search" })).toBeInTheDocument()
+    expect(screen.getByTestId("composer-skill-trigger")).toBeInTheDocument()
+  })
+
+  it("places the same capability group inside the mobile `+` menu", () => {
+    mockUsePlatform.mockReturnValue("mobile")
+    renderComposer()
+
+    fireEvent.click(screen.getByTestId("composer-plus-toggle"))
+
+    expect(screen.getByTestId("composer-enhance-trigger")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Toggle web search" })).toBeInTheDocument()
+    expect(screen.getByTestId("composer-skill-trigger")).toBeInTheDocument()
+  })
+
   it("keeps the drag overlay up when a non-file dragleave interleaves a file drag", () => {
     mockUsePlatform.mockReturnValue("web")
     renderComposer()
@@ -435,11 +457,11 @@ describe("Composer — mobile (Claude-style) layout", () => {
     const textarea = document.querySelector("textarea") as HTMLTextAreaElement
     const surface = textarea.closest('[data-composer-layout="compact"]')
     expect(surface).not.toBeNull()
-    // Desktop compact keeps the paperclip (the "+" menu is mobile-only): its
-    // camera/album branches both degrade to the same file picker off-mobile, so
-    // three entries would be redundant there.
+    // Desktop compact keeps `ComposerAttachMenu` (the WeChat-style plus sheet is
+    // mobile-only): its camera/album branches both degrade to the same file
+    // picker off-mobile, so three entries would be redundant there.
     expect(screen.queryByTestId("composer-plus-toggle")).toBeNull()
-    expect(screen.getByLabelText("Attach files")).toBeInTheDocument()
+    expect(screen.getByTestId("composer-attach-menu")).toBeInTheDocument()
     expect(surface).toContainElement(screen.getByTestId("composer-toolbar-embedded"))
   })
 
@@ -487,6 +509,12 @@ describe("Composer — wallpaper-aware tonality", () => {
     renderComposer()
     const bar = document.querySelector("[class*='@container/composer']")
     expect(bar).toHaveAttribute("data-tonality", "glass")
+  })
+
+  it("aligns the composer with the conversation reading column", () => {
+    renderComposer()
+    const column = document.querySelector('[data-slot="composer-reading-column"]')
+    expect(column).toHaveClass("mx-auto", "max-w-[52rem]")
   })
 })
 

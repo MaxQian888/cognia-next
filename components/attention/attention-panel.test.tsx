@@ -77,8 +77,20 @@ beforeEach(() => {
 })
 
 describe("AttentionPanel", () => {
-  it("renders the trigger without a count when nothing is pending", () => {
+  it("renders nothing at all when there is nothing to attend to", () => {
     renderPanel()
+    expect(screen.queryByTestId("attention-trigger")).toBeNull()
+  })
+
+  it("still shows the trigger when only stale rows remain, so they can be dismissed", async () => {
+    // `liveAttentionCount` excludes stale items, so gating on the count would
+    // strand dead approvals with no way to open the sheet that clears them.
+    renderPanel()
+    await flush()
+    act(() => {
+      useChatStore.getState().pushApproval(approval("dead"))
+      useChatStore.getState().markApprovalInterrupted("dead", "s1")
+    })
     expect(screen.getByTestId("attention-trigger")).toBeInTheDocument()
     expect(screen.queryByTestId("attention-count")).toBeNull()
   })

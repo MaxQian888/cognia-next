@@ -4,6 +4,7 @@
 
 import { render, screen, fireEvent } from "@testing-library/react"
 import { BottomToolbar } from "./bottom-toolbar"
+import { CHROME_BUDGET, countControls } from "@/lib/ui/chrome-budget"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 // Mock next-intl translations.
@@ -198,15 +199,28 @@ describe("BottomToolbar — session-kind branching", () => {
   it("renders the generic toolbar for a direct session", () => {
     render(<BottomToolbar session={session} />)
     expect(screen.queryByTestId("workflow-bottom-toolbar")).toBeNull()
-    // Mode + web-search stay on the primary row; Runtime is overflow-by-default.
-    expect(screen.getByTestId("agent-mode-selector")).toBeInTheDocument()
-    expect(screen.getByTestId("web-search-toggle")).toBeInTheDocument()
+    // Permission is the only inline control besides the model chip; agent mode
+    // and runtime are behind "\u22ef", and the capability toggles left the
+    // toolbar entirely for the composer's `+`.
+    expect(screen.getByTestId("permission-mode-indicator")).toBeInTheDocument()
+    expect(screen.queryByTestId("agent-mode-selector")).toBeNull()
     expect(screen.queryByTestId("agent-runtime-selector")).toBeNull()
+    expect(screen.queryByTestId("web-search-toggle")).toBeNull()
+    expect(screen.queryByTestId("enhance-button")).toBeNull()
   })
 
-  it("renders the effort selector inline in Tier 1 for a direct session", () => {
+  it("keeps capability toggles out of the advanced-controls overflow", () => {
     render(<BottomToolbar session={session} />)
-    expect(screen.getByTestId("effort-selector")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("composer-toolbar-more"))
+    expect(screen.queryByTestId("web-search-toggle")).toBeNull()
+    expect(screen.queryByTestId("enhance-button")).toBeNull()
+  })
+
+  // Effort is a qualifier of the model, meaningless without one, so it renders
+  // inside the model picker's popover instead of as a chip beside it.
+  it("no longer carries a standalone effort chip", () => {
+    render(<BottomToolbar session={session} />)
+    expect(screen.queryByTestId("effort-selector")).toBeNull()
   })
 
   // Regression: the row must wrap instead of pinning both ends with
@@ -220,16 +234,21 @@ describe("BottomToolbar — session-kind branching", () => {
   })
 
   // Regression: a long provider model id must ellipsize the model chip rather
-  // than push Effort / Permission / Sandbox onto a second line. They share one
-  // `flex-nowrap` + `min-w-0` row so the group shrinks as a unit.
+  // than push Permission onto a second line. They share one `flex-nowrap` +
+  // `min-w-0` row so the group shrinks as a unit.
   it("groups Tier 1 controls in a non-wrapping, shrinkable row", () => {
     const { container } = render(<BottomToolbar session={session} />)
     const nowrapRow = container.querySelector(".flex-nowrap")
     expect(nowrapRow).not.toBeNull()
     expect(nowrapRow?.className).toContain("min-w-0")
-    // Effort + Permission live inside the same nowrap unit as the model chip.
-    expect(nowrapRow?.querySelector('[data-testid="effort-selector"]')).not.toBeNull()
     expect(nowrapRow?.querySelector('[data-testid="permission-mode-indicator"]')).not.toBeNull()
+  })
+
+  // The wide branch is the one the user stares at all day, so it carries the
+  // budget. Ratchet, not a target — see lib/ui/chrome-budget.ts.
+  it("stays within the composer-toolbar chrome control budget", () => {
+    const { container } = render(<BottomToolbar session={session} />)
+    expect(countControls(container)).toBeLessThanOrEqual(CHROME_BUDGET.composerToolbar)
   })
 })
 
@@ -239,45 +258,31 @@ describe("BottomToolbar — narrow-width More menu", () => {
 
     expect(screen.getByTestId("composer-toolbar-embedded")).toBeInTheDocument()
     expect(screen.getByTestId("permission-mode-indicator")).toBeInTheDocument()
-    expect(screen.getByTestId("effort-selector")).toBeInTheDocument()
-    expect(screen.queryByTestId("web-search-toggle")).toBeNull()
+    expect(screen.queryByTestId("agent-runtime-selector")).toBeNull()
 
     fireEvent.click(screen.getByTestId("composer-toolbar-more"))
-    expect(screen.getByTestId("web-search-toggle")).toBeInTheDocument()
     expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
-  })
-
-  it("keeps Tier 2/3 inline when the toolbar is wide, with Runtime in the More menu", () => {
-    mockToolbarWidth = 600
-    render(<BottomToolbar session={session} />)
-    expect(screen.getByTestId("web-search-toggle")).toBeInTheDocument()
     expect(screen.getByTestId("agent-mode-selector")).toBeInTheDocument()
-    // Runtime is overflow-by-default even when wide — not inline until More opens.
-    expect(screen.queryByTestId("agent-runtime-selector")).toBeNull()
-    const more = screen.getByTestId("composer-toolbar-more")
-    fireEvent.click(more)
-    expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
   })
 
-  it("collapses Tier 2/3 into a More menu below the compact threshold", () => {
-    mockToolbarWidth = 300
-    render(<BottomToolbar session={session} />)
-    // Tier 1 stays inline.
+  // Every width now shows the SAME roster — the branches differ only in how the
+  // row is packed. That is what keeps each control mounted in exactly one place.
+  it("shows the same controls wide as compact, differing only in packing", () => {
+    mockToolbarWidth = 600
+    const wide = render(<BottomToolbar session={session} />)
     expect(screen.getByTestId("permission-mode-indicator")).toBeInTheDocument()
-    // Tier 2/3 are not mounted until the menu opens (single mount point).
-    expect(screen.queryByTestId("web-search-toggle")).toBeNull()
+    expect(screen.queryByTestId("agent-mode-selector")).toBeNull()
     expect(screen.queryByTestId("agent-runtime-selector")).toBeNull()
-    // The More trigger is present and opens the collapsed controls.
-    const more = screen.getByTestId("composer-toolbar-more")
-    fireEvent.click(more)
-    expect(screen.getByTestId("web-search-toggle")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("composer-toolbar-more"))
     expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
-  })
+    wide.unmount()
 
-  it("keeps the effort selector inline (Tier 1) below the compact threshold", () => {
     mockToolbarWidth = 300
     render(<BottomToolbar session={session} />)
-    expect(screen.getByTestId("effort-selector")).toBeInTheDocument()
+    expect(screen.getByTestId("permission-mode-indicator")).toBeInTheDocument()
+    expect(screen.queryByTestId("agent-runtime-selector")).toBeNull()
+    fireEvent.click(screen.getByTestId("composer-toolbar-more"))
+    expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
   })
 
   // Regression: the compact toolbar must cap at TWO rows (Tier 1, then the
@@ -295,8 +300,19 @@ describe("BottomToolbar — narrow-width More menu", () => {
 })
 
 describe("BottomToolbar — agent-mode wiring", () => {
+  /**
+   * The mode / external-agent selectors moved into the overflow Popover, so
+   * they do not mount until it opens. Render, open, then read the props the
+   * stubs captured.
+   */
+  function renderWithOverflowOpen(node: React.ReactElement) {
+    const result = render(node)
+    fireEvent.click(screen.getByTestId("composer-toolbar-more"))
+    return result
+  }
+
   it("passes onSelectTeam routing to /agent-teams/workspace", () => {
-    render(<BottomToolbar session={session} />)
+    renderWithOverflowOpen(<BottomToolbar session={session} />)
     const onSelectTeam = lastSelectorProps.onSelectTeam as (id: string) => void
     expect(typeof onSelectTeam).toBe("function")
     onSelectTeam("team-x")
@@ -304,7 +320,7 @@ describe("BottomToolbar — agent-mode wiring", () => {
   })
 
   it("passes onCreateTeam routing to /agent-teams", () => {
-    render(<BottomToolbar session={session} />)
+    renderWithOverflowOpen(<BottomToolbar session={session} />)
     const onCreateTeam = lastSelectorProps.onCreateTeam as () => void
     expect(typeof onCreateTeam).toBe("function")
     onCreateTeam()
@@ -312,25 +328,25 @@ describe("BottomToolbar — agent-mode wiring", () => {
   })
 
   it("still passes selectedModeId + onModeChange (existing wiring intact)", () => {
-    render(<BottomToolbar session={session} />)
+    renderWithOverflowOpen(<BottomToolbar session={session} />)
     expect(lastSelectorProps.selectedModeId).toBe("general")
     expect(typeof lastSelectorProps.onModeChange).toBe("function")
   })
 
   it("passes disabled=true to child controls when streaming", () => {
     chatStoreState.status = "streaming"
-    render(<BottomToolbar session={session} />)
+    renderWithOverflowOpen(<BottomToolbar session={session} />)
     expect(lastSelectorProps.disabled).toBe(true)
   })
 
   it("passes disabled=false to child controls when idle", () => {
-    render(<BottomToolbar session={session} />)
+    renderWithOverflowOpen(<BottomToolbar session={session} />)
     expect(lastSelectorProps.disabled).toBe(false)
   })
 
   it("syncs externalAgentId to useExternalAgentStore on agent change", () => {
     agentRuntimeState.runtime = "external"
-    render(<BottomToolbar session={session} />)
+    renderWithOverflowOpen(<BottomToolbar session={session} />)
     const onAgentChange = lastSelectorProps.onAgentChange as (id: string | null) => void
     expect(typeof onAgentChange).toBe("function")
     onAgentChange("agent-1")

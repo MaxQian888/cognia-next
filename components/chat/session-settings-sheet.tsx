@@ -2,7 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { FolderOpenIcon, GitBranchIcon, SparklesIcon, StarIcon, XIcon } from "lucide-react"
+import {
+  ChartLineIcon,
+  FolderOpenIcon,
+  GitBranchIcon,
+  SparklesIcon,
+  StarIcon,
+  XIcon,
+} from "lucide-react"
 import { open as openDialog } from "@tauri-apps/plugin-dialog"
 
 import { Button } from "@/components/ui/button"
@@ -61,9 +68,11 @@ import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { TwinHeaderBadge } from "@/components/chat/twin-header-badge"
 import { SkillsBadge } from "@/components/chat/skills-badge"
 import { AgentFlowDisplayToggle } from "@/components/chat/agent-flow-display-toggle"
+import { SessionInsightsSheet } from "@/components/chat/session-insights/session-insights-sheet"
 import { SingleExportTrigger } from "@/components/chat/dialogs/single-export-trigger"
 import { ClearConversationTrigger } from "@/components/chat/dialogs/clear-conversation-trigger"
 import { isTauri } from "@/lib/tauri"
+import { cn } from "@/lib/utils"
 import { closeSession } from "@/lib/claude/ipc"
 import { forkSessionFromParent } from "@/lib/db/sessions"
 import { useChatStore } from "@/stores/chat"
@@ -72,14 +81,22 @@ import { useSettingsStore } from "@/stores/settings"
 import { resolveEffectiveCwd } from "@/lib/workspace/effective-cwd"
 import { loggers } from "@cognia/logging"
 import { toast } from "sonner"
+import {
+  PERMISSION_MODES as ALL_PERMISSION_MODES,
+  permissionModeMeta,
+  permissionRiskMarker,
+} from "@/lib/settings/permission-mode-meta"
 import type { AppSettings, ChatSession, SystemPromptPreset } from "@cognia/agent-config-types"
 
-const PERMISSION_MODES: NonNullable<AppSettings["permissionMode"]>[] = [
-  "default",
-  "acceptEdits",
-  "plan",
-  "bypassPermissions",
-]
+/**
+ * Every permission mode, straight from the shared metadata rather than a local
+ * list. The local list had drifted to four entries and silently omitted
+ * `dontAsk` and `auto`, which only mattered once the status bar's picker (the
+ * other per-session surface) was removed: this sheet is now the sole place to
+ * set a power mode for one session, so an omission here would mean the mode is
+ * settable app-wide but not per-session.
+ */
+const PERMISSION_MODES = ALL_PERMISSION_MODES as NonNullable<AppSettings["permissionMode"]>[]
 
 interface FormState {
   /**
@@ -129,6 +146,8 @@ export function SessionSettingsSheet({
   showAmbientStatus = false,
 }: SessionSettingsSheetProps) {
   const t = useTranslations("chat.header")
+  const tPermission = useTranslations("chat.permissionMode")
+  const [insightsOpen, setInsightsOpen] = useState(false)
   const updateSession = useUpdateSession()
   const recordPresetUsage = useRecordPresetUsage()
   const presetsRaw = usePresets()
@@ -410,11 +429,24 @@ export function SessionSettingsSheet({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__default__">{t("permissionModeAppDefault")}</SelectItem>
-                  {PERMISSION_MODES.map((m) => (
-                    <SelectItem key={m} value={m}>
-                      {m}
-                    </SelectItem>
-                  ))}
+                  {PERMISSION_MODES.map((m) => {
+                    const marker = permissionRiskMarker(m)
+                    return (
+                      <SelectItem key={m} value={m}>
+                        {/* Localized label + risk marker, not the raw id: this is
+                            now the only per-session picker, and `⚠ Bypass` must
+                            not read like any other option in the list. */}
+                        <span className="flex items-center gap-1.5">
+                          {marker && (
+                            <span aria-hidden className={cn(marker === "⚠" && "text-rose-500")}>
+                              {marker}
+                            </span>
+                          )}
+                          {tPermission(`${permissionModeMeta(m).i18nKey}.label`)}
+                        </span>
+                      </SelectItem>
+                    )
+                  })}
                 </SelectContent>
               </Select>
             </div>
@@ -613,6 +645,22 @@ export function SessionSettingsSheet({
           {/* 会话操作 */}
           <Section label={t("sheet.sections.actions")}>
             <div className="flex flex-wrap items-center gap-2">
+              {/* Insights moved here from its own header icon. Closing this
+                  sheet first avoids stacking two right-side sheets, which would
+                  leave the settings one dangling behind the insights one. */}
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                data-testid="session-open-insights"
+                onClick={() => {
+                  onOpenChange(false)
+                  setInsightsOpen(true)
+                }}
+              >
+                <ChartLineIcon className="size-4" />
+                {t("insights")}
+              </Button>
               <SingleExportTrigger session={session} variant="labeled" />
               <ClearConversationTrigger />
               {session.sdkSessionId && (
@@ -652,6 +700,10 @@ export function SessionSettingsSheet({
           }}
         />
       )}
+
+      {/* Mounted here rather than in the chat header: the header's dedicated
+          chart button is gone, and this sheet is the only thing that opens it. */}
+      <SessionInsightsSheet session={session} open={insightsOpen} onOpenChange={setInsightsOpen} />
     </Sheet>
   )
 }

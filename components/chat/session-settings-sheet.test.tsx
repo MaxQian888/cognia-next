@@ -561,7 +561,7 @@ describe("SessionSettingsSheet", () => {
     fireEvent.click(screen.getByRole("switch", { name: /debug mode/i }))
     fireEvent.click(screen.getByRole("switch", { name: /brief output/i }))
     fireEvent.click(document.getElementById("session-perm")!)
-    fireEvent.click(await screen.findByRole("option", { name: "plan" }))
+    fireEvent.click(await screen.findByRole("option", { name: /^plan$/i }))
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /save/i }))
     })
@@ -572,6 +572,24 @@ describe("SessionSettingsSheet", () => {
       briefMode: true,
       permissionMode: "plan",
     })
+  })
+
+  // This sheet became the ONLY per-session permission picker when the status
+  // bar's popover was removed. Its local mode list had drifted to four entries
+  // and omitted `dontAsk` / `auto`, which would have left those two settable
+  // app-wide but not for a single session.
+  it("offers every permission mode, labelled, with a risk marker on the dangerous one", async () => {
+    render(
+      <DataAdapterProvider adapter={makeAdapter()}>
+        <SessionSettingsSheet session={mkSession()} open onOpenChange={jest.fn()} />
+      </DataAdapterProvider>
+    )
+    fireEvent.click(document.getElementById("session-perm")!)
+    for (const label of [/^default$/i, /^accept edits$/i, /^plan$/i, /^auto$/i, /don't ask/i]) {
+      expect(await screen.findByRole("option", { name: label })).toBeInTheDocument()
+    }
+    const bypass = await screen.findByRole("option", { name: /bypass/i })
+    expect(bypass).toHaveTextContent("⚠")
   })
 
   it("resets the working directory via the inline clear button", async () => {

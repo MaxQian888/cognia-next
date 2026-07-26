@@ -1,8 +1,8 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor, act } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
+import { render, screen, waitFor } from "@testing-library/react"
+import { CHROME_BUDGET, countControls } from "@/lib/ui/chrome-budget"
 
 const logInfo = jest.fn()
 const logWarn = jest.fn()
@@ -202,17 +202,27 @@ beforeEach(() => {
   characterRef.value = undefined
 })
 
+// The bar is ambient status now. Theme / zoom / locale moved to the title bar's
+// Views menu (covered in `title-bar-layout-controls.test.tsx`), the runtime badge
+// and session name were dropped as restatements, and the sidebar + permission
+// duplicates went to their single owners.
+test("no longer carries the relocated or duplicated segments", () => {
+  render(<StatusBar />)
+  for (const id of [
+    "status-runtime",
+    "status-session",
+    "status-theme",
+    "status-zoom",
+    "status-locale",
+  ]) {
+    expect(screen.queryByTestId(id)).toBeNull()
+  }
+})
+
 test("renders all top-level segments", () => {
   render(<StatusBar />)
   expect(screen.getByTestId("status-bar")).toBeInTheDocument()
-  expect(screen.getByTestId("status-sidebar")).toBeInTheDocument()
-  expect(screen.getByTestId("status-runtime")).toBeInTheDocument()
-  expect(screen.getByTestId("status-session")).toBeInTheDocument()
-  expect(screen.getByTestId("status-permission")).toBeInTheDocument()
   expect(screen.getByTestId("status-status")).toBeInTheDocument()
-  expect(screen.getByTestId("status-theme")).toBeInTheDocument()
-  expect(screen.getByTestId("status-zoom")).toBeInTheDocument()
-  expect(screen.getByTestId("status-locale")).toBeInTheDocument()
   expect(screen.getByTestId("status-notifications")).toBeInTheDocument()
   expect(screen.getByTestId("status-job-center")).toBeInTheDocument()
   // Default-visible optional segments.
@@ -250,204 +260,21 @@ test("does not mount desktop-only segments in web mode", () => {
   expect(screen.queryByTestId("status-perf")).toBeNull()
 })
 
-test("sidebar segment toggles the sidebar", async () => {
-  const user = userEvent.setup()
+// Dedupe: `sidebarCollapsed` had four entry points on one screen and the
+// permission mode had two. The bottom bar owns neither now — Views / ⌘B drive
+// the sidebar, and the composer chip is the single permission surface.
+test("carries neither a sidebar toggle nor a permission picker", () => {
   render(<StatusBar />)
-  await user.click(screen.getByTestId("status-sidebar"))
-  expect(toggleSidebar).toHaveBeenCalled()
+  expect(screen.queryByTestId("status-sidebar")).toBeNull()
+  expect(screen.queryByTestId("status-permission")).toBeNull()
+  expect(toggleSidebar).not.toHaveBeenCalled()
+  expect(setPermissionMode).not.toHaveBeenCalled()
 })
 
-test("session segment dispatches Ctrl+K", async () => {
-  const user = userEvent.setup()
-  const seen: KeyboardEvent[] = []
-  const listener = (e: Event) => seen.push(e as KeyboardEvent)
-  window.addEventListener("keydown", listener)
-  try {
-    render(<StatusBar />)
-    await user.click(screen.getByTestId("status-session"))
-    expect(seen.some((e) => e.key === "k" && e.ctrlKey)).toBe(true)
-  } finally {
-    window.removeEventListener("keydown", listener)
-  }
-})
-
-test("permission popover lets the user pick a mode", async () => {
-  const user = userEvent.setup()
-  render(<StatusBar />)
-  await user.click(screen.getByTestId("status-permission"))
-  await waitFor(() => expect(screen.getByTestId("status-permission-plan")).toBeInTheDocument())
-  await user.click(screen.getByTestId("status-permission-plan"))
-  expect(setPermissionMode).toHaveBeenCalledWith("plan")
-})
-
-test("theme button cycles light → dark", async () => {
-  const user = userEvent.setup()
-  themeRef.value = "light"
-  render(<StatusBar />)
-  await user.click(screen.getByTestId("status-theme"))
-  expect(setTheme).toHaveBeenCalledWith("dark")
-})
-
-test("theme toggle persists the choice to settings", async () => {
-  const user = userEvent.setup()
-  themeRef.value = "light"
-  render(<StatusBar />)
-  await user.click(screen.getByTestId("status-theme"))
-  // Without persisting, SettingsSyncProvider re-applies the stale persisted
-  // theme and reverts the toggle — so the save is the actual bug fix.
-  await waitFor(() => expect(saveSettings).toHaveBeenCalledWith({ theme: "dark" }))
-})
-
-test("logs warning when theme persist throws", async () => {
-  const user = userEvent.setup()
-  themeRef.value = "light"
-  saveSettings.mockRejectedValueOnce(new Error("io"))
-  render(<StatusBar />)
-  await act(async () => {
-    await user.click(screen.getByTestId("status-theme"))
-  })
-  await waitFor(() =>
-    expect(logWarn).toHaveBeenCalledWith(
-      "status-bar theme persist failed",
-      expect.objectContaining({ error: "io" })
-    )
-  )
-})
-
-test("theme button cycles dark → system", async () => {
-  const user = userEvent.setup()
-  themeRef.value = "dark"
-  render(<StatusBar />)
-  await user.click(screen.getByTestId("status-theme"))
-  expect(setTheme).toHaveBeenCalledWith("system")
-})
-
-test("theme button cycles system → light", async () => {
-  const user = userEvent.setup()
-  themeRef.value = "system"
-  render(<StatusBar />)
-  await user.click(screen.getByTestId("status-theme"))
-  expect(setTheme).toHaveBeenCalledWith("light")
-})
-
-test("locale button cycles en → zh-CN", async () => {
-  const user = userEvent.setup()
-  render(<StatusBar />)
-  await user.click(screen.getByTestId("status-locale"))
-  expect(setLanguage).toHaveBeenCalledWith("zh-CN")
-})
-
-test("locale button shows 中 when language is zh-CN", () => {
-  settingsRef.language = "zh-CN"
-  render(<StatusBar />)
-  expect(screen.getByTestId("status-locale")).toHaveTextContent("中")
-})
-
-test("locale segment cycles zh-CN → en", async () => {
-  const user = userEvent.setup()
-  settingsRef.language = "zh-CN"
-  render(<StatusBar />)
-  await user.click(screen.getByTestId("status-locale"))
-  expect(setLanguage).toHaveBeenCalledWith("en")
-})
-
-test("zoom popover applies and persists", async () => {
-  const user = userEvent.setup()
-  render(<StatusBar />)
-  await user.click(screen.getByTestId("status-zoom"))
-  await waitFor(() => expect(screen.getByTestId("status-zoom-in")).toBeInTheDocument())
-  await user.click(screen.getByTestId("status-zoom-in"))
-  await waitFor(() => expect(applyZoom).toHaveBeenCalled())
-  await waitFor(() =>
-    expect(saveSettings).toHaveBeenCalledWith(
-      expect.objectContaining({ webviewZoom: expect.any(Number) })
-    )
-  )
-})
-
-test("zoom out works as well", async () => {
-  const user = userEvent.setup()
-  render(<StatusBar />)
-  await user.click(screen.getByTestId("status-zoom"))
-  await user.click(screen.getByTestId("status-zoom-out"))
-  await waitFor(() => expect(applyZoom).toHaveBeenCalled())
-})
-
-test("zoom reset returns to 1.0", async () => {
-  const user = userEvent.setup()
-  settingsRef.webviewZoom = 1.5
-  render(<StatusBar />)
-  await user.click(screen.getByTestId("status-zoom"))
-  await user.click(screen.getByTestId("status-zoom-reset"))
-  await waitFor(() => expect(applyZoom).toHaveBeenCalledWith(1.0))
-})
-
-test("logs warning when zoom persist throws", async () => {
-  const user = userEvent.setup()
-  saveSettings.mockRejectedValueOnce(new Error("io"))
-  render(<StatusBar />)
-  await user.click(screen.getByTestId("status-zoom"))
-  await user.click(screen.getByTestId("status-zoom-out"))
-  await waitFor(() =>
-    expect(logWarn).toHaveBeenCalledWith(
-      "status-bar zoom persist failed",
-      expect.objectContaining({ error: "io" })
-    )
-  )
-})
-
-test("zoom percent reflects clamped persisted value", () => {
-  settingsRef.webviewZoom = 5
-  render(<StatusBar />)
-  // 5 clamps to 2.0 → "200%"
-  expect(screen.getByTestId("status-zoom")).toHaveTextContent("200%")
-})
-
-test("runtime badge says Web in browser mode", () => {
-  isTauriMock.mockReturnValue(false)
-  render(<StatusBar />)
-  expect(screen.getByTestId("status-runtime")).toHaveTextContent("desktop.statusBar.web")
-})
-
-test("permission popover exposes advanced modes with a danger marker", async () => {
-  const user = userEvent.setup()
-  render(<StatusBar />)
-  await user.click(screen.getByTestId("status-permission"))
-  await waitFor(() =>
-    expect(screen.getByTestId("status-permission-bypassPermissions")).toBeInTheDocument()
-  )
-  // Power modes are kept out of the quick cycle but reachable here, each carrying
-  // its risk marker so bypass never reads the same as a safe mode.
-  expect(screen.getByTestId("status-permission-dontAsk")).toBeInTheDocument()
-  expect(screen.getByTestId("status-permission-auto")).toBeInTheDocument()
-  expect(screen.getByTestId("status-permission-bypassPermissions")).toHaveTextContent("⚠")
-  await user.click(screen.getByTestId("status-permission-bypassPermissions"))
-  expect(setPermissionMode).toHaveBeenCalledWith("bypassPermissions")
-})
-
-test("permission popover marks the active mode with bg-accent", async () => {
-  const user = userEvent.setup()
-  chatRef.permissionMode = "plan"
-  render(<StatusBar />)
-  await user.click(screen.getByTestId("status-permission"))
-  await waitFor(() => expect(screen.getByTestId("status-permission-plan")).toBeInTheDocument())
-  expect(screen.getByTestId("status-permission-plan").className).toContain("bg-accent")
-})
-
-test("setLanguage failure is caught and logged", async () => {
-  const user = userEvent.setup()
-  setLanguage.mockRejectedValueOnce(new Error("oops"))
-  render(<StatusBar />)
-  await act(async () => {
-    await user.click(screen.getByTestId("status-locale"))
-  })
-  await waitFor(() =>
-    expect(logWarn).toHaveBeenCalledWith(
-      "setLanguage failed",
-      expect.objectContaining({ error: "oops" })
-    )
-  )
-})
+// The Advanced group (bypassPermissions / dontAsk / auto) used to live in this
+// bar's popover. Its coverage moved with it — see
+// `session-settings-sheet.test.tsx` ("offers every permission mode …"), which is
+// now the only per-session picker for those modes.
 
 test("status indicator turns into the streaming state with animate-pulse", async () => {
   chatRef.status = "streaming"
@@ -465,34 +292,6 @@ test.each([
   expect(screen.getByText(label)).toBeInTheDocument()
 })
 
-test("falls back to session title when no character is bound", () => {
-  chatRef.activeSessionId = "s1"
-  sessionRef.value = { id: "s1", title: "My chat" }
-  render(<StatusBar />)
-  expect(screen.getByText("My chat")).toBeInTheDocument()
-})
-
-test("prefers character name over session title", () => {
-  chatRef.activeSessionId = "s1"
-  sessionRef.value = { id: "s1", title: "Session", characterId: "c1" }
-  characterRef.value = { id: "c1", name: "Pixel" }
-  render(<StatusBar />)
-  expect(screen.getByText("Pixel")).toBeInTheDocument()
-})
-
-test("sidebar icon dims when sidebarCollapsed is true", () => {
-  uiRef.sidebarCollapsed = true
-  const { container } = render(<StatusBar />)
-  const icon = container.querySelector("[data-testid='status-sidebar'] svg")
-  const cls = (icon?.getAttribute("class") ?? icon?.className.toString() ?? "") as string
-  expect(cls).toContain("opacity-60")
-})
-
-test("non-interactive runtime badge has cursor-default", () => {
-  render(<StatusBar />)
-  expect(screen.getByTestId("status-runtime").className).toContain("cursor-default")
-})
-
 test("footer is hidden below the mobile breakpoint and shown from md up", () => {
   render(<StatusBar />)
   const footer = screen.getByTestId("status-bar")
@@ -500,4 +299,13 @@ test("footer is hidden below the mobile breakpoint and shown from md up", () => 
   // (narrow viewports / phone browsers); it only re-appears from `md` (768px).
   expect(footer.className).toContain("hidden")
   expect(footer.className).toContain("md:flex")
+})
+
+test("stays within the status-bar chrome control budget", () => {
+  render(<StatusBar />)
+  // Ratchet, not a target — see lib/ui/chrome-budget.ts. Raising this number
+  // means arguing that the bottom bar earned another permanent control.
+  expect(countControls(screen.getByTestId("status-bar"))).toBeLessThanOrEqual(
+    CHROME_BUDGET.statusBar
+  )
 })

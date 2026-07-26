@@ -240,7 +240,7 @@ export function ChannelList(props: Props) {
   return (
     <aside
       className={cn(
-        "relative hidden h-full shrink-0 flex-col bg-background md:flex",
+        "relative hidden h-full shrink-0 flex-col bg-muted/15 md:flex",
         sidebarCollapsed ? "border-r-0" : "border-r",
         // Clip during collapse (and while animating) so the fixed-width inner
         // layer is hidden rather than spilling; leave it un-clipped when idle
@@ -733,7 +733,8 @@ function ChannelListBody({
     <PerfBoundary id="sidebar:channel-list">
       <div
         ref={containerRef}
-        className="flex h-full flex-col outline-none"
+        className="flex h-full flex-col bg-gradient-to-b from-background/70 to-background/35 outline-none"
+        data-tonality="translucent"
         tabIndex={0}
         onKeyDown={handleContainerKeyDown}
       >
@@ -756,7 +757,7 @@ function ChannelListBody({
           onNewDirect={handleNewDirect}
           onNewTeamConversation={handleNewTeamConversation}
         />
-        <div className="px-3 pb-2">
+        <div className="px-3 pb-2.5">
           <div className="relative">
             <SearchIcon className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -773,7 +774,7 @@ function ChannelListBody({
               }}
               placeholder={t("searchPlaceholder")}
               aria-label={t("searchAria")}
-              className="h-8 pr-9 pl-7 text-sm"
+              className="h-9 rounded-xl border-transparent bg-muted/60 pr-9 pl-8 text-sm shadow-none focus-visible:border-input focus-visible:bg-background"
             />
             {searchInput ? (
               <Button
@@ -808,7 +809,7 @@ function ChannelListBody({
             {t("searchTruncated")}
           </p>
         ) : null}
-        <Separator />
+        <Separator className="opacity-60" />
         <ScrollArea className="flex-1">
           {loading && total === 0 ? (
             <SessionListLoading />

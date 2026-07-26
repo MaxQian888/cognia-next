@@ -46,6 +46,8 @@ import {
   toggleReduceMotionAction,
   toggleSidebarAction,
   toggleStatusBarAction,
+  toggleRightSidebarAction,
+  toggleTerminalAction,
   type MenuActionId,
 } from "@/lib/desktop/menu-actions"
 
@@ -139,6 +141,12 @@ export function useMenuEventRouter(options: UseMenuEventRouterOptions = {}): voi
             break
           case "toggle-status-bar":
             toggleStatusBarAction()
+            break
+          case "toggle-right-sidebar":
+            toggleRightSidebarAction()
+            break
+          case "toggle-terminal":
+            toggleTerminalAction()
             break
           case "reload":
             reloadAction()

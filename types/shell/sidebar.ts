@@ -78,8 +78,22 @@ export interface SidebarLayout {
   hidden: string[]
 }
 
-/** Default: every feature pinned, auxiliary items fall to "More", nothing hidden. */
+/**
+ * The rail's shipped pins.
+ *
+ * This used to be "every `feature` item", which put eleven icons on a 64px rail
+ * before counting the workspace switcher, DM, Canvas, teams, More and Settings.
+ * Ten of the eleven were places you configure once and rarely revisit; these
+ * three are the ones work arrives in — an inbox that fills up, workflows you
+ * re-run, teams you hand tasks to. The rest are one "More" click away and any
+ * of them can be pinned back from the customizer or a rail right-click.
+ *
+ * Order matters: it is the render order on the rail.
+ */
+export const DEFAULT_PINNED_IDS = ["inbox", "workflows", "agent-teams"] as const
+
+/** Default: the three ids above pinned, everything else in "More", nothing hidden. */
 export const DEFAULT_SIDEBAR_LAYOUT: SidebarLayout = {
-  pinned: SIDEBAR_NAV_META.filter((m) => m.group === "feature").map((m) => m.id),
+  pinned: [...DEFAULT_PINNED_IDS],
   hidden: [],
 }

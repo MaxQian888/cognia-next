@@ -20,7 +20,15 @@ import {
   usePromptInputController,
 } from "@/components/ai-elements/prompt-input"
 import type { ChatStatus as PromptStatus, UIMessage } from "ai"
-import { ArrowUpIcon, FileTextIcon, FolderIcon, Loader2Icon, SquareIcon, XIcon } from "lucide-react"
+import {
+  ArrowUpIcon,
+  FileTextIcon,
+  FolderIcon,
+  Loader2Icon,
+  SparklesIcon,
+  SquareIcon,
+  XIcon,
+} from "lucide-react"
 import {
   ChangeEvent,
   ClipboardEvent as ReactClipboardEvent,
@@ -174,6 +182,9 @@ import { VoiceControls } from "./composer/voice-controls"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { InboxComposerActionsHost } from "@/components/inbox/inbox-composer-actions-host"
 import { CannedResponsePicker } from "@/components/inbox/canned-response-picker"
+import { EnhanceButton } from "./composer/enhance-button"
+import { WebSearchToggle } from "./composer/web-search-toggle"
+import { SkillPicker } from "./skill-picker"
 
 interface Props {
   session?: ChatSession | null
@@ -342,6 +353,10 @@ function ComposerInner(props: InnerProps) {
   const [ocrBubbleOpen, setOcrBubbleOpen] = useState(false)
   const [ocrBubbleResult, setOcrBubbleResult] = useState<OcrResult | null>(null)
   const [ocrBubbleImageSrc, setOcrBubbleImageSrc] = useState<string | null>(null)
+  const capabilityMenu =
+    props.session?.kind === "workflow-editor" ? null : (
+      <ComposerCapabilityMenu session={props.session} disabled={props.disabled} />
+    )
 
   // Composer attachment OCR. It used to live on a hover menu on the chip and
   // append text straight into the draft — which silently doubled the payload,
@@ -1749,12 +1764,17 @@ function ComposerInner(props: InnerProps) {
               fileAccept={ATTACHMENT_ACCEPT}
               onAttach={onPlusAttach}
               onError={(_code, message) => toast.error(message)}
+              capabilities={capabilityMenu}
             />
           ) : (
             // One paperclip for both attachment models: files inline, folders
             // as references. Links need no button — typed or pasted URLs are
             // recognised in the text and chipped by `ContextChipBar`.
-            <ComposerAttachMenu disabled={props.disabled} onPickFiles={openFileDialog} />
+            <ComposerAttachMenu
+              disabled={props.disabled}
+              onPickFiles={openFileDialog}
+              capabilities={capabilityMenu}
+            />
           )}
 
           {/* Voice stays outside the menu: it's an input method (speech →
@@ -2036,6 +2056,61 @@ function ComposerAppendBridge() {
     return () => window.removeEventListener(COMPOSER_APPEND_EVENT, onAppend)
   }, [controller.textInput])
   return null
+}
+
+function ComposerCapabilityMenu({
+  session,
+  disabled,
+}: {
+  session?: ChatSession | null
+  disabled?: boolean
+}) {
+  const controller = usePromptInputController()
+  const status = useChatStore((s) => s.status)
+  const ephemeralSkillIds = useChatStore((s) => s.ephemeralSkillIds) ?? []
+  const setEphemeralSkillIds = useChatStore((s) => s.setEphemeralSkillIds) ?? (() => {})
+  const enhanceEnabled = useSettingsStore(
+    (s) => s.settings?.composerAssistance?.enhance?.enabled !== false
+  )
+  const tSkill = useTranslations("skills.composer.skillPicker")
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const isMobile = usePlatform() === "mobile"
+  const isStreaming = status === "streaming" || status === "awaiting_approval"
+  const controlsDisabled = disabled || isStreaming
+
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-2" data-testid="composer-capability-menu">
+        {enhanceEnabled ? (
+          <EnhanceButton
+            value={controller.textInput.value}
+            onApply={(next) => controller.textInput.setInput(next)}
+            session={session}
+            disabled={controlsDisabled}
+          />
+        ) : null}
+        <WebSearchToggle disabled={controlsDisabled} />
+        <Button
+          type="button"
+          size="icon"
+          variant={ephemeralSkillIds.length > 0 ? "default" : "ghost"}
+          onClick={() => setPickerOpen(true)}
+          aria-label={tSkill("trigger")}
+          disabled={controlsDisabled}
+          className={cn("size-7", isMobile && "touch-target")}
+          data-testid="composer-skill-trigger"
+        >
+          <SparklesIcon className="size-3.5" />
+        </Button>
+      </div>
+      <SkillPicker
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        value={ephemeralSkillIds}
+        onChange={setEphemeralSkillIds}
+      />
+    </>
+  )
 }
 
 // --- Outer component ------------------------------------------------------
@@ -2325,8 +2400,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       // ── Artifact selections ─────────────────────────────────────────
       // Prepend the selected snippet(s) + comment as context, and record the
       // edit target so the assistant reply routes into a per-hunk review
-      // proposal against the targeted artifact (the first selection wins; the
-      // rest contribute context only).
+      // proposal against the targeted artifact. The first selection wins; the
+      // rest contribute context only. That is now stated in the UI — the lead
+      // chip carries an "edit target" badge and the others promote on click
+      // (`artifact-selection-chips.tsx`) — where it used to be a `debug` log
+      // nobody would ever see.
       const artifactSelections = useChatStore.getState().artifactSelections
       if (artifactSelections.length > 0 && session?.id) {
         const selectionCtx = formatArtifactSelectionsForLLM(artifactSelections)
@@ -2336,11 +2414,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           artifactId: primary.artifactId,
           requestId: crypto.randomUUID(),
         })
-        if (artifactSelections.length > 1) {
-          loggers.chat.debug("artifact.selections.multi-target-dropped", {
-            dropped: artifactSelections.length - 1,
-          })
-        }
       }
 
       const linkContext = await buildLinkContextBlocks(text)
@@ -2426,41 +2499,45 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
 
   return (
     <div
-      className="@container/composer border-t bg-background/70 p-2 sm:p-3"
+      className="@container/composer shrink-0 bg-gradient-to-t from-background via-background/95 to-transparent px-3 pb-3 pt-5 sm:px-5 sm:pb-4 sm:pt-6"
       // Frosted-glass chrome over an active wallpaper (app/globals.css §5),
       // matching the other toolbar surfaces; bg-background/70 stays the
       // no-wallpaper fallback.
       data-tonality="glass"
     >
-      <PromptInputProvider>
-        {/* Owns per-attachment extraction / order / OCR opt-in. Must sit INSIDE
-            the prompt-input provider: it derives everything from that
-            provider's file list. */}
-        <StagedAttachmentsProvider>
-          <ComposerInner
-            session={session}
-            status={promptStatus}
-            disabled={disabled}
-            onSubmit={handleSubmit}
-            onStop={onStop}
-            onCommand={handleSlashCommand}
-            onSubmitMemory={handleMemorySubmit}
-            handleRef={ref}
-            pendingDraftCount={pendingDrafts.length}
-            mentionMode={mentionMode}
-            mentionables={mentionables}
-            placeholder={placeholder}
-            mobileMentionMembers={mobileMentionMembers}
-            workflowMention={workflowMention}
-            compactLayout={compactLayout}
-            toolbar={
-              compactLayout ? <BottomToolbar session={session ?? null} variant="embedded" /> : null
-            }
-          />
-          {compactLayout ? null : <BottomToolbar session={session ?? null} />}
-          <HelperHints />
-        </StagedAttachmentsProvider>
-      </PromptInputProvider>
+      <div className="mx-auto w-full max-w-[52rem]" data-slot="composer-reading-column">
+        <PromptInputProvider>
+          {/* Owns per-attachment extraction / order / OCR opt-in. Must sit INSIDE
+              the prompt-input provider: it derives everything from that
+              provider's file list. */}
+          <StagedAttachmentsProvider>
+            <ComposerInner
+              session={session}
+              status={promptStatus}
+              disabled={disabled}
+              onSubmit={handleSubmit}
+              onStop={onStop}
+              onCommand={handleSlashCommand}
+              onSubmitMemory={handleMemorySubmit}
+              handleRef={ref}
+              pendingDraftCount={pendingDrafts.length}
+              mentionMode={mentionMode}
+              mentionables={mentionables}
+              placeholder={placeholder}
+              mobileMentionMembers={mobileMentionMembers}
+              workflowMention={workflowMention}
+              compactLayout={compactLayout}
+              toolbar={
+                compactLayout ? (
+                  <BottomToolbar session={session ?? null} variant="embedded" />
+                ) : null
+              }
+            />
+            {compactLayout ? null : <BottomToolbar session={session ?? null} />}
+            <HelperHints />
+          </StagedAttachmentsProvider>
+        </PromptInputProvider>
+      </div>
 
       {/* Draft review dialog — shown when the session has pending connector drafts */}
       <Dialog open={draftDialogOpen} onOpenChange={setDraftDialogOpen}>

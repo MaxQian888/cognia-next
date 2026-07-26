@@ -35,9 +35,21 @@ interface EffortSelectorProps {
   /** Disable interaction while a turn is in flight. */
   disabled?: boolean
   className?: string
+  /**
+   * `"chip"` (default) is the standalone dropdown this used to be on the
+   * composer toolbar. `"section"` is a labelled row of choices meant to sit
+   * inside the model picker's popover — effort only ever qualifies a model, so
+   * the two now share one control rather than two adjacent chips.
+   */
+  variant?: "chip" | "section"
 }
 
-export function EffortSelector({ session, disabled, className }: EffortSelectorProps) {
+export function EffortSelector({
+  session,
+  disabled,
+  className,
+  variant = "chip",
+}: EffortSelectorProps) {
   const t = useTranslations("chat.composer.effort")
   const tEffort = useTranslations("settings.general")
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
@@ -74,6 +86,37 @@ export function EffortSelector({ session, disabled, className }: EffortSelectorP
     void updateSession(session.id, { effort: next }).catch(() => setOptimistic(null))
   }
 
+  if (variant === "section") {
+    return (
+      <div
+        className={cn("flex items-center justify-between gap-2 border-t px-3 py-2", className)}
+        data-testid="effort-selector-section"
+      >
+        <span className="flex items-center gap-1.5 text-xs">
+          <BrainIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          {t("aria")}
+        </span>
+        <div className="flex items-center gap-0.5" role="radiogroup" aria-label={t("aria")}>
+          <EffortChoice
+            active={current === undefined}
+            label={t("auto")}
+            disabled={disabled}
+            onSelect={() => handleSelect(undefined)}
+          />
+          {EFFORT_LEVELS.map((level) => (
+            <EffortChoice
+              key={level}
+              active={current === level}
+              label={tEffort(`effort.${level}` as `effort.${EffortValue}`)}
+              disabled={disabled}
+              onSelect={() => handleSelect(level)}
+            />
+          ))}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -108,5 +151,37 @@ export function EffortSelector({ session, disabled, className }: EffortSelectorP
         </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+/** One choice in the `section` variant's segmented row. */
+function EffortChoice({
+  active,
+  label,
+  disabled,
+  onSelect,
+}: {
+  active: boolean
+  label: string
+  disabled?: boolean
+  onSelect: () => void
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      disabled={disabled}
+      onClick={onSelect}
+      className={cn(
+        "rounded px-1.5 py-0.5 text-[11px] transition-colors",
+        active
+          ? "bg-accent font-medium text-foreground"
+          : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+        disabled && "pointer-events-none opacity-50"
+      )}
+    >
+      {label}
+    </button>
   )
 }

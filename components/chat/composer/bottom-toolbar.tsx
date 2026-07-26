@@ -1,29 +1,34 @@
 "use client"
 
-// Bottom toolbar of the composer. Surfaces session metadata that doesn't
-// fit on the inline button row: the resolved model id (read-only — the
-// real switch lives in Settings), the active permission mode, and the
-// running token / context-window indicator.
+// Bottom toolbar of the composer — a status line, not a control panel.
+//
+// It used to inline every tier at once: model, effort, permission, sandbox,
+// enhance, web search, skills, agent mode, two plugin slots, quick actions,
+// "⋯", and context usage — a dozen controls under the input box. Of those,
+// exactly two answer the question a user asks before every turn ("what will
+// this run as"), so those two stay: the model chip (carrying its effort
+// qualifier) and the permission chip, with the context ring beside them.
+//
+// Turn capabilities (enhance, web search, skills) live under the composer's `+`
+// on both desktop and mobile. This toolbar's "⋯" is reserved for session-shape
+// controls (sandbox, agent mode, external agent, runtime) and plugin slots.
 
-import { useCallback, useRef, useState, type ReactNode } from "react"
+import { useCallback, useRef, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import { useRouter } from "next/navigation"
-import { MoreHorizontalIcon, SparklesIcon } from "lucide-react"
+import { MoreHorizontalIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useElementWidth } from "@/hooks/use-element-width"
 import { usePlatform } from "@/hooks/use-platform"
 import { cn } from "@/lib/utils"
-import { SkillPicker } from "@/components/chat/skill-picker"
 import { ContextUsageIndicator } from "@/components/chat/context-usage-indicator"
 import { useSdkContextUsage } from "@/hooks/chat/use-sdk-context-usage"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { PermissionModeIndicator } from "../permission-mode-indicator"
-import { WebSearchToggle } from "./web-search-toggle"
 import { ModelPicker } from "./model-picker"
-import { EffortSelector } from "./effort-selector"
 import { SandboxShield } from "./sandbox-shield"
 import { AgentRuntimeSelector } from "@/components/agent/mode/runtime-selector"
 import { AgentModeSelector } from "@/components/agent/mode/mode-selector"
@@ -33,8 +38,6 @@ import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import { PluginExtensionSlotWithOverflow } from "@/components/plugins/plugin-extension-slot-with-overflow"
 import { PluginQuickActionsMenu } from "./plugin-quick-actions-menu"
 import { WorkflowBottomToolbar } from "./workflow-bottom-toolbar"
-import { EnhanceButton } from "./enhance-button"
-import { usePromptInputController } from "@/components/ai-elements/prompt-input"
 
 interface BottomToolbarProps {
   session: ChatSession | null
@@ -65,21 +68,10 @@ function GenericBottomToolbar({ session, variant = "default" }: BottomToolbarPro
   const router = useRouter()
   const status = useChatStore((s) => s.status)
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
-  const ephemeralSkillIds = useChatStore((s) => s.ephemeralSkillIds) ?? []
-  const setEphemeralSkillIds = useChatStore((s) => s.setEphemeralSkillIds) ?? (() => {})
-  const webSearchOn = useChatStore((s) => s.webSearchOnForNextSend) ?? false
-  const [pickerOpen, setPickerOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const toolbarWidth = useElementWidth(rootRef)
-  // Capacitor native shell only — desktop keeps the compact 28px controls.
-  const isMobile = usePlatform() === "mobile"
-  const tSkill = useTranslations("skills.composer.skillPicker")
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
   const defaultProvider = useSettingsStore((s) => s.settings?.defaultProvider)
-  const enhanceEnabled = useSettingsStore(
-    (s) => s.settings?.composerAssistance?.enhance?.enabled !== false
-  )
-  const controller = usePromptInputController()
   const modeId = useAgentRuntimeStore((s) => s.modeId)
   const setModeId = useAgentRuntimeStore((s) => s.setModeId)
   const runtime = useAgentRuntimeStore((s) => s.runtime)
@@ -111,43 +103,14 @@ function GenericBottomToolbar({ session, variant = "default" }: BottomToolbarPro
   // only; falls back to the message-derived estimate inside the indicator).
   const { snapshot: sdkUsage } = useSdkContextUsage(session?.id ?? null, providerId)
 
-  // Responsive tiers. Tier 1 (Model / Permission / Sandbox / Context) is
-  // always inline. Tier 2 (Enhance / Web search / Skills) and Tier 3
-  // (AgentRuntime / AgentMode / ExternalAgent / plugin slots) render inline
-  // when the toolbar is wide enough, and collapse into a single "⋯ More"
-  // popover below `COMPACT_TOOLBAR_PX`. The switch is driven by the measured
-  // toolbar width (not a CSS container query) so each control mounts in
-  // EXACTLY ONE place — re-mounting these popover-trigger controls inside a
-  // DropdownMenuItem would desync their open-state, which is why they used to
-  // be hidden outright. `toolbarWidth === 0` (pre-measure) renders inline,
-  // matching the common full-width chat pane.
+  // The measured width now only decides how the same set of controls is
+  // packed, not which of them exist — every branch renders the identical
+  // roster, so no control mounts in two places. (That invariant is why the
+  // overflow is a Popover: re-mounting a trigger-owning control inside a
+  // `DropdownMenuItem` desyncs its open state.) `toolbarWidth === 0`
+  // (pre-measure) takes the wide branch, matching the common chat pane.
   const compact = toolbarWidth > 0 && toolbarWidth < COMPACT_TOOLBAR_PX
-  const tierActive = webSearchOn || ephemeralSkillIds.length > 0 || runtime !== "claude-sdk"
-
-  const tier2 = (
-    <>
-      {enhanceEnabled && (
-        <EnhanceButton
-          value={controller.textInput.value}
-          onApply={(next) => controller.textInput.setInput(next)}
-          session={session}
-          disabled={isStreaming}
-        />
-      )}
-      <WebSearchToggle disabled={isStreaming} />
-      <Button
-        type="button"
-        size="icon"
-        variant={ephemeralSkillIds.length > 0 ? "default" : "ghost"}
-        onClick={() => setPickerOpen(true)}
-        aria-label={tSkill("trigger")}
-        disabled={isStreaming}
-        className={cn("size-7", isMobile && "touch-target")}
-      >
-        <SparklesIcon className="size-3.5" />
-      </Button>
-    </>
-  )
+  const tierActive = runtime !== "claude-sdk"
 
   // Runtime is overflow-by-default: most sessions stay on `claude-sdk`, so the
   // runtime switch lives in the "⋯ More" menu rather than the primary row.
@@ -173,6 +136,16 @@ function GenericBottomToolbar({ session, variant = "default" }: BottomToolbarPro
           disabled={isStreaming}
         />
       )}
+      <SandboxShield session={session} />
+    </>
+  )
+
+  // Plugin-contributed composer actions. Each renders arbitrary plugin UI,
+  // often with its own trigger, and this Popover is the container already
+  // proven safe for that. All three self-hide when no plugin contributes, so
+  // the default install pays nothing for them.
+  const pluginSlots = (
+    <>
       <PluginExtensionSlotWithOverflow
         point="chat.input.actions"
         limit={3}
@@ -195,16 +168,14 @@ function GenericBottomToolbar({ session, variant = "default" }: BottomToolbarPro
     </>
   )
 
-  // Tier 1 stays on ONE line as a single shrinkable unit: `flex-nowrap` +
-  // `min-w-0` lets the model chip ellipsize when space is tight (long provider
-  // model ids) instead of pushing Effort / Permission / Sandbox onto a second
-  // row.
+  // The permanent row: what this turn will run as, and nothing else. Model
+  // carries its effort qualifier inside its own picker; the sandbox shield,
+  // agent mode and runtime moved into "⋯". `flex-nowrap` + `min-w-0` lets a
+  // long provider model id ellipsize instead of wrapping the row.
   const tier1Group = (
     <div className="flex min-w-0 flex-nowrap items-center gap-x-2">
       <ModelPicker session={session} disabled={isStreaming} />
-      <EffortSelector session={session} disabled={isStreaming} />
       <PermissionModeIndicator onCycle={(next) => setPermissionMode(next)} disabled={isStreaming} />
-      <SandboxShield session={session} />
     </div>
   )
 
@@ -217,20 +188,22 @@ function GenericBottomToolbar({ session, variant = "default" }: BottomToolbarPro
     />
   )
 
-  // The SkillPicker dialog stays mounted regardless of tier so the trigger
-  // inside `tier2` (inline or in the More menu) can open it.
-  const skillPicker = (
-    <SkillPicker
-      open={pickerOpen}
-      onOpenChange={setPickerOpen}
-      value={ephemeralSkillIds}
-      onChange={setEphemeralSkillIds}
-    />
+  // Everything that is not "what will this turn run as". A Popover, not a
+  // DropdownMenu: the agent-mode / external-agent selectors and the plugin
+  // slots own their own overlays, and re-mounting those inside a
+  // `DropdownMenuItem` desyncs their open state.
+  const overflow = (
+    <ToolbarMoreMenu label={t("moreControls")} active={tierActive} disabled={isStreaming}>
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-2">{tier3}</div>
+        <div className="flex flex-wrap items-center gap-2">{runtimeControl}</div>
+        <div className="flex flex-wrap items-center gap-2">{pluginSlots}</div>
+      </div>
+    </ToolbarMoreMenu>
   )
 
-  // Compact composer: keep only the stable, high-frequency controls inline.
-  // Everything else remains available in the existing More popover, yielding
-  // one clean footer rail without dropping runtime or plugin capabilities.
+  // All three layouts now agree: [model · effort] [permission] … [context] [⋯].
+  // The variants differ only in how the row is packed, not in what it holds.
   if (variant === "embedded") {
     return (
       <div
@@ -239,22 +212,14 @@ function GenericBottomToolbar({ session, variant = "default" }: BottomToolbarPro
         data-testid="composer-toolbar-embedded"
       >
         {tier1Group}
-        <ToolbarMoreMenu label={t("moreControls")} active={tierActive} disabled={isStreaming}>
-          <div className="flex flex-col gap-2">
-            <div className="flex flex-wrap items-center gap-2">{tier2}</div>
-            <div className="flex flex-wrap items-center gap-2">{tier3}</div>
-            <div className="flex flex-wrap items-center gap-2">{runtimeControl}</div>
-            <div className="flex justify-end">{contextIndicator}</div>
-          </div>
-        </ToolbarMoreMenu>
-        {skillPicker}
+        {contextIndicator}
+        {overflow}
       </div>
     )
   }
 
-  // Compact (mobile / narrow workflow sidebar): cap the toolbar at TWO rows —
-  // Tier 1 on the first, the overflow menu + context usage sharing the second
-  // — so it never spills into the ugly three-row stack ([tier1] / [⋯] / [%]).
+  // Compact (mobile / narrow workflow sidebar): two rows at most — Tier 1 on
+  // the first, context usage + overflow sharing the second.
   if (compact) {
     return (
       <div
@@ -263,43 +228,22 @@ function GenericBottomToolbar({ session, variant = "default" }: BottomToolbarPro
       >
         {tier1Group}
         <div className="flex items-center justify-between gap-x-2">
-          <ToolbarMoreMenu label={t("moreControls")} active={tierActive} disabled={isStreaming}>
-            <div className="flex flex-col gap-2">
-              <div className="flex flex-wrap items-center gap-2">{tier2}</div>
-              <div className="flex flex-wrap items-center gap-2">{tier3}</div>
-              <div className="flex flex-wrap items-center gap-2">{runtimeControl}</div>
-            </div>
-          </ToolbarMoreMenu>
           {contextIndicator}
+          {overflow}
         </div>
-        {skillPicker}
       </div>
     )
   }
 
-  // Wide (web / desktop): everything on a single wrapping row, context usage
-  // pinned to the right via `ml-auto`.
+  // Wide (web / desktop): one row, context usage pinned right via `ml-auto`.
   return (
     <div
       ref={rootRef}
       className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-[11px] text-muted-foreground"
     >
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-        {tier1Group}
-        <div className="flex items-center gap-2">{tier2}</div>
-        <div className="flex items-center gap-2">{tier3}</div>
-        {/* Runtime overflow even on a wide toolbar — keeps the primary row short. */}
-        <ToolbarMoreMenu
-          label={t("moreControls")}
-          active={runtime !== "claude-sdk"}
-          disabled={isStreaming}
-        >
-          <div className="flex flex-col gap-2">{runtimeControl}</div>
-        </ToolbarMoreMenu>
-        {skillPicker}
-      </div>
-
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">{tier1Group}</div>
       {contextIndicator}
+      {overflow}
     </div>
   )
 }

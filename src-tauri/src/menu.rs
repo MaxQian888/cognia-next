@@ -6,6 +6,8 @@ use tauri::{
 };
 
 const GO_SITES_MENU_ID: &str = "go-sites";
+const TOGGLE_RIGHT_SIDEBAR_MENU_ID: &str = "toggle-right-sidebar";
+const TOGGLE_TERMINAL_MENU_ID: &str = "toggle-terminal";
 
 // `MENU_IDS` lives in `crate::commands` so the `menu_action_ids` Tauri
 // command can be registered on every platform — see
@@ -86,6 +88,16 @@ pub fn install(app: &App) -> tauri::Result<()> {
     let toggle_status_bar = MenuItemBuilder::new("Toggle Status Bar")
         .id("toggle-status-bar")
         .build(handle)?;
+    // The artifact dock and the terminal used to be reachable only from icon
+    // buttons in the in-window title bar. macOS suppresses that menubar, so
+    // once those buttons folded into the Views dropdown these were the only two
+    // panels with no menu entry at all.
+    let toggle_right_sidebar = MenuItemBuilder::new("Toggle Right Sidebar")
+        .id(TOGGLE_RIGHT_SIDEBAR_MENU_ID)
+        .build(handle)?;
+    let toggle_terminal = MenuItemBuilder::new("Toggle Terminal")
+        .id(TOGGLE_TERMINAL_MENU_ID)
+        .build(handle)?;
     let theme_light = MenuItemBuilder::new("Light")
         .id("theme-light")
         .build(handle)?;
@@ -124,8 +136,10 @@ pub fn install(app: &App) -> tauri::Result<()> {
     let view = SubmenuBuilder::new(handle, "View")
         .item(&command_palette)
         .item(&toggle_sidebar)
+        .item(&toggle_right_sidebar)
         .item(&toggle_guild_rail)
         .item(&toggle_status_bar)
+        .item(&toggle_terminal)
         .separator()
         .item(&theme_submenu)
         .item(&language_submenu)
@@ -312,11 +326,17 @@ pub fn install(app: &App) -> tauri::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::GO_SITES_MENU_ID;
+    use super::{GO_SITES_MENU_ID, TOGGLE_RIGHT_SIDEBAR_MENU_ID, TOGGLE_TERMINAL_MENU_ID};
 
     #[test]
     fn sites_item_uses_a_registered_go_menu_id() {
         assert_eq!(GO_SITES_MENU_ID, "go-sites");
         assert!(crate::commands::MENU_IDS.contains(&GO_SITES_MENU_ID));
+    }
+
+    #[test]
+    fn new_view_items_use_registered_menu_ids() {
+        assert!(crate::commands::MENU_IDS.contains(&TOGGLE_RIGHT_SIDEBAR_MENU_ID));
+        assert!(crate::commands::MENU_IDS.contains(&TOGGLE_TERMINAL_MENU_ID));
     }
 }

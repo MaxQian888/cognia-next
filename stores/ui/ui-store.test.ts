@@ -239,6 +239,75 @@ describe("useUIStore", () => {
     })
   })
 
+  describe("v3 migration", () => {
+    // `partialize` writes barItems / statusBarCollapsed / guildRailCollapsed
+    // unconditionally and `merge` lets the persisted value win, so anyone who
+    // has ever opened the app pins the old chrome defaults forever. Changing
+    // DEFAULT_BAR_ITEMS without this migration ships a no-op to every existing
+    // install.
+    const writeV2Snapshot = (state: Record<string, unknown>) =>
+      window.localStorage.setItem("cognia-ui", JSON.stringify({ state, version: 2 }))
+
+    it("drops the stale chrome keys so the new defaults apply", async () => {
+      writeV2Snapshot({
+        selectedGuild: { kind: "dm" },
+        sidebarWidth: 320,
+        collapsedFolderIds: ["f1"],
+        guildRailCollapsed: true,
+        statusBarCollapsed: true,
+        barItems: { ...DEFAULT_BAR_ITEMS, accountTop: true, quickActions: true },
+      })
+      await act(async () => {
+        await useUIStore.persist.rehydrate()
+      })
+      const { result } = renderHook(() => useUIStore())
+      expect(result.current.barItems.accountTop).toBe(false)
+      expect(result.current.barItems.quickActions).toBe(false)
+      expect(result.current.guildRailCollapsed).toBe(false)
+      expect(result.current.statusBarCollapsed).toBe(false)
+    })
+
+    it("keeps the preferences the user actually chose", async () => {
+      writeV2Snapshot({
+        selectedGuild: { kind: "team", teamId: "t9" },
+        sidebarWidth: 320,
+        collapsedFolderIds: ["f1"],
+        channelListView: "archived",
+        barItems: { ...DEFAULT_BAR_ITEMS },
+      })
+      await act(async () => {
+        await useUIStore.persist.rehydrate()
+      })
+      const { result } = renderHook(() => useUIStore())
+      expect(result.current.selectedGuild).toEqual({ kind: "team", teamId: "t9" })
+      expect(result.current.sidebarWidth).toBe(320)
+      expect(result.current.collapsedFolderIds).toEqual(["f1"])
+      expect(result.current.channelListView).toBe("archived")
+    })
+
+    it("leaves a v3 snapshot untouched", async () => {
+      window.localStorage.setItem(
+        "cognia-ui",
+        JSON.stringify({
+          state: {
+            guildRailCollapsed: true,
+            statusBarCollapsed: true,
+            barItems: { ...DEFAULT_BAR_ITEMS, usage: false },
+          },
+          version: 3,
+        })
+      )
+      await act(async () => {
+        await useUIStore.persist.rehydrate()
+      })
+      const { result } = renderHook(() => useUIStore())
+      // Post-migration choices are the user's own — never reset them again.
+      expect(result.current.guildRailCollapsed).toBe(true)
+      expect(result.current.statusBarCollapsed).toBe(true)
+      expect(result.current.barItems.usage).toBe(false)
+    })
+  })
+
   describe("guildRailCollapsed", () => {
     it("defaults to false and toggles", () => {
       const { result } = renderHook(() => useUIStore())
@@ -283,6 +352,19 @@ describe("useUIStore", () => {
       expect(result.current.barItems).toEqual(DEFAULT_BAR_ITEMS)
       expect(result.current.barItems.perf).toBe(false)
       expect(result.current.barItems.connectivity).toBe(true)
+    })
+
+    it("ships the account button in exactly one bar", () => {
+      // `accountTop` + `accountStatus` were both on, so the same control
+      // rendered in the title bar AND the status bar at once.
+      expect(DEFAULT_BAR_ITEMS.accountTop).toBe(false)
+      expect(DEFAULT_BAR_ITEMS.accountStatus).toBe(true)
+    })
+
+    it("keeps the one-off launchers out of the title bar by default", () => {
+      // Pet / OCR / clipboard are not touched per conversation — they belong in
+      // the Views menu, not in permanent 32px chrome.
+      expect(DEFAULT_BAR_ITEMS.quickActions).toBe(false)
     })
 
     it("toggleBarItem flips a single segment", () => {

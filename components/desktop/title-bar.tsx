@@ -569,7 +569,9 @@ export function TitleBar() {
         }}
         onContextMenu={onTitleBarContextMenu}
         className={cn(
-          "relative flex h-8 shrink-0 items-center border-b bg-muted/40 text-xs select-none",
+          // Tint, no border — see `guild-rail.tsx`. The tone already reads as
+          // "not content"; a border on top of it is a second seam.
+          "relative flex h-8 shrink-0 items-center bg-muted/40 text-xs select-none",
           isMac ? "pl-20" : "pl-2"
         )}
       >

@@ -70,10 +70,14 @@ const messages = {
   },
 }
 
-function renderSelector(session: ChatSession | null, disabled?: boolean) {
+function renderSelector(
+  session: ChatSession | null,
+  disabled?: boolean,
+  variant?: "chip" | "section"
+) {
   return render(
     <NextIntlClientProvider locale="en" messages={messages}>
-      <EffortSelector session={session} disabled={disabled} />
+      <EffortSelector session={session} disabled={disabled} variant={variant} />
     </NextIntlClientProvider>
   )
 }
@@ -136,6 +140,25 @@ describe("EffortSelector", () => {
   it("disables the trigger while streaming", () => {
     renderSelector(capableSession, true)
     expect(screen.getByRole("button")).toBeDisabled()
+  })
+
+  it("renders and persists effort through the model-picker section variant", () => {
+    renderSelector(capableSession, false, "section")
+
+    expect(screen.getByTestId("effort-selector-section")).toBeInTheDocument()
+    expect(screen.getByRole("radiogroup", { name: "Thinking level" })).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: "high" })).toHaveAttribute("aria-checked", "true")
+
+    fireEvent.click(screen.getByRole("radio", { name: "xhigh" }))
+    expect(mockedUpdateSession).toHaveBeenCalledWith("ses_1", { effort: "xhigh" })
+    expect(screen.getByRole("radio", { name: "xhigh" })).toHaveAttribute("aria-checked", "true")
+  })
+
+  it("keeps every section choice disabled while streaming", () => {
+    renderSelector(capableSession, true, "section")
+    for (const choice of screen.getAllByRole("radio")) {
+      expect(choice).toBeDisabled()
+    }
   })
 
   it("reverts the optimistic label when the persist fails", async () => {

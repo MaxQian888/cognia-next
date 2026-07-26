@@ -28,6 +28,8 @@ import { isTauri } from "@/lib/tauri"
 import { setSessionModel, closeSession } from "@/lib/claude/ipc"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { collectModelOptions, type ModelOption } from "@/lib/ai/model-options"
+import { modelSupportsEffort } from "@/lib/ai/reasoning-capability"
+import { EffortSelector } from "./effort-selector"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
@@ -114,6 +116,7 @@ function groupByProvider(options: ModelOption[]): Array<{
 
 export function ModelPicker({ session, disabled, className }: ModelPickerProps) {
   const t = useTranslations("chat.composer.modelPicker")
+  const tEffortLevels = useTranslations("settings.general")
   const providerSettings = useSettingsStore((s) => s.settings?.providerSettings)
   const customProviders = useSettingsStore((s) => s.settings?.customProviders)
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
@@ -151,6 +154,13 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
       exact?.modelName ?? options.find((o) => o.modelId === activeModel)?.modelName ?? activeModel
     )
   }, [options, activeModel, activeProvider])
+
+  // Only surfaced when the user has actually chosen a level AND the active
+  // model honours it — an "Auto" suffix on every chip would be noise.
+  const effortLabel =
+    session?.effort && modelSupportsEffort(activeProvider, activeModel)
+      ? tEffortLevels(`effort.${session.effort}`)
+      : null
 
   const handleSelect = (providerId: string, modelId: string) => {
     setOpen(false)
@@ -243,6 +253,14 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
           <span className="min-w-0 truncate" title={activeModel}>
             {activeModelName}
           </span>
+          {/* Effort rides on the model chip instead of a second one beside it:
+              it is a qualifier of the model, meaningless on its own, and only
+              shown once set to something other than the model's own default. */}
+          {effortLabel ? (
+            <span className="shrink-0 text-muted-foreground/80" data-testid="model-picker-effort">
+              {t("effortSuffix", { effort: effortLabel })}
+            </span>
+          ) : null}
           <ChevronsUpDownIcon className="size-3 opacity-50" />
         </Button>
       </PopoverTrigger>
@@ -330,6 +348,10 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
             )}
           </CommandList>
         </Command>
+        {/* Reasoning effort lives here rather than as its own toolbar chip. It
+            self-gates to nothing on models that ignore effort, so this row
+            simply does not appear for them. */}
+        <EffortSelector session={session} disabled={disabled} variant="section" />
       </PopoverContent>
     </Popover>
   )

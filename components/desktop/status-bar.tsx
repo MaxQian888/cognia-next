@@ -1,32 +1,9 @@
 "use client"
 
-import { Button } from "@/components/ui/button"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
-import {
-  applyZoom,
-  clampZoom,
-  DEFAULT_ZOOM,
-  formatZoomPercent,
-  ZOOM_STEP,
-} from "@/lib/tauri/webview-zoom"
 import { cn } from "@/lib/utils"
-import { useChatStore, type PermissionMode } from "@/stores/chat/chat-store"
-import { useSettingsStore } from "@/stores/settings"
-import { useBarItemVisible, useUIStore } from "@/stores/ui/ui-store"
-import { useActiveSessionLabel } from "@/hooks/chat/use-active-session-label"
-import {
-  GlobeIcon,
-  MinusIcon,
-  MonitorIcon,
-  MoonIcon,
-  PanelLeftIcon,
-  PlusIcon,
-  RotateCcwIcon,
-  SunIcon,
-} from "lucide-react"
-import { useTheme } from "next-themes"
+import { useChatStore } from "@/stores/chat/chat-store"
+import { useBarItemVisible } from "@/stores/ui/ui-store"
 import { useTranslations } from "next-intl"
 import { useEffect, useState } from "react"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
@@ -40,18 +17,15 @@ import { StatusBarPerf } from "@/components/desktop/status-bar-perf"
 import { StatusBarUsage } from "@/components/desktop/status-bar-usage"
 import { AccountBarButton } from "@/components/account/account-bar-button"
 
-import {
-  ADVANCED_MODES,
-  permissionRiskMarker,
-  SAFE_CYCLE_MODES,
-} from "@/lib/settings/permission-mode-meta"
-
-const log = loggers.ui
-
 /**
  * VSCode-style status bar mounted at the bottom of the desktop shell.
- * Each segment is an interactive button — sidebar toggle, session,
- * permission, theme, zoom, locale, notifications.
+ *
+ * Ambient status only: connectivity, sync, git branch, notifications, running
+ * jobs, plan usage, account, and the turn's run state. Controls that merely had
+ * a second home here — the sidebar toggle, the permission picker, the account
+ * button's twin in the title bar — moved to their single owner, and the
+ * low-frequency preferences (theme / zoom / locale) live in the title bar's
+ * Views menu and the native View menu.
  */
 export function StatusBar() {
   const t = useTranslations("desktop.statusBar")
@@ -64,11 +38,6 @@ export function StatusBar() {
   const isDesktop = mounted && isTauri()
 
   const status = useChatStore((s) => s.status)
-  const permissionMode = useChatStore((s) => s.permissionMode)
-  const setPermissionMode = useChatStore((s) => s.setPermissionMode)
-
-  const toggleSidebar = useUIStore((s) => s.toggleSidebar)
-  const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed)
 
   // Optional segments — each self-hides when its data source is absent; here we
   // additionally gate mounting so a hidden segment sets up no subscriptions
@@ -79,85 +48,20 @@ export function StatusBar() {
   const showUsage = useBarItemVisible("usage")
   const showAccount = useBarItemVisible("accountStatus")
 
-  const persistedZoom = useSettingsStore((s) => s.settings?.webviewZoom)
-  const language = useSettingsStore((s) => s.language)
-  const setLanguage = useSettingsStore((s) => s.setLanguage)
-  const saveSettings = useSettingsStore((s) => s.save)
-
-  const { theme, setTheme } = useTheme()
-
-  const { label } = useActiveSessionLabel()
-  const sessionLabel = label ?? t("noSession")
   const statusLabel = statusLabelFor(status, t)
-  const zoom = clampZoom(persistedZoom ?? DEFAULT_ZOOM)
-
-  const cycleTheme = () => {
-    const order: ("light" | "dark" | "system")[] = ["light", "dark", "system"]
-    const cur = (theme as "light" | "dark" | "system" | undefined) ?? "system"
-    const next = order[(order.indexOf(cur) + 1) % order.length]
-    log.info("status-bar cycleTheme", { from: cur, to: next })
-    setTheme(next)
-    // Persist to settings as well — otherwise SettingsSyncProvider re-applies
-    // the stale persisted theme on the next settings change/reload and reverts
-    // this choice. Mirrors the appearance ThemeTab (setTheme + save).
-    void saveSettings({ theme: next }).catch((err) =>
-      log.warn("status-bar theme persist failed", {
-        error: err instanceof Error ? err.message : String(err),
-      })
-    )
-  }
-
-  const cycleLocale = () => {
-    const next = language === "en" ? "zh-CN" : "en"
-    log.info("status-bar cycleLocale", { from: language, to: next })
-    void setLanguage(next).catch((err) =>
-      log.warn("setLanguage failed", {
-        error: err instanceof Error ? err.message : String(err),
-      })
-    )
-  }
-
-  const openCommandPalette = () => {
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }))
-  }
-
-  const handleZoomChange = async (kind: "in" | "out" | "reset") => {
-    const base = zoom
-    const target =
-      kind === "reset" ? DEFAULT_ZOOM : kind === "in" ? base + ZOOM_STEP : base - ZOOM_STEP
-    const next = await applyZoom(target)
-    try {
-      await saveSettings({ webviewZoom: next })
-    } catch (err) {
-      log.warn("status-bar zoom persist failed", {
-        error: err instanceof Error ? err.message : String(err),
-      })
-    }
-  }
-
-  const localeShort = language === "zh-CN" ? "中" : "EN"
 
   return (
     <footer
       data-app-chrome
-      className="hidden h-6 shrink-0 items-center gap-0 border-t bg-muted/40 text-[11px] select-none md:flex"
+      // Tint, no border — see `guild-rail.tsx`. Same rule as the title bar it
+      // mirrors at the other edge of the window.
+      className="hidden h-6 shrink-0 items-center gap-0 bg-muted/40 text-[11px] select-none md:flex"
       data-testid="status-bar"
     >
-      <StatusItem onClick={toggleSidebar} aria-label={t("toggleSidebar")} testId="status-sidebar">
-        <PanelLeftIcon
-          aria-hidden
-          className={cn("size-3", sidebarCollapsed ? "opacity-60" : "opacity-100")}
-        />
-      </StatusItem>
-
-      <StatusItem testId="status-runtime" aria-label={isDesktop ? t("tauri") : t("web")}>
-        {isDesktop ? (
-          <MonitorIcon aria-hidden className="size-3" />
-        ) : (
-          <GlobeIcon aria-hidden className="size-3" />
-        )}
-        <span>{isDesktop ? t("tauri") : t("web")}</span>
-      </StatusItem>
+      {/* No "Tauri" / "Web" badge: it never changes for a given install, so it
+          spent a permanent slot restating something the user already knows.
+          No session name either — the chat header shows it three rows up, in
+          bigger type, where the conversation actually is. */}
 
       {showConnectivity && <StatusBarConnectivity />}
 
@@ -165,52 +69,12 @@ export function StatusBar() {
 
       {isDesktop && showSync && <StatusBarSync />}
 
-      <StatusItem
-        onClick={openCommandPalette}
-        aria-label={t("openCommandPalette")}
-        testId="status-session"
-      >
-        <span className="max-w-[18ch] truncate text-muted-foreground">{sessionLabel}</span>
-      </StatusItem>
-
-      <Popover>
-        <PopoverTrigger asChild>
-          <button
-            type="button"
-            data-testid="status-permission"
-            className="flex h-6 shrink-0 items-center gap-1.5 px-2 text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            {t("permissionMode")}: {permissionLabelFor(permissionMode, t)}
-          </button>
-        </PopoverTrigger>
-        <PopoverContent align="start" sideOffset={4} className="w-52 p-1">
-          <div className="flex flex-col gap-0.5">
-            {SAFE_CYCLE_MODES.map((mode) => (
-              <PermissionModeOption
-                key={mode}
-                mode={mode}
-                active={permissionMode === mode || (mode === "default" && permissionMode === null)}
-                onSelect={setPermissionMode}
-                t={t}
-              />
-            ))}
-            <div className="my-1 flex items-center gap-2 px-2 text-[10px] uppercase tracking-wide text-muted-foreground">
-              <span className="h-px flex-1 bg-border" />
-              {t("permissionAdvanced")}
-              <span className="h-px flex-1 bg-border" />
-            </div>
-            {ADVANCED_MODES.map((mode) => (
-              <PermissionModeOption
-                key={mode}
-                mode={mode}
-                active={permissionMode === mode}
-                onSelect={setPermissionMode}
-                t={t}
-              />
-            ))}
-          </div>
-        </PopoverContent>
-      </Popover>
+      {/* No permission-mode picker here. The composer's `PermissionModeIndicator`
+          is the single entry point: it sits where the mode is about to take
+          effect and doubles as the "what will this turn run as" readout, which a
+          bottom-bar copy could only duplicate. The elevated modes it refuses to
+          cycle through (bypassPermissions / dontAsk / auto) stay reachable in the
+          session settings sheet and the agent-runtime defaults tab. */}
 
       <PluginExtensionSlot
         point="statusbar.left"
@@ -249,69 +113,10 @@ export function StatusBar() {
         <span>{statusLabel}</span>
       </StatusItem>
 
-      <StatusItem onClick={cycleTheme} aria-label={t("themeNext")} testId="status-theme">
-        {mounted && theme === "light" ? (
-          <SunIcon aria-hidden className="size-3" />
-        ) : mounted && theme === "dark" ? (
-          <MoonIcon aria-hidden className="size-3" />
-        ) : (
-          <MonitorIcon aria-hidden className="size-3" />
-        )}
-      </StatusItem>
-
-      <Popover>
-        <PopoverTrigger asChild>
-          <button
-            type="button"
-            data-testid="status-zoom"
-            aria-label={t("zoom")}
-            className="flex h-6 shrink-0 items-center gap-1 px-2 text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            {formatZoomPercent(zoom)}
-          </button>
-        </PopoverTrigger>
-        <PopoverContent align="end" sideOffset={4} className="w-44 p-1">
-          <div className="flex items-center justify-between">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              onClick={() => void handleZoomChange("out")}
-              aria-label={t("zoomOut")}
-              data-testid="status-zoom-out"
-            >
-              <MinusIcon className="size-3.5" />
-            </Button>
-            <span className="text-xs font-medium" data-testid="status-zoom-value">
-              {formatZoomPercent(zoom)}
-            </span>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              onClick={() => void handleZoomChange("in")}
-              aria-label={t("zoomIn")}
-              data-testid="status-zoom-in"
-            >
-              <PlusIcon className="size-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              onClick={() => void handleZoomChange("reset")}
-              aria-label={t("zoomReset")}
-              data-testid="status-zoom-reset"
-            >
-              <RotateCcwIcon className="size-3.5" />
-            </Button>
-          </div>
-        </PopoverContent>
-      </Popover>
-
-      <StatusItem onClick={cycleLocale} aria-label={t("switchLocale")} testId="status-locale">
-        <span>{localeShort}</span>
-      </StatusItem>
+      {/* Theme, zoom and locale moved to the title bar's Views menu (and stay in
+          the native View menu / ⌘±). Three permanent slots for preferences a
+          user sets once and then leaves alone was the clearest case of the
+          bottom bar charging rent for configuration rather than status. */}
 
       <PluginExtensionSlot
         point="statusbar.right"
@@ -344,65 +149,6 @@ function StatusItem({
       {...props}
     >
       {children}
-    </button>
-  )
-}
-
-function permissionLabelFor(mode: PermissionMode | null, t: (key: string) => string): string {
-  switch (mode) {
-    case "plan":
-      return t("permissionPlan")
-    case "acceptEdits":
-      return t("permissionAcceptEdits")
-    case "bypassPermissions":
-      return t("permissionBypass")
-    case "dontAsk":
-      return t("permissionDontAsk")
-    case "auto":
-      return t("permissionAuto")
-    case "default":
-    default:
-      return t("permissionDefault")
-  }
-}
-
-/** A single selectable permission mode inside the status-bar popover. Advanced
- * (elevated / danger) modes carry a risk marker so a power mode never reads the
- * same as a safe one. */
-function PermissionModeOption({
-  mode,
-  active,
-  onSelect,
-  t,
-}: {
-  mode: PermissionMode
-  active: boolean
-  onSelect: (mode: PermissionMode) => void
-  t: (key: string) => string
-}) {
-  const marker = permissionRiskMarker(mode)
-  return (
-    <button
-      type="button"
-      onClick={() => {
-        log.info("status-bar setPermissionMode", { mode })
-        onSelect(mode)
-      }}
-      className={cn(
-        "flex items-center justify-between rounded px-2 py-1 text-left text-xs hover:bg-accent",
-        active && "bg-accent"
-      )}
-      data-testid={`status-permission-${mode}`}
-    >
-      <span className="flex items-center gap-1.5">
-        {marker && (
-          <span aria-hidden className={cn(marker === "⚠" && "text-rose-500")}>
-            {marker}
-          </span>
-        )}
-        {permissionLabelFor(mode, t)}
-      </span>
-      {active && <span aria-hidden className="size-1.5 rounded-full bg-primary" />}
     </button>
   )
 }

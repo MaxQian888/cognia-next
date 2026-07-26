@@ -28,6 +28,8 @@ import { desktop as automation } from "@/lib/automation/client"
 import { startNewSession } from "@/lib/chat/start-session"
 import { isMainAppWindow } from "@/lib/pet/window-role"
 import { useUIStore } from "@/stores/ui/ui-store"
+import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
+import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import type { AppLanguage, AppSettings, ChatSession } from "@cognia/agent-config-types"
 
 const log = loggers.ui
@@ -53,6 +55,13 @@ export const MENU_ACTION_IDS = [
   "toggle-sidebar",
   "toggle-guild-rail",
   "toggle-status-bar",
+  // Added with the shell de-crowding pass. Both panels previously had exactly
+  // one entry point — an icon button in the title bar — so on macOS, where the
+  // in-window menubar is suppressed, folding those buttons into the Views menu
+  // would have left the artifact dock and the terminal unreachable from any
+  // menu at all.
+  "toggle-right-sidebar",
+  "toggle-terminal",
   "reload",
   "toggle-fullscreen",
   "zoom-in",
@@ -300,6 +309,16 @@ export function toggleGuildRailAction(): void {
 export function toggleStatusBarAction(): void {
   log.info("menu action toggle-status-bar")
   useUIStore.getState().toggleStatusBar()
+}
+
+export function toggleRightSidebarAction(): void {
+  log.info("menu action toggle-right-sidebar")
+  useArtifactDockLayoutStore.getState().toggleDock()
+}
+
+export function toggleTerminalAction(): void {
+  log.info("menu action toggle-terminal")
+  useTerminalStore.getState().togglePanel()
 }
 
 export function reloadAction(): void {

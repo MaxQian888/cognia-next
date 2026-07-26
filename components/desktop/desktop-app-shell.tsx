@@ -28,6 +28,7 @@ import { GuildRail } from "@/components/shell/guild-rail"
 import { StatusBar } from "@/components/desktop/status-bar"
 import { TitleBar } from "@/components/desktop/title-bar"
 import { FindBar } from "@/components/desktop/find-bar"
+import { ShellLayoutNotice } from "@/components/desktop/shell-layout-notice"
 import { WindowFocusTracker } from "@/components/desktop/window-focus-tracker"
 import { WindowResizeEdges } from "@/components/desktop/window-resize-edges"
 import { ZoomShortcuts } from "@/components/desktop/zoom-shortcuts"
@@ -175,6 +176,7 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
       </div>
       {mounted && <CommandPalette onOpenSettings={handleOpenSettings} />}
       <FindBar />
+      <ShellLayoutNotice />
       {!statusBarCollapsed && <StatusBar />}
     </div>
   )

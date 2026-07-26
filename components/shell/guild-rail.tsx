@@ -54,6 +54,20 @@ const log = loggers.ui
 interface Props {
   onCreateTeam: () => void
   onOpenSettings: () => void
+  /**
+   * Where the rail is mounted.
+   *
+   * - `"rail"` (default) — the desktop shell's fixed left column. It collapses
+   *   below `md` because `DesktopAppShell` keys its mobile bail-out on the
+   *   Capacitor *runtime*, not the viewport, so a narrow desktop window would
+   *   otherwise keep a 64px rail it has no room for.
+   * - `"sheet"` — inside the mobile nav Sheet, which supplies its own width
+   *   constraint. The breakpoint gate must NOT apply here: a phone viewport is
+   *   always below `md`, so `hidden md:flex` collapsed the whole rail to
+   *   nothing — the workspace switcher, DM/Canvas, every pinned destination,
+   *   "More", the team list and Settings were all mounted and invisible.
+   */
+  variant?: "rail" | "sheet"
 }
 
 /**
@@ -71,7 +85,7 @@ interface Props {
  * Active state is computed from `usePathname()` for feature buttons and from
  * `selectedGuild` for chat buttons (when on `/`).
  */
-export function GuildRail({ onCreateTeam, onOpenSettings }: Props) {
+export function GuildRail({ onCreateTeam, onOpenSettings, variant = "rail" }: Props) {
   const t = useTranslations("desktop.guildRail")
   const router = useRouter()
   const pathname = usePathname() ?? "/"
@@ -143,8 +157,15 @@ export function GuildRail({ onCreateTeam, onOpenSettings }: Props) {
 
   return (
     <aside
-      className="hidden h-full w-16 shrink-0 flex-col items-center border-r bg-muted/40 py-2 md:flex"
+      // Tint, no border. Shell chrome (this rail, the title bar, the status
+      // bar) separates from content by its `bg-muted/40` tone alone; stacking a
+      // border on top of a tone difference draws the seam twice.
+      className={cn(
+        "h-full w-16 shrink-0 flex-col items-center bg-muted/40 py-2",
+        variant === "sheet" ? "flex" : "hidden md:flex"
+      )}
       aria-label={t("label")}
+      data-variant={variant}
       data-bg-target="sidebar"
     >
       <ScrollArea className="w-full flex-1">

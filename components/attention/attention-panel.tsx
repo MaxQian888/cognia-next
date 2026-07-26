@@ -178,6 +178,16 @@ export function AttentionPanel() {
   const items = useAttentionItems()
   const count = useAttentionCount()
 
+  // Nothing to attend to means no trigger: it used to sit in the status bar all
+  // day showing a bell with no number. Self-gating also lets the surviving
+  // affordance stay loud (amber + pulse + count) instead of being flattened
+  // into a neighbouring menu to save space.
+  //
+  // Gated on `items`, NOT `count` — `liveAttentionCount` excludes stale rows,
+  // and those still need their Dismiss. Hiding on a zero count would strand a
+  // list of dead approvals with no way to open the sheet that clears them.
+  if (items.length === 0) return null
+
   return (
     <Sheet>
       <SheetTrigger asChild>

@@ -219,3 +219,56 @@ test("scratchpad textarea persists on a debounce", async () => {
   })
   jest.useRealTimers()
 })
+
+// ── variant ────────────────────────────────────────────────────────────────
+// The mobile members Sheet mounts this component. Two things blanked it there:
+// the `lg:` breakpoint gate (a phone viewport never reaches it) and the
+// persisted `showMemberList` collapse, whose icon-strip fallback is ALSO
+// `lg:`-gated. The sheet variant opts out of both.
+
+test("the default rail variant keeps the lg breakpoint gate", () => {
+  queueQueries(sampleTeam, sampleMembers, { scratchpad: "" })
+  const { container } = render(
+    <MemberList teamSessionId="ts-1" teamId="t-1" onMention={jest.fn()} />
+  )
+  const aside = container.querySelector("aside")!
+  expect(aside).toHaveAttribute("data-variant", "rail")
+  expect(aside.className).toContain("hidden")
+  expect(aside.className).toContain("lg:flex")
+})
+
+test("the sheet variant renders members unconditionally on a phone viewport", () => {
+  queueQueries(sampleTeam, sampleMembers, { scratchpad: "" })
+  const { container } = render(
+    <MemberList variant="sheet" teamSessionId="ts-1" teamId="t-1" onMention={jest.fn()} />
+  )
+  const aside = container.querySelector("aside")!
+  expect(aside).toHaveAttribute("data-variant", "sheet")
+  expect(aside.className).not.toContain("hidden")
+  expect(aside.className).toContain("w-full")
+  expect(screen.getByText("Alice")).toBeInTheDocument()
+  expect(screen.getByText("Bob")).toBeInTheDocument()
+})
+
+test("the sheet variant ignores a collapsed showMemberList", () => {
+  // A user who collapsed the rail on desktop must not get an empty sheet on
+  // their phone — the two surfaces share one persisted flag.
+  showMemberList.current = false
+  queueQueries(sampleTeam, sampleMembers, { scratchpad: "" })
+  render(<MemberList variant="sheet" teamSessionId="ts-1" teamId="t-1" onMention={jest.fn()} />)
+  expect(screen.getByText("Alice")).toBeInTheDocument()
+})
+
+test("the sheet variant drops the collapse button (the sheet close is the collapse)", () => {
+  queueQueries(sampleTeam, sampleMembers, { scratchpad: "" })
+  render(<MemberList variant="sheet" teamSessionId="ts-1" teamId="t-1" onMention={jest.fn()} />)
+  expect(screen.queryByLabelText("hide")).not.toBeInTheDocument()
+})
+
+test("the rail variant still collapses to the icon strip", () => {
+  showMemberList.current = false
+  queueQueries(sampleTeam, sampleMembers, { scratchpad: "" })
+  render(<MemberList teamSessionId="ts-1" teamId="t-1" onMention={jest.fn()} />)
+  expect(screen.getByLabelText("show")).toBeInTheDocument()
+  expect(screen.queryByText("Alice")).not.toBeInTheDocument()
+})

@@ -56,9 +56,22 @@ export type BarItemId =
   | "accountTop"
 
 /**
- * Default visibility per segment. `perf` starts **off** because mounting its
- * component begins native CPU/mem sampling — it is strictly opt-in. Everything
- * else defaults on (but each still self-hides when its data source is absent).
+ * Default visibility per segment.
+ *
+ * `perf` starts **off** because mounting its component begins native CPU/mem
+ * sampling — it is strictly opt-in.
+ *
+ * `accountTop` is off because `accountStatus` is on: the account button used to
+ * render in the title bar AND the status bar at once, the same control twice on
+ * one screen. The status bar keeps it (it sits with the other ambient status),
+ * and the title bar reclaims the space.
+ *
+ * `quickActions` (pet / OCR / clipboard) is off because none of the three is
+ * touched per conversation — they are one-off launches that belong in the Views
+ * menu, not in permanent 32px chrome.
+ *
+ * Everything else defaults on (and each still self-hides when its data source
+ * is absent).
  */
 export const DEFAULT_BAR_ITEMS: Record<BarItemId, boolean> = {
   connectivity: true,
@@ -67,8 +80,8 @@ export const DEFAULT_BAR_ITEMS: Record<BarItemId, boolean> = {
   accountStatus: true,
   usage: true,
   workspace: true,
-  quickActions: true,
-  accountTop: true,
+  quickActions: false,
+  accountTop: false,
 }
 
 interface UIState {
@@ -156,6 +169,19 @@ interface UIState {
    */
   barItems: Record<BarItemId, boolean>
   toggleBarItem: (id: BarItemId) => void
+
+  /**
+   * True for exactly one boot: the one where the v3 migration reset this
+   * install's chrome layout. Transient by design — it is not in `partialize`,
+   * so the next launch reads a v3 snapshot and the flag is false again. That
+   * makes "notify once" a property of the data rather than a second persisted
+   * "seen" key someone has to remember to write.
+   *
+   * Consumed by `ShellLayoutNotice`, which explains where the moved controls
+   * went. Fresh installs never see it (they had no v2 snapshot to migrate).
+   */
+  chromeLayoutMigrated: boolean
+  acknowledgeChromeLayout: () => void
 
   /**
    * Transient (never persisted) open state for the in-app Find bar. Set by the
@@ -279,6 +305,9 @@ export const useUIStore = create<UIState>()(
       toggleStatusBar: () => set((s) => ({ statusBarCollapsed: !s.statusBarCollapsed })),
       setStatusBarCollapsed: (collapsed) => set({ statusBarCollapsed: collapsed }),
 
+      chromeLayoutMigrated: false,
+      acknowledgeChromeLayout: () => set({ chromeLayoutMigrated: false }),
+
       barItems: { ...DEFAULT_BAR_ITEMS },
       toggleBarItem: (id) =>
         set((s) => ({
@@ -359,11 +388,31 @@ export const useUIStore = create<UIState>()(
       name: "cognia-ui",
       storage: persistLocalStorage(),
       // Bumped 0 → 1 when the conversation-sidebar layout fields were added,
-      // then 1 → 2 when per-segment `barItems` visibility was added. Missing
-      // keys fall back to defaults via `merge` below, so migration stays a
-      // passthrough — the version just gives future migrations a baseline.
-      version: 2,
-      migrate: (persisted) => persisted as UIState,
+      // 1 → 2 when per-segment `barItems` visibility was added, and 2 → 3 for
+      // the shell de-crowding pass.
+      //
+      // 3 is the first migration that actually drops data, and it has to. Every
+      // one of these keys is written unconditionally by `partialize`, and
+      // `merge` lets the persisted value win — so a user who has ever opened the
+      // app carries a snapshot that pins the OLD defaults forever. Changing
+      // `DEFAULT_BAR_ITEMS` alone would have shipped a no-op to every existing
+      // install (the author's included). Dropping the three keys hands them back
+      // to the new defaults; everything the user actually chose (window layout,
+      // sidebar width, folder collapse state, selected guild) is preserved.
+      version: 3,
+      migrate: (persisted, from) => {
+        const p = (persisted ?? {}) as Partial<UIState>
+        if (from >= 3) return p as UIState
+        const {
+          barItems: _barItems,
+          statusBarCollapsed: _statusBarCollapsed,
+          guildRailCollapsed: _guildRailCollapsed,
+          ...kept
+        } = p
+        // Flag this boot so `ShellLayoutNotice` can say what moved. Not
+        // persisted, so it is true exactly once — on the launch that migrated.
+        return { ...kept, chromeLayoutMigrated: true } as UIState
+      },
       // Deep-merge `barItems` so a snapshot written before a new segment
       // existed still gains that segment's default (shallow merge would drop
       // any key the persisted map lacks). Everything else merges shallowly.

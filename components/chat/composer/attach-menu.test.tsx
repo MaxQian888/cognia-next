@@ -10,28 +10,15 @@ jest.mock("@/lib/chat/folder-context", () => {
   )
   return { ...actual, pickFolder: jest.fn(), summarizeFolder: jest.fn() }
 })
-// Radix's DropdownMenu opens on pointer events, which jsdom doesn't emit for
-// `fireEvent.click`. Flatten the primitives so the items are always visible and
-// directly clickable (the pattern in agent/mode/runtime-selector.test.tsx).
-jest.mock("@/components/ui/dropdown-menu", () => {
-  const React = jest.requireActual<typeof import("react")>("react")
-  return {
-    DropdownMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-    DropdownMenuItem: ({
-      children,
-      onSelect,
-    }: {
-      children: React.ReactNode
-      onSelect?: () => void
-    }) => (
-      <button type="button" onClick={onSelect}>
-        {children}
-      </button>
-    ),
-  }
-})
+// Radix's Popover opens on pointer events, which jsdom doesn't emit for
+// `fireEvent.click`. Flatten the primitives so the panel's contents are always
+// visible and directly clickable (the pattern in
+// agent/mode/runtime-selector.test.tsx).
+jest.mock("@/components/ui/popover", () => ({
+  Popover: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  PopoverTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  PopoverContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+}))
 
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -59,10 +46,13 @@ const summary = (over: Partial<FolderSummary> = {}): FolderSummary => ({
   ...over,
 })
 
-function renderMenu(onPickFiles = jest.fn()) {
+function renderMenu(
+  onPickFiles = jest.fn(),
+  capabilities: React.ReactNode = <div data-testid="composer-capabilities">Capabilities</div>
+) {
   render(
     <TooltipProvider>
-      <ComposerAttachMenu onPickFiles={onPickFiles} />
+      <ComposerAttachMenu onPickFiles={onPickFiles} capabilities={capabilities} />
     </TooltipProvider>
   )
   return onPickFiles
@@ -91,9 +81,10 @@ beforeEach(() => {
 })
 
 describe("ComposerAttachMenu", () => {
-  it("offers files and folders behind one paperclip on desktop", async () => {
+  it("offers files and folders behind one `+` on desktop", async () => {
     const onPickFiles = renderMenu()
     expect(screen.getByTestId("composer-attach-menu")).toBeInTheDocument()
+    expect(screen.getByTestId("composer-capabilities")).toBeInTheDocument()
 
     await clickLabel("Upload files")
     expect(onPickFiles).toHaveBeenCalledTimes(1)
@@ -138,15 +129,16 @@ describe("ComposerAttachMenu", () => {
     expect(document.body.querySelector('[role="alertdialog"]')).toBeNull()
   })
 
-  it("collapses to a direct file button off desktop", () => {
+  it("drops the desktop-only branches on web but keeps the panel", async () => {
     platformMock.mockReturnValue("web")
     const onPickFiles = renderMenu()
 
-    expect(screen.queryByTestId("composer-attach-menu")).toBeNull()
+    expect(screen.getByTestId("composer-attach-menu")).toBeInTheDocument()
+    // No filesystem path to reference and no screen to capture in a browser tab.
     expect(screen.queryByText("Add folder")).toBeNull()
-    // No screen to capture in a browser tab — the branch is desktop-only.
     expect(screen.queryByText("Capture screenshot")).toBeNull()
-    fireEvent.click(screen.getByRole("button", { name: "Attach files" }))
+
+    await clickLabel("Upload files")
     expect(onPickFiles).toHaveBeenCalledTimes(1)
   })
 

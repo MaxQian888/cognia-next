@@ -181,6 +181,7 @@ test("desktop history rail opts into the chat wallpaper with sidebar tonality", 
   const rail = container.querySelector("aside")
   expect(rail).toHaveAttribute("data-bg-target", "chat")
   expect(rail).toHaveAttribute("data-slot", "sidebar-inner")
+  expect(container.querySelector("[data-tonality='translucent']")).toBeInTheDocument()
 })
 
 test("narrow history sheet uses the same chat wallpaper surface", async () => {

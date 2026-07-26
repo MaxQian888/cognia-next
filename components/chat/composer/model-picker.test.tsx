@@ -351,6 +351,59 @@ describe("friendly name rendering", () => {
   })
 })
 
+describe("reasoning effort integration", () => {
+  const capableSession: ChatSession = {
+    id: "ses_effort",
+    title: "t",
+    kind: "direct",
+    model: "claude-sonnet-4-6",
+    providerOverride: "anthropic",
+    effort: "high",
+    createdAt: 0,
+    updatedAt: 0,
+  }
+
+  function renderPicker(session: ChatSession) {
+    return render(
+      <NextIntlClientProvider
+        locale="en"
+        messages={{
+          chat: {
+            composer: {
+              effort: { aria: "Thinking level", auto: "Auto" },
+              modelPicker: { effortSuffix: "· {effort}" },
+            },
+          },
+          settings: {
+            general: {
+              effort: { low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" },
+            },
+          },
+        }}
+      >
+        <ModelPicker session={session} />
+      </NextIntlClientProvider>
+    )
+  }
+
+  it("shows the selected effort on the model chip and inside the open picker", () => {
+    renderPicker(capableSession)
+
+    expect(screen.getByTestId("model-picker-effort")).toHaveTextContent("high")
+    fireEvent.click(screen.getByRole("button"))
+    expect(screen.getByTestId("effort-selector-section")).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: "high" })).toHaveAttribute("aria-checked", "true")
+  })
+
+  it("omits effort UI for a model that does not support effort", () => {
+    renderPicker({ ...capableSession, model: "claude-sonnet-4-5" })
+
+    expect(screen.queryByTestId("model-picker-effort")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button"))
+    expect(screen.queryByTestId("effort-selector-section")).not.toBeInTheDocument()
+  })
+})
+
 describe("auto routing toggle + badge", () => {
   const session: ChatSession = {
     id: "ses_1",

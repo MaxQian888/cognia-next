@@ -23,9 +23,28 @@ describe("sidebar nav meta", () => {
     }
   })
 
-  it("default pinned equals the feature ids in catalog order", () => {
+  it("pins the three work-arrives-here entries, in rail order", () => {
+    expect(DEFAULT_SIDEBAR_LAYOUT.pinned).toEqual(["inbox", "workflows", "agent-teams"])
+  })
+
+  it("leaves the remaining features to the More popover", () => {
+    // Pinning every `feature` (the old default) put 11 icons on a 64px rail.
+    // These configure-once destinations are one More click away instead.
     const featureIds = SIDEBAR_NAV_META.filter((m) => m.group === "feature").map((m) => m.id)
-    expect(DEFAULT_SIDEBAR_LAYOUT.pinned).toEqual(featureIds)
+    const unpinnedFeatures = featureIds.filter((id) => !DEFAULT_SIDEBAR_LAYOUT.pinned.includes(id))
+    expect(unpinnedFeatures.sort()).toEqual([
+      "browser",
+      "discover",
+      "goals",
+      "pet",
+      "plugins",
+      "scheduler",
+      "skills",
+      "twin",
+    ])
+    // Unpinned is not hidden — `resolveSidebarLayout` derives overflow from
+    // catalog − pinned − hidden, so every one of them is still reachable.
+    expect(DEFAULT_SIDEBAR_LAYOUT.hidden).toEqual([])
   })
 
   it("default hides nothing", () => {
