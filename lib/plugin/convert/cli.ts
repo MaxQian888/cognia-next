@@ -19,6 +19,7 @@
  */
 
 import { convert, listCandidates } from "./index"
+import { convertPluginBundle, type PluginEcosystem } from "./ecosystem"
 import { BUNDLE_RESOURCE_DIRS } from "./skill-source"
 import type { ConvertIdentityOverrides, ConvertSourceKind } from "./types"
 
@@ -45,7 +46,7 @@ export interface ConvertCliOutput {
   ok: boolean
   /** Present when `ok: false`. */
   error?: string
-  mode?: "create" | "merge" | "list"
+  mode?: "create" | "merge" | "list" | "export"
   pluginId?: string
   /** Absolute path of the directory that was written. */
   dir?: string
@@ -206,6 +207,111 @@ function assertWritableTarget(dir: string, io: ConvertIo): void {
   }
 }
 
+const ECOSYSTEM_TARGETS: PluginEcosystem[] = ["cognia", "claude-code", "codex", "gemini-cli"]
+const BUNDLE_TEXT_PATTERN =
+  /\.(?:md|markdown|txt|json|jsonc|toml|ya?ml|js|mjs|cjs|ts|tsx|jsx|sh|bash|zsh|py|rs|css|html)$/i
+
+function parseEcosystemArgs(argv: string[]): {
+  operation: "import" | "export"
+  input: string
+  target: PluginEcosystem
+  dir?: string
+} {
+  const allowed = new Set(["--operation", "--from", "--input", "--to", "--dir"])
+  const values = new Map<string, string>()
+  for (let i = 0; i < argv.length; i += 1) {
+    const flag = argv[i]
+    if (!allowed.has(flag)) throw new Error(`unknown option: ${flag}`)
+    const value = argv[i + 1]
+    if (value === undefined || value.startsWith("--")) {
+      throw new Error(`missing value for ${flag}`)
+    }
+    values.set(flag, value)
+    i += 1
+  }
+  const operation = values.get("--operation") ?? "import"
+  if (operation !== "import" && operation !== "export") {
+    throw new Error(`--operation must be import or export, got "${operation}"`)
+  }
+  if (operation === "import" && values.get("--from") !== "plugin") {
+    throw new Error("plugin bundle import requires `--from plugin`")
+  }
+  const input = values.get("--input")
+  if (!input) throw new Error("--input is required")
+  const target = values.get("--to") ?? (operation === "import" ? "cognia" : "")
+  if (!ECOSYSTEM_TARGETS.includes(target as PluginEcosystem)) {
+    throw new Error(`--to must be one of ${ECOSYSTEM_TARGETS.join(" | ")}, got "${target}"`)
+  }
+  if (operation === "export" && target === "cognia") {
+    throw new Error("plugin export requires --to claude-code, codex, or gemini-cli")
+  }
+  return {
+    operation,
+    input,
+    target: target as PluginEcosystem,
+    dir: values.get("--dir"),
+  }
+}
+
+/** Run whole-plugin import/export through the same canonical converter as GitHub install. */
+export function runEcosystemConvertCli(argv: string[], io: ConvertIo): ConvertCliOutput {
+  const args = parseEcosystemArgs(argv)
+  const sourceRoot = io.resolve(args.input)
+  if (!io.exists(sourceRoot)) throw new Error(`no such file or directory: ${sourceRoot}`)
+  if (!io.isDirectory(sourceRoot)) {
+    throw new Error(`plugin bundle input must be a directory: ${sourceRoot}`)
+  }
+
+  const files = new Map<string, string>()
+  const binaryPaths = new Set<string>()
+  for (const relative of io.listFiles(sourceRoot).sort()) {
+    const normalized = relative.replaceAll("\\", "/")
+    if (BUNDLE_TEXT_PATTERN.test(normalized)) {
+      files.set(normalized, io.readFile(io.join(sourceRoot, relative)))
+    } else {
+      files.set(normalized, "")
+      binaryPaths.add(normalized)
+    }
+  }
+  const result = convertPluginBundle(files, args.target, { binaryPaths })
+  const defaultDir =
+    args.operation === "import" ? result.manifest.id : `${result.manifest.id}-${args.target}`
+  const outputDir = io.resolve(args.dir ?? defaultDir)
+  assertWritableTarget(outputDir, io)
+
+  const written: string[] = []
+  const copies = [...result.copies]
+  for (const [relative, contents] of result.files) {
+    if (binaryPaths.has(relative) && contents === "") {
+      copies.push({ from: relative, to: relative })
+      continue
+    }
+    const target = io.join(outputDir, relative)
+    io.mkdirp(dirnameOf(target))
+    io.writeFile(target, contents)
+    written.push(relative)
+  }
+  const seenCopies = new Set<string>()
+  for (const copy of copies) {
+    const key = `${copy.from}\0${copy.to}`
+    if (seenCopies.has(key)) continue
+    seenCopies.add(key)
+    const target = io.join(outputDir, copy.to)
+    io.mkdirp(dirnameOf(target))
+    io.copyFile(io.join(sourceRoot, copy.from), target)
+    written.push(copy.to)
+  }
+
+  return {
+    ok: true,
+    mode: args.operation === "export" ? "export" : "create",
+    pluginId: result.manifest.id,
+    dir: outputDir,
+    files: written.sort(),
+    warnings: result.report.warnings.map((issue) => `${issue.path}: ${issue.message}`),
+  }
+}
+
 /** Run one `cognia plugin import` invocation. */
 export function runConvertCli(argv: string[], io: ConvertIo): ConvertCliOutput {
   const args = parseArgs(argv)
@@ -307,7 +413,10 @@ function copyResources(
 /** Wrap `runConvertCli` so failures leave the process with one JSON shape. */
 export function runMain(argv: string[], io: ConvertIo): { output: string; exitCode: number } {
   try {
-    const result = runConvertCli(argv, io)
+    const fromIndex = argv.indexOf("--from")
+    const wholePlugin =
+      argv.includes("--operation") || (fromIndex >= 0 && argv[fromIndex + 1] === "plugin")
+    const result = wholePlugin ? runEcosystemConvertCli(argv, io) : runConvertCli(argv, io)
     return { output: JSON.stringify(result), exitCode: 0 }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

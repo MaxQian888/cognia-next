@@ -20,6 +20,13 @@ const MANIFEST = JSON.stringify({
 type Node = string | Array<{ type: "file" | "dir"; path: string }>
 function installGlobalFetch(tree: Record<string, Node>): jest.Mock {
   const impl = jest.fn(async (url: string) => {
+    if (String(url).includes("/commits/")) {
+      return {
+        status: 200,
+        ok: true,
+        json: async () => ({ sha: "0123456789abcdef0123456789abcdef01234567" }),
+      } as unknown as Response
+    }
     const m = String(url).match(/contents\/(.*?)(\?|$)/)
     const p = decodeURIComponent(m ? m[1] : "")
     const node = tree[p]
@@ -43,12 +50,12 @@ function installGlobalFetch(tree: Record<string, Node>): jest.Mock {
   return impl
 }
 
-function fakeFs(): InstallFs & { writes: Map<string, string> } {
-  const writes = new Map<string, string>()
+function fakeFs(): InstallFs & { writes: Map<string, string | Uint8Array> } {
+  const writes = new Map<string, string | Uint8Array>()
   return {
     writes,
     mkdir: async () => undefined,
-    writeFile: async (p: string, c: string) => void writes.set(p, c),
+    writeFile: async (p: string, c: string | Uint8Array) => void writes.set(p, c),
   }
 }
 
@@ -96,6 +103,81 @@ describe("installFromGithubRef", () => {
     expect(a.fingerprint).toBe(b.fingerprint)
   })
 
+  it("preserves binary files without UTF-8 decoding", async () => {
+    const binary = Buffer.from([0x00, 0xff, 0x80, 0x50, 0x4e, 0x47])
+    const impl = jest.fn(async (url: string) => {
+      if (url.includes("/commits/")) {
+        return {
+          status: 200,
+          ok: true,
+          json: async () => ({ sha: "0123456789abcdef0123456789abcdef01234567" }),
+        } as unknown as Response
+      }
+      const match = url.match(/contents\/(.*?)(\?|$)/)
+      const repoPath = decodeURIComponent(match ? match[1] : "")
+      if (repoPath === "plugin.json") {
+        return {
+          status: 200,
+          ok: true,
+          json: async () => ({
+            type: "file",
+            content: Buffer.from(MANIFEST).toString("base64"),
+          }),
+        } as unknown as Response
+      }
+      if (repoPath === "") {
+        return {
+          status: 200,
+          ok: true,
+          json: async () => [
+            { type: "file", path: "plugin.json" },
+            { type: "file", path: "asset.bin" },
+          ],
+        } as unknown as Response
+      }
+      if (repoPath === "asset.bin") {
+        return {
+          status: 200,
+          ok: true,
+          json: async () => ({ type: "file", content: binary.toString("base64") }),
+        } as unknown as Response
+      }
+      return { status: 404, ok: false, json: async () => ({}) } as unknown as Response
+    })
+    ;(globalThis as { fetch: unknown }).fetch = impl
+    const fs = fakeFs()
+
+    const result = await installFromGithubRef("owner/repo", { home: "/home/u", fs })
+
+    expect(Buffer.from(fs.writes.get(path.join(result.dir, "asset.bin"))!)).toEqual(binary)
+  })
+
+  it("writes the generated Cognia overlay for a foreign plugin", async () => {
+    installGlobalFetch({
+      ".claude-plugin/plugin.json": JSON.stringify({
+        name: "claude-review",
+        version: "1.0.0",
+        skills: "./skills",
+      }),
+      "": [
+        { type: "dir", path: ".claude-plugin" },
+        { type: "dir", path: "skills" },
+      ],
+      ".claude-plugin": [{ type: "file", path: ".claude-plugin/plugin.json" }],
+      skills: [{ type: "dir", path: "skills/review" }],
+      "skills/review": [{ type: "file", path: "skills/review/SKILL.md" }],
+      "skills/review/SKILL.md": "---\nname: Review\n---\nReview every changed line.",
+    })
+    const fs = fakeFs()
+
+    const result = await installFromGithubRef("owner/repo", { home: "/home/u", fs })
+
+    const manifestPath = path.join(result.dir, "plugin.json")
+    const distPath = path.join(result.dir, "dist", "index.js")
+    expect(fs.writes.get(manifestPath)).toContain('"id": "claude-review"')
+    expect(fs.writes.get(distPath)).toContain("claude-review")
+  })
+
   it("bundleFingerprint is order-independent but content-sensitive", () => {
     const f1 = bundleFingerprint([
       { rel: "a.js", content: "1" },
@@ -115,6 +197,13 @@ describe("installFromGithubRef", () => {
 
   it("propagates a non-404 GitHub API error while fetching file content", async () => {
     const impl = jest.fn(async (url: string) => {
+      if (String(url).includes("/commits/")) {
+        return {
+          status: 200,
+          ok: true,
+          json: async () => ({ sha: "0123456789abcdef0123456789abcdef01234567" }),
+        } as unknown as Response
+      }
       const m = String(url).match(/contents\/(.*?)(\?|$)/)
       const p = decodeURIComponent(m ? m[1] : "")
       if (p === "plugin.json") {
@@ -142,6 +231,47 @@ describe("installFromGithubRef", () => {
     await expect(
       installFromGithubRef("owner/repo", { home: "/home/u", fs: fakeFs() })
     ).rejects.toThrow(/GitHub API 500/)
+  })
+
+  it("rejects a listing entry that stops being a file", async () => {
+    const impl = jest.fn(async (url: string) => {
+      if (url.includes("/commits/")) {
+        return {
+          status: 200,
+          ok: true,
+          json: async () => ({ sha: "0123456789abcdef0123456789abcdef01234567" }),
+        } as unknown as Response
+      }
+      const match = url.match(/contents\/(.*?)(\?|$)/)
+      const repoPath = decodeURIComponent(match ? match[1] : "")
+      if (repoPath === "plugin.json") {
+        return {
+          status: 200,
+          ok: true,
+          json: async () => ({
+            type: "file",
+            content: Buffer.from(MANIFEST).toString("base64"),
+          }),
+        } as unknown as Response
+      }
+      if (repoPath === "") {
+        return {
+          status: 200,
+          ok: true,
+          json: async () => [{ type: "file", path: "vanished.js" }],
+        } as unknown as Response
+      }
+      return {
+        status: 200,
+        ok: true,
+        json: async () => ({ type: "dir" }),
+      } as unknown as Response
+    })
+    ;(globalThis as { fetch: unknown }).fetch = impl
+
+    await expect(
+      installFromGithubRef("owner/repo", { home: "/home/u", fs: fakeFs() })
+    ).rejects.toThrow(/not a file: vanished\.js/)
   })
 
   it("rejects a non-frontend plugin as unsupported in CLI", async () => {

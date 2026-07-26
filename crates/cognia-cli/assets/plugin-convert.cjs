@@ -3309,10 +3309,10 @@ var require_stringify = __commonJS({
       data = Object.assign({}, file.data, data);
       const open = opts.delimiters[0];
       const close = opts.delimiters[1];
-      const matter2 = engine.stringify(data, options2).trim();
+      const matter3 = engine.stringify(data, options2).trim();
       let buf = "";
-      if (matter2 !== "{}") {
-        buf = newline(open) + newline(matter2) + newline(close);
+      if (matter3 !== "{}") {
+        buf = newline(open) + newline(matter3) + newline(close);
       }
       if (typeof file.excerpt === "string" && file.excerpt !== "") {
         if (str2.indexOf(file.excerpt.trim()) === -1) {
@@ -3359,7 +3359,7 @@ var require_to_file = __commonJS({
   "node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/lib/to-file.js"(exports2, module2) {
     "use strict";
     var typeOf = require_kind_of();
-    var stringify = require_stringify();
+    var stringify2 = require_stringify();
     var utils = require_utils();
     module2.exports = function(file) {
       if (typeOf(file) !== "object") {
@@ -3378,7 +3378,7 @@ var require_to_file = __commonJS({
         if (options2 && options2.language) {
           file.language = options2.language;
         }
-        return stringify(file, data, options2);
+        return stringify2(file, data, options2);
       });
       file.content = utils.toString(file.content);
       file.isEmpty = false;
@@ -3412,25 +3412,25 @@ var require_gray_matter = __commonJS({
     var fs = require("fs");
     var sections = require_section_matter();
     var defaults = require_defaults();
-    var stringify = require_stringify();
+    var stringify2 = require_stringify();
     var excerpt = require_excerpt();
     var engines2 = require_engines();
     var toFile = require_to_file();
-    var parse15 = require_parse();
+    var parse16 = require_parse();
     var utils = require_utils();
-    function matter2(input, options2) {
+    function matter3(input, options2) {
       if (input === "") {
         return { data: {}, content: input, excerpt: "", orig: input };
       }
       let file = toFile(input);
-      const cached = matter2.cache[file.content];
+      const cached = matter3.cache[file.content];
       if (!options2) {
         if (cached) {
           file = Object.assign({}, cached);
           file.orig = cached.orig;
           return file;
         }
-        matter2.cache[file.content] = file;
+        matter3.cache[file.content] = file;
       }
       return parseMatter(file, options2);
     }
@@ -3452,7 +3452,7 @@ var require_gray_matter = __commonJS({
       }
       str2 = str2.slice(openLen);
       const len = str2.length;
-      const language = matter2.language(str2, opts);
+      const language = matter3.language(str2, opts);
       if (language.name) {
         file.language = language.name;
         str2 = str2.slice(language.raw.length);
@@ -3468,7 +3468,7 @@ var require_gray_matter = __commonJS({
         file.empty = file.content;
         file.data = {};
       } else {
-        file.data = parse15(file.language, file.matter, opts);
+        file.data = parse16(file.language, file.matter, opts);
       }
       if (closeIndex === len) {
         file.content = "";
@@ -3487,24 +3487,24 @@ var require_gray_matter = __commonJS({
       }
       return file;
     }
-    matter2.engines = engines2;
-    matter2.stringify = function(file, data, options2) {
-      if (typeof file === "string") file = matter2(file, options2);
-      return stringify(file, data, options2);
+    matter3.engines = engines2;
+    matter3.stringify = function(file, data, options2) {
+      if (typeof file === "string") file = matter3(file, options2);
+      return stringify2(file, data, options2);
     };
-    matter2.read = function(filepath, options2) {
+    matter3.read = function(filepath, options2) {
       const str2 = fs.readFileSync(filepath, "utf8");
-      const file = matter2(str2, options2);
+      const file = matter3(str2, options2);
       file.path = filepath;
       return file;
     };
-    matter2.test = function(str2, options2) {
+    matter3.test = function(str2, options2) {
       return utils.startsWith(str2, defaults(options2).delimiters[0]);
     };
-    matter2.language = function(str2, options2) {
+    matter3.language = function(str2, options2) {
       const opts = defaults(options2);
       const open = opts.delimiters[0];
-      if (matter2.test(str2)) {
+      if (matter3.test(str2)) {
         str2 = str2.slice(open.length);
       }
       const language = str2.slice(0, str2.search(/\r?\n/));
@@ -3513,11 +3513,11 @@ var require_gray_matter = __commonJS({
         name: language ? language.trim() : ""
       };
     };
-    matter2.cache = {};
-    matter2.clearCache = function() {
-      matter2.cache = {};
+    matter3.cache = {};
+    matter3.clearCache = function() {
+      matter3.cache = {};
     };
-    module2.exports = matter2;
+    module2.exports = matter3;
   }
 });
 
@@ -4367,6 +4367,827 @@ var MCP_AGENT_ADAPTERS = [
 ];
 var ADAPTERS_BY_ID = new Map(MCP_AGENT_ADAPTERS.map((a) => [a.id, a]));
 
+// node_modules/.pnpm/smol-toml@1.7.0/node_modules/smol-toml/dist/date.js
+var DATE_TIME_RE = /^(\d{4}-\d{2}-\d{2})?[T ]?(?:(\d{2}):\d{2}(?::\d{2}(?:\.\d+)?)?)?(Z|[-+]\d{2}:\d{2})?$/i;
+var TomlDate = class _TomlDate extends Date {
+  #hasDate = false;
+  #hasTime = false;
+  #offset = null;
+  constructor(date) {
+    let hasDate = true;
+    let hasTime = true;
+    let offset = "Z";
+    if (typeof date === "string") {
+      let match = date.match(DATE_TIME_RE);
+      if (match) {
+        if (!match[1]) {
+          hasDate = false;
+          date = `0000-01-01T${date}`;
+        }
+        hasTime = !!match[2];
+        hasTime && date[10] === " " && (date = date.replace(" ", "T"));
+        if (match[2] && +match[2] > 23) {
+          date = "";
+        } else {
+          offset = match[3] || null;
+          date = date.toUpperCase();
+          if (!offset && hasTime)
+            date += "Z";
+        }
+      } else {
+        date = "";
+      }
+    }
+    super(date);
+    if (!isNaN(this.getTime())) {
+      this.#hasDate = hasDate;
+      this.#hasTime = hasTime;
+      this.#offset = offset;
+    }
+  }
+  isDateTime() {
+    return this.#hasDate && this.#hasTime;
+  }
+  isLocal() {
+    return !this.#hasDate || !this.#hasTime || !this.#offset;
+  }
+  isDate() {
+    return this.#hasDate && !this.#hasTime;
+  }
+  isTime() {
+    return this.#hasTime && !this.#hasDate;
+  }
+  isValid() {
+    return this.#hasDate || this.#hasTime;
+  }
+  toISOString() {
+    let iso = super.toISOString();
+    if (this.isDate())
+      return iso.slice(0, 10);
+    if (this.isTime())
+      return iso.slice(11, 23);
+    if (this.#offset === null)
+      return iso.slice(0, -1);
+    if (this.#offset === "Z")
+      return iso;
+    let offset = +this.#offset.slice(1, 3) * 60 + +this.#offset.slice(4, 6);
+    offset = this.#offset[0] === "-" ? offset : -offset;
+    let offsetDate = new Date(this.getTime() - offset * 6e4);
+    return offsetDate.toISOString().slice(0, -1) + this.#offset;
+  }
+  static wrapAsOffsetDateTime(jsDate, offset = "Z") {
+    let date = new _TomlDate(jsDate);
+    date.#offset = offset;
+    return date;
+  }
+  static wrapAsLocalDateTime(jsDate) {
+    let date = new _TomlDate(jsDate);
+    date.#offset = null;
+    return date;
+  }
+  static wrapAsLocalDate(jsDate) {
+    let date = new _TomlDate(jsDate);
+    date.#hasTime = false;
+    date.#offset = null;
+    return date;
+  }
+  static wrapAsLocalTime(jsDate) {
+    let date = new _TomlDate(jsDate);
+    date.#hasDate = false;
+    date.#offset = null;
+    return date;
+  }
+};
+
+// node_modules/.pnpm/smol-toml@1.7.0/node_modules/smol-toml/dist/error.js
+function getLineColFromPtr(string, ptr) {
+  let lines = string.slice(0, ptr).split(/\r\n|\n|\r/g);
+  return [lines.length, lines.pop().length + 1];
+}
+function makeCodeBlock(string, line, column) {
+  let lines = string.split(/\r\n|\n|\r/g);
+  let codeblock = "";
+  let numberLen = (Math.log10(line + 1) | 0) + 1;
+  for (let i = line - 1; i <= line + 1; i++) {
+    let l = lines[i - 1];
+    if (!l)
+      continue;
+    codeblock += i.toString().padEnd(numberLen, " ");
+    codeblock += ":  ";
+    codeblock += l;
+    codeblock += "\n";
+    if (i === line) {
+      codeblock += " ".repeat(numberLen + column + 2);
+      codeblock += "^\n";
+    }
+  }
+  return codeblock;
+}
+var TomlError = class extends Error {
+  line;
+  column;
+  codeblock;
+  constructor(message, options2) {
+    const [line, column] = getLineColFromPtr(options2.toml, options2.ptr);
+    const codeblock = makeCodeBlock(options2.toml, line, column);
+    super(`Invalid TOML document: ${message}
+
+${codeblock}`, options2);
+    this.line = line;
+    this.column = column;
+    this.codeblock = codeblock;
+  }
+};
+
+// node_modules/.pnpm/smol-toml@1.7.0/node_modules/smol-toml/dist/primitive.js
+var INT_REGEX = /^((0x[0-9a-fA-F](_?[0-9a-fA-F])*)|(([+-]|0[ob])?\d(_?\d)*))$/;
+var FLOAT_REGEX = /^[+-]?\d(_?\d)*(\.\d(_?\d)*)?([eE][+-]?\d(_?\d)*)?$/;
+var LEADING_ZERO = /^[+-]?0[0-9_]/;
+function parseString(str2, ptr) {
+  let c = str2[ptr++];
+  let first = c;
+  let isLiteral = c === "'";
+  let isMultiline = c === str2[ptr] && c === str2[ptr + 1];
+  if (isMultiline) {
+    if (str2[ptr += 2] === "\n")
+      ptr++;
+    else if (str2[ptr] === "\r" && str2[ptr + 1] === "\n")
+      ptr += 2;
+  }
+  let parsed = "";
+  let sliceStart = ptr;
+  let state = 0;
+  for (let i = ptr; i < str2.length; i++) {
+    c = str2[i];
+    if (isMultiline && (c === "\n" || c === "\r" && str2[i + 1] === "\n")) {
+      state = state && 3;
+    } else if (c < " " && c !== "	" || c === "\x7F") {
+      throw new TomlError("control characters are not allowed in strings", {
+        toml: str2,
+        ptr: i
+      });
+    } else if ((!state || state === 3) && c === first && (!isMultiline || str2[i + 1] === first && str2[i + 2] === first)) {
+      if (isMultiline) {
+        if (str2[i + 3] === first)
+          i++;
+        if (str2[i + 3] === first)
+          i++;
+      }
+      return [
+        // If we're in a newline escape still, then there's nothing to add.
+        // Also try to avoid concat if there's nothing to add to parsed, or nothing has been added to parsed.
+        state ? parsed : parsed + str2.slice(sliceStart, i),
+        i + (isMultiline ? 3 : 1)
+      ];
+    } else if (!state) {
+      if (!isLiteral && c === "\\") {
+        parsed += str2.slice(sliceStart, sliceStart = i);
+        state = 1;
+      }
+    } else if (state === 1) {
+      if (c === "x" || c === "u" || c === "U") {
+        let value = 0;
+        let len = c === "x" ? 2 : c === "u" ? 4 : 8;
+        for (let j = 0; j < len; j++, i++) {
+          let hex = str2.charCodeAt(i + 1);
+          let digit = (
+            /* 0-9 */
+            hex >= 48 && hex <= 57 ? hex - 48 : (
+              /* A-F */
+              hex >= 65 && hex <= 70 ? hex - 65 + 10 : (
+                /* a-f */
+                hex >= 97 && hex <= 102 ? hex - 97 + 10 : -1
+              )
+            )
+          );
+          if (digit < 0)
+            throw new TomlError("invalid non-hex character in unicode escape", { toml: str2, ptr: i + 1 });
+          value = value << 4 | digit;
+        }
+        if (value < 0 || value > 1114111 || value >= 55296 && value <= 57343) {
+          throw new TomlError("invalid unicode escape", { toml: str2, ptr: i });
+        }
+        parsed += String.fromCodePoint(value);
+        sliceStart = i + 1;
+        state = 0;
+      } else if (c === " " || c === "	") {
+        state = 2;
+      } else {
+        if (c === "b")
+          parsed += "\b";
+        else if (c === "t")
+          parsed += "	";
+        else if (c === "n")
+          parsed += "\n";
+        else if (c === "f")
+          parsed += "\f";
+        else if (c === "r")
+          parsed += "\r";
+        else if (c === "e")
+          parsed += "\x1B";
+        else if (c === '"')
+          parsed += '"';
+        else if (c === "\\")
+          parsed += "\\";
+        else
+          throw new TomlError("unrecognized escape sequence", { toml: str2, ptr: i });
+        sliceStart = i + 1;
+        state = 0;
+      }
+    } else if (c !== " " && c !== "	") {
+      if (state === 2) {
+        throw new TomlError("invalid escape: only line-ending whitespace may be escaped", {
+          toml: str2,
+          ptr: sliceStart
+        });
+      }
+      state = !isLiteral && c === "\\" ? 1 : 0;
+      sliceStart = i;
+    }
+  }
+  throw new TomlError("unfinished string", { toml: str2, ptr });
+}
+function parseValue(value, toml, ptr, integersAsBigInt) {
+  if (value === "true")
+    return true;
+  if (value === "false")
+    return false;
+  if (value === "-inf")
+    return -Infinity;
+  if (value === "inf" || value === "+inf")
+    return Infinity;
+  if (value === "nan" || value === "+nan" || value === "-nan")
+    return NaN;
+  if (value === "-0")
+    return integersAsBigInt ? 0n : 0;
+  let isInt = INT_REGEX.test(value);
+  if (isInt || FLOAT_REGEX.test(value)) {
+    if (LEADING_ZERO.test(value)) {
+      throw new TomlError("leading zeroes are not allowed", {
+        toml,
+        ptr
+      });
+    }
+    value = value.replace(/_/g, "");
+    let numeric = +value;
+    if (isNaN(numeric)) {
+      throw new TomlError("invalid number", {
+        toml,
+        ptr
+      });
+    }
+    if (isInt) {
+      if ((isInt = !Number.isSafeInteger(numeric)) && !integersAsBigInt) {
+        throw new TomlError("integer value cannot be represented losslessly", {
+          toml,
+          ptr
+        });
+      }
+      if (isInt || integersAsBigInt === true)
+        numeric = BigInt(value);
+    }
+    return numeric;
+  }
+  const date = new TomlDate(value);
+  if (!date.isValid()) {
+    throw new TomlError("invalid value", {
+      toml,
+      ptr
+    });
+  }
+  return date;
+}
+
+// node_modules/.pnpm/smol-toml@1.7.0/node_modules/smol-toml/dist/util.js
+function indexOfNewline(str2, start = 0, end = str2.length) {
+  let idx = str2.indexOf("\n", start);
+  if (str2[idx - 1] === "\r")
+    idx--;
+  return idx <= end ? idx : -1;
+}
+function skipComment(str2, ptr) {
+  for (let i = ptr; i < str2.length; i++) {
+    let c = str2[i];
+    if (c === "\n")
+      return i;
+    if (c === "\r" && str2[i + 1] === "\n")
+      return i + 1;
+    if (c < " " && c !== "	" || c === "\x7F") {
+      throw new TomlError("control characters are not allowed in comments", {
+        toml: str2,
+        ptr
+      });
+    }
+  }
+  return str2.length;
+}
+function skipVoid(str2, ptr, banNewLines, banComments) {
+  let c;
+  while (1) {
+    while ((c = str2[ptr]) === " " || c === "	" || !banNewLines && (c === "\n" || c === "\r" && str2[ptr + 1] === "\n"))
+      ptr++;
+    if (banComments || c !== "#")
+      break;
+    ptr = skipComment(str2, ptr);
+  }
+  return ptr;
+}
+function skipUntil(str2, ptr, sep, end, banNewLines = false) {
+  if (!end) {
+    ptr = indexOfNewline(str2, ptr);
+    return ptr < 0 ? str2.length : ptr;
+  }
+  for (let i = ptr; i < str2.length; i++) {
+    let c = str2[i];
+    if (c === "#") {
+      i = indexOfNewline(str2, i);
+    } else if (c === sep) {
+      return i + 1;
+    } else if (c === end || banNewLines && (c === "\n" || c === "\r" && str2[i + 1] === "\n")) {
+      return i;
+    }
+  }
+  throw new TomlError("cannot find end of structure", {
+    toml: str2,
+    ptr
+  });
+}
+
+// node_modules/.pnpm/smol-toml@1.7.0/node_modules/smol-toml/dist/extract.js
+function sliceAndTrimEndOf(str2, startPtr, endPtr) {
+  let value = str2.slice(startPtr, endPtr);
+  let commentIdx = value.indexOf("#");
+  if (commentIdx > -1) {
+    skipComment(str2, commentIdx);
+    value = value.slice(0, commentIdx);
+  }
+  return [value.trimEnd(), commentIdx];
+}
+function extractValue(str2, ptr, end, depth, integersAsBigInt) {
+  if (depth === 0) {
+    throw new TomlError("document contains excessively nested structures. aborting.", {
+      toml: str2,
+      ptr
+    });
+  }
+  let c = str2[ptr];
+  if (c === "[" || c === "{") {
+    let [value, endPtr2] = c === "[" ? parseArray(str2, ptr, depth, integersAsBigInt) : parseInlineTable(str2, ptr, depth, integersAsBigInt);
+    if (end) {
+      endPtr2 = skipVoid(str2, endPtr2);
+      if (str2[endPtr2] === ",")
+        endPtr2++;
+      else if (str2[endPtr2] !== end) {
+        throw new TomlError("expected comma or end of structure", {
+          toml: str2,
+          ptr: endPtr2
+        });
+      }
+    }
+    return [value, endPtr2];
+  }
+  if (c === '"' || c === "'") {
+    let [parsed, endPtr2] = parseString(str2, ptr);
+    if (end) {
+      endPtr2 = skipVoid(str2, endPtr2);
+      if (str2[endPtr2] && str2[endPtr2] !== "," && str2[endPtr2] !== end && str2[endPtr2] !== "\n" && str2[endPtr2] !== "\r") {
+        throw new TomlError("unexpected character encountered", {
+          toml: str2,
+          ptr: endPtr2
+        });
+      }
+      if (str2[endPtr2] === ",")
+        endPtr2++;
+    }
+    return [parsed, endPtr2];
+  }
+  let endPtr = skipUntil(str2, ptr, ",", end);
+  let slice = sliceAndTrimEndOf(str2, ptr, endPtr - (str2[endPtr - 1] === "," ? 1 : 0));
+  if (!slice[0]) {
+    throw new TomlError("incomplete key-value declaration: no value specified", {
+      toml: str2,
+      ptr
+    });
+  }
+  if (end && slice[1] > -1) {
+    endPtr = skipVoid(str2, ptr + slice[1]);
+    if (str2[endPtr] === ",")
+      endPtr++;
+  }
+  return [
+    parseValue(slice[0], str2, ptr, integersAsBigInt),
+    endPtr
+  ];
+}
+
+// node_modules/.pnpm/smol-toml@1.7.0/node_modules/smol-toml/dist/struct.js
+var KEY_PART_RE = /^[a-zA-Z0-9-_]+[ \t]*$/;
+function parseKey(str2, ptr, end = "=") {
+  let dot = ptr - 1;
+  let parsed = [];
+  let endPtr = str2.indexOf(end, ptr);
+  if (endPtr < 0) {
+    throw new TomlError("incomplete key-value: cannot find end of key", {
+      toml: str2,
+      ptr
+    });
+  }
+  do {
+    let c = str2[ptr = ++dot];
+    if (c !== " " && c !== "	") {
+      if (c === '"' || c === "'") {
+        if (c === str2[ptr + 1] && c === str2[ptr + 2]) {
+          throw new TomlError("multiline strings are not allowed in keys", {
+            toml: str2,
+            ptr
+          });
+        }
+        let [part, eos] = parseString(str2, ptr);
+        dot = str2.indexOf(".", eos);
+        let strEnd = str2.slice(eos, dot < 0 || dot > endPtr ? endPtr : dot);
+        let newLine = indexOfNewline(strEnd);
+        if (newLine > -1) {
+          throw new TomlError("newlines are not allowed in keys", {
+            toml: str2,
+            ptr: ptr + dot + newLine
+          });
+        }
+        if (strEnd.trimStart()) {
+          throw new TomlError("found extra tokens after the string part", {
+            toml: str2,
+            ptr: eos
+          });
+        }
+        if (endPtr < eos) {
+          endPtr = str2.indexOf(end, eos);
+          if (endPtr < 0) {
+            throw new TomlError("incomplete key-value: cannot find end of key", {
+              toml: str2,
+              ptr
+            });
+          }
+        }
+        parsed.push(part);
+      } else {
+        dot = str2.indexOf(".", ptr);
+        let part = str2.slice(ptr, dot < 0 || dot > endPtr ? endPtr : dot);
+        if (!KEY_PART_RE.test(part)) {
+          throw new TomlError("only letter, numbers, dashes and underscores are allowed in keys", {
+            toml: str2,
+            ptr
+          });
+        }
+        parsed.push(part.trimEnd());
+      }
+    }
+  } while (dot + 1 && dot < endPtr);
+  return [parsed, skipVoid(str2, endPtr + 1, true, true)];
+}
+function parseInlineTable(str2, ptr, depth, integersAsBigInt) {
+  let res = {};
+  let seen = /* @__PURE__ */ new Set();
+  let c;
+  ptr++;
+  while ((c = str2[ptr++]) !== "}" && c) {
+    if (c === ",") {
+      throw new TomlError("expected value, found comma", {
+        toml: str2,
+        ptr: ptr - 1
+      });
+    } else if (c === "#")
+      ptr = skipComment(str2, ptr);
+    else if (c !== " " && c !== "	" && c !== "\n" && c !== "\r") {
+      let k;
+      let t = res;
+      let hasOwn = false;
+      let [key, keyEndPtr] = parseKey(str2, ptr - 1);
+      for (let i = 0; i < key.length; i++) {
+        if (i)
+          t = hasOwn ? t[k] : t[k] = {};
+        k = key[i];
+        if ((hasOwn = Object.hasOwn(t, k)) && (typeof t[k] !== "object" || seen.has(t[k]))) {
+          throw new TomlError("trying to redefine an already defined value", {
+            toml: str2,
+            ptr
+          });
+        }
+        if (!hasOwn && k === "__proto__") {
+          Object.defineProperty(t, k, { enumerable: true, configurable: true, writable: true });
+        }
+      }
+      if (hasOwn) {
+        throw new TomlError("trying to redefine an already defined value", {
+          toml: str2,
+          ptr
+        });
+      }
+      let [value, valueEndPtr] = extractValue(str2, keyEndPtr, "}", depth - 1, integersAsBigInt);
+      seen.add(value);
+      t[k] = value;
+      ptr = valueEndPtr;
+    }
+  }
+  if (!c) {
+    throw new TomlError("unfinished table encountered", {
+      toml: str2,
+      ptr
+    });
+  }
+  return [res, ptr];
+}
+function parseArray(str2, ptr, depth, integersAsBigInt) {
+  let res = [];
+  let c;
+  ptr++;
+  while ((c = str2[ptr++]) !== "]" && c) {
+    if (c === ",") {
+      throw new TomlError("expected value, found comma", {
+        toml: str2,
+        ptr: ptr - 1
+      });
+    } else if (c === "#")
+      ptr = skipComment(str2, ptr);
+    else if (c !== " " && c !== "	" && c !== "\n" && c !== "\r") {
+      let e = extractValue(str2, ptr - 1, "]", depth - 1, integersAsBigInt);
+      res.push(e[0]);
+      ptr = e[1];
+    }
+  }
+  if (!c) {
+    throw new TomlError("unfinished array encountered", {
+      toml: str2,
+      ptr
+    });
+  }
+  return [res, ptr];
+}
+
+// node_modules/.pnpm/smol-toml@1.7.0/node_modules/smol-toml/dist/parse.js
+function peekTable(key, table, meta, type) {
+  let t = table;
+  let m = meta;
+  let k;
+  let hasOwn = false;
+  let state;
+  for (let i = 0; i < key.length; i++) {
+    if (i) {
+      t = hasOwn ? t[k] : t[k] = {};
+      m = (state = m[k]).c;
+      if (type === 0 && (state.t === 1 || state.t === 2)) {
+        return null;
+      }
+      if (state.t === 2) {
+        let l = t.length - 1;
+        t = t[l];
+        m = m[l].c;
+      }
+    }
+    k = key[i];
+    if ((hasOwn = Object.hasOwn(t, k)) && m[k]?.t === 0 && m[k]?.d) {
+      return null;
+    }
+    if (!hasOwn) {
+      if (k === "__proto__") {
+        Object.defineProperty(t, k, { enumerable: true, configurable: true, writable: true });
+        Object.defineProperty(m, k, { enumerable: true, configurable: true, writable: true });
+      }
+      m[k] = {
+        t: i < key.length - 1 && type === 2 ? 3 : type,
+        d: false,
+        i: 0,
+        c: {}
+      };
+    }
+  }
+  state = m[k];
+  if (state.t !== type && !(type === 1 && state.t === 3)) {
+    return null;
+  }
+  if (type === 2) {
+    if (!state.d) {
+      state.d = true;
+      t[k] = [];
+    }
+    t[k].push(t = {});
+    state.c[state.i++] = state = { t: 1, d: false, i: 0, c: {} };
+  }
+  if (state.d) {
+    return null;
+  }
+  state.d = true;
+  if (type === 1) {
+    t = hasOwn ? t[k] : t[k] = {};
+  } else if (type === 0 && hasOwn) {
+    return null;
+  }
+  return [k, t, state.c];
+}
+function parse15(toml, { maxDepth = 1e3, integersAsBigInt } = {}) {
+  let res = {};
+  let meta = {};
+  let tbl = res;
+  let m = meta;
+  for (let ptr = skipVoid(toml, 0); ptr < toml.length; ) {
+    if (toml[ptr] === "[") {
+      let isTableArray = toml[++ptr] === "[";
+      let k = parseKey(toml, ptr += +isTableArray, "]");
+      if (isTableArray) {
+        if (toml[k[1] - 1] !== "]") {
+          throw new TomlError("expected end of table declaration", {
+            toml,
+            ptr: k[1] - 1
+          });
+        }
+        k[1]++;
+      }
+      let p = peekTable(
+        k[0],
+        res,
+        meta,
+        isTableArray ? 2 : 1
+        /* Type.EXPLICIT */
+      );
+      if (!p) {
+        throw new TomlError("trying to redefine an already defined table or value", {
+          toml,
+          ptr
+        });
+      }
+      m = p[2];
+      tbl = p[1];
+      ptr = k[1];
+    } else {
+      let k = parseKey(toml, ptr);
+      let p = peekTable(
+        k[0],
+        tbl,
+        m,
+        0
+        /* Type.DOTTED */
+      );
+      if (!p) {
+        throw new TomlError("trying to redefine an already defined table or value", {
+          toml,
+          ptr
+        });
+      }
+      let v = extractValue(toml, k[1], void 0, maxDepth, integersAsBigInt);
+      p[1][p[0]] = v[0];
+      ptr = v[1];
+    }
+    ptr = skipVoid(toml, ptr, true);
+    if (toml[ptr] && toml[ptr] !== "\n" && toml[ptr] !== "\r") {
+      throw new TomlError("each key-value declaration must be followed by an end-of-line", {
+        toml,
+        ptr
+      });
+    }
+    ptr = skipVoid(toml, ptr);
+  }
+  return res;
+}
+
+// node_modules/.pnpm/smol-toml@1.7.0/node_modules/smol-toml/dist/stringify.js
+var BARE_KEY = /^[a-z0-9-_]+$/i;
+function extendedTypeOf(obj) {
+  let type = typeof obj;
+  if (type === "object") {
+    if (Array.isArray(obj))
+      return "array";
+    if (obj instanceof Date)
+      return "date";
+  }
+  return type;
+}
+function isArrayOfTables(obj) {
+  for (let i = 0; i < obj.length; i++) {
+    if (extendedTypeOf(obj[i]) !== "object")
+      return false;
+  }
+  return obj.length != 0;
+}
+function formatString(s) {
+  return JSON.stringify(s).replace(/\x7f/g, "\\u007f");
+}
+function stringifyValue(val, type, depth, numberAsFloat) {
+  if (depth === 0) {
+    throw new Error("Could not stringify the object: maximum object depth exceeded");
+  }
+  if (type === "number") {
+    if (isNaN(val))
+      return "nan";
+    if (val === Infinity)
+      return "inf";
+    if (val === -Infinity)
+      return "-inf";
+    if (Number.isInteger(val) && (numberAsFloat || !Number.isSafeInteger(val)))
+      return val.toFixed(1);
+    return val.toString();
+  }
+  if (type === "bigint" || type === "boolean") {
+    return val.toString();
+  }
+  if (type === "string") {
+    return formatString(val);
+  }
+  if (type === "date") {
+    if (isNaN(val.getTime())) {
+      throw new TypeError("cannot serialize invalid date");
+    }
+    return val.toISOString();
+  }
+  if (type === "object") {
+    return stringifyInlineTable(val, depth, numberAsFloat);
+  }
+  if (type === "array") {
+    return stringifyArray(val, depth, numberAsFloat);
+  }
+}
+function stringifyInlineTable(obj, depth, numberAsFloat) {
+  let keys = Object.keys(obj);
+  if (keys.length === 0)
+    return "{}";
+  let res = "{ ";
+  for (let i = 0; i < keys.length; i++) {
+    let k = keys[i];
+    if (i)
+      res += ", ";
+    res += BARE_KEY.test(k) ? k : formatString(k);
+    res += " = ";
+    res += stringifyValue(obj[k], extendedTypeOf(obj[k]), depth - 1, numberAsFloat);
+  }
+  return res + " }";
+}
+function stringifyArray(array, depth, numberAsFloat) {
+  if (array.length === 0)
+    return "[]";
+  let res = "[ ";
+  for (let i = 0; i < array.length; i++) {
+    if (i)
+      res += ", ";
+    if (array[i] === null || array[i] === void 0) {
+      throw new TypeError("arrays cannot contain null or undefined values");
+    }
+    res += stringifyValue(array[i], extendedTypeOf(array[i]), depth - 1, numberAsFloat);
+  }
+  return res + " ]";
+}
+function stringifyArrayTable(array, key, depth, numberAsFloat) {
+  if (depth === 0) {
+    throw new Error("Could not stringify the object: maximum object depth exceeded");
+  }
+  let res = "";
+  for (let i = 0; i < array.length; i++) {
+    res += `${res && "\n"}[[${key}]]
+`;
+    res += stringifyTable(0, array[i], key, depth, numberAsFloat);
+  }
+  return res;
+}
+function stringifyTable(tableKey, obj, prefix, depth, numberAsFloat) {
+  if (depth === 0) {
+    throw new Error("Could not stringify the object: maximum object depth exceeded");
+  }
+  let preamble = "";
+  let tables = "";
+  let keys = Object.keys(obj);
+  for (let i = 0; i < keys.length; i++) {
+    let k = keys[i];
+    if (obj[k] !== null && obj[k] !== void 0) {
+      let type = extendedTypeOf(obj[k]);
+      if (type === "symbol" || type === "function") {
+        throw new TypeError(`cannot serialize values of type '${type}'`);
+      }
+      let key = BARE_KEY.test(k) ? k : formatString(k);
+      if (type === "array" && isArrayOfTables(obj[k])) {
+        tables += (tables && "\n") + stringifyArrayTable(obj[k], prefix ? `${prefix}.${key}` : key, depth - 1, numberAsFloat);
+      } else if (type === "object") {
+        let tblKey = prefix ? `${prefix}.${key}` : key;
+        tables += (tables && "\n") + stringifyTable(tblKey, obj[k], tblKey, depth - 1, numberAsFloat);
+      } else {
+        preamble += key;
+        preamble += " = ";
+        preamble += stringifyValue(obj[k], type, depth, numberAsFloat);
+        preamble += "\n";
+      }
+    }
+  }
+  if (tableKey && (preamble || !tables))
+    preamble = preamble ? `[${tableKey}]
+${preamble}` : `[${tableKey}]`;
+  return preamble && tables ? `${preamble}
+${tables}` : preamble || tables;
+}
+function stringify(obj, { maxDepth = 1e3, numbersAsFloat = false } = {}) {
+  if (extendedTypeOf(obj) !== "object") {
+    throw new TypeError("stringify can only be called with an object");
+  }
+  let str2 = stringifyTable(0, obj, "", maxDepth, numbersAsFloat);
+  if (str2[str2.length - 1] !== "\n")
+    return str2 + "\n";
+  return str2;
+}
+
 // lib/plugin/convert/secrets.ts
 var SECRET_MARKERS = [
   "key",
@@ -4493,9 +5314,7 @@ function sanitizeMcpConfig(transport, config) {
 }
 
 // lib/plugin/convert/mcp-source.ts
-var SUPPORTED_MCP_ADAPTERS = MCP_AGENT_ADAPTERS.filter(
-  (adapter) => adapter.format !== "toml"
-);
+var SUPPORTED_MCP_ADAPTERS = MCP_AGENT_ADAPTERS;
 function stripJsonComments(text) {
   let out = "";
   let inString = false;
@@ -4559,12 +5378,23 @@ function selectMcpAdapter(sourceName, value) {
 }
 function readMcpDrafts(text, sourceName) {
   let value;
-  try {
-    value = JSON.parse(stripJsonComments(text));
-  } catch (err) {
-    throw new Error(
-      `could not parse "${sourceName ?? "input"}" as JSON/JSONC: ${err instanceof Error ? err.message : String(err)}`
-    );
+  const toml = /\.toml$/i.test(sourceName ?? "");
+  if (toml) {
+    try {
+      value = parse15(text);
+    } catch (err) {
+      throw new Error(
+        `could not parse "${sourceName ?? "input"}" as TOML: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  } else {
+    try {
+      value = JSON.parse(stripJsonComments(text));
+    } catch (err) {
+      throw new Error(
+        `could not parse "${sourceName ?? "input"}" as JSON/JSONC: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
   }
   const adapter = selectMcpAdapter(sourceName, value);
   return { adapter, drafts: adapter.parse(value) };
@@ -4936,6 +5766,27 @@ var KNOWN_BUT_UNMODELLED_KEYS = /* @__PURE__ */ new Set([
   "promptSignals",
   "metadata"
 ]);
+function serializeSkill(skill) {
+  const data = {
+    name: skill.name
+  };
+  if (skill.description?.trim()) data.description = skill.description.trim();
+  if (skill.allowedTools && skill.allowedTools.length > 0) {
+    data["allowed-tools"] = [...skill.allowedTools];
+  }
+  if (skill.tags && skill.tags.length > 0) {
+    data.tags = [...skill.tags];
+  }
+  if (skill.category && skill.category !== "custom") {
+    data.category = skill.category;
+  }
+  if (skill.version?.trim()) data.version = skill.version.trim();
+  if (skill.author?.trim()) data.author = skill.author.trim();
+  if (skill.license?.trim()) data.license = skill.license.trim();
+  const body = skill.content.endsWith("\n") ? skill.content : `${skill.content}
+`;
+  return import_gray_matter.default.stringify(body, data);
+}
 function parseSkillMarkdown(text, opts = {}) {
   const warnings = [];
   let parsed;
@@ -5228,6 +6079,1262 @@ function convert(input, options2 = {}) {
   };
 }
 
+// lib/claude/agents/markdown-agents.ts
+var import_gray_matter2 = __toESM(require_gray_matter());
+function serializeMarkdownAgent(id, def) {
+  const data = {
+    name: id,
+    description: def.description
+  };
+  if (def.model) data.model = def.model;
+  if (def.effort) data.effort = def.effort;
+  if (def.maxTurns) data.maxTurns = def.maxTurns;
+  if (def.tools?.length) data.tools = [...def.tools];
+  if (def.disallowedTools?.length) data.disallowedTools = [...def.disallowedTools];
+  const body = def.prompt.endsWith("\n") ? def.prompt : `${def.prompt}
+`;
+  return import_gray_matter2.default.stringify(body, data);
+}
+function normalizeToolList(value) {
+  if (Array.isArray(value)) {
+    const arr = value.map((v) => String(v).trim()).filter(Boolean);
+    return arr.length ? arr : void 0;
+  }
+  if (typeof value === "string") {
+    const arr = value.split(",").map((s) => s.trim()).filter(Boolean);
+    return arr.length ? arr : void 0;
+  }
+  return void 0;
+}
+function parseMarkdownAgent(id, content) {
+  let data;
+  let body;
+  try {
+    const parsed = (0, import_gray_matter2.default)(content);
+    data = parsed.data ?? {};
+    body = parsed.content ?? "";
+  } catch (err) {
+    return {
+      id,
+      error: `frontmatter parse failed: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+  const prompt = body.trim();
+  if (!prompt) return { id, error: "empty body (no system prompt)" };
+  const description = typeof data.description === "string" ? data.description.trim() : "";
+  if (!description) return { id, error: "missing `description` frontmatter" };
+  const def = { description, prompt };
+  if (typeof data.model === "string" && data.model.trim()) def.model = data.model.trim();
+  if (typeof data.provider === "string" && data.provider.trim()) {
+    def.provider = data.provider.trim();
+  }
+  const tools = normalizeToolList(data.tools ?? data["allowed-tools"]);
+  if (tools) def.tools = tools;
+  const disallowed = normalizeToolList(data.disallowedTools ?? data["disallowed-tools"]);
+  if (disallowed) def.disallowedTools = disallowed;
+  const maxTurns = data.maxTurns ?? data["max-turns"];
+  if (typeof maxTurns === "number" && Number.isInteger(maxTurns) && maxTurns > 0) {
+    def.maxTurns = maxTurns;
+  } else if (typeof maxTurns === "string" && /^\d+$/.test(maxTurns.trim()) && Number(maxTurns) > 0) {
+    def.maxTurns = Number(maxTurns);
+  }
+  const effort = data.effort;
+  if (effort === "low" || effort === "medium" || effort === "high" || effort === "xhigh" || effort === "max") {
+    def.effort = effort;
+  }
+  const externalPreset = data.externalPresetId ?? data["external-preset-id"];
+  if (typeof externalPreset === "string" && externalPreset.trim()) {
+    def.externalPresetId = externalPreset.trim();
+  }
+  const mcpServerIds = normalizeToolList(data.mcpServerIds ?? data["mcp-server-ids"]);
+  if (mcpServerIds) def.mcpServerIds = mcpServerIds;
+  const allowNesting = data.allowNesting ?? data["allow-nesting"];
+  if (allowNesting === true || allowNesting === "true") def.allowNesting = true;
+  const maxDepth = data.maxDepth ?? data["max-depth"];
+  if (typeof maxDepth === "number" && Number.isFinite(maxDepth)) {
+    def.maxDepth = maxDepth;
+  } else if (typeof maxDepth === "string" && maxDepth.trim() && !Number.isNaN(Number(maxDepth))) {
+    def.maxDepth = Number(maxDepth);
+  }
+  const hidden = data.hidden;
+  if (hidden === true || hidden === "true") def.hidden = true;
+  const disabled = data.disabled ?? data.disable;
+  if (disabled === true || disabled === "true") def.disabled = true;
+  const unsupportedFields = [
+    "skills",
+    "memory",
+    "background",
+    "isolation",
+    "hooks",
+    "mcpServers",
+    "permissionMode"
+  ].filter((key) => {
+    const value = data[key];
+    if (value === void 0 || value === null || value === false) return false;
+    if (typeof value === "string") return value.trim().length > 0;
+    if (Array.isArray(value)) return value.length > 0;
+    return true;
+  });
+  const declaredName = typeof data.name === "string" ? data.name.trim() : "";
+  return { id: declaredName || id, def, unsupportedFields };
+}
+
+// lib/plugin/convert/ecosystem.ts
+var UnsupportedPluginConversionError = class extends Error {
+  constructor(source, target, report) {
+    const details = report.blocking.map((issue) => `${issue.path}: ${issue.message}`).join("; ");
+    super(`cannot convert ${source} plugin to ${target} without losing behavior: ${details}`);
+    this.name = "UnsupportedPluginConversionError";
+    this.report = report;
+  }
+};
+function normalizePath(path) {
+  const parts = [];
+  for (const part of path.replaceAll("\\", "/").split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") {
+      if (parts.length === 0) throw new Error(`path escapes plugin root: ${path}`);
+      parts.pop();
+      continue;
+    }
+    parts.push(part);
+  }
+  return parts.join("/");
+}
+function parseJsonObject(text, path) {
+  let value;
+  try {
+    value = JSON.parse(text);
+  } catch (error) {
+    throw new Error(
+      `could not parse ${path}: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${path} must contain a JSON object`);
+  }
+  return value;
+}
+function requiredString(value, path) {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`${path} must be a non-empty string`);
+  }
+  return value.trim();
+}
+function optionalString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : void 0;
+}
+function stringArray(value) {
+  if (!Array.isArray(value)) return void 0;
+  const result = value.filter((item) => typeof item === "string");
+  return result.length > 0 ? result : void 0;
+}
+function configured(value) {
+  if (value === void 0 || value === null || value === false) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") return Object.keys(value).length > 0;
+  return true;
+}
+function pathList(value, defaultPath) {
+  const raw = typeof value === "string" ? [value] : Array.isArray(value) ? value.filter((item) => typeof item === "string") : defaultPath ? [defaultPath] : [];
+  return raw.map(normalizePath);
+}
+function filesBelow(files, directory) {
+  const prefix = `${normalizePath(directory)}/`;
+  return Array.from(files.keys()).map(normalizePath).filter((path) => path.startsWith(prefix)).map((path) => path.slice(prefix.length));
+}
+function displayNameFromPath(path) {
+  const basename2 = normalizePath(path).split("/").pop() ?? path;
+  return basename2.replace(/\.(md|json)$/i, "");
+}
+function authorFields(author, fallbackName = "unknown") {
+  if (typeof author === "string" && author.trim()) return { name: author.trim() };
+  if (author && typeof author === "object" && !Array.isArray(author)) {
+    const record = author;
+    const name = optionalString(record.name) ?? fallbackName;
+    const email = optionalString(record.email);
+    const url = optionalString(record.url);
+    return {
+      name,
+      ...email ? { email } : {},
+      ...url ? { url } : {}
+    };
+  }
+  return { name: fallbackName };
+}
+function replacePluginRootToken(value) {
+  if (typeof value === "string") {
+    return value.replaceAll("${CLAUDE_PLUGIN_ROOT}", "${COGNIA_PLUGIN_ROOT}").replaceAll("${CODEX_PLUGIN_ROOT}", "${COGNIA_PLUGIN_ROOT}").replaceAll("${extensionPath}", "${COGNIA_PLUGIN_ROOT}");
+  }
+  if (Array.isArray(value)) return value.map(replacePluginRootToken);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, replacePluginRootToken(item)])
+    );
+  }
+  return value;
+}
+var UNSUPPORTED_RUNTIME_TOKENS = [
+  "${CLAUDE_PLUGIN_DATA}",
+  "${CLAUDE_PROJECT_DIR}",
+  "${workspacePath}"
+];
+function rejectUnsupportedRuntimeTokens(args) {
+  const found = UNSUPPORTED_RUNTIME_TOKENS.filter((token) => args.text.includes(token));
+  if (found.length === 0) return false;
+  args.report.blocking.push({
+    capability: args.capability,
+    path: args.path,
+    message: `runtime variables have no equivalent Cognia binding: ${found.join(", ")}`,
+    blocking: true
+  });
+  return true;
+}
+function unsupportedIssue(capability) {
+  return {
+    capability,
+    path: capability,
+    message: `${capability} has no behaviorally equivalent Cognia declarative contribution`,
+    blocking: true
+  };
+}
+function reportUnknownManifestFields(args) {
+  for (const field of Object.keys(args.manifest).sort()) {
+    if (args.known.has(field)) continue;
+    args.report.blocking.push({
+      capability: field,
+      path: `${args.sourcePath}.${field}`,
+      message: "unknown manifest field may carry behavior and cannot be converted safely",
+      blocking: true
+    });
+  }
+}
+function reportUnmappedPresentationFields(value, mapped, report) {
+  if (!value) return;
+  for (const [field, fieldValue] of Object.entries(value)) {
+    if (!configured(fieldValue) || mapped.has(field)) continue;
+    report.warnings.push({
+      capability: "interface",
+      path: `interface.${field}`,
+      message: "presentation metadata has no Cognia manifest equivalent and was not projected",
+      blocking: false
+    });
+  }
+}
+function cloneFiles(files) {
+  return new Map(Array.from(files, ([path, contents]) => [normalizePath(path), contents]));
+}
+function metadataFromForeignManifest(manifest, sourcePath, interfaceMetadata) {
+  const rawName = requiredString(manifest.name, `${sourcePath}.name`);
+  const id = slugify(rawName);
+  if (!id) throw new Error(`${sourcePath}.name cannot produce a valid plugin id`);
+  return {
+    id,
+    name: optionalString(manifest.displayName) ?? optionalString(interfaceMetadata?.displayName) ?? rawName,
+    version: optionalString(manifest.version) ?? "0.1.0",
+    description: optionalString(manifest.description) ?? optionalString(interfaceMetadata?.shortDescription) ?? "",
+    author: authorFields(manifest.author),
+    license: optionalString(manifest.license) ?? "MIT",
+    homepage: optionalString(manifest.homepage) ?? optionalString(interfaceMetadata?.websiteURL),
+    repository: optionalString(manifest.repository),
+    keywords: stringArray(manifest.keywords),
+    icon: optionalString(interfaceMetadata?.logo) ?? optionalString(interfaceMetadata?.composerIcon),
+    screenshots: stringArray(interfaceMetadata?.screenshots)
+  };
+}
+function finalizeForeignConversion(args) {
+  const { source, output: output2, metadata, contributions, report, options: options2 } = args;
+  if (report.blocking.length > 0) {
+    report.fidelity = "unsupported";
+    throw new UnsupportedPluginConversionError(source, "cognia", report);
+  }
+  const capabilities = [];
+  if (contributions.skills.length > 0) capabilities.push("skills");
+  if (contributions.subagents.length > 0) capabilities.push("subagent");
+  if (contributions.presets.length > 0) capabilities.push("mcp-server-preset");
+  const need = contributions.presets.some((preset) => preset.transport === "stdio") ? "host-process" : contributions.needsFilesystem ? "host-filesystem" : "portable";
+  const manifest = assembleManifest({
+    identity: {
+      id: metadata.id,
+      name: metadata.name,
+      version: metadata.version,
+      description: metadata.description,
+      author: metadata.author.name,
+      authorEmail: metadata.author.email,
+      license: metadata.license,
+      minAppVersion: options2.hostVersion ?? "0.1.0"
+    },
+    capabilities,
+    need,
+    contributions: {
+      ...contributions.skills.length > 0 ? { skills: contributions.skills } : {},
+      ...contributions.subagents.length > 0 ? { subagents: contributions.subagents } : {},
+      ...contributions.presets.length > 0 ? { mcpServerPresets: contributions.presets } : {}
+    }
+  });
+  manifest.homepage = metadata.homepage;
+  manifest.repository = metadata.repository;
+  manifest.keywords = metadata.keywords;
+  manifest.icon = metadata.icon;
+  manifest.screenshots = metadata.screenshots;
+  if (metadata.author.url && manifest.author) {
+    manifest.author.url = metadata.author.url;
+  }
+  output2.set("plugin.json", serializeManifest(manifest));
+  output2.set("dist/index.js", renderDist(manifest));
+  return {
+    source,
+    target: "cognia",
+    manifest,
+    files: output2,
+    copies: [],
+    report
+  };
+}
+function collectSkillMarkdownFiles(files, declared) {
+  const declaredPaths = pathList(declared);
+  const roots = declaredPaths.length > 0 ? declaredPaths : ["skills"];
+  const result = /* @__PURE__ */ new Set();
+  for (const root of roots) {
+    if (/\.md$/i.test(root)) {
+      if (files.has(root)) result.add(root);
+      continue;
+    }
+    if (files.has(`${root}/SKILL.md`)) {
+      result.add(`${root}/SKILL.md`);
+      continue;
+    }
+    for (const path of files.keys()) {
+      const normalized = normalizePath(path);
+      if (normalized.startsWith(`${root}/`) && normalized.endsWith("/SKILL.md")) {
+        result.add(normalized);
+      }
+    }
+  }
+  return Array.from(result).sort();
+}
+function convertSkillFiles(args) {
+  const { files, declared, output: output2, report } = args;
+  const paths = collectSkillMarkdownFiles(files, declared);
+  if (!configured(declared) && files.has("SKILL.md")) paths.unshift("SKILL.md");
+  const skills = [];
+  let needsFilesystem = false;
+  if (configured(declared) && paths.length === 0) {
+    report.blocking.push({
+      capability: "skills",
+      path: "skills",
+      message: "declared skill paths did not contain a SKILL.md file",
+      blocking: true
+    });
+  }
+  for (const skillFile of paths) {
+    const text = files.get(skillFile);
+    if (text === void 0) continue;
+    rejectUnsupportedRuntimeTokens({
+      text,
+      capability: "skills",
+      path: skillFile,
+      report
+    });
+    const directory = skillFile.slice(0, Math.max(0, skillFile.lastIndexOf("/")));
+    const resources = directory ? filesBelow(files, directory) : [];
+    const built = buildSkill(text, resources, displayNameFromPath(directory || skillFile));
+    if (built.skill.source.kind === "local-bundle" && directory) {
+      built.skill.source = { kind: "local-bundle", path: directory };
+    }
+    skills.push(built.skill);
+    needsFilesystem ||= built.needsFilesystem;
+    if (!directory) {
+      for (const copy of built.copies) {
+        const contents = files.get(normalizePath(copy.from));
+        if (contents !== void 0) output2.set(copy.to, contents);
+      }
+    }
+    for (const warning of built.warnings) {
+      report.warnings.push({
+        capability: "skills",
+        path: skillFile,
+        message: warning,
+        blocking: false
+      });
+    }
+    report.converted.push({
+      capability: "skills",
+      path: skillFile,
+      message: `converted skill ${built.skill.id}`,
+      blocking: false
+    });
+  }
+  return { skills, needsFilesystem };
+}
+function mcpDocuments(files, declared, defaultPath, rootKey = "mcpServers") {
+  if (declared && typeof declared === "object" && !Array.isArray(declared)) {
+    const record = declared;
+    return [
+      {
+        path: rootKey,
+        value: rootKey in record ? record : { [rootKey]: record }
+      }
+    ];
+  }
+  const paths = pathList(declared);
+  if (paths.length === 0 && files.has(defaultPath)) paths.push(defaultPath);
+  return paths.map((path) => {
+    const text = files.get(path);
+    if (text === void 0) throw new Error(`declared MCP configuration was not found: ${path}`);
+    return { path, value: parseJsonObject(text, path) };
+  });
+}
+function convertMcpDocuments(args) {
+  const presets = [];
+  for (const document of args.documents) {
+    rejectUnsupportedRuntimeTokens({
+      text: JSON.stringify(document.value),
+      capability: "mcpServers",
+      path: document.path,
+      report: args.report
+    });
+    const canonicalText = JSON.stringify(replacePluginRootToken(document.value));
+    const { drafts } = readMcpDrafts(canonicalText, args.adapterSourceName);
+    for (const draft of drafts) {
+      const preset = {
+        id: draft.name,
+        name: draft.name,
+        description: describeConfig(draft.transport, draft.config),
+        transport: draft.transport,
+        config: draft.config,
+        fields: []
+      };
+      presets.push(preset);
+      args.report.converted.push({
+        capability: "mcpServers",
+        path: document.path,
+        message: `converted MCP server ${preset.id}`,
+        blocking: false
+      });
+    }
+  }
+  return presets;
+}
+function detectPluginEcosystem(files) {
+  if (files.has("plugin.json")) return "cognia";
+  if (files.has(".claude-plugin/plugin.json")) return "claude-code";
+  if (files.has(".codex-plugin/plugin.json")) return "codex";
+  if (files.has("gemini-extension.json")) return "gemini-cli";
+  throw new Error(
+    "plugin format not recognized \u2014 expected plugin.json, .claude-plugin/plugin.json, .codex-plugin/plugin.json, or gemini-extension.json"
+  );
+}
+function convertClaudePlugin(files, options2) {
+  const sourcePath = ".claude-plugin/plugin.json";
+  const source = parseJsonObject(
+    requiredString(files.get(sourcePath), sourcePath),
+    sourcePath
+  );
+  const sourceRecord = source;
+  const blocking = [
+    ["hooks", source.hooks],
+    ["lspServers", source.lspServers],
+    ["outputStyles", source.outputStyles],
+    ["workflows", source.workflows],
+    ["settings", source.settings],
+    ["userConfig", source.userConfig],
+    ["channels", source.channels],
+    ["dependencies", source.dependencies],
+    ["experimental", source.experimental]
+  ].filter(([, value]) => configured(value)).map(([capability]) => unsupportedIssue(String(capability)));
+  const discoveredExecutableSurfaces = [
+    ["hooks", ["hooks/", "hooks.json"]],
+    ["monitors", ["monitors/"]],
+    ["bin", ["bin/"]],
+    ["themes", ["themes/"]],
+    ["workflows", ["workflows/"]],
+    ["outputStyles", ["output-styles/"]],
+    ["settings", ["settings.json"]],
+    ["lspServers", [".lsp.json"]]
+  ];
+  for (const [capability, prefixes] of discoveredExecutableSurfaces) {
+    if (prefixes.some(
+      (prefix) => Array.from(files.keys()).some(
+        (path) => prefix.endsWith("/") ? normalizePath(path).startsWith(prefix) : normalizePath(path) === prefix
+      )
+    ) && !blocking.some((issue) => issue.capability === capability)) {
+      blocking.push(unsupportedIssue(capability));
+    }
+  }
+  const report = {
+    fidelity: blocking.length > 0 ? "unsupported" : "structured",
+    converted: [],
+    warnings: [],
+    blocking
+  };
+  reportUnknownManifestFields({
+    manifest: sourceRecord,
+    known: /* @__PURE__ */ new Set([
+      "name",
+      "displayName",
+      "version",
+      "description",
+      "author",
+      "homepage",
+      "repository",
+      "license",
+      "keywords",
+      "skills",
+      "commands",
+      "agents",
+      "mcpServers",
+      "hooks",
+      "lspServers",
+      "outputStyles",
+      "workflows",
+      "settings",
+      "userConfig",
+      "channels",
+      "dependencies",
+      "experimental"
+    ]),
+    sourcePath,
+    report
+  });
+  if (blocking.length > 0) {
+    throw new UnsupportedPluginConversionError("claude-code", "cognia", report);
+  }
+  const output2 = cloneFiles(files);
+  const convertedSkills = convertSkillFiles({
+    files,
+    declared: source.skills,
+    output: output2,
+    report
+  });
+  const skills = convertedSkills.skills;
+  const commandConversionStart = report.converted.length;
+  const commandPaths = pathList(source.commands, "commands");
+  for (const path of commandPaths) {
+    const candidates = path.toLowerCase().endsWith(".md") ? [path] : Array.from(files.keys()).filter(
+      (file) => normalizePath(file).startsWith(`${path}/`) && /\.md$/i.test(file)
+    );
+    for (const commandPath of candidates) {
+      const text = files.get(commandPath);
+      if (text === void 0) continue;
+      rejectUnsupportedRuntimeTokens({
+        text,
+        capability: "commands",
+        path: commandPath,
+        report
+      });
+      const built = buildSkill(text, [], displayNameFromPath(commandPath));
+      skills.push(built.skill);
+      report.converted.push({
+        capability: "commands",
+        path: commandPath,
+        message: `converted prompt command to skill ${built.skill.id}`,
+        blocking: false
+      });
+    }
+  }
+  if (configured(source.commands) && report.converted.length === commandConversionStart) {
+    report.blocking.push({
+      capability: "commands",
+      path: "commands",
+      message: "declared command paths did not contain Markdown command files",
+      blocking: true
+    });
+  }
+  const subagents = [];
+  const agentConversionStart = report.converted.length;
+  const agentPaths = pathList(source.agents, "agents");
+  for (const path of agentPaths) {
+    const candidates = path.toLowerCase().endsWith(".md") ? [path] : Array.from(files.keys()).filter(
+      (file) => normalizePath(file).startsWith(`${path}/`) && /\.md$/i.test(file)
+    );
+    for (const agentPath of candidates) {
+      const text = files.get(agentPath);
+      if (text === void 0) continue;
+      rejectUnsupportedRuntimeTokens({
+        text,
+        capability: "agents",
+        path: agentPath,
+        report
+      });
+      const agentId = slugify(displayNameFromPath(agentPath));
+      const parsed = parseMarkdownAgent(agentId, text);
+      if ("error" in parsed) {
+        report.blocking.push({
+          capability: "agents",
+          path: agentPath,
+          message: parsed.error,
+          blocking: true
+        });
+        continue;
+      }
+      if (parsed.unsupportedFields.length > 0) {
+        report.blocking.push({
+          capability: "agents",
+          path: agentPath,
+          message: `unsupported subagent fields: ${parsed.unsupportedFields.join(", ")}`,
+          blocking: true
+        });
+        continue;
+      }
+      subagents.push({
+        id: parsed.id,
+        name: parsed.id,
+        ...parsed.def
+      });
+      report.converted.push({
+        capability: "agents",
+        path: agentPath,
+        message: `converted subagent ${parsed.id}`,
+        blocking: false
+      });
+    }
+  }
+  if (configured(source.agents) && report.converted.length === agentConversionStart) {
+    report.blocking.push({
+      capability: "agents",
+      path: "agents",
+      message: "declared agent paths did not contain valid Markdown agents",
+      blocking: true
+    });
+  }
+  const presets = convertMcpDocuments({
+    documents: mcpDocuments(files, source.mcpServers, ".mcp.json"),
+    adapterSourceName: "claude-code.json",
+    report
+  });
+  return finalizeForeignConversion({
+    source: "claude-code",
+    output: output2,
+    metadata: metadataFromForeignManifest(sourceRecord, sourcePath),
+    contributions: {
+      skills,
+      subagents,
+      presets,
+      needsFilesystem: convertedSkills.needsFilesystem
+    },
+    report,
+    options: options2
+  });
+}
+function convertCodexPlugin(files, options2) {
+  const sourcePath = ".codex-plugin/plugin.json";
+  const source = parseJsonObject(requiredString(files.get(sourcePath), sourcePath), sourcePath);
+  const blocking = [
+    ["hooks", source.hooks],
+    ["apps", source.apps]
+  ].filter(([, value]) => configured(value)).map(([capability]) => unsupportedIssue(String(capability)));
+  const report = {
+    fidelity: blocking.length > 0 ? "unsupported" : "structured",
+    converted: [],
+    warnings: [],
+    blocking
+  };
+  reportUnknownManifestFields({
+    manifest: source,
+    known: /* @__PURE__ */ new Set([
+      "name",
+      "version",
+      "description",
+      "author",
+      "homepage",
+      "repository",
+      "license",
+      "keywords",
+      "skills",
+      "hooks",
+      "mcpServers",
+      "apps",
+      "interface"
+    ]),
+    sourcePath,
+    report
+  });
+  const output2 = cloneFiles(files);
+  const convertedSkills = convertSkillFiles({
+    files,
+    declared: source.skills,
+    output: output2,
+    report
+  });
+  const presets = convertMcpDocuments({
+    documents: mcpDocuments(files, source.mcpServers, ".mcp.json"),
+    adapterSourceName: "claude-code.json",
+    report
+  });
+  const interfaceMetadata = source.interface && typeof source.interface === "object" && !Array.isArray(source.interface) ? source.interface : void 0;
+  const mappedInterfaceFields = /* @__PURE__ */ new Set(["displayName", "shortDescription", "screenshots"]);
+  if (interfaceMetadata && !optionalString(source.description) && optionalString(interfaceMetadata.longDescription)) {
+    source.description = interfaceMetadata.longDescription;
+    mappedInterfaceFields.add("longDescription");
+  }
+  if (interfaceMetadata && !configured(source.author) && optionalString(interfaceMetadata.developerName)) {
+    source.author = { name: interfaceMetadata.developerName };
+    mappedInterfaceFields.add("developerName");
+  }
+  if (interfaceMetadata && !optionalString(source.homepage) && optionalString(interfaceMetadata.websiteURL)) {
+    mappedInterfaceFields.add("websiteURL");
+  }
+  if (interfaceMetadata) {
+    if (optionalString(interfaceMetadata.logo)) {
+      mappedInterfaceFields.add("logo");
+    } else if (optionalString(interfaceMetadata.composerIcon)) {
+      mappedInterfaceFields.add("composerIcon");
+    }
+  }
+  reportUnmappedPresentationFields(interfaceMetadata, mappedInterfaceFields, report);
+  return finalizeForeignConversion({
+    source: "codex",
+    output: output2,
+    metadata: metadataFromForeignManifest(source, sourcePath, interfaceMetadata),
+    contributions: {
+      skills: convertedSkills.skills,
+      subagents: [],
+      presets,
+      needsFilesystem: convertedSkills.needsFilesystem
+    },
+    report,
+    options: options2
+  });
+}
+function parseGeminiCommand(path, text, report) {
+  let parsed;
+  try {
+    parsed = parse15(text);
+  } catch (error) {
+    report.blocking.push({
+      capability: "commands",
+      path,
+      message: `invalid TOML: ${error instanceof Error ? error.message : String(error)}`,
+      blocking: true
+    });
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    report.blocking.push({
+      capability: "commands",
+      path,
+      message: "command TOML must contain an object",
+      blocking: true
+    });
+    return null;
+  }
+  const command = parsed;
+  const prompt = optionalString(command.prompt);
+  if (!prompt) {
+    report.blocking.push({
+      capability: "commands",
+      path,
+      message: "command is missing the required prompt string",
+      blocking: true
+    });
+    return null;
+  }
+  if (/!\{[\s\S]*\}/.test(prompt)) {
+    report.blocking.push({
+      capability: "commands",
+      path,
+      message: "shell interpolation cannot be executed by a declarative Cognia skill",
+      blocking: true
+    });
+    return null;
+  }
+  const relative2 = normalizePath(path).replace(/^commands\//, "").replace(/\.toml$/i, "");
+  const id = slugify(relative2.replaceAll("/", "-"));
+  report.warnings.push({
+    capability: "commands",
+    path,
+    message: "converted to a contextual skill; Gemini command argument and file interpolation markers remain literal",
+    blocking: false
+  });
+  report.converted.push({
+    capability: "commands",
+    path,
+    message: `converted prompt command to skill ${id}`,
+    blocking: false
+  });
+  return {
+    id,
+    name: relative2.replaceAll("/", ":"),
+    description: optionalString(command.description) ?? "",
+    source: { kind: "inline", markdown: prompt }
+  };
+}
+function convertGeminiPlugin(files, options2) {
+  const sourcePath = "gemini-extension.json";
+  const source = parseJsonObject(requiredString(files.get(sourcePath), sourcePath), sourcePath);
+  const blocking = configured(source.excludeTools) ? [unsupportedIssue("excludeTools")] : [];
+  const report = {
+    fidelity: blocking.length > 0 ? "unsupported" : "structured",
+    converted: [],
+    warnings: [],
+    blocking
+  };
+  reportUnknownManifestFields({
+    manifest: source,
+    known: /* @__PURE__ */ new Set([
+      "name",
+      "version",
+      "description",
+      "author",
+      "homepage",
+      "repository",
+      "license",
+      "keywords",
+      "contextFileName",
+      "excludeTools",
+      "mcpServers"
+    ]),
+    sourcePath,
+    report
+  });
+  const output2 = cloneFiles(files);
+  const skills = [];
+  const contextPath = optionalString(source.contextFileName) ?? "GEMINI.md";
+  const context = files.get(normalizePath(contextPath));
+  if (context !== void 0 && context.trim()) {
+    rejectUnsupportedRuntimeTokens({
+      text: context,
+      capability: "context",
+      path: contextPath,
+      report
+    });
+    skills.push({
+      id: "gemini-context",
+      name: "Gemini Context",
+      description: "Extension context imported from Gemini CLI.",
+      source: { kind: "inline", markdown: context.trim() }
+    });
+    report.converted.push({
+      capability: "context",
+      path: contextPath,
+      message: "converted extension context to a skill",
+      blocking: false
+    });
+  } else if (source.contextFileName !== void 0) {
+    report.blocking.push({
+      capability: "context",
+      path: contextPath,
+      message: "declared context file was not found or was empty",
+      blocking: true
+    });
+  }
+  for (const path of Array.from(files.keys()).map(normalizePath).sort()) {
+    if (!path.startsWith("commands/") || !path.endsWith(".toml")) continue;
+    const skill = parseGeminiCommand(path, requiredString(files.get(path), path), report);
+    if (skill) skills.push(skill);
+  }
+  if (report.warnings.some((issue) => issue.capability === "commands")) {
+    report.fidelity = "contextual";
+  }
+  const presets = convertMcpDocuments({
+    documents: mcpDocuments(files, source.mcpServers, ".mcp.json"),
+    adapterSourceName: "gemini.json",
+    report
+  });
+  return finalizeForeignConversion({
+    source: "gemini-cli",
+    output: output2,
+    metadata: metadataFromForeignManifest(source, sourcePath),
+    contributions: {
+      skills,
+      subagents: [],
+      presets,
+      needsFilesystem: false
+    },
+    report,
+    options: options2
+  });
+}
+function loadCogniaPlugin(files) {
+  const manifest = parseExistingManifest(
+    requiredString(files.get("plugin.json"), "plugin.json"),
+    "plugin.json"
+  );
+  return {
+    source: "cognia",
+    target: "cognia",
+    manifest,
+    files: new Map(files),
+    copies: [],
+    report: {
+      fidelity: "native-exact",
+      converted: [],
+      warnings: [],
+      blocking: []
+    }
+  };
+}
+function replaceCanonicalRootToken(value, target) {
+  const token = target === "claude-code" ? "${CLAUDE_PLUGIN_ROOT}" : target === "gemini-cli" ? "${extensionPath}" : "${CODEX_PLUGIN_ROOT}";
+  if (typeof value === "string") {
+    return value.replaceAll("${COGNIA_PLUGIN_ROOT}", token);
+  }
+  if (Array.isArray(value)) return value.map((item) => replaceCanonicalRootToken(item, target));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, replaceCanonicalRootToken(item, target)])
+    );
+  }
+  return value;
+}
+function exportCogniaSkills(args) {
+  for (const skill of args.manifest.skills ?? []) {
+    const targetDirectory = `skills/${skill.id}`;
+    if (skill.source.kind === "inline") {
+      args.output.set(
+        `${targetDirectory}/SKILL.md`,
+        serializeSkill({
+          name: skill.name,
+          description: skill.description,
+          content: skill.source.markdown,
+          allowedTools: skill.allowedTools
+        })
+      );
+    } else if (skill.source.kind === "local-folder" || skill.source.kind === "local-bundle") {
+      if (args.target === "gemini-cli") {
+        args.report.blocking.push({
+          capability: "skills",
+          path: `skills.${skill.id}.source`,
+          message: "Gemini prompt commands cannot preserve a resource-bearing Cognia skill",
+          blocking: true
+        });
+        continue;
+      }
+      const sourceDirectory = normalizePath(skill.source.path);
+      const entries = Array.from(args.files.entries()).filter(
+        ([path]) => normalizePath(path).startsWith(`${sourceDirectory}/`)
+      );
+      if (entries.length === 0) {
+        args.report.blocking.push({
+          capability: "skills",
+          path: skill.source.path,
+          message: `skill bundle ${skill.id} was not found`,
+          blocking: true
+        });
+        continue;
+      }
+      for (const [path, contents] of entries) {
+        const relative2 = normalizePath(path).slice(sourceDirectory.length + 1);
+        const normalizedSource = normalizePath(path);
+        const target = `${targetDirectory}/${relative2}`;
+        if (args.binaryPaths?.has(normalizedSource)) {
+          args.copies.push({ from: normalizedSource, to: target });
+        } else {
+          args.output.set(target, contents);
+        }
+      }
+    } else {
+      args.report.blocking.push({
+        capability: "skills",
+        path: `skills.${skill.id}.source`,
+        message: `${skill.source.kind} skills cannot be represented as a self-contained ${args.target} bundle`,
+        blocking: true
+      });
+      continue;
+    }
+    args.report.converted.push({
+      capability: "skills",
+      path: `skills.${skill.id}`,
+      message: `exported skill ${skill.id}`,
+      blocking: false
+    });
+  }
+}
+function exportCogniaSubagents(args) {
+  const subagents = args.manifest.subagents ?? [];
+  if (subagents.length === 0) return;
+  if (args.target !== "claude-code") {
+    args.report.blocking.push({
+      capability: "subagent",
+      path: "subagents",
+      message: `${args.target} plugins do not expose a compatible subagent contribution`,
+      blocking: true
+    });
+    return;
+  }
+  for (const agent of subagents) {
+    const unsupported = [
+      agent.provider,
+      agent.externalPresetId,
+      agent.mcpServerIds?.length,
+      agent.allowNesting,
+      agent.maxDepth,
+      agent.hidden,
+      agent.disabled
+    ].some(configured);
+    if (unsupported) {
+      args.report.blocking.push({
+        capability: "subagent",
+        path: `subagents.${agent.id}`,
+        message: "subagent contains Cognia-only routing, nesting, or visibility controls",
+        blocking: true
+      });
+      continue;
+    }
+    args.output.set(
+      `agents/${agent.id}.md`,
+      serializeMarkdownAgent(agent.id, {
+        description: agent.description,
+        prompt: agent.prompt,
+        tools: agent.tools,
+        disallowedTools: agent.disallowedTools,
+        model: agent.model,
+        maxTurns: agent.maxTurns,
+        effort: agent.effort
+      })
+    );
+    args.report.converted.push({
+      capability: "subagent",
+      path: `subagents.${agent.id}`,
+      message: `exported subagent ${agent.id}`,
+      blocking: false
+    });
+  }
+}
+function exportMcpServers(args) {
+  const presets = args.manifest.mcpServerPresets ?? [];
+  if (presets.length === 0) return void 0;
+  const servers = [];
+  for (const preset of presets) {
+    if (preset.fields?.length) {
+      args.report.blocking.push({
+        capability: "mcp-server-preset",
+        path: `mcpServerPresets.${preset.id}.fields`,
+        message: "target plugin formats cannot prompt users for Cognia preset fields",
+        blocking: true
+      });
+      continue;
+    }
+    if (args.target === "codex" && preset.transport === "sse") {
+      args.report.blocking.push({
+        capability: "mcp-server-preset",
+        path: `mcpServerPresets.${preset.id}.transport`,
+        message: "Codex plugins do not support SSE MCP transport",
+        blocking: true
+      });
+      continue;
+    }
+    servers.push({
+      id: preset.id,
+      name: preset.id,
+      transport: preset.transport,
+      config: replaceCanonicalRootToken(preset.config, args.target),
+      enabled: true,
+      createdAt: 0,
+      updatedAt: 0
+    });
+  }
+  if (servers.length === 0) return void 0;
+  const adapterId = args.target === "gemini-cli" ? "gemini" : "claude-code";
+  const adapter = MCP_AGENT_ADAPTERS.find((candidate) => candidate.id === adapterId);
+  if (!adapter) throw new Error(`missing MCP adapter: ${adapterId}`);
+  const projected = adapter.project(null, servers);
+  if (!projected || typeof projected !== "object" || Array.isArray(projected)) {
+    throw new Error(`${adapterId} MCP adapter returned an invalid projection`);
+  }
+  for (const preset of presets) {
+    args.report.converted.push({
+      capability: "mcp-server-preset",
+      path: `mcpServerPresets.${preset.id}`,
+      message: `exported MCP server ${preset.id}`,
+      blocking: false
+    });
+  }
+  return projected;
+}
+function authorForForeign(manifest) {
+  if (!manifest.author) return void 0;
+  return {
+    name: manifest.author.name,
+    ...manifest.author.email ? { email: manifest.author.email } : {},
+    ...manifest.author.url ? { url: manifest.author.url } : {}
+  };
+}
+function convertCogniaPlugin(files, target, options2) {
+  const loaded = loadCogniaPlugin(files);
+  const { manifest } = loaded;
+  const report = {
+    fidelity: target === "gemini-cli" ? "contextual" : "structured",
+    converted: [],
+    warnings: [],
+    blocking: []
+  };
+  const allowedCapabilities = /* @__PURE__ */ new Set([
+    "skills",
+    "mcp-server-preset",
+    ...target === "claude-code" ? ["subagent"] : []
+  ]);
+  for (const capability of manifest.capabilities ?? []) {
+    if (!allowedCapabilities.has(capability)) {
+      report.blocking.push(unsupportedIssue(capability));
+    }
+  }
+  if (manifest.permissions?.length) {
+    report.blocking.push(unsupportedIssue("permissions"));
+  }
+  const executableEntries = [manifest.pythonMain, manifest.wasmMain, manifest.vscodeMain].filter(
+    configured
+  );
+  if (executableEntries.length > 0) {
+    report.blocking.push(unsupportedIssue("runtime"));
+  }
+  if (manifest.main) {
+    const entry = files.get(normalizePath(manifest.main));
+    if (!entry?.includes("Built output of src/index.ts, pre-generated by `cognia plugin import`")) {
+      report.blocking.push({
+        capability: "runtime",
+        path: manifest.main,
+        message: "imperative Cognia activation code cannot be translated declaratively",
+        blocking: true
+      });
+    }
+  }
+  const output2 = /* @__PURE__ */ new Map();
+  const copies = [];
+  exportCogniaSkills({
+    manifest,
+    files,
+    output: output2,
+    target,
+    report,
+    copies,
+    binaryPaths: options2.binaryPaths
+  });
+  exportCogniaSubagents({ manifest, output: output2, target, report });
+  const mcp = exportMcpServers({ manifest, output: output2, target, report });
+  if (report.blocking.length > 0) {
+    report.fidelity = "unsupported";
+    throw new UnsupportedPluginConversionError("cognia", target, report);
+  }
+  const baseManifest = {
+    name: manifest.id,
+    version: manifest.version,
+    description: manifest.description,
+    author: authorForForeign(manifest),
+    homepage: manifest.homepage,
+    repository: manifest.repository,
+    license: manifest.license,
+    keywords: manifest.keywords
+  };
+  if (target === "claude-code") {
+    output2.set(
+      ".claude-plugin/plugin.json",
+      `${JSON.stringify(
+        {
+          ...baseManifest,
+          displayName: manifest.name,
+          ...manifest.skills?.length ? { skills: "./skills" } : {},
+          ...manifest.subagents?.length ? { agents: "./agents" } : {},
+          ...mcp ? { mcpServers: "./.mcp.json" } : {}
+        },
+        null,
+        2
+      )}
+`
+    );
+    if (mcp) output2.set(".mcp.json", `${JSON.stringify(mcp, null, 2)}
+`);
+  } else if (target === "codex") {
+    output2.set(
+      ".codex-plugin/plugin.json",
+      `${JSON.stringify(
+        {
+          ...baseManifest,
+          ...manifest.skills?.length ? { skills: "./skills" } : {},
+          ...mcp ? { mcpServers: "./.mcp.json" } : {},
+          interface: {
+            displayName: manifest.name,
+            shortDescription: manifest.description
+          }
+        },
+        null,
+        2
+      )}
+`
+    );
+    if (mcp) output2.set(".mcp.json", `${JSON.stringify(mcp, null, 2)}
+`);
+  } else {
+    const geminiServers = mcp && typeof mcp.mcpServers === "object" && mcp.mcpServers ? mcp.mcpServers : void 0;
+    for (const skill of manifest.skills ?? []) {
+      const skillFile = output2.get(`skills/${skill.id}/SKILL.md`);
+      if (skillFile === void 0) continue;
+      const parsed = buildSkill(skillFile, [], skill.name).skill;
+      const markdown = parsed.source.kind === "inline" ? parsed.source.markdown : skillFile;
+      output2.set(
+        `commands/${skill.id}.toml`,
+        stringify({
+          description: skill.description,
+          prompt: markdown
+        })
+      );
+      report.warnings.push({
+        capability: "skills",
+        path: `skills.${skill.id}`,
+        message: "exported as a Gemini prompt command; autonomous skill activation is contextual",
+        blocking: false
+      });
+    }
+    for (const path of Array.from(output2.keys())) {
+      if (path.startsWith("skills/")) output2.delete(path);
+    }
+    output2.set(
+      "gemini-extension.json",
+      `${JSON.stringify(
+        {
+          name: manifest.id,
+          version: manifest.version,
+          description: manifest.description,
+          ...geminiServers ? { mcpServers: geminiServers } : {}
+        },
+        null,
+        2
+      )}
+`
+    );
+  }
+  return {
+    source: "cognia",
+    target,
+    manifest,
+    files: output2,
+    copies,
+    report
+  };
+}
+function convertPluginBundle(files, target, options2 = {}) {
+  const source = detectPluginEcosystem(files);
+  if (source === target && source === "cognia") return loadCogniaPlugin(files);
+  if (source === "claude-code" && target === "cognia") {
+    return convertClaudePlugin(files, options2);
+  }
+  if (source === "codex" && target === "cognia") {
+    return convertCodexPlugin(files, options2);
+  }
+  if (source === "gemini-cli" && target === "cognia") {
+    return convertGeminiPlugin(files, options2);
+  }
+  if (source === "cognia" && target !== "cognia") {
+    return convertCogniaPlugin(files, target, options2);
+  }
+  const report = {
+    fidelity: "unsupported",
+    converted: [],
+    warnings: [],
+    blocking: [
+      {
+        capability: "format",
+        path: source,
+        message: `conversion from ${source} to ${target} is not implemented`,
+        blocking: true
+      }
+    ]
+  };
+  throw new UnsupportedPluginConversionError(source, target, report);
+}
+
 // lib/plugin/convert/cli.ts
 var SOURCE_KINDS = ["mcp", "skill", "cli"];
 var VALUE_FLAGS = /* @__PURE__ */ new Set([
@@ -5331,6 +7438,97 @@ function assertWritableTarget(dir, io) {
     );
   }
 }
+var ECOSYSTEM_TARGETS = ["cognia", "claude-code", "codex", "gemini-cli"];
+var BUNDLE_TEXT_PATTERN = /\.(?:md|markdown|txt|json|jsonc|toml|ya?ml|js|mjs|cjs|ts|tsx|jsx|sh|bash|zsh|py|rs|css|html)$/i;
+function parseEcosystemArgs(argv) {
+  const allowed = /* @__PURE__ */ new Set(["--operation", "--from", "--input", "--to", "--dir"]);
+  const values = /* @__PURE__ */ new Map();
+  for (let i = 0; i < argv.length; i += 1) {
+    const flag = argv[i];
+    if (!allowed.has(flag)) throw new Error(`unknown option: ${flag}`);
+    const value = argv[i + 1];
+    if (value === void 0 || value.startsWith("--")) {
+      throw new Error(`missing value for ${flag}`);
+    }
+    values.set(flag, value);
+    i += 1;
+  }
+  const operation = values.get("--operation") ?? "import";
+  if (operation !== "import" && operation !== "export") {
+    throw new Error(`--operation must be import or export, got "${operation}"`);
+  }
+  if (operation === "import" && values.get("--from") !== "plugin") {
+    throw new Error("plugin bundle import requires `--from plugin`");
+  }
+  const input = values.get("--input");
+  if (!input) throw new Error("--input is required");
+  const target = values.get("--to") ?? (operation === "import" ? "cognia" : "");
+  if (!ECOSYSTEM_TARGETS.includes(target)) {
+    throw new Error(`--to must be one of ${ECOSYSTEM_TARGETS.join(" | ")}, got "${target}"`);
+  }
+  if (operation === "export" && target === "cognia") {
+    throw new Error("plugin export requires --to claude-code, codex, or gemini-cli");
+  }
+  return {
+    operation,
+    input,
+    target,
+    dir: values.get("--dir")
+  };
+}
+function runEcosystemConvertCli(argv, io) {
+  const args = parseEcosystemArgs(argv);
+  const sourceRoot = io.resolve(args.input);
+  if (!io.exists(sourceRoot)) throw new Error(`no such file or directory: ${sourceRoot}`);
+  if (!io.isDirectory(sourceRoot)) {
+    throw new Error(`plugin bundle input must be a directory: ${sourceRoot}`);
+  }
+  const files = /* @__PURE__ */ new Map();
+  const binaryPaths = /* @__PURE__ */ new Set();
+  for (const relative2 of io.listFiles(sourceRoot).sort()) {
+    const normalized = relative2.replaceAll("\\", "/");
+    if (BUNDLE_TEXT_PATTERN.test(normalized)) {
+      files.set(normalized, io.readFile(io.join(sourceRoot, relative2)));
+    } else {
+      files.set(normalized, "");
+      binaryPaths.add(normalized);
+    }
+  }
+  const result = convertPluginBundle(files, args.target, { binaryPaths });
+  const defaultDir = args.operation === "import" ? result.manifest.id : `${result.manifest.id}-${args.target}`;
+  const outputDir = io.resolve(args.dir ?? defaultDir);
+  assertWritableTarget(outputDir, io);
+  const written = [];
+  const copies = [...result.copies];
+  for (const [relative2, contents] of result.files) {
+    if (binaryPaths.has(relative2) && contents === "") {
+      copies.push({ from: relative2, to: relative2 });
+      continue;
+    }
+    const target = io.join(outputDir, relative2);
+    io.mkdirp(dirnameOf(target));
+    io.writeFile(target, contents);
+    written.push(relative2);
+  }
+  const seenCopies = /* @__PURE__ */ new Set();
+  for (const copy of copies) {
+    const key = `${copy.from}\0${copy.to}`;
+    if (seenCopies.has(key)) continue;
+    seenCopies.add(key);
+    const target = io.join(outputDir, copy.to);
+    io.mkdirp(dirnameOf(target));
+    io.copyFile(io.join(sourceRoot, copy.from), target);
+    written.push(copy.to);
+  }
+  return {
+    ok: true,
+    mode: args.operation === "export" ? "export" : "create",
+    pluginId: result.manifest.id,
+    dir: outputDir,
+    files: written.sort(),
+    warnings: result.report.warnings.map((issue) => `${issue.path}: ${issue.message}`)
+  };
+}
 function runConvertCli(argv, io) {
   const args = parseArgs(argv);
   const source = readSource(args, io);
@@ -5415,7 +7613,9 @@ function copyResources(copies, sourceRoot, targetDir, io) {
 }
 function runMain(argv, io) {
   try {
-    const result = runConvertCli(argv, io);
+    const fromIndex = argv.indexOf("--from");
+    const wholePlugin = argv.includes("--operation") || fromIndex >= 0 && argv[fromIndex + 1] === "plugin";
+    const result = wholePlugin ? runEcosystemConvertCli(argv, io) : runConvertCli(argv, io);
     return { output: JSON.stringify(result), exitCode: 0 };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

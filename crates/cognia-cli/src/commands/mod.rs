@@ -20,5 +20,6 @@ pub(crate) mod release_verify;
 pub(crate) mod reload;
 pub(crate) mod sign;
 pub(crate) mod status;
+pub(crate) mod sync_types;
 pub(crate) mod uninstall;
 pub(crate) mod verify;

@@ -9,22 +9,21 @@
  * implementation to keep in sync, so the converter picks an adapter and
  * calls `parse()`.
  *
- * TOML-backed agents (Codex) are out of scope: their adapters consume an
- * already-decoded TOML tree, and pulling a TOML parser into the bundled
- * converter buys one agent. The error names the limitation instead of
- * silently returning nothing.
+ * TOML-backed agents use the same path: `smol-toml` decodes the document,
+ * then the existing Codex adapter normalizes its `[mcp_servers.*]` tables.
+ * Keeping format decoding here means the app sync path and plugin converter
+ * still share all agent-specific projection rules.
  */
 
 import { MCP_AGENT_ADAPTERS, type McpAgentAdapter } from "@/lib/claude/agents"
 import type { PluginMcpServerPresetDef } from "@/types/plugin/plugin-mcp-preset"
 import type { McpImportDraft } from "@/lib/db/mcp-servers"
+import { parse as parseToml } from "smol-toml"
 import { sanitizeMcpConfig } from "./secrets"
 import type { ConvertCandidate } from "./types"
 
-/** Adapters the converter can drive (JSON / JSONC only — see module note). */
-export const SUPPORTED_MCP_ADAPTERS: McpAgentAdapter[] = MCP_AGENT_ADAPTERS.filter(
-  (adapter) => adapter.format !== "toml"
-)
+/** Every registered adapter is supported; format decoding happens below. */
+export const SUPPORTED_MCP_ADAPTERS: McpAgentAdapter[] = MCP_AGENT_ADAPTERS
 
 /** Strip `//` and `/* *\/` comments plus trailing commas from JSONC text. */
 export function stripJsonComments(text: string): string {
@@ -108,12 +107,23 @@ export function readMcpDrafts(
   sourceName?: string
 ): { adapter: McpAgentAdapter; drafts: McpImportDraft[] } {
   let value: unknown
-  try {
-    value = JSON.parse(stripJsonComments(text))
-  } catch (err) {
-    throw new Error(
-      `could not parse "${sourceName ?? "input"}" as JSON/JSONC: ${err instanceof Error ? err.message : String(err)}`
-    )
+  const toml = /\.toml$/i.test(sourceName ?? "")
+  if (toml) {
+    try {
+      value = parseToml(text)
+    } catch (err) {
+      throw new Error(
+        `could not parse "${sourceName ?? "input"}" as TOML: ${err instanceof Error ? err.message : String(err)}`
+      )
+    }
+  } else {
+    try {
+      value = JSON.parse(stripJsonComments(text))
+    } catch (err) {
+      throw new Error(
+        `could not parse "${sourceName ?? "input"}" as JSON/JSONC: ${err instanceof Error ? err.message : String(err)}`
+      )
+    }
   }
   const adapter = selectMcpAdapter(sourceName, value)
   return { adapter, drafts: adapter.parse(value) }

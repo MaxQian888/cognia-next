@@ -35,8 +35,10 @@ const CONVERTER_JS: &str = include_str!("../../assets/plugin-convert.cjs");
 /// Options mirrored one-to-one from the clap surface.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ImportArgs {
+    pub(crate) operation: String,
     pub(crate) from: String,
     pub(crate) input: String,
+    pub(crate) to: Option<String>,
     pub(crate) pick: Option<String>,
     pub(crate) into: Option<PathBuf>,
     pub(crate) dir: Option<PathBuf>,
@@ -133,12 +135,17 @@ pub fn run(args: ImportArgs, json: bool, ui: &mut RuntimeUi) -> Result<()> {
 
 /// Translate `ImportArgs` into the converter's argv.
 pub(crate) fn build_argv(args: &ImportArgs) -> Vec<String> {
-    let mut argv = vec![
-        "--from".to_string(),
-        args.from.clone(),
-        "--input".to_string(),
-        args.input.clone(),
-    ];
+    let mut argv = Vec::new();
+    if !args.operation.is_empty() {
+        argv.push("--operation".to_string());
+        argv.push(args.operation.clone());
+    }
+    if !args.from.is_empty() {
+        argv.push("--from".to_string());
+        argv.push(args.from.clone());
+    }
+    argv.push("--input".to_string());
+    argv.push(args.input.clone());
     let mut push = |flag: &str, value: &Option<String>| {
         if let Some(value) = value {
             argv.push(flag.to_string());
@@ -154,6 +161,7 @@ pub(crate) fn build_argv(args: &ImportArgs) -> Vec<String> {
     push("--author-email", &args.author_email);
     push("--license", &args.license);
     push("--min-app-version", &args.min_app_version);
+    push("--to", &args.to);
     if let Some(into) = &args.into {
         argv.push("--into".to_string());
         argv.push(into.to_string_lossy().into_owned());
@@ -263,7 +271,11 @@ fn finish(args: ImportArgs, output: ConverterOutput, ui: &mut RuntimeUi) -> Resu
     Ok(ImportReport {
         schema_version: 1,
         ok: true,
-        action: "import",
+        action: if args.operation == "export" {
+            "export"
+        } else {
+            "import"
+        },
         mode,
         plugin_id: output.plugin_id,
         dir: output.dir,
@@ -299,6 +311,8 @@ fn print_human(report: &ImportReport) {
     let id = report.plugin_id.as_deref().unwrap_or("<unknown>");
     if report.mode == "merge" {
         println!("{} {}", style::ok("Merged into"), style::bold(id));
+    } else if report.mode == "export" {
+        println!("{} {}", style::ok("Exported"), style::bold(id));
     } else {
         println!("{} {}", style::ok("Created"), style::bold(id));
     }
@@ -394,6 +408,30 @@ mod tests {
         assert_eq!(
             build_argv(&args()),
             vec!["--from", "mcp", "--input", "/a/mcp.json"]
+        );
+    }
+
+    #[test]
+    fn build_argv_supports_whole_plugin_export() {
+        let args = ImportArgs {
+            operation: "export".to_string(),
+            input: "/plugins/review".to_string(),
+            to: Some("claude-code".to_string()),
+            dir: Some(PathBuf::from("/out/review")),
+            ..Default::default()
+        };
+        assert_eq!(
+            build_argv(&args),
+            vec![
+                "--operation",
+                "export",
+                "--input",
+                "/plugins/review",
+                "--to",
+                "claude-code",
+                "--dir",
+                "/out/review",
+            ]
         );
     }
 

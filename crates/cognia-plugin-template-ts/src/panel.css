@@ -1,0 +1,50 @@
+/*
+ * Declared as `manifest.styles`. The host wraps this whole file in
+ * `@scope ([data-plugin-root="<your-plugin-id>"])` before injecting it, so
+ * these rules can only ever match inside your own subtree — writing `.badge {}`
+ * here cannot repaint the app's badges.
+ *
+ * Two consequences worth knowing:
+ *
+ *   - Name-defining at-rules (`@keyframes`, `@font-face`, `@property`,
+ *     `@counter-style`) are invalid inside `@scope`, so the host hoists them
+ *     back out. That makes their names GLOBAL — prefix them with your plugin id
+ *     as below, or you will collide with another plugin.
+ *   - Your slot is a query container, so `@container` works and is the right
+ *     way to adapt to a slot that changes width.
+ */
+
+.template-panel {
+  display: flex;
+  align-items: center;
+  /* Host tokens — these track the user's theme and density settings. */
+  gap: var(--density-gap, 0.5rem);
+  padding: var(--density-row-padding, 0.25rem);
+  border-radius: var(--radius, 0.625rem);
+  color: var(--foreground);
+  background: var(--card);
+}
+
+/* Hoisted out of the scope block — hence the plugin-id prefix. */
+@keyframes cognia-plugin-template-ts-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.template-panel {
+  /* `--motion-duration-scale` follows the user's motion speed setting, and the
+     host's reduce-motion reset collapses this rule entirely when they ask. */
+  animation: cognia-plugin-template-ts-fade calc(200ms * var(--motion-duration-scale, 1)) ease-out;
+}
+
+/* Narrow slots: drop to a single column rather than overflowing. */
+@container (max-width: 20rem) {
+  .template-panel {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

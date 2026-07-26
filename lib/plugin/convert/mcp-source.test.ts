@@ -48,9 +48,9 @@ describe("stripJsonComments", () => {
 })
 
 describe("SUPPORTED_MCP_ADAPTERS", () => {
-  it("excludes TOML-backed agents, which the converter cannot decode", () => {
-    expect(SUPPORTED_MCP_ADAPTERS.every((a) => a.format !== "toml")).toBe(true)
-    expect(SUPPORTED_MCP_ADAPTERS.length).toBeGreaterThan(5)
+  it("reuses every registered MCP agent adapter, including Codex TOML", () => {
+    expect(SUPPORTED_MCP_ADAPTERS.some((a) => a.id === "codex" && a.format === "toml")).toBe(true)
+    expect(SUPPORTED_MCP_ADAPTERS.length).toBeGreaterThan(10)
   })
 })
 
@@ -84,6 +84,24 @@ describe("readMcpDrafts", () => {
       "mcp.json"
     )
     expect(drafts.map((d) => d.name)).toEqual(["a"])
+  })
+
+  it("accepts Codex config.toml through the existing Codex adapter", () => {
+    const { adapter, drafts } = readMcpDrafts(
+      `[mcp_servers.review]
+command = "node"
+args = ["server.js"]
+`,
+      "config.toml"
+    )
+    expect(adapter.id).toBe("codex")
+    expect(drafts).toEqual([
+      {
+        name: "review",
+        transport: "stdio",
+        config: { command: "node", args: ["server.js"] },
+      },
+    ])
   })
 })
 

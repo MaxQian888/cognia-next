@@ -1,14 +1,30 @@
 #!/usr/bin/env node
 
+/**
+ * End-to-end proof that `cognia plugin new` produces a project a third-party
+ * author can actually use.
+ *
+ * This test used to pack the SDK locally, rewrite the scaffold's `package.json`
+ * to point at the tarball, and inject `@cognia/provider-*` link: overrides plus
+ * `ai` / `dexie` / `react` / `@types/*`. That made it pass while the real author
+ * path was broken: none of the `@cognia/*` packages are published (the SDK is a
+ * 404 on npm), so an author running plain `pnpm install` got nothing but a
+ * resolution failure.
+ *
+ * The scaffold now vendors the declarations it needs (see
+ * `scripts/plugin/generate-author-types.mjs`) and declares only real, published
+ * dependencies. So this harness injects nothing — whatever the scaffold emits is
+ * what an author gets, and every step below runs against exactly that.
+ */
+
 import { execFileSync } from "node:child_process"
 import assert from "node:assert/strict"
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
-const sdkRoot = join(repoRoot, "packages/plugin-sdk")
 const workDir = mkdtempSync(join(tmpdir(), "cognia-author-scaffold-"))
 const pluginDir = join(workDir, "sdk-probe")
 
@@ -16,23 +32,7 @@ function run(command, args, cwd = repoRoot, env = {}) {
   execFileSync(command, args, { cwd, stdio: "inherit", env: { ...process.env, ...env } })
 }
 
-function installedVersion(packageName) {
-  for (const root of [repoRoot, sdkRoot]) {
-    const manifestPath = join(root, "node_modules", packageName, "package.json")
-    if (existsSync(manifestPath)) {
-      return JSON.parse(readFileSync(manifestPath, "utf8")).version
-    }
-  }
-  throw new Error(`cannot resolve installed version for ${packageName}`)
-}
-
 try {
-  run("pnpm", ["pack", "--pack-destination", workDir], sdkRoot)
-  const sdkTarball = readdirSync(workDir)
-    .filter((entry) => entry.endsWith(".tgz"))
-    .map((entry) => join(workDir, entry))[0]
-  if (!sdkTarball) throw new Error("plugin SDK pack did not produce a tarball")
-
   run("cargo", ["build", "--quiet", "-p", "cognia-cli"])
   const cli = join(
     repoRoot,
@@ -60,38 +60,35 @@ try {
     { COGNIA_PLUGIN_CLI: cli }
   )
 
-  const packagePath = join(pluginDir, "package.json")
-  const packageJson = JSON.parse(readFileSync(packagePath, "utf8"))
-  assert.equal(
-    packageJson.dependencies["@cognia/plugin-sdk"],
-    "^0.1.0",
-    "canonical scaffold must target the currently published SDK contract"
-  )
-  packageJson.dependencies["@cognia/plugin-sdk"] = `file:${sdkTarball}`
-  packageJson.dependencies["@cognia/provider-core"] =
-    `link:${join(repoRoot, "packages/provider-core")}`
-  packageJson.dependencies["@cognia/provider-routing"] =
-    `link:${join(repoRoot, "packages/provider-routing")}`
-  packageJson.dependencies["@cognia/provider-types"] =
-    `link:${join(repoRoot, "packages/provider-types")}`
-  packageJson.dependencies.ai = installedVersion("ai")
-  packageJson.dependencies.dexie = installedVersion("dexie")
-  packageJson.dependencies.react = installedVersion("react")
-  packageJson.devDependencies["@types/json-schema"] = installedVersion("@types/json-schema")
-  packageJson.devDependencies["@types/node"] = installedVersion("@types/node")
-  packageJson.devDependencies["@types/react"] = installedVersion("@types/react")
-  packageJson.pnpm = {
-    ...(packageJson.pnpm ?? {}),
-    overrides: {
-      ...(packageJson.pnpm?.overrides ?? {}),
-      "@cognia/provider-core": `link:${join(repoRoot, "packages/provider-core")}`,
-      "@cognia/provider-routing": `link:${join(repoRoot, "packages/provider-routing")}`,
-      "@cognia/provider-types": `link:${join(repoRoot, "packages/provider-types")}`,
-    },
+  // Nothing below may depend on this repo's node_modules or workspace links.
+  const packageJson = JSON.parse(readFileSync(join(pluginDir, "package.json"), "utf8"))
+  const declared = {
+    ...(packageJson.dependencies ?? {}),
+    ...(packageJson.devDependencies ?? {}),
+    ...(packageJson.peerDependencies ?? {}),
   }
-  writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`)
+  for (const [name, spec] of Object.entries(declared)) {
+    assert.ok(
+      !name.startsWith("@cognia/"),
+      `scaffold must not depend on the unpublished ${name} — vendor its declarations instead`
+    )
+    assert.ok(
+      !/^(file:|link:|workspace:)/.test(spec),
+      `scaffold dependency ${name} must resolve from the registry, got "${spec}"`
+    )
+  }
 
-  run("pnpm", ["install", "--no-frozen-lockfile", "--prefer-offline"], pluginDir)
+  // The declarations the scaffold vendors in place of those packages.
+  for (const declaration of [
+    "types/cognia-plugin-sdk.d.ts",
+    "types/cognia-plugin-ui.d.ts",
+    "types/provider-types/index.d.ts",
+    "types/provider-core/core/client.d.ts",
+  ]) {
+    assert.ok(existsSync(join(pluginDir, declaration)), `scaffold must vendor ${declaration}`)
+  }
+
+  run("pnpm", ["install", "--prefer-offline"], pluginDir)
   run("pnpm", ["exec", "tsc", "--noEmit"], pluginDir)
   run("pnpm", ["exec", "jest", "--runInBand"], pluginDir)
   run("pnpm", ["build"], pluginDir)

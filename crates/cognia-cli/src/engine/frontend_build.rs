@@ -99,6 +99,53 @@ pub(crate) fn build_only(crate_root: &Path, manifest: &serde_json::Value) -> Res
     run_esbuild(crate_root, manifest)
 }
 
+/// Specifiers the bundle must leave for the host to resolve.
+///
+/// The first two are the host's path aliases. The rest mirror the loader's
+/// shared-module whitelist (`lib/plugin/core/shared-modules.ts`) exactly, and
+/// the mirroring is load-bearing in both directions:
+///
+///   * Inlining any of them is fatal for `react` and its jsx runtimes — a
+///     second React instance carries its own hook dispatcher, so a plugin
+///     component rendered inside the host's tree throws `Invalid hook call`.
+///     Note `--external:react` does NOT cover `react/jsx-runtime`: esbuild
+///     matches the import path literally, so the subpaths esbuild's own
+///     automatic JSX transform emits need their own entries or they get
+///     bundled and silently reintroduce the second copy.
+///   * Externalising something the host does *not* share only moves the
+///     failure to `require()` time — which is the intent for `react-dom`.
+///     Keeping it external means it is never bundled, and the author gets the
+///     loader's explicit "not available to plugins" error instead of a second
+///     reconciler quietly rendering into a detached tree.
+const ESBUILD_EXTERNALS: &[&str] = &[
+    "@/types/plugin",
+    "@/lib/*",
+    "react",
+    "react/jsx-runtime",
+    "react/jsx-dev-runtime",
+    "react-dom",
+    "@cognia/plugin-sdk",
+    "@cognia/plugin-ui",
+];
+
+/// Build the esbuild argument vector. Split out from `run_esbuild` so the
+/// externals contract can be asserted without spawning npx.
+fn esbuild_args(entry: &Path, outfile: &Path) -> Vec<String> {
+    let mut args = vec![
+        "--no-install".to_string(), // refuse to silently install globally
+        "esbuild".to_string(),
+        entry.to_string_lossy().into_owned(),
+        "--bundle".to_string(),
+        "--format=cjs".to_string(),
+        "--platform=neutral".to_string(),
+        "--target=es2022".to_string(),
+        format!("--outfile={}", outfile.display()),
+    ];
+    args.extend(ESBUILD_EXTERNALS.iter().map(|e| format!("--external:{e}")));
+    args.push("--log-level=warning".to_string());
+    args
+}
+
 fn run_esbuild(crate_root: &Path, manifest: &serde_json::Value) -> Result<()> {
     let entry = resolve_ts_entry(crate_root, manifest)?;
     let outfile = crate_root.join(
@@ -121,21 +168,7 @@ fn run_esbuild(crate_root: &Path, manifest: &serde_json::Value) -> Result<()> {
     };
     let mut cmd = Command::new(npx_program);
     cmd.current_dir(crate_root)
-        .arg("--no-install") // refuse to silently install globally
-        .arg("esbuild")
-        .arg(entry.to_string_lossy().into_owned())
-        .arg("--bundle")
-        .arg("--format=cjs")
-        .arg("--platform=neutral")
-        .arg("--target=es2022")
-        .arg(format!("--outfile={}", outfile.display()))
-        // Don't try to bundle the host's path-aliased imports — the host
-        // resolves them at runtime.
-        .arg("--external:@/types/plugin")
-        .arg("--external:@/lib/*")
-        .arg("--external:react")
-        .arg("--external:react-dom")
-        .arg("--log-level=warning");
+        .args(esbuild_args(&entry, &outfile));
     run_streaming(cmd, "npx esbuild").with_context(|| {
         format!(
             "esbuild failed for {}. If npx says \"could not determine executable\", run `pnpm install` in {} first.",
@@ -217,6 +250,54 @@ mod tests {
             serde_json::to_vec_pretty(manifest).unwrap(),
         )
         .unwrap();
+    }
+
+    /// The loader's shared-module whitelist and this externals list are one
+    /// contract split across two languages. If they drift, plugins break at
+    /// load time with either "Invalid hook call" (module inlined that should
+    /// have been shared) or "not available to plugins" (module externalised
+    /// that the host does not hand out). Keep this list in sync with
+    /// `PLUGIN_SHARED_MODULES` in `lib/plugin/core/shared-modules.ts`.
+    #[test]
+    fn esbuild_externalises_every_host_shared_module() {
+        let args = esbuild_args(Path::new("src/index.ts"), Path::new("dist/index.js"));
+        for shared in [
+            "react",
+            "react/jsx-runtime",
+            "react/jsx-dev-runtime",
+            "@cognia/plugin-sdk",
+            "@cognia/plugin-ui",
+        ] {
+            assert!(
+                args.iter().any(|a| a == &format!("--external:{shared}")),
+                "missing --external:{shared} — it would be inlined into the plugin bundle"
+            );
+        }
+    }
+
+    #[test]
+    fn esbuild_externalises_react_dom_without_the_host_sharing_it() {
+        // Externalised so it is never bundled; the loader then rejects the
+        // require() with a specific message instead of a second reconciler
+        // rendering into a tree the host does not own.
+        let args = esbuild_args(Path::new("src/index.ts"), Path::new("dist/index.js"));
+        assert!(args.iter().any(|a| a == "--external:react-dom"));
+    }
+
+    #[test]
+    fn esbuild_emits_a_neutral_cjs_bundle_the_loader_can_eval() {
+        let args = esbuild_args(Path::new("src/index.ts"), Path::new("dist/index.js"));
+        for expected in [
+            "--bundle",
+            "--format=cjs",
+            "--platform=neutral",
+            "--target=es2022",
+        ] {
+            assert!(args.iter().any(|a| a == expected), "missing {expected}");
+        }
+        assert!(args.iter().any(|a| a == "--outfile=dist/index.js"));
+        assert_eq!(args[0], "--no-install");
+        assert_eq!(args[1], "esbuild");
     }
 
     #[test]

@@ -106,16 +106,17 @@ pub(crate) enum PluginCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Convert an existing MCP server, agent skill, or CLI binary into a
-    /// cognia plugin project.
+    /// Convert an existing MCP server, agent skill, CLI binary, or complete
+    /// agent plugin bundle into a Cognia plugin project.
     ///
     /// Nothing from the source is executed: no MCP server is spawned, no
     /// `--help` is run, nothing is fetched. Credentials in the source
     /// config are never copied — they become user-filled preset fields.
     Import {
         /// What kind of artifact `--input` points at: `mcp` (an agent's MCP
-        /// config file), `skill` (a SKILL.md file or its folder), or `cli`
-        /// (the name of a binary on PATH).
+        /// config file), `skill` (a SKILL.md file or its folder), `cli`
+        /// (the name of a binary on PATH), or `plugin` (a complete Cognia,
+        /// Claude Code, Codex, or Gemini CLI plugin directory).
         #[arg(long, value_name = "KIND")]
         from: String,
         /// The MCP config file, skill folder / SKILL.md, or binary name.
@@ -167,6 +168,38 @@ pub(crate) enum PluginCommand {
         /// Emit a machine-readable JSON report instead of human prose.
         #[arg(long)]
         json: bool,
+    },
+    /// Export a compatible Cognia plugin bundle to another agent ecosystem.
+    ///
+    /// Conversion is fail-closed: imperative runtime code and contribution
+    /// types without an equivalent target contract stop the export.
+    Export {
+        /// Cognia plugin directory containing plugin.json.
+        #[arg(long, value_name = "DIR")]
+        input: PathBuf,
+        /// Target ecosystem: claude-code, codex, or gemini-cli.
+        #[arg(long, value_name = "ECOSYSTEM")]
+        to: String,
+        /// Directory to create. Defaults to ./<plugin-id>-<ecosystem>.
+        #[arg(long)]
+        dir: Option<PathBuf>,
+        /// Emit a machine-readable JSON report instead of human prose.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Refresh the vendored `@cognia/*` TypeScript declarations in a project.
+    ///
+    /// `plugin new` writes these once; this rewrites them from the CLI's own
+    /// bundle. Run it after upgrading the CLI so the declarations match the host
+    /// the plugin will actually load into. Nothing else in the project is
+    /// touched — the `tsconfig.json` `paths` that point at them are yours.
+    SyncTypes {
+        /// Path to the plugin project. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+        /// Report what would change without writing anything.
+        #[arg(long)]
+        check: bool,
     },
     /// Validate plugin.json against the host's manifest schema.
     Lint {
@@ -401,8 +434,10 @@ pub(crate) fn dispatch_plugin(command: PluginCommand, ui: &mut RuntimeUi) -> Res
             ));
             commands::import::run(
                 commands::import::ImportArgs {
+                    operation: String::new(),
                     from,
                     input,
+                    to: None,
                     pick,
                     into,
                     dir,
@@ -420,6 +455,35 @@ pub(crate) fn dispatch_plugin(command: PluginCommand, ui: &mut RuntimeUi) -> Res
                 json,
                 ui,
             )
+        }
+        PluginCommand::Export {
+            input,
+            to,
+            dir,
+            json,
+        } => {
+            ui.flags.json = json;
+            ui.verbose(format!(
+                "running plugin export input={} to={to} dir={} json={json}",
+                input.display(),
+                dir.as_ref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "<default>".to_string()),
+            ));
+            commands::import::run(
+                commands::import::ImportArgs {
+                    operation: "export".to_string(),
+                    input: input.to_string_lossy().into_owned(),
+                    to: Some(to),
+                    dir,
+                    ..Default::default()
+                },
+                json,
+                ui,
+            )
+        }
+        PluginCommand::SyncTypes { path, check } => {
+            crate::commands::sync_types::run(&path, check, ui)
         }
         PluginCommand::Lint {
             path,

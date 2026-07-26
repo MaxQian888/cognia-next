@@ -782,6 +782,18 @@ mod tests {
     }
 
     #[test]
+    fn lint_rejects_tool_renderer_entry_traversal() {
+        // `toolRenderers` is a lazy-factory field like `messageRenderers`, so it
+        // must inherit the same path-escape guard rather than being a hole.
+        let mut m = minimal_frontend();
+        m["capabilities"] = json!(["tool-renderer"]);
+        m["toolRenderers"] = json!([
+            { "toolName": "evil", "entry": "../../../../etc/passwd", "export": "default" }
+        ]);
+        assert_has_error_code(m, "manifest.toolRenderers.entry.traversal");
+    }
+
+    #[test]
     fn lint_rejects_lazy_factory_entry_absolute() {
         let mut m = minimal_frontend();
         m["capabilities"] = json!(["workspace-backend"]);

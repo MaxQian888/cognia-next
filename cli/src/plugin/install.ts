@@ -21,7 +21,7 @@ const GITHUB_API = "https://api.github.com"
 
 export interface InstallFs {
   mkdir: (p: string, opts?: { recursive?: boolean }) => Promise<unknown>
-  writeFile: (p: string, data: string) => Promise<void>
+  writeFile: (p: string, data: string | Uint8Array) => Promise<void>
 }
 
 export interface InstallDeps {
@@ -39,7 +39,7 @@ export interface InstallResult {
 
 const defaultFs: InstallFs = {
   mkdir: (p, o) => nodeFs.mkdir(p, o),
-  writeFile: (p, d) => nodeFs.writeFile(p, d, "utf8"),
+  writeFile: (p, d) => nodeFs.writeFile(p, d),
 }
 
 interface ContentNode {
@@ -80,12 +80,12 @@ async function walk(
   }
 }
 
-async function fetchFileContent(ref: GithubPluginRef, repoPath: string): Promise<string> {
+async function fetchFileContent(ref: GithubPluginRef, repoPath: string): Promise<Uint8Array> {
   const json = (await ghJson(ref, repoPath)) as ContentNode | null
   if (!json || json.type !== "file" || typeof json.content !== "string") {
     throw new Error(`not a file: ${repoPath}`)
   }
-  return Buffer.from(json.content.replace(/\s/g, ""), "base64").toString("utf8")
+  return Buffer.from(json.content.replace(/\s/g, ""), "base64")
 }
 
 /**
@@ -114,15 +114,34 @@ export async function installFromGithubRef(
 
   const destRoot = path.join(deps.home, ".cognia", "plugins", manifest.id)
   await fs.mkdir(destRoot, { recursive: true })
-  const fetched: Array<{ rel: string; content: string }> = []
+  const installed = new Map<string, string | Uint8Array>()
   for (const file of files) {
     const content = await fetchFileContent(preview.ref, file.repoPath)
-    fetched.push({ rel: file.rel, content })
+    installed.set(file.rel, content)
     const destPath = path.join(destRoot, file.rel)
     await fs.mkdir(path.dirname(destPath), { recursive: true })
     await fs.writeFile(destPath, content)
   }
-  return { id: manifest.id, dir: destRoot, manifest, fingerprint: bundleFingerprint(fetched) }
+  for (const [rel, content] of Object.entries(preview.generatedFiles)) {
+    const normalized = path.posix.normalize(rel.replaceAll("\\", "/"))
+    if (
+      normalized !== rel.replaceAll("\\", "/") ||
+      normalized.startsWith("../") ||
+      path.posix.isAbsolute(normalized)
+    ) {
+      throw new Error(`generated conversion file escapes the plugin directory: ${rel}`)
+    }
+    installed.set(normalized, content)
+    const destPath = path.join(destRoot, ...normalized.split("/"))
+    await fs.mkdir(path.dirname(destPath), { recursive: true })
+    await fs.writeFile(destPath, content)
+  }
+  return {
+    id: manifest.id,
+    dir: destRoot,
+    manifest,
+    fingerprint: bundleFingerprint(Array.from(installed, ([rel, content]) => ({ rel, content }))),
+  }
 }
 
 /**
@@ -130,7 +149,9 @@ export async function installFromGithubRef(
  * which GitHub lists files never changes the hash. Used to detect whether an
  * update actually changed anything ("content changed" vs "already up to date").
  */
-export function bundleFingerprint(files: Array<{ rel: string; content: string }>): string {
+export function bundleFingerprint(
+  files: Array<{ rel: string; content: string | Uint8Array }>
+): string {
   const hash = createHash("sha256")
   for (const f of [...files].sort((a, b) => a.rel.localeCompare(b.rel))) {
     hash.update(f.rel)
