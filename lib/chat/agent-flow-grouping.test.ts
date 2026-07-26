@@ -16,6 +16,13 @@ describe("isToolPartType / isGroupableToolType", () => {
     expect(isToolPartType(undefined)).toBe(false)
   })
 
+  it("recognizes the AI SDK dynamic-tool shape", () => {
+    // Imported transcripts / CLI handoff carry `dynamic-tool` parts; they are
+    // tool calls everywhere else in the app, so grouping must agree.
+    expect(isToolPartType("dynamic-tool")).toBe(true)
+    expect(isGroupableToolType("dynamic-tool")).toBe(true)
+  })
+
   it("excludes TodoWrite from grouping", () => {
     expect(isGroupableToolType("tool-Read")).toBe(true)
     expect(isGroupableToolType("tool-TodoWrite")).toBe(false)
@@ -183,6 +190,10 @@ describe("isToolOnlyFlow", () => {
     expect(
       isToolOnlyFlow([{ type: "step-start" }, { type: "tool-Read" }, { type: "text", text: "" }])
     ).toBe(true)
+  })
+
+  it("counts a dynamic-tool part as a tool call", () => {
+    expect(isToolOnlyFlow([{ type: "dynamic-tool" }, { type: "tool-Grep" }])).toBe(true)
   })
 
   it("is false once the turn carries prose", () => {

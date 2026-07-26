@@ -103,7 +103,12 @@ jest.mock("@/hooks/chat/use-effective-cwd", () => ({
   useEffectiveCwd: () => "/repo",
 }))
 
-import { act, render, screen } from "@testing-library/react"
+const consumePendingChatPromptMock = jest.fn<string | null, [string]>(() => null)
+jest.mock("@/lib/chat/pending-prompt", () => ({
+  consumePendingChatPrompt: (sessionId: string) => consumePendingChatPromptMock(sessionId),
+}))
+
+import { act, render, screen, waitFor } from "@testing-library/react"
 import { SparklesIcon } from "lucide-react"
 import { ChatPane } from "./chat-view"
 import { MessageList } from "./message-list"
@@ -127,6 +132,31 @@ function makeProps() {
 }
 
 describe("ChatPane", () => {
+  beforeEach(() => {
+    consumePendingChatPromptMock.mockReset().mockReturnValue(null)
+  })
+
+  it("sends a queued configuration prompt once through the normal sender", async () => {
+    consumePendingChatPromptMock.mockReturnValueOnce("Configure WebDAV")
+    const props = makeProps()
+    const { rerender } = render(<ChatPane {...props} />)
+
+    await waitFor(() => expect(props.onSend).toHaveBeenCalledWith("Configure WebDAV", undefined))
+    expect(consumePendingChatPromptMock).toHaveBeenCalledWith("s1")
+
+    rerender(<ChatPane {...props} />)
+    expect(props.onSend).toHaveBeenCalledTimes(1)
+  })
+
+  it("fails closed before sending a queued prompt that contains PII", async () => {
+    consumePendingChatPromptMock.mockReturnValueOnce("Configure alice@example.com")
+    const props = makeProps()
+    render(<ChatPane {...props} />)
+
+    await waitFor(() => expect(consumePendingChatPromptMock).toHaveBeenCalledWith("s1"))
+    expect(props.onSend).not.toHaveBeenCalled()
+  })
+
   it("forwards the attachment manifest from Composer to the workspace sender", async () => {
     const props = makeProps()
     render(<ChatPane {...props} />)

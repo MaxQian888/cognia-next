@@ -27,9 +27,14 @@ export interface PartEntry<P> {
 export type AgentFlowSegment<P> =
   { kind: "single"; entry: PartEntry<P> } | { kind: "group"; entries: PartEntry<P>[] }
 
-/** True for any `tool-*` part type. */
+/**
+ * True for any tool-call part type — `tool-*`, plus the AI SDK's
+ * `dynamic-tool` shape for a tool the client never declared statically (it
+ * carries the name on `part.toolName`). Both reach the renderer: imported
+ * sessions and CLI handoff transcripts can hold `dynamic-tool` parts.
+ */
 export function isToolPartType(type: string | undefined): boolean {
-  return typeof type === "string" && type.startsWith("tool-")
+  return typeof type === "string" && (type.startsWith("tool-") || type === "dynamic-tool")
 }
 
 /** True for tool parts that participate in activity grouping. */

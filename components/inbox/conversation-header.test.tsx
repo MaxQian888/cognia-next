@@ -142,6 +142,27 @@ describe("ConversationHeader", () => {
     expect(screen.getByText("My Telegram Chat")).toBeInTheDocument()
   })
 
+  it("renders the artifact dock toggle without a breakpoint gate", () => {
+    // This header is the ONLY standing opener for the dock on `/inbox/c` — the
+    // chat pane below mounts with `showHeader={false}`, and the AppShellMobile
+    // top bar (the other opener) isn't mounted on this route. A `hidden
+    // md:inline-flex` class therefore left phones with no way to open the dock
+    // at all.
+    render(
+      <ConversationHeader
+        conversationKey="ck-dock"
+        sessionId="s-dock"
+        title="Dock"
+        platform="telegram"
+        currentMode="auto"
+        policy={EMPTY_POLICY}
+      />
+    )
+    const toggle = screen.getByTestId("chat-artifact-dock-toggle")
+    expect(toggle).toBeInTheDocument()
+    expect(toggle.className).not.toContain("hidden")
+  })
+
   it("renders the live mode switcher chip in desktop mode", () => {
     ;(isTauri as jest.Mock).mockReturnValue(true)
     render(

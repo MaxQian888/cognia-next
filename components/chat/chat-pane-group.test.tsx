@@ -81,6 +81,29 @@ beforeEach(() => {
 })
 
 describe("ChatPaneGroup", () => {
+  // A one-tab strip is a band of chrome that says nothing — the tab repeats the
+  // chat header's title, and close / split / new all have other homes.
+  it("hides the tab strip for a single, unsplit conversation", () => {
+    chatState.openSessionIds = ["a"]
+    const { queryByTestId } = render(<ChatPaneGroup {...makeProps()} />)
+    expect(queryByTestId("chat-tab-a")).toBeNull()
+  })
+
+  it("shows the tab strip as soon as a second conversation is open", () => {
+    const { getByTestId } = render(<ChatPaneGroup {...makeProps()} />)
+    expect(getByTestId("chat-tab-a")).toBeTruthy()
+    expect(getByTestId("chat-tab-b")).toBeTruthy()
+  })
+
+  it("shows the tab strip while split, even though only one session is open", () => {
+    // Split points at the single open session's pane pair; without this the
+    // strip's split toggle would be the control you need and cannot reach.
+    chatState.openSessionIds = ["a", "b"]
+    chatState.splitSessionId = "b"
+    const { getByTestId } = render(<ChatPaneGroup {...makeProps()} />)
+    expect(getByTestId("chat-tab-a")).toBeTruthy()
+  })
+
   it("renders a single focused pane when not split", () => {
     const { getByTestId, queryByTestId } = render(<ChatPaneGroup {...makeProps()} />)
     expect(getByTestId("pane-a")).toBeTruthy()

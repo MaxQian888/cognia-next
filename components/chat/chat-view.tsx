@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useRef, type ReactNode, type Ref } from "react"
+import { useCallback, useEffect, useRef, type ReactNode, type Ref } from "react"
 import { useTranslations } from "next-intl"
 import { AlertTriangle, Loader2 } from "lucide-react"
 import { Composer, type ComposerHandle, type ComposerWorkflowMention } from "./composer"
@@ -46,6 +46,8 @@ import { useIsMobile } from "@/hooks/ui/use-mobile"
 import { WorkspaceChangesCard } from "./workspace-changes-card"
 import { useEffectiveCwd } from "@/hooks/chat/use-effective-cwd"
 import { ComputerUsePictureInPicture } from "./computer-use-picture-in-picture"
+import { consumePendingChatPrompt } from "@/lib/chat/pending-prompt"
+import { hasNoLeakingPii } from "@cognia/redact"
 
 /**
  * Attach `node` to a (possibly absent) callback or object ref. Defined at
@@ -240,6 +242,19 @@ export function ChatPane({
     },
     [onSend]
   )
+
+  useEffect(() => {
+    if (!boundId || status !== "idle" || messagesLoading || activeSession?.kind === "subagent") {
+      return
+    }
+    const pendingPrompt = consumePendingChatPrompt(boundId)
+    if (!pendingPrompt) return
+    if (!hasNoLeakingPii(pendingPrompt)) {
+      toast.error(tInlineErr("pendingPromptPiiBlocked"))
+      return
+    }
+    void handleSend(pendingPrompt)
+  }, [activeSession?.kind, boundId, handleSend, messagesLoading, status, tInlineErr])
 
   const handleRetry = useCallback(async () => {
     if (boundId) useChatStore.getState().setSessionError(boundId, null)

@@ -55,14 +55,15 @@ describe("<EmptyChatState />", () => {
   })
 
   // ── Welcome style (rich vs minimal) ───────────────────────────────────
-  it("renders the aurora backdrop in the rich style", () => {
+  it("renders the workspace illustration in the rich style", () => {
     render(<EmptyChatState {...baseProps()} />)
-    expect(screen.getByTestId("welcome-aurora")).toBeInTheDocument()
+    expect(screen.getByTestId("welcome-illustration")).toBeInTheDocument()
+    expect(screen.getByRole("img", { name: "illustrationAlt" })).toBeInTheDocument()
   })
 
-  it("drops the aurora in the minimal style", () => {
+  it("drops the workspace illustration in the minimal style", () => {
     render(<EmptyChatState {...baseProps()} welcomeStyle="minimal" />)
-    expect(screen.queryByTestId("welcome-aurora")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("welcome-illustration")).not.toBeInTheDocument()
   })
 
   it("shows the style toggle only when onToggleStyle is provided and fires the opposite style", async () => {

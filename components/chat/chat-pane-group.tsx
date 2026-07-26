@@ -189,17 +189,26 @@ export function ChatPaneGroup({
     )
   }
 
+  // A strip of one tab is a band of chrome that says nothing: the tab repeats
+  // the chat header's title, and its close / split / new controls all have
+  // other homes (⌘W, the split control appears with the second pane, ⌘N and
+  // the welcome CTA). It earns its row once there is something to switch
+  // between — a second tab, or an active split.
+  const showTabStrip = tabs.length > 1 || effectiveSplitId !== null
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <ChatTabStrip
-        tabs={tabs}
-        activeId={activeSessionId}
-        splitId={effectiveSplitId}
-        onSelect={setActiveSession}
-        onClose={closePane}
-        onToggleSplit={handleToggleSplit}
-        onNew={onCreate}
-      />
+      {showTabStrip && (
+        <ChatTabStrip
+          tabs={tabs}
+          activeId={activeSessionId}
+          splitId={effectiveSplitId}
+          onSelect={setActiveSession}
+          onClose={closePane}
+          onToggleSplit={handleToggleSplit}
+          onNew={onCreate}
+        />
+      )}
       {effectiveSplitId ? (
         <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
           <ResizablePanel defaultSize="50%" minSize="25%" className="flex min-h-0 flex-col">

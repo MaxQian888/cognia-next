@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useSettingsStore } from "@/stores/settings"
 import { useChatStore } from "@/stores/chat"
+import { useChatViewportStore } from "@/stores/chat/chat-viewport-store"
 import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
 import { useTimelineTurns, type TimelineTurn } from "./use-timeline-turns"
 import { useTimelineScrollSync } from "./use-timeline-scroll-sync"
@@ -167,8 +168,16 @@ export const ConversationTimeline = memo(function ConversationTimeline({
     [save, settings?.conversationTimeline]
   )
 
+  // The list owns the one jump implementation and publishes it; this used to
+  // be a second, near-identical copy. Falls back to its own local scroll only
+  // when no list has registered (e.g. rendered standalone in a story/test).
+  const jumpToMessage = useChatViewportStore((s) => s.jumpToMessage)
   const jumpTo = useCallback(
     (turn: TimelineTurn) => {
+      if (jumpToMessage) {
+        jumpToMessage(turn.id, turn.index)
+        return
+      }
       if (virtualize && virtualizer) {
         virtualizer.scrollToIndex(turn.index, { align: "start" })
         return
@@ -179,7 +188,7 @@ export const ConversationTimeline = memo(function ConversationTimeline({
         block: "start",
       })
     },
-    [virtualize, virtualizer, scrollRef]
+    [jumpToMessage, virtualize, virtualizer, scrollRef]
   )
 
   /**

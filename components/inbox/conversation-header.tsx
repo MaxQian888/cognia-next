@@ -283,7 +283,9 @@ export function ConversationHeader({
       {/* The chat pane below mounts with `showHeader={false}`, so the copy of
        * this control in `chat-header` never renders here. Without it the dock —
        * which defaults to collapsed — had no in-page opener on this route at
-       * all. */}
+       * all. That applies doubly on a phone, where the `AppShellMobile` top bar
+       * (the other standing opener) isn't mounted either, so the toggle must
+       * NOT be breakpoint-gated. */}
       <ArtifactDockToggle className="h-7 w-7" />
 
       <Tooltip>
