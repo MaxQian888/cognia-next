@@ -4,6 +4,7 @@ packages:
   # root from recursive commands unless --include-workspace-root is passed.
   - .
   - docs
+  - web
   - mobile
   - packages/*
   - services/workspace-runtime

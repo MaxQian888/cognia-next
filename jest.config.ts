@@ -180,6 +180,7 @@ const projectCommon: Config = {
     "^@cognia/agent-config-types(.*)$": "<rootDir>/packages/agent-config-types/src$1",
     "^@cognia/memory(.*)$": "<rootDir>/packages/memory/src$1",
     "^@cognia/ocr(.*)$": "<rootDir>/packages/ocr/src$1",
+    "^@cognia/plugin-ui(.*)$": "<rootDir>/packages/plugin-ui/src$1",
 
     // cheerio's package exports prefer the ESM browser build under jsdom.
     // The HTML parser uses dynamic import("cheerio"), so map Jest to the CJS
@@ -190,6 +191,12 @@ const projectCommon: Config = {
     // output remains ESM after next/jest's node_modules handling. Tests assert
     // our wrappers, so use a small rendering-compatible CJS boundary.
     "^streamdown$": "<rootDir>/__mocks__/streamdown.js",
+
+    // ADR-0092 §3: the marketing workspace uses `@web/*`, never `@/`. Root Jest
+    // collects `web/**` tests (it is not in testPathIgnorePatterns), so a
+    // workspace-local `@/*` would resolve here against the repo root instead of
+    // against `web/`. This entry must precede the `^@/` rule below.
+    "^@web/(.*)$": "<rootDir>/web/$1",
 
     // Handle module aliases (this will be automatically configured for you by Next.js)
     "^@/(.*)$": "<rootDir>/$1",

@@ -33,6 +33,12 @@ const eslintConfig = defineConfig([
     // the minified bundle, same rationale as the root out/ artifact dir.
     "docs/out/**",
     "docs/next-env.d.ts",
+    // The marketing site (ADR-0092) is a static export like docs/: web/out/
+    // holds the minified bundle and web/.next/ the build cache. Same rationale
+    // as the root out/ artifact dir — flat config does not read .gitignore.
+    "web/.next/**",
+    "web/out/**",
+    "web/next-env.d.ts",
     ".agents/**",
     ".claude/**",
     "sidecar/**",

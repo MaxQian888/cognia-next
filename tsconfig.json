@@ -75,7 +75,9 @@
       "@cognia/memory": ["./packages/memory/src/index.ts"],
       "@cognia/memory/*": ["./packages/memory/src/*"],
       "@cognia/ocr": ["./packages/ocr/src/index.ts"],
-      "@cognia/ocr/*": ["./packages/ocr/src/*"]
+      "@cognia/ocr/*": ["./packages/ocr/src/*"],
+      "@cognia/plugin-ui": ["./packages/plugin-ui/src/index.ts"],
+      "@cognia/plugin-ui/*": ["./packages/plugin-ui/src/*"]
     }
   },
   "include": [
@@ -91,6 +93,7 @@
   "exclude": [
     "node_modules",
     "docs",
+    "web",
     "mobile",
     "sidecar",
     "services/share-server",
