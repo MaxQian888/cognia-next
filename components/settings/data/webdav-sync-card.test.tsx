@@ -59,6 +59,18 @@ const toastError = jest.fn()
 jest.mock("sonner", () => ({
   toast: { success: (m: string) => toastSuccess(m), error: (m: string) => toastError(m) },
 }))
+const routerPushMock = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: routerPushMock }),
+}))
+const startNewSessionMock = jest.fn(async (..._a: unknown[]) => ({ id: "ai-session" }))
+jest.mock("@/lib/chat/start-session", () => ({
+  startNewSession: (...a: unknown[]) => startNewSessionMock(...a),
+}))
+const queuePendingChatPromptMock = jest.fn()
+jest.mock("@/lib/chat/pending-prompt", () => ({
+  queuePendingChatPrompt: (...a: unknown[]) => queuePendingChatPromptMock(...a),
+}))
 
 import { WebDavSyncCard } from "./webdav-sync-card"
 
@@ -79,6 +91,10 @@ beforeEach(() => {
   loadPersistedMock.mockClear()
   persistSyncPassphraseMock.mockClear()
   clearStoredSyncPassphraseMock.mockClear()
+  routerPushMock.mockClear()
+  startNewSessionMock.mockClear()
+  startNewSessionMock.mockResolvedValue({ id: "ai-session" })
+  queuePendingChatPromptMock.mockClear()
 })
 
 describe("WebDavSyncCard", () => {
@@ -122,7 +138,61 @@ describe("WebDavSyncCard", () => {
     await user.type(screen.getByLabelText("Password"), "pw")
     await user.click(screen.getByRole("button", { name: "Test connection" }))
     await waitFor(() => expect(ensureCollectionMock).toHaveBeenCalled())
+    expect(createWebDavClientMock).toHaveBeenCalledWith(expect.any(Object), {
+      trustSelfSigned: false,
+    })
     expect(toastSuccess).toHaveBeenCalled()
+  })
+
+  it("uses invalid certificates only after explicit opt-in and persists the choice", async () => {
+    const user = userEvent.setup()
+    render(<WebDavSyncCard />)
+    await waitFor(() => screen.getByText("WebDAV sync"))
+
+    const toggle = screen.getByTestId("webdav-allow-invalid-certificates")
+    expect(toggle).toHaveAttribute("data-state", "unchecked")
+    await user.click(toggle)
+    await user.type(screen.getByLabelText("Server URL"), "https://nas.example")
+    await user.type(screen.getByLabelText("Username"), "bob")
+    await user.type(screen.getByLabelText("Password"), "pw")
+    await user.click(screen.getByRole("button", { name: "Test connection" }))
+
+    await waitFor(() =>
+      expect(createWebDavClientMock).toHaveBeenCalledWith(expect.any(Object), {
+        trustSelfSigned: true,
+      })
+    )
+
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() =>
+      expect(saveSettingsMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          webdavSync: expect.objectContaining({ allowInvalidCertificates: true }),
+        })
+      )
+    )
+  })
+
+  it("starts a normal chat with credential-free AI configuration instructions", async () => {
+    const user = userEvent.setup()
+    render(<WebDavSyncCard />)
+    await waitFor(() => screen.getByText("WebDAV sync"))
+
+    await user.type(screen.getByLabelText("Server URL"), "https://private.example")
+    await user.type(screen.getByLabelText("Username"), "private-user")
+    await user.type(screen.getByLabelText("Password"), "private-password")
+    await user.click(screen.getByRole("button", { name: "Configure with AI" }))
+
+    await waitFor(() => expect(startNewSessionMock).toHaveBeenCalled())
+    expect(queuePendingChatPromptMock).toHaveBeenCalledWith(
+      "ai-session",
+      expect.stringContaining("WebDAV")
+    )
+    const prompt = queuePendingChatPromptMock.mock.calls[0]?.[1] as string
+    expect(prompt).not.toContain("private.example")
+    expect(prompt).not.toContain("private-user")
+    expect(prompt).not.toContain("private-password")
+    expect(routerPushMock).toHaveBeenCalledWith("/")
   })
 
   it("sync now requires a passphrase, then uploads", async () => {

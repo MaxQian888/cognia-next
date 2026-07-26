@@ -255,6 +255,16 @@ export interface ExportOptions {
   includeBuiltIns?: boolean
   /** Include learned memories and their governance graph. Defaults to true. */
   includeMemories?: boolean
+  /** Include the singleton AppSettings row. Defaults to true. */
+  includeSettings?: boolean
+  /** Include non-session, non-plugin Dexie user content. Defaults to true. */
+  includeCoreData?: boolean
+  /** Include plugin catalog, permissions, reviews, and analytics. Defaults to true. */
+  includePlugins?: boolean
+  /** Include localStorage-backed persisted state. Defaults to true. */
+  includeLocalStorage?: boolean
+  /** Include the artifact store within localStorage snapshots. Defaults to true. */
+  includeArtifacts?: boolean
 }
 
 // ---- Errors ---------------------------------------------------------------

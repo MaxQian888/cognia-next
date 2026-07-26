@@ -34,11 +34,28 @@ describe("createWebDavTransport", () => {
     const t = createWebDavTransport()
     const resp = await t.send({ method: "PROPFIND", url: "https://d/x", body: "q" })
     expect(connectorsHttpRequestMock).toHaveBeenCalledWith(
-      expect.objectContaining({ url: "https://d/x", method: "PROPFIND", body: "q" })
+      expect.objectContaining({
+        url: "https://d/x",
+        method: "PROPFIND",
+        body: "q",
+        allowInvalidCertificates: false,
+      })
     )
     expect(resp.status).toBe(207)
     // Headers are lowercased.
     expect(resp.headers["content-type"]).toBe("application/xml")
+  })
+
+  it("only accepts invalid certificates under Tauri after explicit opt-in", async () => {
+    isTauriValue = true
+    connectorsHttpRequestMock.mockResolvedValue({ status: 200, headers: {}, body: "" })
+
+    const t = createWebDavTransport({ trustSelfSigned: true })
+    await t.send({ method: "GET", url: "https://d/x" })
+
+    expect(connectorsHttpRequestMock).toHaveBeenCalledWith(
+      expect.objectContaining({ allowInvalidCertificates: true })
+    )
   })
 
   it("prefers CapacitorHttp when native, passes self-signed trust", async () => {

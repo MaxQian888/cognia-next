@@ -22,7 +22,12 @@ import type { TrustedWorkspace } from "@/lib/db/trusted-workspaces"
 import type { CogniaDB, SessionStateRow, TtsProviderKeyRow } from "@/lib/db/schema"
 import { getDb } from "@/lib/db/schema"
 import { contextCommentRowFromCanvas } from "@/lib/db/context-comments"
-import type { PluginAnalyticsRow, PluginPermissionRow, PluginRow } from "@/lib/db/plugin-types"
+import type {
+  PluginAnalyticsRow,
+  PluginPermissionRow,
+  PluginReviewRow,
+  PluginRow,
+} from "@/lib/db/plugin-types"
 import type { TwinChunk, TwinDraft, TwinJob, TwinProfile, TwinSource } from "@/types/twin"
 import type { Memory } from "@/types/memory/memory"
 import type { MemoryAuditEvent, MemoryEvidence, MemoryJob } from "@/types/memory/governance"
@@ -117,6 +122,7 @@ export async function applyBackupPackage(
       db.a2uiEventHistory,
       db.plugins,
       db.pluginPermissions,
+      db.pluginReviews,
       db.pluginAnalytics,
       db.twinSources,
       db.twinChunks,
@@ -298,12 +304,12 @@ export async function applyBackupPackage(
       //   • Imported plugins are forced to `enabled: false` so a fresh restore
       //     doesn't silently reactivate a plugin the user might have disabled
       //     for security reasons before the export.
-      // Permissions/analytics/scheduled jobs follow the parent plugin via
+      // Permissions/reviews/analytics follow the parent plugin via
       // `bulkPut` keyed on their composite primary keys — overwrite is the
       // only sensible strategy for derived per-plugin data.
       if (env.plugins && env.plugins.length > 0) {
         const incomingPlugins = env.plugins as PluginRow[]
-        const importedIds = new Set<string>()
+        const importedPluginIds = new Map<string, string>()
         for (const row of incomingPlugins) {
           if (row.source === "builtin") {
             incrementCounter(summary.builtInsSkipped, "plugins")
@@ -318,7 +324,7 @@ export async function applyBackupPackage(
           if (!existing) {
             await db.plugins.put(safeRow)
             incrementCounter(summary.added, "plugins")
-            importedIds.add(safeRow.id)
+            importedPluginIds.set(row.id, safeRow.id)
             continue
           }
           switch (opts.mergeStrategy) {
@@ -328,36 +334,45 @@ export async function applyBackupPackage(
             case "overwrite":
               await db.plugins.put(safeRow)
               incrementCounter(summary.overwritten, "plugins")
-              importedIds.add(safeRow.id)
+              importedPluginIds.set(row.id, safeRow.id)
               break
             case "duplicate": {
               const copy: PluginRow = { ...safeRow, id: newId("plugin") }
               await db.plugins.put(copy)
               incrementCounter(summary.added, "plugins")
-              importedIds.add(copy.id)
+              importedPluginIds.set(row.id, copy.id)
               break
             }
           }
         }
 
-        // Permissions / analytics / scheduled jobs follow the imported plugin
-        // rows. Skip rows whose owning plugin wasn't imported.
+        // Child rows follow the imported plugin, including a duplicate's fresh
+        // id. Skip rows whose owning plugin wasn't imported.
+        const remapChildRows = <T extends { pluginId: string }>(rows: T[]): T[] =>
+          rows.flatMap((row) => {
+            const pluginId = importedPluginIds.get(row.pluginId)
+            return pluginId === undefined ? [] : [{ ...row, pluginId }]
+          })
+
         if (env.pluginPermissions && env.pluginPermissions.length > 0) {
-          const perms = (env.pluginPermissions as PluginPermissionRow[]).filter((r) =>
-            importedIds.has(r.pluginId)
-          )
+          const perms = remapChildRows(env.pluginPermissions as PluginPermissionRow[])
           if (perms.length > 0) {
             await db.pluginPermissions.bulkPut(perms)
             incrementCounterBy(summary.added, "pluginPermissions", perms.length)
           }
         }
         if (env.pluginAnalytics && env.pluginAnalytics.length > 0) {
-          const rows = (env.pluginAnalytics as PluginAnalyticsRow[]).filter((r) =>
-            importedIds.has(r.pluginId)
-          )
+          const rows = remapChildRows(env.pluginAnalytics as PluginAnalyticsRow[])
           if (rows.length > 0) {
             await db.pluginAnalytics.bulkPut(rows)
             incrementCounterBy(summary.added, "pluginAnalytics", rows.length)
+          }
+        }
+        if (env.pluginReviews && env.pluginReviews.length > 0) {
+          const rows = remapChildRows(env.pluginReviews as PluginReviewRow[])
+          if (rows.length > 0) {
+            await db.pluginReviews.bulkPut(rows)
+            incrementCounterBy(summary.added, "pluginReviews", rows.length)
           }
         }
       }

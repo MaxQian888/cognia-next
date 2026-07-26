@@ -539,7 +539,51 @@ describe("applyBackupPackage — plugins domain", () => {
     expect(summary.added.plugins).toBe(1)
   })
 
-  it("imports permissions and analytics only for imported plugin ids", async () => {
+  it("'duplicate' strategy retains every plugin child row under the fresh plugin id", async () => {
+    const db = getDb()
+    await db.plugins.put(pluginRow({ id: "plg-dup", name: "local" }))
+
+    const summary = await applyBackupPackage(
+      pkg({
+        plugins: [pluginRow({ id: "plg-dup", name: "remote" })],
+        pluginPermissions: [
+          {
+            pluginId: "plg-dup",
+            permission: "clipboard:read",
+            decision: "allow",
+            grantedAt: 1,
+          },
+        ],
+        pluginReviews: [{ pluginId: "plg-dup", id: "review-1", rating: 5, createdAt: 1 }],
+        pluginAnalytics: [{ pluginId: "plg-dup", key: "tool.invoke", count: 5, lastEventAt: 1 }],
+      }),
+      { mergeStrategy: "duplicate", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+
+    const duplicate = (await db.plugins.toArray()).find((row) => row.id !== "plg-dup")
+    expect(duplicate).toBeDefined()
+    const duplicateId = duplicate!.id
+    expect(await db.pluginPermissions.where("pluginId").equals(duplicateId).toArray()).toEqual([
+      {
+        pluginId: duplicateId,
+        permission: "clipboard:read",
+        decision: "allow",
+        grantedAt: 1,
+      },
+    ])
+    expect(await db.pluginReviews.where("pluginId").equals(duplicateId).toArray()).toEqual([
+      { pluginId: duplicateId, id: "review-1", rating: 5, createdAt: 1 },
+    ])
+    expect(await db.pluginAnalytics.where("pluginId").equals(duplicateId).toArray()).toEqual([
+      { pluginId: duplicateId, key: "tool.invoke", count: 5, lastEventAt: 1 },
+    ])
+    expect(summary.added.pluginPermissions).toBe(1)
+    expect(summary.added.pluginReviews).toBe(1)
+    expect(summary.added.pluginAnalytics).toBe(1)
+  })
+
+  it("imports permissions, reviews, and analytics only for imported plugin ids", async () => {
     const db = getDb()
     const summary = await applyBackupPackage(
       pkg({
@@ -557,13 +601,19 @@ describe("applyBackupPackage — plugins domain", () => {
           { pluginId: "plg-with-data", key: "tool.invoke", count: 5, lastEventAt: 1 },
           { pluginId: "plg-orphan", key: "tool.invoke", count: 5, lastEventAt: 1 },
         ],
+        pluginReviews: [
+          { pluginId: "plg-with-data", id: "review-1", rating: 5, createdAt: 1 },
+          { pluginId: "plg-orphan", id: "review-2", rating: 1, createdAt: 1 },
+        ],
       }),
       { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
       { projectMcp: async () => [] }
     )
     expect(await db.pluginPermissions.toArray()).toHaveLength(1)
+    expect(await db.pluginReviews.toArray()).toHaveLength(1)
     expect(await db.pluginAnalytics.toArray()).toHaveLength(1)
     expect(summary.added.pluginPermissions).toBe(1)
+    expect(summary.added.pluginReviews).toBe(1)
     expect(summary.added.pluginAnalytics).toBe(1)
   })
 

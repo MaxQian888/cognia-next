@@ -123,7 +123,9 @@ pub async fn http_request(req: TauriHttpRequest) -> Result<TauriHttpResponse, St
 
     let timeout = req.timeout_duration();
     let proxy_cfg = proxy_config::current();
-    let mut builder = Client::builder().timeout(timeout);
+    let mut builder = Client::builder()
+        .timeout(timeout)
+        .danger_accept_invalid_certs(req.accept_invalid_certificates());
     // Only attach the proxy when active AND the target isn't on the bypass
     // list — otherwise localhost dev servers would round-trip through the
     // user's external proxy.
@@ -249,6 +251,7 @@ mod tests {
             headers: None,
             body: None,
             timeout_ms: None,
+            allow_invalid_certificates: None,
         })
         .await
         .unwrap_err();
@@ -272,6 +275,7 @@ mod tests {
             headers: None,
             body: None,
             timeout_ms: None,
+            allow_invalid_certificates: None,
         };
 
         let resp = http_request(req).await.unwrap();
@@ -295,6 +299,7 @@ mod tests {
             headers: None,
             body: Some(r#"{"key":"value"}"#.to_string()),
             timeout_ms: None,
+            allow_invalid_certificates: None,
         };
 
         let resp = http_request(req).await.unwrap();

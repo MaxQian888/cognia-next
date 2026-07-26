@@ -7,6 +7,7 @@
 // <ShareSettingsCard/>.
 
 import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -14,7 +15,14 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
-import { CloudIcon } from "lucide-react"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { CloudIcon, ExternalLinkIcon, SparklesIcon } from "lucide-react"
 import { toast } from "sonner"
 import { getSettings, saveSettings } from "@/lib/db/settings"
 import { listBackupHistory } from "@/lib/db/backup-history"
@@ -36,15 +44,26 @@ import {
 } from "@/lib/webdav/passphrase-cache"
 import { runWebDavSyncNow, type WebDavSyncPhase } from "@/lib/webdav/sync-now"
 import { WebDavRestoreDialog } from "@/components/data/import/webdav-restore-dialog"
+import {
+  detectWebDavProvider,
+  getWebDavProviderPreset,
+  WEBDAV_PROVIDER_PRESETS,
+  type WebDavProviderId,
+} from "@/lib/webdav/provider-presets"
+import { startNewSession } from "@/lib/chat/start-session"
+import { queuePendingChatPrompt } from "@/lib/chat/pending-prompt"
 
 export function WebDavSyncCard() {
   const t = useTranslations("settings.data.webdav")
+  const router = useRouter()
   const [enabled, setEnabled] = useState(false)
+  const [providerId, setProviderId] = useState<WebDavProviderId>("generic")
   const [baseUrl, setBaseUrl] = useState("")
   const [remoteDir, setRemoteDir] = useState(DEFAULT_WEBDAV_REMOTE_DIR)
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [passwordSaved, setPasswordSaved] = useState(false)
+  const [allowInvalidCertificates, setAllowInvalidCertificates] = useState(false)
   const [passphrase, setPassphrase] = useState("")
   const [unlocked, setUnlocked] = useState(false)
   const [remember, setRemember] = useState(false)
@@ -62,8 +81,10 @@ export function WebDavSyncCard() {
       const cfg = settings.webdavSync
       setEnabled(cfg?.enabled ?? false)
       setBaseUrl(cfg?.baseUrl ?? "")
+      setProviderId(cfg?.providerId ?? detectWebDavProvider(cfg?.baseUrl ?? ""))
       setRemoteDir(cfg?.remoteDir ?? DEFAULT_WEBDAV_REMOTE_DIR)
       setUsername(cfg?.username ?? "")
+      setAllowInvalidCertificates(cfg?.allowInvalidCertificates ?? false)
       setLastSyncAt(cfg?.lastSyncAt)
       setRemember(cfg?.rememberPassphrase ?? false)
       setPasswordSaved(await hasWebDavPassword())
@@ -110,9 +131,11 @@ export function WebDavSyncCard() {
         webdavSync: {
           ...(settings.webdavSync ?? {}),
           enabled,
+          providerId,
           baseUrl: baseUrl.trim() || undefined,
           remoteDir: remoteDir.trim() || DEFAULT_WEBDAV_REMOTE_DIR,
           username: username.trim() || undefined,
+          allowInvalidCertificates,
         },
       })
       if (password) {
@@ -136,6 +159,36 @@ export function WebDavSyncCard() {
     toast.success(t("cleared"))
   }
 
+  const onProviderChange = (next: WebDavProviderId) => {
+    setProviderId(next)
+    const fixedBaseUrl = getWebDavProviderPreset(next).baseUrl
+    if (fixedBaseUrl) setBaseUrl(fixedBaseUrl)
+  }
+
+  const onAiConfigure = async () => {
+    const preset = getWebDavProviderPreset(providerId)
+    const provider = t(`providers.${providerId}`)
+    try {
+      const session = await startNewSession({
+        title: t("aiSessionTitle", { provider }),
+      })
+      queuePendingChatPrompt(
+        session.id,
+        t("aiPrompt", {
+          provider,
+          docsUrl: preset.docsUrl,
+        })
+      )
+      router.push("/")
+    } catch (error) {
+      toast.error(
+        t("aiConfigureFailed", {
+          error: error instanceof Error ? error.message : String(error),
+        })
+      )
+    }
+  }
+
   const onTestConnection = async () => {
     setBusy(true)
     try {
@@ -146,7 +199,7 @@ export function WebDavSyncCard() {
       }
       const client = createWebDavClient(
         { baseUrl: baseUrl.trim(), username: username.trim(), password: pwd },
-        { trustSelfSigned: true }
+        { trustSelfSigned: allowInvalidCertificates }
       )
       const dir = remoteDir.trim() || DEFAULT_WEBDAV_REMOTE_DIR
       await client.ensureCollection(dir.startsWith("/") ? dir : `/${dir}`)
@@ -217,13 +270,48 @@ export function WebDavSyncCard() {
       </label>
 
       <div className="space-y-1">
+        <Label className="text-xs" htmlFor="webdav-provider">
+          {t("providerLabel")}
+        </Label>
+        <Select
+          value={providerId}
+          onValueChange={(value) => onProviderChange(value as WebDavProviderId)}
+        >
+          <SelectTrigger id="webdav-provider">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {WEBDAV_PROVIDER_PRESETS.map((preset) => (
+              <SelectItem key={preset.id} value={preset.id}>
+                {t(`providers.${preset.id}`)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[11px] text-muted-foreground">
+            {t(`credentialHints.${getWebDavProviderPreset(providerId).credentialKind}`)}
+          </p>
+          <a
+            className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+            href={getWebDavProviderPreset(providerId).docsUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {t("officialDocs")}
+            <ExternalLinkIcon className="size-3" aria-hidden />
+          </a>
+        </div>
+      </div>
+
+      <div className="space-y-1">
         <Label className="text-xs" htmlFor="webdav-url">
           {t("urlLabel")}
         </Label>
         <Input
           id="webdav-url"
           value={baseUrl}
-          placeholder={t("urlPlaceholder")}
+          placeholder={getWebDavProviderPreset(providerId).baseUrlPlaceholder}
           onChange={(e) => setBaseUrl(e.target.value)}
         />
       </div>
@@ -274,6 +362,20 @@ export function WebDavSyncCard() {
         </div>
       </div>
 
+      <label className="flex items-start gap-2 text-sm">
+        <Switch
+          checked={allowInvalidCertificates}
+          data-testid="webdav-allow-invalid-certificates"
+          onCheckedChange={setAllowInvalidCertificates}
+        />
+        <span>
+          <span className="block font-medium">{t("allowInvalidCertificatesLabel")}</span>
+          <span className="block text-xs text-muted-foreground">
+            {t("allowInvalidCertificatesDescription")}
+          </span>
+        </span>
+      </label>
+
       <div className="space-y-1">
         <Label className="text-xs" htmlFor="webdav-passphrase">
           {t("passphraseLabel")}
@@ -316,6 +418,10 @@ export function WebDavSyncCard() {
       ) : null}
 
       <div className="flex flex-wrap justify-end gap-2">
+        <Button variant="outline" size="sm" onClick={() => void onAiConfigure()}>
+          <SparklesIcon className="size-3.5" aria-hidden />
+          {t("aiConfigure")}
+        </Button>
         <Button
           variant="outline"
           size="sm"

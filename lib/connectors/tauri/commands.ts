@@ -65,6 +65,8 @@ export interface TauriHttpRequest {
   headers?: Record<string, string>
   body?: string
   timeoutMs?: number
+  /** Explicit opt-in for a user-configured self-signed endpoint. */
+  allowInvalidCertificates?: boolean
 }
 
 export interface TauriHttpResponse {

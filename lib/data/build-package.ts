@@ -17,6 +17,7 @@ import {
   type ExportOptions,
 } from "./types"
 import { browserSnapshotStorage, SNAPSHOT_MODULES } from "./snapshots/registry"
+import { artifactsSnapshot } from "./snapshots/artifacts"
 import { readAllSnapshots } from "./snapshots/helpers"
 import type { SnapshotEnv, SnapshotStorage } from "./snapshots/types"
 import { filterExposedSessions } from "@/lib/chat/session-exposure"
@@ -53,6 +54,10 @@ export async function buildBackupPackage(
   const db = getDb()
   const includeBuiltIns = opts.includeBuiltIns ?? false
   const includeMemories = opts.includeMemories ?? true
+  const includeSettings = opts.includeSettings ?? true
+  const includeCoreData = opts.includeCoreData ?? true
+  const includePlugins = opts.includePlugins ?? true
+  const includeLocalStorage = opts.includeLocalStorage ?? true
 
   const [
     settingsRow,
@@ -83,6 +88,10 @@ export async function buildBackupPackage(
     memoryEvidence,
     memoryJobs,
     memoryAuditEvents,
+    plugins,
+    pluginPermissions,
+    pluginReviews,
+    pluginAnalytics,
   ] = await Promise.all([
     getSettings(),
     db.characters.toArray(),
@@ -112,6 +121,10 @@ export async function buildBackupPackage(
     includeMemories ? db.memoryEvidence.toArray() : Promise.resolve([]),
     includeMemories ? db.memoryJobs.toArray() : Promise.resolve([]),
     includeMemories ? db.memoryAuditEvents.toArray() : Promise.resolve([]),
+    db.plugins.toArray(),
+    db.pluginPermissions.toArray(),
+    db.pluginReviews.toArray(),
+    db.pluginAnalytics.toArray(),
   ])
 
   // Strip the API key unless the user opted in.
@@ -129,6 +142,10 @@ export async function buildBackupPackage(
   const filteredSkillResources = includeBuiltIns
     ? skillResources
     : skillResources.filter((r) => keptSkillIds.has(r.skillId))
+  const filteredPlugins = includeBuiltIns
+    ? plugins
+    : plugins.filter((plugin) => plugin.source !== "builtin")
+  const keptPluginIds = new Set(filteredPlugins.map((plugin) => plugin.id))
 
   const payload: BackupPayloadV3 = {
     settings,
@@ -157,6 +174,10 @@ export async function buildBackupPackage(
     twinDrafts,
     twinJobs,
     ...(includeMemories ? { memories, memoryEvidence, memoryJobs, memoryAuditEvents } : {}),
+    plugins: filteredPlugins,
+    pluginPermissions: pluginPermissions.filter((row) => keptPluginIds.has(row.pluginId)),
+    pluginReviews: pluginReviews.filter((row) => keptPluginIds.has(row.pluginId)),
+    pluginAnalytics: pluginAnalytics.filter((row) => keptPluginIds.has(row.pluginId)),
   }
   if (opts.includeSessions) {
     const exportedSessions = filterExposedSessions(sessions, "standard-export")
@@ -166,14 +187,61 @@ export async function buildBackupPackage(
     payload.sessionState = sessionState.filter((state) => exportedSessionIds.has(state.sessionId))
   }
 
+  if (!includeSettings) delete payload.settings
+  if (!includeCoreData) {
+    for (const key of [
+      "characters",
+      "skills",
+      "skillResources",
+      "teams",
+      "promptPresets",
+      "mcpServers",
+      "trustedWorkspaces",
+      "ttsProviderKeys",
+      "canvasDocuments",
+      "canvasVersions",
+      "canvasComments",
+      "canvasSessions",
+      "a2uiApps",
+      "a2uiTemplates",
+      "a2uiEventHistory",
+      "twinSources",
+      "twinChunks",
+      "twinProfile",
+      "twinDrafts",
+      "twinJobs",
+      "memories",
+      "memoryEvidence",
+      "memoryJobs",
+      "memoryAuditEvents",
+    ] satisfies (keyof BackupPayloadV3)[]) {
+      delete payload[key]
+    }
+  }
+  if (!includePlugins) {
+    delete payload.plugins
+    delete payload.pluginPermissions
+    delete payload.pluginReviews
+    delete payload.pluginAnalytics
+  }
+
   // localStorage-backed Zustand persist faces (external agents, custom
   // modes, agent teams, custom themes, artifacts, canvas prefs, …). Each
   // module's `read` is non-throwing — a single corrupt persist key cannot
   // brick the build.
-  const storage = extras.storage === undefined ? browserSnapshotStorage() : extras.storage
+  const storage =
+    includeLocalStorage && extras.storage === undefined
+      ? browserSnapshotStorage()
+      : includeLocalStorage
+        ? extras.storage
+        : null
   if (storage) {
     const env: SnapshotEnv = { storage, warn: extras.warn }
-    const { snapshots } = readAllSnapshots(SNAPSHOT_MODULES, env)
+    const snapshotModules =
+      opts.includeArtifacts === false
+        ? SNAPSHOT_MODULES.filter((module) => module.key !== artifactsSnapshot.key)
+        : SNAPSHOT_MODULES
+    const { snapshots } = readAllSnapshots(snapshotModules, env)
     if (Object.keys(snapshots).length > 0) {
       payload.localStorageSnapshots = snapshots
     }

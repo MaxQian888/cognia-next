@@ -45,6 +45,9 @@ pub struct TauriHttpRequest {
     pub headers: Option<HashMap<String, String>>,
     pub body: Option<String>,
     pub timeout_ms: Option<u64>,
+    /// Opt-in for user-configured self-hosted endpoints. Defaults to strict
+    /// platform trust; callers must never enable this implicitly.
+    pub allow_invalid_certificates: Option<bool>,
 }
 
 impl TauriHttpRequest {
@@ -55,6 +58,12 @@ impl TauriHttpRequest {
             "PUT" => Ok(Method::PUT),
             "PATCH" => Ok(Method::PATCH),
             "DELETE" => Ok(Method::DELETE),
+            "HEAD" => Ok(Method::HEAD),
+            "OPTIONS" => Ok(Method::OPTIONS),
+            "PROPFIND" => Method::from_bytes(b"PROPFIND")
+                .map_err(|error| format!("invalid PROPFIND method: {error}")),
+            "MKCOL" => Method::from_bytes(b"MKCOL")
+                .map_err(|error| format!("invalid MKCOL method: {error}")),
             _ => Err(format!(
                 "unsupported HTTP method: {}",
                 safe_http_method_label(&self.method)
@@ -68,6 +77,10 @@ impl TauriHttpRequest {
             .unwrap_or(DEFAULT_HTTP_TIMEOUT_MS)
             .clamp(1, MAX_HTTP_TIMEOUT_MS);
         Duration::from_millis(timeout_ms)
+    }
+
+    pub fn accept_invalid_certificates(&self) -> bool {
+        self.allow_invalid_certificates.unwrap_or(false)
     }
 }
 
@@ -129,6 +142,7 @@ mod tests {
             headers: None,
             body: None,
             timeout_ms,
+            allow_invalid_certificates: None,
         }
     }
 
@@ -149,6 +163,26 @@ mod tests {
         assert_eq!(
             request("DELETE", None).validated_method().unwrap(),
             Method::DELETE
+        );
+    }
+
+    #[test]
+    fn validated_method_accepts_webdav_contract_methods() {
+        assert_eq!(
+            request("PROPFIND", None).validated_method().unwrap(),
+            Method::from_bytes(b"PROPFIND").unwrap()
+        );
+        assert_eq!(
+            request("mkcol", None).validated_method().unwrap(),
+            Method::from_bytes(b"MKCOL").unwrap()
+        );
+        assert_eq!(
+            request("HEAD", None).validated_method().unwrap(),
+            Method::HEAD
+        );
+        assert_eq!(
+            request("OPTIONS", None).validated_method().unwrap(),
+            Method::OPTIONS
         );
     }
 
@@ -177,5 +211,18 @@ mod tests {
             request("GET", Some(MAX_HTTP_TIMEOUT_MS + 1)).timeout_duration(),
             Duration::from_millis(MAX_HTTP_TIMEOUT_MS)
         );
+    }
+
+    #[test]
+    fn invalid_certificate_acceptance_is_explicit_and_defaults_off() {
+        assert!(!request("GET", None).accept_invalid_certificates());
+
+        let enabled: TauriHttpRequest = serde_json::from_value(serde_json::json!({
+            "url": "https://nas.example",
+            "method": "GET",
+            "allowInvalidCertificates": true
+        }))
+        .unwrap();
+        assert!(enabled.accept_invalid_certificates());
     }
 }

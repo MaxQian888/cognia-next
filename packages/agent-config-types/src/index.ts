@@ -3454,9 +3454,24 @@ export interface AppSettings {
    */
   webdavSync?: {
     enabled?: boolean
+    /** Provider preset used for endpoint and credential guidance. */
+    providerId?:
+      | "generic"
+      | "nextcloud"
+      | "owncloud"
+      | "nutstore"
+      | "koofr"
+      | "pcloud-us"
+      | "pcloud-eu"
+      | "yandex"
     /** Base URL with no trailing slash, e.g. `https://dav.example.com`. */
     baseUrl?: string
     username?: string
+    /**
+     * Explicitly accept an invalid or self-signed TLS certificate for this
+     * endpoint. Default false. Intended only for user-controlled LAN servers.
+     */
+    allowInvalidCertificates?: boolean
     /** Collection to store snapshots in. Default `/cognia-backups`. */
     remoteDir?: string
     /** ISO timestamp of the last successful upload. */

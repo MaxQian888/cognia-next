@@ -219,6 +219,101 @@ describe("buildBackupPackage", () => {
     expect(pkg.manifest.integrity.checksum).toBe(expected)
     expect(pkg.manifest.integrity.algorithm).toBe("SHA-256")
   })
+
+  it("exports the complete non-builtin plugin domain", async () => {
+    const db = getDb()
+    await db.plugins.bulkPut([
+      {
+        id: "plugin-user",
+        name: "User plugin",
+        version: "1.0.0",
+        status: "loaded",
+        source: "local",
+        type: "frontend",
+        enabled: true,
+        capabilities: ["tools"],
+        path: "/plugins/user",
+        manifest: { id: "plugin-user" },
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: "plugin-builtin",
+        name: "Built-in plugin",
+        version: "1.0.0",
+        status: "loaded",
+        source: "builtin",
+        type: "frontend",
+        enabled: true,
+        capabilities: [],
+        path: "<builtin>/plugin",
+        manifest: { id: "plugin-builtin" },
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ])
+    await db.pluginPermissions.put({
+      pluginId: "plugin-user",
+      permission: "clipboard:read",
+      decision: "allow",
+      grantedAt: 1,
+    })
+    await db.pluginReviews.put({
+      pluginId: "plugin-user",
+      id: "review-1",
+      rating: 5,
+      createdAt: 1,
+    })
+    await db.pluginAnalytics.put({
+      pluginId: "plugin-user",
+      key: "tool.invoke",
+      count: 2,
+      lastEventAt: 1,
+    })
+
+    const pkg = await buildBackupPackage(
+      { includeSessions: false, includeApiKey: false },
+      { storage: null }
+    )
+
+    expect(pkg.payload.plugins).toEqual([expect.objectContaining({ id: "plugin-user" })])
+    expect(pkg.payload.pluginPermissions).toHaveLength(1)
+    expect(pkg.payload.pluginReviews).toHaveLength(1)
+    expect(pkg.payload.pluginAnalytics).toHaveLength(1)
+  })
+
+  it("honors exact domain selection for settings-only and sessions-only backups", async () => {
+    await seedAll()
+    const settingsOnly = await buildBackupPackage(
+      {
+        includeSessions: false,
+        includeApiKey: false,
+        includeSettings: true,
+        includeCoreData: false,
+        includePlugins: false,
+        includeLocalStorage: false,
+      },
+      { storage: null }
+    )
+    expect(Object.keys(settingsOnly.payload)).toEqual(["settings"])
+
+    const sessionsOnly = await buildBackupPackage(
+      {
+        includeSessions: true,
+        includeApiKey: false,
+        includeSettings: false,
+        includeCoreData: false,
+        includePlugins: false,
+        includeLocalStorage: false,
+      },
+      { storage: null }
+    )
+    expect(Object.keys(sessionsOnly.payload).sort()).toEqual([
+      "messages",
+      "sessionState",
+      "sessions",
+    ])
+  })
 })
 
 describe("serializePackage", () => {

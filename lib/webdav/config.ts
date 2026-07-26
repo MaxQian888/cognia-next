@@ -35,6 +35,7 @@ export interface WebDavSyncConfig {
   username: string
   remoteDir: string
   password: string
+  allowInvalidCertificates: boolean
 }
 
 function normalizeBaseUrl(url: string): string {
@@ -81,6 +82,7 @@ export async function resolveWebDavConfig(
     username,
     remoteDir: normalizeDir(cfg.remoteDir ?? DEFAULT_WEBDAV_REMOTE_DIR),
     password,
+    allowInvalidCertificates: cfg.allowInvalidCertificates ?? false,
   }
 }
 
@@ -130,7 +132,7 @@ export async function makeWebDavClient(opts: ResolveWebDavConfigOptions = {}): P
   if (!config) return null
   const client = createWebDavClient(
     { baseUrl: config.baseUrl, username: config.username, password: config.password },
-    { trustSelfSigned: true }
+    { trustSelfSigned: config.allowInvalidCertificates }
   )
   return { client, config }
 }

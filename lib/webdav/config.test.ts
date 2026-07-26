@@ -76,6 +76,7 @@ describe("resolveWebDavConfig", () => {
       username: "u",
       remoteDir: "/backups",
       password: "p",
+      allowInvalidCertificates: false,
     })
   })
 
@@ -144,6 +145,25 @@ describe("makeWebDavClient", () => {
     expect(made?.config.baseUrl).toBe("https://d")
     expect(createWebDavClientMock).toHaveBeenCalledWith(
       { baseUrl: "https://d", username: "u", password: "p" },
+      { trustSelfSigned: false }
+    )
+  })
+
+  it("accepts a self-signed certificate only after explicit opt-in", async () => {
+    settings = {
+      webdavSync: {
+        enabled: true,
+        baseUrl: "https://nas.example",
+        username: "u",
+        allowInvalidCertificates: true,
+      },
+    }
+    secrets.set(PWD_KEY, "p")
+
+    await makeWebDavClient()
+
+    expect(createWebDavClientMock).toHaveBeenCalledWith(
+      { baseUrl: "https://nas.example", username: "u", password: "p" },
       { trustSelfSigned: true }
     )
   })
