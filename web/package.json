@@ -1,0 +1,31 @@
+{
+  "name": "web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "predev": "node scripts/build-evidence.mjs",
+    "dev": "next dev -p 3002",
+    "prebuild": "node scripts/build-evidence.mjs",
+    "build": "next build",
+    "start": "next start -p 3002",
+    "evidence": "node scripts/build-evidence.mjs",
+    "test:scripts": "node --test scripts/*.test.mjs",
+    "capture": "node scripts/capture-product.mjs"
+  },
+  "dependencies": {
+    "geist": "^1.7.2",
+    "motion": "^12.42.2",
+    "next": "^16.2.11",
+    "next-themes": "^0.4.6",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^25.6.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^6.0.3"
+  }
+}
