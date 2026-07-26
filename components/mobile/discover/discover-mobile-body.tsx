@@ -15,6 +15,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { PlusIcon } from "lucide-react"
+import { motion, useReducedMotion } from "motion/react"
 
 import { ActiveFilterChips } from "@/components/discover/active-filter-chips"
 import { CategoryChipStrip } from "@/components/discover/category-chip-strip"
@@ -63,6 +64,7 @@ import {
   type DiscoverView,
 } from "@/lib/discover/categories"
 import { discoverViewContainer } from "@/lib/discover/view-classes"
+import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 
 /**
  * Categories whose content is rendered through the shared
@@ -86,6 +88,34 @@ const GRID_CATEGORIES = new Set<DiscoverCategoryId>([
  * unchanged.
  */
 const TOGGLE_LEGACY_CATEGORIES = new Set<DiscoverCategoryId>(["characters", "teams", "skills"])
+
+/**
+ * Entrance treatment for the three legacy card lists below.
+ *
+ * `/workflows`, `/me` and the conversation drawer all deal their rows in on
+ * mount; Discover was the one tab landing page whose lists appeared fully
+ * formed, which is most of why it read flatter than its neighbours. Local to
+ * this file on purpose — it is three call sites in one component, not a
+ * vocabulary other screens should reach for (they already have the tokens).
+ */
+function StaggerList({ className, children }: { className?: string; children: React.ReactNode }) {
+  const reduce = useReducedMotion()
+  return (
+    <motion.ul
+      className={className}
+      variants={reduce ? undefined : STAGGER_CONTAINER}
+      initial={reduce ? false : "initial"}
+      animate="animate"
+    >
+      {children}
+    </motion.ul>
+  )
+}
+
+function StaggerRow({ children }: { children: React.ReactNode }) {
+  const reduce = useReducedMotion()
+  return <motion.li variants={reduce ? undefined : STAGGER_CHILD}>{children}</motion.li>
+}
 
 export function DiscoverMobileBody() {
   const t = useTranslations("discover")
@@ -251,12 +281,12 @@ export function DiscoverMobileBody() {
                   description={trimmed.length > 0 ? undefined : t("emptyCharactersHint")}
                 />
               ) : (
-                <ul className={legacyListClass}>
+                <StaggerList className={legacyListClass}>
                   {characters.map((it) => {
                     const c = it.kind === "character" ? it.data : null
                     if (!c) return null
                     return (
-                      <li key={c.id}>
+                      <StaggerRow key={c.id}>
                         <LongPress onLongPress={() => setActionItem(it)} className="block">
                           <CharacterCard
                             character={c}
@@ -266,10 +296,10 @@ export function DiscoverMobileBody() {
                             }}
                           />
                         </LongPress>
-                      </li>
+                      </StaggerRow>
                     )
                   })}
-                </ul>
+                </StaggerList>
               )}
             </>
           ) : null}
@@ -284,19 +314,19 @@ export function DiscoverMobileBody() {
                 description={trimmed.length > 0 ? undefined : t("emptyTeamsHint")}
               />
             ) : (
-              <ul className={legacyListClass}>
+              <StaggerList className={legacyListClass}>
                 {teams.map((it) => {
                   const tm = it.kind === "team" ? it.data : null
                   if (!tm) return null
                   return (
-                    <li key={tm.id}>
+                    <StaggerRow key={tm.id}>
                       <LongPress onLongPress={() => setActionItem(it)} className="block">
                         <TeamCard team={tm} />
                       </LongPress>
-                    </li>
+                    </StaggerRow>
                   )
                 })}
-              </ul>
+              </StaggerList>
             )
           ) : null}
 
@@ -311,12 +341,12 @@ export function DiscoverMobileBody() {
                   description={trimmed.length > 0 ? undefined : t("emptySkillsHint")}
                 />
               ) : (
-                <ul className={legacyListClass}>
+                <StaggerList className={legacyListClass}>
                   {skills.map((it) => {
                     const s = it.kind === "skill" ? it.data : null
                     if (!s) return null
                     return (
-                      <li key={s.id}>
+                      <StaggerRow key={s.id}>
                         <LongPress onLongPress={() => setActionItem(it)} className="block">
                           <SkillCard
                             skill={s}
@@ -331,10 +361,10 @@ export function DiscoverMobileBody() {
                             }}
                           />
                         </LongPress>
-                      </li>
+                      </StaggerRow>
                     )
                   })}
-                </ul>
+                </StaggerList>
               )}
               <SkillMarketplaceSheet className="self-start" />
             </div>

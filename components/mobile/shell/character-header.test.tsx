@@ -48,3 +48,28 @@ describe("<CharacterHeader />", () => {
     expect(screen.getByTestId("character-header-streaming")).toHaveTextContent("Streaming")
   })
 })
+
+describe("<CharacterHeader /> — streaming presence", () => {
+  const subject = { id: "c1", name: "Ada", avatarEmoji: "🤖" }
+
+  it("adds an avatar ring while streaming", () => {
+    render(<CharacterHeader subject={subject} fallbackTitle="cognia" streaming />)
+    expect(screen.getByTestId("character-header-streaming-ring")).toBeInTheDocument()
+  })
+
+  it("drops the avatar ring once the turn settles", () => {
+    const { rerender } = render(
+      <CharacterHeader subject={subject} fallbackTitle="cognia" streaming />
+    )
+    rerender(<CharacterHeader subject={subject} fallbackTitle="cognia" streaming={false} />)
+    expect(screen.queryByTestId("character-header-streaming-ring")).not.toBeInTheDocument()
+  })
+
+  it("keeps the ring decorative so the name stays the only announced label", () => {
+    render(<CharacterHeader subject={subject} fallbackTitle="cognia" streaming />)
+    expect(screen.getByTestId("character-header-streaming-ring")).toHaveAttribute(
+      "aria-hidden",
+      "true"
+    )
+  })
+})

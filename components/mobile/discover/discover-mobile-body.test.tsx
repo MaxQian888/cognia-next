@@ -266,7 +266,49 @@ jest.mock("@/components/interactions/pull-to-refresh", () => ({
 // motion/react's useReducedMotion is consumed by the real PullToRefresh
 // (which we mocked), but the mock above doesn't need it. Guard against any
 // transitive import that might still pull it in.
-jest.mock("motion/react", () => ({ useReducedMotion: () => false }))
+// `motion` is proxied to plain host elements with the animation-only props
+// stripped, so the list markup this suite asserts on (ul → li → card) survives
+// the stagger wrappers unchanged. Keep `useReducedMotion` false: the reduced
+// branch renders the same DOM, just without variants.
+jest.mock("motion/react", () => {
+  const MOTION_ONLY_PROPS = new Set([
+    "variants",
+    "initial",
+    "animate",
+    "exit",
+    "transition",
+    "whileTap",
+    "whileHover",
+    "whileInView",
+    "layout",
+    "layoutId",
+  ])
+  const strip = (props: Record<string, unknown>) =>
+    Object.fromEntries(Object.entries(props).filter(([k]) => !MOTION_ONLY_PROPS.has(k)))
+  const motion = new Proxy(
+    {},
+    {
+      get: (_target, tag: string) => {
+        // `jest.requireActual`, not a bare `require` — a jest.mock factory is
+        // hoisted above the imports, so it cannot close over the file's React
+        // binding.
+        const { createElement } = jest.requireActual<typeof import("react")>("react")
+        const Comp = ({ children, ...props }: Record<string, unknown>) =>
+          createElement(
+            tag,
+            // Marker so a test can prove the list is still animated — the
+            // stagger is easy to drop by accident in a refactor and leaves no
+            // other trace in the rendered DOM.
+            { ...strip(props), "data-motion": tag },
+            children as never
+          )
+        Comp.displayName = `motion.${tag}`
+        return Comp
+      },
+    }
+  )
+  return { motion, useReducedMotion: () => false }
+})
 
 // Haptics — not available in jsdom.
 jest.mock("@/lib/capacitor/haptics", () => ({ impact: jest.fn() }))
@@ -384,6 +426,18 @@ describe("<DiscoverMobileBody />", () => {
       render(<DiscoverMobileBody />)
       // The character fixture renders via our CharacterCard stub.
       expect(screen.getByTestId("stub-character-card-char-1")).toBeInTheDocument()
+    })
+
+    it("deals the legacy card lists in rather than snapping them on", () => {
+      // Discover was the only tab landing page whose lists appeared fully
+      // formed while /workflows, /me and the conversation drawer all
+      // staggered — the main reason this screen read flatter than its
+      // neighbours.
+      currentSearch = "?category=characters"
+      const { container } = render(<DiscoverMobileBody />)
+      const list = container.querySelector("ul")!
+      expect(list).toHaveAttribute("data-motion", "ul")
+      expect(list.querySelector("li")).toHaveAttribute("data-motion", "li")
     })
 
     it("clicking a chip calls router.replace with the matching category query param", async () => {

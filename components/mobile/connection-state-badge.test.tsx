@@ -57,6 +57,15 @@ jest.mock("@/lib/tauri", () => ({
   transport: { reconnectRtc: jest.fn(() => "no-tier" as const) },
 }))
 
+jest.mock("sonner", () => ({
+  toast: {
+    error: jest.fn(),
+    info: jest.fn(),
+    message: jest.fn(),
+    success: jest.fn(),
+  },
+}))
+
 // The two sheet components have their own deep dependencies; stub them so
 // the badge test stays focused on the dropdown trigger + menu items.
 jest.mock("./connection-state-sheets/mobile-server-scan-sheet", () => ({
@@ -115,19 +124,17 @@ describe("ConnectionStateBadge", () => {
   })
 
   it("surfaces the busy outcome when a reconnect is already in progress", async () => {
+    const user = userEvent.setup()
     const { transport } = jest.requireMock("@/lib/tauri") as {
       transport: { reconnectRtc: jest.Mock }
     }
     const { toast } = jest.requireMock("sonner") as { toast: { info: jest.Mock } }
     transport.reconnectRtc.mockReturnValueOnce("busy")
-    mockedUse.mockReturnValue("reconnecting")
+    mockedUse.mockReturnValue("connected")
     render(<ConnectionStateBadge />)
 
-    fireEvent.pointerDown(screen.getByTestId("connection-state-badge"), {
-      button: 0,
-      ctrlKey: false,
-    })
-    fireEvent.click(screen.getByText("Reconnect now"))
+    await user.click(screen.getByTestId("connection-state-badge"))
+    fireEvent.click(await screen.findByText("Reconnect now"))
 
     await waitFor(() =>
       expect(toast.info).toHaveBeenCalledWith("Reconnect already in progress")

@@ -14,9 +14,11 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { SlidersHorizontalIcon } from "lucide-react"
+import { motion, useReducedMotion } from "motion/react"
 
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import { MOBILE_SPRING, STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { MobileSpotIcon } from "@/components/mobile/mobile-spot-icon"
 import {
   Sheet,
@@ -32,6 +34,9 @@ import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 
 import { MobileQuickActionsEditor } from "./mobile-quick-actions-editor"
 
+/** `Card` forwards its ref, so motion can drive it directly (no wrapper div). */
+const MotionCard = motion.create(Card)
+
 export interface MobileQuickActionsProps {
   /** Start a new chat (opens the character picker in the shell). */
   onNewChat: () => void
@@ -45,6 +50,7 @@ export function MobileQuickActions({ onNewChat, onSearch, className }: MobileQui
   const tActions = useTranslations("mobile.home.actions")
   const router = useRouter()
   const { resolved, isSectionHidden } = useMobileHomeLayout()
+  const reduce = useReducedMotion()
   const [editorOpen, setEditorOpen] = useState(false)
   // Android hardware / browser back closes the editor sheet instead of
   // navigating. (Must run before the section-hidden early return below.)
@@ -80,9 +86,17 @@ export function MobileQuickActions({ onNewChat, onSearch, className }: MobileQui
         </Button>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      {/* The grid is the welcome screen's centrepiece — the one thing on an
+          otherwise empty first launch. It deals itself in rather than
+          appearing fully formed, and each card takes a press. */}
+      <motion.div
+        className="grid grid-cols-2 gap-2 sm:grid-cols-4"
+        variants={reduce ? undefined : STAGGER_CONTAINER}
+        initial={reduce ? false : "initial"}
+        animate="animate"
+      >
         {resolved.active.map((item) => (
-          <Card
+          <MotionCard
             key={item.id}
             role="button"
             tabIndex={0}
@@ -94,13 +108,16 @@ export function MobileQuickActions({ onNewChat, onSearch, className }: MobileQui
               }
             }}
             data-testid={`mobile-quick-action-${item.id}`}
+            variants={reduce ? undefined : STAGGER_CHILD}
+            whileTap={reduce ? undefined : { scale: 0.95 }}
+            transition={MOBILE_SPRING}
             className="flex min-h-28 cursor-pointer flex-col items-center justify-center gap-1 rounded-xl p-2 text-center shadow-none transition-colors active:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <MobileSpotIcon name={item.spotIcon} size={64} className="-my-1" />
             <span className="line-clamp-1 text-xs font-medium">{tActions(item.i18nKey)}</span>
-          </Card>
+          </MotionCard>
         ))}
-      </div>
+      </motion.div>
 
       <Sheet open={editorOpen} onOpenChange={setEditorOpen}>
         <SheetContent

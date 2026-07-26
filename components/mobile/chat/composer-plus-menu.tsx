@@ -70,6 +70,8 @@ export interface ComposerPlusMenuProps {
   showVoice?: boolean
   /** `accept` for the file-branch input; defaults to any file. */
   fileAccept?: string
+  /** Turn capabilities colocated under the same `+` trigger. */
+  capabilities?: React.ReactNode
   className?: string
 }
 
@@ -93,6 +95,7 @@ export function ComposerPlusMenu({
   onError,
   showVoice = true,
   fileAccept,
+  capabilities,
   className,
 }: ComposerPlusMenuProps) {
   const t = useTranslations("mobile.composerPlus")
@@ -292,6 +295,11 @@ export function ComposerPlusMenu({
               testId="composer-plus-voice"
             />
           )}
+          {capabilities ? (
+            <div className="col-span-3 flex flex-wrap items-center gap-2 border-t border-border pt-2">
+              {capabilities}
+            </div>
+          ) : null}
         </PopoverContent>
       </div>
     </Popover>

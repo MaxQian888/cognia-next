@@ -275,10 +275,18 @@ describe("<ComposerPlusMenu />", () => {
 
   it("hides the voice branch when showVoice is false and applies fileAccept", async () => {
     const user = userEvent.setup()
-    render(<ComposerPlusMenu onAttach={jest.fn()} showVoice={false} fileAccept="image/*,.pdf" />)
+    render(
+      <ComposerPlusMenu
+        onAttach={jest.fn()}
+        showVoice={false}
+        fileAccept="image/*,.pdf"
+        capabilities={<div data-testid="mobile-composer-capabilities">Capabilities</div>}
+      />
+    )
     await user.click(screen.getByTestId("composer-plus-toggle"))
     expect(screen.queryByTestId("composer-plus-voice")).not.toBeInTheDocument()
     expect(screen.queryByTestId("composer-plus-voice-stop")).not.toBeInTheDocument()
+    expect(screen.getByTestId("mobile-composer-capabilities")).toBeInTheDocument()
     const input = screen.getByTestId("composer-plus-file-input") as HTMLInputElement
     expect(input.accept).toBe("image/*,.pdf")
   })

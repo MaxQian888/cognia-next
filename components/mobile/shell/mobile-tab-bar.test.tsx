@@ -120,3 +120,36 @@ describe("<MobileTabBar />", () => {
     expect(bar.className).not.toContain("translate-y-full")
   })
 })
+
+describe("<MobileTabBar /> — active indicator", () => {
+  it("mounts exactly one indicator, inside the active tab", () => {
+    // One instance is the whole point: `layoutId` can only slide a shared
+    // element between stops if there is a single one to slide.
+    pathnameMock.mockReturnValue("/workflows")
+    render(<MobileTabBar />)
+    const indicators = screen.getAllByTestId("mobile-tab-indicator")
+    expect(indicators).toHaveLength(1)
+    expect(screen.getByTestId("mobile-tab-workflows")).toContainElement(indicators[0])
+  })
+
+  it("moves the indicator when the active route changes", () => {
+    pathnameMock.mockReturnValue("/")
+    const { rerender } = render(<MobileTabBar />)
+    expect(screen.getByTestId("mobile-tab-chat")).toContainElement(
+      screen.getByTestId("mobile-tab-indicator")
+    )
+
+    pathnameMock.mockReturnValue("/me")
+    rerender(<MobileTabBar />)
+    expect(screen.getByTestId("mobile-tab-me")).toContainElement(
+      screen.getByTestId("mobile-tab-indicator")
+    )
+    expect(screen.getAllByTestId("mobile-tab-indicator")).toHaveLength(1)
+  })
+
+  it("keeps the indicator decorative (the aria-selected state carries the meaning)", () => {
+    pathnameMock.mockReturnValue("/")
+    render(<MobileTabBar />)
+    expect(screen.getByTestId("mobile-tab-indicator")).toHaveAttribute("aria-hidden", "true")
+  })
+})
