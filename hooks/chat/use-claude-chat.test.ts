@@ -168,6 +168,12 @@ jest.mock("@/lib/db/session-state", () => ({
   bumpUnread: jest.fn().mockResolvedValue(undefined),
 }))
 
+const flushProjectEditorEdits = jest.fn<Promise<string[]>, []>()
+const toastWarning = jest.fn()
+jest.mock("@/lib/files/project-editor-bridge", () => ({
+  flushProjectEditorEdits: () => flushProjectEditorEdits(),
+}))
+jest.mock("sonner", () => ({ toast: { warning: (msg: string) => toastWarning(msg) } }))
 jest.mock("@/lib/claude/build-options", () => ({
   resolveSendOptions: jest.fn(async () => ({ model: "sonnet", systemPrompt: "sys" })),
 }))
@@ -450,6 +456,8 @@ import { useClaudeChat, SIDECAR_EXITED_ERROR } from "./use-claude-chat"
 
 beforeEach(() => {
   isTauriMock.mockReset().mockReturnValue(true)
+  flushProjectEditorEdits.mockReset().mockResolvedValue([])
+  toastWarning.mockReset()
   _messageCallback = null
   busEmitMock.mockClear()
   onClaudeMessageMock.mockClear()
@@ -2025,5 +2033,59 @@ describe("useClaudeChat — concurrent sessions", () => {
     })
     expect(closeSessionIpcMock).toHaveBeenCalledWith("sess-1")
     expect(chatState.closeSession).toHaveBeenCalledWith("sess-1")
+  })
+})
+
+describe("useClaudeChat — pre-turn editor flush", () => {
+  it("flushes unsaved editor buffers before the turn reaches the sidecar", async () => {
+    // The agent's file tools read the filesystem, so an editor buffer the user
+    // edited but never saved is invisible to them: the turn would reason about
+    // stale content and its write would clobber that work.
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello")
+    })
+
+    expect(flushProjectEditorEdits).toHaveBeenCalled()
+    expect(sendPromptMock).toHaveBeenCalled()
+    expect(flushProjectEditorEdits.mock.invocationCallOrder[0]).toBeLessThan(
+      sendPromptMock.mock.invocationCallOrder[0]
+    )
+  })
+
+  it("stays quiet when everything flushed cleanly", async () => {
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello")
+    })
+
+    expect(toastWarning).not.toHaveBeenCalled()
+  })
+
+  it("warns about files it could not flush but still runs the turn", async () => {
+    // The turn may not touch those files at all, so blocking would be wrong —
+    // but for them disk is not what the user is looking at, and that must be said.
+    flushProjectEditorEdits.mockResolvedValue(["/repo/a.ts", "/repo/b.ts"])
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello")
+    })
+
+    expect(toastWarning).toHaveBeenCalledTimes(1)
+    expect(sendPromptMock).toHaveBeenCalled()
+  })
+
+  it("does not flush for a send the guards reject", async () => {
+    // Empty content never becomes a turn, so nothing should be saved for it.
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("   ")
+    })
+
+    expect(flushProjectEditorEdits).not.toHaveBeenCalled()
   })
 })

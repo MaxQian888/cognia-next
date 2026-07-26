@@ -11,7 +11,9 @@ import {
   mergeMemorySourcesIntoLastAssistant,
   mergeTwinSourcesIntoLastAssistant,
 } from "@/lib/claude/adapter"
+import { toast } from "sonner"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
+import { flushProjectEditorEdits } from "@/lib/files/project-editor-bridge"
 import { getGoalRuntime } from "@/lib/goal/runtime"
 import { handleTurnComplete } from "@/lib/goal/turn-driver"
 import { defaultLifecycleFirer } from "@/lib/claude/hooks/lifecycle-firer"
@@ -892,6 +894,23 @@ export function useClaudeChat() {
           }
           return
         }
+      }
+
+      // The turn is definitely running now, so make disk honest before the agent's
+      // file tools read it. Those tools go straight to the filesystem, so a buffer
+      // the user edited but never saved is invisible to them: the agent would
+      // reason about stale content and its write would then clobber that work.
+      // No-op when no project editor is mounted, which is the common case.
+      const unflushed = await flushProjectEditorEdits()
+      if (unflushed.length > 0) {
+        // Proceed anyway — the turn may not touch these files at all — but say so,
+        // because for those files disk is not what the user is looking at.
+        toast.warning(
+          tInlineErr("unflushedEditorBuffers", {
+            count: unflushed.length,
+            files: unflushed.join(", "),
+          })
+        )
       }
 
       const session = await getSession(sessionId)
