@@ -380,3 +380,32 @@ it("shows the shared empty editor state in the mobile Editor pane", () => {
   expect(screen.getByTestId("editor-empty")).toHaveTextContent("emptyEditor")
   expect(screen.queryByTestId("project-editor-mobile-save")).not.toBeInTheDocument()
 })
+
+describe("saveDirty", () => {
+  const registeredSaveDirty = () => {
+    const args = registerOpener.mock.calls.at(-1)?.[0] as {
+      saveDirty?: () => Promise<string[]>
+    }
+    return args.saveDirty
+  }
+
+  it("registers a flush so Monaco's drafts are not invisible to the agent", async () => {
+    // Monaco keeps `draftContent` in memory until saved, exactly like a VS Code
+    // buffer — without this, the agent reading disk sees stale content and its
+    // write clobbers the user's unsaved work, on the default engine.
+    render(<Harness />)
+
+    await expect(registeredSaveDirty()?.()).resolves.toEqual([])
+    expect(editor.saveAll).toHaveBeenCalled()
+  })
+
+  it("reports the root when the flush fails, rather than throwing into the turn", async () => {
+    // `saveAll` doesn't say which file it choked on; naming the root is more
+    // useful than swallowing it, and throwing would abort a turn that could
+    // still proceed with a warning.
+    editor.saveAll.mockRejectedValueOnce(new Error("disk full"))
+    render(<Harness />)
+
+    await expect(registeredSaveDirty()?.()).resolves.toEqual(["/repo"])
+  })
+})

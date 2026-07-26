@@ -110,6 +110,24 @@ export function useProjectEditorWorkbench({
     [beforeOpen, openFile]
   )
 
+  /**
+   * Flush this workbench's dirty drafts so the agent's disk-based file tools see
+   * what the user is actually looking at.
+   *
+   * Monaco keeps `draftContent` in memory until saved, exactly like a VS Code
+   * buffer — so without this the staleness hole the Pro IDE's `saveAll` closes
+   * would still be wide open whenever Monaco is the mounted engine. Reports the
+   * root on failure, since `saveAll` doesn't say which file it choked on.
+   */
+  const flushDrafts = useCallback(async () => {
+    try {
+      await saveAll()
+      return []
+    } catch {
+      return [rootPath]
+    }
+  }, [rootPath, saveAll])
+
   useEffect(() => {
     if (!registerProjectOpener) return
     return registerProjectEditorOpener({
@@ -119,8 +137,9 @@ export function useProjectEditorWorkbench({
       // external-change reload. `readActive`, though, has no such fallback —
       // without it the read side would stay Pro-IDE-only.
       readActive,
+      saveDirty: flushDrafts,
     })
-  }, [gotoLine, readActive, registerProjectOpener, rootPath])
+  }, [flushDrafts, gotoLine, readActive, registerProjectOpener, rootPath])
 
   const saveActive = useCallback(() => {
     if (!activePath) return

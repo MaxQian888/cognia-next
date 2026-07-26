@@ -45,6 +45,15 @@ export interface UseCodeServerPane {
   progress: number | null
   error: string | null
   retry: () => void
+  /**
+   * Stop the code-server serving this root and bring a fresh one up.
+   *
+   * Distinct from {@link retry}, which re-`ensure`s and therefore reuses a healthy
+   * instance: some changes are only read at workbench startup (`argv.json`'s
+   * display language, a newly side-loaded extension), so applying them means
+   * actually replacing the process.
+   */
+  restart: () => void
 }
 
 export interface UseCodeServerPaneOptions {
@@ -225,5 +234,20 @@ export function useCodeServerPane(
 
   const retry = useCallback(() => setAttempt((n) => n + 1), [])
 
-  return { phase, mounted, progress, error, retry }
+  const restart = useCallback(() => {
+    // Back to `starting` first so the placeholder covers the pane while the old
+    // workbench goes away — the native webview floats above the DOM and would
+    // otherwise sit there showing a dead page.
+    setMounted(false)
+    setPhase("starting")
+    // Stop, then bump `attempt` regardless: a failed stop still leaves the
+    // ensure-with-a-dead-instance path (which prunes and respawns) as the way out,
+    // whereas swallowing the bump would strand the pane in `starting`.
+    void codeServerClient
+      .stop(root)
+      .catch(() => undefined)
+      .then(() => setAttempt((n) => n + 1))
+  }, [root])
+
+  return { phase, mounted, progress, error, retry, restart }
 }

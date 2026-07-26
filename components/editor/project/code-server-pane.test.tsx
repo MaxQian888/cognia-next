@@ -5,6 +5,15 @@ import { act, fireEvent, render, screen } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({ useTranslations: () => (k: string) => k }))
 jest.mock("sonner", () => ({ toast: { error: jest.fn(), info: jest.fn() } }))
+jest.mock("@/hooks/codeserver/use-code-server-settings-sync", () => ({
+  useCodeServerSettingsSync: jest.fn(),
+}))
+jest.mock("@/hooks/codeserver/use-code-server-locale-sync", () => ({
+  useCodeServerLocaleSync: jest.fn(),
+}))
+jest.mock("@/hooks/codeserver/use-code-server-editor-events", () => ({
+  useCodeServerEditorEvents: jest.fn(),
+}))
 
 const paneState = {
   phase: "starting" as "unsupported" | "starting" | "downloading" | "ready" | "error",
@@ -12,6 +21,7 @@ const paneState = {
   progress: null as number | null,
   error: null as string | null,
   retry: jest.fn(),
+  restart: jest.fn(),
 }
 const capturedOptions: { onRevoked?: () => void } = {}
 jest.mock("@/hooks/codeserver/use-code-server-pane", () => ({
@@ -24,12 +34,24 @@ const driveOpen = jest.fn()
 const driveApplyEdit = jest.fn()
 const openFile = jest.fn()
 const cancelDownload = jest.fn()
+const readActive = jest.fn()
+const saveAll = jest.fn()
+const showDiff = jest.fn()
+const reveal = jest.fn()
+const runInTerminal = jest.fn()
+const notify = jest.fn()
 jest.mock("@/lib/codeserver/client", () => ({
   codeServerClient: {
     driveOpen: (...args: unknown[]) => driveOpen(...args),
     driveApplyEdit: (...args: unknown[]) => driveApplyEdit(...args),
     openFile: (...args: unknown[]) => openFile(...args),
     cancelDownload: (...args: unknown[]) => cancelDownload(...args),
+    readActive: (...args: unknown[]) => readActive(...args),
+    saveAll: (...args: unknown[]) => saveAll(...args),
+    showDiff: (...args: unknown[]) => showDiff(...args),
+    reveal: (...args: unknown[]) => reveal(...args),
+    runInTerminal: (...args: unknown[]) => runInTerminal(...args),
+    notify: (...args: unknown[]) => notify(...args),
   },
 }))
 // The debounce/single-flight policy has its own suite; here it is a pass-through
@@ -51,6 +73,12 @@ let registeredOpener:
       root: string
       open: (path: string, line?: number, column?: number) => void
       applyEdit?: (path: string, line?: number, column?: number) => void
+      readActive?: () => Promise<unknown>
+      saveDirty?: () => Promise<string[]>
+      showDiff?: (path: string, content: string, title?: string) => Promise<void>
+      reveal?: (path: string) => Promise<void>
+      runInTerminal?: (command: string, options?: { cwd?: string; name?: string }) => Promise<void>
+      notify?: (message: string, kind?: "info" | "warning" | "error") => Promise<void>
     }
   | undefined
 const unregister = jest.fn()
@@ -82,7 +110,14 @@ beforeEach(() => {
   paneState.progress = null
   paneState.error = null
   paneState.retry = jest.fn()
+  paneState.restart = jest.fn()
   registeredOpener = undefined
+  readActive.mockReset().mockResolvedValue({ path: null })
+  saveAll.mockReset().mockResolvedValue({ saved: [], failed: [] })
+  showDiff.mockReset().mockResolvedValue(undefined)
+  reveal.mockReset().mockResolvedValue(undefined)
+  runInTerminal.mockReset().mockResolvedValue(undefined)
+  notify.mockReset().mockResolvedValue(undefined)
   driveOpen.mockReset().mockResolvedValue(undefined)
   driveApplyEdit.mockReset().mockResolvedValue(undefined)
   openFile.mockReset().mockResolvedValue(undefined)
@@ -358,5 +393,70 @@ describe("joinProjectPath", () => {
   })
   it("returns the bare root when the relative path is empty", () => {
     expect(joinProjectPath("/repo/", "")).toBe("/repo")
+  })
+})
+
+describe("bridge capabilities registered once ready", () => {
+  const ready = () => {
+    paneState.phase = "ready"
+    paneState.mounted = true
+    return renderPane()
+  }
+
+  it("reports the paths saveAll could not flush, so the caller can warn", async () => {
+    // The contract the agent's pre-turn flush depends on: `saveDirty` resolves the
+    // files whose on-disk copy must NOT be trusted.
+    saveAll.mockResolvedValue({ saved: ["/repo/a.ts"], failed: ["/repo/b.ts"] })
+    ready()
+
+    await expect(registeredOpener?.saveDirty?.()).resolves.toEqual(["/repo/b.ts"])
+    expect(saveAll).toHaveBeenCalledWith("/repo")
+  })
+
+  it("passes absolute paths to the diff and reveal calls", async () => {
+    ready()
+
+    await registeredOpener?.showDiff?.("src/a.ts", "next", "Proposed")
+    await registeredOpener?.reveal?.("src/a.ts")
+
+    // The bridge speaks project-relative; the extension needs absolute.
+    expect(showDiff).toHaveBeenCalledWith("/repo", "/repo/src/a.ts", "next", "Proposed")
+    expect(reveal).toHaveBeenCalledWith("/repo", "/repo/src/a.ts")
+  })
+
+  it("defaults a terminal command's cwd to the project root", async () => {
+    ready()
+
+    await registeredOpener?.runInTerminal?.("pnpm test")
+
+    expect(runInTerminal).toHaveBeenCalledWith("/repo", "pnpm test", { cwd: "/repo" })
+  })
+
+  it("lets an explicit cwd override the project root", async () => {
+    ready()
+
+    await registeredOpener?.runInTerminal?.("pnpm build", { cwd: "/repo/pkg", name: "Build" })
+
+    expect(runInTerminal).toHaveBeenCalledWith("/repo", "pnpm build", {
+      cwd: "/repo/pkg",
+      name: "Build",
+    })
+  })
+
+  it("forwards a notification with its kind", async () => {
+    ready()
+
+    await registeredOpener?.notify?.("done", "warning")
+
+    expect(notify).toHaveBeenCalledWith("/repo", "done", "warning")
+  })
+
+  it("registers none of it before the extension can answer", () => {
+    // Registering while still downloading guarantees a rejection instead of a
+    // fall-through to whichever editor actually is live.
+    paneState.phase = "downloading"
+    renderPane()
+
+    expect(registeredOpener).toBeUndefined()
   })
 })

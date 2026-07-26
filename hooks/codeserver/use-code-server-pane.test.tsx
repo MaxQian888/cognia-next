@@ -40,7 +40,7 @@ jest.mock("@/lib/codeserver/client", () => ({
     downloadProgress: "codeserver://download-progress",
     instanceExited: "codeserver://instance-exited",
   },
-  codeServerClient: { supported: jest.fn(), ensure: jest.fn() },
+  codeServerClient: { supported: jest.fn(), ensure: jest.fn(), stop: jest.fn() },
 }))
 jest.mock("@/lib/codeserver/pane-manager", () => ({
   claimCodeServerPane: jest.fn(),
@@ -103,6 +103,7 @@ beforeEach(() => {
   paneOwner = null
   client.supported.mockReset().mockResolvedValue(true)
   client.ensure.mockReset().mockResolvedValue({ running: true, port: 43117, version: "4.128.0" })
+  client.stop.mockReset().mockResolvedValue(true)
   claim.mockReset().mockImplementation((ownerId: string) => {
     paneOwner = ownerId
     return Promise.resolve()
@@ -429,4 +430,55 @@ it("releases — never destroys — the pane on unmount", async () => {
   unmount()
 
   expect(release).toHaveBeenCalledWith(OWNER)
+})
+
+describe("restart", () => {
+  it("stops the instance and brings a fresh one up", async () => {
+    // `retry` alone re-`ensure`s and would hand back the *same* healthy instance;
+    // a locale change is only read at workbench startup, so the process has to go.
+    const { result } = renderHook(() => useCodeServerPane(ref, options()))
+    await flush()
+    deliverRect()
+    await flush()
+    expect(result.current.phase).toBe("ready")
+    client.ensure.mockClear()
+
+    act(() => result.current.restart())
+    await flush()
+
+    expect(client.stop).toHaveBeenCalledWith(ROOT)
+    expect(client.ensure).toHaveBeenCalledWith(ROOT)
+    expect(result.current.phase).toBe("ready")
+  })
+
+  it("covers the pane with the placeholder while the old workbench goes away", async () => {
+    const { result } = renderHook(() => useCodeServerPane(ref, options()))
+    await flush()
+    deliverRect()
+    await flush()
+
+    // Never resolves: hold the restart mid-flight and inspect the interim state.
+    client.stop.mockReturnValue(new Promise<boolean>(() => {}))
+    act(() => result.current.restart())
+
+    expect(result.current.phase).toBe("starting")
+    expect(result.current.mounted).toBe(false)
+  })
+
+  it("still respawns when the stop itself fails", async () => {
+    // Otherwise a failed stop strands the pane in `starting` with no way out; the
+    // ensure path prunes an unhealthy instance on its own.
+    const { result } = renderHook(() => useCodeServerPane(ref, options()))
+    await flush()
+    deliverRect()
+    await flush()
+    client.ensure.mockClear()
+    client.stop.mockRejectedValue(new Error("no such instance"))
+
+    act(() => result.current.restart())
+    await flush()
+
+    expect(client.ensure).toHaveBeenCalledWith(ROOT)
+    expect(result.current.phase).toBe("ready")
+  })
 })

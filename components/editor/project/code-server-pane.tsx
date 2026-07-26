@@ -12,8 +12,10 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
+import { useCodeServerEditorEvents } from "@/hooks/codeserver/use-code-server-editor-events"
+import { useCodeServerLocaleSync } from "@/hooks/codeserver/use-code-server-locale-sync"
 import { useCodeServerPane } from "@/hooks/codeserver/use-code-server-pane"
-import { useCodeServerThemeSync } from "@/hooks/codeserver/use-code-server-theme-sync"
+import { useCodeServerSettingsSync } from "@/hooks/codeserver/use-code-server-settings-sync"
 import { codeServerClient } from "@/lib/codeserver/client"
 import { createCodeServerOpenQueue } from "@/lib/codeserver/open-file-queue"
 import { PRO_IDE_REGION_ATTR } from "@/lib/codeserver/pane-manager"
@@ -53,7 +55,7 @@ export function CodeServerPane({ root, ownerId, onRevoked, onCancelled }: Props)
     toast.info(t("proIde.revokedToMonaco"))
     onRevoked()
   }, [onRevoked, t])
-  const { phase, mounted, progress, error, retry } = useCodeServerPane(ref, {
+  const { phase, mounted, progress, error, retry, restart } = useCodeServerPane(ref, {
     root,
     ownerId,
     onRevoked: handleRevoked,
@@ -67,9 +69,32 @@ export function CodeServerPane({ root, ownerId, onRevoked, onCancelled }: Props)
     void codeServerClient.cancelDownload().catch(() => {})
     onCancelled?.()
   }, [onCancelled])
-  // Paint code-server in the app palette. Kept outside the phase gate so the
-  // very first spawn already reads a themed settings.json.
-  useCodeServerThemeSync(true)
+  // Paint + configure code-server from the app's own appearance and editor
+  // preferences. Kept outside the phase gate so the very first spawn already
+  // reads a synced settings.json rather than booting stock and repainting.
+  useCodeServerSettingsSync(true)
+  // Display language is a *runtime argument*, not a setting: it needs argv.json
+  // plus a workbench restart (which is also what installs the language pack), so
+  // it gets its own sync rather than riding along with the hot-applied ones.
+  const handleLocaleChanged = useCallback(() => {
+    toast.info(t("proIde.languageRestart"))
+    restart()
+  }, [restart, t])
+  // VS Code has no translation for every language the app ships. Say so instead
+  // of restarting into the same English and looking broken.
+  const handleUntranslated = useCallback(
+    (locale: string) => {
+      toast.info(t("proIde.languageUnavailable", { locale }))
+    },
+    [t]
+  )
+  useCodeServerLocaleSync(true, {
+    restart: handleLocaleChanged,
+    onUntranslated: handleUntranslated,
+  })
+  // Republish the extension's pushed editor changes as the app's active-editor
+  // signal, so "what the user is looking at" stays live without anyone polling.
+  useCodeServerEditorEvents(phase === "ready", root)
   // `ready` only means code-server answers; the native webview lands a beat
   // later. Holding the placeholder until it is actually mounted removes the
   // flash of bare background in between.
@@ -124,6 +149,16 @@ export function CodeServerPane({ root, ownerId, onRevoked, onCancelled }: Props)
       // companion extension isn't connected and a read would reject rather than
       // fall through to whichever editor *is* live.
       readActive: () => codeServerClient.readActive(root),
+      // Dirty VS Code buffers are invisible to the agent's disk-based file tools;
+      // flushing them is what stops a turn reading stale content and overwriting
+      // the user's unsaved work.
+      saveDirty: async () => (await codeServerClient.saveAll(root)).failed,
+      showDiff: (path, content, title) =>
+        codeServerClient.showDiff(root, joinProjectPath(root, path), content, title),
+      reveal: (path) => codeServerClient.reveal(root, joinProjectPath(root, path)),
+      runInTerminal: (command, options) =>
+        codeServerClient.runInTerminal(root, command, { cwd: options?.cwd ?? root, ...options }),
+      notify: (message, kind) => codeServerClient.notify(root, message, kind),
     })
     return () => {
       unregister()
