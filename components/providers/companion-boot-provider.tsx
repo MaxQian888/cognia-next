@@ -101,6 +101,9 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
   const appearanceColorTheme = useSettingsStore((s) => s.colorTheme)
   const appearanceActiveCustomThemeId = useSettingsStore((s) => s.activeCustomThemeId)
   const appearanceCustomThemes = useSettingsStore((s) => s.customThemes)
+  // High contrast replaces the whole palette; without it the status / nav bars
+  // stayed on the normal palette while the app itself repainted.
+  const appearanceA11y = useSettingsStore((s) => s.settings?.a11y)
 
   // Status bar + Android nav bar track the resolved theme on every change.
   // Decoupled from the boot effect because theme can flip after boot
@@ -118,6 +121,7 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
         colorTheme: appearanceColorTheme,
         activeCustomThemeId: appearanceActiveCustomThemeId,
         customThemes: appearanceCustomThemes,
+        a11y: appearanceA11y,
       },
       resolvedTheme
     )
@@ -130,6 +134,7 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
     appearanceColorTheme,
     appearanceActiveCustomThemeId,
     appearanceCustomThemes,
+    appearanceA11y,
   ])
 
   useEffect(() => {

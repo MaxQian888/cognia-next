@@ -1,7 +1,9 @@
 /**
  * @jest-environment node
  */
+import { DEFAULT_A11Y } from "@/types/appearance"
 import type { CustomTheme } from "@/types/plugin/plugin"
+import { HIGH_CONTRAST_DARK, HIGH_CONTRAST_LIGHT } from "./high-contrast-presets"
 import { getShellColors } from "./shell-sync"
 
 describe("getShellColors", () => {
@@ -141,5 +143,51 @@ describe("getShellColors", () => {
       "dark"
     )
     expect(result.isDark).toBe(true)
+  })
+
+  it("paints the shell from the high-contrast palette when a11y forces it", () => {
+    // Regression: the native window / status bar used to stay on the normal
+    // palette while the app repainted in high contrast.
+    // The presets are authored in oklch; the shell paints hex, so assert the
+    // converted values — that is what the window / status bar actually receives.
+    const dark = getShellColors(
+      {
+        colorTheme: "default",
+        activeCustomThemeId: null,
+        customThemes: [],
+        a11y: { ...DEFAULT_A11Y, highContrast: "dark" },
+      },
+      // Opposite variant on purpose: the a11y mode picks the palette.
+      "light"
+    )
+    expect(HIGH_CONTRAST_DARK.background).toBe("oklch(0 0 0)")
+    expect(dark.backgroundHex.toLowerCase()).toBe("#000000")
+    expect(dark.foregroundHex.toLowerCase()).toBe("#ffffff")
+
+    const light = getShellColors(
+      {
+        colorTheme: "default",
+        activeCustomThemeId: null,
+        customThemes: [],
+        a11y: { ...DEFAULT_A11Y, highContrast: "light" },
+      },
+      "dark"
+    )
+    expect(HIGH_CONTRAST_LIGHT.background).toBe("oklch(1 0 0)")
+    expect(light.backgroundHex.toLowerCase()).toBe("#ffffff")
+    expect(light.foregroundHex.toLowerCase()).not.toBe("#ffffff")
+  })
+
+  it("paints the shell from an active plugin theme's declared tokens", () => {
+    const result = getShellColors(
+      {
+        colorTheme: "default",
+        activeCustomThemeId: null,
+        customThemes: [],
+        pluginTheme: { variables: { "--background": "#123456" } },
+      },
+      "dark"
+    )
+    expect(result.backgroundHex.toLowerCase()).toBe("#123456")
   })
 })

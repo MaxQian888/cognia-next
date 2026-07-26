@@ -3,17 +3,11 @@
 import { useEffect, useRef } from "react"
 import { useTheme } from "next-themes"
 import { useSettingsStore } from "@/stores/settings"
-import { resolveActiveThemeColors } from "@/lib/themes"
 import type { ThemeColors } from "@/types/plugin/plugin"
 import { themeKeyToCssVar, CSS_VAR_KEYS, applyCssVars, removeCssVars } from "./css-var"
 import { BOOT_MIRROR_KEYS } from "./boot-script"
-import { ensureForegroundContrast } from "./ensure-contrast"
-import { highContrastOverride } from "./high-contrast-presets"
-import {
-  COLORBLIND_EXTRA_VAR_KEYS,
-  colorblindCssVars,
-  colorblindThemeOverrides,
-} from "./colorblind-palettes"
+import { resolveAppPalette } from "./resolve-app-palette"
+import { COLORBLIND_EXTRA_VAR_KEYS, colorblindCssVars } from "./colorblind-palettes"
 
 /**
  * Mounts at the root layout and writes resolved theme tokens onto `<html>`
@@ -81,28 +75,23 @@ export function CustomThemeApplier(): null {
     //   2. high-contrast override (replaces ThemeColors when active)
     //   3. colorblind theme overrides (patches destructive + a few extras)
     //   4. colorblind CSS vars (chart-1..5 + --wf-*)
-    const highContrast = a11y?.highContrast ?? "off"
     const colorblind = a11y?.colorblindMode ?? "off"
 
-    let tokens: ThemeColors
-    const hcOverride = highContrastOverride(highContrast)
-    if (hcOverride) {
-      tokens = hcOverride
-    } else {
-      const resolved = resolveActiveThemeColors({
-        colorTheme,
-        resolvedTheme: variant,
-        activeCustomThemeId,
-        customThemes,
-        accentColor,
-      })
-      tokens = resolved.colors
-    }
-    // Layer colorblind overrides on top of whichever base we landed on.
-    const cbOverrides = colorblindThemeOverrides(colorblind)
-    if (Object.keys(cbOverrides).length > 0) {
-      tokens = { ...tokens, ...cbOverrides } as ThemeColors
-    }
+    // Steps 1-4 live in `resolveAppPalette` so the native shell and the embedded
+    // Pro IDE resolve the palette exactly the way this applier does — they used
+    // to each re-implement a subset and disagree with what the DOM showed. No
+    // `pluginTheme` is passed: this applier stands down entirely while a plugin
+    // theme owns the cascade (see the early return above).
+    const resolved = resolveAppPalette({
+      colorTheme,
+      resolvedTheme: variant,
+      activeCustomThemeId,
+      customThemes,
+      accentColor,
+      a11y,
+    })
+    const tokens = resolved.colors
+    const hcOverride = resolved.highContrast
 
     // Decide whether the inline `:root` write is necessary. When there is
     // no a11y override AND the base resolved to the default preset for the
@@ -111,7 +100,7 @@ export function CustomThemeApplier(): null {
     // to the globals.css :root/.dark rules — force the inline write path.
     const usingDefaultBase =
       !hcOverride && colorTheme === "default" && !activeCustomThemeId && !accentColor
-    const usingExtras = Object.keys(cbOverrides).length > 0 || colorblind !== "off"
+    const usingExtras = colorblind !== "off"
 
     if (usingDefaultBase && !usingExtras) {
       if (lastApplied.current) {
@@ -145,12 +134,12 @@ export function CustomThemeApplier(): null {
       return
     }
 
-    // Harden legibility before writing: any preset / custom / imported theme
-    // whose foreground clashes with its surface (notably secondary buttons in
-    // dark mode) gets its foreground nudged to WCAG AA. The default theme
-    // short-circuits above and is governed by `globals.css`, so this only
-    // touches inline-applied palettes.
-    applyTokens(root, ensureForegroundContrast(tokens))
+    // `tokens` is already contrast-hardened by `resolveAppPalette`: any preset /
+    // custom / imported theme whose foreground clashes with its surface (notably
+    // secondary buttons in dark mode) has had it nudged to WCAG AA. The default
+    // theme short-circuits above and is governed by `globals.css`, so that only
+    // ever touches inline-applied palettes.
+    applyTokens(root, tokens)
     lastApplied.current = true
 
     // Extra categorical vars (chart + wf) live outside ThemeColors.

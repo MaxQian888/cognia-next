@@ -54,6 +54,9 @@ export function TauriProvider({ children }: { children: React.ReactNode }) {
   const appearanceColorTheme = useSettingsStore((s) => s.colorTheme)
   const appearanceActiveCustomThemeId = useSettingsStore((s) => s.activeCustomThemeId)
   const appearanceCustomThemes = useSettingsStore((s) => s.customThemes)
+  // High contrast replaces the whole palette, so without this the window
+  // background stayed on the normal palette while the app repainted.
+  const appearanceA11y = useSettingsStore((s) => s.settings?.a11y)
 
   // Feed the crash-report subsystem a redacted config snapshot so a later Rust
   // panic / native crash report reflects the current app state. Change-driven
@@ -82,11 +85,18 @@ export function TauriProvider({ children }: { children: React.ReactNode }) {
         colorTheme: appearanceColorTheme,
         activeCustomThemeId: appearanceActiveCustomThemeId,
         customThemes: appearanceCustomThemes,
+        a11y: appearanceA11y,
       },
       resolvedTheme
     )
     void setWindowBackgroundColor(shellColors.backgroundHex)
-  }, [resolvedTheme, appearanceColorTheme, appearanceActiveCustomThemeId, appearanceCustomThemes])
+  }, [
+    resolvedTheme,
+    appearanceColorTheme,
+    appearanceActiveCustomThemeId,
+    appearanceCustomThemes,
+    appearanceA11y,
+  ])
 
   useEffect(() => {
     // The transparent pet overlay/popup windows load this same root layout but
