@@ -49,6 +49,12 @@
       "skillPath": "skills/general-video/SKILL.md",
       "computedHash": "e034ab7b4df777ce87048df5f4f9b96adde04472a61d396fdbb3902f5d74b7a0"
     },
+    "gpt-taste": {
+      "source": "Leonxlnx/taste-skill",
+      "sourceType": "github",
+      "skillPath": "skills/gpt-tasteskill/SKILL.md",
+      "computedHash": "cc8f0c601d8240a124e1d11634351a2be7b8a72fd807c75e5b6bf7afcd5ddee0"
+    },
     "hyperframes": {
       "source": "heygen-com/hyperframes",
       "sourceType": "github",
@@ -90,6 +96,12 @@
       "sourceType": "github",
       "skillPath": "skills/hyperframes-registry/SKILL.md",
       "computedHash": "f8a3dc6f4e0897f78b97e707c51de55d47f9732599f77d90978208161fb23bb1"
+    },
+    "imagegen-frontend-web": {
+      "source": "Leonxlnx/taste-skill",
+      "sourceType": "github",
+      "skillPath": "skills/imagegen-frontend-web/SKILL.md",
+      "computedHash": "65f5ae59fa317567809438310b1c54f78cd133426deb43e4d3d4ca4c8f541628"
     },
     "media-use": {
       "source": "heygen-com/hyperframes",

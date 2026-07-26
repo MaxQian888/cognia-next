@@ -49,6 +49,14 @@ pnpm mobile:sync / mobile:open:ios / mobile:open:android
 # Docs (Fumadocs, port 3001)
 pnpm docs:dev / docs:build / docs:start
 
+# Marketing website (port 3002) — ADR-0092. Uses the `@web/*` alias, NOT `@/`:
+# root Jest maps `^@/` to the repo root and collects web/** tests, so a
+# workspace-local `@/` would resolve against the wrong tree.
+pnpm web:dev / web:build / web:start
+pnpm web:evidence      # rebuild the release/changelog/stats snapshot
+pnpm web:capture       # re-shoot the product screenshot matrix
+pnpm web:test:scripts  # node --test over web/scripts/
+
 # Repo-specific gates
 pnpm audit:slots        # plugin slot manifest audit
 pnpm lint:i18n          # diff against the i18n key baseline
@@ -89,6 +97,7 @@ running** — use its MCP tools to author/preview stories, not as an always-on s
 | -------- | --------- | ---- | ------------------------------------------------------------ |
 | Main app | `/`       | 3000 | static export (`out/`) — consumed by Tauri **and** Capacitor |
 | Docs     | `docs/`   | 3001 | static export (`docs/out/`, Fumadocs) — Cloudflare Pages     |
+| Website  | `web/`    | 3002 | static export (`web/out/`) — Cloudflare Pages (ADR-0092)     |
 | Mobile   | `mobile/` | —    | Capacitor 8 shell over `../out`                              |
 
 Install from repo root only — single `pnpm-lock.yaml`.
@@ -176,6 +185,7 @@ One line per subsystem — the **full detail lives in the ADR** under `docs/cont
 | Voice / TTS                | `packages/tts/`, `crates/cognia-tts/`, `lib/tts/`, `components/settings/speech/`, `app/me/speech/`, pet voice in `hooks/pet/use-pet-speak.ts`                                                      | Dexie tts-cache                            | 0075                   |
 | 源代码管理 (SCM)           | `crates/cognia-git/`, `components/source-control/`, `lib/git/`, `stores/git/`, `hooks/git/`, `app/source-control/`, settings `components/settings/source-control/`                                 | `AppSettings.gitSettings.panel` (非 Dexie) | 0038                   |
 | Pro IDE (code-server)      | `src-tauri/src/codeserver/`, `lib/codeserver/`, `hooks/codeserver/`, `components/editor/project/{code-server-pane,editor-engine-toggle}.tsx`, `components/settings/pro-ide/`                       | 无（磁盘 + settings.json）                 | 0088                   |
+| 官网 (marketing site)      | `web/` (独立 workspace，`@web/*` alias，零跨包引用)；文案 `web/content/{types,en,zh}.ts`；证据管道 `web/scripts/build-evidence.mjs`；截图/OG `web/scripts/capture-*.mjs`                           | 无（构建期 JSON 快照）                     | 0092                   |
 
 ### Cross-cutting hooks (reuse, don't reinvent)
 
